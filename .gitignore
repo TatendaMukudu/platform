@@ -1,0 +1,5 @@
+serve.ps1
+.claude/
+*.log
+Thumbs.db
+.DS_Store

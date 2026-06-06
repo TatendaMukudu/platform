@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Platform — IntelliQ Ecosystem</title>
+<link rel="stylesheet" href="css/styles.css"/>
+<!-- Chart.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<!-- Inter font -->
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════
+     LOGIN SCREEN
+     ════════════════════════════════════════════════════════ -->
+<div id="login-screen">
+  <div class="login-box">
+    <div class="login-logo">
+      <div class="logo-icon">P</div>
+      <div>
+        <div class="logo-text">Platform</div>
+        <div class="logo-sub">IntelliQ Ecosystem</div>
+      </div>
+    </div>
+    <div class="login-title">Welcome to Platform</div>
+    <div class="login-sub">Universal Performance Intelligence System — configure your organization to begin.</div>
+
+    <form id="login-form">
+      <div class="form-group">
+        <label>ORGANIZATION NAME</label>
+        <input class="form-control" id="login-org" placeholder="e.g. Westfield Academy, FC United, TechCorp..." value="Westfield Academy"/>
+      </div>
+      <div class="form-group">
+        <label>YOUR NAME</label>
+        <input class="form-control" id="login-name" placeholder="Administrator / Coach / Manager..." value="Dr. A. Moyo"/>
+      </div>
+      <div class="form-group">
+        <label>ORGANIZATION TYPE</label>
+        <div class="org-grid">
+          <div class="org-tile active" data-mode="school">
+            <div class="tile-icon">🎓</div><div>School</div>
+          </div>
+          <div class="org-tile" data-mode="sports">
+            <div class="tile-icon">⚽</div><div>Sports</div>
+          </div>
+          <div class="org-tile" data-mode="workplace">
+            <div class="tile-icon">🏢</div><div>Workplace</div>
+          </div>
+          <div class="org-tile" data-mode="military">
+            <div class="tile-icon">🎖️</div><div>Military</div>
+          </div>
+          <div class="org-tile" data-mode="healthcare">
+            <div class="tile-icon">🏥</div><div>Healthcare</div>
+          </div>
+          <div class="org-tile" data-mode="government">
+            <div class="tile-icon">🏛️</div><div>Government</div>
+          </div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>PLATFORM GRADE</label>
+        <select class="form-control" id="login-grade">
+          <option value="A">A-Grade — Full IntelliQ + AI Insights + Real-time Monitoring</option>
+          <option value="B">B-Grade — Performance Tracking + Basic IntelliQ</option>
+          <option value="C">C-Grade — Simple Monitoring + Basic Evaluation</option>
+        </select>
+      </div>
+      <button type="submit" class="btn-primary">Launch Platform →</button>
+    </form>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     MAIN APP SHELL
+     ════════════════════════════════════════════════════════ -->
+<div id="app">
+
+  <!-- ── SIDEBAR ─────────────────────────────────────────── -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="sb-logo-icon">P</div>
+      <div>
+        <div class="sb-logo-text">Platform</div>
+        <div class="sb-logo-sub">IntelliQ Ecosystem</div>
+      </div>
+    </div>
+
+    <div class="mode-badge" id="mode-badge">🎓 School</div>
+
+    <nav class="sidebar-nav">
+      <div class="nav-section-label">Overview</div>
+      <div class="nav-item active" data-page="dashboard">
+        <span class="nav-icon">⊞</span> Dashboard
+      </div>
+      <div class="nav-item" data-page="members">
+        <span class="nav-icon">👥</span> Members
+      </div>
+
+      <div class="nav-section-label">Intelligence</div>
+      <div class="nav-item" data-page="analytics">
+        <span class="nav-icon">📊</span> Analytics
+      </div>
+      <div class="nav-item" data-page="intelliq">
+        <span class="nav-icon">🧠</span> IntelliQ Engine
+      </div>
+
+      <div class="nav-section-label">Management</div>
+      <div class="nav-item" data-page="alerts">
+        <span class="nav-icon">🔔</span> Alerts
+        <span class="nav-badge" style="display:none">0</span>
+      </div>
+      <div class="nav-item" data-page="reports">
+        <span class="nav-icon">📋</span> Reports
+      </div>
+      <div class="nav-item" data-page="settings">
+        <span class="nav-icon">⚙️</span> Settings
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-pill">
+        <div class="user-avatar" style="background:#4f8ef7">A</div>
+        <div>
+          <div class="user-name">Admin</div>
+          <div class="user-role">Administrator</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── MAIN CONTENT ────────────────────────────────────── -->
+  <div class="main-wrap">
+
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <div class="topbar-title" id="topbar-page-title">Overview Dashboard</div>
+      <div style="flex:1"></div>
+      <div class="topbar-search">
+        <span style="color:var(--text-muted);font-size:0.9rem">🔍</span>
+        <input id="topbar-search-input" placeholder="Search members..."/>
+      </div>
+      <div class="topbar-actions">
+        <div class="icon-btn" id="notif-btn" data-tip="Notifications" style="cursor:pointer">
+          🔔 <div class="badge"></div>
+        </div>
+        <div class="icon-btn" data-tip="Add Member" onclick="showAddMember()" style="cursor:pointer">➕</div>
+        <div style="font-size:0.8rem;color:var(--text-secondary);padding:0 0.5rem" id="topbar-org">Org</div>
+      </div>
+    </header>
+
+    <!-- PAGE CONTENT -->
+    <main class="page-content">
+
+      <!-- ════════════════════════════
+           DASHBOARD PAGE
+           ════════════════════════════ -->
+      <section class="page active" id="page-dashboard">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Organization Overview</div>
+            <div class="section-sub">Real-time performance intelligence across your entire organization</div>
+          </div>
+          <div style="display:flex;gap:0.5rem">
+            <button class="btn btn-outline btn-sm" onclick="navigate('reports')">📋 Full Report</button>
+            <button class="btn btn-accent btn-sm" onclick="showAddMember()">+ Add Member</button>
+          </div>
+        </div>
+
+        <!-- Stat cards -->
+        <div class="stats-grid" id="dash-stats"></div>
+
+        <!-- Charts row 1 -->
+        <div class="grid-2" style="margin-bottom:1rem">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">Performance Trend</div>
+              <select class="btn btn-outline btn-sm" style="padding:0.25rem 0.6rem;font-size:0.75rem">
+                <option>Last 12 months</option>
+                <option>Last 6 months</option>
+              </select>
+            </div>
+            <div class="card-body">
+              <div class="chart-wrap"><canvas id="chart-perf-history"></canvas></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><div class="card-title">Group / Team Performance</div></div>
+            <div class="card-body">
+              <div class="chart-wrap"><canvas id="chart-group-avg"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Charts row 2 -->
+        <div class="grid-2" style="margin-bottom:1rem">
+          <div class="card">
+            <div class="card-header"><div class="card-title">Wellness Distribution</div></div>
+            <div class="card-body" style="display:flex;justify-content:center">
+              <div style="max-width:260px;width:100%">
+                <canvas id="chart-wellness"></canvas>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><div class="card-title">IntelliQ vs Performance</div></div>
+            <div class="card-body">
+              <div class="chart-wrap"><canvas id="chart-scatter"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom row: top5 + alerts -->
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">Top Performers</div>
+              <button class="btn btn-outline btn-sm" onclick="navigate('members')">View All</button>
+            </div>
+            <div class="card-body" style="padding:0">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Name</th><th>Role</th><th>IQ</th><th>Performance</th><th>Grade</th>
+                  </tr>
+                </thead>
+                <tbody id="dash-top5"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">Recent Alerts</div>
+              <button class="btn btn-outline btn-sm" onclick="navigate('alerts')">View All</button>
+            </div>
+            <div id="dash-alerts"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ════════════════════════════
+           MEMBERS PAGE
+           ════════════════════════════ -->
+      <section class="page" id="page-members">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Members</div>
+            <div class="section-sub" id="members-count">24 members</div>
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="showAddMember()">+ Add Member</button>
+        </div>
+
+        <div style="margin-bottom:1rem">
+          <div class="tabs" id="members-group-tabs" style="border-bottom:none;gap:0.3rem;flex-wrap:wrap"></div>
+        </div>
+
+        <div class="grid-auto" id="members-grid"></div>
+      </section>
+
+      <!-- ════════════════════════════
+           ANALYTICS PAGE
+           ════════════════════════════ -->
+      <section class="page" id="page-analytics">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Analytics & Insights</div>
+            <div class="section-sub">Deep intelligence across all metrics and groups</div>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="exportReport()">⬇ Export</button>
+        </div>
+
+        <div class="grid-2" style="margin-bottom:1rem">
+          <div class="card">
+            <div class="card-header"><div class="card-title">Average Metric Scores (Org-wide)</div></div>
+            <div class="card-body">
+              <div class="chart-wrap"><canvas id="chart-metric-avgs"></canvas></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><div class="card-title">Top 5 vs Bottom 5 Performers</div></div>
+            <div class="card-body">
+              <div class="chart-wrap"><canvas id="chart-top-bot"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-bottom:1rem">
+          <div class="card">
+            <div class="card-header"><div class="card-title">IntelliQ Score Distribution</div></div>
+            <div class="card-body">
+              <div class="chart-wrap"><canvas id="chart-iq-dist"></canvas></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><div class="card-title">Group Performance Trends (6 Months)</div></div>
+            <div class="card-body">
+              <div class="chart-wrap"><canvas id="chart-group-trend"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">⚠️ At-Risk Members</div>
+            <span style="font-size:0.75rem;color:var(--text-secondary)">Members requiring immediate attention</span>
+          </div>
+          <div class="card-body" style="padding:0">
+            <table class="data-table">
+              <thead>
+                <tr><th>Name</th><th>Group</th><th>Wellness</th><th>Performance</th><th>Alerts</th><th></th></tr>
+              </thead>
+              <tbody id="analytics-risk-table"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ════════════════════════════
+           INTELLIQ PAGE
+           ════════════════════════════ -->
+      <section class="page" id="page-intelliq">
+        <div class="section-header">
+          <div>
+            <div class="section-title">IntelliQ Engine</div>
+            <div class="section-sub">Decision intelligence, mental readiness, and development insights</div>
+          </div>
+          <div class="grade-selector">
+            <div class="grade-btn active-A">A-Grade Features Active</div>
+          </div>
+        </div>
+
+        <!-- Top IQ rings -->
+        <div class="card" style="margin-bottom:1rem">
+          <div class="card-header"><div class="card-title">Top IntelliQ Performers</div></div>
+          <div class="card-body">
+            <div id="iq-top-rings" style="display:flex;gap:2rem;flex-wrap:wrap;justify-content:center"></div>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-bottom:1rem">
+          <div class="card">
+            <div class="card-header"><div class="card-title">Organization Skill Radar</div></div>
+            <div class="card-body">
+              <div class="chart-wrap"><canvas id="chart-org-radar"></canvas></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><div class="card-title">Mental Readiness Distribution</div></div>
+            <div class="card-body">
+              <div class="chart-wrap"><canvas id="chart-readiness"></canvas></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- IQ Leaderboard -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">IntelliQ Leaderboard</div>
+            <span style="font-size:0.75rem;color:var(--text-secondary)">Ranked by decision intelligence score</span>
+          </div>
+          <div class="card-body" style="padding:0;max-height:420px;overflow-y:auto">
+            <table class="data-table">
+              <thead>
+                <tr><th>#</th><th>Name</th><th>Group</th><th>IntelliQ Score</th><th>Grade</th><th>Wellness</th></tr>
+              </thead>
+              <tbody id="iq-leaderboard"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ════════════════════════════
+           ALERTS PAGE
+           ════════════════════════════ -->
+      <section class="page" id="page-alerts">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Alerts & Notifications</div>
+            <div class="section-sub"><span id="alerts-unread-count">0</span> unread alerts</div>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="markAllRead()">✓ Mark All Read</button>
+        </div>
+
+        <div class="card">
+          <div id="alerts-list"></div>
+        </div>
+      </section>
+
+      <!-- ════════════════════════════
+           REPORTS PAGE
+           ════════════════════════════ -->
+      <section class="page" id="page-reports">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Reports & Stat Sheets</div>
+            <div class="section-sub">Official performance documentation for your organization</div>
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="exportReport()">⬇ Export PDF</button>
+        </div>
+
+        <!-- Report header card -->
+        <div class="card" style="margin-bottom:1rem">
+          <div class="card-body">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:1rem">
+              <div>
+                <div style="font-size:1.2rem;font-weight:700;margin-bottom:4px" id="report-org">—</div>
+                <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px">
+                  <span id="report-mode">—</span> &nbsp;·&nbsp; <span id="report-grade"></span>
+                </div>
+                <div style="font-size:0.78rem;color:var(--text-muted)">Generated: <span id="report-date">—</span></div>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(4,auto);gap:1.5rem;text-align:center">
+                <div><div style="font-size:1.4rem;font-weight:800" id="report-total">—</div><div style="font-size:0.72rem;color:var(--text-secondary)">Members</div></div>
+                <div><div style="font-size:1.4rem;font-weight:800;color:var(--accent)" id="report-avg-iq">—</div><div style="font-size:0.72rem;color:var(--text-secondary)">Avg IQ</div></div>
+                <div><div style="font-size:1.4rem;font-weight:800;color:var(--success)" id="report-avg-perf">—</div><div style="font-size:0.72rem;color:var(--text-secondary)">Avg Perf</div></div>
+                <div><div style="font-size:1.4rem;font-weight:800;color:var(--danger)" id="report-at-risk">—</div><div style="font-size:0.72rem;color:var(--text-secondary)">At Risk</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stat Sheet -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Full Stat Sheet</div>
+            <span style="font-size:0.75rem;color:var(--text-secondary)">Click any row to view full profile</span>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="data-table">
+              <thead id="stat-sheet-thead"></thead>
+              <tbody id="stat-sheet-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ════════════════════════════
+           SETTINGS PAGE
+           ════════════════════════════ -->
+      <section class="page" id="page-settings">
+        <div class="section-header">
+          <div class="section-title">Platform Settings</div>
+        </div>
+
+        <div class="grid-2">
+          <div>
+            <!-- Org Info -->
+            <div class="card" style="margin-bottom:1rem">
+              <div class="card-header"><div class="card-title">Organization</div></div>
+              <div class="card-body">
+                <div style="margin-bottom:0.8rem">
+                  <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px">ORG NAME</div>
+                  <div style="font-weight:600" id="settings-org-name">—</div>
+                </div>
+                <div style="margin-bottom:0.8rem">
+                  <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px">MODE</div>
+                  <div style="font-weight:600" id="settings-mode">—</div>
+                </div>
+                <div style="margin-bottom:0.8rem">
+                  <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px">PLATFORM GRADE</div>
+                  <div id="settings-grade"></div>
+                </div>
+                <div>
+                  <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px">ADMINISTRATOR</div>
+                  <div style="font-weight:600" id="settings-admin">—</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Active Features -->
+            <div class="card">
+              <div class="card-header"><div class="card-title">Active Features</div></div>
+              <div class="card-body" id="settings-features"></div>
+            </div>
+          </div>
+
+          <div>
+            <!-- Switch Mode -->
+            <div class="card" style="margin-bottom:1rem">
+              <div class="card-header"><div class="card-title">Switch Organization Mode</div></div>
+              <div class="card-body">
+                <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.8rem">
+                  Switching mode regenerates all member data for the new context. Your Platform grade and settings are retained.
+                </div>
+                <div class="org-grid" id="settings-modes"></div>
+              </div>
+            </div>
+
+            <!-- Platform Grade -->
+            <div class="card">
+              <div class="card-header"><div class="card-title">Platform Grade</div></div>
+              <div class="card-body">
+                <div style="display:flex;flex-direction:column;gap:0.6rem">
+                  <div class="card" style="cursor:pointer;border-color:var(--success)22" onclick="switchGrade('A')">
+                    <div class="card-body" style="padding:0.8rem">
+                      <div style="display:flex;align-items:center;justify-content:space-between">
+                        <div>
+                          <div style="font-weight:600;margin-bottom:2px">A-Grade Platform</div>
+                          <div style="font-size:0.75rem;color:var(--text-secondary)">Full IntelliQ + AI + Real-time</div>
+                        </div>
+                        <span class="grade-badge grade-A">● A</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="card" style="cursor:pointer" onclick="switchGrade('B')">
+                    <div class="card-body" style="padding:0.8rem">
+                      <div style="display:flex;align-items:center;justify-content:space-between">
+                        <div>
+                          <div style="font-weight:600;margin-bottom:2px">B-Grade Platform</div>
+                          <div style="font-size:0.75rem;color:var(--text-secondary)">Performance + Basic IntelliQ</div>
+                        </div>
+                        <span class="grade-badge grade-B">● B</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="card" style="cursor:pointer" onclick="switchGrade('C')">
+                    <div class="card-body" style="padding:0.8rem">
+                      <div style="display:flex;align-items:center;justify-content:space-between">
+                        <div>
+                          <div style="font-weight:600;margin-bottom:2px">C-Grade Platform</div>
+                          <div style="font-size:0.75rem;color:var(--text-secondary)">Simple monitoring only</div>
+                        </div>
+                        <span class="grade-badge grade-C">● C</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main><!-- /page-content -->
+  </div><!-- /main-wrap -->
+
+  <!-- ── NOTIFICATION PANEL ──────────────────────────────── -->
+  <div class="notif-panel" id="notif-panel">
+    <div class="notif-header">
+      <div style="font-weight:600">Notifications</div>
+      <div style="display:flex;gap:0.5rem;align-items:center">
+        <button class="btn btn-outline btn-sm" onclick="markAllRead()">Mark all read</button>
+        <button class="icon-btn" id="notif-panel-close">✕</button>
+      </div>
+    </div>
+    <div id="notif-panel-content" style="padding:0.5rem 0">
+      <div style="padding:1rem;text-align:center;color:var(--text-muted);font-size:0.82rem">
+        Open the app and alerts will appear here.
+      </div>
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<!-- ════════════════════════════════════════════════════════
+     PROFILE MODAL
+     ════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="profile-modal">
+  <div class="modal" style="max-width:720px">
+    <div class="modal-header">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="user-avatar" id="pm-avatar" style="width:40px;height:40px;font-size:0.9rem;border-radius:50%">A</div>
+        <div>
+          <div class="modal-title" id="pm-name">Name</div>
+          <div style="font-size:0.78rem;color:var(--text-secondary)" id="pm-role">Role</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:0.6rem">
+        <div id="pm-grade"></div>
+        <button class="icon-btn" onclick="closeAllModals()">✕</button>
+      </div>
+    </div>
+    <div class="modal-body">
+
+      <!-- Meta row -->
+      <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.2rem;font-size:0.75rem;color:var(--text-secondary)">
+        <span id="pm-joined">—</span>
+        <span id="pm-active">—</span>
+        <span id="pm-streak">—</span>
+      </div>
+
+      <!-- Top section: IQ ring + overall + wellness -->
+      <div style="display:flex;gap:1.5rem;margin-bottom:1.4rem;flex-wrap:wrap">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:0.4rem">
+          <div id="pm-iq-ring"></div>
+          <div style="font-size:0.72rem;color:var(--text-secondary)">IntelliQ Score</div>
+        </div>
+        <div style="flex:1;min-width:200px">
+          <div style="margin-bottom:0.8rem">
+            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:3px">OVERALL PERFORMANCE</div>
+            <div style="font-size:2.2rem;font-weight:800" id="pm-overall">—</div>
+          </div>
+          <div>
+            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:3px">WELLNESS</div>
+            <div id="pm-wellness"></div>
+          </div>
+        </div>
+        <div style="flex:1;min-width:200px">
+          <div class="chart-wrap" style="max-width:200px">
+            <canvas id="pm-radar" width="200" height="200"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabbed sections -->
+      <div data-tabs>
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="scores">Scores</button>
+          <button class="tab-btn" data-tab="history">History</button>
+          <button class="tab-btn" data-tab="devplan">Dev Plan</button>
+          <button class="tab-btn" data-tab="insights">AI Insights</button>
+        </div>
+
+        <div class="tab-panel active" data-panel="scores">
+          <div id="pm-scores"></div>
+        </div>
+
+        <div class="tab-panel" data-panel="history">
+          <div class="chart-wrap" style="margin-bottom:1rem"><canvas id="pm-chart"></canvas></div>
+          <div id="pm-history-vals" style="display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:space-between"></div>
+        </div>
+
+        <div class="tab-panel" data-panel="devplan">
+          <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.8rem">Personal development tasks for this individual</div>
+          <div id="pm-dev-plan"></div>
+          <button class="btn btn-outline btn-sm" style="margin-top:0.8rem" onclick="showToast('New task added','success')">+ Add Task</button>
+        </div>
+
+        <div class="tab-panel" data-panel="insights">
+          <div class="rec-box">
+            <div class="rec-title">🤖 IntelliQ AI Recommendations</div>
+            <div id="pm-recs"></div>
+          </div>
+          <div style="margin-top:1rem;padding:0.8rem;background:var(--bg-surface);border-radius:var(--radius);border:1px solid var(--border)">
+            <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:4px">COACH/MANAGER NOTES</div>
+            <div style="font-size:0.85rem" id="pm-notes">—</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-outline" onclick="closeAllModals()">Close</button>
+      <button class="btn btn-accent" onclick="showToast('Report generated','success')">📋 Generate Report</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     ADD MEMBER MODAL
+     ════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="add-member-modal">
+  <div class="modal" style="max-width:440px">
+    <div class="modal-header">
+      <div class="modal-title">Add New Member</div>
+      <button class="icon-btn" onclick="closeAllModals()">✕</button>
+    </div>
+    <form id="add-member-form" onsubmit="submitAddMember(event)">
+      <div class="modal-body">
+        <div class="form-group">
+          <label>FULL NAME</label>
+          <input class="form-control" id="am-name" placeholder="First Last" required/>
+        </div>
+        <div class="form-group">
+          <label>ROLE / POSITION</label>
+          <input class="form-control" id="am-role" placeholder="e.g. Student, Forward, Analyst..." required/>
+        </div>
+        <div class="form-group">
+          <label>GROUP / TEAM</label>
+          <input class="form-control" id="am-group" placeholder="e.g. Class 10A, First Team..." required/>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" onclick="closeAllModals()">Cancel</button>
+        <button type="submit" class="btn btn-accent">Add Member</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ── SCRIPTS ──────────────────────────────────────────── -->
+<script src="js/data.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+
+<script>
+function switchGrade(g){
+  AppState.grade = g;
+  renderSettings();
+  renderSidebar();
+  showToast('Switched to ' + g + '-Grade Platform', 'success');
+}
+</script>
+
+</body>
+</html>
