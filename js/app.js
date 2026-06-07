@@ -17,6 +17,7 @@ function navigate(page){
   else if(page==='analytics') renderAnalytics();
   else if(page==='intelliq')  renderIntelliQ();
   else if(page==='scenarios') renderScenarios();
+  else if(page==='people')    renderPeople();
   else if(page==='alerts')    renderAlerts();
   else if(page==='reports')   renderReports();
   else if(page==='settings')  renderSettings();
@@ -28,30 +29,105 @@ const PAGE_TITLES = {
   analytics: 'Analytics & Insights',
   intelliq:  'IntelliQ Engine',
   scenarios: 'Decision Scenarios',
+  people:    'People & Hierarchy',
   alerts:    'Alerts & Notifications',
   reports:   'Reports & Stat Sheets',
   settings:  'Platform Settings',
 };
 
 /* ── LOGIN ────────────────────────────────────────────────── */
-function initLogin(){
+function showLoginPanel(panel) {
+  ['login','setup'].forEach(p => {
+    document.getElementById(`login-panel-${p}`).style.display = p === panel ? 'block' : 'none';
+  });
+}
+
+function initLogin() {
+  // Org tile selection (setup panel)
   let selectedMode = 'school';
   document.querySelectorAll('.org-tile').forEach(tile => {
     tile.addEventListener('click', () => {
-      document.querySelectorAll('.org-tile').forEach(t=>t.classList.remove('active'));
+      document.querySelectorAll('.org-tile').forEach(t => t.classList.remove('active'));
       tile.classList.add('active');
       selectedMode = tile.dataset.mode;
     });
   });
 
-  document.getElementById('login-form').addEventListener('submit', e => {
-    e.preventDefault();
-    const orgName  = document.getElementById('login-org').value  || 'My Organization';
-    const userName = document.getElementById('login-name').value || 'Admin User';
-    const grade    = document.getElementById('login-grade').value || 'A';
-    AppState.init(selectedMode, orgName, userName, grade);
+  // Check if already logged in via Auth
+  if (Auth.init()) {
+    const mode  = Auth.currentOrg?.orgMode || 'school';
+    const grade = 'A';
+    AppState.init(mode, Auth.currentOrg?.orgName || 'Organisation', Auth.currentUser?.name || 'User', grade);
+    AppState.adminRole = Auth.ROLE_LABELS[Auth.currentUser?.role] || 'Admin';
     launchApp();
+    return;
+  }
+
+  // Expose selectedMode for setup handler
+  window._selectedOrgMode = selectedMode;
+  document.querySelectorAll('.org-tile').forEach(tile => {
+    tile.addEventListener('click', () => { window._selectedOrgMode = tile.dataset.mode; });
   });
+}
+
+async function handleLogin() {
+  const orgCode  = (document.getElementById('login-org-code')?.value  || '').trim();
+  const name     = (document.getElementById('login-name')?.value      || '').trim();
+  const password = (document.getElementById('login-password')?.value  || '').trim();
+  const errEl    = document.getElementById('login-error');
+  errEl.style.display = 'none';
+
+  if (!orgCode || !name || !password) {
+    errEl.textContent = 'Please fill in all fields.'; errEl.style.display = 'block'; return;
+  }
+
+  try {
+    const { org } = await Auth.login(orgCode, name, password);
+    const mode  = org?.orgMode || 'school';
+    AppState.init(mode, org?.orgName || orgCode, name, 'A');
+    AppState.adminRole = Auth.ROLE_LABELS[Auth.currentUser?.role] || 'Admin';
+
+    if (Auth.isMember()) { launchMemberView(); return; }
+    launchApp();
+  } catch(e) {
+    errEl.textContent  = e.message || 'Login failed.';
+    errEl.style.display = 'block';
+  }
+}
+
+async function handleSetup() {
+  const orgName  = (document.getElementById('setup-org-name')?.value   || '').trim();
+  const name     = (document.getElementById('setup-admin-name')?.value  || '').trim();
+  const password = (document.getElementById('setup-password')?.value    || '').trim();
+  const grade    = document.getElementById('setup-grade')?.value        || 'A';
+  const orgMode  = window._selectedOrgMode || 'school';
+  const errEl    = document.getElementById('setup-error');
+  errEl.style.display = 'none';
+
+  if (!orgName || !name || !password) {
+    errEl.textContent = 'Please fill in all fields.'; errEl.style.display = 'block'; return;
+  }
+
+  try {
+    const data = await Auth.setupOrg(orgName, orgMode, name, password);
+    await Auth.login(data.orgCode, name, password);
+    AppState.init(orgMode, orgName, name, grade);
+    AppState.adminRole = 'Super Admin';
+
+    showToast(`Org created! Your code: ${data.orgCode}`, 'success');
+    launchApp();
+  } catch(e) {
+    errEl.textContent   = e.message || 'Setup failed.';
+    errEl.style.display = 'block';
+  }
+}
+
+/* ── MEMBER VIEW (Canvas-style — member logs in, sees their world) ─────── */
+function launchMemberView() {
+  // Hide the login, show a simplified member dashboard inside the same shell
+  document.getElementById('login-screen').style.display = 'none';
+  // Redirect to member app
+  window.location.href = `/member/?orgCode=${encodeURIComponent(Auth.currentUser.orgCode)}&name=${encodeURIComponent(Auth.currentUser.name)}`;
 }
 
 function launchApp(){
@@ -760,6 +836,65 @@ function renderReports(){
       <td><span style="font-weight:700;color:${scoreColor(m.overall)}">${m.overall}</span></td>
       <td>${gradeBadgeHTML(m.iqGrade)}</td>
     </tr>`).join('');
+}
+
+/* ── PEOPLE PAGE ─────────────────────────────────────────── */
+async function renderPeople() {
+  const subEl = document.getElementById('people-sub');
+  if (subEl) subEl.textContent = `${AppState.orgName} · ${Auth.currentUser?.name || 'Admin'}`;
+
+  const container = document.getElementById('hierarchy-tree-container');
+  if (!container) return;
+  container.innerHTML = `<div style="padding:1rem;color:var(--text-muted);font-size:0.85rem">Loading tree…</div>`;
+
+  try {
+    await HierarchyTree.load();
+    // Expand current user's node by default
+    if (Auth.currentUser?.id) HierarchyTree._expanded.add(Auth.currentUser.id);
+    HierarchyTree.render('hierarchy-tree-container');
+  } catch(e) {
+    // Demo mode — build tree from AppState.members
+    container.innerHTML = `
+      <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.8rem;padding:0.5rem;background:rgba(247,178,79,0.1);border-radius:6px">
+        Demo mode — tree shows mock members. Real hierarchy available after org setup.
+      </div>
+      ${_demoTreeHTML()}`;
+  }
+}
+
+function _demoTreeHTML() {
+  const color = ORG_MODES[AppState.mode].color;
+  return `
+    <div class="tree-node" style="border-color:rgba(124,90,245,0.4);background:rgba(124,90,245,0.05);margin-bottom:0.4rem">
+      <div class="tree-node-left">
+        <span style="width:20px;display:inline-block"></span>
+        <div class="tree-avatar" style="background:rgba(124,90,245,0.2);color:var(--accent)">🔑</div>
+        <div class="tree-info">
+          <div class="tree-name">${AppState.adminName} <span style="color:var(--text-muted);font-weight:400;font-size:0.72rem">(you)</span></div>
+          <div class="tree-role">Super Admin</div>
+        </div>
+      </div>
+      <div class="tree-actions">
+        <span class="tree-count">${AppState.members.length} below</span>
+      </div>
+    </div>
+    <div style="margin-left:28px">
+      ${AppState.members.slice(0,8).map(m => `
+        <div class="tree-node" style="margin-bottom:0.4rem">
+          <div class="tree-node-left">
+            <span style="width:20px;display:inline-block"></span>
+            <div class="tree-avatar" style="background:${m.color}22;color:${m.color}">${m.initials}</div>
+            <div class="tree-info">
+              <div class="tree-name">${m.name}</div>
+              <div class="tree-role">${m.role} · ${m.group}</div>
+            </div>
+          </div>
+          <div class="tree-actions">
+            <button class="tree-btn" onclick="showProfile(${m.id})">View</button>
+          </div>
+        </div>`).join('')}
+      ${AppState.members.length > 8 ? `<div style="font-size:0.78rem;color:var(--text-muted);padding:0.5rem 0">+ ${AppState.members.length-8} more members</div>` : ''}
+    </div>`;
 }
 
 /* ── SETTINGS PAGE ───────────────────────────────────────── */

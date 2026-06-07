@@ -7,6 +7,10 @@
 <link rel="stylesheet" href="css/styles.css"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<!-- SheetJS — for parsing .xlsx spreadsheets -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
 <!-- Inter font -->
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
@@ -14,62 +18,85 @@
 <body>
 
 <!-- ════════════════════════════════════════════════════════
-     LOGIN SCREEN
+     LOGIN SCREEN — three panels: login / setup / member
      ════════════════════════════════════════════════════════ -->
 <div id="login-screen">
   <div class="login-box">
     <div class="login-logo">
-      <div class="logo-icon">P</div>
+      <div class="logo-icon">IQ</div>
       <div>
-        <div class="logo-text">Platform</div>
-        <div class="logo-sub">IntelliQ Ecosystem</div>
+        <div class="logo-text">IntelliQ</div>
+        <div class="logo-sub">Platform</div>
       </div>
     </div>
-    <div class="login-title">Welcome to Platform</div>
-    <div class="login-sub">Universal Performance Intelligence System — configure your organization to begin.</div>
 
-    <form id="login-form">
+    <!-- ── Panel A: Login (existing org) ── -->
+    <div id="login-panel-login">
+      <div class="login-title">Sign in</div>
+      <div class="login-sub" style="margin-bottom:1.2rem">Enter your org code and name to continue.</div>
+
       <div class="form-group">
-        <label>ORGANIZATION NAME</label>
-        <input class="form-control" id="login-org" placeholder="e.g. Westfield Academy, FC United, TechCorp..." value="Westfield Academy"/>
+        <label>ORG CODE</label>
+        <input class="form-control" id="login-org-code" placeholder="e.g. westfield-academy" autocapitalize="none"/>
       </div>
       <div class="form-group">
         <label>YOUR NAME</label>
-        <input class="form-control" id="login-name" placeholder="Administrator / Coach / Manager..." value="Dr. A. Moyo"/>
+        <input class="form-control" id="login-name" placeholder="As set up by your admin"/>
       </div>
       <div class="form-group">
-        <label>ORGANIZATION TYPE</label>
+        <label>PASSWORD</label>
+        <input class="form-control" type="password" id="login-password" placeholder="Your password"/>
+      </div>
+      <div id="login-error" style="color:#f74f4f;font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
+      <button class="btn-primary" onclick="handleLogin()">Sign In →</button>
+      <div style="text-align:center;margin-top:1rem;font-size:0.82rem;color:var(--text-secondary)">
+        New organisation? <a href="#" onclick="showLoginPanel('setup')" style="color:var(--accent)">Set up here →</a>
+      </div>
+    </div>
+
+    <!-- ── Panel B: Setup new org ── -->
+    <div id="login-panel-setup" style="display:none">
+      <div class="login-title">Set up your org</div>
+      <div class="login-sub" style="margin-bottom:1.2rem">You'll be the Super Admin. Takes 60 seconds.</div>
+
+      <div class="form-group">
+        <label>ORGANISATION NAME</label>
+        <input class="form-control" id="setup-org-name" placeholder="e.g. Westfield FC, City Academy…"/>
+      </div>
+      <div class="form-group">
+        <label>YOUR NAME</label>
+        <input class="form-control" id="setup-admin-name" placeholder="Club owner, director, headmaster…"/>
+      </div>
+      <div class="form-group">
+        <label>PASSWORD</label>
+        <input class="form-control" type="password" id="setup-password" placeholder="Choose a password"/>
+      </div>
+      <div class="form-group">
+        <label>ORGANISATION TYPE</label>
         <div class="org-grid">
-          <div class="org-tile active" data-mode="school">
-            <div class="tile-icon">🎓</div><div>School</div>
-          </div>
-          <div class="org-tile" data-mode="sports">
-            <div class="tile-icon">⚽</div><div>Sports</div>
-          </div>
-          <div class="org-tile" data-mode="workplace">
-            <div class="tile-icon">🏢</div><div>Workplace</div>
-          </div>
-          <div class="org-tile" data-mode="military">
-            <div class="tile-icon">🎖️</div><div>Military</div>
-          </div>
-          <div class="org-tile" data-mode="healthcare">
-            <div class="tile-icon">🏥</div><div>Healthcare</div>
-          </div>
-          <div class="org-tile" data-mode="government">
-            <div class="tile-icon">🏛️</div><div>Government</div>
-          </div>
+          <div class="org-tile active" data-mode="school"><div class="tile-icon">🎓</div><div>School</div></div>
+          <div class="org-tile" data-mode="sports"><div class="tile-icon">⚽</div><div>Sports</div></div>
+          <div class="org-tile" data-mode="workplace"><div class="tile-icon">🏢</div><div>Workplace</div></div>
+          <div class="org-tile" data-mode="military"><div class="tile-icon">🎖️</div><div>Military</div></div>
+          <div class="org-tile" data-mode="healthcare"><div class="tile-icon">🏥</div><div>Healthcare</div></div>
+          <div class="org-tile" data-mode="government"><div class="tile-icon">🏛️</div><div>Government</div></div>
         </div>
       </div>
       <div class="form-group">
         <label>PLATFORM GRADE</label>
-        <select class="form-control" id="login-grade">
-          <option value="A">A-Grade — Full IntelliQ + AI Insights + Real-time Monitoring</option>
+        <select class="form-control" id="setup-grade">
+          <option value="A">A-Grade — Full IntelliQ + AI + Real-time Monitoring</option>
           <option value="B">B-Grade — Performance Tracking + Basic IntelliQ</option>
           <option value="C">C-Grade — Simple Monitoring + Basic Evaluation</option>
         </select>
       </div>
-      <button type="submit" class="btn-primary">Launch Platform →</button>
-    </form>
+      <div id="setup-error" style="color:#f74f4f;font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
+      <button class="btn-primary" onclick="handleSetup()">Create Organisation →</button>
+      <div style="text-align:center;margin-top:1rem;font-size:0.82rem;color:var(--text-secondary)">
+        Already have an org? <a href="#" onclick="showLoginPanel('login')" style="color:var(--accent)">Sign in →</a>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -106,8 +133,14 @@
       <div class="nav-item" data-page="intelliq">
         <span class="nav-icon">🧠</span> IntelliQ Engine
       </div>
+      <div class="nav-item" data-page="scenarios">
+        <span class="nav-icon">🎯</span> Scenarios
+      </div>
 
       <div class="nav-section-label">Management</div>
+      <div class="nav-item" data-page="people">
+        <span class="nav-icon">👥</span> People
+      </div>
       <div class="nav-item" data-page="alerts">
         <span class="nav-icon">🔔</span> Alerts
         <span class="nav-badge" style="display:none">0</span>
@@ -123,10 +156,12 @@
     <div class="sidebar-footer">
       <div class="user-pill">
         <div class="user-avatar" style="background:#4f8ef7">A</div>
-        <div>
+        <div style="flex:1;min-width:0">
           <div class="user-name">Admin</div>
           <div class="user-role">Administrator</div>
         </div>
+        <button onclick="Auth.logout()" title="Sign out"
+          style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1rem;padding:4px;flex-shrink:0">⏻</button>
       </div>
     </div>
   </aside>
@@ -318,6 +353,20 @@
       </section>
 
       <!-- ════════════════════════════
+           SCENARIOS PAGE
+           ════════════════════════════ -->
+      <section class="page" id="page-scenarios">
+        <div class="section-header">
+          <div>
+            <div class="section-title">AI Scenarios</div>
+            <div class="section-sub">Create a context — the AI runs the scenario, evaluates reasoning, and scores the result</div>
+          </div>
+          <div id="scenarios-grade-badge"></div>
+        </div>
+        <div id="scenarios-content"></div>
+      </section>
+
+      <!-- ════════════════════════════
            INTELLIQ PAGE
            ════════════════════════════ -->
       <section class="page" id="page-intelliq">
@@ -329,6 +378,11 @@
           <div class="grade-selector">
             <div class="grade-btn active-A">A-Grade Features Active</div>
           </div>
+        </div>
+
+        <!-- IntelliQ Executive Health Panel -->
+        <div class="card" style="margin-bottom:1rem">
+          <div class="card-body" id="iq-health-panel"></div>
         </div>
 
         <!-- Top IQ rings -->
@@ -369,6 +423,27 @@
             </table>
           </div>
         </div>
+      </section>
+
+      <!-- ════════════════════════════
+           PEOPLE PAGE
+           ════════════════════════════ -->
+      <section class="page" id="page-people">
+        <div class="section-header">
+          <div>
+            <div class="section-title">People & Hierarchy</div>
+            <div class="section-sub" id="people-sub">Your organisation tree</div>
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="HierarchyTree.openAddBelow(Auth.currentUser?.id, Auth.currentUser?.name)">+ Add Person</button>
+        </div>
+
+        <!-- Org tree -->
+        <div class="card" style="margin-bottom:1rem">
+          <div id="hierarchy-tree-container"></div>
+        </div>
+
+        <!-- Add panel (shown inline when + Add is clicked) -->
+        <div id="hierarchy-add-panel" style="display:none"></div>
       </section>
 
       <!-- ════════════════════════════
@@ -486,6 +561,12 @@
                 </div>
                 <div class="org-grid" id="settings-modes"></div>
               </div>
+            </div>
+
+            <!-- Hierarchy Builder -->
+            <div class="card" style="margin-bottom:1rem">
+              <div class="card-header"><div class="card-title">Org Hierarchy</div></div>
+              <div class="card-body" id="settings-hierarchy"></div>
             </div>
 
             <!-- Platform Grade -->
@@ -610,6 +691,7 @@
           <button class="tab-btn active" data-tab="scores">Scores</button>
           <button class="tab-btn" data-tab="history">History</button>
           <button class="tab-btn" data-tab="devplan">Dev Plan</button>
+          <button class="tab-btn" data-tab="coach">Coach Input</button>
           <button class="tab-btn" data-tab="insights">AI Insights</button>
         </div>
 
@@ -624,8 +706,13 @@
 
         <div class="tab-panel" data-panel="devplan">
           <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.8rem">Personal development tasks for this individual</div>
+          <div id="pm-notes" style="font-size:0.83rem;color:var(--text-secondary);background:var(--surface-2);border-radius:8px;padding:0.7rem 0.9rem;margin-bottom:0.9rem;line-height:1.55;border-left:3px solid var(--accent)"></div>
           <div id="pm-dev-plan"></div>
           <button class="btn btn-outline btn-sm" style="margin-top:0.8rem" onclick="showToast('New task added','success')">+ Add Task</button>
+        </div>
+
+        <div class="tab-panel" data-panel="coach">
+          <div id="pm-coach-content"></div>
         </div>
 
         <div class="tab-panel" data-panel="insights">
@@ -633,9 +720,12 @@
             <div class="rec-title">🤖 IntelliQ AI Recommendations</div>
             <div id="pm-recs"></div>
           </div>
-          <div style="margin-top:1rem;padding:0.8rem;background:var(--bg-surface);border-radius:var(--radius);border:1px solid var(--border)">
-            <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:4px">COACH/MANAGER NOTES</div>
-            <div style="font-size:0.85rem" id="pm-notes">—</div>
+          <div style="margin-top:1rem">
+            <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Recent AI Check-ins</div>
+            <div id="pm-chat-history"></div>
+          </div>
+          <div style="margin-top:0.8rem">
+            <button class="btn btn-outline btn-sm" onclick="ChatEngine.open(AppState.currentMemberId)">💬 Start AI Check-in</button>
           </div>
         </div>
       </div>
@@ -680,10 +770,159 @@
   </div>
 </div>
 
+<!-- ════════════════════════════════════════════════════════
+     SCENARIO RUNNER MODAL
+     ════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="scenario-runner-modal">
+  <div class="modal scenario-modal">
+    <div id="scenario-runner-content"></div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     ALERT COMPOSE MODAL
+     Coach responds to an IntelliQ alert: brief + attachment
+     → AI drafts scenario → approve → launch
+     ════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="alert-compose-modal">
+  <div class="modal" style="max-width:640px;width:100%">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="acm-title">Respond to Alert</div>
+        <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px" id="acm-sub"></div>
+      </div>
+      <button class="icon-btn" onclick="closeAllModals()">✕</button>
+    </div>
+    <div style="padding:1.2rem;overflow-y:auto;max-height:75vh">
+
+      <!-- Alert context banner -->
+      <div id="acm-context-banner" style="background:rgba(247,178,79,0.1);border:1px solid rgba(247,178,79,0.3);border-radius:8px;padding:0.9rem 1rem;margin-bottom:1.1rem;font-size:0.82rem;color:var(--text-secondary);line-height:1.6"></div>
+
+      <!-- Member + difficulty -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:0.9rem">
+        <div>
+          <label class="form-label">Member</label>
+          <select id="acm-member" class="form-input"></select>
+        </div>
+        <div>
+          <label class="form-label">Difficulty</label>
+          <div style="display:flex;gap:0.4rem;margin-top:2px">
+            ${['Easy','Medium','Hard'].map(d => `
+              <button class="domain-badge acm-diff-btn" data-diff="${d}"
+                style="cursor:pointer;padding:5px 10px;font-size:0.73rem"
+                onclick="selectAlertDifficulty('${d}')">${d}</button>`).join('')}
+          </div>
+        </div>
+      </div>
+
+      <!-- Brief -->
+      <div style="margin-bottom:0.9rem">
+        <label class="form-label">Your brief — plain language, AI will draft from this</label>
+        <textarea id="acm-brief" class="form-input" rows="3" style="resize:vertical"
+          placeholder="Describe what you want to address, what you've observed, what you want to find out…"></textarea>
+      </div>
+
+      <!-- Attachment -->
+      <div style="margin-bottom:0.9rem">
+        <label class="form-label">Attach media <span style="font-weight:400;text-transform:none;color:var(--text-muted)">(optional — film, doc, spreadsheet, image…)</span></label>
+        <div id="acm-dropzone" class="attach-dropzone"
+          onclick="document.getElementById('acm-file-input').click()"
+          ondragover="event.preventDefault();this.classList.add('drag-over')"
+          ondragleave="this.classList.remove('drag-over')"
+          ondrop="handleAlertDrop(event)">
+          <div style="font-size:1.4rem;margin-bottom:0.3rem">📎</div>
+          <div style="font-size:0.82rem;color:var(--text-secondary)">Drop file or click to upload</div>
+          <div style="font-size:0.72rem;color:var(--text-muted);margin-top:3px">Images, PDF, Word, Excel, PowerPoint, CSV, Text</div>
+        </div>
+        <input type="file" id="acm-file-input" style="display:none"
+          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv"
+          onchange="handleAlertFileSelect(this.files[0])"/>
+        <div id="acm-attachment-preview" style="margin-top:0.5rem"></div>
+      </div>
+
+      <!-- URL embed -->
+      <div style="margin-bottom:1.1rem">
+        <label class="form-label">Or paste a link <span style="font-weight:400;text-transform:none;color:var(--text-muted)">(Hudl, YouTube, Google Drive, etc.)</span></label>
+        <div style="display:flex;gap:0.5rem">
+          <input type="url" id="acm-embed-url" class="form-input" placeholder="https://…" style="flex:1"/>
+          <button class="btn btn-outline btn-sm" onclick="attachAlertEmbed()">Attach</button>
+        </div>
+        <div id="acm-embed-preview" style="margin-top:0.5rem"></div>
+      </div>
+
+      <!-- Draft review panel (hidden until AI responds) -->
+      <div id="acm-draft-panel" style="display:none;background:var(--surface-1);border:1px solid var(--accent);border-radius:var(--radius);padding:1.1rem;margin-bottom:1rem">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.9rem">
+          <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent)">AI Draft — Review &amp; Approve</div>
+          <button class="btn btn-outline btn-sm" onclick="draftAlertScenario()">↺ Regenerate</button>
+        </div>
+        <div style="margin-bottom:0.7rem">
+          <label class="form-label">Title</label>
+          <input type="text" id="acm-draft-title" class="form-input"/>
+        </div>
+        <div style="margin-bottom:0.7rem">
+          <label class="form-label">Opening Situation</label>
+          <textarea id="acm-draft-opening" class="form-input" rows="3" style="resize:vertical"></textarea>
+        </div>
+        <div style="margin-bottom:0.7rem">
+          <label class="form-label">Probe Framework</label>
+          <div id="acm-draft-probes"></div>
+        </div>
+        <div style="background:rgba(124,90,245,0.08);border:1px solid rgba(124,90,245,0.25);border-radius:8px;padding:0.8rem;margin-bottom:0.9rem">
+          <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;color:var(--accent);margin-bottom:0.3rem">🔒 Coach Note — Private</div>
+          <div id="acm-draft-coachnote" style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6"></div>
+        </div>
+        <div style="display:flex;justify-content:flex-end">
+          <button class="btn btn-accent" onclick="approveAlertDraft()">✓ Approve &amp; Launch</button>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div style="display:flex;justify-content:flex-end;gap:0.5rem" id="acm-actions">
+        <button class="btn btn-outline" onclick="closeAllModals()">Cancel</button>
+        <button class="btn btn-accent" id="acm-draft-btn" onclick="draftAlertScenario()">✦ Draft Scenario with AI →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     AI CHAT MODAL
+     ════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="chat-modal">
+  <div class="modal chat-modal-inner">
+    <div class="modal-header" style="padding:1rem 1.2rem">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="ai-avatar">IQ</div>
+        <div>
+          <div class="modal-title" id="chat-modal-title">IntelliQ AI</div>
+          <div style="font-size:0.72rem;color:var(--text-secondary)">Reflection Assistant · Confidential</div>
+        </div>
+      </div>
+      <button class="icon-btn" onclick="closeAllModals()">✕</button>
+    </div>
+    <div class="chat-messages-wrap">
+      <div id="chat-messages"></div>
+    </div>
+    <div class="chat-input-bar">
+      <input id="chat-input" placeholder="Type your response…"
+             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();ChatEngine.sendMessage(this.value);}"/>
+      <button class="btn btn-accent btn-sm" onclick="ChatEngine.sendMessage(document.getElementById('chat-input').value)">Send</button>
+    </div>
+  </div>
+</div>
+
+<!-- Hierarchy manage modal (outside page flow) -->
+<div id="hierarchy-manage-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center;padding:1rem"></div>
+
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
 <script src="js/data.js"></script>
+<script src="js/auth.js"></script>
 <script src="js/charts.js"></script>
 <script src="js/ui.js"></script>
+<script src="js/attachments.js"></script>
+<script src="js/scenarios.js"></script>
+<script src="js/chat.js"></script>
 <script src="js/app.js"></script>
 
 <script>

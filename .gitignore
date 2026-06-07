@@ -3,3 +3,9 @@ serve.ps1
 *.log
 Thumbs.db
 .DS_Store
+
+# Environment — never commit real keys
+.env
+
+# Dependencies
+node_modules/

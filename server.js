@@ -314,6 +314,209 @@ Be honest. Be specific. Reference what ${memberName} actually said. Do not give 
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   AUTH — ORG & USER MANAGEMENT
+   Simple in-memory store. Replace with Postgres/Redis for production.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const orgMeta  = {};  // orgCode → { orgName, orgMode, createdAt }
+const orgUsers = {};  // orgCode → { userId → userObject }
+const inviteTokens = {}; // token → { orgCode, role, supervisorId, expiresAt }
+
+function generateId()    { return Math.random().toString(36).slice(2,10); }
+function generateToken() { return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2); }
+function simpleHash(str) { let h = 0; for (const c of str) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h.toString(16); }
+function toOrgCode(name) { return name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''); }
+
+/* ── Setup new org (first super admin) ─────────────────────────────────── */
+app.post('/api/auth/setup-org', (req, res) => {
+  const { orgName, orgMode, adminName, password } = req.body;
+  if (!orgName || !adminName || !password) return res.status(400).json({ error: 'Missing fields' });
+
+  const orgCode = toOrgCode(orgName);
+  if (orgUsers[orgCode] && Object.keys(orgUsers[orgCode]).length > 0) {
+    return res.status(400).json({ error: 'Organisation already exists. Ask your admin for an invite.' });
+  }
+
+  const userId = generateId();
+  orgMeta[orgCode]  = { orgName, orgMode: orgMode || 'school', createdAt: new Date().toISOString() };
+  orgUsers[orgCode] = {};
+  orgUsers[orgCode][userId] = {
+    id:           userId,
+    name:         adminName,
+    role:         'superadmin',
+    orgCode,
+    supervisorId: null,
+    passwordHash: simpleHash(password),
+    createdAt:    new Date().toISOString(),
+    levelId:      1,
+  };
+
+  res.json({ ok: true, orgCode, userId, orgName, role: 'superadmin' });
+});
+
+/* ── Login ──────────────────────────────────────────────────────────────── */
+app.post('/api/auth/login', (req, res) => {
+  const { orgCode, name, password } = req.body;
+  const code  = (orgCode || '').toLowerCase().trim();
+  const users = orgUsers[code];
+  if (!users) return res.status(404).json({ error: 'Organisation not found. Check your org code.' });
+
+  const user = Object.values(users).find(u =>
+    u.name.toLowerCase() === name.toLowerCase().trim() &&
+    u.passwordHash === simpleHash(password)
+  );
+  if (!user) return res.status(401).json({ error: 'Name or password incorrect.' });
+
+  const org = orgMeta[code];
+  res.json({ ok: true, user: { ...user, passwordHash: undefined }, org });
+});
+
+/* ── Create user (admin/coach adds someone below them) ─────────────────── */
+app.post('/api/auth/create-user', (req, res) => {
+  const { orgCode, creatorId, name, role, supervisorId, password } = req.body;
+  const code  = (orgCode || '').toLowerCase();
+  const users = orgUsers[code];
+  if (!users) return res.status(404).json({ error: 'Org not found' });
+
+  const creator = users[creatorId];
+  if (!creator) return res.status(403).json({ error: 'Creator not found' });
+
+  // Role hierarchy check — can't create someone at same level or higher
+  const roleLevel = { superadmin:1, admin:2, coach:3, member:4 };
+  if (roleLevel[role] <= roleLevel[creator.role] && creator.role !== 'superadmin') {
+    return res.status(403).json({ error: 'You cannot create someone at or above your level' });
+  }
+
+  // Check name uniqueness in org
+  const exists = Object.values(users).find(u => u.name.toLowerCase() === name.toLowerCase().trim());
+  if (exists) return res.status(400).json({ error: 'Someone with that name already exists in this org' });
+
+  const userId = generateId();
+  users[userId] = {
+    id:           userId,
+    name:         name.trim(),
+    role,
+    orgCode:      code,
+    supervisorId: supervisorId || creatorId,
+    passwordHash: simpleHash(password || name.trim().toLowerCase()),
+    createdAt:    new Date().toISOString(),
+    levelId:      roleLevel[role],
+  };
+
+  res.json({ ok: true, user: { ...users[userId], passwordHash: undefined } });
+});
+
+/* ── Bulk create users from CSV ─────────────────────────────────────────── */
+app.post('/api/auth/bulk-create', (req, res) => {
+  const { orgCode, creatorId, users: newUsers, role, supervisorId } = req.body;
+  const code  = (orgCode || '').toLowerCase();
+  const users = orgUsers[code];
+  if (!users) return res.status(404).json({ error: 'Org not found' });
+
+  const created = [], skipped = [];
+  (newUsers || []).forEach(name => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const exists = Object.values(users).find(u => u.name.toLowerCase() === trimmed.toLowerCase());
+    if (exists) { skipped.push(trimmed); return; }
+    const userId = generateId();
+    const roleLevel = { superadmin:1, admin:2, coach:3, member:4 };
+    users[userId] = {
+      id: userId, name: trimmed, role: role || 'member', orgCode: code,
+      supervisorId: supervisorId || creatorId,
+      passwordHash: simpleHash(trimmed.toLowerCase()),
+      createdAt: new Date().toISOString(),
+      levelId: roleLevel[role] || 4,
+    };
+    created.push({ name: trimmed, password: trimmed.toLowerCase() });
+  });
+
+  res.json({ ok: true, created, skipped });
+});
+
+/* ── Generate invite link ───────────────────────────────────────────────── */
+app.post('/api/auth/invite', (req, res) => {
+  const { orgCode, role, supervisorId } = req.body;
+  const token = generateToken();
+  inviteTokens[token] = {
+    orgCode: orgCode.toLowerCase(),
+    role: role || 'member',
+    supervisorId,
+    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
+  };
+  res.json({ ok: true, token, url: `/join?invite=${token}` });
+});
+
+/* ── Join via invite ────────────────────────────────────────────────────── */
+app.post('/api/auth/join-invite', (req, res) => {
+  const { token, name, password } = req.body;
+  const invite = inviteTokens[token];
+  if (!invite) return res.status(404).json({ error: 'Invalid or expired invite link' });
+  if (invite.expiresAt < Date.now()) return res.status(410).json({ error: 'Invite link has expired' });
+
+  const code  = invite.orgCode;
+  const users = orgUsers[code];
+  if (!users) return res.status(404).json({ error: 'Organisation not found' });
+
+  const exists = Object.values(users).find(u => u.name.toLowerCase() === name.toLowerCase().trim());
+  if (exists) return res.status(400).json({ error: 'That name is already taken in this org' });
+
+  const roleLevel = { superadmin:1, admin:2, coach:3, member:4 };
+  const userId = generateId();
+  users[userId] = {
+    id: userId, name: name.trim(), role: invite.role, orgCode: code,
+    supervisorId: invite.supervisorId,
+    passwordHash: simpleHash(password),
+    createdAt: new Date().toISOString(),
+    levelId: roleLevel[invite.role] || 4,
+  };
+
+  const org = orgMeta[code];
+  res.json({ ok: true, user: { ...users[userId], passwordHash: undefined }, org });
+});
+
+/* ── Get org hierarchy tree ─────────────────────────────────────────────── */
+app.get('/api/auth/org-tree', (req, res) => {
+  const { orgCode } = req.query;
+  const code  = (orgCode || '').toLowerCase();
+  const users = orgUsers[code];
+  if (!users) return res.status(404).json({ error: 'Org not found' });
+
+  // Build tree from flat list
+  const all   = Object.values(users).map(u => ({ ...u, passwordHash: undefined, children: [] }));
+  const byId  = {};
+  all.forEach(u => byId[u.id] = u);
+
+  const roots = [];
+  all.forEach(u => {
+    if (!u.supervisorId || !byId[u.supervisorId]) roots.push(u);
+    else byId[u.supervisorId].children.push(u);
+  });
+
+  res.json({ ok: true, tree: roots, flat: all });
+});
+
+/* ── Update user ────────────────────────────────────────────────────────── */
+app.put('/api/auth/update-user', (req, res) => {
+  const { orgCode, userId, updates } = req.body;
+  const users = orgUsers[(orgCode||'').toLowerCase()];
+  if (!users || !users[userId]) return res.status(404).json({ error: 'User not found' });
+  const safe = ['name','role','supervisorId','group'];
+  safe.forEach(k => { if (updates[k] !== undefined) users[userId][k] = updates[k]; });
+  if (updates.password) users[userId].passwordHash = simpleHash(updates.password);
+  res.json({ ok: true, user: { ...users[userId], passwordHash: undefined } });
+});
+
+/* ── Delete user ────────────────────────────────────────────────────────── */
+app.delete('/api/auth/delete-user', (req, res) => {
+  const { orgCode, userId } = req.body;
+  const users = orgUsers[(orgCode||'').toLowerCase()];
+  if (!users || !users[userId]) return res.status(404).json({ error: 'User not found' });
+  delete users[userId];
+  res.json({ ok: true });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
    MEMBER APP — SHARED SESSION STORE
    In-memory bridge between Platform (coach) and Member App (Timmy).
    Replace with a real DB (Postgres/Redis) when persistence is needed.
