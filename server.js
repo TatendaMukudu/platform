@@ -1,0 +1,449 @@
+require('dotenv').config();
+const express   = require('express');
+const Anthropic  = require('@anthropic-ai/sdk');
+const path      = require('path');
+
+const app    = express();
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+app.use(express.json());
+app.use(express.static(path.join(__dirname)));
+
+/* ─── REFLECTION SYSTEM PROMPT ─────────────────────────────────────────── */
+function buildReflectionPrompt(orgMode, orgName) {
+  const ctx = {
+    school:     'students in a school environment. Academic pressure, peer relationships, behaviour, and moral development are common themes.',
+    sports:     'athletes in a sports club. Performance pressure, team dynamics, coaching relationships, and mental resilience are common themes.',
+    workplace:  'employees in a workplace. Professional conduct, leadership, team conflict, stress, and work-life balance are common themes.',
+    military:   'personnel in a military unit. Discipline, command decisions, ethics under pressure, and stress management are common themes.',
+    healthcare: 'healthcare workers. Patient care decisions, ethical dilemmas, burnout, and high-stakes stress are common themes.',
+    government: 'government officials and public servants. Policy decisions, integrity, public accountability, and crisis management are common themes.',
+  };
+
+  return `You are the IntelliQ Reflection Assistant — an empathetic, intelligent AI coach embedded in the IntelliQ platform used by ${orgName}.
+
+You are speaking with ${ctx[orgMode] || 'individuals in a professional or institutional environment.'}
+
+YOUR ROLE:
+Guide structured post-scenario reflections and standalone check-ins. Help individuals develop genuine self-awareness and understand their decision-making patterns. You are not a therapist — but you are warm, perceptive, and take what people share seriously.
+
+REFLECTION STRUCTURE — move through these phases naturally, don't announce them:
+1. Reaction — immediate emotional response
+2. Reasoning — unpacking the thinking behind their choices
+3. Influences — what shaped their decisions (people, experiences, environment)
+4. External — gently checking on life outside this context
+5. Closing — a forward-looking takeaway
+
+TONE:
+- Conversational, warm, direct. Not clinical or robotic.
+- Ask one question at a time.
+- Reference what they actually said — never give generic responses.
+- Use their name naturally but not excessively.
+
+SAFEGUARDING — MANDATORY — HIGHEST PRIORITY:
+You are a mandated reporter. If anything suggests self-harm, suicidal ideation, abuse, threats, feeling unsafe, or severe hopelessness — you MUST:
+1. Respond with care, without alarm
+2. State that what they shared is important and you are flagging it for a trusted adult
+3. Ask if there is someone nearby they feel safe with
+4. Include the exact string [[MANDATED_FLAG]] in your response
+
+Catch nuanced language — "I've been in a really dark place" or "I just don't see the point anymore" should trigger this, not only explicit statements.`;
+}
+
+/* ─── SCENARIO SYSTEM PROMPT ────────────────────────────────────────────── */
+function buildScenarioPrompt(orgMode, orgName, title, context, memberName, difficulty, opening = null, probes = null) {
+  const difficultyNote = {
+    easy:   'Start with a clear, straightforward situation. Keep the stakes moderate.',
+    medium: 'Present a situation with genuine tension and no obvious right answer.',
+    hard:   'Create high-stakes complexity with competing obligations, time pressure, and moral ambiguity.',
+  }[difficulty] || 'Present a situation with genuine tension and no obvious right answer.';
+
+  return `You are the IntelliQ Scenario Facilitator — an intelligent evaluator running a live decision-making assessment in the IntelliQ platform used by ${orgName}.
+
+You are assessing ${memberName} using a scenario in the domain: "${title}".
+SCENARIO CONTEXT: ${context}
+DIFFICULTY: ${difficultyNote}
+${opening ? `\nAPPROVED OPENING — use this exact opening to begin:\n"${opening}"\n` : ''}
+${probes?.length ? `\nAPPROVED PROBE FRAMEWORK — the coach has pre-approved these follow-up angles. Use them as your guide but adapt naturally to what ${memberName} says:\n${probes.map((p, i) => `${i+1}. ${p}`).join('\n')}\n` : ''}
+YOUR JOB:
+1. ${opening ? `Start with the approved opening above — present it naturally, do not just read it verbatim.` : `Open with a vivid, specific, realistic situation tied to the context above.`}
+2. Let ${memberName} respond in their own words.
+3. React to what they actually say. ${probes?.length ? `Use the approved probes as your framework.` : `Probe reasoning: "Why that approach?", "What would you do if X changed?", "Who else is affected?"`}
+4. Introduce a complication or escalation based on their response — raise the stakes when they handle something well.
+5. After 5–7 exchanges you have enough data. Wrap up naturally, then output your scoring.
+
+SCORING — output this when ready (after sufficient exchanges):
+Append this block on a new line at the end of your closing message:
+[[SCORE:{"ethical_reasoning":75,"stakeholder_awareness":80,"pressure_response":65,"self_awareness":70,"overall":73,"summary":"2-3 sentence honest assessment of their decision-making quality","strengths":["specific strength 1","specific strength 2"],"development":["specific area 1","specific area 2"]}]]
+
+SCORING CRITERIA:
+- ethical_reasoning: Did they weigh right/wrong, fairness, duty? Did they justify their choices?
+- stakeholder_awareness: Did they consider who else is affected, not just the immediate situation?
+- pressure_response: How did they handle complexity, time pressure, or escalation?
+- self_awareness: Did they acknowledge uncertainty, reflect on their own role, or show intellectual honesty?
+- overall: Weighted composite. Be honest — a 70 earned through genuine reasoning is more valuable than an inflated 90.
+- strengths/development: Specific, actionable, tied to what they actually said. Not generic.
+
+SAFEGUARDING — MANDATORY:
+If anything suggests self-harm, abuse, threats, or danger — respond with care, include [[MANDATED_FLAG]], ask if they're safe. This overrides the scenario immediately.
+
+TONE:
+- Direct and realistic. This is an assessment, not a therapy session.
+- Keep scenario descriptions concise — one short paragraph to open, then let them respond.
+- React specifically to what they say. No generic follow-up questions.
+- Do not reveal the scoring criteria to the member.`;
+}
+
+/* ─── CHAT / SCENARIO ENDPOINT ──────────────────────────────────────────── */
+app.post('/api/chat', async (req, res) => {
+  const {
+    messages,
+    orgMode,
+    orgName,
+    memberName,
+    scenarioContext,    // reflection mode: completed scenario summary
+    promptType,         // 'reflection' (default) | 'scenario'
+    scenarioRunContext, // scenario mode: { title, context, difficulty, opening, probes, image }
+  } = req.body;
+
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: 'messages array required' });
+  }
+
+  try {
+    let systemPrompt;
+
+    if (promptType === 'scenario') {
+      const sc = scenarioRunContext || {};
+      systemPrompt = buildScenarioPrompt(
+        orgMode || 'school',
+        orgName  || 'your organisation',
+        sc.title || 'Decision Making',
+        sc.context || 'A challenging workplace or social situation',
+        memberName || 'the member',
+        sc.difficulty || 'medium',
+        sc.opening  || null,
+        sc.probes   || null
+      );
+    } else {
+      systemPrompt = buildReflectionPrompt(orgMode || 'school', orgName || 'your organisation');
+      if (scenarioContext) {
+        systemPrompt += `\n\nSCENARIO JUST COMPLETED:\nTitle: ${scenarioContext.title}\nScore: ${scenarioContext.score}/100 (${scenarioContext.label})\n`;
+        if (scenarioContext.answers?.length) {
+          systemPrompt += 'Their answers:\n' + scenarioContext.answers.map((a, i) =>
+            `Q${i+1}: "${a.chosen}" — Score: ${a.score}/100`
+          ).join('\n');
+        }
+      }
+    }
+
+    // If scenario has an attached image, inject it into the first user message
+    const scenarioImage = scenarioRunContext?.image;
+    const apiMessages = messages.map((m, i) => {
+      if (i === 0 && m.role === 'user' && scenarioImage?.data) {
+        return {
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: scenarioImage.mediaType || 'image/jpeg', data: scenarioImage.data } },
+            { type: 'text', text: m.content },
+          ],
+        };
+      }
+      return { role: m.role, content: m.content };
+    });
+
+    const response = await client.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 500,
+      system:     systemPrompt,
+      messages:   apiMessages,
+    });
+
+    const raw = response.content[0]?.text || '';
+
+    // Extract structured score block if present
+    const scoreMatch = raw.match(/\[\[SCORE:(\{[\s\S]*?\})\]\]/);
+    let scoreData = null;
+    if (scoreMatch) {
+      try { scoreData = JSON.parse(scoreMatch[1]); } catch(e) { console.warn('Score parse error:', e.message); }
+    }
+
+    const mandated = raw.includes('[[MANDATED_FLAG]]');
+    const cleaned  = raw
+      .replace(/\[\[SCORE:[\s\S]*?\]\]/, '')
+      .replace('[[MANDATED_FLAG]]', '')
+      .trim();
+
+    res.json({ text: cleaned, mandated, score: scoreData });
+
+  } catch (err) {
+    console.error('Anthropic API error:', err.message);
+    res.status(500).json({ error: 'AI service unavailable', detail: err.message });
+  }
+});
+
+/* ─── SCENARIO DRAFT ENDPOINT ───────────────────────────────────────────
+   Coach submits a plain-language brief. Claude drafts a scenario:
+   opening situation, 3-5 probing questions, and a coaching note.
+   Coach reviews and approves before it ever reaches the member.
+   ────────────────────────────────────────────────────────────────────── */
+app.post('/api/draft-scenario', async (req, res) => {
+  const { brief, orgMode, orgName, memberName, difficulty, image } = req.body;
+  if (!brief) return res.status(400).json({ error: 'brief required' });
+
+  const hasImage = image && image.data && image.mediaType;
+
+  const systemPrompt = `You are an expert scenario designer for IntelliQ, a performance intelligence platform used by ${orgName || 'an organisation'}.
+
+A coach/professional has written a brief about a member. Your job is to draft a scenario that will be used to assess that member's decision-making, reasoning, and self-awareness.
+
+ORGANISATION TYPE: ${orgMode || 'school'}
+MEMBER: ${memberName || 'the member'}
+DIFFICULTY: ${difficulty || 'medium'}
+${hasImage ? '\nAn image has been attached by the coach. Build the scenario around what is shown in the image — reference specific elements the member should notice and respond to.' : ''}
+
+OUTPUT FORMAT — respond with valid JSON only, no extra text:
+{
+  "opening": "The vivid opening situation (2-3 sentences). ${hasImage ? 'Reference the image directly — e.g. \"Take a look at the clip/diagram/sheet below.\" Then set the scene.' : 'Ground it in reality.'} Do not resolve the tension.",
+  "probes": [
+    "First follow-up — references something specific in the image or brief",
+    "Second follow-up — introduces a complication or raises stakes",
+    "Third follow-up — tests self-awareness or understanding"
+  ],
+  "coachNote": "What this scenario is designed to reveal, and what strong vs weak responses look like. 2-3 sentences. Reference the image content if relevant.",
+  "title": "A short scenario title (3-6 words)"
+}
+
+RULES:
+- The opening must feel real and specific
+- Do not make the right answer obvious
+- The probes should escalate
+- The coachNote is private — never shown to the member
+- Adapt to the org type`;
+
+  // Build message content — include image if provided
+  const userContent = hasImage
+    ? [
+        { type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.data } },
+        { type: 'text', text: `Coach brief: ${brief}` },
+      ]
+    : `Coach brief: ${brief}`;
+
+  try {
+    const response = await client.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 700,
+      system:     systemPrompt,
+      messages:   [{ role: 'user', content: userContent }],
+    });
+
+    const raw = response.content[0]?.text || '';
+    // Strip markdown code fences if present
+    const jsonStr = raw.replace(/```json\n?|\n?```/g, '').trim();
+
+    let draft;
+    try { draft = JSON.parse(jsonStr); }
+    catch(e) { return res.status(500).json({ error: 'Draft parse failed', raw }); }
+
+    res.json({ draft });
+
+  } catch (err) {
+    console.error('Draft scenario error:', err.message);
+    res.status(500).json({ error: 'AI service unavailable', detail: err.message });
+  }
+});
+
+/* ─── COACH DEBRIEF ENDPOINT ────────────────────────────────────────────
+   After a member completes a scenario, generates a private debrief
+   for the coach: what the responses reveal + recommended actions.
+   Never shown to the member.
+   ────────────────────────────────────────────────────────────────────── */
+app.post('/api/coach-debrief', async (req, res) => {
+  const { conversation, scores, memberName, scenarioTitle, orgMode, orgName, coachRole } = req.body;
+  if (!conversation || !scores) return res.status(400).json({ error: 'conversation and scores required' });
+
+  const systemPrompt = `You are an expert performance analyst for IntelliQ, used by ${orgName || 'an organisation'}.
+
+You are writing a private debrief for a ${coachRole || 'coach/supervisor'} — NOT for the member. The member will never see this.
+
+Your job: analyse ${memberName}'s responses to the "${scenarioTitle}" scenario and give the coach practical, specific guidance.
+
+ORGANISATION TYPE: ${orgMode || 'school'}
+
+OUTPUT FORMAT — valid JSON only:
+{
+  "headline": "One sentence summary of the most important thing the coach should know",
+  "whatThisReveals": "2-3 sentences on what ${memberName}'s reasoning pattern shows — not just the score, but the WHY behind it. What does this tell you about how they think?",
+  "watchFor": ["Specific behaviour or pattern to observe in real situations", "Another thing to monitor"],
+  "coachingActions": ["Concrete action the coach can take this week", "A second specific action", "Optional third action"],
+  "escalate": false
+}
+
+Set "escalate" to true ONLY if the conversation contains anything suggesting the member needs support beyond normal coaching (wellbeing concern, significant distress, safeguarding indicator).
+
+Be honest. Be specific. Reference what ${memberName} actually said. Do not give generic coaching advice.`;
+
+  const conversationText = conversation
+    .map(m => `${m.role === 'user' ? memberName : 'AI'}: ${m.content}`)
+    .join('\n');
+
+  try {
+    const response = await client.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 600,
+      system:     systemPrompt,
+      messages:   [{
+        role:    'user',
+        content: `SCORES: Ethical Reasoning ${scores.ethical_reasoning}, Stakeholder Awareness ${scores.stakeholder_awareness}, Pressure Response ${scores.pressure_response}, Self Awareness ${scores.self_awareness}, Overall ${scores.overall}\n\nCONVERSATION:\n${conversationText}`,
+      }],
+    });
+
+    const raw     = response.content[0]?.text || '';
+    const jsonStr = raw.replace(/```json\n?|\n?```/g, '').trim();
+
+    let debrief;
+    try { debrief = JSON.parse(jsonStr); }
+    catch(e) { return res.status(500).json({ error: 'Debrief parse failed', raw }); }
+
+    res.json({ debrief });
+
+  } catch (err) {
+    console.error('Coach debrief error:', err.message);
+    res.status(500).json({ error: 'AI service unavailable', detail: err.message });
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MEMBER APP — SHARED SESSION STORE
+   In-memory bridge between Platform (coach) and Member App (Timmy).
+   Replace with a real DB (Postgres/Redis) when persistence is needed.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// orgStore: orgCode → { orgName, orgMode }
+const orgStore = {};
+
+// assignedScenarios: orgCode:memberKey → [ scenario objects ]
+const assignedScenarios = {};
+
+// memberResults: orgCode:memberKey → [ result objects ]
+const memberResults = {};
+
+// checkins: orgCode:memberKey → [ checkin objects ]
+const memberCheckins = {};
+
+function memberKey(orgCode, memberName) {
+  return `${orgCode.toLowerCase().trim()}:${memberName.toLowerCase().trim()}`;
+}
+
+/* ── Platform registers org (called on login) ───────────────────────────── */
+app.post('/api/platform/register-org', (req, res) => {
+  const { orgCode, orgName, orgMode } = req.body;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  orgStore[orgCode.toLowerCase().trim()] = { orgName, orgMode };
+  res.json({ ok: true });
+});
+
+/* ── Platform assigns a scenario to a member ────────────────────────────── */
+app.post('/api/platform/assign-scenario', (req, res) => {
+  const { orgCode, memberName, scenario } = req.body;
+  if (!orgCode || !memberName || !scenario) {
+    return res.status(400).json({ error: 'orgCode, memberName and scenario required' });
+  }
+  const key = memberKey(orgCode, memberName);
+  if (!assignedScenarios[key]) assignedScenarios[key] = [];
+  // Avoid duplicates by scenario id
+  if (!assignedScenarios[key].find(s => s.id === scenario.id)) {
+    assignedScenarios[key].push({ ...scenario, assignedAt: new Date().toISOString(), status: 'pending' });
+  }
+  res.json({ ok: true, total: assignedScenarios[key].length });
+});
+
+/* ── Member joins org ───────────────────────────────────────────────────── */
+app.post('/api/member/join', (req, res) => {
+  const { orgCode, memberName } = req.body;
+  if (!orgCode || !memberName) return res.status(400).json({ error: 'orgCode and memberName required' });
+  const code = orgCode.toLowerCase().trim();
+  const org  = orgStore[code];
+  // Allow join even if org not pre-registered (demo mode)
+  res.json({
+    ok:         true,
+    orgName:    org?.orgName  || orgCode,
+    orgMode:    org?.orgMode  || 'school',
+    memberName: memberName.trim(),
+    orgCode:    code,
+  });
+});
+
+/* ── Member gets pending scenarios ─────────────────────────────────────── */
+app.get('/api/member/pending', (req, res) => {
+  const { orgCode, memberName } = req.query;
+  if (!orgCode || !memberName) return res.status(400).json({ error: 'orgCode and memberName required' });
+  const key      = memberKey(orgCode, memberName);
+  const pending  = (assignedScenarios[key] || []).filter(s => s.status === 'pending');
+  res.json({ scenarios: pending });
+});
+
+/* ── Member submits scenario result ─────────────────────────────────────── */
+app.post('/api/member/submit-result', (req, res) => {
+  const { orgCode, memberName, scenarioId, result } = req.body;
+  if (!orgCode || !memberName || !result) return res.status(400).json({ error: 'missing fields' });
+  const key = memberKey(orgCode, memberName);
+
+  // Mark scenario as completed
+  if (assignedScenarios[key]) {
+    const sc = assignedScenarios[key].find(s => s.id === scenarioId);
+    if (sc) sc.status = 'completed';
+  }
+
+  // Store result
+  if (!memberResults[key]) memberResults[key] = [];
+  memberResults[key].push({ ...result, submittedAt: new Date().toISOString() });
+  res.json({ ok: true });
+});
+
+/* ── Member submits check-in ────────────────────────────────────────────── */
+app.post('/api/member/checkin', (req, res) => {
+  const { orgCode, memberName, mood, note } = req.body;
+  if (!orgCode || !memberName) return res.status(400).json({ error: 'missing fields' });
+  const key = memberKey(orgCode, memberName);
+  if (!memberCheckins[key]) memberCheckins[key] = [];
+  memberCheckins[key].push({
+    mood, note,
+    date: new Date().toLocaleDateString('en-GB'),
+    ts:   new Date().toISOString(),
+  });
+  res.json({ ok: true });
+});
+
+/* ── Platform pulls member results ─────────────────────────────────────── */
+app.get('/api/platform/member-results', (req, res) => {
+  const { orgCode, memberName } = req.query;
+  if (!orgCode || !memberName) return res.status(400).json({ error: 'missing fields' });
+  const key = memberKey(orgCode, memberName);
+  res.json({
+    results:  memberResults[key]  || [],
+    checkins: memberCheckins[key] || [],
+  });
+});
+
+/* ── Platform pulls all results for org ─────────────────────────────────── */
+app.get('/api/platform/org-results', (req, res) => {
+  const { orgCode } = req.query;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  const code    = orgCode.toLowerCase().trim();
+  const results = {};
+  Object.keys(memberResults).forEach(key => {
+    if (key.startsWith(code + ':')) {
+      const name = key.split(':').slice(1).join(':');
+      results[name] = memberResults[key];
+    }
+  });
+  res.json({ results });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`IntelliQ running → http://localhost:${PORT}`);
+  console.log(`Member app   → http://localhost:${PORT}/member/`);
+  console.log(`API key: ${process.env.ANTHROPIC_API_KEY ? '✓ loaded' : '✗ MISSING'}`);
+});

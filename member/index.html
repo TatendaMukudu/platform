@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+<meta name="theme-color" content="#0d0d12"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<title>IntelliQ</title>
+<link rel="stylesheet" href="css/styles.css"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ══════════════════════════════════════
+       JOIN SCREEN
+       ══════════════════════════════════════ -->
+  <div class="screen active" id="screen-join">
+    <div class="join-logo">
+      <div class="join-logo-ring">IQ</div>
+      <div class="join-logo-title">IntelliQ</div>
+      <div class="join-logo-sub">Performance Intelligence</div>
+    </div>
+
+    <div class="join-card">
+      <div class="join-card-title">Join your organisation</div>
+      <div class="form-group">
+        <label class="form-label">Organisation Code</label>
+        <input class="form-input" id="join-org-code" placeholder="e.g. westfield-academy" autocomplete="off" autocapitalize="none"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Your Name</label>
+        <input class="form-input" id="join-name" placeholder="First name is fine" autocomplete="off"/>
+      </div>
+      <button class="btn-join" onclick="MemberApp.join()">Join →</button>
+      <div id="join-error" style="color:var(--danger);font-size:0.8rem;margin-top:0.6rem;text-align:center;display:none"></div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       MAIN APP (home, scenarios, check-in, stats)
+       ══════════════════════════════════════ -->
+  <div class="screen" id="screen-main">
+    <div class="page-content" id="main-content">
+
+      <!-- HOME TAB -->
+      <div class="tab-page active" id="tab-home">
+        <div class="page-header">
+          <div class="page-header-greeting" id="home-greeting">Good morning</div>
+          <div class="page-header-title"    id="home-name">—</div>
+          <div class="page-header-sub"      id="home-org">—</div>
+        </div>
+
+        <!-- IQ ring + streak -->
+        <div id="home-stat-row"></div>
+
+        <!-- Pending scenarios -->
+        <div class="card-label" style="margin-bottom:0.5rem">Pending Scenarios</div>
+        <div id="home-pending"></div>
+
+        <!-- Today's check-in prompt -->
+        <div id="home-checkin-prompt"></div>
+
+        <!-- Recent result -->
+        <div id="home-recent-result"></div>
+      </div>
+
+      <!-- SCENARIOS TAB -->
+      <div class="tab-page" id="tab-scenarios">
+        <div class="page-header">
+          <div class="page-header-title">Scenarios</div>
+          <div class="page-header-sub">Assigned by your coach</div>
+        </div>
+        <div id="scenarios-list"></div>
+      </div>
+
+      <!-- CHECK-IN TAB -->
+      <div class="tab-page" id="tab-checkin">
+        <div class="page-header">
+          <div class="page-header-title">Daily Check-In</div>
+          <div class="page-header-sub">How are you doing today?</div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">How's your mood?</div>
+          <div class="mood-grid" id="mood-grid">
+            <div>
+              <button class="mood-btn" data-mood="1" data-label="Rough" onclick="MemberApp.selectMood(1)">😔</button>
+              <div class="mood-label">Rough</div>
+            </div>
+            <div>
+              <button class="mood-btn" data-mood="2" data-label="Low" onclick="MemberApp.selectMood(2)">😕</button>
+              <div class="mood-label">Low</div>
+            </div>
+            <div>
+              <button class="mood-btn" data-mood="3" data-label="Okay" onclick="MemberApp.selectMood(3)">😐</button>
+              <div class="mood-label">Okay</div>
+            </div>
+            <div>
+              <button class="mood-btn" data-mood="4" data-label="Good" onclick="MemberApp.selectMood(4)">🙂</button>
+              <div class="mood-label">Good</div>
+            </div>
+            <div>
+              <button class="mood-btn" data-mood="5" data-label="Great" onclick="MemberApp.selectMood(5)">😄</button>
+              <div class="mood-label">Great</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-label">Anything on your mind?</div>
+          <textarea class="note-input" id="checkin-note"
+            placeholder="Optional — share anything you want. Could be about training, school, life. It stays between you and IntelliQ."></textarea>
+        </div>
+
+        <button class="btn-primary" id="checkin-submit-btn" onclick="MemberApp.submitCheckin()" disabled>
+          Submit Check-In
+        </button>
+
+        <div id="checkin-done" style="display:none;text-align:center;padding:1.5rem 0">
+          <div style="font-size:2rem;margin-bottom:0.5rem">✅</div>
+          <div style="font-weight:700">Check-in saved</div>
+          <div style="font-size:0.82rem;color:var(--text-muted);margin-top:4px">See you tomorrow</div>
+        </div>
+      </div>
+
+      <!-- STATS TAB -->
+      <div class="tab-page" id="tab-stats">
+        <div class="page-header">
+          <div class="page-header-title">My Stats</div>
+          <div class="page-header-sub">Your IntelliQ scores</div>
+        </div>
+        <div id="stats-content"></div>
+      </div>
+
+    </div><!-- /page-content -->
+
+    <!-- Bottom Navigation -->
+    <nav class="bottom-nav">
+      <button class="nav-tab active" data-tab="home" onclick="MemberApp.switchTab('home')">
+        <span class="nav-icon">🏠</span>
+        Home
+      </button>
+      <button class="nav-tab" data-tab="scenarios" onclick="MemberApp.switchTab('scenarios')">
+        <span class="nav-icon">🎯</span>
+        Scenarios
+        <span class="nav-badge" id="scenarios-badge" style="display:none">0</span>
+      </button>
+      <button class="nav-tab" data-tab="checkin" onclick="MemberApp.switchTab('checkin')">
+        <span class="nav-icon">💬</span>
+        Check-In
+      </button>
+      <button class="nav-tab" data-tab="stats" onclick="MemberApp.switchTab('stats')">
+        <span class="nav-icon">📊</span>
+        My Stats
+      </button>
+    </nav>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       SCENARIO CHAT SCREEN (full screen)
+       ══════════════════════════════════════ -->
+  <div class="screen" id="screen-scenario">
+    <div class="scenario-header">
+      <button class="scenario-back-btn" onclick="MemberApp.exitScenario()">‹</button>
+      <div class="scenario-header-info">
+        <div class="scenario-header-title" id="sc-header-title">Scenario</div>
+        <div class="scenario-header-meta"  id="sc-header-meta">IntelliQ Assessment</div>
+      </div>
+      <div class="scenario-exchange-badge" id="sc-exchange-badge">Exchange 0</div>
+    </div>
+
+    <div class="scenario-messages" id="sc-messages"></div>
+
+    <div class="scenario-input-bar" id="sc-input-bar">
+      <textarea class="scenario-input" id="sc-input" rows="1"
+        placeholder="Type your response…"
+        oninput="MemberApp.autoResizeInput(this)"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.sendScenarioMessage();}"></textarea>
+      <button class="send-btn" id="sc-send-btn" onclick="MemberApp.sendScenarioMessage()">➤</button>
+    </div>
+  </div>
+
+</div><!-- /app -->
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>

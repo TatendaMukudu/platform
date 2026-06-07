@@ -13,12 +13,13 @@ function navigate(page){
   document.querySelector('.topbar-title').textContent = PAGE_TITLES[page] || 'Platform';
 
   if(page==='dashboard') renderDashboard();
-  else if(page==='members') renderMembers();
+  else if(page==='members')   renderMembers();
   else if(page==='analytics') renderAnalytics();
-  else if(page==='intelliq') renderIntelliQ();
-  else if(page==='alerts')   renderAlerts();
-  else if(page==='reports')  renderReports();
-  else if(page==='settings') renderSettings();
+  else if(page==='intelliq')  renderIntelliQ();
+  else if(page==='scenarios') renderScenarios();
+  else if(page==='alerts')    renderAlerts();
+  else if(page==='reports')   renderReports();
+  else if(page==='settings')  renderSettings();
 }
 
 const PAGE_TITLES = {
@@ -26,6 +27,7 @@ const PAGE_TITLES = {
   members:   'Members & Profiles',
   analytics: 'Analytics & Insights',
   intelliq:  'IntelliQ Engine',
+  scenarios: 'Decision Scenarios',
   alerts:    'Alerts & Notifications',
   reports:   'Reports & Stat Sheets',
   settings:  'Platform Settings',
@@ -60,6 +62,18 @@ function launchApp(){
   renderTopbar();
   renderAllPages();
   navigate('dashboard');
+
+  // Register org with server so member app can join
+  const orgCode = AppState.orgName.toLowerCase().replace(/\s+/g,'-');
+  AppState.orgCode = orgCode;
+  fetch('/api/platform/register-org', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orgCode, orgName: AppState.orgName, orgMode: AppState.mode }),
+  }).catch(() => {});
+
+  // Show org join code to admin
+  setTimeout(() => showToast(`Member join code: ${orgCode}`, 'info'), 1200);
 }
 
 /* ── SIDEBAR ──────────────────────────────────────────────── */
@@ -375,6 +389,47 @@ function renderIntelliQ(){
       <td><span style="color:${scoreColor(m.wellnessScore)}">${m.wellnessScore}</span></td>
     </tr>`).join('');
 
+  // ── IntelliQ Executive Health Panel ──────────────────────
+  AppState.runHealthCheck();
+  const openAlerts     = AppState.alerts.filter(a => a.proactive && !a.responded);
+  const unactioned     = AppState.alerts.filter(a => (a.type === 'danger' || a.type === 'warning') && !a.responded);
+  const atRiskMembers  = AppState.members.filter(m => m.wellnessScore < 45 || m.overall < 55);
+  const noEngagement   = AppState.members.filter(m => !m.lastActive || m.lastActive === '1 week ago');
+
+  document.getElementById('iq-health-panel').innerHTML = `
+    <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:1rem">IntelliQ Org Health View</div>
+
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.7rem;margin-bottom:1.2rem">
+      ${[
+        { label:'Open Warnings',   val: openAlerts.length,   color: openAlerts.length ? 'var(--warning)' : 'var(--success)', icon:'⚠' },
+        { label:'Unactioned Flags',val: unactioned.length,   color: unactioned.length > 2 ? 'var(--danger)' : unactioned.length ? 'var(--warning)' : 'var(--success)', icon:'🔔' },
+        { label:'At-Risk Members', val: atRiskMembers.length,color: atRiskMembers.length > 3 ? 'var(--danger)' : 'var(--warning)', icon:'🚨' },
+        { label:'Low Engagement',  val: noEngagement.length, color: noEngagement.length > 4 ? 'var(--warning)' : 'var(--text-secondary)', icon:'💤' },
+      ].map(s => `
+        <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:0.8rem;text-align:center">
+          <div style="font-size:1.2rem">${s.icon}</div>
+          <div style="font-size:1.4rem;font-weight:700;color:${s.color};margin:4px 0">${s.val}</div>
+          <div style="font-size:0.7rem;color:var(--text-muted)">${s.label}</div>
+        </div>`).join('')}
+    </div>
+
+    ${openAlerts.length ? `
+      <div style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:0.5rem">Active IntelliQ Warnings — requires coach response</div>
+      ${openAlerts.slice(0,4).map((a, i) => {
+        const idx = AppState.alerts.indexOf(a);
+        return `<div style="display:flex;align-items:center;gap:0.6rem;padding:0.6rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;margin-bottom:0.4rem;font-size:0.8rem">
+          <span style="color:${a.type==='danger'?'var(--danger)':'var(--warning)'}">●</span>
+          <div style="flex:1;min-width:0">
+            <span style="font-weight:600">${a.member?.name || '—'}</span>
+            <span style="color:var(--text-muted);margin-left:0.4rem">${a.title}</span>
+          </div>
+          <button class="btn btn-accent btn-sm" style="font-size:0.72rem"
+            onclick="openAlertCompose(${idx})">Respond →</button>
+        </div>`;
+      }).join('')}
+      ${openAlerts.length > 4 ? `<div style="font-size:0.75rem;color:var(--accent);cursor:pointer;margin-top:0.3rem" onclick="navigate('alerts')">+ ${openAlerts.length-4} more — view all alerts →</div>` : ''}
+    ` : `<div style="font-size:0.82rem;color:var(--success);text-align:center;padding:1rem">✓ No open warnings — org looks healthy</div>`}`;
+
   setTimeout(()=>{
     // Radar for org average
     const avgScores = metrics.map(k => {
@@ -402,15 +457,72 @@ function renderIntelliQ(){
 
 /* ── ALERTS PAGE ─────────────────────────────────────────── */
 function renderAlerts(){
+  // Run a health check each time the page is opened so it's always fresh
+  AppState.runHealthCheck();
+
+  const alerts  = AppState.alerts;
   const container = document.getElementById('alerts-list');
-  container.innerHTML = AppState.alerts.map((a,i)=>alertItemHTML(a,i)).join('');
   document.getElementById('alerts-unread-count').textContent = AppState.getUnreadAlertCount();
+
+  if (!alerts.length) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">✅</div><p>No alerts — org looks healthy.</p></div>`;
+    return;
+  }
+
+  // Group: proactive (IntelliQ-generated) vs manual
+  const proactive = alerts.filter(a => a.proactive);
+  const manual    = alerts.filter(a => !a.proactive);
+
+  const sectionHTML = (title, icon, items) => {
+    if (!items.length) return '';
+    return `
+      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin:1rem 0 0.6rem">${icon} ${title} (${items.length})</div>
+      ${items.map((a, i) => {
+        const idx = alerts.indexOf(a);
+        return alertActionItemHTML(a, idx);
+      }).join('')}`;
+  };
+
+  container.innerHTML =
+    sectionHTML('IntelliQ Early Warnings', '🧠', proactive) +
+    sectionHTML('Manual Flags & Notifications', '🔔', manual);
+}
+
+function alertActionItemHTML(a, idx) {
+  const typeColors = { danger:'#f74f4f', warning:'#f7b24f', success:'#4ff77a', info:'#4f8ef7' };
+  const color = typeColors[a.type] || '#4f8ef7';
+  const unreadDot = a.unread ? `<span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block;flex-shrink:0;margin-top:4px"></span>` : `<span style="width:8px;height:8px;display:inline-block;flex-shrink:0"></span>`;
+  const proactiveBadge = a.proactive ? `<span style="font-size:0.65rem;background:rgba(124,90,245,0.15);color:var(--accent);border:1px solid rgba(124,90,245,0.3);border-radius:4px;padding:2px 6px;margin-left:6px">IntelliQ</span>` : '';
+  const respondedBadge = a.responded ? `<span style="font-size:0.65rem;background:rgba(79,247,122,0.15);color:var(--success);border:1px solid rgba(79,247,122,0.3);border-radius:4px;padding:2px 6px;margin-left:6px">Responded</span>` : '';
+
+  const actionBtn = a.memberId && !a.responded
+    ? `<button class="btn btn-accent btn-sm" style="flex-shrink:0"
+        onclick="openAlertCompose(${idx})">Respond →</button>`
+    : a.member
+    ? `<button class="btn btn-outline btn-sm" style="flex-shrink:0;font-size:0.73rem"
+        onclick="showProfile(${a.member.id})">View Profile</button>`
+    : '';
+
+  return `
+    <div style="display:flex;gap:0.7rem;align-items:flex-start;padding:0.9rem 0;border-bottom:1px solid var(--border)"
+         onclick="markAlertRead(${idx})">
+      ${unreadDot}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:0.25rem">
+          <span style="font-size:0.85rem;font-weight:600;color:${color}">${a.title}</span>
+          ${proactiveBadge}${respondedBadge}
+        </div>
+        <div style="font-size:0.8rem;color:var(--text-secondary);line-height:1.5;margin-bottom:0.35rem">${a.detail}</div>
+        <div style="font-size:0.7rem;color:var(--text-muted)">${a.time}</div>
+      </div>
+      ${actionBtn}
+    </div>`;
 }
 
 function markAlertRead(idx){
   if(AppState.alerts[idx]) AppState.alerts[idx].unread = false;
   updateAlertBadge();
-  renderAlerts();
+  if (AppState.currentPage === 'alerts') renderAlerts();
 }
 
 function markAllRead(){
@@ -418,6 +530,194 @@ function markAllRead(){
   updateAlertBadge();
   renderAlerts();
   showToast('All alerts marked as read','success');
+}
+
+/* ── ALERT COMPOSE FLOW ──────────────────────────────────── */
+let _alertComposeIdx    = null;
+let _alertAttachment    = null;
+let _alertDifficulty    = 'Medium';
+
+function openAlertCompose(alertIdx) {
+  const a = AppState.alerts[alertIdx];
+  if (!a) return;
+
+  _alertComposeIdx = alertIdx;
+  _alertAttachment = null;
+  _alertDifficulty = 'Medium';
+
+  // Header
+  document.getElementById('acm-title').textContent = `Respond: ${a.title}`;
+  document.getElementById('acm-sub').textContent   = a.member ? a.member.name : '';
+
+  // Context banner
+  document.getElementById('acm-context-banner').textContent = a.detail;
+
+  // Member selector — pre-select flagged member
+  const memberSel = document.getElementById('acm-member');
+  memberSel.innerHTML = AppState.members
+    .sort((x,y) => x.name.localeCompare(y.name))
+    .map(m => `<option value="${m.id}" ${m.id === a.memberId ? 'selected' : ''}>${m.name}</option>`)
+    .join('');
+
+  // Pre-fill brief from suggested
+  document.getElementById('acm-brief').value = a.suggestedBrief || '';
+
+  // Reset panels
+  document.getElementById('acm-draft-panel').style.display   = 'none';
+  document.getElementById('acm-attachment-preview').innerHTML = '';
+  document.getElementById('acm-embed-preview').innerHTML      = '';
+  document.getElementById('acm-embed-url').value              = '';
+
+  selectAlertDifficulty('Medium');
+  openModal('alert-compose-modal');
+}
+
+function selectAlertDifficulty(diff) {
+  _alertDifficulty = diff;
+  document.querySelectorAll('.acm-diff-btn').forEach(btn => {
+    const active = btn.dataset.diff === diff;
+    const color  = ORG_MODES[AppState.mode].color;
+    btn.style.background  = active ? `${color}22` : '';
+    btn.style.color       = active ? color : '';
+    btn.style.borderColor = active ? `${color}44` : '';
+  });
+}
+
+async function handleAlertFileSelect(file) {
+  if (!file) return;
+  const preview = document.getElementById('acm-attachment-preview');
+  preview.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Processing ${file.name}…</div>`;
+  try {
+    _alertAttachment = await AttachmentHandler.process(file);
+    preview.innerHTML = `
+      <div style="display:flex;align-items:center;gap:0.6rem;padding:0.6rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:0.8rem">
+        <span>${AttachmentHandler.ICONS[_alertAttachment.kind] || '📎'}</span>
+        <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_alertAttachment.name}</span>
+        <span style="color:var(--success);font-size:0.72rem">✓ Ready</span>
+        <button onclick="_alertAttachment=null;document.getElementById('acm-attachment-preview').innerHTML=''" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:0.9rem">✕</button>
+      </div>
+      ${_alertAttachment.kind === 'image' ? `<img src="${_alertAttachment.preview}" style="max-height:120px;border-radius:6px;margin-top:0.4rem"/>` : ''}`;
+  } catch(e) {
+    preview.innerHTML = `<div style="font-size:0.8rem;color:var(--danger)">${e.message}</div>`;
+  }
+}
+
+function handleAlertDrop(event) {
+  event.preventDefault();
+  document.getElementById('acm-dropzone').classList.remove('drag-over');
+  const file = event.dataTransfer.files[0];
+  if (file) handleAlertFileSelect(file);
+}
+
+function attachAlertEmbed() {
+  const url = (document.getElementById('acm-embed-url').value || '').trim();
+  if (!url) return;
+  const embed = AttachmentHandler.processEmbed(url);
+  if (!embed) return;
+  _alertAttachment = embed;
+  document.getElementById('acm-embed-preview').innerHTML = `
+    <div style="margin-top:0.4rem">${embed.embedHTML}</div>
+    <div style="font-size:0.72rem;color:var(--success);margin-top:4px">✓ Will be shown to member during scenario</div>`;
+}
+
+async function draftAlertScenario() {
+  const brief    = (document.getElementById('acm-brief')?.value || '').trim();
+  const memberId = parseInt(document.getElementById('acm-member')?.value) || null;
+  if (!brief)    { showToast('Write a brief first', 'warning'); return; }
+  if (!memberId) { showToast('Select a member', 'warning'); return; }
+
+  const btn = document.getElementById('acm-draft-btn');
+  if (btn) { btn.textContent = '✦ Drafting…'; btn.disabled = true; }
+
+  const member = AppState.getMember(memberId);
+
+  // Build image payload if attachment is image/pdf
+  let imagePayload = null;
+  if (_alertAttachment?.kind === 'image' || _alertAttachment?.kind === 'pdf') {
+    imagePayload = { data: _alertAttachment.data, mediaType: _alertAttachment.mediaType };
+  }
+
+  try {
+    const res = await fetch('/api/draft-scenario', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brief,
+        orgMode:    AppState.mode,
+        orgName:    AppState.orgName,
+        memberName: member?.name?.split(' ')[0] || 'the member',
+        difficulty: _alertDifficulty,
+        image:      imagePayload,
+      }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { draft } = await res.json();
+
+    document.getElementById('acm-draft-title').value   = draft.title   || '';
+    document.getElementById('acm-draft-opening').value = draft.opening || '';
+    document.getElementById('acm-draft-coachnote').textContent = draft.coachNote || '';
+    document.getElementById('acm-draft-probes').innerHTML = (draft.probes || []).map((p, i) => `
+      <div style="display:flex;gap:0.5rem;margin-bottom:0.4rem;align-items:flex-start">
+        <span style="font-size:0.72rem;color:var(--text-muted);padding-top:8px;flex-shrink:0">${i+1}.</span>
+        <input type="text" class="form-input acm-probe-input" value="${p.replace(/"/g,'&quot;')}" style="flex:1;font-size:0.82rem"/>
+      </div>`).join('');
+
+    document.getElementById('acm-draft-panel').style.display = 'block';
+    document.getElementById('acm-actions').style.display     = 'none';
+
+  } catch(err) {
+    // Fallback: let coach edit manually
+    document.getElementById('acm-draft-title').value   = 'Follow-up Scenario';
+    document.getElementById('acm-draft-opening').value = `[AI unavailable — edit manually]\n\nBrief: ${brief}`;
+    document.getElementById('acm-draft-coachnote').textContent = 'AI service offline. Edit the scenario manually.';
+    document.getElementById('acm-draft-probes').innerHTML = `
+      <div style="display:flex;gap:0.5rem;margin-bottom:0.4rem">
+        <span style="font-size:0.72rem;color:var(--text-muted);padding-top:8px">1.</span>
+        <input type="text" class="form-input acm-probe-input" value="Walk me through your thinking on this." style="flex:1;font-size:0.82rem"/>
+      </div>`;
+    document.getElementById('acm-draft-panel').style.display = 'block';
+    document.getElementById('acm-actions').style.display     = 'none';
+  } finally {
+    if (btn) { btn.textContent = '✦ Draft Scenario with AI →'; btn.disabled = false; }
+  }
+}
+
+function approveAlertDraft() {
+  const title    = (document.getElementById('acm-draft-title')?.value   || '').trim();
+  const opening  = (document.getElementById('acm-draft-opening')?.value || '').trim();
+  const brief    = (document.getElementById('acm-brief')?.value         || '').trim();
+  const memberId = parseInt(document.getElementById('acm-member')?.value) || null;
+  const probes   = [...document.querySelectorAll('.acm-probe-input')].map(i => i.value.trim()).filter(Boolean);
+
+  if (!title || !opening || !memberId) { showToast('Fill in title, opening, and member', 'warning'); return; }
+
+  const scenario = {
+    id:         `sc_alert_${Date.now()}`,
+    title,
+    brief,
+    domain:     'Follow-up',
+    context:    brief,
+    opening,
+    probes,
+    difficulty: _alertDifficulty,
+    attachment: _alertAttachment || null,
+    createdBy:  AppState.adminName,
+    createdAt:  new Date().toLocaleDateString('en-GB'),
+    fromAlert:  true,
+  };
+
+  AppState.scenarios.push(scenario);
+
+  // Mark the source alert as responded
+  if (_alertComposeIdx !== null && AppState.alerts[_alertComposeIdx]) {
+    AppState.alerts[_alertComposeIdx].responded = true;
+    AppState.alerts[_alertComposeIdx].unread    = false;
+  }
+
+  updateAlertBadge();
+  closeAllModals();
+  showToast(`Scenario approved — launching for ${AppState.getMember(memberId)?.name}`, 'success');
+  ScenarioEngine.start(scenario, memberId);
 }
 
 /* ── REPORTS PAGE ────────────────────────────────────────── */
@@ -487,6 +787,10 @@ function renderSettings(){
       <div class="tile-icon">${v.icon}</div>
       <div style="font-size:0.72rem">${v.label}</div>
     </div>`).join('');
+
+  // Hierarchy builder
+  const hierarchyEl = document.getElementById('settings-hierarchy');
+  if (hierarchyEl) hierarchyEl.innerHTML = renderHierarchyBuilder();
 }
 
 function switchMode(newMode){
@@ -495,9 +799,83 @@ function switchMode(newMode){
   AppState.alerts  = generateAlerts(newMode, AppState.members);
   AppState.stats   = generateOrgStats(newMode, AppState.members);
   AppState.perfHistory = generatePerformanceHistory(12);
+  AppState.members.forEach((m, i) => {
+    m.levelId      = i < 2 ? 2 : i < 6 ? 3 : 4;
+    m.supervisorId = i < 2 ? null : (i % 2 === 0 ? 1 : 2);
+  });
   renderSidebar();
   renderSettings();
   showToast(`Switched to ${ORG_MODES[newMode].label} mode`, 'success');
+}
+
+/* ── HIERARCHY BUILDER (in Settings) ────────────────────── */
+function renderHierarchyBuilder() {
+  const levels = AppState.orgLevels;
+  return `
+    <div style="margin-top:1.5rem">
+      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.8rem">Organisation Hierarchy</div>
+      <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:1rem;line-height:1.6">
+        Define your org's levels. Assign members to levels from their profile. Higher levels can see everyone below them.
+        IntelliQ watches all levels and escalates upward automatically.
+      </div>
+
+      <div id="hierarchy-levels-list">
+        ${levels.map((l, i) => `
+          <div style="display:flex;align-items:center;gap:0.6rem;padding:0.6rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;margin-bottom:0.4rem">
+            <span style="font-size:0.72rem;color:var(--text-muted);width:16px;text-align:center;flex-shrink:0">${l.id}</span>
+            <input type="text" class="form-input" value="${l.label}" id="level-label-${l.id}"
+              style="flex:1;font-size:0.82rem;padding:5px 8px"
+              onchange="AppState.orgLevels[${i}].label=this.value"/>
+            <label style="display:flex;align-items:center;gap:5px;font-size:0.75rem;color:var(--text-secondary);cursor:pointer;flex-shrink:0">
+              <input type="checkbox" ${l.canSeeBelow ? 'checked' : ''}
+                onchange="AppState.orgLevels[${i}].canSeeBelow=this.checked"/>
+              Can see below
+            </label>
+            ${levels.length > 2 ? `<button onclick="removeHierarchyLevel(${i})"
+              style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:0.9rem;padding:0 4px">✕</button>` : ''}
+          </div>`).join('')}
+      </div>
+
+      <div style="display:flex;gap:0.5rem;margin-top:0.6rem">
+        <button class="btn btn-outline btn-sm" onclick="addHierarchyLevel()">+ Add Level</button>
+        <button class="btn btn-accent btn-sm" onclick="saveHierarchy()">Save Hierarchy</button>
+      </div>
+
+      <!-- Member level assignment -->
+      <div style="margin-top:1.4rem">
+        <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.7rem">Assign Members to Levels</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0.5rem;max-height:220px;overflow-y:auto;padding:2px">
+          ${AppState.members.map(m => `
+            <div style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.7rem;background:var(--surface-2);border:1px solid var(--border);border-radius:6px">
+              <div class="user-avatar" style="width:24px;height:24px;font-size:0.65rem;background:${m.color};flex-shrink:0">${m.initials}</div>
+              <span style="font-size:0.78rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.name}</span>
+              <select style="font-size:0.72rem;padding:2px 4px;background:var(--bg-surface);border:1px solid var(--border);border-radius:4px;color:var(--text-primary)"
+                onchange="AppState.getMember(${m.id}).levelId=parseInt(this.value)">
+                ${AppState.orgLevels.map(l =>
+                  `<option value="${l.id}" ${m.levelId === l.id ? 'selected' : ''}>${l.label}</option>`
+                ).join('')}
+              </select>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+function addHierarchyLevel() {
+  const nextId = Math.max(...AppState.orgLevels.map(l => l.id)) + 1;
+  AppState.orgLevels.push({ id: nextId, label: `Level ${nextId}`, canSeeBelow: false });
+  document.getElementById('settings-hierarchy').innerHTML = renderHierarchyBuilder();
+}
+
+function removeHierarchyLevel(idx) {
+  if (AppState.orgLevels.length <= 2) return;
+  AppState.orgLevels.splice(idx, 1);
+  AppState.orgLevels.forEach((l, i) => l.id = i + 1);
+  document.getElementById('settings-hierarchy').innerHTML = renderHierarchyBuilder();
+}
+
+function saveHierarchy() {
+  showToast('Hierarchy saved', 'success');
 }
 
 /* ── PROFILE MODAL ───────────────────────────────────────── */
@@ -541,6 +919,23 @@ function showProfile(id){
     <div style="padding:0.5rem 0;border-bottom:1px solid var(--border);font-size:0.83rem;line-height:1.55;color:var(--text-secondary)">
       → ${r}
     </div>`).join('');
+
+  // Chat history summary
+  const chatEl = document.getElementById('pm-chat-history');
+  if (chatEl) {
+    const chats = (m.chatHistory || []).filter(h => h.role === 'user').slice(-4).reverse();
+    chatEl.innerHTML = chats.length
+      ? chats.map(h => `
+          <div style="padding:0.5rem 0;border-bottom:1px solid var(--border);font-size:0.8rem;color:var(--text-secondary)">
+            <span style="color:var(--text-muted);font-size:0.68rem">${h.date} · Member said: </span>${h.text.slice(0, 120)}${h.text.length > 120 ? '…' : ''}
+          </div>`).join('')
+      : `<div style="font-size:0.8rem;color:var(--text-muted)">No check-ins recorded yet.</div>`;
+  }
+
+  // Coach input tab
+  _coachConcern = 'none';
+  const coachEl = document.getElementById('pm-coach-content');
+  if (coachEl) coachEl.innerHTML = renderCoachInputTab(id);
 
   // History sparkline data
   document.getElementById('pm-history-vals').innerHTML = m.history.map((v,i)=>`
@@ -645,6 +1040,563 @@ function submitAddMember(e){
   renderMembers();
   showToast(`${name} added successfully!`,'success');
   e.target.reset();
+}
+
+/* ── SCENARIOS PAGE ──────────────────────────────────────── */
+function renderScenarios() {
+  const color     = ORG_MODES[AppState.mode].color;
+  const scenarios = AppState.scenarios;
+
+  const gradeBadgeEl = document.getElementById('scenarios-grade-badge');
+  if (gradeBadgeEl) gradeBadgeEl.innerHTML = gradeBadgeHTML(AppState.grade);
+
+  const container = document.getElementById('scenarios-content');
+  if (!container) return;
+
+  const domainOptions = {
+    school:     ['Moral IQ','Social IQ','Behavior IQ','Academic IQ'],
+    sports:     ['Tactical','Mental Resilience','Team Dynamics','Leadership'],
+    workplace:  ['Ethics','Leadership','Conflict','Performance'],
+    military:   ['Tactical','Ethics','Command','Stress'],
+    healthcare: ['Triage','Ethics','Patient Care','Decision'],
+    government: ['Policy','Crisis','Integrity','Leadership'],
+  }[AppState.mode] || ['General'];
+
+  const scenarioCards = scenarios.length ? scenarios.map(s => {
+    const completions = AppState.members.reduce((n, m) =>
+      n + ((m.scenarioResults || []).filter(r => r.scenarioId === s.id).length), 0);
+    return `
+      <div class="scenario-card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.5rem">
+          <div>
+            <div class="scenario-card-title">${s.title}</div>
+            <div style="display:flex;gap:0.4rem;margin-top:0.3rem;flex-wrap:wrap">
+              <span class="domain-badge" style="background:${color}22;color:${color};border-color:${color}44">${s.domain}</span>
+              <span class="domain-badge">${s.difficulty}</span>
+              ${s.avgScore ? `<span class="domain-badge" style="color:var(--success);border-color:rgba(79,247,122,0.3)">Avg ${s.avgScore}</span>` : ''}
+            </div>
+          </div>
+          <div style="font-size:0.7rem;color:var(--text-muted);text-align:right;flex-shrink:0">
+            ${completions} run${completions !== 1 ? 's' : ''}<br>
+            <span style="font-size:0.65rem">${s.createdAt}</span>
+          </div>
+        </div>
+        <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.8rem;line-height:1.5">${s.brief}</div>
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="font-size:0.72rem;color:var(--text-muted)">Created by ${s.createdBy}</div>
+          <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap">
+            <select class="form-input" id="sc-launch-member-${s.id}" style="font-size:0.75rem;padding:4px 8px;height:auto">
+              <option value="">— Member —</option>
+              ${[...AppState.members].sort((a,b)=>a.name.localeCompare(b.name))
+                .map(m=>`<option value="${m.id}">${m.name}</option>`).join('')}
+            </select>
+            <button class="btn btn-accent btn-sm" onclick="launchScenario('${s.id}')">▶ Run Here</button>
+            <button class="btn btn-outline btn-sm" onclick="assignToMemberApp('${s.id}')" title="Send to member's app">📱 Assign</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('') : `
+    <div style="padding:2.5rem 1rem;text-align:center;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius)">
+      <div style="font-size:2.5rem;margin-bottom:0.8rem">🎯</div>
+      <div style="font-size:0.95rem;font-weight:600;color:var(--text-primary);margin-bottom:0.4rem">No scenarios yet</div>
+      <div style="font-size:0.82rem;color:var(--text-secondary)">Write a brief above — the AI drafts it, you approve it, then it runs with the member.</div>
+    </div>`;
+
+  container.innerHTML = `
+    <!-- BRIEF INPUT -->
+    <div style="background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);padding:1.2rem;margin-bottom:1rem">
+      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.9rem">New Scenario — Coach Brief</div>
+
+      <div style="margin-bottom:0.8rem">
+        <label class="form-label">Write your brief in plain language</label>
+        <textarea id="sc-brief" class="form-input" rows="3" style="resize:vertical"
+          placeholder="e.g. Timmy isn't tracking second ball movements in our 4-3-3. When the ball goes wide he stays static instead of rotating. I want to test if he understands why that movement matters and how he thinks about team shape…"></textarea>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.7rem;margin-bottom:0.9rem">
+        <div>
+          <label class="form-label">Domain</label>
+          <select id="sc-domain" class="form-input">
+            ${domainOptions.map(d => `<option value="${d}">${d}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label class="form-label">Difficulty</label>
+          <div style="display:flex;gap:0.4rem;margin-top:2px">
+            ${['Easy','Medium','Hard'].map(d => `
+              <button class="domain-badge sc-diff-btn" data-diff="${d}"
+                style="cursor:pointer;padding:5px 10px;font-size:0.73rem"
+                onclick="selectDifficulty('${d}')">${d}</button>`).join('')}
+          </div>
+        </div>
+        <div>
+          <label class="form-label">Assign to Member</label>
+          <select id="sc-member" class="form-input">
+            <option value="">— Select member —</option>
+            ${[...AppState.members].sort((a,b)=>a.name.localeCompare(b.name))
+              .map(m=>`<option value="${m.id}">${m.name} · ${m.role}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end">
+        <button class="btn btn-accent" id="sc-draft-btn" onclick="draftScenario()">
+          ✦ Draft Scenario with AI →
+        </button>
+      </div>
+    </div>
+
+    <!-- DRAFT REVIEW PANEL (hidden until AI drafts) -->
+    <div id="sc-draft-panel" style="display:none;background:var(--surface-1);border:1px solid var(--accent);border-radius:var(--radius);padding:1.2rem;margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+        <div>
+          <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent)">AI Draft — Review &amp; Approve</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">Edit anything before it goes to the member. They will never see your brief or this review.</div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="draftScenario()">↺ Regenerate</button>
+      </div>
+
+      <div style="margin-bottom:0.9rem">
+        <label class="form-label">Scenario Title</label>
+        <input type="text" id="sc-draft-title" class="form-input" />
+      </div>
+
+      <div style="margin-bottom:0.9rem">
+        <label class="form-label">Opening Situation <span style="font-weight:400;text-transform:none;color:var(--text-muted)">(what the member will see first)</span></label>
+        <textarea id="sc-draft-opening" class="form-input" rows="4" style="resize:vertical"></textarea>
+      </div>
+
+      <div style="margin-bottom:0.9rem">
+        <label class="form-label">Probe Questions <span style="font-weight:400;text-transform:none;color:var(--text-muted)">(AI will use these as follow-up framework)</span></label>
+        <div id="sc-draft-probes-list"></div>
+      </div>
+
+      <div style="background:rgba(124,90,245,0.08);border:1px solid rgba(124,90,245,0.25);border-radius:8px;padding:0.9rem;margin-bottom:1rem">
+        <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin-bottom:0.4rem">🔒 Coach Note — Private</div>
+        <div id="sc-draft-coachnote" style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6"></div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:0.5rem">
+        <button class="btn btn-outline" onclick="document.getElementById('sc-draft-panel').style.display='none'">Cancel</button>
+        <button class="btn btn-accent" onclick="approveDraft()">✓ Approve &amp; Launch</button>
+      </div>
+    </div>
+
+    <!-- SCENARIO LIST -->
+    <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.8rem">
+      ${scenarios.length} Scenario${scenarios.length !== 1 ? 's' : ''} Created
+    </div>
+    <div class="scenario-grid">${scenarioCards}</div>`;
+
+  selectDifficulty('Medium');
+}
+
+let _scenarioDifficulty = 'Medium';
+
+function selectDifficulty(diff) {
+  _scenarioDifficulty = diff;
+  document.querySelectorAll('.sc-diff-btn').forEach(btn => {
+    const active = btn.dataset.diff === diff;
+    const color  = ORG_MODES[AppState.mode].color;
+    btn.style.background  = active ? `${color}22` : '';
+    btn.style.color       = active ? color : '';
+    btn.style.borderColor = active ? `${color}44` : '';
+  });
+}
+
+async function draftScenario() {
+  const brief    = (document.getElementById('sc-brief')?.value || '').trim();
+  const memberId = parseInt(document.getElementById('sc-member')?.value) || null;
+
+  if (!brief)    { showToast('Write a brief first', 'warning'); return; }
+  if (!memberId) { showToast('Select a member', 'warning'); return; }
+
+  const btn = document.getElementById('sc-draft-btn');
+  if (btn) { btn.textContent = '✦ Drafting…'; btn.disabled = true; }
+
+  const member = AppState.getMember(memberId);
+
+  try {
+    const res = await fetch('/api/draft-scenario', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        brief,
+        orgMode:    AppState.mode,
+        orgName:    AppState.orgName,
+        memberName: member?.name?.split(' ')[0] || 'the member',
+        difficulty: _scenarioDifficulty,
+      }),
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const { draft } = await res.json();
+
+    // Populate draft review panel
+    document.getElementById('sc-draft-title').value   = draft.title   || '';
+    document.getElementById('sc-draft-opening').value = draft.opening || '';
+    document.getElementById('sc-draft-coachnote').textContent = draft.coachNote || '';
+
+    const probesList = document.getElementById('sc-draft-probes-list');
+    probesList.innerHTML = (draft.probes || []).map((p, i) => `
+      <div style="display:flex;gap:0.5rem;margin-bottom:0.4rem;align-items:flex-start">
+        <span style="font-size:0.72rem;color:var(--text-muted);padding-top:8px;flex-shrink:0">${i+1}.</span>
+        <input type="text" class="form-input sc-probe-input" value="${p.replace(/"/g,'&quot;')}" style="flex:1;font-size:0.82rem" />
+      </div>`).join('');
+
+    document.getElementById('sc-draft-panel').style.display = 'block';
+    document.getElementById('sc-draft-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+  } catch (err) {
+    console.warn('Draft API unavailable:', err.message);
+    // Fallback: populate with a basic structure so the flow still works
+    const domain = document.getElementById('sc-domain')?.value || 'General';
+    document.getElementById('sc-draft-title').value   = `${domain} Scenario`;
+    document.getElementById('sc-draft-opening').value = `Based on your brief: ${brief}\n\n[AI unavailable — edit this opening manually before launching]`;
+    document.getElementById('sc-draft-coachnote').textContent = 'AI service unavailable. You can still edit and launch this scenario manually.';
+    document.getElementById('sc-draft-probes-list').innerHTML = `
+      <div style="display:flex;gap:0.5rem;margin-bottom:0.4rem">
+        <span style="font-size:0.72rem;color:var(--text-muted);padding-top:8px">1.</span>
+        <input type="text" class="form-input sc-probe-input" value="Why did you make that decision?" style="flex:1;font-size:0.82rem" />
+      </div>`;
+    document.getElementById('sc-draft-panel').style.display = 'block';
+  } finally {
+    if (btn) { btn.textContent = '✦ Draft Scenario with AI →'; btn.disabled = false; }
+  }
+}
+
+function approveDraft() {
+  const title    = (document.getElementById('sc-draft-title')?.value || '').trim();
+  const opening  = (document.getElementById('sc-draft-opening')?.value || '').trim();
+  const brief    = (document.getElementById('sc-brief')?.value || '').trim();
+  const domain   = document.getElementById('sc-domain')?.value || 'General';
+  const memberId = parseInt(document.getElementById('sc-member')?.value) || null;
+
+  const probeInputs = document.querySelectorAll('.sc-probe-input');
+  const probes = [...probeInputs].map(i => i.value.trim()).filter(Boolean);
+
+  if (!title)    { showToast('Scenario needs a title', 'warning'); return; }
+  if (!opening)  { showToast('Opening situation is empty', 'warning'); return; }
+  if (!memberId) { showToast('Select a member', 'warning'); return; }
+
+  const scenario = {
+    id:          `sc_${Date.now()}`,
+    title,
+    brief,
+    domain,
+    context:     brief,
+    opening,
+    probes,
+    difficulty:  _scenarioDifficulty,
+    createdBy:   AppState.adminName,
+    createdAt:   new Date().toLocaleDateString('en-GB'),
+    completions: 0,
+    avgScore:    null,
+  };
+
+  AppState.scenarios.push(scenario);
+  document.getElementById('sc-draft-panel').style.display = 'none';
+  showToast(`Scenario approved — launching for ${AppState.getMember(memberId)?.name}`, 'success');
+  ScenarioEngine.start(scenario, memberId);
+  renderScenarios();
+}
+
+function launchScenario(scenarioId) {
+  const scenario = AppState.scenarios.find(s => s.id === scenarioId);
+  if (!scenario) return;
+
+  const selEl    = document.getElementById(`sc-launch-member-${scenarioId}`);
+  const memberId = selEl ? parseInt(selEl.value) || null : null;
+
+  if (!memberId) { showToast('Select a member to launch with', 'warning'); return; }
+  ScenarioEngine.start(scenario, memberId);
+}
+
+async function assignToMemberApp(scenarioId) {
+  const scenario = AppState.scenarios.find(s => s.id === scenarioId);
+  if (!scenario) return;
+
+  const selEl    = document.getElementById(`sc-launch-member-${scenarioId}`);
+  const memberId = selEl ? parseInt(selEl.value) || null : null;
+  if (!memberId) { showToast('Select a member first', 'warning'); return; }
+
+  const member  = AppState.getMember(memberId);
+  const orgCode = AppState.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g,'-');
+
+  try {
+    const res = await fetch('/api/platform/assign-scenario', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orgCode, memberName: member.name, scenario }),
+    });
+    if (!res.ok) throw new Error();
+    showToast(`Assigned to ${member.name.split(' ')[0]}'s app ✓`, 'success');
+  } catch(e) {
+    showToast('Could not assign — server may be offline', 'warning');
+  }
+}
+
+/* ── COACH INPUT TAB ─────────────────────────────────────── */
+let _coachConcern = 'none';
+
+function renderCoachInputTab(memberId) {
+  const m = AppState.getMember(memberId);
+  if (!m) return '';
+
+  const mode    = AppState.mode;
+  const metrics = ORG_MODES[mode].metrics;
+
+  // Previous coach inputs
+  const prevInputs = (m.coachInputs || []).slice().reverse();
+  const prevHTML   = prevInputs.length
+    ? prevInputs.map(ci => `
+        <div class="coach-log-item">
+          <div class="coach-log-meta">
+            <span class="coach-log-date">${ci.date}</span>
+            <span class="coach-log-author">${ci.author}</span>
+          </div>
+          ${ci.notes ? `<div class="coach-log-notes">${ci.notes}</div>` : ''}
+          ${ci.concern !== 'none' ? `<span class="coach-log-concern concern-${ci.concern}">${ci.concern === 'monitor' ? '⚠ Monitor' : '🔴 Urgent'}</span>` : ''}
+          ${Object.keys(ci.scores || {}).length ? `
+            <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.5rem">
+              ${Object.entries(ci.scores).map(([k,v]) => `
+                <span class="score-pill" style="color:${scoreColor(v)};border-color:${scoreColor(v)}40">${k.split(' ')[0]}: ${v}</span>`).join('')}
+            </div>` : ''}
+        </div>`).join('')
+    : `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.5rem 0">No coach inputs recorded yet.</div>`;
+
+  // External data table
+  const extData = (m.externalData || []);
+  const extHTML = extData.length
+    ? `<table class="ext-data-table">
+        <thead><tr><th>Test / Assessment</th><th>Score</th><th>Source</th><th>Date</th></tr></thead>
+        <tbody>
+          ${extData.slice().reverse().map(d => `
+            <tr>
+              <td>${d.name}</td>
+              <td><span style="color:${scoreColor(d.score)};font-weight:600">${d.score}</span></td>
+              <td style="color:var(--text-secondary)">${d.source || '—'}</td>
+              <td style="color:var(--text-muted)">${d.date}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`
+    : `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.5rem 0">No external data added yet.</div>`;
+
+  // Scenario results
+  const scenRes = (m.scenarioResults || []);
+  const scenHTML = scenRes.length
+    ? scenRes.slice().reverse().map(r => {
+        const { label, color } = ScenarioEngine.getScoreLabel(r.score);
+        return `<div class="scenario-result-row">
+          <div style="flex:1">
+            <div style="font-weight:600;font-size:0.83rem">${r.scenarioTitle}</div>
+            <div style="font-size:0.72rem;color:var(--text-muted)">${r.domain} · ${r.date}</div>
+          </div>
+          <span style="color:${color};font-weight:700;font-size:0.9rem">${r.score}</span>
+          <span class="domain-badge" style="color:${color};border-color:${color}44;background:${color}11">${label}</span>
+        </div>`;
+      }).join('')
+    : `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.5rem 0">No scenarios completed yet. Assign one from the Scenarios page.</div>`;
+
+  return `
+    <!-- ─ NEW INPUT ─ -->
+    <div style="margin-bottom:1.4rem">
+      <div class="section-divider">Add Coach / Counsellor Input</div>
+      <div class="coach-form" style="margin-top:0.8rem">
+
+        <div>
+          <label>METRIC SCORE OVERRIDES <span style="font-weight:400;text-transform:none;letter-spacing:0">(leave blank to keep current)</span></label>
+          <div class="metric-score-grid" id="coach-metric-grid">
+            ${metrics.map(metric => `
+              <div class="metric-score-item">
+                <label>${metric}</label>
+                <input type="number" min="0" max="100" placeholder="${m.scores[metric]}"
+                  id="ci-score-${metric.replace(/\s+/g,'_')}"
+                  style="width:100%;padding:0.45rem 0.7rem;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:0.82rem"/>
+              </div>`).join('')}
+          </div>
+        </div>
+
+        <div>
+          <label>OBSERVATIONS & NOTES</label>
+          <textarea id="ci-notes" placeholder="Record observations, patterns, concerns, or feedback for this individual…"></textarea>
+        </div>
+
+        <div>
+          <label>CONCERN LEVEL</label>
+          <div class="concern-selector">
+            <button class="concern-btn active-none" id="concern-none"    onclick="setConcernLevel('none')"   >✓ No Concern</button>
+            <button class="concern-btn"             id="concern-monitor" onclick="setConcernLevel('monitor')">⚠ Monitor</button>
+            <button class="concern-btn"             id="concern-urgent"  onclick="setConcernLevel('urgent')" >🔴 Urgent</button>
+          </div>
+        </div>
+
+        <button class="btn btn-accent btn-sm" onclick="submitCoachInput(${memberId})" style="align-self:flex-start">
+          Save Coach Input
+        </button>
+      </div>
+    </div>
+
+    <!-- ─ PREVIOUS INPUTS ─ -->
+    <div style="margin-bottom:1.4rem">
+      <div class="section-divider">Previous Coach Inputs</div>
+      <div class="coach-input-log" style="margin-top:0.6rem">${prevHTML}</div>
+    </div>
+
+    <!-- ─ EXTERNAL DATA ─ -->
+    <div style="margin-bottom:1.4rem">
+      <div class="section-divider">External Test & Assessment Data</div>
+      <div style="margin-top:0.6rem;margin-bottom:0.8rem">${extHTML}</div>
+      <details style="margin-top:0.5rem">
+        <summary style="font-size:0.8rem;color:var(--accent);cursor:pointer;user-select:none">+ Add External Test / Assessment</summary>
+        <div class="coach-form" style="margin-top:0.8rem;padding:0.9rem;background:var(--bg-surface);border-radius:var(--radius-sm);border:1px solid var(--border)">
+          <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.6rem">
+            <div>
+              <label>TEST / ASSESSMENT NAME</label>
+              <input type="text" id="ext-name" placeholder="e.g. Fitness Test, Match Rating…"/>
+            </div>
+            <div>
+              <label>SCORE (0–100)</label>
+              <input type="number" id="ext-score" min="0" max="100" placeholder="0–100"/>
+            </div>
+            <div>
+              <label>DATE</label>
+              <input type="date" id="ext-date"/>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.6rem">
+            <div>
+              <label>SOURCE / EVALUATOR</label>
+              <input type="text" id="ext-source" placeholder="e.g. Fitness Coach, Match Analyst…"/>
+            </div>
+            <div>
+              <label>NOTES</label>
+              <input type="text" id="ext-notes" placeholder="Optional notes…"/>
+            </div>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="submitExternalData(${memberId})" style="align-self:flex-start">Add Data</button>
+        </div>
+      </details>
+    </div>
+
+    <!-- ─ SCENARIO RESULTS ─ -->
+    <div>
+      <div class="section-divider">Scenario Results</div>
+      <div style="margin-top:0.6rem">${scenHTML}</div>
+    </div>`;
+}
+
+function setConcernLevel(level) {
+  _coachConcern = level;
+  ['none','monitor','urgent'].forEach(l => {
+    const btn = document.getElementById(`concern-${l}`);
+    if (!btn) return;
+    btn.className = 'concern-btn';
+    if (l === level) btn.classList.add(`active-${l}`);
+  });
+}
+
+function submitCoachInput(memberId) {
+  const m = AppState.getMember(memberId);
+  if (!m) return;
+
+  const mode    = AppState.mode;
+  const metrics = ORG_MODES[mode].metrics;
+  const notes   = (document.getElementById('ci-notes') || {}).value || '';
+
+  // Collect score overrides
+  const newScores = {};
+  metrics.forEach(metric => {
+    const key = metric.replace(/\s+/g, '_');
+    const el  = document.getElementById(`ci-score-${key}`);
+    if (el && el.value !== '') {
+      const val = Math.min(100, Math.max(0, parseInt(el.value)));
+      if (!isNaN(val)) {
+        newScores[metric] = val;
+        m.scores[metric]  = val;  // apply override
+      }
+    }
+  });
+
+  // Recalculate overall if any scores changed
+  if (Object.keys(newScores).length) {
+    m.overall = Math.round(Object.values(m.scores).reduce((a, b) => a + b, 0) / metrics.length);
+  }
+
+  if (!notes && Object.keys(newScores).length === 0 && _coachConcern === 'none') {
+    showToast('Please add notes or score overrides before saving.', 'warning');
+    return;
+  }
+
+  if (!m.coachInputs) m.coachInputs = [];
+  m.coachInputs.push({
+    date:    new Date().toLocaleDateString('en-GB'),
+    author:  AppState.adminName,
+    notes,
+    concern: _coachConcern,
+    scores:  newScores,
+  });
+
+  // If urgent concern, raise an alert
+  if (_coachConcern === 'urgent') {
+    m.alerts = (m.alerts || 0) + 1;
+    AppState.alerts.unshift({
+      type:   'danger',
+      title:  'Coach Urgent Concern',
+      detail: `${m.name}: "${notes.slice(0, 80)}${notes.length > 80 ? '…' : ''}"`,
+      time:   'Just now',
+      unread: true,
+      member: m,
+    });
+    updateAlertBadge();
+  } else if (_coachConcern === 'monitor') {
+    AppState.alerts.unshift({
+      type:   'warning',
+      title:  'Coach Monitor Flag',
+      detail: `${m.name} flagged for monitoring by ${AppState.adminName}.`,
+      time:   'Just now',
+      unread: true,
+      member: m,
+    });
+    updateAlertBadge();
+  }
+
+  AppState.stats = generateOrgStats(AppState.mode, AppState.members);
+  _coachConcern  = 'none';
+  showToast('Coach input saved successfully', 'success');
+
+  // Re-render the tab
+  const el = document.getElementById('pm-coach-content');
+  if (el) el.innerHTML = renderCoachInputTab(memberId);
+}
+
+function submitExternalData(memberId) {
+  const m = AppState.getMember(memberId);
+  if (!m) return;
+
+  const name   = (document.getElementById('ext-name')  || {}).value || '';
+  const score  = parseInt((document.getElementById('ext-score') || {}).value);
+  const date   = (document.getElementById('ext-date')  || {}).value || new Date().toLocaleDateString('en-GB');
+  const source = (document.getElementById('ext-source')|| {}).value || '';
+  const notes  = (document.getElementById('ext-notes') || {}).value || '';
+
+  if (!name || isNaN(score)) {
+    showToast('Please enter a test name and score.', 'warning');
+    return;
+  }
+
+  if (!m.externalData) m.externalData = [];
+  m.externalData.push({
+    name,
+    score: Math.min(100, Math.max(0, score)),
+    date:  date || new Date().toLocaleDateString('en-GB'),
+    source,
+    notes,
+  });
+
+  showToast(`External data added for ${m.name}`, 'success');
+  const el = document.getElementById('pm-coach-content');
+  if (el) el.innerHTML = renderCoachInputTab(memberId);
 }
 
 /* ── INIT ────────────────────────────────────────────────── */
