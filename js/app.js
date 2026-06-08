@@ -1087,6 +1087,249 @@ function switchMode(newMode){
   showToast(`Switched to ${ORG_MODES[newMode].label} mode`, 'success');
 }
 
+/* ── PEOPLE PAGE TABS ────────────────────────────────────── */
+function switchPeopleTab(tab) {
+  ['tree','groups','inbox'].forEach(t => {
+    const el = document.getElementById(`people-tab-${t}`);
+    if (el) el.style.display = t === tab ? 'block' : 'none';
+  });
+  document.querySelectorAll('#page-people .tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+  if (tab === 'groups') renderGroups();
+  if (tab === 'inbox')  renderPlatformInbox();
+}
+
+/* ── GROUPS ──────────────────────────────────────────────── */
+let _platformGroups = [];
+let _currentGroupId = null;
+
+async function renderGroups() {
+  const orgCode = Auth.currentUser?.orgCode || AppState.orgCode;
+  if (!orgCode) return;
+  const container = document.getElementById('groups-list');
+  if (!container) return;
+  container.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem;padding:1rem">Loading…</div>`;
+
+  try {
+    const res  = await fetch(`/api/groups?orgCode=${encodeURIComponent(orgCode)}`);
+    const data = res.ok ? await res.json() : { groups: [] };
+    _platformGroups = data.groups || [];
+
+    if (!_platformGroups.length) {
+      container.innerHTML = `
+        <div style="text-align:center;padding:2.5rem 1rem;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius)">
+          <div style="font-size:2rem;margin-bottom:0.6rem">👥</div>
+          <div style="font-size:0.9rem;font-weight:600;margin-bottom:0.3rem">No groups yet</div>
+          <div style="font-size:0.82rem;color:var(--text-secondary)">Create sub-teams like QB Room, Offense, Starting XI. Members can be in multiple groups.</div>
+        </div>`;
+      return;
+    }
+
+    // Get all org users for display
+    const treeRes  = await fetch(`/api/auth/org-tree?orgCode=${encodeURIComponent(orgCode)}`);
+    const treeData = treeRes.ok ? await treeRes.json() : { flat: [] };
+    const allUsers = treeData.flat || [];
+    const byId     = {};
+    allUsers.forEach(u => byId[u.id] = u);
+
+    container.innerHTML = _platformGroups.map(g => {
+      const members = (g.memberIds || []).map(id => byId[id]?.name || id).slice(0,5);
+      const leads   = (g.leadIds   || []).map(id => byId[id]?.name || id);
+      const color   = ORG_MODES[AppState.mode].color;
+      return `
+        <div style="background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin-bottom:0.7rem">
+          <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:0.5rem">
+            <div>
+              <div style="font-size:0.95rem;font-weight:700">${g.name}</div>
+              ${g.description ? `<div style="font-size:0.8rem;color:var(--text-secondary);margin-top:2px">${g.description}</div>` : ''}
+            </div>
+            <div style="display:flex;gap:0.4rem">
+              <button class="btn btn-outline btn-sm" onclick="openGroupDetail('${g.id}')">View Feed</button>
+              <button class="btn btn-outline btn-sm" onclick="openEditGroup('${g.id}')">Edit</button>
+              <button class="btn btn-sm" style="color:var(--danger);border-color:rgba(247,79,79,0.3);background:none" onclick="deleteGroup('${g.id}')">✕</button>
+            </div>
+          </div>
+          <div style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center">
+            <span style="font-size:0.7rem;color:var(--text-muted)">${g.memberIds?.length || 0} members</span>
+            ${leads.length ? `<span style="font-size:0.72rem;padding:2px 8px;background:${color}22;color:${color};border-radius:20px;border:1px solid ${color}44">Lead: ${leads.join(', ')}</span>` : ''}
+            ${members.map(n => `<span style="font-size:0.72rem;padding:2px 8px;background:var(--surface-2);border:1px solid var(--border);border-radius:20px;color:var(--text-secondary)">${n}</span>`).join('')}
+            ${g.memberIds?.length > 5 ? `<span style="font-size:0.72rem;color:var(--text-muted)">+${g.memberIds.length-5} more</span>` : ''}
+          </div>
+        </div>`;
+    }).join('');
+  } catch(e) {
+    if (container) container.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">Could not load groups.</div>`;
+  }
+}
+
+async function openCreateGroup() {
+  // Populate member/lead lists from org tree
+  const orgCode = Auth.currentUser?.orgCode || AppState.orgCode;
+  const treeRes  = await fetch(`/api/auth/org-tree?orgCode=${encodeURIComponent(orgCode)}`).catch(() => null);
+  const treeData = treeRes?.ok ? await treeRes.json() : { flat: [] };
+  const allUsers = (treeData.flat || []).filter(u => u.id !== Auth.currentUser?.id);
+
+  const makeList = (containerId, preselected = []) => {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.innerHTML = allUsers.map(u => `
+      <label style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.2rem;cursor:pointer;font-size:0.82rem">
+        <input type="checkbox" value="${u.id}" ${preselected.includes(u.id) ? 'checked' : ''}/>
+        <div class="user-avatar" style="width:22px;height:22px;font-size:0.6rem;background:${COLORS[allUsers.indexOf(u)%COLORS.length]};flex-shrink:0">${u.name.slice(0,2).toUpperCase()}</div>
+        ${u.name} <span style="color:var(--text-muted);font-size:0.72rem">${u.role}</span>
+      </label>`).join('');
+  };
+
+  document.getElementById('cg-name').value = '';
+  document.getElementById('cg-desc').value = '';
+  makeList('cg-members-list');
+  makeList('cg-leads-list');
+  openModal('create-group-modal');
+}
+
+async function submitCreateGroup() {
+  const name    = (document.getElementById('cg-name')?.value || '').trim();
+  const desc    = (document.getElementById('cg-desc')?.value || '').trim();
+  if (!name) { showToast('Give the group a name', 'warning'); return; }
+
+  const memberIds = [...document.querySelectorAll('#cg-members-list input:checked')].map(cb => cb.value);
+  const leadIds   = [...document.querySelectorAll('#cg-leads-list input:checked')].map(cb => cb.value);
+  const orgCode   = Auth.currentUser?.orgCode || AppState.orgCode;
+
+  try {
+    const res = await fetch('/api/groups/create', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orgCode, name, description: desc, memberIds, leadIds }),
+    });
+    if (!res.ok) throw new Error();
+    closeAllModals();
+    showToast(`Group "${name}" created`, 'success');
+    renderGroups();
+  } catch(e) {
+    showToast('Could not create group', 'warning');
+  }
+}
+
+async function deleteGroup(gid) {
+  const orgCode = Auth.currentUser?.orgCode || AppState.orgCode;
+  await fetch(`/api/groups/${gid}`, {
+    method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orgCode }),
+  });
+  showToast('Group removed', 'success');
+  renderGroups();
+}
+
+async function openGroupDetail(gid) {
+  _currentGroupId = gid;
+  const group = _platformGroups.find(g => g.id === gid);
+  document.getElementById('gd-title').textContent = group?.name || 'Group';
+  document.getElementById('gd-sub').textContent   = `${group?.memberIds?.length || 0} members · shared notes & messages`;
+  document.getElementById('gd-compose').value     = '';
+  openModal('group-detail-modal');
+  await loadGroupFeed(gid);
+}
+
+async function loadGroupFeed(gid) {
+  const feedEl  = document.getElementById('gd-feed');
+  if (!feedEl) return;
+  feedEl.innerHTML = `<div style="padding:1rem;text-align:center;color:var(--text-muted);font-size:0.82rem">Loading…</div>`;
+
+  const orgCode = Auth.currentUser?.orgCode || AppState.orgCode;
+  const me      = Auth.currentUser?.id;
+
+  try {
+    const res  = await fetch(`/api/groups/${gid}/feed?orgCode=${encodeURIComponent(orgCode)}&requesterId=${encodeURIComponent(me)}`);
+    const data = res.ok ? await res.json() : { notes: [], messages: [] };
+
+    const allItems = [
+      ...(data.notes    || []).map(n => ({ ...n, _kind: 'note'    })),
+      ...(data.messages || []).map(m => ({ ...m, _kind: 'message' })),
+    ].sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+
+    if (!allItems.length) {
+      feedEl.innerHTML = `<div style="text-align:center;padding:1.5rem;color:var(--text-muted);font-size:0.82rem">No shared notes or messages yet.<br>Members post from the IntelliQ app.</div>`;
+      return;
+    }
+
+    feedEl.innerHTML = allItems.map(item => {
+      const isAnon   = item.anonymous || item.type === 'anonymous';
+      const author   = isAnon ? 'Anonymous' : (item.authorName || item.fromName || '—');
+      const icon     = isAnon ? '👤' : (item._kind === 'note' ? '📝' : '💬');
+      const typeLabel = item._kind === 'note' ? (item.type || 'shared') : 'message';
+      const color    = ORG_MODES[AppState.mode].color;
+      const time     = new Date(item.createdAt).toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+      return `
+        <div style="padding:0.8rem 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.4rem">
+            <span>${icon}</span>
+            <span style="font-size:0.82rem;font-weight:600">${author}</span>
+            <span style="font-size:0.68rem;padding:2px 7px;background:var(--surface-2);border-radius:20px;border:1px solid var(--border);color:var(--text-muted)">${typeLabel}</span>
+            <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto">${time}</span>
+          </div>
+          <div style="font-size:0.83rem;color:var(--text-secondary);line-height:1.55">${item.content}</div>
+        </div>`;
+    }).join('');
+  } catch(e) {
+    feedEl.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">Could not load feed.</div>`;
+  }
+}
+
+async function sendGroupMessage(anonymous) {
+  const text    = (document.getElementById('gd-compose')?.value || '').trim();
+  if (!text || !_currentGroupId) { showToast('Write something first', 'warning'); return; }
+  const orgCode = Auth.currentUser?.orgCode || AppState.orgCode;
+  const me      = Auth.currentUser;
+
+  await fetch('/api/messages/send', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      orgCode, fromId: me?.id, fromName: me?.name,
+      toType: 'group', toId: _currentGroupId,
+      content: text, anonymous,
+    }),
+  });
+
+  document.getElementById('gd-compose').value = '';
+  showToast(anonymous ? 'Sent anonymously ✓' : 'Message sent ✓', 'success');
+  loadGroupFeed(_currentGroupId);
+}
+
+/* ── PLATFORM INBOX (all groups, cross-group view) ───────── */
+async function renderPlatformInbox() {
+  const el = document.getElementById('platform-inbox-content');
+  if (!el) return;
+
+  const orgCode = Auth.currentUser?.orgCode || AppState.orgCode;
+  if (!_platformGroups.length) {
+    try {
+      const res = await fetch(`/api/groups?orgCode=${encodeURIComponent(orgCode)}`);
+      const data = res.ok ? await res.json() : { groups: [] };
+      _platformGroups = data.groups || [];
+    } catch(e) {}
+  }
+
+  if (!_platformGroups.length) {
+    el.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--text-muted);font-size:0.82rem">Create groups first to see their feeds here.</div>`;
+    return;
+  }
+
+  el.innerHTML = _platformGroups.map(g => `
+    <div style="background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);padding:0.8rem 1rem;margin-bottom:0.6rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between"
+         onclick="openGroupDetail('${g.id}')">
+      <div>
+        <div style="font-size:0.88rem;font-weight:600">${g.name}</div>
+        <div style="font-size:0.75rem;color:var(--text-muted)">${g.memberIds?.length || 0} members</div>
+      </div>
+      <span style="color:var(--accent);font-size:0.82rem">View →</span>
+    </div>`).join('');
+}
+
+function openEditGroup(gid) {
+  showToast('Edit group — coming soon', 'info');
+}
+
 /* ── WEEKLY PULSE (IntelliQ page) ───────────────────────── */
 async function loadWeeklyPulse() {
   const panel  = document.getElementById('weekly-pulse-panel');

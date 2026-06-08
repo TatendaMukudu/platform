@@ -449,13 +449,37 @@
           <button class="btn btn-accent btn-sm" onclick="HierarchyTree.openAddBelow(Auth.currentUser?.id, Auth.currentUser?.name)">+ Add Person</button>
         </div>
 
-        <!-- Org tree -->
-        <div class="card" style="margin-bottom:1rem">
-          <div id="hierarchy-tree-container"></div>
+        <!-- Sub-tabs -->
+        <div class="tabs" style="margin-bottom:1rem">
+          <button class="tab-btn active" data-tab="tree" onclick="switchPeopleTab('tree')">Org Tree</button>
+          <button class="tab-btn" data-tab="groups" onclick="switchPeopleTab('groups')">Groups</button>
+          <button class="tab-btn" data-tab="inbox" onclick="switchPeopleTab('inbox')">Inbox</button>
         </div>
 
-        <!-- Add panel (shown inline when + Add is clicked) -->
-        <div id="hierarchy-add-panel" style="display:none"></div>
+        <!-- Org tree tab -->
+        <div id="people-tab-tree">
+          <div class="card" style="margin-bottom:1rem">
+            <div id="hierarchy-tree-container"></div>
+          </div>
+          <div id="hierarchy-add-panel" style="display:none"></div>
+        </div>
+
+        <!-- Groups tab -->
+        <div id="people-tab-groups" style="display:none">
+          <div style="display:flex;justify-content:flex-end;margin-bottom:0.8rem">
+            <button class="btn btn-accent btn-sm" onclick="openCreateGroup()">+ New Group</button>
+          </div>
+          <div id="groups-list"></div>
+        </div>
+
+        <!-- Inbox tab (platform side: coach sees group feeds) -->
+        <div id="people-tab-inbox" style="display:none">
+          <div id="platform-inbox-content">
+            <div style="font-size:0.82rem;color:var(--text-muted);text-align:center;padding:2rem">
+              Select a group to see its shared notes and messages.
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- ════════════════════════════
@@ -1008,6 +1032,74 @@
           </div>
         </div>
         <button class="btn btn-accent" style="width:100%" onclick="closeAllModals()">Got it — open platform</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     CREATE GROUP MODAL
+     ════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="create-group-modal">
+  <div class="modal" style="max-width:520px;width:100%">
+    <div class="modal-header">
+      <div><div class="modal-title">Create Group</div><div class="modal-sub">Sub-team within your org</div></div>
+      <button class="modal-close" onclick="closeAllModals()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Group name</label>
+        <input type="text" class="form-input" id="cg-name" placeholder="e.g. QB Room, Offense, Starting XI…"/>
+      </div>
+      <div class="form-group" style="margin-top:0.7rem">
+        <label class="form-label">Description <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
+        <input type="text" class="form-input" id="cg-desc" placeholder="What this group is for…"/>
+      </div>
+      <div class="form-group" style="margin-top:0.7rem">
+        <label class="form-label">Members <span style="font-weight:400;color:var(--text-muted)">(select all that apply)</span></label>
+        <div id="cg-members-list" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:0.5rem;margin-top:0.3rem"></div>
+      </div>
+      <div class="form-group" style="margin-top:0.7rem">
+        <label class="form-label">Group leads / coaches</label>
+        <div id="cg-leads-list" style="max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:0.5rem;margin-top:0.3rem"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:0.5rem;margin-top:1rem">
+        <button class="btn btn-outline" onclick="closeAllModals()">Cancel</button>
+        <button class="btn btn-accent" onclick="submitCreateGroup()">Create Group</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     GROUP DETAIL MODAL — feed of shared notes + messages
+     ════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="group-detail-modal">
+  <div class="modal" style="max-width:600px;width:100%;max-height:90vh;display:flex;flex-direction:column">
+    <div class="modal-header" style="flex-shrink:0">
+      <div>
+        <div class="modal-title" id="gd-title">Group</div>
+        <div class="modal-sub" id="gd-sub">Shared notes and messages</div>
+      </div>
+      <button class="modal-close" onclick="closeAllModals()">✕</button>
+    </div>
+    <div class="modal-body" style="flex:1;overflow-y:auto">
+
+      <!-- Compose message to group -->
+      <div style="margin-bottom:1rem;padding:0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px">
+        <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Send to Group</div>
+        <textarea id="gd-compose" class="form-input" rows="2" style="resize:none;margin-bottom:0.5rem"
+          placeholder="Write a message to this group…"></textarea>
+        <div style="display:flex;justify-content:flex-end;gap:0.4rem">
+          <button class="btn btn-outline btn-sm" onclick="sendGroupMessage(false)">Send (Known)</button>
+          <button class="btn btn-accent btn-sm" onclick="sendGroupMessage(true)">👤 Send Anonymously</button>
+        </div>
+      </div>
+
+      <!-- Feed: shared notes + messages -->
+      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Group Feed</div>
+      <div id="gd-feed">
+        <div style="text-align:center;padding:1.5rem;color:var(--text-muted);font-size:0.82rem">Loading…</div>
       </div>
     </div>
   </div>

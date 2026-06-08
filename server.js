@@ -519,6 +519,251 @@ app.delete('/api/auth/delete-user', (req, res) => {
   res.json({ ok: true });
 });
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   GROUPS — Sub-teams within an org
+   Members can belong to multiple groups (QB room, Offense, Starters, etc.)
+   Each group has its own notes feed, anonymous channel, and messages.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// orgGroups: orgCode → [ { id, name, description, memberIds[], leadIds[], createdAt } ]
+const orgGroups = {};
+
+// notes: noteId → { id, orgCode, groupId|null, authorId, authorName, content, type, aiResponse, createdAt }
+// type: 'private' | 'shared' | 'anonymous'
+const orgNotes = {};
+
+// messages: msgId → { id, orgCode, fromId, fromName, toType:'user'|'group'|'org', toId, content, anonymous, createdAt, readBy:[] }
+const orgMessages = {};
+
+function noteId()   { return 'n_'  + generateId(); }
+function msgId()    { return 'm_'  + generateId(); }
+function groupId()  { return 'grp_'+ generateId(); }
+
+/* ── Create group ─────────────────────────────────────────────────────────── */
+app.post('/api/groups/create', (req, res) => {
+  const { orgCode, name, description, memberIds, leadIds } = req.body;
+  if (!orgCode || !name) return res.status(400).json({ error: 'orgCode and name required' });
+  const code = orgCode.toLowerCase().trim();
+  if (!orgGroups[code]) orgGroups[code] = [];
+  const group = { id: groupId(), name, description: description || '', memberIds: memberIds || [], leadIds: leadIds || [], createdAt: new Date().toISOString() };
+  orgGroups[code].push(group);
+  res.json({ ok: true, group });
+});
+
+/* ── List groups for org ─────────────────────────────────────────────────── */
+app.get('/api/groups', (req, res) => {
+  const { orgCode } = req.query;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  res.json({ groups: orgGroups[orgCode.toLowerCase().trim()] || [] });
+});
+
+/* ── Update group (add/remove members, rename) ───────────────────────────── */
+app.put('/api/groups/:groupId', (req, res) => {
+  const { orgCode, name, description, memberIds, leadIds } = req.body;
+  const code   = orgCode?.toLowerCase().trim();
+  const groups = orgGroups[code] || [];
+  const g      = groups.find(g => g.id === req.params.groupId);
+  if (!g) return res.status(404).json({ error: 'Group not found' });
+  if (name        !== undefined) g.name        = name;
+  if (description !== undefined) g.description = description;
+  if (memberIds   !== undefined) g.memberIds   = memberIds;
+  if (leadIds     !== undefined) g.leadIds     = leadIds;
+  res.json({ ok: true, group: g });
+});
+
+/* ── Delete group ─────────────────────────────────────────────────────────── */
+app.delete('/api/groups/:groupId', (req, res) => {
+  const { orgCode } = req.body;
+  const code = orgCode?.toLowerCase().trim();
+  if (!orgGroups[code]) return res.status(404).json({ error: 'Org not found' });
+  orgGroups[code] = orgGroups[code].filter(g => g.id !== req.params.groupId);
+  res.json({ ok: true });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   NOTES — Private / Shared / Anonymous
+   Private:   author + AI only
+   Shared:    author + group members + leads
+   Anonymous: group sees content, not author name
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Create note ─────────────────────────────────────────────────────────── */
+app.post('/api/notes', async (req, res) => {
+  const { orgCode, authorId, authorName, content, type, groupId: gid, orgMode, orgName, goals } = req.body;
+  if (!orgCode || !authorId || !content || !type) return res.status(400).json({ error: 'missing fields' });
+
+  const id   = noteId();
+  const note = {
+    id, orgCode: orgCode.toLowerCase().trim(),
+    groupId: gid || null,
+    authorId, authorName,
+    content, type,
+    createdAt: new Date().toISOString(),
+    aiResponse: null,
+  };
+  orgNotes[id] = note;
+
+  // AI responds to private and anonymous notes
+  const shouldGetAIResponse = type === 'private' || type === 'anonymous' || type === 'shared';
+  if (shouldGetAIResponse) {
+    const prompts = {
+      private:   `You are IntelliQ, a private AI companion. Someone has written a private note — only they and you see this. Respond with 1-2 sentences: acknowledge what they've written with genuine care, and if useful, offer one thought or gentle prompt to go deeper. Be warm and human, not clinical.`,
+      shared:    `You are IntelliQ. Someone has written a note they're sharing with their group. Acknowledge it briefly (1 sentence) and note anything that might be useful context for their goals or development. Max 2 sentences.`,
+      anonymous: `You are IntelliQ. Someone has posted an anonymous note to their group. Acknowledge it (1 sentence). This response is shown only to the author — not the group. Max 2 sentences.`,
+    };
+    const userMsg = goals?.goal ? `Their goal: "${goals.goal}"\n\nNote: ${content}` : `Note: ${content}`;
+    try {
+      const response = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001', max_tokens: 100,
+        system: prompts[type] || prompts.private,
+        messages: [{ role: 'user', content: userMsg }],
+      });
+      note.aiResponse = response.content[0]?.text?.trim() || null;
+    } catch(e) { /* non-critical */ }
+  }
+
+  res.json({ ok: true, note: _sanitizeNote(note, authorId) });
+});
+
+/* ── Get notes (filtered by requester's access) ──────────────────────────── */
+app.get('/api/notes', (req, res) => {
+  const { orgCode, requesterId, groupId: gid, type } = req.query;
+  if (!orgCode || !requesterId) return res.status(400).json({ error: 'missing fields' });
+  const code = orgCode.toLowerCase().trim();
+
+  // Get groups this requester belongs to (as member or lead)
+  const myGroups = (orgGroups[code] || []).filter(g =>
+    g.memberIds.includes(requesterId) || g.leadIds.includes(requesterId)
+  ).map(g => g.id);
+
+  const notes = Object.values(orgNotes)
+    .filter(n => {
+      if (n.orgCode !== code) return false;
+      if (gid && n.groupId !== gid) return false;
+      if (type && n.type !== type) return false;
+      // Private: only author sees it
+      if (n.type === 'private') return n.authorId === requesterId;
+      // Shared/anonymous: requester must be in the group (or it's an org-wide note)
+      if (n.groupId) return myGroups.includes(n.groupId) || n.authorId === requesterId;
+      return n.authorId === requesterId;
+    })
+    .map(n => _sanitizeNote(n, requesterId))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  res.json({ notes });
+});
+
+function _sanitizeNote(note, requesterId) {
+  // Anonymous notes: hide author name/id from everyone except the author
+  if (note.type === 'anonymous' && note.authorId !== requesterId) {
+    return { ...note, authorId: null, authorName: 'Anonymous' };
+  }
+  return note;
+}
+
+/* ── Delete own note ─────────────────────────────────────────────────────── */
+app.delete('/api/notes/:noteId', (req, res) => {
+  const { requesterId } = req.body;
+  const note = orgNotes[req.params.noteId];
+  if (!note) return res.status(404).json({ error: 'Note not found' });
+  if (note.authorId !== requesterId) return res.status(403).json({ error: 'Not your note' });
+  delete orgNotes[req.params.noteId];
+  res.json({ ok: true });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MESSAGES — Known or Anonymous, to a person / group / org
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Send message ─────────────────────────────────────────────────────────── */
+app.post('/api/messages/send', (req, res) => {
+  const { orgCode, fromId, fromName, toType, toId, content, anonymous } = req.body;
+  if (!orgCode || !fromId || !content || !toType) return res.status(400).json({ error: 'missing fields' });
+  const id  = msgId();
+  const msg = {
+    id, orgCode: orgCode.toLowerCase().trim(),
+    fromId, fromName: anonymous ? 'Anonymous' : fromName,
+    _realFromId: fromId, // never exposed to non-author
+    toType, toId: toId || null,
+    content, anonymous: !!anonymous,
+    createdAt: new Date().toISOString(),
+    readBy: [],
+  };
+  orgMessages[id] = msg;
+  res.json({ ok: true, messageId: id });
+});
+
+/* ── Get messages for a user/group ───────────────────────────────────────── */
+app.get('/api/messages', (req, res) => {
+  const { orgCode, requesterId, groupId: gid, toType } = req.query;
+  if (!orgCode || !requesterId) return res.status(400).json({ error: 'missing fields' });
+  const code = orgCode.toLowerCase().trim();
+
+  // Groups requester is in
+  const myGroups = (orgGroups[code] || []).filter(g =>
+    g.memberIds.includes(requesterId) || g.leadIds.includes(requesterId)
+  ).map(g => g.id);
+
+  const msgs = Object.values(orgMessages)
+    .filter(m => {
+      if (m.orgCode !== code) return false;
+      if (gid && m.toId !== gid) return false;
+      if (toType && m.toType !== toType) return false;
+      // Sent by me
+      if (m._realFromId === requesterId) return true;
+      // Sent to me directly
+      if (m.toType === 'user' && m.toId === requesterId) return true;
+      // Sent to a group I'm in
+      if (m.toType === 'group' && myGroups.includes(m.toId)) return true;
+      // Sent to org
+      if (m.toType === 'org' && m.orgCode === code) return true;
+      return false;
+    })
+    .map(m => _sanitizeMsg(m, requesterId))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  res.json({ messages: msgs });
+});
+
+/* ── Mark message read ───────────────────────────────────────────────────── */
+app.post('/api/messages/:msgId/read', (req, res) => {
+  const { requesterId } = req.body;
+  const m = orgMessages[req.params.msgId];
+  if (!m) return res.status(404).json({ error: 'Not found' });
+  if (!m.readBy.includes(requesterId)) m.readBy.push(requesterId);
+  res.json({ ok: true });
+});
+
+function _sanitizeMsg(msg, requesterId) {
+  // Anonymous: hide real sender from everyone except themselves
+  if (msg.anonymous && msg._realFromId !== requesterId) {
+    const { _realFromId, ...safe } = msg;
+    return safe;
+  }
+  const { _realFromId, ...safe } = msg;
+  return safe;
+}
+
+/* ── Platform: get group feed (shared + anonymous notes + messages) ─────── */
+app.get('/api/groups/:groupId/feed', (req, res) => {
+  const { orgCode, requesterId } = req.query;
+  if (!orgCode || !requesterId) return res.status(400).json({ error: 'missing fields' });
+  const code = orgCode.toLowerCase().trim();
+  const gid  = req.params.groupId;
+
+  const notes = Object.values(orgNotes)
+    .filter(n => n.orgCode === code && n.groupId === gid && (n.type === 'shared' || n.type === 'anonymous'))
+    .map(n => _sanitizeNote(n, requesterId))
+    .sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+
+  const messages = Object.values(orgMessages)
+    .filter(m => m.orgCode === code && m.toType === 'group' && m.toId === gid)
+    .map(m => _sanitizeMsg(m, requesterId))
+    .sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+
+  res.json({ notes, messages });
+});
+
 /* ══════════════════════════════════════════════════════════════════════════
    MEMBER APP — SHARED SESSION STORE
    In-memory bridge between Platform (coach) and Member App (Timmy).

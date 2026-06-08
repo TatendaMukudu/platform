@@ -13,6 +13,8 @@ const MemberApp = {
   checkins: [],       // local check-in history
   goals: null,        // { goal, identity } — set on first login
   mood: null,         // selected mood (1-5)
+  _noteType: 'private', // current note type
+  _myGroups: [],      // groups this member belongs to
 
   // Scenario runner state
   _scenario:   null,
@@ -301,16 +303,7 @@ const MemberApp = {
     }
   },
 
-  /* ── Tab switching ─────────────────────────────────────── */
-  switchTab(tab) {
-    document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
-    document.getElementById(`tab-${tab}`).classList.add('active');
-    document.querySelector(`.nav-tab[data-tab="${tab}"]`).classList.add('active');
-
-    if (tab === 'scenarios') this._renderScenariosList();
-    if (tab === 'stats')     this._renderStats();
-  },
+  /* ── Tab switching — defined fully in INBOX section below ── */
 
   /* ── HOME ──────────────────────────────────────────────── */
   _renderHome() {
@@ -973,6 +966,221 @@ const MemberApp = {
           </div>`;
         }).join('')}
       </div>`;
+  },
+
+  /* ── INBOX — Notes & Messages ──────────────────────────── */
+
+  async _loadMyGroups() {
+    const s = this.session;
+    if (!s) return;
+    try {
+      const res  = await fetch(`/api/groups?orgCode=${encodeURIComponent(s.orgCode)}`);
+      const data = res.ok ? await res.json() : { groups: [] };
+      // Filter to groups this member is in — we use name matching since member app doesn't have userId
+      this._myGroups = (data.groups || []);
+    } catch(e) { this._myGroups = []; }
+  },
+
+  async switchTab(tab) {
+    document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
+    document.getElementById(`tab-${tab}`).classList.add('active');
+    document.querySelector(`.nav-tab[data-tab="${tab}"]`).classList.add('active');
+
+    if (tab === 'scenarios') this._renderScenariosList();
+    if (tab === 'stats')     this._renderStats();
+    if (tab === 'inbox')     await this._renderInbox();
+  },
+
+  async _renderInbox() {
+    await this._loadMyGroups();
+    this._populateGroupSelectors();
+    this.switchInboxTab('notes');
+    await this._loadNotes();
+    await this._loadMessages();
+  },
+
+  switchInboxTab(sub) {
+    document.querySelectorAll('.inbox-sub-btn').forEach(b => b.classList.toggle('active', b.dataset.sub === sub));
+    document.getElementById('inbox-notes').style.display    = sub === 'notes'    ? 'block' : 'none';
+    document.getElementById('inbox-messages').style.display = sub === 'messages' ? 'block' : 'none';
+  },
+
+  _populateGroupSelectors() {
+    const groups = this._myGroups;
+    const opts   = groups.length
+      ? groups.map(g => `<option value="${g.id}">${g.name}</option>`).join('')
+      : `<option value="">No groups yet</option>`;
+    const noteGrp  = document.getElementById('note-group-id');
+    const msgGrp   = document.getElementById('msg-to-group');
+    if (noteGrp) noteGrp.innerHTML = `<option value="">— Select group —</option>` + opts;
+    if (msgGrp)  msgGrp.innerHTML  = `<option value="">— Select group —</option>` + opts;
+  },
+
+  selectNoteType(type) {
+    this._noteType = type;
+    document.querySelectorAll('.note-type-btn').forEach(b => b.classList.toggle('active', b.dataset.type === type));
+    const descs = {
+      private:   'Only you and IntelliQ see this.',
+      shared:    'Your group members and leads can see this.',
+      anonymous: 'Your group sees the content — your name is hidden.',
+    };
+    const descEl = document.getElementById('note-type-desc');
+    if (descEl) descEl.textContent = descs[type] || '';
+    const grpRow = document.getElementById('note-group-row');
+    if (grpRow) grpRow.style.display = type !== 'private' ? 'block' : 'none';
+
+    // Hide AI response when changing type
+    const aiEl = document.getElementById('note-ai-response');
+    if (aiEl) aiEl.style.display = 'none';
+  },
+
+  async submitNote() {
+    const content = (document.getElementById('note-content')?.value || '').trim();
+    const groupId = document.getElementById('note-group-id')?.value || null;
+    if (!content) { this.showToast('Write something first', 'warning'); return; }
+    if (this._noteType !== 'private' && !groupId) { this.showToast('Select a group', 'warning'); return; }
+
+    const btn = document.querySelector('#inbox-notes .btn-primary');
+    if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
+
+    const s = this.session;
+    try {
+      const res = await fetch('/api/notes', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orgCode:    s.orgCode,
+          authorId:   s.memberName, // using name as ID in member app (no userId)
+          authorName: s.memberName,
+          content, type: this._noteType,
+          groupId:    groupId || null,
+          orgMode:    s.orgMode,
+          orgName:    s.orgName,
+          goals:      this.goals,
+        }),
+      });
+      const data = res.ok ? await res.json() : {};
+
+      // Clear input
+      const noteEl = document.getElementById('note-content');
+      if (noteEl) noteEl.value = '';
+
+      // Show AI response
+      if (data.note?.aiResponse) {
+        const aiEl  = document.getElementById('note-ai-response');
+        const txtEl = document.getElementById('note-ai-text');
+        if (aiEl && txtEl) {
+          txtEl.textContent  = data.note.aiResponse;
+          aiEl.style.display = 'block';
+        }
+      }
+      this.showToast('Note saved ✓', 'success');
+      this._loadNotes();
+    } catch(e) {
+      this.showToast('Could not save note', 'warning');
+    } finally {
+      if (btn) { btn.textContent = 'Save Note'; btn.disabled = false; }
+    }
+  },
+
+  async _loadNotes() {
+    const el = document.getElementById('notes-list');
+    if (!el) return;
+    const s = this.session;
+    try {
+      const res  = await fetch(`/api/notes?orgCode=${encodeURIComponent(s.orgCode)}&requesterId=${encodeURIComponent(s.memberName)}`);
+      const data = res.ok ? await res.json() : { notes: [] };
+      const notes = data.notes || [];
+
+      if (!notes.length) {
+        el.innerHTML = `<div class="empty-card"><div class="empty-icon">📝</div><div>No notes yet. Write your first one above.</div></div>`;
+        return;
+      }
+
+      const typeIcons = { private:'🔒', shared:'📤', anonymous:'👤' };
+      const typeColors = { private:'var(--text-muted)', shared:'var(--accent)', anonymous:'var(--warning)' };
+      el.innerHTML = notes.map(n => {
+        const icon  = typeIcons[n.type] || '📝';
+        const color = typeColors[n.type] || 'var(--text-muted)';
+        const time  = new Date(n.createdAt).toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+        return `
+          <div class="card" style="margin-bottom:0.6rem;border-color:${n.type==='private'?'var(--border)':n.type==='shared'?'rgba(124,90,245,0.25)':'rgba(247,178,79,0.25)'}">
+            <div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.5rem">
+              <span>${icon}</span>
+              <span style="font-size:0.72rem;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:0.5px">${n.type}</span>
+              <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto">${time}</span>
+            </div>
+            <div style="font-size:0.83rem;color:var(--text-primary);line-height:1.55;margin-bottom:${n.aiResponse?'0.6rem':'0'}">${this._escape(n.content)}</div>
+            ${n.aiResponse && n.authorId === s.memberName ? `
+              <div style="display:flex;gap:0.5rem;align-items:flex-start;padding-top:0.5rem;border-top:1px solid var(--border)">
+                <span style="font-size:0.68rem;font-weight:700;color:var(--accent);white-space:nowrap">IQ:</span>
+                <span style="font-size:0.78rem;color:var(--text-secondary);line-height:1.5">${this._escape(n.aiResponse)}</span>
+              </div>` : ''}
+          </div>`;
+      }).join('');
+    } catch(e) {
+      el.innerHTML = `<div style="font-size:0.8rem;color:var(--danger)">Could not load notes.</div>`;
+    }
+  },
+
+  updateMsgRecipient() {
+    const toType = document.getElementById('msg-to-type')?.value;
+    const grpEl  = document.getElementById('msg-to-group');
+    if (grpEl) grpEl.style.display = toType === 'group' ? 'block' : 'none';
+  },
+
+  async sendMessage(anonymous) {
+    const content = (document.getElementById('msg-content')?.value || '').trim();
+    const toType  = document.getElementById('msg-to-type')?.value  || 'group';
+    const toId    = toType === 'group' ? (document.getElementById('msg-to-group')?.value || '') : null;
+    if (!content) { this.showToast('Write something first', 'warning'); return; }
+    if (toType === 'group' && !toId) { this.showToast('Select a group', 'warning'); return; }
+
+    const s = this.session;
+    await fetch('/api/messages/send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orgCode: s.orgCode, fromId: s.memberName, fromName: s.memberName,
+        toType, toId: toId || null, content, anonymous,
+      }),
+    });
+    document.getElementById('msg-content').value = '';
+    this.showToast(anonymous ? 'Sent anonymously ✓' : 'Sent ✓', 'success');
+    this._loadMessages();
+  },
+
+  async _loadMessages() {
+    const el = document.getElementById('messages-list');
+    if (!el) return;
+    const s = this.session;
+    try {
+      const res  = await fetch(`/api/messages?orgCode=${encodeURIComponent(s.orgCode)}&requesterId=${encodeURIComponent(s.memberName)}`);
+      const data = res.ok ? await res.json() : { messages: [] };
+      const msgs = data.messages || [];
+
+      if (!msgs.length) {
+        el.innerHTML = `<div class="empty-card"><div class="empty-icon">💬</div><div>No messages yet.</div></div>`;
+        return;
+      }
+
+      el.innerHTML = msgs.map(m => {
+        const isMine = m.fromId === s.memberName || (!m.anonymous && m.fromName === s.memberName);
+        const label  = m.anonymous ? '👤 Anonymous' : m.fromName;
+        const target = m.toType === 'org' ? 'Whole Org' : (this._myGroups.find(g=>g.id===m.toId)?.name || m.toId || '—');
+        const time   = new Date(m.createdAt).toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+        return `
+          <div class="card" style="margin-bottom:0.6rem;${isMine?'border-color:rgba(124,90,245,0.2)':''}">
+            <div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.4rem;flex-wrap:wrap">
+              <span style="font-size:0.82rem;font-weight:600">${label}</span>
+              <span style="font-size:0.7rem;color:var(--text-muted)">→ ${target}</span>
+              <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto">${time}</span>
+            </div>
+            <div style="font-size:0.83rem;color:var(--text-secondary);line-height:1.55">${this._escape(m.content)}</div>
+          </div>`;
+      }).join('');
+    } catch(e) {
+      el.innerHTML = `<div style="font-size:0.8rem;color:var(--danger)">Could not load messages.</div>`;
+    }
   },
 
   /* ── Helpers ───────────────────────────────────────────── */

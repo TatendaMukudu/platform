@@ -211,6 +211,94 @@
 
       </div>
 
+      <!-- INBOX TAB (Notes + Messages) -->
+      <div class="tab-page" id="tab-inbox">
+        <div class="page-header">
+          <div class="page-header-title">Inbox</div>
+          <div class="page-header-sub" id="inbox-sub">Notes & Messages</div>
+        </div>
+
+        <!-- Sub-tabs -->
+        <div style="display:flex;gap:0.4rem;margin-bottom:1rem">
+          <button class="inbox-sub-btn active" data-sub="notes"    onclick="MemberApp.switchInboxTab('notes')"   >📝 Notes</button>
+          <button class="inbox-sub-btn"        data-sub="messages" onclick="MemberApp.switchInboxTab('messages')">💬 Messages</button>
+        </div>
+
+        <!-- Notes sub-tab -->
+        <div id="inbox-notes">
+          <!-- Compose note -->
+          <div class="card" style="margin-bottom:0.8rem">
+            <div class="card-label" style="margin-bottom:0.7rem">New Note</div>
+            <textarea class="form-input" id="note-content" rows="3" style="resize:none;margin-bottom:0.6rem"
+              placeholder="Write anything — a goal, a reflection, something you want to remember…"></textarea>
+
+            <!-- Type selector -->
+            <div style="margin-bottom:0.7rem">
+              <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.4rem">Who sees this?</div>
+              <div style="display:flex;gap:0.4rem;flex-wrap:wrap">
+                <button class="note-type-btn active" data-type="private"   onclick="MemberApp.selectNoteType('private')">🔒 Private</button>
+                <button class="note-type-btn"        data-type="shared"    onclick="MemberApp.selectNoteType('shared')">📤 Shared</button>
+                <button class="note-type-btn"        data-type="anonymous" onclick="MemberApp.selectNoteType('anonymous')">👤 Anonymous</button>
+              </div>
+              <div id="note-type-desc" style="font-size:0.74rem;color:var(--text-muted);margin-top:0.4rem">Only you and IntelliQ see this.</div>
+            </div>
+
+            <!-- Group selector (shown for shared/anonymous) -->
+            <div id="note-group-row" style="display:none;margin-bottom:0.6rem">
+              <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.3rem">Post to group</div>
+              <select class="form-input" id="note-group-id" style="font-size:0.82rem">
+                <option value="">— Select group —</option>
+              </select>
+            </div>
+
+            <button class="btn-primary" style="padding:0.6rem 1rem;font-size:0.85rem" onclick="MemberApp.submitNote()">Save Note</button>
+          </div>
+
+          <!-- AI response (shown after submit) -->
+          <div id="note-ai-response" style="display:none;margin-bottom:0.8rem">
+            <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06)">
+              <div style="display:flex;gap:0.7rem;align-items:flex-start">
+                <div style="width:26px;height:26px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.68rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
+                <div>
+                  <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.3rem">IntelliQ</div>
+                  <div id="note-ai-text" style="font-size:0.83rem;color:var(--text-secondary);line-height:1.6"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Notes list -->
+          <div id="notes-list"></div>
+        </div>
+
+        <!-- Messages sub-tab -->
+        <div id="inbox-messages" style="display:none">
+          <!-- Compose message -->
+          <div class="card" style="margin-bottom:0.8rem">
+            <div class="card-label" style="margin-bottom:0.7rem">New Message</div>
+            <textarea class="form-input" id="msg-content" rows="2" style="resize:none;margin-bottom:0.6rem"
+              placeholder="Write your message…"></textarea>
+            <div style="margin-bottom:0.6rem">
+              <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.3rem">Send to</div>
+              <select class="form-input" id="msg-to-type" style="font-size:0.82rem;margin-bottom:0.4rem" onchange="MemberApp.updateMsgRecipient()">
+                <option value="group">A group</option>
+                <option value="org">Whole organisation</option>
+              </select>
+              <select class="form-input" id="msg-to-group" style="font-size:0.82rem">
+                <option value="">— Select group —</option>
+              </select>
+            </div>
+            <div style="display:flex;gap:0.4rem">
+              <button class="btn-primary" style="flex:1;padding:0.6rem;font-size:0.83rem" onclick="MemberApp.sendMessage(false)">Send (Known)</button>
+              <button style="flex:1;padding:0.6rem;font-size:0.83rem;border-radius:10px;border:1px solid rgba(124,90,245,0.4);background:rgba(124,90,245,0.1);color:var(--accent);cursor:pointer;font-weight:600" onclick="MemberApp.sendMessage(true)">👤 Anonymous</button>
+            </div>
+          </div>
+
+          <!-- Messages list -->
+          <div id="messages-list"></div>
+        </div>
+      </div>
+
       <!-- STATS TAB -->
       <div class="tab-page" id="tab-stats">
         <div class="page-header">
@@ -237,9 +325,14 @@
         <span class="nav-icon">💬</span>
         Check-In
       </button>
+      <button class="nav-tab" data-tab="inbox" onclick="MemberApp.switchTab('inbox')">
+        <span class="nav-icon">📬</span>
+        Inbox
+        <span class="nav-badge" id="inbox-badge" style="display:none">0</span>
+      </button>
       <button class="nav-tab" data-tab="stats" onclick="MemberApp.switchTab('stats')">
         <span class="nav-icon">📊</span>
-        My Stats
+        Stats
       </button>
     </nav>
   </div>

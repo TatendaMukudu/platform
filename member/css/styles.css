@@ -680,3 +680,62 @@ html, body {
 ::-webkit-scrollbar       { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 2px; }
+
+/* ── Inbox — Note type buttons ─────────────────────────────── */
+.note-type-btn {
+  padding: 6px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.note-type-btn.active[data-type="private"]   { background: rgba(90,90,90,0.15); border-color: #888; color: var(--text-primary); }
+.note-type-btn.active[data-type="shared"]    { background: rgba(124,90,245,0.12); border-color: rgba(124,90,245,0.4); color: var(--accent); }
+.note-type-btn.active[data-type="anonymous"] { background: rgba(247,178,79,0.1); border-color: rgba(247,178,79,0.4); color: var(--warning); }
+
+/* ── Inbox sub-tabs ────────────────────────────────────────── */
+.inbox-sub-btn {
+  padding: 7px 16px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.inbox-sub-btn.active {
+  background: rgba(124,90,245,0.12);
+  border-color: rgba(124,90,245,0.35);
+  color: var(--accent);
+}
+
+/* ── Weekly rating buttons ─────────────────────────────────── */
+.weekly-rating-btn { font-family: inherit; cursor: pointer; transition: all 0.15s; }
+
+/* ── Bottom nav: 5-item layout ─────────────────────────────── */
+.nav-tab .nav-icon { font-size: 1.15rem; line-height: 1; }
+
+/* ── Empty card ────────────────────────────────────────────── */
+.empty-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 2rem 1rem;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.empty-icon { font-size: 1.8rem; }
