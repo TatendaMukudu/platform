@@ -11,6 +11,7 @@ const MemberApp = {
   pending: [],        // assigned scenarios from server
   results: [],        // completed scenario results (local)
   checkins: [],       // local check-in history
+  goals: null,        // { goal, identity } — set on first login
   mood: null,         // selected mood (1-5)
 
   // Scenario runner state
@@ -29,14 +30,72 @@ const MemberApp = {
         this.session  = JSON.parse(saved);
         this.results  = JSON.parse(localStorage.getItem('iq_member_results')  || '[]');
         this.checkins = JSON.parse(localStorage.getItem('iq_member_checkins') || '[]');
-        this._showMain();
-        this.loadPending();
+        this.goals    = JSON.parse(localStorage.getItem('iq_member_goals')    || 'null');
+        this._afterJoin();
         return;
       } catch(e) { localStorage.clear(); }
     }
     // Show join screen
     document.getElementById('join-org-code').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('join-name').focus(); });
     document.getElementById('join-name').addEventListener('keydown', e => { if (e.key === 'Enter') this.join(); });
+  },
+
+  // After join/restore — check if goals set, then show main
+  _afterJoin() {
+    if (!this.goals) {
+      this._showGoalIntake();
+    } else {
+      this._showMain();
+      this.loadPending();
+    }
+  },
+
+  /* ── GOAL INTAKE ───────────────────────────────────────────── */
+  _showGoalIntake() {
+    document.getElementById('screen-join').classList.remove('active');
+    document.getElementById('screen-goals').classList.add('active');
+  },
+
+  async submitGoals() {
+    const goal     = (document.getElementById('goals-goal')?.value     || '').trim();
+    const identity = (document.getElementById('goals-identity')?.value || '').trim();
+    const errEl    = document.getElementById('goals-error');
+    errEl.style.display = 'none';
+
+    if (!goal) {
+      errEl.textContent  = 'Tell us your goal — even a rough one.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    const btn = document.getElementById('goals-submit-btn');
+    btn.textContent = 'Saving…'; btn.disabled = true;
+
+    this.goals = { goal, identity, setAt: new Date().toISOString() };
+    localStorage.setItem('iq_member_goals', JSON.stringify(this.goals));
+
+    // Save to server (non-blocking)
+    const s = this.session;
+    if (s) {
+      fetch('/api/member/goals', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orgCode: s.orgCode, memberName: s.memberName, goal, identity }),
+      }).catch(() => {});
+    }
+
+    document.getElementById('screen-goals').classList.remove('active');
+    this._showMain();
+    this.loadPending();
+    this.showToast('Goal saved ✓', 'success');
+  },
+
+  skipGoals() {
+    // Allow skip — they can set goals later
+    this.goals = { goal: '', identity: '', setAt: new Date().toISOString() };
+    localStorage.setItem('iq_member_goals', JSON.stringify(this.goals));
+    document.getElementById('screen-goals').classList.remove('active');
+    this._showMain();
+    this.loadPending();
   },
 
   /* ── Join ──────────────────────────────────────────────── */
@@ -61,14 +120,13 @@ const MemberApp = {
 
       this.session = { memberName: data.memberName, orgCode: data.orgCode, orgName: data.orgName, orgMode: data.orgMode };
       localStorage.setItem('iq_member_session', JSON.stringify(this.session));
-      this._showMain();
-      this.loadPending();
+      this._afterJoin();
 
     } catch(err) {
       // Demo mode — work offline
       this.session = { memberName, orgCode: orgCode.toLowerCase(), orgName: orgCode, orgMode: 'school' };
       localStorage.setItem('iq_member_session', JSON.stringify(this.session));
-      this._showMain();
+      this._afterJoin();
       this.showToast('Joined in demo mode', 'warning');
     }
   },
@@ -110,10 +168,56 @@ const MemberApp = {
   /* ── Show main app ─────────────────────────────────────── */
   _showMain() {
     document.getElementById('screen-join').classList.remove('active');
+    document.getElementById('screen-goals').classList.remove('active');
     document.getElementById('screen-main').classList.add('active');
     this._renderHome();
     this._renderStats();
-    this._checkTodayCheckin();
+    this._setupCheckinPrompt();
+  },
+
+  // Personalise the check-in prompt label based on their goal
+  _setupCheckinPrompt() {
+    const done = this._checkedInToday();
+    const form = document.getElementById('checkin-form');
+    const doneEl = document.getElementById('checkin-done');
+
+    if (done) {
+      if (form)   form.style.display   = 'none';
+      if (doneEl) doneEl.style.display = 'block';
+      // Show today's AI response if we have it
+      const today = new Date().toLocaleDateString('en-GB');
+      const todayCheckin = [...this.checkins].reverse().find(c => c.date === today && c.aiResponse);
+      const replayEl = document.getElementById('checkin-ai-replay');
+      if (replayEl && todayCheckin?.aiResponse) {
+        replayEl.style.display = 'block';
+        replayEl.innerHTML = `
+          <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06);margin-top:0.8rem">
+            <div style="display:flex;align-items:flex-start;gap:0.7rem">
+              <div style="width:28px;height:28px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.72rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
+              <div>
+                <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.4rem">IntelliQ said</div>
+                <div style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6">${this._escape(todayCheckin.aiResponse)}</div>
+              </div>
+            </div>
+          </div>`;
+      }
+      return;
+    }
+
+    if (form)   form.style.display   = 'block';
+    if (doneEl) doneEl.style.display = 'none';
+
+    // Set personalised prompt label
+    const labelEl = document.getElementById('checkin-prompt-label');
+    if (labelEl && this.goals?.goal) {
+      const prompts = [
+        'How did things go today? Did you get any closer to your goal?',
+        'How are you feeling? What happened today?',
+        'Tell IntelliQ how your day went.',
+        'What worked today? What didn\'t?',
+      ];
+      labelEl.textContent = prompts[Math.floor(Math.random() * prompts.length)];
+    }
   },
 
   /* ── Tab switching ─────────────────────────────────────── */
@@ -480,7 +584,9 @@ const MemberApp = {
     document.querySelectorAll('.mood-btn').forEach(btn => {
       btn.classList.toggle('selected', parseInt(btn.dataset.mood) === val);
     });
-    document.getElementById('checkin-submit-btn').disabled = false;
+    // Enable submit (requires mood; text is also required but prompted on submit)
+    const btn = document.getElementById('checkin-submit-btn');
+    if (btn) { btn.disabled = false; btn.textContent = 'Submit Check-In'; }
   },
 
   _checkedInToday() {
@@ -488,40 +594,70 @@ const MemberApp = {
     return this.checkins.some(c => c.date === today);
   },
 
-  _checkTodayCheckin() {
-    if (this._checkedInToday()) {
-      document.getElementById('checkin-done').style.display   = 'block';
-      document.getElementById('checkin-submit-btn').style.display = 'none';
-      document.getElementById('checkin-note').disabled = true;
-      document.querySelectorAll('.mood-btn').forEach(b => b.disabled = true);
-    }
-  },
-
   async submitCheckin() {
     if (!this.mood) { this.showToast('Pick a mood first', 'warning'); return; }
-    const note = (document.getElementById('checkin-note').value || '').trim();
-    const s    = this.session;
+    const noteEl = document.getElementById('checkin-note');
+    const note   = (noteEl?.value || '').trim();
+    const s      = this.session;
+
+    if (!note) { this.showToast('Add a line or two — IntelliQ reads it', 'warning'); return; }
+
+    const btn = document.getElementById('checkin-submit-btn');
+    btn.textContent = 'Sending…'; btn.disabled = true;
+
     const entry = {
-      mood:  this.mood,
-      note,
-      date:  new Date().toLocaleDateString('en-GB'),
-      label: ['','Rough','Low','Okay','Good','Great'][this.mood],
+      mood:      this.mood,
+      moodLabel: ['','Rough','Low','Okay','Good','Great'][this.mood],
+      text:      note,
+      date:      new Date().toLocaleDateString('en-GB'),
+      aiResponse: null,
     };
 
     this.checkins.push(entry);
     localStorage.setItem('iq_member_checkins', JSON.stringify(this.checkins));
 
-    // Submit to server (non-blocking)
-    fetch('/api/member/checkin', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orgCode: s.orgCode, memberName: s.memberName, mood: this.mood, note }),
-    }).catch(() => {});
+    // Disable form
+    if (noteEl) noteEl.disabled = true;
+    document.querySelectorAll('.mood-btn').forEach(b => b.disabled = true);
+
+    // Submit to new freeform endpoint (gets AI response)
+    try {
+      const res = await fetch('/api/checkin/freeform', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orgCode:    s.orgCode,
+          memberName: s.memberName,
+          text:       note,
+          mood:       this.mood,
+          role:       'member',
+          orgMode:    s.orgMode,
+          orgName:    s.orgName,
+          goals:      this.goals,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.aiResponse) {
+          entry.aiResponse = data.aiResponse;
+          // Update local storage with AI response
+          this.checkins[this.checkins.length - 1].aiResponse = data.aiResponse;
+          localStorage.setItem('iq_member_checkins', JSON.stringify(this.checkins));
+          // Show AI response in UI
+          const aiEl = document.getElementById('checkin-ai-response');
+          const textEl = document.getElementById('checkin-ai-text');
+          if (aiEl && textEl) {
+            textEl.textContent = data.aiResponse;
+            aiEl.style.display = 'block';
+          }
+        }
+      }
+    } catch(err) {
+      // Non-critical — checkin still saved locally
+    }
 
     // Show done state
-    document.getElementById('checkin-done').style.display    = 'block';
-    document.getElementById('checkin-submit-btn').style.display = 'none';
-    document.getElementById('checkin-note').disabled = true;
-    document.querySelectorAll('.mood-btn').forEach(b => b.disabled = true);
+    document.getElementById('checkin-done').style.display = 'block';
+    document.getElementById('checkin-form').style.display = 'none';
 
     this.showToast('Check-in saved ✓', 'success');
     this._renderHome();

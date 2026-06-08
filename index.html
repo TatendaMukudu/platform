@@ -72,15 +72,10 @@
         <input class="form-control" type="password" id="setup-password" placeholder="Choose a password"/>
       </div>
       <div class="form-group">
-        <label>ORGANISATION TYPE</label>
-        <div class="org-grid">
-          <div class="org-tile active" data-mode="school"><div class="tile-icon">🎓</div><div>School</div></div>
-          <div class="org-tile" data-mode="sports"><div class="tile-icon">⚽</div><div>Sports</div></div>
-          <div class="org-tile" data-mode="workplace"><div class="tile-icon">🏢</div><div>Workplace</div></div>
-          <div class="org-tile" data-mode="military"><div class="tile-icon">🎖️</div><div>Military</div></div>
-          <div class="org-tile" data-mode="healthcare"><div class="tile-icon">🏥</div><div>Healthcare</div></div>
-          <div class="org-tile" data-mode="government"><div class="tile-icon">🏛️</div><div>Government</div></div>
-        </div>
+        <label>TELL US ABOUT YOUR ORGANISATION <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)">— IntelliQ reads this to adapt to you</span></label>
+        <textarea class="form-control" id="setup-org-description" rows="3" style="resize:vertical"
+          placeholder="e.g. We're a semi-professional football academy working with 16-21 year olds. We want to build mentally tough, coachable players who take responsibility for their development. Success for us looks like players progressing to senior contracts and becoming good people..."></textarea>
+        <div style="font-size:0.74rem;color:var(--text-muted);margin-top:0.4rem">Be honest and specific — the more you tell it, the better IntelliQ adapts.</div>
       </div>
       <div class="form-group">
         <label>PLATFORM GRADE</label>
@@ -908,6 +903,95 @@
       <input id="chat-input" placeholder="Type your response…"
              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();ChatEngine.sendMessage(this.value);}"/>
       <button class="btn btn-accent btn-sm" onclick="ChatEngine.sendMessage(document.getElementById('chat-input').value)">Send</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     ORG INTELLIGENCE MODAL
+     Shown after setup — IntelliQ confirms what it extracted
+     ════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="org-intelligence-modal">
+  <div class="modal" style="max-width:520px;width:100%">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">IntelliQ understood your org</div>
+        <div class="modal-sub" id="org-intel-sub">Extracted from your description</div>
+      </div>
+      <button class="modal-close" onclick="closeOrgIntelModal()">✕</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Summary -->
+      <div id="org-intel-summary" style="font-size:0.88rem;color:var(--text-secondary);line-height:1.6;padding:0.8rem 1rem;background:rgba(124,90,245,0.06);border:1px solid rgba(124,90,245,0.2);border-radius:8px;margin-bottom:1.2rem"></div>
+
+      <!-- Traits -->
+      <div style="margin-bottom:1rem">
+        <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Key Traits IntelliQ will monitor</div>
+        <div id="org-intel-traits" style="display:flex;flex-wrap:wrap;gap:0.4rem"></div>
+      </div>
+
+      <!-- Goals -->
+      <div style="margin-bottom:1rem">
+        <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Org Goals detected</div>
+        <div id="org-intel-goals"></div>
+      </div>
+
+      <!-- Environment -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:1.2rem">
+        <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:0.8rem">
+          <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:0.3rem">Environment</div>
+          <div id="org-intel-env" style="font-size:0.8rem;color:var(--text-secondary);line-height:1.5"></div>
+        </div>
+        <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:0.8rem">
+          <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:0.3rem">Success looks like</div>
+          <div id="org-intel-success" style="font-size:0.8rem;color:var(--text-secondary);line-height:1.5"></div>
+        </div>
+      </div>
+
+      <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:1.2rem">IntelliQ will use this to personalise every assessment, check-in, and alert. You can update your org description in Settings at any time.</div>
+
+      <button class="btn btn-accent" style="width:100%" onclick="closeOrgIntelModal()">Got it — let's go →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     DAILY COACH CHECK-IN MODAL
+     Shows once per day when admin/coach opens Platform
+     ════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="coach-checkin-modal">
+  <div class="modal" style="max-width:480px;width:100%">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="ccc-title">Morning check-in</div>
+        <div class="modal-sub" id="ccc-sub">Takes 60 seconds — IntelliQ reads this</div>
+      </div>
+      <button class="modal-close" onclick="closeAllModals()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div id="ccc-form">
+        <div style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6;margin-bottom:1rem" id="ccc-prompt">
+          How did last session go? Any players you're watching? Anything on your mind?
+        </div>
+        <textarea id="ccc-text" class="form-input" rows="4" style="resize:none"
+          placeholder="Write freely — what happened, what you noticed, what you're thinking about…"></textarea>
+        <div style="display:flex;justify-content:flex-end;gap:0.5rem;margin-top:0.8rem">
+          <button class="btn btn-outline" onclick="closeAllModals()">Skip today</button>
+          <button class="btn btn-accent" id="ccc-submit-btn" onclick="submitCoachCheckin()">Submit →</button>
+        </div>
+      </div>
+      <!-- AI Response -->
+      <div id="ccc-response" style="display:none">
+        <div style="display:flex;align-items:flex-start;gap:0.7rem;padding:0.9rem;background:rgba(124,90,245,0.06);border:1px solid rgba(124,90,245,0.2);border-radius:8px;margin-bottom:1rem">
+          <div style="width:30px;height:30px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
+          <div>
+            <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.5rem">IntelliQ</div>
+            <div id="ccc-ai-text" style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6"></div>
+          </div>
+        </div>
+        <button class="btn btn-accent" style="width:100%" onclick="closeAllModals()">Got it — open platform</button>
+      </div>
     </div>
   </div>
 </div>

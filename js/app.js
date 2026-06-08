@@ -60,6 +60,7 @@ function initLogin() {
     AppState.init(mode, Auth.currentOrg?.orgName || 'Organisation', Auth.currentUser?.name || 'User', grade);
     AppState.adminRole = Auth.ROLE_LABELS[Auth.currentUser?.role] || 'Admin';
     launchApp();
+    _checkCoachDailyCheckin();
     return;
   }
 
@@ -89,6 +90,7 @@ async function handleLogin() {
 
     if (Auth.isMember()) { launchMemberView(); return; }
     launchApp();
+    _checkCoachDailyCheckin();
   } catch(e) {
     errEl.textContent  = e.message || 'Login failed.';
     errEl.style.display = 'block';
@@ -96,29 +98,166 @@ async function handleLogin() {
 }
 
 async function handleSetup() {
-  const orgName  = (document.getElementById('setup-org-name')?.value   || '').trim();
-  const name     = (document.getElementById('setup-admin-name')?.value  || '').trim();
-  const password = (document.getElementById('setup-password')?.value    || '').trim();
-  const grade    = document.getElementById('setup-grade')?.value        || 'A';
-  const orgMode  = window._selectedOrgMode || 'school';
-  const errEl    = document.getElementById('setup-error');
+  const orgName     = (document.getElementById('setup-org-name')?.value        || '').trim();
+  const name        = (document.getElementById('setup-admin-name')?.value       || '').trim();
+  const password    = (document.getElementById('setup-password')?.value         || '').trim();
+  const grade       = document.getElementById('setup-grade')?.value             || 'A';
+  const description = (document.getElementById('setup-org-description')?.value || '').trim();
+  const errEl       = document.getElementById('setup-error');
   errEl.style.display = 'none';
 
   if (!orgName || !name || !password) {
     errEl.textContent = 'Please fill in all fields.'; errEl.style.display = 'block'; return;
   }
 
+  // Determine org mode from description (default: school)
+  // We'll detect it via AI after setup — for now pick 'school' as placeholder
+  // The real orgMode gets updated after the describe call
+  let orgMode = 'school';
+
+  // Quick keyword detection as fast fallback (AI call happens after login)
+  const descLower = description.toLowerCase();
+  if (/sport|football|soccer|basketball|cricket|athletics|team|player|coach|match/i.test(descLower)) orgMode = 'sports';
+  else if (/school|student|pupil|class|teacher|academic|curriculum/i.test(descLower)) orgMode = 'school';
+  else if (/hospital|patient|clinic|nurse|doctor|healthcare|medical/i.test(descLower)) orgMode = 'healthcare';
+  else if (/military|army|navy|air force|regiment|battalion|soldier/i.test(descLower)) orgMode = 'military';
+  else if (/government|ministry|department|policy|public service/i.test(descLower)) orgMode = 'government';
+  else if (/company|office|employee|workplace|business|startup|staff/i.test(descLower)) orgMode = 'workplace';
+
   try {
     const data = await Auth.setupOrg(orgName, orgMode, name, password);
     await Auth.login(data.orgCode, name, password);
     AppState.init(orgMode, orgName, name, grade);
     AppState.adminRole = 'Super Admin';
+    AppState.orgDescription = description;
 
     showToast(`Org created! Your code: ${data.orgCode}`, 'success');
     launchApp();
+
+    // After launch, call AI to extract traits (non-blocking)
+    if (description) {
+      _analyseOrgDescription(description, orgName, data.orgCode);
+    } else {
+      // No description — skip directly to coach check-in
+      _checkCoachDailyCheckin();
+    }
   } catch(e) {
     errEl.textContent   = e.message || 'Setup failed.';
     errEl.style.display = 'block';
+  }
+}
+
+/* ── ORG INTELLIGENCE — Show extracted traits after setup ──────────────── */
+async function _analyseOrgDescription(description, orgName, orgCode) {
+  try {
+    const res = await fetch('/api/org/describe', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ description, orgName }),
+    });
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+
+    // Update orgMode if AI detected a different one
+    if (data.orgMode && data.orgMode !== AppState.mode) {
+      AppState.mode = data.orgMode;
+      renderSidebar();
+    }
+
+    // Store traits on AppState
+    AppState.orgTraits      = data.traits    || [];
+    AppState.orgGoals       = data.goals     || [];
+    AppState.orgEnvironment = data.environment || '';
+    AppState.orgSuccess     = data.successLooks || '';
+
+    // Show org intelligence modal
+    document.getElementById('org-intel-sub').textContent     = `${orgName} — detected as ${data.orgMode}`;
+    document.getElementById('org-intel-summary').textContent  = data.summary || '';
+    document.getElementById('org-intel-env').textContent      = data.environment || '—';
+    document.getElementById('org-intel-success').textContent  = data.successLooks || '—';
+
+    const traitsEl = document.getElementById('org-intel-traits');
+    traitsEl.innerHTML = (data.traits || []).map(t =>
+      `<span style="font-size:0.75rem;padding:4px 10px;background:rgba(124,90,245,0.12);border:1px solid rgba(124,90,245,0.25);border-radius:20px;color:var(--accent)">${t}</span>`
+    ).join('');
+
+    const goalsEl = document.getElementById('org-intel-goals');
+    goalsEl.innerHTML = (data.goals || []).map(g =>
+      `<div style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.4rem 0;border-bottom:1px solid var(--border);font-size:0.82rem;color:var(--text-secondary)"><span style="color:var(--accent);flex-shrink:0">→</span>${g}</div>`
+    ).join('');
+
+    openModal('org-intelligence-modal');
+
+  } catch(err) {
+    // Silent fail — org still works, just without extracted traits
+    _checkCoachDailyCheckin();
+  }
+}
+
+function closeOrgIntelModal() {
+  closeAllModals();
+  _checkCoachDailyCheckin();
+}
+
+/* ── COACH DAILY CHECK-IN ──────────────────────────────────────────────── */
+function _checkCoachDailyCheckin() {
+  const today    = new Date().toLocaleDateString('en-GB');
+  const lastKey  = `iq_coach_checkin_${Auth.currentUser?.id || 'admin'}`;
+  const lastDate = localStorage.getItem(lastKey);
+  if (lastDate === today) return; // Already done today
+
+  // Set role-specific prompt
+  const role   = Auth.currentUser?.role || 'coach';
+  const name   = AppState.adminName.split(' ')[0];
+  const hour   = new Date().getHours();
+  const tod    = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+
+  const prompts = {
+    superadmin: `Good ${tod}, ${name}. How's the organisation running? Anything at the top of your mind — players, staff, decisions you're thinking about?`,
+    admin:      `Good ${tod}, ${name}. How's the programme going? Any issues or highlights from the last session?`,
+    coach:      `Good ${tod}, ${name}. How did last session go? Any players you're watching? Anything you want to flag?`,
+  };
+
+  document.getElementById('ccc-title').textContent  = `${tod.charAt(0).toUpperCase() + tod.slice(1)} check-in`;
+  document.getElementById('ccc-prompt').textContent = prompts[role] || prompts.coach;
+
+  setTimeout(() => openModal('coach-checkin-modal'), 600);
+}
+
+async function submitCoachCheckin() {
+  const text  = (document.getElementById('ccc-text')?.value || '').trim();
+  if (!text)  { showToast('Write something — even a line', 'warning'); return; }
+
+  const btn = document.getElementById('ccc-submit-btn');
+  btn.textContent = 'Sending…'; btn.disabled = true;
+
+  const today   = new Date().toLocaleDateString('en-GB');
+  const lastKey = `iq_coach_checkin_${Auth.currentUser?.id || 'admin'}`;
+  localStorage.setItem(lastKey, today);
+
+  try {
+    const res = await fetch('/api/checkin/freeform', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        orgCode:    AppState.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g,'-'),
+        memberName: AppState.adminName,
+        text,
+        mood:       null,
+        role:       Auth.currentUser?.role || 'coach',
+        orgMode:    AppState.mode,
+        orgName:    AppState.orgName,
+      }),
+    });
+    const data = res.ok ? await res.json() : { aiResponse: null };
+
+    document.getElementById('ccc-form').style.display     = 'none';
+    document.getElementById('ccc-response').style.display = 'block';
+    document.getElementById('ccc-ai-text').textContent    = data.aiResponse || 'Check-in saved. Have a good session.';
+
+  } catch(err) {
+    closeAllModals();
+    showToast('Check-in saved', 'success');
   }
 }
 

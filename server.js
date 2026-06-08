@@ -644,6 +644,150 @@ app.get('/api/platform/org-results', (req, res) => {
   res.json({ results });
 });
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   ORG INTELLIGENCE — FREEFORM DESCRIPTION → AI TRAIT EXTRACTION
+   Admin describes their org in plain language. Claude extracts what matters.
+   ═══════════════════════════════════════════════════════════════════════════ */
+app.post('/api/org/describe', async (req, res) => {
+  const { description, orgName } = req.body;
+  if (!description) return res.status(400).json({ error: 'description required' });
+
+  const systemPrompt = `You are an intelligent org analyst for IntelliQ, a performance intelligence platform.
+
+An organisation admin has described their organisation in their own words. Your job is to:
+1. Determine the closest org category
+2. Extract the key values, goals, and environment they want to create
+3. Identify what "success" means to them
+
+OUTPUT FORMAT — valid JSON only, no extra text:
+{
+  "orgMode": "school|sports|workplace|military|healthcare|government",
+  "summary": "One sentence capturing what this org is really about",
+  "traits": ["specific trait 1", "specific trait 2", "specific trait 3", "specific trait 4"],
+  "goals": ["meaningful org goal 1", "meaningful org goal 2", "meaningful org goal 3"],
+  "environment": "The kind of culture/environment they want to build (1 sentence)",
+  "successLooks": "What success looks like for them specifically (1 sentence)"
+}
+
+RULES:
+- orgMode must be exactly one of: school, sports, workplace, military, healthcare, government
+- traits should be observable, specific characteristics (e.g. "athlete wellbeing first", "high accountability culture", "data-driven decisions")
+- goals should be meaningful outcomes, not generic platitudes
+- Be grounded in what they actually wrote — do not invent things they didn't mention`;
+
+  try {
+    const response = await client.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 500,
+      system:     systemPrompt,
+      messages:   [{ role: 'user', content: `Organisation: ${orgName}\n\nDescription: ${description}` }],
+    });
+    const raw     = response.content[0]?.text || '';
+    const jsonStr = raw.replace(/```json\n?|\n?```/g, '').trim();
+    let traits;
+    try { traits = JSON.parse(jsonStr); }
+    catch(e) { return res.status(500).json({ error: 'Parse failed', raw }); }
+
+    // Store traits in orgMeta if orgCode known
+    res.json({ ok: true, ...traits });
+  } catch(err) {
+    console.error('Org describe error:', err.message);
+    res.status(500).json({ error: 'AI unavailable', detail: err.message });
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MEMBER GOALS — Individual goal & identity intake
+   Every member sets a season goal + who they want to become. Stored once.
+   IntelliQ references these in check-ins and reflections.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const memberGoals = {}; // orgCode:memberName → { goal, identity, setAt }
+
+app.post('/api/member/goals', (req, res) => {
+  const { orgCode, memberName, goal, identity } = req.body;
+  if (!orgCode || !memberName) return res.status(400).json({ error: 'missing fields' });
+  const key = memberKey(orgCode, memberName);
+  memberGoals[key] = { goal: goal || '', identity: identity || '', setAt: new Date().toISOString() };
+  res.json({ ok: true });
+});
+
+app.get('/api/member/goals', (req, res) => {
+  const { orgCode, memberName } = req.query;
+  if (!orgCode || !memberName) return res.status(400).json({ error: 'missing fields' });
+  const key = memberKey(orgCode, memberName);
+  res.json({ goals: memberGoals[key] || null });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FREEFORM CHECK-IN — Free text + AI response
+   Member writes anything. IntelliQ reads it, saves it, responds briefly.
+   Coach check-ins also flow through here.
+   ═══════════════════════════════════════════════════════════════════════════ */
+app.post('/api/checkin/freeform', async (req, res) => {
+  const { orgCode, memberName, text, mood, role, orgMode, orgName, goals } = req.body;
+  if (!orgCode || !memberName || !text) return res.status(400).json({ error: 'missing fields' });
+
+  const key = memberKey(orgCode, memberName);
+  if (!memberCheckins[key]) memberCheckins[key] = [];
+
+  const moodLabels = { 1:'Rough', 2:'Low', 3:'Okay', 4:'Good', 5:'Great' };
+  const checkin = {
+    text,
+    mood: mood || null,
+    moodLabel: moodLabels[mood] || null,
+    role: role || 'member',
+    orgMode: orgMode || 'school',
+    date: new Date().toLocaleDateString('en-GB'),
+    ts:   new Date().toISOString(),
+  };
+  memberCheckins[key].push(checkin);
+
+  // Role-specific AI prompt
+  const rolePrompts = {
+    member:  `You are IntelliQ, a warm and perceptive performance intelligence system. A team member has just submitted their daily check-in. Read what they shared, acknowledge it genuinely in 1-2 sentences, then if they have a goal — leave them with one specific, actionable thought about it. Keep it brief and human. Max 3 sentences total. Never be generic or robotic.`,
+    coach:   `You are IntelliQ, a performance intelligence assistant for coaches. A coach has submitted their daily check-in. Acknowledge what they shared briefly. If they mentioned a specific player or session, reflect something useful back. If there's a pattern worth noting, surface it. Max 3 sentences. Be direct and practical.`,
+    admin:   `You are IntelliQ, a performance intelligence assistant. An admin has submitted a check-in. Acknowledge briefly. If anything sounds like it needs org-level attention, note it. Max 2 sentences.`,
+  };
+
+  const systemPrompt = rolePrompts[role] || rolePrompts.member;
+
+  let userContent = '';
+  if (mood) userContent += `Mood: ${moodLabels[mood]}\n`;
+  if (goals?.goal) userContent += `Their season goal: "${goals.goal}"\n`;
+  if (goals?.identity) userContent += `Who they want to become: "${goals.identity}"\n`;
+  userContent += `\nCheck-in: ${text}`;
+
+  try {
+    const response = await client.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 120,
+      system:     systemPrompt,
+      messages:   [{ role: 'user', content: userContent }],
+    });
+    const aiResponse = response.content[0]?.text?.trim() || '';
+    checkin.aiResponse = aiResponse;
+    res.json({ ok: true, aiResponse });
+  } catch(err) {
+    console.error('Checkin AI error:', err.message);
+    res.json({ ok: true, aiResponse: null });
+  }
+});
+
+/* ─── Platform: pull all checkins for org ───────────────────────────────── */
+app.get('/api/platform/org-checkins', (req, res) => {
+  const { orgCode } = req.query;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  const code    = orgCode.toLowerCase().trim();
+  const results = {};
+  Object.keys(memberCheckins).forEach(key => {
+    if (key.startsWith(code + ':')) {
+      const name = key.split(':').slice(1).join(':');
+      results[name] = memberCheckins[key];
+    }
+  });
+  res.json({ checkins: results });
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`IntelliQ running → http://localhost:${PORT}`);

@@ -50,12 +50,14 @@ html, body {
 .screen { display: none; flex-direction: column; flex: 1; overflow: hidden; }
 .screen.active { display: flex; }
 
-/* ── Join screen ───────────────────────────────────────────── */
-#screen-join {
+/* ── Join / Goals screens ──────────────────────────────────── */
+#screen-join,
+#screen-goals {
   justify-content: center;
   align-items: center;
   padding: 2rem 1.5rem;
   background: var(--bg);
+  overflow-y: auto;
 }
 
 .join-logo {
