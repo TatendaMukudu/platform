@@ -16,6 +16,33 @@
 <div id="app">
 
   <!-- ══════════════════════════════════════
+       SET PASSWORD SCREEN (first login only)
+       ══════════════════════════════════════ -->
+  <div class="screen" id="screen-setpassword">
+    <div class="join-logo">
+      <div class="join-logo-ring">IQ</div>
+      <div class="join-logo-title">IntelliQ</div>
+      <div class="join-logo-sub">Set your password to continue</div>
+    </div>
+    <div class="join-card">
+      <div class="join-card-title">Welcome, <span id="sp-name">—</span></div>
+      <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:1.2rem;line-height:1.6">
+        Your coach added you. Set your own password to secure your account.
+      </p>
+      <div class="form-group">
+        <label class="form-label">New password</label>
+        <input class="form-input" type="password" id="sp-password" placeholder="Choose a password"/>
+      </div>
+      <div class="form-group" style="margin-top:0.6rem">
+        <label class="form-label">Confirm password</label>
+        <input class="form-input" type="password" id="sp-confirm" placeholder="Repeat it"/>
+      </div>
+      <div id="sp-error" style="color:var(--danger);font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
+      <button class="btn-join" onclick="MemberApp.submitSetPassword()">Set Password & Continue →</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════
        GOAL INTAKE SCREEN (first login only)
        ══════════════════════════════════════ -->
   <div class="screen" id="screen-goals">
@@ -93,6 +120,9 @@
         <div class="card-label" style="margin-bottom:0.5rem">Pending Scenarios</div>
         <div id="home-pending"></div>
 
+        <!-- Weekly assessment prompt (shows once a week) -->
+        <div id="home-weekly-prompt"></div>
+
         <!-- Today's check-in prompt -->
         <div id="home-checkin-prompt"></div>
 
@@ -100,10 +130,10 @@
         <div id="home-recent-result"></div>
       </div>
 
-      <!-- SCENARIOS TAB -->
+      <!-- ASSESSMENTS TAB -->
       <div class="tab-page" id="tab-scenarios">
         <div class="page-header">
-          <div class="page-header-title">Scenarios</div>
+          <div class="page-header-title">Assessments</div>
           <div class="page-header-sub">Assigned by your coach</div>
         </div>
         <div id="scenarios-list"></div>
@@ -200,7 +230,7 @@
       </button>
       <button class="nav-tab" data-tab="scenarios" onclick="MemberApp.switchTab('scenarios')">
         <span class="nav-icon">🎯</span>
-        Scenarios
+        Assessments
         <span class="nav-badge" id="scenarios-badge" style="display:none">0</span>
       </button>
       <button class="nav-tab" data-tab="checkin" onclick="MemberApp.switchTab('checkin')">
@@ -212,6 +242,49 @@
         My Stats
       </button>
     </nav>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       WEEKLY ASSESSMENT SCREEN
+       ══════════════════════════════════════ -->
+  <div class="screen" id="screen-weekly">
+    <div class="scenario-header">
+      <button class="scenario-back-btn" onclick="MemberApp.exitWeekly()">‹</button>
+      <div class="scenario-header-info">
+        <div class="scenario-header-title">Weekly Reflection</div>
+        <div class="scenario-header-meta" id="weekly-header-meta">This week</div>
+      </div>
+    </div>
+
+    <div class="page-content" style="padding-bottom:1.5rem">
+
+      <div class="card" style="margin-bottom:0.8rem">
+        <div style="font-size:0.78rem;color:var(--text-secondary);line-height:1.6;margin-bottom:1rem" id="weekly-intro">
+          Take 2 minutes. Be honest — nobody sees this except IntelliQ. The more real you are, the more useful the feedback.
+        </div>
+
+        <!-- Fields rendered by JS based on role -->
+        <div id="weekly-fields"></div>
+
+        <div id="weekly-error" style="color:var(--danger);font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
+        <button class="btn-primary" id="weekly-submit-btn" onclick="MemberApp.submitWeekly()">Submit Weekly Reflection →</button>
+      </div>
+
+      <!-- AI Response (shown after submit) -->
+      <div id="weekly-ai-response" style="display:none">
+        <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06)">
+          <div style="display:flex;align-items:flex-start;gap:0.7rem">
+            <div style="width:28px;height:28px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.72rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
+            <div>
+              <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.4rem">IntelliQ</div>
+              <div id="weekly-ai-text" style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6"></div>
+            </div>
+          </div>
+        </div>
+        <button class="btn-primary" style="margin-top:1rem" onclick="MemberApp.exitWeekly()">Back to Home</button>
+      </div>
+
+    </div>
   </div>
 
   <!-- ══════════════════════════════════════

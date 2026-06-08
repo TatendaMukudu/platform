@@ -392,6 +392,7 @@ app.post('/api/auth/create-user', (req, res) => {
   if (exists) return res.status(400).json({ error: 'Someone with that name already exists in this org' });
 
   const userId = generateId();
+  const isDefaultPassword = !password; // no explicit password = default = name in lowercase
   users[userId] = {
     id:           userId,
     name:         name.trim(),
@@ -399,6 +400,7 @@ app.post('/api/auth/create-user', (req, res) => {
     orgCode:      code,
     supervisorId: supervisorId || creatorId,
     passwordHash: simpleHash(password || name.trim().toLowerCase()),
+    passwordSet:  !isDefaultPassword, // false = member needs to set their own password
     createdAt:    new Date().toISOString(),
     levelId:      roleLevel[role],
   };
@@ -425,8 +427,9 @@ app.post('/api/auth/bulk-create', (req, res) => {
       id: userId, name: trimmed, role: role || 'member', orgCode: code,
       supervisorId: supervisorId || creatorId,
       passwordHash: simpleHash(trimmed.toLowerCase()),
-      createdAt: new Date().toISOString(),
-      levelId: roleLevel[role] || 4,
+      passwordSet:  false, // bulk-created users always need to set their own password
+      createdAt:    new Date().toISOString(),
+      levelId:      roleLevel[role] || 4,
     };
     created.push({ name: trimmed, password: trimmed.toLowerCase() });
   });
@@ -786,6 +789,163 @@ app.get('/api/platform/org-checkins', (req, res) => {
     }
   });
   res.json({ checkins: results });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   WEEKLY ASSESSMENTS — Role-specific weekly reflection forms
+   Everyone fills out their piece. IntelliQ assembles the full picture.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// weeklyAssessments: orgCode:week → [ { memberName, role, data, submittedAt } ]
+const weeklyAssessments = {};
+
+function weekKey(orgCode, weekStr) {
+  return `${orgCode.toLowerCase().trim()}:${weekStr}`;
+}
+
+function currentWeekStr() {
+  const d = new Date();
+  const jan1 = new Date(d.getFullYear(), 0, 1);
+  const week = Math.ceil(((d - jan1) / 86400000 + jan1.getDay() + 1) / 7);
+  return `${d.getFullYear()}-W${String(week).padStart(2,'0')}`;
+}
+
+/* ── Submit weekly assessment ───────────────────────────────────────────── */
+app.post('/api/weekly/submit', async (req, res) => {
+  const { orgCode, memberName, role, orgMode, orgName, data, goals } = req.body;
+  if (!orgCode || !memberName || !data) return res.status(400).json({ error: 'missing fields' });
+
+  const week = currentWeekStr();
+  const key  = weekKey(orgCode, week);
+  if (!weeklyAssessments[key]) weeklyAssessments[key] = [];
+
+  // Remove any prior submission this week for this member
+  const idx = weeklyAssessments[key].findIndex(e => e.memberName.toLowerCase() === memberName.toLowerCase());
+  if (idx > -1) weeklyAssessments[key].splice(idx, 1);
+
+  const rolePrompts = {
+    member: `You are IntelliQ. A team member has completed their weekly reflection. Read what they shared and respond in 2-3 sentences: acknowledge their week genuinely, and if they have a goal, connect something they said to it. Be warm and specific. Max 3 sentences.`,
+    coach:  `You are IntelliQ, a performance intelligence assistant. A coach has submitted their weekly assessment. Read it and respond with one practical insight or observation worth acting on. Reference specifics they mentioned. Max 3 sentences.`,
+    staff:  `You are IntelliQ. A staff member has submitted their weekly report. Acknowledge what they shared and note anything that may need follow-up. Max 2 sentences.`,
+  };
+
+  const roleKey = role === 'member' ? 'member' : role === 'coach' ? 'coach' : 'staff';
+  const systemPrompt = rolePrompts[roleKey];
+
+  let userMsg = '';
+  if (goals?.goal) userMsg += `Their goal: "${goals.goal}"\n\n`;
+  userMsg += `Weekly reflection:\n${Object.entries(data).map(([k,v]) => `${k}: ${v}`).join('\n')}`;
+
+  let aiResponse = null;
+  try {
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001', max_tokens: 150,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMsg }],
+    });
+    aiResponse = response.content[0]?.text?.trim() || null;
+  } catch(e) { /* non-critical */ }
+
+  const entry = {
+    memberName, role: role || 'member', orgMode: orgMode || 'school',
+    data, week, aiResponse,
+    submittedAt: new Date().toISOString(),
+  };
+  weeklyAssessments[key].push(entry);
+
+  res.json({ ok: true, aiResponse, week });
+});
+
+/* ── Get weekly assessments for org ─────────────────────────────────────── */
+app.get('/api/weekly/org', (req, res) => {
+  const { orgCode, week } = req.query;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  const w   = week || currentWeekStr();
+  const key = weekKey(orgCode, w);
+  res.json({ week: w, assessments: weeklyAssessments[key] || [] });
+});
+
+/* ── Get own weekly history ─────────────────────────────────────────────── */
+app.get('/api/weekly/member', (req, res) => {
+  const { orgCode, memberName } = req.query;
+  if (!orgCode || !memberName) return res.status(400).json({ error: 'missing fields' });
+  const code = orgCode.toLowerCase().trim();
+  const name = memberName.toLowerCase().trim();
+  const history = [];
+  Object.keys(weeklyAssessments).forEach(key => {
+    if (key.startsWith(code + ':')) {
+      const entries = weeklyAssessments[key].filter(e => e.memberName.toLowerCase() === name);
+      history.push(...entries);
+    }
+  });
+  history.sort((a, b) => b.week.localeCompare(a.week));
+  res.json({ history });
+});
+
+/* ── Platform: IntelliQ synthesis of this week's inputs ─────────────────── */
+app.post('/api/weekly/synthesis', async (req, res) => {
+  const { orgCode, orgName, orgMode, week } = req.body;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+
+  const w   = week || currentWeekStr();
+  const key = weekKey(orgCode, w);
+  const entries = weeklyAssessments[key] || [];
+
+  if (entries.length === 0) {
+    return res.json({ synthesis: null, message: 'No weekly assessments submitted yet for this week.' });
+  }
+
+  const systemPrompt = `You are IntelliQ, an intelligent performance system used by ${orgName || 'an organisation'}.
+
+You have received the weekly assessment inputs from multiple people across the organisation. Your job is to synthesise what all of them are saying together — finding patterns, gaps, and things that need attention.
+
+OUTPUT FORMAT — valid JSON:
+{
+  "headline": "The most important thing the admin/coach should know this week (1 sentence)",
+  "patterns": ["Pattern 1 across multiple inputs", "Pattern 2"],
+  "watchFor": ["Specific person or situation to keep an eye on"],
+  "positives": ["Something going well worth acknowledging"],
+  "recommendations": ["One concrete action for this week", "Optional second action"]
+}
+
+Be specific and grounded — only say what the data actually supports. Do not invent things nobody mentioned.`;
+
+  const inputsText = entries.map(e =>
+    `${e.memberName} (${e.role}):\n${Object.entries(e.data).map(([k,v]) => `  ${k}: ${v}`).join('\n')}`
+  ).join('\n\n');
+
+  try {
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001', max_tokens: 600,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: `Week: ${w}\nOrg: ${orgName}\n\n${inputsText}` }],
+    });
+    const raw = response.content[0]?.text || '';
+    const jsonStr = raw.replace(/```json\n?|\n?```/g, '').trim();
+    let synthesis;
+    try { synthesis = JSON.parse(jsonStr); }
+    catch(e) { return res.json({ synthesis: null, raw }); }
+    res.json({ synthesis, week: w, count: entries.length });
+  } catch(err) {
+    res.status(500).json({ error: 'AI unavailable', detail: err.message });
+  }
+});
+
+/* ── Set member password (first-login flow) ─────────────────────────────── */
+app.post('/api/auth/set-password', (req, res) => {
+  const { orgCode, userId, currentPassword, newPassword } = req.body;
+  const code  = (orgCode || '').toLowerCase();
+  const users = orgUsers[code];
+  if (!users || !users[userId]) return res.status(404).json({ error: 'User not found' });
+
+  const user = users[userId];
+  if (user.passwordHash !== simpleHash(currentPassword)) {
+    return res.status(401).json({ error: 'Current password incorrect' });
+  }
+
+  user.passwordHash = simpleHash(newPassword);
+  user.passwordSet  = true;
+  res.json({ ok: true });
 });
 
 const PORT = process.env.PORT || 3000;

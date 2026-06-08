@@ -23,6 +23,44 @@ const MemberApp = {
 
   /* ── Boot ──────────────────────────────────────────────── */
   init() {
+    // Check if redirected from platform with password setup flag
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('needsPassword') === '1') {
+      const name   = params.get('name')   || '';
+      const userId = params.get('userId') || '';
+      const orgCode= params.get('orgCode')|| '';
+      if (name && userId && orgCode) {
+        this._pendingPasswordSetup = { name, userId, orgCode };
+        document.getElementById('sp-name').textContent = name;
+        document.getElementById('screen-join').classList.remove('active');
+        document.getElementById('screen-setpassword').classList.add('active');
+        return;
+      }
+    }
+
+    // Check if already redirected from platform login (orgCode + name in URL)
+    if (params.get('orgCode') && params.get('name')) {
+      const orgCode    = params.get('orgCode');
+      const memberName = params.get('name');
+      this.session = { memberName, orgCode: orgCode.toLowerCase(), orgName: orgCode, orgMode: 'school' };
+      localStorage.setItem('iq_member_session', JSON.stringify(this.session));
+      // Fetch real org info
+      fetch('/api/member/join', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orgCode, memberName }),
+      }).then(r => r.json()).then(data => {
+        if (data.ok) {
+          this.session = { memberName: data.memberName, orgCode: data.orgCode, orgName: data.orgName, orgMode: data.orgMode };
+          localStorage.setItem('iq_member_session', JSON.stringify(this.session));
+        }
+      }).catch(() => {});
+      this.results  = JSON.parse(localStorage.getItem('iq_member_results')  || '[]');
+      this.checkins = JSON.parse(localStorage.getItem('iq_member_checkins') || '[]');
+      this.goals    = JSON.parse(localStorage.getItem('iq_member_goals')    || 'null');
+      this._afterJoin();
+      return;
+    }
+
     // Restore session from localStorage
     const saved = localStorage.getItem('iq_member_session');
     if (saved) {
@@ -47,6 +85,49 @@ const MemberApp = {
     } else {
       this._showMain();
       this.loadPending();
+    }
+  },
+
+  /* ── SET PASSWORD (first login) ────────────────────────────── */
+  _pendingPasswordSetup: null,
+
+  async submitSetPassword() {
+    const pass    = (document.getElementById('sp-password')?.value || '').trim();
+    const confirm = (document.getElementById('sp-confirm')?.value  || '').trim();
+    const errEl   = document.getElementById('sp-error');
+    errEl.style.display = 'none';
+
+    if (!pass)            { errEl.textContent = 'Enter a password.';              errEl.style.display = 'block'; return; }
+    if (pass.length < 6)  { errEl.textContent = 'Password must be 6+ characters.';errEl.style.display = 'block'; return; }
+    if (pass !== confirm) { errEl.textContent = 'Passwords don\'t match.';        errEl.style.display = 'block'; return; }
+
+    const setup = this._pendingPasswordSetup;
+    if (!setup) return;
+
+    try {
+      const res = await fetch('/api/auth/set-password', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orgCode:         setup.orgCode,
+          userId:          setup.userId,
+          currentPassword: setup.name.toLowerCase(), // default is name in lowercase
+          newPassword:     pass,
+        }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Failed');
+
+      // Now set up session and continue
+      this.session = { memberName: setup.name, orgCode: setup.orgCode.toLowerCase(), orgName: setup.orgCode, orgMode: 'school' };
+      localStorage.setItem('iq_member_session', JSON.stringify(this.session));
+      this._pendingPasswordSetup = null;
+
+      document.getElementById('screen-setpassword').classList.remove('active');
+      this._afterJoin();
+      this.showToast('Password set ✓', 'success');
+    } catch(err) {
+      errEl.textContent   = err.message || 'Could not set password — try again.';
+      errEl.style.display = 'block';
     }
   },
 
@@ -266,6 +347,9 @@ const MemberApp = {
         </div>
       </div>`;
 
+    // Weekly assessment prompt
+    this._renderWeeklyPrompt();
+
     // Pending scenarios on home
     const pendingEl = document.getElementById('home-pending');
     const pending   = this.pending.filter(s => s.status === 'pending');
@@ -317,6 +401,177 @@ const MemberApp = {
     } else {
       recentEl.innerHTML = '';
     }
+  },
+
+  /* ── WEEKLY ASSESSMENT ─────────────────────────────────── */
+
+  // Returns ISO week string e.g. "2026-W23"
+  _currentWeek() {
+    const d   = new Date();
+    const jan = new Date(d.getFullYear(), 0, 1);
+    const wk  = Math.ceil(((d - jan) / 86400000 + jan.getDay() + 1) / 7);
+    return `${d.getFullYear()}-W${String(wk).padStart(2,'0')}`;
+  },
+
+  _weeklyDoneThisWeek() {
+    const key = `iq_weekly_${this._currentWeek()}`;
+    return !!localStorage.getItem(key);
+  },
+
+  _renderWeeklyPrompt() {
+    const el = document.getElementById('home-weekly-prompt');
+    if (!el) return;
+    if (this._weeklyDoneThisWeek()) {
+      el.innerHTML = ''; return;
+    }
+    // Show weekly prompt card
+    el.innerHTML = `
+      <div class="card" style="cursor:pointer;border-color:rgba(79,247,122,0.35);margin-bottom:0.8rem"
+           onclick="MemberApp.startWeekly()">
+        <div style="display:flex;align-items:center;gap:0.6rem">
+          <span style="font-size:1.3rem">📋</span>
+          <div style="flex:1">
+            <div style="font-size:0.85rem;font-weight:600">Weekly reflection ready</div>
+            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">2 minutes — IntelliQ synthesises everyone's input</div>
+          </div>
+          <span style="color:var(--success);font-weight:700;font-size:0.8rem">NEW</span>
+        </div>
+      </div>`;
+  },
+
+  startWeekly() {
+    document.getElementById('screen-main').classList.remove('active');
+    document.getElementById('screen-weekly').classList.add('active');
+
+    // Reset UI
+    document.getElementById('weekly-ai-response').style.display = 'none';
+    document.getElementById('weekly-error').style.display       = 'none';
+    document.getElementById('weekly-submit-btn').style.display  = 'block';
+    document.getElementById('weekly-submit-btn').disabled       = false;
+    document.getElementById('weekly-submit-btn').textContent    = 'Submit Weekly Reflection →';
+    document.getElementById('weekly-header-meta').textContent   = this._currentWeek().replace('W', 'Week ');
+
+    // Render role-appropriate fields
+    this._renderWeeklyFields();
+  },
+
+  _renderWeeklyFields() {
+    const el = document.getElementById('weekly-fields');
+    if (!el) return;
+
+    // For now everyone gets the member form — role detection can be added later
+    // When org auth is integrated, role comes from session
+    el.innerHTML = `
+      <div class="form-group" style="margin-bottom:1rem">
+        <label class="form-label">How did this week go overall? <span style="color:var(--text-muted);font-weight:400">(be honest)</span></label>
+        <textarea class="form-input" id="weekly-overall" rows="3" style="resize:none"
+          placeholder="Training, school, games, life — whatever felt significant this week…"></textarea>
+      </div>
+      <div class="form-group" style="margin-bottom:1rem">
+        <label class="form-label">What improved or clicked?</label>
+        <textarea class="form-input" id="weekly-improved" rows="2" style="resize:none"
+          placeholder="Something you did better, understood more clearly, or felt more confident with…"></textarea>
+      </div>
+      <div class="form-group" style="margin-bottom:1rem">
+        <label class="form-label">What's still hard or not working?</label>
+        <textarea class="form-input" id="weekly-hard" rows="2" style="resize:none"
+          placeholder="Be specific — what keeps tripping you up?"></textarea>
+      </div>
+      <div class="form-group" style="margin-bottom:1rem">
+        <label class="form-label">Rate your week 1–10 <span style="color:var(--text-muted);font-weight:400">(1 = rough, 10 = best week)</span></label>
+        <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.4rem" id="weekly-rating-btns">
+          ${[1,2,3,4,5,6,7,8,9,10].map(n => `
+            <button class="weekly-rating-btn" data-val="${n}"
+              onclick="MemberApp._selectWeeklyRating(${n})"
+              style="width:38px;height:38px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-secondary);font-size:0.82rem;font-weight:600;cursor:pointer"
+            >${n}</button>`).join('')}
+        </div>
+      </div>
+      ${this.goals?.goal ? `
+      <div class="form-group" style="margin-bottom:1.2rem">
+        <label class="form-label">Your goal: <em style="font-weight:400">"${this._escape(this.goals.goal)}"</em></label>
+        <textarea class="form-input" id="weekly-goal-progress" rows="2" style="resize:none"
+          placeholder="Did you get closer to it this week? What did you do toward it?"></textarea>
+      </div>` : ''}
+    `;
+    this._weeklyRating = null;
+  },
+
+  _weeklyRating: null,
+  _selectWeeklyRating(n) {
+    this._weeklyRating = n;
+    document.querySelectorAll('.weekly-rating-btn').forEach(btn => {
+      const active = parseInt(btn.dataset.val) === n;
+      const col    = n >= 7 ? 'var(--success)' : n >= 5 ? 'var(--warning)' : 'var(--danger)';
+      btn.style.background   = active ? col      : 'var(--surface-2)';
+      btn.style.color        = active ? '#fff'   : 'var(--text-secondary)';
+      btn.style.borderColor  = active ? col      : 'var(--border)';
+    });
+  },
+
+  async submitWeekly() {
+    const overall  = (document.getElementById('weekly-overall')?.value  || '').trim();
+    const improved = (document.getElementById('weekly-improved')?.value || '').trim();
+    const hard     = (document.getElementById('weekly-hard')?.value     || '').trim();
+    const goalProg = (document.getElementById('weekly-goal-progress')?.value || '').trim();
+    const errEl    = document.getElementById('weekly-error');
+    errEl.style.display = 'none';
+
+    if (!overall) {
+      errEl.textContent  = 'Tell us how the week went — even a sentence.';
+      errEl.style.display = 'block'; return;
+    }
+
+    const btn = document.getElementById('weekly-submit-btn');
+    btn.textContent = 'Submitting…'; btn.disabled = true;
+
+    const data = {
+      'How the week went':       overall,
+      'What improved':           improved || '—',
+      'What\'s still hard':      hard     || '—',
+      'Week rating':             this._weeklyRating ? `${this._weeklyRating}/10` : '—',
+    };
+    if (goalProg) data['Goal progress'] = goalProg;
+
+    const s = this.session;
+    try {
+      const res = await fetch('/api/weekly/submit', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orgCode:    s.orgCode,
+          memberName: s.memberName,
+          role:       'member',
+          orgMode:    s.orgMode,
+          orgName:    s.orgName,
+          goals:      this.goals,
+          data,
+        }),
+      });
+      const result = res.ok ? await res.json() : {};
+
+      // Mark as done this week
+      localStorage.setItem(`iq_weekly_${this._currentWeek()}`, '1');
+
+      // Hide form, show AI response
+      btn.style.display = 'none';
+      const aiEl  = document.getElementById('weekly-ai-response');
+      const txtEl = document.getElementById('weekly-ai-text');
+      aiEl.style.display = 'block';
+      txtEl.textContent  = result.aiResponse || 'Reflection saved. Keep building on what\'s working.';
+
+      this._renderWeeklyPrompt();
+    } catch(err) {
+      errEl.textContent   = 'Could not submit — check your connection.';
+      errEl.style.display = 'block';
+      btn.textContent     = 'Submit Weekly Reflection →';
+      btn.disabled        = false;
+    }
+  },
+
+  exitWeekly() {
+    document.getElementById('screen-weekly').classList.remove('active');
+    document.getElementById('screen-main').classList.add('active');
+    this._renderHome();
   },
 
   /* ── SCENARIOS LIST ────────────────────────────────────── */

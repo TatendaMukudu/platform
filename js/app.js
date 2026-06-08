@@ -28,7 +28,7 @@ const PAGE_TITLES = {
   members:   'Members & Profiles',
   analytics: 'Analytics & Insights',
   intelliq:  'IntelliQ Engine',
-  scenarios: 'Decision Scenarios',
+  scenarios: 'AI Assessments',
   people:    'People & Hierarchy',
   alerts:    'Alerts & Notifications',
   reports:   'Reports & Stat Sheets',
@@ -263,10 +263,15 @@ async function submitCoachCheckin() {
 
 /* ── MEMBER VIEW (Canvas-style — member logs in, sees their world) ─────── */
 function launchMemberView() {
-  // Hide the login, show a simplified member dashboard inside the same shell
   document.getElementById('login-screen').style.display = 'none';
-  // Redirect to member app
-  window.location.href = `/member/?orgCode=${encodeURIComponent(Auth.currentUser.orgCode)}&name=${encodeURIComponent(Auth.currentUser.name)}`;
+  const u = Auth.currentUser;
+  const base = `/member/?orgCode=${encodeURIComponent(u.orgCode)}&name=${encodeURIComponent(u.name)}`;
+  // If password was never changed (passwordSet is false), send to set-password flow
+  if (u.passwordSet === false) {
+    window.location.href = base + `&userId=${encodeURIComponent(u.id)}&needsPassword=1`;
+  } else {
+    window.location.href = base;
+  }
 }
 
 function launchApp(){
@@ -1082,6 +1087,90 @@ function switchMode(newMode){
   showToast(`Switched to ${ORG_MODES[newMode].label} mode`, 'success');
 }
 
+/* ── WEEKLY PULSE (IntelliQ page) ───────────────────────── */
+async function loadWeeklyPulse() {
+  const panel  = document.getElementById('weekly-pulse-panel');
+  if (!panel) return;
+  panel.innerHTML = `<div style="padding:1rem;text-align:center;color:var(--text-muted);font-size:0.82rem">Loading…</div>`;
+
+  const orgCode = AppState.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g,'-');
+
+  try {
+    // Get this week's raw submissions
+    const [rawRes, synthRes] = await Promise.all([
+      fetch(`/api/weekly/org?orgCode=${encodeURIComponent(orgCode)}`),
+      fetch('/api/weekly/synthesis', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orgCode, orgName: AppState.orgName, orgMode: AppState.mode }),
+      }),
+    ]);
+
+    const rawData  = rawRes.ok  ? await rawRes.json()  : { assessments: [] };
+    const synthData = synthRes.ok ? await synthRes.json() : { synthesis: null };
+
+    const entries = rawData.assessments || [];
+    const synth   = synthData.synthesis;
+
+    if (!entries.length) {
+      panel.innerHTML = `
+        <div style="text-align:center;padding:1.5rem 0;color:var(--text-muted);font-size:0.82rem">
+          <div style="font-size:1.5rem;margin-bottom:0.5rem">📋</div>
+          No weekly reflections submitted yet for ${rawData.week || 'this week'}.<br>
+          Members complete these in the IntelliQ app when they open it each week.
+        </div>`;
+      return;
+    }
+
+    const color = ORG_MODES[AppState.mode].color;
+    let html = `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.8rem">${rawData.week || 'This Week'} · ${entries.length} submission${entries.length !== 1 ? 's' : ''}</div>`;
+
+    // IntelliQ synthesis
+    if (synth) {
+      html += `
+        <div style="background:rgba(124,90,245,0.07);border:1px solid rgba(124,90,245,0.2);border-radius:10px;padding:0.9rem;margin-bottom:1rem">
+          <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin-bottom:0.6rem">🧠 IntelliQ Synthesis</div>
+          <div style="font-size:0.88rem;font-weight:600;color:var(--text-primary);margin-bottom:0.7rem">${synth.headline || ''}</div>
+          ${synth.patterns?.length ? `
+            <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:0.4rem">Patterns</div>
+            ${synth.patterns.map(p => `<div style="font-size:0.8rem;color:var(--text-secondary);padding:3px 0">• ${p}</div>`).join('')}` : ''}
+          ${synth.watchFor?.length ? `
+            <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:var(--warning);margin:0.6rem 0 0.4rem">Watch For</div>
+            ${synth.watchFor.map(w => `<div style="font-size:0.8rem;color:var(--warning);padding:3px 0">⚠ ${w}</div>`).join('')}` : ''}
+          ${synth.positives?.length ? `
+            <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:var(--success);margin:0.6rem 0 0.4rem">Positives</div>
+            ${synth.positives.map(p => `<div style="font-size:0.8rem;color:var(--success);padding:3px 0">✓ ${p}</div>`).join('')}` : ''}
+          ${synth.recommendations?.length ? `
+            <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:${color};margin:0.6rem 0 0.4rem">Recommended Actions</div>
+            ${synth.recommendations.map((r,i) => `<div style="font-size:0.8rem;color:var(--text-secondary);padding:3px 0">${i+1}. ${r}</div>`).join('')}` : ''}
+        </div>`;
+    }
+
+    // Individual submissions (coach can see each person's input)
+    html += `<div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Individual Reflections</div>`;
+    html += entries.map(e => {
+      const member = AppState.members.find(m => m.name.toLowerCase() === e.memberName.toLowerCase());
+      const col    = member?.color || color;
+      const init   = e.memberName.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+      return `
+        <div style="padding:0.7rem 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem">
+            <div class="user-avatar" style="width:26px;height:26px;font-size:0.65rem;background:${col}">${init}</div>
+            <span style="font-size:0.82rem;font-weight:600">${e.memberName}</span>
+            <span style="font-size:0.7rem;color:var(--text-muted)">${e.role}</span>
+          </div>
+          ${Object.entries(e.data).map(([k,v]) => v && v !== '—' ? `
+            <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:1px">${k}:</div>
+            <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.4rem;line-height:1.5">${v}</div>` : '').join('')}
+        </div>`;
+    }).join('');
+
+    panel.innerHTML = html;
+
+  } catch(err) {
+    panel.innerHTML = `<div style="font-size:0.82rem;color:var(--danger);padding:0.8rem">Could not load — check server connection.</div>`;
+  }
+}
+
 /* ── HIERARCHY BUILDER (in Settings) ────────────────────── */
 function renderHierarchyBuilder() {
   const levels = AppState.orgLevels;
@@ -1372,14 +1461,14 @@ function renderScenarios() {
   }).join('') : `
     <div style="padding:2.5rem 1rem;text-align:center;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius)">
       <div style="font-size:2.5rem;margin-bottom:0.8rem">🎯</div>
-      <div style="font-size:0.95rem;font-weight:600;color:var(--text-primary);margin-bottom:0.4rem">No scenarios yet</div>
-      <div style="font-size:0.82rem;color:var(--text-secondary)">Write a brief above — the AI drafts it, you approve it, then it runs with the member.</div>
+      <div style="font-size:0.95rem;font-weight:600;color:var(--text-primary);margin-bottom:0.4rem">No assessments yet</div>
+      <div style="font-size:0.82rem;color:var(--text-secondary)">Write a brief above — the AI designs it, you approve it, then it runs with the member.</div>
     </div>`;
 
   container.innerHTML = `
     <!-- BRIEF INPUT -->
     <div style="background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);padding:1.2rem;margin-bottom:1rem">
-      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.9rem">New Scenario — Coach Brief</div>
+      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.9rem">New Assessment — Coach Brief</div>
 
       <div style="margin-bottom:0.8rem">
         <label class="form-label">Write your brief in plain language</label>
@@ -1415,7 +1504,7 @@ function renderScenarios() {
 
       <div style="display:flex;justify-content:flex-end">
         <button class="btn btn-accent" id="sc-draft-btn" onclick="draftScenario()">
-          ✦ Draft Scenario with AI →
+          ✦ Draft Assessment with AI →
         </button>
       </div>
     </div>
@@ -1425,9 +1514,10 @@ function renderScenarios() {
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
         <div>
           <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent)">AI Draft — Review &amp; Approve</div>
-          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">Edit anything before it goes to the member. They will never see your brief or this review.</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">Edit anything before it goes to the member. They will never see your brief or coach notes.</div>
         </div>
         <button class="btn btn-outline btn-sm" onclick="draftScenario()">↺ Regenerate</button>
+
       </div>
 
       <div style="margin-bottom:0.9rem">
@@ -1458,7 +1548,7 @@ function renderScenarios() {
 
     <!-- SCENARIO LIST -->
     <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.8rem">
-      ${scenarios.length} Scenario${scenarios.length !== 1 ? 's' : ''} Created
+      ${scenarios.length} Assessment${scenarios.length !== 1 ? 's' : ''} Created
     </div>
     <div class="scenario-grid">${scenarioCards}</div>`;
 

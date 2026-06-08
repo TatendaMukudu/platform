@@ -129,7 +129,7 @@
         <span class="nav-icon">🧠</span> IntelliQ Engine
       </div>
       <div class="nav-item" data-page="scenarios">
-        <span class="nav-icon">🎯</span> Scenarios
+        <span class="nav-icon">🎯</span> Assessments
       </div>
 
       <div class="nav-section-label">Management</div>
@@ -353,8 +353,8 @@
       <section class="page" id="page-scenarios">
         <div class="section-header">
           <div>
-            <div class="section-title">AI Scenarios</div>
-            <div class="section-sub">Create a context — the AI runs the scenario, evaluates reasoning, and scores the result</div>
+            <div class="section-title">AI Assessments</div>
+            <div class="section-sub">Write a brief — the AI designs the assessment, you approve it, then it runs with the member</div>
           </div>
           <div id="scenarios-grade-badge"></div>
         </div>
@@ -378,6 +378,23 @@
         <!-- IntelliQ Executive Health Panel -->
         <div class="card" style="margin-bottom:1rem">
           <div class="card-body" id="iq-health-panel"></div>
+        </div>
+
+        <!-- Weekly Pulse — synthesis of this week's member reflections -->
+        <div class="card" style="margin-bottom:1rem">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Weekly Pulse</div>
+              <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">IntelliQ synthesis of this week's reflections</div>
+            </div>
+            <button class="btn btn-outline btn-sm" onclick="loadWeeklyPulse()">↻ Refresh</button>
+          </div>
+          <div class="card-body" id="weekly-pulse-panel">
+            <div style="text-align:center;padding:1.5rem 0;color:var(--text-muted);font-size:0.82rem">
+              <div style="font-size:1.5rem;margin-bottom:0.5rem">📋</div>
+              Click Refresh to load this week's member reflections.
+            </div>
+          </div>
         </div>
 
         <!-- Top IQ rings -->
