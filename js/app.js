@@ -710,6 +710,691 @@ function renderIntelliQ(){
          borderColor:['#f74f4f','#f7a84f','#f7b24f','#4f8ef7','#4ff77a'], borderWidth:1, borderRadius:4 }],
       { legend:false });
   }, 50);
+
+  // Load org intelligence summary (async — populates #org-insights-content)
+  loadOrgInsights();
+  // Load intervention tracker
+  loadInterventions();
+  // Load IntelliQ learning summary
+  loadLearningSummary();
+}
+
+/* ── ORG INTELLIGENCE — "What IntelliQ Knows" ───────────────────────────── */
+
+async function loadOrgInsights(forceRefresh = false) {
+  const el   = document.getElementById('org-insights-content');
+  const meta = document.getElementById('insights-meta');
+  if (!el) return;
+
+  el.innerHTML = `
+    <div style="text-align:center;padding:1.5rem 0;color:var(--text-muted);font-size:0.82rem">
+      <div style="font-size:1.4rem;margin-bottom:0.5rem">🧠</div>
+      IntelliQ is reading the data…
+    </div>`;
+
+  const orgCode = AppState.orgCode
+    || (AppState.orgName || '').toLowerCase().replace(/\s+/g, '-');
+
+  try {
+    const url = `/api/intelliq/org-insights?orgCode=${encodeURIComponent(orgCode)}`
+              + (forceRefresh ? '&refresh=1' : '');
+    const res = await authFetch(url);
+    if (!res.ok) throw new Error(res.status === 401 ? 'Session expired — please log in again' : `Server error ${res.status}`);
+    const data = await res.json();
+
+    if (meta) {
+      const ts = new Date(data.generatedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      meta.textContent = `Generated at ${ts}${data.cached ? ' · cached (updates hourly)' : ''}`;
+    }
+
+    _renderOrgInsights(data, el);
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem;padding:0.5rem">
+      Could not load intelligence summary — ${e.message}.
+      <button class="btn btn-ghost btn-sm" onclick="loadOrgInsights(true)" style="margin-left:0.5rem">Retry</button>
+    </div>`;
+  }
+}
+
+function _renderOrgInsights(data, el) {
+  const { ai, stats } = data || {};
+  if (!ai) {
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Intelligence data unavailable.</div>`;
+    return;
+  }
+
+  const urgencyColor = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-secondary)' };
+  const urgencyIcon  = { high: '🔴', medium: '🟡', low: '⚪' };
+  const trendColor   = { improving: 'var(--success)', stable: 'var(--text-secondary)', declining: 'var(--warning)', unknown: 'var(--text-muted)' };
+  const alignIcon    = { on_track: '✓', mixed: '~', off_track: '↗', no_goal: '○', unknown: '—' };
+  const alignColor   = { on_track: 'var(--success)', mixed: 'var(--warning)', off_track: 'var(--danger)', no_goal: 'var(--text-muted)', unknown: 'var(--text-muted)' };
+  const evidenceLabel = { checkins: 'check-ins', weeklyAssessments: 'weeklies', goals: 'goals', assessmentScores: 'scores', notes: 'notes' };
+
+  let html = '';
+
+  // ── 1. Summary ─────────────────────────────────────────────────────────────
+  html += `
+    <div style="background:rgba(124,90,245,0.07);border:1px solid rgba(124,90,245,0.2);border-radius:10px;padding:1rem 1.1rem;margin-bottom:1rem;font-size:0.88rem;line-height:1.7;color:var(--text-primary)">
+      <span style="color:var(--accent);font-weight:700;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.8px;display:block;margin-bottom:0.4rem">IntelliQ Summary</span>
+      ${ai.summary}
+    </div>`;
+
+  // ── 2. Evidence-based Recommendations ─────────────────────────────────────
+  const recs = ai.recommendations?.length ? ai.recommendations : (ai.recommendedActions || []).map(r => ({ action: r.action, urgency: r.priority, evidence: [] }));
+  // Store in global registry for trackRecommendation()
+  _currentInsightRecs = recs;
+  if (recs.length > 0 && !ai.notEnoughData) {
+    html += `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.6rem">Recommended Actions</div>`;
+    html += recs.map((r, i) => {
+      const borderColor  = urgencyColor[r.urgency] || 'var(--border)';
+      const evidenceTags = (r.evidence || []).map(e =>
+        `<span style="background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:0.68rem;color:var(--text-muted)">${evidenceLabel[e] || e}</span>`
+      ).join(' ');
+      const confChipColor = r.confidence === 'high' ? 'rgba(79,200,142,0.18)' : r.confidence === 'medium' ? 'rgba(247,168,79,0.15)' : 'var(--surface-2)';
+      const confChipBorder = r.confidence === 'high' ? 'rgba(79,200,142,0.4)' : r.confidence === 'medium' ? 'rgba(247,168,79,0.35)' : 'var(--border)';
+      const confChipText = r.confidence === 'high' ? '#4fc88e' : r.confidence === 'medium' ? '#f7a84f' : 'var(--text-muted)';
+      return `
+        <div style="padding:0.65rem 0.9rem;background:var(--surface-2);border:1px solid var(--border);border-left:3px solid ${borderColor};border-radius:0 8px 8px 0;margin-bottom:0.5rem">
+          <div style="display:flex;align-items:flex-start;gap:0.6rem">
+            <span style="font-size:0.75rem;font-weight:700;color:var(--accent);flex-shrink:0;min-width:16px;margin-top:2px">${i+1}</span>
+            <div style="flex:1">
+              <div style="font-size:0.83rem;color:var(--text-primary);line-height:1.5;margin-bottom:0.3rem">${r.action}</div>
+              ${r.reason ? `<div style="font-size:0.75rem;color:var(--text-secondary);line-height:1.45;margin-bottom:0.3rem">${r.reason}</div>` : ''}
+              ${r.predictedOutcome ? `<div style="font-size:0.73rem;color:#4fc88e;line-height:1.4;margin-bottom:0.2rem">✓ If acted on: ${r.predictedOutcome}</div>` : ''}
+              ${r.riskIfIgnored    ? `<div style="font-size:0.73rem;color:#f7a84f;line-height:1.4;margin-bottom:0.3rem">⚠ If ignored: ${r.riskIfIgnored}</div>` : ''}
+              <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;margin-top:0.3rem">
+                ${r.confidence ? `<span style="background:${confChipColor};border:1px solid ${confChipBorder};border-radius:4px;padding:1px 6px;font-size:0.68rem;color:${confChipText};font-weight:600">${r.confidence} confidence</span>` : ''}
+                ${evidenceTags}
+                <button id="track-btn-${i}" onclick="trackRecommendation(${i})"
+                  style="margin-left:auto;background:transparent;border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:0.7rem;cursor:pointer;color:var(--text-secondary)">
+                  + Track
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+    html += `<div style="margin-bottom:1rem"></div>`;
+  }
+
+  // ── 2b. Risk Patterns (from local pattern engine — always reliable) ───────
+  if (data.patterns && data.patterns.length > 0) {
+    const patternIconMap = {
+      BURNOUT_RISK:        '🔴',
+      DISENGAGEMENT_RISK:  '🟠',
+      CONFIDENCE_CONCERN:  '🟡',
+      ISOLATION_RISK:      '🟣',
+      GOAL_MISALIGNMENT:   '⚪',
+    };
+    const patternConfColor = { high: '#f74f4f', medium: '#f7a84f', low: 'var(--text-muted)' };
+    html += `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">⚡ Risk Patterns Detected</div>`;
+    html += `<div style="margin-bottom:1rem">`;
+    html += data.patterns.map(p => `
+      <div style="display:flex;align-items:flex-start;gap:0.6rem;padding:0.5rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;margin-bottom:0.35rem">
+        <span style="flex-shrink:0;font-size:0.9rem">${patternIconMap[p.type] || '⚪'}</span>
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.15rem">
+            <span style="font-size:0.82rem;font-weight:700;color:var(--text-primary)">${p.member}</span>
+            <span style="font-size:0.72rem;font-weight:600;color:${patternConfColor[p.confidence] || 'var(--text-muted)'};background:rgba(0,0,0,0.08);padding:1px 6px;border-radius:4px">${p.label}</span>
+            <span style="font-size:0.68rem;color:var(--text-muted)">${p.confidence} confidence</span>
+          </div>
+          <div style="font-size:0.73rem;color:var(--text-secondary);line-height:1.4">${(p.signals || []).join(' · ')}</div>
+        </div>
+      </div>`).join('');
+    html += `</div>`;
+  }
+
+  // ── 3. Needs Attention ─────────────────────────────────────────────────────
+  if (ai.atRisk?.length > 0) {
+    html += `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">Needs Attention</div>`;
+    html += ai.atRisk.map(r => `
+      <div style="display:flex;align-items:flex-start;gap:0.6rem;padding:0.6rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-left:3px solid ${urgencyColor[r.urgency]||'var(--border)'};border-radius:0 8px 8px 0;margin-bottom:0.4rem">
+        <span style="flex-shrink:0;margin-top:2px">${urgencyIcon[r.urgency]||'⚪'}</span>
+        <div>
+          <span style="font-weight:700;font-size:0.85rem">${r.name}</span>
+          <span style="color:var(--text-secondary);font-size:0.8rem;margin-left:0.4rem">${r.reason}</span>
+        </div>
+      </div>`).join('');
+    html += `<div style="margin-bottom:1rem"></div>`;
+  }
+
+  // ── 4. Trends (multi-week) ─────────────────────────────────────────────────
+  if (ai.trends && !ai.notEnoughData) {
+    const { trendDirection, trendReason, confidenceLevel, moodComparison, engagementTrend } = ai.trends;
+    const tdColor = trendColor[trendDirection] || 'var(--text-muted)';
+    const tdArrow = { improving: '↑', stable: '→', declining: '↓', unknown: '—' }[trendDirection] || '—';
+    html += `
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:0.75rem 0.9rem;margin-bottom:1rem">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.4rem">
+          <span style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted)">Trend (30 days)</span>
+          <span style="font-size:0.8rem;font-weight:700;color:${tdColor}">${tdArrow} ${trendDirection}</span>
+        </div>
+        ${moodComparison ? `<div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.3rem">${moodComparison}</div>` : ''}
+        ${trendReason    ? `<div style="font-size:0.78rem;color:var(--text-primary)">${trendReason}</div>` : ''}
+        <div style="display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap">
+          ${stats?.avgMoodLast7    != null ? `<span style="background:var(--surface-1);border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:0.7rem">This week: ${stats.avgMoodLast7}/5</span>` : ''}
+          ${stats?.avgMoodPrevWeek != null ? `<span style="background:var(--surface-1);border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:0.7rem">Prev week: ${stats.avgMoodPrevWeek}/5</span>` : ''}
+          ${stats?.avgMoodLast30   != null ? `<span style="background:var(--surface-1);border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:0.7rem">30-day avg: ${stats.avgMoodLast30}/5</span>` : ''}
+          ${confidenceLevel ? `<span style="background:var(--surface-1);border:1px solid var(--border);border-radius:4px;padding:2px 7px;font-size:0.7rem;color:var(--text-muted)">confidence: ${confidenceLevel}</span>` : ''}
+        </div>
+      </div>`;
+  }
+
+  // ── 5. Semantic Themes ─────────────────────────────────────────────────────
+  const semanticThemes = ai.semanticThemes?.length ? ai.semanticThemes : null;
+  const simpleThemes   = ai.themes?.length ? ai.themes : null;
+  if (semanticThemes) {
+    html += `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">Recurring Themes</div>`;
+    const sevColor = { high: 'rgba(247,79,79,0.12)', medium: 'rgba(247,168,79,0.1)', low: 'var(--surface-2)' };
+    const sevBorder = { high: 'rgba(247,79,79,0.3)', medium: 'rgba(247,168,79,0.25)', low: 'var(--border)' };
+    html += `<div style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:1rem">`;
+    html += semanticThemes.map(t => {
+      const signals = (t.signals || []).slice(0, 4).join(', ');
+      const members = (t.affectedMembers || []).join(', ');
+      return `
+        <div style="background:${sevColor[t.severity]||'var(--surface-2)'};border:1px solid ${sevBorder[t.severity]||'var(--border)'};border-radius:8px;padding:0.45rem 0.75rem;font-size:0.8rem">
+          <span style="font-weight:700;color:var(--text-primary)">${t.theme}</span>
+          ${signals ? `<span style="color:var(--text-muted);font-size:0.72rem;margin-left:0.4rem">${signals}</span>` : ''}
+          ${members ? `<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:2px">→ ${members}</div>` : ''}
+        </div>`;
+    }).join('');
+    html += `</div>`;
+  } else if (simpleThemes) {
+    html += `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">Themes</div>`;
+    html += `<div style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:1rem">`;
+    html += simpleThemes.map(t => `<span style="background:var(--surface-2);border:1px solid var(--border);border-radius:20px;padding:0.25rem 0.75rem;font-size:0.78rem;color:var(--text-secondary)">${t}</span>`).join('');
+    html += `</div>`;
+  }
+
+  // ── 6. Member Intelligence ─────────────────────────────────────────────────
+  if (ai.memberProfiles?.length > 0 && !ai.notEnoughData) {
+    html += `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">Member Intelligence</div>`;
+    html += `<div id="iq-member-profiles" style="margin-bottom:1rem">`;
+    html += ai.memberProfiles.map((p, idx) => {
+      const aColor = alignColor[p.goalAlignment] || 'var(--text-muted)';
+      const aIcon  = alignIcon[p.goalAlignment]  || '—';
+      const riskBadge = p.riskSignals?.length > 0
+        ? `<span style="background:rgba(247,79,79,0.1);border:1px solid rgba(247,79,79,0.25);border-radius:4px;padding:1px 6px;font-size:0.68rem;color:var(--danger);margin-left:0.3rem">⚠ risk</span>`
+        : '';
+      const profileId = `iq-profile-${idx}`;
+      return `
+        <div style="border:1px solid var(--border);border-radius:8px;margin-bottom:0.4rem;overflow:hidden">
+          <div onclick="document.getElementById('${profileId}').style.display=document.getElementById('${profileId}').style.display==='none'?'block':'none'"
+               style="display:flex;align-items:center;justify-content:space-between;padding:0.6rem 0.8rem;cursor:pointer;background:var(--surface-2)">
+            <div style="display:flex;align-items:center;gap:0.5rem">
+              <span style="font-weight:700;font-size:0.85rem">${p.name}</span>
+              ${riskBadge}
+            </div>
+            <div style="display:flex;align-items:center;gap:0.6rem">
+              <span style="font-size:0.72rem;color:${aColor};font-weight:600">goal: ${aIcon} ${(p.goalAlignment||'').replace('_',' ')}</span>
+              <span style="color:var(--text-muted);font-size:0.7rem">▾</span>
+            </div>
+          </div>
+          <div id="${profileId}" style="display:none;padding:0.7rem 0.9rem;font-size:0.8rem;border-top:1px solid var(--border)">
+            ${p.currentState ? `<div style="color:var(--text-primary);margin-bottom:0.5rem;line-height:1.5">${p.currentState}</div>` : ''}
+            ${p.goalAlignmentExplanation ? `<div style="color:var(--text-secondary);padding:0.4rem 0.6rem;background:var(--surface-2);border-radius:6px;margin-bottom:0.5rem;line-height:1.5">${p.goalAlignmentExplanation}</div>` : ''}
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin-bottom:0.5rem">
+              ${p.strengths?.length ? `<div><div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;color:var(--success);margin-bottom:0.2rem">Strengths</div>${p.strengths.map(s=>`<div style="color:var(--text-secondary)">• ${s}</div>`).join('')}</div>` : ''}
+              ${p.concerns?.length  ? `<div><div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;color:var(--warning);margin-bottom:0.2rem">Concerns</div>${p.concerns.map(c=>`<div style="color:var(--text-secondary)">• ${c}</div>`).join('')}</div>` : ''}
+            </div>
+            ${p.riskSignals?.length ? `<div style="font-size:0.73rem;color:var(--danger);margin-bottom:0.4rem">${p.riskSignals.join(' · ')}</div>` : ''}
+            ${p.recommendedAction ? `<div style="background:rgba(124,90,245,0.07);border:1px solid rgba(124,90,245,0.15);border-radius:6px;padding:0.4rem 0.6rem;font-size:0.78rem;color:var(--text-primary)">→ ${p.recommendedAction}</div>` : ''}
+            <div style="margin-top:0.5rem;text-align:right">
+              <button onclick="viewMemberTimelineByName('${p.name.replace(/'/g,"\\'")}'); event.stopPropagation();"
+                style="background:transparent;border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:0.7rem;cursor:pointer;color:var(--text-muted)">
+                📅 View Timeline
+              </button>
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+    html += `</div>`;
+  }
+
+  // ── 7. Group Intelligence ──────────────────────────────────────────────────
+  if (ai.groupInsights?.length > 0 && !ai.notEnoughData) {
+    html += `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">Group Intelligence</div>`;
+    html += `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.5rem;margin-bottom:1rem">`;
+    const moodColor = { high: 'var(--success)', okay: 'var(--text-secondary)', low: 'var(--warning)', unknown: 'var(--text-muted)' };
+    html += ai.groupInsights.map(g => {
+      const mColor = moodColor[g.mood] || 'var(--text-muted)';
+      const themes = (g.recurringThemes || []).slice(0, 3).join(', ');
+      const risks  = (g.riskSignals    || []).slice(0, 2).join(', ');
+      const attn   = (g.membersNeedingAttention || []).join(', ');
+      return `
+        <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:0.7rem 0.8rem">
+          <div style="font-weight:700;font-size:0.83rem;margin-bottom:0.4rem">${g.groupName}</div>
+          <div style="display:flex;gap:0.4rem;margin-bottom:0.4rem">
+            <span style="background:var(--surface-1);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:0.7rem;color:${mColor}">mood: ${g.mood}</span>
+            <span style="background:var(--surface-1);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:0.7rem">engagement: ${g.engagement}</span>
+          </div>
+          ${themes ? `<div style="font-size:0.73rem;color:var(--text-secondary);margin-bottom:0.3rem">Themes: ${themes}</div>` : ''}
+          ${risks  ? `<div style="font-size:0.73rem;color:var(--warning);margin-bottom:0.3rem">⚠ ${risks}</div>` : ''}
+          ${attn   ? `<div style="font-size:0.73rem;color:var(--text-muted);margin-bottom:0.3rem">Attention: ${attn}</div>` : ''}
+          ${g.suggestedAction ? `<div style="font-size:0.75rem;color:var(--accent);margin-top:0.4rem;border-top:1px solid var(--border);padding-top:0.35rem">→ ${g.suggestedAction}</div>` : ''}
+        </div>`;
+    }).join('');
+    html += `</div>`;
+  }
+
+  // ── 8. Stats (secondary — metrics last) ───────────────────────────────────
+  if (!ai.notEnoughData && stats) {
+    const moodVal = stats.avgMoodLast7 != null ? `${stats.avgMoodLast7}/5` : '—';
+    const tColor  = trendColor[ai.moodTrend] || 'var(--text-muted)';
+    html += `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;margin-bottom:1rem">
+        ${[
+          { label: 'Team Mood', val: moodVal, sub: ai.moodTrend || '—', subColor: tColor },
+          { label: 'Active', val: `${stats.activeThisWeek}/${stats.memberCount}`, sub: 'this week', subColor: 'var(--text-muted)' },
+          { label: 'Goals Set', val: `${stats.goalsSet}/${stats.memberCount}`, sub: stats.goalsSet === stats.memberCount ? 'all set ✓' : 'members', subColor: stats.goalsSet === stats.memberCount ? 'var(--success)' : 'var(--text-muted)' },
+        ].map(s => `
+          <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:0.65rem;text-align:center">
+            <div style="font-size:1.2rem;font-weight:700;color:var(--text-primary)">${s.val}</div>
+            <div style="font-size:0.68rem;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin:2px 0">${s.label}</div>
+            <div style="font-size:0.7rem;color:${s.subColor}">${s.sub}</div>
+          </div>`).join('')}
+      </div>`;
+  }
+
+  // ── 9. Goal Progress + Member Highlights ──────────────────────────────────
+  if (ai.goalProgress && !ai.notEnoughData) {
+    html += `<div style="font-size:0.8rem;color:var(--text-secondary);padding:0.5rem 0.9rem;border-left:2px solid var(--border);margin-bottom:0.8rem;line-height:1.5">${ai.goalProgress}</div>`;
+  }
+
+  if (ai.memberHighlights?.length > 0) {
+    html += ai.memberHighlights.map(h => `
+      <div style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.5rem 0.8rem;background:rgba(79,247,122,0.05);border:1px solid rgba(79,247,122,0.18);border-radius:8px;font-size:0.8rem;margin-bottom:0.4rem">
+        <span style="flex-shrink:0">✨</span>
+        <div>
+          <span style="font-weight:700">${h.name}</span>
+          <span style="color:var(--text-secondary);margin-left:0.4rem">${h.note}</span>
+        </div>
+      </div>`).join('');
+  }
+
+  el.innerHTML = html;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   INTELLIQ MEMORY — Intervention Tracker + Timelines
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// Temp registry for recommendations from the current insight load
+let _currentInsightRecs = [];
+
+// Called when coach clicks "Track" on a recommendation
+async function trackRecommendation(idx) {
+  const rec = _currentInsightRecs[idx];
+  if (!rec) return;
+  const orgCode = AppState.orgCode || '';
+  try {
+    const res = await authFetch('/api/intelliq/intervention', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        orgCode,
+        targetMember:   rec.targetMember   || null,
+        targetMemberId: rec.targetMemberId || null,
+        action:         rec.action,
+        urgency:        rec.urgency  || 'medium',
+        owner:          rec.owner    || 'coach',
+        reason:         rec.reason   || '',
+        evidence:       rec.evidence || [],
+      }),
+    });
+    if (!res.ok) throw new Error('Failed');
+    // Visual feedback on the button
+    const btn = document.getElementById(`track-btn-${idx}`);
+    if (btn) { btn.textContent = '✓ Tracked'; btn.disabled = true; btn.style.color = 'var(--success)'; }
+    loadInterventions(); // Refresh tracker
+  } catch(e) {
+    alert('Could not track recommendation: ' + e.message);
+  }
+}
+
+// Update an intervention's status
+async function updateInterventionStatus(id, status) {
+  const orgCode = AppState.orgCode || '';
+  try {
+    const res = await authFetch(`/api/intelliq/intervention/${id}`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ orgCode, status }),
+    });
+    if (!res.ok) throw new Error('Failed');
+    loadInterventions();
+  } catch(e) {
+    alert('Could not update: ' + e.message);
+  }
+}
+
+// Load and render the intervention tracker
+async function loadInterventions() {
+  const el    = document.getElementById('interventions-content');
+  const count = document.getElementById('interventions-count');
+  if (!el) return;
+
+  el.innerHTML = `<div style="color:var(--text-muted);font-size:0.8rem;padding:0.5rem">Loading…</div>`;
+
+  const orgCode = AppState.orgCode || '';
+  try {
+    const res  = await authFetch(`/api/intelliq/interventions?orgCode=${encodeURIComponent(orgCode)}`);
+    if (!res.ok) throw new Error(res.status === 401 ? 'Session expired' : 'Failed');
+    const data = await res.json();
+    _renderInterventions(data, el, count);
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Could not load — ${e.message}</div>`;
+  }
+}
+
+function _renderInterventions(data, el, countEl) {
+  const all    = data.interventions || [];
+  const active = all.filter(i => i.status === 'suggested' || i.status === 'acknowledged');
+  const done   = all.filter(i => i.status === 'completed' || i.status === 'dismissed');
+
+  if (countEl) countEl.textContent = `${all.length} total · ${active.length} active`;
+
+  if (!all.length) {
+    el.innerHTML = `<div style="text-align:center;padding:1.5rem 0;color:var(--text-muted);font-size:0.82rem">
+      No tracked interventions yet.<br>
+      <span style="font-size:0.75rem">Click "Track" on a recommendation in "What IntelliQ Knows" to start.</span>
+    </div>`;
+    return;
+  }
+
+  const urgencyColor = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-secondary)' };
+  const statusColor  = { suggested: 'var(--text-muted)', acknowledged: 'var(--accent)', completed: 'var(--success)', dismissed: 'var(--text-muted)' };
+  const statusLabel  = { suggested: 'Suggested', acknowledged: 'In Progress', completed: 'Completed', dismissed: 'Dismissed' };
+  const outcomeColor = { positive: 'var(--success)', neutral: 'var(--text-secondary)', negative: 'var(--warning)' };
+  const outcomeIcon  = { positive: '↑', neutral: '→', negative: '↓' };
+
+  let html = '';
+
+  if (active.length > 0) {
+    html += `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">Active (${active.length})</div>`;
+    html += active.map(i => {
+      const bColor = urgencyColor[i.urgency] || 'var(--border)';
+      const canAck  = i.status === 'suggested';
+      const canComp = i.status !== 'completed';
+      return `
+        <div style="padding:0.7rem 0.9rem;background:var(--surface-2);border:1px solid var(--border);border-left:3px solid ${bColor};border-radius:0 8px 8px 0;margin-bottom:0.5rem">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.5rem;margin-bottom:0.35rem">
+            <span style="font-size:0.83rem;font-weight:600;color:var(--text-primary);flex:1">${i.action}</span>
+            <span style="font-size:0.7rem;font-weight:700;color:${statusColor[i.status]};white-space:nowrap">${statusLabel[i.status]}</span>
+          </div>
+          ${i.targetMember ? `<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:0.3rem">→ ${i.targetMember}</div>` : ''}
+          ${i.reason ? `<div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.4rem">${i.reason}</div>` : ''}
+          <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.4rem">
+            ${canAck ? `<button onclick="updateInterventionStatus('${i.id}','acknowledged')" class="btn btn-ghost btn-sm" style="font-size:0.72rem">Acknowledge</button>` : ''}
+            ${canComp ? `<button onclick="updateInterventionStatus('${i.id}','completed')" class="btn btn-outline btn-sm" style="font-size:0.72rem">Mark Complete</button>` : ''}
+            <button onclick="updateInterventionStatus('${i.id}','dismissed')" class="btn btn-ghost btn-sm" style="font-size:0.72rem;color:var(--text-muted)">Dismiss</button>
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  if (done.length > 0) {
+    html += `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-top:0.8rem;margin-bottom:0.5rem">Completed / Dismissed (${done.length})</div>`;
+    html += done.slice(0, 6).map(i => {
+      const outcome = i.outcome;
+      return `
+        <div style="padding:0.55rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;margin-bottom:0.35rem;opacity:0.8">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:0.5rem">
+            <span style="font-size:0.8rem;color:var(--text-secondary);flex:1">${i.action}</span>
+            <div style="display:flex;align-items:center;gap:0.4rem;flex-shrink:0">
+              ${outcome?.status === 'measured'
+                ? `<span style="font-size:0.75rem;font-weight:700;color:${outcomeColor[outcome.outcome]}">${outcomeIcon[outcome.outcome]} ${outcome.moodDelta > 0 ? '+' : ''}${outcome.moodDelta}</span>`
+                : outcome?.status === 'pending'
+                ? `<span style="font-size:0.7rem;color:var(--text-muted)">⏳ pending</span>`
+                : ''}
+              <span style="font-size:0.7rem;color:${statusColor[i.status]}">${statusLabel[i.status]}</span>
+            </div>
+          </div>
+          ${outcome?.note ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.25rem">${outcome.note}</div>` : ''}
+        </div>`;
+    }).join('');
+  }
+
+  // Learning stats (if enough data)
+  const measured = done.filter(i => i.outcome?.status === 'measured');
+  if (measured.length >= 2) {
+    const positive    = measured.filter(i => i.outcome.outcome === 'positive').length;
+    const successRate = Math.round(positive / measured.length * 100);
+    html += `
+      <div style="margin-top:1rem;padding:0.6rem 0.9rem;background:rgba(124,90,245,0.06);border:1px solid rgba(124,90,245,0.15);border-radius:8px;font-size:0.8rem">
+        <span style="font-weight:700">IntelliQ Learning:</span>
+        <span style="color:var(--text-secondary);margin-left:0.4rem">${successRate}% of tracked interventions led to measurable mood improvement (${positive}/${measured.length} measured).</span>
+      </div>`;
+  }
+
+  el.innerHTML = html;
+}
+
+// ── IntelliQ Learning Summary ────────────────────────────────────────────────
+async function loadLearningSummary(forceRefresh = false) {
+  const el = document.getElementById('learning-summary-content');
+  if (!el) return;
+  el.innerHTML = `<div style="color:var(--text-muted);font-size:0.8rem;text-align:center;padding:1rem">Loading IntelliQ learning…</div>`;
+  const orgCode = AppState.orgCode;
+  if (!orgCode) return;
+  try {
+    const url = `/api/intelliq/learning-summary?orgCode=${encodeURIComponent(orgCode)}${forceRefresh ? '&refresh=1' : ''}`;
+    const res  = await authFetch(url);
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    _renderLearningSummary(data, el);
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:0.8rem;padding:0.5rem">Could not load learning summary.</div>`;
+  }
+}
+
+function _renderLearningSummary(data, el) {
+  if (!data) { el.innerHTML = ''; return; }
+
+  const { narrative, interventions, patternFrequency, monthlyMood, currentPredictions, generatedAt, cached } = data;
+
+  let html = '';
+
+  // ── Narrative ────────────────────────────────────────────────────────────
+  if (narrative) {
+    html += `<div style="font-size:0.84rem;color:var(--text-primary);line-height:1.65;margin-bottom:1rem;padding:0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px">
+      <span style="display:block;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">IntelliQ's Read on This Org</span>
+      ${narrative}
+    </div>`;
+  }
+
+  // ── Stats row ─────────────────────────────────────────────────────────────
+  const statsItems = [
+    interventions?.total > 0         ? `${interventions.total} intervention${interventions.total !== 1 ? 's' : ''} tracked` : null,
+    interventions?.successRate != null ? `${interventions.successRate}% success rate` : null,
+    currentPredictions > 0            ? `${currentPredictions} declining trajectory${currentPredictions !== 1 ? 's' : ''}` : null,
+  ].filter(Boolean);
+
+  if (statsItems.length > 0) {
+    html += `<div style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:0.9rem">`;
+    statsItems.forEach(s => {
+      html += `<span style="background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:0.73rem;color:var(--text-secondary)">${s}</span>`;
+    });
+    html += `</div>`;
+  }
+
+  // ── Monthly mood trend ────────────────────────────────────────────────────
+  if (monthlyMood?.length > 0 && monthlyMood.some(m => m.avgMood !== null)) {
+    html += `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.4rem">Mood Over Time</div>`;
+    html += `<div style="display:flex;gap:0.5rem;margin-bottom:0.9rem;flex-wrap:wrap">`;
+    [...monthlyMood].reverse().forEach(m => {
+      const moodBg = m.avgMood >= 4 ? 'rgba(79,200,142,0.12)' : m.avgMood >= 3 ? 'rgba(247,168,79,0.1)' : m.avgMood !== null ? 'rgba(247,79,79,0.1)' : 'var(--surface-2)';
+      html += `<div style="flex:1;min-width:80px;background:${moodBg};border:1px solid var(--border);border-radius:8px;padding:0.5rem;text-align:center">
+        <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.15rem">${m.month}</div>
+        <div style="font-size:1rem;font-weight:700;color:var(--text-primary)">${m.avgMood !== null ? m.avgMood + '/5' : '—'}</div>
+        <div style="font-size:0.65rem;color:var(--text-muted)">${m.checkins} check-in${m.checkins !== 1 ? 's' : ''}</div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  // ── Pattern frequency ─────────────────────────────────────────────────────
+  const patFreq = patternFrequency || {};
+  const patEntries = Object.entries(patFreq).sort((a, b) => b[1] - a[1]);
+  if (patEntries.length > 0) {
+    html += `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.4rem">Recurring Patterns</div>`;
+    html += `<div style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-bottom:0.9rem">`;
+    patEntries.forEach(([label, count]) => {
+      html += `<span style="background:rgba(247,168,79,0.1);border:1px solid rgba(247,168,79,0.25);border-radius:4px;padding:2px 8px;font-size:0.73rem;color:#f7a84f">${label} <strong>(${count})</strong></span>`;
+    });
+    html += `</div>`;
+  }
+
+  // ── Effective intervention types ──────────────────────────────────────────
+  const byType = interventions?.byType || {};
+  const typeEntries = Object.entries(byType).filter(([,s]) => s.total > 0);
+  if (typeEntries.length > 0) {
+    html += `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.4rem">Intervention Effectiveness by Type</div>`;
+    typeEntries.forEach(([type, s]) => {
+      const rate = Math.round(s.positive / s.total * 100);
+      const barColor = rate >= 60 ? '#4fc88e' : rate >= 40 ? '#f7a84f' : '#f74f4f';
+      html += `<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem">
+        <div style="flex:0 0 100px;font-size:0.75rem;color:var(--text-secondary);text-transform:capitalize">${type.replace(/_/g, ' ')}</div>
+        <div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+          <div style="width:${rate}%;height:100%;background:${barColor};border-radius:3px"></div>
+        </div>
+        <div style="font-size:0.72rem;color:var(--text-muted);flex:0 0 36px;text-align:right">${rate}%</div>
+      </div>`;
+    });
+    html += `<div style="margin-bottom:0.6rem"></div>`;
+  }
+
+  const ts = generatedAt ? new Date(generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  html += `<div style="font-size:0.67rem;color:var(--text-muted);margin-top:0.3rem">${cached ? '⚡ Cached' : '🔄 Live'} · Generated ${ts}</div>`;
+
+  el.innerHTML = html;
+}
+
+// Load and render the org journey timeline
+async function loadOrgTimeline(forceRefresh = false) {
+  const el = document.getElementById('org-timeline-content');
+  if (!el) return;
+  el.innerHTML = `<div style="color:var(--text-muted);font-size:0.8rem;text-align:center;padding:1rem">Loading org journey…</div>`;
+
+  const orgCode = AppState.orgCode || '';
+  try {
+    const res  = await authFetch(`/api/intelliq/org-timeline?orgCode=${encodeURIComponent(orgCode)}${forceRefresh ? '&refresh=1' : ''}`);
+    if (!res.ok) throw new Error('Failed');
+    const data = await res.json();
+    _renderOrgTimeline(data, el);
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Could not load — ${e.message}</div>`;
+  }
+}
+
+function _renderOrgTimeline(data, el) {
+  const { timeline = [] } = data;
+  if (!timeline.length) {
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem;text-align:center;padding:1rem">No historical data yet.</div>`;
+    return;
+  }
+  const moodColor = v => v == null ? 'var(--text-muted)' : v >= 4 ? 'var(--success)' : v >= 3 ? 'var(--text-secondary)' : 'var(--warning)';
+  let html = `<div style="position:relative">`;
+  html += timeline.map((m, idx) => {
+    const isLast  = idx === timeline.length - 1;
+    const mColor  = moodColor(m.avgMood);
+    const engRate = m.totalMembers > 0 ? Math.round(m.activeMembers / m.totalMembers * 100) : 0;
+    return `
+      <div style="display:flex;gap:0.8rem;padding-bottom:${isLast ? '0' : '1rem'}">
+        <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0">
+          <div style="width:10px;height:10px;border-radius:50%;background:${mColor};flex-shrink:0;margin-top:4px"></div>
+          ${!isLast ? `<div style="width:2px;flex:1;background:var(--border);margin-top:4px"></div>` : ''}
+        </div>
+        <div style="flex:1;padding-bottom:${isLast ? '0' : '0.5rem'}">
+          <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.25rem">
+            <span style="font-size:0.8rem;font-weight:700;color:var(--text-primary)">${m.label}</span>
+            ${m.avgMood != null ? `<span style="font-size:0.72rem;color:${mColor}">${m.avgMood}/5</span>` : ''}
+            ${engRate > 0 ? `<span style="font-size:0.7rem;color:var(--text-muted)">${engRate}% engaged</span>` : ''}
+          </div>
+          ${m.textSamples?.length ? `<div style="font-size:0.75rem;color:var(--text-secondary);line-height:1.5">"${m.textSamples[0].slice(0, 100)}${m.textSamples[0].length > 100 ? '…' : ''}"</div>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+  html += `</div>`;
+  el.innerHTML = html;
+}
+
+// Resolve member from AppState by name, then open timeline
+function viewMemberTimelineByName(memberName) {
+  const member = (AppState.members || []).find(m => m.name === memberName);
+  const userId = member?.userId || member?.id || '';
+  viewMemberTimeline(memberName, userId);
+}
+
+// Open member timeline modal
+async function viewMemberTimeline(memberName, memberId) {
+  const modal   = document.getElementById('member-timeline-modal');
+  const content = document.getElementById('member-timeline-content');
+  const title   = document.getElementById('timeline-modal-title');
+  const sub     = document.getElementById('timeline-modal-sub');
+  if (!modal) return;
+
+  title.textContent = memberName + ' — Timeline';
+  sub.textContent   = 'Loading…';
+  modal.style.display = 'block';
+  content.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--text-muted)">Building timeline…</div>`;
+
+  const orgCode = AppState.orgCode || '';
+  try {
+    const url = `/api/intelliq/member-timeline?orgCode=${encodeURIComponent(orgCode)}&memberId=${encodeURIComponent(memberId || '')}&memberName=${encodeURIComponent(memberName)}`;
+    const res  = await authFetch(url);
+    if (!res.ok) throw new Error('Failed');
+    const data = await res.json();
+    sub.textContent = `${data.timeline?.length || 0} months of activity`;
+    _renderMemberTimeline(data, content);
+  } catch(e) {
+    content.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Could not load timeline — ${e.message}</div>`;
+  }
+}
+
+function _renderMemberTimeline(data, el) {
+  const { timeline = [] } = data;
+  if (!timeline.length) {
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem;text-align:center;padding:2rem">No activity recorded yet.</div>`;
+    return;
+  }
+
+  const typeIcon  = { goal_set: '🎯', checkin: '•', weekly_reflection: '📝', assessment: '📊', note: '💬', mood_improving: '↑', mood_declining: '↓', intervention_completed: '✓' };
+  const typeColor = { goal_set: 'var(--accent)', checkin: 'var(--text-muted)', weekly_reflection: 'var(--text-secondary)', assessment: 'var(--accent)', note: 'var(--text-secondary)', mood_improving: 'var(--success)', mood_declining: 'var(--warning)', intervention_completed: 'var(--success)' };
+
+  let html = '';
+  timeline.slice().reverse().forEach((month, idx) => {
+    const isLast = idx === timeline.length - 1;
+    html += `
+      <div style="display:flex;gap:0.8rem;padding-bottom:${isLast ? '0' : '1.2rem'}">
+        <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:60px">
+          <div style="font-size:0.72rem;font-weight:700;color:var(--accent);text-align:center;white-space:nowrap">${month.label.replace(' ', '\n')}</div>
+          ${!isLast ? `<div style="width:2px;flex:1;background:var(--border);margin-top:4px"></div>` : ''}
+        </div>
+        <div style="flex:1">
+          ${month.narrative ? `<div style="font-size:0.82rem;color:var(--text-primary);font-style:italic;margin-bottom:0.4rem;line-height:1.55">"${month.narrative}"</div>` : ''}
+          ${month.moodAvg   ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.3rem">Mood avg: ${month.moodAvg}/5</div>` : ''}
+          <div style="font-size:0.75rem;line-height:1.7">
+            ${month.events.filter(e => !['checkin'].includes(e.type) || e.data.text).slice(0, 5).map(e => {
+              const icon  = typeIcon[e.type]  || '•';
+              const color = typeColor[e.type] || 'var(--text-muted)';
+              let label = '';
+              if (e.type === 'goal_set')              label = `Goal: "${e.data.goal?.slice(0, 60) || ''}"`;
+              else if (e.type === 'weekly_reflection') label = `Weekly: "${e.data.text?.slice(0, 80) || ''}"`;
+              else if (e.type === 'assessment')        label = `Assessment score: ${e.data.overall ?? '?'}/100`;
+              else if (e.type === 'mood_improving')    label = `Mood improving (${e.data.from} → ${e.data.to})`;
+              else if (e.type === 'mood_declining')    label = `Mood declining (${e.data.from} → ${e.data.to})`;
+              else if (e.type === 'checkin' && e.data.text) label = `"${e.data.text.slice(0, 80)}"`;
+              else if (e.type === 'intervention_completed') label = `Intervention completed${e.data.outcome ? ` — ${e.data.outcome}` : ''}`;
+              else return '';
+              return `<div style="display:flex;gap:0.4rem"><span style="color:${color}">${icon}</span><span style="color:var(--text-secondary)">${label}</span></div>`;
+            }).filter(Boolean).join('')}
+          </div>
+        </div>
+      </div>`;
+  });
+
+  el.innerHTML = html;
 }
 
 /* ── ALERTS PAGE ─────────────────────────────────────────── */

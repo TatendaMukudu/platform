@@ -375,6 +375,23 @@
           </div>
         </div>
 
+        <!-- ── What IntelliQ Knows — AI org intelligence synthesis ────────── -->
+        <div class="card" style="margin-bottom:1rem" id="org-insights-card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">🧠 What IntelliQ Knows</div>
+              <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px" id="insights-meta">Not yet loaded</div>
+            </div>
+            <button class="btn btn-outline btn-sm" onclick="loadOrgInsights(true)">↻ Refresh</button>
+          </div>
+          <div class="card-body" id="org-insights-content">
+            <div style="text-align:center;padding:1.5rem 0;color:var(--text-muted);font-size:0.82rem">
+              <div style="font-size:1.5rem;margin-bottom:0.5rem">🧠</div>
+              Loading intelligence summary…
+            </div>
+          </div>
+        </div>
+
         <!-- IntelliQ Executive Health Panel -->
         <div class="card" style="margin-bottom:1rem">
           <div class="card-body" id="iq-health-panel"></div>
@@ -435,7 +452,68 @@
             </table>
           </div>
         </div>
+
+        <!-- ── Intervention Tracker ─────────────────────────────────────────── -->
+        <div class="card" style="margin-top:1rem">
+          <div class="card-header">
+            <div>
+              <div class="card-title">📋 Intervention Tracker</div>
+              <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">Track whether recommended actions are taken and whether they work</div>
+            </div>
+            <div style="display:flex;gap:0.5rem;align-items:center">
+              <span id="interventions-count" style="font-size:0.75rem;color:var(--text-muted)"></span>
+              <button class="btn btn-outline btn-sm" onclick="loadInterventions()">↻ Refresh</button>
+            </div>
+          </div>
+          <div class="card-body" id="interventions-content">
+            <div style="text-align:center;padding:1.5rem 0;color:var(--text-muted);font-size:0.82rem">
+              Track a recommendation from "What IntelliQ Knows" to start.
+            </div>
+          </div>
+        </div>
+
+        <!-- ── IntelliQ Learning ────────────────────────────────────────────── -->
+        <div class="card" style="margin-top:1rem">
+          <div class="card-header">
+            <div class="card-title">🧬 What IntelliQ Has Learned</div>
+            <button class="btn btn-outline btn-sm" onclick="loadLearningSummary()">↻ Refresh</button>
+          </div>
+          <div class="card-body" id="learning-summary-content">
+            <div style="color:var(--text-muted);font-size:0.82rem;text-align:center;padding:1rem 0">
+              Loading IntelliQ's learning summary…
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Org Journey ──────────────────────────────────────────────────── -->
+        <div class="card" style="margin-top:1rem">
+          <div class="card-header">
+            <div class="card-title">📅 Org Journey</div>
+            <button class="btn btn-outline btn-sm" onclick="loadOrgTimeline()">Load Journey</button>
+          </div>
+          <div class="card-body" id="org-timeline-content">
+            <div style="color:var(--text-muted);font-size:0.82rem;text-align:center;padding:1rem 0">
+              Click Load Journey to see how this organisation has changed over time.
+            </div>
+          </div>
+        </div>
       </section>
+
+      <!-- ── Member Timeline Modal ──────────────────────────────────────────── -->
+      <div id="member-timeline-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;overflow-y:auto;padding:2rem 1rem">
+        <div style="max-width:620px;margin:0 auto;background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:1.5rem;position:relative">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem">
+            <div>
+              <div class="card-title" id="timeline-modal-title">Member Timeline</div>
+              <div style="font-size:0.75rem;color:var(--text-secondary)" id="timeline-modal-sub">Loading…</div>
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('member-timeline-modal').style.display='none'">✕ Close</button>
+          </div>
+          <div id="member-timeline-content">
+            <div style="text-align:center;padding:2rem;color:var(--text-muted)">Loading timeline…</div>
+          </div>
+        </div>
+      </div>
 
       <!-- ════════════════════════════
            PEOPLE PAGE

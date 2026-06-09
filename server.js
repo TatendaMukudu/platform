@@ -39,7 +39,7 @@ function scheduleSave() {
         orgMeta, orgUsers, inviteTokens,
         orgGroups, orgNotes, orgMessages, orgStore,
         assignedScenarios, memberResults, memberCheckins,
-        memberGoals, weeklyAssessments,
+        memberGoals, weeklyAssessments, orgInterventions,
       };
       fs.writeFileSync(STORE_FILE, JSON.stringify(data), 'utf8');
     } catch(e) { console.error('[store] Save failed:', e.message); }
@@ -897,6 +897,7 @@ const orgStore          = _store.orgStore          || {};
 const assignedScenarios = _store.assignedScenarios || {};
 const memberResults     = _store.memberResults     || {};
 const memberCheckins    = _store.memberCheckins    || {};
+const orgInterventions  = _store.orgInterventions  || {}; // orgCode → [intervention, ...]
 
 // Key helpers — new code uses userId keys; legacy name keys still supported for reads
 function memberKey(orgCode, memberName) {
@@ -1320,6 +1321,1426 @@ Be specific and grounded — only say what the data actually supports. Do not in
     res.status(500).json({ error: 'AI unavailable', detail: err.message });
   }
 });
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   INTELLIQ ORG INTELLIGENCE v2 — "What IntelliQ Knows"
+   Decision-support intelligence: multi-week trends, member profiles,
+   group intelligence, semantic theme clustering, evidence-based recommendations.
+   Cached per org for 1 hour. Force refresh: ?refresh=1
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const orgInsightCache = {}; // orgCode → { data, generatedAt } — in-memory only
+
+// Return the ISO week string for N weeks in the past
+function _weekStrOffset(n) {
+  const d    = new Date(Date.now() - n * 7 * 24 * 60 * 60 * 1000);
+  const jan1 = new Date(d.getFullYear(), 0, 1);
+  const wk   = Math.ceil(((d - jan1) / 86400000 + jan1.getDay() + 1) / 7);
+  return `${d.getFullYear()}-W${String(wk).padStart(2, '0')}`;
+}
+
+function _avgMood(checkins) {
+  const scores = checkins.filter(c => c.mood !== null && c.mood !== undefined).map(c => Number(c.mood));
+  if (!scores.length) return null;
+  return Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;
+}
+
+// ── Pattern & Prediction helpers ──────────────────────────────────────────────
+
+function _countConsecutiveDeclines(weeklyAvgs) {
+  // weeklyAvgs: array of {week, avg} sorted newest-first
+  // Returns number of consecutive weekly declines from most recent
+  let count = 0;
+  for (let i = 0; i < weeklyAvgs.length - 1; i++) {
+    if (weeklyAvgs[i].avg !== null && weeklyAvgs[i + 1].avg !== null &&
+        weeklyAvgs[i].avg < weeklyAvgs[i + 1].avg - 0.1) {
+      count++;
+    } else break;
+  }
+  return count;
+}
+
+function _detectMemberPatternsFromData(name, weeklyMoodAvgs, allMemberCheckins, weeklySubCount, hasGoal, latestScores, orgTextCorpus) {
+  // weeklyMoodAvgs: [{week, avg}] newest-first, up to 4 weeks
+  // allMemberCheckins: check-ins last 30 days for this member
+  // weeklySubCount: number of weekly reflections submitted last 30 days
+  // hasGoal: boolean
+  // latestScores: {ethical_reasoning, pressure_response, self_awareness, overall} or {}
+  // orgTextCorpus: all recent text entries for this member
+  const patterns = [];
+
+  const validMoods = weeklyMoodAvgs.filter(w => w.avg !== null);
+  const recentAvg  = validMoods.length ? validMoods[0].avg : null;
+  const consecutive = _countConsecutiveDeclines(weeklyMoodAvgs);
+
+  const thisWeekCheckins = allMemberCheckins.filter(c => c.isThisWeek).length;
+  const prevWeekCheckins = allMemberCheckins.filter(c => c.isPrevWeek).length;
+  const totalCheckins    = allMemberCheckins.length;
+
+  const textSample = orgTextCorpus.join(' ').toLowerCase();
+  const doubtWords = ['not sure', "don't know", 'confused', 'struggling', 'lost', 'doubt', 'unsure', 'overwhelmed', 'stuck'];
+  const isolationWords = ['alone', 'nobody', 'no one', 'ignored', 'left out', 'excluded', 'disconnected'];
+  const burnoutWords = ['exhausted', 'burnt out', 'burned out', 'drained', 'no energy', 'tired', 'can\'t keep up'];
+  const doubtSignals = doubtWords.filter(w => textSample.includes(w)).length;
+  const isolationSignals = isolationWords.filter(w => textSample.includes(w)).length;
+  const burnoutSignals = burnoutWords.filter(w => textSample.includes(w)).length;
+
+  const pressureScore = latestScores?.pressure_response || null;
+  const overallScore  = latestScores?.overall || null;
+
+  // ── Burnout Risk ──────────────────────────────────────────────────────────
+  const burnoutFlags = [];
+  if (recentAvg !== null && recentAvg < 2.5) burnoutFlags.push(`mood ${recentAvg}/5`);
+  if (consecutive >= 3) burnoutFlags.push(`${consecutive} consecutive weekly mood declines`);
+  if (burnoutSignals >= 2) burnoutFlags.push('burnout language detected in reflections');
+  if (thisWeekCheckins > 0 && recentAvg !== null && recentAvg < 2.5) burnoutFlags.push('still engaging despite low mood');
+  if (burnoutFlags.length >= 2) {
+    patterns.push({
+      type:       'BURNOUT_RISK',
+      label:      'Burnout Risk',
+      confidence: burnoutFlags.length >= 3 ? 'high' : 'medium',
+      signals:    burnoutFlags,
+    });
+  }
+
+  // ── Disengagement Risk ───────────────────────────────────────────────────
+  const disengFlags = [];
+  if (thisWeekCheckins === 0) disengFlags.push('no check-in this week');
+  if (prevWeekCheckins === 0) disengFlags.push('no check-in previous week');
+  if (weeklySubCount === 0)   disengFlags.push('no weekly reflections submitted');
+  if (totalCheckins < 2)     disengFlags.push('fewer than 2 check-ins in 30 days');
+  if (disengFlags.length >= 2) {
+    patterns.push({
+      type:       'DISENGAGEMENT_RISK',
+      label:      'Disengagement Risk',
+      confidence: disengFlags.length >= 3 ? 'high' : 'medium',
+      signals:    disengFlags,
+    });
+  }
+
+  // ── Confidence Concern ───────────────────────────────────────────────────
+  const confFlags = [];
+  if (doubtSignals >= 2) confFlags.push(`doubt/uncertainty language (${doubtSignals} signals)`);
+  if (pressureScore !== null && pressureScore < 3) confFlags.push(`low pressure response score (${pressureScore}/5)`);
+  if (overallScore !== null && overallScore < 3) confFlags.push(`below-average assessment score (${overallScore}/5)`);
+  if (recentAvg !== null && recentAvg < 2.8) confFlags.push(`low mood (${recentAvg}/5)`);
+  if (confFlags.length >= 2) {
+    patterns.push({
+      type:       'CONFIDENCE_CONCERN',
+      label:      'Confidence Concern',
+      confidence: confFlags.length >= 3 ? 'high' : 'medium',
+      signals:    confFlags,
+    });
+  }
+
+  // ── Isolation Risk ───────────────────────────────────────────────────────
+  const isoFlags = [];
+  if (isolationSignals >= 1) isoFlags.push('isolation language detected');
+  if (totalCheckins < 2)     isoFlags.push('minimal participation');
+  if (recentAvg !== null && recentAvg < 2.5) isoFlags.push(`low mood (${recentAvg}/5)`);
+  if (isoFlags.length >= 2) {
+    patterns.push({
+      type:       'ISOLATION_RISK',
+      label:      'Isolation Risk',
+      confidence: isoFlags.length >= 3 ? 'high' : 'medium',
+      signals:    isoFlags,
+    });
+  }
+
+  // ── Goal Misalignment ────────────────────────────────────────────────────
+  const goalFlags = [];
+  if (hasGoal) {
+    if (weeklySubCount === 0)                 goalFlags.push('has goal but no weekly reflections submitted');
+    if (totalCheckins > 0 && consecutive >= 2) goalFlags.push('declining engagement alongside active goal');
+    if (recentAvg !== null && recentAvg < 2.8) goalFlags.push('goal-holder showing low mood');
+    if (goalFlags.length >= 2) {
+      patterns.push({
+        type:       'GOAL_MISALIGNMENT',
+        label:      'Goal Abandonment Risk',
+        confidence: goalFlags.length >= 3 ? 'high' : 'medium',
+        signals:    goalFlags,
+      });
+    }
+  }
+
+  return patterns;
+}
+
+function _predictMemberRisksFromData(name, weeklyMoodAvgs) {
+  // weeklyMoodAvgs: [{week, avg}] newest-first
+  // Returns array of {type, prediction, confidence, reasons, urgency} or []
+  const valid = weeklyMoodAvgs.filter(w => w.avg !== null);
+  if (valid.length < 3) return [];
+
+  // Linear slope over last 3-4 points (newest-first → reverse for regression)
+  const pts = valid.slice(0, 4).reverse(); // oldest first
+  const n = pts.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  pts.forEach((p, i) => { sumX += i; sumY += p.avg; sumXY += i * p.avg; sumX2 += i * i; });
+  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+
+  const predictions = [];
+  if (slope < -0.2) {
+    // Project 2 periods forward from most recent
+    const projected = valid[0].avg + slope * 2;
+    const urgency   = projected < 2.0 ? 'high' : projected < 2.5 ? 'medium' : 'low';
+    const conf      = valid.length >= 4 ? 'high' : 'medium';
+    predictions.push({
+      type:             'MOOD_DECLINE_RISK',
+      label:            'Mood Decline Trajectory',
+      prediction:       `If current trend continues, mood may reach ~${Math.max(1, Math.round(projected * 10) / 10).toFixed(1)}/5 within 2 weeks`,
+      confidence:       conf,
+      urgency,
+      reasons:          [`Slope: ${slope.toFixed(2)} per week over last ${n} periods`, `Current mood: ${valid[0].avg}/5`],
+    });
+  }
+  return predictions;
+}
+
+function _aggregateOrgData(code) {
+  const users  = orgUsers[code]  || {};
+  const meta   = orgMeta[code]   || {};
+  const groups = orgGroups[code] || [];
+
+  const WEEK_MS       = 7  * 24 * 60 * 60 * 1000;
+  const MONTH_MS      = 30 * 24 * 60 * 60 * 1000;
+  const now           = Date.now();
+  const weekAgo       = now - WEEK_MS;
+  const monthAgo      = now - MONTH_MS;
+  const prevWeekFrom  = now - 14 * 24 * 60 * 60 * 1000; // 7–14 days ago
+  const prevWeekTo    = now - WEEK_MS;
+
+  const allMembers = Object.values(users).filter(u => u.role !== 'superadmin');
+
+  // ── Collect ALL check-ins across last 30 days ─────────────────────────────
+  const allCheckins = [];
+  Object.entries(memberCheckins).forEach(([key, entries]) => {
+    if (!key.startsWith(code + ':')) return;
+    (entries || []).forEach(c => {
+      const ts = c.ts || c.date;
+      if (!ts) return;
+      const time = new Date(ts).getTime();
+      if (time < monthAgo) return;
+      allCheckins.push({
+        memberName: c.memberName || key.split(':').slice(1).join(':'),
+        mood: c.mood != null ? Number(c.mood) : null,
+        text: c.text || c.note || '',
+        role: c.role || 'member',
+        ts, time,
+        isThisWeek: time > weekAgo,
+        isPrevWeek: time > prevWeekFrom && time <= prevWeekTo,
+      });
+    });
+  });
+
+  const recentCheckins = allCheckins.filter(c => c.isThisWeek);
+  const prevCheckins   = allCheckins.filter(c => c.isPrevWeek);
+
+  // Consolidated per-member (handles both name-key and userId-key entries)
+  const checkinsByMember = {};
+  allCheckins.forEach(c => {
+    const n = c.memberName || 'Unknown';
+    if (!checkinsByMember[n]) checkinsByMember[n] = [];
+    checkinsByMember[n].push(c);
+  });
+
+  const moodLast7    = _avgMood(recentCheckins);
+  const moodLast30   = _avgMood(allCheckins);
+  const moodPrevWeek = _avgMood(prevCheckins);
+  const moodCount7   = recentCheckins.filter(c => c.mood !== null).length;
+
+  // ── Engagement ────────────────────────────────────────────────────────────
+  const activeThisWeek  = new Set(recentCheckins.map(c => c.memberName)).size;
+  const activeLast30    = new Set(allCheckins.map(c => c.memberName)).size;
+  const inactiveMembers = allMembers
+    .filter(u => !recentCheckins.some(c => c.memberName === u.name))
+    .map(u => u.name);
+
+  // ── At-risk rule-based signals ────────────────────────────────────────────
+  const atRiskComputed = [];
+  Object.entries(checkinsByMember).forEach(([name, checkins]) => {
+    const thisWeekMoods = checkins.filter(c => c.isThisWeek && c.mood !== null).map(c => c.mood);
+    if (!thisWeekMoods.length) return;
+    const avg = thisWeekMoods.reduce((a, b) => a + b, 0) / thisWeekMoods.length;
+    if (avg <= 2) {
+      atRiskComputed.push({ name, reason: `Low mood avg ${avg.toFixed(1)}/5 across ${thisWeekMoods.length} check-in(s)`, urgency: 'high' });
+    } else if (avg < 2.8) {
+      atRiskComputed.push({ name, reason: `Below-average mood (${avg.toFixed(1)}/5) this week`, urgency: 'medium' });
+    } else if (thisWeekMoods.length >= 3) {
+      const last    = thisWeekMoods[thisWeekMoods.length - 1];
+      const prevAvg = thisWeekMoods.slice(0, -1).reduce((a, b) => a + b, 0) / (thisWeekMoods.length - 1);
+      if (last < prevAvg - 1.2) {
+        atRiskComputed.push({ name, reason: 'Mood dropping sharply — latest well below recent average', urgency: 'medium' });
+      }
+    }
+  });
+  inactiveMembers.forEach(name => atRiskComputed.push({ name, reason: 'No check-in this week', urgency: 'low' }));
+
+  // ── Goals ─────────────────────────────────────────────────────────────────
+  const membersWithGoals    = [];
+  const membersWithoutGoals = [];
+  allMembers.forEach(u => {
+    const goal = memberGoals[userKey(code, u.id)] || memberGoals[memberKey(code, u.name)];
+    if (goal?.goal) membersWithGoals.push({ name: u.name, userId: u.id, goal: goal.goal, identity: goal.identity || '' });
+    else membersWithoutGoals.push(u.name);
+  });
+
+  // ── Weekly reflections — last 4 weeks ─────────────────────────────────────
+  const last4WeekKeys    = [0, 1, 2, 3].map(n => weekKey(code, _weekStrOffset(n)));
+  const allWeeklyEntries = last4WeekKeys.flatMap(k => weeklyAssessments[k] || []);
+  const thisWeekEntries  = weeklyAssessments[last4WeekKeys[0]] || [];
+
+  // ── Assessment/scenario results per member ────────────────────────────────
+  const resultsByMember = {};
+  allMembers.forEach(u => {
+    const all = [
+      ...(memberResults[memberKey(code, u.name)] || []),
+      ...(memberResults[userKey(code, u.id)]     || []),
+    ];
+    if (all.length) resultsByMember[u.name] = all.slice(-4);
+  });
+
+  // ── Shared/anonymous notes — last 30 days ─────────────────────────────────
+  const recentSharedNotes = Object.values(orgNotes).filter(
+    n => n.orgCode === code && n.type !== 'private' && new Date(n.createdAt).getTime() > monthAgo
+  );
+
+  // ── Group cross-reference ─────────────────────────────────────────────────
+  const groupData = groups.map(g => {
+    const memberIds  = g.memberIds || [];
+    const gmUsers    = allMembers.filter(u => memberIds.includes(u.id));
+    const gmNames    = gmUsers.map(u => u.name);
+    const gmCheckins = allCheckins.filter(c => gmNames.includes(c.memberName) && c.isThisWeek);
+    return {
+      id: g.id, name: g.name,
+      memberCount: memberIds.length,
+      memberNames: gmNames,
+      avgMood: _avgMood(gmCheckins),
+      activeCount: new Set(gmCheckins.map(c => c.memberName)).size,
+      noteCount: Object.values(orgNotes).filter(
+        n => n.orgCode === code && n.groupId === g.id && new Date(n.createdAt).getTime() > weekAgo
+      ).length,
+    };
+  });
+
+  // ── Text corpus for semantic theme detection ───────────────────────────────
+  const textCorpus = [
+    ...allCheckins.map(c => c.text),
+    ...allWeeklyEntries.flatMap(e => Object.values(e.data || {})),
+    ...recentSharedNotes.map(n => n.content),
+  ].filter(Boolean).map(t => String(t).slice(0, 200));
+
+  // ── Per-member pattern detection & predictions ────────────────────────────
+  const memberPatterns     = {};
+  const memberPredictions  = {};
+
+  allMembers.forEach(u => {
+    const mCheckins = checkinsByMember[u.name] || [];
+    const goals     = (memberGoals[memberKey(code, u.name)] || memberGoals[userKey(code, u.id)] || [])
+                        .filter(g => g.status !== 'completed');
+    const scores    = resultsByMember[u.name] || {};
+
+    // Build per-week mood averages (last 4 weeks)
+    const weeklyMoodAvgs = [0, 1, 2, 3].map(n => {
+      const wStr = _weekStrOffset(n);
+      const wCheckins = mCheckins.filter(c => {
+        if (!c.ts && !c.date) return false;
+        // crude: check if entry is approximately in that week
+        const t = new Date(c.ts || c.date).getTime();
+        const wStart = Date.now() - (n + 1) * 7 * 24 * 60 * 60 * 1000;
+        const wEnd   = Date.now() - n * 7 * 24 * 60 * 60 * 1000;
+        return t >= wStart && t < wEnd;
+      });
+      return { week: wStr, avg: _avgMood(wCheckins) };
+    });
+
+    // Weekly reflection count
+    const memberName = u.name;
+    const memberId   = u.id;
+    const weeklySubCount = Object.values(weeklyAssessments).reduce((sum, entries) => {
+      return sum + (entries || []).filter(e =>
+        (e.memberName === memberName || e.memberId === memberId) &&
+        new Date(e.submittedAt || 0).getTime() > monthAgo
+      ).length;
+    }, 0);
+
+    // Member text corpus
+    const memberText = mCheckins.map(c => c.text).filter(Boolean);
+
+    memberPatterns[u.name]    = _detectMemberPatternsFromData(
+      u.name, weeklyMoodAvgs, mCheckins, weeklySubCount, goals.length > 0, scores, memberText
+    );
+    memberPredictions[u.name] = _predictMemberRisksFromData(u.name, weeklyMoodAvgs);
+  });
+
+  return {
+    meta, allMembers, memberCount: allMembers.length,
+    allCheckins, recentCheckins, checkinsByMember,
+    moodLast7, moodLast30, moodPrevWeek, moodCount7,
+    activeThisWeek, activeLast30, inactiveMembers,
+    atRiskComputed,
+    membersWithGoals, membersWithoutGoals,
+    allWeeklyEntries, thisWeekEntries,
+    resultsByMember,
+    recentSharedNotes,
+    groupData, textCorpus,
+    memberPatterns, memberPredictions,
+    thisWeek: _weekStrOffset(0),
+  };
+}
+
+function _buildInsightPrompt(agg, orgCode) {
+  const lines = [];
+
+  // ── Header ────────────────────────────────────────────────────────────────
+  lines.push(`ORG: ${agg.meta.orgName || orgCode} (${agg.meta.orgMode || 'general'})`);
+  lines.push(`WEEK: ${agg.thisWeek} | Members: ${agg.memberCount}`);
+  lines.push(`ENGAGEMENT: ${agg.activeThisWeek}/${agg.memberCount} active this week, ${agg.activeLast30}/${agg.memberCount} active last 30 days`);
+
+  const trendDir = agg.moodLast7 !== null && agg.moodPrevWeek !== null
+    ? (agg.moodLast7 > agg.moodPrevWeek + 0.3 ? 'up ↑' : agg.moodLast7 < agg.moodPrevWeek - 0.3 ? 'down ↓' : 'stable →')
+    : '—';
+  lines.push(`MOOD: This week avg ${agg.moodLast7 ?? '—'}/5 (${agg.moodCount7} responses) | Prev week ${agg.moodPrevWeek ?? '—'}/5 | Last 30d avg ${agg.moodLast30 ?? '—'}/5 | vs last week: ${trendDir}`);
+  if (agg.inactiveMembers.length) lines.push(`NO CHECK-IN THIS WEEK: ${agg.inactiveMembers.join(', ')}`);
+  lines.push('');
+
+  // ── Per-member cross-referenced profiles ──────────────────────────────────
+  lines.push('MEMBER PROFILES (goals + check-ins + weekly reflections + assessments):');
+  agg.allMembers.forEach(u => {
+    const thisWeekC  = (agg.checkinsByMember[u.name] || []).filter(c => c.isThisWeek);
+    const allC       = agg.checkinsByMember[u.name]  || [];
+    const moods7     = thisWeekC.filter(c => c.mood !== null).map(c => c.mood);
+    const avgM       = moods7.length ? (moods7.reduce((a, b) => a + b, 0) / moods7.length).toFixed(1) : null;
+    const text7      = thisWeekC.map(c => c.text).filter(Boolean).slice(0, 3).join(' / ').slice(0, 280);
+    const text30     = allC.filter(c => !c.isThisWeek).map(c => c.text).filter(Boolean).slice(-4).join(' / ').slice(0, 280);
+    const goalObj    = agg.membersWithGoals.find(g => g.name === u.name);
+    const weeklies   = agg.allWeeklyEntries.filter(e => e.memberName === u.name || (e.memberId && e.memberId === u.id)).slice(-2);
+    const weeklyText = weeklies.map(e => Object.values(e.data || {}).filter(Boolean).join(' | ').slice(0, 250)).join(' // ');
+    const results    = agg.resultsByMember[u.name] || [];
+    const scoreLines = results.map(r => r.score
+      ? `overall:${r.score.overall ?? '?'} ethical:${r.score.ethical_reasoning ?? '?'} pressure:${r.score.pressure_response ?? '?'} self-awareness:${r.score.self_awareness ?? '?'}`
+      : null).filter(Boolean).slice(-2).join(' | ');
+
+    lines.push(`\n[${u.name}] role:${u.role}`);
+    lines.push(`  Goal: ${goalObj ? `"${goalObj.goal.slice(0, 130)}"` : 'not set'}${goalObj?.identity ? ` | Identity: "${goalObj.identity.slice(0, 80)}"` : ''}`);
+    lines.push(`  Mood this week: ${avgM !== null ? `${avgM}/5 (${moods7.length} check-ins)` : 'no check-in'}`);
+    if (text7)   lines.push(`  Check-in text (this week): "${text7}"`);
+    if (text30)  lines.push(`  Check-in text (prev weeks): "${text30}"`);
+    if (weeklyText) lines.push(`  Weekly reflections: "${weeklyText}"`);
+    if (scoreLines) lines.push(`  Assessment scores: ${scoreLines}`);
+  });
+  lines.push('');
+
+  // ── Groups ────────────────────────────────────────────────────────────────
+  if (agg.groupData.length > 0) {
+    lines.push('GROUPS:');
+    agg.groupData.forEach(g => {
+      const mStr = g.avgMood !== null ? `avg mood ${g.avgMood}/5` : 'no mood data';
+      lines.push(`${g.name}: members [${g.memberNames.join(', ')}] — ${g.activeCount}/${g.memberCount} active, ${mStr}`);
+    });
+    lines.push('');
+  }
+
+  // ── Text corpus for semantic clustering ───────────────────────────────────
+  const corpus = agg.textCorpus.filter(Boolean).slice(0, 35);
+  if (corpus.length > 0) {
+    lines.push('ALL MEMBER TEXT (check-ins + reflections + notes — use for semantic theme clustering):');
+    corpus.forEach((t, i) => lines.push(`${i + 1}. "${t}"`));
+    lines.push('');
+  }
+
+  // ── Detected risk patterns (rule-based, pre-computed) ────────────────────
+  const allPatternNames = Object.entries(agg.memberPatterns || {})
+    .flatMap(([name, pats]) => pats.map(p => `${name}: ${p.label} (${p.confidence} confidence — ${p.signals.join('; ')})`));
+  const allPredictions = Object.entries(agg.memberPredictions || {})
+    .flatMap(([name, preds]) => preds.map(p => `${name}: ${p.label} — ${p.prediction}`));
+
+  if (allPatternNames.length > 0) {
+    lines.push('DETECTED RISK PATTERNS (algorithm-detected, include in recommendations):');
+    allPatternNames.forEach(s => lines.push(`  • ${s}`));
+    lines.push('');
+  }
+  if (allPredictions.length > 0) {
+    lines.push('TRAJECTORY PREDICTIONS (linear trend extrapolation):');
+    allPredictions.forEach(s => lines.push(`  • ${s}`));
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
+app.get('/api/intelliq/org-insights', requireAuth, async (req, res) => {
+  const { orgCode, refresh } = req.query;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  const code = orgCode.toLowerCase().trim();
+
+  const CACHE_TTL    = 60 * 60 * 1000;
+  const cached       = orgInsightCache[code];
+  const forceRefresh = refresh === '1';
+  if (cached && !forceRefresh && (Date.now() - cached.generatedAt < CACHE_TTL)) {
+    return res.json({ ...cached.data, cached: true });
+  }
+
+  const agg = _aggregateOrgData(code);
+  const stats = {
+    memberCount:       agg.memberCount,
+    activeThisWeek:    agg.activeThisWeek,
+    activeLast30:      agg.activeLast30,
+    avgMoodLast7:      agg.moodLast7,
+    avgMoodLast30:     agg.moodLast30,
+    avgMoodPrevWeek:   agg.moodPrevWeek,
+    moodCount:         agg.moodCount7,
+    goalsSet:          agg.membersWithGoals.length,
+    weeklySubmissions: agg.thisWeekEntries.length,
+    inactiveMembers:   agg.inactiveMembers,
+    atRiskComputed:    agg.atRiskComputed,
+    week:              agg.thisWeek,
+  };
+
+  const hasAnyData = agg.allCheckins.length > 0
+    || agg.allWeeklyEntries.length > 0
+    || agg.membersWithGoals.length > 0;
+
+  if (!hasAnyData || agg.memberCount === 0) {
+    const result = {
+      generatedAt: new Date().toISOString(), cached: false, stats,
+      ai: _noDataFallback(agg),
+    };
+    orgInsightCache[code] = { data: result, generatedAt: Date.now() };
+    return res.json(result);
+  }
+
+  // ── Claude synthesis with v2 structured output ────────────────────────────
+  const SYSTEM = `You are IntelliQ, a decision-support intelligence system. You receive structured data about an organisation — member goals, check-ins, weekly reflections, assessment scores, groups. Your job is NOT to describe the data, but to synthesise it into intelligence: what does it mean, what patterns exist, and what should the coach do?
+
+OUTPUT FORMAT — valid JSON only, absolutely no markdown or extra text outside the JSON object:
+{
+  "summary": "2-3 sentences. What does the coach need to know TODAY? Name specific people and specific patterns. Never be generic.",
+  "moodTrend": "improving|stable|declining|unknown",
+  "moodNote": "One sentence comparing this week's mood to the previous week and 30-day trend.",
+  "notEnoughData": false,
+
+  "trends": {
+    "trendDirection": "improving|stable|declining",
+    "trendReason": "One sentence — reference the actual numbers and which members are driving the change.",
+    "confidenceLevel": "high|medium|low",
+    "engagementTrend": "improving|stable|declining",
+    "moodComparison": "One sentence comparing this week to prev week and 30-day avg with specific numbers."
+  },
+
+  "semanticThemes": [
+    {
+      "theme": "Cluster label — e.g. Fatigue / Burnout, Confidence Concerns, Leadership Tension, Transition Stress",
+      "signals": ["exact word or short phrase from the actual text"],
+      "affectedMembers": ["name — only if clearly identifiable"],
+      "severity": "high|medium|low"
+    }
+  ],
+
+  "memberProfiles": [
+    {
+      "name": "exact member name from data",
+      "currentState": "One sentence — where is this person right now, specifically?",
+      "strengths": ["one specific observable strength grounded in their data"],
+      "concerns": ["one specific concern with data evidence"],
+      "goalAlignment": "on_track|mixed|off_track|no_goal",
+      "goalAlignmentExplanation": "One sentence — does their behavior match their goal? Reference the goal and the check-in/assessment evidence.",
+      "riskSignals": ["specific signal — e.g. 'mood avg 1.8/5', 'pressure_response score 42'"],
+      "recommendedAction": "One concrete action for the coach, with their name."
+    }
+  ],
+
+  "groupInsights": [
+    {
+      "groupName": "exact group name",
+      "mood": "high|okay|low|unknown",
+      "engagement": "high|medium|low",
+      "recurringThemes": ["theme"],
+      "riskSignals": ["specific signal"],
+      "positiveSignals": ["specific signal"],
+      "membersNeedingAttention": ["name"],
+      "suggestedAction": "One concrete group-level action."
+    }
+  ],
+
+  "recommendations": [
+    {
+      "action": "Specific action — who, what, when.",
+      "urgency": "high|medium|low",
+      "owner": "coach|admin|member",
+      "reason": "Why — reference actual data from the brief.",
+      "evidence": ["checkins", "weeklyAssessments", "goals", "assessmentScores", "notes"],
+      "confidence": "high|medium|low",
+      "predictedOutcome": "One sentence: what likely improves if this action is taken?",
+      "riskIfIgnored": "One sentence: what likely happens if this is not acted on?"
+    }
+  ],
+
+  "memberHighlights": [
+    { "name": "...", "note": "Specific positive observation with data support." }
+  ],
+
+  "goalProgress": "One sentence summarising goal-setting and whether people's actions align with their goals.",
+
+  "atRisk": [
+    { "name": "...", "reason": "Specific reason with data.", "urgency": "high|medium|low" }
+  ],
+
+  "themes": ["short label 1", "short label 2", "short label 3"],
+
+  "groupHighlights": [],
+
+  "recommendedActions": [
+    { "priority": "high|medium|low", "action": "..." }
+  ]
+}
+
+CRITICAL RULES:
+- Synthesise, don't describe. "Timmy is struggling with leadership confidence" is synthesis. "Timmy checked in 3 times" is description.
+- Every recommendation must name the person and reference specific data.
+- semanticThemes: cluster conceptually similar text even if words differ (overwhelmed/drained/burned out → Fatigue). Max 4.
+- memberProfiles: include ALL members — even those with no data (state "No activity this week — unknown").
+- goalAlignment: "off_track" if check-ins or assessments contradict the stated goal direction. "on_track" if they support it. "mixed" if partial.
+- recommendations: max 4, highest urgency first. Each must have evidence[] listing the data sources that support it. Each must include confidence, predictedOutcome, riskIfIgnored.
+- atRisk max 3, memberHighlights max 2.
+- groupInsights: only include groups that have members with data. Skip empty groups.
+- confidenceLevel: "high" if 4+ data points, "medium" if 2-3, "low" if 0-1.
+- If DETECTED RISK PATTERNS are listed in the brief, use them to inform your recommendations and atRisk entries. Do not ignore them.
+- riskPatterns in each recommendation: reference the pattern label (e.g. "Burnout Risk") if that pattern was the driver.`;
+
+  let ai = null;
+  try {
+    const response = await client.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 2400,
+      system:     SYSTEM,
+      messages:   [{ role: 'user', content: _buildInsightPrompt(agg, code) }],
+    });
+    const raw = (response.content[0]?.text || '').replace(/```json\n?|\n?```/g, '').trim();
+    ai = JSON.parse(raw);
+  } catch(err) {
+    console.warn('Org insights v2 — AI fallback:', err.message);
+  }
+
+  if (!ai) ai = _buildFallbackInsight(agg);
+
+  // Flatten patterns for the frontend — include in response so the UI can render them without a second call
+  const flatPatterns = Object.entries(agg.memberPatterns || {})
+    .flatMap(([name, pats]) => pats.map(p => ({ member: name, ...p })));
+  const flatPredictions = Object.entries(agg.memberPredictions || {})
+    .flatMap(([name, preds]) => preds.map(p => ({ member: name, ...p })));
+
+  const result = { generatedAt: new Date().toISOString(), cached: false, stats, ai, patterns: flatPatterns, predictions: flatPredictions };
+  orgInsightCache[code] = { data: result, generatedAt: Date.now() };
+  res.json(result);
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   INTELLIQ MEMORY — Timelines + Intervention Tracking + Outcome Analysis
+   Timelines: computed on demand from existing stores, cached 30 min.
+   Interventions: persisted in orgInterventions store.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const memberTimelineCache = {}; // `orgCode:userId`  → { data, ts }
+const groupTimelineCache  = {}; // `orgCode:groupId` → { data, ts }
+const orgTimelineCache    = {}; // orgCode            → { data, ts }
+const TIMELINE_TTL        = 30 * 60 * 1000; // 30 minutes
+
+function _intvId() { return 'intv_' + Math.random().toString(36).slice(2, 10); }
+
+// Categorise an intervention action by keyword for learning stats
+function _categorizeAction(action) {
+  const a = action || '';
+  if (/private|1-on-1|one.on.one|conversation|speak with|talk to/i.test(a)) return 'Private conversation';
+  if (/group|session|workshop|team meeting/i.test(a))                        return 'Group session';
+  if (/goal|objective|check on progress/i.test(a))                           return 'Goal review';
+  if (/nudge|remind|encourage|prompt|check.in/i.test(a))                     return 'Engagement nudge';
+  if (/assessment|scenario|assign/i.test(a))                                 return 'Assessment assigned';
+  return 'Other';
+}
+
+// Measure outcome of a completed intervention (mood delta pre/post)
+function _measureInterventionOutcome(code, intv) {
+  const { targetMember, targetMemberId, createdAt, completedAt } = intv;
+  if (!completedAt) return null;
+
+  const completedTs = new Date(completedAt).getTime();
+  const createdTs   = new Date(createdAt).getTime();
+  const MIN_WAIT    = 7 * 24 * 60 * 60 * 1000;
+
+  if (Date.now() < completedTs + MIN_WAIT) {
+    return {
+      status:     'pending',
+      note:       'Needs 7+ days of post-intervention check-ins.',
+      checkAfter: new Date(completedTs + MIN_WAIT).toISOString(),
+    };
+  }
+
+  const keys = [
+    targetMember   ? memberKey(code, targetMember)   : null,
+    targetMemberId ? userKey(code, targetMemberId)   : null,
+  ].filter(Boolean);
+
+  const allC = [];
+  keys.forEach(k => (memberCheckins[k] || []).forEach(c => {
+    const ts = c.ts || c.date;
+    if (ts) allC.push({ mood: c.mood != null ? Number(c.mood) : null, time: new Date(ts).getTime() });
+  }));
+
+  const PRE = 21 * 24 * 60 * 60 * 1000;
+  const beforeC = allC.filter(c => c.time >= createdTs - PRE && c.time < createdTs);
+  const afterC  = allC.filter(c => c.time >= completedTs     && c.time <= completedTs + PRE);
+
+  const beforeMoods = beforeC.filter(c => c.mood !== null).map(c => c.mood);
+  const afterMoods  = afterC.filter(c => c.mood !== null).map(c => c.mood);
+
+  if (!beforeMoods.length || !afterMoods.length) {
+    return { status: 'insufficient_data', note: 'Not enough check-ins to measure impact.' };
+  }
+
+  const beforeAvg = beforeMoods.reduce((a, b) => a + b, 0) / beforeMoods.length;
+  const afterAvg  = afterMoods.reduce((a, b)  => a + b, 0) / afterMoods.length;
+  const moodDelta = afterAvg - beforeAvg;
+
+  // ── Engagement delta (check-in frequency) ─────────────────────────────────
+  const PRE_DAYS  = PRE / (24 * 60 * 60 * 1000);
+  const beforeRate = beforeC.length / PRE_DAYS * 7; // per week
+  const afterRate  = afterC.length  / PRE_DAYS * 7;
+  const engDelta   = afterRate - beforeRate;
+
+  // ── Weekly participation delta ─────────────────────────────────────────────
+  const countWeekliesInWindow = (from, to) => {
+    const name = targetMember || '';
+    const id   = targetMemberId || '';
+    return Object.values(weeklyAssessments).reduce((sum, entries) => {
+      return sum + (entries || []).filter(e =>
+        (e.memberName === name || e.memberId === id) &&
+        new Date(e.submittedAt || 0).getTime() >= from &&
+        new Date(e.submittedAt || 0).getTime() < to
+      ).length;
+    }, 0);
+  };
+  const weeklyBefore = countWeekliesInWindow(createdTs - PRE, createdTs);
+  const weeklyAfter  = countWeekliesInWindow(completedTs, completedTs + PRE);
+  const weeklyDelta  = weeklyAfter - weeklyBefore;
+
+  // ── changesDetected ────────────────────────────────────────────────────────
+  const changesDetected = [
+    {
+      dimension: 'mood',
+      before:    Math.round(beforeAvg * 10) / 10,
+      after:     Math.round(afterAvg  * 10) / 10,
+      delta:     Math.round(moodDelta * 10) / 10,
+      direction: moodDelta > 0.3 ? 'improved' : moodDelta < -0.3 ? 'declined' : 'unchanged',
+    },
+    {
+      dimension: 'engagement',
+      before:    Math.round(beforeRate * 10) / 10,
+      after:     Math.round(afterRate  * 10) / 10,
+      delta:     Math.round(engDelta   * 10) / 10,
+      direction: engDelta > 0.3 ? 'improved' : engDelta < -0.3 ? 'declined' : 'unchanged',
+    },
+  ];
+  if (weeklyBefore > 0 || weeklyAfter > 0) {
+    changesDetected.push({
+      dimension: 'weekly_participation',
+      before:    weeklyBefore,
+      after:     weeklyAfter,
+      delta:     weeklyDelta,
+      direction: weeklyDelta > 0 ? 'improved' : weeklyDelta < 0 ? 'declined' : 'unchanged',
+    });
+  }
+
+  // ── Confidence level ───────────────────────────────────────────────────────
+  const totalPoints = beforeMoods.length + afterMoods.length;
+  const confidence  = totalPoints >= 8 ? 'high' : totalPoints >= 4 ? 'medium' : 'low';
+
+  // ── Likely drivers (rule-based inference) ─────────────────────────────────
+  const likelyDrivers = [];
+  const moodUp   = moodDelta  >  0.3;
+  const moodDown = moodDelta  < -0.3;
+  const engUp    = engDelta   >  0.2;
+  const engDown  = engDelta   < -0.2;
+  if (moodUp   && engUp)   likelyDrivers.push('Both mood and engagement improved — intervention appears to have addressed core needs');
+  if (moodUp   && !engUp)  likelyDrivers.push('Mood improved without significant engagement change — emotional impact without behavior change');
+  if (!moodUp  && engUp)   likelyDrivers.push('Engagement increased but mood unchanged — member re-engaged but underlying concerns may persist');
+  if (moodDown && engDown) likelyDrivers.push('Both mood and engagement declined — intervention may not have addressed root cause');
+  if (weeklyDelta > 0)     likelyDrivers.push('Weekly reflection participation increased — stronger accountability loop forming');
+
+  // ── Overall outcome ────────────────────────────────────────────────────────
+  const positiveSignals  = changesDetected.filter(c => c.direction === 'improved').length;
+  const negativeSignals  = changesDetected.filter(c => c.direction === 'declined').length;
+  const overallOutcome   = positiveSignals > negativeSignals ? 'positive'
+                         : negativeSignals > positiveSignals ? 'negative' : 'neutral';
+
+  return {
+    status:          'measured',
+    moodBefore:      Math.round(beforeAvg  * 10) / 10,
+    moodAfter:       Math.round(afterAvg   * 10) / 10,
+    moodDelta:       Math.round(moodDelta  * 10) / 10,
+    dataPoints:      { before: beforeMoods.length, after: afterMoods.length },
+    outcome:         overallOutcome,
+    confidence,
+    changesDetected,
+    likelyDrivers,
+    outcomeSummary:  likelyDrivers[0] || (moodDelta > 0.5 ? `Mood improved ${moodDelta.toFixed(1)} points.` : 'No significant change detected.'),
+    note:            moodDelta >  0.5 ? `Mood improved ${moodDelta.toFixed(1)} points.`
+                   : moodDelta < -0.5 ? `Mood declined ${moodDelta.toFixed(1)} points.`
+                   : 'No significant mood change detected.',
+  };
+}
+
+// ── Build member timeline from existing data stores ───────────────────────────
+async function _buildMemberTimeline(code, userId, memberName) {
+  const events = [];
+
+  // Goal events
+  const goal = memberGoals[userKey(code, userId)] || memberGoals[memberKey(code, memberName)];
+  if (goal?.setAt) events.push({ type: 'goal_set', ts: goal.setAt, data: { goal: goal.goal, identity: goal.identity || '' } });
+
+  // Check-ins
+  const checkinKeys = [userKey(code, userId), memberKey(code, memberName)];
+  const seenCheckins = new Set();
+  checkinKeys.forEach(k => (memberCheckins[k] || []).forEach(c => {
+    const ts = c.ts || c.date;
+    if (!ts || seenCheckins.has(ts)) return;
+    seenCheckins.add(ts);
+    events.push({ type: 'checkin', ts, data: { mood: c.mood != null ? Number(c.mood) : null, text: (c.text || c.note || '').slice(0, 120) } });
+  }));
+
+  // Weekly reflections (all weeks)
+  Object.entries(weeklyAssessments).forEach(([key, entries]) => {
+    if (!key.startsWith(code + ':')) return;
+    (entries || []).forEach(e => {
+      if (e.memberName !== memberName && e.memberId !== userId) return;
+      const ts = e.submittedAt;
+      if (!ts) return;
+      events.push({ type: 'weekly_reflection', ts, data: { role: e.role || 'member', text: Object.values(e.data || {}).filter(Boolean).join(' | ').slice(0, 180) } });
+    });
+  });
+
+  // Assessment results
+  const seenResults = new Set();
+  checkinKeys.forEach(k => (memberResults[k] || []).forEach(r => {
+    const ts = r.submittedAt;
+    if (!ts || seenResults.has(ts)) return;
+    seenResults.add(ts);
+    const score = r.score;
+    events.push({ type: 'assessment', ts, data: { overall: score?.overall, summary: score?.summary?.slice(0, 120) || '', strengths: score?.strengths || [], development: score?.development || [] } });
+  }));
+
+  // Notes authored by this member (their own notes)
+  Object.values(orgNotes).filter(n => n.orgCode === code && n.authorId === userId).forEach(n => {
+    events.push({ type: 'note', ts: n.createdAt, data: { noteType: n.type, tag: n.tag, content: n.content.slice(0, 100) } });
+  });
+
+  // Intervention completions targeting this member
+  (orgInterventions[code] || [])
+    .filter(i => (i.targetMember === memberName || i.targetMemberId === userId) && i.completedAt)
+    .forEach(i => {
+      events.push({ type: 'intervention_completed', ts: i.completedAt, data: { action: i.action, outcome: i.outcome?.outcome, delta: i.outcome?.moodDelta } });
+    });
+
+  // Sort chronologically
+  events.sort((a, b) => new Date(a.ts) - new Date(b.ts));
+
+  // Group by month
+  const byMonth = {};
+  events.forEach(e => {
+    const month = (e.ts || '').slice(0, 7);
+    if (!month) return;
+    if (!byMonth[month]) byMonth[month] = [];
+    byMonth[month].push(e);
+  });
+
+  // Add computed mood change events between adjacent months
+  const months = Object.keys(byMonth).sort();
+  let prevMoodAvg = null;
+  months.forEach(month => {
+    const cis = byMonth[month].filter(e => e.type === 'checkin' && e.data.mood !== null);
+    if (!cis.length) return;
+    const avg = cis.reduce((s, e) => s + e.data.mood, 0) / cis.length;
+    if (prevMoodAvg !== null) {
+      const delta = avg - prevMoodAvg;
+      if (delta >  0.8) byMonth[month].unshift({ type: 'mood_improving', ts: month + '-01T00:00:00Z', data: { from: prevMoodAvg.toFixed(1), to: avg.toFixed(1), delta: delta.toFixed(1) } });
+      if (delta < -0.8) byMonth[month].unshift({ type: 'mood_declining', ts: month + '-01T00:00:00Z', data: { from: prevMoodAvg.toFixed(1), to: avg.toFixed(1), delta: delta.toFixed(1) } });
+    }
+    prevMoodAvg = avg;
+  });
+
+  // Generate 1-sentence AI narrative for months with 3+ events
+  const monthData = await Promise.all(months.map(async month => {
+    const evs = byMonth[month] || [];
+    const label = new Date(month + '-15').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+    const checkins = evs.filter(e => e.type === 'checkin');
+    const moodAvg  = checkins.filter(e => e.data.mood !== null).length > 0
+      ? (checkins.filter(e => e.data.mood !== null).reduce((s, e) => s + e.data.mood, 0) / checkins.filter(e => e.data.mood !== null).length).toFixed(1)
+      : null;
+
+    let narrative = null;
+    if (evs.length >= 2) {
+      const brief = evs.slice(0, 6).map(e => {
+        if (e.type === 'goal_set')              return `Goal set: "${e.data.goal}"`;
+        if (e.type === 'checkin' && e.data.text) return `Check-in: "${e.data.text}"`;
+        if (e.type === 'weekly_reflection')      return `Weekly: "${e.data.text}"`;
+        if (e.type === 'assessment')             return `Assessment score: ${e.data.overall ?? '?'}/100`;
+        if (e.type === 'mood_improving')         return `Mood improved: ${e.data.from}→${e.data.to}`;
+        if (e.type === 'mood_declining')         return `Mood declined: ${e.data.from}→${e.data.to}`;
+        if (e.type === 'intervention_completed') return `Intervention: ${e.data.action}`;
+        return null;
+      }).filter(Boolean).join(' | ');
+      try {
+        const r = await client.messages.create({
+          model: 'claude-haiku-4-5-20251001', max_tokens: 80,
+          system: `Write ONE sentence (max 20 words) summarising what this data shows about a member during this month. Past tense. Specific. No fluff.`,
+          messages: [{ role: 'user', content: `${memberName} — ${label}: ${brief}` }],
+        });
+        narrative = r.content[0]?.text?.trim() || null;
+      } catch(e) { /* non-critical */ }
+    }
+
+    return { month, label, eventCount: evs.length, moodAvg, events: evs, narrative };
+  }));
+
+  return { member: memberName, userId, timeline: monthData.filter(m => m.eventCount > 0) };
+}
+
+// ── Build group timeline ────────────────────────────────────────────────────────
+function _buildGroupTimeline(code, group) {
+  const memberIds   = group.memberIds || [];
+  const users       = orgUsers[code]   || {};
+  const gmUsers     = Object.values(users).filter(u => memberIds.includes(u.id));
+
+  // Collect all check-ins for group members, grouped by month
+  const monthlyMood = {}; // month → [mood scores]
+  const monthlyText = {}; // month → [text snippets]
+
+  gmUsers.forEach(u => {
+    const keys = [userKey(code, u.id), memberKey(code, u.name)];
+    keys.forEach(k => (memberCheckins[k] || []).forEach(c => {
+      const ts = c.ts || c.date;
+      if (!ts) return;
+      const month = ts.slice(0, 7);
+      if (c.mood != null) {
+        if (!monthlyMood[month]) monthlyMood[month] = [];
+        monthlyMood[month].push(Number(c.mood));
+      }
+      if (c.text || c.note) {
+        if (!monthlyText[month]) monthlyText[month] = [];
+        monthlyText[month].push((c.text || c.note || '').slice(0, 80));
+      }
+    }));
+
+    // Weekly reflections
+    Object.entries(weeklyAssessments).forEach(([key, entries]) => {
+      if (!key.startsWith(code + ':')) return;
+      entries.filter(e => e.memberName === u.name || e.memberId === u.id).forEach(e => {
+        const month = (e.submittedAt || '').slice(0, 7);
+        if (!month) return;
+        const text = Object.values(e.data || {}).filter(Boolean).join(' | ').slice(0, 100);
+        if (text) { if (!monthlyText[month]) monthlyText[month] = []; monthlyText[month].push(text); }
+      });
+    });
+  });
+
+  const months = [...new Set([...Object.keys(monthlyMood), ...Object.keys(monthlyText)])].sort();
+  const timeline = months.map(month => {
+    const moods = monthlyMood[month] || [];
+    const avgMood = moods.length ? Math.round((moods.reduce((a, b) => a + b, 0) / moods.length) * 10) / 10 : null;
+    const texts   = (monthlyText[month] || []).slice(0, 4);
+    return {
+      month,
+      label:        new Date(month + '-15').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }),
+      avgMood,
+      checkInCount: moods.length,
+      textSamples:  texts,
+    };
+  });
+
+  return { groupId: group.id, groupName: group.name, memberCount: gmUsers.length, timeline };
+}
+
+// ── Build org timeline ────────────────────────────────────────────────────────
+function _buildOrgTimeline(code) {
+  const users  = orgUsers[code]  || {};
+  const allMembers = Object.values(users).filter(u => u.role !== 'superadmin');
+
+  const monthlyMood = {};
+  const monthlyActive = {};
+  const monthlyText = {};
+
+  allMembers.forEach(u => {
+    const keys = [userKey(code, u.id), memberKey(code, u.name)];
+    keys.forEach(k => (memberCheckins[k] || []).forEach(c => {
+      const ts = c.ts || c.date;
+      if (!ts) return;
+      const month = ts.slice(0, 7);
+      if (c.mood != null) {
+        if (!monthlyMood[month])   monthlyMood[month]   = [];
+        if (!monthlyActive[month]) monthlyActive[month] = new Set();
+        monthlyMood[month].push(Number(c.mood));
+        monthlyActive[month].add(u.name);
+      }
+      if (c.text || c.note) {
+        if (!monthlyText[month]) monthlyText[month] = [];
+        monthlyText[month].push((c.text || c.note || '').slice(0, 80));
+      }
+    }));
+  });
+
+  const months = [...new Set([...Object.keys(monthlyMood), ...Object.keys(monthlyText)])].sort();
+  const timeline = months.map(month => {
+    const moods     = monthlyMood[month] || [];
+    const avgMood   = moods.length ? Math.round((moods.reduce((a, b) => a + b, 0) / moods.length) * 10) / 10 : null;
+    const active    = monthlyActive[month]?.size || 0;
+    const texts     = (monthlyText[month] || []).slice(0, 5);
+    return {
+      month,
+      label:         new Date(month + '-15').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }),
+      avgMood,
+      activeMembers: active,
+      totalMembers:  allMembers.length,
+      textSamples:   texts,
+    };
+  });
+
+  return { orgCode: code, orgName: orgMeta[code]?.orgName || code, memberCount: allMembers.length, timeline };
+}
+
+/* ── GET member timeline ───────────────────────────────────────────────── */
+app.get('/api/intelliq/member-timeline', requireAuth, async (req, res) => {
+  const { orgCode, memberId, memberName, refresh } = req.query;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  const code    = orgCode.toLowerCase().trim();
+  const cacheKey = `${code}:${memberId || memberName || ''}`;
+  const cached  = memberTimelineCache[cacheKey];
+
+  if (cached && refresh !== '1' && (Date.now() - cached.ts < TIMELINE_TTL)) {
+    return res.json({ ...cached.data, cached: true });
+  }
+
+  // Resolve member name from userId if only id provided
+  let resolvedName = memberName || '';
+  if (memberId && !resolvedName) {
+    const u = (orgUsers[code] || {})[memberId];
+    resolvedName = u?.name || memberId;
+  }
+
+  try {
+    const data = await _buildMemberTimeline(code, memberId || '', resolvedName);
+    memberTimelineCache[cacheKey] = { data, ts: Date.now() };
+    res.json(data);
+  } catch(err) {
+    res.status(500).json({ error: 'Timeline generation failed', detail: err.message });
+  }
+});
+
+/* ── GET group timeline ────────────────────────────────────────────────── */
+app.get('/api/intelliq/group-timeline', requireAuth, (req, res) => {
+  const { orgCode, groupId, refresh } = req.query;
+  if (!orgCode || !groupId) return res.status(400).json({ error: 'orgCode and groupId required' });
+  const code  = orgCode.toLowerCase().trim();
+  const cacheKey = `${code}:${groupId}`;
+  const cached = groupTimelineCache[cacheKey];
+
+  if (cached && refresh !== '1' && (Date.now() - cached.ts < TIMELINE_TTL)) {
+    return res.json({ ...cached.data, cached: true });
+  }
+
+  const group = (orgGroups[code] || []).find(g => g.id === groupId);
+  if (!group) return res.status(404).json({ error: 'Group not found' });
+
+  const data = _buildGroupTimeline(code, group);
+  groupTimelineCache[cacheKey] = { data, ts: Date.now() };
+  res.json(data);
+});
+
+/* ── GET org timeline ──────────────────────────────────────────────────── */
+app.get('/api/intelliq/org-timeline', requireAuth, (req, res) => {
+  const { orgCode, refresh } = req.query;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  const code   = orgCode.toLowerCase().trim();
+  const cached = orgTimelineCache[code];
+
+  if (cached && refresh !== '1' && (Date.now() - cached.ts < TIMELINE_TTL)) {
+    return res.json({ ...cached.data, cached: true });
+  }
+
+  const data = _buildOrgTimeline(code);
+  orgTimelineCache[code] = { data, ts: Date.now() };
+  res.json(data);
+});
+
+/* ── POST create intervention ──────────────────────────────────────────── */
+app.post('/api/intelliq/intervention', requireAuth, (req, res) => {
+  const { orgCode, targetMember, targetMemberId, targetGroup, action, urgency, owner, reason, evidence } = req.body;
+  if (!orgCode || !action) return res.status(400).json({ error: 'orgCode and action required' });
+  const code = orgCode.toLowerCase().trim();
+
+  if (!orgInterventions[code]) orgInterventions[code] = [];
+  const intv = {
+    id:             _intvId(),
+    createdAt:      new Date().toISOString(),
+    targetMember:   targetMember   || null,
+    targetMemberId: targetMemberId || null,
+    targetGroup:    targetGroup    || null,
+    action,
+    urgency:        urgency  || 'medium',
+    owner:          owner    || 'coach',
+    reason:         reason   || '',
+    evidence:       evidence || [],
+    status:         'suggested',
+    acknowledgedAt: null,
+    completedAt:    null,
+    dismissedAt:    null,
+    outcome:        null,
+  };
+  orgInterventions[code].push(intv);
+  scheduleSave();
+  res.json({ ok: true, intervention: intv });
+});
+
+/* ── PATCH update intervention status ──────────────────────────────────── */
+app.patch('/api/intelliq/intervention/:id', requireAuth, (req, res) => {
+  const { orgCode, status, outcomeNote } = req.body;
+  if (!orgCode || !status) return res.status(400).json({ error: 'orgCode and status required' });
+  const code        = orgCode.toLowerCase().trim();
+  const interventions = orgInterventions[code] || [];
+  const intv        = interventions.find(i => i.id === req.params.id);
+  if (!intv) return res.status(404).json({ error: 'Intervention not found' });
+
+  const VALID = ['suggested', 'acknowledged', 'completed', 'dismissed'];
+  if (!VALID.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+
+  intv.status = status;
+  if (status === 'acknowledged' && !intv.acknowledgedAt) intv.acknowledgedAt = new Date().toISOString();
+  if (status === 'completed'    && !intv.completedAt)    {
+    intv.completedAt = new Date().toISOString();
+    intv.outcome     = _measureInterventionOutcome(code, intv);
+  }
+  if (status === 'dismissed'    && !intv.dismissedAt)    intv.dismissedAt = new Date().toISOString();
+  if (outcomeNote) intv.outcomeNote = outcomeNote;
+
+  scheduleSave();
+  res.json({ ok: true, intervention: intv });
+});
+
+/* ── GET interventions for org ─────────────────────────────────────────── */
+app.get('/api/intelliq/interventions', requireAuth, (req, res) => {
+  const { orgCode, status } = req.query;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  const code = orgCode.toLowerCase().trim();
+  let all = orgInterventions[code] || [];
+  if (status) all = all.filter(i => i.status === status);
+  // Return most recent first
+  res.json({ interventions: [...all].reverse() });
+});
+
+/* ── GET intervention analysis + learning stats ─────────────────────────── */
+app.get('/api/intelliq/intervention-analysis', requireAuth, (req, res) => {
+  const { orgCode } = req.query;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  const code = orgCode.toLowerCase().trim();
+  const all  = orgInterventions[code] || [];
+
+  const byStatus = { suggested: 0, acknowledged: 0, completed: 0, dismissed: 0 };
+  all.forEach(i => { if (byStatus[i.status] !== undefined) byStatus[i.status]++; });
+
+  const measured  = all.filter(i => i.status === 'completed' && i.outcome?.status === 'measured');
+  const outcomes  = { positive: 0, neutral: 0, negative: 0 };
+  measured.forEach(i => { if (outcomes[i.outcome.outcome] !== undefined) outcomes[i.outcome.outcome]++; });
+
+  // Learning stats by action type
+  const actionStats = {};
+  measured.forEach(i => {
+    const type = _categorizeAction(i.action);
+    if (!actionStats[type]) actionStats[type] = { total: 0, positive: 0, neutral: 0, negative: 0, moodDeltas: [] };
+    actionStats[type].total++;
+    actionStats[type][i.outcome.outcome]++;
+    actionStats[type].moodDeltas.push(i.outcome.moodDelta);
+  });
+  const patterns = Object.entries(actionStats).map(([type, s]) => ({
+    type,
+    total:       s.total,
+    successRate: Math.round(s.positive / s.total * 100),
+    avgMoodDelta: s.moodDeltas.length ? Math.round((s.moodDeltas.reduce((a, b) => a + b, 0) / s.moodDeltas.length) * 10) / 10 : 0,
+    outcomes:    { positive: s.positive, neutral: s.neutral, negative: s.negative },
+  })).sort((a, b) => b.successRate - a.successRate);
+
+  // Pending outcome checks — re-measure on request
+  const pendingOutcomes = all.filter(i => i.status === 'completed' && i.outcome?.status === 'pending');
+  pendingOutcomes.forEach(i => {
+    const fresh = _measureInterventionOutcome(code, i);
+    if (fresh && fresh.status !== 'pending') { i.outcome = fresh; scheduleSave(); }
+  });
+
+  res.json({
+    total: all.length, byStatus, outcomes,
+    patterns,
+    successRate:    measured.length > 0 ? Math.round(outcomes.positive / measured.length * 100) : null,
+    avgMoodDelta:   measured.length > 0 ? Math.round(measured.reduce((s, i) => s + (i.outcome.moodDelta || 0), 0) / measured.length * 10) / 10 : null,
+    recent:         [...all].reverse().slice(0, 8),
+    hasEnoughData:  measured.length >= 3,
+  });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LEARNING ENGINE — Patterns, Predictions, Effectiveness, Summary
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── GET /api/intelliq/patterns — rule-based risk patterns for org ────────── */
+app.get('/api/intelliq/patterns', requireAuth, (req, res) => {
+  const { orgCode } = req.query;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  const code = orgCode.toLowerCase().trim();
+  const agg  = _aggregateOrgData(code);
+
+  const flat = [];
+  Object.entries(agg.memberPatterns || {}).forEach(([name, pats]) => {
+    pats.forEach(p => flat.push({ member: name, ...p }));
+  });
+
+  const summary = {
+    totalMembers:    agg.memberCount,
+    membersAtRisk:   new Set(flat.map(p => p.member)).size,
+    patternCounts:   flat.reduce((acc, p) => { acc[p.type] = (acc[p.type] || 0) + 1; return acc; }, {}),
+    highConfidence:  flat.filter(p => p.confidence === 'high').length,
+    patterns:        flat,
+  };
+  res.json(summary);
+});
+
+/* ── GET /api/intelliq/predictions — trajectory predictions ──────────────── */
+app.get('/api/intelliq/predictions', requireAuth, (req, res) => {
+  const { orgCode } = req.query;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  const code = orgCode.toLowerCase().trim();
+  const agg  = _aggregateOrgData(code);
+
+  const flat = [];
+  Object.entries(agg.memberPredictions || {}).forEach(([name, preds]) => {
+    preds.forEach(p => flat.push({ member: name, ...p }));
+  });
+
+  const high   = flat.filter(p => p.urgency === 'high');
+  const medium = flat.filter(p => p.urgency === 'medium');
+
+  res.json({
+    totalPredictions: flat.length,
+    highUrgency:      high.length,
+    mediumUrgency:    medium.length,
+    predictions:      flat.sort((a, b) => (a.urgency === 'high' ? -1 : 1)),
+    generatedAt:      new Date().toISOString(),
+  });
+});
+
+/* ── GET /api/intelliq/intervention-effectiveness — per-type breakdown ────── */
+app.get('/api/intelliq/intervention-effectiveness', requireAuth, (req, res) => {
+  const { orgCode } = req.query;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  const code = orgCode.toLowerCase().trim();
+  const all  = orgInterventions[code] || [];
+
+  const measured = all.filter(i => i.status === 'completed' && i.outcome?.status === 'measured');
+
+  const byType = {};
+  measured.forEach(i => {
+    const type = _categorizeAction(i.action);
+    if (!byType[type]) byType[type] = { total: 0, positive: 0, neutral: 0, negative: 0, moodDeltas: [], engDeltas: [] };
+    byType[type].total++;
+    byType[type][i.outcome.outcome]++;
+    if (i.outcome.moodDelta != null) byType[type].moodDeltas.push(i.outcome.moodDelta);
+    const engChange = (i.outcome.changesDetected || []).find(c => c.dimension === 'engagement');
+    if (engChange) byType[type].engDeltas.push(engChange.delta || 0);
+  });
+
+  const effectiveness = Object.entries(byType).map(([type, s]) => ({
+    type,
+    total:              s.total,
+    successRate:        Math.round(s.positive / s.total * 100),
+    avgMoodDelta:       s.moodDeltas.length ? Math.round((s.moodDeltas.reduce((a, b) => a + b, 0) / s.moodDeltas.length) * 10) / 10 : null,
+    avgEngagementDelta: s.engDeltas.length  ? Math.round((s.engDeltas.reduce((a, b) => a + b, 0)  / s.engDeltas.length)  * 10) / 10 : null,
+    outcomes:           { positive: s.positive, neutral: s.neutral, negative: s.negative },
+    verdict:            s.positive / s.total >= 0.6 ? 'effective' : s.positive / s.total >= 0.4 ? 'mixed' : 'low-impact',
+  })).sort((a, b) => b.successRate - a.successRate);
+
+  res.json({
+    totalMeasured: measured.length,
+    byType:        effectiveness,
+    mostEffective: effectiveness[0] || null,
+    hasEnoughData: measured.length >= 3,
+  });
+});
+
+/* ── Learning-summary cache ───────────────────────────────────────────────── */
+const learningSummaryCache = {}; // orgCode → { data, generatedAt }
+const LEARNING_CACHE_TTL   = 2 * 60 * 60 * 1000; // 2 hours
+
+/* ── GET /api/intelliq/learning-summary — org-level learning narrative ───── */
+app.get('/api/intelliq/learning-summary', requireAuth, async (req, res) => {
+  const { orgCode, refresh } = req.query;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  const code   = orgCode.toLowerCase().trim();
+  const cached = learningSummaryCache[code];
+  if (cached && refresh !== '1' && Date.now() - cached.generatedAt < LEARNING_CACHE_TTL) {
+    return res.json({ ...cached.data, cached: true });
+  }
+
+  const agg  = _aggregateOrgData(code);
+  const all  = orgInterventions[code] || [];
+
+  // ── Intervention stats ─────────────────────────────────────────────────
+  const measured = all.filter(i => i.status === 'completed' && i.outcome?.status === 'measured');
+  const positive = measured.filter(i => i.outcome.outcome === 'positive').length;
+  const intStats = {
+    total:           all.length,
+    completed:       all.filter(i => i.status === 'completed').length,
+    measured:        measured.length,
+    successRate:     measured.length > 0 ? Math.round(positive / measured.length * 100) : null,
+    byType:          {},
+  };
+  measured.forEach(i => {
+    const t = _categorizeAction(i.action);
+    if (!intStats.byType[t]) intStats.byType[t] = { total: 0, positive: 0 };
+    intStats.byType[t].total++;
+    if (i.outcome.outcome === 'positive') intStats.byType[t].positive++;
+  });
+
+  // ── Pattern frequency ──────────────────────────────────────────────────
+  const allPatterns = Object.values(agg.memberPatterns || {}).flat();
+  const patternFreq = allPatterns.reduce((acc, p) => { acc[p.label] = (acc[p.label] || 0) + 1; return acc; }, {});
+
+  // ── Monthly mood trend (last 3 months) ────────────────────────────────
+  const monthlyMood = [0, 1, 2].map(n => {
+    const from = Date.now() - (n + 1) * 30 * 24 * 60 * 60 * 1000;
+    const to   = Date.now() - n * 30 * 24 * 60 * 60 * 1000;
+    const mc   = agg.allCheckins.filter(c => c.time >= from && c.time < to);
+    return { month: n === 0 ? 'current' : n === 1 ? '1 month ago' : '2 months ago', avgMood: _avgMood(mc), checkins: mc.length };
+  });
+
+  // ── Build learning data block for Claude ──────────────────────────────
+  const byTypeLines = Object.entries(intStats.byType).map(([t, s]) =>
+    `${t}: ${s.total} completed, ${Math.round(s.positive / s.total * 100)}% positive`
+  ).join(', ');
+  const patternLines = Object.entries(patternFreq).map(([l, c]) => `${l}: ${c} member(s)`).join(', ');
+  const moodLine = monthlyMood.map(m => `${m.month}: ${m.avgMood ?? 'no data'}/5 (${m.checkins} check-ins)`).join(' | ');
+  const predCount = Object.values(agg.memberPredictions || {}).flat().length;
+
+  const learningBrief = [
+    `ORG: ${agg.meta.orgName || code} (${agg.meta.orgMode || 'general'}) — ${agg.memberCount} members`,
+    `INTERVENTION HISTORY: ${intStats.total} tracked, ${intStats.completed} completed, ${intStats.measured} measured.`,
+    intStats.successRate !== null ? `Overall success rate: ${intStats.successRate}%.` : 'Not enough measured outcomes yet.',
+    byTypeLines ? `By action type: ${byTypeLines}.` : '',
+    patternLines ? `Current risk patterns: ${patternLines}.` : 'No current risk patterns detected.',
+    `Monthly mood: ${moodLine}.`,
+    predCount > 0 ? `Active trajectory predictions: ${predCount} members showing declining trends.` : '',
+    `Org mood this week: ${agg.moodLast7 ?? 'no data'}/5 | Last 30d: ${agg.moodLast30 ?? 'no data'}/5.`,
+    `Active this week: ${agg.activeThisWeek}/${agg.memberCount} members.`,
+  ].filter(Boolean).join('\n');
+
+  // ── Claude narrative (150 tokens, cached 2h) ──────────────────────────
+  let narrative = null;
+  try {
+    const response = await client.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 200,
+      system:     `You are IntelliQ, a learning intelligence system. You receive a summary of what an org has done and what has worked. Write 3-4 short sentences that describe what IntelliQ has learned about this specific organisation over time: what intervention approaches work best, what patterns recur, and what the trajectory looks like. Be specific. Be honest about limited data. Do not be generic. Do not use headers or bullet points. Write as one flowing paragraph.`,
+      messages:   [{ role: 'user', content: learningBrief }],
+    });
+    narrative = response.content[0]?.text?.trim() || null;
+  } catch(err) {
+    console.warn('learning-summary AI error:', err.message);
+  }
+
+  const result = {
+    generatedAt:     new Date().toISOString(),
+    cached:          false,
+    orgName:         agg.meta.orgName || code,
+    narrative:       narrative || `IntelliQ is building its understanding of this organisation. ${intStats.total} intervention(s) tracked so far. More data will unlock richer learning.`,
+    interventions:   intStats,
+    patternFrequency: patternFreq,
+    monthlyMood,
+    currentPredictions: predCount,
+    memberCount:     agg.memberCount,
+  };
+
+  learningSummaryCache[code] = { data: result, generatedAt: Date.now() };
+  res.json(result);
+});
+
+function _noDataFallback(agg) {
+  return {
+    summary: 'Not enough data yet. Once members complete a check-in or weekly reflection, IntelliQ will synthesise what it learns here.',
+    moodTrend: 'unknown', moodNote: 'No mood data collected yet.', notEnoughData: true,
+    trends: { trendDirection: 'unknown', trendReason: 'No data yet.', confidenceLevel: 'low', engagementTrend: 'unknown', moodComparison: 'No data yet.' },
+    semanticThemes: [], memberProfiles: [], groupInsights: [],
+    recommendations: [
+      { action: 'Ask members to complete their first check-in in the IntelliQ app.', urgency: 'high', owner: 'coach', reason: 'No member activity recorded yet.', evidence: [] },
+      { action: 'Ensure all members have set a personal goal on first login.', urgency: 'medium', owner: 'coach', reason: `${agg.memberCount - agg.membersWithGoals.length} member(s) have no goal set.`, evidence: ['goals'] },
+    ],
+    memberHighlights: [], goalProgress: `${agg.membersWithGoals.length} of ${agg.memberCount} member(s) have set goals.`,
+    atRisk: [], themes: [], groupHighlights: [], recommendedActions: [],
+  };
+}
+
+function _buildFallbackInsight(agg) {
+  const moodTrend = agg.moodLast7 === null ? 'unknown'
+    : agg.moodPrevWeek !== null && agg.moodLast7 > agg.moodPrevWeek + 0.3 ? 'improving'
+    : agg.moodPrevWeek !== null && agg.moodLast7 < agg.moodPrevWeek - 0.3 ? 'declining'
+    : 'stable';
+  const engTrend = agg.activeThisWeek >= Math.ceil(agg.memberCount * 0.7) ? 'stable' : 'declining';
+
+  return {
+    summary: `${agg.activeThisWeek} of ${agg.memberCount} members active this week.`
+      + (agg.moodLast7 !== null ? ` Team mood: ${agg.moodLast7}/5.` : '')
+      + (agg.atRiskComputed.length > 0 ? ` ${agg.atRiskComputed.length} member(s) need attention.` : ''),
+    moodTrend, notEnoughData: false,
+    moodNote: agg.moodLast7 !== null ? `Team mood ${agg.moodLast7}/5 this week.` : 'No mood data.',
+    trends: {
+      trendDirection: moodTrend, engagementTrend: engTrend,
+      confidenceLevel: agg.moodCount7 >= 4 ? 'high' : agg.moodCount7 >= 2 ? 'medium' : 'low',
+      trendReason: agg.moodLast7 !== null && agg.moodPrevWeek !== null
+        ? `Mood moved from ${agg.moodPrevWeek}/5 last week to ${agg.moodLast7}/5 this week.`
+        : 'Insufficient data for trend comparison.',
+      moodComparison: agg.moodLast30 !== null
+        ? `Last 30d avg: ${agg.moodLast30}/5 — this week: ${agg.moodLast7 ?? '—'}/5.`
+        : 'No historical data yet.',
+    },
+    semanticThemes: [],
+    memberProfiles: agg.allMembers.map(u => {
+      const thisWeekC = (agg.checkinsByMember[u.name] || []).filter(c => c.isThisWeek);
+      const moods     = thisWeekC.filter(c => c.mood !== null).map(c => c.mood);
+      const avg       = moods.length ? moods.reduce((a, b) => a + b, 0) / moods.length : null;
+      const hasGoal   = agg.membersWithGoals.some(g => g.name === u.name);
+      return {
+        name: u.name,
+        currentState: avg !== null ? `Mood ${avg.toFixed(1)}/5 this week (${moods.length} check-ins)` : 'No check-in this week — status unknown',
+        strengths: [], concerns: thisWeekC.length === 0 ? ['No check-in this week'] : [],
+        goalAlignment: hasGoal ? 'unknown' : 'no_goal',
+        goalAlignmentExplanation: hasGoal ? 'Insufficient check-in data for alignment analysis.' : 'No goal set.',
+        riskSignals: avg !== null && avg < 2.5 ? [`Low mood avg ${avg.toFixed(1)}/5`] : [],
+        recommendedAction: avg !== null && avg < 2.5 ? `Check in with ${u.name} directly this week.`
+          : thisWeekC.length === 0 ? `Nudge ${u.name} to check in.` : '',
+      };
+    }),
+    groupInsights: agg.groupData.filter(g => g.memberCount > 0).map(g => ({
+      groupName: g.name,
+      mood: g.avgMood === null ? 'unknown' : g.avgMood >= 4 ? 'high' : g.avgMood >= 3 ? 'okay' : 'low',
+      engagement: g.memberCount === 0 ? 'low' : g.activeCount / g.memberCount >= 0.7 ? 'high' : g.activeCount > 0 ? 'medium' : 'low',
+      recurringThemes: [], riskSignals: [], positiveSignals: [],
+      membersNeedingAttention: [], suggestedAction: '',
+    })),
+    recommendations: agg.atRiskComputed.slice(0, 3).map(r => ({
+      action: `Check in with ${r.name} — ${r.reason.toLowerCase()}.`,
+      urgency: r.urgency, owner: 'coach', reason: r.reason, evidence: ['checkins'],
+    })),
+    memberHighlights: [],
+    goalProgress: `${agg.membersWithGoals.length} of ${agg.memberCount} members have set goals.`,
+    atRisk: agg.atRiskComputed.slice(0, 3),
+    themes: [], groupHighlights: [],
+    recommendedActions: agg.atRiskComputed.slice(0, 2).map(r => ({ priority: r.urgency, action: `Check in with ${r.name}.` })),
+  };
+}
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
