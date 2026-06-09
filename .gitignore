@@ -9,3 +9,6 @@ Thumbs.db
 
 # Dependencies
 node_modules/
+
+# Persisted data — do not commit (contains real user data)
+data/

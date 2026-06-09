@@ -9,6 +9,7 @@ const Auth = {
   /* ── State ─────────────────────────────────────────────── */
   currentUser: null,
   currentOrg:  null,
+  token:       null,
 
   ROLE_LABELS: {
     superadmin: 'Super Admin',
@@ -29,9 +30,10 @@ const Auth = {
     const saved = localStorage.getItem('iq_auth');
     if (saved) {
       try {
-        const { user, org } = JSON.parse(saved);
+        const { user, org, token } = JSON.parse(saved);
         this.currentUser = user;
         this.currentOrg  = org;
+        this.token       = token || null;
         return true; // already logged in
       } catch(e) { localStorage.removeItem('iq_auth'); }
     }
@@ -40,16 +42,25 @@ const Auth = {
 
   save() {
     localStorage.setItem('iq_auth', JSON.stringify({
-      user: this.currentUser,
-      org:  this.currentOrg,
+      user:  this.currentUser,
+      org:   this.currentOrg,
+      token: this.token,
     }));
   },
 
   logout() {
     this.currentUser = null;
     this.currentOrg  = null;
+    this.token       = null;
     localStorage.removeItem('iq_auth');
     location.reload();
+  },
+
+  /* ── Auth headers helper ───────────────────────────────── */
+  _headers(extra = {}) {
+    const h = { 'Content-Type': 'application/json', ...extra };
+    if (this.token) h['Authorization'] = `Bearer ${this.token}`;
+    return h;
   },
 
   isMember()     { return this.currentUser?.role === 'member'; },
@@ -66,24 +77,26 @@ const Auth = {
   /* ── Setup org ─────────────────────────────────────────── */
   async setupOrg(orgName, orgMode, adminName, password) {
     const res  = await fetch('/api/auth/setup-org', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: this._headers(),
       body: JSON.stringify({ orgName, orgMode, adminName, password }),
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
+    if (data.token) { this.token = data.token; this.save(); }
     return data;
   },
 
   /* ── Login ─────────────────────────────────────────────── */
   async login(orgCode, name, password) {
     const res  = await fetch('/api/auth/login', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: this._headers(),
       body: JSON.stringify({ orgCode, name, password }),
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
     this.currentUser = data.user;
     this.currentOrg  = data.org;
+    this.token       = data.token || null;
     this.save();
     return data;
   },
@@ -91,7 +104,7 @@ const Auth = {
   /* ── Create user ───────────────────────────────────────── */
   async createUser(name, role, supervisorId, password) {
     const res  = await fetch('/api/auth/create-user', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: this._headers(),
       body: JSON.stringify({
         orgCode:     this.currentUser.orgCode,
         creatorId:   this.currentUser.id,
@@ -108,7 +121,7 @@ const Auth = {
   /* ── Bulk create ───────────────────────────────────────── */
   async bulkCreate(names, role, supervisorId) {
     const res  = await fetch('/api/auth/bulk-create', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: this._headers(),
       body: JSON.stringify({
         orgCode:     this.currentUser.orgCode,
         creatorId:   this.currentUser.id,
@@ -124,7 +137,7 @@ const Auth = {
   /* ── Generate invite link ──────────────────────────────── */
   async generateInvite(role, supervisorId) {
     const res  = await fetch('/api/auth/invite', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: this._headers(),
       body: JSON.stringify({
         orgCode:     this.currentUser.orgCode,
         role,
@@ -138,7 +151,10 @@ const Auth = {
 
   /* ── Get hierarchy tree ────────────────────────────────── */
   async getOrgTree() {
-    const res  = await fetch(`/api/auth/org-tree?orgCode=${encodeURIComponent(this.currentUser.orgCode)}`);
+    const res  = await fetch(
+      `/api/auth/org-tree?orgCode=${encodeURIComponent(this.currentUser.orgCode)}`,
+      { headers: this._headers() }
+    );
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
     return data;
@@ -147,7 +163,7 @@ const Auth = {
   /* ── Update user ───────────────────────────────────────── */
   async updateUser(userId, updates) {
     const res  = await fetch('/api/auth/update-user', {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      method: 'PUT', headers: this._headers(),
       body: JSON.stringify({ orgCode: this.currentUser.orgCode, userId, updates }),
     });
     const data = await res.json();
@@ -158,7 +174,7 @@ const Auth = {
   /* ── Delete user ───────────────────────────────────────── */
   async deleteUser(userId) {
     const res  = await fetch('/api/auth/delete-user', {
-      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      method: 'DELETE', headers: this._headers(),
       body: JSON.stringify({ orgCode: this.currentUser.orgCode, userId }),
     });
     const data = await res.json();

@@ -720,7 +720,39 @@ html, body {
 /* ── Weekly rating buttons ─────────────────────────────────── */
 .weekly-rating-btn { font-family: inherit; cursor: pointer; transition: all 0.15s; }
 
-/* ── Bottom nav: 5-item layout ─────────────────────────────── */
+/* ── Note tag buttons ──────────────────────────────────────── */
+.note-tag-btn {
+  padding: 4px 10px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+}
+.note-tag-btn.active, .note-tag-btn:hover {
+  background: rgba(124,90,245,0.12);
+  border-color: rgba(124,90,245,0.35);
+  color: var(--accent);
+}
+
+/* ── Note tag badge ────────────────────────────────────────── */
+.note-tag-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  background: rgba(124,90,245,0.1);
+  border: 1px solid rgba(124,90,245,0.25);
+  color: var(--accent);
+  margin-left: 0.4rem;
+}
+
+/* ── Bottom nav: 4-item layout ─────────────────────────────── */
 .nav-tab .nav-icon { font-size: 1.15rem; line-height: 1; }
 
 /* ── Empty card ────────────────────────────────────────────── */

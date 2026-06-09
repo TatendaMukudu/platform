@@ -61,6 +61,7 @@ function initLogin() {
     AppState.adminRole = Auth.ROLE_LABELS[Auth.currentUser?.role] || 'Admin';
     launchApp();
     _checkCoachDailyCheckin();
+    syncOrgMembersToAppState(); // sync real users into analytics after session restore
     return;
   }
 
@@ -265,13 +266,30 @@ async function submitCoachCheckin() {
 function launchMemberView() {
   document.getElementById('login-screen').style.display = 'none';
   const u = Auth.currentUser;
-  const base = `/member/?orgCode=${encodeURIComponent(u.orgCode)}&name=${encodeURIComponent(u.name)}`;
+  const base = `/member/?orgCode=${encodeURIComponent(u.orgCode)}&name=${encodeURIComponent(u.name)}&userId=${encodeURIComponent(u.id)}&role=${encodeURIComponent(u.role || 'member')}`;
   // If password was never changed (passwordSet is false), send to set-password flow
   if (u.passwordSet === false) {
-    window.location.href = base + `&userId=${encodeURIComponent(u.id)}&needsPassword=1`;
+    window.location.href = base + `&needsPassword=1`;
   } else {
     window.location.href = base;
   }
+}
+
+/* ── Sync org users into AppState.members after session restore ───────── */
+async function syncOrgMembersToAppState() {
+  try {
+    const { flat } = await Auth.getOrgTree();
+    (flat || []).forEach(user => {
+      if (user.role !== 'superadmin') _addMemberToAppState(user);
+    });
+  } catch(e) { /* non-critical — analytics may show stale data until next login */ }
+}
+
+/* ── Auth-aware fetch helper for protected platform endpoints ─────────── */
+function authFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (Auth.token) headers['Authorization'] = `Bearer ${Auth.token}`;
+  return fetch(url, { ...options, headers });
 }
 
 function launchApp(){
@@ -570,6 +588,25 @@ function renderAnalytics(){
 }
 
 /* ── INTELLIQ PAGE ───────────────────────────────────────── */
+
+/*
+ * TODO — IntelliQ Org Intelligence Card (Priority 8)
+ * Add a "What IntelliQ knows this week" card below the existing health panel,
+ * above the weekly pulse section. Implementation steps:
+ *
+ * 1. Call GET /api/platform/org-checkins?orgCode=X and GET /api/weekly/org?orgCode=X
+ * 2. From check-ins: average the mood scores (1-5) → display as team mood (e.g. "3.8/5")
+ * 3. From check-in text + weekly data: count word frequency (split on spaces, lowercase,
+ *    ignore stop words) → show top 5 recurring words/themes as chips
+ * 4. Call GET /api/notes?orgCode=X&requesterId=adminId and count private vs shared notes
+ * 5. Call GET /api/member/goals for each member → count how many have goals set
+ * 6. Render as a card: mood average pill, theme chips, note counts, goal count
+ * 7. Insert HTML after the id="iq-health-panel" element in renderIntelliQ()
+ *
+ * All data is already stored in server memory — no new endpoints needed.
+ * Keep the card read-only and collapsible. Label it "This Week's Signal".
+ */
+
 function renderIntelliQ(){
   const members = AppState.members;
   const mode = AppState.mode;
@@ -1339,10 +1376,10 @@ async function loadWeeklyPulse() {
   const orgCode = AppState.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g,'-');
 
   try {
-    // Get this week's raw submissions
+    // Get this week's raw submissions (both endpoints require auth)
     const [rawRes, synthRes] = await Promise.all([
-      fetch(`/api/weekly/org?orgCode=${encodeURIComponent(orgCode)}`),
-      fetch('/api/weekly/synthesis', {
+      authFetch(`/api/weekly/org?orgCode=${encodeURIComponent(orgCode)}`),
+      authFetch('/api/weekly/synthesis', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ orgCode, orgName: AppState.orgName, orgMode: AppState.mode }),
       }),
@@ -1711,21 +1748,15 @@ function renderScenarios() {
   container.innerHTML = `
     <!-- BRIEF INPUT -->
     <div style="background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);padding:1.2rem;margin-bottom:1rem">
-      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.9rem">New Assessment — Coach Brief</div>
+      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.9rem">Create an Assessment</div>
 
       <div style="margin-bottom:0.8rem">
-        <label class="form-label">Write your brief in plain language</label>
+        <label class="form-label">What's going on with this person?</label>
         <textarea id="sc-brief" class="form-input" rows="3" style="resize:vertical"
-          placeholder="e.g. Timmy isn't tracking second ball movements in our 4-3-3. When the ball goes wide he stays static instead of rotating. I want to test if he understands why that movement matters and how he thinks about team shape…"></textarea>
+          placeholder="Describe what's happening with this player in plain English. What have you noticed? What do you want to understand better? The AI will design the assessment from your description."></textarea>
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.7rem;margin-bottom:0.9rem">
-        <div>
-          <label class="form-label">Domain</label>
-          <select id="sc-domain" class="form-input">
-            ${domainOptions.map(d => `<option value="${d}">${d}</option>`).join('')}
-          </select>
-        </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:0.9rem">
         <div>
           <label class="form-label">Difficulty</label>
           <div style="display:flex;gap:0.4rem;margin-top:2px">

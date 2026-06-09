@@ -218,6 +218,14 @@
           <div class="page-header-sub" id="inbox-sub">Notes & Messages</div>
         </div>
 
+        <!-- Group membership notice -->
+        <div id="inbox-group-notice" style="display:none;margin-bottom:0.8rem">
+          <div class="empty-card" style="padding:0.8rem 1rem;flex-direction:row;gap:0.6rem;text-align:left">
+            <span style="font-size:1.2rem">👥</span>
+            <div style="font-size:0.78rem;color:var(--text-muted);line-height:1.5">You're not in any groups yet. Your coach will add you when ready. You can still write private notes below.</div>
+          </div>
+        </div>
+
         <!-- Sub-tabs -->
         <div style="display:flex;gap:0.4rem;margin-bottom:1rem">
           <button class="inbox-sub-btn active" data-sub="notes"    onclick="MemberApp.switchInboxTab('notes')"   >📝 Notes</button>
@@ -231,6 +239,20 @@
             <div class="card-label" style="margin-bottom:0.7rem">New Note</div>
             <textarea class="form-input" id="note-content" rows="3" style="resize:none;margin-bottom:0.6rem"
               placeholder="Write anything — a goal, a reflection, something you want to remember…"></textarea>
+
+            <!-- Tag selector -->
+            <div style="margin-bottom:0.7rem">
+              <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.4rem">Tag <span style="font-weight:400">(optional)</span></div>
+              <div style="display:flex;gap:0.35rem;flex-wrap:wrap" id="note-tags-row">
+                <button class="note-tag-btn active" data-tag="" onclick="MemberApp.selectNoteTag('')">None</button>
+                <button class="note-tag-btn" data-tag="Goals" onclick="MemberApp.selectNoteTag('Goals')">🎯 Goals</button>
+                <button class="note-tag-btn" data-tag="Training" onclick="MemberApp.selectNoteTag('Training')">💪 Training</button>
+                <button class="note-tag-btn" data-tag="Personal" onclick="MemberApp.selectNoteTag('Personal')">🧠 Personal</button>
+                <button class="note-tag-btn" data-tag="Team" onclick="MemberApp.selectNoteTag('Team')">🤝 Team</button>
+                <button class="note-tag-btn" data-tag="Mental" onclick="MemberApp.selectNoteTag('Mental')">🧘 Mental</button>
+                <button class="note-tag-btn" data-tag="Other" onclick="MemberApp.selectNoteTag('Other')">📌 Other</button>
+              </div>
+            </div>
 
             <!-- Type selector -->
             <div style="margin-bottom:0.7rem">
@@ -265,6 +287,17 @@
                 </div>
               </div>
             </div>
+          </div>
+
+          <!-- Notes filter -->
+          <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.6rem" id="notes-filter-row">
+            <button class="note-tag-btn active" data-filter="All" onclick="MemberApp._filterNotes('All')">All</button>
+            <button class="note-tag-btn" data-filter="Goals" onclick="MemberApp._filterNotes('Goals')">🎯 Goals</button>
+            <button class="note-tag-btn" data-filter="Training" onclick="MemberApp._filterNotes('Training')">💪 Training</button>
+            <button class="note-tag-btn" data-filter="Personal" onclick="MemberApp._filterNotes('Personal')">🧠 Personal</button>
+            <button class="note-tag-btn" data-filter="Team" onclick="MemberApp._filterNotes('Team')">🤝 Team</button>
+            <button class="note-tag-btn" data-filter="Mental" onclick="MemberApp._filterNotes('Mental')">🧘 Mental</button>
+            <button class="note-tag-btn" data-filter="Other" onclick="MemberApp._filterNotes('Other')">📌 Other</button>
           </div>
 
           <!-- Notes list -->
@@ -310,7 +343,7 @@
 
     </div><!-- /page-content -->
 
-    <!-- Bottom Navigation -->
+    <!-- Bottom Navigation (4 items) -->
     <nav class="bottom-nav">
       <button class="nav-tab active" data-tab="home" onclick="MemberApp.switchTab('home')">
         <span class="nav-icon">🏠</span>
@@ -320,10 +353,6 @@
         <span class="nav-icon">🎯</span>
         Assessments
         <span class="nav-badge" id="scenarios-badge" style="display:none">0</span>
-      </button>
-      <button class="nav-tab" data-tab="checkin" onclick="MemberApp.switchTab('checkin')">
-        <span class="nav-icon">💬</span>
-        Check-In
       </button>
       <button class="nav-tab" data-tab="inbox" onclick="MemberApp.switchTab('inbox')">
         <span class="nav-icon">📬</span>

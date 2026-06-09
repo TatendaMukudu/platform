@@ -7,13 +7,15 @@
 const MemberApp = {
 
   /* ── State ─────────────────────────────────────────────── */
-  session: null,      // { memberName, orgCode, orgName, orgMode }
+  session: null,      // { memberName, userId, orgCode, orgName, orgMode }
   pending: [],        // assigned scenarios from server
   results: [],        // completed scenario results (local)
   checkins: [],       // local check-in history
   goals: null,        // { goal, identity } — set on first login
   mood: null,         // selected mood (1-5)
   _noteType: 'private', // current note type
+  _noteTag: '',         // current note tag (optional)
+  _notesFilter: 'All',  // active filter in notes list
   _myGroups: [],      // groups this member belongs to
 
   // Scenario runner state
@@ -23,6 +25,12 @@ const MemberApp = {
   _sending:    false,
   _completed:  false,
 
+  /* ── Auth headers (sent with all protected fetch calls) ── */
+  _authHeaders() {
+    const t = this.session?.token;
+    return t ? { Authorization: `Bearer ${t}` } : {};
+  },
+
   /* ── Boot ──────────────────────────────────────────────── */
   init() {
     // Check if redirected from platform with password setup flag
@@ -31,8 +39,9 @@ const MemberApp = {
       const name   = params.get('name')   || '';
       const userId = params.get('userId') || '';
       const orgCode= params.get('orgCode')|| '';
+      const role   = params.get('role')   || 'member';
       if (name && userId && orgCode) {
-        this._pendingPasswordSetup = { name, userId, orgCode };
+        this._pendingPasswordSetup = { name, userId, orgCode, role };
         document.getElementById('sp-name').textContent = name;
         document.getElementById('screen-join').classList.remove('active');
         document.getElementById('screen-setpassword').classList.add('active');
@@ -44,15 +53,21 @@ const MemberApp = {
     if (params.get('orgCode') && params.get('name')) {
       const orgCode    = params.get('orgCode');
       const memberName = params.get('name');
-      this.session = { memberName, orgCode: orgCode.toLowerCase(), orgName: orgCode, orgMode: 'school' };
+      const userId     = params.get('userId') || null;
+      const role       = params.get('role')   || 'member';
+      this.session = { memberName, userId, role, orgCode: orgCode.toLowerCase(), orgName: orgCode, orgMode: 'school' };
       localStorage.setItem('iq_member_session', JSON.stringify(this.session));
-      // Fetch real org info
+      // Fetch real org info and get a session token
       fetch('/api/member/join', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orgCode, memberName }),
+        body: JSON.stringify({ orgCode, memberName, userId }),
       }).then(r => r.json()).then(data => {
         if (data.ok) {
-          this.session = { memberName: data.memberName, orgCode: data.orgCode, orgName: data.orgName, orgMode: data.orgMode };
+          this.session = {
+            memberName: data.memberName, userId, role,
+            orgCode: data.orgCode, orgName: data.orgName, orgMode: data.orgMode,
+            token: data.token || null,
+          };
           localStorage.setItem('iq_member_session', JSON.stringify(this.session));
         }
       }).catch(() => {});
@@ -119,8 +134,12 @@ const MemberApp = {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Failed');
 
-      // Now set up session and continue
-      this.session = { memberName: setup.name, orgCode: setup.orgCode.toLowerCase(), orgName: setup.orgCode, orgMode: 'school' };
+      // Now set up session and continue (capture token returned by set-password)
+      this.session = {
+        memberName: setup.name, userId: setup.userId, role: setup.role || 'member',
+        orgCode: setup.orgCode.toLowerCase(), orgName: setup.orgCode, orgMode: 'school',
+        token: data.token || null,
+      };
       localStorage.setItem('iq_member_session', JSON.stringify(this.session));
       this._pendingPasswordSetup = null;
 
@@ -161,8 +180,9 @@ const MemberApp = {
     const s = this.session;
     if (s) {
       fetch('/api/member/goals', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orgCode: s.orgCode, memberName: s.memberName, goal, identity }),
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ orgCode: s.orgCode, memberName: s.memberName, memberId: s.userId || null, goal, identity }),
       }).catch(() => {});
     }
 
@@ -223,6 +243,8 @@ const MemberApp = {
   /* ── Load pending scenarios from server ─────────────────── */
   async loadPending() {
     if (!this.session) return;
+    const pendingEl = document.getElementById('home-pending');
+    if (pendingEl) pendingEl.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.5rem 0">Loading…</div>`;
     try {
       const res  = await fetch(`/api/member/pending?orgCode=${encodeURIComponent(this.session.orgCode)}&memberName=${encodeURIComponent(this.session.memberName)}`);
       const data = await res.json();
@@ -449,29 +471,13 @@ const MemberApp = {
   },
 
   _renderWeeklyFields() {
-    const el = document.getElementById('weekly-fields');
+    const el   = document.getElementById('weekly-fields');
     if (!el) return;
+    const role = this.session?.role || 'member';
 
-    // For now everyone gets the member form — role detection can be added later
-    // When org auth is integrated, role comes from session
-    el.innerHTML = `
+    const ratingBlock = `
       <div class="form-group" style="margin-bottom:1rem">
-        <label class="form-label">How did this week go overall? <span style="color:var(--text-muted);font-weight:400">(be honest)</span></label>
-        <textarea class="form-input" id="weekly-overall" rows="3" style="resize:none"
-          placeholder="Training, school, games, life — whatever felt significant this week…"></textarea>
-      </div>
-      <div class="form-group" style="margin-bottom:1rem">
-        <label class="form-label">What improved or clicked?</label>
-        <textarea class="form-input" id="weekly-improved" rows="2" style="resize:none"
-          placeholder="Something you did better, understood more clearly, or felt more confident with…"></textarea>
-      </div>
-      <div class="form-group" style="margin-bottom:1rem">
-        <label class="form-label">What's still hard or not working?</label>
-        <textarea class="form-input" id="weekly-hard" rows="2" style="resize:none"
-          placeholder="Be specific — what keeps tripping you up?"></textarea>
-      </div>
-      <div class="form-group" style="margin-bottom:1rem">
-        <label class="form-label">Rate your week 1–10 <span style="color:var(--text-muted);font-weight:400">(1 = rough, 10 = best week)</span></label>
+        <label class="form-label">Rate the week 1–10 <span style="color:var(--text-muted);font-weight:400">(1 = rough, 10 = best)</span></label>
         <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.4rem" id="weekly-rating-btns">
           ${[1,2,3,4,5,6,7,8,9,10].map(n => `
             <button class="weekly-rating-btn" data-val="${n}"
@@ -479,14 +485,94 @@ const MemberApp = {
               style="width:38px;height:38px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-secondary);font-size:0.82rem;font-weight:600;cursor:pointer"
             >${n}</button>`).join('')}
         </div>
-      </div>
-      ${this.goals?.goal ? `
+      </div>`;
+
+    const goalBlock = this.goals?.goal ? `
       <div class="form-group" style="margin-bottom:1.2rem">
         <label class="form-label">Your goal: <em style="font-weight:400">"${this._escape(this.goals.goal)}"</em></label>
         <textarea class="form-input" id="weekly-goal-progress" rows="2" style="resize:none"
           placeholder="Did you get closer to it this week? What did you do toward it?"></textarea>
-      </div>` : ''}
-    `;
+      </div>` : '';
+
+    if (role === 'coach') {
+      el.innerHTML = `
+        <div class="form-group" style="margin-bottom:1rem">
+          <label class="form-label">How did training go this week? What worked?</label>
+          <textarea class="form-input" id="weekly-overall" rows="3" style="resize:none"
+            placeholder="Sessions, drills, team energy — what clicked, what didn't?"></textarea>
+        </div>
+        <div class="form-group" style="margin-bottom:1rem">
+          <label class="form-label">Any players you're watching closely?</label>
+          <textarea class="form-input" id="weekly-improved" rows="2" style="resize:none"
+            placeholder="Names, behaviours, concerns — anything worth noting…"></textarea>
+        </div>
+        <div class="form-group" style="margin-bottom:1rem">
+          <label class="form-label">What's the team's energy like right now?</label>
+          <textarea class="form-input" id="weekly-hard" rows="2" style="resize:none"
+            placeholder="Morale, cohesion, any tension or standout positives…"></textarea>
+        </div>
+        <div class="form-group" style="margin-bottom:1rem">
+          <label class="form-label">What would you do differently next week?</label>
+          <textarea class="form-input" id="weekly-different" rows="2" style="resize:none"
+            placeholder="Adjustments to plan, approach, or focus areas…"></textarea>
+        </div>
+        ${ratingBlock}`;
+    } else if (role === 'strength_coach' || role === 'staff') {
+      el.innerHTML = `
+        <div class="form-group" style="margin-bottom:1rem">
+          <label class="form-label">Physical state of the group this week?</label>
+          <textarea class="form-input" id="weekly-overall" rows="3" style="resize:none"
+            placeholder="Load, recovery, injuries, general readiness…"></textarea>
+        </div>
+        <div class="form-group" style="margin-bottom:1rem">
+          <label class="form-label">Anyone carrying load concerns?</label>
+          <textarea class="form-input" id="weekly-improved" rows="2" style="resize:none"
+            placeholder="Names or situations worth flagging to the coach…"></textarea>
+        </div>
+        <div class="form-group" style="margin-bottom:1rem">
+          <label class="form-label">What needs attention next week?</label>
+          <textarea class="form-input" id="weekly-hard" rows="2" style="resize:none"
+            placeholder="Adjustments to training load, recovery protocols, or focus areas…"></textarea>
+        </div>
+        ${ratingBlock.replace('Rate the week', 'Rate readiness levels')}`;
+    } else if (role === 'admin') {
+      el.innerHTML = `
+        <div class="form-group" style="margin-bottom:1rem">
+          <label class="form-label">How is the programme running overall?</label>
+          <textarea class="form-input" id="weekly-overall" rows="3" style="resize:none"
+            placeholder="Operations, logistics, culture — what's running well?"></textarea>
+        </div>
+        <div class="form-group" style="margin-bottom:1rem">
+          <label class="form-label">Any operational concerns?</label>
+          <textarea class="form-input" id="weekly-improved" rows="2" style="resize:none"
+            placeholder="Anything that needs attention at an org level…"></textarea>
+        </div>
+        <div class="form-group" style="margin-bottom:1.2rem">
+          <label class="form-label">What's your focus for next week?</label>
+          <textarea class="form-input" id="weekly-hard" rows="2" style="resize:none"
+            placeholder="Priorities, decisions to make, people to connect with…"></textarea>
+        </div>`;
+    } else {
+      // Default: player / member form
+      el.innerHTML = `
+        <div class="form-group" style="margin-bottom:1rem">
+          <label class="form-label">How did this week go overall? <span style="color:var(--text-muted);font-weight:400">(be honest)</span></label>
+          <textarea class="form-input" id="weekly-overall" rows="3" style="resize:none"
+            placeholder="Training, school, games, life — whatever felt significant this week…"></textarea>
+        </div>
+        <div class="form-group" style="margin-bottom:1rem">
+          <label class="form-label">What improved or clicked?</label>
+          <textarea class="form-input" id="weekly-improved" rows="2" style="resize:none"
+            placeholder="Something you did better, understood more clearly, or felt more confident with…"></textarea>
+        </div>
+        <div class="form-group" style="margin-bottom:1rem">
+          <label class="form-label">What's still hard or not working?</label>
+          <textarea class="form-input" id="weekly-hard" rows="2" style="resize:none"
+            placeholder="Be specific — what keeps tripping you up?"></textarea>
+        </div>
+        ${ratingBlock}
+        ${goalBlock}`;
+    }
     this._weeklyRating = null;
   },
 
@@ -503,11 +589,12 @@ const MemberApp = {
   },
 
   async submitWeekly() {
-    const overall  = (document.getElementById('weekly-overall')?.value  || '').trim();
-    const improved = (document.getElementById('weekly-improved')?.value || '').trim();
-    const hard     = (document.getElementById('weekly-hard')?.value     || '').trim();
-    const goalProg = (document.getElementById('weekly-goal-progress')?.value || '').trim();
-    const errEl    = document.getElementById('weekly-error');
+    const overall    = (document.getElementById('weekly-overall')?.value    || '').trim();
+    const improved   = (document.getElementById('weekly-improved')?.value   || '').trim();
+    const hard       = (document.getElementById('weekly-hard')?.value       || '').trim();
+    const different  = (document.getElementById('weekly-different')?.value  || '').trim();
+    const goalProg   = (document.getElementById('weekly-goal-progress')?.value || '').trim();
+    const errEl      = document.getElementById('weekly-error');
     errEl.style.display = 'none';
 
     if (!overall) {
@@ -518,22 +605,26 @@ const MemberApp = {
     const btn = document.getElementById('weekly-submit-btn');
     btn.textContent = 'Submitting…'; btn.disabled = true;
 
+    const role = this.session?.role || 'member';
     const data = {
       'How the week went':       overall,
-      'What improved':           improved || '—',
-      'What\'s still hard':      hard     || '—',
+      'What improved':           improved   || '—',
+      'What\'s still hard':      hard       || '—',
       'Week rating':             this._weeklyRating ? `${this._weeklyRating}/10` : '—',
     };
-    if (goalProg) data['Goal progress'] = goalProg;
+    if (different)  data['What I\'d do differently'] = different;
+    if (goalProg)   data['Goal progress']             = goalProg;
 
     const s = this.session;
     try {
       const res = await fetch('/api/weekly/submit', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
         body: JSON.stringify({
           orgCode:    s.orgCode,
           memberName: s.memberName,
-          role:       'member',
+          memberId:   s.userId || null,
+          role,
           orgMode:    s.orgMode,
           orgName:    s.orgName,
           goals:      this.goals,
@@ -871,10 +962,12 @@ const MemberApp = {
     // Submit to new freeform endpoint (gets AI response)
     try {
       const res = await fetch('/api/checkin/freeform', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
         body: JSON.stringify({
           orgCode:    s.orgCode,
           memberName: s.memberName,
+          memberId:   s.userId || null,
           text:       note,
           mood:       this.mood,
           role:       'member',
@@ -974,9 +1067,9 @@ const MemberApp = {
     const s = this.session;
     if (!s) return;
     try {
-      const res  = await fetch(`/api/groups?orgCode=${encodeURIComponent(s.orgCode)}`);
+      const memberId = s.userId || s.memberName;
+      const res  = await fetch(`/api/groups?orgCode=${encodeURIComponent(s.orgCode)}&memberId=${encodeURIComponent(memberId)}`);
       const data = res.ok ? await res.json() : { groups: [] };
-      // Filter to groups this member is in — we use name matching since member app doesn't have userId
       this._myGroups = (data.groups || []);
     } catch(e) { this._myGroups = []; }
   },
@@ -984,8 +1077,10 @@ const MemberApp = {
   async switchTab(tab) {
     document.querySelectorAll('.tab-page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll('.nav-tab').forEach(b => b.classList.remove('active'));
-    document.getElementById(`tab-${tab}`).classList.add('active');
-    document.querySelector(`.nav-tab[data-tab="${tab}"]`).classList.add('active');
+    const tabEl  = document.getElementById(`tab-${tab}`);
+    const navBtn = document.querySelector(`.nav-tab[data-tab="${tab}"]`);
+    if (tabEl)  tabEl.classList.add('active');
+    if (navBtn) navBtn.classList.add('active'); // guard: checkin tab has no nav button
 
     if (tab === 'scenarios') this._renderScenariosList();
     if (tab === 'stats')     this._renderStats();
@@ -995,6 +1090,11 @@ const MemberApp = {
   async _renderInbox() {
     await this._loadMyGroups();
     this._populateGroupSelectors();
+    // Show group notice if member isn't in any groups
+    const noticeEl = document.getElementById('inbox-group-notice');
+    if (noticeEl) {
+      noticeEl.style.display = this._myGroups.length ? 'none' : 'block';
+    }
     this.switchInboxTab('notes');
     await this._loadNotes();
     await this._loadMessages();
@@ -1010,11 +1110,26 @@ const MemberApp = {
     const groups = this._myGroups;
     const opts   = groups.length
       ? groups.map(g => `<option value="${g.id}">${g.name}</option>`).join('')
-      : `<option value="">No groups yet</option>`;
+      : `<option value="">You're not in any groups yet</option>`;
     const noteGrp  = document.getElementById('note-group-id');
     const msgGrp   = document.getElementById('msg-to-group');
     if (noteGrp) noteGrp.innerHTML = `<option value="">— Select group —</option>` + opts;
     if (msgGrp)  msgGrp.innerHTML  = `<option value="">— Select group —</option>` + opts;
+  },
+
+  selectNoteTag(tag) {
+    this._noteTag = tag;
+    document.querySelectorAll('#note-tags-row .note-tag-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.tag === tag);
+    });
+  },
+
+  _filterNotes(filter) {
+    this._notesFilter = filter;
+    document.querySelectorAll('#notes-filter-row .note-tag-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.filter === filter);
+    });
+    this._renderNotesList();
   },
 
   selectNoteType(type) {
@@ -1050,9 +1165,10 @@ const MemberApp = {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           orgCode:    s.orgCode,
-          authorId:   s.memberName, // using name as ID in member app (no userId)
+          authorId:   s.userId || s.memberName, // prefer stable userId when available
           authorName: s.memberName,
           content, type: this._noteType,
+          tag:        this._noteTag || null,
           groupId:    groupId || null,
           orgMode:    s.orgMode,
           orgName:    s.orgName,
@@ -1061,9 +1177,11 @@ const MemberApp = {
       });
       const data = res.ok ? await res.json() : {};
 
-      // Clear input
+      // Clear input and reset tag
       const noteEl = document.getElementById('note-content');
       if (noteEl) noteEl.value = '';
+      this._noteTag = '';
+      this.selectNoteTag('');
 
       // Show AI response
       if (data.note?.aiResponse) {
@@ -1083,44 +1201,69 @@ const MemberApp = {
     }
   },
 
+  _cachedNotes: [],
+
   async _loadNotes() {
     const el = document.getElementById('notes-list');
     if (!el) return;
     const s = this.session;
+    el.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);padding:1rem 0">Loading…</div>`;
     try {
-      const res  = await fetch(`/api/notes?orgCode=${encodeURIComponent(s.orgCode)}&requesterId=${encodeURIComponent(s.memberName)}`);
+      const requesterId = s.userId || s.memberName;
+      const res  = await fetch(
+        `/api/notes?orgCode=${encodeURIComponent(s.orgCode)}&requesterId=${encodeURIComponent(requesterId)}`,
+        { headers: this._authHeaders() }
+      );
+      if (res.status === 401) { this._cachedNotes = []; this._renderNotesList(); return; }
       const data = res.ok ? await res.json() : { notes: [] };
-      const notes = data.notes || [];
-
-      if (!notes.length) {
-        el.innerHTML = `<div class="empty-card"><div class="empty-icon">📝</div><div>No notes yet. Write your first one above.</div></div>`;
-        return;
-      }
-
-      const typeIcons = { private:'🔒', shared:'📤', anonymous:'👤' };
-      const typeColors = { private:'var(--text-muted)', shared:'var(--accent)', anonymous:'var(--warning)' };
-      el.innerHTML = notes.map(n => {
-        const icon  = typeIcons[n.type] || '📝';
-        const color = typeColors[n.type] || 'var(--text-muted)';
-        const time  = new Date(n.createdAt).toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
-        return `
-          <div class="card" style="margin-bottom:0.6rem;border-color:${n.type==='private'?'var(--border)':n.type==='shared'?'rgba(124,90,245,0.25)':'rgba(247,178,79,0.25)'}">
-            <div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.5rem">
-              <span>${icon}</span>
-              <span style="font-size:0.72rem;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:0.5px">${n.type}</span>
-              <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto">${time}</span>
-            </div>
-            <div style="font-size:0.83rem;color:var(--text-primary);line-height:1.55;margin-bottom:${n.aiResponse?'0.6rem':'0'}">${this._escape(n.content)}</div>
-            ${n.aiResponse && n.authorId === s.memberName ? `
-              <div style="display:flex;gap:0.5rem;align-items:flex-start;padding-top:0.5rem;border-top:1px solid var(--border)">
-                <span style="font-size:0.68rem;font-weight:700;color:var(--accent);white-space:nowrap">IQ:</span>
-                <span style="font-size:0.78rem;color:var(--text-secondary);line-height:1.5">${this._escape(n.aiResponse)}</span>
-              </div>` : ''}
-          </div>`;
-      }).join('');
+      this._cachedNotes = data.notes || [];
+      this._renderNotesList();
     } catch(e) {
       el.innerHTML = `<div style="font-size:0.8rem;color:var(--danger)">Could not load notes.</div>`;
     }
+  },
+
+  _renderNotesList() {
+    const el = document.getElementById('notes-list');
+    if (!el) return;
+    const s = this.session;
+    const filter = this._notesFilter || 'All';
+    const notes = filter === 'All'
+      ? this._cachedNotes
+      : this._cachedNotes.filter(n => n.tag === filter);
+
+    if (!this._cachedNotes.length) {
+      el.innerHTML = `<div class="empty-card"><div class="empty-icon">📝</div><div>No notes yet. Write your first one above.</div></div>`;
+      return;
+    }
+    if (!notes.length) {
+      el.innerHTML = `<div class="empty-card"><div class="empty-icon">🔍</div><div>No ${filter} notes yet.</div></div>`;
+      return;
+    }
+
+    const typeIcons  = { private:'🔒', shared:'📤', anonymous:'👤' };
+    const typeColors = { private:'var(--text-muted)', shared:'var(--accent)', anonymous:'var(--warning)' };
+    el.innerHTML = notes.map(n => {
+      const icon  = typeIcons[n.type] || '📝';
+      const color = typeColors[n.type] || 'var(--text-muted)';
+      const time  = new Date(n.createdAt).toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+      const tagBadge = n.tag ? `<span class="note-tag-badge">${n.tag}</span>` : '';
+      return `
+        <div class="card" style="margin-bottom:0.6rem;padding:1rem;border-radius:12px;background:var(--surface-1);border-color:${n.type==='private'?'var(--border)':n.type==='shared'?'rgba(124,90,245,0.25)':'rgba(247,178,79,0.25)'}">
+          <div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.5rem">
+            <span>${icon}</span>
+            <span style="font-size:0.72rem;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:0.5px">${n.type}</span>
+            ${tagBadge}
+            <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto">${time}</span>
+          </div>
+          <div style="font-size:0.83rem;color:var(--text-primary);line-height:1.55;margin-bottom:${n.aiResponse?'0.6rem':'0'}">${this._escape(n.content)}</div>
+          ${n.aiResponse && (n.authorId === (s.userId || s.memberName) || n.authorName === s.memberName) ? `
+            <div style="display:flex;gap:0.5rem;align-items:flex-start;padding-top:0.5rem;border-top:1px solid var(--border)">
+              <span style="font-size:0.68rem;font-weight:700;color:var(--accent);white-space:nowrap">IQ:</span>
+              <span style="font-size:0.78rem;color:var(--text-secondary);line-height:1.5">${this._escape(n.aiResponse)}</span>
+            </div>` : ''}
+        </div>`;
+    }).join('');
   },
 
   updateMsgRecipient() {
@@ -1140,7 +1283,7 @@ const MemberApp = {
     await fetch('/api/messages/send', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        orgCode: s.orgCode, fromId: s.memberName, fromName: s.memberName,
+        orgCode: s.orgCode, fromId: s.userId || s.memberName, fromName: s.memberName,
         toType, toId: toId || null, content, anonymous,
       }),
     });
@@ -1153,18 +1296,25 @@ const MemberApp = {
     const el = document.getElementById('messages-list');
     if (!el) return;
     const s = this.session;
+    el.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);padding:1rem 0">Loading…</div>`;
     try {
-      const res  = await fetch(`/api/messages?orgCode=${encodeURIComponent(s.orgCode)}&requesterId=${encodeURIComponent(s.memberName)}`);
+      const requesterId = s.userId || s.memberName;
+      const res  = await fetch(
+        `/api/messages?orgCode=${encodeURIComponent(s.orgCode)}&requesterId=${encodeURIComponent(requesterId)}`,
+        { headers: this._authHeaders() }
+      );
+      if (res.status === 401) { el.innerHTML = `<div class="empty-card"><div class="empty-icon">🔒</div><div>Session expired — please log in again.</div></div>`; return; }
       const data = res.ok ? await res.json() : { messages: [] };
       const msgs = data.messages || [];
 
       if (!msgs.length) {
-        el.innerHTML = `<div class="empty-card"><div class="empty-icon">💬</div><div>No messages yet.</div></div>`;
+        el.innerHTML = `<div class="empty-card"><div class="empty-icon">💬</div><div>No messages yet. Messages from your coach and groups will appear here.</div></div>`;
         return;
       }
 
       el.innerHTML = msgs.map(m => {
-        const isMine = m.fromId === s.memberName || (!m.anonymous && m.fromName === s.memberName);
+        const myId   = s.userId || s.memberName;
+        const isMine = m.fromId === myId || (!m.anonymous && m.fromName === s.memberName);
         const label  = m.anonymous ? '👤 Anonymous' : m.fromName;
         const target = m.toType === 'org' ? 'Whole Org' : (this._myGroups.find(g=>g.id===m.toId)?.name || m.toId || '—');
         const time   = new Date(m.createdAt).toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });

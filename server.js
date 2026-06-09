@@ -2,12 +2,92 @@ require('dotenv').config();
 const express   = require('express');
 const Anthropic  = require('@anthropic-ai/sdk');
 const path      = require('path');
+const bcrypt    = require('bcryptjs');
+const fs        = require('fs');
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname)));
+
+/* ── Persistence ──────────────────────────────────────────────────────────────
+   All in-memory stores are saved to data/store.json on every write (debounced).
+   On startup, data is restored from that file.
+   DATA_DIR can be overridden via env var (e.g. a Render persistent disk mount).
+   ─────────────────────────────────────────────────────────────────────────── */
+const DATA_DIR   = process.env.DATA_DIR  || path.join(__dirname, 'data');
+const STORE_FILE = path.join(DATA_DIR, 'store.json');
+
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+function loadStore() {
+  try {
+    if (fs.existsSync(STORE_FILE)) {
+      return JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'));
+    }
+  } catch(e) { console.warn('[store] Load failed:', e.message); }
+  return {};
+}
+
+let _saveTimer = null;
+function scheduleSave() {
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    try {
+      const data = {
+        orgMeta, orgUsers, inviteTokens,
+        orgGroups, orgNotes, orgMessages, orgStore,
+        assignedScenarios, memberResults, memberCheckins,
+        memberGoals, weeklyAssessments,
+      };
+      fs.writeFileSync(STORE_FILE, JSON.stringify(data), 'utf8');
+    } catch(e) { console.error('[store] Save failed:', e.message); }
+  }, 500);
+}
+
+const _store = loadStore();
+
+/* ── Session tokens ───────────────────────────────────────────────────────────
+   Issued on login / setup / member join. NOT persisted — tokens die on restart
+   so users re-authenticate naturally. 24-hour expiry.
+   ─────────────────────────────────────────────────────────────────────────── */
+const activeSessions = {}; // token → { userId, orgCode, role, expiresAt }
+
+const SALT_ROUNDS = 10;
+
+// Detect passwords still stored with the old toy simpleHash (short hex, no $2b$ prefix)
+function isLegacyHash(h) { return h && !h.startsWith('$2b$') && !h.startsWith('$2a$'); }
+
+// Legacy hash used only for migration path — new code never calls this for new passwords
+function simpleHash(str) { let h = 0; for (const c of str) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h.toString(16); }
+
+function issueToken(userId, orgCode, role) {
+  const token = generateToken();
+  activeSessions[token] = {
+    userId, orgCode: (orgCode || '').toLowerCase(), role,
+    expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+  };
+  return token;
+}
+
+function verifyToken(tokenStr) {
+  if (!tokenStr) return null;
+  const s = activeSessions[tokenStr];
+  if (!s) return null;
+  if (s.expiresAt < Date.now()) { delete activeSessions[tokenStr]; return null; }
+  return s;
+}
+
+// Middleware — applied to endpoints that expose aggregate org data
+function requireAuth(req, res, next) {
+  const header = (req.headers.authorization || '').replace('Bearer ', '').trim();
+  const token  = header || req.query.token || req.body?.token;
+  const session = verifyToken(token);
+  if (!session) return res.status(401).json({ error: 'Authentication required. Please log in again.' });
+  req.iqSession = session;
+  next();
+}
 
 /* ─── REFLECTION SYSTEM PROMPT ─────────────────────────────────────────── */
 function buildReflectionPrompt(orgMode, orgName) {
@@ -182,11 +262,7 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-/* ─── SCENARIO DRAFT ENDPOINT ───────────────────────────────────────────
-   Coach submits a plain-language brief. Claude drafts a scenario:
-   opening situation, 3-5 probing questions, and a coaching note.
-   Coach reviews and approves before it ever reaches the member.
-   ────────────────────────────────────────────────────────────────────── */
+/* ─── SCENARIO DRAFT ENDPOINT ──────────────────────────────────────────── */
 app.post('/api/draft-scenario', async (req, res) => {
   const { brief, orgMode, orgName, memberName, difficulty, image } = req.body;
   if (!brief) return res.status(400).json({ error: 'brief required' });
@@ -221,7 +297,6 @@ RULES:
 - The coachNote is private — never shown to the member
 - Adapt to the org type`;
 
-  // Build message content — include image if provided
   const userContent = hasImage
     ? [
         { type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.data } },
@@ -238,7 +313,6 @@ RULES:
     });
 
     const raw = response.content[0]?.text || '';
-    // Strip markdown code fences if present
     const jsonStr = raw.replace(/```json\n?|\n?```/g, '').trim();
 
     let draft;
@@ -253,11 +327,7 @@ RULES:
   }
 });
 
-/* ─── COACH DEBRIEF ENDPOINT ────────────────────────────────────────────
-   After a member completes a scenario, generates a private debrief
-   for the coach: what the responses reveal + recommended actions.
-   Never shown to the member.
-   ────────────────────────────────────────────────────────────────────── */
+/* ─── COACH DEBRIEF ENDPOINT ────────────────────────────────────────────── */
 app.post('/api/coach-debrief', async (req, res) => {
   const { conversation, scores, memberName, scenarioTitle, orgMode, orgName, coachRole } = req.body;
   if (!conversation || !scores) return res.status(400).json({ error: 'conversation and scores required' });
@@ -315,20 +385,18 @@ Be honest. Be specific. Reference what ${memberName} actually said. Do not give 
 
 /* ═══════════════════════════════════════════════════════════════════════════
    AUTH — ORG & USER MANAGEMENT
-   Simple in-memory store. Replace with Postgres/Redis for production.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const orgMeta  = {};  // orgCode → { orgName, orgMode, createdAt }
-const orgUsers = {};  // orgCode → { userId → userObject }
-const inviteTokens = {}; // token → { orgCode, role, supervisorId, expiresAt }
+const orgMeta      = _store.orgMeta      || {};  // orgCode → { orgName, orgMode, createdAt }
+const orgUsers     = _store.orgUsers     || {};  // orgCode → { userId → userObject }
+const inviteTokens = _store.inviteTokens || {};  // token → { orgCode, role, supervisorId, expiresAt }
 
 function generateId()    { return Math.random().toString(36).slice(2,10); }
 function generateToken() { return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2); }
-function simpleHash(str) { let h = 0; for (const c of str) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h.toString(16); }
 function toOrgCode(name) { return name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''); }
 
 /* ── Setup new org (first super admin) ─────────────────────────────────── */
-app.post('/api/auth/setup-org', (req, res) => {
+app.post('/api/auth/setup-org', async (req, res) => {
   const { orgName, orgMode, adminName, password } = req.body;
   if (!orgName || !adminName || !password) return res.status(400).json({ error: 'Missing fields' });
 
@@ -337,7 +405,8 @@ app.post('/api/auth/setup-org', (req, res) => {
     return res.status(400).json({ error: 'Organisation already exists. Ask your admin for an invite.' });
   }
 
-  const userId = generateId();
+  const userId      = generateId();
+  const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
   orgMeta[orgCode]  = { orgName, orgMode: orgMode || 'school', createdAt: new Date().toISOString() };
   orgUsers[orgCode] = {};
   orgUsers[orgCode][userId] = {
@@ -346,33 +415,50 @@ app.post('/api/auth/setup-org', (req, res) => {
     role:         'superadmin',
     orgCode,
     supervisorId: null,
-    passwordHash: simpleHash(password),
+    passwordHash,
+    passwordSet:  true,
     createdAt:    new Date().toISOString(),
     levelId:      1,
   };
+  scheduleSave();
 
-  res.json({ ok: true, orgCode, userId, orgName, role: 'superadmin' });
+  const token = issueToken(userId, orgCode, 'superadmin');
+  res.json({ ok: true, orgCode, userId, orgName, role: 'superadmin', token });
 });
 
 /* ── Login ──────────────────────────────────────────────────────────────── */
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { orgCode, name, password } = req.body;
   const code  = (orgCode || '').toLowerCase().trim();
   const users = orgUsers[code];
   if (!users) return res.status(404).json({ error: 'Organisation not found. Check your org code.' });
 
   const user = Object.values(users).find(u =>
-    u.name.toLowerCase() === name.toLowerCase().trim() &&
-    u.passwordHash === simpleHash(password)
+    u.name.toLowerCase() === name.toLowerCase().trim()
   );
   if (!user) return res.status(401).json({ error: 'Name or password incorrect.' });
 
-  const org = orgMeta[code];
-  res.json({ ok: true, user: { ...user, passwordHash: undefined }, org });
+  // Lazy bcrypt migration: verify old hash then upgrade
+  let passwordValid = false;
+  if (isLegacyHash(user.passwordHash)) {
+    if (simpleHash(password) === user.passwordHash) {
+      passwordValid = true;
+      user.passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+      scheduleSave();
+    }
+  } else {
+    passwordValid = await bcrypt.compare(password, user.passwordHash);
+  }
+
+  if (!passwordValid) return res.status(401).json({ error: 'Name or password incorrect.' });
+
+  const org   = orgMeta[code];
+  const token = issueToken(user.id, code, user.role);
+  res.json({ ok: true, user: { ...user, passwordHash: undefined }, org, token });
 });
 
 /* ── Create user (admin/coach adds someone below them) ─────────────────── */
-app.post('/api/auth/create-user', (req, res) => {
+app.post('/api/auth/create-user', async (req, res) => {
   const { orgCode, creatorId, name, role, supervisorId, password } = req.body;
   const code  = (orgCode || '').toLowerCase();
   const users = orgUsers[code];
@@ -381,59 +467,64 @@ app.post('/api/auth/create-user', (req, res) => {
   const creator = users[creatorId];
   if (!creator) return res.status(403).json({ error: 'Creator not found' });
 
-  // Role hierarchy check — can't create someone at same level or higher
   const roleLevel = { superadmin:1, admin:2, coach:3, member:4 };
   if (roleLevel[role] <= roleLevel[creator.role] && creator.role !== 'superadmin') {
     return res.status(403).json({ error: 'You cannot create someone at or above your level' });
   }
 
-  // Check name uniqueness in org
   const exists = Object.values(users).find(u => u.name.toLowerCase() === name.toLowerCase().trim());
   if (exists) return res.status(400).json({ error: 'Someone with that name already exists in this org' });
 
-  const userId = generateId();
-  const isDefaultPassword = !password; // no explicit password = default = name in lowercase
+  const userId          = generateId();
+  const isDefaultPassword = !password;
+  const rawPassword     = password || name.trim().toLowerCase();
+  const passwordHash    = await bcrypt.hash(rawPassword, SALT_ROUNDS);
+
   users[userId] = {
     id:           userId,
     name:         name.trim(),
     role,
     orgCode:      code,
     supervisorId: supervisorId || creatorId,
-    passwordHash: simpleHash(password || name.trim().toLowerCase()),
-    passwordSet:  !isDefaultPassword, // false = member needs to set their own password
+    passwordHash,
+    passwordSet:  !isDefaultPassword,
     createdAt:    new Date().toISOString(),
     levelId:      roleLevel[role],
   };
+  scheduleSave();
 
   res.json({ ok: true, user: { ...users[userId], passwordHash: undefined } });
 });
 
-/* ── Bulk create users from CSV ─────────────────────────────────────────── */
-app.post('/api/auth/bulk-create', (req, res) => {
+/* ── Bulk create users ──────────────────────────────────────────────────── */
+app.post('/api/auth/bulk-create', async (req, res) => {
   const { orgCode, creatorId, users: newUsers, role, supervisorId } = req.body;
   const code  = (orgCode || '').toLowerCase();
   const users = orgUsers[code];
   if (!users) return res.status(404).json({ error: 'Org not found' });
 
   const created = [], skipped = [];
-  (newUsers || []).forEach(name => {
+  const roleLevel = { superadmin:1, admin:2, coach:3, member:4 };
+
+  for (const name of (newUsers || [])) {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    if (!trimmed) continue;
     const exists = Object.values(users).find(u => u.name.toLowerCase() === trimmed.toLowerCase());
-    if (exists) { skipped.push(trimmed); return; }
-    const userId = generateId();
-    const roleLevel = { superadmin:1, admin:2, coach:3, member:4 };
+    if (exists) { skipped.push(trimmed); continue; }
+    const userId      = generateId();
+    const passwordHash = await bcrypt.hash(trimmed.toLowerCase(), SALT_ROUNDS);
     users[userId] = {
       id: userId, name: trimmed, role: role || 'member', orgCode: code,
       supervisorId: supervisorId || creatorId,
-      passwordHash: simpleHash(trimmed.toLowerCase()),
-      passwordSet:  false, // bulk-created users always need to set their own password
+      passwordHash,
+      passwordSet:  false,
       createdAt:    new Date().toISOString(),
       levelId:      roleLevel[role] || 4,
     };
     created.push({ name: trimmed, password: trimmed.toLowerCase() });
-  });
+  }
 
+  scheduleSave();
   res.json({ ok: true, created, skipped });
 });
 
@@ -445,13 +536,14 @@ app.post('/api/auth/invite', (req, res) => {
     orgCode: orgCode.toLowerCase(),
     role: role || 'member',
     supervisorId,
-    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days
+    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
   };
+  scheduleSave();
   res.json({ ok: true, token, url: `/join?invite=${token}` });
 });
 
 /* ── Join via invite ────────────────────────────────────────────────────── */
-app.post('/api/auth/join-invite', (req, res) => {
+app.post('/api/auth/join-invite', async (req, res) => {
   const { token, name, password } = req.body;
   const invite = inviteTokens[token];
   if (!invite) return res.status(404).json({ error: 'Invalid or expired invite link' });
@@ -464,18 +556,22 @@ app.post('/api/auth/join-invite', (req, res) => {
   const exists = Object.values(users).find(u => u.name.toLowerCase() === name.toLowerCase().trim());
   if (exists) return res.status(400).json({ error: 'That name is already taken in this org' });
 
-  const roleLevel = { superadmin:1, admin:2, coach:3, member:4 };
-  const userId = generateId();
+  const roleLevel   = { superadmin:1, admin:2, coach:3, member:4 };
+  const userId      = generateId();
+  const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
   users[userId] = {
     id: userId, name: name.trim(), role: invite.role, orgCode: code,
     supervisorId: invite.supervisorId,
-    passwordHash: simpleHash(password),
+    passwordHash,
+    passwordSet: true,
     createdAt: new Date().toISOString(),
     levelId: roleLevel[invite.role] || 4,
   };
+  scheduleSave();
 
-  const org = orgMeta[code];
-  res.json({ ok: true, user: { ...users[userId], passwordHash: undefined }, org });
+  const org   = orgMeta[code];
+  const tkn   = issueToken(userId, code, invite.role);
+  res.json({ ok: true, user: { ...users[userId], passwordHash: undefined }, org, token: tkn });
 });
 
 /* ── Get org hierarchy tree ─────────────────────────────────────────────── */
@@ -485,9 +581,8 @@ app.get('/api/auth/org-tree', (req, res) => {
   const users = orgUsers[code];
   if (!users) return res.status(404).json({ error: 'Org not found' });
 
-  // Build tree from flat list
-  const all   = Object.values(users).map(u => ({ ...u, passwordHash: undefined, children: [] }));
-  const byId  = {};
+  const all  = Object.values(users).map(u => ({ ...u, passwordHash: undefined, children: [] }));
+  const byId = {};
   all.forEach(u => byId[u.id] = u);
 
   const roots = [];
@@ -500,13 +595,14 @@ app.get('/api/auth/org-tree', (req, res) => {
 });
 
 /* ── Update user ────────────────────────────────────────────────────────── */
-app.put('/api/auth/update-user', (req, res) => {
+app.put('/api/auth/update-user', async (req, res) => {
   const { orgCode, userId, updates } = req.body;
   const users = orgUsers[(orgCode||'').toLowerCase()];
   if (!users || !users[userId]) return res.status(404).json({ error: 'User not found' });
   const safe = ['name','role','supervisorId','group'];
   safe.forEach(k => { if (updates[k] !== undefined) users[userId][k] = updates[k]; });
-  if (updates.password) users[userId].passwordHash = simpleHash(updates.password);
+  if (updates.password) users[userId].passwordHash = await bcrypt.hash(updates.password, SALT_ROUNDS);
+  scheduleSave();
   res.json({ ok: true, user: { ...users[userId], passwordHash: undefined } });
 });
 
@@ -516,28 +612,47 @@ app.delete('/api/auth/delete-user', (req, res) => {
   const users = orgUsers[(orgCode||'').toLowerCase()];
   if (!users || !users[userId]) return res.status(404).json({ error: 'User not found' });
   delete users[userId];
+  scheduleSave();
   res.json({ ok: true });
+});
+
+/* ── Set member password (first-login flow) ─────────────────────────────── */
+app.post('/api/auth/set-password', async (req, res) => {
+  const { orgCode, userId, currentPassword, newPassword } = req.body;
+  const code  = (orgCode || '').toLowerCase();
+  const users = orgUsers[code];
+  if (!users || !users[userId]) return res.status(404).json({ error: 'User not found' });
+
+  const user = users[userId];
+
+  // Verify current password (supports legacy hash migration)
+  let valid = false;
+  if (isLegacyHash(user.passwordHash)) {
+    valid = simpleHash(currentPassword) === user.passwordHash;
+  } else {
+    valid = await bcrypt.compare(currentPassword, user.passwordHash);
+  }
+  if (!valid) return res.status(401).json({ error: 'Current password incorrect' });
+
+  user.passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+  user.passwordSet  = true;
+  scheduleSave();
+
+  const token = issueToken(userId, code, user.role);
+  res.json({ ok: true, token });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
    GROUPS — Sub-teams within an org
-   Members can belong to multiple groups (QB room, Offense, Starters, etc.)
-   Each group has its own notes feed, anonymous channel, and messages.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-// orgGroups: orgCode → [ { id, name, description, memberIds[], leadIds[], createdAt } ]
-const orgGroups = {};
+const orgGroups   = _store.orgGroups   || {};
+const orgNotes    = _store.orgNotes    || {};
+const orgMessages = _store.orgMessages || {};
 
-// notes: noteId → { id, orgCode, groupId|null, authorId, authorName, content, type, aiResponse, createdAt }
-// type: 'private' | 'shared' | 'anonymous'
-const orgNotes = {};
-
-// messages: msgId → { id, orgCode, fromId, fromName, toType:'user'|'group'|'org', toId, content, anonymous, createdAt, readBy:[] }
-const orgMessages = {};
-
-function noteId()   { return 'n_'  + generateId(); }
-function msgId()    { return 'm_'  + generateId(); }
-function groupId()  { return 'grp_'+ generateId(); }
+function noteId()  { return 'n_'   + generateId(); }
+function msgId()   { return 'm_'   + generateId(); }
+function groupId() { return 'grp_' + generateId(); }
 
 /* ── Create group ─────────────────────────────────────────────────────────── */
 app.post('/api/groups/create', (req, res) => {
@@ -547,17 +662,22 @@ app.post('/api/groups/create', (req, res) => {
   if (!orgGroups[code]) orgGroups[code] = [];
   const group = { id: groupId(), name, description: description || '', memberIds: memberIds || [], leadIds: leadIds || [], createdAt: new Date().toISOString() };
   orgGroups[code].push(group);
+  scheduleSave();
   res.json({ ok: true, group });
 });
 
-/* ── List groups for org ─────────────────────────────────────────────────── */
+/* ── List groups for org (filtered by memberId if provided) ─────────────── */
 app.get('/api/groups', (req, res) => {
-  const { orgCode } = req.query;
+  const { orgCode, memberId } = req.query;
   if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
-  res.json({ groups: orgGroups[orgCode.toLowerCase().trim()] || [] });
+  let groups = orgGroups[orgCode.toLowerCase().trim()] || [];
+  if (memberId) {
+    groups = groups.filter(g => g.memberIds.includes(memberId) || g.leadIds.includes(memberId));
+  }
+  res.json({ groups });
 });
 
-/* ── Update group (add/remove members, rename) ───────────────────────────── */
+/* ── Update group ────────────────────────────────────────────────────────── */
 app.put('/api/groups/:groupId', (req, res) => {
   const { orgCode, name, description, memberIds, leadIds } = req.body;
   const code   = orgCode?.toLowerCase().trim();
@@ -568,6 +688,7 @@ app.put('/api/groups/:groupId', (req, res) => {
   if (description !== undefined) g.description = description;
   if (memberIds   !== undefined) g.memberIds   = memberIds;
   if (leadIds     !== undefined) g.leadIds     = leadIds;
+  scheduleSave();
   res.json({ ok: true, group: g });
 });
 
@@ -577,19 +698,17 @@ app.delete('/api/groups/:groupId', (req, res) => {
   const code = orgCode?.toLowerCase().trim();
   if (!orgGroups[code]) return res.status(404).json({ error: 'Org not found' });
   orgGroups[code] = orgGroups[code].filter(g => g.id !== req.params.groupId);
+  scheduleSave();
   res.json({ ok: true });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
    NOTES — Private / Shared / Anonymous
-   Private:   author + AI only
-   Shared:    author + group members + leads
-   Anonymous: group sees content, not author name
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Create note ─────────────────────────────────────────────────────────── */
 app.post('/api/notes', async (req, res) => {
-  const { orgCode, authorId, authorName, content, type, groupId: gid, orgMode, orgName, goals } = req.body;
+  const { orgCode, authorId, authorName, content, type, tag, groupId: gid, orgMode, orgName, goals } = req.body;
   if (!orgCode || !authorId || !content || !type) return res.status(400).json({ error: 'missing fields' });
 
   const id   = noteId();
@@ -598,12 +717,12 @@ app.post('/api/notes', async (req, res) => {
     groupId: gid || null,
     authorId, authorName,
     content, type,
+    tag: tag || null,
     createdAt: new Date().toISOString(),
     aiResponse: null,
   };
   orgNotes[id] = note;
 
-  // AI responds to private and anonymous notes
   const shouldGetAIResponse = type === 'private' || type === 'anonymous' || type === 'shared';
   if (shouldGetAIResponse) {
     const prompts = {
@@ -622,16 +741,16 @@ app.post('/api/notes', async (req, res) => {
     } catch(e) { /* non-critical */ }
   }
 
+  scheduleSave();
   res.json({ ok: true, note: _sanitizeNote(note, authorId) });
 });
 
-/* ── Get notes (filtered by requester's access) ──────────────────────────── */
-app.get('/api/notes', (req, res) => {
+/* ── Get notes — requires auth ───────────────────────────────────────────── */
+app.get('/api/notes', requireAuth, (req, res) => {
   const { orgCode, requesterId, groupId: gid, type } = req.query;
   if (!orgCode || !requesterId) return res.status(400).json({ error: 'missing fields' });
   const code = orgCode.toLowerCase().trim();
 
-  // Get groups this requester belongs to (as member or lead)
   const myGroups = (orgGroups[code] || []).filter(g =>
     g.memberIds.includes(requesterId) || g.leadIds.includes(requesterId)
   ).map(g => g.id);
@@ -641,9 +760,7 @@ app.get('/api/notes', (req, res) => {
       if (n.orgCode !== code) return false;
       if (gid && n.groupId !== gid) return false;
       if (type && n.type !== type) return false;
-      // Private: only author sees it
       if (n.type === 'private') return n.authorId === requesterId;
-      // Shared/anonymous: requester must be in the group (or it's an org-wide note)
       if (n.groupId) return myGroups.includes(n.groupId) || n.authorId === requesterId;
       return n.authorId === requesterId;
     })
@@ -654,7 +771,6 @@ app.get('/api/notes', (req, res) => {
 });
 
 function _sanitizeNote(note, requesterId) {
-  // Anonymous notes: hide author name/id from everyone except the author
   if (note.type === 'anonymous' && note.authorId !== requesterId) {
     return { ...note, authorId: null, authorName: 'Anonymous' };
   }
@@ -668,6 +784,7 @@ app.delete('/api/notes/:noteId', (req, res) => {
   if (!note) return res.status(404).json({ error: 'Note not found' });
   if (note.authorId !== requesterId) return res.status(403).json({ error: 'Not your note' });
   delete orgNotes[req.params.noteId];
+  scheduleSave();
   res.json({ ok: true });
 });
 
@@ -683,23 +800,23 @@ app.post('/api/messages/send', (req, res) => {
   const msg = {
     id, orgCode: orgCode.toLowerCase().trim(),
     fromId, fromName: anonymous ? 'Anonymous' : fromName,
-    _realFromId: fromId, // never exposed to non-author
+    _realFromId: fromId,
     toType, toId: toId || null,
     content, anonymous: !!anonymous,
     createdAt: new Date().toISOString(),
     readBy: [],
   };
   orgMessages[id] = msg;
+  scheduleSave();
   res.json({ ok: true, messageId: id });
 });
 
-/* ── Get messages for a user/group ───────────────────────────────────────── */
-app.get('/api/messages', (req, res) => {
+/* ── Get messages — requires auth ────────────────────────────────────────── */
+app.get('/api/messages', requireAuth, (req, res) => {
   const { orgCode, requesterId, groupId: gid, toType } = req.query;
   if (!orgCode || !requesterId) return res.status(400).json({ error: 'missing fields' });
   const code = orgCode.toLowerCase().trim();
 
-  // Groups requester is in
   const myGroups = (orgGroups[code] || []).filter(g =>
     g.memberIds.includes(requesterId) || g.leadIds.includes(requesterId)
   ).map(g => g.id);
@@ -709,13 +826,9 @@ app.get('/api/messages', (req, res) => {
       if (m.orgCode !== code) return false;
       if (gid && m.toId !== gid) return false;
       if (toType && m.toType !== toType) return false;
-      // Sent by me
       if (m._realFromId === requesterId) return true;
-      // Sent to me directly
       if (m.toType === 'user' && m.toId === requesterId) return true;
-      // Sent to a group I'm in
       if (m.toType === 'group' && myGroups.includes(m.toId)) return true;
-      // Sent to org
       if (m.toType === 'org' && m.orgCode === code) return true;
       return false;
     })
@@ -731,11 +844,11 @@ app.post('/api/messages/:msgId/read', (req, res) => {
   const m = orgMessages[req.params.msgId];
   if (!m) return res.status(404).json({ error: 'Not found' });
   if (!m.readBy.includes(requesterId)) m.readBy.push(requesterId);
+  scheduleSave();
   res.json({ ok: true });
 });
 
 function _sanitizeMsg(msg, requesterId) {
-  // Anonymous: hide real sender from everyone except themselves
   if (msg.anonymous && msg._realFromId !== requesterId) {
     const { _realFromId, ...safe } = msg;
     return safe;
@@ -744,12 +857,24 @@ function _sanitizeMsg(msg, requesterId) {
   return safe;
 }
 
-/* ── Platform: get group feed (shared + anonymous notes + messages) ─────── */
+/* ── Group feed (shared + anonymous notes + messages) ────────────────────── */
 app.get('/api/groups/:groupId/feed', (req, res) => {
   const { orgCode, requesterId } = req.query;
   if (!orgCode || !requesterId) return res.status(400).json({ error: 'missing fields' });
   const code = orgCode.toLowerCase().trim();
   const gid  = req.params.groupId;
+
+  const groups = orgGroups[code] || [];
+  const group  = groups.find(g => g.id === gid);
+  if (group) {
+    const isMemberOrLead = group.memberIds.includes(requesterId) || group.leadIds.includes(requesterId);
+    const users = orgUsers[code] || {};
+    const requesterUser = users[requesterId];
+    const isOrgStaff = requesterUser && ['superadmin','admin','coach'].includes(requesterUser.role);
+    if (!isMemberOrLead && !isOrgStaff) {
+      return res.status(403).json({ error: 'Not a member of this group' });
+    }
+  }
 
   const notes = Object.values(orgNotes)
     .filter(n => n.orgCode === code && n.groupId === gid && (n.type === 'shared' || n.type === 'anonymous'))
@@ -764,33 +889,29 @@ app.get('/api/groups/:groupId/feed', (req, res) => {
   res.json({ notes, messages });
 });
 
-/* ══════════════════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════════════════════
    MEMBER APP — SHARED SESSION STORE
-   In-memory bridge between Platform (coach) and Member App (Timmy).
-   Replace with a real DB (Postgres/Redis) when persistence is needed.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-// orgStore: orgCode → { orgName, orgMode }
-const orgStore = {};
+const orgStore          = _store.orgStore          || {};
+const assignedScenarios = _store.assignedScenarios || {};
+const memberResults     = _store.memberResults     || {};
+const memberCheckins    = _store.memberCheckins    || {};
 
-// assignedScenarios: orgCode:memberKey → [ scenario objects ]
-const assignedScenarios = {};
-
-// memberResults: orgCode:memberKey → [ result objects ]
-const memberResults = {};
-
-// checkins: orgCode:memberKey → [ checkin objects ]
-const memberCheckins = {};
-
+// Key helpers — new code uses userId keys; legacy name keys still supported for reads
 function memberKey(orgCode, memberName) {
   return `${orgCode.toLowerCase().trim()}:${memberName.toLowerCase().trim()}`;
 }
+function userKey(orgCode, userId) {
+  return `${orgCode.toLowerCase().trim()}:${userId}`;
+}
 
-/* ── Platform registers org (called on login) ───────────────────────────── */
+/* ── Platform registers org ─────────────────────────────────────────────── */
 app.post('/api/platform/register-org', (req, res) => {
   const { orgCode, orgName, orgMode } = req.body;
   if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
   orgStore[orgCode.toLowerCase().trim()] = { orgName, orgMode };
+  scheduleSave();
   res.json({ ok: true });
 });
 
@@ -802,26 +923,34 @@ app.post('/api/platform/assign-scenario', (req, res) => {
   }
   const key = memberKey(orgCode, memberName);
   if (!assignedScenarios[key]) assignedScenarios[key] = [];
-  // Avoid duplicates by scenario id
   if (!assignedScenarios[key].find(s => s.id === scenario.id)) {
     assignedScenarios[key].push({ ...scenario, assignedAt: new Date().toISOString(), status: 'pending' });
   }
+  scheduleSave();
   res.json({ ok: true, total: assignedScenarios[key].length });
 });
 
-/* ── Member joins org ───────────────────────────────────────────────────── */
+/* ── Member joins org — issues token if userId is valid ─────────────────── */
 app.post('/api/member/join', (req, res) => {
-  const { orgCode, memberName } = req.body;
+  const { orgCode, memberName, userId } = req.body;
   if (!orgCode || !memberName) return res.status(400).json({ error: 'orgCode and memberName required' });
   const code = orgCode.toLowerCase().trim();
   const org  = orgStore[code];
-  // Allow join even if org not pre-registered (demo mode)
+
+  // Issue a token if the userId is a real user in this org
+  let token = null;
+  if (userId && orgUsers[code]?.[userId]) {
+    const user = orgUsers[code][userId];
+    token = issueToken(userId, code, user.role);
+  }
+
   res.json({
     ok:         true,
     orgName:    org?.orgName  || orgCode,
     orgMode:    org?.orgMode  || 'school',
     memberName: memberName.trim(),
     orgCode:    code,
+    token,
   });
 });
 
@@ -829,8 +958,8 @@ app.post('/api/member/join', (req, res) => {
 app.get('/api/member/pending', (req, res) => {
   const { orgCode, memberName } = req.query;
   if (!orgCode || !memberName) return res.status(400).json({ error: 'orgCode and memberName required' });
-  const key      = memberKey(orgCode, memberName);
-  const pending  = (assignedScenarios[key] || []).filter(s => s.status === 'pending');
+  const key     = memberKey(orgCode, memberName);
+  const pending = (assignedScenarios[key] || []).filter(s => s.status === 'pending');
   res.json({ scenarios: pending });
 });
 
@@ -840,34 +969,36 @@ app.post('/api/member/submit-result', (req, res) => {
   if (!orgCode || !memberName || !result) return res.status(400).json({ error: 'missing fields' });
   const key = memberKey(orgCode, memberName);
 
-  // Mark scenario as completed
   if (assignedScenarios[key]) {
     const sc = assignedScenarios[key].find(s => s.id === scenarioId);
     if (sc) sc.status = 'completed';
   }
 
-  // Store result
   if (!memberResults[key]) memberResults[key] = [];
-  memberResults[key].push({ ...result, submittedAt: new Date().toISOString() });
+  // Store memberName inside result so display works even if keyed by userId later
+  memberResults[key].push({ ...result, memberName, submittedAt: new Date().toISOString() });
+  scheduleSave();
   res.json({ ok: true });
 });
 
-/* ── Member submits check-in ────────────────────────────────────────────── */
+/* ── Member submits check-in (legacy simple endpoint) ───────────────────── */
 app.post('/api/member/checkin', (req, res) => {
   const { orgCode, memberName, mood, note } = req.body;
   if (!orgCode || !memberName) return res.status(400).json({ error: 'missing fields' });
   const key = memberKey(orgCode, memberName);
   if (!memberCheckins[key]) memberCheckins[key] = [];
   memberCheckins[key].push({
+    memberName,
     mood, note,
     date: new Date().toLocaleDateString('en-GB'),
     ts:   new Date().toISOString(),
   });
+  scheduleSave();
   res.json({ ok: true });
 });
 
 /* ── Platform pulls member results ─────────────────────────────────────── */
-app.get('/api/platform/member-results', (req, res) => {
+app.get('/api/platform/member-results', requireAuth, (req, res) => {
   const { orgCode, memberName } = req.query;
   if (!orgCode || !memberName) return res.status(400).json({ error: 'missing fields' });
   const key = memberKey(orgCode, memberName);
@@ -878,23 +1009,24 @@ app.get('/api/platform/member-results', (req, res) => {
 });
 
 /* ── Platform pulls all results for org ─────────────────────────────────── */
-app.get('/api/platform/org-results', (req, res) => {
+app.get('/api/platform/org-results', requireAuth, (req, res) => {
   const { orgCode } = req.query;
   if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
   const code    = orgCode.toLowerCase().trim();
   const results = {};
   Object.keys(memberResults).forEach(key => {
-    if (key.startsWith(code + ':')) {
-      const name = key.split(':').slice(1).join(':');
-      results[name] = memberResults[key];
-    }
+    if (!key.startsWith(code + ':')) return;
+    const entries = memberResults[key];
+    if (!entries?.length) return;
+    // Use memberName from the entry; fall back to parsing the key
+    const name = entries[0]?.memberName || key.split(':').slice(1).join(':');
+    results[name] = entries;
   });
   res.json({ results });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ORG INTELLIGENCE — FREEFORM DESCRIPTION → AI TRAIT EXTRACTION
-   Admin describes their org in plain language. Claude extracts what matters.
    ═══════════════════════════════════════════════════════════════════════════ */
 app.post('/api/org/describe', async (req, res) => {
   const { description, orgName } = req.body;
@@ -935,8 +1067,6 @@ RULES:
     let traits;
     try { traits = JSON.parse(jsonStr); }
     catch(e) { return res.status(500).json({ error: 'Parse failed', raw }); }
-
-    // Store traits in orgMeta if orgCode known
     res.json({ ok: true, ...traits });
   } catch(err) {
     console.error('Org describe error:', err.message);
@@ -946,40 +1076,50 @@ RULES:
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MEMBER GOALS — Individual goal & identity intake
-   Every member sets a season goal + who they want to become. Stored once.
-   IntelliQ references these in check-ins and reflections.
+   Accepts memberId (stable) or memberName (legacy). Prefers memberId.
    ═══════════════════════════════════════════════════════════════════════════ */
-const memberGoals = {}; // orgCode:memberName → { goal, identity, setAt }
+const memberGoals = _store.memberGoals || {};
 
 app.post('/api/member/goals', (req, res) => {
-  const { orgCode, memberName, goal, identity } = req.body;
-  if (!orgCode || !memberName) return res.status(400).json({ error: 'missing fields' });
-  const key = memberKey(orgCode, memberName);
-  memberGoals[key] = { goal: goal || '', identity: identity || '', setAt: new Date().toISOString() };
+  const { orgCode, memberName, memberId, goal, identity } = req.body;
+  if (!orgCode || (!memberName && !memberId)) return res.status(400).json({ error: 'missing fields' });
+  // Prefer stable userId as key; fall back to name for backward compat
+  const key = memberId
+    ? userKey(orgCode, memberId)
+    : memberKey(orgCode, memberName);
+  memberGoals[key] = { goal: goal || '', identity: identity || '', memberName, setAt: new Date().toISOString() };
+  scheduleSave();
   res.json({ ok: true });
 });
 
 app.get('/api/member/goals', (req, res) => {
-  const { orgCode, memberName } = req.query;
-  if (!orgCode || !memberName) return res.status(400).json({ error: 'missing fields' });
-  const key = memberKey(orgCode, memberName);
-  res.json({ goals: memberGoals[key] || null });
+  const { orgCode, memberName, memberId } = req.query;
+  if (!orgCode || (!memberName && !memberId)) return res.status(400).json({ error: 'missing fields' });
+  const key = memberId
+    ? userKey(orgCode, memberId)
+    : memberKey(orgCode, memberName);
+  // Also try the other format as fallback (data may have been saved under either key)
+  const altKey = memberId ? memberKey(orgCode, memberName || '') : null;
+  res.json({ goals: memberGoals[key] || (altKey ? memberGoals[altKey] : null) || null });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
    FREEFORM CHECK-IN — Free text + AI response
-   Member writes anything. IntelliQ reads it, saves it, responds briefly.
-   Coach check-ins also flow through here.
+   Accepts memberId (stable) or memberName (legacy). Prefers memberId.
    ═══════════════════════════════════════════════════════════════════════════ */
 app.post('/api/checkin/freeform', async (req, res) => {
-  const { orgCode, memberName, text, mood, role, orgMode, orgName, goals } = req.body;
+  const { orgCode, memberName, memberId, text, mood, role, orgMode, orgName, goals } = req.body;
   if (!orgCode || !memberName || !text) return res.status(400).json({ error: 'missing fields' });
 
-  const key = memberKey(orgCode, memberName);
+  const key = memberId
+    ? userKey(orgCode, memberId)
+    : memberKey(orgCode, memberName);
+
   if (!memberCheckins[key]) memberCheckins[key] = [];
 
   const moodLabels = { 1:'Rough', 2:'Low', 3:'Okay', 4:'Good', 5:'Great' };
   const checkin = {
+    memberName,   // always store name inside entry for display
     text,
     mood: mood || null,
     moodLabel: moodLabels[mood] || null,
@@ -990,7 +1130,6 @@ app.post('/api/checkin/freeform', async (req, res) => {
   };
   memberCheckins[key].push(checkin);
 
-  // Role-specific AI prompt
   const rolePrompts = {
     member:  `You are IntelliQ, a warm and perceptive performance intelligence system. A team member has just submitted their daily check-in. Read what they shared, acknowledge it genuinely in 1-2 sentences, then if they have a goal — leave them with one specific, actionable thought about it. Keep it brief and human. Max 3 sentences total. Never be generic or robotic.`,
     coach:   `You are IntelliQ, a performance intelligence assistant for coaches. A coach has submitted their daily check-in. Acknowledge what they shared briefly. If they mentioned a specific player or session, reflect something useful back. If there's a pattern worth noting, surface it. Max 3 sentences. Be direct and practical.`,
@@ -998,7 +1137,6 @@ app.post('/api/checkin/freeform', async (req, res) => {
   };
 
   const systemPrompt = rolePrompts[role] || rolePrompts.member;
-
   let userContent = '';
   if (mood) userContent += `Mood: ${moodLabels[mood]}\n`;
   if (goals?.goal) userContent += `Their season goal: "${goals.goal}"\n`;
@@ -1014,42 +1152,45 @@ app.post('/api/checkin/freeform', async (req, res) => {
     });
     const aiResponse = response.content[0]?.text?.trim() || '';
     checkin.aiResponse = aiResponse;
+    scheduleSave();
     res.json({ ok: true, aiResponse });
   } catch(err) {
     console.error('Checkin AI error:', err.message);
+    scheduleSave();
     res.json({ ok: true, aiResponse: null });
   }
 });
 
-/* ─── Platform: pull all checkins for org ───────────────────────────────── */
-app.get('/api/platform/org-checkins', (req, res) => {
+/* ── Platform: pull all checkins for org — requires auth ────────────────── */
+app.get('/api/platform/org-checkins', requireAuth, (req, res) => {
   const { orgCode } = req.query;
   if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
   const code    = orgCode.toLowerCase().trim();
   const results = {};
   Object.keys(memberCheckins).forEach(key => {
-    if (key.startsWith(code + ':')) {
-      const name = key.split(':').slice(1).join(':');
-      results[name] = memberCheckins[key];
-    }
+    if (!key.startsWith(code + ':')) return;
+    const entries = memberCheckins[key];
+    if (!entries?.length) return;
+    // Use memberName stored inside the entry; fall back to key parsing for legacy data
+    const name = entries[0]?.memberName || key.split(':').slice(1).join(':');
+    if (name) results[name] = entries;
   });
   res.json({ checkins: results });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
    WEEKLY ASSESSMENTS — Role-specific weekly reflection forms
-   Everyone fills out their piece. IntelliQ assembles the full picture.
+   Accepts memberId (stable) or memberName (legacy). Prefers memberId.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-// weeklyAssessments: orgCode:week → [ { memberName, role, data, submittedAt } ]
-const weeklyAssessments = {};
+const weeklyAssessments = _store.weeklyAssessments || {};
 
 function weekKey(orgCode, weekStr) {
   return `${orgCode.toLowerCase().trim()}:${weekStr}`;
 }
 
 function currentWeekStr() {
-  const d = new Date();
+  const d    = new Date();
   const jan1 = new Date(d.getFullYear(), 0, 1);
   const week = Math.ceil(((d - jan1) / 86400000 + jan1.getDay() + 1) / 7);
   return `${d.getFullYear()}-W${String(week).padStart(2,'0')}`;
@@ -1057,15 +1198,18 @@ function currentWeekStr() {
 
 /* ── Submit weekly assessment ───────────────────────────────────────────── */
 app.post('/api/weekly/submit', async (req, res) => {
-  const { orgCode, memberName, role, orgMode, orgName, data, goals } = req.body;
+  const { orgCode, memberName, memberId, role, orgMode, orgName, data, goals } = req.body;
   if (!orgCode || !memberName || !data) return res.status(400).json({ error: 'missing fields' });
 
   const week = currentWeekStr();
   const key  = weekKey(orgCode, week);
   if (!weeklyAssessments[key]) weeklyAssessments[key] = [];
 
-  // Remove any prior submission this week for this member
-  const idx = weeklyAssessments[key].findIndex(e => e.memberName.toLowerCase() === memberName.toLowerCase());
+  // Remove prior submission this week for this member (by id or name)
+  const idx = weeklyAssessments[key].findIndex(e =>
+    (memberId && e.memberId === memberId) ||
+    (!memberId && e.memberName.toLowerCase() === memberName.toLowerCase())
+  );
   if (idx > -1) weeklyAssessments[key].splice(idx, 1);
 
   const rolePrompts = {
@@ -1075,8 +1219,6 @@ app.post('/api/weekly/submit', async (req, res) => {
   };
 
   const roleKey = role === 'member' ? 'member' : role === 'coach' ? 'coach' : 'staff';
-  const systemPrompt = rolePrompts[roleKey];
-
   let userMsg = '';
   if (goals?.goal) userMsg += `Their goal: "${goals.goal}"\n\n`;
   userMsg += `Weekly reflection:\n${Object.entries(data).map(([k,v]) => `${k}: ${v}`).join('\n')}`;
@@ -1085,24 +1227,26 @@ app.post('/api/weekly/submit', async (req, res) => {
   try {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001', max_tokens: 150,
-      system: systemPrompt,
+      system: rolePrompts[roleKey],
       messages: [{ role: 'user', content: userMsg }],
     });
     aiResponse = response.content[0]?.text?.trim() || null;
   } catch(e) { /* non-critical */ }
 
   const entry = {
-    memberName, role: role || 'member', orgMode: orgMode || 'school',
+    memberName, memberId: memberId || null,
+    role: role || 'member', orgMode: orgMode || 'school',
     data, week, aiResponse,
     submittedAt: new Date().toISOString(),
   };
   weeklyAssessments[key].push(entry);
+  scheduleSave();
 
   res.json({ ok: true, aiResponse, week });
 });
 
-/* ── Get weekly assessments for org ─────────────────────────────────────── */
-app.get('/api/weekly/org', (req, res) => {
+/* ── Get weekly assessments for org — requires auth ─────────────────────── */
+app.get('/api/weekly/org', requireAuth, (req, res) => {
   const { orgCode, week } = req.query;
   if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
   const w   = week || currentWeekStr();
@@ -1112,28 +1256,29 @@ app.get('/api/weekly/org', (req, res) => {
 
 /* ── Get own weekly history ─────────────────────────────────────────────── */
 app.get('/api/weekly/member', (req, res) => {
-  const { orgCode, memberName } = req.query;
-  if (!orgCode || !memberName) return res.status(400).json({ error: 'missing fields' });
+  const { orgCode, memberName, memberId } = req.query;
+  if (!orgCode || (!memberName && !memberId)) return res.status(400).json({ error: 'missing fields' });
   const code = orgCode.toLowerCase().trim();
-  const name = memberName.toLowerCase().trim();
   const history = [];
   Object.keys(weeklyAssessments).forEach(key => {
-    if (key.startsWith(code + ':')) {
-      const entries = weeklyAssessments[key].filter(e => e.memberName.toLowerCase() === name);
-      history.push(...entries);
-    }
+    if (!key.startsWith(code + ':')) return;
+    const entries = weeklyAssessments[key].filter(e =>
+      (memberId && e.memberId === memberId) ||
+      (!memberId && e.memberName?.toLowerCase() === memberName?.toLowerCase())
+    );
+    history.push(...entries);
   });
   history.sort((a, b) => b.week.localeCompare(a.week));
   res.json({ history });
 });
 
-/* ── Platform: IntelliQ synthesis of this week's inputs ─────────────────── */
-app.post('/api/weekly/synthesis', async (req, res) => {
+/* ── IntelliQ synthesis of this week's inputs — requires auth ───────────── */
+app.post('/api/weekly/synthesis', requireAuth, async (req, res) => {
   const { orgCode, orgName, orgMode, week } = req.body;
   if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
 
-  const w   = week || currentWeekStr();
-  const key = weekKey(orgCode, w);
+  const w    = week || currentWeekStr();
+  const key  = weekKey(orgCode, w);
   const entries = weeklyAssessments[key] || [];
 
   if (entries.length === 0) {
@@ -1176,26 +1321,10 @@ Be specific and grounded — only say what the data actually supports. Do not in
   }
 });
 
-/* ── Set member password (first-login flow) ─────────────────────────────── */
-app.post('/api/auth/set-password', (req, res) => {
-  const { orgCode, userId, currentPassword, newPassword } = req.body;
-  const code  = (orgCode || '').toLowerCase();
-  const users = orgUsers[code];
-  if (!users || !users[userId]) return res.status(404).json({ error: 'User not found' });
-
-  const user = users[userId];
-  if (user.passwordHash !== simpleHash(currentPassword)) {
-    return res.status(401).json({ error: 'Current password incorrect' });
-  }
-
-  user.passwordHash = simpleHash(newPassword);
-  user.passwordSet  = true;
-  res.json({ ok: true });
-});
-
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`IntelliQ running → http://localhost:${PORT}`);
   console.log(`Member app   → http://localhost:${PORT}/member/`);
-  console.log(`API key: ${process.env.ANTHROPIC_API_KEY ? '✓ loaded' : '✗ MISSING'}`);
+  console.log(`API key: ${process.env.ANTHROPIC_API_KEY ? '✓ loaded' : '✗ MISSING — set ANTHROPIC_API_KEY'}`);
+  console.log(`Data store: ${STORE_FILE}`);
 });
