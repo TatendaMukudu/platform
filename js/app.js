@@ -59,6 +59,7 @@ function initLogin() {
     const grade = 'A';
     AppState.init(mode, Auth.currentOrg?.orgName || 'Organisation', Auth.currentUser?.name || 'User', grade);
     AppState.adminRole = Auth.ROLE_LABELS[Auth.currentUser?.role] || 'Admin';
+    if (Auth.isMember()) { launchMemberView(); return; }
     launchApp();
     loadRealOrgData();
     _checkCoachDailyCheckin();
@@ -264,17 +265,15 @@ async function submitCoachCheckin() {
   }
 }
 
-/* ── MEMBER VIEW (Canvas-style — member logs in, sees their world) ─────── */
+/* ── MEMBER VIEW — unified shell inside main app ────────────────────────── */
 function launchMemberView() {
   document.getElementById('login-screen').style.display = 'none';
-  const u = Auth.currentUser;
-  const base = `/member/?orgCode=${encodeURIComponent(u.orgCode)}&name=${encodeURIComponent(u.name)}&userId=${encodeURIComponent(u.id)}&role=${encodeURIComponent(u.role || 'member')}`;
-  // If password was never changed (passwordSet is false), send to set-password flow
-  if (u.passwordSet === false) {
-    window.location.href = base + `&needsPassword=1`;
-  } else {
-    window.location.href = base;
+  const shell = document.getElementById('member-shell');
+  if (shell) {
+    shell.style.display = 'flex';
+    shell.classList.add('visible');
   }
+  if (typeof MemberApp !== 'undefined') MemberApp.init();
 }
 
 /* ── Load real org data from server and populate AppState ─────────────── */

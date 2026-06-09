@@ -746,6 +746,26 @@ app.delete('/api/auth/delete-user', (req, res) => {
 /* ── Set member password (first-login flow) ─────────────────────────────── */
 app.post('/api/auth/set-password', async (req, res) => {
   const { orgCode, userId, currentPassword, newPassword } = req.body;
+
+  // ── Token-only path: unified app sends a Bearer token, no currentPassword needed
+  //    Allowed only when passwordSet === false (first-login).
+  const authHeader = (req.headers.authorization || '').replace('Bearer ', '').trim();
+  if (authHeader) {
+    const session = verifyToken(authHeader);
+    if (!session) return res.status(401).json({ error: 'Invalid or expired token' });
+    const user = orgUsers[session.orgCode]?.[session.userId];
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    // Only allow skipping current-password check when password was never set
+    if (user.passwordSet !== false) return res.status(403).json({ error: 'Current password required' });
+    if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: 'Password must be 6+ characters' });
+    user.passwordHash = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    user.passwordSet  = true;
+    scheduleSave();
+    const token = issueToken(session.userId, session.orgCode, user.role);
+    return res.json({ ok: true, token });
+  }
+
+  // ── Legacy path: orgCode + userId + currentPassword (platform set-password form)
   const code  = (orgCode || '').toLowerCase();
   const users = orgUsers[code];
   if (!users || !users[userId]) return res.status(404).json({ error: 'User not found' });
@@ -1230,18 +1250,36 @@ app.post('/api/member/join', (req, res) => {
 
 /* ── Member gets pending scenarios ─────────────────────────────────────── */
 app.get('/api/member/pending', (req, res) => {
-  const { orgCode, memberName } = req.query;
-  if (!orgCode || !memberName) return res.status(400).json({ error: 'orgCode and memberName required' });
-  const key     = memberKey(orgCode, memberName);
+  const { orgCode, memberName, userId } = req.query;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+
+  // Resolve memberName from userId when provided (unified app path)
+  let resolvedName = memberName;
+  if (userId && !resolvedName) {
+    const user = orgUsers[orgCode.toLowerCase()]?.[userId];
+    if (user) resolvedName = user.name;
+  }
+  if (!resolvedName) return res.status(400).json({ error: 'memberName or userId required' });
+
+  const key     = memberKey(orgCode, resolvedName);
   const pending = (assignedScenarios[key] || []).filter(s => s.status === 'pending');
   res.json({ scenarios: pending });
 });
 
 /* ── Member submits scenario result ─────────────────────────────────────── */
 app.post('/api/member/submit-result', (req, res) => {
-  const { orgCode, memberName, scenarioId, result } = req.body;
-  if (!orgCode || !memberName || !result) return res.status(400).json({ error: 'missing fields' });
-  const key = memberKey(orgCode, memberName);
+  const { orgCode, memberName, memberId, scenarioId, result } = req.body;
+  if (!orgCode || !result) return res.status(400).json({ error: 'missing fields' });
+
+  // Resolve memberName from memberId (unified app path)
+  let resolvedName = memberName;
+  if (memberId && !resolvedName) {
+    const user = orgUsers[orgCode.toLowerCase()]?.[memberId];
+    if (user) resolvedName = user.name;
+  }
+  if (!resolvedName) return res.status(400).json({ error: 'memberName or memberId required' });
+
+  const key = memberKey(orgCode, resolvedName);
 
   if (assignedScenarios[key]) {
     const sc = assignedScenarios[key].find(s => s.id === scenarioId);
@@ -1249,8 +1287,8 @@ app.post('/api/member/submit-result', (req, res) => {
   }
 
   if (!memberResults[key]) memberResults[key] = [];
-  // Store memberName inside result so display works even if keyed by userId later
-  memberResults[key].push({ ...result, memberName, submittedAt: new Date().toISOString() });
+  // Store memberName and memberId inside result for display + future migration
+  memberResults[key].push({ ...result, memberName: resolvedName, memberId: memberId || null, submittedAt: new Date().toISOString() });
   scheduleSave();
   res.json({ ok: true });
 });
