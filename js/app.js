@@ -60,8 +60,8 @@ function initLogin() {
     AppState.init(mode, Auth.currentOrg?.orgName || 'Organisation', Auth.currentUser?.name || 'User', grade);
     AppState.adminRole = Auth.ROLE_LABELS[Auth.currentUser?.role] || 'Admin';
     launchApp();
+    loadRealOrgData();
     _checkCoachDailyCheckin();
-    syncOrgMembersToAppState(); // sync real users into analytics after session restore
     return;
   }
 
@@ -91,6 +91,7 @@ async function handleLogin() {
 
     if (Auth.isMember()) { launchMemberView(); return; }
     launchApp();
+    loadRealOrgData();
     _checkCoachDailyCheckin();
   } catch(e) {
     errEl.textContent  = e.message || 'Login failed.';
@@ -134,12 +135,12 @@ async function handleSetup() {
 
     showToast(`Org created! Your code: ${data.orgCode}`, 'success');
     launchApp();
+    loadRealOrgData();
 
     // After launch, call AI to extract traits (non-blocking)
     if (description) {
       _analyseOrgDescription(description, orgName, data.orgCode);
     } else {
-      // No description — skip directly to coach check-in
       _checkCoachDailyCheckin();
     }
   } catch(e) {
@@ -275,21 +276,62 @@ function launchMemberView() {
   }
 }
 
-/* ── Sync org users into AppState.members after session restore ───────── */
-async function syncOrgMembersToAppState() {
+/* ── Load real org data from server and populate AppState ─────────────── */
+async function loadRealOrgData() {
   try {
     const { flat } = await Auth.getOrgTree();
-    (flat || []).forEach(user => {
-      if (user.role !== 'superadmin') _addMemberToAppState(user);
-    });
-  } catch(e) { /* non-critical — analytics may show stale data until next login */ }
+    const realUsers = (flat || []).filter(u => u.role !== 'superadmin');
+
+    // Build real member records — clear any previous data first
+    AppState.members = realUsers.map((u, i) => buildRealMemberRecord(u, i, AppState.mode));
+    AppState.stats   = buildEmptyOrgStats(AppState.members.length);
+    AppState.orgDataLoaded = true;
+
+    // Re-render pages that are currently visible
+    const page = AppState.currentPage;
+    if (page === 'dashboard')  renderDashboard();
+    if (page === 'members')    renderMembers();
+    if (page === 'analytics')  renderAnalytics();
+    if (page === 'reports')    renderReports();
+    if (page === 'intelliq')   renderIntelliQ();
+    if (page === 'people')     renderPeople();
+    if (page === 'alerts')     renderAlerts();
+    updateAlertBadge();
+  } catch(e) {
+    console.warn('loadRealOrgData failed:', e.message);
+    // Don't crash — platform stays functional with empty state
+    AppState.orgDataLoaded = true;
+  }
 }
 
-/* ── Auth-aware fetch helper for protected platform endpoints ─────────── */
-function authFetch(url, options = {}) {
+/* ── Auth-aware fetch helper — intercepts 401s globally ──────────────── */
+async function authFetch(url, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (Auth.token) headers['Authorization'] = `Bearer ${Auth.token}`;
-  return fetch(url, { ...options, headers });
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) {
+    _showSessionExpired();
+    // Return a synthetic non-ok response so callers don't crash
+    return new Response(JSON.stringify({ error: 'Session expired' }), { status: 401 });
+  }
+  return res;
+}
+
+let _sessionExpiredShown = false;
+function _showSessionExpired() {
+  if (_sessionExpiredShown) return;
+  _sessionExpiredShown = true;
+  // Show a non-intrusive banner at the top of the page
+  const existing = document.getElementById('session-expired-banner');
+  if (existing) return;
+  const banner = document.createElement('div');
+  banner.id = 'session-expired-banner';
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#f74f4f;color:#fff;text-align:center;padding:0.75rem 1rem;font-size:0.88rem;display:flex;align-items:center;justify-content:center;gap:1rem';
+  banner.innerHTML = `
+    <span>⏱ Your session has expired.</span>
+    <button onclick="Auth.logout()" style="background:#fff;color:#f74f4f;border:none;border-radius:4px;padding:4px 14px;font-size:0.85rem;cursor:pointer;font-weight:700">Log In Again</button>
+  `;
+  document.body.prepend(banner);
 }
 
 function launchApp(){
@@ -351,12 +393,50 @@ function renderTopbar(){
   document.getElementById('topbar-org').textContent = AppState.orgName;
 }
 
+/* ── Onboarding empty-state HTML (reused across pages) ───────────────── */
+function _emptyStateHTML(mode) {
+  const cfg   = getModeConfig(mode);
+  const color = ORG_MODES[mode]?.color || 'var(--accent)';
+  return `
+    <div style="text-align:center;padding:3rem 1rem;max-width:480px;margin:0 auto">
+      <div style="font-size:2.5rem;margin-bottom:1rem">${ORG_MODES[mode]?.icon || '🏢'}</div>
+      <div style="font-size:1.05rem;font-weight:700;color:var(--text-primary);margin-bottom:0.5rem">${cfg.emptyLabel}</div>
+      <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1.5rem;line-height:1.6">
+        Add your first ${cfg.memberTerm.toLowerCase()} to start using IntelliQ. You can add people manually, import a spreadsheet, invite by email, or share a join link.
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:0.6rem;justify-content:center">
+        <button class="btn btn-accent btn-sm" onclick="navigate('people');setTimeout(()=>openOnboardingTab(),100)">+ Add ${cfg.memberTerm}</button>
+        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>openOnboardingTab('import'),100)">📁 Import Spreadsheet</button>
+        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>openOnboardingTab('invite'),100)">✉ Invite by Email</button>
+        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>openOnboardingTab('link'),100)">🔗 Share Join Link</button>
+      </div>
+    </div>`;
+}
+
 /* ── DASHBOARD ───────────────────────────────────────────── */
 function renderDashboard(){
   const s = AppState.stats;
   const mode = AppState.mode;
   const color = ORG_MODES[mode].color;
   const metrics = ORG_MODES[mode].metrics;
+
+  // ── Empty state guard ─────────────────────────────────────
+  if (AppState.orgDataLoaded && AppState.members.length === 0) {
+    const statsGrid = document.getElementById('dash-stats');
+    const contentEl = statsGrid?.closest('#page-dashboard') || document.getElementById('page-dashboard');
+    if (statsGrid) statsGrid.innerHTML = _emptyStateHTML(mode);
+    // Hide charts section
+    const chartsEl = document.getElementById('dash-charts');
+    if (chartsEl) chartsEl.style.display = 'none';
+    const top5El = document.getElementById('dash-top5')?.closest('.card');
+    if (top5El) top5El.style.display = 'none';
+    return;
+  }
+  // Restore visibility if previously hidden
+  const chartsEl2 = document.getElementById('dash-charts');
+  if (chartsEl2) chartsEl2.style.display = '';
+  const top5Card = document.getElementById('dash-top5')?.closest('.card');
+  if (top5Card) top5Card.style.display = '';
 
   // Stat cards
   const statsGrid = document.getElementById('dash-stats');
@@ -492,6 +572,18 @@ let memberSearch = '', memberGroup = 'All';
 function renderMembers(){
   const mode = AppState.mode;
   const metrics = ORG_MODES[mode].metrics;
+
+  // ── Empty state guard ─────────────────────────────────────
+  if (AppState.orgDataLoaded && AppState.members.length === 0) {
+    const tableEl = document.getElementById('members-table-body')?.closest('.card') ||
+                    document.getElementById('members-group-tabs')?.parentElement;
+    const tabsEl  = document.getElementById('members-group-tabs');
+    if (tabsEl) tabsEl.innerHTML = '';
+    const bodyEl  = document.getElementById('members-table-body');
+    if (bodyEl) bodyEl.innerHTML = `<tr><td colspan="99">${_emptyStateHTML(mode)}</td></tr>`;
+    return;
+  }
+
   const groups = AppState.getGroups();
 
   // Group filter tabs
@@ -525,17 +617,27 @@ function renderAnalytics(){
   const color = ORG_MODES[mode].color;
   const metrics = ORG_MODES[mode].metrics;
 
+  // ── Empty state guard ─────────────────────────────────────
+  if (AppState.orgDataLoaded && AppState.members.length === 0) {
+    const riskEl = document.getElementById('analytics-risk-table');
+    if (riskEl) riskEl.innerHTML = `<tr><td colspan="99">${_emptyStateHTML(mode)}</td></tr>`;
+    return;
+  }
+
+  // Only members with real score data
+  const scoredMembers = AppState.members.filter(m => m.overall !== null);
+
   setTimeout(() => {
-    // Metric averages bar
+    // Metric averages bar — only use members with actual scores
     const metricAvgs = metrics.map(m => {
-      const vals = AppState.members.map(mem=>mem.scores[m]);
-      return Math.round(vals.reduce((a,b)=>a+b,0)/vals.length);
+      const vals = scoredMembers.map(mem => mem.scores[m]).filter(v => v !== null && v !== undefined);
+      return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)/vals.length) : 0;
     });
     createHorizBarChart('chart-metric-avgs', metrics, metricAvgs, color);
 
-    // Top vs Bottom performers
-    const top = [...AppState.members].sort((a,b)=>b.overall-a.overall).slice(0,5);
-    const bot = [...AppState.members].sort((a,b)=>a.overall-b.overall).slice(0,5);
+    // Top vs Bottom performers — only real data
+    const top = [...scoredMembers].sort((a,b)=>b.overall-a.overall).slice(0,5);
+    const bot = [...scoredMembers].sort((a,b)=>a.overall-b.overall).slice(0,5);
     createBarChart('chart-top-bot', [...top.map(m=>m.name.split(' ')[0]), ...bot.map(m=>m.name.split(' ')[0])],
       [{
         label: 'Performance',
@@ -545,9 +647,9 @@ function renderAnalytics(){
         borderWidth: 1, borderRadius: 4,
       }], { legend: false });
 
-    // IQ distribution
+    // IQ distribution — only members with real IQ scores
     const buckets = [0,0,0,0,0]; // 0-19,20-39,40-59,60-79,80-100
-    AppState.members.forEach(m => {
+    scoredMembers.filter(m => m.iqScore !== null).forEach(m => {
       const b = Math.min(4, Math.floor(m.iqScore/20));
       buckets[b]++;
     });
@@ -568,9 +670,12 @@ function renderAnalytics(){
     createLineChart('chart-group-trend', last6, datasets, { yMin:40 });
   }, 50);
 
-  // At-risk table
-  const atRisk = AppState.members.filter(m=>m.wellnessScore<50||m.overall<55||m.alerts>1)
-    .sort((a,b)=>a.wellnessScore-b.wellnessScore).slice(0,8);
+  // At-risk table — only from members with real data
+  const atRisk = AppState.members.filter(m =>
+    (m.wellnessScore !== null && m.wellnessScore < 50) ||
+    (m.overall !== null && m.overall < 55) ||
+    m.alerts > 1
+  ).sort((a,b) => (a.wellnessScore ?? 100) - (b.wellnessScore ?? 100)).slice(0,8);
   document.getElementById('analytics-risk-table').innerHTML = atRisk.map(m=>`
     <tr onclick="showProfile(${m.id})">
       <td>
@@ -1668,6 +1773,13 @@ function renderReports(){
   const color = ORG_MODES[mode].color;
   const metrics = ORG_MODES[mode].metrics;
 
+  // ── Empty state guard ─────────────────────────────────────
+  if (AppState.orgDataLoaded && AppState.members.length === 0) {
+    const tableEl = document.getElementById('stat-sheet-tbody');
+    if (tableEl) tableEl.innerHTML = `<tr><td colspan="99">${_emptyStateHTML(mode)}</td></tr>`;
+    return;
+  }
+
   // Summary stat sheet
   const s = AppState.stats;
   document.getElementById('report-org').textContent = AppState.orgName;
@@ -1719,48 +1831,12 @@ async function renderPeople() {
     if (Auth.currentUser?.id) HierarchyTree._expanded.add(Auth.currentUser.id);
     HierarchyTree.render('hierarchy-tree-container');
   } catch(e) {
-    // Demo mode — build tree from AppState.members
     container.innerHTML = `
-      <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.8rem;padding:0.5rem;background:rgba(247,178,79,0.1);border-radius:6px">
-        Demo mode — tree shows mock members. Real hierarchy available after org setup.
-      </div>
-      ${_demoTreeHTML()}`;
+      <div style="padding:1.5rem;text-align:center;color:var(--text-muted);font-size:0.85rem">
+        <div style="font-size:1.2rem;margin-bottom:0.5rem">⚠️</div>
+        Could not load hierarchy. <a href="#" onclick="renderPeople()" style="color:var(--accent)">Try again</a>
+      </div>`;
   }
-}
-
-function _demoTreeHTML() {
-  const color = ORG_MODES[AppState.mode].color;
-  return `
-    <div class="tree-node" style="border-color:rgba(124,90,245,0.4);background:rgba(124,90,245,0.05);margin-bottom:0.4rem">
-      <div class="tree-node-left">
-        <span style="width:20px;display:inline-block"></span>
-        <div class="tree-avatar" style="background:rgba(124,90,245,0.2);color:var(--accent)">🔑</div>
-        <div class="tree-info">
-          <div class="tree-name">${AppState.adminName} <span style="color:var(--text-muted);font-weight:400;font-size:0.72rem">(you)</span></div>
-          <div class="tree-role">Super Admin</div>
-        </div>
-      </div>
-      <div class="tree-actions">
-        <span class="tree-count">${AppState.members.length} below</span>
-      </div>
-    </div>
-    <div style="margin-left:28px">
-      ${AppState.members.slice(0,8).map(m => `
-        <div class="tree-node" style="margin-bottom:0.4rem">
-          <div class="tree-node-left">
-            <span style="width:20px;display:inline-block"></span>
-            <div class="tree-avatar" style="background:${m.color}22;color:${m.color}">${m.initials}</div>
-            <div class="tree-info">
-              <div class="tree-name">${m.name}</div>
-              <div class="tree-role">${m.role} · ${m.group}</div>
-            </div>
-          </div>
-          <div class="tree-actions">
-            <button class="tree-btn" onclick="showProfile(${m.id})">View</button>
-          </div>
-        </div>`).join('')}
-      ${AppState.members.length > 8 ? `<div style="font-size:0.78rem;color:var(--text-muted);padding:0.5rem 0">+ ${AppState.members.length-8} more members</div>` : ''}
-    </div>`;
 }
 
 /* ── SETTINGS PAGE ───────────────────────────────────────── */
@@ -1796,30 +1872,430 @@ function renderSettings(){
 
 function switchMode(newMode){
   AppState.mode = newMode;
-  AppState.members = generateMembers(newMode, 24);
-  AppState.alerts  = generateAlerts(newMode, AppState.members);
-  AppState.stats   = generateOrgStats(newMode, AppState.members);
-  AppState.perfHistory = generatePerformanceHistory(12);
-  AppState.members.forEach((m, i) => {
-    m.levelId      = i < 2 ? 2 : i < 6 ? 3 : 4;
-    m.supervisorId = i < 2 ? null : (i % 2 === 0 ? 1 : 2);
-  });
+  // Update hierarchy labels from MODE_CONFIG — never regenerate fake members
+  const cfg = getModeConfig(newMode);
+  AppState.orgLevels = cfg.levels.map((label, i) => ({
+    id: i + 1, label, canSeeBelow: i < cfg.levels.length - 1,
+  }));
+  // Rebuild member role labels in case they need updating (keeps real data)
   renderSidebar();
   renderSettings();
+  // Save updated mode to server
+  authFetch('/api/platform/update-org-mode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orgCode: AppState.orgCode, orgMode: newMode }),
+  }).catch(() => {});
   showToast(`Switched to ${ORG_MODES[newMode].label} mode`, 'success');
 }
 
 /* ── PEOPLE PAGE TABS ────────────────────────────────────── */
 function switchPeopleTab(tab) {
-  ['tree','groups','inbox'].forEach(t => {
+  ['tree','onboard','groups','inbox'].forEach(t => {
     const el = document.getElementById(`people-tab-${t}`);
     if (el) el.style.display = t === tab ? 'block' : 'none';
   });
   document.querySelectorAll('#page-people .tab-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
-  if (tab === 'groups') renderGroups();
-  if (tab === 'inbox')  renderPlatformInbox();
+  if (tab === 'groups')  renderGroups();
+  if (tab === 'inbox')   renderPlatformInbox();
+  if (tab === 'onboard') renderOnboardHub();
+}
+
+/* Navigate to People page and open a specific onboard sub-tab */
+function openOnboardingTab(sub) {
+  navigate('people');
+  setTimeout(() => {
+    switchPeopleTab('onboard');
+    if (sub) _openOnboardSection(sub);
+  }, 80);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   ONBOARDING HUB
+   ══════════════════════════════════════════════════════════════ */
+function renderOnboardHub() {
+  const el = document.getElementById('onboard-hub-content');
+  if (!el) return;
+  const cfg   = getModeConfig(AppState.mode);
+  const color = ORG_MODES[AppState.mode]?.color || 'var(--accent)';
+
+  el.innerHTML = `
+    <!-- Method cards -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0.75rem;margin-bottom:1.5rem">
+      ${_onboardCard('add',    '👤', `Add ${cfg.memberTerm}`,    'Add one person manually',          color)}
+      ${_onboardCard('import', '📁', 'Import Spreadsheet',      'Upload a CSV or XLSX file',        color)}
+      ${_onboardCard('invite', '✉',  'Invite by Email',         'Send email invite links',          color)}
+      ${_onboardCard('link',   '🔗', 'Generate Join Link',      'Shareable self-registration link', color)}
+      ${_onboardCard('sample', '🎭', 'Load Sample Data',        'Add example people to explore',    color)}
+    </div>
+
+    <!-- Active panel -->
+    <div id="onboard-active-panel"></div>
+
+    <!-- Recent additions -->
+    <div id="onboard-recent" style="margin-top:1rem"></div>
+  `;
+  _renderOnboardRecent();
+}
+
+function _onboardCard(id, icon, label, sub, color) {
+  return `
+    <div onclick="_openOnboardSection('${id}')" style="cursor:pointer;background:var(--surface-1);border:1px solid var(--border);border-radius:10px;padding:1.1rem;display:flex;flex-direction:column;align-items:flex-start;gap:0.4rem;transition:border-color 0.15s"
+      onmouseover="this.style.borderColor='${color}'" onmouseout="this.style.borderColor='var(--border)'">
+      <span style="font-size:1.4rem">${icon}</span>
+      <div style="font-size:0.88rem;font-weight:700;color:var(--text-primary)">${label}</div>
+      <div style="font-size:0.75rem;color:var(--text-secondary)">${sub}</div>
+    </div>`;
+}
+
+let _currentOnboardSection = null;
+
+function _openOnboardSection(section) {
+  _currentOnboardSection = section;
+  const el = document.getElementById('onboard-active-panel');
+  if (!el) return;
+  const cfg = getModeConfig(AppState.mode);
+
+  if (section === 'add') {
+    el.innerHTML = `
+      <div class="card" style="margin-bottom:0">
+        <div class="card-header"><div class="card-title">👤 Add ${cfg.memberTerm}</div></div>
+        <div class="card-body">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:0.7rem">
+            <div><label class="form-label">Full Name *</label><input id="ob-add-name" class="form-input" placeholder="${cfg.memberTerm} name" /></div>
+            <div><label class="form-label">Email</label><input id="ob-add-email" class="form-input" type="email" placeholder="email@example.com" /></div>
+            <div>
+              <label class="form-label">Role</label>
+              <select id="ob-add-role" class="form-input">
+                <option value="member">Member</option>
+                <option value="coach">Coach / Leader</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div><label class="form-label">${cfg.groupTerm}</label><input id="ob-add-group" class="form-input" placeholder="${cfg.sampleGroups[0] || cfg.groupTerm}" /></div>
+          </div>
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.7rem">Default password = name in lowercase. They can change it after first login.</div>
+          <button class="btn btn-accent btn-sm" onclick="_submitAddPerson()">Create ${cfg.memberTerm}</button>
+          <span id="ob-add-result" style="margin-left:0.7rem;font-size:0.8rem"></span>
+        </div>
+      </div>`;
+
+  } else if (section === 'import') {
+    el.innerHTML = `
+      <div class="card" style="margin-bottom:0">
+        <div class="card-header"><div class="card-title">📁 Import Spreadsheet</div></div>
+        <div class="card-body">
+          <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.8rem;line-height:1.6">
+            Upload a <strong>CSV</strong> or <strong>XLSX</strong> file. Required columns: <code>name</code>, <code>email</code>. Optional: <code>role</code>, <code>group</code>/<code>department</code>.
+          </div>
+          <div style="margin-bottom:0.8rem">
+            <input type="file" id="ob-import-file" accept=".csv,.xlsx,.xls" class="form-input" style="padding:6px" onchange="_previewImportFile()" />
+          </div>
+          <div id="ob-import-preview" style="margin-bottom:0.8rem"></div>
+          <button class="btn btn-accent btn-sm" id="ob-import-btn" onclick="_submitImport()" style="display:none">Import All</button>
+          <span id="ob-import-result" style="margin-left:0.7rem;font-size:0.8rem"></span>
+        </div>
+      </div>`;
+
+  } else if (section === 'invite') {
+    el.innerHTML = `
+      <div class="card" style="margin-bottom:0">
+        <div class="card-header"><div class="card-title">✉ Invite by Email</div></div>
+        <div class="card-body">
+          <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+            Enter email addresses, one per line. Each gets a unique invite link.
+          </div>
+          <textarea id="ob-invite-emails" class="form-input" rows="4"
+            placeholder="john@company.com&#10;sarah@company.com&#10;alex@company.com" style="margin-bottom:0.6rem;font-family:monospace"></textarea>
+          <div style="display:flex;gap:0.7rem;align-items:center;margin-bottom:0.7rem;flex-wrap:wrap">
+            <div style="display:flex;align-items:center;gap:0.4rem">
+              <label class="form-label" style="margin:0">Role:</label>
+              <select id="ob-invite-role" class="form-input" style="width:auto;padding:4px 8px">
+                <option value="member">Member</option>
+                <option value="coach">Coach</option>
+              </select>
+            </div>
+            <div style="display:flex;align-items:center;gap:0.4rem">
+              <label class="form-label" style="margin:0">${cfg.groupTerm}:</label>
+              <input id="ob-invite-group" class="form-input" style="width:140px" placeholder="Optional" />
+            </div>
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="_submitEmailInvites()">Generate Invite Links</button>
+          <div id="ob-invite-result" style="margin-top:0.8rem;font-size:0.8rem"></div>
+        </div>
+      </div>`;
+
+  } else if (section === 'link') {
+    el.innerHTML = `
+      <div class="card" style="margin-bottom:0">
+        <div class="card-header"><div class="card-title">🔗 Generate Join Link</div></div>
+        <div class="card-body">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:0.7rem">
+            <div>
+              <label class="form-label">Link Label</label>
+              <input id="ob-link-label" class="form-input" placeholder="e.g. Year 10 Students" />
+            </div>
+            <div>
+              <label class="form-label">Role</label>
+              <select id="ob-link-role" class="form-input">
+                <option value="member">Member</option>
+                <option value="coach">Coach</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label">${cfg.groupTerm} (optional)</label>
+              <input id="ob-link-group" class="form-input" placeholder="${cfg.sampleGroups[0] || ''}" />
+            </div>
+            <div>
+              <label class="form-label">Expires in</label>
+              <select id="ob-link-expiry" class="form-input">
+                <option value="7">7 days</option>
+                <option value="14">14 days</option>
+                <option value="30">30 days</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label">Max uses (0 = unlimited)</label>
+              <input id="ob-link-limit" class="form-input" type="number" min="0" value="0" />
+            </div>
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="_createJoinLink()">Generate Link</button>
+          <div id="ob-link-result" style="margin-top:0.8rem"></div>
+          <div id="ob-link-list" style="margin-top:1rem"></div>
+        </div>
+      </div>`;
+    _loadJoinLinks();
+
+  } else if (section === 'sample') {
+    el.innerHTML = `
+      <div class="card" style="margin-bottom:0">
+        <div class="card-header"><div class="card-title">🎭 Load Sample Data</div></div>
+        <div class="card-body">
+          <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:1rem;line-height:1.5">
+            This will add example people to your org so you can explore IntelliQ. Real organisations should use the other onboarding methods.
+            <br><strong style="color:var(--warning)">⚠ This adds real users to your org — not just a demo mode.</strong>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:0.5rem">
+            <button class="btn btn-outline btn-sm" onclick="_loadSampleData('sports')">⚽ Sports Sample</button>
+            <button class="btn btn-outline btn-sm" onclick="_loadSampleData('school')">🎓 School Sample</button>
+            <button class="btn btn-outline btn-sm" onclick="_loadSampleData('workplace')">🏢 Workplace Sample</button>
+          </div>
+          <div id="ob-sample-result" style="margin-top:0.8rem;font-size:0.8rem"></div>
+        </div>
+      </div>`;
+  }
+}
+
+/* ── Onboard action handlers ──────────────────────────────── */
+async function _submitAddPerson() {
+  const name  = document.getElementById('ob-add-name')?.value.trim();
+  const email = document.getElementById('ob-add-email')?.value.trim();
+  const role  = document.getElementById('ob-add-role')?.value || 'member';
+  const group = document.getElementById('ob-add-group')?.value.trim();
+  const resEl = document.getElementById('ob-add-result');
+  if (!name) { if (resEl) resEl.textContent = 'Name is required.'; return; }
+  try {
+    if (resEl) resEl.textContent = 'Adding…';
+    const res  = await authFetch('/api/auth/create-user', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orgCode: AppState.orgCode, creatorId: Auth.currentUser?.id, name, email, role, password: name.toLowerCase().replace(/\s+/g,'') }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    if (resEl) resEl.innerHTML = `<span style="color:var(--success)">✓ ${name} added.</span>`;
+    // Add to AppState immediately
+    _addMemberToAppState({ ...data.user, group });
+    // Clear fields
+    ['ob-add-name','ob-add-email','ob-add-group'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    _renderOnboardRecent();
+    await HierarchyTree.load();
+    HierarchyTree.render('hierarchy-tree-container');
+    showToast(`${name} added`, 'success');
+  } catch(e) {
+    if (resEl) resEl.textContent = e.message;
+  }
+}
+
+let _importRows = [];
+async function _previewImportFile() {
+  const file  = document.getElementById('ob-import-file')?.files[0];
+  const el    = document.getElementById('ob-import-preview');
+  const btn   = document.getElementById('ob-import-btn');
+  if (!file || !el) return;
+  el.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem">Parsing…</div>';
+
+  try {
+    const text = await file.text();
+    _importRows = _parseCSV(text);
+    if (!_importRows.length) { el.innerHTML = '<div style="color:var(--warning);font-size:0.8rem">No rows found. Check file format.</div>'; return; }
+
+    el.innerHTML = `
+      <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.4rem">${_importRows.length} row(s) found — preview:</div>
+      <div style="overflow-x:auto;max-height:180px;border:1px solid var(--border);border-radius:6px">
+        <table style="width:100%;border-collapse:collapse;font-size:0.75rem">
+          <thead><tr style="background:var(--surface-2)">${Object.keys(_importRows[0]).map(k=>`<th style="padding:4px 8px;text-align:left;border-bottom:1px solid var(--border)">${k}</th>`).join('')}</tr></thead>
+          <tbody>${_importRows.slice(0,5).map(r=>`<tr>${Object.values(r).map(v=>`<td style="padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-secondary)">${v||''}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table>
+      </div>`;
+    if (btn) btn.style.display = 'inline-block';
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--danger);font-size:0.8rem">Could not parse file: ${e.message}</div>`;
+  }
+}
+
+function _parseCSV(text) {
+  const lines = text.replace(/\r/g,'').split('\n').filter(l => l.trim());
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[^a-z]/g,''));
+  return lines.slice(1).map(line => {
+    const vals = line.split(',');
+    const obj  = {};
+    headers.forEach((h, i) => { obj[h] = (vals[i] || '').trim().replace(/^"|"$/g,''); });
+    return obj;
+  }).filter(r => r.name);
+}
+
+async function _submitImport() {
+  const resEl = document.getElementById('ob-import-result');
+  if (!_importRows.length) return;
+  if (resEl) resEl.textContent = `Importing ${_importRows.length} people…`;
+  try {
+    const res  = await authFetch('/api/auth/bulk-import', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orgCode: AppState.orgCode, users: _importRows }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Import failed');
+    if (resEl) resEl.innerHTML = `<span style="color:var(--success)">✓ ${data.created.length} imported${data.skipped.length ? `, ${data.skipped.length} skipped (already exist)` : ''}.</span>`;
+    showToast(`${data.created.length} people imported`, 'success');
+    await loadRealOrgData();
+    _renderOnboardRecent();
+  } catch(e) {
+    if (resEl) resEl.textContent = e.message;
+  }
+}
+
+async function _submitEmailInvites() {
+  const emailsRaw = document.getElementById('ob-invite-emails')?.value || '';
+  const role      = document.getElementById('ob-invite-role')?.value || 'member';
+  const group     = document.getElementById('ob-invite-group')?.value.trim() || '';
+  const resEl     = document.getElementById('ob-invite-result');
+  const emails    = emailsRaw.split('\n').map(e => e.trim()).filter(Boolean);
+  if (!emails.length) { if (resEl) resEl.textContent = 'Enter at least one email.'; return; }
+  if (resEl) resEl.innerHTML = 'Generating invite links…';
+  const results = [];
+  for (const email of emails) {
+    try {
+      const res  = await authFetch('/api/auth/invite', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orgCode: AppState.orgCode, role, group, label: email, expiryDays: 14 }),
+      });
+      const data = await res.json();
+      if (data.ok) results.push({ email, url: `${window.location.origin}${data.url}` });
+    } catch(e) { /* skip */ }
+  }
+  if (resEl) {
+    resEl.innerHTML = results.length
+      ? results.map(r => `<div style="margin-bottom:0.4rem;padding:0.4rem 0.6rem;background:var(--surface-2);border-radius:6px;font-size:0.77rem">
+          <span style="color:var(--text-secondary)">${r.email}</span><br>
+          <span style="font-family:monospace;color:var(--accent);word-break:break-all">${r.url}</span>
+          <button onclick="navigator.clipboard.writeText('${r.url}').then(()=>showToast('Copied','success'))" style="border:none;background:none;cursor:pointer;color:var(--text-muted);font-size:0.7rem;margin-left:4px">📋 Copy</button>
+        </div>`).join('')
+      : '<span style="color:var(--danger)">Could not generate links.</span>';
+  }
+}
+
+async function _createJoinLink() {
+  const label  = document.getElementById('ob-link-label')?.value.trim() || '';
+  const role   = document.getElementById('ob-link-role')?.value || 'member';
+  const group  = document.getElementById('ob-link-group')?.value.trim() || '';
+  const expiry = parseInt(document.getElementById('ob-link-expiry')?.value) || 7;
+  const limit  = parseInt(document.getElementById('ob-link-limit')?.value) || 0;
+  const resEl  = document.getElementById('ob-link-result');
+  try {
+    const res  = await authFetch('/api/auth/invite', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orgCode: AppState.orgCode, role, group, label, expiryDays: expiry, usageLimit: limit || null }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    const fullUrl = `${window.location.origin}${data.url}`;
+    if (resEl) resEl.innerHTML = `
+      <div style="padding:0.6rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:0.8rem">
+        <div style="font-weight:700;color:var(--text-primary);margin-bottom:0.3rem">🔗 ${label || 'Join Link'} created</div>
+        <div style="font-family:monospace;color:var(--accent);word-break:break-all;margin-bottom:0.4rem">${fullUrl}</div>
+        <button onclick="navigator.clipboard.writeText('${fullUrl}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm">📋 Copy Link</button>
+      </div>`;
+    showToast('Join link created', 'success');
+    _loadJoinLinks();
+  } catch(e) {
+    if (resEl) resEl.textContent = e.message;
+  }
+}
+
+async function _loadJoinLinks() {
+  const el = document.getElementById('ob-link-list');
+  if (!el) return;
+  try {
+    const res  = await authFetch(`/api/auth/join-links?orgCode=${encodeURIComponent(AppState.orgCode)}`);
+    const data = await res.json();
+    const links = data.links || [];
+    if (!links.length) { el.innerHTML = '<div style="font-size:0.78rem;color:var(--text-muted)">No active join links.</div>'; return; }
+    el.innerHTML = `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">Active Links</div>` +
+      links.map(l => {
+        const expires = new Date(l.expiresAt).toLocaleDateString('en-GB');
+        const fullUrl = `${window.location.origin}/join?invite=${l.token}`;
+        return `<div style="padding:0.5rem 0.7rem;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;margin-bottom:0.4rem;font-size:0.78rem">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap">
+            <div>
+              <span style="font-weight:600">${l.label || l.role}</span>
+              ${l.group ? `<span style="color:var(--text-muted)"> · ${l.group}</span>` : ''}
+              <span style="color:var(--text-muted)"> · ${l.useCount}${l.usageLimit ? '/'+l.usageLimit : ''} uses · expires ${expires}</span>
+            </div>
+            <button onclick="navigator.clipboard.writeText('${fullUrl}').then(()=>showToast('Copied','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px">📋 Copy</button>
+          </div>
+        </div>`;
+      }).join('');
+  } catch(e) { /* ignore */ }
+}
+
+async function _loadSampleData(sampleMode) {
+  const resEl = document.getElementById('ob-sample-result');
+  if (resEl) resEl.textContent = 'Loading…';
+  try {
+    const res  = await authFetch('/api/auth/load-sample', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orgCode: AppState.orgCode, sampleMode }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    if (resEl) resEl.innerHTML = `<span style="color:var(--success)">✓ ${data.created.length} sample people added.</span>`;
+    showToast(`${data.created.length} sample people loaded`, 'success');
+    await loadRealOrgData();
+    _renderOnboardRecent();
+  } catch(e) {
+    if (resEl) resEl.textContent = e.message;
+  }
+}
+
+function _renderOnboardRecent() {
+  const el = document.getElementById('onboard-recent');
+  if (!el) return;
+  const members = AppState.members.slice().reverse().slice(0, 8);
+  if (!members.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">People in This Org (${AppState.members.length})</div>
+    <div style="display:flex;flex-wrap:wrap;gap:0.4rem">
+      ${members.map(m => `
+        <div style="padding:0.35rem 0.7rem;background:var(--surface-1);border:1px solid var(--border);border-radius:20px;font-size:0.78rem;display:flex;align-items:center;gap:0.4rem">
+          <div style="width:20px;height:20px;border-radius:50%;background:${m.color}22;color:${m.color};font-size:0.62rem;display:flex;align-items:center;justify-content:center;font-weight:700">${m.initials}</div>
+          <span>${m.name}</span>
+          <span style="color:var(--text-muted);font-size:0.7rem">${m.role}</span>
+        </div>`).join('')}
+      ${AppState.members.length > 8 ? `<div style="padding:0.35rem 0.7rem;color:var(--text-muted);font-size:0.78rem">+${AppState.members.length - 8} more</div>` : ''}
+    </div>`;
 }
 
 /* ── GROUPS ──────────────────────────────────────────────── */
@@ -2436,25 +2912,25 @@ function renderScenarios() {
       <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.9rem">Create an Assessment</div>
 
       <div style="margin-bottom:0.8rem">
-        <label class="form-label">What's going on with this person?</label>
+        <label class="form-label">What's going on with this ${getModeConfig(AppState.mode).memberTerm.toLowerCase()}?</label>
         <textarea id="sc-brief" class="form-input" rows="3" style="resize:vertical"
-          placeholder="Describe what's happening with this player in plain English. What have you noticed? What do you want to understand better? The AI will design the assessment from your description."></textarea>
+          placeholder="${getModeConfig(AppState.mode).assessPrompt}"></textarea>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:0.9rem">
         <div>
-          <label class="form-label">Difficulty</label>
+          <label class="form-label">Depth</label>
           <div style="display:flex;gap:0.4rem;margin-top:2px">
-            ${['Easy','Medium','Hard'].map(d => `
+            ${['Basic','Standard','Advanced'].map(d => `
               <button class="domain-badge sc-diff-btn" data-diff="${d}"
                 style="cursor:pointer;padding:5px 10px;font-size:0.73rem"
                 onclick="selectDifficulty('${d}')">${d}</button>`).join('')}
           </div>
         </div>
         <div>
-          <label class="form-label">Assign to Member</label>
+          <label class="form-label">Select ${getModeConfig(AppState.mode).memberTerm}</label>
           <select id="sc-member" class="form-input">
-            <option value="">— Select member —</option>
+            <option value="">— Select ${getModeConfig(AppState.mode).memberTerm.toLowerCase()} —</option>
             ${[...AppState.members].sort((a,b)=>a.name.localeCompare(b.name))
               .map(m=>`<option value="${m.id}">${m.name} · ${m.role}</option>`).join('')}
           </select>

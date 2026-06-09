@@ -530,6 +530,7 @@
         <!-- Sub-tabs -->
         <div class="tabs" style="margin-bottom:1rem">
           <button class="tab-btn active" data-tab="tree" onclick="switchPeopleTab('tree')">Org Tree</button>
+          <button class="tab-btn" data-tab="onboard" onclick="switchPeopleTab('onboard')">＋ Onboard</button>
           <button class="tab-btn" data-tab="groups" onclick="switchPeopleTab('groups')">Groups</button>
           <button class="tab-btn" data-tab="inbox" onclick="switchPeopleTab('inbox')">Inbox</button>
         </div>
@@ -540,6 +541,11 @@
             <div id="hierarchy-tree-container"></div>
           </div>
           <div id="hierarchy-add-panel" style="display:none"></div>
+        </div>
+
+        <!-- Onboarding Hub tab -->
+        <div id="people-tab-onboard" style="display:none">
+          <div id="onboard-hub-content"></div>
         </div>
 
         <!-- Groups tab -->

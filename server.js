@@ -530,13 +530,19 @@ app.post('/api/auth/bulk-create', async (req, res) => {
 
 /* ── Generate invite link ───────────────────────────────────────────────── */
 app.post('/api/auth/invite', (req, res) => {
-  const { orgCode, role, supervisorId } = req.body;
+  const { orgCode, role, supervisorId, group, label, usageLimit, expiryDays } = req.body;
   const token = generateToken();
+  const days  = Math.min(Math.max(parseInt(expiryDays) || 7, 1), 90);
   inviteTokens[token] = {
-    orgCode: orgCode.toLowerCase(),
-    role: role || 'member',
+    orgCode:    orgCode.toLowerCase(),
+    role:       role || 'member',
     supervisorId,
-    expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+    group:      group || '',
+    label:      label || '',
+    usageLimit: usageLimit ? parseInt(usageLimit) : null,
+    useCount:   0,
+    expiresAt:  Date.now() + days * 24 * 60 * 60 * 1000,
+    createdAt:  new Date().toISOString(),
   };
   scheduleSave();
   res.json({ ok: true, token, url: `/join?invite=${token}` });
@@ -548,6 +554,7 @@ app.post('/api/auth/join-invite', async (req, res) => {
   const invite = inviteTokens[token];
   if (!invite) return res.status(404).json({ error: 'Invalid or expired invite link' });
   if (invite.expiresAt < Date.now()) return res.status(410).json({ error: 'Invite link has expired' });
+  if (invite.usageLimit && (invite.useCount || 0) >= invite.usageLimit) return res.status(410).json({ error: 'This invite link has reached its usage limit' });
 
   const code  = invite.orgCode;
   const users = orgUsers[code];
@@ -562,11 +569,17 @@ app.post('/api/auth/join-invite', async (req, res) => {
   users[userId] = {
     id: userId, name: name.trim(), role: invite.role, orgCode: code,
     supervisorId: invite.supervisorId,
-    passwordHash,
-    passwordSet: true,
+    group: invite.group || '',
+    passwordHash, passwordSet: true,
     createdAt: new Date().toISOString(),
     levelId: roleLevel[invite.role] || 4,
   };
+  // Auto-add to group if specified
+  if (invite.group && orgGroups[code]) {
+    const gObj = orgGroups[code].find(g => g.name.toLowerCase() === (invite.group || '').toLowerCase());
+    if (gObj && !gObj.memberIds.includes(userId)) gObj.memberIds.push(userId);
+  }
+  invite.useCount = (invite.useCount || 0) + 1;
   scheduleSave();
 
   const org   = orgMeta[code];
@@ -914,6 +927,142 @@ app.post('/api/platform/register-org', (req, res) => {
   orgStore[orgCode.toLowerCase().trim()] = { orgName, orgMode };
   scheduleSave();
   res.json({ ok: true });
+});
+
+/* ── Update org mode ────────────────────────────────────────────────────── */
+app.post('/api/platform/update-org-mode', requireAuth, (req, res) => {
+  const { orgCode, orgMode } = req.body;
+  if (!orgCode || !orgMode) return res.status(400).json({ error: 'orgCode and orgMode required' });
+  const code = orgCode.toLowerCase().trim();
+  if (orgMeta[code]) { orgMeta[code].orgMode = orgMode; scheduleSave(); }
+  if (orgStore[code]) { orgStore[code].orgMode = orgMode; scheduleSave(); }
+  res.json({ ok: true });
+});
+
+/* ── Bulk import users (CSV/XLSX parsed client-side) ─────────────────── */
+app.post('/api/auth/bulk-import', requireAuth, async (req, res) => {
+  const { orgCode, users: importRows } = req.body;
+  if (!orgCode || !Array.isArray(importRows)) return res.status(400).json({ error: 'orgCode and users[] required' });
+  const code    = orgCode.toLowerCase().trim();
+  const creator = req.user;
+
+  if (!orgUsers[code]) return res.status(404).json({ error: 'Org not found' });
+
+  const created = [], skipped = [], failed = [];
+
+  for (const row of importRows) {
+    const name  = (row.name  || '').trim();
+    const email = (row.email || '').trim().toLowerCase();
+    const role  = (['admin','coach','member'].includes(row.role?.toLowerCase()) ? row.role.toLowerCase() : 'member');
+    const group = (row.group || row.department || '').trim();
+
+    if (!name) { failed.push({ row, reason: 'Missing name' }); continue; }
+
+    // Check for duplicate by name
+    const existing = Object.values(orgUsers[code]).find(u => u.name.toLowerCase() === name.toLowerCase());
+    if (existing) { skipped.push(name); continue; }
+
+    const userId = generateId();
+    const password = name.toLowerCase().replace(/\s+/g, '');
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+    const roleLevel = { admin: 2, coach: 3, member: 4 };
+
+    orgUsers[code][userId] = {
+      id: userId, name, email, role, orgCode: code,
+      group, department: group,
+      passwordHash, passwordSet: false,
+      createdAt: new Date().toISOString(),
+      levelId: roleLevel[role] || 4,
+      supervisorId: creator.id,
+      importedAt: new Date().toISOString(),
+    };
+
+    // Auto-create group if it doesn't exist
+    if (group) {
+      if (!orgGroups[code]) orgGroups[code] = [];
+      const groupExists = orgGroups[code].some(g => g.name.toLowerCase() === group.toLowerCase());
+      if (!groupExists) {
+        orgGroups[code].push({
+          id: generateId(), name: group, orgCode: code,
+          memberIds: [], createdAt: new Date().toISOString(),
+        });
+      }
+      // Add member to group
+      const gObj = orgGroups[code].find(g => g.name.toLowerCase() === group.toLowerCase());
+      if (gObj && !gObj.memberIds.includes(userId)) gObj.memberIds.push(userId);
+    }
+
+    created.push({ id: userId, name, role, group });
+  }
+
+  scheduleSave();
+  res.json({ ok: true, created, skipped, failed, total: importRows.length });
+});
+
+/* ── List active join/invite links ───────────────────────────────────── */
+app.get('/api/auth/join-links', requireAuth, (req, res) => {
+  const { orgCode } = req.query;
+  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  const code  = orgCode.toLowerCase().trim();
+  const now   = Date.now();
+  const links = Object.entries(inviteTokens)
+    .filter(([, t]) => t.orgCode === code && t.expiresAt > now)
+    .map(([token, t]) => ({
+      token,
+      url:        `/join?invite=${token}`,
+      role:       t.role,
+      group:      t.group || '',
+      label:      t.label || '',
+      usageLimit: t.usageLimit || null,
+      useCount:   t.useCount || 0,
+      expiresAt:  new Date(t.expiresAt).toISOString(),
+      createdAt:  t.createdAt || null,
+    }));
+  res.json({ links });
+});
+
+/* ── Load sample data for org ─────────────────────────────────────────── */
+app.post('/api/auth/load-sample', requireAuth, async (req, res) => {
+  const { orgCode, sampleMode } = req.body;
+  if (!orgCode || !sampleMode) return res.status(400).json({ error: 'orgCode and sampleMode required' });
+  const code = orgCode.toLowerCase().trim();
+  if (!orgUsers[code]) return res.status(404).json({ error: 'Org not found' });
+
+  const SAMPLE_DATA = {
+    sports:    { names: ['Marcus Silva','Jordan Johnson','Tyler Wright','Isaiah Thompson','Devon Parker','Andre Mensah'], groups: ['First Team','U21 Squad','Academy','Coaching Staff'] },
+    school:    { names: ['Emma Smith','Olivia Brown','Noah Williams','Liam Jones','Ava Taylor','Isabella Wilson'], groups: ['Year 10','Year 11','Year 12','Staff'] },
+    workplace: { names: ['Sarah Martinez','Alex Lee','Jordan Robinson','Taylor Walker','Morgan Hall','Jamie Young'], groups: ['Leadership','Engineering','Product','Finance','Marketing'] },
+  };
+
+  const sample = SAMPLE_DATA[sampleMode] || SAMPLE_DATA.workplace;
+  const created = [];
+
+  for (let i = 0; i < sample.names.length; i++) {
+    const name  = sample.names[i];
+    const group = sample.groups[i % sample.groups.length];
+    const role  = i === 0 ? 'coach' : 'member';
+    const existing = Object.values(orgUsers[code]).find(u => u.name.toLowerCase() === name.toLowerCase());
+    if (existing) continue;
+    const userId = generateId();
+    const passwordHash = await bcrypt.hash(name.toLowerCase().replace(/\s+/g, ''), SALT_ROUNDS);
+    const roleLevel = { coach: 3, member: 4 };
+    orgUsers[code][userId] = {
+      id: userId, name, role, orgCode: code, group,
+      passwordHash, passwordSet: false,
+      createdAt: new Date().toISOString(),
+      levelId: roleLevel[role] || 4,
+      isSampleData: true,
+    };
+    if (!orgGroups[code]) orgGroups[code] = [];
+    const gExists = orgGroups[code].some(g => g.name.toLowerCase() === group.toLowerCase());
+    if (!gExists) orgGroups[code].push({ id: generateId(), name: group, orgCode: code, memberIds: [], createdAt: new Date().toISOString() });
+    const gObj = orgGroups[code].find(g => g.name.toLowerCase() === group.toLowerCase());
+    if (gObj && !gObj.memberIds.includes(userId)) gObj.memberIds.push(userId);
+    created.push({ name, role, group });
+  }
+
+  scheduleSave();
+  res.json({ ok: true, created });
 });
 
 /* ── Platform assigns a scenario to a member ────────────────────────────── */

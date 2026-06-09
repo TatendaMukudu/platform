@@ -498,36 +498,18 @@ const HierarchyTree = {
   },
 };
 
-/* ── Helper: mirror auth user into AppState.members ─────── */
+/* ── Helper: add a newly-created auth user into AppState.members ──────
+   Uses buildRealMemberRecord so scores start null (real, not random).
+   Never called at login — only called when a member is added via the UI
+   so the page updates immediately without a full reload.
+────────────────────────────────────────────────────────────────────── */
 function _addMemberToAppState(authUser) {
   if (!AppState?.members) return;
-  const mode    = AppState.mode || 'school';
-  const metrics = (ORG_MODES[mode] || {}).metrics || [];
-  const scores  = {};
-  metrics.forEach(m => { scores[m] = rnd(55,85); });
-  const iq = rnd(55,85);
-  const existing = AppState.members.find(m => m.name.toLowerCase() === authUser.name.toLowerCase());
+  const existing = AppState.members.find(m =>
+    m.userId === authUser.id || m.name.toLowerCase() === authUser.name.toLowerCase()
+  );
   if (existing) return;
-  AppState.members.push({
-    id:           AppState.members.length + 1,
-    name:         authUser.name,
-    initials:     authUser.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),
-    role:         Auth.ROLE_LABELS[authUser.role] || authUser.role,
-    group:        'General',
-    color:        COLORS[AppState.members.length % COLORS.length],
-    iqScore:      iq,
-    iqGrade:      iq>=80?'A':iq>=60?'B':'C',
-    scores,
-    overall:      Math.round(Object.values(scores).reduce((a,b)=>a+b,0)/metrics.length),
-    wellnessScore: rnd(55,90),
-    streak:       0, alerts:0,
-    lastActive:   'Today', trend:'stable', trendVal:0,
-    history:      Array.from({length:12},()=>rnd(55,85)),
-    joinDate:     new Date().toLocaleDateString('en-GB'),
-    notes:        'Added via hierarchy.',
-    devPlan:      [{text:'Complete onboarding',done:false}],
-    coachInputs:  [], externalData:[], scenarioResults:[], chatHistory:[],
-    authId:       authUser.id,
-  });
-  AppState.stats = generateOrgStats(AppState.mode, AppState.members);
+  const record = buildRealMemberRecord(authUser, AppState.members.length, AppState.mode);
+  AppState.members.push(record);
+  AppState.stats = buildEmptyOrgStats(AppState.members.length);
 }
