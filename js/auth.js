@@ -75,22 +75,28 @@ const Auth = {
   },
 
   /* ── Setup org ─────────────────────────────────────────── */
-  async setupOrg(orgName, orgMode, adminName, password) {
+  async setupOrg(orgName, orgMode, { firstName, lastName, email }, password) {
+    const adminName = `${firstName} ${lastName}`.trim();
     const res  = await fetch('/api/auth/setup-org', {
       method: 'POST', headers: this._headers(),
-      body: JSON.stringify({ orgName, orgMode, adminName, password }),
+      body: JSON.stringify({ orgName, orgMode, adminName, firstName, lastName, email, password }),
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
-    if (data.token) { this.token = data.token; this.save(); }
+    if (data.token) {
+      this.currentUser = data.user || { id: data.userId, name: adminName, firstName, lastName, email, role: 'superadmin', orgCode: data.orgCode };
+      this.currentOrg  = { orgCode: data.orgCode, orgName: data.orgName, orgMode };
+      this.token = data.token;
+      this.save();
+    }
     return data;
   },
 
   /* ── Login ─────────────────────────────────────────────── */
-  async login(orgCode, name, password) {
+  async login(email, password) {
     const res  = await fetch('/api/auth/login', {
       method: 'POST', headers: this._headers(),
-      body: JSON.stringify({ orgCode, name, password }),
+      body: JSON.stringify({ email, password }),
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
@@ -101,16 +107,16 @@ const Auth = {
     return data;
   },
 
-  /* ── Create user ───────────────────────────────────────── */
-  async createUser(name, role, supervisorId, password) {
+  /* ── Create user (now requires email) ─────────────────── */
+  async createUser(name, role, supervisorId, password, { email, firstName, lastName, group } = {}) {
     const res  = await fetch('/api/auth/create-user', {
       method: 'POST', headers: this._headers(),
       body: JSON.stringify({
         orgCode:     this.currentUser.orgCode,
         creatorId:   this.currentUser.id,
-        name, role,
+        name, firstName, lastName, email, role, group,
         supervisorId: supervisorId || this.currentUser.id,
-        password:    password || name.toLowerCase(),
+        password:    password || undefined,
       }),
     });
     const data = await res.json();
@@ -147,6 +153,17 @@ const Auth = {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
     return `${location.origin}/join?invite=${data.token}`;
+  },
+
+  /* ── Get current user profile (refreshes from server) ─── */
+  async getMe() {
+    const res  = await fetch('/api/auth/me', { headers: this._headers() });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    this.currentUser = data.user;
+    this.currentOrg  = data.org;
+    this.save();
+    return data;
   },
 
   /* ── Get hierarchy tree ────────────────────────────────── */

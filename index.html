@@ -33,19 +33,16 @@
     <!-- ── Panel A: Login (existing org) ── -->
     <div id="login-panel-login">
       <div class="login-title">Sign in</div>
-      <div class="login-sub" style="margin-bottom:1.2rem">Enter your org code and name to continue.</div>
+      <div class="login-sub" style="margin-bottom:1.2rem">Enter your email and password to continue.</div>
 
       <div class="form-group">
-        <label>ORG CODE</label>
-        <input class="form-control" id="login-org-code" placeholder="e.g. westfield-academy" autocapitalize="none"/>
-      </div>
-      <div class="form-group">
-        <label>YOUR NAME</label>
-        <input class="form-control" id="login-name" placeholder="As set up by your admin"/>
+        <label>EMAIL ADDRESS</label>
+        <input class="form-control" id="login-email" type="email" placeholder="you@example.com" autocapitalize="none" autocomplete="email"/>
       </div>
       <div class="form-group">
         <label>PASSWORD</label>
-        <input class="form-control" type="password" id="login-password" placeholder="Your password"/>
+        <input class="form-control" type="password" id="login-password" placeholder="Your password" autocomplete="current-password"
+          onkeydown="if(event.key==='Enter')handleLogin()"/>
       </div>
       <div id="login-error" style="color:#f74f4f;font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
       <button class="btn-primary" onclick="handleLogin()">Sign In →</button>
@@ -63,13 +60,23 @@
         <label>ORGANISATION NAME</label>
         <input class="form-control" id="setup-org-name" placeholder="e.g. Westfield FC, City Academy…"/>
       </div>
-      <div class="form-group">
-        <label>YOUR NAME</label>
-        <input class="form-control" id="setup-admin-name" placeholder="Club owner, director, headmaster…"/>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem">
+        <div class="form-group" style="margin-bottom:0">
+          <label>FIRST NAME</label>
+          <input class="form-control" id="setup-first-name" placeholder="First name"/>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>LAST NAME</label>
+          <input class="form-control" id="setup-last-name" placeholder="Last name"/>
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:0.75rem">
+        <label>EMAIL ADDRESS</label>
+        <input class="form-control" id="setup-email" type="email" placeholder="you@example.com" autocomplete="email"/>
       </div>
       <div class="form-group">
         <label>PASSWORD</label>
-        <input class="form-control" type="password" id="setup-password" placeholder="Choose a password"/>
+        <input class="form-control" type="password" id="setup-password" placeholder="Choose a strong password" autocomplete="new-password"/>
       </div>
       <div class="form-group">
         <label>TELL US ABOUT YOUR ORGANISATION <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)">— IntelliQ reads this to adapt to you</span></label>

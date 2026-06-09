@@ -36,7 +36,7 @@ function scheduleSave() {
   _saveTimer = setTimeout(() => {
     try {
       const data = {
-        orgMeta, orgUsers, inviteTokens,
+        orgMeta, orgUsers, inviteTokens, emailIndex, pendingInvites,
         orgGroups, orgNotes, orgMessages, orgStore,
         assignedScenarios, memberResults, memberCheckins,
         memberGoals, weeklyAssessments, orgInterventions,
@@ -390,6 +390,17 @@ Be honest. Be specific. Reference what ${memberName} actually said. Do not give 
 const orgMeta      = _store.orgMeta      || {};  // orgCode → { orgName, orgMode, createdAt }
 const orgUsers     = _store.orgUsers     || {};  // orgCode → { userId → userObject }
 const inviteTokens = _store.inviteTokens || {};  // token → { orgCode, role, supervisorId, expiresAt }
+const emailIndex   = _store.emailIndex   || {};  // email (lowercase) → { orgCode, userId }
+const pendingInvites = _store.pendingInvites || {}; // token → { email, orgCode, role, ... }
+
+// Rebuild emailIndex from orgUsers on startup (repairs any missing entries)
+(function _rebuildEmailIndex() {
+  for (const [orgCode, users] of Object.entries(orgUsers)) {
+    for (const [userId, user] of Object.entries(users)) {
+      if (user.email) emailIndex[user.email.toLowerCase()] = { orgCode, userId };
+    }
+  }
+})();
 
 function generateId()    { return Math.random().toString(36).slice(2,10); }
 function generateToken() { return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2); }
@@ -397,8 +408,19 @@ function toOrgCode(name) { return name.toLowerCase().replace(/[^a-z0-9]+/g,'-').
 
 /* ── Setup new org (first super admin) ─────────────────────────────────── */
 app.post('/api/auth/setup-org', async (req, res) => {
-  const { orgName, orgMode, adminName, password } = req.body;
-  if (!orgName || !adminName || !password) return res.status(400).json({ error: 'Missing fields' });
+  const { orgName, orgMode, adminName, firstName, lastName, email, password } = req.body;
+  // Support legacy adminName OR new firstName+lastName
+  const fName = (firstName || '').trim();
+  const lName = (lastName  || '').trim();
+  const fullName = fName && lName ? `${fName} ${lName}` : (adminName || '').trim();
+  const emailNorm = (email || '').toLowerCase().trim();
+
+  if (!orgName || !fullName || !password) return res.status(400).json({ error: 'Missing fields: organisation name, admin name and password are required.' });
+  if (!emailNorm) return res.status(400).json({ error: 'Email address is required for Super Admin creation.' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm)) return res.status(400).json({ error: 'Please enter a valid email address.' });
+
+  // Global email uniqueness check
+  if (emailIndex[emailNorm]) return res.status(400).json({ error: 'An account with this email already exists.' });
 
   const orgCode = toOrgCode(orgName);
   if (orgUsers[orgCode] && Object.keys(orgUsers[orgCode]).length > 0) {
@@ -407,36 +429,56 @@ app.post('/api/auth/setup-org', async (req, res) => {
 
   const userId      = generateId();
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-  orgMeta[orgCode]  = { orgName, orgMode: orgMode || 'school', createdAt: new Date().toISOString() };
+  orgMeta[orgCode]  = { orgName, orgMode: orgMode || 'workplace', createdAt: new Date().toISOString() };
   orgUsers[orgCode] = {};
   orgUsers[orgCode][userId] = {
     id:           userId,
-    name:         adminName,
+    firstName:    fName || fullName,
+    lastName:     lName || '',
+    name:         fullName,
+    email:        emailNorm,
     role:         'superadmin',
     orgCode,
     supervisorId: null,
     passwordHash,
     passwordSet:  true,
+    status:       'active',
     createdAt:    new Date().toISOString(),
     levelId:      1,
   };
+  emailIndex[emailNorm] = { orgCode, userId };
   scheduleSave();
 
   const token = issueToken(userId, orgCode, 'superadmin');
-  res.json({ ok: true, orgCode, userId, orgName, role: 'superadmin', token });
+  res.json({ ok: true, orgCode, userId, orgName, role: 'superadmin', token,
+             user: { ...orgUsers[orgCode][userId], passwordHash: undefined } });
 });
 
 /* ── Login ──────────────────────────────────────────────────────────────── */
 app.post('/api/auth/login', async (req, res) => {
-  const { orgCode, name, password } = req.body;
-  const code  = (orgCode || '').toLowerCase().trim();
-  const users = orgUsers[code];
-  if (!users) return res.status(404).json({ error: 'Organisation not found. Check your org code.' });
+  const { email, orgCode, name, password } = req.body;
+  const emailNorm = (email || '').toLowerCase().trim();
 
-  const user = Object.values(users).find(u =>
-    u.name.toLowerCase() === name.toLowerCase().trim()
-  );
-  if (!user) return res.status(401).json({ error: 'Name or password incorrect.' });
+  let user = null;
+  let code = '';
+
+  if (emailNorm) {
+    // ── Email-primary path ──────────────────────────────────────────────
+    const entry = emailIndex[emailNorm];
+    if (!entry) return res.status(401).json({ error: 'No account found with that email address.' });
+    code = entry.orgCode;
+    user = orgUsers[code]?.[entry.userId];
+    if (!user) return res.status(401).json({ error: 'Account not found. Please contact your admin.' });
+  } else {
+    // ── Legacy fallback: orgCode + name ─────────────────────────────────
+    code = (orgCode || '').toLowerCase().trim();
+    const users = orgUsers[code];
+    if (!users) return res.status(404).json({ error: 'Organisation not found. Check your org code.' });
+    user = Object.values(users).find(u =>
+      u.name.toLowerCase() === (name || '').toLowerCase().trim()
+    );
+    if (!user) return res.status(401).json({ error: 'Name or password incorrect.' });
+  }
 
   // Lazy bcrypt migration: verify old hash then upgrade
   let passwordValid = false;
@@ -450,7 +492,7 @@ app.post('/api/auth/login', async (req, res) => {
     passwordValid = await bcrypt.compare(password, user.passwordHash);
   }
 
-  if (!passwordValid) return res.status(401).json({ error: 'Name or password incorrect.' });
+  if (!passwordValid) return res.status(401).json({ error: 'Email or password incorrect.' });
 
   const org   = orgMeta[code];
   const token = issueToken(user.id, code, user.role);
@@ -459,7 +501,7 @@ app.post('/api/auth/login', async (req, res) => {
 
 /* ── Create user (admin/coach adds someone below them) ─────────────────── */
 app.post('/api/auth/create-user', async (req, res) => {
-  const { orgCode, creatorId, name, role, supervisorId, password } = req.body;
+  const { orgCode, creatorId, name, firstName, lastName, email, role, supervisorId, password, group } = req.body;
   const code  = (orgCode || '').toLowerCase();
   const users = orgUsers[code];
   if (!users) return res.status(404).json({ error: 'Org not found' });
@@ -472,25 +514,42 @@ app.post('/api/auth/create-user', async (req, res) => {
     return res.status(403).json({ error: 'You cannot create someone at or above your level' });
   }
 
-  const exists = Object.values(users).find(u => u.name.toLowerCase() === name.toLowerCase().trim());
+  // Build full name
+  const fName = (firstName || '').trim();
+  const lName = (lastName  || '').trim();
+  const fullName = fName && lName ? `${fName} ${lName}` : (name || '').trim();
+  if (!fullName) return res.status(400).json({ error: 'Name is required' });
+
+  const emailNorm = (email || '').toLowerCase().trim();
+  if (!emailNorm) return res.status(400).json({ error: 'Email address is required.' });
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm)) return res.status(400).json({ error: 'Please enter a valid email address.' });
+  if (emailIndex[emailNorm]) return res.status(400).json({ error: 'An account with this email already exists.' });
+
+  const exists = Object.values(users).find(u => u.name.toLowerCase() === fullName.toLowerCase());
   if (exists) return res.status(400).json({ error: 'Someone with that name already exists in this org' });
 
   const userId          = generateId();
   const isDefaultPassword = !password;
-  const rawPassword     = password || name.trim().toLowerCase();
+  const rawPassword     = password || fullName.trim().toLowerCase();
   const passwordHash    = await bcrypt.hash(rawPassword, SALT_ROUNDS);
 
   users[userId] = {
     id:           userId,
-    name:         name.trim(),
+    firstName:    fName || fullName,
+    lastName:     lName || '',
+    name:         fullName,
+    email:        emailNorm,
     role,
     orgCode:      code,
     supervisorId: supervisorId || creatorId,
+    group:        group || '',
     passwordHash,
     passwordSet:  !isDefaultPassword,
+    status:       'active',
     createdAt:    new Date().toISOString(),
-    levelId:      roleLevel[role],
+    levelId:      roleLevel[role] || 4,
   };
+  emailIndex[emailNorm] = { orgCode: code, userId };
   scheduleSave();
 
   res.json({ ok: true, user: { ...users[userId], passwordHash: undefined } });
@@ -550,7 +609,7 @@ app.post('/api/auth/invite', (req, res) => {
 
 /* ── Join via invite ────────────────────────────────────────────────────── */
 app.post('/api/auth/join-invite', async (req, res) => {
-  const { token, name, password } = req.body;
+  const { token, name, firstName, lastName, email, password } = req.body;
   const invite = inviteTokens[token];
   if (!invite) return res.status(404).json({ error: 'Invalid or expired invite link' });
   if (invite.expiresAt < Date.now()) return res.status(410).json({ error: 'Invite link has expired' });
@@ -560,20 +619,41 @@ app.post('/api/auth/join-invite', async (req, res) => {
   const users = orgUsers[code];
   if (!users) return res.status(404).json({ error: 'Organisation not found' });
 
-  const exists = Object.values(users).find(u => u.name.toLowerCase() === name.toLowerCase().trim());
+  // Build full name
+  const fName = (firstName || '').trim();
+  const lName = (lastName  || '').trim();
+  const fullName = fName && lName ? `${fName} ${lName}` : (name || '').trim();
+  if (!fullName) return res.status(400).json({ error: 'Full name is required' });
+
+  // Email: use provided, or fall back to invite-embedded email
+  const emailNorm = ((email || invite.email || '')).toLowerCase().trim();
+  if (!emailNorm) return res.status(400).json({ error: 'Email address is required.' });
+  if (emailIndex[emailNorm]) return res.status(400).json({ error: 'An account with this email already exists. Please log in instead.' });
+
+  const exists = Object.values(users).find(u => u.name.toLowerCase() === fullName.toLowerCase());
   if (exists) return res.status(400).json({ error: 'That name is already taken in this org' });
 
   const roleLevel   = { superadmin:1, admin:2, coach:3, member:4 };
   const userId      = generateId();
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
   users[userId] = {
-    id: userId, name: name.trim(), role: invite.role, orgCode: code,
+    id: userId,
+    firstName:    fName || fullName,
+    lastName:     lName || '',
+    name:         fullName,
+    email:        emailNorm,
+    role:         invite.role,
+    orgCode:      code,
     supervisorId: invite.supervisorId,
-    group: invite.group || '',
-    passwordHash, passwordSet: true,
-    createdAt: new Date().toISOString(),
-    levelId: roleLevel[invite.role] || 4,
+    group:        invite.group || '',
+    passwordHash,
+    passwordSet:  true,
+    status:       'active',
+    createdAt:    new Date().toISOString(),
+    levelId:      roleLevel[invite.role] || 4,
   };
+  emailIndex[emailNorm] = { orgCode: code, userId };
+
   // Auto-add to group if specified
   if (invite.group && orgGroups[code]) {
     const gObj = orgGroups[code].find(g => g.name.toLowerCase() === (invite.group || '').toLowerCase());
@@ -585,6 +665,20 @@ app.post('/api/auth/join-invite', async (req, res) => {
   const org   = orgMeta[code];
   const tkn   = issueToken(userId, code, invite.role);
   res.json({ ok: true, user: { ...users[userId], passwordHash: undefined }, org, token: tkn });
+});
+
+/* ── Get current user profile ───────────────────────────────────────────── */
+app.get('/api/auth/me', (req, res) => {
+  const header  = (req.headers.authorization || '').replace('Bearer ', '').trim();
+  const token   = header || req.query.token;
+  const session = verifyToken(token);
+  if (!session) return res.status(401).json({ error: 'Authentication required.' });
+
+  const user = orgUsers[session.orgCode]?.[session.userId];
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+
+  const org = orgMeta[session.orgCode];
+  res.json({ ok: true, user: { ...user, passwordHash: undefined }, org });
 });
 
 /* ── Get org hierarchy tree ─────────────────────────────────────────────── */
@@ -610,10 +704,26 @@ app.get('/api/auth/org-tree', (req, res) => {
 /* ── Update user ────────────────────────────────────────────────────────── */
 app.put('/api/auth/update-user', async (req, res) => {
   const { orgCode, userId, updates } = req.body;
-  const users = orgUsers[(orgCode||'').toLowerCase()];
+  const code  = (orgCode||'').toLowerCase();
+  const users = orgUsers[code];
   if (!users || !users[userId]) return res.status(404).json({ error: 'User not found' });
-  const safe = ['name','role','supervisorId','group'];
+  const safe = ['name','firstName','lastName','role','supervisorId','group','status'];
   safe.forEach(k => { if (updates[k] !== undefined) users[userId][k] = updates[k]; });
+  // Recompute name if first/last changed
+  if ((updates.firstName || updates.lastName) && !updates.name) {
+    users[userId].name = `${users[userId].firstName || ''} ${users[userId].lastName || ''}`.trim();
+  }
+  // Email update: check uniqueness, update index
+  if (updates.email) {
+    const newEmail = updates.email.toLowerCase().trim();
+    const oldEmail = users[userId].email;
+    if (newEmail !== oldEmail) {
+      if (emailIndex[newEmail]) return res.status(400).json({ error: 'Email already in use.' });
+      if (oldEmail) delete emailIndex[oldEmail];
+      emailIndex[newEmail] = { orgCode: code, userId };
+      users[userId].email = newEmail;
+    }
+  }
   if (updates.password) users[userId].passwordHash = await bcrypt.hash(updates.password, SALT_ROUNDS);
   scheduleSave();
   res.json({ ok: true, user: { ...users[userId], passwordHash: undefined } });
@@ -622,8 +732,12 @@ app.put('/api/auth/update-user', async (req, res) => {
 /* ── Delete user ────────────────────────────────────────────────────────── */
 app.delete('/api/auth/delete-user', (req, res) => {
   const { orgCode, userId } = req.body;
-  const users = orgUsers[(orgCode||'').toLowerCase()];
+  const code  = (orgCode||'').toLowerCase();
+  const users = orgUsers[code];
   if (!users || !users[userId]) return res.status(404).json({ error: 'User not found' });
+  // Remove from emailIndex
+  const email = users[userId].email;
+  if (email && emailIndex[email]) delete emailIndex[email];
   delete users[userId];
   scheduleSave();
   res.json({ ok: true });
@@ -957,8 +1071,11 @@ app.post('/api/auth/bulk-import', requireAuth, async (req, res) => {
     const group = (row.group || row.department || '').trim();
 
     if (!name) { failed.push({ row, reason: 'Missing name' }); continue; }
+    if (!email) { failed.push({ row, reason: 'Missing email' }); continue; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { failed.push({ row: name, reason: 'Invalid email format' }); continue; }
 
-    // Check for duplicate by name
+    // Check for duplicate by email (global) or name (org)
+    if (emailIndex[email]) { skipped.push(`${name} (email already used)`); continue; }
     const existing = Object.values(orgUsers[code]).find(u => u.name.toLowerCase() === name.toLowerCase());
     if (existing) { skipped.push(name); continue; }
 
@@ -966,16 +1083,23 @@ app.post('/api/auth/bulk-import', requireAuth, async (req, res) => {
     const password = name.toLowerCase().replace(/\s+/g, '');
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
     const roleLevel = { admin: 2, coach: 3, member: 4 };
+    // Parse firstName/lastName from name or explicit columns
+    const fName = (row.firstName || name.split(' ')[0] || '').trim();
+    const lName = (row.lastName  || name.split(' ').slice(1).join(' ') || '').trim();
 
     orgUsers[code][userId] = {
-      id: userId, name, email, role, orgCode: code,
+      id: userId,
+      firstName: fName, lastName: lName,
+      name, email, role, orgCode: code,
       group, department: group,
       passwordHash, passwordSet: false,
+      status: 'active',
       createdAt: new Date().toISOString(),
       levelId: roleLevel[role] || 4,
-      supervisorId: creator.id,
+      supervisorId: req.iqSession.userId,
       importedAt: new Date().toISOString(),
     };
+    emailIndex[email] = { orgCode: code, userId };
 
     // Auto-create group if it doesn't exist
     if (group) {

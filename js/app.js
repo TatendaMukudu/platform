@@ -73,21 +73,21 @@ function initLogin() {
 }
 
 async function handleLogin() {
-  const orgCode  = (document.getElementById('login-org-code')?.value  || '').trim();
-  const name     = (document.getElementById('login-name')?.value      || '').trim();
-  const password = (document.getElementById('login-password')?.value  || '').trim();
+  const email    = (document.getElementById('login-email')?.value    || '').trim();
+  const password = (document.getElementById('login-password')?.value || '').trim();
   const errEl    = document.getElementById('login-error');
   errEl.style.display = 'none';
 
-  if (!orgCode || !name || !password) {
-    errEl.textContent = 'Please fill in all fields.'; errEl.style.display = 'block'; return;
+  if (!email || !password) {
+    errEl.textContent = 'Please enter your email and password.'; errEl.style.display = 'block'; return;
   }
 
   try {
-    const { org } = await Auth.login(orgCode, name, password);
-    const mode  = org?.orgMode || 'school';
-    AppState.init(mode, org?.orgName || orgCode, name, 'A');
-    AppState.adminRole = Auth.ROLE_LABELS[Auth.currentUser?.role] || 'Admin';
+    const { org } = await Auth.login(email, password);
+    const mode  = org?.orgMode || 'workplace';
+    const user  = Auth.currentUser;
+    AppState.init(mode, org?.orgName || '', user?.name || '', 'A');
+    AppState.adminRole = Auth.ROLE_LABELS[user?.role] || 'Admin';
 
     if (Auth.isMember()) { launchMemberView(); return; }
     launchApp();
@@ -101,43 +101,44 @@ async function handleLogin() {
 
 async function handleSetup() {
   const orgName     = (document.getElementById('setup-org-name')?.value        || '').trim();
-  const name        = (document.getElementById('setup-admin-name')?.value       || '').trim();
-  const password    = (document.getElementById('setup-password')?.value         || '').trim();
-  const grade       = document.getElementById('setup-grade')?.value             || 'A';
+  const firstName   = (document.getElementById('setup-first-name')?.value      || '').trim();
+  const lastName    = (document.getElementById('setup-last-name')?.value       || '').trim();
+  const email       = (document.getElementById('setup-email')?.value           || '').trim().toLowerCase();
+  const password    = (document.getElementById('setup-password')?.value        || '').trim();
+  const grade       = document.getElementById('setup-grade')?.value            || 'A';
   const description = (document.getElementById('setup-org-description')?.value || '').trim();
   const errEl       = document.getElementById('setup-error');
   errEl.style.display = 'none';
 
-  if (!orgName || !name || !password) {
-    errEl.textContent = 'Please fill in all fields.'; errEl.style.display = 'block'; return;
+  if (!orgName || !firstName || !lastName || !email || !password) {
+    errEl.textContent = 'Please fill in all fields including first name, last name, and email.';
+    errEl.style.display = 'block'; return;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errEl.textContent = 'Please enter a valid email address.';
+    errEl.style.display = 'block'; return;
   }
 
-  // Determine org mode from description (default: school)
-  // We'll detect it via AI after setup — for now pick 'school' as placeholder
-  // The real orgMode gets updated after the describe call
-  let orgMode = 'school';
-
-  // Quick keyword detection as fast fallback (AI call happens after login)
+  // Quick keyword mode detection (AI analysis happens post-launch)
+  let orgMode = 'workplace';
   const descLower = description.toLowerCase();
   if (/sport|football|soccer|basketball|cricket|athletics|team|player|coach|match/i.test(descLower)) orgMode = 'sports';
   else if (/school|student|pupil|class|teacher|academic|curriculum/i.test(descLower)) orgMode = 'school';
   else if (/hospital|patient|clinic|nurse|doctor|healthcare|medical/i.test(descLower)) orgMode = 'healthcare';
   else if (/military|army|navy|air force|regiment|battalion|soldier/i.test(descLower)) orgMode = 'military';
   else if (/government|ministry|department|policy|public service/i.test(descLower)) orgMode = 'government';
-  else if (/company|office|employee|workplace|business|startup|staff/i.test(descLower)) orgMode = 'workplace';
 
   try {
-    const data = await Auth.setupOrg(orgName, orgMode, name, password);
-    await Auth.login(data.orgCode, name, password);
-    AppState.init(orgMode, orgName, name, grade);
+    const data = await Auth.setupOrg(orgName, orgMode, { firstName, lastName, email }, password);
+    const fullName = `${firstName} ${lastName}`.trim();
+    AppState.init(orgMode, orgName, fullName, grade);
     AppState.adminRole = 'Super Admin';
     AppState.orgDescription = description;
 
-    showToast(`Org created! Your code: ${data.orgCode}`, 'success');
+    showToast(`Organisation created! Welcome, ${firstName}.`, 'success');
     launchApp();
     loadRealOrgData();
 
-    // After launch, call AI to extract traits (non-blocking)
     if (description) {
       _analyseOrgDescription(description, orgName, data.orgCode);
     } else {
@@ -343,17 +344,14 @@ function launchApp(){
   renderAllPages();
   navigate('dashboard');
 
-  // Register org with server so member app can join
-  const orgCode = AppState.orgName.toLowerCase().replace(/\s+/g,'-');
+  // Use real orgCode from Auth session, fall back to derived
+  const orgCode = Auth.currentUser?.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g,'-');
   AppState.orgCode = orgCode;
   fetch('/api/platform/register-org', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ orgCode, orgName: AppState.orgName, orgMode: AppState.mode }),
   }).catch(() => {});
-
-  // Show org join code to admin
-  setTimeout(() => showToast(`Member join code: ${orgCode}`, 'info'), 1200);
 }
 
 /* ── SIDEBAR ──────────────────────────────────────────────── */
@@ -1965,7 +1963,7 @@ function _openOnboardSection(section) {
         <div class="card-body">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:0.7rem">
             <div><label class="form-label">Full Name *</label><input id="ob-add-name" class="form-input" placeholder="${cfg.memberTerm} name" /></div>
-            <div><label class="form-label">Email</label><input id="ob-add-email" class="form-input" type="email" placeholder="email@example.com" /></div>
+            <div><label class="form-label">Email *</label><input id="ob-add-email" class="form-input" type="email" placeholder="email@example.com" /></div>
             <div>
               <label class="form-label">Role</label>
               <select id="ob-add-role" class="form-input">
@@ -1976,7 +1974,7 @@ function _openOnboardSection(section) {
             </div>
             <div><label class="form-label">${cfg.groupTerm}</label><input id="ob-add-group" class="form-input" placeholder="${cfg.sampleGroups[0] || cfg.groupTerm}" /></div>
           </div>
-          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.7rem">Default password = name in lowercase. They can change it after first login.</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.7rem">Email is required for login. Default password = first name in lowercase. They can change it after first login.</div>
           <button class="btn btn-accent btn-sm" onclick="_submitAddPerson()">Create ${cfg.memberTerm}</button>
           <span id="ob-add-result" style="margin-left:0.7rem;font-size:0.8rem"></span>
         </div>
@@ -2091,16 +2089,22 @@ function _openOnboardSection(section) {
 /* ── Onboard action handlers ──────────────────────────────── */
 async function _submitAddPerson() {
   const name  = document.getElementById('ob-add-name')?.value.trim();
-  const email = document.getElementById('ob-add-email')?.value.trim();
+  const email = (document.getElementById('ob-add-email')?.value || '').trim().toLowerCase();
   const role  = document.getElementById('ob-add-role')?.value || 'member';
   const group = document.getElementById('ob-add-group')?.value.trim();
   const resEl = document.getElementById('ob-add-result');
   if (!name) { if (resEl) resEl.textContent = 'Name is required.'; return; }
+  if (!email) { if (resEl) resEl.textContent = 'Email address is required.'; return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { if (resEl) resEl.textContent = 'Please enter a valid email address.'; return; }
+  // Split name into first/last
+  const parts = name.split(' ');
+  const firstName = parts[0] || name;
+  const lastName  = parts.slice(1).join(' ') || '';
   try {
     if (resEl) resEl.textContent = 'Adding…';
     const res  = await authFetch('/api/auth/create-user', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orgCode: AppState.orgCode, creatorId: Auth.currentUser?.id, name, email, role, password: name.toLowerCase().replace(/\s+/g,'') }),
+      body: JSON.stringify({ orgCode: AppState.orgCode, creatorId: Auth.currentUser?.id, name, firstName, lastName, email, role, group }),
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
