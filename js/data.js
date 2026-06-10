@@ -1,7 +1,7 @@
 /* ============================================================
    PLATFORM — DATA LAYER
    Static config, mode definitions, and org AppState.
-   Mock data generators kept for explicit sample-data use only.
+   All member data is real — loaded via loadRealOrgData() after login.
    ============================================================ */
 
 const COLORS = ['#4f8ef7','#7c5af5','#0ecfb0','#f7b24f','#f74f7a','#4ff77a','#f74f4f','#b24ff7','#4fb8f7','#f7e44f'];
@@ -33,96 +33,8 @@ function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-/* ── SAMPLE DATA GENERATORS ───────────────────────────────────
-   These are ONLY used when the admin explicitly clicks
-   "Load Sample Data". Never called on login or auto-load.
-─────────────────────────────────────────────────────────────── */
-const SAMPLE_NAMES = {
-  sports:    [['Marcus','Jordan','Tyler','Isaiah','Devon','Andre','Kofi','Liam'],     ['Silva','Johnson','Wright','Thompson','Parker','Mensah','Chen','Davis']],
-  school:    [['Emma','Olivia','Noah','Liam','Ava','Isabella','James','Sophia'],      ['Smith','Brown','Williams','Jones','Taylor','Wilson','Anderson','Thomas']],
-  workplace: [['Sarah','Alex','Jordan','Taylor','Morgan','Jamie','Casey','Riley'],   ['Martinez','Lee','Robinson','Walker','Hall','Young','Allen','King']],
-  military:  [['James','Robert','Michael','David','John','William','Richard','Thomas'],['Miller','Wilson','Moore','Jackson','White','Harris','Lewis','Robinson']],
-  healthcare:[['Lisa','Amanda','Jennifer','Patricia','Barbara','Linda','Maria','Susan'],['Garcia','Martinez','Anderson','Taylor','Thomas','Moore','Jackson','Lee']],
-  government:[['Charles','Daniel','Matthew','Anthony','Donald','Steven','Paul','Mark'], ['Harris','Clark','Lewis','Robinson','Walker','Hall','Young','Allen']],
-};
-
-function generateSampleMembers(mode, count=12) {
-  const config  = getModeConfig(mode);
-  const metrics = ORG_MODES[mode].metrics;
-  const [fns, lns] = SAMPLE_NAMES[mode] || SAMPLE_NAMES.workplace;
-  const groups  = config.sampleGroups;
-  const levels  = config.levels;
-
-  return Array.from({length: count}, (_, i) => {
-    const fn = fns[i % fns.length];
-    const ln = lns[i % lns.length];
-    const scores = {};
-    metrics.forEach(m => { scores[m] = rnd(45, 98); });
-    const iqScore = rnd(48, 99);
-    return {
-      id:           i + 1,
-      name:         `${fn} ${ln}`,
-      initials:     fn[0] + ln[0],
-      role:         levels[Math.min(i < 1 ? 0 : i < 3 ? 1 : i < 6 ? 2 : 3, levels.length - 1)],
-      group:        groups[i % groups.length],
-      color:        COLORS[i % COLORS.length],
-      iqScore,
-      iqGrade:      iqScore >= 80 ? 'A' : iqScore >= 60 ? 'B' : 'C',
-      scores,
-      overall:      Math.round(Object.values(scores).reduce((a, b) => a + b, 0) / metrics.length),
-      wellnessScore: rnd(30, 100),
-      streak:       rnd(0, 30),
-      alerts:       rnd(0, 2),
-      lastActive:   pick(['Today', 'Yesterday', '2 days ago', '3 days ago']),
-      trend:        pick(['up', 'up', 'stable', 'down']),
-      trendVal:     rnd(1, 12),
-      history:      Array.from({length: 12}, () => rnd(50, 98)),
-      joinDate:     `${pick(['Jan','Feb','Mar','Sep','Oct'])} ${rnd(2022, 2024)}`,
-      notes:        '',
-      devPlan:      [{ text: 'Complete onboarding assessment', done: false }],
-      coachInputs:  [], externalData: [], scenarioResults: [], chatHistory: [],
-      isSampleData: true,
-    };
-  });
-}
-
-function generateSampleAlerts(mode, members) {
-  const types = [
-    { type:'warning', title:'Performance Drop',  detail:(m)=>`${m.name} showed a ${rnd(8,22)}% decline this week.` },
-    { type:'danger',  title:'Wellness Alert',    detail:(m)=>`${m.name}'s wellness score is critically low.` },
-    { type:'success', title:'Milestone Reached', detail:(m)=>`${m.name} achieved a new personal best.` },
-    { type:'info',    title:'Assessment Ready',  detail:(m)=>`${m.name} is due for their next IntelliQ assessment.` },
-  ];
-  const times = ['1h ago','2h ago','5h ago','Yesterday'];
-  return Array.from({length: 6}, () => {
-    const m = pick(members);
-    const t = pick(types);
-    return { ...t, detail: t.detail(m), time: pick(times), unread: Math.random() > 0.5, member: m, isSampleData: true };
-  });
-}
-
-function generateSampleOrgStats(mode, members) {
-  const avg = arr => arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0;
-  return {
-    totalMembers: members.length,
-    avgIQ:        avg(members.map(m=>m.iqScore)),
-    avgWellness:  avg(members.map(m=>m.wellnessScore)),
-    avgOverall:   avg(members.map(m=>m.overall)),
-    topPerformer: members.length ? members.reduce((a,b) => a.overall>b.overall?a:b) : null,
-    atRisk:       members.filter(m=>m.wellnessScore<50 || m.overall<55).length,
-    improving:    members.filter(m=>m.trend==='up').length,
-    alerts:       members.reduce((s,m)=>s+m.alerts,0),
-  };
-}
-
-function generatePerformanceHistory(months=12){
-  let base = rndFloat(60,75);
-  return Array.from({length:months}, () => {
-    base += rndFloat(-5,7);
-    base = Math.max(40, Math.min(98, base));
-    return parseFloat(base.toFixed(1));
-  });
-}
+// Sample data generators removed in Sprint 2.
+// All member data is real — loaded via loadRealOrgData() from server.
 
 /* ── Real-user member record constructor ─────────────────────
    Used when mirroring server users into AppState.members.
@@ -178,9 +90,8 @@ function buildEmptyOrgStats(memberCount) {
 
 /* ─────────────────────────────────────────────────────────────
    AppState — session-level state.
-   members[] starts EMPTY. Populated by loadRealOrgData()
-   after login. generateSampleMembers() only called when admin
-   explicitly requests sample data.
+   members[] starts EMPTY. Populated by loadRealOrgData() after login.
+   No sample data generators — all data is real.
 ───────────────────────────────────────────────────────────── */
 const AppState = {
   mode:      'school',
@@ -217,16 +128,6 @@ const AppState = {
     this.orgDataLoaded = false;
   },
 
-  /* Load sample data — only called when admin clicks "Load Sample Data" */
-  loadSampleData(mode) {
-    const m = mode || this.mode;
-    this.members     = generateSampleMembers(m, 12);
-    this.alerts      = generateSampleAlerts(m, this.members);
-    this.stats       = generateSampleOrgStats(m, this.members);
-    this.perfHistory = generatePerformanceHistory(12);
-    this.orgDataLoaded = true;
-  },
-
   getGroups() {
     const groups = new Set(this.members.map(m => m.group).filter(Boolean));
     return ['All', ...groups];
@@ -249,11 +150,6 @@ const AppState = {
 
   getUnreadAlertCount() {
     return this.alerts.filter(a => a.unread).length;
-  },
-
-  getLevelLabel(levelId) {
-    const l = this.orgLevels.find(l => l.id === levelId);
-    return l ? l.label : getModeConfig(this.mode).memberTerm;
   },
 
   /* ── PROACTIVE HEALTH CHECK ───────────────────────────────
