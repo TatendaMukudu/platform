@@ -59,20 +59,38 @@ function memberCardHTML(m, metrics){
     const v = m.scores[k];
     return `<span class="score-pill" style="color:${scoreColor(v)};border-color:${scoreColor(v)}40">${k.split(' ')[0]}: ${v}</span>`;
   }).join('');
-  const trendIcon = m.trend==='up'?'↑':m.trend==='down'?'↓':'→';
+  const trendIcon  = m.trend==='up'?'↑':m.trend==='down'?'↓':'→';
   const trendColor = m.trend==='up'?'var(--success)':m.trend==='down'?'var(--danger)':'var(--text-muted)';
+  const isPending  = m.passwordSet === false;
+
+  // Admin action row — only shown when user has permission to manage/delete members
+  const canManage  = typeof Auth !== 'undefined' && (Auth.isSuperAdmin() || Auth.canDo('delete_members') || Auth.canDo('edit_members'));
+  const adminRow   = canManage ? `
+    <div class="member-card-actions" onclick="event.stopPropagation()">
+      ${isPending ? `
+        <button class="mca-btn" title="Copy invite link"
+          onclick="copyMemberInviteLink('${m.userId}','${m.email}')">🔗 Copy Invite</button>
+        <button class="mca-btn" title="Generate new invite link"
+          onclick="regenerateMemberInvite('${m.userId}','${m.email}')">↺ New Invite</button>` : ''}
+      <button class="mca-btn mca-btn-danger" title="Remove person"
+        onclick="openRemovePersonModal('${m.userId}')">✕ Remove</button>
+    </div>` : '';
+
   return `
     <div class="member-card" onclick="showProfile(${m.id})">
       <div class="member-avatar" style="background:${m.color}">${m.initials}</div>
       <div class="member-info">
         <div style="display:flex;align-items:center;justify-content:space-between">
-          <div class="member-name">${m.name}</div>
+          <div class="member-name">${m.name}${isPending
+            ? ' <span style="font-size:0.65rem;font-weight:600;background:rgba(247,178,79,0.15);color:#f7b24f;border:1px solid rgba(247,178,79,0.35);border-radius:4px;padding:1px 5px;vertical-align:middle">PENDING</span>'
+            : ''}</div>
           <span style="font-size:0.85rem;color:${trendColor};font-weight:700">${trendIcon}${m.trendVal}%</span>
         </div>
-        <div class="member-meta">${m.role} · ${m.group}</div>
+        <div class="member-meta">${m.role}${m.group ? ' · ' + m.group : ''}</div>
         <div class="member-scores">${pillColors}</div>
-        <div style="margin-top:6px">${progressHTML(m.overall)}</div>
+        <div style="margin-top:6px">${m.overall !== null ? progressHTML(m.overall) : '<span style="font-size:0.72rem;color:var(--text-muted)">Not yet assessed</span>'}</div>
       </div>
+      ${adminRow}
     </div>`;
 }
 

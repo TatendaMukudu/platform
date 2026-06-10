@@ -808,16 +808,98 @@ app.put('/api/auth/update-user', async (req, res) => {
   res.json({ ok: true, user: { ...users[userId], passwordHash: undefined } });
 });
 
-/* ── Delete user ────────────────────────────────────────────────────────── */
-app.delete('/api/auth/delete-user', (req, res) => {
-  const { orgCode, userId } = req.body;
-  const code  = (orgCode||'').toLowerCase();
+/* ── Remove person — full cleanup ───────────────────────────────────────── */
+//
+//  DELETE /api/auth/users/:userId
+//  DELETE /api/auth/users/:userId?deleteData=true   (also wipes historical data)
+//
+//  Cleans:
+//    orgUsers  · emailIndex  · inviteTokens  · pendingInvites
+//    orgNodes memberIds/leaderIds  · orgGroups memberIds/leadIds
+//    userPermissions
+//
+//  With ?deleteData=true also cleans:
+//    memberGoals · memberCheckins · weeklyAssessments
+//    memberResults · assignedScenarios
+//
+function _removePerson(code, userId, deleteData) {
   const users = orgUsers[code];
-  if (!users || !users[userId]) return res.status(404).json({ error: 'User not found' });
-  // Remove from emailIndex
-  const email = users[userId].email;
+  if (!users || !users[userId]) return { ok: false, error: 'User not found' };
+
+  const user  = users[userId];
+  const email = (user.email || '').toLowerCase();
+  const name  = user.name  || '';
+
+  // 1. Remove from emailIndex
   if (email && emailIndex[email]) delete emailIndex[email];
+
+  // 2. Remove invite tokens linked to this org + email
+  Object.keys(inviteTokens).forEach(token => {
+    const t = inviteTokens[token];
+    if (t.orgCode === code && (t.label === email || t.email === email)) {
+      delete inviteTokens[token];
+    }
+  });
+
+  // 3. Remove pendingInvites linked to this org + email
+  Object.keys(pendingInvites).forEach(k => {
+    const p = pendingInvites[k];
+    if (p.orgCode === code && p.email === email) delete pendingInvites[k];
+  });
+
+  // 4. Remove from all org tree nodes (memberIds and leaderIds)
+  const nodes = orgNodes[code] || {};
+  Object.values(nodes).forEach(node => {
+    if (node.memberIds) node.memberIds = node.memberIds.filter(id => id !== userId);
+    if (node.leaderIds) node.leaderIds = node.leaderIds.filter(id => id !== userId);
+  });
+
+  // 5. Remove from all groups (memberIds and leadIds)
+  const groups = orgGroups[code] || [];
+  groups.forEach(g => {
+    if (g.memberIds) g.memberIds = g.memberIds.filter(id => id !== userId && id !== name);
+    if (g.leadIds)   g.leadIds   = g.leadIds.filter(id   => id !== userId && id !== name);
+  });
+
+  // 6. Remove explicit permissions
+  if (userPermissions[code]) delete userPermissions[code][userId];
+
+  // 7. Remove user record itself
   delete users[userId];
+
+  // 8. Hard-delete historical data if requested
+  if (deleteData) {
+    const uKey = userKey(code, userId);
+    const mKey = memberKey(code, name);
+    [uKey, mKey].forEach(k => {
+      delete memberGoals[k];
+      delete memberCheckins[k];
+      delete weeklyAssessments[k];
+      delete memberResults[k];
+      delete assignedScenarios[k];
+    });
+  }
+
+  return { ok: true };
+}
+
+app.delete('/api/auth/users/:userId', requirePermission('delete_members'), (req, res) => {
+  const code       = req.iqSession.orgCode;
+  const { userId } = req.params;
+  const deleteData = req.query.deleteData === 'true';
+
+  const result = _removePerson(code, userId, deleteData);
+  if (!result.ok) return res.status(404).json(result);
+  scheduleSave();
+  res.json({ ok: true, deleteData });
+});
+
+/* ── Legacy delete-user endpoint — forwards to _removePerson ────────────── */
+app.delete('/api/auth/delete-user', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.body;
+  const code   = (orgCode || req.iqSession?.orgCode || '').toLowerCase();
+  const result = _removePerson(code, userId, false);
+  if (!result.ok) return res.status(404).json(result);
   scheduleSave();
   res.json({ ok: true });
 });

@@ -172,11 +172,11 @@ const Auth = {
     return data.user;
   },
 
-  /* ── Delete user ───────────────────────────────────────── */
-  async deleteUser(userId) {
-    const res  = await fetch('/api/auth/delete-user', {
+  /* ── Remove person (full cleanup) ─────────────────────── */
+  async deleteUser(userId, { deleteData = false } = {}) {
+    const qs  = deleteData ? '?deleteData=true' : '';
+    const res = await fetch(`/api/auth/users/${encodeURIComponent(userId)}${qs}`, {
       method: 'DELETE', headers: this._headers(),
-      body: JSON.stringify({ orgCode: this.currentUser.orgCode, userId }),
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);

@@ -434,8 +434,34 @@ img { max-width: 100%; }
   display: flex; align-items: flex-start; gap: 0.9rem;
   cursor: pointer;
   transition: all 0.18s;
+  flex-wrap: wrap;
 }
 .member-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: var(--shadow-glow); }
+
+/* Admin action row — appears at the bottom of each member card */
+.member-card-actions {
+  width: 100%;
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.5rem;
+}
+.mca-btn {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 3px 9px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.mca-btn:hover { background: var(--surface-3, var(--border)); color: var(--text-primary); }
+.mca-btn-danger { color: var(--danger) !important; border-color: rgba(247,79,79,0.3) !important; }
+.mca-btn-danger:hover { background: rgba(247,79,79,0.1) !important; }
 
 .member-avatar {
   width: 46px; height: 46px;

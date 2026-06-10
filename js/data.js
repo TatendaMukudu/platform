@@ -70,6 +70,8 @@ function buildRealMemberRecord(authUser, index, _modeIgnored) {
     devPlan:      [{ text: 'Complete onboarding', done: false }],
     coachInputs:  [], externalData: [], scenarioResults: [], chatHistory: [],
     authId:       authUser.id,
+    email:        authUser.email        || '',
+    passwordSet:  authUser.passwordSet  !== false,  // false = pending setup
     isSampleData: false,
   };
 }

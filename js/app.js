@@ -432,6 +432,139 @@ async function loadRealOrgData() {
   }
 }
 
+/* ── REMOVE PERSON ────────────────────────────────────────────────────────
+   openRemovePersonModal(userId)   — shows inline confirm modal
+   _confirmRemovePerson(userId, deleteData) — calls API, updates AppState
+   copyMemberInviteLink(userId, email)  — generates invite + copies link
+   regenerateMemberInvite(userId, email) — generates fresh invite + shows link
+─────────────────────────────────────────────────────────────────────────── */
+
+function openRemovePersonModal(userId) {
+  const member = AppState.members.find(m => m.userId === userId || m.authId === userId);
+  if (!member) { showToast('Person not found', 'warning'); return; }
+
+  _showInlineModal(`
+    <div class="card-title" style="margin-bottom:0.8rem">Remove person</div>
+    <div style="display:flex;align-items:center;gap:0.8rem;padding:0.8rem;background:var(--surface-2);border-radius:8px;margin-bottom:1rem">
+      <div style="width:36px;height:36px;border-radius:50%;background:${member.color};display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;color:#fff;flex-shrink:0">${member.initials}</div>
+      <div>
+        <div style="font-weight:600;font-size:0.9rem">${member.name}</div>
+        <div style="font-size:0.75rem;color:var(--text-muted)">${member.email || 'No email on record'}</div>
+      </div>
+    </div>
+
+    <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:1rem;line-height:1.6">
+      <strong>What happens when you remove this person:</strong>
+      <ul style="margin:0.4rem 0 0 1.2rem;padding:0">
+        <li>They will immediately lose access to this organisation.</li>
+        <li>Their email address can be invited again — the slot is freed.</li>
+        <li>They are removed from all org tree nodes and groups.</li>
+      </ul>
+    </div>
+
+    <div style="margin-bottom:1rem">
+      <label style="font-size:0.78rem;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-muted);display:block;margin-bottom:0.4rem">Data handling</label>
+      <label style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.6rem 0.7rem;border:1px solid var(--border);border-radius:6px;cursor:pointer;margin-bottom:0.4rem">
+        <input type="radio" name="rm-data-opt" value="preserve" checked style="margin-top:2px;flex-shrink:0"/>
+        <span><strong style="font-size:0.82rem">Preserve historical data</strong><br>
+          <span style="font-size:0.75rem;color:var(--text-muted)">Check-ins, assessments, goals and results are kept for records.</span></span>
+      </label>
+      <label style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.6rem 0.7rem;border:1px solid rgba(247,79,79,0.3);border-radius:6px;cursor:pointer">
+        <input type="radio" name="rm-data-opt" value="delete" style="margin-top:2px;flex-shrink:0"/>
+        <span><strong style="font-size:0.82rem;color:var(--danger)">Delete all data</strong><br>
+          <span style="font-size:0.75rem;color:var(--text-muted)">Permanently removes all check-ins, assessments, goals and results. Cannot be undone.</span></span>
+      </label>
+    </div>
+
+    <div style="display:flex;gap:0.5rem;justify-content:flex-end">
+      <button class="btn btn-outline btn-sm" onclick="_closeInlineModal()">Cancel</button>
+      <button class="btn btn-sm" style="background:var(--danger);color:#fff;border:none"
+        onclick="_confirmRemovePerson('${userId}')">Remove ${member.name.split(' ')[0]}</button>
+    </div>`);
+}
+
+async function _confirmRemovePerson(userId) {
+  const deleteData = document.querySelector('input[name="rm-data-opt"]:checked')?.value === 'delete';
+  const member     = AppState.members.find(m => m.userId === userId || m.authId === userId);
+  const name       = member?.name || 'Person';
+
+  const btn = document.querySelector('#_inline-modal-overlay .btn[style*="var(--danger)"]');
+  if (btn) { btn.disabled = true; btn.textContent = 'Removing…'; }
+
+  try {
+    await Auth.deleteUser(userId, { deleteData });
+    _closeInlineModal();
+
+    // Remove from local AppState immediately — no reload required
+    AppState.members = AppState.members.filter(m => m.userId !== userId && m.authId !== userId);
+    AppState.stats   = buildEmptyOrgStats(AppState.members.length);
+
+    // Also remove from any OrgTree nodes in memory
+    Object.values(OrgTree._nodes || {}).forEach(node => {
+      if (node.memberIds) node.memberIds = node.memberIds.filter(id => id !== userId);
+      if (node.leaderIds) node.leaderIds = node.leaderIds.filter(id => id !== userId);
+    });
+
+    showToast(`${name} removed${deleteData ? ' and data deleted' : ''}`, 'success');
+
+    // Refresh whichever page is visible
+    const page = AppState.currentPage;
+    if (page === 'members')  renderMembers();
+    if (page === 'people')   renderPeople();
+    if (page === 'dashboard') renderDashboard();
+
+  } catch(e) {
+    showToast(e.message || 'Could not remove person', 'warning');
+    if (btn) { btn.disabled = false; btn.textContent = `Remove`; }
+  }
+}
+
+async function copyMemberInviteLink(userId, email) {
+  try {
+    const res  = await authFetch('/api/auth/invite', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orgCode: AppState.orgCode, role: 'member',
+        label: email || userId, expiryDays: 14,
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    const link = `${window.location.origin}${data.url}`;
+    await navigator.clipboard.writeText(link);
+    showToast('Invite link copied to clipboard', 'success');
+  } catch(e) {
+    showToast(e.message || 'Could not generate link', 'warning');
+  }
+}
+
+async function regenerateMemberInvite(userId, email) {
+  try {
+    const res  = await authFetch('/api/auth/invite', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orgCode: AppState.orgCode, role: 'member',
+        label: email || userId, expiryDays: 14,
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    const link = `${window.location.origin}${data.url}`;
+    const safeLink = link.replace(/'/g, "\\'");
+    _showInlineModal(`
+      <div class="card-title" style="margin-bottom:0.8rem">New invite link generated</div>
+      <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.5rem">Share this link — it expires in 14 days.</div>
+      <div style="font-family:monospace;font-size:0.75rem;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:0.6rem;word-break:break-all;margin-bottom:0.8rem;color:var(--accent)">${link}</div>
+      <div style="display:flex;gap:0.5rem;justify-content:flex-end">
+        <button class="btn btn-outline btn-sm" onclick="_closeInlineModal()">Close</button>
+        <button class="btn btn-accent btn-sm"
+          onclick="navigator.clipboard.writeText('${safeLink}').then(()=>showToast('Copied!','success'))">📋 Copy Link</button>
+      </div>`);
+  } catch(e) {
+    showToast(e.message || 'Could not generate link', 'warning');
+  }
+}
+
 /* ── Auth-aware fetch helper — intercepts 401s globally ──────────────── */
 async function authFetch(url, options = {}) {
   const headers = { ...(options.headers || {}) };
