@@ -128,6 +128,9 @@
       <div class="nav-item" data-page="members">
         <span class="nav-icon">👥</span> Members
       </div>
+      <div class="nav-item" data-page="inbox">
+        <span class="nav-icon">💬</span> Inbox
+      </div>
 
       <div class="nav-section-label">Intelligence</div>
       <div class="nav-item" data-page="analytics">
@@ -142,7 +145,7 @@
 
       <div class="nav-section-label">Management</div>
       <div class="nav-item" data-page="people">
-        <span class="nav-icon">👥</span> People
+        <span class="nav-icon">🏗️</span> People
       </div>
       <div class="nav-item" data-page="alerts">
         <span class="nav-icon">🔔</span> Alerts
@@ -295,6 +298,23 @@
         </div>
 
         <div class="grid-auto" id="members-grid"></div>
+      </section>
+
+      <!-- ════════════════════════════
+           INBOX PAGE (moved from People tabs in Sprint 2)
+           ════════════════════════════ -->
+      <section class="page" id="page-inbox">
+        <div class="section-header">
+          <div>
+            <div class="section-title">Inbox</div>
+            <div class="section-sub">Messages and notes from your groups and members</div>
+          </div>
+        </div>
+        <div id="platform-inbox-content">
+          <div style="font-size:0.82rem;color:var(--text-muted);text-align:center;padding:2rem">
+            Select a group to see its shared notes and messages.
+          </div>
+        </div>
       </section>
 
       <!-- ════════════════════════════
@@ -529,10 +549,10 @@
       <section class="page" id="page-people">
         <div class="section-header">
           <div>
-            <div class="section-title">People & Hierarchy</div>
-            <div class="section-sub" id="people-sub">Your organisation tree</div>
+            <div class="section-title">People</div>
+            <div class="section-sub" id="people-sub">Org structure, onboarding, and groups</div>
           </div>
-          <button class="btn btn-accent btn-sm" onclick="HierarchyTree.openAddBelow(Auth.currentUser?.id, Auth.currentUser?.name)">+ Add Person</button>
+          <button class="btn btn-accent btn-sm" onclick="switchPeopleTab('onboard')">+ Add Person</button>
         </div>
 
         <!-- Sub-tabs -->
@@ -540,15 +560,13 @@
           <button class="tab-btn active" data-tab="tree" onclick="switchPeopleTab('tree')">Org Tree</button>
           <button class="tab-btn" data-tab="onboard" onclick="switchPeopleTab('onboard')">＋ Onboard</button>
           <button class="tab-btn" data-tab="groups" onclick="switchPeopleTab('groups')">Groups</button>
-          <button class="tab-btn" data-tab="inbox" onclick="switchPeopleTab('inbox')">Inbox</button>
         </div>
 
         <!-- Org tree tab -->
         <div id="people-tab-tree">
           <div class="card" style="margin-bottom:1rem">
-            <div id="hierarchy-tree-container"></div>
+            <div id="org-tree-container"></div>
           </div>
-          <div id="hierarchy-add-panel" style="display:none"></div>
         </div>
 
         <!-- Onboarding Hub tab -->
@@ -562,15 +580,6 @@
             <button class="btn btn-accent btn-sm" onclick="openCreateGroup()">+ New Group</button>
           </div>
           <div id="groups-list"></div>
-        </div>
-
-        <!-- Inbox tab (platform side: coach sees group feeds) -->
-        <div id="people-tab-inbox" style="display:none">
-          <div id="platform-inbox-content">
-            <div style="font-size:0.82rem;color:var(--text-muted);text-align:center;padding:2rem">
-              Select a group to see its shared notes and messages.
-            </div>
-          </div>
         </div>
       </section>
 
@@ -647,18 +656,27 @@
           <div class="section-title">Platform Settings</div>
         </div>
 
-        <div class="grid-2">
-          <div>
-            <!-- Org Info -->
-            <div class="card" style="margin-bottom:1rem">
-              <div class="card-header"><div class="card-title">Organization</div></div>
+        <!-- Settings tabs -->
+        <div class="tabs" style="margin-bottom:1.5rem">
+          <button class="tab-btn active" data-tab="org"         onclick="switchSettingsTab('org')">Organisation</button>
+          <button class="tab-btn"         data-tab="metrics"    onclick="switchSettingsTab('metrics')">Metrics</button>
+          <button class="tab-btn"         data-tab="values"     onclick="switchSettingsTab('values')">Values</button>
+          <button class="tab-btn"         data-tab="goals"      onclick="switchSettingsTab('goals')">Org Goals</button>
+          <button class="tab-btn"         data-tab="grade"      onclick="switchSettingsTab('grade')">Platform Grade</button>
+        </div>
+
+        <!-- Organisation tab -->
+        <div id="settings-tab-org">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-header"><div class="card-title">Organisation Details</div></div>
               <div class="card-body">
                 <div style="margin-bottom:0.8rem">
                   <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px">ORG NAME</div>
                   <div style="font-weight:600" id="settings-org-name">—</div>
                 </div>
                 <div style="margin-bottom:0.8rem">
-                  <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px">MODE</div>
+                  <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px">TYPE / CONTEXT</div>
                   <div style="font-weight:600" id="settings-mode">—</div>
                 </div>
                 <div style="margin-bottom:0.8rem">
@@ -671,68 +689,105 @@
                 </div>
               </div>
             </div>
-
-            <!-- Active Features -->
             <div class="card">
               <div class="card-header"><div class="card-title">Active Features</div></div>
               <div class="card-body" id="settings-features"></div>
             </div>
           </div>
+        </div>
 
-          <div>
-            <!-- Switch Mode -->
-            <div class="card" style="margin-bottom:1rem">
-              <div class="card-header"><div class="card-title">Switch Organization Mode</div></div>
-              <div class="card-body">
-                <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.8rem">
-                  Switching mode regenerates all member data for the new context. Your Platform grade and settings are retained.
-                </div>
-                <div class="org-grid" id="settings-modes"></div>
+        <!-- Metrics tab -->
+        <div id="settings-tab-metrics" style="display:none">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">Performance Metrics</div>
+                <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">Define what you measure. These apply across all members and feed into AI analysis.</div>
+              </div>
+              <div style="display:flex;gap:0.5rem">
+                <button class="btn btn-outline btn-sm" onclick="renderMetricSuggest()">✨ AI Suggest</button>
+                <button class="btn btn-accent btn-sm" onclick="renderAddMetric()">+ Add Metric</button>
               </div>
             </div>
-
-            <!-- Hierarchy Builder -->
-            <div class="card" style="margin-bottom:1rem">
-              <div class="card-header"><div class="card-title">Org Hierarchy</div></div>
-              <div class="card-body" id="settings-hierarchy"></div>
+            <div class="card-body" id="settings-metrics-list">
+              <div style="color:var(--text-muted);font-size:0.82rem">Loading…</div>
             </div>
+          </div>
+          <div id="settings-metric-form" style="margin-top:1rem"></div>
+        </div>
 
-            <!-- Platform Grade -->
-            <div class="card">
-              <div class="card-header"><div class="card-title">Platform Grade</div></div>
-              <div class="card-body">
-                <div style="display:flex;flex-direction:column;gap:0.6rem">
-                  <div class="card" style="cursor:pointer;border-color:var(--success)22" onclick="switchGrade('A')">
-                    <div class="card-body" style="padding:0.8rem">
-                      <div style="display:flex;align-items:center;justify-content:space-between">
-                        <div>
-                          <div style="font-weight:600;margin-bottom:2px">A-Grade Platform</div>
-                          <div style="font-size:0.75rem;color:var(--text-secondary)">Full IntelliQ + AI + Real-time</div>
-                        </div>
-                        <span class="grade-badge grade-A">● A</span>
+        <!-- Values tab -->
+        <div id="settings-tab-values" style="display:none">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">Org Values</div>
+                <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">Core principles that IntelliQ uses to contextualise all AI analysis.</div>
+              </div>
+              <button class="btn btn-accent btn-sm" onclick="saveOrgValues()">Save Values</button>
+            </div>
+            <div class="card-body">
+              <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.8rem">One value per line. Be specific — "Honesty" is better than "Good".</div>
+              <textarea id="settings-values-input" class="form-control" rows="8"
+                placeholder="Honesty&#10;Accountability&#10;Resilience&#10;Teamwork&#10;Growth mindset"></textarea>
+              <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.5rem" id="settings-values-status"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Goals tab -->
+        <div id="settings-tab-goals" style="display:none">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">Org Goals</div>
+                <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">High-level goals for your organisation. IntelliQ tracks progress against these.</div>
+              </div>
+              <button class="btn btn-accent btn-sm" onclick="renderAddGoal()">+ Add Goal</button>
+            </div>
+            <div class="card-body" id="settings-goals-list">
+              <div style="color:var(--text-muted);font-size:0.82rem">Loading…</div>
+            </div>
+          </div>
+          <div id="settings-goal-form" style="margin-top:1rem"></div>
+        </div>
+
+        <!-- Platform Grade tab -->
+        <div id="settings-tab-grade" style="display:none">
+          <div class="card" style="max-width:480px">
+            <div class="card-header"><div class="card-title">Platform Grade</div></div>
+            <div class="card-body">
+              <div style="display:flex;flex-direction:column;gap:0.6rem">
+                <div class="card" style="cursor:pointer" onclick="switchGrade('A')">
+                  <div class="card-body" style="padding:0.8rem">
+                    <div style="display:flex;align-items:center;justify-content:space-between">
+                      <div>
+                        <div style="font-weight:600;margin-bottom:2px">A-Grade Platform</div>
+                        <div style="font-size:0.75rem;color:var(--text-secondary)">Full IntelliQ + AI + Real-time</div>
                       </div>
+                      <span class="grade-badge grade-A">● A</span>
                     </div>
                   </div>
-                  <div class="card" style="cursor:pointer" onclick="switchGrade('B')">
-                    <div class="card-body" style="padding:0.8rem">
-                      <div style="display:flex;align-items:center;justify-content:space-between">
-                        <div>
-                          <div style="font-weight:600;margin-bottom:2px">B-Grade Platform</div>
-                          <div style="font-size:0.75rem;color:var(--text-secondary)">Performance + Basic IntelliQ</div>
-                        </div>
-                        <span class="grade-badge grade-B">● B</span>
+                </div>
+                <div class="card" style="cursor:pointer" onclick="switchGrade('B')">
+                  <div class="card-body" style="padding:0.8rem">
+                    <div style="display:flex;align-items:center;justify-content:space-between">
+                      <div>
+                        <div style="font-weight:600;margin-bottom:2px">B-Grade Platform</div>
+                        <div style="font-size:0.75rem;color:var(--text-secondary)">Performance + Basic IntelliQ</div>
                       </div>
+                      <span class="grade-badge grade-B">● B</span>
                     </div>
                   </div>
-                  <div class="card" style="cursor:pointer" onclick="switchGrade('C')">
-                    <div class="card-body" style="padding:0.8rem">
-                      <div style="display:flex;align-items:center;justify-content:space-between">
-                        <div>
-                          <div style="font-weight:600;margin-bottom:2px">C-Grade Platform</div>
-                          <div style="font-size:0.75rem;color:var(--text-secondary)">Simple monitoring only</div>
-                        </div>
-                        <span class="grade-badge grade-C">● C</span>
+                </div>
+                <div class="card" style="cursor:pointer" onclick="switchGrade('C')">
+                  <div class="card-body" style="padding:0.8rem">
+                    <div style="display:flex;align-items:center;justify-content:space-between">
+                      <div>
+                        <div style="font-weight:600;margin-bottom:2px">C-Grade Platform</div>
+                        <div style="font-size:0.75rem;color:var(--text-secondary)">Simple monitoring only</div>
                       </div>
+                      <span class="grade-badge grade-C">● C</span>
                     </div>
                   </div>
                 </div>
@@ -740,6 +795,7 @@
             </div>
           </div>
         </div>
+
       </section>
 
     </main><!-- /page-content -->
@@ -1527,6 +1583,7 @@
 <script src="js/attachments.js"></script>
 <script src="js/scenarios.js"></script>
 <script src="js/chat.js"></script>
+<script src="js/tree.js"></script>
 <script src="js/app.js"></script>
 <script src="js/member-view.js"></script>
 

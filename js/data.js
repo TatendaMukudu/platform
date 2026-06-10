@@ -6,87 +6,19 @@
 
 const COLORS = ['#4f8ef7','#7c5af5','#0ecfb0','#f7b24f','#f74f7a','#4ff77a','#f74f4f','#b24ff7','#4fb8f7','#f7e44f'];
 
-/* ── Org mode display config ──────────────────────────────── */
+/* ── Org mode display config ──────────────────────────────────────────────
+   orgMode is kept as optional AI/reporting context only (Option B).
+   Do NOT use for metrics, hierarchy, permissions, or UI branching.
+   Metrics are defined per-org in the Metrics settings, not here.
+─────────────────────────────────────────────────────────────────────────── */
 const ORG_MODES = {
-  school:     { label:'School',      icon:'🎓', color:'#4f8ef7', metrics:['Academic','Behavior','Moral IQ','Wellness','Engagement','Teacher Rating'] },
-  sports:     { label:'Sports Club', icon:'⚽', color:'#f74f7a', metrics:['Tactical IQ','Fitness','Readiness','Consistency','Coachability','Mental'] },
-  workplace:  { label:'Workplace',   icon:'🏢', color:'#4ff7b2', metrics:['Performance','Leadership','Engagement','Values Fit','Teamwork','Initiative'] },
-  military:   { label:'Military',    icon:'🎖️', color:'#f7c44f', metrics:['Tactical IQ','Discipline','Ethics','Stress IQ','Fitness','Command'] },
-  healthcare: { label:'Healthcare',  icon:'🏥', color:'#b24ff7', metrics:['Triage Perf','Ethics','Patient Int.','Decision IQ','Accuracy','Empathy'] },
-  government: { label:'Government',  icon:'🏛️', color:'#4fb8f7', metrics:['Decision IQ','Crisis Mgmt','Leadership','Compliance','Public Svc','Integrity'] },
+  school:     { label:'School',      icon:'🎓', color:'#4f8ef7' },
+  sports:     { label:'Sports Club', icon:'⚽', color:'#f74f7a' },
+  workplace:  { label:'Workplace',   icon:'🏢', color:'#4ff7b2' },
+  military:   { label:'Military',    icon:'🎖️', color:'#f7c44f' },
+  healthcare: { label:'Healthcare',  icon:'🏥', color:'#b24ff7' },
+  government: { label:'Government',  icon:'🏛️', color:'#4fb8f7' },
 };
-
-/* ── Mode-aware config: hierarchy labels, role terms, prompts ─
-   Used by People page, Assessment page, Settings, and empty states.
-   Never falls back to sports labels for non-sports orgs.
-─────────────────────────────────────────────────────────────── */
-const MODE_CONFIG = {
-  sports: {
-    levels:        ['Head Coach', 'Assistant Coach', 'Support Staff', 'Athlete'],
-    memberTerm:    'Athlete',
-    groupTerm:     'Squad',
-    membersLabel:  'Athletes',
-    groupsLabel:   'Squads',
-    emptyLabel:    'No athletes added yet.',
-    assessPrompt:  'Describe what you\'ve observed about this athlete — their training, attitude, recent form, and anything that concerns or impresses you.',
-    sampleGroups:  ['First Team', 'U21 Squad', 'Academy', 'Coaching Staff'],
-  },
-  school: {
-    levels:        ['Principal', 'Vice Principal', 'Teacher', 'Counselor', 'Student'],
-    memberTerm:    'Student',
-    groupTerm:     'Class',
-    membersLabel:  'Students',
-    groupsLabel:   'Classes',
-    emptyLabel:    'No students added yet.',
-    assessPrompt:  'Describe what you\'ve observed about this student — their academic performance, behaviour, relationships, and anything you\'re concerned about.',
-    sampleGroups:  ['Year 10', 'Year 11', 'Year 12', 'Staff'],
-  },
-  workplace: {
-    levels:        ['Executive', 'Director', 'Manager', 'Team Lead', 'Employee'],
-    memberTerm:    'Employee',
-    groupTerm:     'Department',
-    membersLabel:  'Employees',
-    groupsLabel:   'Departments',
-    emptyLabel:    'No employees added yet.',
-    assessPrompt:  'Describe what you\'ve observed about this employee — their performance, collaboration, decision-making, and any concerns.',
-    sampleGroups:  ['Leadership', 'Engineering', 'Product', 'Finance', 'Marketing', 'Operations'],
-  },
-  military: {
-    levels:        ['Commander', 'Officer', 'NCO', 'Service Member'],
-    memberTerm:    'Service Member',
-    groupTerm:     'Unit',
-    membersLabel:  'Personnel',
-    groupsLabel:   'Units',
-    emptyLabel:    'No personnel added yet.',
-    assessPrompt:  'Describe what you\'ve observed about this service member — their performance, conduct, discipline, and readiness.',
-    sampleGroups:  ['Alpha Squad', 'Bravo Squad', 'Charlie Company', 'HQ Unit'],
-  },
-  healthcare: {
-    levels:        ['Administrator', 'Physician', 'Nurse', 'Staff'],
-    memberTerm:    'Staff Member',
-    groupTerm:     'Ward',
-    membersLabel:  'Staff',
-    groupsLabel:   'Wards',
-    emptyLabel:    'No staff added yet.',
-    assessPrompt:  'Describe what you\'ve observed about this staff member — their clinical performance, patient interactions, decision-making, and any concerns.',
-    sampleGroups:  ['Ward A', 'Ward B', 'ICU', 'ER', 'Outpatient'],
-  },
-  government: {
-    levels:        ['Director', 'Deputy Director', 'Supervisor', 'Staff Member'],
-    memberTerm:    'Staff Member',
-    groupTerm:     'Department',
-    membersLabel:  'Staff',
-    groupsLabel:   'Departments',
-    emptyLabel:    'No staff added yet.',
-    assessPrompt:  'Describe what you\'ve observed about this staff member — their performance, compliance, decision-making, and public service conduct.',
-    sampleGroups:  ['Policy', 'Finance', 'Legal', 'Operations', 'Public Affairs'],
-  },
-};
-
-/* Helper to get MODE_CONFIG for the current mode — always safe */
-function getModeConfig(mode) {
-  return MODE_CONFIG[mode] || MODE_CONFIG.workplace;
-}
 
 const PLATFORM_GRADES = {
   A: { label:'A-Grade', features:['Full IntelliQ','Real-time monitoring','Behavioral trend analysis','Wellness alerts','AI development plans','External data integration','Mandated reporter tools','Advanced analytics','Complete security'] },
@@ -197,11 +129,9 @@ function generatePerformanceHistory(months=12){
    All score fields start null — filled in as the member
    completes assessments and check-ins.
 ─────────────────────────────────────────────────────────────── */
-function buildRealMemberRecord(authUser, index, mode) {
-  const mode2 = mode || 'workplace';
-  const metrics = ORG_MODES[mode2]?.metrics || [];
-  const scores = {};
-  metrics.forEach(m => { scores[m] = null; });
+function buildRealMemberRecord(authUser, index, _modeIgnored) {
+  // mode argument ignored — metrics are org-defined, loaded separately
+  const scores = {};  // populated when org metrics load
   const name = authUser.name || '';
   const parts = name.trim().split(/\s+/);
   return {
@@ -268,28 +198,23 @@ const AppState = {
   currentGroup:    'All',
   orgDataLoaded:   false,   // true once loadRealOrgData() completes
 
-  // Org hierarchy levels — set from MODE_CONFIG on init, never hardcoded sports labels
-  orgLevels: [],
+  // Sprint 2: org-defined metrics and values (loaded async from server)
+  orgMetrics: [],  // [{ metricId, name, source, order }]
+  orgValues:  [],  // [string]
 
   init(mode, orgName, adminName, grade='A') {
-    this.mode      = mode;
-    this.orgName   = orgName;
-    this.adminName = adminName;
-    this.grade     = grade;
-    this.members   = [];          // always start empty — real data loaded async
-    this.alerts    = [];
-    this.stats     = buildEmptyOrgStats(0);
+    this.mode       = mode;
+    this.orgName    = orgName;
+    this.adminName  = adminName;
+    this.grade      = grade;
+    this.members    = [];          // always start empty — real data loaded async
+    this.alerts     = [];
+    this.stats      = buildEmptyOrgStats(0);
     this.perfHistory = [];
-    this.scenarios = [];
+    this.scenarios  = [];
+    this.orgMetrics = [];
+    this.orgValues  = [];
     this.orgDataLoaded = false;
-
-    // Set hierarchy levels from mode config — no more hardcoded sports labels
-    const cfg = getModeConfig(mode);
-    this.orgLevels = cfg.levels.map((label, i) => ({
-      id:          i + 1,
-      label,
-      canSeeBelow: i < cfg.levels.length - 1,
-    }));
   },
 
   /* Load sample data — only called when admin clicks "Load Sample Data" */

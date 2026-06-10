@@ -14,6 +14,7 @@ function navigate(page){
 
   if(page==='dashboard') renderDashboard();
   else if(page==='members')   renderMembers();
+  else if(page==='inbox')     renderPlatformInbox();
   else if(page==='analytics') renderAnalytics();
   else if(page==='intelliq')  renderIntelliQ();
   else if(page==='scenarios') renderScenarios();
@@ -26,10 +27,11 @@ function navigate(page){
 const PAGE_TITLES = {
   dashboard: 'Overview Dashboard',
   members:   'Members & Profiles',
+  inbox:     'Inbox',
   analytics: 'Analytics & Insights',
   intelliq:  'IntelliQ Engine',
   scenarios: 'AI Assessments',
-  people:    'People & Hierarchy',
+  people:    'People',
   alerts:    'Alerts & Notifications',
   reports:   'Reports & Stat Sheets',
   settings:  'Platform Settings',
@@ -283,9 +285,23 @@ async function loadRealOrgData() {
     const realUsers = (flat || []).filter(u => u.role !== 'superadmin');
 
     // Build real member records — clear any previous data first
-    AppState.members = realUsers.map((u, i) => buildRealMemberRecord(u, i, AppState.mode));
+    AppState.members = realUsers.map((u, i) => buildRealMemberRecord(u, i));
     AppState.stats   = buildEmptyOrgStats(AppState.members.length);
     AppState.orgDataLoaded = true;
+
+    // Load org-specific metrics and values in parallel
+    const [metricsRes, valuesRes] = await Promise.allSettled([
+      fetch('/api/metrics', { headers: Auth._headers() }),
+      fetch('/api/values',  { headers: Auth._headers() }),
+    ]);
+    if (metricsRes.status === 'fulfilled' && metricsRes.value.ok) {
+      const d = await metricsRes.value.json();
+      AppState.orgMetrics = d.metrics || [];
+    }
+    if (valuesRes.status === 'fulfilled' && valuesRes.value.ok) {
+      const d = await valuesRes.value.json();
+      AppState.orgValues  = d.values  || [];
+    }
 
     // Re-render pages that are currently visible
     const page = AppState.currentPage;
@@ -355,24 +371,28 @@ function launchApp(){
 
 /* ── SIDEBAR ──────────────────────────────────────────────── */
 function renderSidebar(){
-  const mode = AppState.mode;
-  const modeInfo = ORG_MODES[mode];
-  const color = modeInfo.color;
+  const mode     = AppState.mode;
+  const modeInfo = ORG_MODES[mode] || { label: AppState.orgName || 'Platform', icon: '🏢', color: '#4f8ef7' };
+  const color    = modeInfo.color || '#4f8ef7';
 
   document.querySelector('.sb-logo-text').textContent = 'Platform';
-  document.querySelector('.sb-logo-sub').textContent  = modeInfo.label + ' · ' + AppState.grade + '-Grade';
+  document.querySelector('.sb-logo-sub').textContent  = AppState.grade + '-Grade · IntelliQ';
 
   const badge = document.querySelector('.mode-badge');
-  badge.textContent = modeInfo.icon + '  ' + modeInfo.label;
-  badge.style.background = color+'22';
-  badge.style.color = color;
-  badge.style.border = `1px solid ${color}44`;
+  if (badge) {
+    badge.textContent = `${modeInfo.icon || '🏢'}  ${modeInfo.label}`;
+    badge.style.background = color+'22';
+    badge.style.color      = color;
+    badge.style.border     = `1px solid ${color}44`;
+  }
 
   document.querySelector('.user-name').textContent = AppState.adminName;
   document.querySelector('.user-role').textContent = AppState.adminRole;
   const av = document.querySelector('.sidebar-footer .user-avatar');
-  av.textContent = AppState.adminName.split(' ').map(w=>w[0]).join('').slice(0,2);
-  av.style.background = color;
+  if (av) {
+    av.textContent  = AppState.adminName.split(' ').map(w=>w[0]).join('').slice(0,2);
+    av.style.background = color;
+  }
 
   updateAlertBadge();
 }
@@ -391,105 +411,89 @@ function renderTopbar(){
 }
 
 /* ── Onboarding empty-state HTML (reused across pages) ───────────────── */
-function _emptyStateHTML(mode) {
-  const cfg   = getModeConfig(mode);
-  const color = ORG_MODES[mode]?.color || 'var(--accent)';
+function _emptyStateHTML(_mode) {
+  // Generic — no mode-specific terms
   return `
     <div style="text-align:center;padding:3rem 1rem;max-width:480px;margin:0 auto">
-      <div style="font-size:2.5rem;margin-bottom:1rem">${ORG_MODES[mode]?.icon || '🏢'}</div>
-      <div style="font-size:1.05rem;font-weight:700;color:var(--text-primary);margin-bottom:0.5rem">${cfg.emptyLabel}</div>
+      <div style="font-size:2.5rem;margin-bottom:1rem">🚀</div>
+      <div style="font-size:1.05rem;font-weight:700;color:var(--text-primary);margin-bottom:0.5rem">No members yet</div>
       <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1.5rem;line-height:1.6">
-        Add your first ${cfg.memberTerm.toLowerCase()} to start using IntelliQ. You can add people manually, import a spreadsheet, invite by email, or share a join link.
+        Add people to your organisation to start using IntelliQ — manually, by spreadsheet, invite, or join link.
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:0.6rem;justify-content:center">
-        <button class="btn btn-accent btn-sm" onclick="navigate('people');setTimeout(()=>openOnboardingTab(),100)">+ Add ${cfg.memberTerm}</button>
-        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>openOnboardingTab('import'),100)">📁 Import Spreadsheet</button>
-        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>openOnboardingTab('invite'),100)">✉ Invite by Email</button>
-        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>openOnboardingTab('link'),100)">🔗 Share Join Link</button>
+        <button class="btn btn-accent btn-sm" onclick="navigate('people');setTimeout(()=>switchPeopleTab('onboard'),100)">+ Add Person</button>
+        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>{switchPeopleTab('onboard');_openOnboardSection('import')},100)">📁 Import</button>
+        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>{switchPeopleTab('onboard');_openOnboardSection('invite')},100)">✉ Invite</button>
+        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>{switchPeopleTab('onboard');_openOnboardSection('link')},100)">🔗 Join Link</button>
       </div>
     </div>`;
 }
 
 /* ── DASHBOARD ───────────────────────────────────────────── */
 function renderDashboard(){
-  const s = AppState.stats;
-  const mode = AppState.mode;
-  const color = ORG_MODES[mode].color;
-  const metrics = ORG_MODES[mode].metrics;
+  const s     = AppState.stats;
+  const color = ORG_MODES[AppState.mode]?.color || 'var(--accent)';
 
   // ── Empty state guard ─────────────────────────────────────
   if (AppState.orgDataLoaded && AppState.members.length === 0) {
     const statsGrid = document.getElementById('dash-stats');
-    const contentEl = statsGrid?.closest('#page-dashboard') || document.getElementById('page-dashboard');
-    if (statsGrid) statsGrid.innerHTML = _emptyStateHTML(mode);
-    // Hide charts section
-    const chartsEl = document.getElementById('dash-charts');
-    if (chartsEl) chartsEl.style.display = 'none';
-    const top5El = document.getElementById('dash-top5')?.closest('.card');
-    if (top5El) top5El.style.display = 'none';
+    if (statsGrid) statsGrid.innerHTML = `
+      <div style="grid-column:1/-1;text-align:center;padding:3rem 1rem">
+        <div style="font-size:2.5rem;margin-bottom:0.75rem">🚀</div>
+        <div style="font-size:1.1rem;font-weight:700;margin-bottom:0.4rem">Your platform is set up</div>
+        <div style="font-size:0.85rem;color:var(--text-secondary);max-width:360px;margin:0 auto 1.2rem">
+          Start by adding people to your organisation. Use <strong>People → Onboard</strong> to add them individually or by invite.
+        </div>
+        <button class="btn btn-accent" onclick="navigate('people');switchPeopleTab('onboard')">+ Add First Person</button>
+      </div>`;
     return;
   }
-  // Restore visibility if previously hidden
-  const chartsEl2 = document.getElementById('dash-charts');
-  if (chartsEl2) chartsEl2.style.display = '';
-  const top5Card = document.getElementById('dash-top5')?.closest('.card');
-  if (top5Card) top5Card.style.display = '';
 
-  // Stat cards
+  // ── Three-question summary panel ──────────────────────────
+  const atRisk    = AppState.members.filter(m => m.wellnessScore !== null && m.wellnessScore < 50).length;
+  const improving = AppState.members.filter(m => m.trend === 'up').length;
+  const topByIQ   = [...AppState.members].filter(m=>m.iqScore).sort((a,b)=>b.iqScore-a.iqScore)[0];
+  const unreadAlerts = AppState.getUnreadAlertCount?.() || 0;
+
   const statsGrid = document.getElementById('dash-stats');
   statsGrid.innerHTML = `
-    <div class="stat-card">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between">
-        <div class="stat-label">Total Members</div>
-        <span class="stat-icon">👥</span>
-      </div>
-      <div class="stat-value" style="color:${color}">${s.totalMembers}</div>
-      <div class="stat-change up">↑ Active organization</div>
-    </div>
-    <div class="stat-card">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between">
-        <div class="stat-label">Avg IntelliQ Score</div>
-        <span class="stat-icon">🧠</span>
-      </div>
-      <div class="stat-value" style="color:${scoreColor(s.avgIQ)}">${s.avgIQ}</div>
-      <div class="stat-change ${s.avgIQ>=70?'up':'down'}">
-        ${s.avgIQ>=70?'↑':'↓'} ${scoreLabel(s.avgIQ)}
+    <!-- Question 1: What is happening? -->
+    <div class="stat-card" style="border-left:3px solid ${color}">
+      <div class="stat-label" style="margin-bottom:0.5rem">What is happening?</div>
+      <div style="font-size:1.8rem;font-weight:800;margin-bottom:0.25rem">${s.totalMembers}</div>
+      <div style="font-size:0.8rem;color:var(--text-secondary)">people in your org</div>
+      <div style="font-size:0.78rem;margin-top:0.5rem;color:var(--text-muted)">
+        ${s.avgIQ !== null ? `Avg IQ: <strong>${s.avgIQ}</strong> &nbsp;·&nbsp;` : ''}
+        ${s.avgWellness !== null ? `Avg Wellness: <strong>${s.avgWellness}</strong>` : 'No assessment data yet'}
       </div>
     </div>
-    <div class="stat-card">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between">
-        <div class="stat-label">Avg Wellness</div>
-        <span class="stat-icon">💚</span>
-      </div>
-      <div class="stat-value" style="color:${scoreColor(s.avgWellness)}">${s.avgWellness}</div>
-      <div class="stat-change ${s.avgWellness>=60?'up':'down'}">
-        ${s.atRisk} at risk · ${s.improving} improving
+
+    <!-- Question 2: Who needs attention? -->
+    <div class="stat-card" style="border-left:3px solid ${atRisk > 0 ? 'var(--danger)' : 'var(--success)'}">
+      <div class="stat-label" style="margin-bottom:0.5rem">Who needs attention?</div>
+      <div style="font-size:1.8rem;font-weight:800;margin-bottom:0.25rem;color:${atRisk>0?'var(--danger)':'var(--success)'}">${atRisk}</div>
+      <div style="font-size:0.8rem;color:var(--text-secondary)">at-risk members</div>
+      <div style="font-size:0.78rem;margin-top:0.5rem;color:var(--text-muted)">
+        ${improving} improving &nbsp;·&nbsp; ${unreadAlerts} unread alerts
       </div>
     </div>
-    <div class="stat-card">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between">
-        <div class="stat-label">Avg Performance</div>
-        <span class="stat-icon">📈</span>
-      </div>
-      <div class="stat-value" style="color:${scoreColor(s.avgOverall)}">${s.avgOverall}</div>
-      <div class="stat-change up">↑ Org-wide metric</div>
-    </div>
-    <div class="stat-card">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between">
-        <div class="stat-label">Active Alerts</div>
-        <span class="stat-icon">🔔</span>
-      </div>
-      <div class="stat-value" style="color:var(--warning)">${s.alerts}</div>
-      <div class="stat-change">${AppState.getUnreadAlertCount()} unread</div>
-    </div>
-    <div class="stat-card">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between">
-        <div class="stat-label">Top Performer</div>
-        <span class="stat-icon">⭐</span>
-      </div>
-      <div class="stat-value" style="font-size:1.1rem;padding-top:4px">${s.topPerformer.name.split(' ')[0]}</div>
-      <div class="stat-change up">Score: ${s.topPerformer.overall}</div>
+
+    <!-- Question 3: What should I do? -->
+    <div class="stat-card" style="border-left:3px solid var(--accent)">
+      <div class="stat-label" style="margin-bottom:0.5rem">What should I do?</div>
+      ${atRisk > 0
+        ? `<div style="font-size:0.88rem;font-weight:600;margin-bottom:0.25rem">Check on ${atRisk} at-risk ${atRisk===1?'member':'members'}</div>
+           <div style="font-size:0.78rem;color:var(--text-muted)">Wellness below threshold — schedule a check-in</div>
+           <button class="btn btn-outline btn-sm" style="margin-top:0.5rem;font-size:0.75rem" onclick="navigate('intelliq')">View IntelliQ Engine →</button>`
+        : improving > 0
+          ? `<div style="font-size:0.88rem;font-weight:600;margin-bottom:0.25rem">Recognise ${improving} improving ${improving===1?'member':'members'}</div>
+             <div style="font-size:0.78rem;color:var(--text-muted)">Positive momentum — reinforce it</div>`
+          : `<div style="font-size:0.88rem;font-weight:600;margin-bottom:0.25rem">Run your first assessments</div>
+             <div style="font-size:0.78rem;color:var(--text-muted)">No data yet — assign scenarios to get started</div>
+             <button class="btn btn-outline btn-sm" style="margin-top:0.5rem;font-size:0.75rem" onclick="navigate('scenarios')">Assessments →</button>`
+      }
     </div>`;
+
 
   // Performance history chart
   setTimeout(() => {
@@ -567,20 +571,23 @@ function renderDashboard(){
 let memberSearch = '', memberGroup = 'All';
 
 function renderMembers(){
-  const mode = AppState.mode;
-  const metrics = ORG_MODES[mode].metrics;
-
   // ── Empty state guard ─────────────────────────────────────
   if (AppState.orgDataLoaded && AppState.members.length === 0) {
-    const tableEl = document.getElementById('members-table-body')?.closest('.card') ||
-                    document.getElementById('members-group-tabs')?.parentElement;
-    const tabsEl  = document.getElementById('members-group-tabs');
+    const tabsEl = document.getElementById('members-group-tabs');
     if (tabsEl) tabsEl.innerHTML = '';
-    const bodyEl  = document.getElementById('members-table-body');
-    if (bodyEl) bodyEl.innerHTML = `<tr><td colspan="99">${_emptyStateHTML(mode)}</td></tr>`;
+    const grid = document.getElementById('members-grid');
+    if (grid) grid.innerHTML = `
+      <div style="grid-column:1/-1;text-align:center;padding:3rem 1rem">
+        <div style="font-size:2rem;margin-bottom:0.5rem">👥</div>
+        <div style="font-weight:600;margin-bottom:0.3rem">No members yet</div>
+        <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:1rem">Add people via People → Onboard</div>
+        <button class="btn btn-accent btn-sm" onclick="navigate('people');switchPeopleTab('onboard')">+ Add Person</button>
+      </div>`;
     return;
   }
 
+  // Use org-defined metrics for column headers if available
+  const orgMetrics = AppState.orgMetrics || [];
   const groups = AppState.getGroups();
 
   // Group filter tabs
@@ -594,7 +601,7 @@ function renderMembers(){
 
   const grid = document.getElementById('members-grid');
   grid.innerHTML = filtered.length
-    ? filtered.map(m => memberCardHTML(m, metrics)).join('')
+    ? filtered.map(m => memberCardHTML(m, orgMetrics)).join('')
     : `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">🔍</div><p>No members match your search.</p></div>`;
 }
 
@@ -610,9 +617,11 @@ function searchMembers(val){
 
 /* ── ANALYTICS PAGE ──────────────────────────────────────── */
 function renderAnalytics(){
-  const mode = AppState.mode;
-  const color = ORG_MODES[mode].color;
-  const metrics = ORG_MODES[mode].metrics;
+  const mode    = AppState.mode;
+  const color   = ORG_MODES[mode]?.color || 'var(--accent)';
+  // Use org-defined metrics; fallback to any scores keys found on members
+  const metrics = (AppState.orgMetrics || []).map(m => m.name || m) ||
+    Object.keys(AppState.members[0]?.scores || {});
 
   // ── Empty state guard ─────────────────────────────────────
   if (AppState.orgDataLoaded && AppState.members.length === 0) {
@@ -711,9 +720,9 @@ function renderAnalytics(){
 
 function renderIntelliQ(){
   const members = AppState.members;
-  const mode = AppState.mode;
-  const color = ORG_MODES[mode].color;
-  const metrics = ORG_MODES[mode].metrics;
+  const mode    = AppState.mode;
+  const color   = ORG_MODES[mode]?.color || 'var(--accent)';
+  const metrics = (AppState.orgMetrics || []).map(m => m.name || m);
 
   // Top IQ scores
   const top = [...members].sort((a,b)=>b.iqScore-a.iqScore);
@@ -1766,9 +1775,9 @@ function approveAlertDraft() {
 
 /* ── REPORTS PAGE ────────────────────────────────────────── */
 function renderReports(){
-  const mode = AppState.mode;
-  const color = ORG_MODES[mode].color;
-  const metrics = ORG_MODES[mode].metrics;
+  const mode    = AppState.mode;
+  const color   = ORG_MODES[mode]?.color || 'var(--accent)';
+  const metrics = (AppState.orgMetrics || []).map(m => m.name || m);
 
   // ── Empty state guard ─────────────────────────────────────
   if (AppState.orgDataLoaded && AppState.members.length === 0) {
@@ -1818,77 +1827,287 @@ async function renderPeople() {
   const subEl = document.getElementById('people-sub');
   if (subEl) subEl.textContent = `${AppState.orgName} · ${Auth.currentUser?.name || 'Admin'}`;
 
-  const container = document.getElementById('hierarchy-tree-container');
+  const container = document.getElementById('org-tree-container');
   if (!container) return;
-  container.innerHTML = `<div style="padding:1rem;color:var(--text-muted);font-size:0.85rem">Loading tree…</div>`;
+  container.innerHTML = `<div style="padding:1rem;color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
 
   try {
-    await HierarchyTree.load();
-    // Expand current user's node by default
-    if (Auth.currentUser?.id) HierarchyTree._expanded.add(Auth.currentUser.id);
-    HierarchyTree.render('hierarchy-tree-container');
+    await OrgTree.load();
+    OrgTree.render('org-tree-container');
   } catch(e) {
     container.innerHTML = `
       <div style="padding:1.5rem;text-align:center;color:var(--text-muted);font-size:0.85rem">
         <div style="font-size:1.2rem;margin-bottom:0.5rem">⚠️</div>
-        Could not load hierarchy. <a href="#" onclick="renderPeople()" style="color:var(--accent)">Try again</a>
+        Could not load tree. <a href="#" onclick="renderPeople()" style="color:var(--accent)">Try again</a>
       </div>`;
   }
 }
 
 /* ── SETTINGS PAGE ───────────────────────────────────────── */
 function renderSettings(){
-  const mode = AppState.mode;
-  const info = ORG_MODES[mode];
+  const mode  = AppState.mode;
+  const info  = ORG_MODES[mode] || { label: mode || 'Custom', icon: '🏢' };
   const grade = AppState.grade;
 
   document.getElementById('settings-org-name').textContent  = AppState.orgName;
-  document.getElementById('settings-mode').textContent      = info.label;
+  document.getElementById('settings-mode').textContent      = `${info.icon || ''} ${info.label || mode}`.trim();
   document.getElementById('settings-grade').innerHTML       = gradeBadgeHTML(grade);
   document.getElementById('settings-admin').textContent     = AppState.adminName;
 
-  // Feature list for current grade
-  const features = PLATFORM_GRADES[grade].features;
+  const features = PLATFORM_GRADES[grade]?.features || [];
   document.getElementById('settings-features').innerHTML = features.map(f=>`
     <div style="display:flex;align-items:center;gap:8px;padding:0.5rem 0;border-bottom:1px solid var(--border)">
       <span style="color:var(--success);font-size:0.9rem">✓</span>
       <span style="font-size:0.85rem">${f}</span>
     </div>`).join('');
 
-  // Mode cards
-  document.getElementById('settings-modes').innerHTML = Object.entries(ORG_MODES).map(([k,v])=>`
-    <div class="org-tile ${k===mode?'active':''}" onclick="switchMode('${k}')" style="${k===mode?'border-color:'+v.color+';background:'+v.color+'22;color:'+v.color:''}">
-      <div class="tile-icon">${v.icon}</div>
-      <div style="font-size:0.72rem">${v.label}</div>
-    </div>`).join('');
-
-  // Hierarchy builder
-  const hierarchyEl = document.getElementById('settings-hierarchy');
-  if (hierarchyEl) hierarchyEl.innerHTML = renderHierarchyBuilder();
+  // Load values into textarea
+  _loadValuesIntoTextarea();
 }
 
-function switchMode(newMode){
-  AppState.mode = newMode;
-  // Update hierarchy labels from MODE_CONFIG — never regenerate fake members
-  const cfg = getModeConfig(newMode);
-  AppState.orgLevels = cfg.levels.map((label, i) => ({
-    id: i + 1, label, canSeeBelow: i < cfg.levels.length - 1,
-  }));
-  // Rebuild member role labels in case they need updating (keeps real data)
-  renderSidebar();
-  renderSettings();
-  // Save updated mode to server
-  authFetch('/api/platform/update-org-mode', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ orgCode: AppState.orgCode, orgMode: newMode }),
-  }).catch(() => {});
-  showToast(`Switched to ${ORG_MODES[newMode].label} mode`, 'success');
+function switchSettingsTab(tab) {
+  ['org','metrics','values','goals','grade'].forEach(t => {
+    const el  = document.getElementById(`settings-tab-${t}`);
+    const btn = document.querySelector(`#page-settings .tab-btn[data-tab="${t}"]`);
+    if (el)  el.style.display  = t === tab ? 'block' : 'none';
+    if (btn) btn.classList.toggle('active', t === tab);
+  });
+  if (tab === 'metrics') renderMetricsSettings();
+  if (tab === 'values')  _loadValuesIntoTextarea();
+  if (tab === 'goals')   renderGoalsSettings();
+}
+
+/* ── METRICS SETTINGS ────────────────────────────────────── */
+async function renderMetricsSettings() {
+  const el = document.getElementById('settings-metrics-list');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--text-muted);font-size:0.82rem">Loading…</div>';
+  try {
+    const res  = await fetch('/api/metrics', { headers: Auth._headers() });
+    const data = await res.json();
+    AppState.orgMetrics = data.metrics || [];
+    if (!AppState.orgMetrics.length) {
+      el.innerHTML = `
+        <div style="text-align:center;padding:1.5rem;color:var(--text-muted)">
+          <div style="font-size:1.5rem;margin-bottom:0.4rem">📏</div>
+          No metrics defined yet. Add your first metric or use AI Suggest.
+        </div>`;
+      return;
+    }
+    el.innerHTML = AppState.orgMetrics.map((m, i) => `
+      <div style="display:flex;align-items:center;gap:0.5rem;padding:0.55rem 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:0.8rem;color:var(--text-muted);width:20px;text-align:right">${i+1}</span>
+        <span style="flex:1;font-size:0.88rem;font-weight:500">${m.name}</span>
+        <span style="font-size:0.72rem;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:1px 6px">${m.source || 'org'}</span>
+        ${Auth.canDo('manage_metrics') ? `
+          <button onclick="deleteMetric('${m.metricId}')" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:0.85rem;padding:2px 4px" title="Delete">✕</button>` : ''}
+      </div>`).join('');
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">Failed to load metrics.</div>`;
+  }
+}
+
+function renderAddMetric() {
+  const formEl = document.getElementById('settings-metric-form');
+  if (!formEl) return;
+  formEl.innerHTML = `
+    <div class="card">
+      <div class="card-header"><div class="card-title">Add Metric</div></div>
+      <div class="card-body">
+        <div style="display:flex;gap:0.5rem;align-items:flex-end">
+          <div style="flex:1">
+            <label class="form-label">METRIC NAME</label>
+            <input id="new-metric-name" class="form-input" placeholder="e.g. Accountability, Decision Quality, Resilience…" />
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="_submitAddMetric()">Add</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('settings-metric-form').innerHTML=''">Cancel</button>
+        </div>
+        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.4rem">Be specific. "Accountability" is better than "Good attitude".</div>
+      </div>
+    </div>`;
+  setTimeout(() => document.getElementById('new-metric-name')?.focus(), 50);
+}
+
+async function _submitAddMetric() {
+  const name = (document.getElementById('new-metric-name')?.value || '').trim();
+  if (!name) { showToast('Enter a metric name', 'warning'); return; }
+  try {
+    const res  = await fetch('/api/metrics', {
+      method: 'POST', headers: Auth._headers(),
+      body: JSON.stringify({ name, source: 'org' }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    showToast(`"${name}" added ✓`, 'success');
+    document.getElementById('settings-metric-form').innerHTML = '';
+    renderMetricsSettings();
+  } catch(e) { showToast(e.message, 'warning'); }
+}
+
+async function deleteMetric(metricId) {
+  if (!confirm('Remove this metric?')) return;
+  try {
+    const res  = await fetch(`/api/metrics/${metricId}`, { method: 'DELETE', headers: Auth._headers() });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    renderMetricsSettings();
+    showToast('Metric removed', 'success');
+  } catch(e) { showToast(e.message, 'warning'); }
+}
+
+async function renderMetricSuggest() {
+  const formEl = document.getElementById('settings-metric-form');
+  if (!formEl) return;
+  formEl.innerHTML = `<div style="padding:1rem;color:var(--text-muted);font-size:0.82rem">✨ Asking IntelliQ to suggest metrics…</div>`;
+  try {
+    const res  = await fetch('/api/metrics/suggest', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({}) });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    const suggestions = data.suggestions || [];
+    formEl.innerHTML = `
+      <div class="card">
+        <div class="card-header"><div class="card-title">✨ AI Metric Suggestions</div></div>
+        <div class="card-body">
+          <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.8rem">Select the ones that fit your org — you can always add more later.</div>
+          ${suggestions.map((s,i)=>`
+            <label style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem;border-radius:6px;cursor:pointer;border:1px solid var(--border);margin-bottom:0.3rem">
+              <input type="checkbox" value="${s}" checked />
+              <span style="font-size:0.85rem">${s}</span>
+            </label>`).join('')}
+          <div style="display:flex;gap:0.5rem;margin-top:0.8rem">
+            <button class="btn btn-accent btn-sm" onclick="_addSuggestedMetrics()">Add Selected</button>
+            <button class="btn btn-outline btn-sm" onclick="document.getElementById('settings-metric-form').innerHTML=''">Dismiss</button>
+          </div>
+        </div>
+      </div>`;
+  } catch(e) {
+    formEl.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">AI suggestion failed: ${e.message}</div>`;
+  }
+}
+
+async function _addSuggestedMetrics() {
+  const checkboxes = document.querySelectorAll('#settings-metric-form input[type=checkbox]:checked');
+  const names      = Array.from(checkboxes).map(c => c.value);
+  let added = 0;
+  for (const name of names) {
+    try {
+      const res = await fetch('/api/metrics', {
+        method: 'POST', headers: Auth._headers(),
+        body: JSON.stringify({ name, source: 'org' }),
+      });
+      const data = await res.json();
+      if (data.ok) added++;
+    } catch(e) { /* skip */ }
+  }
+  document.getElementById('settings-metric-form').innerHTML = '';
+  renderMetricsSettings();
+  showToast(`${added} metric${added!==1?'s':''} added ✓`, 'success');
+}
+
+/* ── VALUES SETTINGS ─────────────────────────────────────── */
+async function _loadValuesIntoTextarea() {
+  const ta = document.getElementById('settings-values-input');
+  if (!ta) return;
+  try {
+    const res  = await fetch('/api/values', { headers: Auth._headers() });
+    const data = await res.json();
+    ta.value = (data.values || []).join('\n');
+  } catch(e) { /* non-fatal */ }
+}
+
+async function saveOrgValues() {
+  const ta     = document.getElementById('settings-values-input');
+  const status = document.getElementById('settings-values-status');
+  if (!ta) return;
+  const values = ta.value.split('\n').map(v=>v.trim()).filter(Boolean);
+  try {
+    const res  = await fetch('/api/values', {
+      method: 'PUT', headers: Auth._headers(),
+      body: JSON.stringify({ values }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    AppState.orgValues = data.values;
+    if (status) { status.textContent = `Saved ${data.values.length} values ✓`; status.style.color = 'var(--success)'; }
+    showToast('Values saved ✓', 'success');
+  } catch(e) {
+    if (status) { status.textContent = e.message; status.style.color = 'var(--danger)'; }
+  }
+}
+
+/* ── GOALS SETTINGS ──────────────────────────────────────── */
+async function renderGoalsSettings() {
+  const el = document.getElementById('settings-goals-list');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--text-muted);font-size:0.82rem">Loading…</div>';
+  try {
+    const res  = await fetch('/api/goals', { headers: Auth._headers() });
+    const data = await res.json();
+    const goals = data.goals || [];
+    if (!goals.length) {
+      el.innerHTML = `<div style="text-align:center;padding:1.5rem;color:var(--text-muted)">No org goals yet. Add your first goal above.</div>`;
+      return;
+    }
+    el.innerHTML = goals.map(g => `
+      <div style="display:flex;align-items:center;gap:0.6rem;padding:0.6rem 0;border-bottom:1px solid var(--border)">
+        <span style="font-size:0.88rem;flex:1">${g.text}</span>
+        <span style="font-size:0.72rem;color:var(--text-muted)">${g.status || 'active'}</span>
+        ${Auth.canDo('manage_goals') ? `<button onclick="deleteGoal('${g.goalId}')" style="background:none;border:none;cursor:pointer;color:var(--text-muted)">✕</button>` : ''}
+      </div>`).join('');
+  } catch(e) {
+    el.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">Failed to load goals.</div>`;
+  }
+}
+
+function renderAddGoal() {
+  const formEl = document.getElementById('settings-goal-form');
+  if (!formEl) return;
+  formEl.innerHTML = `
+    <div class="card">
+      <div class="card-body">
+        <div style="display:flex;gap:0.5rem;align-items:flex-end">
+          <div style="flex:1">
+            <label class="form-label">GOAL</label>
+            <input id="new-goal-text" class="form-input" placeholder="e.g. Every member completes one reflection per week" />
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="_submitAddGoal()">Add</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('settings-goal-form').innerHTML=''">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+  setTimeout(() => document.getElementById('new-goal-text')?.focus(), 50);
+}
+
+async function _submitAddGoal() {
+  const text = (document.getElementById('new-goal-text')?.value || '').trim();
+  if (!text) { showToast('Enter a goal', 'warning'); return; }
+  try {
+    const res  = await fetch('/api/goals', {
+      method: 'POST', headers: Auth._headers(),
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    document.getElementById('settings-goal-form').innerHTML = '';
+    renderGoalsSettings();
+    showToast('Goal added ✓', 'success');
+  } catch(e) { showToast(e.message, 'warning'); }
+}
+
+async function deleteGoal(goalId) {
+  if (!confirm('Remove this goal?')) return;
+  try {
+    const res  = await fetch(`/api/goals/${goalId}`, { method: 'DELETE', headers: Auth._headers() });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    renderGoalsSettings();
+    showToast('Goal removed', 'success');
+  } catch(e) { showToast(e.message, 'warning'); }
 }
 
 /* ── PEOPLE PAGE TABS ────────────────────────────────────── */
 function switchPeopleTab(tab) {
-  ['tree','onboard','groups','inbox'].forEach(t => {
+  ['tree','onboard','groups'].forEach(t => {
     const el = document.getElementById(`people-tab-${t}`);
     if (el) el.style.display = t === tab ? 'block' : 'none';
   });
@@ -1896,7 +2115,7 @@ function switchPeopleTab(tab) {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
   if (tab === 'groups')  renderGroups();
-  if (tab === 'inbox')   renderPlatformInbox();
+  if (tab === 'tree')    renderPeople();
   if (tab === 'onboard') renderOnboardHub();
 }
 
@@ -1910,22 +2129,21 @@ function openOnboardingTab(sub) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   ONBOARDING HUB
+   ONBOARDING HUB (Sprint 2 — invite-only, no default passwords,
+   no sample data)
    ══════════════════════════════════════════════════════════════ */
 function renderOnboardHub() {
-  const el = document.getElementById('onboard-hub-content');
+  const el    = document.getElementById('onboard-hub-content');
   if (!el) return;
-  const cfg   = getModeConfig(AppState.mode);
   const color = ORG_MODES[AppState.mode]?.color || 'var(--accent)';
 
   el.innerHTML = `
     <!-- Method cards -->
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0.75rem;margin-bottom:1.5rem">
-      ${_onboardCard('add',    '👤', `Add ${cfg.memberTerm}`,    'Add one person manually',          color)}
-      ${_onboardCard('import', '📁', 'Import Spreadsheet',      'Upload a CSV or XLSX file',        color)}
-      ${_onboardCard('invite', '✉',  'Invite by Email',         'Send email invite links',          color)}
-      ${_onboardCard('link',   '🔗', 'Generate Join Link',      'Shareable self-registration link', color)}
-      ${_onboardCard('sample', '🎭', 'Load Sample Data',        'Add example people to explore',    color)}
+      ${_onboardCard('add',    '👤', 'Add Person',         'Add one person with their email',   color)}
+      ${_onboardCard('import', '📁', 'Import Spreadsheet', 'Upload a CSV or XLSX file',         color)}
+      ${_onboardCard('invite', '✉',  'Invite by Email',    'Send personalised email invites',   color)}
+      ${_onboardCard('link',   '🔗', 'Generate Join Link', 'Shareable self-registration link',  color)}
     </div>
 
     <!-- Active panel -->
@@ -1953,28 +2171,41 @@ function _openOnboardSection(section) {
   _currentOnboardSection = section;
   const el = document.getElementById('onboard-active-panel');
   if (!el) return;
-  const cfg = getModeConfig(AppState.mode);
 
   if (section === 'add') {
+    // Build node selector from OrgTree
+    const nodeOptions = Object.values(OrgTree._nodes || {})
+      .sort((a,b)=>a.name.localeCompare(b.name))
+      .map(n => `<option value="${n.nodeId}">${n.name}</option>`).join('');
+
     el.innerHTML = `
       <div class="card" style="margin-bottom:0">
-        <div class="card-header"><div class="card-title">👤 Add ${cfg.memberTerm}</div></div>
+        <div class="card-header"><div class="card-title">👤 Add Person</div></div>
         <div class="card-body">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:0.7rem">
-            <div><label class="form-label">Full Name *</label><input id="ob-add-name" class="form-input" placeholder="${cfg.memberTerm} name" /></div>
-            <div><label class="form-label">Email *</label><input id="ob-add-email" class="form-input" type="email" placeholder="email@example.com" /></div>
+            <div><label class="form-label">FIRST NAME *</label><input id="ob-add-first" class="form-input" placeholder="First name" /></div>
+            <div><label class="form-label">LAST NAME *</label><input id="ob-add-last" class="form-input" placeholder="Last name" /></div>
+            <div><label class="form-label">EMAIL ADDRESS *</label><input id="ob-add-email" class="form-input" type="email" placeholder="person@example.com" /></div>
             <div>
-              <label class="form-label">Role</label>
+              <label class="form-label">ROLE</label>
               <select id="ob-add-role" class="form-input">
                 <option value="member">Member</option>
                 <option value="coach">Coach / Leader</option>
                 <option value="admin">Admin</option>
               </select>
             </div>
-            <div><label class="form-label">${cfg.groupTerm}</label><input id="ob-add-group" class="form-input" placeholder="${cfg.sampleGroups[0] || cfg.groupTerm}" /></div>
+            ${nodeOptions ? `<div style="grid-column:1/-1">
+              <label class="form-label">ORG NODE (optional)</label>
+              <select id="ob-add-node" class="form-input">
+                <option value="">— None —</option>
+                ${nodeOptions}
+              </select>
+            </div>` : ''}
           </div>
-          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.7rem">Email is required for login. Default password = first name in lowercase. They can change it after first login.</div>
-          <button class="btn btn-accent btn-sm" onclick="_submitAddPerson()">Create ${cfg.memberTerm}</button>
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.8rem">
+            An invite email will be sent so they can set their own password. No default passwords are used.
+          </div>
+          <button class="btn btn-accent btn-sm" onclick="_submitAddPerson()">Send Invite</button>
           <span id="ob-add-result" style="margin-left:0.7rem;font-size:0.8rem"></span>
         </div>
       </div>`;
@@ -2015,7 +2246,7 @@ function _openOnboardSection(section) {
               </select>
             </div>
             <div style="display:flex;align-items:center;gap:0.4rem">
-              <label class="form-label" style="margin:0">${cfg.groupTerm}:</label>
+              <label class="form-label" style="margin:0">Group:</label>
               <input id="ob-invite-group" class="form-input" style="width:140px" placeholder="Optional" />
             </div>
           </div>
@@ -2042,8 +2273,8 @@ function _openOnboardSection(section) {
               </select>
             </div>
             <div>
-              <label class="form-label">${cfg.groupTerm} (optional)</label>
-              <input id="ob-link-group" class="form-input" placeholder="${cfg.sampleGroups[0] || ''}" />
+              <label class="form-label">Group (optional)</label>
+              <input id="ob-link-group" class="form-input" placeholder="e.g. First Team, Year 10…" />
             </div>
             <div>
               <label class="form-label">Expires in</label>
@@ -2065,57 +2296,56 @@ function _openOnboardSection(section) {
       </div>`;
     _loadJoinLinks();
 
-  } else if (section === 'sample') {
-    el.innerHTML = `
-      <div class="card" style="margin-bottom:0">
-        <div class="card-header"><div class="card-title">🎭 Load Sample Data</div></div>
-        <div class="card-body">
-          <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:1rem;line-height:1.5">
-            This will add example people to your org so you can explore IntelliQ. Real organisations should use the other onboarding methods.
-            <br><strong style="color:var(--warning)">⚠ This adds real users to your org — not just a demo mode.</strong>
-          </div>
-          <div style="display:flex;flex-wrap:wrap;gap:0.5rem">
-            <button class="btn btn-outline btn-sm" onclick="_loadSampleData('sports')">⚽ Sports Sample</button>
-            <button class="btn btn-outline btn-sm" onclick="_loadSampleData('school')">🎓 School Sample</button>
-            <button class="btn btn-outline btn-sm" onclick="_loadSampleData('workplace')">🏢 Workplace Sample</button>
-          </div>
-          <div id="ob-sample-result" style="margin-top:0.8rem;font-size:0.8rem"></div>
-        </div>
-      </div>`;
   }
+  // 'sample' section removed in Sprint 2 — no demo data injection
 }
 
 /* ── Onboard action handlers ──────────────────────────────── */
 async function _submitAddPerson() {
-  const name  = document.getElementById('ob-add-name')?.value.trim();
-  const email = (document.getElementById('ob-add-email')?.value || '').trim().toLowerCase();
-  const role  = document.getElementById('ob-add-role')?.value || 'member';
-  const group = document.getElementById('ob-add-group')?.value.trim();
-  const resEl = document.getElementById('ob-add-result');
-  if (!name) { if (resEl) resEl.textContent = 'Name is required.'; return; }
-  if (!email) { if (resEl) resEl.textContent = 'Email address is required.'; return; }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { if (resEl) resEl.textContent = 'Please enter a valid email address.'; return; }
-  // Split name into first/last
-  const parts = name.split(' ');
-  const firstName = parts[0] || name;
-  const lastName  = parts.slice(1).join(' ') || '';
+  const firstName = (document.getElementById('ob-add-first')?.value || '').trim();
+  const lastName  = (document.getElementById('ob-add-last')?.value  || '').trim();
+  const email     = (document.getElementById('ob-add-email')?.value  || '').trim().toLowerCase();
+  const role      = document.getElementById('ob-add-role')?.value    || 'member';
+  const nodeId    = document.getElementById('ob-add-node')?.value    || '';
+  const resEl     = document.getElementById('ob-add-result');
+  const fullName  = `${firstName} ${lastName}`.trim();
+
+  if (!firstName) { if (resEl) resEl.textContent = 'First name is required.'; return; }
+  if (!email)     { if (resEl) resEl.textContent = 'Email address is required.'; return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { if (resEl) resEl.textContent = 'Enter a valid email.'; return; }
+
   try {
-    if (resEl) resEl.textContent = 'Adding…';
+    if (resEl) resEl.textContent = 'Sending invite…';
     const res  = await authFetch('/api/auth/create-user', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orgCode: AppState.orgCode, creatorId: Auth.currentUser?.id, name, firstName, lastName, email, role, group }),
+      body: JSON.stringify({
+        orgCode:    AppState.orgCode,
+        creatorId:  Auth.currentUser?.id,
+        firstName, lastName, name: fullName, email, role,
+        // passwordSet = false so they get the set-password flow on first login
+      }),
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
-    if (resEl) resEl.innerHTML = `<span style="color:var(--success)">✓ ${name} added.</span>`;
-    // Add to AppState immediately
-    _addMemberToAppState({ ...data.user, group });
+
+    // Assign to org tree node if selected
+    if (nodeId && OrgTree._nodes[nodeId]) {
+      const currentIds = OrgTree._nodes[nodeId].memberIds || [];
+      if (!currentIds.includes(data.user.id)) {
+        await fetch(`/api/tree/node/${nodeId}`, {
+          method: 'PUT', headers: Auth._headers(),
+          body: JSON.stringify({ memberIds: [...currentIds, data.user.id] }),
+        });
+        OrgTree._nodes[nodeId].memberIds = [...currentIds, data.user.id];
+      }
+    }
+
+    if (resEl) resEl.innerHTML = `<span style="color:var(--success)">✓ ${fullName} added — they can log in with their email.</span>`;
+    _addMemberToAppState({ ...data.user });
     // Clear fields
-    ['ob-add-name','ob-add-email','ob-add-group'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    ['ob-add-first','ob-add-last','ob-add-email'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     _renderOnboardRecent();
-    await HierarchyTree.load();
-    HierarchyTree.render('hierarchy-tree-container');
-    showToast(`${name} added`, 'success');
+    showToast(`${fullName} added ✓`, 'success');
   } catch(e) {
     if (resEl) resEl.textContent = e.message;
   }
@@ -2264,24 +2494,7 @@ async function _loadJoinLinks() {
   } catch(e) { /* ignore */ }
 }
 
-async function _loadSampleData(sampleMode) {
-  const resEl = document.getElementById('ob-sample-result');
-  if (resEl) resEl.textContent = 'Loading…';
-  try {
-    const res  = await authFetch('/api/auth/load-sample', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orgCode: AppState.orgCode, sampleMode }),
-    });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error);
-    if (resEl) resEl.innerHTML = `<span style="color:var(--success)">✓ ${data.created.length} sample people added.</span>`;
-    showToast(`${data.created.length} sample people loaded`, 'success');
-    await loadRealOrgData();
-    _renderOnboardRecent();
-  } catch(e) {
-    if (resEl) resEl.textContent = e.message;
-  }
-}
+// _loadSampleData removed in Sprint 2 — no demo data injection
 
 function _renderOnboardRecent() {
   const el = document.getElementById('onboard-recent');
@@ -2689,9 +2902,9 @@ function saveHierarchy() {
 function showProfile(id){
   const m = AppState.getMember(id);
   if(!m) return;
-  const mode = AppState.mode;
-  const metrics = ORG_MODES[mode].metrics;
-  const color = m.color;
+  const mode    = AppState.mode;
+  const metrics = (AppState.orgMetrics || []).map(mt => mt.name || mt);
+  const color   = m.color;
 
   AppState.currentMemberId = id;
 
@@ -2819,18 +3032,17 @@ function submitAddMember(e){
   const role  = document.getElementById('am-role').value;
   const group = document.getElementById('am-group').value;
   if(!name||!role||!group){ showToast('Please fill all fields','warning'); return; }
-  const mode = AppState.mode;
-  const metrics = ORG_MODES[mode].metrics;
-  const scores = {};
-  metrics.forEach(m=>{ scores[m]=rnd(55,90); });
-  const iq = rnd(55,90);
+  const metrics = (AppState.orgMetrics || []).map(m => m.name || m);
+  const scores  = {};
+  metrics.forEach(m=>{ scores[m]=null; });   // null = not yet assessed
+  const iq = null;
   AppState.members.push({
     id: AppState.members.length+1,
     name, role, group,
     initials: name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),
     color: COLORS[AppState.members.length % COLORS.length],
-    iqScore: iq, iqGrade: iq>=80?'A':iq>=60?'B':'C',
-    scores, overall: Math.round(Object.values(scores).reduce((a,b)=>a+b,0)/metrics.length),
+    iqScore: iq, iqGrade: null,
+    scores, overall: null,
     wellnessScore: rnd(55,90), streak: 0, alerts: 0,
     lastActive:'Today', trend:'stable', trendVal:0,
     history: Array.from({length:12},()=>rnd(55,90)),
@@ -2915,9 +3127,9 @@ function renderScenarios() {
       <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.9rem">Create an Assessment</div>
 
       <div style="margin-bottom:0.8rem">
-        <label class="form-label">What's going on with this ${getModeConfig(AppState.mode).memberTerm.toLowerCase()}?</label>
+        <label class="form-label">What's going on with this person?</label>
         <textarea id="sc-brief" class="form-input" rows="3" style="resize:vertical"
-          placeholder="${getModeConfig(AppState.mode).assessPrompt}"></textarea>
+          placeholder="Describe what you've observed — their behaviour, recent performance, attitude, and anything that concerns or impresses you. Be specific."></textarea>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:0.9rem">
@@ -2931,9 +3143,9 @@ function renderScenarios() {
           </div>
         </div>
         <div>
-          <label class="form-label">Select ${getModeConfig(AppState.mode).memberTerm}</label>
+          <label class="form-label">Select Member</label>
           <select id="sc-member" class="form-input">
-            <option value="">— Select ${getModeConfig(AppState.mode).memberTerm.toLowerCase()} —</option>
+            <option value="">— Select member —</option>
             ${[...AppState.members].sort((a,b)=>a.name.localeCompare(b.name))
               .map(m=>`<option value="${m.id}">${m.name} · ${m.role}</option>`).join('')}
           </select>
@@ -3145,8 +3357,7 @@ function renderCoachInputTab(memberId) {
   const m = AppState.getMember(memberId);
   if (!m) return '';
 
-  const mode    = AppState.mode;
-  const metrics = ORG_MODES[mode].metrics;
+  const metrics = (AppState.orgMetrics || []).map(mt => mt.name || mt);
 
   // Previous coach inputs
   const prevInputs = (m.coachInputs || []).slice().reverse();
@@ -3302,8 +3513,7 @@ function submitCoachInput(memberId) {
   const m = AppState.getMember(memberId);
   if (!m) return;
 
-  const mode    = AppState.mode;
-  const metrics = ORG_MODES[mode].metrics;
+  const metrics = (AppState.orgMetrics || []).map(mt => mt.name || mt);
   const notes   = (document.getElementById('ci-notes') || {}).value || '';
 
   // Collect score overrides

@@ -7,9 +7,10 @@
 const Auth = {
 
   /* ── State ─────────────────────────────────────────────── */
-  currentUser: null,
-  currentOrg:  null,
-  token:       null,
+  currentUser:  null,
+  currentOrg:   null,
+  token:        null,
+  permissions:  null,  // Sprint 2: loaded from server via getMe()
 
   ROLE_LABELS: {
     superadmin: 'Super Admin',
@@ -30,10 +31,11 @@ const Auth = {
     const saved = localStorage.getItem('iq_auth');
     if (saved) {
       try {
-        const { user, org, token } = JSON.parse(saved);
+        const { user, org, token, permissions } = JSON.parse(saved);
         this.currentUser = user;
         this.currentOrg  = org;
         this.token       = token || null;
+        this.permissions = permissions || null;
         return true; // already logged in
       } catch(e) { localStorage.removeItem('iq_auth'); }
     }
@@ -42,10 +44,17 @@ const Auth = {
 
   save() {
     localStorage.setItem('iq_auth', JSON.stringify({
-      user:  this.currentUser,
-      org:   this.currentOrg,
-      token: this.token,
+      user:        this.currentUser,
+      org:         this.currentOrg,
+      token:       this.token,
+      permissions: this.permissions,
     }));
+  },
+
+  /* ── Permission check ──────────────────────────────────── */
+  canDo(perm) {
+    if (!this.permissions) return this.isSuperAdmin(); // not loaded yet
+    return this.permissions[perm] === true;
   },
 
   logout() {
@@ -103,7 +112,10 @@ const Auth = {
     this.currentUser = data.user;
     this.currentOrg  = data.org;
     this.token       = data.token || null;
+    // Fetch permissions after login (login endpoint doesn't resolve them)
     this.save();
+    // Fire-and-forget permissions refresh — non-blocking
+    this.getMe().catch(() => {});
     return data;
   },
 
@@ -124,21 +136,7 @@ const Auth = {
     return data.user;
   },
 
-  /* ── Bulk create ───────────────────────────────────────── */
-  async bulkCreate(names, role, supervisorId) {
-    const res  = await fetch('/api/auth/bulk-create', {
-      method: 'POST', headers: this._headers(),
-      body: JSON.stringify({
-        orgCode:     this.currentUser.orgCode,
-        creatorId:   this.currentUser.id,
-        users: names, role,
-        supervisorId: supervisorId || this.currentUser.id,
-      }),
-    });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error);
-    return data;
-  },
+  /* bulkCreate removed in Sprint 2 — name-only creation without email is no longer supported */
 
   /* ── Generate invite link ──────────────────────────────── */
   async generateInvite(role, supervisorId) {
@@ -162,6 +160,7 @@ const Auth = {
     if (!data.ok) throw new Error(data.error);
     this.currentUser = data.user;
     this.currentOrg  = data.org;
+    this.permissions = data.permissions || null;
     this.save();
     return data;
   },
@@ -401,14 +400,18 @@ const HierarchyTree = {
     }
   },
 
-  async addBulk(supervisorId) {
+  async addBulk(_supervisorId) {
+    // Bulk name-only creation removed in Sprint 2. Use People → Onboard → Import for bulk.
+    showToast('Bulk name-only creation has been removed. Use People → Onboard → Import Spreadsheet (requires email).', 'warning');
+    return;
+    // Dead code below kept for reference — remove in future cleanup
     const raw  = document.getElementById('hadd-bulk-names')?.value || '';
     const role = document.getElementById('hadd-bulk-role')?.value  || 'member';
     const names = raw.split('\n').map(n => n.trim()).filter(Boolean);
     if (!names.length) { showToast('Enter at least one name', 'warning'); return; }
 
     try {
-      const { created, skipped } = await Auth.bulkCreate(names, role, supervisorId);
+      const { created, skipped } = await ({ created: [], skipped: [] });
       const resultEl = document.getElementById('hadd-bulk-result');
       resultEl.innerHTML = `
         <div style="color:var(--success)">✓ Added ${created.length}: ${created.map(u=>u.name).join(', ')}</div>

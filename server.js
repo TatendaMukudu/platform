@@ -40,6 +40,8 @@ function scheduleSave() {
         orgGroups, orgNotes, orgMessages, orgStore,
         assignedScenarios, memberResults, memberCheckins,
         memberGoals, weeklyAssessments, orgInterventions,
+        // Sprint 2 stores
+        orgNodes, orgMetrics, orgValues, orgGoals, userPermissions,
       };
       fs.writeFileSync(STORE_FILE, JSON.stringify(data), 'utf8');
     } catch(e) { console.error('[store] Save failed:', e.message); }
@@ -90,8 +92,9 @@ function requireAuth(req, res, next) {
 }
 
 /* ─── REFLECTION SYSTEM PROMPT ─────────────────────────────────────────── */
-function buildReflectionPrompt(orgMode, orgName) {
-  const ctx = {
+function buildReflectionPrompt(orgMode, orgName, orgValues = [], orgMetrics = []) {
+  // orgMode kept as optional fallback context only (Option B soft deprecation)
+  const verticalCtx = {
     school:     'students in a school environment. Academic pressure, peer relationships, behaviour, and moral development are common themes.',
     sports:     'athletes in a sports club. Performance pressure, team dynamics, coaching relationships, and mental resilience are common themes.',
     workplace:  'employees in a workplace. Professional conduct, leadership, team conflict, stress, and work-life balance are common themes.',
@@ -100,9 +103,16 @@ function buildReflectionPrompt(orgMode, orgName) {
     government: 'government officials and public servants. Policy decisions, integrity, public accountability, and crisis management are common themes.',
   };
 
+  const contextLine = orgMode && verticalCtx[orgMode]
+    ? `You are speaking with ${verticalCtx[orgMode]}`
+    : `You are speaking with individuals in a professional or institutional environment.`;
+
+  const valuesLine  = orgValues.length  ? `\nORG VALUES: ${orgValues.join(', ')} — connect your reflections to these where relevant.` : '';
+  const metricsLine = orgMetrics.length ? `\nORG PERFORMANCE DIMENSIONS: ${orgMetrics.map(m=>typeof m==='string'?m:m.name).join(', ')} — explore how the member's behaviour connects to these.` : '';
+
   return `You are the IntelliQ Reflection Assistant — an empathetic, intelligent AI coach embedded in the IntelliQ platform used by ${orgName}.
 
-You are speaking with ${ctx[orgMode] || 'individuals in a professional or institutional environment.'}
+${contextLine}${valuesLine}${metricsLine}
 
 YOUR ROLE:
 Guide structured post-scenario reflections and standalone check-ins. Help individuals develop genuine self-awareness and understand their decision-making patterns. You are not a therapist — but you are warm, perceptive, and take what people share seriously.
@@ -131,7 +141,7 @@ Catch nuanced language — "I've been in a really dark place" or "I just don't s
 }
 
 /* ─── SCENARIO SYSTEM PROMPT ────────────────────────────────────────────── */
-function buildScenarioPrompt(orgMode, orgName, title, context, memberName, difficulty, opening = null, probes = null) {
+function buildScenarioPrompt(orgMode, orgName, title, context, memberName, difficulty, opening = null, probes = null, orgValues = [], orgMetrics = []) {
   const difficultyNote = {
     easy:   'Start with a clear, straightforward situation. Keep the stakes moderate.',
     medium: 'Present a situation with genuine tension and no obvious right answer.',
@@ -180,6 +190,7 @@ app.post('/api/chat', async (req, res) => {
     messages,
     orgMode,
     orgName,
+    orgCode,
     memberName,
     scenarioContext,    // reflection mode: completed scenario summary
     promptType,         // 'reflection' (default) | 'scenario'
@@ -190,23 +201,30 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ error: 'messages array required' });
   }
 
+  // Load org-specific values and metrics for prompt enrichment
+  const code    = (orgCode || '').toLowerCase();
+  const values  = orgValues[code]  || [];
+  const metrics = (orgMetrics[code] || []).map(m => m.name || m);
+
   try {
     let systemPrompt;
 
     if (promptType === 'scenario') {
       const sc = scenarioRunContext || {};
       systemPrompt = buildScenarioPrompt(
-        orgMode || 'school',
+        orgMode || '',
         orgName  || 'your organisation',
         sc.title || 'Decision Making',
         sc.context || 'A challenging workplace or social situation',
         memberName || 'the member',
         sc.difficulty || 'medium',
         sc.opening  || null,
-        sc.probes   || null
+        sc.probes   || null,
+        values,
+        metrics
       );
     } else {
-      systemPrompt = buildReflectionPrompt(orgMode || 'school', orgName || 'your organisation');
+      systemPrompt = buildReflectionPrompt(orgMode || '', orgName || 'your organisation', values, metrics);
       if (scenarioContext) {
         systemPrompt += `\n\nSCENARIO JUST COMPLETED:\nTitle: ${scenarioContext.title}\nScore: ${scenarioContext.score}/100 (${scenarioContext.label})\n`;
         if (scenarioContext.answers?.length) {
@@ -393,6 +411,13 @@ const inviteTokens = _store.inviteTokens || {};  // token → { orgCode, role, s
 const emailIndex   = _store.emailIndex   || {};  // email (lowercase) → { orgCode, userId }
 const pendingInvites = _store.pendingInvites || {}; // token → { email, orgCode, role, ... }
 
+// ── Sprint 2 stores ────────────────────────────────────────────────────────
+const orgNodes        = _store.orgNodes        || {};  // orgCode → { nodeId → OrgNode }
+const orgMetrics      = _store.orgMetrics      || {};  // orgCode → [{ metricId, name, source, order }]
+const orgValues       = _store.orgValues       || {};  // orgCode → [string]
+const orgGoals        = _store.orgGoals        || {};  // orgCode → [{ goalId, text, createdAt }]
+const userPermissions = _store.userPermissions || {};  // orgCode → { userId → { perm → bool } }
+
 // Rebuild emailIndex from orgUsers on startup (repairs any missing entries)
 (function _rebuildEmailIndex() {
   for (const [orgCode, users] of Object.entries(orgUsers)) {
@@ -555,37 +580,10 @@ app.post('/api/auth/create-user', async (req, res) => {
   res.json({ ok: true, user: { ...users[userId], passwordHash: undefined } });
 });
 
-/* ── Bulk create users ──────────────────────────────────────────────────── */
-app.post('/api/auth/bulk-create', async (req, res) => {
-  const { orgCode, creatorId, users: newUsers, role, supervisorId } = req.body;
-  const code  = (orgCode || '').toLowerCase();
-  const users = orgUsers[code];
-  if (!users) return res.status(404).json({ error: 'Org not found' });
-
-  const created = [], skipped = [];
-  const roleLevel = { superadmin:1, admin:2, coach:3, member:4 };
-
-  for (const name of (newUsers || [])) {
-    const trimmed = name.trim();
-    if (!trimmed) continue;
-    const exists = Object.values(users).find(u => u.name.toLowerCase() === trimmed.toLowerCase());
-    if (exists) { skipped.push(trimmed); continue; }
-    const userId      = generateId();
-    const passwordHash = await bcrypt.hash(trimmed.toLowerCase(), SALT_ROUNDS);
-    users[userId] = {
-      id: userId, name: trimmed, role: role || 'member', orgCode: code,
-      supervisorId: supervisorId || creatorId,
-      passwordHash,
-      passwordSet:  false,
-      createdAt:    new Date().toISOString(),
-      levelId:      roleLevel[role] || 4,
-    };
-    created.push({ name: trimmed, password: trimmed.toLowerCase() });
-  }
-
-  scheduleSave();
-  res.json({ ok: true, created, skipped });
-});
+/* ── Bulk create (name-only) REMOVED — use bulk-import with email instead ── */
+// POST /api/auth/bulk-create was removed in Sprint 2.
+// All new users must be created with an email address via /api/auth/create-user
+// or imported in bulk via /api/auth/bulk-import (which requires email column).
 
 /* ── Generate invite link ───────────────────────────────────────────────── */
 app.post('/api/auth/invite', (req, res) => {
@@ -678,8 +676,68 @@ app.get('/api/auth/me', (req, res) => {
   if (!user) return res.status(404).json({ error: 'User not found.' });
 
   const org = orgMeta[session.orgCode];
-  res.json({ ok: true, user: { ...user, passwordHash: undefined }, org });
+
+  // Resolve permissions: explicit grants merged with role defaults
+  const explicitGrants = userPermissions[session.orgCode]?.[session.userId] || {};
+  const roleDefaults   = _resolveRoleDefaults(user.role);
+  const permissions    = { ...roleDefaults, ...explicitGrants };
+
+  res.json({ ok: true, user: { ...user, passwordHash: undefined }, org, permissions });
 });
+
+/* ── Permission defaults by role (fallback when no explicit grant) ───────── */
+function _resolveRoleDefaults(role) {
+  const d = {
+    superadmin: {
+      view_members: true, edit_members: true, delete_members: true,
+      view_analytics: true, manage_metrics: true, manage_values: true,
+      manage_goals: true, manage_tree: true, manage_permissions: true,
+      assign_scenarios: true, view_reports: true, manage_settings: true,
+    },
+    admin: {
+      view_members: true, edit_members: true, delete_members: false,
+      view_analytics: true, manage_metrics: true, manage_values: true,
+      manage_goals: true, manage_tree: true, manage_permissions: false,
+      assign_scenarios: true, view_reports: true, manage_settings: false,
+    },
+    coach: {
+      view_members: true, edit_members: false, delete_members: false,
+      view_analytics: true, manage_metrics: false, manage_values: false,
+      manage_goals: false, manage_tree: false, manage_permissions: false,
+      assign_scenarios: true, view_reports: true, manage_settings: false,
+    },
+    member: {
+      view_members: false, edit_members: false, delete_members: false,
+      view_analytics: false, manage_metrics: false, manage_values: false,
+      manage_goals: false, manage_tree: false, manage_permissions: false,
+      assign_scenarios: false, view_reports: false, manage_settings: false,
+    },
+  };
+  return d[role] || d.member;
+}
+
+/* ── Permission middleware factory ──────────────────────────────────────── */
+function requirePermission(perm) {
+  return (req, res, next) => {
+    const header  = (req.headers.authorization || '').replace('Bearer ', '').trim();
+    const session = verifyToken(header || req.query.token);
+    if (!session) return res.status(401).json({ error: 'Authentication required.' });
+
+    const user = orgUsers[session.orgCode]?.[session.userId];
+    if (!user) return res.status(401).json({ error: 'User not found.' });
+
+    // SuperAdmin bypasses all permission checks
+    if (user.role === 'superadmin') { req.iqSession = session; return next(); }
+
+    const explicit = userPermissions[session.orgCode]?.[session.userId] || {};
+    const defaults = _resolveRoleDefaults(user.role);
+    const allowed  = explicit[perm] !== undefined ? explicit[perm] : (defaults[perm] || false);
+
+    if (!allowed) return res.status(403).json({ error: `Permission denied: ${perm}` });
+    req.iqSession = session;
+    next();
+  };
+}
 
 /* ── Get org hierarchy tree ─────────────────────────────────────────────── */
 app.get('/api/auth/org-tree', (req, res) => {
@@ -787,6 +845,240 @@ app.post('/api/auth/set-password', async (req, res) => {
 
   const token = issueToken(userId, code, user.role);
   res.json({ ok: true, token });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SPRINT 2 — ORG TREE
+   Flat node store reconstructed as tree by parentId.
+   Node: { nodeId, name, parentId, childNodeIds, memberIds, leaderIds, createdAt, updatedAt }
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+app.get('/api/tree', requireAuth, (req, res) => {
+  const code  = req.iqSession.orgCode;
+  const nodes = Object.values(orgNodes[code] || {});
+  res.json({ ok: true, nodes });
+});
+
+app.post('/api/tree/node', requirePermission('manage_tree'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const { name, parentId } = req.body;
+  if (!name) return res.status(400).json({ error: 'name required' });
+  if (!orgNodes[code]) orgNodes[code] = {};
+  const nodeId = 'nd_' + generateId();
+  const now    = new Date().toISOString();
+  orgNodes[code][nodeId] = { nodeId, name: name.trim(), parentId: parentId || null, memberIds: [], leaderIds: [], createdAt: now, updatedAt: now };
+  // Add to parent's childNodeIds
+  if (parentId && orgNodes[code][parentId]) {
+    if (!orgNodes[code][parentId].childNodeIds) orgNodes[code][parentId].childNodeIds = [];
+    orgNodes[code][parentId].childNodeIds.push(nodeId);
+    orgNodes[code][parentId].updatedAt = now;
+  }
+  scheduleSave();
+  res.json({ ok: true, node: orgNodes[code][nodeId] });
+});
+
+app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), (req, res) => {
+  const code   = req.iqSession.orgCode;
+  const nodeId = req.params.nodeId;
+  const node   = orgNodes[code]?.[nodeId];
+  if (!node) return res.status(404).json({ error: 'Node not found' });
+  const { name, parentId, memberIds, leaderIds } = req.body;
+  const now = new Date().toISOString();
+  if (name      !== undefined) node.name      = name.trim();
+  if (memberIds !== undefined) node.memberIds = memberIds;
+  if (leaderIds !== undefined) node.leaderIds = leaderIds;
+  // Handle reparenting
+  if (parentId !== undefined && parentId !== node.parentId) {
+    // Remove from old parent
+    if (node.parentId && orgNodes[code][node.parentId]) {
+      const op = orgNodes[code][node.parentId];
+      op.childNodeIds = (op.childNodeIds || []).filter(id => id !== nodeId);
+      op.updatedAt = now;
+    }
+    // Add to new parent
+    if (parentId && orgNodes[code][parentId]) {
+      if (!orgNodes[code][parentId].childNodeIds) orgNodes[code][parentId].childNodeIds = [];
+      orgNodes[code][parentId].childNodeIds.push(nodeId);
+      orgNodes[code][parentId].updatedAt = now;
+    }
+    node.parentId = parentId || null;
+  }
+  node.updatedAt = now;
+  scheduleSave();
+  res.json({ ok: true, node });
+});
+
+app.delete('/api/tree/node/:nodeId', requirePermission('manage_tree'), (req, res) => {
+  const code   = req.iqSession.orgCode;
+  const nodeId = req.params.nodeId;
+  const node   = orgNodes[code]?.[nodeId];
+  if (!node) return res.status(404).json({ error: 'Node not found' });
+  const now = new Date().toISOString();
+  // Remove from parent
+  if (node.parentId && orgNodes[code][node.parentId]) {
+    const p = orgNodes[code][node.parentId];
+    p.childNodeIds = (p.childNodeIds || []).filter(id => id !== nodeId);
+    p.updatedAt = now;
+  }
+  // Reparent children to deleted node's parent
+  (node.childNodeIds || []).forEach(childId => {
+    if (orgNodes[code][childId]) {
+      orgNodes[code][childId].parentId  = node.parentId;
+      orgNodes[code][childId].updatedAt = now;
+    }
+  });
+  delete orgNodes[code][nodeId];
+  scheduleSave();
+  res.json({ ok: true });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SPRINT 2 — METRICS
+   Three sources: org (superadmin-defined), shared (leader), personal (member)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+app.get('/api/metrics', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode;
+  res.json({ ok: true, metrics: orgMetrics[code] || [] });
+});
+
+app.post('/api/metrics', requirePermission('manage_metrics'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const { name, source } = req.body;
+  if (!name) return res.status(400).json({ error: 'name required' });
+  if (!orgMetrics[code]) orgMetrics[code] = [];
+  const metric = {
+    metricId: 'met_' + generateId(),
+    name:     name.trim(),
+    source:   source || 'org',
+    order:    orgMetrics[code].length,
+    createdAt: new Date().toISOString(),
+  };
+  orgMetrics[code].push(metric);
+  scheduleSave();
+  res.json({ ok: true, metric });
+});
+
+app.put('/api/metrics/:metricId', requirePermission('manage_metrics'), (req, res) => {
+  const code   = req.iqSession.orgCode;
+  const metric = (orgMetrics[code] || []).find(m => m.metricId === req.params.metricId);
+  if (!metric) return res.status(404).json({ error: 'Metric not found' });
+  if (req.body.name  !== undefined) metric.name  = req.body.name.trim();
+  if (req.body.order !== undefined) metric.order = req.body.order;
+  scheduleSave();
+  res.json({ ok: true, metric });
+});
+
+app.delete('/api/metrics/:metricId', requirePermission('manage_metrics'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  if (!orgMetrics[code]) return res.status(404).json({ error: 'Not found' });
+  const before = orgMetrics[code].length;
+  orgMetrics[code] = orgMetrics[code].filter(m => m.metricId !== req.params.metricId);
+  if (orgMetrics[code].length === before) return res.status(404).json({ error: 'Metric not found' });
+  scheduleSave();
+  res.json({ ok: true });
+});
+
+// AI metric suggestions
+app.post('/api/metrics/suggest', requirePermission('manage_metrics'), async (req, res) => {
+  const code   = req.iqSession.orgCode;
+  const meta   = orgMeta[code] || {};
+  const desc   = req.body.description || meta.orgDescription || meta.orgName || '';
+  const values = orgValues[code] || [];
+  try {
+    const response = await client.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 400,
+      system:     'You are a performance measurement expert. Output valid JSON only.',
+      messages:   [{
+        role:    'user',
+        content: `Suggest 5-8 performance metrics for an organisation described as: "${desc}"${values.length ? '. Their values are: ' + values.join(', ') : ''}.
+Output JSON array of strings: ["Metric Name 1", "Metric Name 2", ...]. Be specific to the organisation. No generic HR metrics.`,
+      }],
+    });
+    const raw  = response.content[0]?.text || '[]';
+    const json = raw.replace(/```json\n?|\n?```/g, '').trim();
+    const suggestions = JSON.parse(json);
+    res.json({ ok: true, suggestions });
+  } catch(e) {
+    res.status(500).json({ error: 'AI unavailable', detail: e.message });
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SPRINT 2 — VALUES STORE
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+app.get('/api/values', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode;
+  res.json({ ok: true, values: orgValues[code] || [] });
+});
+
+app.put('/api/values', requirePermission('manage_values'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const { values } = req.body;
+  if (!Array.isArray(values)) return res.status(400).json({ error: 'values must be an array of strings' });
+  orgValues[code] = values.map(v => String(v).trim()).filter(Boolean);
+  scheduleSave();
+  res.json({ ok: true, values: orgValues[code] });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SPRINT 2 — GOALS STORE (org-level goals)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+app.get('/api/goals', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode;
+  res.json({ ok: true, goals: orgGoals[code] || [] });
+});
+
+app.post('/api/goals', requirePermission('manage_goals'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const { text } = req.body;
+  if (!text) return res.status(400).json({ error: 'text required' });
+  if (!orgGoals[code]) orgGoals[code] = [];
+  const goal = { goalId: 'goal_' + generateId(), text: text.trim(), createdAt: new Date().toISOString(), status: 'active' };
+  orgGoals[code].push(goal);
+  scheduleSave();
+  res.json({ ok: true, goal });
+});
+
+app.put('/api/goals/:goalId', requirePermission('manage_goals'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const goal = (orgGoals[code] || []).find(g => g.goalId === req.params.goalId);
+  if (!goal) return res.status(404).json({ error: 'Goal not found' });
+  if (req.body.text   !== undefined) goal.text   = req.body.text.trim();
+  if (req.body.status !== undefined) goal.status = req.body.status;
+  scheduleSave();
+  res.json({ ok: true, goal });
+});
+
+app.delete('/api/goals/:goalId', requirePermission('manage_goals'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  if (!orgGoals[code]) return res.status(404).json({ error: 'Not found' });
+  orgGoals[code] = orgGoals[code].filter(g => g.goalId !== req.params.goalId);
+  scheduleSave();
+  res.json({ ok: true });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SPRINT 2 — PERMISSIONS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+app.get('/api/permissions', requirePermission('manage_permissions'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  res.json({ ok: true, permissions: userPermissions[code] || {} });
+});
+
+app.put('/api/permissions', requirePermission('manage_permissions'), (req, res) => {
+  const code   = req.iqSession.orgCode;
+  const { userId, grants } = req.body;
+  if (!userId || typeof grants !== 'object') return res.status(400).json({ error: 'userId and grants object required' });
+  if (!orgUsers[code]?.[userId]) return res.status(404).json({ error: 'User not found' });
+  if (!userPermissions[code]) userPermissions[code] = {};
+  userPermissions[code][userId] = { ...(userPermissions[code][userId] || {}), ...grants };
+  scheduleSave();
+  res.json({ ok: true, permissions: userPermissions[code][userId] });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1166,47 +1458,11 @@ app.get('/api/auth/join-links', requireAuth, (req, res) => {
 });
 
 /* ── Load sample data for org ─────────────────────────────────────────── */
-app.post('/api/auth/load-sample', requireAuth, async (req, res) => {
-  const { orgCode, sampleMode } = req.body;
-  if (!orgCode || !sampleMode) return res.status(400).json({ error: 'orgCode and sampleMode required' });
-  const code = orgCode.toLowerCase().trim();
-  if (!orgUsers[code]) return res.status(404).json({ error: 'Org not found' });
-
-  const SAMPLE_DATA = {
-    sports:    { names: ['Marcus Silva','Jordan Johnson','Tyler Wright','Isaiah Thompson','Devon Parker','Andre Mensah'], groups: ['First Team','U21 Squad','Academy','Coaching Staff'] },
-    school:    { names: ['Emma Smith','Olivia Brown','Noah Williams','Liam Jones','Ava Taylor','Isabella Wilson'], groups: ['Year 10','Year 11','Year 12','Staff'] },
-    workplace: { names: ['Sarah Martinez','Alex Lee','Jordan Robinson','Taylor Walker','Morgan Hall','Jamie Young'], groups: ['Leadership','Engineering','Product','Finance','Marketing'] },
-  };
-
-  const sample = SAMPLE_DATA[sampleMode] || SAMPLE_DATA.workplace;
-  const created = [];
-
-  for (let i = 0; i < sample.names.length; i++) {
-    const name  = sample.names[i];
-    const group = sample.groups[i % sample.groups.length];
-    const role  = i === 0 ? 'coach' : 'member';
-    const existing = Object.values(orgUsers[code]).find(u => u.name.toLowerCase() === name.toLowerCase());
-    if (existing) continue;
-    const userId = generateId();
-    const passwordHash = await bcrypt.hash(name.toLowerCase().replace(/\s+/g, ''), SALT_ROUNDS);
-    const roleLevel = { coach: 3, member: 4 };
-    orgUsers[code][userId] = {
-      id: userId, name, role, orgCode: code, group,
-      passwordHash, passwordSet: false,
-      createdAt: new Date().toISOString(),
-      levelId: roleLevel[role] || 4,
-      isSampleData: true,
-    };
-    if (!orgGroups[code]) orgGroups[code] = [];
-    const gExists = orgGroups[code].some(g => g.name.toLowerCase() === group.toLowerCase());
-    if (!gExists) orgGroups[code].push({ id: generateId(), name: group, orgCode: code, memberIds: [], createdAt: new Date().toISOString() });
-    const gObj = orgGroups[code].find(g => g.name.toLowerCase() === group.toLowerCase());
-    if (gObj && !gObj.memberIds.includes(userId)) gObj.memberIds.push(userId);
-    created.push({ name, role, group });
-  }
-
-  scheduleSave();
-  res.json({ ok: true, created });
+/* ── load-sample REMOVED (Sprint 2) ─────────────────────────────────────── */
+// Demo data injection is no longer supported. All people must be real users
+// with valid email addresses. Use /api/auth/create-user or bulk-import.
+app.post('/api/auth/load-sample', requireAuth, (req, res) => {
+  res.status(410).json({ error: 'Sample data loading has been removed. Please add real members using the People → Onboard section.' });
 });
 
 /* ── Platform assigns a scenario to a member ────────────────────────────── */
