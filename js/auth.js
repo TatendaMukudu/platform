@@ -150,7 +150,7 @@ const Auth = {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
-    return `${location.origin}/join?invite=${data.token}`;
+    return `${location.origin}/?invite=${data.token}`;
   },
 
   /* ── Get current user profile (refreshes from server) ─── */

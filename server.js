@@ -602,7 +602,28 @@ app.post('/api/auth/invite', (req, res) => {
     createdAt:  new Date().toISOString(),
   };
   scheduleSave();
-  res.json({ ok: true, token, url: `/join?invite=${token}` });
+  const inviteUrl = `/?invite=${token}`;
+  console.log(`[INVITE] token=${token} | url=${inviteUrl} | org=${orgCode} | role=${role || 'member'}`);
+  res.json({ ok: true, token, url: inviteUrl });
+});
+
+/* ── Validate invite token (no account created — used by registration page) ── */
+app.get('/api/auth/invite-info', (req, res) => {
+  const { token } = req.query;
+  if (!token) return res.status(400).json({ error: 'token required' });
+  const invite = inviteTokens[token];
+  if (!invite) return res.status(404).json({ error: 'Invalid or expired invite link.' });
+  if (invite.expiresAt < Date.now()) return res.status(410).json({ error: 'This invite link has expired.' });
+  if (invite.usageLimit && (invite.useCount || 0) >= invite.usageLimit)
+    return res.status(410).json({ error: 'This invite link has reached its usage limit.' });
+  const org = orgMeta[invite.orgCode];
+  res.json({
+    ok:      true,
+    orgName: org?.orgName || invite.orgCode,
+    role:    invite.role,
+    group:   invite.group || '',
+    email:   invite.email || '',   // prefill if invite was email-targeted
+  });
 });
 
 /* ── Join via invite ────────────────────────────────────────────────────── */
@@ -1445,7 +1466,7 @@ app.get('/api/auth/join-links', requireAuth, (req, res) => {
     .filter(([, t]) => t.orgCode === code && t.expiresAt > now)
     .map(([token, t]) => ({
       token,
-      url:        `/join?invite=${token}`,
+      url:        `/?invite=${token}`,
       role:       t.role,
       group:      t.group || '',
       label:      t.label || '',

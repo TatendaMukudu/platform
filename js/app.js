@@ -39,8 +39,9 @@ const PAGE_TITLES = {
 
 /* ── LOGIN ────────────────────────────────────────────────── */
 function showLoginPanel(panel) {
-  ['login','setup'].forEach(p => {
-    document.getElementById(`login-panel-${p}`).style.display = p === panel ? 'block' : 'none';
+  ['login','setup','register'].forEach(p => {
+    const el = document.getElementById(`login-panel-${p}`);
+    if (el) el.style.display = p === panel ? 'block' : 'none';
   });
 }
 
@@ -54,6 +55,14 @@ function initLogin() {
       selectedMode = tile.dataset.mode;
     });
   });
+
+  // Check for invite token in URL — must run before Auth check
+  const _urlParams    = new URLSearchParams(window.location.search);
+  const _inviteToken  = _urlParams.get('invite');
+  if (_inviteToken) {
+    _handleInviteOnBoot(_inviteToken);
+    return;
+  }
 
   // Check if already logged in via Auth
   if (Auth.init()) {
@@ -150,6 +159,109 @@ async function handleSetup() {
   } catch(e) {
     errEl.textContent   = e.message || 'Setup failed.';
     errEl.style.display = 'block';
+  }
+}
+
+/* ── INVITE BOOT HANDLER ───────────────────────────────────────────────── */
+// Called on page load when ?invite=TOKEN is present in the URL.
+// Validates the token server-side, then shows the registration panel.
+async function _handleInviteOnBoot(token) {
+  // Keep token in memory for the register submit
+  window._pendingInviteToken = token;
+
+  // Show login screen while we validate
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('app').style.display          = 'none';
+
+  try {
+    const res  = await fetch(`/api/auth/invite-info?token=${encodeURIComponent(token)}`);
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) {
+      // Invalid / expired — fall through to normal login with a message
+      showLoginPanel('login');
+      const errEl = document.getElementById('login-error');
+      if (errEl) { errEl.textContent = data.error || 'This invite link is invalid or has expired.'; errEl.style.display = 'block'; }
+      return;
+    }
+
+    // Show registration panel
+    showLoginPanel('register');
+
+    const badge = document.getElementById('invite-org-badge');
+    if (badge) {
+      badge.innerHTML = `You've been invited to join <strong>${data.orgName}</strong> as a <strong>${data.role}</strong>.`;
+    }
+
+    // Prefill email if invite was email-targeted
+    if (data.email) {
+      const emailEl = document.getElementById('reg-email');
+      if (emailEl) { emailEl.value = data.email; emailEl.readOnly = true; emailEl.style.opacity = '0.7'; }
+    }
+
+    // Focus first name
+    setTimeout(() => document.getElementById('reg-first-name')?.focus(), 100);
+
+  } catch(e) {
+    showLoginPanel('login');
+  }
+}
+
+/* ── INVITE REGISTRATION SUBMIT ────────────────────────────────────────── */
+async function handleInviteRegister() {
+  const firstName = (document.getElementById('reg-first-name')?.value || '').trim();
+  const lastName  = (document.getElementById('reg-last-name')?.value  || '').trim();
+  const email     = (document.getElementById('reg-email')?.value      || '').trim().toLowerCase();
+  const password  = (document.getElementById('reg-password')?.value   || '');
+  const errEl     = document.getElementById('reg-error');
+  const token     = window._pendingInviteToken;
+  errEl.style.display = 'none';
+
+  if (!firstName)      { errEl.textContent = 'First name is required.'; errEl.style.display = 'block'; return; }
+  if (!email)          { errEl.textContent = 'Email address is required.'; errEl.style.display = 'block'; return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { errEl.textContent = 'Enter a valid email.'; errEl.style.display = 'block'; return; }
+  if (!password || password.length < 8) { errEl.textContent = 'Password must be at least 8 characters.'; errEl.style.display = 'block'; return; }
+  if (!token)          { errEl.textContent = 'Invite token missing. Please use the invite link again.'; errEl.style.display = 'block'; return; }
+
+  const btn = document.querySelector('#login-panel-register .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Creating account…'; }
+
+  try {
+    const res  = await fetch('/api/auth/join-invite', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ token, firstName, lastName, email, password }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Registration failed.');
+
+    // Auto-login: store credentials and launch
+    Auth.token       = data.token;
+    Auth.currentUser = data.user;
+    Auth.currentOrg  = data.org;
+    // Load full permissions from /me
+    await Auth.getMe();
+    Auth.save();
+
+    const mode  = data.org?.orgMode || 'workplace';
+    const grade = 'A';
+    AppState.init(mode, data.org?.orgName || '', data.user?.name || '', grade);
+    AppState.adminRole = Auth.ROLE_LABELS[data.user?.role] || 'Member';
+
+    // Remove invite token from URL without reload
+    window._pendingInviteToken = null;
+    window.history.replaceState({}, document.title, window.location.pathname);
+
+    showToast(`Welcome, ${firstName}! Your account is ready.`, 'success');
+
+    if (Auth.isMember()) { launchMemberView(); return; }
+    launchApp();
+    loadRealOrgData();
+
+  } catch(e) {
+    errEl.textContent   = e.message || 'Registration failed.';
+    errEl.style.display = 'block';
+    if (btn) { btn.disabled = false; btn.textContent = 'Create Account →'; }
   }
 }
 
@@ -2203,7 +2315,7 @@ function _openOnboardSection(section) {
             </div>` : ''}
           </div>
           <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.8rem">
-            An invite email will be sent so they can set their own password. No default passwords are used.
+            An invite link will be generated after adding. Share it with the person so they can set their own password.
           </div>
           <button class="btn btn-accent btn-sm" onclick="_submitAddPerson()">Send Invite</button>
           <span id="ob-add-result" style="margin-left:0.7rem;font-size:0.8rem"></span>
@@ -2233,7 +2345,7 @@ function _openOnboardSection(section) {
         <div class="card-header"><div class="card-title">✉ Invite by Email</div></div>
         <div class="card-body">
           <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
-            Enter email addresses, one per line. Each gets a unique invite link.
+            Enter email addresses, one per line. Each gets a unique invite link to copy and share. (Email delivery is not yet active — you copy and send the link yourself.)
           </div>
           <textarea id="ob-invite-emails" class="form-input" rows="4"
             placeholder="john@company.com&#10;sarah@company.com&#10;alex@company.com" style="margin-bottom:0.6rem;font-family:monospace"></textarea>
@@ -2315,7 +2427,7 @@ async function _submitAddPerson() {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { if (resEl) resEl.textContent = 'Enter a valid email.'; return; }
 
   try {
-    if (resEl) resEl.textContent = 'Sending invite…';
+    if (resEl) resEl.textContent = 'Creating account…';
     const res  = await authFetch('/api/auth/create-user', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -2340,7 +2452,26 @@ async function _submitAddPerson() {
       }
     }
 
-    if (resEl) resEl.innerHTML = `<span style="color:var(--success)">✓ ${fullName} added — they can log in with their email.</span>`;
+    // Generate an invite link for this person so admin can share it
+    let inviteLink = '';
+    try {
+      const invRes  = await authFetch('/api/auth/invite', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orgCode: AppState.orgCode, role, label: email, expiryDays: 14 }),
+      });
+      const invData = await invRes.json();
+      if (invData.ok) inviteLink = `${window.location.origin}${invData.url}`;
+    } catch(_) { /* non-fatal */ }
+
+    const safeLink = inviteLink.replace(/'/g, "\\'");
+    if (resEl) resEl.innerHTML = `
+      <div style="color:var(--success);margin-bottom:0.4rem">✓ Account created for ${fullName}.</div>
+      ${inviteLink
+        ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.3rem">Share this link so they can set their password:</div>
+           <div style="font-family:monospace;font-size:0.72rem;color:var(--accent);word-break:break-all;margin-bottom:0.3rem">${inviteLink}</div>
+           <button onclick="navigator.clipboard.writeText('${safeLink}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.72rem">📋 Copy Invite Link</button>`
+        : `<div style="font-size:0.78rem;color:var(--text-muted)">They can log in with their email once a password is set.</div>`
+      }`;
     _addMemberToAppState({ ...data.user });
     // Clear fields
     ['ob-add-first','ob-add-last','ob-add-email'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
@@ -2417,7 +2548,7 @@ async function _submitEmailInvites() {
   const resEl     = document.getElementById('ob-invite-result');
   const emails    = emailsRaw.split('\n').map(e => e.trim()).filter(Boolean);
   if (!emails.length) { if (resEl) resEl.textContent = 'Enter at least one email.'; return; }
-  if (resEl) resEl.innerHTML = 'Generating invite links…';
+  if (resEl) resEl.innerHTML = 'Creating invite links…';
   const results = [];
   for (const email of emails) {
     try {
@@ -2431,11 +2562,17 @@ async function _submitEmailInvites() {
   }
   if (resEl) {
     resEl.innerHTML = results.length
-      ? results.map(r => `<div style="margin-bottom:0.4rem;padding:0.4rem 0.6rem;background:var(--surface-2);border-radius:6px;font-size:0.77rem">
-          <span style="color:var(--text-secondary)">${r.email}</span><br>
-          <span style="font-family:monospace;color:var(--accent);word-break:break-all">${r.url}</span>
-          <button onclick="navigator.clipboard.writeText('${r.url}').then(()=>showToast('Copied','success'))" style="border:none;background:none;cursor:pointer;color:var(--text-muted);font-size:0.7rem;margin-left:4px">📋 Copy</button>
-        </div>`).join('')
+      ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.5rem">
+           ⚠️ Email delivery is not yet active. Share these links directly with each person.
+         </div>` +
+        results.map(r => {
+          const safeUrl = r.url.replace(/'/g, "\\'");
+          return `<div style="margin-bottom:0.5rem;padding:0.5rem 0.7rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:0.78rem">
+            <div style="font-weight:600;margin-bottom:0.2rem">Invite created for <span style="color:var(--accent)">${r.email}</span></div>
+            <div style="font-family:monospace;font-size:0.72rem;color:var(--text-secondary);word-break:break-all;margin-bottom:0.3rem">${r.url}</div>
+            <button onclick="navigator.clipboard.writeText('${safeUrl}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.72rem">📋 Copy Link</button>
+          </div>`;
+        }).join('')
       : '<span style="color:var(--danger)">Could not generate links.</span>';
   }
 }
@@ -2479,7 +2616,7 @@ async function _loadJoinLinks() {
     el.innerHTML = `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">Active Links</div>` +
       links.map(l => {
         const expires = new Date(l.expiresAt).toLocaleDateString('en-GB');
-        const fullUrl = `${window.location.origin}/join?invite=${l.token}`;
+        const fullUrl = `${window.location.origin}/?invite=${l.token}`;
         return `<div style="padding:0.5rem 0.7rem;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;margin-bottom:0.4rem;font-size:0.78rem">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap">
             <div>
