@@ -331,9 +331,9 @@ function _checkCoachDailyCheckin() {
   const tod    = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
 
   const prompts = {
-    superadmin: `Good ${tod}, ${name}. How's the organisation running? Anything at the top of your mind — players, staff, decisions you're thinking about?`,
-    admin:      `Good ${tod}, ${name}. How's the programme going? Any issues or highlights from the last session?`,
-    coach:      `Good ${tod}, ${name}. How did last session go? Any players you're watching? Anything you want to flag?`,
+    superadmin: `Good ${tod}, ${name}. How's the organisation running? Anything at the top of your mind — people, decisions, things you're tracking?`,
+    admin:      `Good ${tod}, ${name}. How's the programme going? Any issues or highlights worth flagging?`,
+    coach:      `Good ${tod}, ${name}. How's the team doing? Anyone you're keeping an eye on? Anything you want to record?`,
   };
 
   document.getElementById('ccc-title').textContent  = `${tod.charAt(0).toUpperCase() + tod.slice(1)} check-in`;
@@ -2298,14 +2298,6 @@ function _openOnboardSection(section) {
             <div><label class="form-label">FIRST NAME *</label><input id="ob-add-first" class="form-input" placeholder="First name" /></div>
             <div><label class="form-label">LAST NAME *</label><input id="ob-add-last" class="form-input" placeholder="Last name" /></div>
             <div><label class="form-label">EMAIL ADDRESS *</label><input id="ob-add-email" class="form-input" type="email" placeholder="person@example.com" /></div>
-            <div>
-              <label class="form-label">ROLE</label>
-              <select id="ob-add-role" class="form-input">
-                <option value="member">Member</option>
-                <option value="coach">Coach / Leader</option>
-                <option value="admin">Admin</option>
-              </select>
-            </div>
             ${nodeOptions ? `<div style="grid-column:1/-1">
               <label class="form-label">ORG NODE (optional)</label>
               <select id="ob-add-node" class="form-input">
@@ -2351,15 +2343,8 @@ function _openOnboardSection(section) {
             placeholder="john@company.com&#10;sarah@company.com&#10;alex@company.com" style="margin-bottom:0.6rem;font-family:monospace"></textarea>
           <div style="display:flex;gap:0.7rem;align-items:center;margin-bottom:0.7rem;flex-wrap:wrap">
             <div style="display:flex;align-items:center;gap:0.4rem">
-              <label class="form-label" style="margin:0">Role:</label>
-              <select id="ob-invite-role" class="form-input" style="width:auto;padding:4px 8px">
-                <option value="member">Member</option>
-                <option value="coach">Coach</option>
-              </select>
-            </div>
-            <div style="display:flex;align-items:center;gap:0.4rem">
               <label class="form-label" style="margin:0">Group:</label>
-              <input id="ob-invite-group" class="form-input" style="width:140px" placeholder="Optional" />
+              <input id="ob-invite-group" class="form-input" style="width:160px" placeholder="Optional" />
             </div>
           </div>
           <button class="btn btn-accent btn-sm" onclick="_submitEmailInvites()">Generate Invite Links</button>
@@ -2375,18 +2360,11 @@ function _openOnboardSection(section) {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:0.7rem">
             <div>
               <label class="form-label">Link Label</label>
-              <input id="ob-link-label" class="form-input" placeholder="e.g. Year 10 Students" />
-            </div>
-            <div>
-              <label class="form-label">Role</label>
-              <select id="ob-link-role" class="form-input">
-                <option value="member">Member</option>
-                <option value="coach">Coach</option>
-              </select>
+              <input id="ob-link-label" class="form-input" placeholder="e.g. Cohort A, Leadership Team" />
             </div>
             <div>
               <label class="form-label">Group (optional)</label>
-              <input id="ob-link-group" class="form-input" placeholder="e.g. First Team, Year 10…" />
+              <input id="ob-link-group" class="form-input" placeholder="e.g. Unit A, Department X…" />
             </div>
             <div>
               <label class="form-label">Expires in</label>
@@ -2417,7 +2395,7 @@ async function _submitAddPerson() {
   const firstName = (document.getElementById('ob-add-first')?.value || '').trim();
   const lastName  = (document.getElementById('ob-add-last')?.value  || '').trim();
   const email     = (document.getElementById('ob-add-email')?.value  || '').trim().toLowerCase();
-  const role      = document.getElementById('ob-add-role')?.value    || 'member';
+  const role      = 'member';  // Default — elevate permissions via People → Permissions after onboarding
   const nodeId    = document.getElementById('ob-add-node')?.value    || '';
   const resEl     = document.getElementById('ob-add-result');
   const fullName  = `${firstName} ${lastName}`.trim();
@@ -2543,7 +2521,7 @@ async function _submitImport() {
 
 async function _submitEmailInvites() {
   const emailsRaw = document.getElementById('ob-invite-emails')?.value || '';
-  const role      = document.getElementById('ob-invite-role')?.value || 'member';
+  const role      = 'member';  // Permissions set post-onboarding
   const group     = document.getElementById('ob-invite-group')?.value.trim() || '';
   const resEl     = document.getElementById('ob-invite-result');
   const emails    = emailsRaw.split('\n').map(e => e.trim()).filter(Boolean);
@@ -2579,7 +2557,7 @@ async function _submitEmailInvites() {
 
 async function _createJoinLink() {
   const label  = document.getElementById('ob-link-label')?.value.trim() || '';
-  const role   = document.getElementById('ob-link-role')?.value || 'member';
+  const role   = 'member';  // Permissions set post-onboarding
   const group  = document.getElementById('ob-link-group')?.value.trim() || '';
   const expiry = parseInt(document.getElementById('ob-link-expiry')?.value) || 7;
   const limit  = parseInt(document.getElementById('ob-link-limit')?.value) || 0;
@@ -2672,7 +2650,7 @@ async function renderGroups() {
         <div style="text-align:center;padding:2.5rem 1rem;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius)">
           <div style="font-size:2rem;margin-bottom:0.6rem">👥</div>
           <div style="font-size:0.9rem;font-weight:600;margin-bottom:0.3rem">No groups yet</div>
-          <div style="font-size:0.82rem;color:var(--text-secondary)">Create sub-teams like QB Room, Offense, Starting XI. Members can be in multiple groups.</div>
+          <div style="font-size:0.82rem;color:var(--text-secondary)">Create sub-groups within your org. People can be in multiple groups.</div>
         </div>`;
       return;
     }
@@ -2965,75 +2943,8 @@ async function loadWeeklyPulse() {
   }
 }
 
-/* ── HIERARCHY BUILDER (in Settings) ────────────────────── */
-function renderHierarchyBuilder() {
-  const levels = AppState.orgLevels;
-  return `
-    <div style="margin-top:1.5rem">
-      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.8rem">Organisation Hierarchy</div>
-      <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:1rem;line-height:1.6">
-        Define your org's levels. Assign members to levels from their profile. Higher levels can see everyone below them.
-        IntelliQ watches all levels and escalates upward automatically.
-      </div>
-
-      <div id="hierarchy-levels-list">
-        ${levels.map((l, i) => `
-          <div style="display:flex;align-items:center;gap:0.6rem;padding:0.6rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;margin-bottom:0.4rem">
-            <span style="font-size:0.72rem;color:var(--text-muted);width:16px;text-align:center;flex-shrink:0">${l.id}</span>
-            <input type="text" class="form-input" value="${l.label}" id="level-label-${l.id}"
-              style="flex:1;font-size:0.82rem;padding:5px 8px"
-              onchange="AppState.orgLevels[${i}].label=this.value"/>
-            <label style="display:flex;align-items:center;gap:5px;font-size:0.75rem;color:var(--text-secondary);cursor:pointer;flex-shrink:0">
-              <input type="checkbox" ${l.canSeeBelow ? 'checked' : ''}
-                onchange="AppState.orgLevels[${i}].canSeeBelow=this.checked"/>
-              Can see below
-            </label>
-            ${levels.length > 2 ? `<button onclick="removeHierarchyLevel(${i})"
-              style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:0.9rem;padding:0 4px">✕</button>` : ''}
-          </div>`).join('')}
-      </div>
-
-      <div style="display:flex;gap:0.5rem;margin-top:0.6rem">
-        <button class="btn btn-outline btn-sm" onclick="addHierarchyLevel()">+ Add Level</button>
-        <button class="btn btn-accent btn-sm" onclick="saveHierarchy()">Save Hierarchy</button>
-      </div>
-
-      <!-- Member level assignment -->
-      <div style="margin-top:1.4rem">
-        <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.7rem">Assign Members to Levels</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0.5rem;max-height:220px;overflow-y:auto;padding:2px">
-          ${AppState.members.map(m => `
-            <div style="display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.7rem;background:var(--surface-2);border:1px solid var(--border);border-radius:6px">
-              <div class="user-avatar" style="width:24px;height:24px;font-size:0.65rem;background:${m.color};flex-shrink:0">${m.initials}</div>
-              <span style="font-size:0.78rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.name}</span>
-              <select style="font-size:0.72rem;padding:2px 4px;background:var(--bg-surface);border:1px solid var(--border);border-radius:4px;color:var(--text-primary)"
-                onchange="AppState.getMember(${m.id}).levelId=parseInt(this.value)">
-                ${AppState.orgLevels.map(l =>
-                  `<option value="${l.id}" ${m.levelId === l.id ? 'selected' : ''}>${l.label}</option>`
-                ).join('')}
-              </select>
-            </div>`).join('')}
-        </div>
-      </div>
-    </div>`;
-}
-
-function addHierarchyLevel() {
-  const nextId = Math.max(...AppState.orgLevels.map(l => l.id)) + 1;
-  AppState.orgLevels.push({ id: nextId, label: `Level ${nextId}`, canSeeBelow: false });
-  document.getElementById('settings-hierarchy').innerHTML = renderHierarchyBuilder();
-}
-
-function removeHierarchyLevel(idx) {
-  if (AppState.orgLevels.length <= 2) return;
-  AppState.orgLevels.splice(idx, 1);
-  AppState.orgLevels.forEach((l, i) => l.id = i + 1);
-  document.getElementById('settings-hierarchy').innerHTML = renderHierarchyBuilder();
-}
-
-function saveHierarchy() {
-  showToast('Hierarchy saved', 'success');
-}
+// renderHierarchyBuilder / addHierarchyLevel / removeHierarchyLevel / saveHierarchy
+// removed in Sprint 2.5. Org structure is now managed via the Org Tree (tree.js).
 
 /* ── PROFILE MODAL ───────────────────────────────────────── */
 function showProfile(id){
@@ -3160,43 +3071,8 @@ function exportReport(){
 }
 
 /* ── ADD MEMBER MODAL ────────────────────────────────────── */
-function showAddMember(){
-  openModal('add-member-modal');
-}
-function submitAddMember(e){
-  e.preventDefault();
-  const name  = document.getElementById('am-name').value;
-  const role  = document.getElementById('am-role').value;
-  const group = document.getElementById('am-group').value;
-  if(!name||!role||!group){ showToast('Please fill all fields','warning'); return; }
-  const metrics = (AppState.orgMetrics || []).map(m => m.name || m);
-  const scores  = {};
-  metrics.forEach(m=>{ scores[m]=null; });   // null = not yet assessed
-  const iq = null;
-  AppState.members.push({
-    id: AppState.members.length+1,
-    name, role, group,
-    initials: name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),
-    color: COLORS[AppState.members.length % COLORS.length],
-    iqScore: iq, iqGrade: null,
-    scores, overall: null,
-    wellnessScore: rnd(55,90), streak: 0, alerts: 0,
-    lastActive:'Today', trend:'stable', trendVal:0,
-    history: Array.from({length:12},()=>rnd(55,90)),
-    joinDate:`${pick(['Jan','Feb','Mar','Apr','May','Jun'])} 2025`,
-    notes:'New member. Awaiting initial assessment.',
-    devPlan:[
-      {text:'Complete onboarding assessment',done:false},
-      {text:'Initial IntelliQ evaluation',done:false},
-      {text:'Set performance baseline',done:false},
-    ],
-  });
-  AppState.stats = generateOrgStats(mode, AppState.members);
-  closeAllModals();
-  renderMembers();
-  showToast(`${name} added successfully!`,'success');
-  e.target.reset();
-}
+// showAddMember / submitAddMember removed in Sprint 2.5.
+// All person creation goes through People → Onboard → _submitAddPerson().
 
 /* ── SCENARIOS PAGE ──────────────────────────────────────── */
 function renderScenarios() {
@@ -3710,7 +3586,7 @@ function submitCoachInput(memberId) {
     updateAlertBadge();
   }
 
-  AppState.stats = generateOrgStats(AppState.mode, AppState.members);
+  AppState.stats = buildEmptyOrgStats(AppState.members.length);
   _coachConcern  = 'none';
   showToast('Coach input saved successfully', 'success');
 

@@ -161,7 +161,7 @@ const ChatEngine = {
       mandated: true,
     });
 
-    AppState.stats = generateOrgStats(AppState.mode, AppState.members);
+    AppState.stats = buildEmptyOrgStats(AppState.members.length);
     updateAlertBadge();
     showToast(`Mandated reporter alert raised for ${member.name}`, 'danger');
   },

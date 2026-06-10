@@ -218,7 +218,7 @@
         <div class="icon-btn" id="notif-btn" data-tip="Notifications" style="cursor:pointer">
           🔔 <div class="badge"></div>
         </div>
-        <div class="icon-btn" data-tip="Add Member" onclick="showAddMember()" style="cursor:pointer">➕</div>
+        <div class="icon-btn" data-tip="Add Person" onclick="navigate('people');switchPeopleTab('onboard')" style="cursor:pointer">➕</div>
         <div style="font-size:0.8rem;color:var(--text-secondary);padding:0 0.5rem" id="topbar-org">Org</div>
       </div>
     </header>
@@ -237,7 +237,7 @@
           </div>
           <div style="display:flex;gap:0.5rem">
             <button class="btn btn-outline btn-sm" onclick="navigate('reports')">📋 Full Report</button>
-            <button class="btn btn-accent btn-sm" onclick="showAddMember()">+ Add Member</button>
+            <button class="btn btn-accent btn-sm" onclick="navigate('people');switchPeopleTab('onboard')">+ Add Person</button>
           </div>
         </div>
 
@@ -321,7 +321,7 @@
             <div class="section-title">Members</div>
             <div class="section-sub" id="members-count">24 members</div>
           </div>
-          <button class="btn btn-accent btn-sm" onclick="showAddMember()">+ Add Member</button>
+          <button class="btn btn-accent btn-sm" onclick="navigate('people');switchPeopleTab('onboard')">+ Add Person</button>
         </div>
 
         <div style="margin-bottom:1rem">
@@ -953,37 +953,7 @@
   </div>
 </div>
 
-<!-- ════════════════════════════════════════════════════════
-     ADD MEMBER MODAL
-     ════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" id="add-member-modal">
-  <div class="modal" style="max-width:440px">
-    <div class="modal-header">
-      <div class="modal-title">Add New Member</div>
-      <button class="icon-btn" onclick="closeAllModals()">✕</button>
-    </div>
-    <form id="add-member-form" onsubmit="submitAddMember(event)">
-      <div class="modal-body">
-        <div class="form-group">
-          <label>FULL NAME</label>
-          <input class="form-control" id="am-name" placeholder="First Last" required/>
-        </div>
-        <div class="form-group">
-          <label>ROLE / POSITION</label>
-          <input class="form-control" id="am-role" placeholder="e.g. Student, Forward, Analyst..." required/>
-        </div>
-        <div class="form-group">
-          <label>GROUP / TEAM</label>
-          <input class="form-control" id="am-group" placeholder="e.g. Class 10A, First Team..." required/>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline" onclick="closeAllModals()">Cancel</button>
-        <button type="submit" class="btn btn-accent">Add Member</button>
-      </div>
-    </form>
-  </div>
-</div>
+<!-- ADD MEMBER MODAL removed in Sprint 2.5 — onboarding now via People → Onboard -->
 
 <!-- ════════════════════════════════════════════════════════
      SCENARIO RUNNER MODAL
@@ -1228,7 +1198,7 @@
     <div class="modal-body">
       <div class="form-group">
         <label class="form-label">Group name</label>
-        <input type="text" class="form-input" id="cg-name" placeholder="e.g. QB Room, Offense, Starting XI…"/>
+        <input type="text" class="form-input" id="cg-name" placeholder="e.g. Leadership, Engineering, Cohort A…"/>
       </div>
       <div class="form-group" style="margin-top:0.7rem">
         <label class="form-label">Description <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
@@ -1239,7 +1209,7 @@
         <div id="cg-members-list" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:0.5rem;margin-top:0.3rem"></div>
       </div>
       <div class="form-group" style="margin-top:0.7rem">
-        <label class="form-label">Group leads / coaches</label>
+        <label class="form-label">Group leads</label>
         <div id="cg-leads-list" style="max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:0.5rem;margin-top:0.3rem"></div>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:0.5rem;margin-top:1rem">
@@ -1284,8 +1254,7 @@
   </div>
 </div>
 
-<!-- Hierarchy manage modal (outside page flow) -->
-<div id="hierarchy-manage-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center;padding:1rem"></div>
+<!-- hierarchy-manage-modal removed in Sprint 2.5 — managed via OrgTree inline modal -->
 
 <!-- ════════════════════════════════════════════════════════
      MEMBER SHELL — hosts the member view inside unified app

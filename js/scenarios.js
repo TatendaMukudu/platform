@@ -177,7 +177,7 @@ const ScenarioEngine = {
     // Nudge IQ score
     member.iqScore = Math.round(member.iqScore * 0.85 + score.overall * 0.15);
     member.iqGrade = member.iqScore >= 80 ? 'A' : member.iqScore >= 60 ? 'B' : 'C';
-    AppState.stats = generateOrgStats(AppState.mode, AppState.members);
+    AppState.stats = buildEmptyOrgStats(AppState.members.length);
 
     const dims = [
       ['Ethical Reasoning',     score.ethical_reasoning],
@@ -364,7 +364,7 @@ const ScenarioEngine = {
       member,
       mandated: true,
     });
-    AppState.stats = generateOrgStats(AppState.mode, AppState.members);
+    AppState.stats = buildEmptyOrgStats(AppState.members.length);
     updateAlertBadge();
     showToast(`Mandated reporter alert raised for ${member.name}`, 'danger');
   },
