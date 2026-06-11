@@ -150,6 +150,18 @@ const Auth = {
     return data;
   },
 
+  /* ── Visibility-scoped member list (Phase 2) ──────────── *
+   *  Returns only users this account is permitted to see,    *
+   *  enforced server-side by tree position + permissions.    *
+   *  SuperAdmin/Admin → full org. Coach → subtree. Member → self.
+   * ──────────────────────────────────────────────────────── */
+  async loadVisibleMembers() {
+    const res  = await fetch('/api/workspace/visible-members', { headers: this._headers() });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    return data; // { ok, members[], visibleCount, requestingUserId }
+  },
+
   /* ── Get hierarchy tree ────────────────────────────────── */
   async getOrgTree() {
     const res  = await fetch(

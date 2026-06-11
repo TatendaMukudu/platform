@@ -1181,6 +1181,181 @@ app.delete('/api/tree/node/:nodeId', requirePermission('manage_tree'), (req, res
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   PHASE 2 — VISIBILITY ENGINE
+   Core rule:
+     · Permissions decide WHAT a user can do.
+     · Org tree position decides WHO a user can see.
+   Enforced server-side only — clients never receive hidden users.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Internal: resolve a single permission for any user ─────────────────── */
+function _userHasPerm(orgCode, userId, perm) {
+  const user = orgUsers[orgCode]?.[userId];
+  if (!user) return false;
+  if (user.role === 'superadmin') return true;
+  const explicit = userPermissions[orgCode]?.[userId] || {};
+  const defaults = _resolveRoleDefaults(user.role);
+  return explicit[perm] !== undefined ? explicit[perm] : (defaults[perm] || false);
+}
+
+/* ── Get all node IDs where a user appears (as member OR leader) ────────── */
+function getUserNodeIds(orgCode, userId) {
+  const nodes = orgNodes[orgCode] || {};
+  return Object.values(nodes)
+    .filter(n =>
+      (n.memberIds || []).includes(userId) ||
+      (n.leaderIds || []).includes(userId)
+    )
+    .map(n => n.nodeId);
+}
+
+/* ── Collect a node + all descendant node IDs (BFS, cycle-safe) ─────────── */
+function getDescendantNodeIds(orgCode, rootNodeId) {
+  const nodes   = orgNodes[orgCode] || {};
+  const visited = new Set();
+  const queue   = [rootNodeId];
+  while (queue.length) {
+    const curr = queue.shift();
+    if (visited.has(curr)) continue;
+    visited.add(curr);
+    const node = nodes[curr];
+    if (node?.childNodeIds) node.childNodeIds.forEach(c => queue.push(c));
+  }
+  return [...visited];
+}
+
+/* ── Compute the set of user IDs visible to the requesting user ─────────── *
+ *
+ *  Visibility rules (evaluated in order):
+ *  1. SuperAdmin                    → everyone in the org
+ *  2. Has edit_members permission   → everyone (full People management access)
+ *  3. Has view_team permission      → all users in own tree node(s) + descendants
+ *     3a. Has view_team but no node → only self (unassigned leader)
+ *  4. Everyone else                 → only self
+ *
+ * ──────────────────────────────────────────────────────────────────────── */
+function getVisibleUserIds(orgCode, requestingUserId) {
+  const user = orgUsers[orgCode]?.[requestingUserId];
+  if (!user) return [];
+
+  // Rule 1 — SuperAdmin sees all
+  if (user.role === 'superadmin') {
+    return Object.keys(orgUsers[orgCode] || {});
+  }
+
+  // Rule 2 — Full member management permission sees all
+  if (_userHasPerm(orgCode, requestingUserId, 'edit_members')) {
+    return Object.keys(orgUsers[orgCode] || {});
+  }
+
+  // Rule 3 — view_team: see own subtree
+  if (_userHasPerm(orgCode, requestingUserId, 'view_team')) {
+    const myNodeIds = getUserNodeIds(orgCode, requestingUserId);
+
+    if (myNodeIds.length === 0) {
+      // Rule 3a — has permission but unassigned to any node
+      return [requestingUserId];
+    }
+
+    // Expand each assigned node to its full descendant set
+    const allNodeIds = new Set();
+    myNodeIds.forEach(nid =>
+      getDescendantNodeIds(orgCode, nid).forEach(d => allNodeIds.add(d))
+    );
+
+    // Collect every member + leader from all those nodes
+    const allNodes   = orgNodes[orgCode] || {};
+    const visibleIds = new Set([requestingUserId]); // always include self
+    allNodeIds.forEach(nid => {
+      const n = allNodes[nid];
+      if (!n) return;
+      (n.memberIds || []).forEach(id => visibleIds.add(id));
+      (n.leaderIds || []).forEach(id => visibleIds.add(id));
+    });
+    return [...visibleIds];
+  }
+
+  // Rule 4 — standard member: only self
+  return [requestingUserId];
+}
+
+/* ── GET /api/workspace/visible-members ──────────────────────────────────
+ *
+ *  Returns the subset of org users the requesting user is allowed to see.
+ *  Fields per member: userId, name, email, role, status, passwordSet,
+ *    profileComplete, nodeIds, latestCheckin (snippet).
+ *  Never exposes passwordHash or any user outside the visible set.
+ *
+ * ──────────────────────────────────────────────────────────────────────── */
+app.get('/api/workspace/visible-members', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = orgCode;
+  const user = orgUsers[code]?.[userId];
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const visibleIds = getVisibleUserIds(code, userId);
+  const myNodeIds  = getUserNodeIds(code, userId);
+
+  console.log(
+    `[VISIBILITY] userId=${userId} role=${user.role} ` +
+    `nodes=${myNodeIds.join(',') || 'none'} visibleCount=${visibleIds.length}`
+  );
+
+  // Build reverse index: userId → nodeIds (from the whole tree — only used
+  // for users who are already in the visible set, so no data leakage)
+  const allNodes   = orgNodes[code] || {};
+  const userNodeMap = {};
+  Object.values(allNodes).forEach(n => {
+    [...(n.memberIds || []), ...(n.leaderIds || [])].forEach(uid => {
+      if (!userNodeMap[uid]) userNodeMap[uid] = [];
+      if (!userNodeMap[uid].includes(n.nodeId)) userNodeMap[uid].push(n.nodeId);
+    });
+  });
+
+  const members = visibleIds
+    .map(uid => {
+      const u = orgUsers[code]?.[uid];
+      if (!u) return null;
+
+      // Latest check-in — try userId key first, then legacy name key
+      const ckList =
+        memberCheckins[userKey(code, uid)] ||
+        memberCheckins[memberKey(code, u.name || '')] ||
+        [];
+      const latest = ckList.length ? ckList[ckList.length - 1] : null;
+      const latestCheckin = latest
+        ? {
+            date:      latest.date  || null,
+            mood:      latest.mood  || null,
+            moodLabel: latest.moodLabel || null,
+            text:      (latest.text || '').slice(0, 120), // snippet — not the full entry
+            ts:        latest.ts    || null,
+          }
+        : null;
+
+      return {
+        userId:          u.id,
+        name:            u.name            || '',
+        email:           u.email           || '',
+        role:            u.role            || 'member',
+        status:          u.status          || 'active',
+        passwordSet:     u.passwordSet     !== false,
+        profileComplete: u.profileComplete === true,
+        nodeIds:         userNodeMap[uid]  || [],
+        latestCheckin,
+      };
+    })
+    .filter(Boolean);
+
+  res.json({
+    ok: true,
+    members,
+    requestingUserId: userId,
+    visibleCount:     members.length,
+  });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
    SPRINT 2 — METRICS
    Three sources: org (superadmin-defined), shared (leader), personal (member)
    ═══════════════════════════════════════════════════════════════════════════ */

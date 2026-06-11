@@ -1060,8 +1060,40 @@ function _memberErrorHTML(err) {
 /* ── Load real org data from server and populate AppState ─────────────── */
 async function loadRealOrgData() {
   try {
-    const { flat } = await Auth.getOrgTree();
-    const realUsers = (flat || []).filter(u => u.role !== 'superadmin');
+    let realUsers = [];
+
+    if (Auth.isAdmin() || Auth.isSuperAdmin()) {
+      // ── Admin / SuperAdmin: full org tree (needed for People management) ──
+      // Filter out the superadmin account from the member list — admins
+      // manage all other users but superadmin is not a "member" in the UI.
+      const { flat } = await Auth.getOrgTree();
+      realUsers = (flat || []).filter(u => u.role !== 'superadmin');
+      console.log(`[VISIBILITY] Admin path — loaded ${realUsers.length} users via org-tree`);
+    } else {
+      // ── Coach / Member: server-enforced subtree visibility ────────────────
+      // GET /api/workspace/visible-members returns only users this person
+      // is allowed to see based on their org tree position + permissions.
+      const res  = await fetch('/api/workspace/visible-members', { headers: Auth._headers() });
+      const data = await res.json();
+      if (data.ok) {
+        // visible-members already strips superadmin; map to the same shape
+        // that buildRealMemberRecord expects (id, name, email, role, …)
+        realUsers = (data.members || []).map(m => ({
+          id:             m.userId,
+          name:           m.name,
+          email:          m.email,
+          role:           m.role,
+          status:         m.status,
+          passwordSet:    m.passwordSet,
+          profileComplete:m.profileComplete,
+          nodeIds:        m.nodeIds,
+          latestCheckin:  m.latestCheckin, // kept on the record for My Team panel
+        }));
+        console.log(`[VISIBILITY] Restricted path — ${realUsers.length} visible users for ${Auth.currentUser?.id}`);
+      } else {
+        console.warn('[VISIBILITY] visible-members failed:', data.error);
+      }
+    }
 
     // Build real member records — clear any previous data first
     AppState.members = realUsers.map((u, i) => buildRealMemberRecord(u, i));
