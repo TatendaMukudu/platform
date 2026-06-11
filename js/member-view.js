@@ -566,7 +566,7 @@ const MemberApp = {
       }).join('');
     }
     if (!pending.length && !done.length) {
-      html = `<div class="empty-card"><div class="empty-icon">🎯</div><div>No scenarios assigned yet.<br>Your coach will send one when ready.</div></div>`;
+      html = `<div class="empty-card"><div class="empty-icon">🎯</div><div>No assessments assigned yet.<br>Assessments will appear here when assigned.</div></div>`;
     }
     el.innerHTML = html;
   },
@@ -575,6 +575,14 @@ const MemberApp = {
     const diffColors = { Easy:'var(--success)', Medium:'var(--warning)', Hard:'var(--danger)' };
     const color      = diffColors[sc.difficulty] || 'var(--accent)';
     const done       = sc.status === 'completed';
+
+    // Assigner attribution — Phase 3.
+    // Priority: assignedByNodeName (group context) → assignedByName (person) → 'Organisation'
+    const assignerLabel = sc.assignedByNodeName || sc.assignedByName || 'Organisation';
+    const assignedDate  = sc.assignedAt
+      ? new Date(sc.assignedAt).toLocaleDateString('en-GB', { day:'numeric', month:'short' })
+      : null;
+
     return `
       <div class="scenario-pending-card ${sc.fromAlert ? 'from-alert' : ''}"
            onclick="${done ? '' : `MemberApp.startScenario('${sc.id}')`}"
@@ -585,6 +593,9 @@ const MemberApp = {
           <div class="sc-meta">
             <span class="diff-badge" style="color:${color};border-color:${color}44;background:${color}11">${sc.difficulty}</span>
             ${sc.domain} ${done && result ? `· Score: <span style="color:${this._scoreColor(result.score)};font-weight:700">${result.score}</span>` : ''}
+          </div>
+          <div class="sc-assigner">
+            Assigned by: <strong>${assignerLabel}</strong>${assignedDate ? ` · ${assignedDate}` : ''}
           </div>
         </div>
         ${done ? '' : '<div class="sc-arrow">›</div>'}
@@ -1133,7 +1144,7 @@ const MemberApp = {
       const msgs = data.messages || [];
 
       if (!msgs.length) {
-        el.innerHTML = `<div class="empty-card"><div class="empty-icon">💬</div><div>No messages yet. Messages from your coach and groups will appear here.</div></div>`;
+        el.innerHTML = `<div class="empty-card"><div class="empty-icon">💬</div><div>No messages yet. Messages from your organisation and groups will appear here.</div></div>`;
         return;
       }
 

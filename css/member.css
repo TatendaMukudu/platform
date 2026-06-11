@@ -186,10 +186,12 @@
   display: flex; align-items: center; justify-content: center;
   font-size: 1.3rem; flex-shrink: 0;
 }
-.sc-info  { flex: 1; min-width: 0; }
-.sc-title { font-size: 0.88rem; font-weight: 700; margin-bottom: 2px; }
-.sc-meta  { font-size: 0.73rem; color: var(--text-muted); }
-.sc-arrow { font-size: 1rem; color: var(--text-muted); flex-shrink: 0; }
+.sc-info     { flex: 1; min-width: 0; }
+.sc-title    { font-size: 0.88rem; font-weight: 700; margin-bottom: 2px; }
+.sc-meta     { font-size: 0.73rem; color: var(--text-muted); }
+.sc-assigner { font-size: 0.69rem; color: var(--text-muted); margin-top: 4px; opacity: 0.8; }
+.sc-assigner strong { color: var(--text-secondary); font-weight: 600; }
+.sc-arrow    { font-size: 1rem; color: var(--text-muted); flex-shrink: 0; }
 
 /* ── Difficulty badge ──────────────────────────────────────── */
 .diff-badge {

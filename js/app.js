@@ -1781,7 +1781,7 @@ function renderIntelliQ(){
     </div>
 
     ${openAlerts.length ? `
-      <div style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:0.5rem">Active IntelliQ Warnings — requires coach response</div>
+      <div style="font-size:0.75rem;font-weight:600;color:var(--text-secondary);margin-bottom:0.5rem">Active IntelliQ Warnings — requires leadership response</div>
       ${openAlerts.slice(0,4).map((a, i) => {
         const idx = AppState.alerts.indexOf(a);
         return `<div style="display:flex;align-items:center;gap:0.6rem;padding:0.6rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;margin-bottom:0.4rem;font-size:0.8rem">
@@ -4240,8 +4240,16 @@ async function assignToMemberApp(scenarioId) {
   try {
     const res = await fetch('/api/platform/assign-scenario', {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ orgCode, memberName: member.name, scenario }),
+      headers: Auth._headers(),   // auth token required by Phase 3 endpoint
+      body: JSON.stringify({
+        orgCode,
+        memberName: member.name,
+        memberId:   member.userId || member.authId || null,
+        scenario,
+        // assignedByNodeId / assignedByNodeName can be passed here in
+        // Phase 5 when assignments are made from the My Team panel.
+        // For now they are null — assigner identity comes from the session.
+      }),
     });
     if (!res.ok) throw new Error();
     showToast(`Assigned to ${member.name.split(' ')[0]}'s app ✓`, 'success');
@@ -4250,8 +4258,8 @@ async function assignToMemberApp(scenarioId) {
   }
 }
 
-/* ── COACH INPUT TAB ─────────────────────────────────────── */
-let _coachConcern = 'none';
+/* ── LEADER INPUT TAB ────────────────────────────────────── */
+let _coachConcern = 'none'; // variable name kept for backward compat; represents concern level
 
 function renderCoachInputTab(memberId) {
   const m = AppState.getMember(memberId);
@@ -4259,7 +4267,7 @@ function renderCoachInputTab(memberId) {
 
   const metrics = (AppState.orgMetrics || []).map(mt => mt.name || mt);
 
-  // Previous coach inputs
+  // Previous leadership inputs
   const prevInputs = (m.coachInputs || []).slice().reverse();
   const prevHTML   = prevInputs.length
     ? prevInputs.map(ci => `
@@ -4276,7 +4284,7 @@ function renderCoachInputTab(memberId) {
                 <span class="score-pill" style="color:${scoreColor(v)};border-color:${scoreColor(v)}40">${k.split(' ')[0]}: ${v}</span>`).join('')}
             </div>` : ''}
         </div>`).join('')
-    : `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.5rem 0">No coach inputs recorded yet.</div>`;
+    : `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.5rem 0">No leadership inputs recorded yet.</div>`;
 
   // External data table
   const extData = (m.externalData || []);
@@ -4314,7 +4322,7 @@ function renderCoachInputTab(memberId) {
   return `
     <!-- ─ NEW INPUT ─ -->
     <div style="margin-bottom:1.4rem">
-      <div class="section-divider">Add Coach / Counsellor Input</div>
+      <div class="section-divider">Add Leadership Input</div>
       <div class="coach-form" style="margin-top:0.8rem">
 
         <div>
@@ -4345,14 +4353,14 @@ function renderCoachInputTab(memberId) {
         </div>
 
         <button class="btn btn-accent btn-sm" onclick="submitCoachInput(${memberId})" style="align-self:flex-start">
-          Save Coach Input
+          Save Input
         </button>
       </div>
     </div>
 
     <!-- ─ PREVIOUS INPUTS ─ -->
     <div style="margin-bottom:1.4rem">
-      <div class="section-divider">Previous Coach Inputs</div>
+      <div class="section-divider">Previous Leadership Inputs</div>
       <div class="coach-input-log" style="margin-top:0.6rem">${prevHTML}</div>
     </div>
 
@@ -4454,7 +4462,7 @@ function submitCoachInput(memberId) {
     m.alerts = (m.alerts || 0) + 1;
     AppState.alerts.unshift({
       type:   'danger',
-      title:  'Coach Urgent Concern',
+      title:  'Urgent Concern',
       detail: `${m.name}: "${notes.slice(0, 80)}${notes.length > 80 ? '…' : ''}"`,
       time:   'Just now',
       unread: true,
@@ -4464,7 +4472,7 @@ function submitCoachInput(memberId) {
   } else if (_coachConcern === 'monitor') {
     AppState.alerts.unshift({
       type:   'warning',
-      title:  'Coach Monitor Flag',
+      title:  'Monitor Flag',
       detail: `${m.name} flagged for monitoring by ${AppState.adminName}.`,
       time:   'Just now',
       unread: true,

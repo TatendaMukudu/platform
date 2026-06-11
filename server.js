@@ -1888,17 +1888,64 @@ app.post('/api/auth/load-sample', requireAuth, (req, res) => {
   res.status(410).json({ error: 'Sample data loading has been removed. Please add real members using the People → Onboard section.' });
 });
 
-/* ── Platform assigns a scenario to a member ────────────────────────────── */
-app.post('/api/platform/assign-scenario', (req, res) => {
-  const { orgCode, memberName, scenario } = req.body;
-  if (!orgCode || !memberName || !scenario) {
-    return res.status(400).json({ error: 'orgCode, memberName and scenario required' });
+/* ── Platform assigns a scenario to a member ────────────────────────────── *
+ *
+ *  Body: { orgCode, memberName?, memberId?, scenario,
+ *          assignedByNodeId?, assignedByNodeName? }
+ *
+ *  Assigner identity is always taken from the auth session — the client
+ *  never controls assignedByUserId / assignedByName to prevent spoofing.
+ *  assignedByNodeId / assignedByNodeName are optional context fields the
+ *  admin UI may pass when the assignment is made on behalf of a node/group.
+ *
+ * ──────────────────────────────────────────────────────────────────────── */
+app.post('/api/platform/assign-scenario', requireAuth, (req, res) => {
+  const {
+    orgCode, memberName, memberId, scenario,
+    assignedByNodeId, assignedByNodeName,
+  } = req.body;
+
+  const code = (orgCode || req.iqSession.orgCode || '').toLowerCase().trim();
+  if (!code || !scenario) {
+    return res.status(400).json({ error: 'orgCode and scenario required' });
   }
-  const key = memberKey(orgCode, memberName);
+
+  // Resolve member name — prefer memberId lookup for accuracy
+  let resolvedName = memberName;
+  if (memberId && !resolvedName) {
+    const u = orgUsers[code]?.[memberId];
+    if (u) resolvedName = u.name;
+  }
+  if (!resolvedName) {
+    return res.status(400).json({ error: 'memberName or memberId required' });
+  }
+
+  // Assigner always comes from the verified session — never from request body
+  const assignerUser       = orgUsers[code]?.[req.iqSession.userId];
+  const assignedByUserId   = req.iqSession.userId;
+  const assignedByName     = assignerUser?.name  || 'Organisation';
+  const assignedByRole     = assignerUser?.role   || 'admin';
+
+  const key = memberKey(code, resolvedName);
   if (!assignedScenarios[key]) assignedScenarios[key] = [];
-  if (!assignedScenarios[key].find(s => s.id === scenario.id)) {
-    assignedScenarios[key].push({ ...scenario, assignedAt: new Date().toISOString(), status: 'pending' });
+
+  // Prevent exact duplicate (same scenario id, same assigner, already pending)
+  const alreadyPending = assignedScenarios[key].find(
+    s => s.id === scenario.id && s.status === 'pending'
+  );
+  if (!alreadyPending) {
+    assignedScenarios[key].push({
+      ...scenario,
+      status:             'pending',
+      assignedAt:         new Date().toISOString(),
+      assignedByUserId,
+      assignedByName,
+      assignedByRole,
+      assignedByNodeId:   assignedByNodeId   || null,
+      assignedByNodeName: assignedByNodeName || null,
+    });
   }
+
   scheduleSave();
   res.json({ ok: true, total: assignedScenarios[key].length });
 });
@@ -1927,22 +1974,48 @@ app.post('/api/member/join', (req, res) => {
   });
 });
 
-/* ── Member gets pending scenarios ─────────────────────────────────────── */
-app.get('/api/member/pending', (req, res) => {
+/* ── Member gets pending scenarios ─────────────────────────────────────── *
+ *
+ *  Returns pending + completed scenarios for the requesting member.
+ *  Each scenario object includes assigner metadata fields:
+ *    assignedByUserId, assignedByName, assignedByRole,
+ *    assignedByNodeId, assignedByNodeName, assignedAt
+ *  Legacy assignments that predate Phase 3 will have these fields as null/
+ *  undefined; clients should fall back to "Assigned by: Organisation".
+ *
+ * ──────────────────────────────────────────────────────────────────────── */
+app.get('/api/member/pending', requireAuth, (req, res) => {
   const { orgCode, memberName, userId } = req.query;
-  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  const code = (orgCode || req.iqSession.orgCode || '').toLowerCase().trim();
+  if (!code) return res.status(400).json({ error: 'orgCode required' });
 
   // Resolve memberName from userId when provided (unified app path)
   let resolvedName = memberName;
-  if (userId && !resolvedName) {
-    const user = orgUsers[orgCode.toLowerCase()]?.[userId];
+  if (!resolvedName) {
+    const uid  = userId || req.iqSession.userId;
+    const user = orgUsers[code]?.[uid];
     if (user) resolvedName = user.name;
   }
   if (!resolvedName) return res.status(400).json({ error: 'memberName or userId required' });
 
-  const key     = memberKey(orgCode, resolvedName);
-  const pending = (assignedScenarios[key] || []).filter(s => s.status === 'pending');
-  res.json({ scenarios: pending });
+  const key      = memberKey(code, resolvedName);
+  const all      = assignedScenarios[key] || [];
+  const pending  = all.filter(s => s.status === 'pending');
+  const completed = all.filter(s => s.status === 'completed');
+
+  // Enrich each scenario: ensure assigner fallback for legacy entries
+  const enrich = sc => ({
+    ...sc,
+    assignedByName:     sc.assignedByName     || 'Organisation',
+    assignedByRole:     sc.assignedByRole     || null,
+    assignedByNodeId:   sc.assignedByNodeId   || null,
+    assignedByNodeName: sc.assignedByNodeName || null,
+  });
+
+  res.json({
+    scenarios: pending.map(enrich),
+    completed: completed.map(enrich),
+  });
 });
 
 /* ── Member submits scenario result ─────────────────────────────────────── */
