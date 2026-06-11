@@ -94,6 +94,8 @@ async function showOnboardingFlow() {
 
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display          = 'none';
+  const orgOvEl = document.getElementById('org-setup-overlay');
+  if (orgOvEl) orgOvEl.style.display = 'none';
   document.getElementById('onboarding-overlay').style.display = 'flex';
 
   _obRenderStep();
@@ -364,6 +366,8 @@ function showOrgSetupWizard(prefillDescription = '') {
 
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display          = 'none';
+  const obOverlay = document.getElementById('onboarding-overlay');
+  if (obOverlay) obOverlay.style.display = 'none';
 
   const ov = document.getElementById('org-setup-overlay');
   if (ov) ov.style.display = 'flex';
@@ -638,17 +642,25 @@ function initLogin() {
     const grade = 'A';
     AppState.init(mode, Auth.currentOrg?.orgName || 'Organisation', Auth.currentUser?.name || 'User', grade);
     AppState.adminRole = Auth.ROLE_LABELS[Auth.currentUser?.role] || 'Admin';
+    console.log('[ROUTE] session restore — role:', Auth.currentUser?.role, '| profileComplete:', Auth.currentUser?.profileComplete, '| orgComplete:', Auth.currentOrg?.organizationProfileComplete);
+
     if (Auth.isMember()) {
+      console.log('[ROUTE] needs onboarding?', _needsOnboarding());
       if (_needsOnboarding()) { showOnboardingFlow(); return; }
+      console.log('[ROUTE] launching member view');
       launchMemberView();
       return;
     }
     // SuperAdmin: check org setup first, then personal profile
     if (Auth.currentUser?.role === 'superadmin') {
       if (Auth.currentOrg?.organizationProfileComplete !== true) {
+        console.log('[ROUTE] SuperAdmin needs org setup');
         showOrgSetupWizard(); return;
       }
-      if (_needsOnboarding()) { showOnboardingFlow(); return; }
+      if (_needsOnboarding()) {
+        console.log('[ROUTE] SuperAdmin needs personal onboarding');
+        showOnboardingFlow(); return;
+      }
     }
     launchApp();
     loadRealOrgData();
@@ -679,18 +691,25 @@ async function handleLogin() {
     const user  = Auth.currentUser;
     AppState.init(mode, org?.orgName || '', user?.name || '', 'A');
     AppState.adminRole = Auth.ROLE_LABELS[user?.role] || 'Admin';
+    console.log('[ROUTE] login success — role:', user?.role, '| profileComplete:', user?.profileComplete, '| orgComplete:', org?.organizationProfileComplete);
 
     if (Auth.isMember()) {
+      console.log('[ROUTE] needs onboarding?', _needsOnboarding());
       if (_needsOnboarding()) { showOnboardingFlow(); return; }
+      console.log('[ROUTE] launching member view');
       launchMemberView();
       return;
     }
     // SuperAdmin: check org setup first, then personal profile
     if (Auth.currentUser?.role === 'superadmin') {
       if (Auth.currentOrg?.organizationProfileComplete !== true) {
+        console.log('[ROUTE] SuperAdmin needs org setup');
         showOrgSetupWizard(); return;
       }
-      if (_needsOnboarding()) { showOnboardingFlow(); return; }
+      if (_needsOnboarding()) {
+        console.log('[ROUTE] SuperAdmin needs personal onboarding');
+        showOnboardingFlow(); return;
+      }
     }
     launchApp();
     loadRealOrgData();
@@ -970,44 +989,72 @@ async function submitCoachCheckin() {
 
 /* ── MEMBER VIEW — unified shell inside main app ────────────────────────── */
 function launchMemberView() {
+  console.log('[ROUTE] launchMemberView — showing member shell');
+
+  // Hide all source screens and overlays
   document.getElementById('login-screen').style.display = 'none';
-  // Safety: always hide onboarding overlay before showing member shell
-  const ob = document.getElementById('onboarding-overlay');
-  if (ob) ob.style.display = 'none';
+  const obOv  = document.getElementById('onboarding-overlay');
+  const orgOv = document.getElementById('org-setup-overlay');
+  const appEl = document.getElementById('app');
+  if (obOv)  obOv.style.display  = 'none';
+  if (orgOv) orgOv.style.display = 'none';
+  if (appEl) appEl.style.display = 'none';  // hide admin shell explicitly
 
   const shell = document.getElementById('member-shell');
-  if (shell) {
-    shell.style.display = 'flex';
-    shell.classList.add('visible');
+  if (!shell) {
+    console.error('[ROUTE] launchMemberView — #member-shell not found in DOM');
+    _showGlobalError('Member shell missing from page — please refresh.', new Error('#member-shell not found'));
+    return;
   }
 
+  // Use inline style (not class) so it always wins regardless of prior CSS state
+  shell.style.display = 'flex';
+  shell.classList.add('visible');
+
+  console.log('[ROUTE] MemberApp.init start');
   if (typeof MemberApp !== 'undefined') {
     try {
       MemberApp.init();
+      console.log('[ROUTE] MemberApp.init success');
     } catch(err) {
-      console.error('[launchMemberView] MemberApp.init() threw:', err);
-      // Never leave the user with a blank screen
-      if (shell) {
-        shell.innerHTML = `
-          <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-                      height:100vh;padding:2rem;text-align:center;gap:1.2rem">
-            <div style="font-size:2rem">⚠️</div>
-            <div style="font-weight:600;font-size:1.1rem">Something went wrong loading your dashboard.</div>
-            <div style="color:#888;font-size:0.85rem">This is usually a temporary issue. Try refreshing the page.</div>
-            <div style="display:flex;gap:0.8rem;margin-top:0.5rem">
-              <button onclick="location.reload()"
-                style="padding:0.6rem 1.4rem;border-radius:8px;background:#0066ff;color:#fff;border:none;cursor:pointer;font-size:0.9rem">
-                Retry
-              </button>
-              <button onclick="Auth.logout();location.reload()"
-                style="padding:0.6rem 1.4rem;border-radius:8px;background:#eee;color:#333;border:none;cursor:pointer;font-size:0.9rem">
-                Log out
-              </button>
-            </div>
-          </div>`;
-      }
+      console.error('[ROUTE] MemberApp.init failed:', err);
+      shell.innerHTML = _memberErrorHTML(err);
     }
+  } else {
+    console.error('[ROUTE] MemberApp is not defined — member-view.js may not have loaded');
+    shell.innerHTML = _memberErrorHTML(new Error('MemberApp script not loaded'));
   }
+}
+
+function _memberErrorHTML(err) {
+  const detail = err?.message || String(err);
+  return `
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+                min-height:100vh;padding:2rem;text-align:center;gap:1.2rem;background:#fff">
+      <div style="font-size:2.5rem">⚠️</div>
+      <div style="font-weight:700;font-size:1.15rem;color:#111">Something went wrong loading your dashboard.</div>
+      <div style="color:#666;font-size:0.85rem;max-width:320px;line-height:1.5">
+        This is usually a temporary issue. Try refreshing — if it keeps happening, log out and back in.
+      </div>
+      <div style="display:flex;gap:0.8rem;flex-wrap:wrap;justify-content:center;margin-top:0.4rem">
+        <button onclick="location.reload()"
+          style="padding:0.6rem 1.6rem;border-radius:8px;background:#0066ff;color:#fff;border:none;cursor:pointer;font-size:0.9rem;font-weight:600">
+          Retry
+        </button>
+        <button onclick="Auth.logout();location.reload()"
+          style="padding:0.6rem 1.4rem;border-radius:8px;background:#f3f4f6;color:#333;border:none;cursor:pointer;font-size:0.9rem">
+          Log out
+        </button>
+        <button onclick="navigator.clipboard?.writeText(${JSON.stringify(detail)}).then(()=>showToast('Copied','success')).catch(()=>{})"
+          style="padding:0.6rem 1.2rem;border-radius:8px;background:#f3f4f6;color:#555;border:none;cursor:pointer;font-size:0.82rem">
+          Copy error
+        </button>
+      </div>
+      <details style="margin-top:0.5rem;max-width:380px">
+        <summary style="font-size:0.75rem;color:#aaa;cursor:pointer">Error details</summary>
+        <pre style="font-size:0.72rem;color:#999;text-align:left;white-space:pre-wrap;margin-top:0.4rem">${detail}</pre>
+      </details>
+    </div>`;
 }
 
 /* ── Load real org data from server and populate AppState ─────────────── */
@@ -1216,13 +1263,29 @@ function _showSessionExpired() {
 }
 
 function launchApp(){
-  document.getElementById('login-screen').style.display = 'none';
+  console.log('[ROUTE] launchApp — showing admin dashboard');
+
+  // Hide all possible source screens / overlays
+  document.getElementById('login-screen').style.display    = 'none';
+  const obOv  = document.getElementById('onboarding-overlay');
+  const orgOv = document.getElementById('org-setup-overlay');
+  if (obOv)  obOv.style.display  = 'none';
+  if (orgOv) orgOv.style.display = 'none';
+
   const app = document.getElementById('app');
+  // CRITICAL: clear any inline display:none set by showOnboardingFlow() or
+  // showOrgSetupWizard() before adding the class — inline styles override CSS classes.
+  app.style.display = '';
   app.classList.add('visible');
-  renderSidebar();
-  renderTopbar();
-  renderAllPages();
-  navigate('dashboard');
+
+  try {
+    renderSidebar();
+    renderTopbar();
+    renderAllPages();
+    navigate('dashboard');
+  } catch(err) {
+    console.error('[ROUTE] launchApp render error:', err);
+  }
 
   // Use real orgCode from Auth session, fall back to derived
   const orgCode = Auth.currentUser?.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g,'-');
@@ -1232,6 +1295,8 @@ function launchApp(){
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ orgCode, orgName: AppState.orgName, orgMode: AppState.mode }),
   }).catch(() => {});
+
+  console.log('[ROUTE] launchApp — done');
 }
 
 /* ── SIDEBAR ──────────────────────────────────────────────── */
@@ -4376,6 +4441,86 @@ function submitExternalData(memberId) {
   const el = document.getElementById('pm-coach-content');
   if (el) el.innerHTML = renderCoachInputTab(memberId);
 }
+
+/* ── GLOBAL ERROR BOUNDARY ───────────────────────────────────────────────── *
+ * Catches any unhandled JS error or promise rejection and shows a visible    *
+ * error panel instead of leaving a blank/black screen.                       *
+ * ─────────────────────────────────────────────────────────────────────────── */
+function _showGlobalError(message, err) {
+  console.error('[GLOBAL ERROR]', message, err);
+  const detail = err?.stack || err?.message || String(err || '');
+
+  // Try to find a visible container to inject into — prefer body
+  const target = document.body || document.documentElement;
+  const panel  = document.createElement('div');
+  panel.id = 'iq-global-error';
+  panel.style.cssText = [
+    'position:fixed','inset:0','z-index:99999',
+    'background:#fff','display:flex','flex-direction:column',
+    'align-items:center','justify-content:center',
+    'padding:2rem','text-align:center','gap:1rem',
+  ].join(';');
+  panel.innerHTML = `
+    <div style="font-size:2.5rem">⚠️</div>
+    <div style="font-weight:700;font-size:1.15rem;color:#111">Something went wrong loading IntelliQ.</div>
+    <div style="color:#666;font-size:0.85rem;max-width:340px;line-height:1.5">${message || 'An unexpected error occurred. Please refresh or log out and try again.'}</div>
+    <div style="display:flex;gap:0.75rem;flex-wrap:wrap;justify-content:center;margin-top:0.4rem">
+      <button onclick="location.reload()"
+        style="padding:0.6rem 1.6rem;border-radius:8px;background:#0066ff;color:#fff;border:none;cursor:pointer;font-size:0.9rem;font-weight:600">
+        Retry
+      </button>
+      <button onclick="(()=>{try{Auth.logout();}catch(e){}location.reload();})()"
+        style="padding:0.6rem 1.4rem;border-radius:8px;background:#f3f4f6;color:#333;border:none;cursor:pointer;font-size:0.9rem">
+        Log out
+      </button>
+      <button id="iq-err-copy-btn"
+        style="padding:0.6rem 1.2rem;border-radius:8px;background:#f3f4f6;color:#555;border:none;cursor:pointer;font-size:0.82rem">
+        Copy error details
+      </button>
+    </div>
+    <details style="margin-top:0.5rem;max-width:420px;text-align:left">
+      <summary style="font-size:0.75rem;color:#aaa;cursor:pointer">Error details</summary>
+      <pre id="iq-err-detail" style="font-size:0.7rem;color:#999;white-space:pre-wrap;margin-top:0.4rem;overflow:auto;max-height:120px">${detail}</pre>
+    </details>`;
+  target.appendChild(panel);
+
+  // Wire up copy button after appending
+  const copyBtn = document.getElementById('iq-err-copy-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      const text = document.getElementById('iq-err-detail')?.textContent || detail;
+      navigator.clipboard?.writeText(text).then(() => {
+        copyBtn.textContent = 'Copied ✓';
+        setTimeout(() => { copyBtn.textContent = 'Copy error details'; }, 2000);
+      }).catch(() => { copyBtn.textContent = 'Copy failed'; });
+    });
+  }
+}
+
+window.onerror = function(message, source, lineno, colno, error) {
+  // Only intercept if we're not already showing an error panel
+  if (document.getElementById('iq-global-error')) return false;
+  // Don't catch errors from extensions or unrelated scripts
+  if (source && !source.includes(location.hostname) && !source.includes('/js/')) return false;
+  _showGlobalError('An unexpected error stopped IntelliQ from loading.', error || new Error(message));
+  return false; // don't suppress — let DevTools also see it
+};
+
+window.addEventListener('unhandledrejection', (event) => {
+  if (document.getElementById('iq-global-error')) return;
+  const reason = event.reason;
+  // Ignore network errors that are expected (e.g. failed fetch for optional data)
+  if (reason?.name === 'TypeError' && /fetch|network/i.test(reason?.message || '')) return;
+  console.error('[ROUTE] Unhandled promise rejection:', reason);
+  // Don't pop the full overlay for every async blip — just log it
+  // Only show overlay if the page appears blank (none of the main containers are visible)
+  const appVisible  = document.getElementById('app')?.classList.contains('visible');
+  const shellVis    = document.getElementById('member-shell')?.style.display === 'flex';
+  const loginVis    = document.getElementById('login-screen')?.style.display !== 'none';
+  if (!appVisible && !shellVis && !loginVis) {
+    _showGlobalError('A network or script error prevented IntelliQ from loading.', reason);
+  }
+});
 
 /* ── INIT ────────────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', () => {
