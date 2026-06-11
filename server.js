@@ -470,31 +470,20 @@ app.post('/api/auth/setup-org', async (req, res) => {
              user: { ...orgUsers[orgCode][userId], passwordHash: undefined } });
 });
 
-/* ── Login ──────────────────────────────────────────────────────────────── */
+/* ── Login — email + password only ─────────────────────────────────────── */
 app.post('/api/auth/login', async (req, res) => {
-  const { email, orgCode, name, password } = req.body;
+  const { email, password } = req.body;
   const emailNorm = (email || '').toLowerCase().trim();
 
-  let user = null;
-  let code = '';
+  if (!emailNorm) return res.status(400).json({ error: 'Email address is required.' });
+  if (!password)  return res.status(400).json({ error: 'Password is required.' });
 
-  if (emailNorm) {
-    // ── Email-primary path ──────────────────────────────────────────────
-    const entry = emailIndex[emailNorm];
-    if (!entry) return res.status(401).json({ error: 'No account found with that email address.' });
-    code = entry.orgCode;
-    user = orgUsers[code]?.[entry.userId];
-    if (!user) return res.status(401).json({ error: 'Account not found. Please contact your admin.' });
-  } else {
-    // ── Legacy fallback: orgCode + name ─────────────────────────────────
-    code = (orgCode || '').toLowerCase().trim();
-    const users = orgUsers[code];
-    if (!users) return res.status(404).json({ error: 'Organisation not found. Check your org code.' });
-    user = Object.values(users).find(u =>
-      u.name.toLowerCase() === (name || '').toLowerCase().trim()
-    );
-    if (!user) return res.status(401).json({ error: 'Name or password incorrect.' });
-  }
+  const entry = emailIndex[emailNorm];
+  if (!entry) return res.status(401).json({ error: 'No account found with that email address.' });
+
+  const code = entry.orgCode;
+  const user = orgUsers[code]?.[entry.userId];
+  if (!user) return res.status(401).json({ error: 'Account not found. Please contact your admin.' });
 
   // Lazy bcrypt migration: verify old hash then upgrade
   let passwordValid = false;
@@ -545,8 +534,10 @@ app.post('/api/auth/create-user', async (req, res) => {
   if (exists) return res.status(400).json({ error: 'Someone with that name already exists in this org' });
 
   const userId          = generateId();
-  const isDefaultPassword = !password;
-  const rawPassword     = password || fullName.trim().toLowerCase();
+  const hasPassword     = !!(password && password.trim());
+  // If no password supplied: set a cryptographically random hash so no one can log in
+  // with a guessed default. The user must activate via an invite link (passwordSet: false).
+  const rawPassword     = hasPassword ? password : (Math.random().toString(36) + Math.random().toString(36));
   const passwordHash    = await bcrypt.hash(rawPassword, SALT_ROUNDS);
 
   users[userId] = {
@@ -560,7 +551,7 @@ app.post('/api/auth/create-user', async (req, res) => {
     supervisorId: supervisorId || creatorId,
     group:        group || '',
     passwordHash,
-    passwordSet:  !isDefaultPassword,
+    passwordSet:  hasPassword,
     status:       'active',
     createdAt:    new Date().toISOString(),
     levelId:      roleLevel[role] || 4,
