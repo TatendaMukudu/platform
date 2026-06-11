@@ -3,7 +3,8 @@ const express   = require('express');
 const Anthropic  = require('@anthropic-ai/sdk');
 const path      = require('path');
 const bcrypt    = require('bcryptjs');
-const fs        = require('fs');
+const fs        = require('fs');   // kept for store.json → Postgres one-time migration
+const db        = require('./db');
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -12,43 +13,32 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname)));
 
 /* ── Persistence ──────────────────────────────────────────────────────────────
-   All in-memory stores are saved to data/store.json on every write (debounced).
-   On startup, data is restored from that file.
-   DATA_DIR can be overridden via env var (e.g. a Render persistent disk mount).
+   All in-memory stores are persisted to Neon Postgres (via db.js).
+   On startup, data is loaded from Postgres. A one-time migration from
+   store.json is performed if Postgres is empty and the file still exists.
+
+   scheduleSave() debounces writes to Postgres (500 ms), same as before.
    ─────────────────────────────────────────────────────────────────────────── */
-const DATA_DIR   = process.env.DATA_DIR  || path.join(__dirname, 'data');
+
+// Legacy store.json path — used only for the one-time migration at startup.
+const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, 'data');
 const STORE_FILE = path.join(DATA_DIR, 'store.json');
-
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-
-function loadStore() {
-  try {
-    if (fs.existsSync(STORE_FILE)) {
-      return JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'));
-    }
-  } catch(e) { console.warn('[store] Load failed:', e.message); }
-  return {};
-}
 
 let _saveTimer = null;
 function scheduleSave() {
   if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(() => {
+  _saveTimer = setTimeout(async () => {
     try {
-      const data = {
+      await db.saveMain({
         orgMeta, orgUsers, inviteTokens, emailIndex, pendingInvites,
         orgGroups, orgNotes, orgMessages, orgStore,
         assignedScenarios, memberResults, memberCheckins,
         memberGoals, weeklyAssessments, orgInterventions,
-        // Sprint 2 stores
         orgNodes, orgMetrics, orgValues, orgGoals, userPermissions,
-      };
-      fs.writeFileSync(STORE_FILE, JSON.stringify(data), 'utf8');
-    } catch(e) { console.error('[store] Save failed:', e.message); }
+      });
+    } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
 }
-
-const _store = loadStore();
 
 /* ── Session tokens ───────────────────────────────────────────────────────────
    Issued on login / setup / member join. NOT persisted — tokens die on restart
@@ -405,27 +395,28 @@ Be honest. Be specific. Reference what ${memberName} actually said. Do not give 
    AUTH — ORG & USER MANAGEMENT
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const orgMeta      = _store.orgMeta      || {};  // orgCode → { orgName, orgMode, createdAt }
-const orgUsers     = _store.orgUsers     || {};  // orgCode → { userId → userObject }
-const inviteTokens = _store.inviteTokens || {};  // token → { orgCode, role, supervisorId, expiresAt }
-const emailIndex   = _store.emailIndex   || {};  // email (lowercase) → { orgCode, userId }
-const pendingInvites = _store.pendingInvites || {}; // token → { email, orgCode, role, ... }
+// ── In-memory stores — populated from Postgres at startup via _loadAllStores() ──
+const orgMeta      = {};  // orgCode → { orgName, orgMode, createdAt }
+const orgUsers     = {};  // orgCode → { userId → userObject }
+const inviteTokens = {};  // token → { orgCode, role, supervisorId, expiresAt }
+const emailIndex   = {};  // email (lowercase) → { orgCode, userId }
+const pendingInvites = {}; // token → { email, orgCode, role, ... }
 
 // ── Sprint 2 stores ────────────────────────────────────────────────────────
-const orgNodes        = _store.orgNodes        || {};  // orgCode → { nodeId → OrgNode }
-const orgMetrics      = _store.orgMetrics      || {};  // orgCode → [{ metricId, name, source, order }]
-const orgValues       = _store.orgValues       || {};  // orgCode → [string]
-const orgGoals        = _store.orgGoals        || {};  // orgCode → [{ goalId, text, createdAt }]
-const userPermissions = _store.userPermissions || {};  // orgCode → { userId → { perm → bool } }
+const orgNodes        = {};  // orgCode → { nodeId → OrgNode }
+const orgMetrics      = {};  // orgCode → [{ metricId, name, source, order }]
+const orgValues       = {};  // orgCode → [string]
+const orgGoals        = {};  // orgCode → [{ goalId, text, createdAt }]
+const userPermissions = {};  // orgCode → { userId → { perm → bool } }
 
-// Rebuild emailIndex from orgUsers on startup (repairs any missing entries)
-(function _rebuildEmailIndex() {
+// Rebuild emailIndex from orgUsers (called after _loadAllStores at startup)
+function _rebuildEmailIndex() {
   for (const [orgCode, users] of Object.entries(orgUsers)) {
     for (const [userId, user] of Object.entries(users)) {
       if (user.email) emailIndex[user.email.toLowerCase()] = { orgCode, userId };
     }
   }
-})();
+}
 
 function generateId()    { return Math.random().toString(36).slice(2,10); }
 function generateToken() { return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2); }
@@ -1188,9 +1179,9 @@ app.put('/api/permissions', requirePermission('manage_permissions'), (req, res) 
    GROUPS — Sub-teams within an org
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const orgGroups   = _store.orgGroups   || {};
-const orgNotes    = _store.orgNotes    || {};
-const orgMessages = _store.orgMessages || {};
+const orgGroups   = {};  // populated at startup via _loadAllStores()
+const orgNotes    = {};
+const orgMessages = {};
 
 function noteId()  { return 'n_'   + generateId(); }
 function msgId()   { return 'm_'   + generateId(); }
@@ -1435,11 +1426,11 @@ app.get('/api/groups/:groupId/feed', (req, res) => {
    MEMBER APP — SHARED SESSION STORE
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const orgStore          = _store.orgStore          || {};
-const assignedScenarios = _store.assignedScenarios || {};
-const memberResults     = _store.memberResults     || {};
-const memberCheckins    = _store.memberCheckins    || {};
-const orgInterventions  = _store.orgInterventions  || {}; // orgCode → [intervention, ...]
+const orgStore          = {};  // populated at startup via _loadAllStores()
+const assignedScenarios = {};
+const memberResults     = {};
+const memberCheckins    = {};
+const orgInterventions  = {};  // orgCode → [intervention, ...]
 
 // Key helpers — new code uses userId keys; legacy name keys still supported for reads
 function memberKey(orgCode, memberName) {
@@ -1749,7 +1740,7 @@ RULES:
    MEMBER GOALS — Individual goal & identity intake
    Accepts memberId (stable) or memberName (legacy). Prefers memberId.
    ═══════════════════════════════════════════════════════════════════════════ */
-const memberGoals = _store.memberGoals || {};
+const memberGoals = {};  // populated at startup via _loadAllStores()
 
 app.post('/api/member/goals', (req, res) => {
   const { orgCode, memberName, memberId, goal, identity } = req.body;
@@ -1854,7 +1845,7 @@ app.get('/api/platform/org-checkins', requireAuth, (req, res) => {
    Accepts memberId (stable) or memberName (legacy). Prefers memberId.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const weeklyAssessments = _store.weeklyAssessments || {};
+const weeklyAssessments = {};  // populated at startup via _loadAllStores()
 
 function weekKey(orgCode, weekStr) {
   return `${orgCode.toLowerCase().trim()}:${weekStr}`;
@@ -3412,10 +3403,77 @@ function _buildFallbackInsight(agg) {
   };
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   STARTUP — Postgres init → load stores → start HTTP server
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Populate all in-memory store objects from a loaded data blob.
+   Uses Object.assign so the existing const references stay valid. */
+function _loadAllStores(data) {
+  Object.assign(orgMeta,          data.orgMeta          || {});
+  Object.assign(orgUsers,         data.orgUsers         || {});
+  Object.assign(inviteTokens,     data.inviteTokens     || {});
+  Object.assign(emailIndex,       data.emailIndex       || {});
+  Object.assign(pendingInvites,   data.pendingInvites   || {});
+  Object.assign(orgNodes,         data.orgNodes         || {});
+  Object.assign(orgMetrics,       data.orgMetrics       || {});
+  Object.assign(orgValues,        data.orgValues        || {});
+  Object.assign(orgGoals,         data.orgGoals         || {});
+  Object.assign(userPermissions,  data.userPermissions  || {});
+  Object.assign(orgGroups,        data.orgGroups        || {});
+  Object.assign(orgNotes,         data.orgNotes         || {});
+  Object.assign(orgMessages,      data.orgMessages      || {});
+  Object.assign(orgStore,         data.orgStore         || {});
+  Object.assign(assignedScenarios,data.assignedScenarios|| {});
+  Object.assign(memberResults,    data.memberResults    || {});
+  Object.assign(memberCheckins,   data.memberCheckins   || {});
+  Object.assign(memberGoals,      data.memberGoals      || {});
+  Object.assign(weeklyAssessments,data.weeklyAssessments|| {});
+  Object.assign(orgInterventions, data.orgInterventions || {});
+}
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`IntelliQ running → http://localhost:${PORT}`);
-  console.log(`Member app   → http://localhost:${PORT}/member/`);
-  console.log(`API key: ${process.env.ANTHROPIC_API_KEY ? '✓ loaded' : '✗ MISSING — set ANTHROPIC_API_KEY'}`);
-  console.log(`Data store: ${STORE_FILE}`);
-});
+
+(async () => {
+  try {
+    // 1. Connect to Postgres + create schema
+    await db.init();
+
+    // 2. Load persisted data
+    let storeData = await db.loadMain();
+
+    // 3. One-time migration: if Postgres is empty and store.json still exists,
+    //    copy it into Postgres so no existing data is lost on first deploy.
+    if (Object.keys(storeData).length === 0 && fs.existsSync(STORE_FILE)) {
+      console.log('[db] Postgres is empty — migrating from store.json...');
+      try {
+        const jsonData = JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'));
+        await db.saveMain(jsonData);
+        storeData = jsonData;
+        console.log('[db] Migration complete ✓  store.json data is now in Postgres.');
+        console.log('[db] You can delete data/store.json — it will no longer be used.');
+      } catch (e) {
+        console.warn('[db] Migration skipped (store.json unreadable):', e.message);
+      }
+    }
+
+    // 4. Populate in-memory stores
+    _loadAllStores(storeData);
+
+    // 5. Repair emailIndex (handles any missing entries from loaded data)
+    _rebuildEmailIndex();
+
+    // 6. Start HTTP server
+    app.listen(PORT, () => {
+      console.log('');
+      console.log(`[server] ✓ IntelliQ ready on port ${PORT}`);
+      console.log(`[server]   API key: ${process.env.ANTHROPIC_API_KEY ? '✓ loaded' : '✗ MISSING — set ANTHROPIC_API_KEY'}`);
+      console.log(`[server]   Persistence: Neon Postgres (DATABASE_URL)`);
+      console.log('');
+    });
+
+  } catch (err) {
+    console.error('[server] FATAL startup error:', err.message);
+    process.exit(1);
+  }
+})();
