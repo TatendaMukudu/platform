@@ -90,6 +90,35 @@ function buildEmptyOrgStats(memberCount) {
   };
 }
 
+/* ── Workspace modules — single source of truth for navigation ────────────
+   Every module has: id (matches data-page / navigate() target), label,
+   icon, section (used as nav group header), and permission (or null for
+   always-visible items).  renderSidebar() filters this list by Auth.canDo()
+   so no hardcoded role/type branching ever appears in nav HTML.
+   ─────────────────────────────────────────────────────────────────────── */
+const WORKSPACE_MODULES = [
+  // ── Overview ──────────────────────────────────────────────────────────
+  { section: 'Overview',      id: 'dashboard',  icon: '⊞',  label: 'Dashboard',      permission: null              },
+  { section: null,             id: 'members',    icon: '👥', label: 'Members',         permission: 'view_members'    },
+  { section: null,             id: 'inbox',      icon: '💬', label: 'Inbox',           permission: null              },
+
+  // ── My Team (leader layer — Phase 5) ─────────────────────────────────
+  { section: 'My Team',       id: 'myteam',     icon: '🤝', label: 'My Team',         permission: 'view_team'       },
+  { section: null,             id: 'assignments',icon: '📌', label: 'Assignments',     permission: 'assign_scenarios'},
+  { section: null,             id: 'teaminsights',icon:'💡', label: 'Team Insights',   permission: 'view_insights'   },
+
+  // ── Intelligence ──────────────────────────────────────────────────────
+  { section: 'Intelligence',  id: 'analytics',  icon: '📊', label: 'Analytics',       permission: 'view_analytics'  },
+  { section: null,             id: 'intelliq',   icon: '🧠', label: 'IntelliQ Engine', permission: 'view_analytics'  },
+  { section: null,             id: 'scenarios',  icon: '🎯', label: 'Assessments',     permission: 'assign_scenarios'},
+
+  // ── Management ────────────────────────────────────────────────────────
+  { section: 'Management',    id: 'people',     icon: '🏗️', label: 'People',          permission: 'view_members'    },
+  { section: null,             id: 'alerts',     icon: '🔔', label: 'Alerts',          permission: 'view_members',   badge: true },
+  { section: null,             id: 'reports',    icon: '📋', label: 'Reports',         permission: 'view_reports'    },
+  { section: null,             id: 'settings',   icon: '⚙️', label: 'Settings',        permission: 'manage_settings' },
+];
+
 /* ─────────────────────────────────────────────────────────────
    AppState — session-level state.
    members[] starts EMPTY. Populated by loadRealOrgData() after login.

@@ -151,44 +151,10 @@
 
     <div class="mode-badge" id="mode-badge">🎓 School</div>
 
-    <nav class="sidebar-nav">
-      <div class="nav-section-label">Overview</div>
-      <div class="nav-item active" data-page="dashboard">
-        <span class="nav-icon">⊞</span> Dashboard
-      </div>
-      <div class="nav-item" data-page="members">
-        <span class="nav-icon">👥</span> Members
-      </div>
-      <div class="nav-item" data-page="inbox">
-        <span class="nav-icon">💬</span> Inbox
-      </div>
-
-      <div class="nav-section-label">Intelligence</div>
-      <div class="nav-item" data-page="analytics">
-        <span class="nav-icon">📊</span> Analytics
-      </div>
-      <div class="nav-item" data-page="intelliq">
-        <span class="nav-icon">🧠</span> IntelliQ Engine
-      </div>
-      <div class="nav-item" data-page="scenarios">
-        <span class="nav-icon">🎯</span> Assessments
-      </div>
-
-      <div class="nav-section-label">Management</div>
-      <div class="nav-item" data-page="people">
-        <span class="nav-icon">🏗️</span> People
-      </div>
-      <div class="nav-item" data-page="alerts">
-        <span class="nav-icon">🔔</span> Alerts
-        <span class="nav-badge" style="display:none">0</span>
-      </div>
-      <div class="nav-item" data-page="reports">
-        <span class="nav-icon">📋</span> Reports
-      </div>
-      <div class="nav-item" data-page="settings">
-        <span class="nav-icon">⚙️</span> Settings
-      </div>
-    </nav>
+    <!-- Nav items are rendered dynamically by renderSidebar() in app.js -->
+    <!-- using WORKSPACE_MODULES filtered by Auth.canDo() permissions.  -->
+    <!-- Do NOT add hardcoded nav items here.                            -->
+    <nav class="sidebar-nav" id="sidebar-nav"></nav>
 
     <div class="sidebar-footer">
       <div class="user-pill">

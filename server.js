@@ -696,24 +696,32 @@ function _resolveRoleDefaults(role) {
       view_analytics: true, manage_metrics: true, manage_values: true,
       manage_goals: true, manage_tree: true, manage_permissions: true,
       assign_scenarios: true, view_reports: true, manage_settings: true,
+      // Phase 1: leader layer permissions
+      view_team: true, review_checkins: true, view_insights: true,
     },
     admin: {
       view_members: true, edit_members: true, delete_members: false,
       view_analytics: true, manage_metrics: true, manage_values: true,
       manage_goals: true, manage_tree: true, manage_permissions: false,
       assign_scenarios: true, view_reports: true, manage_settings: false,
+      // Phase 1: leader layer permissions
+      view_team: true, review_checkins: true, view_insights: true,
     },
     coach: {
       view_members: true, edit_members: false, delete_members: false,
       view_analytics: true, manage_metrics: false, manage_values: false,
       manage_goals: false, manage_tree: false, manage_permissions: false,
       assign_scenarios: true, view_reports: true, manage_settings: false,
+      // Phase 1: leader layer — coaches can see their team and assign
+      view_team: true, review_checkins: true, view_insights: true,
     },
     member: {
       view_members: false, edit_members: false, delete_members: false,
       view_analytics: false, manage_metrics: false, manage_values: false,
       manage_goals: false, manage_tree: false, manage_permissions: false,
       assign_scenarios: false, view_reports: false, manage_settings: false,
+      // Phase 1: members never see the leader layer
+      view_team: false, review_checkins: false, view_insights: false,
     },
   };
   return d[role] || d.member;

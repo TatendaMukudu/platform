@@ -1324,6 +1324,43 @@ function renderSidebar(){
     av.style.background = color;
   }
 
+  // ── Dynamic permission-driven nav ─────────────────────────────────────
+  // Filter WORKSPACE_MODULES by Auth.canDo(). null permission = always shown.
+  // Sections are rendered as group labels when a new section label appears.
+  const nav = document.getElementById('sidebar-nav');
+  if (nav) {
+    let currentSection = null;
+    let html = '';
+    const activePage = AppState.currentPage || 'dashboard';
+
+    WORKSPACE_MODULES.forEach(mod => {
+      // Permission gate
+      if (mod.permission !== null && !Auth.canDo(mod.permission)) return;
+
+      // Section label
+      if (mod.section && mod.section !== currentSection) {
+        currentSection = mod.section;
+        html += `<div class="nav-section-label">${currentSection}</div>`;
+      }
+
+      const activeClass = activePage === mod.id ? ' active' : '';
+      const badgeHTML   = mod.badge
+        ? `<span class="nav-badge" style="display:none">0</span>`
+        : '';
+
+      html += `<div class="nav-item${activeClass}" data-page="${mod.id}">
+        <span class="nav-icon">${mod.icon}</span> ${mod.label}${badgeHTML}
+      </div>`;
+    });
+
+    nav.innerHTML = html;
+
+    // Re-attach click listeners (event delegation on the nav container)
+    nav.querySelectorAll('.nav-item[data-page]').forEach(item => {
+      item.addEventListener('click', () => navigate(item.dataset.page));
+    });
+  }
+
   updateAlertBadge();
 }
 
