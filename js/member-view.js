@@ -8,12 +8,12 @@
 const MemberApp = {
 
   /* ── Auth getters (replaces this.session.*) ─────────────── */
-  get _userId()  { return Auth.currentUser?.id; }
-  get _name()    { return Auth.currentUser?.name || `${Auth.currentUser?.firstName || ''} ${Auth.currentUser?.lastName || ''}`.trim(); }
-  get _orgCode() { return Auth.currentUser?.orgCode; }
-  get _orgName() { return Auth.currentOrg?.orgName  || Auth.currentUser?.orgCode || ''; }
-  get _orgMode() { return Auth.currentOrg?.orgMode  || 'school'; }
-  get _role()    { return Auth.currentUser?.role    || 'member'; }
+  get _userId()  { return Auth.currentUser?.id; },
+  get _name()    { return Auth.currentUser?.name || `${Auth.currentUser?.firstName || ''} ${Auth.currentUser?.lastName || ''}`.trim(); },
+  get _orgCode() { return Auth.currentUser?.orgCode; },
+  get _orgName() { return Auth.currentOrg?.orgName  || Auth.currentUser?.orgCode || ''; },
+  get _orgMode() { return Auth.currentOrg?.orgMode  || 'school'; },
+  get _role()    { return Auth.currentUser?.role    || 'member'; },
 
   /* ── Local state ────────────────────────────────────────── */
   pending:  [],
