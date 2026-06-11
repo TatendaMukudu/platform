@@ -1355,6 +1355,115 @@ app.get('/api/workspace/visible-members', requireAuth, (req, res) => {
   });
 });
 
+/* ── GET /api/workspace/team-insights ────────────────────────────────────
+ *
+ *  Aggregated snapshot for anyone with view_insights or review_checkins.
+ *  Uses getVisibleUserIds() — same scoping rules as visible-members.
+ *
+ *  Returns:
+ *    visibleCount      — total members in scope
+ *    activeThisWeek    — members with ≥1 check-in since Monday
+ *    avgMood           — average mood across this-week check-ins (1–5) | null
+ *    needsAttention    — [ { userId, name, reason } ] (capped at 5)
+ *    recommendedAction — plain-text suggestion | null
+ *    notEnoughData     — true when <3 active check-ins this week
+ *    canReviewCheckins — whether caller has full check-in text access
+ *
+ * ──────────────────────────────────────────────────────────────────────── */
+app.get('/api/workspace/team-insights', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = orgCode;
+
+  const canViewInsights   = _userHasPerm(code, userId, 'view_insights');
+  const canReviewCheckins = _userHasPerm(code, userId, 'review_checkins');
+  if (!canViewInsights && !canReviewCheckins) {
+    return res.status(403).json({ error: 'Permission denied: view_insights or review_checkins required' });
+  }
+
+  const visibleIds   = getVisibleUserIds(code, userId);
+  const visibleCount = visibleIds.length;
+
+  if (visibleCount === 0) {
+    return res.json({ ok: true, visibleCount: 0, activeThisWeek: 0, avgMood: null,
+                      needsAttention: [], recommendedAction: null, notEnoughData: true, canReviewCheckins });
+  }
+
+  // Start-of-week: most recent Monday at 00:00 local
+  const now = new Date();
+  const dayOfWeek = now.getDay(); // 0=Sun … 6=Sat
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+  monday.setHours(0, 0, 0, 0);
+
+  let activeThisWeek = 0;
+  let moodSum = 0;
+  let moodCount = 0;
+  const needsAttention = [];
+
+  visibleIds.forEach(uid => {
+    const u = orgUsers[code]?.[uid];
+    if (!u || u.role === 'superadmin') return;
+
+    const ckList =
+      memberCheckins[userKey(code, uid)] ||
+      memberCheckins[memberKey(code, u.name || '')] ||
+      [];
+
+    // Check-ins from this calendar week
+    const thisWeek = ckList.filter(c => {
+      const ts = c.ts ? new Date(c.ts) : null;
+      return ts && ts >= monday;
+    });
+
+    if (thisWeek.length > 0) {
+      activeThisWeek++;
+      thisWeek.forEach(c => { if (c.mood) { moodSum += c.mood; moodCount++; } });
+    }
+
+    // Needs-attention heuristics
+    const lastCk = ckList.length ? ckList[ckList.length - 1] : null;
+    const daysSince = lastCk?.ts
+      ? Math.floor((Date.now() - new Date(lastCk.ts).getTime()) / 86400000)
+      : null;
+
+    if (daysSince !== null && daysSince >= 7) {
+      needsAttention.push({ userId: uid, name: u.name || '', reason: `No check-in for ${daysSince} days` });
+    } else if (thisWeek.length > 0) {
+      const weekMoods = thisWeek.filter(c => c.mood).map(c => c.mood);
+      if (weekMoods.length) {
+        const weekAvg = weekMoods.reduce((s, v) => s + v, 0) / weekMoods.length;
+        if (weekAvg < 2.5) needsAttention.push({ userId: uid, name: u.name || '', reason: 'Low mood this week' });
+      }
+    }
+  });
+
+  const avgMood      = moodCount > 0 ? Math.round((moodSum / moodCount) * 10) / 10 : null;
+  const notEnoughData = activeThisWeek < 3;
+
+  let recommendedAction = null;
+  if (needsAttention.length > 0) {
+    recommendedAction = `${needsAttention.length} team member${needsAttention.length !== 1 ? 's' : ''} may need a direct conversation — check in personally or assign a targeted assessment.`;
+  } else if (activeThisWeek < Math.ceil(visibleCount * 0.5)) {
+    recommendedAction = `Fewer than half your team has checked in this week. Consider prompting engagement.`;
+  } else if (avgMood !== null && avgMood >= 3.8) {
+    recommendedAction = `Team energy is strong this week. A good moment to assign a stretch assessment.`;
+  }
+
+  console.log(`[TEAM-INSIGHTS] userId=${userId} visible=${visibleCount} active=${activeThisWeek} mood=${avgMood} attn=${needsAttention.length}`);
+
+  res.json({
+    ok: true,
+    visibleCount,
+    activeThisWeek,
+    avgMood,
+    needsAttention:    needsAttention.slice(0, 5),
+    commonThemes:      null, // Phase 8
+    recommendedAction,
+    notEnoughData,
+    canReviewCheckins,
+  });
+});
+
 /* ═══════════════════════════════════════════════════════════════════════════
    SPRINT 2 — METRICS
    Three sources: org (superadmin-defined), shared (leader), personal (member)

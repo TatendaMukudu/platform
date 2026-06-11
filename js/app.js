@@ -593,20 +593,26 @@ function navigate(page){
   else if(page==='people')    renderPeople();
   else if(page==='alerts')    renderAlerts();
   else if(page==='reports')   renderReports();
-  else if(page==='settings')  renderSettings();
+  else if(page==='settings')     renderSettings();
+  else if(page==='myteam')       renderMyTeam();
+  else if(page==='assignments')  renderAssignments();
+  else if(page==='teaminsights') renderTeamInsights();
 }
 
 const PAGE_TITLES = {
-  dashboard: 'Overview Dashboard',
-  members:   'Members & Profiles',
-  inbox:     'Inbox',
-  analytics: 'Analytics & Insights',
-  intelliq:  'IntelliQ Engine',
-  scenarios: 'AI Assessments',
-  people:    'People',
-  alerts:    'Alerts & Notifications',
-  reports:   'Reports & Stat Sheets',
-  settings:  'Platform Settings',
+  dashboard:    'Overview Dashboard',
+  members:      'Members & Profiles',
+  inbox:        'Inbox',
+  analytics:    'Analytics & Insights',
+  intelliq:     'IntelliQ Engine',
+  scenarios:    'AI Assessments',
+  people:       'People',
+  alerts:       'Alerts & Notifications',
+  reports:      'Reports & Stat Sheets',
+  settings:     'Platform Settings',
+  myteam:       'My Team',
+  assignments:  'Assignments',
+  teaminsights: 'Team Insights',
 };
 
 /* ── LOGIN ────────────────────────────────────────────────── */
@@ -4255,6 +4261,260 @@ async function assignToMemberApp(scenarioId) {
     showToast(`Assigned to ${member.name.split(' ')[0]}'s app ✓`, 'success');
   } catch(e) {
     showToast('Could not assign — server may be offline', 'warning');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PHASE 5 — LEADER LAYER
+   My Team · Assignments · Team Insights
+   All gates are permission-only — no hardcoded role names.
+   ═══════════════════════════════════════════════════════════ */
+
+// ── State ──────────────────────────────────────────────────
+let _myTeamMembers = [];   // cached from last fetch
+let _myTeamSearch  = '';
+
+// ── My Team ────────────────────────────────────────────────
+async function renderMyTeam() {
+  const el      = document.getElementById('myteam-content');
+  const countEl = document.getElementById('myteam-count');
+  if (!el) return;
+
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Loading team…</div>`;
+
+  try {
+    const data     = await Auth.loadVisibleMembers();
+    _myTeamMembers = data.members || [];
+    if (countEl) countEl.textContent = `${_myTeamMembers.length} visible member${_myTeamMembers.length !== 1 ? 's' : ''}`;
+    _renderMyTeamList();
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load team — try refreshing.</p></div>`;
+  }
+}
+
+function filterMyTeam(search) {
+  _myTeamSearch = (search || '').toLowerCase();
+  _renderMyTeamList();
+}
+
+function _renderMyTeamList() {
+  const el = document.getElementById('myteam-content');
+  if (!el) return;
+
+  const MOOD_ICONS = { 1:'😔', 2:'😕', 3:'😐', 4:'🙂', 5:'😄' };
+  const filtered   = _myTeamSearch
+    ? _myTeamMembers.filter(m =>
+        m.name.toLowerCase().includes(_myTeamSearch) ||
+        (m.email || '').toLowerCase().includes(_myTeamSearch))
+    : _myTeamMembers;
+
+  if (!filtered.length) {
+    el.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">👥</div>
+        <p>${_myTeamMembers.length === 0
+          ? 'No members visible yet. Ask an administrator to assign people to your area of responsibility.'
+          : 'No members match your search.'}</p>
+      </div>`;
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="leader-member-list">
+      ${filtered.map(m => {
+        const initials   = (m.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+        const roleLabel  = Auth.ROLE_LABELS?.[m.role] || m.role || 'Member';
+        const moodEmoji  = MOOD_ICONS[m.latestCheckin?.mood] || '—';
+        const ckDate     = m.latestCheckin?.date || null;
+        const isPending  = !m.passwordSet;
+        const needsSetup = !m.profileComplete && !isPending;
+        const nodeCount  = (m.nodeIds || []).length;
+
+        return `
+          <div class="leader-member-row">
+            <div class="lm-avatar">${initials}</div>
+            <div class="lm-info">
+              <div class="lm-name">
+                ${m.name}
+                ${isPending  ? `<span class="lm-badge lm-badge--pending">PENDING</span>` : ''}
+                ${needsSetup ? `<span class="lm-badge lm-badge--setup">SETUP</span>` : ''}
+              </div>
+              <div class="lm-meta">${roleLabel}${m.email ? ' · ' + m.email : ''}</div>
+              ${nodeCount ? `<div class="lm-nodes">${nodeCount} node${nodeCount !== 1 ? 's' : ''}</div>` : ''}
+            </div>
+            <div class="lm-checkin">
+              <div class="lm-mood" title="${ckDate ? 'Last check-in ' + ckDate : 'No check-in yet'}">${moodEmoji}</div>
+              <div class="lm-checkin-date">${ckDate || 'No check-in'}</div>
+            </div>
+          </div>`;
+      }).join('')}
+    </div>`;
+}
+
+// ── Assignments ────────────────────────────────────────────
+async function renderAssignments() {
+  const el = document.getElementById('assignments-content');
+  if (!el) return;
+
+  // AppState.members is already scoped to visible members for non-admins
+  // (Phase 2 — loadRealOrgData uses /visible-members for non-edit_members users)
+  const members   = AppState.members || [];
+  const scenarios = AppState.scenarios || [];
+
+  if (!members.length) {
+    el.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">📌</div>
+        <p>No visible members to assign to yet. You'll be able to assign once members are added to your area.</p>
+      </div>`;
+    return;
+  }
+
+  if (!scenarios.length) {
+    el.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">🎯</div>
+        <p>No assessments created yet.
+          <a href="#" onclick="navigate('scenarios');return false" style="color:var(--accent)">
+            Go to Assessments</a> to create one first.</p>
+      </div>`;
+    return;
+  }
+
+  const memberOptions = [...members]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(m => `<option value="${m.id}">${m.name}</option>`)
+    .join('');
+
+  el.innerHTML = `
+    <div style="margin-bottom:1.2rem;font-size:0.82rem;color:var(--text-secondary)">
+      Assigning to <strong>${members.length}</strong> visible member${members.length !== 1 ? 's' : ''}.
+      Your name is recorded as the assigner on every assignment.
+    </div>
+    <div class="assignments-list">
+      ${scenarios.map(s => `
+        <div class="assignment-row card" style="margin-bottom:0.6rem">
+          <div class="assignment-scenario-info">
+            <div class="assignment-scenario-title">${s.title || 'Untitled'}</div>
+            <div class="assignment-scenario-meta">${s.domain || '—'} · ${s.difficulty || '—'}</div>
+          </div>
+          <div class="assignment-actions">
+            <select id="assign-sel-${s.id}" class="form-input assignment-select">
+              <option value="">— Select member —</option>
+              ${memberOptions}
+            </select>
+            <button class="btn btn-accent btn-sm" onclick="assignFromLeaderLayer('${s.id}')">Assign →</button>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+async function assignFromLeaderLayer(scenarioId) {
+  const scenario = (AppState.scenarios || []).find(s => s.id === scenarioId);
+  if (!scenario) return;
+
+  const selEl    = document.getElementById(`assign-sel-${scenarioId}`);
+  const memberId = selEl ? parseInt(selEl.value) || null : null;
+  if (!memberId) { showToast('Select a member first', 'warning'); return; }
+
+  const member  = AppState.getMember(memberId);
+  if (!member)  { showToast('Member not found', 'warning'); return; }
+
+  const orgCode = AppState.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g, '-');
+
+  try {
+    const res = await fetch('/api/platform/assign-scenario', {
+      method:  'POST',
+      headers: Auth._headers(),
+      body: JSON.stringify({
+        orgCode,
+        memberName: member.name,
+        memberId:   member.userId || member.authId || null,
+        scenario,
+        // assignedByNodeId / assignedByNodeName omitted here — identity comes from session
+      }),
+    });
+    if (!res.ok) throw new Error();
+    showToast(`Assigned "${scenario.title}" to ${member.name.split(' ')[0]} ✓`, 'success');
+    if (selEl) selEl.value = '';  // reset selector after success
+  } catch(e) {
+    showToast('Could not assign — check your connection', 'warning');
+  }
+}
+
+// ── Team Insights ──────────────────────────────────────────
+async function renderTeamInsights() {
+  const el = document.getElementById('teaminsights-content');
+  if (!el) return;
+
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Loading insights…</div>`;
+
+  try {
+    const res  = await fetch('/api/workspace/team-insights', { headers: Auth._headers() });
+    const data = res.ok ? await res.json() : { ok: false, error: `HTTP ${res.status}` };
+
+    if (!data.ok) throw new Error(data.error || 'Request failed');
+
+    if (data.notEnoughData) {
+      el.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">📊</div>
+          <p>Not enough check-in data yet — ask your team to complete a few check-ins.</p>
+          <div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.6rem">
+            ${data.visibleCount} visible member${data.visibleCount !== 1 ? 's' : ''}
+            · ${data.activeThisWeek} active this week
+          </div>
+        </div>`;
+      return;
+    }
+
+    const moodVal   = data.avgMood;
+    const moodEmoji = moodVal >= 4 ? '😊' : moodVal >= 3 ? '😐' : '😕';
+    const moodLabel = moodVal >= 4 ? 'Good'  : moodVal >= 3 ? 'Okay' : 'Low';
+    const moodColor = moodVal >= 4 ? 'var(--success)' : moodVal >= 3 ? 'var(--warning)' : 'var(--danger)';
+
+    el.innerHTML = `
+      <div class="grid-3" style="margin-bottom:1.2rem">
+        <div class="stat-card">
+          <div class="stat-card-val">${data.visibleCount}</div>
+          <div class="stat-card-label">Team Members</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-val">${data.activeThisWeek}</div>
+          <div class="stat-card-label">Active This Week</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-val" style="color:${moodColor}">${moodEmoji} ${moodVal !== null ? moodVal.toFixed(1) : '—'}</div>
+          <div class="stat-card-label">Avg Mood · ${moodLabel}</div>
+        </div>
+      </div>
+
+      ${(data.needsAttention || []).length ? `
+        <div class="card" style="margin-bottom:1rem;border-color:rgba(247,79,122,0.3)">
+          <div class="card-header">
+            <div class="card-title" style="color:var(--danger)">⚠ Needs Attention (${data.needsAttention.length})</div>
+          </div>
+          <div class="card-body" style="padding:0.6rem 1rem">
+            ${data.needsAttention.map(m => `
+              <div class="leader-attn-row">
+                <span class="leader-attn-name">${m.name}</span>
+                <span class="leader-attn-reason">${m.reason}</span>
+              </div>`).join('')}
+          </div>
+        </div>` : ''}
+
+      ${data.recommendedAction ? `
+        <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.04)">
+          <div class="card-header">
+            <div class="card-title" style="color:var(--accent)">💡 Recommended Action</div>
+          </div>
+          <div style="font-size:0.85rem;color:var(--text-primary);padding:0 1rem 1rem;line-height:1.65">
+            ${data.recommendedAction}
+          </div>
+        </div>` : ''}`;
+
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load team insights. Try refreshing.</p></div>`;
   }
 }
 

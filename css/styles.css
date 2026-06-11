@@ -1652,3 +1652,169 @@ img { max-width: 100%; }
   color: var(--text, #111);
 }
 .org-ob-add-btn:hover { border-color: var(--accent, #0066ff); color: var(--accent, #0066ff); }
+
+/* ══════════════════════════════════════════════════════════════
+   PHASE 5 — LEADER LAYER
+   My Team · Assignments · Team Insights
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── My Team ─────────────────────────────────────────────── */
+.leader-member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.leader-member-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  transition: border-color 0.15s;
+}
+.leader-member-row:hover { border-color: var(--border-light); }
+
+.lm-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+
+.lm-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.lm-name {
+  font-weight: 600;
+  font-size: 0.87rem;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.lm-meta {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.lm-nodes {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.lm-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 5px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.lm-badge--pending {
+  background: rgba(247,158,66,0.15);
+  color: #d97706;
+  border: 1px solid rgba(247,158,66,0.35);
+}
+.lm-badge--setup {
+  background: rgba(124,90,245,0.12);
+  color: var(--accent);
+  border: 1px solid rgba(124,90,245,0.3);
+}
+
+.lm-checkin {
+  text-align: right;
+  flex-shrink: 0;
+}
+.lm-mood {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+.lm-checkin-date {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 3px;
+}
+
+/* ── Assignments ─────────────────────────────────────────── */
+.assignments-list { display: flex; flex-direction: column; }
+
+.assignment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  flex-wrap: wrap;
+}
+
+.assignment-scenario-info { flex: 1; min-width: 0; }
+.assignment-scenario-title {
+  font-weight: 600;
+  font-size: 0.87rem;
+  color: var(--text-primary);
+}
+.assignment-scenario-meta {
+  font-size: 0.73rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.assignment-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.assignment-select {
+  font-size: 0.82rem;
+  padding: 0.35rem 0.6rem;
+  height: auto;
+  min-width: 160px;
+}
+
+/* ── Team Insights ───────────────────────────────────────── */
+.leader-attn-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.83rem;
+  gap: 1rem;
+}
+.leader-attn-row:last-child { border-bottom: none; }
+
+.leader-attn-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+.leader-attn-reason {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  text-align: right;
+}
+
+@media (max-width: 600px) {
+  .assignment-row       { flex-direction: column; align-items: flex-start; }
+  .assignment-actions   { width: 100%; }
+  .assignment-select    { flex: 1; min-width: 0; }
+  .leader-member-row    { flex-wrap: wrap; }
+  .lm-checkin           { flex-basis: 100%; text-align: left; display: flex; align-items: center; gap: 0.4rem; }
+}
