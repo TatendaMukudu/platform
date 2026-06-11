@@ -1578,6 +1578,41 @@
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
 <script src="js/data.js"></script>
 <script src="js/auth.js"></script>
+<!-- ════════════════════════════════════════════════════════
+     MEMBER ONBOARDING FLOW
+     Full-screen overlay shown after first login when profileComplete !== true.
+     Generic — no industry-specific language.
+     ════════════════════════════════════════════════════════ -->
+<div id="onboarding-overlay" style="display:none">
+  <div class="ob-wrap">
+
+    <div class="ob-brand">
+      <div class="ob-logo">IQ</div>
+      <span class="ob-logo-text">IntelliQ</span>
+    </div>
+
+    <!-- Progress bar -->
+    <div class="ob-progress-track">
+      <div class="ob-progress-fill" id="ob-progress-fill" style="width:14%"></div>
+    </div>
+    <div class="ob-step-label" id="ob-step-label">Step 1 of 7</div>
+
+    <!-- Step content (replaced on each step) -->
+    <div class="ob-content" id="ob-content"></div>
+
+    <!-- Navigation -->
+    <div class="ob-nav">
+      <button class="ob-btn-skip" id="ob-skip-btn" onclick="_obSkip()">Skip this question</button>
+      <button class="ob-btn-next" id="ob-next-btn" onclick="_obNext()">Next →</button>
+    </div>
+
+    <div class="ob-privacy-note">
+      Your answers are private. IntelliQ uses them to personalise your experience.
+    </div>
+
+  </div>
+</div>
+
 <script src="js/charts.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/attachments.js"></script>

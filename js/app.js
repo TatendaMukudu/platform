@@ -2,6 +2,311 @@
    PLATFORM — MAIN APPLICATION
    ============================================================ */
 
+/* ════════════════════════════════════════════════════════════
+   MEMBER ONBOARDING FLOW
+   Shown to any invited user whose profileComplete !== true.
+   Generic — no industry-specific language. 7 steps.
+   ════════════════════════════════════════════════════════════ */
+
+const OB_STEPS = [
+  {
+    key:         'mainGoals',
+    question:    'What are your main goals while you are part of this organisation?',
+    hint:        'Think about what you want to achieve, contribute, or get better at during your time here.',
+    type:        'textarea',
+    placeholder: 'e.g. Develop my communication skills, become more consistent, contribute meaningfully to the team…',
+  },
+  {
+    key:         'longTermGoals',
+    question:    'What long-term goals are you working toward?',
+    hint:        'These can go beyond this organisation — think 1, 3, or 5 years from now.',
+    type:        'textarea',
+    placeholder: 'e.g. Take on a leadership role, build expertise in my field, develop the confidence to handle high-pressure situations…',
+  },
+  {
+    key:         'strengths',
+    question:    'What strengths do you want this organisation to know about?',
+    hint:        'These help the people supporting you understand what you already bring.',
+    type:        'textarea',
+    placeholder: 'e.g. High work ethic, strong communicator, calm under pressure, I learn quickly from feedback…',
+  },
+  {
+    key:         'improvementAreas',
+    question:    'What areas would you like to improve?',
+    hint:        'Honest answers here lead to the most useful support. There are no wrong answers.',
+    type:        'textarea',
+    placeholder: 'e.g. Managing nerves before high-stakes moments, staying consistent when things get difficult, asking for help sooner…',
+  },
+  {
+    key:         'selectedValues',
+    question:    'Which organisation values matter most to you?',
+    hint:        'Select the values you feel most connected to right now.',
+    type:        'values',   // rendered using orgValues tags, or free text if none
+  },
+  {
+    key:         'personalMetrics',
+    question:    'What personal metrics would you like to track?',
+    hint:        'These are private to you. Pick from the suggestions or add your own.',
+    type:        'metrics',
+    suggestions: ['Confidence','Communication','Consistency','Readiness','Leadership','Recovery','Focus','Time Management'],
+  },
+  {
+    key:         'freeText',
+    question:    'Anything else you want IntelliQ to know?',
+    hint:        'Optional — share any context that would help us give you better support.',
+    type:        'textarea',
+    placeholder: 'e.g. I\'ve recently been going through some changes and I\'m still finding my footing. I respond better to encouragement than criticism…',
+    optional:    true,
+  },
+];
+
+// State for the current onboarding session
+const _ob = {
+  step:     0,
+  orgValues: [],   // loaded from server if available
+  answers: {
+    mainGoals:        '',
+    longTermGoals:    '',
+    strengths:        '',
+    improvementAreas: '',
+    selectedValues:   [],
+    personalMetrics:  [],
+    freeText:         '',
+  },
+};
+
+/* ── Entry point — called instead of launchMemberView() when profile incomplete ── */
+async function showOnboardingFlow() {
+  // Load org values for step 5
+  try {
+    const r = await fetch('/api/values', { headers: Auth._headers() });
+    const d = await r.json();
+    _ob.orgValues = Array.isArray(d.values) ? d.values : [];
+  } catch(e) {
+    _ob.orgValues = [];
+  }
+
+  _ob.step = 0;
+  Object.assign(_ob.answers, {
+    mainGoals: '', longTermGoals: '', strengths: '', improvementAreas: '',
+    selectedValues: [], personalMetrics: [], freeText: '',
+  });
+
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display          = 'none';
+  document.getElementById('onboarding-overlay').style.display = 'flex';
+
+  _obRenderStep();
+}
+
+/* ── Render the current step ─────────────────────────────────────────────── */
+function _obRenderStep() {
+  const step     = OB_STEPS[_ob.step];
+  const total    = OB_STEPS.length;
+  const progress = Math.round(((_ob.step) / total) * 100);
+
+  // Progress bar + label
+  const fill = document.getElementById('ob-progress-fill');
+  if (fill) fill.style.width = Math.max(progress, 6) + '%';
+
+  const label = document.getElementById('ob-step-label');
+  if (label) label.textContent = `Step ${_ob.step + 1} of ${total}`;
+
+  // Skip button visibility
+  const skipBtn = document.getElementById('ob-skip-btn');
+  if (skipBtn) skipBtn.style.display = step.optional ? 'inline' : 'inline';
+
+  // Next button label on last step
+  const nextBtn = document.getElementById('ob-next-btn');
+  if (nextBtn) nextBtn.textContent = _ob.step === total - 1 ? 'Finish →' : 'Next →';
+
+  // Render content area
+  const content = document.getElementById('ob-content');
+  if (!content) return;
+
+  let inputHTML = '';
+
+  if (step.type === 'textarea') {
+    const saved = _ob.answers[step.key] || '';
+    inputHTML = `
+      <p class="ob-question">${step.question}</p>
+      <p class="ob-hint">${step.hint}</p>
+      <textarea class="ob-textarea" id="ob-input" placeholder="${step.placeholder || ''}"
+        rows="4">${_escHtml(saved)}</textarea>`;
+
+  } else if (step.type === 'values') {
+    const saved = _ob.answers.selectedValues || [];
+    if (_ob.orgValues.length > 0) {
+      const tags = _ob.orgValues.map(v => {
+        const sel = saved.includes(v) ? 'selected' : '';
+        return `<span class="ob-tag ${sel}" onclick="_obToggleTag(this,'selectedValues','${_escHtml(v)}')">${_escHtml(v)}</span>`;
+      }).join('');
+      inputHTML = `
+        <p class="ob-question">${step.question}</p>
+        <p class="ob-hint">${step.hint}</p>
+        <div class="ob-tag-grid" id="ob-tag-grid-values">${tags}</div>`;
+    } else {
+      // No org values — free text field
+      const saved2 = _ob.answers.selectedValues.join(', ') || '';
+      inputHTML = `
+        <p class="ob-question">${step.question}</p>
+        <p class="ob-hint">${step.hint}</p>
+        <p class="ob-freetext-label">Your organisation hasn't set values yet. Type the values that matter most to you:</p>
+        <textarea class="ob-textarea" id="ob-input" placeholder="e.g. Integrity, Accountability, Growth, Teamwork…"
+          rows="3">${_escHtml(saved2)}</textarea>`;
+    }
+
+  } else if (step.type === 'metrics') {
+    const saved    = _ob.answers.personalMetrics || [];
+    const builtIn  = step.suggestions || [];
+    const custom   = saved.filter(m => !builtIn.includes(m));
+    const allTags  = [...builtIn, ...custom];
+    const tags     = allTags.map(m => {
+      const sel = saved.includes(m) ? 'selected' : '';
+      return `<span class="ob-tag ${sel}" onclick="_obToggleTag(this,'personalMetrics','${_escHtml(m)}')">${_escHtml(m)}</span>`;
+    }).join('');
+    inputHTML = `
+      <p class="ob-question">${step.question}</p>
+      <p class="ob-hint">${step.hint}</p>
+      <div class="ob-tag-grid" id="ob-tag-grid-metrics">${tags}</div>
+      <div class="ob-add-custom">
+        <input class="ob-add-input" id="ob-custom-metric" placeholder="Add your own…"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();_obAddCustomMetric();}"/>
+        <button class="ob-add-button" onclick="_obAddCustomMetric()">+ Add</button>
+      </div>`;
+  }
+
+  content.innerHTML = inputHTML;
+
+  // Auto-focus textarea if present
+  setTimeout(() => {
+    const ta = document.getElementById('ob-input');
+    if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    const ci = document.getElementById('ob-custom-metric');
+    if (ci && step.type === 'metrics') ci.focus();
+  }, 50);
+}
+
+/* ── Save current step answer into _ob.answers ──────────────────────────── */
+function _obSaveCurrentAnswer() {
+  const step = OB_STEPS[_ob.step];
+  if (step.type === 'textarea') {
+    const ta = document.getElementById('ob-input');
+    if (ta) _ob.answers[step.key] = ta.value.trim();
+  } else if (step.type === 'values' && _ob.orgValues.length === 0) {
+    // Free text fallback — split by comma
+    const ta = document.getElementById('ob-input');
+    if (ta) {
+      _ob.answers.selectedValues = ta.value.split(',').map(s => s.trim()).filter(Boolean);
+    }
+  }
+  // tag-based steps (values + metrics) are updated live via _obToggleTag
+}
+
+/* ── Toggle a tag on/off ─────────────────────────────────────────────────── */
+function _obToggleTag(el, key, value) {
+  const arr = _ob.answers[key];
+  const idx = arr.indexOf(value);
+  if (idx === -1) arr.push(value);
+  else arr.splice(idx, 1);
+  el.classList.toggle('selected', arr.includes(value));
+}
+
+/* ── Add a custom metric tag ─────────────────────────────────────────────── */
+function _obAddCustomMetric() {
+  const inp = document.getElementById('ob-custom-metric');
+  if (!inp) return;
+  const val = inp.value.trim();
+  if (!val) return;
+  if (!_ob.answers.personalMetrics.includes(val)) {
+    _ob.answers.personalMetrics.push(val);
+    // Rebuild tag grid
+    const grid = document.getElementById('ob-tag-grid-metrics');
+    if (grid) {
+      const tag = document.createElement('span');
+      tag.className = 'ob-tag selected';
+      tag.textContent = val;
+      tag.setAttribute('onclick', `_obToggleTag(this,'personalMetrics','${_escHtml(val)}')`);
+      grid.appendChild(tag);
+    }
+  }
+  inp.value = '';
+  inp.focus();
+}
+
+/* ── Next ────────────────────────────────────────────────────────────────── */
+function _obNext() {
+  _obSaveCurrentAnswer();
+  if (_ob.step < OB_STEPS.length - 1) {
+    _ob.step++;
+    _obRenderStep();
+  } else {
+    _obSubmitProfile();
+  }
+}
+
+/* ── Skip (clears this step's answer) ───────────────────────────────────── */
+function _obSkip() {
+  const step = OB_STEPS[_ob.step];
+  // Clear the answer for this step
+  if (Array.isArray(_ob.answers[step.key])) {
+    _ob.answers[step.key] = [];
+  } else {
+    _ob.answers[step.key] = '';
+  }
+  if (_ob.step < OB_STEPS.length - 1) {
+    _ob.step++;
+    _obRenderStep();
+  } else {
+    _obSubmitProfile();
+  }
+}
+
+/* ── Submit all answers to server ────────────────────────────────────────── */
+async function _obSubmitProfile() {
+  const nextBtn = document.getElementById('ob-next-btn');
+  if (nextBtn) { nextBtn.disabled = true; nextBtn.textContent = 'Saving…'; }
+
+  try {
+    const res = await fetch('/api/auth/complete-profile', {
+      method:  'POST',
+      headers: Auth._headers(),
+      body:    JSON.stringify(_ob.answers),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Could not save profile');
+
+    // Update local auth state so profileComplete is reflected
+    if (data.user) {
+      Auth.currentUser = { ...Auth.currentUser, profileComplete: true };
+      Auth.save();
+    }
+  } catch(e) {
+    // Non-fatal — proceed anyway so the user is not stuck
+    console.warn('[onboarding] Profile save failed (non-fatal):', e.message);
+  }
+
+  // Hide onboarding and continue to app
+  document.getElementById('onboarding-overlay').style.display = 'none';
+  _obAfterComplete();
+}
+
+/* ── Route after onboarding completes ────────────────────────────────────── */
+function _obAfterComplete() {
+  showToast('Welcome! Your profile is set up.', 'success');
+  launchMemberView();
+}
+
+/* ── Helper: HTML-escape for inline onclick values ───────────────────────── */
+function _escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* ── Check whether onboarding is needed ─────────────────────────────────── */
+function _needsOnboarding() {
+  return Auth.currentUser?.profileComplete !== true;
+}
+
 /* ── NAVIGATION ──────────────────────────────────────────── */
 function navigate(page){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -70,7 +375,11 @@ function initLogin() {
     const grade = 'A';
     AppState.init(mode, Auth.currentOrg?.orgName || 'Organisation', Auth.currentUser?.name || 'User', grade);
     AppState.adminRole = Auth.ROLE_LABELS[Auth.currentUser?.role] || 'Admin';
-    if (Auth.isMember()) { launchMemberView(); return; }
+    if (Auth.isMember()) {
+      if (_needsOnboarding()) { showOnboardingFlow(); return; }
+      launchMemberView();
+      return;
+    }
     launchApp();
     loadRealOrgData();
     _checkCoachDailyCheckin();
@@ -101,7 +410,11 @@ async function handleLogin() {
     AppState.init(mode, org?.orgName || '', user?.name || '', 'A');
     AppState.adminRole = Auth.ROLE_LABELS[user?.role] || 'Admin';
 
-    if (Auth.isMember()) { launchMemberView(); return; }
+    if (Auth.isMember()) {
+      if (_needsOnboarding()) { showOnboardingFlow(); return; }
+      launchMemberView();
+      return;
+    }
     launchApp();
     loadRealOrgData();
     _checkCoachDailyCheckin();
@@ -254,7 +567,11 @@ async function handleInviteRegister() {
 
     showToast(`Welcome, ${firstName}! Your account is ready.`, 'success');
 
-    if (Auth.isMember()) { launchMemberView(); return; }
+    if (Auth.isMember()) {
+      // All new members need onboarding — profileComplete is false on first join
+      showOnboardingFlow();
+      return;
+    }
     launchApp();
     loadRealOrgData();
 

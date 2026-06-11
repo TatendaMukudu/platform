@@ -886,6 +886,54 @@ app.delete('/api/auth/delete-user', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+/* ── Complete member profile (first-login onboarding) ──────────────────── *
+ *  POST /api/auth/complete-profile
+ *  Body: { mainGoals, longTermGoals, strengths, improvementAreas,
+ *          selectedValues[], personalMetrics[], freeText }
+ *  Sets profileComplete = true on the user record.
+ *  Also stores the profile data in memberGoals[userKey] for use by IntelliQ.
+ * ─────────────────────────────────────────────────────────────────────────── */
+app.post('/api/auth/complete-profile', requireAuth, (req, res) => {
+  const { orgCode: _c, userId: _u, ...body } = req.body;
+  const code   = req.iqSession.orgCode;
+  const userId = req.iqSession.userId;
+  const user   = orgUsers[code]?.[userId];
+  if (!user) return res.status(404).json({ error: 'User not found' });
+
+  const {
+    mainGoals        = '',
+    longTermGoals    = '',
+    strengths        = '',
+    improvementAreas = '',
+    selectedValues   = [],
+    personalMetrics  = [],
+    freeText         = '',
+  } = req.body;
+
+  // Store profile data in memberGoals — extends existing structure
+  const key = userKey(code, userId);
+  memberGoals[key] = {
+    ...(memberGoals[key] || {}),
+    goal:             mainGoals,       // primary "goal" field used by IntelliQ chat prompts
+    identity:         longTermGoals,   // "who they want to become" → maps to long-term vision
+    mainGoals,
+    longTermGoals,
+    strengths,
+    improvementAreas,
+    selectedValues:   Array.isArray(selectedValues)  ? selectedValues  : [],
+    personalMetrics:  Array.isArray(personalMetrics) ? personalMetrics : [],
+    freeText,
+    memberName: user.name,
+    setAt:      new Date().toISOString(),
+  };
+
+  // Mark profile complete on the user record
+  user.profileComplete = true;
+  scheduleSave();
+
+  res.json({ ok: true, user: { ...user, passwordHash: undefined } });
+});
+
 /* ── Set member password (first-login flow) ─────────────────────────────── */
 app.post('/api/auth/set-password', async (req, res) => {
   const { orgCode, userId, currentPassword, newPassword } = req.body;
