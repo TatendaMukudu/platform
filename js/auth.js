@@ -58,10 +58,29 @@ const Auth = {
   },
 
   logout() {
+    // Wipe member-specific localStorage so data doesn't leak on shared devices.
+    // Keys are user-ID-scoped so only this user's entries are removed.
+    const uid = this.currentUser?.id;
+    if (uid) {
+      ['iq_results_', 'iq_checkins_', 'iq_goals_', 'iq_insight_'].forEach(prefix =>
+        localStorage.removeItem(prefix + uid)
+      );
+      // Sweep weekly-assessment flags: iq_weekly_{week}_{userId}
+      const toRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('iq_weekly_') && k.endsWith('_' + uid)) toRemove.push(k);
+      }
+      toRemove.forEach(k => localStorage.removeItem(k));
+    }
     this.currentUser = null;
     this.currentOrg  = null;
     this.token       = null;
     localStorage.removeItem('iq_auth');
+    // Strip URL query params (e.g. invite token) so the login screen is clean
+    if (window.location.search || window.location.hash) {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
     location.reload();
   },
 

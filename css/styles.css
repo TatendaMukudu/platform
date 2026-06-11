@@ -1654,6 +1654,189 @@ img { max-width: 100%; }
 .org-ob-add-btn:hover { border-color: var(--accent, #0066ff); color: var(--accent, #0066ff); }
 
 /* ══════════════════════════════════════════════════════════════
+   SIGN-OUT & ACCOUNT MENUS
+   Admin topbar widget + Member topbar widget.
+   Both share the same dropdown pattern.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Shared account dropdown ─────────────────────────────── */
+.topbar-account-menu,
+.member-account-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.14);
+  min-width: 210px;
+  z-index: 9000;
+  padding: 0.6rem 0;
+  display: none;
+  flex-direction: column;
+}
+.topbar-account-menu.open,
+.member-account-menu.open {
+  display: flex;
+}
+
+.topbar-account-info,
+.member-account-info {
+  padding: 0.55rem 1rem 0.65rem;
+}
+.topbar-account-name,
+.member-account-name {
+  font-size: 0.87rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar-account-email,
+.member-account-email {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  word-break: break-all;
+}
+.topbar-account-role {
+  font-size: 0.71rem;
+  color: var(--text-muted);
+  margin-top: 3px;
+  text-transform: capitalize;
+}
+.topbar-account-divider,
+.member-account-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0.25rem 0;
+}
+.topbar-signout-btn,
+.member-signout-btn {
+  width: 100%;
+  padding: 0.5rem 1rem;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.83rem;
+  color: var(--danger, #f74f4f);
+  font-weight: 600;
+  font-family: inherit;
+  transition: background 0.12s;
+}
+.topbar-signout-btn:hover,
+.member-signout-btn:hover {
+  background: rgba(247, 79, 79, 0.07);
+}
+
+/* ── Admin topbar avatar button ──────────────────────────── */
+.topbar-user-widget {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.topbar-avatar-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity 0.15s, transform 0.1s;
+}
+.topbar-avatar-btn:hover  { opacity: 0.82; }
+.topbar-avatar-btn:active { transform: scale(0.94); }
+
+/* ── Member topbar ───────────────────────────────────────── */
+.member-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 1rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  flex-shrink: 0;
+}
+.member-topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.member-topbar-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.67rem;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.member-topbar-orgname {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.member-topbar-right {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.member-avatar-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity 0.15s, transform 0.1s;
+}
+.member-avatar-btn:hover  { opacity: 0.82; }
+.member-avatar-btn:active { transform: scale(0.94); }
+
+/* ── Onboarding / set-password escape link ───────────────── */
+.screen-escape-link {
+  text-align: center;
+  margin-top: 1rem;
+}
+.screen-escape-link a {
+  font-size: 0.77rem;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.screen-escape-link a:hover {
+  color: var(--text-secondary);
+  text-decoration: underline;
+}
+
+/* ══════════════════════════════════════════════════════════════
    PHASE 5 — LEADER LAYER
    My Team · Assignments · Team Insights
    ══════════════════════════════════════════════════════════════ */

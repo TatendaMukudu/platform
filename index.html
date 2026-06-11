@@ -186,6 +186,23 @@
         </div>
         <div class="icon-btn" data-tip="Add Person" onclick="navigate('people');switchPeopleTab('onboard')" style="cursor:pointer">➕</div>
         <div style="font-size:0.8rem;color:var(--text-secondary);padding:0 0.5rem" id="topbar-org">Org</div>
+        <!-- User account widget — sign out, name, email, role -->
+        <div class="topbar-user-widget" id="topbar-user-widget">
+          <button class="topbar-avatar-btn" id="topbar-avatar-btn"
+                  onclick="toggleAdminAccountMenu()" aria-label="Account menu"
+                  title="Account">
+            <span id="topbar-avatar-initials">?</span>
+          </button>
+          <div class="topbar-account-menu" id="topbar-account-menu">
+            <div class="topbar-account-info">
+              <div class="topbar-account-name"  id="topbar-account-name">—</div>
+              <div class="topbar-account-email" id="topbar-account-email">—</div>
+              <div class="topbar-account-role"  id="topbar-account-role">—</div>
+            </div>
+            <div class="topbar-account-divider"></div>
+            <button class="topbar-signout-btn" onclick="Auth.logout()">Sign Out</button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -1289,6 +1306,9 @@
       </div>
       <div id="sp-error" style="color:var(--danger);font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
       <button class="btn-join" onclick="MemberApp.submitSetPassword()">Set Password &amp; Continue →</button>
+      <div class="screen-escape-link">
+        <a href="#" onclick="Auth.logout();return false">← Sign out / switch account</a>
+      </div>
     </div>
   </div>
 
@@ -1319,11 +1339,38 @@
       <div style="text-align:center;margin-top:0.8rem">
         <a href="#" onclick="MemberApp.skipGoals();return false;" style="font-size:0.78rem;color:var(--text-muted)">Skip for now</a>
       </div>
+      <div class="screen-escape-link">
+        <a href="#" onclick="Auth.logout();return false">← Sign out / switch account</a>
+      </div>
     </div>
   </div>
 
   <!-- MAIN APP (home, assessments, check-in, inbox, stats) -->
   <div class="screen" id="screen-main">
+
+    <!-- Member topbar — always visible; contains account menu + sign out -->
+    <header class="member-topbar">
+      <div class="member-topbar-brand">
+        <div class="member-topbar-logo">IQ</div>
+        <div class="member-topbar-orgname" id="member-topbar-org">—</div>
+      </div>
+      <div class="member-topbar-right">
+        <button class="member-avatar-btn" id="member-avatar-btn"
+                onclick="MemberApp.toggleAccountMenu()" aria-label="Account menu"
+                title="Account">
+          <span id="member-avatar-initials">?</span>
+        </button>
+        <div class="member-account-menu" id="member-account-menu">
+          <div class="member-account-info">
+            <div class="member-account-name"  id="member-account-name">—</div>
+            <div class="member-account-email" id="member-account-email">—</div>
+          </div>
+          <div class="member-account-divider"></div>
+          <button class="member-signout-btn" onclick="Auth.logout()">Sign Out</button>
+        </div>
+      </div>
+    </header>
+
     <div class="page-content" id="main-content">
 
       <!-- HOME TAB -->
@@ -1603,6 +1650,12 @@
     <div id="org-ob-body" class="org-ob-body">
       <!-- Rendered dynamically by _orgObRender() -->
     </div>
+    <div style="text-align:center;padding-bottom:1rem">
+      <a href="#" onclick="Auth.logout();return false"
+         style="font-size:0.75rem;color:var(--text-muted);text-decoration:none">
+        ← Sign out / switch account
+      </a>
+    </div>
   </div>
 </div>
 
@@ -1636,6 +1689,13 @@
 
     <div class="ob-privacy-note">
       Your answers are private. IntelliQ uses them to personalise your experience.
+    </div>
+
+    <div style="text-align:center;margin-top:0.6rem">
+      <a href="#" onclick="Auth.logout();return false"
+         style="font-size:0.75rem;color:var(--text-muted);text-decoration:none">
+        ← Sign out / switch account
+      </a>
     </div>
 
   </div>

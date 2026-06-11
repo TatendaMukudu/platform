@@ -222,9 +222,37 @@ const MemberApp = {
   /* ── MAIN SCREEN ────────────────────────────────────────── */
   _showMain() {
     this._showScreen('screen-main');
+
+    // Populate member topbar (always-visible header with sign-out)
+    const orgEl  = document.getElementById('member-topbar-org');
+    const initEl = document.getElementById('member-avatar-initials');
+    const nameEl = document.getElementById('member-account-name');
+    const emlEl  = document.getElementById('member-account-email');
+    if (orgEl)  orgEl.textContent  = Auth.currentOrg?.orgName || this._orgCode || '—';
+    if (initEl) initEl.textContent = (this._name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    if (nameEl) nameEl.textContent = this._name || '—';
+    if (emlEl)  emlEl.textContent  = Auth.currentUser?.email || '—';
+
     this._renderHome();
     this._renderStats();
     this._setupCheckinPrompt();
+  },
+
+  toggleAccountMenu() {
+    const menu = document.getElementById('member-account-menu');
+    if (!menu) return;
+    const opening = !menu.classList.contains('open');
+    menu.classList.toggle('open', opening);
+    if (opening) {
+      const close = (e) => {
+        const btn = document.getElementById('member-avatar-btn');
+        if (!btn?.contains(e.target) && !menu.contains(e.target)) {
+          menu.classList.remove('open');
+          document.removeEventListener('click', close);
+        }
+      };
+      setTimeout(() => document.addEventListener('click', close), 10);
+    }
   },
 
   _setupCheckinPrompt() {

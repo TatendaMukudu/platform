@@ -1413,6 +1413,36 @@ function updateAlertBadge(){
 /* ── TOPBAR ──────────────────────────────────────────────── */
 function renderTopbar(){
   document.getElementById('topbar-org').textContent = AppState.orgName;
+
+  // Populate user account widget
+  const user = Auth.currentUser;
+  if (!user) return;
+  const initials = (user.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  const initEl   = document.getElementById('topbar-avatar-initials');
+  const nameEl   = document.getElementById('topbar-account-name');
+  const emlEl    = document.getElementById('topbar-account-email');
+  const roleEl   = document.getElementById('topbar-account-role');
+  if (initEl) initEl.textContent = initials;
+  if (nameEl) nameEl.textContent = user.name  || '—';
+  if (emlEl)  emlEl.textContent  = user.email || '—';
+  if (roleEl) roleEl.textContent = Auth.ROLE_LABELS?.[user.role] || user.role || 'Admin';
+}
+
+function toggleAdminAccountMenu() {
+  const menu = document.getElementById('topbar-account-menu');
+  if (!menu) return;
+  const opening = !menu.classList.contains('open');
+  menu.classList.toggle('open', opening);
+  if (opening) {
+    const close = (e) => {
+      const btn = document.getElementById('topbar-avatar-btn');
+      if (!btn?.contains(e.target) && !menu.contains(e.target)) {
+        menu.classList.remove('open');
+        document.removeEventListener('click', close);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', close), 10);
+  }
 }
 
 /* ── Onboarding empty-state HTML (reused across pages) ───────────────── */
