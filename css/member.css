@@ -433,3 +433,107 @@
 #member-shell.visible ~ #toast.show {
   transform: translateX(-50%) translateY(0);
 }
+
+/* ═══════════════════════════════════════════════════════════
+   PHASE 4 — MEMBER VALUE LOOP
+   Insight card, focus section, progress signals
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Insight card ──────────────────────────────────────────── */
+.iq-insight-card {
+  background: rgba(124, 90, 245, 0.05);
+  border: 1px solid rgba(124, 90, 245, 0.25);
+  border-radius: var(--radius-sm);
+  padding: 0.9rem 1rem;
+  margin-bottom: 0;
+}
+.iq-insight-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.iq-badge-circle {
+  width: 26px; height: 26px;
+  border-radius: 50%;
+  background: rgba(124, 90, 245, 0.2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.63rem; font-weight: 700; color: var(--accent);
+  flex-shrink: 0;
+}
+.iq-insight-meta {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+}
+.iq-insight-summary {
+  font-size: 0.87rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.5;
+  margin-bottom: 0.5rem;
+}
+.iq-insight-detail {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid rgba(124, 90, 245, 0.12);
+}
+.iq-insight-detail.noticed  { color: var(--text-primary); border-top: none; margin-top: 0; padding-top: 0; margin-bottom: 0.4rem; }
+.iq-insight-detail.goal-line      { color: var(--accent); }
+.iq-insight-detail.encourage-line { color: var(--text-secondary); font-style: italic; }
+.iq-insight-detail.watch-line     { color: var(--warning); }
+.iq-insight-action {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+  padding: 0.5rem 0.65rem;
+  background: rgba(124, 90, 245, 0.1);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  font-weight: 500;
+  line-height: 1.4;
+}
+.iq-action-icon { flex-shrink: 0; }
+
+/* ── Your Focus card ───────────────────────────────────────── */
+.iq-focus-card  { padding: 0.8rem 1rem; }
+.iq-focus-goal  {
+  display: flex; align-items: flex-start; gap: 0.3rem;
+  font-size: 0.87rem; font-weight: 600; color: var(--text-primary);
+  line-height: 1.5;
+}
+.iq-focus-identity {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  margin-top: 0.3rem;
+  line-height: 1.5;
+  padding-left: 1.4rem;
+}
+
+/* ── Progress signals ──────────────────────────────────────── */
+.iq-progress-card { padding: 0.8rem 1rem; }
+.iq-signal-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.iq-signal {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  flex: 1;
+  min-width: 90px;
+}
+.iq-signal-icon  { font-size: 1.1rem; flex-shrink: 0; }
+.iq-signal-label { font-size: 0.82rem; font-weight: 700; color: var(--text-primary); }
+.iq-signal-sub   { font-size: 0.65rem; color: var(--text-muted); margin-top: 1px; }

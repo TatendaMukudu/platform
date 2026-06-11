@@ -2169,59 +2169,156 @@ app.get('/api/member/goals', (req, res) => {
 
 /* ═══════════════════════════════════════════════════════════════════════════
    FREEFORM CHECK-IN — Free text + AI response
+   Phase 4: Member role returns structured insight object.
+   Other roles (leader/admin) return a plain text aiResponse as before.
    Accepts memberId (stable) or memberName (legacy). Prefers memberId.
    ═══════════════════════════════════════════════════════════════════════════ */
 app.post('/api/checkin/freeform', async (req, res) => {
   const { orgCode, memberName, memberId, text, mood, role, orgMode, orgName, goals } = req.body;
   if (!orgCode || !memberName || !text) return res.status(400).json({ error: 'missing fields' });
 
+  const code = (orgCode || '').toLowerCase().trim();
   const key = memberId
-    ? userKey(orgCode, memberId)
-    : memberKey(orgCode, memberName);
+    ? userKey(code, memberId)
+    : memberKey(code, memberName);
 
   if (!memberCheckins[key]) memberCheckins[key] = [];
 
   const moodLabels = { 1:'Rough', 2:'Low', 3:'Okay', 4:'Good', 5:'Great' };
   const checkin = {
-    memberName,   // always store name inside entry for display
+    memberName,
     text,
-    mood: mood || null,
+    mood:      mood || null,
     moodLabel: moodLabels[mood] || null,
-    role: role || 'member',
-    orgMode: orgMode || 'school',
-    date: new Date().toLocaleDateString('en-GB'),
-    ts:   new Date().toISOString(),
+    role:      role || 'member',
+    orgMode:   orgMode || 'school',
+    date:      new Date().toLocaleDateString('en-GB'),
+    ts:        new Date().toISOString(),
   };
   memberCheckins[key].push(checkin);
 
-  const rolePrompts = {
-    member:  `You are IntelliQ, a warm and perceptive performance intelligence system. A team member has just submitted their daily check-in. Read what they shared, acknowledge it genuinely in 1-2 sentences, then if they have a goal — leave them with one specific, actionable thought about it. Keep it brief and human. Max 3 sentences total. Never be generic or robotic.`,
-    coach:   `You are IntelliQ, a performance intelligence assistant for coaches. A coach has submitted their daily check-in. Acknowledge what they shared briefly. If they mentioned a specific player or session, reflect something useful back. If there's a pattern worth noting, surface it. Max 3 sentences. Be direct and practical.`,
-    admin:   `You are IntelliQ, a performance intelligence assistant. An admin has submitted a check-in. Acknowledge briefly. If anything sounds like it needs org-level attention, note it. Max 2 sentences.`,
+  const effectiveRole = role || 'member';
+
+  /* ── MEMBER: structured insight (Phase 4) ─────────────────────────────── */
+  if (effectiveRole === 'member') {
+
+    // Gather server-side context
+    const stored       = memberGoals[key] || memberGoals[memberKey(code, memberName)] || {};
+    const focusGoal    = goals?.goal      || stored.goal     || '';
+    const identityGoal = goals?.identity  || stored.identity || '';
+
+    // Recent check-ins before this one (last 5 entries, already pushed above so slice -6,-1)
+    const prior = (memberCheckins[key] || []).slice(-6, -1);
+    const recentMoodStr = prior.length
+      ? prior.map(c => `${c.date}: ${c.moodLabel || 'unknown'}`).join(' | ')
+      : 'This is the first check-in';
+
+    const orgVals       = (orgValues[code]   || []).slice(0, 6).join(', ') || null;
+    const orgMetricList = (orgMetrics[code]  || []).slice(0, 6).map(m => m.name || m).join(', ') || null;
+
+    const systemPrompt = `You are IntelliQ — a warm, perceptive, and honest performance intelligence system.
+
+A member has submitted their daily check-in. Return a structured insight that is genuinely useful and grounded strictly in what they actually wrote. Do not invent data, assume context, or fake trends.
+
+RULES:
+- Observe only what the member explicitly shared — never project or extrapolate
+- If this is their first check-in, acknowledge it honestly ("This is your first check-in — patterns will emerge over time")
+- Keep language generic — no sports-specific, school-specific, or workplace-specific wording unless the member used those words themselves
+- suggestedNextAction must be concrete and specific to TODAY's check-in — not generic advice
+- watchOutFor: only include if there is a genuine signal (avoidance language, persistent low mood, contradictions) — otherwise null
+- goalConnection: only include if a goal is set and today's check-in has a real connection to it — otherwise null
+- metricSignals: only include if org metrics are defined and the member mentioned something relevant — otherwise null
+- Max 2 sentences per field. Keep it tight and human.
+
+OUTPUT — valid JSON only, no markdown fencing, no extra text:
+{
+  "summary": "One honest sentence of what IntelliQ noticed today",
+  "whatIntelliQNoticed": "A specific personal observation from today's check-in (1-2 sentences)",
+  "goalConnection": "How today connects to their focus goal, or null",
+  "metricSignals": "Any metric-relevant signals from what they shared, or null",
+  "suggestedNextAction": "One concrete specific action based on what they wrote today",
+  "encouragement": "A brief genuine note — 1 sentence, not generic",
+  "watchOutFor": "A real concern if present in their words, or null"
+}`;
+
+    const userContent = [
+      `Member: ${memberName}`,
+      focusGoal    ? `Focus goal: "${focusGoal}"` : 'Focus goal: not set',
+      identityGoal ? `Identity aspiration: "${identityGoal}"` : null,
+      orgVals       ? `Organisation values: ${orgVals}` : null,
+      orgMetricList ? `Organisation metrics: ${orgMetricList}` : null,
+      `Recent mood history: ${recentMoodStr}`,
+      ``,
+      `Today's mood: ${moodLabels[mood] || 'not specified'}`,
+      `Today's check-in: "${text}"`,
+    ].filter(Boolean).join('\n');
+
+    try {
+      const response = await client.messages.create({
+        model:      'claude-haiku-4-5-20251001',
+        max_tokens: 600,
+        system:     systemPrompt,
+        messages:   [{ role: 'user', content: userContent }],
+      });
+
+      const raw     = (response.content[0]?.text || '').trim();
+      const jsonStr = raw.replace(/^```(?:json)?\n?/,'').replace(/\n?```$/,'').trim();
+
+      let insight;
+      try {
+        insight = JSON.parse(jsonStr);
+      } catch(parseErr) {
+        // AI returned non-JSON — degrade gracefully
+        console.warn('[CHECKIN] insight parse failed, using raw as summary');
+        insight = {
+          summary:             raw.slice(0, 160) || 'Check-in received.',
+          whatIntelliQNoticed: null,
+          goalConnection:      null,
+          metricSignals:       null,
+          suggestedNextAction: null,
+          encouragement:       null,
+          watchOutFor:         null,
+        };
+      }
+
+      checkin.insight    = insight;
+      checkin.aiResponse = insight.summary || null; // backward compat
+      scheduleSave();
+      return res.json({ ok: true, insight, aiResponse: checkin.aiResponse });
+
+    } catch(err) {
+      console.error('[CHECKIN] AI error:', err.message);
+      scheduleSave();
+      return res.json({ ok: true, insight: null, aiResponse: null });
+    }
+  }
+
+  /* ── LEADER / ADMIN: lightweight plain-text response (unchanged) ─────── */
+  const leaderPrompts = {
+    coach:  `You are IntelliQ, a performance intelligence assistant for leaders. A leader has submitted their daily check-in. Acknowledge what they shared briefly. If they mentioned a specific person or situation, reflect something useful back. Max 3 sentences. Be direct and practical.`,
+    admin:  `You are IntelliQ, a performance intelligence assistant. An admin has submitted a check-in. Acknowledge briefly. If anything sounds like it needs org-level attention, note it. Max 2 sentences.`,
   };
 
-  const systemPrompt = rolePrompts[role] || rolePrompts.member;
+  const systemPrompt = leaderPrompts[effectiveRole] || leaderPrompts.coach;
   let userContent = '';
   if (mood) userContent += `Mood: ${moodLabels[mood]}\n`;
-  if (goals?.goal) userContent += `Their season goal: "${goals.goal}"\n`;
-  if (goals?.identity) userContent += `Who they want to become: "${goals.identity}"\n`;
-  userContent += `\nCheck-in: ${text}`;
+  userContent += `Check-in: ${text}`;
 
   try {
     const response = await client.messages.create({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 120,
+      max_tokens: 150,
       system:     systemPrompt,
       messages:   [{ role: 'user', content: userContent }],
     });
     const aiResponse = response.content[0]?.text?.trim() || '';
     checkin.aiResponse = aiResponse;
     scheduleSave();
-    res.json({ ok: true, aiResponse });
+    return res.json({ ok: true, insight: null, aiResponse });
   } catch(err) {
-    console.error('Checkin AI error:', err.message);
+    console.error('[CHECKIN] AI error (leader):', err.message);
     scheduleSave();
-    res.json({ ok: true, aiResponse: null });
+    return res.json({ ok: true, insight: null, aiResponse: null });
   }
 });
 

@@ -16,11 +16,12 @@ const MemberApp = {
   get _role()    { return Auth.currentUser?.role    || 'member'; },
 
   /* ── Local state ────────────────────────────────────────── */
-  pending:  [],
-  results:  [],
-  checkins: [],
-  goals:    null,
-  mood:     null,
+  pending:       [],
+  results:       [],
+  checkins:      [],
+  goals:         null,
+  latestInsight: null,   // Phase 4: last structured check-in insight
+  mood:          null,
   _noteType:    'private',
   _noteTag:     '',
   _notesFilter: 'All',
@@ -43,6 +44,7 @@ const MemberApp = {
   _lsResults()  { return `iq_results_${this._userId}`; },
   _lsCheckins() { return `iq_checkins_${this._userId}`; },
   _lsGoals()    { return `iq_goals_${this._userId}`; },
+  _lsInsight()  { return `iq_insight_${this._userId}`; },  // Phase 4
 
   /* ── Load local data (with legacy migration) ─────────────── */
   _loadLocalData() {
@@ -65,9 +67,10 @@ const MemberApp = {
       if (leg) { goals = leg; localStorage.setItem(this._lsGoals(), JSON.stringify(goals)); }
     }
 
-    this.results  = results;
-    this.checkins = checkins;
-    this.goals    = goals;
+    this.results       = results;
+    this.checkins      = checkins;
+    this.goals         = goals;
+    this.latestInsight = this._parseLS(this._lsInsight(), 'null'); // Phase 4
   },
 
   _parseLS(key, fallback) {
@@ -233,20 +236,27 @@ const MemberApp = {
       if (form)   form.style.display   = 'none';
       if (doneEl) doneEl.style.display = 'block';
       const today        = new Date().toLocaleDateString('en-GB');
-      const todayCheckin = [...this.checkins].reverse().find(c => c.date === today && c.aiResponse);
+      const todayCheckin = [...this.checkins].reverse().find(c => c.date === today);
       const replayEl     = document.getElementById('checkin-ai-replay');
-      if (replayEl && todayCheckin?.aiResponse) {
-        replayEl.style.display = 'block';
-        replayEl.innerHTML = `
-          <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06);margin-top:0.8rem">
-            <div style="display:flex;align-items:flex-start;gap:0.7rem">
-              <div style="width:28px;height:28px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.72rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
-              <div>
-                <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.4rem">IntelliQ said</div>
-                <div style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6">${this._escape(todayCheckin.aiResponse)}</div>
+      if (replayEl) {
+        // Phase 4: prefer structured insight; fall back to plain aiResponse
+        const insight = todayCheckin?.insight || this.latestInsight;
+        if (insight) {
+          replayEl.style.display = 'block';
+          this._renderInsightPanel(replayEl, null, insight);
+        } else if (todayCheckin?.aiResponse) {
+          replayEl.style.display = 'block';
+          replayEl.innerHTML = `
+            <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06);margin-top:0.8rem">
+              <div style="display:flex;align-items:flex-start;gap:0.7rem">
+                <div style="width:28px;height:28px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.72rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
+                <div>
+                  <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.4rem">IntelliQ said</div>
+                  <div style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6">${this._escape(todayCheckin.aiResponse)}</div>
+                </div>
               </div>
-            </div>
-          </div>`;
+            </div>`;
+        }
       }
       return;
     }
@@ -297,6 +307,54 @@ const MemberApp = {
       </div>`;
 
     this._renderWeeklyPrompt();
+
+    // ── Phase 4: Your Focus ──────────────────────────────────
+    const focusEl = document.getElementById('home-focus');
+    if (focusEl) {
+      if (this.goals?.goal) {
+        focusEl.innerHTML = `
+          <div class="card-label" style="margin-bottom:0.5rem">Your Focus</div>
+          <div class="card iq-focus-card" style="margin-bottom:0.8rem">
+            <div class="iq-focus-goal">
+              <span style="margin-right:0.4rem">🎯</span>
+              <span>${this._escape(this.goals.goal)}</span>
+            </div>
+            ${this.goals.identity ? `
+            <div class="iq-focus-identity">
+              Becoming: ${this._escape(this.goals.identity)}
+            </div>` : ''}
+          </div>`;
+      } else {
+        focusEl.innerHTML = '';
+      }
+    }
+
+    // ── Phase 4: Latest IntelliQ Insight ─────────────────────
+    const insightEl = document.getElementById('home-insight');
+    if (insightEl) {
+      const insight = this.latestInsight;
+      if (insight) {
+        insightEl.innerHTML = `<div class="card-label" style="margin-bottom:0.5rem">Latest IntelliQ Insight</div>`;
+        const wrapper = document.createElement('div');
+        wrapper.style.marginBottom = '0.8rem';
+        insightEl.appendChild(wrapper);
+        this._renderInsightPanel(wrapper, null, insight);
+      } else if (this.checkins.length === 0) {
+        insightEl.innerHTML = `
+          <div class="empty-card" style="margin-bottom:0.8rem">
+            <div class="empty-icon">🧠</div>
+            <div>Submit your first check-in and IntelliQ will start building a picture of your progress.</div>
+          </div>`;
+      } else {
+        insightEl.innerHTML = '';
+      }
+    }
+
+    // ── Phase 4: Progress Signals ─────────────────────────────
+    const progressEl = document.getElementById('home-progress');
+    if (progressEl) {
+      progressEl.innerHTML = this._renderProgressSignals();
+    }
 
     const pendingEl = document.getElementById('home-pending');
     const pending   = this.pending.filter(s => s.status === 'pending');
@@ -373,6 +431,75 @@ const MemberApp = {
             <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">2 minutes — IntelliQ synthesises everyone's input</div>
           </div>
           <span style="color:var(--success);font-weight:700;font-size:0.8rem">NEW</span>
+        </div>
+      </div>`;
+  },
+
+  /* ── Phase 4: Progress Signals ─────────────────────────── *
+   *  Derived from check-in mood history. Only shows trends     *
+   *  when there is genuine data (≥3 check-ins). Honest empty   *
+   *  states for new members.                                    *
+   * ───────────────────────────────────────────────────────── */
+  _renderProgressSignals() {
+    const MIN_FOR_TREND = 3;
+    if (this.checkins.length < MIN_FOR_TREND) {
+      return `
+        <div class="empty-card" style="margin-bottom:0.8rem;padding:0.9rem">
+          <div class="empty-icon" style="font-size:1.2rem;margin-bottom:0.3rem">📈</div>
+          <div style="font-size:0.78rem">Complete a few check-ins so IntelliQ can identify patterns.</div>
+        </div>`;
+    }
+
+    // Take last 5 check-ins with a valid mood score
+    const recent    = this.checkins.filter(c => c.mood).slice(-5);
+    const moodNums  = recent.map(c => c.mood);
+    const avgMood   = moodNums.reduce((s, v) => s + v, 0) / moodNums.length;
+
+    // Simple trend: compare first half avg vs second half avg
+    const half1 = moodNums.slice(0, Math.floor(moodNums.length / 2));
+    const half2 = moodNums.slice(Math.floor(moodNums.length / 2));
+    const avg1  = half1.reduce((s, v) => s + v, 0) / (half1.length || 1);
+    const avg2  = half2.reduce((s, v) => s + v, 0) / (half2.length || 1);
+    const diff  = avg2 - avg1;
+
+    let signal, signalColor, signalIcon;
+    if (diff >= 0.8) {
+      signal = 'Improving';       signalColor = 'var(--success)'; signalIcon = '📈';
+    } else if (diff <= -0.8) {
+      signal = 'Needs attention'; signalColor = 'var(--danger)';  signalIcon = '📉';
+    } else {
+      signal = 'Steady';          signalColor = 'var(--warning)'; signalIcon = '➡️';
+    }
+
+    // Streak: consecutive days with a check-in
+    const streak = this.checkins.length;
+
+    return `
+      <div class="card-label" style="margin-bottom:0.5rem">Progress Signals</div>
+      <div class="card iq-progress-card" style="margin-bottom:0.8rem">
+        <div class="iq-signal-row">
+          <div class="iq-signal">
+            <div class="iq-signal-icon">${signalIcon}</div>
+            <div>
+              <div class="iq-signal-label" style="color:${signalColor}">${signal}</div>
+              <div class="iq-signal-sub">Mood trend (last ${recent.length} check-ins)</div>
+            </div>
+          </div>
+          <div class="iq-signal">
+            <div class="iq-signal-icon">🔥</div>
+            <div>
+              <div class="iq-signal-label">${streak}</div>
+              <div class="iq-signal-sub">Total check-ins</div>
+            </div>
+          </div>
+          ${this.results.length ? `
+          <div class="iq-signal">
+            <div class="iq-signal-icon">🎯</div>
+            <div>
+              <div class="iq-signal-label">${this.results.length}</div>
+              <div class="iq-signal-sub">Assessments done</div>
+            </div>
+          </div>` : ''}
         </div>
       </div>`;
   },
@@ -839,7 +966,33 @@ const MemberApp = {
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.aiResponse) {
+
+        // ── Phase 4: structured insight ──────────────────────────
+        if (data.insight) {
+          const insight = data.insight;
+
+          // Stamp insight with today's date for display
+          insight._date = new Date().toLocaleDateString('en-GB', { day:'numeric', month:'short' });
+
+          // Persist on the checkin entry
+          entry.insight    = insight;
+          entry.aiResponse = data.aiResponse || insight.summary || null;
+          this.checkins[this.checkins.length - 1] = entry;
+          localStorage.setItem(this._lsCheckins(), JSON.stringify(this.checkins));
+
+          // Persist as latest insight (survives refresh)
+          this.latestInsight = insight;
+          localStorage.setItem(this._lsInsight(), JSON.stringify(insight));
+
+          // Show rich insight panel on check-in tab immediately
+          this._renderInsightPanel(
+            document.getElementById('checkin-ai-response'),
+            document.getElementById('checkin-ai-text'),
+            insight
+          );
+
+        } else if (data.aiResponse) {
+          // Legacy plain-text fallback
           entry.aiResponse = data.aiResponse;
           this.checkins[this.checkins.length - 1].aiResponse = data.aiResponse;
           localStorage.setItem(this._lsCheckins(), JSON.stringify(this.checkins));
@@ -848,63 +1001,168 @@ const MemberApp = {
           if (aiEl && txtEl) { txtEl.textContent = data.aiResponse; aiEl.style.display = 'block'; }
         }
       }
-    } catch(err) { /* non-critical */ }
+    } catch(err) { /* non-critical — check-in is saved locally */ }
 
     document.getElementById('checkin-done').style.display = 'block';
     document.getElementById('checkin-form').style.display = 'none';
     this.showToast('Check-in saved ✓', 'success');
-    this._renderHome();
+    this._renderHome();  // refreshes home with new insight + progress
+  },
+
+  /* ── Phase 4: render structured insight into a container ─── */
+  _renderInsightPanel(containerEl, _legacyTextEl, insight) {
+    if (!containerEl || !insight) return;
+    containerEl.style.display = 'block';
+    containerEl.innerHTML = `
+      <div class="iq-insight-card">
+        <div class="iq-insight-header">
+          <div class="iq-badge-circle">IQ</div>
+          <div class="iq-insight-meta">IntelliQ${insight._date ? ` · ${insight._date}` : ''}</div>
+        </div>
+        <div class="iq-insight-summary">${this._escape(insight.summary || '')}</div>
+        ${insight.whatIntelliQNoticed ? `
+          <div class="iq-insight-detail noticed">
+            ${this._escape(insight.whatIntelliQNoticed)}
+          </div>` : ''}
+        ${insight.suggestedNextAction ? `
+          <div class="iq-insight-action">
+            <span class="iq-action-icon">👉</span>
+            <span>${this._escape(insight.suggestedNextAction)}</span>
+          </div>` : ''}
+        ${insight.goalConnection ? `
+          <div class="iq-insight-detail goal-line">
+            <span style="margin-right:0.35rem">🎯</span>${this._escape(insight.goalConnection)}
+          </div>` : ''}
+        ${insight.encouragement ? `
+          <div class="iq-insight-detail encourage-line">
+            ${this._escape(insight.encouragement)}
+          </div>` : ''}
+        ${insight.watchOutFor ? `
+          <div class="iq-insight-detail watch-line">
+            <span style="margin-right:0.35rem">⚠️</span>${this._escape(insight.watchOutFor)}
+          </div>` : ''}
+      </div>`;
   },
 
   /* ── STATS ──────────────────────────────────────────────── */
   _renderStats() {
     const el = document.getElementById('stats-content');
-    if (!this.results.length) {
-      el.innerHTML = `<div class="empty-card"><div class="empty-icon">📊</div><div>Complete a scenario to see your stats.</div></div>`;
-      return;
+    let html = '';
+
+    // ── 1. Your Focus (goals) ─────────────────────────────────
+    if (this.goals?.goal) {
+      html += `
+        <div class="card" style="margin-bottom:0.8rem">
+          <div class="card-label" style="margin-bottom:0.5rem">Your Focus</div>
+          <div style="font-size:0.87rem;color:var(--text-primary);font-weight:600;line-height:1.5">
+            🎯 ${this._escape(this.goals.goal)}
+          </div>
+          ${this.goals.identity ? `
+          <div style="font-size:0.78rem;color:var(--text-secondary);line-height:1.5;margin-top:0.35rem">
+            Becoming: ${this._escape(this.goals.identity)}
+          </div>` : ''}
+        </div>`;
     }
 
-    const avgScore = Math.round(this.results.reduce((s, r) => s + r.score, 0) / this.results.length);
-    const { label, color } = this._scoreLabel(avgScore);
-    const dims    = ['ethical_reasoning','stakeholder_awareness','pressure_response','self_awareness'];
-    const dimAvgs = dims.map(d => {
-      const vals = this.results.map(r => r.dimensions?.[d]).filter(v => v != null);
-      return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
-    });
+    // ── 2. Latest IntelliQ Insight ────────────────────────────
+    const insight = this.latestInsight;
+    if (insight) {
+      html += `<div class="card-label" style="margin-bottom:0.5rem">Latest IntelliQ Insight</div>`;
+      const placeholder = `<div id="stats-insight-slot" style="margin-bottom:0.8rem"></div>`;
+      html += placeholder;
+    }
 
-    el.innerHTML = `
-      <div class="card" style="text-align:center;margin-bottom:0.8rem">
-        <div style="margin:0 auto 0.8rem;width:100px">${this._svgRing(avgScore, color, 100)}</div>
-        <div style="font-size:0.9rem;font-weight:700;color:${color}">${label}</div>
-        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">Avg across ${this.results.length} scenario${this.results.length !== 1 ? 's' : ''}</div>
-      </div>
-      <div class="card" style="margin-bottom:0.8rem">
-        <div class="card-label" style="margin-bottom:0.8rem">Dimension Breakdown</div>
-        ${dims.map((d, i) => {
-          const v = dimAvgs[i];
-          if (v == null) return '';
-          const c = this._scoreColor(v);
-          return `<div class="dimension-row">
-            <div class="dimension-name">${d.replace(/_/g,' ')}</div>
-            <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:${v}%;background:${c}"></div></div>
-            <div class="dimension-val" style="color:${c}">${v}</div>
-          </div>`;
-        }).join('')}
-      </div>
-      <div class="card">
-        <div class="card-label" style="margin-bottom:0.6rem">History</div>
-        ${[...this.results].reverse().map(r => {
-          const { label: l, color: c } = this._scoreLabel(r.score);
-          return `<div class="result-history-item">
-            <div class="result-score-ring" style="border-color:${c};color:${c}">${r.score}</div>
-            <div class="result-info">
-              <div class="result-title">${r.scenarioTitle}</div>
-              <div class="result-meta">${r.domain} · ${r.date}</div>
-            </div>
-            <span class="diff-badge" style="color:${c};border-color:${c}44">${l}</span>
-          </div>`;
-        }).join('')}
-      </div>`;
+    // ── 3. Check-In History ───────────────────────────────────
+    const moodIcons  = { 1:'😔', 2:'😕', 3:'😐', 4:'🙂', 5:'😄' };
+    const moodColors = { 1:'var(--danger)', 2:'#f7b24f', 3:'var(--text-muted)', 4:'var(--success)', 5:'var(--success)' };
+    if (this.checkins.length) {
+      const recent = [...this.checkins].reverse().slice(0, 7);
+      html += `
+        <div class="card" style="margin-bottom:0.8rem">
+          <div class="card-label" style="margin-bottom:0.6rem">Check-In History</div>
+          ${recent.map(c => `
+            <div style="display:flex;align-items:center;gap:0.6rem;padding:0.45rem 0;border-bottom:1px solid var(--border)">
+              <span style="font-size:1rem;flex-shrink:0">${moodIcons[c.mood] || '—'}</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:0.78rem;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                  ${this._escape((c.text || '').slice(0, 65))}${(c.text || '').length > 65 ? '…' : ''}
+                </div>
+                <div style="font-size:0.68rem;color:var(--text-muted)">${c.date}</div>
+              </div>
+              <span style="font-size:0.72rem;color:${moodColors[c.mood] || 'var(--text-muted)'};flex-shrink:0">
+                ${c.moodLabel || ''}
+              </span>
+            </div>`).join('')}
+          ${this.checkins.length < 3 ? `
+            <div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.5rem;text-align:center;padding:0.3rem 0">
+              Complete a few check-ins so IntelliQ can identify patterns.
+            </div>` : ''}
+        </div>`;
+    } else {
+      html += `
+        <div class="empty-card" style="margin-bottom:0.8rem">
+          <div class="empty-icon">💬</div>
+          <div>No check-ins yet. Start from the Check-In tab.</div>
+        </div>`;
+    }
+
+    // ── 4. Assessment / scenario stats ───────────────────────
+    if (!this.results.length) {
+      html += `<div class="empty-card"><div class="empty-icon">📊</div><div>Complete an assessment to see your performance stats.</div></div>`;
+      el.innerHTML = html;
+    } else {
+      const avgScore = Math.round(this.results.reduce((s, r) => s + r.score, 0) / this.results.length);
+      const { label, color } = this._scoreLabel(avgScore);
+      const dims    = ['ethical_reasoning','stakeholder_awareness','pressure_response','self_awareness'];
+      const dimAvgs = dims.map(d => {
+        const vals = this.results.map(r => r.dimensions?.[d]).filter(v => v != null);
+        return vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+      });
+
+      html += `
+        <div class="card" style="text-align:center;margin-bottom:0.8rem">
+          <div style="margin:0 auto 0.8rem;width:100px">${this._svgRing(avgScore, color, 100)}</div>
+          <div style="font-size:0.9rem;font-weight:700;color:${color}">${label}</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">
+            Avg across ${this.results.length} assessment${this.results.length !== 1 ? 's' : ''}
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:0.8rem">
+          <div class="card-label" style="margin-bottom:0.8rem">Dimension Breakdown</div>
+          ${dims.map((d, i) => {
+            const v = dimAvgs[i];
+            if (v == null) return '';
+            const c = this._scoreColor(v);
+            return `<div class="dimension-row">
+              <div class="dimension-name">${d.replace(/_/g,' ')}</div>
+              <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:${v}%;background:${c}"></div></div>
+              <div class="dimension-val" style="color:${c}">${v}</div>
+            </div>`;
+          }).join('')}
+        </div>
+        <div class="card">
+          <div class="card-label" style="margin-bottom:0.6rem">Assessment History</div>
+          ${[...this.results].reverse().map(r => {
+            const { label: l, color: c } = this._scoreLabel(r.score);
+            return `<div class="result-history-item">
+              <div class="result-score-ring" style="border-color:${c};color:${c}">${r.score}</div>
+              <div class="result-info">
+                <div class="result-title">${r.scenarioTitle}</div>
+                <div class="result-meta">${r.domain} · ${r.date}</div>
+              </div>
+              <span class="diff-badge" style="color:${c};border-color:${c}44">${l}</span>
+            </div>`;
+          }).join('')}
+        </div>`;
+
+      el.innerHTML = html;
+    }
+
+    // Insert insight panel into its placeholder slot (can't innerHTML after DOM render)
+    if (insight) {
+      const slot = document.getElementById('stats-insight-slot');
+      if (slot) this._renderInsightPanel(slot, null, insight);
+    }
   },
 
   /* ── TAB SWITCHING ──────────────────────────────────────── */
