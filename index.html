@@ -1579,6 +1579,25 @@
 <script src="js/data.js"></script>
 <script src="js/auth.js"></script>
 <!-- ════════════════════════════════════════════════════════
+     SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
+     Full-screen overlay shown after first org creation / login
+     when organizationProfileComplete !== true.
+     AI suggests — humans approve. Nothing auto-locked.
+     ════════════════════════════════════════════════════════ -->
+<div id="org-setup-overlay" style="display:none">
+  <div class="org-ob-wrap">
+    <div class="org-ob-brand">
+      <div class="org-ob-logo-ring">IQ</div>
+      <div class="org-ob-logo-title">IntelliQ</div>
+      <div class="org-ob-logo-sub">Organisation Setup</div>
+    </div>
+    <div id="org-ob-body" class="org-ob-body">
+      <!-- Rendered dynamically by _orgObRender() -->
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
      MEMBER ONBOARDING FLOW
      Full-screen overlay shown after first login when profileComplete !== true.
      Generic — no industry-specific language.

@@ -101,6 +101,13 @@ const MemberApp = {
   },
 
   _afterAuth() {
+    // If the new onboarding flow already completed, skip the legacy goals intake screen.
+    // profileComplete is set by /api/auth/complete-profile and persisted in Auth.currentUser.
+    if (Auth.currentUser?.profileComplete === true) {
+      this._showMain();
+      this.loadPending();
+      return;
+    }
     if (!this.goals) {
       this._showScreen('screen-goals');
     } else {

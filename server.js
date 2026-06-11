@@ -934,6 +934,113 @@ app.post('/api/auth/complete-profile', requireAuth, (req, res) => {
   res.json({ ok: true, user: { ...user, passwordHash: undefined } });
 });
 
+/* ── Complete organisation profile (SuperAdmin Layer 1 onboarding) ─────── *
+ *  POST /api/auth/complete-org-profile                                       *
+ *  Requires SuperAdmin. Saves org profile, sets organizationProfileComplete. *
+ * ─────────────────────────────────────────────────────────────────────────── */
+app.post('/api/auth/complete-org-profile', requireAuth, (req, res) => {
+  const code   = req.iqSession.orgCode;
+  const userId = req.iqSession.userId;
+  const user   = orgUsers[code]?.[userId];
+  const org    = orgMeta[code];
+
+  if (!org)  return res.status(404).json({ error: 'Organisation not found' });
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (user.role !== 'superadmin') return res.status(403).json({ error: 'Only Super Admins can complete the organisation profile' });
+
+  const {
+    description       = '',
+    values            = [],
+    goals             = [],
+    successDefinition = '',
+    behaviours        = [],
+    metrics           = [],
+  } = req.body;
+
+  // Save org profile — fully human-approved, nothing auto-locked
+  org.organizationProfile = {
+    description,
+    values:            Array.isArray(values)      ? values      : [],
+    goals:             Array.isArray(goals)        ? goals        : [],
+    successDefinition,
+    behaviours:        Array.isArray(behaviours)   ? behaviours   : [],
+    metrics:           Array.isArray(metrics)      ? metrics      : [],
+    setAt: new Date().toISOString(),
+    setBy: userId,
+  };
+  org.organizationProfileComplete = true;
+
+  scheduleSave();
+  res.json({ ok: true, org: { ...org } });
+});
+
+/* ── AI suggestions for org setup wizard ─────────────────────────────────── *
+ *  POST /api/org-setup/suggest                                                *
+ *  Body: { description, orgName }                                             *
+ *  Returns: { values[], goals[], successDefinition, behaviours[], metrics[] } *
+ * ─────────────────────────────────────────────────────────────────────────── */
+app.post('/api/org-setup/suggest', requireAuth, async (req, res) => {
+  const { description = '', orgName = '' } = req.body;
+  if (!description || description.trim().length < 10) {
+    return res.status(400).json({ error: 'Organisation description is required.' });
+  }
+
+  const systemPrompt = `You are an organisational intelligence assistant helping a Super Admin set up their IntelliQ platform.
+Your job is to analyse the organisation description and suggest appropriate values, goals, success criteria, expected behaviours, and metrics.
+Keep suggestions professional, generic (not sports-specific or school-specific unless the description says so), actionable, and concise.
+Return ONLY valid JSON — no markdown, no explanation, no extra text.`;
+
+  const userPrompt = `Organisation name: ${orgName || 'Not specified'}
+Description: ${description.trim()}
+
+Based on this, suggest:
+- 4-6 core organisational VALUES (single words or short phrases)
+- 3-5 primary GOALS for the organisation (action-oriented sentences)
+- A SUCCESS DEFINITION (1-2 sentences describing what success looks like)
+- 4-6 expected BEHAVIOURS from members (short phrases)
+- 4-6 HEALTH METRICS to track (short metric names like "Engagement Score")
+
+Return exactly this JSON shape:
+{
+  "values": ["...", "..."],
+  "goals": ["...", "..."],
+  "successDefinition": "...",
+  "behaviours": ["...", "..."],
+  "metrics": ["...", "..."]
+}`;
+
+  try {
+    const response = await client.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 800,
+      system:     systemPrompt,
+      messages:   [{ role: 'user', content: userPrompt }],
+    });
+
+    const raw = response.content?.[0]?.text || '{}';
+    let parsed;
+    try {
+      // Strip any accidental markdown fences
+      const cleaned = raw.replace(/^```json?\s*/i, '').replace(/```\s*$/i, '').trim();
+      parsed = JSON.parse(cleaned);
+    } catch(e) {
+      console.error('[org-setup/suggest] JSON parse failed:', raw);
+      return res.status(500).json({ error: 'AI returned malformed data — please try again or fill in manually.' });
+    }
+
+    res.json({
+      values:            Array.isArray(parsed.values)      ? parsed.values      : [],
+      goals:             Array.isArray(parsed.goals)        ? parsed.goals        : [],
+      successDefinition: typeof parsed.successDefinition === 'string' ? parsed.successDefinition : '',
+      behaviours:        Array.isArray(parsed.behaviours)   ? parsed.behaviours   : [],
+      metrics:           Array.isArray(parsed.metrics)      ? parsed.metrics      : [],
+    });
+  } catch(err) {
+    console.error('[org-setup/suggest] Anthropic error:', err.message);
+    res.status(500).json({ error: 'AI service unavailable — please fill in the fields manually.' });
+  }
+});
+
 /* ── Set member password (first-login flow) ─────────────────────────────── */
 app.post('/api/auth/set-password', async (req, res) => {
   const { orgCode, userId, currentPassword, newPassword } = req.body;

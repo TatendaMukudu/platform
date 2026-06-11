@@ -286,15 +286,37 @@ async function _obSubmitProfile() {
     console.warn('[onboarding] Profile save failed (non-fatal):', e.message);
   }
 
+  // Belt-and-suspenders: set localStorage goals so MemberApp._afterAuth()
+  // routes to _showMain() even if profileComplete check ever misses.
+  try {
+    const userId = Auth.currentUser?.id;
+    if (userId) {
+      const goalsPayload = {
+        goal:     _ob.answers.mainGoals    || '',
+        identity: _ob.answers.longTermGoals || '',
+        setAt:    new Date().toISOString(),
+      };
+      localStorage.setItem(`iq_goals_${userId}`, JSON.stringify(goalsPayload));
+    }
+  } catch(e) { /* localStorage unavailable — not fatal */ }
+
   // Hide onboarding and continue to app
   document.getElementById('onboarding-overlay').style.display = 'none';
   _obAfterComplete();
 }
 
-/* ── Route after onboarding completes ────────────────────────────────────── */
+/* ── Route after personal onboarding completes ───────────────────────────── */
 function _obAfterComplete() {
   showToast('Welcome! Your profile is set up.', 'success');
-  launchMemberView();
+  // SuperAdmins get routed to the admin dashboard after completing personal onboarding.
+  // Everyone else (members, coaches) goes to the member view.
+  if (Auth.currentUser?.role === 'superadmin') {
+    launchApp();
+    loadRealOrgData();
+    _checkCoachDailyCheckin();
+  } else {
+    launchMemberView();
+  }
 }
 
 /* ── Helper: HTML-escape for inline onclick values ───────────────────────── */
@@ -305,6 +327,247 @@ function _escHtml(s) {
 /* ── Check whether onboarding is needed ─────────────────────────────────── */
 function _needsOnboarding() {
   return Auth.currentUser?.profileComplete !== true;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SUPER ADMIN — ORG SETUP WIZARD (Layer 1 of 2)
+
+   Flow:
+     Phase "describe" — Super Admin types org description, hits Generate.
+     Phase "loading"  — AI suggestion call in progress.
+     Phase "review"   — All AI-suggested values/goals/success/behaviours/metrics
+                        shown as editable tag lists. SuperAdmin reviews, edits,
+                        adds, removes freely before approving.
+     Phase "saving"   — POST /api/auth/complete-org-profile
+
+   Principle: AI suggests. Humans approve.
+   Nothing is locked. Every field is fully editable before submit.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const _orgOb = {
+  phase: 'describe',  // 'describe' | 'loading' | 'review' | 'saving'
+  description: '',
+  suggestions: {
+    values:            [],
+    goals:             [],
+    successDefinition: '',
+    behaviours:        [],
+    metrics:           [],
+  },
+};
+
+/* ── Entry point ──────────────────────────────────────────────────────────── */
+function showOrgSetupWizard(prefillDescription = '') {
+  _orgOb.phase       = 'describe';
+  _orgOb.description = prefillDescription;
+  _orgOb.suggestions = { values: [], goals: [], successDefinition: '', behaviours: [], metrics: [] };
+
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app').style.display          = 'none';
+
+  const ov = document.getElementById('org-setup-overlay');
+  if (ov) ov.style.display = 'flex';
+
+  _orgObRender();
+}
+
+/* ── Render current phase ─────────────────────────────────────────────────── */
+function _orgObRender() {
+  const body = document.getElementById('org-ob-body');
+  if (!body) return;
+
+  if (_orgOb.phase === 'describe') {
+    body.innerHTML = `
+      <div class="org-ob-phase-title">Step 1 of 2 &mdash; Describe your organisation</div>
+      <p class="org-ob-hint">Tell us what your organisation does, who your members are, and what you are trying to achieve. This takes about 30 seconds and helps IntelliQ set up everything for you.</p>
+      <textarea id="org-ob-desc" class="org-ob-textarea" rows="5"
+        placeholder="e.g. We are a professional development programme for emerging leaders in the financial sector. Our members are high-potential employees at mid-career stage. We want to accelerate their growth, build accountability habits, and prepare them for senior roles within two years."
+      >${_escHtml(_orgOb.description)}</textarea>
+      <div id="org-ob-desc-error" style="color:var(--danger);font-size:0.8rem;margin-top:0.4rem;display:none"></div>
+      <button class="org-ob-btn-primary" onclick="_orgObRequestSuggestions()">Generate AI Suggestions &rarr;</button>
+      <p class="org-ob-skip-note">Already know what you want? <a href="#" onclick="_orgObSkipToReview();return false;">Skip AI suggestions</a></p>`;
+
+  } else if (_orgOb.phase === 'loading') {
+    body.innerHTML = `
+      <div class="org-ob-loading">
+        <div class="org-ob-spinner"></div>
+        <div class="org-ob-loading-text">Analysing your organisation&hellip;</div>
+        <div class="org-ob-loading-sub">IntelliQ is generating suggested values, goals, success criteria, and metrics. This takes about 10 seconds.</div>
+      </div>`;
+
+  } else if (_orgOb.phase === 'review') {
+    const s = _orgOb.suggestions;
+    body.innerHTML = `
+      <div class="org-ob-phase-title">Step 2 of 2 &mdash; Review &amp; Approve</div>
+      <div class="org-ob-review-note">
+        <strong>AI suggests. You decide.</strong> Change anything before approving — add, remove, or rename any item. Nothing is locked.
+      </div>
+
+      ${_orgObSection('values',     'Core Values',          s.values,      'tag',      'e.g. Integrity')}
+      ${_orgObSection('goals',      'Organisation Goals',   s.goals,       'tag',      'e.g. Improve team performance')}
+      <div class="org-ob-section">
+        <div class="org-ob-section-label">Success Definition</div>
+        <div class="org-ob-section-hint">How will you know the organisation is succeeding?</div>
+        <textarea id="org-ob-success" class="org-ob-textarea org-ob-textarea-sm" rows="3"
+          oninput="_orgOb.suggestions.successDefinition=this.value"
+        >${_escHtml(s.successDefinition)}</textarea>
+      </div>
+      ${_orgObSection('behaviours', 'Expected Behaviours',  s.behaviours,  'tag',      'e.g. Show up prepared')}
+      ${_orgObSection('metrics',    'Health Metrics',       s.metrics,     'tag',      'e.g. Engagement Score')}
+
+      <div id="org-ob-save-error" style="color:var(--danger);font-size:0.8rem;margin-bottom:0.6rem;display:none"></div>
+      <button class="org-ob-btn-primary" id="org-ob-approve-btn" onclick="_orgObSubmit()">Approve &amp; Continue &rarr;</button>`;
+
+  } else if (_orgOb.phase === 'saving') {
+    body.innerHTML = `
+      <div class="org-ob-loading">
+        <div class="org-ob-spinner"></div>
+        <div class="org-ob-loading-text">Saving your organisation profile&hellip;</div>
+      </div>`;
+  }
+}
+
+/* ── Build one editable tag section ─────────────────────────────────────── */
+function _orgObSection(key, label, items, _type, placeholder) {
+  const tags = (Array.isArray(items) ? items : []).map((item, i) =>
+    `<span class="org-ob-tag" id="org-ob-tag-${key}-${i}">
+       ${_escHtml(item)}
+       <button class="org-ob-tag-remove" onclick="_orgObRemoveItem('${key}',${i})" title="Remove">&times;</button>
+     </span>`
+  ).join('');
+  return `
+    <div class="org-ob-section">
+      <div class="org-ob-section-label">${label}</div>
+      <div class="org-ob-tag-row" id="org-ob-tags-${key}">${tags}</div>
+      <div class="org-ob-add-row">
+        <input class="org-ob-add-input" id="org-ob-add-${key}" type="text"
+          placeholder="${placeholder}"
+          onkeydown="if(event.key==='Enter'){_orgObAddItem('${key}');event.preventDefault();}">
+        <button class="org-ob-add-btn" onclick="_orgObAddItem('${key}')">+ Add</button>
+      </div>
+    </div>`;
+}
+
+/* ── Add / remove tag items ──────────────────────────────────────────────── */
+function _orgObAddItem(key) {
+  const inp = document.getElementById(`org-ob-add-${key}`);
+  const val = (inp?.value || '').trim();
+  if (!val) return;
+  if (!Array.isArray(_orgOb.suggestions[key])) _orgOb.suggestions[key] = [];
+  _orgOb.suggestions[key].push(val);
+  inp.value = '';
+  _orgObRender(); // re-render review phase
+}
+
+function _orgObRemoveItem(key, index) {
+  if (Array.isArray(_orgOb.suggestions[key])) {
+    _orgOb.suggestions[key].splice(index, 1);
+  }
+  _orgObRender();
+}
+
+/* ── Request AI suggestions ──────────────────────────────────────────────── */
+async function _orgObRequestSuggestions() {
+  const desc = (document.getElementById('org-ob-desc')?.value || '').trim();
+  const errEl = document.getElementById('org-ob-desc-error');
+
+  if (!desc || desc.length < 20) {
+    if (errEl) { errEl.textContent = 'Please describe your organisation in at least a sentence or two.'; errEl.style.display = 'block'; }
+    return;
+  }
+
+  _orgOb.description = desc;
+  _orgOb.phase = 'loading';
+  _orgObRender();
+
+  try {
+    const res  = await fetch('/api/org-setup/suggest', {
+      method:  'POST',
+      headers: Auth._headers(),
+      body:    JSON.stringify({ description: desc, orgName: Auth.currentOrg?.orgName || '' }),
+    });
+    const data = await res.json();
+
+    if (!res.ok || data.error) throw new Error(data.error || 'AI suggestion failed');
+
+    _orgOb.suggestions = {
+      values:            Array.isArray(data.values)      ? data.values      : [],
+      goals:             Array.isArray(data.goals)        ? data.goals        : [],
+      successDefinition: typeof data.successDefinition === 'string' ? data.successDefinition : '',
+      behaviours:        Array.isArray(data.behaviours)   ? data.behaviours   : [],
+      metrics:           Array.isArray(data.metrics)      ? data.metrics      : [],
+    };
+    _orgOb.phase = 'review';
+  } catch(e) {
+    console.warn('[orgSetup] AI suggestion failed:', e.message);
+    // Fall through to review with empty lists so admin can still fill manually
+    _orgOb.suggestions = { values: [], goals: [], successDefinition: '', behaviours: [], metrics: [] };
+    _orgOb.phase = 'review';
+    showToast('AI suggestions unavailable — fill in the fields manually.', 'warning');
+  }
+  _orgObRender();
+}
+
+/* ── Skip AI, go straight to blank review ────────────────────────────────── */
+function _orgObSkipToReview() {
+  const desc = (document.getElementById('org-ob-desc')?.value || '').trim();
+  _orgOb.description = desc;
+  _orgOb.suggestions = { values: [], goals: [], successDefinition: '', behaviours: [], metrics: [] };
+  _orgOb.phase = 'review';
+  _orgObRender();
+}
+
+/* ── Submit approved org profile ─────────────────────────────────────────── */
+async function _orgObSubmit() {
+  // Sync success definition from textarea (may not have fired oninput)
+  const successEl = document.getElementById('org-ob-success');
+  if (successEl) _orgOb.suggestions.successDefinition = successEl.value;
+
+  const errEl = document.getElementById('org-ob-save-error');
+  const btn   = document.getElementById('org-ob-approve-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+  _orgOb.phase = 'saving';
+  _orgObRender();
+
+  try {
+    const res  = await fetch('/api/auth/complete-org-profile', {
+      method:  'POST',
+      headers: Auth._headers(),
+      body:    JSON.stringify({
+        description:       _orgOb.description,
+        values:            _orgOb.suggestions.values,
+        goals:             _orgOb.suggestions.goals,
+        successDefinition: _orgOb.suggestions.successDefinition,
+        behaviours:        _orgOb.suggestions.behaviours,
+        metrics:           _orgOb.suggestions.metrics,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Could not save organisation profile');
+
+    // Update local org state so organizationProfileComplete is reflected
+    Auth.currentOrg = { ...Auth.currentOrg, organizationProfileComplete: true };
+    Auth.save();
+
+    // Hide org setup overlay, proceed to personal onboarding (Layer 2)
+    const ov = document.getElementById('org-setup-overlay');
+    if (ov) ov.style.display = 'none';
+
+    showToast('Organisation profile saved!', 'success');
+    // Now run personal onboarding (7 steps) — Layer 2
+    showOnboardingFlow();
+
+  } catch(e) {
+    console.error('[orgSetup] Submit failed:', e.message);
+    // Go back to review screen so admin isn't stuck
+    _orgOb.phase = 'review';
+    _orgObRender();
+    const newErrEl = document.getElementById('org-ob-save-error');
+    if (newErrEl) { newErrEl.textContent = e.message || 'Save failed — please try again.'; newErrEl.style.display = 'block'; }
+    const newBtn = document.getElementById('org-ob-approve-btn');
+    if (newBtn) { newBtn.disabled = false; newBtn.textContent = 'Approve & Continue →'; }
+  }
 }
 
 /* ── NAVIGATION ──────────────────────────────────────────── */
@@ -380,6 +643,13 @@ function initLogin() {
       launchMemberView();
       return;
     }
+    // SuperAdmin: check org setup first, then personal profile
+    if (Auth.currentUser?.role === 'superadmin') {
+      if (Auth.currentOrg?.organizationProfileComplete !== true) {
+        showOrgSetupWizard(); return;
+      }
+      if (_needsOnboarding()) { showOnboardingFlow(); return; }
+    }
     launchApp();
     loadRealOrgData();
     _checkCoachDailyCheckin();
@@ -414,6 +684,13 @@ async function handleLogin() {
       if (_needsOnboarding()) { showOnboardingFlow(); return; }
       launchMemberView();
       return;
+    }
+    // SuperAdmin: check org setup first, then personal profile
+    if (Auth.currentUser?.role === 'superadmin') {
+      if (Auth.currentOrg?.organizationProfileComplete !== true) {
+        showOrgSetupWizard(); return;
+      }
+      if (_needsOnboarding()) { showOnboardingFlow(); return; }
     }
     launchApp();
     loadRealOrgData();
@@ -461,14 +738,9 @@ async function handleSetup() {
     AppState.orgDescription = description;
 
     showToast(`Organisation created! Welcome, ${firstName}.`, 'success');
-    launchApp();
-    loadRealOrgData();
-
-    if (description) {
-      _analyseOrgDescription(description, orgName, data.orgCode);
-    } else {
-      _checkCoachDailyCheckin();
-    }
+    // New SuperAdmins go through the org setup wizard before entering the dashboard.
+    // Pass description so the wizard can pre-populate Phase 1 and skip manual typing.
+    showOrgSetupWizard(description || '');
   } catch(e) {
     errEl.textContent   = e.message || 'Setup failed.';
     errEl.style.display = 'block';
@@ -699,12 +971,43 @@ async function submitCoachCheckin() {
 /* ── MEMBER VIEW — unified shell inside main app ────────────────────────── */
 function launchMemberView() {
   document.getElementById('login-screen').style.display = 'none';
+  // Safety: always hide onboarding overlay before showing member shell
+  const ob = document.getElementById('onboarding-overlay');
+  if (ob) ob.style.display = 'none';
+
   const shell = document.getElementById('member-shell');
   if (shell) {
     shell.style.display = 'flex';
     shell.classList.add('visible');
   }
-  if (typeof MemberApp !== 'undefined') MemberApp.init();
+
+  if (typeof MemberApp !== 'undefined') {
+    try {
+      MemberApp.init();
+    } catch(err) {
+      console.error('[launchMemberView] MemberApp.init() threw:', err);
+      // Never leave the user with a blank screen
+      if (shell) {
+        shell.innerHTML = `
+          <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
+                      height:100vh;padding:2rem;text-align:center;gap:1.2rem">
+            <div style="font-size:2rem">⚠️</div>
+            <div style="font-weight:600;font-size:1.1rem">Something went wrong loading your dashboard.</div>
+            <div style="color:#888;font-size:0.85rem">This is usually a temporary issue. Try refreshing the page.</div>
+            <div style="display:flex;gap:0.8rem;margin-top:0.5rem">
+              <button onclick="location.reload()"
+                style="padding:0.6rem 1.4rem;border-radius:8px;background:#0066ff;color:#fff;border:none;cursor:pointer;font-size:0.9rem">
+                Retry
+              </button>
+              <button onclick="Auth.logout();location.reload()"
+                style="padding:0.6rem 1.4rem;border-radius:8px;background:#eee;color:#333;border:none;cursor:pointer;font-size:0.9rem">
+                Log out
+              </button>
+            </div>
+          </div>`;
+      }
+    }
+  }
 }
 
 /* ── Load real org data from server and populate AppState ─────────────── */
