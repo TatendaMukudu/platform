@@ -514,3 +514,32 @@
 .iq-signal-icon  { font-size: 1.1rem; flex-shrink: 0; }
 .iq-signal-label { font-size: 0.82rem; font-weight: 700; color: var(--text-primary); }
 .iq-signal-sub   { font-size: 0.65rem; color: var(--text-muted); margin-top: 1px; }
+
+/* ── Weekly reflection — desktop responsive layout ────────── */
+/* On mobile the content fills the full narrow screen (default).
+   On desktop we centre a readable column so it doesn't stretch
+   across the full viewport like a broken mobile layout.        */
+@media (min-width: 768px) {
+  /* The scrollable body gets a centred max-width column */
+  #weekly-scroll-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1.5rem 2rem !important;
+  }
+  #weekly-scroll-body > .card,
+  #weekly-scroll-body > #weekly-ai-response {
+    width: 100%;
+    max-width: 640px;
+  }
+  /* Tighten up the scenario header on desktop too */
+  #screen-weekly .scenario-header {
+    max-width: 640px;
+    margin: 0 auto;
+    width: 100%;
+    border-bottom: none;
+  }
+  #screen-weekly {
+    background: var(--bg);
+  }
+}

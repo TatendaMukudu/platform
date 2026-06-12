@@ -697,8 +697,14 @@ const MemberApp = {
   },
 
   exitWeekly() {
-    this._showScreen('screen-main');
-    this._renderHome();
+    // Close any open overlay and return to the workspace home page.
+    // _showScreen('screen-main') used to early-return without doing anything,
+    // so the overlay stayed visible. We close it explicitly here, then use
+    // navigate() so the topbar title and sidebar nav highlight also update.
+    document.querySelectorAll('.member-fullscreen-overlay')
+      .forEach(s => s.classList.remove('active'));
+    if (typeof navigate === 'function') navigate('home');
+    else this._renderHome();
   },
 
   /* ── SCENARIOS ──────────────────────────────────────────── */
@@ -1038,8 +1044,31 @@ const MemberApp = {
   },
 
   /* ── Phase 4: render structured insight into a container ─── */
+  // Convert third-person references to the member's own name into second-person
+  // so the member sees "Your mood improved" rather than "Tyler's mood improved".
+  _personalizeInsight(text) {
+    if (!text) return text;
+    const first = (this._name || '').split(' ')[0].trim();
+    if (!first || first.length < 2) return text;
+    // Escape any regex-special chars in the name (rare but safe)
+    const esc = first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Possessive: "[Name]'s" → "your" / "Your" depending on position
+    text = text.replace(
+      new RegExp(`((?:^|[.!?]\\s+))${esc}'s\\b|(\\s)${esc}'s\\b`, 'gi'),
+      (m, sentStart, wordSpace) => sentStart ? sentStart + 'Your' : (wordSpace || '') + 'your'
+    );
+    // Plain name: "[Name]" → "you" / "You" depending on position
+    text = text.replace(
+      new RegExp(`((?:^|[.!?]\\s+))${esc}\\b|(\\s)${esc}\\b`, 'gi'),
+      (m, sentStart, wordSpace) => sentStart ? sentStart + 'You' : (wordSpace || '') + 'you'
+    );
+    return text;
+  },
+
   _renderInsightPanel(containerEl, _legacyTextEl, insight) {
     if (!containerEl || !insight) return;
+    // Personalize all text fields so the member reads "your" instead of "[Name]'s"
+    const p = t => this._escape(this._personalizeInsight(t) || '');
     containerEl.style.display = 'block';
     containerEl.innerHTML = `
       <div class="iq-insight-card">
@@ -1047,27 +1076,27 @@ const MemberApp = {
           <div class="iq-badge-circle">IQ</div>
           <div class="iq-insight-meta">IntelliQ${insight._date ? ` · ${insight._date}` : ''}</div>
         </div>
-        <div class="iq-insight-summary">${this._escape(insight.summary || '')}</div>
+        <div class="iq-insight-summary">${p(insight.summary)}</div>
         ${insight.whatIntelliQNoticed ? `
           <div class="iq-insight-detail noticed">
-            ${this._escape(insight.whatIntelliQNoticed)}
+            ${p(insight.whatIntelliQNoticed)}
           </div>` : ''}
         ${insight.suggestedNextAction ? `
           <div class="iq-insight-action">
             <span class="iq-action-icon">👉</span>
-            <span>${this._escape(insight.suggestedNextAction)}</span>
+            <span>${p(insight.suggestedNextAction)}</span>
           </div>` : ''}
         ${insight.goalConnection ? `
           <div class="iq-insight-detail goal-line">
-            <span style="margin-right:0.35rem">🎯</span>${this._escape(insight.goalConnection)}
+            <span style="margin-right:0.35rem">🎯</span>${p(insight.goalConnection)}
           </div>` : ''}
         ${insight.encouragement ? `
           <div class="iq-insight-detail encourage-line">
-            ${this._escape(insight.encouragement)}
+            ${p(insight.encouragement)}
           </div>` : ''}
         ${insight.watchOutFor ? `
           <div class="iq-insight-detail watch-line">
-            <span style="margin-right:0.35rem">⚠️</span>${this._escape(insight.watchOutFor)}
+            <span style="margin-right:0.35rem">⚠️</span>${p(insight.watchOutFor)}
           </div>` : ''}
       </div>`;
   },
