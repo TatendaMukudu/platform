@@ -269,6 +269,16 @@ async function _obSubmitProfile() {
   const nextBtn = document.getElementById('ob-next-btn');
   if (nextBtn) { nextBtn.disabled = true; nextBtn.textContent = 'Saving…'; }
 
+  // Mark complete locally IMMEDIATELY — before any async call.
+  // This ensures the current session always routes past onboarding even if
+  // the server call below fails (e.g. 401 from a server restart mid-session).
+  const _obUserId = Auth.currentUser?.id;
+  Auth.currentUser = { ...Auth.currentUser, profileComplete: true };
+  Auth.save();
+  // Durable flag that survives logout — used by handleLogin() repair logic
+  // so the server record can be re-synced on the next email+password login.
+  if (_obUserId) localStorage.setItem(`iq_profile_complete_${_obUserId}`, '1');
+
   try {
     const res = await fetch('/api/auth/complete-profile', {
       method:  'POST',
@@ -277,28 +287,23 @@ async function _obSubmitProfile() {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Could not save profile');
-
-    // Update local auth state so profileComplete is reflected
-    if (data.user) {
-      Auth.currentUser = { ...Auth.currentUser, profileComplete: true };
-      Auth.save();
-    }
+    // Server confirmed — client already up to date
   } catch(e) {
-    // Non-fatal — proceed anyway so the user is not stuck
-    console.warn('[onboarding] Profile save failed (non-fatal):', e.message);
+    // API call failed (most commonly: server restarted → 401 → token gone).
+    // Client is already correct (profileComplete: true set above).
+    // handleLogin() will repair the server record automatically on next login.
+    console.warn('[onboarding] Profile save to server failed — will repair on next login:', e.message);
   }
 
-  // Belt-and-suspenders: set localStorage goals so MemberApp._afterAuth()
-  // routes to _showMain() even if profileComplete check ever misses.
+  // Belt-and-suspenders: persist goals to localStorage for MemberApp._afterAuth()
   try {
-    const userId = Auth.currentUser?.id;
-    if (userId) {
+    if (_obUserId) {
       const goalsPayload = {
         goal:     _ob.answers.mainGoals    || '',
         identity: _ob.answers.longTermGoals || '',
         setAt:    new Date().toISOString(),
       };
-      localStorage.setItem(`iq_goals_${userId}`, JSON.stringify(goalsPayload));
+      localStorage.setItem(`iq_goals_${_obUserId}`, JSON.stringify(goalsPayload));
     }
   } catch(e) { /* localStorage unavailable — not fatal */ }
 
@@ -581,6 +586,8 @@ function navigate(page){
   const pg = document.getElementById('page-'+page);
   if(pg) pg.classList.add('active');
   document.querySelectorAll(`.nav-item[data-page="${page}"]`).forEach(n=>n.classList.add('active'));
+  // Close mobile sidebar drawer on navigation
+  document.getElementById('sidebar')?.classList.remove('open');
   AppState.currentPage = page;
   document.querySelector('.topbar-title').textContent = PAGE_TITLES[page] || 'Platform';
 
@@ -651,6 +658,19 @@ function initLogin() {
     console.log('[ROUTE] session restore — role:', Auth.currentUser?.role, '| profileComplete:', Auth.currentUser?.profileComplete, '| orgComplete:', Auth.currentOrg?.organizationProfileComplete);
 
     if (Auth.isMember()) {
+      // Repair: if the server lost profileComplete (server restart after onboarding),
+      // the cached localStorage value may already be true — trust it.
+      // If not, check for the durable iq_profile_complete_ flag written by
+      // _obSubmitProfile(). If found, fix locally; server is re-synced on the
+      // next email+password login via handleLogin().
+      if (_needsOnboarding()) {
+        const _uid = Auth.currentUser?.id;
+        if (_uid && localStorage.getItem(`iq_profile_complete_${_uid}`)) {
+          Auth.currentUser = { ...Auth.currentUser, profileComplete: true };
+          Auth.save();
+          console.log('[ROUTE] session restore — profileComplete repaired from local flag');
+        }
+      }
       console.log('[ROUTE] needs onboarding?', _needsOnboarding());
       if (_needsOnboarding()) { showOnboardingFlow(); return; }
       console.log('[ROUTE] launching member view');
@@ -693,6 +713,11 @@ async function handleLogin() {
 
   try {
     const { org } = await Auth.login(email, password);
+
+    // Refresh permissions and profile state from server — must be awaited so the
+    // routing decision below uses authoritative data, not just the login response.
+    try { await Auth.getMe(); } catch(e) { /* use login-response data if getMe fails */ }
+
     const mode  = org?.orgMode || 'workplace';
     const user  = Auth.currentUser;
     AppState.init(mode, org?.orgName || '', user?.name || '', 'A');
@@ -701,6 +726,33 @@ async function handleLogin() {
 
     if (Auth.isMember()) {
       console.log('[ROUTE] needs onboarding?', _needsOnboarding());
+      // Repair: server lost profileComplete (server restarted after member's onboarding).
+      // Check for the durable local flag written by _obSubmitProfile() — it survives logout.
+      if (_needsOnboarding()) {
+        const _uid = Auth.currentUser?.id;
+        if (_uid && localStorage.getItem(`iq_profile_complete_${_uid}`)) {
+          console.log('[ROUTE] repairing profileComplete on server (lost on server restart)');
+          try {
+            const _r = await fetch('/api/auth/complete-profile', {
+              method: 'POST', headers: Auth._headers(), body: JSON.stringify({}),
+            });
+            const _d = await _r.json();
+            if (_d.ok) {
+              Auth.currentUser = { ...Auth.currentUser, profileComplete: true };
+              Auth.save();
+              console.log('[ROUTE] profileComplete repaired on server');
+            } else {
+              throw new Error(_d.error || 'repair rejected');
+            }
+          } catch(e) {
+            // Repair call failed — fix locally so at least this session works.
+            // Will retry on next login.
+            Auth.currentUser = { ...Auth.currentUser, profileComplete: true };
+            Auth.save();
+            console.warn('[ROUTE] server repair failed — set locally:', e.message);
+          }
+        }
+      }
       if (_needsOnboarding()) { showOnboardingFlow(); return; }
       console.log('[ROUTE] launching member view');
       launchMemberView();
@@ -776,6 +828,21 @@ async function handleSetup() {
 // Called on page load when ?invite=TOKEN is present in the URL.
 // Validates the token server-side, then shows the registration panel.
 async function _handleInviteOnBoot(token) {
+  // If a user is already signed in, warn them rather than silently breaking.
+  if (Auth.init()) {
+    document.getElementById('login-screen').style.display = 'flex';
+    document.getElementById('app').style.display          = 'none';
+    showLoginPanel('login');
+    const errEl = document.getElementById('login-error');
+    if (errEl) {
+      errEl.textContent = `You're already signed in as ${Auth.currentUser?.name || Auth.currentUser?.email || 'another account'}. Sign out first to use this invite link.`;
+      errEl.style.display = 'block';
+    }
+    // Strip the invite token from the URL so a reload goes to normal login
+    window.history.replaceState({}, '', window.location.pathname);
+    return;
+  }
+
   // Keep token in memory for the register submit
   window._pendingInviteToken = token;
 
@@ -1122,13 +1189,16 @@ async function loadRealOrgData() {
 
     // Re-render pages that are currently visible
     const page = AppState.currentPage;
-    if (page === 'dashboard')  renderDashboard();
-    if (page === 'members')    renderMembers();
-    if (page === 'analytics')  renderAnalytics();
-    if (page === 'reports')    renderReports();
-    if (page === 'intelliq')   renderIntelliQ();
-    if (page === 'people')     renderPeople();
-    if (page === 'alerts')     renderAlerts();
+    if (page === 'dashboard')    renderDashboard();
+    if (page === 'members')      renderMembers();
+    if (page === 'analytics')    renderAnalytics();
+    if (page === 'reports')      renderReports();
+    if (page === 'intelliq')     renderIntelliQ();
+    if (page === 'people')       renderPeople();
+    if (page === 'alerts')       renderAlerts();
+    if (page === 'myteam')       renderMyTeam();
+    if (page === 'assignments')  renderAssignments();
+    if (page === 'teaminsights') renderTeamInsights();
     updateAlertBadge();
   } catch(e) {
     console.warn('loadRealOrgData failed:', e.message);
@@ -1438,6 +1508,24 @@ function toggleAdminAccountMenu() {
       const btn = document.getElementById('topbar-avatar-btn');
       if (!btn?.contains(e.target) && !menu.contains(e.target)) {
         menu.classList.remove('open');
+        document.removeEventListener('click', close);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', close), 10);
+  }
+}
+
+/* ── Mobile sidebar toggle ───────────────────────────────────────────── */
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar) return;
+  const opening = !sidebar.classList.contains('open');
+  sidebar.classList.toggle('open', opening);
+  if (opening) {
+    // Close when clicking outside
+    const close = (e) => {
+      if (!sidebar.contains(e.target) && e.target.id !== 'topbar-hamburger') {
+        sidebar.classList.remove('open');
         document.removeEventListener('click', close);
       }
     };
@@ -2709,15 +2797,14 @@ function attachAlertEmbed() {
 }
 
 async function draftAlertScenario() {
-  const brief    = (document.getElementById('acm-brief')?.value || '').trim();
-  const memberId = parseInt(document.getElementById('acm-member')?.value) || null;
-  if (!brief)    { showToast('Write a brief first', 'warning'); return; }
-  if (!memberId) { showToast('Select a member', 'warning'); return; }
+  const brief  = (document.getElementById('acm-brief')?.value || '').trim();
+  const member = getSelectedMemberFromSelect('acm-member');
+  if (!brief)   { showToast('Write a brief first', 'warning'); return; }
+  if (!member)  { showToast('Select a member', 'warning'); return; }
 
+  const memberId = member.id;
   const btn = document.getElementById('acm-draft-btn');
   if (btn) { btn.textContent = '✦ Drafting…'; btn.disabled = true; }
-
-  const member = AppState.getMember(memberId);
 
   // Build image payload if attachment is image/pdf
   let imagePayload = null;
@@ -2774,8 +2861,9 @@ function approveAlertDraft() {
   const title    = (document.getElementById('acm-draft-title')?.value   || '').trim();
   const opening  = (document.getElementById('acm-draft-opening')?.value || '').trim();
   const brief    = (document.getElementById('acm-brief')?.value         || '').trim();
-  const memberId = parseInt(document.getElementById('acm-member')?.value) || null;
-  const probes   = [...document.querySelectorAll('.acm-probe-input')].map(i => i.value.trim()).filter(Boolean);
+  const _alertMember = getSelectedMemberFromSelect('acm-member');
+  const memberId     = _alertMember?.id || null;
+  const probes       = [...document.querySelectorAll('.acm-probe-input')].map(i => i.value.trim()).filter(Boolean);
 
   if (!title || !opening || !memberId) { showToast('Fill in title, opening, and member', 'warning'); return; }
 
@@ -4154,17 +4242,54 @@ function selectDifficulty(diff) {
   });
 }
 
-async function draftScenario() {
-  const brief    = (document.getElementById('sc-brief')?.value || '').trim();
-  const memberId = parseInt(document.getElementById('sc-member')?.value) || null;
+/* ── Member-select helper ────────────────────────────────────────────────────
+   Reads the value from any member <select>, then finds the matching AppState
+   member by trying every field it might have been keyed on.
 
-  if (!brief)    { showToast('Write a brief first', 'warning'); return; }
-  if (!memberId) { showToast('Select a member', 'warning'); return; }
+   The option value is normally m.id (a UUID string like "usr_abc123"), but
+   older data paths can produce numeric fallback IDs or name-based values.
+   This function tolerates all of them.
+
+   Debug logging is intentionally left in so failures surface in the console
+   rather than silently showing "Select a member." Remove the logs once the
+   correct value format is confirmed in production.
+──────────────────────────────────────────────────────────────────────────── */
+function getSelectedMemberFromSelect(selectId) {
+  const sel      = document.getElementById(selectId);
+  const rawValue = sel?.value ?? '';
+
+  console.log('[ASSIGN DEBUG]', {
+    selectId,
+    rawValue,
+    selectedIndex:  sel?.selectedIndex,
+    options: sel ? [...sel.options].map(o => ({ value: o.value, text: o.text })) : [],
+    memberCount: AppState.members?.length,
+  });
+
+  if (!rawValue) return null;
+
+  const found = (AppState.members || []).find(m =>
+    String(m.id)     === String(rawValue) ||
+    String(m.userId) === String(rawValue) ||
+    m.email          === rawValue         ||
+    m.name           === rawValue
+  ) || null;
+
+  console.log('[ASSIGN DEBUG] resolved member →', found?.name ?? '(none)', '| id:', found?.id ?? '—');
+  return found;
+}
+
+async function draftScenario() {
+  const brief  = (document.getElementById('sc-brief')?.value || '').trim();
+  const member = getSelectedMemberFromSelect('sc-member');
+
+  if (!brief)   { showToast('Write a brief first', 'warning'); return; }
+  if (!member)  { showToast('Select a member', 'warning'); return; }
+
+  const memberId = member.id;
 
   const btn = document.getElementById('sc-draft-btn');
   if (btn) { btn.textContent = '✦ Drafting…'; btn.disabled = true; }
-
-  const member = AppState.getMember(memberId);
 
   try {
     const res = await fetch('/api/draft-scenario', {
@@ -4220,7 +4345,8 @@ function approveDraft() {
   const opening  = (document.getElementById('sc-draft-opening')?.value || '').trim();
   const brief    = (document.getElementById('sc-brief')?.value || '').trim();
   const domain   = document.getElementById('sc-domain')?.value || 'General';
-  const memberId = parseInt(document.getElementById('sc-member')?.value) || null;
+  const _member  = getSelectedMemberFromSelect('sc-member');
+  const memberId = _member?.id || null;
 
   const probeInputs = document.querySelectorAll('.sc-probe-input');
   const probes = [...probeInputs].map(i => i.value.trim()).filter(Boolean);
@@ -4255,22 +4381,17 @@ function launchScenario(scenarioId) {
   const scenario = AppState.scenarios.find(s => s.id === scenarioId);
   if (!scenario) return;
 
-  const selEl    = document.getElementById(`sc-launch-member-${scenarioId}`);
-  const memberId = selEl ? parseInt(selEl.value) || null : null;
-
-  if (!memberId) { showToast('Select a member to launch with', 'warning'); return; }
-  ScenarioEngine.start(scenario, memberId);
+  const member = getSelectedMemberFromSelect(`sc-launch-member-${scenarioId}`);
+  if (!member) { showToast('Select a member to launch with', 'warning'); return; }
+  ScenarioEngine.start(scenario, member.id);
 }
 
 async function assignToMemberApp(scenarioId) {
   const scenario = AppState.scenarios.find(s => s.id === scenarioId);
   if (!scenario) return;
 
-  const selEl    = document.getElementById(`sc-launch-member-${scenarioId}`);
-  const memberId = selEl ? parseInt(selEl.value) || null : null;
-  if (!memberId) { showToast('Select a member first', 'warning'); return; }
-
-  const member  = AppState.getMember(memberId);
+  const member = getSelectedMemberFromSelect(`sc-launch-member-${scenarioId}`);
+  if (!member) { showToast('Select a member first', 'warning'); return; }
   const orgCode = AppState.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g,'-');
 
   try {
@@ -4443,12 +4564,8 @@ async function assignFromLeaderLayer(scenarioId) {
   const scenario = (AppState.scenarios || []).find(s => s.id === scenarioId);
   if (!scenario) return;
 
-  const selEl    = document.getElementById(`assign-sel-${scenarioId}`);
-  const memberId = selEl ? parseInt(selEl.value) || null : null;
-  if (!memberId) { showToast('Select a member first', 'warning'); return; }
-
-  const member  = AppState.getMember(memberId);
-  if (!member)  { showToast('Member not found', 'warning'); return; }
+  const member  = getSelectedMemberFromSelect(`assign-sel-${scenarioId}`);
+  if (!member)  { showToast('Select a member first', 'warning'); return; }
 
   const orgCode = AppState.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g, '-');
 
@@ -4466,6 +4583,7 @@ async function assignFromLeaderLayer(scenarioId) {
     });
     if (!res.ok) throw new Error();
     showToast(`Assigned "${scenario.title}" to ${member.name.split(' ')[0]} ✓`, 'success');
+    const selEl = document.getElementById(`assign-sel-${scenarioId}`);
     if (selEl) selEl.value = '';  // reset selector after success
   } catch(e) {
     showToast('Could not assign — check your connection', 'warning');

@@ -206,13 +206,9 @@ const MemberApp = {
       const data = await res.json();
       this.pending = data.scenarios || [];
     } catch(e) {
-      if (!this.pending.length) {
-        this.pending = [{
-          id: 'demo_sc_1', title: 'Sample Scenario', domain: 'General',
-          difficulty: 'Medium', context: 'A challenging situation requiring good decision-making.',
-          opening: null, probes: null, status: 'pending', fromAlert: false,
-        }];
-      }
+      console.warn('[MemberApp] loadPending failed:', e.message);
+      // Do NOT show a fake scenario — leave pending empty so the UI shows
+      // a genuine empty state rather than misleading demo content.
     }
     this._updateBadge();
     this._renderHome();

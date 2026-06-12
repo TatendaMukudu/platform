@@ -29,20 +29,27 @@ function scheduleSave() {
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(async () => {
     try {
+      // Prune expired sessions before saving so the blob doesn't grow unbounded
+      const now = Date.now();
+      for (const [token, s] of Object.entries(activeSessions)) {
+        if (s.expiresAt < now) delete activeSessions[token];
+      }
       await db.saveMain({
         orgMeta, orgUsers, inviteTokens, emailIndex, pendingInvites,
         orgGroups, orgNotes, orgMessages, orgStore,
         assignedScenarios, memberResults, memberCheckins,
         memberGoals, weeklyAssessments, orgInterventions,
         orgNodes, orgMetrics, orgValues, orgGoals, userPermissions,
+        activeSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
 }
 
 /* ── Session tokens ───────────────────────────────────────────────────────────
-   Issued on login / setup / member join. NOT persisted — tokens die on restart
-   so users re-authenticate naturally. 24-hour expiry.
+   Persisted to Postgres so tokens survive server restarts (Railway redeploys).
+   Expired sessions are pruned before each save and on load.
+   24-hour expiry per token.
    ─────────────────────────────────────────────────────────────────────────── */
 const activeSessions = {}; // token → { userId, orgCode, role, expiresAt }
 
@@ -60,6 +67,7 @@ function issueToken(userId, orgCode, role) {
     userId, orgCode: (orgCode || '').toLowerCase(), role,
     expiresAt: Date.now() + 24 * 60 * 60 * 1000,
   };
+  scheduleSave(); // persist so this token survives a server restart
   return token;
 }
 
@@ -2766,6 +2774,50 @@ function _predictMemberRisksFromData(name, weeklyMoodAvgs) {
   return predictions;
 }
 
+/* ── normalizeMemberGoals ─────────────────────────────────────────────────
+   memberGoals[key] can be either:
+     • Array   — set by old goal-management endpoints
+     • Object  — set by POST /api/auth/complete-profile (onboarding)
+   This normaliser always returns an Array so callers can safely call .filter()
+   without crashing on object-format data.
+──────────────────────────────────────────────────────────────────────────── */
+function normalizeMemberGoals(goalData) {
+  if (!goalData) return [];
+  if (Array.isArray(goalData)) return goalData;
+  if (typeof goalData === 'object') {
+    const goals = [];
+    if (goalData.goal || goalData.mainGoals) {
+      goals.push({
+        id: 'profile_main_goal',
+        title: goalData.goal || goalData.mainGoals,
+        status: 'active',
+        source: 'profile',
+      });
+    }
+    if (goalData.longTermGoals || goalData.identity) {
+      goals.push({
+        id: 'profile_long_term_goal',
+        title: goalData.longTermGoals || goalData.identity,
+        status: 'active',
+        source: 'profile',
+      });
+    }
+    if (Array.isArray(goalData.personalMetrics)) {
+      goalData.personalMetrics.forEach(metric => {
+        goals.push({
+          id: 'metric_' + String(metric).toLowerCase().replace(/\W+/g, '_'),
+          title: metric,
+          status: 'active',
+          source: 'personal_metric',
+          type: 'metric',
+        });
+      });
+    }
+    return goals;
+  }
+  return [];
+}
+
 function _aggregateOrgData(code) {
   const users  = orgUsers[code]  || {};
   const meta   = orgMeta[code]   || {};
@@ -2905,8 +2957,8 @@ function _aggregateOrgData(code) {
 
   allMembers.forEach(u => {
     const mCheckins = checkinsByMember[u.name] || [];
-    const goals     = (memberGoals[memberKey(code, u.name)] || memberGoals[userKey(code, u.id)] || [])
-                        .filter(g => g.status !== 'completed');
+    const rawGoals  = memberGoals[memberKey(code, u.name)] || memberGoals[userKey(code, u.id)];
+    const goals     = normalizeMemberGoals(rawGoals).filter(g => g.status !== 'completed');
     const scores    = resultsByMember[u.name] || {};
 
     // Build per-week mood averages (last 4 weeks)
@@ -3050,7 +3102,13 @@ app.get('/api/intelliq/org-insights', requireAuth, async (req, res) => {
     return res.json({ ...cached.data, cached: true });
   }
 
-  const agg = _aggregateOrgData(code);
+  let agg;
+  try {
+    agg = _aggregateOrgData(code);
+  } catch(e) {
+    console.error('[org-insights] _aggregateOrgData failed:', e.message, e.stack);
+    return res.status(500).json({ error: 'Intelligence data unavailable — internal error. Please try again.' });
+  }
   const stats = {
     memberCount:       agg.memberCount,
     activeThisWeek:    agg.activeThisWeek,
@@ -4038,6 +4096,13 @@ function _loadAllStores(data) {
   Object.assign(memberGoals,      data.memberGoals      || {});
   Object.assign(weeklyAssessments,data.weeklyAssessments|| {});
   Object.assign(orgInterventions, data.orgInterventions || {});
+  // Restore sessions, pruning any that expired while the server was down
+  const _now = Date.now();
+  const _savedSessions = data.activeSessions || {};
+  for (const [token, s] of Object.entries(_savedSessions)) {
+    if (s.expiresAt > _now) activeSessions[token] = s;
+  }
+  console.log(`[sessions] Restored ${Object.keys(activeSessions).length} active session(s) from Postgres`);
 }
 
 const PORT = process.env.PORT || 3000;

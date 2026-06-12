@@ -772,8 +772,27 @@ img { max-width: 100%; }
 @media (max-width: 900px) {
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
 }
+/* Hamburger button — hidden on desktop, shown on mobile */
+.topbar-hamburger {
+  display: none;
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 0 0.5rem 0 0;
+  line-height: 1;
+  flex-shrink: 0;
+}
 @media (max-width: 700px) {
-  .sidebar { transform: translateX(-100%); }
+  .topbar-hamburger { display: flex; align-items: center; }
+  .sidebar {
+    transform: translateX(-100%);
+    /* Overlay on top of content on mobile */
+    position: fixed; top: 0; left: 0; z-index: 200;
+    box-shadow: 4px 0 16px rgba(0,0,0,0.18);
+    transition: transform 0.22s ease;
+  }
   .sidebar.open { transform: translateX(0); }
   .main-wrap { margin-left: 0; }
   .topbar-search { display: none; }

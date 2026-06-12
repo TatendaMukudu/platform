@@ -131,10 +131,11 @@ const Auth = {
     this.currentUser = data.user;
     this.currentOrg  = data.org;
     this.token       = data.token || null;
-    // Fetch permissions after login (login endpoint doesn't resolve them)
     this.save();
-    // Fire-and-forget permissions refresh — non-blocking
-    this.getMe().catch(() => {});
+    // NOTE: getMe() is NOT called here. Callers (handleLogin, handleInviteRegister)
+    // explicitly await getMe() after Auth.login() so they control the sequence.
+    // The old fire-and-forget pattern caused a race: getMe() could overwrite
+    // profileComplete:true (written by repair logic) with false from the server.
     return data;
   },
 
