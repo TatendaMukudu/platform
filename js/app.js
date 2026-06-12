@@ -3961,6 +3961,17 @@ async function loadWeeklyPulse() {
 function showProfile(id){
   const m = AppState.getMember(id);
   if(!m) return;
+  try {
+    _showProfileInner(id, m);
+  } catch(err) {
+    console.error('[showProfile] render error for', id, err);
+    // Open the modal with a warning rather than crashing the whole app
+    const recsEl = document.getElementById('pm-recs');
+    if (recsEl) recsEl.innerHTML = `<div style="padding:0.6rem;background:rgba(247,79,79,0.08);border:1px solid rgba(247,79,79,0.25);border-radius:6px;font-size:0.8rem;color:var(--danger)">⚠ Some profile data could not be displayed. This member may not have completed assessments yet.</div>`;
+    openModal('profile-modal');
+  }
+}
+function _showProfileInner(id, m){
   const mode    = AppState.mode;
   const metrics = (AppState.orgMetrics || []).map(mt => mt.name || mt);
   const color   = m.color;
@@ -4017,9 +4028,12 @@ function showProfile(id){
   if (coachEl) coachEl.innerHTML = renderCoachInputTab(id);
 
   // History sparkline data
-  document.getElementById('pm-history-vals').innerHTML = m.history.map((v,i)=>`
-    <div style="text-align:center;font-size:0.68rem;color:var(--text-muted)">${MONTHS[i]||i+1}<br>
-      <span style="color:${scoreColor(v)};font-weight:600">${v}</span></div>`).join('');
+  const _history = Array.isArray(m.history) ? m.history : [];
+  document.getElementById('pm-history-vals').innerHTML = _history.length
+    ? _history.map((v,i)=>`
+        <div style="text-align:center;font-size:0.68rem;color:var(--text-muted)">${MONTHS[i]||i+1}<br>
+          <span style="color:${scoreColor(v)};font-weight:600">${v}</span></div>`).join('')
+    : `<div style="font-size:0.78rem;color:var(--text-muted);padding:0.4rem 0">No history yet.</div>`;
 
   openModal('profile-modal');
 
@@ -4035,7 +4049,7 @@ function showProfile(id){
     }]);
     createLineChart('pm-chart', MONTHS, [{
       label:'Performance',
-      data: m.history,
+      data: _history,
       borderColor: color,
       backgroundColor: color+'22',
       fill:true, tension:0.4, borderWidth:2, pointRadius:3,

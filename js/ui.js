@@ -194,13 +194,33 @@ function showToast(msg, type='info'){
 
 /* ── RECOMMENDATION ENGINE (mock AI) ────────────────────── */
 function generateRecommendation(member, metrics){
-  const lowest = Object.entries(member.scores).sort((a,b)=>a[1]-b[1])[0];
-  const highest = Object.entries(member.scores).sort((a,b)=>b[1]-a[1])[0];
-  const recs = [
-    `Focus on improving <strong>${lowest[0]}</strong> (currently ${lowest[1]}) through targeted exercises and additional coaching sessions.`,
-    `${member.name} demonstrates exceptional strength in <strong>${highest[0]}</strong> (${highest[1]}). Leverage this in leadership and peer mentoring roles.`,
-    `Wellness score of ${member.wellnessScore} requires attention. Recommend a structured wellbeing check-in programme.`,
-    `IntelliQ score of ${member.iqScore} indicates ${scoreLabel(member.iqScore).toLowerCase()} decision intelligence. ${member.iqScore<70?'Additional scenario training is advised.':'Consider advanced scenario modules.'}`,
-  ];
-  return recs;
+  try {
+    const scoreEntries = Object.entries(member.scores || {})
+      .filter(([, v]) => v !== null && v !== undefined);
+
+    // Not enough data — honest empty state
+    if (scoreEntries.length === 0) {
+      return ['Not enough activity yet to generate a recommendation. Ask this member to complete check-ins or assessments first.'];
+    }
+
+    const lowest  = scoreEntries.sort((a, b) => a[1] - b[1])[0];
+    const highest = scoreEntries.slice().sort((a, b) => b[1] - a[1])[0];
+
+    const recs = [
+      `Focus on improving <strong>${lowest[0]}</strong> (currently ${lowest[1]}) through targeted exercises and additional coaching sessions.`,
+      `${member.name} demonstrates exceptional strength in <strong>${highest[0]}</strong> (${highest[1]}). Leverage this in leadership and peer mentoring roles.`,
+    ];
+
+    if (member.wellnessScore != null) {
+      recs.push(`Wellness score of ${member.wellnessScore} requires attention. Recommend a structured wellbeing check-in programme.`);
+    }
+    if (member.iqScore != null) {
+      recs.push(`IntelliQ score of ${member.iqScore} indicates ${scoreLabel(member.iqScore).toLowerCase()} decision intelligence. ${member.iqScore < 70 ? 'Additional scenario training is advised.' : 'Consider advanced scenario modules.'}`);
+    }
+
+    return recs;
+  } catch(e) {
+    console.warn('[generateRecommendation] failed for', member?.name, e.message);
+    return ['Recommendation data unavailable for this member.'];
+  }
 }
