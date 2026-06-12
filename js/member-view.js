@@ -940,8 +940,13 @@ const MemberApp = {
   },
 
   exitScenario() {
-    this._showScreen('screen-main');
-    this._renderHome();
+    // Mirror exitWeekly: _showScreen('screen-main') early-returns without
+    // closing the overlay. Explicitly strip .active from all overlays,
+    // then navigate so topbar + sidebar also update.
+    document.querySelectorAll('.member-fullscreen-overlay')
+      .forEach(s => s.classList.remove('active'));
+    if (typeof navigate === 'function') navigate('home');
+    else this._renderHome();
   },
 
   /* ── CHECK-IN ───────────────────────────────────────────── */

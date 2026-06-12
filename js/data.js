@@ -111,7 +111,8 @@ const WORKSPACE_MODULES = [
   { section: 'Leader Workspace', id: 'leader-home',   icon: '👁',  label: 'Dashboard',    leaderOnly: true },
   { section: null,                id: 'leader-people', icon: '👥', label: 'My People',    leaderOnly: true },
   { section: null,                id: 'assignments',   icon: '📌', label: 'Assignments',  leaderOnly: true, permission: 'assign_scenarios' },
-  { section: null,                id: 'org-insights',  icon: '💡', label: 'Team Insights', leaderOnly: true, permission: 'view_insights' },
+  // Intelligence: what IntelliQ is noticing — AI patterns, themes, follow-ups
+  { section: null, id: 'org-insights', icon: '🧠', label: 'Intelligence', leaderOnly: true, permission: 'view_insights' },
 
   // ── Intelligence — analytics / AI (admin+ or explicit grant) ─────────
   { section: 'Intelligence', id: 'analytics', icon: '📊', label: 'Insights',           permission: 'view_analytics'   },
@@ -119,11 +120,12 @@ const WORKSPACE_MODULES = [
   { section: null,            id: 'scenarios', icon: '🎯', label: 'Manage Assessments', permission: 'assign_scenarios' },
 
   // ── Management — admin / superadmin ───────────────────────────────────
-  { section: 'Management', id: 'organisation', icon: '🏛️', label: 'Organisation',  permission: 'view_team'       },
-  { section: null,          id: 'people',       icon: '🏗️', label: 'People',        permission: 'view_members'    },
-  { section: null,          id: 'alerts',       icon: '🔔', label: 'Alerts',         permission: 'view_members',   badge: true },
-  { section: null,          id: 'reports',      icon: '📋', label: 'Reports',        permission: 'view_reports'    },
-  { section: null,          id: 'settings',     icon: '⚙️', label: 'Settings',       permission: 'manage_settings' },
+  { section: 'Management',  id: 'organisation', icon: '🏛️', label: 'Organisation',      permission: 'view_team'       },
+  { section: null,           id: 'org-health',   icon: '🏥', label: 'Organisation Health', permission: 'view_analytics' },
+  { section: null,           id: 'people',       icon: '🏗️', label: 'People',              permission: 'view_members'    },
+  { section: null,           id: 'alerts',       icon: '🔔', label: 'Alerts',               permission: 'view_members',   badge: true },
+  { section: null,           id: 'reports',      icon: '📋', label: 'Reports',              permission: 'view_reports'    },
+  { section: null,           id: 'settings',     icon: '⚙️', label: 'Settings',             permission: 'manage_settings' },
 ];
 
 /* ─────────────────────────────────────────────────────────────

@@ -594,10 +594,12 @@ function navigate(page){
   else if (page==='inbox')        { if(typeof MemberApp!=='undefined') MemberApp._renderInbox(); }
   else if (page==='stats')        { if(typeof MemberApp!=='undefined') MemberApp._renderStats(); }
   // Leader Workspace — scoped to node leader's subtree
-  else if (page==='leader-home')   renderLeaderHome();
-  else if (page==='leader-people') renderLeaderPeople();
-  else if (page==='org-insights')  renderTeamInsights();
-  else if (page==='assignments')   renderAssignments();
+  else if (page==='leader-home')        renderLeaderHome();
+  else if (page==='leader-people')      renderLeaderPeople();
+  else if (page==='org-insights')       renderLeaderIntelligence();
+  else if (page==='assignments')        renderAssignments();
+  // Management — org-wide
+  else if (page==='org-health')         renderOrgHealth();
   // Intelligence pages
   else if (page==='analytics')  renderAnalytics();
   else if (page==='intelliq')   renderIntelliQ();
@@ -625,7 +627,9 @@ const PAGE_TITLES = {
   'leader-home':   'Leader Dashboard',
   'leader-people': 'My People',
   assignments:     'Assignments',
-  'org-insights':  'Team Insights',
+  'org-insights':  'Intelligence',
+  // Organisation Health — management level
+  'org-health':    'Organisation Health',
   // Intelligence
   analytics:    'Insights',
   intelliq:     'Intelligence',
@@ -1189,9 +1193,12 @@ async function loadRealOrgData() {
     if (page === 'intelliq')     renderIntelliQ();
     if (page === 'people')       renderPeople();
     if (page === 'alerts')       renderAlerts();
-    if (page === 'myteam')       renderMyTeam();
-    if (page === 'assignments')  renderAssignments();
-    if (page === 'teaminsights') renderTeamInsights();
+    if (page === 'myteam')            renderMyTeam();
+    if (page === 'assignments')       renderAssignments();
+    if (page === 'org-insights')      renderLeaderIntelligence();
+    if (page === 'org-health')        renderOrgHealth();
+    if (page === 'leader-home')       renderLeaderHome();
+    if (page === 'leader-people')     renderLeaderPeople();
     updateAlertBadge();
   } catch(e) {
     console.warn('loadRealOrgData failed:', e.message);
@@ -4684,6 +4691,256 @@ async function renderTeamInsights() {
   }
 }
 
+/* ── LEADER INTELLIGENCE ─────────────────────────────────── *
+ * "What is IntelliQ noticing?"
+ * Pulls from: team-insights API (stats + attention) +
+ *             visible-members (engagement status) +
+ *             shared memory themes (anonymous patterns)
+ * No raw check-in text exposed by default.
+ * ──────────────────────────────────────────────────────────── */
+async function renderLeaderIntelligence() {
+  const el = document.getElementById('leader-intelligence-content');
+  if (!el) return;
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Loading intelligence…</div>`;
+
+  try {
+    const [insRes, membRes] = await Promise.all([
+      fetch('/api/workspace/team-insights', { headers: Auth._headers() }),
+      fetch('/api/workspace/visible-members', { headers: Auth._headers() }),
+    ]);
+    const ins  = insRes.ok  ? await insRes.json()  : { ok: false };
+    const memb = membRes.ok ? await membRes.json() : { ok: false };
+
+    if (!ins.ok) throw new Error('Could not load data');
+
+    const members    = memb.members || [];
+    const attn       = ins.needsAttention || [];
+    const moodVal    = ins.avgMood;
+    const moodColor  = v => v >= 4 ? 'var(--success)' : v >= 3 ? 'var(--warning)' : 'var(--danger)';
+    const moodEmoji  = moodVal ? (moodVal >= 4 ? '😊' : moodVal >= 3 ? '😐' : '😕') : null;
+    const moodLabel  = moodVal ? (moodVal >= 4 ? 'Strong'  : moodVal >= 3 ? 'Mixed'   : 'Low')  : '—';
+
+    // Derive engagement signals from member list
+    const now      = Date.now();
+    const active   = members.filter(m => m.latestCheckin?.ts && (now - new Date(m.latestCheckin.ts).getTime()) < 7*86400000);
+    const silent   = members.filter(m => !m.latestCheckin?.ts || (now - new Date(m.latestCheckin.ts).getTime()) >= 14*86400000);
+    const pending  = members.filter(m => !m.passwordSet);
+
+    // Infer patterns from attention list + mood
+    const patterns = [];
+    if (attn.length >= 2) {
+      const lowMoodCount = attn.filter(a => /mood/i.test(a.reason)).length;
+      if (lowMoodCount >= 2) patterns.push({ icon: '📉', text: `${lowMoodCount} people showing low mood this week — check for common stressors.`, level: 'warning' });
+      const noCheckinCount = attn.filter(a => /check.in/i.test(a.reason)).length;
+      if (noCheckinCount >= 2) patterns.push({ icon: '🔇', text: `${noCheckinCount} people haven't checked in recently — engagement may be dropping.`, level: 'warning' });
+    }
+    if (silent.length > 0 && silent.length >= Math.ceil(members.length * 0.3)) {
+      patterns.push({ icon: '⏸', text: `${silent.length} of ${members.length} people have been silent for 2+ weeks. Worth a direct check-in.`, level: 'warning' });
+    }
+    if (moodVal !== null && moodVal >= 4 && active.length >= Math.ceil(members.length * 0.6)) {
+      patterns.push({ icon: '📈', text: `Team energy is strong this week — ${active.length} people active, avg mood ${moodVal.toFixed(1)}. Good moment for a stretch challenge.`, level: 'positive' });
+    }
+    if (pending.length > 0) {
+      patterns.push({ icon: '🔑', text: `${pending.length} person${pending.length !== 1 ? 's' : ''} ${pending.length !== 1 ? 'have' : 'has'} not yet set up ${pending.length !== 1 ? 'their accounts' : 'their account'}.`, level: 'info' });
+    }
+    if (patterns.length === 0 && !ins.notEnoughData) {
+      patterns.push({ icon: '✓', text: 'No significant patterns detected this week. Team looks stable.', level: 'positive' });
+    }
+
+    const levelColor = l => l === 'warning' ? 'var(--warning)' : l === 'positive' ? 'var(--success)' : 'var(--text-muted)';
+
+    el.innerHTML = `
+      <!-- Signal summary row -->
+      <div class="grid-3" style="margin-bottom:1.2rem">
+        <div class="stat-card">
+          <div class="stat-card-val" style="color:${moodVal ? moodColor(moodVal) : 'var(--text-muted)'}">
+            ${moodEmoji || '—'}${moodVal ? ' ' + moodVal.toFixed(1) : ''}
+          </div>
+          <div class="stat-card-label">Mood · ${moodLabel}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-val">${active.length} / ${members.length}</div>
+          <div class="stat-card-label">Active This Week</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-val" style="color:${attn.length ? 'var(--danger)' : 'var(--success)'}">
+            ${attn.length}
+          </div>
+          <div class="stat-card-label">Needs Attention</div>
+        </div>
+      </div>
+
+      <!-- What IntelliQ is noticing -->
+      <div class="card-label" style="margin-bottom:0.6rem">What IntelliQ is noticing</div>
+      ${ins.notEnoughData ? `
+        <div class="card" style="margin-bottom:1rem">
+          <div style="font-size:0.85rem;color:var(--text-muted);line-height:1.65">
+            Not enough data yet — encourage your team to complete check-ins and assessments.
+            Intelligence improves as IntelliQ gathers more observations over time.
+          </div>
+        </div>` : `
+        <div style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:1.2rem">
+          ${patterns.map(p => `
+            <div class="card" style="padding:0.75rem 1rem;border-color:${levelColor(p.level)}33;display:flex;gap:0.7rem;align-items:flex-start">
+              <span style="font-size:1.1rem;flex-shrink:0">${p.icon}</span>
+              <span style="font-size:0.85rem;color:var(--text-primary);line-height:1.55">${p.text}</span>
+            </div>`).join('')}
+        </div>`}
+
+      <!-- Attention list (no raw text) -->
+      ${attn.length ? `
+        <div class="card-label" style="margin-bottom:0.5rem">People to follow up with</div>
+        <div class="leader-member-list" style="margin-bottom:1.2rem">
+          ${attn.map(m => `
+            <div class="leader-member-row lm-row--attn">
+              <div class="lm-avatar">${(m.name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()}</div>
+              <div class="lm-info">
+                <div class="lm-name">${m.name}</div>
+                <div class="lm-meta">${m.reason}</div>
+              </div>
+            </div>`).join('')}
+        </div>` : ''}
+
+      <!-- Recommended action -->
+      ${ins.recommendedAction ? `
+        <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.04)">
+          <div class="card-label" style="color:var(--accent);margin-bottom:0.4rem">💡 Recommended next action</div>
+          <div style="font-size:0.85rem;color:var(--text-primary);line-height:1.65">${ins.recommendedAction}</div>
+          <div style="margin-top:0.8rem;display:flex;gap:0.5rem;flex-wrap:wrap">
+            <button class="btn btn-sm btn-outline" onclick="navigate('assignments')">Assign Assessment</button>
+            <button class="btn btn-sm btn-outline" onclick="navigate('leader-people')">View My People</button>
+          </div>
+        </div>` : ''}`;
+
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load intelligence. Try refreshing.</p></div>`;
+  }
+}
+
+/* ── ORGANISATION HEALTH ─────────────────────────────────── *
+ * "How is the organisation doing?"
+ * Admin-level aggregate view. Anonymous-first. Scoped via
+ * getVisibleUserIds() — admins see full org.
+ * ──────────────────────────────────────────────────────────── */
+async function renderOrgHealth() {
+  const el = document.getElementById('org-health-content');
+  if (!el) return;
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Loading…</div>`;
+
+  try {
+    const [insRes, membRes] = await Promise.all([
+      fetch('/api/workspace/team-insights', { headers: Auth._headers() }),
+      fetch('/api/workspace/visible-members', { headers: Auth._headers() }),
+    ]);
+    const ins  = insRes.ok  ? await insRes.json()  : { ok: false };
+    const memb = membRes.ok ? await membRes.json() : { ok: false };
+
+    if (!ins.ok) throw new Error('Could not load data');
+
+    const members   = memb.members || [];
+    const now       = Date.now();
+    const moodVal   = ins.avgMood;
+    const moodColor = v => v >= 4 ? 'var(--success)' : v >= 3 ? 'var(--warning)' : 'var(--danger)';
+
+    // Participation breakdown
+    const active7d  = members.filter(m => m.latestCheckin?.ts && (now - new Date(m.latestCheckin.ts).getTime()) < 7*86400000).length;
+    const active30d = members.filter(m => m.latestCheckin?.ts && (now - new Date(m.latestCheckin.ts).getTime()) < 30*86400000).length;
+    const neverCk   = members.filter(m => !m.latestCheckin?.ts).length;
+    const pending   = members.filter(m => !m.passwordSet).length;
+    const setupPct  = members.length ? Math.round(((members.length - pending) / members.length) * 100) : 0;
+    const activePct = members.length ? Math.round((active7d / members.length) * 100) : 0;
+
+    el.innerHTML = `
+      <!-- Headline stats -->
+      <div class="grid-3" style="margin-bottom:1.2rem">
+        <div class="stat-card">
+          <div class="stat-card-val">${members.length}</div>
+          <div class="stat-card-label">Total Members</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-val" style="color:${activePct >= 60 ? 'var(--success)' : activePct >= 30 ? 'var(--warning)' : 'var(--danger)'}">
+            ${activePct}%
+          </div>
+          <div class="stat-card-label">Active This Week</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-val" style="color:${moodVal ? moodColor(moodVal) : 'var(--text-muted)'}">
+            ${moodVal ? moodVal.toFixed(1) : '—'}
+          </div>
+          <div class="stat-card-label">Avg Mood (1–5)</div>
+        </div>
+      </div>
+
+      <!-- Engagement breakdown -->
+      <div class="card" style="margin-bottom:1rem">
+        <div class="card-label" style="margin-bottom:0.8rem">Engagement</div>
+        <div style="display:flex;flex-direction:column;gap:0.5rem">
+          ${_healthBar('Active this week',    active7d,  members.length, 'var(--success)')}
+          ${_healthBar('Active last 30 days', active30d, members.length, 'var(--accent)')}
+          ${_healthBar('Account set up',      members.length - pending, members.length, '#4f8ef7')}
+          ${neverCk ? `
+            <div style="font-size:0.78rem;color:var(--warning);margin-top:0.3rem">
+              ⚠ ${neverCk} member${neverCk !== 1 ? 's' : ''} ${neverCk !== 1 ? 'have' : 'has'} never checked in.
+            </div>` : ''}
+        </div>
+      </div>
+
+      <!-- Wellbeing summary (anonymous) -->
+      ${ins.notEnoughData ? `
+        <div class="card" style="margin-bottom:1rem">
+          <div class="card-label" style="margin-bottom:0.4rem">Wellbeing</div>
+          <div style="font-size:0.82rem;color:var(--text-muted)">Not enough check-ins yet for a meaningful wellbeing picture.</div>
+        </div>` : `
+        <div class="card" style="margin-bottom:1rem">
+          <div class="card-label" style="margin-bottom:0.6rem">Wellbeing snapshot (anonymous)</div>
+          <div style="display:flex;gap:1.2rem;flex-wrap:wrap">
+            <div>
+              <div style="font-size:1.4rem;font-weight:800;color:${moodColor(moodVal)}">${moodVal?.toFixed(1) ?? '—'}</div>
+              <div style="font-size:0.72rem;color:var(--text-muted)">Average mood</div>
+            </div>
+            <div>
+              <div style="font-size:1.4rem;font-weight:800">${ins.activeThisWeek}</div>
+              <div style="font-size:0.72rem;color:var(--text-muted)">Checked in this week</div>
+            </div>
+            <div>
+              <div style="font-size:1.4rem;font-weight:800;color:${ins.needsAttention?.length ? 'var(--danger)' : 'var(--success)'}">
+                ${ins.needsAttention?.length ?? 0}
+              </div>
+              <div style="font-size:0.72rem;color:var(--text-muted)">Needs attention</div>
+            </div>
+          </div>
+          <div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.6rem">
+            Individual names not shown here. Leaders can review specific cases in their workspace.
+          </div>
+        </div>`}
+
+      <!-- Recommended action -->
+      ${ins.recommendedAction ? `
+        <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.04)">
+          <div class="card-label" style="color:var(--accent);margin-bottom:0.3rem">💡 Suggested action</div>
+          <div style="font-size:0.85rem;color:var(--text-primary);line-height:1.6">${ins.recommendedAction}</div>
+        </div>` : ''}`;
+
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load organisation health. Try refreshing.</p></div>`;
+  }
+}
+
+// Helper: horizontal progress bar for health metrics
+function _healthBar(label, value, total, color) {
+  const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+  return `
+    <div>
+      <div style="display:flex;justify-content:space-between;font-size:0.78rem;margin-bottom:3px">
+        <span style="color:var(--text-secondary)">${label}</span>
+        <span style="color:var(--text-primary);font-weight:600">${value} / ${total} (${pct}%)</span>
+      </div>
+      <div style="height:6px;background:var(--surface-2);border-radius:3px;overflow:hidden">
+        <div style="height:100%;width:${pct}%;background:${color};border-radius:3px;transition:width 0.4s"></div>
+      </div>
+    </div>`;
+}
+
 /* ════════════════════════════════════════════════════════════
    LEADER WORKSPACE
    Pages scoped to a node-leader's subtree.
@@ -4734,11 +4991,16 @@ async function renderLeaderHome() {
       return bTs - aTs; // most recent first
     });
 
-    // Pending scenarios for visible members (from AppState, already scoped)
-    const pendingByMember = {};
-    (AppState.members || []).forEach(m => {
-      const p = (m.scenarioResults || []).filter ? 0 : 0; // placeholder — assessed below
-    });
+    // Count pending assessments across visible members (AppState is already scoped)
+    const pendingTotal = (AppState.scenarios || []).reduce((count, sc) => {
+      if (sc.status === 'pending') return count + 1;
+      return count;
+    }, 0);
+    // Also count from member scenarioResults (assigned-but-not-started)
+    const assignedPending = (AppState.members || []).reduce((count, m) => {
+      const pending = (m.scenarioResults || []).filter(r => r.status === 'pending').length;
+      return count + pending;
+    }, 0);
 
     // Stat bar
     const activeThisWeek = ins.activeThisWeek ?? 0;
@@ -4778,8 +5040,8 @@ async function renderLeaderHome() {
           </div>
         </div>`}
 
-      <!-- This week stats -->
-      <div class="grid-3" style="margin-bottom:1rem">
+      <!-- This week stats — 4 tiles -->
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0.6rem;margin-bottom:1rem">
         <div class="stat-card">
           <div class="stat-card-val">${members.length}</div>
           <div class="stat-card-label">In My Scope</div>
@@ -4793,6 +5055,12 @@ async function renderLeaderHome() {
             ${moodEmoji}${avgMood ? ' ' + avgMood.toFixed(1) : ''}
           </div>
           <div class="stat-card-label">Avg Mood</div>
+        </div>
+        <div class="stat-card" style="cursor:pointer" onclick="navigate('assignments')">
+          <div class="stat-card-val" style="color:${assignedPending > 0 ? 'var(--warning)' : 'var(--text-muted)'}">
+            ${assignedPending || '—'}
+          </div>
+          <div class="stat-card-label">Pending Assessments</div>
         </div>
       </div>
 
