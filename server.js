@@ -1106,7 +1106,10 @@ app.post('/api/auth/set-password', async (req, res) => {
 /* ═══════════════════════════════════════════════════════════════════════════
    SPRINT 2 — ORG TREE
    Flat node store reconstructed as tree by parentId.
-   Node: { nodeId, name, parentId, childNodeIds, memberIds, leaderIds, createdAt, updatedAt }
+   Node: { nodeId, name, description, parentId, childNodeIds, memberIds, leaderIds, createdAt, updatedAt }
+   User records carry derived caches kept in sync by _syncUserNodeArrays():
+     user.assignedNodeIds    — nodeIds where this user appears in node.memberIds
+     user.leadershipNodeIds  — nodeIds where this user appears in node.leaderIds
    ═══════════════════════════════════════════════════════════════════════════ */
 
 app.get('/api/tree', requireAuth, (req, res) => {
@@ -1117,12 +1120,22 @@ app.get('/api/tree', requireAuth, (req, res) => {
 
 app.post('/api/tree/node', requirePermission('manage_tree'), (req, res) => {
   const code = req.iqSession.orgCode;
-  const { name, parentId } = req.body;
+  const { name, parentId, description } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
   if (!orgNodes[code]) orgNodes[code] = {};
   const nodeId = 'nd_' + generateId();
   const now    = new Date().toISOString();
-  orgNodes[code][nodeId] = { nodeId, name: name.trim(), parentId: parentId || null, memberIds: [], leaderIds: [], createdAt: now, updatedAt: now };
+  orgNodes[code][nodeId] = {
+    nodeId,
+    name:        name.trim(),
+    description: (description || '').trim(),
+    parentId:    parentId || null,
+    childNodeIds: [],
+    memberIds:   [],
+    leaderIds:   [],
+    createdAt:   now,
+    updatedAt:   now,
+  };
   // Add to parent's childNodeIds
   if (parentId && orgNodes[code][parentId]) {
     if (!orgNodes[code][parentId].childNodeIds) orgNodes[code][parentId].childNodeIds = [];
@@ -1138,11 +1151,18 @@ app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), (req, res) =
   const nodeId = req.params.nodeId;
   const node   = orgNodes[code]?.[nodeId];
   if (!node) return res.status(404).json({ error: 'Node not found' });
-  const { name, parentId, memberIds, leaderIds } = req.body;
+  const { name, description, parentId, memberIds, leaderIds } = req.body;
   const now = new Date().toISOString();
-  if (name      !== undefined) node.name      = name.trim();
+  if (name        !== undefined) node.name        = name.trim();
+  if (description !== undefined) node.description = description.trim();
+  // Sync user arrays before and after membership changes
+  const oldMemberIds = [...(node.memberIds || [])];
+  const oldLeaderIds = [...(node.leaderIds || [])];
   if (memberIds !== undefined) node.memberIds = memberIds;
   if (leaderIds !== undefined) node.leaderIds = leaderIds;
+  if (memberIds !== undefined || leaderIds !== undefined) {
+    _syncUserNodeArrays(code, nodeId, oldMemberIds, node.memberIds, oldLeaderIds, node.leaderIds);
+  }
   // Handle reparenting
   if (parentId !== undefined && parentId !== node.parentId) {
     // Remove from old parent
@@ -1170,6 +1190,8 @@ app.delete('/api/tree/node/:nodeId', requirePermission('manage_tree'), (req, res
   const node   = orgNodes[code]?.[nodeId];
   if (!node) return res.status(404).json({ error: 'Node not found' });
   const now = new Date().toISOString();
+  // Remove nodeId from user caches before deleting
+  _syncUserNodeArrays(code, nodeId, node.memberIds || [], [], node.leaderIds || [], []);
   // Remove from parent
   if (node.parentId && orgNodes[code][node.parentId]) {
     const p = orgNodes[code][node.parentId];
@@ -1232,6 +1254,76 @@ function getDescendantNodeIds(orgCode, rootNodeId) {
   return [...visited];
 }
 
+/* ── Sync user.assignedNodeIds / user.leadershipNodeIds on node membership changes ──
+ *  Called whenever memberIds or leaderIds on a node change (PUT or DELETE).
+ *  Keeps the per-user cached arrays in sync with the node stores so that
+ *  getVisibleUserIds() can use O(1) lookups instead of full scans.
+ * ──────────────────────────────────────────────────────────────────────── */
+function _syncUserNodeArrays(orgCode, nodeId, oldMemberIds, newMemberIds, oldLeaderIds, newLeaderIds) {
+  const users = orgUsers[orgCode];
+  if (!users) return;
+  const add    = (arr, id) => { if (!arr.includes(id)) arr.push(id); };
+  const remove = (arr, id) => { const i = arr.indexOf(id); if (i !== -1) arr.splice(i, 1); };
+
+  // Members removed
+  (oldMemberIds || []).filter(id => !(newMemberIds || []).includes(id)).forEach(uid => {
+    if (users[uid]) { if (!users[uid].assignedNodeIds) users[uid].assignedNodeIds = []; remove(users[uid].assignedNodeIds, nodeId); }
+  });
+  // Members added
+  (newMemberIds || []).filter(id => !(oldMemberIds || []).includes(id)).forEach(uid => {
+    if (users[uid]) { if (!users[uid].assignedNodeIds) users[uid].assignedNodeIds = []; add(users[uid].assignedNodeIds, nodeId); }
+  });
+  // Leaders removed
+  (oldLeaderIds || []).filter(id => !(newLeaderIds || []).includes(id)).forEach(uid => {
+    if (users[uid]) { if (!users[uid].leadershipNodeIds) users[uid].leadershipNodeIds = []; remove(users[uid].leadershipNodeIds, nodeId); }
+  });
+  // Leaders added
+  (newLeaderIds || []).filter(id => !(oldLeaderIds || []).includes(id)).forEach(uid => {
+    if (users[uid]) { if (!users[uid].leadershipNodeIds) users[uid].leadershipNodeIds = []; add(users[uid].leadershipNodeIds, nodeId); }
+  });
+}
+
+/* ── Derive user.assignedNodeIds / user.leadershipNodeIds from orgNodes ──
+ *  Run once at startup after _loadAllStores() to initialise the cached
+ *  arrays on every user record — safe to run repeatedly (always rebuilt fresh).
+ * ──────────────────────────────────────────────────────────────────────── */
+function _backfillUserNodeIds() {
+  let userCount = 0;
+  for (const [orgCode, nodes] of Object.entries(orgNodes)) {
+    const users = orgUsers[orgCode];
+    if (!users) continue;
+    // Reset caches
+    Object.values(users).forEach(u => { u.assignedNodeIds = []; u.leadershipNodeIds = []; });
+    // Rebuild from node membership
+    Object.values(nodes).forEach(node => {
+      (node.memberIds || []).forEach(uid => {
+        if (users[uid]) {
+          if (!users[uid].assignedNodeIds.includes(node.nodeId)) users[uid].assignedNodeIds.push(node.nodeId);
+        }
+      });
+      (node.leaderIds || []).forEach(uid => {
+        if (users[uid]) {
+          if (!users[uid].leadershipNodeIds.includes(node.nodeId)) users[uid].leadershipNodeIds.push(node.nodeId);
+        }
+      });
+    });
+    userCount += Object.keys(users).length;
+  }
+  console.log(`[startup] _backfillUserNodeIds: processed ${userCount} user records`);
+}
+
+/* ── Get node IDs where a user is a LEADER (used for visibility scoping) ── */
+function getUserLeaderNodeIds(orgCode, userId) {
+  const user = orgUsers[orgCode]?.[userId];
+  if (!user) return [];
+  // Use cached array if populated; fall back to full scan for safety
+  if (user.leadershipNodeIds?.length) return [...user.leadershipNodeIds];
+  const nodes = orgNodes[orgCode] || {};
+  return Object.values(nodes)
+    .filter(n => (n.leaderIds || []).includes(userId))
+    .map(n => n.nodeId);
+}
+
 /* ── Compute the set of user IDs visible to the requesting user ─────────── *
  *
  *  Visibility rules (evaluated in order):
@@ -1256,18 +1348,20 @@ function getVisibleUserIds(orgCode, requestingUserId) {
     return Object.keys(orgUsers[orgCode] || {});
   }
 
-  // Rule 3 — view_team: see own subtree
+  // Rule 3 — view_team: see subtree of nodes this user LEADS
+  // Visibility flows through LEADERSHIP assignment only — being a plain member
+  // of a node does not grant visibility over that node's subtree.
   if (_userHasPerm(orgCode, requestingUserId, 'view_team')) {
-    const myNodeIds = getUserNodeIds(orgCode, requestingUserId);
+    const myLeaderNodeIds = getUserLeaderNodeIds(orgCode, requestingUserId);
 
-    if (myNodeIds.length === 0) {
-      // Rule 3a — has permission but unassigned to any node
+    if (myLeaderNodeIds.length === 0) {
+      // Rule 3a — has permission but leads no nodes → only self
       return [requestingUserId];
     }
 
-    // Expand each assigned node to its full descendant set
+    // Expand each led node to its full descendant set
     const allNodeIds = new Set();
-    myNodeIds.forEach(nid =>
+    myLeaderNodeIds.forEach(nid =>
       getDescendantNodeIds(orgCode, nid).forEach(d => allNodeIds.add(d))
     );
 
@@ -4135,6 +4229,9 @@ const PORT = process.env.PORT || 3000;
 
     // 5. Repair emailIndex (handles any missing entries from loaded data)
     _rebuildEmailIndex();
+
+    // 5b. Derive user.assignedNodeIds / user.leadershipNodeIds from orgNodes
+    _backfillUserNodeIds();
 
     // 6. Start HTTP server
     app.listen(PORT, () => {
