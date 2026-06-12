@@ -315,15 +315,10 @@ async function _obSubmitProfile() {
 /* ── Route after personal onboarding completes ───────────────────────────── */
 function _obAfterComplete() {
   showToast('Welcome! Your profile is set up.', 'success');
-  // SuperAdmins get routed to the admin dashboard after completing personal onboarding.
-  // Everyone else (members, coaches) goes to the member view.
-  if (Auth.currentUser?.role === 'superadmin') {
-    launchApp();
-    loadRealOrgData();
-    _checkCoachDailyCheckin();
-  } else {
-    launchMemberView();
-  }
+  // Everyone enters the unified workspace. Members land on Home; others on Dashboard.
+  launchApp();
+  loadRealOrgData();
+  _checkCoachDailyCheckin();
 }
 
 /* ── Helper: HTML-escape for inline onclick values ───────────────────────── */
@@ -591,35 +586,53 @@ function navigate(page){
   AppState.currentPage = page;
   document.querySelector('.topbar-title').textContent = PAGE_TITLES[page] || 'Platform';
 
-  if(page==='dashboard') renderDashboard();
-  else if(page==='members')   renderMembers();
-  else if(page==='inbox')     renderPlatformInbox();
-  else if(page==='analytics') renderAnalytics();
-  else if(page==='intelliq')  renderIntelliQ();
-  else if(page==='scenarios') renderScenarios();
-  else if(page==='people')    renderPeople();
-  else if(page==='alerts')    renderAlerts();
-  else if(page==='reports')   renderReports();
-  else if(page==='settings')     renderSettings();
-  else if(page==='myteam')       renderMyTeam();
-  else if(page==='assignments')  renderAssignments();
-  else if(page==='teaminsights') renderTeamInsights();
+  // Personal pages (every authenticated user)
+  if      (page==='home')         { if(typeof MemberApp!=='undefined') MemberApp._renderHome(); }
+  else if (page==='assessments')  { if(typeof MemberApp!=='undefined') MemberApp._renderScenariosList(); }
+  else if (page==='checkin')      { if(typeof MemberApp!=='undefined') MemberApp._setupCheckinPrompt(); }
+  else if (page==='inbox')        { if(typeof MemberApp!=='undefined') MemberApp._renderInbox(); }
+  else if (page==='stats')        { if(typeof MemberApp!=='undefined') MemberApp._renderStats(); }
+  // Organisation pages (leadership permissions)
+  else if (page==='organisation')  renderMyTeam();
+  else if (page==='org-insights')  renderTeamInsights();
+  else if (page==='assignments')   renderAssignments();
+  // Intelligence pages
+  else if (page==='analytics')  renderAnalytics();
+  else if (page==='intelliq')   renderIntelliQ();
+  else if (page==='scenarios')  renderScenarios();
+  // Management pages
+  else if (page==='people')    renderPeople();
+  else if (page==='alerts')    renderAlerts();
+  else if (page==='reports')   renderReports();
+  else if (page==='settings')  renderSettings();
+  // Legacy aliases
+  else if (page==='dashboard') renderDashboard();
+  else if (page==='members')   renderMembers();
 }
 
 const PAGE_TITLES = {
-  dashboard:    'Overview Dashboard',
-  members:      'Members & Profiles',
+  // Personal — every user
+  home:         'Home',
+  assessments:  'Assessments',
+  checkin:      'Daily Check-In',
   inbox:        'Inbox',
+  stats:        'My Stats',
+  // Organisation — leadership permissions
+  organisation: 'Organisation',
+  assignments:  'Assignments',
+  'org-insights': 'Organisation Insights',
+  // Intelligence
   analytics:    'Analytics & Insights',
   intelliq:     'IntelliQ Engine',
-  scenarios:    'AI Assessments',
+  scenarios:    'Manage Assessments',
+  // Management
   people:       'People',
   alerts:       'Alerts & Notifications',
   reports:      'Reports & Stat Sheets',
   settings:     'Platform Settings',
-  myteam:       'My Team',
-  assignments:  'Assignments',
-  teaminsights: 'Team Insights',
+  // Kept for backward compatibility with any remaining internal navigate() calls
+  dashboard:    'Overview Dashboard',
+  members:      'Members & Profiles',
 };
 
 /* ── LOGIN ────────────────────────────────────────────────── */
@@ -657,26 +670,19 @@ function initLogin() {
     AppState.adminRole = Auth.ROLE_LABELS[Auth.currentUser?.role] || 'Admin';
     console.log('[ROUTE] session restore — role:', Auth.currentUser?.role, '| profileComplete:', Auth.currentUser?.profileComplete, '| orgComplete:', Auth.currentOrg?.organizationProfileComplete);
 
-    if (Auth.isMember()) {
-      // Repair: if the server lost profileComplete (server restart after onboarding),
-      // the cached localStorage value may already be true — trust it.
-      // If not, check for the durable iq_profile_complete_ flag written by
-      // _obSubmitProfile(). If found, fix locally; server is re-synced on the
-      // next email+password login via handleLogin().
-      if (_needsOnboarding()) {
-        const _uid = Auth.currentUser?.id;
-        if (_uid && localStorage.getItem(`iq_profile_complete_${_uid}`)) {
-          Auth.currentUser = { ...Auth.currentUser, profileComplete: true };
-          Auth.save();
-          console.log('[ROUTE] session restore — profileComplete repaired from local flag');
-        }
+    // Repair: if the server lost profileComplete (server restart after onboarding),
+    // the cached localStorage value may already be true — trust it.
+    // If not, check for the durable iq_profile_complete_ flag written by _obSubmitProfile().
+    if (_needsOnboarding()) {
+      const _uid = Auth.currentUser?.id;
+      if (_uid && localStorage.getItem(`iq_profile_complete_${_uid}`)) {
+        Auth.currentUser = { ...Auth.currentUser, profileComplete: true };
+        Auth.save();
+        console.log('[ROUTE] session restore — profileComplete repaired from local flag');
       }
-      console.log('[ROUTE] needs onboarding?', _needsOnboarding());
-      if (_needsOnboarding()) { showOnboardingFlow(); return; }
-      console.log('[ROUTE] launching member view');
-      launchMemberView();
-      return;
     }
+    console.log('[ROUTE] needs onboarding?', _needsOnboarding());
+    if (_needsOnboarding()) { showOnboardingFlow(); return; }
     // SuperAdmin: check org setup first, then personal profile
     if (Auth.currentUser?.role === 'superadmin') {
       if (Auth.currentOrg?.organizationProfileComplete !== true) {
@@ -724,40 +730,33 @@ async function handleLogin() {
     AppState.adminRole = Auth.ROLE_LABELS[user?.role] || 'Admin';
     console.log('[ROUTE] login success — role:', user?.role, '| profileComplete:', user?.profileComplete, '| orgComplete:', org?.organizationProfileComplete);
 
-    if (Auth.isMember()) {
-      console.log('[ROUTE] needs onboarding?', _needsOnboarding());
-      // Repair: server lost profileComplete (server restarted after member's onboarding).
-      // Check for the durable local flag written by _obSubmitProfile() — it survives logout.
-      if (_needsOnboarding()) {
-        const _uid = Auth.currentUser?.id;
-        if (_uid && localStorage.getItem(`iq_profile_complete_${_uid}`)) {
-          console.log('[ROUTE] repairing profileComplete on server (lost on server restart)');
-          try {
-            const _r = await fetch('/api/auth/complete-profile', {
-              method: 'POST', headers: Auth._headers(), body: JSON.stringify({}),
-            });
-            const _d = await _r.json();
-            if (_d.ok) {
-              Auth.currentUser = { ...Auth.currentUser, profileComplete: true };
-              Auth.save();
-              console.log('[ROUTE] profileComplete repaired on server');
-            } else {
-              throw new Error(_d.error || 'repair rejected');
-            }
-          } catch(e) {
-            // Repair call failed — fix locally so at least this session works.
-            // Will retry on next login.
+    // Repair: server lost profileComplete (server restarted after member's onboarding).
+    // Check for the durable local flag written by _obSubmitProfile() — it survives logout.
+    console.log('[ROUTE] needs onboarding?', _needsOnboarding());
+    if (_needsOnboarding()) {
+      const _uid = Auth.currentUser?.id;
+      if (_uid && localStorage.getItem(`iq_profile_complete_${_uid}`)) {
+        console.log('[ROUTE] repairing profileComplete on server (lost on server restart)');
+        try {
+          const _r = await fetch('/api/auth/complete-profile', {
+            method: 'POST', headers: Auth._headers(), body: JSON.stringify({}),
+          });
+          const _d = await _r.json();
+          if (_d.ok) {
             Auth.currentUser = { ...Auth.currentUser, profileComplete: true };
             Auth.save();
-            console.warn('[ROUTE] server repair failed — set locally:', e.message);
+            console.log('[ROUTE] profileComplete repaired on server');
+          } else {
+            throw new Error(_d.error || 'repair rejected');
           }
+        } catch(e) {
+          Auth.currentUser = { ...Auth.currentUser, profileComplete: true };
+          Auth.save();
+          console.warn('[ROUTE] server repair failed — set locally:', e.message);
         }
       }
-      if (_needsOnboarding()) { showOnboardingFlow(); return; }
-      console.log('[ROUTE] launching member view');
-      launchMemberView();
-      return;
     }
+    if (_needsOnboarding()) { showOnboardingFlow(); return; }
     // SuperAdmin: check org setup first, then personal profile
     if (Auth.currentUser?.role === 'superadmin') {
       if (Auth.currentOrg?.organizationProfileComplete !== true) {
@@ -1062,41 +1061,10 @@ async function submitCoachCheckin() {
 
 /* ── MEMBER VIEW — unified shell inside main app ────────────────────────── */
 function launchMemberView() {
-  console.log('[ROUTE] launchMemberView — showing member shell');
-
-  // Hide all source screens and overlays
-  document.getElementById('login-screen').style.display = 'none';
-  const obOv  = document.getElementById('onboarding-overlay');
-  const orgOv = document.getElementById('org-setup-overlay');
-  const appEl = document.getElementById('app');
-  if (obOv)  obOv.style.display  = 'none';
-  if (orgOv) orgOv.style.display = 'none';
-  if (appEl) appEl.style.display = 'none';  // hide admin shell explicitly
-
-  const shell = document.getElementById('member-shell');
-  if (!shell) {
-    console.error('[ROUTE] launchMemberView — #member-shell not found in DOM');
-    _showGlobalError('Member shell missing from page — please refresh.', new Error('#member-shell not found'));
-    return;
-  }
-
-  // Use inline style (not class) so it always wins regardless of prior CSS state
-  shell.style.display = 'flex';
-  shell.classList.add('visible');
-
-  console.log('[ROUTE] MemberApp.init start');
-  if (typeof MemberApp !== 'undefined') {
-    try {
-      MemberApp.init();
-      console.log('[ROUTE] MemberApp.init success');
-    } catch(err) {
-      console.error('[ROUTE] MemberApp.init failed:', err);
-      shell.innerHTML = _memberErrorHTML(err);
-    }
-  } else {
-    console.error('[ROUTE] MemberApp is not defined — member-view.js may not have loaded');
-    shell.innerHTML = _memberErrorHTML(new Error('MemberApp script not loaded'));
-  }
+  // DEPRECATED — the separate member shell has been removed.
+  // All users now enter the unified IntelliQ workspace via launchApp().
+  console.warn('[ROUTE] launchMemberView() is deprecated — routing through launchApp()');
+  launchApp();
 }
 
 function _memberErrorHTML(err) {
@@ -1371,7 +1339,7 @@ function _showSessionExpired() {
 }
 
 function launchApp(){
-  console.log('[ROUTE] launchApp — showing admin dashboard');
+  console.log('[ROUTE] launchApp — launching unified workspace');
 
   // Hide all possible source screens / overlays
   document.getElementById('login-screen').style.display    = 'none';
@@ -1390,7 +1358,12 @@ function launchApp(){
     renderSidebar();
     renderTopbar();
     renderAllPages();
-    navigate('dashboard');
+    // Members land on Home; everyone else lands on the Overview Dashboard.
+    const isMember = Auth.currentUser?.role === 'member';
+    if (isMember && typeof MemberApp !== 'undefined') {
+      try { MemberApp.init(); } catch(e) { console.warn('[ROUTE] MemberApp.init failed:', e.message); }
+    }
+    navigate(isMember ? 'home' : 'dashboard');
   } catch(err) {
     console.error('[ROUTE] launchApp render error:', err);
   }

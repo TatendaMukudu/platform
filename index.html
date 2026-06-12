@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
@@ -316,9 +316,10 @@
       </section>
 
       <!-- ════════════════════════════
-           INBOX PAGE (moved from People tabs in Sprint 2)
+           PLATFORM INBOX PAGE (leader/admin group messages — Sprint 2)
+           Renamed from page-inbox to avoid conflict with member inbox page.
            ════════════════════════════ -->
-      <section class="page" id="page-inbox">
+      <section class="page" id="page-platform-inbox">
         <div class="section-header">
           <div>
             <div class="section-title">Inbox</div>
@@ -813,11 +814,11 @@
 
       </section>
 
-      <!-- ── MY TEAM PAGE ─────────────────────────────────── -->
-      <section class="page" id="page-myteam">
+      <!-- ── ORGANISATION PAGE (renamed from My Team) ────── -->
+      <section class="page" id="page-organisation">
         <div class="section-header">
           <div>
-            <div class="section-title">My Team</div>
+            <div class="section-title">Organisation</div>
             <div class="section-sub" id="myteam-count">—</div>
           </div>
           <div>
@@ -833,21 +834,206 @@
         <div class="section-header">
           <div>
             <div class="section-title">Assignments</div>
-            <div class="section-sub">Assign assessments to your visible team members</div>
+            <div class="section-sub">Assign assessments to your visible members</div>
           </div>
         </div>
         <div id="assignments-content"></div>
       </section>
 
-      <!-- ── TEAM INSIGHTS PAGE ────────────────────────────── -->
-      <section class="page" id="page-teaminsights">
+      <!-- ── ORGANISATION INSIGHTS PAGE (renamed from Team Insights) ── -->
+      <section class="page" id="page-org-insights">
         <div class="section-header">
           <div>
-            <div class="section-title">Team Insights</div>
-            <div class="section-sub">A snapshot of how your team is doing right now</div>
+            <div class="section-title">Organisation Insights</div>
+            <div class="section-sub">A snapshot of how your organisation is doing right now</div>
           </div>
         </div>
         <div id="teaminsights-content"></div>
+      </section>
+
+      <!-- ════════════════════════════════════════════════════
+           MEMBER WORKSPACE PAGES
+           These are the personal/member modules visible to
+           every authenticated user, rendered by MemberApp.
+           ════════════════════════════════════════════════════ -->
+
+      <!-- ── HOME PAGE ─────────────────────────────────────── -->
+      <section class="page" id="page-home">
+        <div class="page-header">
+          <div class="page-header-greeting" id="home-greeting">Good morning</div>
+          <div class="page-header-title"    id="home-name">—</div>
+          <div class="page-header-sub"      id="home-org">—</div>
+        </div>
+        <div id="home-stat-row"></div>
+        <div id="home-focus"></div>
+        <div id="home-insight"></div>
+        <div id="home-progress"></div>
+        <div class="card-label" style="margin-bottom:0.5rem">Pending Assessments</div>
+        <div id="home-pending"></div>
+        <div id="home-weekly-prompt"></div>
+        <div id="home-checkin-prompt"></div>
+        <div id="home-recent-result"></div>
+      </section>
+
+      <!-- ── ASSESSMENTS PAGE ───────────────────────────────── -->
+      <section class="page" id="page-assessments">
+        <div class="page-header">
+          <div class="page-header-title">Assessments
+            <span class="nav-badge" id="scenarios-badge" style="display:none;margin-left:0.4rem">0</span>
+          </div>
+          <div class="page-header-sub">Assessments assigned to you</div>
+        </div>
+        <div id="scenarios-list"></div>
+      </section>
+
+      <!-- ── DAILY CHECK-IN PAGE ────────────────────────────── -->
+      <section class="page" id="page-checkin">
+        <div class="page-header">
+          <div class="page-header-title">Daily Check-In</div>
+          <div class="page-header-sub" id="checkin-sub">How are you doing today?</div>
+        </div>
+        <div id="checkin-done" style="display:none;padding:0">
+          <div class="card" style="border-color:rgba(79,247,122,0.3);text-align:center;padding:1.4rem 1rem">
+            <div style="font-size:2rem;margin-bottom:0.4rem">✅</div>
+            <div style="font-weight:700;font-size:0.9rem">Check-in done for today</div>
+            <div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px">Come back tomorrow</div>
+          </div>
+          <div id="checkin-ai-replay" style="display:none"></div>
+        </div>
+        <div id="checkin-form">
+          <div class="card">
+            <div class="card-label">How's your mood?</div>
+            <div class="mood-grid" id="mood-grid">
+              <div><button class="mood-btn" data-mood="1" onclick="MemberApp.selectMood(1)">😔</button><div class="mood-label">Rough</div></div>
+              <div><button class="mood-btn" data-mood="2" onclick="MemberApp.selectMood(2)">😕</button><div class="mood-label">Low</div></div>
+              <div><button class="mood-btn" data-mood="3" onclick="MemberApp.selectMood(3)">😐</button><div class="mood-label">Okay</div></div>
+              <div><button class="mood-btn" data-mood="4" onclick="MemberApp.selectMood(4)">🙂</button><div class="mood-label">Good</div></div>
+              <div><button class="mood-btn" data-mood="5" onclick="MemberApp.selectMood(5)">😄</button><div class="mood-label">Great</div></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-label" id="checkin-prompt-label">How did things go today?</div>
+            <textarea class="note-input" id="checkin-note"
+              placeholder="Write anything — how you're feeling, something that happened. IntelliQ reads this and responds."></textarea>
+          </div>
+          <button class="btn-primary" id="checkin-submit-btn" onclick="MemberApp.submitCheckin()" disabled>Submit Check-In</button>
+          <div id="checkin-ai-response" style="display:none;margin-top:1rem">
+            <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06)">
+              <div style="display:flex;align-items:flex-start;gap:0.7rem">
+                <div style="width:28px;height:28px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.72rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
+                <div>
+                  <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.4rem">IntelliQ</div>
+                  <div id="checkin-ai-text" style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── INBOX PAGE ─────────────────────────────────────── -->
+      <section class="page" id="page-inbox">
+        <div class="page-header">
+          <div class="page-header-title">Inbox</div>
+          <div class="page-header-sub">Notes &amp; Messages</div>
+        </div>
+        <div id="inbox-group-notice" style="display:none;margin-bottom:0.8rem">
+          <div class="empty-card" style="padding:0.8rem 1rem;flex-direction:row;gap:0.6rem;text-align:left">
+            <span style="font-size:1.2rem">👥</span>
+            <div style="font-size:0.78rem;color:var(--text-muted);line-height:1.5">You're not in any groups yet. You can still write private notes below.</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:0.4rem;margin-bottom:1rem">
+          <button class="inbox-sub-btn active" data-sub="notes"    onclick="MemberApp.switchInboxTab('notes')"   >📝 Notes</button>
+          <button class="inbox-sub-btn"        data-sub="messages" onclick="MemberApp.switchInboxTab('messages')">💬 Messages</button>
+        </div>
+        <div id="inbox-notes">
+          <div class="card" style="margin-bottom:0.8rem">
+            <div class="card-label" style="margin-bottom:0.7rem">New Note</div>
+            <textarea class="form-input" id="note-content" rows="3" style="resize:none;margin-bottom:0.6rem"
+              placeholder="Write anything — a goal, a reflection, something you want to remember…"></textarea>
+            <div style="margin-bottom:0.7rem">
+              <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.4rem">Tag <span style="font-weight:400">(optional)</span></div>
+              <div style="display:flex;gap:0.35rem;flex-wrap:wrap" id="note-tags-row">
+                <button class="note-tag-btn active" data-tag=""        onclick="MemberApp.selectNoteTag('')">None</button>
+                <button class="note-tag-btn" data-tag="Goals"    onclick="MemberApp.selectNoteTag('Goals')">🎯 Goals</button>
+                <button class="note-tag-btn" data-tag="Training" onclick="MemberApp.selectNoteTag('Training')">💪 Training</button>
+                <button class="note-tag-btn" data-tag="Personal" onclick="MemberApp.selectNoteTag('Personal')">🧠 Personal</button>
+                <button class="note-tag-btn" data-tag="Team"     onclick="MemberApp.selectNoteTag('Team')">🤝 Team</button>
+                <button class="note-tag-btn" data-tag="Mental"   onclick="MemberApp.selectNoteTag('Mental')">🧘 Mental</button>
+                <button class="note-tag-btn" data-tag="Other"    onclick="MemberApp.selectNoteTag('Other')">📌 Other</button>
+              </div>
+            </div>
+            <div style="margin-bottom:0.7rem">
+              <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.4rem">Who sees this?</div>
+              <div style="display:flex;gap:0.4rem;flex-wrap:wrap">
+                <button class="note-type-btn active" data-type="private"   onclick="MemberApp.selectNoteType('private')">🔒 Private</button>
+                <button class="note-type-btn"        data-type="shared"    onclick="MemberApp.selectNoteType('shared')">📤 Shared</button>
+                <button class="note-type-btn"        data-type="anonymous" onclick="MemberApp.selectNoteType('anonymous')">👤 Anonymous</button>
+              </div>
+              <div id="note-type-desc" style="font-size:0.74rem;color:var(--text-muted);margin-top:0.4rem">Only you and IntelliQ see this.</div>
+            </div>
+            <div id="note-group-row" style="display:none;margin-bottom:0.6rem">
+              <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.3rem">Post to group</div>
+              <select class="form-input" id="note-group-id" style="font-size:0.82rem">
+                <option value="">— Select group —</option>
+              </select>
+            </div>
+            <button class="btn-primary" style="padding:0.6rem 1rem;font-size:0.85rem" onclick="MemberApp.submitNote()">Save Note</button>
+          </div>
+          <div id="note-ai-response" style="display:none;margin-bottom:0.8rem">
+            <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06)">
+              <div style="display:flex;gap:0.7rem;align-items:flex-start">
+                <div style="width:26px;height:26px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.68rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
+                <div>
+                  <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.3rem">IntelliQ</div>
+                  <div id="note-ai-text" style="font-size:0.83rem;color:var(--text-secondary);line-height:1.6"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.6rem" id="notes-filter-row">
+            <button class="note-tag-btn active" data-filter="All"      onclick="MemberApp._filterNotes('All')">All</button>
+            <button class="note-tag-btn" data-filter="Goals"    onclick="MemberApp._filterNotes('Goals')">🎯 Goals</button>
+            <button class="note-tag-btn" data-filter="Training" onclick="MemberApp._filterNotes('Training')">💪 Training</button>
+            <button class="note-tag-btn" data-filter="Personal" onclick="MemberApp._filterNotes('Personal')">🧠 Personal</button>
+            <button class="note-tag-btn" data-filter="Team"     onclick="MemberApp._filterNotes('Team')">🤝 Team</button>
+            <button class="note-tag-btn" data-filter="Mental"   onclick="MemberApp._filterNotes('Mental')">🧘 Mental</button>
+            <button class="note-tag-btn" data-filter="Other"    onclick="MemberApp._filterNotes('Other')">📌 Other</button>
+          </div>
+          <div id="notes-list"></div>
+        </div>
+        <div id="inbox-messages" style="display:none">
+          <div class="card" style="margin-bottom:0.8rem">
+            <div class="card-label" style="margin-bottom:0.7rem">New Message</div>
+            <textarea class="form-input" id="msg-content" rows="2" style="resize:none;margin-bottom:0.6rem"
+              placeholder="Write your message…"></textarea>
+            <div style="margin-bottom:0.6rem">
+              <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.3rem">Send to</div>
+              <select class="form-input" id="msg-to-type" style="font-size:0.82rem;margin-bottom:0.4rem" onchange="MemberApp.updateMsgRecipient()">
+                <option value="group">A group</option>
+                <option value="org">Whole organisation</option>
+              </select>
+              <select class="form-input" id="msg-to-group" style="font-size:0.82rem">
+                <option value="">— Select group —</option>
+              </select>
+            </div>
+            <div style="display:flex;gap:0.4rem">
+              <button class="btn-primary" style="flex:1;padding:0.6rem;font-size:0.83rem" onclick="MemberApp.sendMessage(false)">Send (Known)</button>
+              <button style="flex:1;padding:0.6rem;font-size:0.83rem;border-radius:10px;border:1px solid rgba(124,90,245,0.4);background:rgba(124,90,245,0.1);color:var(--accent);cursor:pointer;font-weight:600" onclick="MemberApp.sendMessage(true)">👤 Anonymous</button>
+            </div>
+          </div>
+          <div id="messages-list"></div>
+        </div>
+      </section>
+
+      <!-- ── MY STATS PAGE ──────────────────────────────────── -->
+      <section class="page" id="page-stats">
+        <div class="page-header">
+          <div class="page-header-title">My Stats</div>
+          <div class="page-header-sub">Your IntelliQ scores and progress</div>
+        </div>
+        <div id="stats-content"></div>
       </section>
 
     </main><!-- /page-content -->
@@ -1278,357 +1464,133 @@
 <!-- hierarchy-manage-modal removed in Sprint 2.5 — managed via OrgTree inline modal -->
 
 <!-- ════════════════════════════════════════════════════════
-     MEMBER SHELL — hosts the member view inside unified app
-     Shown instead of #app for members after login.
-     Controlled by launchMemberView() in app.js.
-     All inner IDs match member/index.html (no changes to onclick handlers).
+     FULL-SCREEN OVERLAYS
+     Scenario runner, weekly reflection, set-password, goal intake.
+     Shown over the workspace via .member-fullscreen-overlay.active.
+     No dependency on the old member-shell routing.
      ════════════════════════════════════════════════════════ -->
-<div id="member-shell">
 
-  <!-- SET PASSWORD SCREEN (first login only) -->
-  <div class="screen" id="screen-setpassword">
-    <div class="join-logo">
-      <div class="join-logo-ring">IQ</div>
-      <div class="join-logo-title">IntelliQ</div>
-      <div class="join-logo-sub">Set your password to continue</div>
+<!-- SET PASSWORD SCREEN (first login only) -->
+<div id="screen-setpassword" class="member-fullscreen-overlay" style="justify-content:center;align-items:center;padding:2rem 1.5rem;overflow-y:auto">
+  <div class="join-logo">
+    <div class="join-logo-ring">IQ</div>
+    <div class="join-logo-title">IntelliQ</div>
+    <div class="join-logo-sub">Set your password to continue</div>
+  </div>
+  <div class="join-card">
+    <div class="join-card-title">Welcome, <span id="sp-name">—</span></div>
+    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:1.2rem;line-height:1.6">
+      You've been added to this organisation. Set your own password to secure your account.
+    </p>
+    <div class="form-group">
+      <label class="form-label">New password</label>
+      <input class="form-input" type="password" id="sp-password" placeholder="Choose a password"/>
     </div>
-    <div class="join-card">
-      <div class="join-card-title">Welcome, <span id="sp-name">—</span></div>
-      <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:1.2rem;line-height:1.6">
-        You've been added to this organisation. Set your own password to secure your account.
-      </p>
-      <div class="form-group">
-        <label class="form-label">New password</label>
-        <input class="form-input" type="password" id="sp-password" placeholder="Choose a password"/>
-      </div>
-      <div class="form-group" style="margin-top:0.6rem">
-        <label class="form-label">Confirm password</label>
-        <input class="form-input" type="password" id="sp-confirm" placeholder="Repeat it"/>
-      </div>
-      <div id="sp-error" style="color:var(--danger);font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
-      <button class="btn-join" onclick="MemberApp.submitSetPassword()">Set Password &amp; Continue →</button>
-      <div class="screen-escape-link">
-        <a href="#" onclick="Auth.logout();return false">← Sign out / switch account</a>
-      </div>
+    <div class="form-group" style="margin-top:0.6rem">
+      <label class="form-label">Confirm password</label>
+      <input class="form-input" type="password" id="sp-confirm" placeholder="Repeat it"/>
+    </div>
+    <div id="sp-error" style="color:var(--danger);font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
+    <button class="btn-join" onclick="MemberApp.submitSetPassword()">Set Password &amp; Continue →</button>
+    <div class="screen-escape-link" style="text-align:center;margin-top:1rem">
+      <a href="#" onclick="Auth.logout();return false" style="font-size:0.78rem;color:var(--text-muted)">← Sign out / switch account</a>
     </div>
   </div>
+</div>
 
-  <!-- GOAL INTAKE SCREEN (first login only) -->
-  <div class="screen" id="screen-goals">
-    <div class="join-logo">
-      <div class="join-logo-ring">IQ</div>
-      <div class="join-logo-title">IntelliQ</div>
-      <div class="join-logo-sub">Before we start — tell us about you</div>
+<!-- GOAL INTAKE SCREEN (legacy first-login path) -->
+<div id="screen-goals" class="member-fullscreen-overlay" style="justify-content:center;align-items:center;padding:2rem 1.5rem;overflow-y:auto">
+  <div class="join-logo">
+    <div class="join-logo-ring">IQ</div>
+    <div class="join-logo-title">IntelliQ</div>
+    <div class="join-logo-sub">Before we start — tell us about you</div>
+  </div>
+  <div class="join-card">
+    <div class="join-card-title">Set your goal</div>
+    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:1.2rem;line-height:1.6">
+      IntelliQ will use this to personalise every check-in and help you track real progress.
+    </p>
+    <div class="form-group">
+      <label class="form-label">What is your goal? <span style="color:var(--text-muted);font-weight:400">(be specific)</span></label>
+      <textarea class="form-input" id="goals-goal" rows="3" style="resize:none"
+        placeholder="e.g. Improve my decision-making under pressure…"></textarea>
     </div>
-    <div class="join-card">
-      <div class="join-card-title">Set your goal</div>
-      <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:1.2rem;line-height:1.6">
-        IntelliQ will use this to personalise every check-in and help you track real progress. Takes 30 seconds.
-      </p>
-      <div class="form-group">
-        <label class="form-label">What is your goal this season? <span style="color:var(--text-muted);font-weight:400">(be specific)</span></label>
-        <textarea class="form-input" id="goals-goal" rows="3" style="resize:none"
-          placeholder="e.g. Get into the starting eleven, improve my 40m sprint time, be more consistent under pressure…"></textarea>
-      </div>
-      <div class="form-group" style="margin-top:0.8rem">
-        <label class="form-label">What kind of person do you need to become to reach it?</label>
-        <textarea class="form-input" id="goals-identity" rows="3" style="resize:none"
-          placeholder="e.g. Someone who shows up even when tired, who takes feedback well, who prepares mentally before games…"></textarea>
-      </div>
-      <div id="goals-error" style="color:var(--danger);font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
-      <button class="btn-join" id="goals-submit-btn" onclick="MemberApp.submitGoals()">Save &amp; Continue →</button>
-      <div style="text-align:center;margin-top:0.8rem">
-        <a href="#" onclick="MemberApp.skipGoals();return false;" style="font-size:0.78rem;color:var(--text-muted)">Skip for now</a>
-      </div>
-      <div class="screen-escape-link">
-        <a href="#" onclick="Auth.logout();return false">← Sign out / switch account</a>
-      </div>
+    <div class="form-group" style="margin-top:0.8rem">
+      <label class="form-label">What kind of person do you need to become to reach it?</label>
+      <textarea class="form-input" id="goals-identity" rows="3" style="resize:none"
+        placeholder="e.g. Someone who stays calm, takes feedback well, prepares thoroughly…"></textarea>
+    </div>
+    <div id="goals-error" style="color:var(--danger);font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
+    <button class="btn-join" id="goals-submit-btn" onclick="MemberApp.submitGoals()">Save &amp; Continue →</button>
+    <div style="text-align:center;margin-top:0.8rem">
+      <a href="#" onclick="MemberApp.skipGoals();return false;" style="font-size:0.78rem;color:var(--text-muted)">Skip for now</a>
+    </div>
+    <div class="screen-escape-link" style="text-align:center;margin-top:0.6rem">
+      <a href="#" onclick="Auth.logout();return false" style="font-size:0.78rem;color:var(--text-muted)">← Sign out / switch account</a>
     </div>
   </div>
+</div>
 
-  <!-- MAIN APP (home, assessments, check-in, inbox, stats) -->
-  <div class="screen" id="screen-main">
-
-    <!-- Member topbar — always visible; contains account menu + sign out -->
-    <header class="member-topbar">
-      <div class="member-topbar-brand">
-        <div class="member-topbar-logo">IQ</div>
-        <div class="member-topbar-orgname" id="member-topbar-org">—</div>
-      </div>
-      <div class="member-topbar-right">
-        <button class="member-avatar-btn" id="member-avatar-btn"
-                onclick="MemberApp.toggleAccountMenu()" aria-label="Account menu"
-                title="Account">
-          <span id="member-avatar-initials">?</span>
-        </button>
-        <div class="member-account-menu" id="member-account-menu">
-          <div class="member-account-info">
-            <div class="member-account-name"  id="member-account-name">—</div>
-            <div class="member-account-email" id="member-account-email">—</div>
-          </div>
-          <div class="member-account-divider"></div>
-          <button class="member-signout-btn" onclick="Auth.logout()">Sign Out</button>
-        </div>
-      </div>
-    </header>
-
-    <div class="page-content" id="main-content">
-
-      <!-- HOME TAB -->
-      <div class="tab-page active" id="tab-home">
-        <div class="page-header">
-          <div class="page-header-greeting" id="home-greeting">Good morning</div>
-          <div class="page-header-title"    id="home-name">—</div>
-          <div class="page-header-sub"      id="home-org">—</div>
-        </div>
-        <div id="home-stat-row"></div>
-        <!-- Phase 4: Your Focus — populated by _renderHome() -->
-        <div id="home-focus"></div>
-        <!-- Phase 4: Latest IntelliQ Insight — populated by _renderHome() -->
-        <div id="home-insight"></div>
-        <!-- Phase 4: Progress Signals — populated by _renderHome() -->
-        <div id="home-progress"></div>
-        <div class="card-label" style="margin-bottom:0.5rem">Pending Assessments</div>
-        <div id="home-pending"></div>
-        <div id="home-weekly-prompt"></div>
-        <div id="home-checkin-prompt"></div>
-        <div id="home-recent-result"></div>
-      </div>
-
-      <!-- ASSESSMENTS TAB -->
-      <div class="tab-page" id="tab-scenarios">
-        <div class="page-header">
-          <div class="page-header-title">Assessments</div>
-          <div class="page-header-sub">Assessments assigned to you</div>
-        </div>
-        <div id="scenarios-list"></div>
-      </div>
-
-      <!-- CHECK-IN TAB -->
-      <div class="tab-page" id="tab-checkin">
-        <div class="page-header">
-          <div class="page-header-title">Daily Check-In</div>
-          <div class="page-header-sub" id="checkin-sub">How are you doing today?</div>
-        </div>
-        <div id="checkin-done" style="display:none;padding:0">
-          <div class="card" style="border-color:rgba(79,247,122,0.3);text-align:center;padding:1.4rem 1rem">
-            <div style="font-size:2rem;margin-bottom:0.4rem">✅</div>
-            <div style="font-weight:700;font-size:0.9rem">Check-in done for today</div>
-            <div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px">Come back tomorrow</div>
-          </div>
-          <div id="checkin-ai-replay" style="display:none"></div>
-        </div>
-        <div id="checkin-form">
-          <div class="card">
-            <div class="card-label">How's your mood?</div>
-            <div class="mood-grid" id="mood-grid">
-              <div><button class="mood-btn" data-mood="1" onclick="MemberApp.selectMood(1)">😔</button><div class="mood-label">Rough</div></div>
-              <div><button class="mood-btn" data-mood="2" onclick="MemberApp.selectMood(2)">😕</button><div class="mood-label">Low</div></div>
-              <div><button class="mood-btn" data-mood="3" onclick="MemberApp.selectMood(3)">😐</button><div class="mood-label">Okay</div></div>
-              <div><button class="mood-btn" data-mood="4" onclick="MemberApp.selectMood(4)">🙂</button><div class="mood-label">Good</div></div>
-              <div><button class="mood-btn" data-mood="5" onclick="MemberApp.selectMood(5)">😄</button><div class="mood-label">Great</div></div>
-            </div>
-          </div>
-          <div class="card">
-            <div class="card-label" id="checkin-prompt-label">How did things go today?</div>
-            <textarea class="note-input" id="checkin-note"
-              placeholder="Write anything — training, school, how you're feeling, something that happened. IntelliQ reads this and responds. It stays between you and the system."></textarea>
-          </div>
-          <button class="btn-primary" id="checkin-submit-btn" onclick="MemberApp.submitCheckin()" disabled>Submit Check-In</button>
-          <div id="checkin-ai-response" style="display:none;margin-top:1rem">
-            <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06)">
-              <div style="display:flex;align-items:flex-start;gap:0.7rem">
-                <div style="width:28px;height:28px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.72rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
-                <div>
-                  <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.4rem">IntelliQ</div>
-                  <div id="checkin-ai-text" style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- INBOX TAB (Notes + Messages) -->
-      <div class="tab-page" id="tab-inbox">
-        <div class="page-header">
-          <div class="page-header-title">Inbox</div>
-          <div class="page-header-sub" id="inbox-sub">Notes &amp; Messages</div>
-        </div>
-        <div id="inbox-group-notice" style="display:none;margin-bottom:0.8rem">
-          <div class="empty-card" style="padding:0.8rem 1rem;flex-direction:row;gap:0.6rem;text-align:left">
-            <span style="font-size:1.2rem">👥</span>
-            <div style="font-size:0.78rem;color:var(--text-muted);line-height:1.5">You're not in any groups yet. You'll be added to groups when ready. You can still write private notes below.</div>
-          </div>
-        </div>
-        <div style="display:flex;gap:0.4rem;margin-bottom:1rem">
-          <button class="inbox-sub-btn active" data-sub="notes"    onclick="MemberApp.switchInboxTab('notes')"   >📝 Notes</button>
-          <button class="inbox-sub-btn"        data-sub="messages" onclick="MemberApp.switchInboxTab('messages')">💬 Messages</button>
-        </div>
-        <!-- Notes sub-tab -->
-        <div id="inbox-notes">
-          <div class="card" style="margin-bottom:0.8rem">
-            <div class="card-label" style="margin-bottom:0.7rem">New Note</div>
-            <textarea class="form-input" id="note-content" rows="3" style="resize:none;margin-bottom:0.6rem"
-              placeholder="Write anything — a goal, a reflection, something you want to remember…"></textarea>
-            <div style="margin-bottom:0.7rem">
-              <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.4rem">Tag <span style="font-weight:400">(optional)</span></div>
-              <div style="display:flex;gap:0.35rem;flex-wrap:wrap" id="note-tags-row">
-                <button class="note-tag-btn active" data-tag=""        onclick="MemberApp.selectNoteTag('')">None</button>
-                <button class="note-tag-btn" data-tag="Goals"    onclick="MemberApp.selectNoteTag('Goals')">🎯 Goals</button>
-                <button class="note-tag-btn" data-tag="Training" onclick="MemberApp.selectNoteTag('Training')">💪 Training</button>
-                <button class="note-tag-btn" data-tag="Personal" onclick="MemberApp.selectNoteTag('Personal')">🧠 Personal</button>
-                <button class="note-tag-btn" data-tag="Team"     onclick="MemberApp.selectNoteTag('Team')">🤝 Team</button>
-                <button class="note-tag-btn" data-tag="Mental"   onclick="MemberApp.selectNoteTag('Mental')">🧘 Mental</button>
-                <button class="note-tag-btn" data-tag="Other"    onclick="MemberApp.selectNoteTag('Other')">📌 Other</button>
-              </div>
-            </div>
-            <div style="margin-bottom:0.7rem">
-              <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.4rem">Who sees this?</div>
-              <div style="display:flex;gap:0.4rem;flex-wrap:wrap">
-                <button class="note-type-btn active" data-type="private"   onclick="MemberApp.selectNoteType('private')">🔒 Private</button>
-                <button class="note-type-btn"        data-type="shared"    onclick="MemberApp.selectNoteType('shared')">📤 Shared</button>
-                <button class="note-type-btn"        data-type="anonymous" onclick="MemberApp.selectNoteType('anonymous')">👤 Anonymous</button>
-              </div>
-              <div id="note-type-desc" style="font-size:0.74rem;color:var(--text-muted);margin-top:0.4rem">Only you and IntelliQ see this.</div>
-            </div>
-            <div id="note-group-row" style="display:none;margin-bottom:0.6rem">
-              <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.3rem">Post to group</div>
-              <select class="form-input" id="note-group-id" style="font-size:0.82rem">
-                <option value="">— Select group —</option>
-              </select>
-            </div>
-            <button class="btn-primary" style="padding:0.6rem 1rem;font-size:0.85rem" onclick="MemberApp.submitNote()">Save Note</button>
-          </div>
-          <div id="note-ai-response" style="display:none;margin-bottom:0.8rem">
-            <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06)">
-              <div style="display:flex;gap:0.7rem;align-items:flex-start">
-                <div style="width:26px;height:26px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.68rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
-                <div>
-                  <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.3rem">IntelliQ</div>
-                  <div id="note-ai-text" style="font-size:0.83rem;color:var(--text-secondary);line-height:1.6"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.6rem" id="notes-filter-row">
-            <button class="note-tag-btn active" data-filter="All"      onclick="MemberApp._filterNotes('All')">All</button>
-            <button class="note-tag-btn" data-filter="Goals"    onclick="MemberApp._filterNotes('Goals')">🎯 Goals</button>
-            <button class="note-tag-btn" data-filter="Training" onclick="MemberApp._filterNotes('Training')">💪 Training</button>
-            <button class="note-tag-btn" data-filter="Personal" onclick="MemberApp._filterNotes('Personal')">🧠 Personal</button>
-            <button class="note-tag-btn" data-filter="Team"     onclick="MemberApp._filterNotes('Team')">🤝 Team</button>
-            <button class="note-tag-btn" data-filter="Mental"   onclick="MemberApp._filterNotes('Mental')">🧘 Mental</button>
-            <button class="note-tag-btn" data-filter="Other"    onclick="MemberApp._filterNotes('Other')">📌 Other</button>
-          </div>
-          <div id="notes-list"></div>
-        </div>
-        <!-- Messages sub-tab -->
-        <div id="inbox-messages" style="display:none">
-          <div class="card" style="margin-bottom:0.8rem">
-            <div class="card-label" style="margin-bottom:0.7rem">New Message</div>
-            <textarea class="form-input" id="msg-content" rows="2" style="resize:none;margin-bottom:0.6rem"
-              placeholder="Write your message…"></textarea>
-            <div style="margin-bottom:0.6rem">
-              <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.3rem">Send to</div>
-              <select class="form-input" id="msg-to-type" style="font-size:0.82rem;margin-bottom:0.4rem" onchange="MemberApp.updateMsgRecipient()">
-                <option value="group">A group</option>
-                <option value="org">Whole organisation</option>
-              </select>
-              <select class="form-input" id="msg-to-group" style="font-size:0.82rem">
-                <option value="">— Select group —</option>
-              </select>
-            </div>
-            <div style="display:flex;gap:0.4rem">
-              <button class="btn-primary" style="flex:1;padding:0.6rem;font-size:0.83rem" onclick="MemberApp.sendMessage(false)">Send (Known)</button>
-              <button style="flex:1;padding:0.6rem;font-size:0.83rem;border-radius:10px;border:1px solid rgba(124,90,245,0.4);background:rgba(124,90,245,0.1);color:var(--accent);cursor:pointer;font-weight:600" onclick="MemberApp.sendMessage(true)">👤 Anonymous</button>
-            </div>
-          </div>
-          <div id="messages-list"></div>
-        </div>
-      </div>
-
-      <!-- STATS TAB -->
-      <div class="tab-page" id="tab-stats">
-        <div class="page-header">
-          <div class="page-header-title">My Stats</div>
-          <div class="page-header-sub">Your IntelliQ scores</div>
-        </div>
-        <div id="stats-content"></div>
-      </div>
-
-    </div><!-- /page-content -->
-
-    <!-- Bottom Navigation -->
-    <nav class="bottom-nav">
-      <button class="nav-tab active" data-tab="home" onclick="MemberApp.switchTab('home')">
-        <span class="nav-icon">🏠</span>Home
-      </button>
-      <button class="nav-tab" data-tab="scenarios" onclick="MemberApp.switchTab('scenarios')">
-        <span class="nav-icon">🎯</span>Assessments
-        <span class="nav-badge" id="scenarios-badge" style="display:none">0</span>
-      </button>
-      <button class="nav-tab" data-tab="inbox" onclick="MemberApp.switchTab('inbox')">
-        <span class="nav-icon">📬</span>Inbox
-        <span class="nav-badge" id="inbox-badge" style="display:none">0</span>
-      </button>
-      <button class="nav-tab" data-tab="stats" onclick="MemberApp.switchTab('stats')">
-        <span class="nav-icon">📊</span>Stats
-      </button>
-    </nav>
-  </div>
-
-  <!-- WEEKLY ASSESSMENT SCREEN -->
-  <div class="screen" id="screen-weekly">
-    <div class="scenario-header">
-      <button class="scenario-back-btn" onclick="MemberApp.exitWeekly()">‹</button>
-      <div class="scenario-header-info">
-        <div class="scenario-header-title">Weekly Reflection</div>
-        <div class="scenario-header-meta" id="weekly-header-meta">This week</div>
-      </div>
-    </div>
-    <div class="page-content" style="padding-bottom:1.5rem">
-      <div class="card" style="margin-bottom:0.8rem">
-        <div style="font-size:0.78rem;color:var(--text-secondary);line-height:1.6;margin-bottom:1rem" id="weekly-intro">
-          Take 2 minutes. Be honest — nobody sees this except IntelliQ. The more real you are, the more useful the feedback.
-        </div>
-        <div id="weekly-fields"></div>
-        <div id="weekly-error" style="color:var(--danger);font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
-        <button class="btn-primary" id="weekly-submit-btn" onclick="MemberApp.submitWeekly()">Submit Weekly Reflection →</button>
-      </div>
-      <div id="weekly-ai-response" style="display:none">
-        <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06)">
-          <div style="display:flex;align-items:flex-start;gap:0.7rem">
-            <div style="width:28px;height:28px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.72rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
-            <div>
-              <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.4rem">IntelliQ</div>
-              <div id="weekly-ai-text" style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6"></div>
-            </div>
-          </div>
-        </div>
-        <button class="btn-primary" style="margin-top:1rem" onclick="MemberApp.exitWeekly()">Back to Home</button>
-      </div>
+<!-- WEEKLY REFLECTION SCREEN (full-screen overlay) -->
+<div id="screen-weekly" class="member-fullscreen-overlay">
+  <div class="scenario-header">
+    <button class="scenario-back-btn" onclick="MemberApp.exitWeekly()">‹</button>
+    <div class="scenario-header-info">
+      <div class="scenario-header-title">Weekly Reflection</div>
+      <div class="scenario-header-meta" id="weekly-header-meta">This week</div>
     </div>
   </div>
-
-  <!-- SCENARIO CHAT SCREEN (full screen) -->
-  <div class="screen" id="screen-scenario">
-    <div class="scenario-header">
-      <button class="scenario-back-btn" onclick="MemberApp.exitScenario()">‹</button>
-      <div class="scenario-header-info">
-        <div class="scenario-header-title" id="sc-header-title">Scenario</div>
-        <div class="scenario-header-meta"  id="sc-header-meta">IntelliQ Assessment</div>
+  <div style="flex:1;overflow-y:auto;padding:1rem">
+    <div class="card" style="margin-bottom:0.8rem">
+      <div style="font-size:0.78rem;color:var(--text-secondary);line-height:1.6;margin-bottom:1rem" id="weekly-intro">
+        Take 2 minutes. Be honest — nobody sees this except IntelliQ. The more real you are, the more useful the feedback.
       </div>
-      <div class="scenario-exchange-badge" id="sc-exchange-badge">Exchange 0</div>
+      <div id="weekly-fields"></div>
+      <div id="weekly-error" style="color:var(--danger);font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
+      <button class="btn-primary" id="weekly-submit-btn" onclick="MemberApp.submitWeekly()">Submit Weekly Reflection →</button>
     </div>
-    <div class="scenario-messages" id="sc-messages"></div>
-    <div class="scenario-input-bar" id="sc-input-bar">
-      <textarea class="scenario-input" id="sc-input" rows="1"
-        placeholder="Type your response…"
-        oninput="MemberApp.autoResizeInput(this)"
-        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.sendScenarioMessage();}"></textarea>
-      <button class="send-btn" id="sc-send-btn" onclick="MemberApp.sendScenarioMessage()">➤</button>
+    <div id="weekly-ai-response" style="display:none">
+      <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06)">
+        <div style="display:flex;align-items:flex-start;gap:0.7rem">
+          <div style="width:28px;height:28px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.72rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
+          <div>
+            <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.4rem">IntelliQ</div>
+            <div id="weekly-ai-text" style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6"></div>
+          </div>
+        </div>
+      </div>
+      <button class="btn-primary" style="margin-top:1rem" onclick="MemberApp.exitWeekly()">Back to Home</button>
     </div>
   </div>
+</div>
+
+<!-- SCENARIO CHAT SCREEN (full-screen overlay) -->
+<div id="screen-scenario" class="member-fullscreen-overlay">
+  <div class="scenario-header">
+    <button class="scenario-back-btn" onclick="MemberApp.exitScenario()">‹</button>
+    <div class="scenario-header-info">
+      <div class="scenario-header-title" id="sc-header-title">Assessment</div>
+      <div class="scenario-header-meta"  id="sc-header-meta">IntelliQ Assessment</div>
+    </div>
+    <div class="scenario-exchange-badge" id="sc-exchange-badge">Exchange 0</div>
+  </div>
+  <div class="scenario-messages" id="sc-messages"></div>
+  <div class="scenario-input-bar" id="sc-input-bar">
+    <textarea class="scenario-input" id="sc-input" rows="1"
+      placeholder="Type your response…"
+      oninput="MemberApp.autoResizeInput(this)"
+      onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.sendScenarioMessage();}"></textarea>
+    <button class="send-btn" id="sc-send-btn" onclick="MemberApp.sendScenarioMessage()">➤</button>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════
+     MEMBER SHELL — DEPRECATED
+     All users now enter the unified IntelliQ workspace.
+     This element is kept for reference only and never shown.
+     ════════════════════════════════════════════════════════ -->
+<div id="member-shell" style="display:none!important" aria-hidden="true">
+  <!-- DEPRECATED — all content moved to workspace pages and .member-fullscreen-overlay elements above -->
 
 </div><!-- /member-shell -->
 

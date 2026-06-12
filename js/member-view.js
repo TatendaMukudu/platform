@@ -79,8 +79,16 @@ const MemberApp = {
 
   /* ── Screen control ─────────────────────────────────────── */
   _showScreen(id) {
-    document.querySelectorAll('#member-shell .screen').forEach(s => s.classList.remove('active'));
-    document.getElementById(id)?.classList.add('active');
+    // Map legacy screen IDs to unified workspace actions
+    if (id === 'screen-main') {
+      // "main" just means the workspace — nothing to do, we're already there
+      return;
+    }
+    // Overlay screens (scenario, weekly, setpassword, goals) are now top-level
+    // .member-fullscreen-overlay elements — toggle .active class on them.
+    document.querySelectorAll('.member-fullscreen-overlay').forEach(s => s.classList.remove('active'));
+    const el = document.getElementById(id);
+    if (el) el.classList.add('active');
   },
 
   /* ── Boot ───────────────────────────────────────────────── */
@@ -217,17 +225,10 @@ const MemberApp = {
 
   /* ── MAIN SCREEN ────────────────────────────────────────── */
   _showMain() {
-    this._showScreen('screen-main');
-
-    // Populate member topbar (always-visible header with sign-out)
-    const orgEl  = document.getElementById('member-topbar-org');
-    const initEl = document.getElementById('member-avatar-initials');
-    const nameEl = document.getElementById('member-account-name');
-    const emlEl  = document.getElementById('member-account-email');
-    if (orgEl)  orgEl.textContent  = Auth.currentOrg?.orgName || this._orgCode || '—';
-    if (initEl) initEl.textContent = (this._name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-    if (nameEl) nameEl.textContent = this._name || '—';
-    if (emlEl)  emlEl.textContent  = Auth.currentUser?.email || '—';
+    // In the unified workspace there is no separate "main" screen to show.
+    // The workspace topbar handles identity display — no member-topbar DOM refs needed.
+    // Close any open overlays (e.g. after set-password or goal intake).
+    document.querySelectorAll('.member-fullscreen-overlay').forEach(s => s.classList.remove('active'));
 
     this._renderHome();
     this._renderStats();
@@ -1191,16 +1192,17 @@ const MemberApp = {
 
   /* ── TAB SWITCHING ──────────────────────────────────────── */
   async switchTab(tab) {
-    document.querySelectorAll('#member-shell .tab-page').forEach(p => p.classList.remove('active'));
-    document.querySelectorAll('#member-shell .nav-tab').forEach(b => b.classList.remove('active'));
-    const tabEl  = document.getElementById(`tab-${tab}`);
-    const navBtn = document.querySelector(`#member-shell .nav-tab[data-tab="${tab}"]`);
-    if (tabEl)  tabEl.classList.add('active');
-    if (navBtn) navBtn.classList.add('active');
-
-    if (tab === 'scenarios') this._renderScenariosList();
-    if (tab === 'stats')     this._renderStats();
-    if (tab === 'inbox')     await this._renderInbox();
+    // Translate old bottom-nav tab names to unified workspace page IDs,
+    // then delegate to the workspace navigate() function.
+    const pageMap = {
+      home:      'home',
+      scenarios: 'assessments',
+      checkin:   'checkin',
+      inbox:     'inbox',
+      stats:     'stats',
+    };
+    const page = pageMap[tab] || tab;
+    if (typeof navigate === 'function') navigate(page);
   },
 
   /* ── INBOX ──────────────────────────────────────────────── */

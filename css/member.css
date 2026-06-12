@@ -4,36 +4,30 @@
    Loaded alongside css/styles.css — platform styles apply first.
    ============================================================ */
 
-/* ── Member shell root ─────────────────────────────────────── */
+/* ── Member shell root — DEPRECATED (never shown) ─────────── */
 #member-shell {
-  display: none;
-  flex-direction: column;
-  height: 100dvh;
-  max-width: 480px;
-  margin: 0 auto;
-  position: relative;
-  background: var(--bg);
-  color: var(--text-primary);
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  overscroll-behavior: none;
+  display: none !important;
 }
-#member-shell.visible { display: flex; }
 
-/* ── Screen management ─────────────────────────────────────── */
-#member-shell .screen { display: none; flex-direction: column; flex: 1; overflow: hidden; }
-#member-shell .screen.active { display: flex; }
+/* ── Full-screen overlay screens ──────────────────────────────
+   Used for: scenario runner, weekly reflection, set-password,
+   goal intake.  Shown over the unified workspace by adding
+   .active — no dependency on #member-shell.
+────────────────────────────────────────────────────────────── */
+.member-fullscreen-overlay {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 400;
+  background: var(--bg);
+  flex-direction: column;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.member-fullscreen-overlay.active { display: flex; }
 
 /* ── Join / Goals / Set-password screens ──────────────────── */
-#member-shell #screen-join,
-#member-shell #screen-goals,
-#member-shell #screen-setpassword {
-  justify-content: center;
-  align-items: center;
-  padding: 2rem 1.5rem;
-  background: var(--bg);
-  overflow-y: auto;
-}
+/* Positioning handled by .member-fullscreen-overlay inline styles above */
 
 .join-logo {
   text-align: center;
@@ -81,16 +75,7 @@
 }
 .btn-join:active { transform: scale(0.98); opacity: 0.9; }
 
-/* ── Main app screen ───────────────────────────────────────── */
-#member-shell #screen-main { flex-direction: column; }
-
-/* Scrollable content area (scoped — differs from platform .page-content) */
-#member-shell .page-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1rem 1rem calc(var(--nav-h) + var(--safe-bottom, 0px) + 1rem);
-  -webkit-overflow-scrolling: touch;
-}
+/* (deprecated member-shell screen/content rules removed) */
 
 /* ── Bottom nav ────────────────────────────────────────────── */
 .bottom-nav {
@@ -148,8 +133,8 @@
 .tab-page { display: none; }
 .tab-page.active { display: block; }
 
-/* ── Page header (member view) ─────────────────────────────── */
-#member-shell .page-header {
+/* ── Page header (member workspace pages) ─────────────────── */
+.page-header {
   padding: 1.2rem 0 0.8rem;
   margin-bottom: 0.2rem;
 }
@@ -288,7 +273,7 @@
 .stat-pill-label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
 
 /* ── Scenario chat (full screen) ───────────────────────────── */
-#member-shell #screen-scenario { background: var(--bg); }
+#screen-scenario { background: var(--bg); }
 .scenario-header {
   display: flex; align-items: center; gap: 0.8rem;
   padding: 0.9rem 1rem;
@@ -424,15 +409,7 @@
 /* ── Media in scenario ─────────────────────────────────────── */
 .scenario-media { margin-bottom: 0.8rem; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--border); }
 
-/* ── Member toast (overrides platform toast position on mobile) */
-#member-shell ~ #toast {
-  bottom: calc(var(--nav-h) + var(--safe-bottom, 0px) + 0.5rem);
-  top: auto;
-  transform: translateX(-50%) translateY(120%);
-}
-#member-shell.visible ~ #toast.show {
-  transform: translateX(-50%) translateY(0);
-}
+/* (deprecated member-shell toast override removed) */
 
 /* ═══════════════════════════════════════════════════════════
    PHASE 4 — MEMBER VALUE LOOP
