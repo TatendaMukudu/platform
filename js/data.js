@@ -97,28 +97,33 @@ function buildEmptyOrgStats(memberCount) {
    so no hardcoded role/type branching ever appears in nav HTML.
    ─────────────────────────────────────────────────────────────────────── */
 const WORKSPACE_MODULES = [
-  // ── Personal — visible to every authenticated user ────────────────────
-  { section: 'My Space',      id: 'home',         icon: '🏠', label: 'Home',                  permission: null               },
-  { section: null,             id: 'assessments',  icon: '🎯', label: 'Assessments',            permission: null               },
-  { section: null,             id: 'checkin',      icon: '💬', label: 'Check-In',              permission: null               },
-  { section: null,             id: 'inbox',        icon: '📬', label: 'Inbox',                  permission: null               },
-  { section: null,             id: 'stats',        icon: '📊', label: 'Progress',               permission: null               },
+  // ── My Space — visible to every authenticated user ────────────────────
+  { section: 'My Space', id: 'home',        icon: '🏠', label: 'Home',        permission: null },
+  { section: null,        id: 'assessments', icon: '🎯', label: 'Assessments', permission: null },
+  { section: null,        id: 'checkin',     icon: '💬', label: 'Check-In',    permission: null },
+  { section: null,        id: 'notes',       icon: '📝', label: 'Notes',       permission: null },
+  { section: null,        id: 'inbox',       icon: '📬', label: 'Inbox',       permission: null },
+  { section: null,        id: 'stats',       icon: '📊', label: 'Progress',    permission: null },
 
-  // ── Organisation — visible with leadership permissions ────────────────
-  { section: 'Organisation',  id: 'organisation', icon: '🏛️', label: 'Organisation',           permission: 'view_team'        },
-  { section: null,             id: 'assignments',  icon: '📌', label: 'Assignments',            permission: 'assign_scenarios' },
-  { section: null,             id: 'org-insights', icon: '💡', label: 'Organisation Insights',  permission: 'view_insights'    },
+  // ── Leader Workspace — only shown when user leads ≥1 node ────────────
+  // leaderOnly: true means renderSidebar() gates this on Auth.isLeaderNode().
+  // All data in these pages is scoped server-side to the leader's subtree.
+  { section: 'Leader Workspace', id: 'leader-home',   icon: '👁',  label: 'Dashboard',    leaderOnly: true },
+  { section: null,                id: 'leader-people', icon: '👥', label: 'My People',    leaderOnly: true },
+  { section: null,                id: 'assignments',   icon: '📌', label: 'Assignments',  leaderOnly: true, permission: 'assign_scenarios' },
+  { section: null,                id: 'org-insights',  icon: '💡', label: 'Team Insights', leaderOnly: true, permission: 'view_insights' },
 
-  // ── Intelligence ──────────────────────────────────────────────────────
-  { section: 'Intelligence',  id: 'analytics',    icon: '📊', label: 'Insights',               permission: 'view_analytics'   },
-  { section: null,             id: 'intelliq',     icon: '🧠', label: 'Intelligence',           permission: 'view_analytics'   },
-  { section: null,             id: 'scenarios',    icon: '🎯', label: 'Manage Assessments',     permission: 'assign_scenarios' },
+  // ── Intelligence — analytics / AI (admin+ or explicit grant) ─────────
+  { section: 'Intelligence', id: 'analytics', icon: '📊', label: 'Insights',           permission: 'view_analytics'   },
+  { section: null,            id: 'intelliq',  icon: '🧠', label: 'Intelligence',       permission: 'view_analytics'   },
+  { section: null,            id: 'scenarios', icon: '🎯', label: 'Manage Assessments', permission: 'assign_scenarios' },
 
-  // ── Management ────────────────────────────────────────────────────────
-  { section: 'Management',    id: 'people',       icon: '🏗️', label: 'People',                 permission: 'view_members'     },
-  { section: null,             id: 'alerts',       icon: '🔔', label: 'Alerts',                 permission: 'view_members',    badge: true },
-  { section: null,             id: 'reports',      icon: '📋', label: 'Reports',                permission: 'view_reports'     },
-  { section: null,             id: 'settings',     icon: '⚙️', label: 'Settings',               permission: 'manage_settings'  },
+  // ── Management — admin / superadmin ───────────────────────────────────
+  { section: 'Management', id: 'organisation', icon: '🏛️', label: 'Organisation',  permission: 'view_team'       },
+  { section: null,          id: 'people',       icon: '🏗️', label: 'People',        permission: 'view_members'    },
+  { section: null,          id: 'alerts',       icon: '🔔', label: 'Alerts',         permission: 'view_members',   badge: true },
+  { section: null,          id: 'reports',      icon: '📋', label: 'Reports',        permission: 'view_reports'    },
+  { section: null,          id: 'settings',     icon: '⚙️', label: 'Settings',       permission: 'manage_settings' },
 ];
 
 /* ─────────────────────────────────────────────────────────────

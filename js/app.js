@@ -586,14 +586,16 @@ function navigate(page){
   AppState.currentPage = page;
   document.querySelector('.topbar-title').textContent = PAGE_TITLES[page] || 'Platform';
 
-  // Personal pages (every authenticated user)
+  // My Space — every user
   if      (page==='home')         { if(typeof MemberApp!=='undefined') MemberApp._renderHome(); }
   else if (page==='assessments')  { if(typeof MemberApp!=='undefined') MemberApp._renderScenariosList(); }
   else if (page==='checkin')      { if(typeof MemberApp!=='undefined') MemberApp._setupCheckinPrompt(); }
+  else if (page==='notes')        { if(typeof MemberApp!=='undefined') MemberApp._renderNotesPage(); }
   else if (page==='inbox')        { if(typeof MemberApp!=='undefined') MemberApp._renderInbox(); }
   else if (page==='stats')        { if(typeof MemberApp!=='undefined') MemberApp._renderStats(); }
-  // Organisation pages (leadership permissions)
-  else if (page==='organisation')  renderMyTeam();
+  // Leader Workspace — scoped to node leader's subtree
+  else if (page==='leader-home')   renderLeaderHome();
+  else if (page==='leader-people') renderLeaderPeople();
   else if (page==='org-insights')  renderTeamInsights();
   else if (page==='assignments')   renderAssignments();
   // Intelligence pages
@@ -601,6 +603,7 @@ function navigate(page){
   else if (page==='intelliq')   renderIntelliQ();
   else if (page==='scenarios')  renderScenarios();
   // Management pages
+  else if (page==='organisation')  renderMyTeam();
   else if (page==='people')    renderPeople();
   else if (page==='alerts')    renderAlerts();
   else if (page==='reports')   renderReports();
@@ -611,26 +614,29 @@ function navigate(page){
 }
 
 const PAGE_TITLES = {
-  // Personal — every user
+  // My Space — every user
   home:         'Home',
   assessments:  'Assessments',
   checkin:      'Check-In',
+  notes:        'Notes',
   inbox:        'Inbox',
   stats:        'Progress',
-  // Organisation — leadership permissions
-  organisation: 'Organisation',
-  assignments:  'Assignments',
-  'org-insights': 'Organisation Insights',
+  // Leader Workspace — node leader scoped tools
+  'leader-home':   'Leader Dashboard',
+  'leader-people': 'My People',
+  assignments:     'Assignments',
+  'org-insights':  'Team Insights',
   // Intelligence
   analytics:    'Insights',
   intelliq:     'Intelligence',
   scenarios:    'Manage Assessments',
   // Management
+  organisation: 'Organisation',
   people:       'People',
   alerts:       'Alerts & Notifications',
   reports:      'Reports & Stat Sheets',
   settings:     'Platform Settings',
-  // Kept for backward compatibility with any remaining internal navigate() calls
+  // Kept for backward compatibility
   dashboard:    'Overview Dashboard',
   members:      'Members & Profiles',
 };
@@ -1377,12 +1383,17 @@ function launchApp(){
     renderSidebar();
     renderTopbar();
     renderAllPages();
-    // Members land on Home; everyone else lands on the Overview Dashboard.
-    const isMember = Auth.currentUser?.role === 'member';
+    // Routing:
+    //   member                → Home (personal)
+    //   non-member + isLeaderNode → Leader Dashboard (scoped workspace)
+    //   non-member, no leadership  → Overview Dashboard (admin/super)
+    const isMember  = Auth.currentUser?.role === 'member';
+    const isLeader  = Auth.isLeaderNode();
     if (isMember && typeof MemberApp !== 'undefined') {
       try { MemberApp.init(); } catch(e) { console.warn('[ROUTE] MemberApp.init failed:', e.message); }
     }
-    navigate(isMember ? 'home' : 'dashboard');
+    const defaultPage = isMember ? 'home' : isLeader ? 'leader-home' : 'dashboard';
+    navigate(defaultPage);
   } catch(err) {
     console.error('[ROUTE] launchApp render error:', err);
   }
@@ -1433,9 +1444,13 @@ function renderSidebar(){
     let html = '';
     const activePage = AppState.currentPage || 'dashboard';
 
+    const isLeader = Auth.isLeaderNode();
+
     WORKSPACE_MODULES.forEach(mod => {
-      // Permission gate
-      if (mod.permission !== null && !Auth.canDo(mod.permission)) return;
+      // leaderOnly items: only shown when the user leads at least one node
+      if (mod.leaderOnly && !isLeader) return;
+      // Permission gate (null = always shown; check after leaderOnly so gates compose)
+      if (mod.permission !== null && mod.permission !== undefined && !Auth.canDo(mod.permission)) return;
 
       // Section label
       if (mod.section && mod.section !== currentSection) {
@@ -4667,6 +4682,256 @@ async function renderTeamInsights() {
   } catch(e) {
     el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load team insights. Try refreshing.</p></div>`;
   }
+}
+
+/* ════════════════════════════════════════════════════════════
+   LEADER WORKSPACE
+   Pages scoped to a node-leader's subtree.
+   All data comes from /api/workspace/* which gates via
+   getVisibleUserIds() — the server enforces the scope.
+   ════════════════════════════════════════════════════════════ */
+
+/* ── Leader Dashboard ────────────────────────────────────── *
+ * Answers: "Who needs my attention right now?"
+ * ── ────────────────────────────────────────────────────── */
+async function renderLeaderHome() {
+  const el    = document.getElementById('ldr-home-content');
+  const sub   = document.getElementById('ldr-home-sub');
+  const title = document.getElementById('ldr-home-title');
+  if (!el) return;
+
+  // Update header to name the scope
+  const nodeNames = (Auth.currentUser?.leadershipNodeIds || []).length;
+  if (title) title.textContent = 'Leader Dashboard';
+  if (sub)   sub.textContent   = 'Who needs my attention?';
+
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Loading…</div>`;
+
+  try {
+    // Run both fetches in parallel
+    const [insRes, membRes] = await Promise.all([
+      fetch('/api/workspace/team-insights', { headers: Auth._headers() }),
+      fetch('/api/workspace/visible-members', { headers: Auth._headers() }),
+    ]);
+    const ins  = insRes.ok  ? await insRes.json()  : { ok: false };
+    const memb = membRes.ok ? await membRes.json() : { ok: false };
+
+    if (!ins.ok && !memb.ok) throw new Error('Could not load data');
+
+    const members      = memb.members || [];
+    const attn         = ins.needsAttention || [];
+    const MOOD_ICONS   = { 1:'😔', 2:'😕', 3:'😐', 4:'🙂', 5:'😄' };
+    const moodColor    = v => v >= 4 ? 'var(--success)' : v >= 3 ? 'var(--warning)' : 'var(--danger)';
+
+    // Sort: needs-attention first, then by most-recent check-in
+    const attnIds = new Set(attn.map(a => a.userId));
+    const sorted  = [...members].sort((a, b) => {
+      const aAttn = attnIds.has(a.userId) ? -1 : 0;
+      const bAttn = attnIds.has(b.userId) ? -1 : 0;
+      if (aAttn !== bAttn) return aAttn - bAttn;
+      const aTs = a.latestCheckin?.ts ? new Date(a.latestCheckin.ts).getTime() : 0;
+      const bTs = b.latestCheckin?.ts ? new Date(b.latestCheckin.ts).getTime() : 0;
+      return bTs - aTs; // most recent first
+    });
+
+    // Pending scenarios for visible members (from AppState, already scoped)
+    const pendingByMember = {};
+    (AppState.members || []).forEach(m => {
+      const p = (m.scenarioResults || []).filter ? 0 : 0; // placeholder — assessed below
+    });
+
+    // Stat bar
+    const activeThisWeek = ins.activeThisWeek ?? 0;
+    const avgMood        = ins.avgMood;
+    const moodEmoji      = avgMood ? (avgMood >= 4 ? '😊' : avgMood >= 3 ? '😐' : '😕') : '—';
+
+    el.innerHTML = `
+      <!-- Scope indicator -->
+      <div class="card" style="margin-bottom:1rem;border-color:rgba(124,90,245,0.25);background:rgba(124,90,245,0.04)">
+        <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap">
+          <div style="font-size:0.78rem;color:var(--text-muted)">
+            Your scope: <strong style="color:var(--text-primary)">${members.length} visible member${members.length !== 1 ? 's' : ''}</strong>
+            in your subtree
+          </div>
+          <div style="margin-left:auto;display:flex;gap:0.5rem">
+            <button class="btn btn-sm btn-outline" onclick="navigate('leader-people')">My People →</button>
+            <button class="btn btn-sm btn-outline" onclick="navigate('assignments')">Assign →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Attention needed -->
+      ${attn.length ? `
+        <div class="card" style="margin-bottom:1rem;border-color:rgba(247,79,122,0.4);background:rgba(247,79,122,0.04)">
+          <div class="card-label" style="color:var(--danger);margin-bottom:0.6rem">⚠ Needs Attention (${attn.length})</div>
+          ${attn.map(m => `
+            <div class="leader-attn-row">
+              <span class="leader-attn-name">${m.name}</span>
+              <span class="leader-attn-reason">${m.reason}</span>
+            </div>`).join('')}
+        </div>` : `
+        <div class="card" style="margin-bottom:1rem;border-color:rgba(79,247,122,0.3);background:rgba(79,247,122,0.04)">
+          <div style="font-size:0.85rem;color:var(--success);font-weight:600">✓ No immediate attention flags this week</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem">
+            ${ins.notEnoughData ? 'Not enough check-in data yet — encourage your team to check in.' :
+              'Your team looks stable. Keep the momentum going.'}
+          </div>
+        </div>`}
+
+      <!-- This week stats -->
+      <div class="grid-3" style="margin-bottom:1rem">
+        <div class="stat-card">
+          <div class="stat-card-val">${members.length}</div>
+          <div class="stat-card-label">In My Scope</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-val">${activeThisWeek}</div>
+          <div class="stat-card-label">Active This Week</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-val" style="color:${avgMood ? moodColor(avgMood) : 'var(--text-muted)'}">
+            ${moodEmoji}${avgMood ? ' ' + avgMood.toFixed(1) : ''}
+          </div>
+          <div class="stat-card-label">Avg Mood</div>
+        </div>
+      </div>
+
+      <!-- Recommended action -->
+      ${ins.recommendedAction ? `
+        <div class="card" style="margin-bottom:1rem;border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.04)">
+          <div class="card-label" style="color:var(--accent);margin-bottom:0.4rem">💡 IntelliQ Suggests</div>
+          <div style="font-size:0.85rem;color:var(--text-primary);line-height:1.65">${ins.recommendedAction}</div>
+        </div>` : ''}
+
+      <!-- Recent check-ins (first 6, sorted: attention first) -->
+      <div class="card-label" style="margin-bottom:0.5rem">Recent Activity</div>
+      <div class="leader-member-list">
+        ${sorted.slice(0, 8).map(m => {
+          const initials  = (m.name || '?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+          const mood      = m.latestCheckin?.mood;
+          const moodIcon  = MOOD_ICONS[mood] || '—';
+          const ckDate    = m.latestCheckin?.date || null;
+          const hasAttn   = attnIds.has(m.userId);
+          return `
+            <div class="leader-member-row${hasAttn ? ' lm-row--attn' : ''}">
+              <div class="lm-avatar">${initials}</div>
+              <div class="lm-info">
+                <div class="lm-name">
+                  ${m.name}
+                  ${hasAttn ? `<span class="lm-badge lm-badge--attn">ATTENTION</span>` : ''}
+                  ${!m.passwordSet ? `<span class="lm-badge lm-badge--pending">PENDING</span>` : ''}
+                </div>
+                <div class="lm-meta">${Auth.ROLE_LABELS?.[m.role] || m.role}</div>
+              </div>
+              <div class="lm-checkin">
+                <div class="lm-mood">${moodIcon}</div>
+                <div class="lm-checkin-date">${ckDate || 'No check-in'}</div>
+              </div>
+            </div>`;
+        }).join('')}
+      </div>
+      ${sorted.length > 8 ? `
+        <div style="text-align:center;margin-top:0.8rem">
+          <button class="btn btn-outline btn-sm" onclick="navigate('leader-people')">
+            View all ${sorted.length} people →
+          </button>
+        </div>` : ''}`;
+
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load leader dashboard. Try refreshing.</p></div>`;
+  }
+}
+
+/* ── Leader People ───────────────────────────────────────── *
+ * Answers: "Who am I responsible for?"
+ * Full subtree member list with check-in status, role, and
+ * links to profiles. No members outside the leader's subtree.
+ * ── ────────────────────────────────────────────────────── */
+let _leaderPeopleMembers = [];
+let _leaderPeopleSearch  = '';
+
+async function renderLeaderPeople() {
+  const el       = document.getElementById('ldr-people-content');
+  const countEl  = document.getElementById('ldr-people-count');
+  if (!el) return;
+
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Loading…</div>`;
+
+  try {
+    const res  = await fetch('/api/workspace/visible-members', { headers: Auth._headers() });
+    const data = res.ok ? await res.json() : { ok: false };
+    if (!data.ok) throw new Error('Request failed');
+
+    _leaderPeopleMembers = data.members || [];
+    if (countEl) countEl.textContent = `${_leaderPeopleMembers.length} member${_leaderPeopleMembers.length !== 1 ? 's' : ''} in your scope`;
+    _renderLeaderPeopleList();
+  } catch(e) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load people. Try refreshing.</p></div>`;
+  }
+}
+
+function filterLeaderPeople(search) {
+  _leaderPeopleSearch = (search || '').toLowerCase();
+  _renderLeaderPeopleList();
+}
+
+function _renderLeaderPeopleList() {
+  const el = document.getElementById('ldr-people-content');
+  if (!el) return;
+
+  const MOOD_ICONS = { 1:'😔', 2:'😕', 3:'😐', 4:'🙂', 5:'😄' };
+  const filtered   = _leaderPeopleSearch
+    ? _leaderPeopleMembers.filter(m =>
+        m.name.toLowerCase().includes(_leaderPeopleSearch) ||
+        (m.email || '').toLowerCase().includes(_leaderPeopleSearch))
+    : _leaderPeopleMembers;
+
+  if (!filtered.length) {
+    el.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">👥</div>
+        <p>${_leaderPeopleMembers.length === 0
+          ? 'No members in your scope yet. An administrator needs to assign people to the nodes you lead.'
+          : 'No members match your search.'}</p>
+      </div>`;
+    return;
+  }
+
+  // Group: needs attention vs active vs pending
+  const now    = Date.now();
+  const week   = 7 * 86400 * 1000;
+
+  el.innerHTML = `
+    <div class="leader-member-list">
+      ${filtered.map(m => {
+        const initials  = (m.name || '?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+        const roleLabel = Auth.ROLE_LABELS?.[m.role] || m.role || 'Member';
+        const mood      = m.latestCheckin?.mood;
+        const ckDate    = m.latestCheckin?.date || null;
+        const ckTs      = m.latestCheckin?.ts ? new Date(m.latestCheckin.ts).getTime() : null;
+        const daysSince = ckTs ? Math.floor((now - ckTs) / 86400000) : null;
+        const stale     = daysSince !== null && daysSince >= 7;
+        const isPending = !m.passwordSet;
+
+        return `
+          <div class="leader-member-row${stale && !isPending ? ' lm-row--stale' : ''}">
+            <div class="lm-avatar">${initials}</div>
+            <div class="lm-info">
+              <div class="lm-name">
+                ${m.name}
+                ${isPending  ? `<span class="lm-badge lm-badge--pending">PENDING</span>` : ''}
+                ${stale && !isPending ? `<span class="lm-badge lm-badge--warn">NO CHECK-IN ${daysSince}d</span>` : ''}
+              </div>
+              <div class="lm-meta">${roleLabel}${m.email ? ' · ' + m.email : ''}</div>
+              ${(m.nodeIds||[]).length ? `<div class="lm-nodes">${m.nodeIds.length} node${m.nodeIds.length!==1?'s':''}</div>` : ''}
+            </div>
+            <div class="lm-checkin">
+              <div class="lm-mood" title="${ckDate ? 'Last check-in '+ckDate : 'No check-in yet'}">${MOOD_ICONS[mood] || '—'}</div>
+              <div class="lm-checkin-date">${ckDate || 'No check-in'}</div>
+            </div>
+          </div>`;
+      }).join('')}
+    </div>`;
 }
 
 /* ── LEADER INPUT TAB ────────────────────────────────────── */

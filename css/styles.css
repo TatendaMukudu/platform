@@ -1938,6 +1938,23 @@ img { max-width: 100%; }
   color: var(--accent);
   border: 1px solid rgba(124,90,245,0.3);
 }
+/* Leader Dashboard — attention / stale badges */
+.lm-badge--attn {
+  background: rgba(247,79,122,0.12);
+  color: var(--danger);
+  border: 1px solid rgba(247,79,122,0.35);
+}
+.lm-badge--warn {
+  background: rgba(247,178,79,0.12);
+  color: var(--warning);
+  border: 1px solid rgba(247,178,79,0.35);
+}
+.lm-row--attn {
+  border-left: 3px solid var(--danger) !important;
+}
+.lm-row--stale {
+  border-left: 3px solid var(--warning) !important;
+}
 
 .lm-checkin {
   text-align: right;

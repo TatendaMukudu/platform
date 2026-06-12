@@ -865,10 +865,24 @@ app.get('/api/auth/me', (req, res) => {
 
   const org = orgMeta[session.orgCode];
 
-  // Resolve permissions: explicit grants merged with role defaults
+  // Resolve permissions: role defaults → node-leader promotion → explicit grants
   const explicitGrants = userPermissions[session.orgCode]?.[session.userId] || {};
   const roleDefaults   = _resolveRoleDefaults(user.role);
-  const permissions    = { ...roleDefaults, ...explicitGrants };
+
+  // If this user leads at least one org node, automatically grant the minimal
+  // set of leader-layer permissions regardless of their role.
+  // A member placed as a node leader should be able to see their subtree.
+  const isNodeLeader = (user.leadershipNodeIds || []).length > 0;
+  const nodeLeaderGrants = isNodeLeader ? {
+    view_team:        true,
+    review_checkins:  true,
+    view_insights:    true,
+    assign_scenarios: true,
+    view_reports:     true,
+    view_members:     true,   // needed to see the subtree member list
+  } : {};
+
+  const permissions = { ...roleDefaults, ...nodeLeaderGrants, ...explicitGrants };
 
   res.json({ ok: true, user: { ...user, passwordHash: undefined }, org, permissions });
 });

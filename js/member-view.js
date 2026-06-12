@@ -1249,30 +1249,51 @@ const MemberApp = {
     } catch(e) { this._myGroups = []; }
   },
 
+  // _renderInbox: Inbox is now communication-only (messages).
+  // Notes have their own dedicated page — see _renderNotesPage().
   async _renderInbox() {
     await this._loadMyGroups();
-    this._populateGroupSelectors();
+    this._populateMsgGroupSelector();
     const noticeEl = document.getElementById('inbox-group-notice');
     if (noticeEl) noticeEl.style.display = this._myGroups.length ? 'none' : 'block';
-    this.switchInboxTab('notes');
-    await this._loadNotes();
     await this._loadMessages();
   },
 
-  switchInboxTab(sub) {
-    document.querySelectorAll('.inbox-sub-btn').forEach(b => b.classList.toggle('active', b.dataset.sub === sub));
-    document.getElementById('inbox-notes').style.display    = sub === 'notes'    ? 'block' : 'none';
-    document.getElementById('inbox-messages').style.display = sub === 'messages' ? 'block' : 'none';
+  // _renderNotesPage: called when the user navigates to the Notes page.
+  async _renderNotesPage() {
+    await this._loadMyGroups();
+    this._populateNoteGroupSelector();
+    await this._loadNotes();
   },
 
-  _populateGroupSelectors() {
+  // Separate group-selector population helpers so each page only populates its own selectors
+  _populateMsgGroupSelector() {
+    const opts = this._myGroups.length
+      ? this._myGroups.map(g => `<option value="${g.id}">${g.name}</option>`).join('')
+      : `<option value="">You're not in any groups yet</option>`;
+    const msgGrp = document.getElementById('msg-to-group');
+    if (msgGrp) msgGrp.innerHTML = `<option value="">— Select group —</option>` + opts;
+  },
+
+  _populateNoteGroupSelector() {
     const opts = this._myGroups.length
       ? this._myGroups.map(g => `<option value="${g.id}">${g.name}</option>`).join('')
       : `<option value="">You're not in any groups yet</option>`;
     const noteGrp = document.getElementById('note-group-id');
-    const msgGrp  = document.getElementById('msg-to-group');
     if (noteGrp) noteGrp.innerHTML = `<option value="">— Select group —</option>` + opts;
-    if (msgGrp)  msgGrp.innerHTML  = `<option value="">— Select group —</option>` + opts;
+  },
+
+  // Legacy switchInboxTab stub — Notes are now on their own page.
+  // Kept so any stale onclick="MemberApp.switchInboxTab(...)" doesn't throw.
+  switchInboxTab(sub) {
+    if (sub === 'notes') navigate('notes');
+  },
+
+  // Legacy — called in a few places before the Notes/Inbox split.
+  // Now delegates to the two separate helpers.
+  _populateGroupSelectors() {
+    this._populateNoteGroupSelector();
+    this._populateMsgGroupSelector();
   },
 
   selectNoteTag(tag) {
@@ -1312,7 +1333,7 @@ const MemberApp = {
     if (!content) { this.showToast('Write something first', 'warning'); return; }
     if (this._noteType !== 'private' && !groupId) { this.showToast('Select a group', 'warning'); return; }
 
-    const btn = document.querySelector('#inbox-notes .btn-primary');
+    const btn = document.getElementById('notes-submit-btn');
     if (btn) { btn.textContent = 'Saving…'; btn.disabled = true; }
 
     try {

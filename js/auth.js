@@ -96,6 +96,14 @@ const Auth = {
   isAdmin()      { return ['admin','superadmin'].includes(this.currentUser?.role); },
   isSuperAdmin() { return this.currentUser?.role === 'superadmin'; },
 
+  // Returns true if this user leads at least one node in the org tree.
+  // Leader node users get a scoped Leader Workspace in the nav.
+  // Being a SuperAdmin does NOT automatically grant leadership — you must
+  // be explicitly placed as a leader on a node.
+  isLeaderNode() {
+    return (this.currentUser?.leadershipNodeIds?.length || 0) > 0;
+  },
+
   canManageRole(role) {
     const myLevel   = this.ROLE_ORDER[this.currentUser?.role] || 99;
     const theirLevel = this.ROLE_ORDER[role] || 99;
