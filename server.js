@@ -40,6 +40,7 @@ function scheduleSave() {
         assignedScenarios, memberResults, memberCheckins,
         memberGoals, weeklyAssessments, orgInterventions,
         orgNodes, orgMetrics, orgValues, orgGoals, userPermissions,
+        userAiProfiles,
         activeSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
@@ -201,6 +202,7 @@ app.post('/api/chat', async (req, res) => {
     orgMode,
     orgName,
     orgCode,
+    userId,             // optional: member's server userId for memory lookup
     memberName,
     scenarioContext,    // reflection mode: completed scenario summary
     promptType,         // 'reflection' (default) | 'scenario'
@@ -236,7 +238,9 @@ app.post('/api/chat', async (req, res) => {
         orgProfile
       );
     } else {
+      const memBlock = userId ? _buildMemoryBlock(code, userId) : '';
       systemPrompt = buildReflectionPrompt(orgMode || orgProfile.orgMode || '', orgName || 'your organisation', values, metrics, orgProfile);
+      if (memBlock) systemPrompt += memBlock;
       if (scenarioContext) {
         systemPrompt += `\n\nSCENARIO JUST COMPLETED:\nTitle: ${scenarioContext.title}\nScore: ${scenarioContext.score}/100 (${scenarioContext.label})\n`;
         if (scenarioContext.answers?.length) {
@@ -436,6 +440,159 @@ const orgMetrics      = {};  // orgCode → [{ metricId, name, source, order }]
 const orgValues       = {};  // orgCode → [string]
 const orgGoals        = {};  // orgCode → [{ goalId, text, createdAt }]
 const userPermissions = {};  // orgCode → { userId → { perm → bool } }
+
+// ── Memory Engine ──────────────────────────────────────────────────────────
+const userAiProfiles  = {};  // `orgCode:userId` → { openThreads, recentThemes, priorFollowUps, lastUpdated }
+
+/* Get or create a user's AI memory profile */
+function _getMemory(orgCode, userId) {
+  const key = `${orgCode}:${userId}`;
+  if (!userAiProfiles[key]) {
+    userAiProfiles[key] = {
+      openThreads:    [],  // [{ id, text, source, date, occurrences, resolved }]
+      recentThemes:   [],  // string[], max 10
+      priorFollowUps: [],  // [{ id, commitment, source, date, resolved }]
+      lastUpdated:    null,
+    };
+  }
+  return userAiProfiles[key];
+}
+
+/* Update memory after a check-in insight or scenario score.
+   source: 'checkin' | 'weekly' | 'scenario'
+   data: { watchOutFor?, themes?[], development?[], suggestedNextAction? } */
+function _updateUserMemory(orgCode, userId, source, data) {
+  if (!orgCode || !userId) return;
+  const mem = _getMemory(orgCode, userId);
+  const today = new Date().toISOString().split('T')[0];
+  let changed = false;
+
+  // ── 1. Open threads from watchOutFor ──────────────────────────────────────
+  if (data.watchOutFor && typeof data.watchOutFor === 'string') {
+    const text = data.watchOutFor.trim();
+    if (text && text.toLowerCase() !== 'null') {
+      // Check for existing similar thread (simple keyword overlap, 40% threshold)
+      const textWords = new Set(text.toLowerCase().split(/\W+/).filter(w => w.length > 3));
+      const similar = mem.openThreads.find(t => {
+        if (t.resolved) return false;
+        const tWords = new Set(t.text.toLowerCase().split(/\W+/).filter(w => w.length > 3));
+        const shared = [...textWords].filter(w => tWords.has(w)).length;
+        return shared >= Math.ceil(textWords.size * 0.4);
+      });
+      if (similar) {
+        similar.occurrences = (similar.occurrences || 1) + 1;
+        similar.date = today;
+      } else {
+        mem.openThreads.push({
+          id:          `${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+          text,
+          source,
+          date:        today,
+          occurrences: 1,
+          resolved:    false,
+        });
+      }
+      changed = true;
+    }
+  }
+
+  // ── 2. Scenario development areas → open threads ──────────────────────────
+  if (Array.isArray(data.development)) {
+    for (const dev of data.development.slice(0, 3)) {
+      if (!dev || typeof dev !== 'string') continue;
+      const text = dev.trim();
+      const already = mem.openThreads.find(t => !t.resolved && t.text.toLowerCase().includes(text.toLowerCase().slice(0, 30)));
+      if (!already) {
+        mem.openThreads.push({
+          id:          `${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+          text,
+          source:      'scenario',
+          date:        today,
+          occurrences: 1,
+          resolved:    false,
+        });
+        changed = true;
+      }
+    }
+  }
+
+  // ── 3. Recent themes (keywords from watchOutFor + development) ─────────────
+  const themeWords = [];
+  if (data.watchOutFor) themeWords.push(...data.watchOutFor.toLowerCase().split(/\W+/).filter(w => w.length > 4));
+  if (Array.isArray(data.themes)) themeWords.push(...data.themes.map(t => t.toLowerCase().trim()).filter(Boolean));
+  if (themeWords.length) {
+    for (const word of themeWords) {
+      if (!mem.recentThemes.includes(word)) {
+        mem.recentThemes.unshift(word);
+        changed = true;
+      }
+    }
+    mem.recentThemes = mem.recentThemes.slice(0, 10); // cap at 10
+  }
+
+  // ── 4. Prior follow-ups from suggestedNextAction ───────────────────────────
+  if (data.suggestedNextAction && typeof data.suggestedNextAction === 'string') {
+    const action = data.suggestedNextAction.trim();
+    if (action && !mem.priorFollowUps.find(f => !f.resolved && f.commitment === action)) {
+      mem.priorFollowUps.push({
+        id:         `${Date.now()}_${Math.random().toString(36).slice(2,7)}`,
+        commitment: action,
+        source,
+        date:       today,
+        resolved:   false,
+      });
+      // Cap at 10 unresolved follow-ups
+      const unresolved = mem.priorFollowUps.filter(f => !f.resolved);
+      if (unresolved.length > 10) {
+        const oldest = unresolved.sort((a, b) => a.date.localeCompare(b.date))[0];
+        oldest.resolved = true;
+      }
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    // Cap open threads at 20 (keep most recent unresolved)
+    const unresolved = mem.openThreads.filter(t => !t.resolved);
+    if (unresolved.length > 20) {
+      unresolved.sort((a, b) => a.date.localeCompare(b.date));
+      unresolved.slice(0, unresolved.length - 20).forEach(t => { t.resolved = true; });
+    }
+    mem.lastUpdated = new Date().toISOString();
+    scheduleSave();
+  }
+}
+
+/* Build the memory injection block for AI prompts */
+function _buildMemoryBlock(orgCode, userId) {
+  const mem = userAiProfiles[`${orgCode}:${userId}`];
+  if (!mem) return '';
+
+  const activeThreads  = (mem.openThreads  || []).filter(t => !t.resolved).slice(0, 5);
+  const activeFollowUps = (mem.priorFollowUps || []).filter(f => !f.resolved).slice(0, 3);
+  const themes          = (mem.recentThemes || []).slice(0, 6);
+
+  if (!activeThreads.length && !activeFollowUps.length && !themes.length) return '';
+
+  const lines = ['MEMBER MEMORY — real observations from prior sessions (only reference if directly relevant):'];
+  if (activeThreads.length) {
+    lines.push('Recurring themes:');
+    activeThreads.forEach(t => {
+      const freq = t.occurrences > 1 ? ` (mentioned ${t.occurrences}× — last: ${t.date})` : ` (${t.date})`;
+      lines.push(`  - "${t.text}"${freq}`);
+    });
+  }
+  if (activeFollowUps.length) {
+    lines.push('Prior follow-ups:');
+    activeFollowUps.forEach(f => lines.push(`  - "${f.commitment}" (${f.date}, unresolved)`));
+  }
+  if (themes.length) {
+    lines.push(`Keywords: ${themes.join(', ')}`);
+  }
+  lines.push('Do not force memory into every response. Reference it only when the member says something that connects naturally.');
+
+  return '\n\n' + lines.join('\n');
+}
 
 // Rebuild emailIndex from orgUsers (called after _loadAllStores at startup)
 function _rebuildEmailIndex() {
@@ -2251,7 +2408,7 @@ app.get('/api/member/pending', requireAuth, (req, res) => {
 
 /* ── Member submits scenario result ─────────────────────────────────────── */
 app.post('/api/member/submit-result', (req, res) => {
-  const { orgCode, memberName, memberId, scenarioId, result } = req.body;
+  const { orgCode, memberName, memberId, userId, scenarioId, result } = req.body;
   if (!orgCode || !result) return res.status(400).json({ error: 'missing fields' });
 
   // Resolve memberName from memberId (unified app path)
@@ -2272,6 +2429,15 @@ app.post('/api/member/submit-result', (req, res) => {
   if (!memberResults[key]) memberResults[key] = [];
   // Store memberName and memberId inside result for display + future migration
   memberResults[key].push({ ...result, memberName: resolvedName, memberId: memberId || null, submittedAt: new Date().toISOString() });
+
+  // Update memory from scenario development areas
+  const resolvedUserId = userId || memberId;
+  if (resolvedUserId && result?.dimensions?.development?.length) {
+    _updateUserMemory(orgCode.toLowerCase(), resolvedUserId, 'scenario', {
+      development: result.dimensions.development,
+    });
+  }
+
   scheduleSave();
   res.json({ ok: true });
 });
@@ -2426,13 +2592,62 @@ app.get('/api/member/goals', (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   MEMORY ENGINE — Read / resolve user AI profile
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* GET /api/user/memory?orgCode=X&userId=Y — leader reads member memory */
+app.get('/api/user/memory', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.query;
+  if (!orgCode || !userId) return res.status(400).json({ error: 'orgCode and userId required' });
+  const code = orgCode.toLowerCase().trim();
+
+  // Must have view_insights permission or be a superadmin
+  const requester = orgUsers[code]?.[req.iqSession.userId];
+  if (!requester) return res.status(403).json({ error: 'Forbidden' });
+  const canView = requester.role === 'superadmin' || requester.role === 'admin' ||
+    (userPermissions[code]?.[req.iqSession.userId]?.view_insights === true);
+  if (!canView) return res.status(403).json({ error: 'Insufficient permissions' });
+
+  const mem = userAiProfiles[`${code}:${userId}`] || null;
+  res.json({ memory: mem });
+});
+
+/* PUT /api/user/memory/resolve — mark a thread or follow-up as resolved */
+app.put('/api/user/memory/resolve', requireAuth, (req, res) => {
+  const { orgCode, userId, threadId, followUpId } = req.body;
+  if (!orgCode || !userId || (!threadId && !followUpId)) {
+    return res.status(400).json({ error: 'orgCode, userId, and threadId or followUpId required' });
+  }
+  const code = orgCode.toLowerCase().trim();
+
+  const requester = orgUsers[code]?.[req.iqSession.userId];
+  if (!requester) return res.status(403).json({ error: 'Forbidden' });
+  const canView = requester.role === 'superadmin' || requester.role === 'admin' ||
+    (userPermissions[code]?.[req.iqSession.userId]?.view_insights === true);
+  if (!canView) return res.status(403).json({ error: 'Insufficient permissions' });
+
+  const mem = _getMemory(code, userId);
+  if (threadId) {
+    const t = mem.openThreads.find(t => t.id === threadId);
+    if (t) { t.resolved = true; t.resolvedAt = new Date().toISOString(); }
+  }
+  if (followUpId) {
+    const f = mem.priorFollowUps.find(f => f.id === followUpId);
+    if (f) { f.resolved = true; f.resolvedAt = new Date().toISOString(); }
+  }
+  mem.lastUpdated = new Date().toISOString();
+  scheduleSave();
+  res.json({ ok: true, memory: mem });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
    FREEFORM CHECK-IN — Free text + AI response
    Phase 4: Member role returns structured insight object.
    Other roles (leader/admin) return a plain text aiResponse as before.
    Accepts memberId (stable) or memberName (legacy). Prefers memberId.
    ═══════════════════════════════════════════════════════════════════════════ */
 app.post('/api/checkin/freeform', async (req, res) => {
-  const { orgCode, memberName, memberId, text, mood, role, orgMode, orgName, goals } = req.body;
+  const { orgCode, memberName, memberId, userId, text, mood, role, orgMode, orgName, goals } = req.body;
   if (!orgCode || !memberName || !text) return res.status(400).json({ error: 'missing fields' });
 
   const code = (orgCode || '').toLowerCase().trim();
@@ -2474,10 +2689,13 @@ app.post('/api/checkin/freeform', async (req, res) => {
     const orgVals       = (orgValues[code]   || []).slice(0, 6).join(', ') || null;
     const orgMetricList = (orgMetrics[code]  || []).slice(0, 6).map(m => m.name || m).join(', ') || null;
 
+    // Memory injection — only for members with a userId
+    const memoryBlock = userId ? _buildMemoryBlock(code, userId) : '';
+
     const systemPrompt = `You are IntelliQ — a warm, perceptive, and honest performance intelligence system.
 
 A member has submitted their daily check-in. Return a structured insight that is genuinely useful and grounded strictly in what they actually wrote. Do not invent data, assume context, or fake trends.
-
+${memoryBlock}
 RULES:
 - Observe only what the member explicitly shared — never project or extrapolate
 - If this is their first check-in, acknowledge it honestly ("This is your first check-in — patterns will emerge over time")
@@ -2541,6 +2759,15 @@ OUTPUT — valid JSON only, no markdown fencing, no extra text:
 
       checkin.insight    = insight;
       checkin.aiResponse = insight.summary || null; // backward compat
+
+      // Update user memory from this insight
+      if (userId && insight) {
+        _updateUserMemory(code, userId, 'checkin', {
+          watchOutFor:        insight.watchOutFor,
+          suggestedNextAction: insight.suggestedNextAction,
+        });
+      }
+
       scheduleSave();
       return res.json({ ok: true, insight, aiResponse: checkin.aiResponse });
 
@@ -2618,7 +2845,7 @@ function currentWeekStr() {
 
 /* ── Submit weekly assessment ───────────────────────────────────────────── */
 app.post('/api/weekly/submit', async (req, res) => {
-  const { orgCode, memberName, memberId, role, orgMode, orgName, data, goals } = req.body;
+  const { orgCode, memberName, memberId, userId, role, orgMode, orgName, data, goals } = req.body;
   if (!orgCode || !memberName || !data) return res.status(400).json({ error: 'missing fields' });
 
   const week = currentWeekStr();
@@ -2639,6 +2866,20 @@ app.post('/api/weekly/submit', async (req, res) => {
   };
 
   const roleKey = role === 'member' ? 'member' : (role === 'coach' || role === 'admin' || role === 'superadmin') ? 'leader' : 'staff';
+  const code    = (orgCode || '').toLowerCase().trim();
+
+  // Memory injection for members
+  const memoryBlock = (roleKey === 'member' && userId)
+    ? _buildMemoryBlock(code, userId)
+    : '';
+  const memberSystemPrompt = `You are IntelliQ. A member has completed their weekly reflection. Read what they shared and respond in 2-3 sentences: acknowledge their week genuinely, and if they have a goal, connect something they said to it. Be warm and specific. Max 3 sentences.${memoryBlock ? '\n' + memoryBlock : ''}`;
+
+  const finalRolePrompts = {
+    member: memberSystemPrompt,
+    leader: rolePrompts.leader,
+    staff:  rolePrompts.staff,
+  };
+
   let userMsg = '';
   if (goals?.goal) userMsg += `Their goal: "${goals.goal}"\n\n`;
   userMsg += `Weekly reflection:\n${Object.entries(data).map(([k,v]) => `${k}: ${v}`).join('\n')}`;
@@ -2647,11 +2888,21 @@ app.post('/api/weekly/submit', async (req, res) => {
   try {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001', max_tokens: 150,
-      system: rolePrompts[roleKey],
+      system: finalRolePrompts[roleKey],
       messages: [{ role: 'user', content: userMsg }],
     });
     aiResponse = response.content[0]?.text?.trim() || null;
   } catch(e) { /* non-critical */ }
+
+  // Update memory for members: use weekly reflection text as theme source
+  if (roleKey === 'member' && userId) {
+    const allText = Object.values(data).filter(Boolean).join(' ');
+    // Extract themes from the 'hard' / 'overall' fields if present
+    const themes = [];
+    if (data.hard)    themes.push(...data.hard.toLowerCase().split(/\W+/).filter(w => w.length > 4).slice(0, 3));
+    if (data.overall) themes.push(...data.overall.toLowerCase().split(/\W+/).filter(w => w.length > 4).slice(0, 3));
+    if (themes.length) _updateUserMemory(code, userId, 'weekly', { themes });
+  }
 
   const entry = {
     memberName, memberId: memberId || null,
@@ -4238,6 +4489,7 @@ function _loadAllStores(data) {
   Object.assign(memberGoals,      data.memberGoals      || {});
   Object.assign(weeklyAssessments,data.weeklyAssessments|| {});
   Object.assign(orgInterventions, data.orgInterventions || {});
+  Object.assign(userAiProfiles,   data.userAiProfiles   || {});
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
   const _savedSessions = data.activeSessions || {};

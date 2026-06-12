@@ -12,7 +12,7 @@ const MemberApp = {
   get _name()    { return Auth.currentUser?.name || `${Auth.currentUser?.firstName || ''} ${Auth.currentUser?.lastName || ''}`.trim(); },
   get _orgCode() { return Auth.currentUser?.orgCode; },
   get _orgName() { return Auth.currentOrg?.orgName  || Auth.currentUser?.orgCode || ''; },
-  get _orgMode() { return Auth.currentOrg?.orgMode  || 'school'; },
+  get _orgMode() { return Auth.currentOrg?.orgMode  || ''; },
   get _role()    { return Auth.currentUser?.role    || 'member'; },
 
   /* ── Local state ────────────────────────────────────────── */
@@ -671,6 +671,7 @@ const MemberApp = {
           orgCode:    this._orgCode,
           memberName: this._name,
           memberId:   this._userId,
+          userId:     this._userId,
           role:       this._role,
           orgMode:    this._orgMode,
           orgName:    this._orgName,
@@ -894,6 +895,7 @@ const MemberApp = {
       body:    JSON.stringify({
         orgCode:    this._orgCode,
         memberId:   this._userId,
+        userId:     this._userId,
         memberName: this._name,
         scenarioId: this._scenario.id,
         result,
@@ -981,6 +983,7 @@ const MemberApp = {
           orgCode:    this._orgCode,
           memberName: this._name,
           memberId:   this._userId,
+          userId:     this._userId,
           text:       note,
           mood:       this.mood,
           role:       'member',

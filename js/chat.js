@@ -86,11 +86,12 @@ const ChatEngine = {
 
   async _callAPI(messages, isOpener = false) {
     const member = AppState.getMember(this.memberId);
-
     const body = {
       messages,
       orgMode:   AppState.mode,
       orgName:   AppState.orgName,
+      orgCode:   AppState.orgCode,
+      userId:    member?.userId || member?.id,
       memberName: this.memberName,
     };
 
