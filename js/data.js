@@ -100,7 +100,7 @@ const WORKSPACE_MODULES = [
   // ── Personal — visible to every authenticated user ────────────────────
   { section: 'My Space',      id: 'home',         icon: '🏠', label: 'Home',                  permission: null               },
   { section: null,             id: 'assessments',  icon: '🎯', label: 'Assessments',            permission: null               },
-  { section: null,             id: 'checkin',      icon: '💬', label: 'Daily Check-In',         permission: null               },
+  { section: null,             id: 'checkin',      icon: '💬', label: 'Check-In',              permission: null               },
   { section: null,             id: 'inbox',        icon: '📬', label: 'Inbox',                  permission: null               },
   { section: null,             id: 'stats',        icon: '📊', label: 'Progress',               permission: null               },
 
@@ -110,8 +110,8 @@ const WORKSPACE_MODULES = [
   { section: null,             id: 'org-insights', icon: '💡', label: 'Organisation Insights',  permission: 'view_insights'    },
 
   // ── Intelligence ──────────────────────────────────────────────────────
-  { section: 'Intelligence',  id: 'analytics',    icon: '📊', label: 'Analytics',              permission: 'view_analytics'   },
-  { section: null,             id: 'intelliq',     icon: '🧠', label: 'IntelliQ Engine',        permission: 'view_analytics'   },
+  { section: 'Intelligence',  id: 'analytics',    icon: '📊', label: 'Insights',               permission: 'view_analytics'   },
+  { section: null,             id: 'intelliq',     icon: '🧠', label: 'Intelligence',           permission: 'view_analytics'   },
   { section: null,             id: 'scenarios',    icon: '🎯', label: 'Manage Assessments',     permission: 'assign_scenarios' },
 
   // ── Management ────────────────────────────────────────────────────────

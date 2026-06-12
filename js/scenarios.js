@@ -274,7 +274,7 @@ const ScenarioEngine = {
       panel.style.cssText = 'margin-top:1rem;padding-top:1rem;border-top:2px solid rgba(124,90,245,0.3)';
       panel.innerHTML = `
         <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.9rem">
-          <span style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent)">🔒 Coach Debrief — Private</span>
+          <span style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent)">🔒 Leader Debrief — Private</span>
           ${debrief.escalate ? `<span style="font-size:0.7rem;background:rgba(247,79,122,0.15);color:var(--danger);border:1px solid rgba(247,79,122,0.3);border-radius:4px;padding:2px 8px">⚠ Review Recommended</span>` : ''}
         </div>
 

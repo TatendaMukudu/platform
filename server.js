@@ -90,8 +90,7 @@ function requireAuth(req, res, next) {
 }
 
 /* ─── REFLECTION SYSTEM PROMPT ─────────────────────────────────────────── */
-function buildReflectionPrompt(orgMode, orgName, orgValues = [], orgMetrics = []) {
-  // orgMode kept as optional fallback context only (Option B soft deprecation)
+function buildReflectionPrompt(orgMode, orgName, orgValues = [], orgMetrics = [], orgProfile = {}) {
   const verticalCtx = {
     school:     'students in a school environment. Academic pressure, peer relationships, behaviour, and moral development are common themes.',
     sports:     'athletes in a sports club. Performance pressure, team dynamics, coaching relationships, and mental resilience are common themes.',
@@ -101,14 +100,22 @@ function buildReflectionPrompt(orgMode, orgName, orgValues = [], orgMetrics = []
     government: 'government officials and public servants. Policy decisions, integrity, public accountability, and crisis management are common themes.',
   };
 
-  const contextLine = orgMode && verticalCtx[orgMode]
-    ? `You are speaking with ${verticalCtx[orgMode]}`
-    : `You are speaking with individuals in a professional or institutional environment.`;
+  // Prefer rich org description over generic vertical tag
+  let contextLine;
+  if (orgProfile.orgSummary) {
+    contextLine = `You are speaking with members of ${orgName}. About this organisation: ${orgProfile.orgSummary}`;
+    if (orgProfile.orgEnvironment)      contextLine += ` Environment: ${orgProfile.orgEnvironment}`;
+    if (orgProfile.orgSuccessDefinition) contextLine += ` Success looks like: ${orgProfile.orgSuccessDefinition}`;
+  } else if (orgMode && verticalCtx[orgMode]) {
+    contextLine = `You are speaking with ${verticalCtx[orgMode]}`;
+  } else {
+    contextLine = `You are speaking with individuals in a professional or institutional environment.`;
+  }
 
   const valuesLine  = orgValues.length  ? `\nORG VALUES: ${orgValues.join(', ')} — connect your reflections to these where relevant.` : '';
   const metricsLine = orgMetrics.length ? `\nORG PERFORMANCE DIMENSIONS: ${orgMetrics.map(m=>typeof m==='string'?m:m.name).join(', ')} — explore how the member's behaviour connects to these.` : '';
 
-  return `You are the IntelliQ Reflection Assistant — an empathetic, intelligent AI coach embedded in the IntelliQ platform used by ${orgName}.
+  return `You are the IntelliQ Reflection Assistant — an empathetic, intelligent AI embedded in the IntelliQ platform used by ${orgName}.
 
 ${contextLine}${valuesLine}${metricsLine}
 
@@ -139,20 +146,25 @@ Catch nuanced language — "I've been in a really dark place" or "I just don't s
 }
 
 /* ─── SCENARIO SYSTEM PROMPT ────────────────────────────────────────────── */
-function buildScenarioPrompt(orgMode, orgName, title, context, memberName, difficulty, opening = null, probes = null, orgValues = [], orgMetrics = []) {
+function buildScenarioPrompt(orgMode, orgName, title, context, memberName, difficulty, opening = null, probes = null, orgValues = [], orgMetrics = [], orgProfile = {}) {
   const difficultyNote = {
     easy:   'Start with a clear, straightforward situation. Keep the stakes moderate.',
     medium: 'Present a situation with genuine tension and no obvious right answer.',
     hard:   'Create high-stakes complexity with competing obligations, time pressure, and moral ambiguity.',
   }[difficulty] || 'Present a situation with genuine tension and no obvious right answer.';
 
+  const orgCtxLine = orgProfile.orgSummary
+    ? `ORGANISATION: ${orgName} — ${orgProfile.orgSummary}${orgProfile.orgEnvironment ? ' ' + orgProfile.orgEnvironment : ''}`
+    : `ORGANISATION: ${orgName}${orgMode ? ' (type: ' + orgMode + ')' : ''}`;
+
   return `You are the IntelliQ Scenario Facilitator — an intelligent evaluator running a live decision-making assessment in the IntelliQ platform used by ${orgName}.
 
+${orgCtxLine}
 You are assessing ${memberName} using a scenario in the domain: "${title}".
 SCENARIO CONTEXT: ${context}
 DIFFICULTY: ${difficultyNote}
 ${opening ? `\nAPPROVED OPENING — use this exact opening to begin:\n"${opening}"\n` : ''}
-${probes?.length ? `\nAPPROVED PROBE FRAMEWORK — the coach has pre-approved these follow-up angles. Use them as your guide but adapt naturally to what ${memberName} says:\n${probes.map((p, i) => `${i+1}. ${p}`).join('\n')}\n` : ''}
+${probes?.length ? `\nAPPROVED PROBE FRAMEWORK — the leader has pre-approved these follow-up angles. Use them as your guide but adapt naturally to what ${memberName} says:\n${probes.map((p, i) => `${i+1}. ${p}`).join('\n')}\n` : ''}
 YOUR JOB:
 1. ${opening ? `Start with the approved opening above — present it naturally, do not just read it verbatim.` : `Open with a vivid, specific, realistic situation tied to the context above.`}
 2. Let ${memberName} respond in their own words.
@@ -199,10 +211,11 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ error: 'messages array required' });
   }
 
-  // Load org-specific values and metrics for prompt enrichment
+  // Load org-specific values, metrics, and profile for prompt enrichment
   const code    = (orgCode || '').toLowerCase();
   const values  = orgValues[code]  || [];
   const metrics = (orgMetrics[code] || []).map(m => m.name || m);
+  const orgProfile = orgMeta[code] || {};
 
   try {
     let systemPrompt;
@@ -210,19 +223,20 @@ app.post('/api/chat', async (req, res) => {
     if (promptType === 'scenario') {
       const sc = scenarioRunContext || {};
       systemPrompt = buildScenarioPrompt(
-        orgMode || '',
+        orgMode || orgProfile.orgMode || '',
         orgName  || 'your organisation',
         sc.title || 'Decision Making',
-        sc.context || 'A challenging workplace or social situation',
+        sc.context || 'A general situational assessment',
         memberName || 'the member',
         sc.difficulty || 'medium',
         sc.opening  || null,
         sc.probes   || null,
         values,
-        metrics
+        metrics,
+        orgProfile
       );
     } else {
-      systemPrompt = buildReflectionPrompt(orgMode || '', orgName || 'your organisation', values, metrics);
+      systemPrompt = buildReflectionPrompt(orgMode || orgProfile.orgMode || '', orgName || 'your organisation', values, metrics, orgProfile);
       if (scenarioContext) {
         systemPrompt += `\n\nSCENARIO JUST COMPLETED:\nTitle: ${scenarioContext.title}\nScore: ${scenarioContext.score}/100 (${scenarioContext.label})\n`;
         if (scenarioContext.answers?.length) {
@@ -279,20 +293,26 @@ app.post('/api/chat', async (req, res) => {
 });
 
 /* ─── SCENARIO DRAFT ENDPOINT ──────────────────────────────────────────── */
-app.post('/api/draft-scenario', async (req, res) => {
-  const { brief, orgMode, orgName, memberName, difficulty, image } = req.body;
+app.post('/api/draft-scenario', requireAuth, async (req, res) => {
+  const { brief, orgMode, orgName, orgCode, memberName, difficulty, image } = req.body;
   if (!brief) return res.status(400).json({ error: 'brief required' });
 
   const hasImage = image && image.data && image.mediaType;
+  const code = (orgCode || req.iqSession?.orgCode || '').toLowerCase();
+  const profile = orgMeta[code] || {};
+
+  const orgCtx = profile.orgSummary
+    ? `ORGANISATION: ${orgName || profile.orgName || 'an organisation'} — ${profile.orgSummary}`
+    : `ORGANISATION TYPE: ${orgMode || profile.orgMode || 'general'}`;
 
   const systemPrompt = `You are an expert scenario designer for IntelliQ, a performance intelligence platform used by ${orgName || 'an organisation'}.
 
-A coach/professional has written a brief about a member. Your job is to draft a scenario that will be used to assess that member's decision-making, reasoning, and self-awareness.
+A leader has written a brief about a member. Your job is to draft a scenario that will be used to assess that member's decision-making, reasoning, and self-awareness.
 
-ORGANISATION TYPE: ${orgMode || 'school'}
+${orgCtx}
 MEMBER: ${memberName || 'the member'}
 DIFFICULTY: ${difficulty || 'medium'}
-${hasImage ? '\nAn image has been attached by the coach. Build the scenario around what is shown in the image — reference specific elements the member should notice and respond to.' : ''}
+${hasImage ? '\nEvidence has been attached. Build the scenario around what is shown — reference specific elements the member should notice and respond to.' : ''}
 
 OUTPUT FORMAT — respond with valid JSON only, no extra text:
 {
@@ -302,7 +322,7 @@ OUTPUT FORMAT — respond with valid JSON only, no extra text:
     "Second follow-up — introduces a complication or raises stakes",
     "Third follow-up — tests self-awareness or understanding"
   ],
-  "coachNote": "What this scenario is designed to reveal, and what strong vs weak responses look like. 2-3 sentences. Reference the image content if relevant.",
+  "coachNote": "What this scenario is designed to reveal, and what strong vs weak responses look like. 2-3 sentences. Reference the evidence content if relevant.",
   "title": "A short scenario title (3-6 words)"
 }
 
@@ -311,7 +331,7 @@ RULES:
 - Do not make the right answer obvious
 - The probes should escalate
 - The coachNote is private — never shown to the member
-- Adapt to the org type`;
+- Adapt language and context to the organisation type`;
 
   const userContent = hasImage
     ? [
@@ -350,18 +370,18 @@ app.post('/api/coach-debrief', async (req, res) => {
 
   const systemPrompt = `You are an expert performance analyst for IntelliQ, used by ${orgName || 'an organisation'}.
 
-You are writing a private debrief for a ${coachRole || 'coach/supervisor'} — NOT for the member. The member will never see this.
+You are writing a private debrief for a ${coachRole || 'leader/supervisor'} — NOT for the member. The member will never see this.
 
-Your job: analyse ${memberName}'s responses to the "${scenarioTitle}" scenario and give the coach practical, specific guidance.
+Your job: analyse ${memberName}'s responses to the "${scenarioTitle}" scenario and give the leader practical, specific guidance.
 
-ORGANISATION TYPE: ${orgMode || 'school'}
+ORGANISATION TYPE: ${orgMode || 'general'}
 
 OUTPUT FORMAT — valid JSON only:
 {
-  "headline": "One sentence summary of the most important thing the coach should know",
+  "headline": "One sentence summary of the most important thing the leader should know",
   "whatThisReveals": "2-3 sentences on what ${memberName}'s reasoning pattern shows — not just the score, but the WHY behind it. What does this tell you about how they think?",
   "watchFor": ["Specific behaviour or pattern to observe in real situations", "Another thing to monitor"],
-  "coachingActions": ["Concrete action the coach can take this week", "A second specific action", "Optional third action"],
+  "coachingActions": ["Concrete action the leader can take this week", "A second specific action", "Optional third action"],
   "escalate": false
 }
 
@@ -453,7 +473,7 @@ app.post('/api/auth/setup-org', async (req, res) => {
 
   const userId      = generateId();
   const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
-  orgMeta[orgCode]  = { orgName, orgMode: orgMode || 'workplace', createdAt: new Date().toISOString() };
+  orgMeta[orgCode]  = { orgName, orgMode: orgMode || '', createdAt: new Date().toISOString() };
   orgUsers[orgCode] = {};
   orgUsers[orgCode][userId] = {
     id:           userId,
@@ -2178,7 +2198,7 @@ app.post('/api/member/join', (req, res) => {
   res.json({
     ok:         true,
     orgName:    org?.orgName  || orgCode,
-    orgMode:    org?.orgMode  || 'school',
+    orgMode:    org?.orgMode  || '',
     memberName: memberName.trim(),
     orgCode:    code,
     token,
@@ -2316,7 +2336,7 @@ An organisation admin has described their organisation in their own words. Your 
 
 OUTPUT FORMAT — valid JSON only, no extra text:
 {
-  "orgMode": "school|sports|workplace|military|healthcare|government",
+  "orgMode": "school|sports|workplace|military|healthcare|government|other",
   "summary": "One sentence capturing what this org is really about",
   "traits": ["specific trait 1", "specific trait 2", "specific trait 3", "specific trait 4"],
   "goals": ["meaningful org goal 1", "meaningful org goal 2", "meaningful org goal 3"],
@@ -2325,7 +2345,7 @@ OUTPUT FORMAT — valid JSON only, no extra text:
 }
 
 RULES:
-- orgMode must be exactly one of: school, sports, workplace, military, healthcare, government
+- orgMode must be exactly one of: school, sports, workplace, military, healthcare, government, other
 - traits should be observable, specific characteristics (e.g. "athlete wellbeing first", "high accountability culture", "data-driven decisions")
 - goals should be meaningful outcomes, not generic platitudes
 - Be grounded in what they actually wrote — do not invent things they didn't mention`;
@@ -2347,6 +2367,33 @@ RULES:
     console.error('Org describe error:', err.message);
     res.status(500).json({ error: 'AI unavailable', detail: err.message });
   }
+});
+
+/* ─── ORG PROFILE UPDATE ────────────────────────────────────────────────── */
+/* Stores AI-extracted org profile fields (description, summary, traits, etc.)
+   These come from /api/org/describe and are persisted here by the setup wizard.
+   Additive merge — never overwrites orgName, orgMode, or createdAt.          */
+app.put('/api/org/profile', requireAuth, (req, res) => {
+  const { orgCode, orgMode, orgDescription, orgSummary, orgEnvironment, orgSuccessDefinition, orgTraits } = req.body;
+  const code = (orgCode || req.iqSession?.orgCode || '').toLowerCase().trim();
+  if (!code) return res.status(400).json({ error: 'orgCode required' });
+
+  // Only superadmin for this org may update the profile
+  const user = orgUsers[code]?.[req.iqSession.userId];
+  if (!user || user.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
+
+  if (!orgMeta[code]) return res.status(404).json({ error: 'Organisation not found' });
+
+  // Additive merge — never overwrite immutable fields
+  if (orgMode            !== undefined) orgMeta[code].orgMode             = orgMode;
+  if (orgDescription     !== undefined) orgMeta[code].orgDescription      = orgDescription;
+  if (orgSummary         !== undefined) orgMeta[code].orgSummary          = orgSummary;
+  if (orgEnvironment     !== undefined) orgMeta[code].orgEnvironment      = orgEnvironment;
+  if (orgSuccessDefinition !== undefined) orgMeta[code].orgSuccessDefinition = orgSuccessDefinition;
+  if (orgTraits          !== undefined) orgMeta[code].orgTraits           = orgTraits;
+
+  scheduleSave();
+  res.json({ ok: true, org: orgMeta[code] });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -2402,7 +2449,7 @@ app.post('/api/checkin/freeform', async (req, res) => {
     mood:      mood || null,
     moodLabel: moodLabels[mood] || null,
     role:      role || 'member',
-    orgMode:   orgMode || 'school',
+    orgMode:   orgMode || '',
     date:      new Date().toLocaleDateString('en-GB'),
     ts:        new Date().toISOString(),
   };
@@ -2506,11 +2553,12 @@ OUTPUT — valid JSON only, no markdown fencing, no extra text:
 
   /* ── LEADER / ADMIN: lightweight plain-text response (unchanged) ─────── */
   const leaderPrompts = {
-    coach:  `You are IntelliQ, a performance intelligence assistant for leaders. A leader has submitted their daily check-in. Acknowledge what they shared briefly. If they mentioned a specific person or situation, reflect something useful back. Max 3 sentences. Be direct and practical.`,
+    leader: `You are IntelliQ, a performance intelligence assistant for leaders. A leader has submitted their daily check-in. Acknowledge what they shared briefly. If they mentioned a specific person or situation, reflect something useful back. Max 3 sentences. Be direct and practical.`,
     admin:  `You are IntelliQ, a performance intelligence assistant. An admin has submitted a check-in. Acknowledge briefly. If anything sounds like it needs org-level attention, note it. Max 2 sentences.`,
   };
 
-  const systemPrompt = leaderPrompts[effectiveRole] || leaderPrompts.coach;
+  const leaderRoleKey = (effectiveRole === 'admin' || effectiveRole === 'superadmin') ? 'admin' : 'leader';
+  const systemPrompt = leaderPrompts[leaderRoleKey];
   let userContent = '';
   if (mood) userContent += `Mood: ${moodLabels[mood]}\n`;
   userContent += `Check-in: ${text}`;
@@ -2585,12 +2633,12 @@ app.post('/api/weekly/submit', async (req, res) => {
   if (idx > -1) weeklyAssessments[key].splice(idx, 1);
 
   const rolePrompts = {
-    member: `You are IntelliQ. A team member has completed their weekly reflection. Read what they shared and respond in 2-3 sentences: acknowledge their week genuinely, and if they have a goal, connect something they said to it. Be warm and specific. Max 3 sentences.`,
-    coach:  `You are IntelliQ, a performance intelligence assistant. A coach has submitted their weekly assessment. Read it and respond with one practical insight or observation worth acting on. Reference specifics they mentioned. Max 3 sentences.`,
+    member: `You are IntelliQ. A member has completed their weekly reflection. Read what they shared and respond in 2-3 sentences: acknowledge their week genuinely, and if they have a goal, connect something they said to it. Be warm and specific. Max 3 sentences.`,
+    leader: `You are IntelliQ, a performance intelligence assistant. A leader has submitted their weekly reflection. Read it and respond with one practical insight or observation worth acting on. Reference specifics they mentioned. Max 3 sentences.`,
     staff:  `You are IntelliQ. A staff member has submitted their weekly report. Acknowledge what they shared and note anything that may need follow-up. Max 2 sentences.`,
   };
 
-  const roleKey = role === 'member' ? 'member' : role === 'coach' ? 'coach' : 'staff';
+  const roleKey = role === 'member' ? 'member' : (role === 'coach' || role === 'admin' || role === 'superadmin') ? 'leader' : 'staff';
   let userMsg = '';
   if (goals?.goal) userMsg += `Their goal: "${goals.goal}"\n\n`;
   userMsg += `Weekly reflection:\n${Object.entries(data).map(([k,v]) => `${k}: ${v}`).join('\n')}`;
@@ -2607,7 +2655,7 @@ app.post('/api/weekly/submit', async (req, res) => {
 
   const entry = {
     memberName, memberId: memberId || null,
-    role: role || 'member', orgMode: orgMode || 'school',
+    role: role || 'member', orgMode: orgMode || '',
     data, week, aiResponse,
     submittedAt: new Date().toISOString(),
   };
@@ -3232,11 +3280,11 @@ app.get('/api/intelliq/org-insights', requireAuth, async (req, res) => {
   }
 
   // ── Claude synthesis with v2 structured output ────────────────────────────
-  const SYSTEM = `You are IntelliQ, a decision-support intelligence system. You receive structured data about an organisation — member goals, check-ins, weekly reflections, assessment scores, groups. Your job is NOT to describe the data, but to synthesise it into intelligence: what does it mean, what patterns exist, and what should the coach do?
+  const SYSTEM = `You are IntelliQ, a decision-support intelligence system. You receive structured data about an organisation — member goals, check-ins, weekly reflections, assessment scores, groups. Your job is NOT to describe the data, but to synthesise it into intelligence: what does it mean, what patterns exist, and what should the leader do?
 
 OUTPUT FORMAT — valid JSON only, absolutely no markdown or extra text outside the JSON object:
 {
-  "summary": "2-3 sentences. What does the coach need to know TODAY? Name specific people and specific patterns. Never be generic.",
+  "summary": "2-3 sentences. What does the leader need to know TODAY? Name specific people and specific patterns. Never be generic.",
   "moodTrend": "improving|stable|declining|unknown",
   "moodNote": "One sentence comparing this week's mood to the previous week and 30-day trend.",
   "notEnoughData": false,
@@ -3267,7 +3315,7 @@ OUTPUT FORMAT — valid JSON only, absolutely no markdown or extra text outside 
       "goalAlignment": "on_track|mixed|off_track|no_goal",
       "goalAlignmentExplanation": "One sentence — does their behavior match their goal? Reference the goal and the check-in/assessment evidence.",
       "riskSignals": ["specific signal — e.g. 'mood avg 1.8/5', 'pressure_response score 42'"],
-      "recommendedAction": "One concrete action for the coach, with their name."
+      "recommendedAction": "One concrete action for the leader, with their name."
     }
   ],
 
@@ -3288,7 +3336,7 @@ OUTPUT FORMAT — valid JSON only, absolutely no markdown or extra text outside 
     {
       "action": "Specific action — who, what, when.",
       "urgency": "high|medium|low",
-      "owner": "coach|admin|member",
+      "owner": "leader|admin|member",
       "reason": "Why — reference actual data from the brief.",
       "evidence": ["checkins", "weeklyAssessments", "goals", "assessmentScores", "notes"],
       "confidence": "high|medium|low",
@@ -4096,8 +4144,8 @@ function _noDataFallback(agg) {
     trends: { trendDirection: 'unknown', trendReason: 'No data yet.', confidenceLevel: 'low', engagementTrend: 'unknown', moodComparison: 'No data yet.' },
     semanticThemes: [], memberProfiles: [], groupInsights: [],
     recommendations: [
-      { action: 'Ask members to complete their first check-in in the IntelliQ app.', urgency: 'high', owner: 'coach', reason: 'No member activity recorded yet.', evidence: [] },
-      { action: 'Ensure all members have set a personal goal on first login.', urgency: 'medium', owner: 'coach', reason: `${agg.memberCount - agg.membersWithGoals.length} member(s) have no goal set.`, evidence: ['goals'] },
+      { action: 'Ask members to complete their first check-in in the IntelliQ app.', urgency: 'high', owner: 'leader', reason: 'No member activity recorded yet.', evidence: [] },
+      { action: 'Ensure all members have set a personal goal on first login.', urgency: 'medium', owner: 'leader', reason: `${agg.memberCount - agg.membersWithGoals.length} member(s) have no goal set.`, evidence: ['goals'] },
     ],
     memberHighlights: [], goalProgress: `${agg.membersWithGoals.length} of ${agg.memberCount} member(s) have set goals.`,
     atRisk: [], themes: [], groupHighlights: [], recommendedActions: [],
@@ -4153,7 +4201,7 @@ function _buildFallbackInsight(agg) {
     })),
     recommendations: agg.atRiskComputed.slice(0, 3).map(r => ({
       action: `Check in with ${r.name} — ${r.reason.toLowerCase()}.`,
-      urgency: r.urgency, owner: 'coach', reason: r.reason, evidence: ['checkins'],
+      urgency: r.urgency, owner: 'leader', reason: r.reason, evidence: ['checkins'],
     })),
     memberHighlights: [],
     goalProgress: `${agg.membersWithGoals.length} of ${agg.memberCount} members have set goals.`,

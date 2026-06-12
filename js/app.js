@@ -614,7 +614,7 @@ const PAGE_TITLES = {
   // Personal — every user
   home:         'Home',
   assessments:  'Assessments',
-  checkin:      'Daily Check-In',
+  checkin:      'Check-In',
   inbox:        'Inbox',
   stats:        'Progress',
   // Organisation — leadership permissions
@@ -622,8 +622,8 @@ const PAGE_TITLES = {
   assignments:  'Assignments',
   'org-insights': 'Organisation Insights',
   // Intelligence
-  analytics:    'Analytics & Insights',
-  intelliq:     'IntelliQ Engine',
+  analytics:    'Insights',
+  intelliq:     'Intelligence',
   scenarios:    'Manage Assessments',
   // Management
   people:       'People',
@@ -797,14 +797,16 @@ async function handleSetup() {
     errEl.style.display = 'block'; return;
   }
 
-  // Quick keyword mode detection (AI analysis happens post-launch)
+  // Quick keyword mode detection — conservative, unambiguous terms only.
+  // Intentionally avoids generic words (team, coach, player) that appear in many non-sports contexts.
+  // The AI analysis from /api/org/describe will refine this after launch.
   let orgMode = 'workplace';
   const descLower = description.toLowerCase();
-  if (/sport|football|soccer|basketball|cricket|athletics|team|player|coach|match/i.test(descLower)) orgMode = 'sports';
-  else if (/school|student|pupil|class|teacher|academic|curriculum/i.test(descLower)) orgMode = 'school';
-  else if (/hospital|patient|clinic|nurse|doctor|healthcare|medical/i.test(descLower)) orgMode = 'healthcare';
-  else if (/military|army|navy|air force|regiment|battalion|soldier/i.test(descLower)) orgMode = 'military';
-  else if (/government|ministry|department|policy|public service/i.test(descLower)) orgMode = 'government';
+  if (/\b(soccer|football|basketball|cricket|athletics|rugby|netball|volleyball|tennis|swimming)\b/i.test(descLower)) orgMode = 'sports';
+  else if (/\b(school|student|pupil|classroom|teacher|academic|curriculum|grades|tutor)\b/i.test(descLower)) orgMode = 'school';
+  else if (/\b(hospital|patient|clinic|nurse|doctor|healthcare|medical|ward|triage|surgery)\b/i.test(descLower)) orgMode = 'healthcare';
+  else if (/\b(military|army|navy|air force|regiment|battalion|soldier|squad|platoon)\b/i.test(descLower)) orgMode = 'military';
+  else if (/\b(government|ministry|department|policy|public service|civil service)\b/i.test(descLower)) orgMode = 'government';
 
   try {
     const data = await Auth.setupOrg(orgName, orgMode, { firstName, lastName, email }, password);
@@ -968,6 +970,23 @@ async function _analyseOrgDescription(description, orgName, orgCode) {
     AppState.orgEnvironment = data.environment || '';
     AppState.orgSuccess     = data.successLooks || '';
 
+    // Persist org AI profile to server so prompts can use it
+    if (orgCode && Auth.token) {
+      fetch('/api/org/profile', {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${Auth.token}` },
+        body: JSON.stringify({
+          orgCode,
+          orgMode:             data.orgMode || AppState.mode,
+          orgDescription:      description,
+          orgSummary:          data.summary || '',
+          orgEnvironment:      data.environment || '',
+          orgSuccessDefinition: data.successLooks || '',
+          orgTraits:           data.traits || [],
+        }),
+      }).catch(() => {}); // fire-and-forget; non-critical
+    }
+
     // Show org intelligence modal
     document.getElementById('org-intel-sub').textContent     = `${orgName} — detected as ${data.orgMode}`;
     document.getElementById('org-intel-summary').textContent  = data.summary || '';
@@ -1013,11 +1032,11 @@ function _checkCoachDailyCheckin() {
   const prompts = {
     superadmin: `Good ${tod}, ${name}. How's the organisation running? Anything at the top of your mind — people, decisions, things you're tracking?`,
     admin:      `Good ${tod}, ${name}. How's the programme going? Any issues or highlights worth flagging?`,
-    coach:      `Good ${tod}, ${name}. How's the team doing? Anyone you're keeping an eye on? Anything you want to record?`,
+    coach:      `Good ${tod}, ${name}. How's your group? Anyone you're keeping an eye on? Anything you want to record?`,
   };
 
   document.getElementById('ccc-title').textContent  = `${tod.charAt(0).toUpperCase() + tod.slice(1)} check-in`;
-  document.getElementById('ccc-prompt').textContent = prompts[role] || prompts.coach;
+  document.getElementById('ccc-prompt').textContent = prompts[role] || prompts['coach'];
 
   setTimeout(() => openModal('coach-checkin-modal'), 600);
 }
@@ -4083,14 +4102,11 @@ function renderScenarios() {
   const container = document.getElementById('scenarios-content');
   if (!container) return;
 
-  const domainOptions = {
-    school:     ['Moral IQ','Social IQ','Behavior IQ','Academic IQ'],
-    sports:     ['Tactical','Mental Resilience','Team Dynamics','Leadership'],
-    workplace:  ['Ethics','Leadership','Conflict','Performance'],
-    military:   ['Tactical','Ethics','Command','Stress'],
-    healthcare: ['Triage','Ethics','Patient Care','Decision'],
-    government: ['Policy','Crisis','Integrity','Leadership'],
-  }[AppState.mode] || ['General'];
+  // Use org's own metrics as domain suggestions — fall back to generic set
+  const metricNames = (AppState.metrics || []).map(m => typeof m === 'string' ? m : m.name).filter(Boolean);
+  const domainOptions = metricNames.length
+    ? metricNames.slice(0, 6)
+    : ['Decision Making', 'Situational Awareness', 'Communication', 'Leadership', 'Ethics', 'Pressure Response'];
 
   const scenarioCards = scenarios.length ? scenarios.map(s => {
     const completions = AppState.members.reduce((n, m) =>
@@ -4197,7 +4213,7 @@ function renderScenarios() {
       </div>
 
       <div style="background:rgba(124,90,245,0.08);border:1px solid rgba(124,90,245,0.25);border-radius:8px;padding:0.9rem;margin-bottom:1rem">
-        <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin-bottom:0.4rem">🔒 Coach Note — Private</div>
+        <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin-bottom:0.4rem">🔒 Leader Note — Private</div>
         <div id="sc-draft-coachnote" style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6"></div>
       </div>
 

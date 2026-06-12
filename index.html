@@ -113,7 +113,7 @@
       <div class="form-group">
         <label>TELL US ABOUT YOUR ORGANISATION <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)">— IntelliQ reads this to adapt to you</span></label>
         <textarea class="form-control" id="setup-org-description" rows="3" style="resize:vertical"
-          placeholder="e.g. We're a semi-professional football academy working with 16-21 year olds. We want to build mentally tough, coachable players who take responsibility for their development. Success for us looks like players progressing to senior contracts and becoming good people..."></textarea>
+          placeholder="e.g. We're a professional development programme for emerging leaders in the financial sector. Our members are high-potential individuals at mid-career stage. We want to accelerate their growth, build accountability habits, and prepare them for senior roles within two years. Success looks like measurable growth in decision-making and consistent engagement."></textarea>
         <div style="font-size:0.74rem;color:var(--text-muted);margin-top:0.4rem">Be honest and specific — the more you tell it, the better IntelliQ adapts.</div>
       </div>
       <div class="form-group">
@@ -957,7 +957,7 @@
               <div style="display:flex;gap:0.35rem;flex-wrap:wrap" id="note-tags-row">
                 <button class="note-tag-btn active" data-tag=""        onclick="MemberApp.selectNoteTag('')">None</button>
                 <button class="note-tag-btn" data-tag="Goals"    onclick="MemberApp.selectNoteTag('Goals')">🎯 Goals</button>
-                <button class="note-tag-btn" data-tag="Training" onclick="MemberApp.selectNoteTag('Training')">💪 Training</button>
+                <button class="note-tag-btn" data-tag="Activity" onclick="MemberApp.selectNoteTag('Activity')">💪 Activity</button>
                 <button class="note-tag-btn" data-tag="Personal" onclick="MemberApp.selectNoteTag('Personal')">🧠 Personal</button>
                 <button class="note-tag-btn" data-tag="Team"     onclick="MemberApp.selectNoteTag('Team')">🤝 Team</button>
                 <button class="note-tag-btn" data-tag="Mental"   onclick="MemberApp.selectNoteTag('Mental')">🧘 Mental</button>
@@ -995,7 +995,7 @@
           <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.6rem" id="notes-filter-row">
             <button class="note-tag-btn active" data-filter="All"      onclick="MemberApp._filterNotes('All')">All</button>
             <button class="note-tag-btn" data-filter="Goals"    onclick="MemberApp._filterNotes('Goals')">🎯 Goals</button>
-            <button class="note-tag-btn" data-filter="Training" onclick="MemberApp._filterNotes('Training')">💪 Training</button>
+            <button class="note-tag-btn" data-filter="Activity" onclick="MemberApp._filterNotes('Activity')">💪 Activity</button>
             <button class="note-tag-btn" data-filter="Personal" onclick="MemberApp._filterNotes('Personal')">🧠 Personal</button>
             <button class="note-tag-btn" data-filter="Team"     onclick="MemberApp._filterNotes('Team')">🤝 Team</button>
             <button class="note-tag-btn" data-filter="Mental"   onclick="MemberApp._filterNotes('Mental')">🧘 Mental</button>
@@ -1261,7 +1261,7 @@
           <div id="acm-draft-probes"></div>
         </div>
         <div style="background:rgba(124,90,245,0.08);border:1px solid rgba(124,90,245,0.25);border-radius:8px;padding:0.8rem;margin-bottom:0.9rem">
-          <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;color:var(--accent);margin-bottom:0.3rem">🔒 Coach Note — Private</div>
+          <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;color:var(--accent);margin-bottom:0.3rem">🔒 Leader Note — Private</div>
           <div id="acm-draft-coachnote" style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6"></div>
         </div>
         <div style="display:flex;justify-content:flex-end">
