@@ -1671,7 +1671,7 @@ function renderDashboard(){
   // Top 5 performers
   const top5 = [...AppState.members].sort((a,b)=>b.overall-a.overall).slice(0,5);
   document.getElementById('dash-top5').innerHTML = top5.map(m => `
-    <tr onclick="showProfile(${m.id})">
+    <tr onclick="showProfile('${m.id}')">
       <td>
         <div style="display:flex;align-items:center;gap:8px">
           <div class="user-avatar" style="width:28px;height:28px;font-size:0.7rem;background:${m.color}">${m.initials}</div>
@@ -1806,7 +1806,7 @@ function renderAnalytics(){
     m.alerts > 1
   ).sort((a,b) => (a.wellnessScore ?? 100) - (b.wellnessScore ?? 100)).slice(0,8);
   document.getElementById('analytics-risk-table').innerHTML = atRisk.map(m=>`
-    <tr onclick="showProfile(${m.id})">
+    <tr onclick="showProfile('${m.id}')">
       <td>
         <div style="display:flex;align-items:center;gap:8px">
           <div class="user-avatar" style="width:28px;height:28px;font-size:0.7rem;background:${m.color}">${m.initials}</div>
@@ -1817,7 +1817,7 @@ function renderAnalytics(){
       <td><span style="color:${scoreColor(m.wellnessScore)};font-weight:600">${m.wellnessScore}</span></td>
       <td><span style="color:${scoreColor(m.overall)};font-weight:600">${m.overall}</span></td>
       <td>${m.alerts > 0 ? `<span style="color:var(--danger)">${m.alerts} active</span>` : '—'}</td>
-      <td><button class="btn btn-sm btn-accent" onclick="event.stopPropagation();showProfile(${m.id})">View Profile</button></td>
+      <td><button class="btn btn-sm btn-accent" onclick="event.stopPropagation();showProfile('${m.id}')">View Profile</button></td>
     </tr>`).join('');
 }
 
@@ -1861,7 +1861,7 @@ function renderIntelliQ(){
 
   // IQ leaderboard table
   document.getElementById('iq-leaderboard').innerHTML = top.map((m,i)=>`
-    <tr onclick="showProfile(${m.id})">
+    <tr onclick="showProfile('${m.id}')">
       <td><span style="font-weight:700;color:var(--text-muted)">#${i+1}</span></td>
       <td>
         <div style="display:flex;align-items:center;gap:8px">
@@ -2676,7 +2676,7 @@ function alertActionItemHTML(a, idx) {
         onclick="openAlertCompose(${idx})">Respond →</button>`
     : a.member
     ? `<button class="btn btn-outline btn-sm" style="flex-shrink:0;font-size:0.73rem"
-        onclick="showProfile(${a.member.id})">View Profile</button>`
+        onclick="showProfile('${a.member.id}')">View Profile</button>`
     : '';
 
   return `
@@ -2929,7 +2929,7 @@ function renderReports(){
       <th>IntelliQ</th><th>Overall</th><th>Grade</th>
     </tr>`;
   document.getElementById('stat-sheet-tbody').innerHTML = sorted.map((m,i)=>`
-    <tr onclick="showProfile(${m.id})">
+    <tr onclick="showProfile('${m.id}')">
       <td><span style="font-weight:700;color:var(--text-muted)">${i+1}</span></td>
       <td>
         <div style="display:flex;align-items:center;gap:6px">
@@ -4760,7 +4760,7 @@ function renderCoachInputTab(memberId) {
           </div>
         </div>
 
-        <button class="btn btn-accent btn-sm" onclick="submitCoachInput(${memberId})" style="align-self:flex-start">
+        <button class="btn btn-accent btn-sm" onclick="submitCoachInput('${memberId}')" style="align-self:flex-start">
           Save Input
         </button>
       </div>
@@ -4803,7 +4803,7 @@ function renderCoachInputTab(memberId) {
               <input type="text" id="ext-notes" placeholder="Optional notes…"/>
             </div>
           </div>
-          <button class="btn btn-outline btn-sm" onclick="submitExternalData(${memberId})" style="align-self:flex-start">Add Data</button>
+          <button class="btn btn-outline btn-sm" onclick="submitExternalData('${memberId}')" style="align-self:flex-start">Add Data</button>
         </div>
       </details>
     </div>

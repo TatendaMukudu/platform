@@ -77,7 +77,7 @@ function memberCardHTML(m, metrics){
     </div>` : '';
 
   return `
-    <div class="member-card" onclick="showProfile(${m.id})">
+    <div class="member-card" onclick="showProfile('${m.id}')">
       <div class="member-avatar" style="background:${m.color}">${m.initials}</div>
       <div class="member-info">
         <div style="display:flex;align-items:center;justify-content:space-between">
