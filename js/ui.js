@@ -4,6 +4,7 @@
 
 /* ── COLOUR UTILS ────────────────────────────────────────── */
 function scoreColor(v){
+  if (v === null || v === undefined) return 'var(--text-muted)';
   if(v >= 80) return 'var(--success)';
   if(v >= 60) return 'var(--accent4)';
   return 'var(--danger)';
@@ -22,6 +23,15 @@ function alertDotColor(type){
 function iqRingHTML(score, color='#4f8ef7', size=120){
   const r = size/2 - 10;
   const circ = 2*Math.PI*r;
+  if (score === null || score === undefined) {
+    return `
+      <div class="iq-ring" style="width:${size}px;height:${size}px;">
+        <svg width="${size}" height="${size}">
+          <circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--bg-surface)" stroke-width="9"/>
+        </svg>
+        <div class="iq-val" style="color:var(--text-muted)">—</div>
+      </div>`;
+  }
   const dash = (score/100)*circ;
   return `
     <div class="iq-ring" style="width:${size}px;height:${size}px;">
@@ -38,6 +48,7 @@ function iqRingHTML(score, color='#4f8ef7', size=120){
 
 /* ── GRADE BADGE ─────────────────────────────────────────── */
 function gradeBadgeHTML(grade){
+  if (!grade) return '';
   return `<span class="grade-badge grade-${grade}">● ${grade}-Grade</span>`;
 }
 
@@ -49,6 +60,7 @@ function statusDotHTML(score){
 
 /* ── PROGRESS BAR ────────────────────────────────────────── */
 function progressHTML(val, color){
+  if (val === null || val === undefined) return '';
   const c = color || scoreColor(val);
   return `<div class="progress"><div class="progress-bar" style="width:${val}%;background:${c}"></div></div>`;
 }
@@ -57,6 +69,7 @@ function progressHTML(val, color){
 function memberCardHTML(m, metrics){
   const pillColors = metrics.slice(0,3).map(k => {
     const v = m.scores[k];
+    if (v === null || v === undefined) return '';
     return `<span class="score-pill" style="color:${scoreColor(v)};border-color:${scoreColor(v)}40">${k.split(' ')[0]}: ${v}</span>`;
   }).join('');
   const trendIcon  = m.trend==='up'?'↑':m.trend==='down'?'↓':'→';
@@ -129,6 +142,9 @@ function heatmapHTML(data){
 
 /* ── WELLNESS METER ──────────────────────────────────────── */
 function wellnessMeterHTML(score){
+  if (score === null || score === undefined) {
+    return `<span style="font-size:0.78rem;color:var(--text-muted)">No wellness data yet</span>`;
+  }
   return `
     <div class="wellness-bar">
       <div class="marker" style="left:${score}%"></div>

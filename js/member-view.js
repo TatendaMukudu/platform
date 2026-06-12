@@ -569,17 +569,17 @@ const MemberApp = {
     if (role === 'coach') {
       el.innerHTML = `
         <div class="form-group" style="margin-bottom:1rem">
-          <label class="form-label">How did training go this week? What worked?</label>
+          <label class="form-label">How did this week's programme go? What worked?</label>
           <textarea class="form-input" id="weekly-overall" rows="3" style="resize:none"
-            placeholder="Sessions, drills, team energy — what clicked, what didn't?"></textarea>
+            placeholder="Sessions, activities, group energy — what clicked, what didn't?"></textarea>
         </div>
         <div class="form-group" style="margin-bottom:1rem">
-          <label class="form-label">Any players you're watching closely?</label>
+          <label class="form-label">Anyone on your team you're watching closely?</label>
           <textarea class="form-input" id="weekly-improved" rows="2" style="resize:none"
             placeholder="Names, behaviours, concerns — anything worth noting…"></textarea>
         </div>
         <div class="form-group" style="margin-bottom:1rem">
-          <label class="form-label">What's the team's energy like right now?</label>
+          <label class="form-label">What's the group's energy like right now?</label>
           <textarea class="form-input" id="weekly-hard" rows="2" style="resize:none"
             placeholder="Morale, cohesion, any tension or standout positives…"></textarea>
         </div>
@@ -611,7 +611,7 @@ const MemberApp = {
         <div class="form-group" style="margin-bottom:1rem">
           <label class="form-label">How did this week go overall? <span style="color:var(--text-muted);font-weight:400">(be honest)</span></label>
           <textarea class="form-input" id="weekly-overall" rows="3" style="resize:none"
-            placeholder="Training, school, games, life — whatever felt significant this week…"></textarea>
+            placeholder="Work, sessions, events, life — whatever felt significant this week…"></textarea>
         </div>
         <div class="form-group" style="margin-bottom:1rem">
           <label class="form-label">What improved or clicked?</label>

@@ -97,26 +97,28 @@ function buildEmptyOrgStats(memberCount) {
    so no hardcoded role/type branching ever appears in nav HTML.
    ─────────────────────────────────────────────────────────────────────── */
 const WORKSPACE_MODULES = [
-  // ── Overview ──────────────────────────────────────────────────────────
-  { section: 'Overview',      id: 'dashboard',  icon: '⊞',  label: 'Dashboard',      permission: null              },
-  { section: null,             id: 'members',    icon: '👥', label: 'Members',         permission: 'view_members'    },
-  { section: null,             id: 'inbox',      icon: '💬', label: 'Inbox',           permission: null              },
+  // ── Personal — visible to every authenticated user ────────────────────
+  { section: 'My Space',      id: 'home',         icon: '🏠', label: 'Home',                  permission: null               },
+  { section: null,             id: 'assessments',  icon: '🎯', label: 'Assessments',            permission: null               },
+  { section: null,             id: 'checkin',      icon: '💬', label: 'Daily Check-In',         permission: null               },
+  { section: null,             id: 'inbox',        icon: '📬', label: 'Inbox',                  permission: null               },
+  { section: null,             id: 'stats',        icon: '📊', label: 'Progress',               permission: null               },
 
-  // ── My Team (leader layer — Phase 5) ─────────────────────────────────
-  { section: 'My Team',       id: 'myteam',     icon: '🤝', label: 'My Team',         permission: 'view_team'       },
-  { section: null,             id: 'assignments',icon: '📌', label: 'Assignments',     permission: 'assign_scenarios'},
-  { section: null,             id: 'teaminsights',icon:'💡', label: 'Team Insights',   permission: 'view_insights'   },
+  // ── Organisation — visible with leadership permissions ────────────────
+  { section: 'Organisation',  id: 'organisation', icon: '🏛️', label: 'Organisation',           permission: 'view_team'        },
+  { section: null,             id: 'assignments',  icon: '📌', label: 'Assignments',            permission: 'assign_scenarios' },
+  { section: null,             id: 'org-insights', icon: '💡', label: 'Organisation Insights',  permission: 'view_insights'    },
 
   // ── Intelligence ──────────────────────────────────────────────────────
-  { section: 'Intelligence',  id: 'analytics',  icon: '📊', label: 'Analytics',       permission: 'view_analytics'  },
-  { section: null,             id: 'intelliq',   icon: '🧠', label: 'IntelliQ Engine', permission: 'view_analytics'  },
-  { section: null,             id: 'scenarios',  icon: '🎯', label: 'Assessments',     permission: 'assign_scenarios'},
+  { section: 'Intelligence',  id: 'analytics',    icon: '📊', label: 'Analytics',              permission: 'view_analytics'   },
+  { section: null,             id: 'intelliq',     icon: '🧠', label: 'IntelliQ Engine',        permission: 'view_analytics'   },
+  { section: null,             id: 'scenarios',    icon: '🎯', label: 'Manage Assessments',     permission: 'assign_scenarios' },
 
   // ── Management ────────────────────────────────────────────────────────
-  { section: 'Management',    id: 'people',     icon: '🏗️', label: 'People',          permission: 'view_members'    },
-  { section: null,             id: 'alerts',     icon: '🔔', label: 'Alerts',          permission: 'view_members',   badge: true },
-  { section: null,             id: 'reports',    icon: '📋', label: 'Reports',         permission: 'view_reports'    },
-  { section: null,             id: 'settings',   icon: '⚙️', label: 'Settings',        permission: 'manage_settings' },
+  { section: 'Management',    id: 'people',       icon: '🏗️', label: 'People',                 permission: 'view_members'     },
+  { section: null,             id: 'alerts',       icon: '🔔', label: 'Alerts',                 permission: 'view_members',    badge: true },
+  { section: null,             id: 'reports',      icon: '📋', label: 'Reports',                permission: 'view_reports'     },
+  { section: null,             id: 'settings',     icon: '⚙️', label: 'Settings',               permission: 'manage_settings'  },
 ];
 
 /* ─────────────────────────────────────────────────────────────

@@ -616,7 +616,7 @@ const PAGE_TITLES = {
   assessments:  'Assessments',
   checkin:      'Daily Check-In',
   inbox:        'Inbox',
-  stats:        'My Stats',
+  stats:        'Progress',
   // Organisation — leadership permissions
   organisation: 'Organisation',
   assignments:  'Assignments',
@@ -1652,11 +1652,11 @@ function renderDashboard(){
         </div>
       </td>
       <td>${m.role}</td>
-      <td><span style="color:${scoreColor(m.iqScore)};font-weight:600">${m.iqScore}</span></td>
+      <td><span style="color:${scoreColor(m.iqScore)};font-weight:600">${m.iqScore ?? '—'}</span></td>
       <td>
         <div style="display:flex;align-items:center;gap:8px">
           <div style="flex:1">${progressHTML(m.overall, scoreColor(m.overall))}</div>
-          <span style="font-size:0.8rem;font-weight:600;width:28px;text-align:right">${m.overall}</span>
+          <span style="font-size:0.8rem;font-weight:600;width:28px;text-align:right">${m.overall ?? '—'}</span>
         </div>
       </td>
       <td>${gradeBadgeHTML(m.iqGrade)}</td>
@@ -1787,8 +1787,8 @@ function renderAnalytics(){
         </div>
       </td>
       <td>${m.group}</td>
-      <td><span style="color:${scoreColor(m.wellnessScore)};font-weight:600">${m.wellnessScore}</span></td>
-      <td><span style="color:${scoreColor(m.overall)};font-weight:600">${m.overall}</span></td>
+      <td><span style="color:${scoreColor(m.wellnessScore)};font-weight:600">${m.wellnessScore ?? '—'}</span></td>
+      <td><span style="color:${scoreColor(m.overall)};font-weight:600">${m.overall ?? '—'}</span></td>
       <td>${m.alerts > 0 ? `<span style="color:var(--danger)">${m.alerts} active</span>` : '—'}</td>
       <td><button class="btn btn-sm btn-accent" onclick="event.stopPropagation();showProfile('${m.id}')">View Profile</button></td>
     </tr>`).join('');
@@ -1846,11 +1846,11 @@ function renderIntelliQ(){
       <td>
         <div style="display:flex;align-items:center;gap:8px">
           ${progressHTML(m.iqScore, scoreColor(m.iqScore))}
-          <span style="font-size:0.82rem;font-weight:700;color:${scoreColor(m.iqScore)};width:30px">${m.iqScore}</span>
+          <span style="font-size:0.82rem;font-weight:700;color:${scoreColor(m.iqScore)};width:30px">${m.iqScore ?? '—'}</span>
         </div>
       </td>
       <td>${gradeBadgeHTML(m.iqGrade)}</td>
-      <td><span style="color:${scoreColor(m.wellnessScore)}">${m.wellnessScore}</span></td>
+      <td><span style="color:${scoreColor(m.wellnessScore)}">${m.wellnessScore ?? '—'}</span></td>
     </tr>`).join('');
 
   // ── IntelliQ Executive Health Panel ──────────────────────
@@ -2911,9 +2911,9 @@ function renderReports(){
         </div>
       </td>
       <td style="color:var(--text-secondary)">${m.group}</td>
-      ${metrics.map(k=>`<td><span style="color:${scoreColor(m.scores[k])};font-weight:600">${m.scores[k]}</span></td>`).join('')}
-      <td><span style="color:${scoreColor(m.iqScore)};font-weight:600">${m.iqScore}</span></td>
-      <td><span style="font-weight:700;color:${scoreColor(m.overall)}">${m.overall}</span></td>
+      ${metrics.map(k=>`<td><span style="color:${scoreColor(m.scores[k])};font-weight:600">${m.scores[k] ?? '—'}</span></td>`).join('')}
+      <td><span style="color:${scoreColor(m.iqScore)};font-weight:600">${m.iqScore ?? '—'}</span></td>
+      <td><span style="font-weight:700;color:${scoreColor(m.overall)}">${m.overall ?? '—'}</span></td>
       <td>${gradeBadgeHTML(m.iqGrade)}</td>
     </tr>`).join('');
 }
@@ -3961,7 +3961,7 @@ function _showProfileInner(id, m){
   document.getElementById('pm-active').textContent  = `Active: ${m.lastActive}`;
   document.getElementById('pm-streak').textContent  = `🔥 ${m.streak}-day streak`;
   document.getElementById('pm-iq-ring').innerHTML   = iqRingHTML(m.iqScore, scoreColor(m.iqScore), 100);
-  document.getElementById('pm-overall').textContent = m.overall;
+  document.getElementById('pm-overall').textContent = m.overall ?? '—';
   document.getElementById('pm-wellness').innerHTML  = wellnessMeterHTML(m.wellnessScore);
   document.getElementById('pm-notes').textContent   = m.notes;
   document.getElementById('pm-dev-plan').innerHTML  = devPlanHTML(m.devPlan);
@@ -3971,7 +3971,7 @@ function _showProfileInner(id, m){
     <div style="margin-bottom:0.7rem">
       <div style="display:flex;justify-content:space-between;margin-bottom:3px">
         <span style="font-size:0.8rem">${k}</span>
-        <span style="font-size:0.8rem;font-weight:600;color:${scoreColor(m.scores[k])}">${m.scores[k]}</span>
+        <span style="font-size:0.8rem;font-weight:600;color:${scoreColor(m.scores[k])}">${m.scores[k] ?? '—'}</span>
       </div>
       ${progressHTML(m.scores[k], scoreColor(m.scores[k]))}
     </div>`).join('');
