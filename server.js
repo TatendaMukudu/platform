@@ -2183,7 +2183,7 @@ app.post('/api/groups/create', (req, res) => {
   if (!orgCode || !name) return res.status(400).json({ error: 'orgCode and name required' });
   const code = orgCode.toLowerCase().trim();
   if (!orgGroups[code]) orgGroups[code] = [];
-  const group = { id: groupId(), name, description: description || '', memberIds: memberIds || [], leadIds: leadIds || [], createdAt: new Date().toISOString() };
+  const group = { id: groupId(), name, description: description || '', memberIds: memberIds || [], leadIds: leadIds || [], goals: [], traits: [], createdAt: new Date().toISOString() };
   orgGroups[code].push(group);
   scheduleSave();
   res.json({ ok: true, group });
@@ -2211,6 +2211,34 @@ app.put('/api/groups/:groupId', (req, res) => {
   if (description !== undefined) g.description = description;
   if (memberIds   !== undefined) g.memberIds   = memberIds;
   if (leadIds     !== undefined) g.leadIds     = leadIds;
+  scheduleSave();
+  res.json({ ok: true, group: g });
+});
+
+/* ── Set a group's GOALS & TRAITS (the TEAM frame) ────────────────────────────
+   Only a LEAD of the group (or an admin/superadmin) may set its aims — being a
+   member is not enough. This is the membership-vs-leadership distinction: a coach
+   leads "Quarterbacks" (can set goals) but is only a member of "Staff" (cannot). */
+app.put('/api/groups/:groupId/aims', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code   = orgCode;
+  const groups = orgGroups[code] || [];
+  const g      = groups.find(g => g.id === req.params.groupId);
+  if (!g) return res.status(404).json({ error: 'Group not found' });
+
+  const isLead  = (g.leadIds || []).includes(userId);
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin' || _userHasPerm(code, userId, 'manage_goals');
+  if (!isLead && !isAdmin) {
+    return res.status(403).json({ error: 'Only a lead of this group can set its goals and traits.' });
+  }
+
+  const clean = arr => Array.isArray(arr)
+    ? [...new Set(arr.map(s => String(s).trim()).filter(Boolean))].slice(0, 20)
+    : undefined;
+  const goals  = clean(req.body.goals);
+  const traits = clean(req.body.traits);
+  if (goals  !== undefined) g.goals  = goals;
+  if (traits !== undefined) g.traits = traits;
   scheduleSave();
   res.json({ ok: true, group: g });
 });

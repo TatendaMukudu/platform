@@ -598,6 +598,7 @@ function navigate(page){
   else if (page==='leader-people')      renderLeaderPeople();
   else if (page==='org-insights')       renderLeaderIntelligence();
   else if (page==='group-health')       renderGroupHealth();
+  else if (page==='leader-groups')      renderLeaderGroups();
   else if (page==='assignments')        renderAssignments();
   // Management — org-wide
   else if (page==='org-health')         renderOrgHealth();
@@ -630,6 +631,7 @@ const PAGE_TITLES = {
   assignments:     'Assignments',
   'org-insights':  'Intelligence',
   'group-health':  'Group Health',
+  'leader-groups': 'My Groups',
   // Organisation Health — management level
   'org-health':    'Organisation Health',
   // Intelligence
@@ -1219,6 +1221,7 @@ async function loadRealOrgData() {
     if (page === 'assignments')       renderAssignments();
     if (page === 'org-insights')      renderLeaderIntelligence();
     if (page === 'group-health')      renderGroupHealth();
+    if (page === 'leader-groups')     renderLeaderGroups();
     if (page === 'org-health')        renderOrgHealth();
     if (page === 'leader-home')       renderLeaderHome();
     if (page === 'leader-people')     renderLeaderPeople();
@@ -5176,6 +5179,137 @@ async function renderGroupHealth() {
     `;
   } catch (err) {
     el.innerHTML = `<div class="card"><div style="font-size:0.85rem;color:var(--danger)">⚠ ${_escAdvisor(err.message || 'Could not load group health.')}</div></div>`;
+  }
+}
+
+/* ── My Groups — set goals & traits for groups you LEAD ───────────────────────
+   Membership ≠ leadership: you can edit a group's aims only if you're a lead of
+   it. Groups you only belong to are shown read-only. Feeds the alignment TEAM
+   frame (team goals + traits) used by the Advisor and Group Health. */
+let _leaderGroups = { led: [], member: [], orgTraits: [] };
+
+async function renderLeaderGroups() {
+  const el = document.getElementById('leader-groups-content');
+  if (!el) return;
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Loading…</div>`;
+
+  try {
+    const uid = Auth.currentUser?.id;
+    const [gRes, vRes] = await Promise.all([
+      fetch(`/api/groups?orgCode=${encodeURIComponent(AppState.orgCode)}&memberId=${encodeURIComponent(uid)}`, { headers: Auth._headers() }),
+      fetch('/api/values', { headers: Auth._headers() }).catch(() => null),
+    ]);
+    const gData = gRes.ok ? await gRes.json() : { groups: [] };
+    const vData = vRes && vRes.ok ? await vRes.json() : { values: [] };
+    const groups = gData.groups || [];
+
+    _leaderGroups = {
+      led:       groups.filter(g => (g.leadIds || []).includes(uid)),
+      member:    groups.filter(g => !(g.leadIds || []).includes(uid)),
+      orgTraits: vData.values || [],
+    };
+    _renderLeaderGroups();
+  } catch (e) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load your groups.</p></div>`;
+  }
+}
+
+function _renderLeaderGroups() {
+  const el = document.getElementById('leader-groups-content');
+  if (!el) return;
+  const { led, member } = _leaderGroups;
+
+  if (!led.length && !member.length) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">🎯</div>
+      <p>You're not in any groups yet. An admin can create groups in Members → Groups and make you a lead.</p></div>`;
+    return;
+  }
+
+  const ledHTML = led.map(g => `
+    <div class="grp-card" data-gid="${g.id}">
+      <div class="grp-head">
+        <div class="grp-name">${_escAdvisor(g.name)} <span class="grp-leadtag">you lead</span></div>
+      </div>
+      <div class="grp-aim">
+        <div class="grp-aim-label">🎯 Goals</div>
+        <div class="grp-chips" id="grp-goals-${g.id}">${(g.goals||[]).map(x => _aimChip(g.id,'goal',x)).join('') || '<span class="grp-none">None yet</span>'}</div>
+        <div class="grp-add">
+          <input class="search-input" id="grp-goal-in-${g.id}" placeholder="Add a goal…" onkeydown="if(event.key==='Enter')addGroupAim('${g.id}','goal')">
+          <button class="btn btn-outline btn-sm" onclick="addGroupAim('${g.id}','goal')">Add</button>
+        </div>
+      </div>
+      <div class="grp-aim">
+        <div class="grp-aim-label">🧬 Traits</div>
+        <div class="grp-chips" id="grp-traits-${g.id}">${(g.traits||[]).map(x => _aimChip(g.id,'trait',x)).join('') || '<span class="grp-none">None yet</span>'}</div>
+        <div class="grp-add">
+          <input class="search-input" id="grp-trait-in-${g.id}" placeholder="Add a trait…" onkeydown="if(event.key==='Enter')addGroupAim('${g.id}','trait')">
+          <button class="btn btn-outline btn-sm" onclick="addGroupAim('${g.id}','trait')">Add</button>
+        </div>
+        ${(_leaderGroups.orgTraits||[]).length ? `<div class="grp-suggest">From org values: ${_leaderGroups.orgTraits.map(t => `<button class="grp-suggest-chip" onclick="addGroupAim('${g.id}','trait','${_escAdvisor(t).replace(/'/g,"\\'")}')">+ ${_escAdvisor(t)}</button>`).join('')}</div>` : ''}
+      </div>
+      <div class="grp-save"><span class="grp-saved" id="grp-saved-${g.id}"></span></div>
+    </div>`).join('');
+
+  const memberHTML = member.length ? `
+    <div class="grp-section-label">Groups you're in (read-only)</div>
+    ${member.map(g => `
+      <div class="grp-card grp-card--ro">
+        <div class="grp-name">${_escAdvisor(g.name)}</div>
+        <div class="grp-ro-aims">
+          ${(g.goals||[]).length ? `🎯 ${(g.goals).map(_escAdvisor).join(', ')}` : ''}
+          ${(g.traits||[]).length ? `<br>🧬 ${(g.traits).map(_escAdvisor).join(', ')}` : ''}
+          ${!(g.goals||[]).length && !(g.traits||[]).length ? '<span class="grp-none">No goals or traits set by its lead yet.</span>' : ''}
+        </div>
+      </div>`).join('')}` : '';
+
+  el.innerHTML = `
+    ${led.length ? `<div class="grp-section-label">Groups you lead</div>${ledHTML}` : '<div class="grp-none" style="margin-bottom:1rem">You don\'t lead any groups yet — ask an admin to make you a group lead.</div>'}
+    ${memberHTML}`;
+}
+
+function _aimChip(gid, kind, value) {
+  const safe = _escAdvisor(value);
+  return `<span class="grp-chip">${safe}<button class="grp-chip-x" onclick="removeGroupAim('${gid}','${kind}','${safe.replace(/'/g,"\\'")}')">×</button></span>`;
+}
+
+function _groupById(gid) { return _leaderGroups.led.find(g => g.id === gid); }
+
+function addGroupAim(gid, kind, presetVal) {
+  const g = _groupById(gid); if (!g) return;
+  const inputId = kind === 'goal' ? `grp-goal-in-${gid}` : `grp-trait-in-${gid}`;
+  const input = document.getElementById(inputId);
+  const val = (presetVal != null ? presetVal : (input?.value || '')).trim();
+  if (!val) return;
+  const arrKey = kind === 'goal' ? 'goals' : 'traits';
+  g[arrKey] = g[arrKey] || [];
+  if (!g[arrKey].includes(val)) g[arrKey].push(val);
+  if (input) input.value = '';
+  _renderLeaderGroups();
+  _saveGroupAims(gid);
+}
+
+function removeGroupAim(gid, kind, value) {
+  const g = _groupById(gid); if (!g) return;
+  const arrKey = kind === 'goal' ? 'goals' : 'traits';
+  g[arrKey] = (g[arrKey] || []).filter(x => x !== value);
+  _renderLeaderGroups();
+  _saveGroupAims(gid);
+}
+
+async function _saveGroupAims(gid) {
+  const g = _groupById(gid); if (!g) return;
+  const savedEl = document.getElementById(`grp-saved-${gid}`);
+  if (savedEl) { savedEl.style.color = 'var(--text-muted)'; savedEl.textContent = 'Saving…'; }
+  try {
+    const res = await fetch(`/api/groups/${encodeURIComponent(gid)}/aims`, {
+      method: 'PUT', headers: Auth._headers(),
+      body: JSON.stringify({ orgCode: AppState.orgCode, goals: g.goals || [], traits: g.traits || [] }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Save failed');
+    if (savedEl) { savedEl.style.color = 'var(--success)'; savedEl.textContent = '✓ Saved'; setTimeout(() => { if (savedEl) savedEl.textContent = ''; }, 1500); }
+  } catch (err) {
+    if (savedEl) { savedEl.style.color = 'var(--danger)'; savedEl.textContent = `⚠ ${err.message}`; }
   }
 }
 

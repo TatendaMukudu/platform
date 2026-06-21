@@ -2162,3 +2162,26 @@ img { max-width: 100%; }
 }
 .ltree-members { display: flex; flex-direction: column; gap: 0.3rem; margin: 0.2rem 0 0.4rem; }
 .ltree-empty { font-size: 0.78rem; color: var(--text-muted); padding: 0.3rem 0.2rem; }
+
+/* ── Leader "My Groups" — goals & traits editor ────────────── */
+.grp-section-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin: 1rem 0 0.5rem; }
+.grp-card { background: var(--surface-1, var(--surface-2)); border: 1px solid var(--border); border-radius: 10px; padding: 0.9rem 1rem; margin-bottom: 0.8rem; }
+.grp-card--ro { opacity: 0.85; }
+.grp-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; }
+.grp-name { font-size: 0.95rem; font-weight: 700; }
+.grp-leadtag { font-size: 0.64rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 0.05rem 0.45rem; margin-left: 0.4rem; }
+.grp-aim { margin-bottom: 0.8rem; }
+.grp-aim-label { font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 0.4rem; }
+.grp-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.5rem; }
+.grp-chip { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.78rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 0.2rem 0.55rem; }
+.grp-chip-x { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.95rem; line-height: 1; padding: 0; }
+.grp-chip-x:hover { color: var(--danger); }
+.grp-none { font-size: 0.78rem; color: var(--text-muted); }
+.grp-add { display: flex; gap: 0.4rem; }
+.grp-add .search-input { flex: 1; min-width: 0; }
+.grp-suggest { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+.grp-suggest-chip { font-size: 0.72rem; background: none; border: 1px dashed var(--border); color: var(--text-secondary); border-radius: 999px; padding: 0.1rem 0.5rem; cursor: pointer; }
+.grp-suggest-chip:hover { border-color: var(--accent); color: var(--accent); }
+.grp-save { min-height: 1rem; text-align: right; }
+.grp-saved { font-size: 0.74rem; }
+.grp-ro-aims { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.6; }
