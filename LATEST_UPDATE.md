@@ -1,35 +1,27 @@
-# Latest Update — Safe Hardening Pass
+# Latest Update — "People" → "Members" rename
 
-**Merged to main:** `163c451` (deploying)
+**Merged to main:** `b581c25` (deploying)
 
-You asked to make the code more robust ("throw exceptions everywhere"). The
-robust version of that is to *catch* at the boundaries and fail gracefully, not
-literally throw — so that's what this does.
+User-facing wording changed from "People" to "Members" for a more professional
+feel. **Labels only** — page IDs, route keys, function names, and container IDs
+are untouched, so nothing breaks.
 
-## Server (`server.js`)
-- **Process crash guards** — `unhandledRejection` / `uncaughtException` now log
-  loudly instead of taking the whole server down and signing everyone out.
-- **Global API error handler** — any error thrown in a route, or a malformed JSON
-  body, returns clean JSON (400/500) instead of crashing or leaking a stack trace.
-- **/api 404** — unknown endpoints return JSON, not the SPA HTML page.
-- **Real bug fixed:** request body limit was Express's default **100 KB**, which
-  silently rejects base64 image/PDF attachments. Raised to **25 MB**.
+## Changed (visible)
+- Nav: **People → Members**, **My People → My Members**
+- Page titles + section headers updated to match
+- **Add Person → Add Member** (buttons, ➕ tooltip, onboard card + form title)
+- Leader buttons "View My People" / "My People →" → **My Members**
+- Asset version bumped to `?v=20260621d` so the new bundle loads
 
-## Frontend
-- Already had global handlers (`window.onerror` + `unhandledrejection`) that show
-  a recovery overlay — verified, kept as-is.
-- (Earlier) Org Tree action buttons now toast "Tree still loading — refresh"
-  instead of silently doing nothing.
+## Left untouched (on purpose)
+- Code: `id="page-people"`, `navigate('people')`, `PAGE_TITLES.people` key,
+  `switchPeopleTab`, `renderPeople`, `leader-people` ids — all internal, renaming
+  them would break wiring for no benefit.
 
-## What this means
-A single bad input or async bug in one request can no longer crash the server or
-blank the app. Errors surface as messages/logs instead of silent failures.
+## To see it on your phone
+Load once with a cache-bust: **`https://827l.onrender.com/?fresh=1`**
+(after that, future deploys refresh automatically).
 
 ## Verification
-- `node --check server.js` passes; error handlers registered after all routes.
-- Not run live here (no DB/API key) — deploys on Render.
-
-## Still pending your call
-- The **"People" → "Members"** rename: you didn't pick a scope yet. Tell me
-  "nav + titles only" or "all visible labels" and I'll do it. (Left untouched
-  for now to avoid a botched global rename.)
+- `node --check` passes on app.js and data.js.
+- No visible "People" / "Add Person" strings remain in the UI.
