@@ -1,40 +1,38 @@
-# Latest Update — Why the dashboard didn't change (two fixes)
+# Latest Update — Org Tree buttons + how to make someone a leader
 
-**Merged to main:** `d0ab73d` (deploying on Render now)
+**Merged to main:** `e2d2927` (deploying)
 
-"Pushed but the leader dashboard looks the same" had two compounding causes — both now fixed.
+## The buttons are wired, not toys
+Verified in code:
+- **Assign People** has a blue **Leader** checkbox → writes node `leaderIds` →
+  grants the Leader Workspace. This is the path to making someone a leader.
+- + Child / + Sibling / Manage / Move all open editors that call the backend
+  (`/api/tree/node`).
+- People → Org Tree loads nodes via `OrgTree.load()` before rendering.
 
-## 1. The browser was running the OLD JavaScript
-`js/*.js` / css / html were served with default caching, so after a Render
-redeploy the browser kept the stale bundle (very common on mobile Safari).
-- Now sent with `Cache-Control: no-cache` (cheap — uses etag revalidation).
-- Added a `?v=` query to local script tags so THIS deploy is force-fetched.
+## Why they looked dead: stale cached index.html
+My no-cache fix only applies once Safari fetches a FRESH index.html — and it was
+serving the cached one (old JS). Break the cache ONCE:
 
-## 2. A returning session never re-checked leadership
-When you're already logged in, the app booted straight from cached localStorage
-and **never called `getMe()`** — so the new `leads` flag (from B) was never
-fetched and the Leader Workspace stayed hidden.
-- The restore path now refreshes `leads` + permissions + role from
-  `/api/auth/me` before building the nav (merging only those fields so it can't
-  wipe your onboarding state).
+**Open:**  `https://827l.onrender.com/?fresh=1`
 
-## What to do on your phone (one time)
-The old files are still cached from before this fix, so do ONE of these once:
-- Fully close the browser tab and reopen the site, **or**
-- Log out and log back in.
+(or Settings → Safari → Clear History and Website Data, or use a Private tab).
+After that, future deploys refresh automatically.
 
-After that you should see the **Leader Workspace** (Dashboard, My People,
-Intelligence, Group Health) — and future deploys will refresh automatically.
+## How to make Tyler a leader
+From the screenshot, Tyler is a MEMBER of the "Coach" node — not a leader of
+anything, so he's correctly shown member nav. To promote him:
 
-## If it STILL shows member-only nav after that
-Then it's not a code/cache problem — it means the data has **no leadership link
-for your account** (you don't lead a node, supervise anyone, or lead a group).
-That's fixable; tell me and I'll help check:
-- What is your account's role? (member / coach / admin)
-- Does anyone report to you / are you assigned as a node or group leader?
+1. People → **Org Tree**
+2. On the node he should lead (e.g. **Player** or **Coach**) → **👥 Assign People**
+3. Tick the **blue "Leader"** box next to **Tyler Mukudu** → **Save**
+4. Tyler **logs out and back in** → Leader Workspace + Group Health appear.
 
-I can then either assign you as a leader of your group, or adjust your role.
+## Also fixed
+- Tree action buttons now show a "Tree still loading — refresh" toast instead of
+  silently doing nothing when node data isn't loaded yet.
+- Asset version bumped to `?v=20260621c`.
 
-## Verification
-- `node --check` passes on server.js and app.js.
-- Not run live here (no DB/API key) — needs your reload to confirm.
+## If buttons STILL do nothing after a Private-tab load
+Then it's a real bug, not cache. Tell me what happens when you tap (e.g. nothing
+at all vs. a flash) and I'll dig in.
