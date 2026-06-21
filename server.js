@@ -2627,6 +2627,21 @@ const SIGNAL_SOURCES = {
 
 function signalId() { return 'sig_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7); }
 
+/* ── Signal weighting — not everything is equally important ────────────────────
+   STRONG  : assessment results, metrics, game stats, stat sheets (hard outcomes)
+   MEDIUM  : reflections, notes, check-ins, film/voice/document
+   WEAK    : one-off external events / messages / comments
+   Effective weight also rises with REPETITION (repeated behaviour) and RECENCY,
+   so a recurring pattern outweighs a single strong data point. Keeps the AI from
+   treating one stray note like a season of results. */
+const SIGNAL_WEIGHTS = {
+  assessment: 3, metric: 3, gamestats: 3, sheet: 3,
+  weekly: 2, note: 2, checkin: 2, film: 2, document: 2, voice: 2,
+  external: 1, teams: 1, google: 1, outlook: 1,
+};
+function _signalBaseWeight(source) { return SIGNAL_WEIGHTS[source] != null ? SIGNAL_WEIGHTS[source] : 1; }
+function _weightTier(n) { return n >= 3 ? 'strong' : n >= 2 ? 'medium' : 'weak'; }
+
 /* Normalise + store one raw signal. Returns the stored signal (or null if invalid). */
 function _ingestSignal(code, raw, createdBy) {
   if (!raw || !raw.source) return null;
@@ -2649,6 +2664,8 @@ function _ingestSignal(code, raw, createdBy) {
     data:        raw.data || null,                // structured payload (sheet row, event, etc.)
     sensitivity,
     public:      sensitivity === 'public',
+    weightNum:   raw.weightNum != null ? raw.weightNum : _signalBaseWeight(raw.source),
+    weight:      _weightTier(raw.weightNum != null ? raw.weightNum : _signalBaseWeight(raw.source)),
     createdBy:   createdBy || null,
     createdAt:   new Date().toISOString(),
   };
@@ -4910,16 +4927,36 @@ function _buildAdvisorContext(code, member, requesterUser) {
     (agg.memberPredictions?.[memberName] || []).forEach(p => citable.push(`Trajectory: ${p.prediction}`));
   } catch (_) { /* aggregation is best-effort here */ }
 
-  // ── Ingested signals (voice notes, metrics, game stats, sheets, feeds…) ───
-  // The universal input layer: public/normal signals are citable; sensitive ones
-  // inform reasoning only. This is how external data (e.g. strength numbers,
-  // public game stats, coach film notes) reaches the Advisor.
-  _gatherSignals(code, 'member', memberId, 30).forEach(s => {
+  // ── Ingested signals — WEIGHTED so the AI doesn't treat noise like results ──
+  // The universal input layer: public/normal = citable, sensitive = inform-only.
+  // Effective weight = base(source) + repetition + recency, so repeated behaviour
+  // and recent hard outcomes outrank one-off notes. Strong/medium are included;
+  // weak one-offs are capped to keep reasoning signal-rich, not noisy.
+  const sigs = _gatherSignals(code, 'member', memberId, 60);
+  const srcCount = {};
+  sigs.forEach(s => { srcCount[s.source] = (srcCount[s.source] || 0) + 1; });
+  const nowTs = Date.now();
+  const effective = s => {
+    let w = s.weightNum != null ? s.weightNum : _signalBaseWeight(s.source);
+    if ((srcCount[s.source] || 0) >= 3) w += 1;                       // repeated behaviour
+    if (nowTs - new Date(s.ts).getTime() < 14 * 86400000) w += 0.5;   // recent
+    return w;
+  };
+  const ranked = sigs
+    .map(s => ({ s, w: effective(s) }))
+    .sort((a, b) => b.w - a.w || new Date(b.s.ts) - new Date(a.s.ts));
+
+  let weakUsed = 0;
+  ranked.forEach(({ s, w }) => {
+    const tier = _weightTier(w);
+    if (tier === 'weak' && weakUsed >= 3) return;                     // cap noise
+    if (tier === 'weak') weakUsed++;
     const src   = SIGNAL_SOURCES[s.source]?.label || s.source;
     const valid = s.valueText || (s.valueNum != null ? `${s.label ? s.label + ': ' : ''}${s.valueNum}` : null)
                   || (s.data ? JSON.stringify(s.data).slice(0, 200) : null);
     if (!valid) return;
-    const line = `${src}${s.label && s.valueText ? ` (${s.label})` : ''}: ${valid}`;
+    const tag  = tier === 'strong' ? '[strong] ' : tier === 'weak' ? '[minor] ' : '';
+    const line = `${tag}${src}${s.label && s.valueText ? ` (${s.label})` : ''}: ${valid}`;
     if (privacy.isPrivate(s.sensitivity)) {
       privateInforming.push(line);
       if (s.valueText) privateStrings.push(s.valueText.slice(0, 200));
@@ -4942,6 +4979,9 @@ Optimize for: the member's own goals, pursued within org guardrails, integrated 
 
 DIRECTIONAL LANGUAGE — NEVER SCORES:
 Describe trajectory with words, not numbers: converging, sustaining, stalled, diverging, unanchored (no stated aim yet), or unknown (not enough signal). Never say "62% aligned" or assign a grade.
+
+WEIGH THE EVIDENCE:
+Not all signals are equal. Lean on [strong] signals (results, metrics, attendance, repeated behaviour, long-term trends) and converging patterns across several signals. Treat [minor] one-offs (a single note/message) lightly — never build a judgement on one of them. A pattern across signals beats any single data point.
 
 CONFLICT DOCTRINE:
 - MEMBER aim vs TEAM aim → seek INTEGRATION first: show how pursuing the team's aim also serves the member's own goal. If they genuinely conflict, name the honest tradeoff for the humans to decide — do not coerce toward the team.
@@ -5155,6 +5195,7 @@ app.get('/api/signals/recent', requireAuth, (req, res) => {
       id: s.id, ts: s.ts, source: s.source,
       sourceLabel: SIGNAL_SOURCES[s.source]?.label || s.source,
       modality: s.modality, sensitivity: s.sensitivity, public: s.public,
+      weight: s.weight || _weightTier(s.weightNum != null ? s.weightNum : _signalBaseWeight(s.source)),
       subjectType: s.subjectType, subject: subjectName(s),
       label: s.label,
       snippet: privacy.isPrivate(s.sensitivity)

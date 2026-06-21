@@ -5676,6 +5676,7 @@ async function _loadDataSourcesRecent() {
     el.innerHTML = list.map(s => `
       <div class="ds-recent-row">
         <div class="ds-recent-main">
+          <span class="ds-recent-w ds-w-${s.weight || 'weak'}" title="${s.weight || 'weak'} signal"></span>
           <span class="ds-recent-src">${_escAdvisor(s.sourceLabel)}</span>
           <span class="ds-recent-snip">${_escAdvisor(s.snippet || '')}</span>
         </div>

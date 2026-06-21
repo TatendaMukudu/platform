@@ -2240,3 +2240,9 @@ img { max-width: 100%; }
 .iqc-chip { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.74rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 0.15rem 0.5rem; }
 .iqc-chip-x { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.9rem; line-height: 1; }
 .iqc-chip-x:hover { color: var(--danger); }
+
+/* ── Signal weight indicator (Data Sources list) ───────────── */
+.ds-recent-w { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 0.45rem; flex-shrink: 0; vertical-align: middle; }
+.ds-w-strong { background: var(--success); }
+.ds-w-medium { background: var(--warning); }
+.ds-w-weak   { background: var(--text-muted); }
