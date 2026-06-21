@@ -4049,6 +4049,14 @@ function _showProfileInner(id, m){
           <span style="color:${scoreColor(v)};font-weight:600">${v}</span></div>`).join('')
     : `<div style="font-size:0.78rem;color:var(--text-muted);padding:0.4rem 0">No history yet.</div>`;
 
+  // Advisor tab (Phase 1) — additive; reset UI and load prior threads
+  renderAdvisorChips();
+  const _advResp  = document.getElementById('pm-advisor-response');
+  if (_advResp)  _advResp.innerHTML = '';
+  const _advInput = document.getElementById('pm-advisor-input');
+  if (_advInput) _advInput.value = '';
+  loadAdvisorThreads(id);
+
   openModal('profile-modal');
 
   setTimeout(()=>{
@@ -4077,6 +4085,105 @@ function toggleDevPlan(idx){
     m.devPlan[idx].done = !m.devPlan[idx].done;
     document.getElementById('pm-dev-plan').innerHTML = devPlanHTML(m.devPlan);
     showToast(m.devPlan[idx].done ? 'Task completed!' : 'Task unchecked','success');
+  }
+}
+
+/* ── INDIVIDUAL ADVISOR AI (Phase 1) ─────────────────────────
+   Leader asks a question about a specific member; server reasons over
+   what IntelliQ knows about them, through the privacy gate + role lens.
+   Additive — lives in the profile modal's "Ask Advisor" tab. */
+
+function _escAdvisor(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+const ADVISOR_CHIPS = [
+  'How do I motivate this person?',
+  'How should I hold them accountable?',
+  'How should I approach them right now?',
+  'What leadership opportunity fits them?',
+];
+
+function renderAdvisorChips(){
+  const el = document.getElementById('pm-advisor-chips');
+  if (!el) return;
+  el.innerHTML = ADVISOR_CHIPS.map(q =>
+    `<button type="button" class="advisor-chip" data-q="${_escAdvisor(q)}" onclick="setAdvisorQuestion(this.dataset.q)">${_escAdvisor(q)}</button>`
+  ).join('');
+}
+
+function setAdvisorQuestion(q){
+  const input = document.getElementById('pm-advisor-input');
+  if (input){ input.value = q; input.focus(); }
+}
+
+function _renderAdvisorAnswer(data){
+  const lens = data.lens ? `<span class="advisor-lens">${_escAdvisor(data.lens)} lens</span>` : '';
+  return `<div class="advisor-answer">
+    <div class="advisor-answer-head">🤖 Advisor ${lens}</div>
+    <div class="advisor-answer-body">${_escAdvisor(data.answer).replace(/\n/g,'<br>')}</div>
+  </div>`;
+}
+
+async function askAdvisor(){
+  const input    = document.getElementById('pm-advisor-input');
+  const btn      = document.getElementById('pm-advisor-ask');
+  const out      = document.getElementById('pm-advisor-response');
+  const memberId = AppState.currentMemberId;
+  const question = (input?.value || '').trim();
+  if (!out) return;
+
+  if (!memberId){
+    out.innerHTML = `<div class="advisor-error">⚠ No member selected.</div>`;
+    return;
+  }
+  if (!question){
+    out.innerHTML = `<div class="advisor-error">Type a question or pick a suggestion above.</div>`;
+    return;
+  }
+
+  const member  = AppState.getMember(memberId);
+  const oldLabel = btn ? btn.textContent : '';
+  if (btn){ btn.disabled = true; btn.textContent = 'Thinking…'; }
+  out.innerHTML = `<div class="advisor-loading">🤖 IntelliQ is considering ${_escAdvisor(member?.name || 'this member')}…</div>`;
+
+  try {
+    const res  = await fetch(`/api/advisor/${encodeURIComponent(memberId)}/ask`, {
+      method:  'POST',
+      headers: Auth._headers(),
+      body:    JSON.stringify({ question }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Advisor unavailable');
+    out.innerHTML = _renderAdvisorAnswer(data);
+    if (input) input.value = '';
+    loadAdvisorThreads(memberId); // refresh history with the new thread
+  } catch (err){
+    out.innerHTML = `<div class="advisor-error">⚠ ${_escAdvisor(err.message || 'Something went wrong.')} Please try again.</div>`;
+  } finally {
+    if (btn){ btn.disabled = false; btn.textContent = oldLabel; }
+  }
+}
+
+async function loadAdvisorThreads(memberId){
+  const el = document.getElementById('pm-advisor-history');
+  if (!el) return;
+  el.innerHTML = `<div class="advisor-muted">Loading…</div>`;
+  try {
+    const res  = await fetch(`/api/advisor/${encodeURIComponent(memberId)}/threads`, { headers: Auth._headers() });
+    const data = await res.json();
+    const threads = (data && data.threads) || [];
+    if (!threads.length){ el.innerHTML = `<div class="advisor-muted">No questions asked yet.</div>`; return; }
+    el.innerHTML = threads.map(t => `
+      <div class="advisor-thread">
+        <div class="advisor-thread-q">Q: ${_escAdvisor(t.question)}</div>
+        <div class="advisor-thread-a">${_escAdvisor(t.answer).replace(/\n/g,'<br>')}</div>
+        <div class="advisor-thread-meta">${_escAdvisor(new Date(t.createdAt).toLocaleString())}${t.lens ? ' · ' + _escAdvisor(t.lens) : ''}</div>
+      </div>`).join('');
+  } catch (err){
+    el.innerHTML = `<div class="advisor-muted">Could not load history.</div>`;
   }
 }
 

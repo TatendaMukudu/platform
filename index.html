@@ -1160,6 +1160,7 @@
           <button class="tab-btn" data-tab="devplan">Dev Plan</button>
           <button class="tab-btn" data-tab="coach">Leader Input</button>
           <button class="tab-btn" data-tab="insights">AI Insights</button>
+          <button class="tab-btn" data-tab="advisor">Ask Advisor</button>
         </div>
 
         <div class="tab-panel active" data-panel="scores">
@@ -1193,6 +1194,24 @@
           </div>
           <div style="margin-top:0.8rem">
             <button class="btn btn-outline btn-sm" onclick="ChatEngine.open(AppState.currentMemberId)">💬 Start AI Check-in</button>
+          </div>
+        </div>
+
+        <div class="tab-panel" data-panel="advisor">
+          <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.75rem">
+            Ask IntelliQ how to support, develop, or lead this person. Answers are specific to them.
+          </div>
+          <div id="pm-advisor-chips" class="advisor-chips"></div>
+          <textarea id="pm-advisor-input" class="advisor-input" rows="2"
+            placeholder="e.g. How do I motivate this person?"></textarea>
+          <div class="advisor-actions">
+            <div class="advisor-privacy">🔒 Advisor may use protected context to generate safe recommendations, but private notes are not revealed.</div>
+            <button class="btn btn-accent btn-sm" id="pm-advisor-ask" onclick="askAdvisor()">Ask Advisor</button>
+          </div>
+          <div id="pm-advisor-response" class="advisor-response"></div>
+          <div style="margin-top:1.1rem">
+            <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Previous questions</div>
+            <div id="pm-advisor-history"></div>
           </div>
         </div>
       </div>
