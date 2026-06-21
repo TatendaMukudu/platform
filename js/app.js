@@ -597,6 +597,7 @@ function navigate(page){
   else if (page==='leader-home')        renderLeaderHome();
   else if (page==='leader-people')      renderLeaderPeople();
   else if (page==='org-insights')       renderLeaderIntelligence();
+  else if (page==='group-health')       renderGroupHealth();
   else if (page==='assignments')        renderAssignments();
   // Management — org-wide
   else if (page==='org-health')         renderOrgHealth();
@@ -628,6 +629,7 @@ const PAGE_TITLES = {
   'leader-people': 'My People',
   assignments:     'Assignments',
   'org-insights':  'Intelligence',
+  'group-health':  'Group Health',
   // Organisation Health — management level
   'org-health':    'Organisation Health',
   // Intelligence
@@ -1196,6 +1198,7 @@ async function loadRealOrgData() {
     if (page === 'myteam')            renderMyTeam();
     if (page === 'assignments')       renderAssignments();
     if (page === 'org-insights')      renderLeaderIntelligence();
+    if (page === 'group-health')      renderGroupHealth();
     if (page === 'org-health')        renderOrgHealth();
     if (page === 'leader-home')       renderLeaderHome();
     if (page === 'leader-people')     renderLeaderPeople();
@@ -5054,6 +5057,106 @@ function _healthBar(label, value, total, color) {
         <div style="height:100%;width:${pct}%;background:${color};border-radius:3px;transition:width 0.4s"></div>
       </div>
     </div>`;
+}
+
+/* ── Group Health (item D) — subtree-scoped metrics for a leader ──────────────
+   Aggregate health bars + per-member DIRECTIONAL states (no ranking, no scores).
+   Server enforces the subtree scope via getVisibleUserIds(). */
+const ADVISOR_STATE_META = {
+  converging:  { label: 'Converging', color: 'var(--success)', icon: '↗' },
+  sustaining:  { label: 'Sustaining', color: 'var(--accent)',  icon: '→' },
+  stalled:     { label: 'Stalled',    color: 'var(--warning)', icon: '•' },
+  diverging:   { label: 'Diverging',  color: 'var(--danger)',  icon: '↘' },
+  unanchored:  { label: 'Unanchored', color: 'var(--text-muted)', icon: '○' },
+  unknown:     { label: 'Unknown',    color: 'var(--text-muted)', icon: '?' },
+};
+
+async function renderGroupHealth() {
+  const el = document.getElementById('group-health-content');
+  if (!el) return;
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Loading…</div>`;
+
+  try {
+    const res = await fetch('/api/workspace/group-health', { headers: Auth._headers() });
+    if (!res.ok) throw new Error('Could not load group health');
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'Could not load group health');
+
+    if (d.notEnoughData || d.groupSize === 0) {
+      el.innerHTML = `<div class="card"><div style="font-size:0.85rem;color:var(--text-muted)">No members in your group yet. Once people are added under you and start checking in, their group health appears here.</div></div>`;
+      return;
+    }
+
+    const p = d.participation, w = d.wellbeing, e = d.engagement;
+    const moodColor = v => v == null ? 'var(--text-muted)' : v >= 4 ? 'var(--success)' : v >= 3 ? 'var(--warning)' : 'var(--danger)';
+    const trendLabel = { improving: '↗ improving', declining: '↘ declining', steady: '→ steady', unknown: '— no trend yet' }[w.trend] || '—';
+    const activePct = p.total ? Math.round((p.active7 / p.total) * 100) : 0;
+
+    // State distribution chips (counts only — never a per-person score)
+    const stateChips = Object.entries(d.states)
+      .filter(([, n]) => n > 0)
+      .map(([s, n]) => {
+        const m = ADVISOR_STATE_META[s] || ADVISOR_STATE_META.unknown;
+        return `<span class="gh-state-chip" style="color:${m.color};border-color:${m.color}55">${m.icon} ${m.label} · ${n}</span>`;
+      }).join('');
+
+    const memberRows = d.members.map(mem => {
+      const m = ADVISOR_STATE_META[mem.state] || ADVISOR_STATE_META.unknown;
+      const safeName = (mem.name || '').replace(/'/g, "\\'");
+      return `
+        <div class="gh-member" onclick="showProfile('${mem.userId}')">
+          <div class="gh-member-main">
+            <span class="gh-dot" style="background:${m.color}"></span>
+            <span class="gh-member-name">${_escAdvisor(mem.name)}</span>
+          </div>
+          <div class="gh-member-right">
+            <span class="gh-state" style="color:${m.color}">${m.label}</span>
+            <span class="gh-note">${_escAdvisor(mem.note)}</span>
+          </div>
+        </div>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div class="grid-3" style="margin-bottom:1.2rem">
+        <div class="stat-card">
+          <div class="stat-card-val">${d.groupSize}</div>
+          <div class="stat-card-label">In Your Group</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-val" style="color:${activePct >= 60 ? 'var(--success)' : activePct >= 30 ? 'var(--warning)' : 'var(--danger)'}">${activePct}%</div>
+          <div class="stat-card-label">Active This Week</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-val" style="color:${moodColor(w.mood7)}">${w.mood7 != null ? w.mood7.toFixed(1) : '—'}</div>
+          <div class="stat-card-label">Avg Mood (1–5)</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:1rem">
+        <div class="card-label" style="margin-bottom:0.8rem">Participation & Engagement</div>
+        <div style="display:flex;flex-direction:column;gap:0.5rem">
+          ${_healthBar('Active this week',    p.active7,  p.total, 'var(--success)')}
+          ${_healthBar('Active last 30 days', p.active30, p.total, 'var(--accent)')}
+          ${_healthBar('Has a goal set',      e.withGoal, e.total, '#4f8ef7')}
+          ${_healthBar('Account set up',      e.setup,    e.total, 'var(--text-secondary)')}
+        </div>
+        <div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.7rem">Wellbeing trend (7d vs 30d): <span style="color:${moodColor(w.mood7)}">${trendLabel}</span></div>
+      </div>
+
+      <div class="card" style="margin-bottom:1rem">
+        <div class="card-label" style="margin-bottom:0.6rem">How your group is tracking</div>
+        <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.7rem">Direction toward each person's own goals — a triage view, not a ranking.</div>
+        <div class="gh-states">${stateChips || '<span style="color:var(--text-muted);font-size:0.8rem">No signal yet.</span>'}</div>
+      </div>
+
+      <div class="card">
+        <div class="card-label" style="margin-bottom:0.6rem">Members (most attention first)</div>
+        <div class="gh-member-list">${memberRows}</div>
+      </div>
+    `;
+  } catch (err) {
+    el.innerHTML = `<div class="card"><div style="font-size:0.85rem;color:var(--danger)">⚠ ${_escAdvisor(err.message || 'Could not load group health.')}</div></div>`;
+  }
 }
 
 /* ════════════════════════════════════════════════════════════

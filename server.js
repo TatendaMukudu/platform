@@ -1808,6 +1808,109 @@ app.get('/api/workspace/team-insights', requireAuth, (req, res) => {
   });
 });
 
+/* ── GET /api/workspace/group-health ──────────────────────────────────────────
+   Item D — metrics on a leader's group, scoped to their subtree.
+   Aggregate health (participation / wellbeing / engagement / completion) PLUS a
+   per-member DIRECTIONAL state — NOT a ranked scoreboard, per the alignment
+   canon ("if a screen lets you sort people by a number, it's wrong").
+   States: converging · sustaining · stalled · diverging · unanchored · unknown.
+ * ──────────────────────────────────────────────────────────────────────── */
+function _memberDirection(code, u) {
+  // Returns { state, note } from mood trajectory + activity + goal presence.
+  const keys   = [userKey(code, u.id), memberKey(code, u.name || '')];
+  const cks    = [];
+  keys.forEach(k => (memberCheckins[k] || []).forEach(c => {
+    const ts = c.ts || c.date;
+    if (ts) cks.push({ mood: c.mood != null ? Number(c.mood) : null, t: new Date(ts).getTime() });
+  }));
+  cks.sort((a, b) => a.t - b.t);
+
+  const hasGoal = normalizeMemberGoals(memberGoals[userKey(code, u.id)] || memberGoals[memberKey(code, u.name || '')]).length > 0;
+  const lastT   = cks.length ? cks[cks.length - 1].t : null;
+  const daysSince = lastT != null ? Math.floor((Date.now() - lastT) / 86400000) : null;
+
+  if (!hasGoal) return { state: 'unanchored', note: 'No goal set yet — anchor a goal first.' };
+
+  const moods = cks.filter(c => c.mood != null);
+  if (moods.length < 2 || daysSince === null || daysSince > 21) {
+    return { state: 'unknown', note: daysSince != null ? `Quiet for ${daysSince}d — not enough recent signal.` : 'No check-ins yet.' };
+  }
+
+  // Compare recent half vs earlier half of available mood points.
+  const mid    = Math.floor(moods.length / 2);
+  const earlier = moods.slice(0, mid).map(c => c.mood);
+  const recent  = moods.slice(mid).map(c => c.mood);
+  const avg = a => a.reduce((s, v) => s + v, 0) / a.length;
+  const delta = avg(recent) - avg(earlier);
+  const recentAvg = avg(recent);
+
+  if (delta > 0.3)  return { state: 'converging', note: 'Mood trending up.' };
+  if (delta < -0.3) return { state: 'diverging',  note: 'Mood trending down — worth a check-in.' };
+  if (daysSince > 10) return { state: 'stalled', note: `Steady but quiet (${daysSince}d since last check-in).` };
+  if (recentAvg < 2.7) return { state: 'stalled', note: 'Steady but low — may be stuck.' };
+  return { state: 'sustaining', note: 'Consistent and engaged.' };
+}
+
+app.get('/api/workspace/group-health', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = orgCode;
+
+  if (!_userHasPerm(code, userId, 'view_insights') && !_userHasPerm(code, userId, 'review_checkins')) {
+    return res.status(403).json({ error: 'Permission denied: view_insights or review_checkins required' });
+  }
+
+  const now      = Date.now();
+  const members  = getVisibleUserIds(code, userId)
+    .map(uid => orgUsers[code]?.[uid])
+    .filter(u => u && u.id !== userId && u.role !== 'superadmin');
+
+  const STATE_ORDER = ['diverging', 'stalled', 'unanchored', 'unknown', 'sustaining', 'converging'];
+  const counts = { converging: 0, sustaining: 0, stalled: 0, diverging: 0, unanchored: 0, unknown: 0 };
+
+  let active7 = 0, active30 = 0, withGoal = 0, setup = 0;
+  let mood7Sum = 0, mood7Cnt = 0, mood30Sum = 0, mood30Cnt = 0;
+
+  const perMember = members.map(u => {
+    const cks = (memberCheckins[userKey(code, u.id)] || memberCheckins[memberKey(code, u.name || '')] || []);
+    const lastTs = cks.length ? new Date(cks[cks.length - 1].ts || cks[cks.length - 1].date).getTime() : null;
+    if (lastTs && now - lastTs < 7 * 86400000)  active7++;
+    if (lastTs && now - lastTs < 30 * 86400000) active30++;
+    if (u.passwordSet !== false) setup++;
+    cks.forEach(c => {
+      const t = new Date(c.ts || c.date).getTime();
+      if (c.mood == null || isNaN(t)) return;
+      if (now - t < 7 * 86400000)  { mood7Sum += Number(c.mood);  mood7Cnt++; }
+      if (now - t < 30 * 86400000) { mood30Sum += Number(c.mood); mood30Cnt++; }
+    });
+
+    const dir = _memberDirection(code, u);
+    counts[dir.state] = (counts[dir.state] || 0) + 1;
+    if (dir.state !== 'unanchored') withGoal++;
+    return { userId: u.id, name: u.name || '', state: dir.state, note: dir.note };
+  });
+
+  // Sort by attention-need (diverging first) — this orders by STATE, not by any
+  // per-person score, so it stays a triage list, not a ranking.
+  perMember.sort((a, b) => STATE_ORDER.indexOf(a.state) - STATE_ORDER.indexOf(b.state));
+
+  const mood7  = mood7Cnt  ? Math.round((mood7Sum  / mood7Cnt)  * 10) / 10 : null;
+  const mood30 = mood30Cnt ? Math.round((mood30Sum / mood30Cnt) * 10) / 10 : null;
+  const moodTrend = (mood7 != null && mood30 != null)
+    ? (mood7 > mood30 + 0.2 ? 'improving' : mood7 < mood30 - 0.2 ? 'declining' : 'steady')
+    : 'unknown';
+
+  res.json({
+    ok: true,
+    groupSize: members.length,
+    participation: { active7, active30, total: members.length },
+    wellbeing:     { mood7, mood30, trend: moodTrend },
+    engagement:    { withGoal, setup, total: members.length },
+    states:        counts,
+    members:       perMember,
+    notEnoughData: members.length === 0,
+  });
+});
+
 /* ═══════════════════════════════════════════════════════════════════════════
    SPRINT 2 — METRICS
    Three sources: org (superadmin-defined), shared (leader), personal (member)

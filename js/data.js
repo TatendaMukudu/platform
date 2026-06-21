@@ -113,6 +113,8 @@ const WORKSPACE_MODULES = [
   { section: null,                id: 'assignments',   icon: '📌', label: 'Assignments',  leaderOnly: true, permission: 'assign_scenarios' },
   // Intelligence: what IntelliQ is noticing — AI patterns, themes, follow-ups
   { section: null, id: 'org-insights', icon: '🧠', label: 'Intelligence', leaderOnly: true, permission: 'view_insights' },
+  // Group Health: quantitative metrics on the leader's own subtree (item D)
+  { section: null, id: 'group-health', icon: '📊', label: 'Group Health', leaderOnly: true, permission: 'view_insights' },
 
   // ── Intelligence — analytics / AI (admin+ or explicit grant) ─────────
   { section: 'Intelligence', id: 'analytics', icon: '📊', label: 'Insights',           permission: 'view_analytics'   },
