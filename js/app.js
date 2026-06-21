@@ -5361,6 +5361,56 @@ function filterLeaderPeople(search) {
   _renderLeaderPeopleList();
 }
 
+/* ── Add Member to my subtree (item C) ───────────────────────────────────────
+   A leader adds a plain member under themselves. Server forces placement into
+   the leader's subtree and only permits role 'member' (see create-user). */
+function toggleLeaderAddMember() {
+  const box = document.getElementById('ldr-add-member');
+  if (!box) return;
+  const open = box.style.display !== 'none';
+  box.style.display = open ? 'none' : 'block';
+  if (!open) document.getElementById('ldr-add-first')?.focus();
+}
+
+async function leaderAddMember() {
+  const first = (document.getElementById('ldr-add-first')?.value || '').trim();
+  const last  = (document.getElementById('ldr-add-last')?.value  || '').trim();
+  const email = (document.getElementById('ldr-add-email')?.value || '').trim().toLowerCase();
+  const btn   = document.getElementById('ldr-add-submit');
+  const out   = document.getElementById('ldr-add-result');
+  if (!out) return;
+
+  if (!first)  { out.style.color = 'var(--danger)'; out.textContent = 'First name is required.'; return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { out.style.color = 'var(--danger)'; out.textContent = 'Enter a valid email.'; return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+  out.style.color = 'var(--text-muted)';
+  out.textContent = 'Creating account…';
+  try {
+    const res = await fetch('/api/auth/create-user', {
+      method: 'POST', headers: Auth._headers(),
+      body: JSON.stringify({
+        orgCode:   AppState.orgCode,
+        creatorId: Auth.currentUser?.id,
+        firstName: first, lastName: last, name: `${first} ${last}`.trim(),
+        email, role: 'member',
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Could not add member');
+
+    out.style.color = 'var(--success)';
+    out.textContent = `✓ ${data.user.name} added under you.`;
+    ['ldr-add-first','ldr-add-last','ldr-add-email'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    renderLeaderPeople(); // refresh the list (now includes the new member)
+  } catch (err) {
+    out.style.color = 'var(--danger)';
+    out.textContent = `⚠ ${err.message}`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Add'; }
+  }
+}
+
 function _renderLeaderPeopleList() {
   const el = document.getElementById('ldr-people-content');
   if (!el) return;

@@ -1075,10 +1075,22 @@
             <div class="section-title">My People</div>
             <div class="section-sub" id="ldr-people-count">Who am I responsible for?</div>
           </div>
-          <div>
+          <div style="display:flex;gap:0.5rem;align-items:center">
             <input class="search-input" id="ldr-people-search" placeholder="Search name or email…"
                    oninput="filterLeaderPeople(this.value)" style="min-width:200px">
+            <button class="btn btn-accent btn-sm" onclick="toggleLeaderAddMember()">＋ Add Member</button>
           </div>
+        </div>
+        <div id="ldr-add-member" class="ldr-add-member" style="display:none">
+          <div class="ldr-add-row">
+            <input class="search-input" id="ldr-add-first" placeholder="First name">
+            <input class="search-input" id="ldr-add-last"  placeholder="Last name">
+            <input class="search-input" id="ldr-add-email" placeholder="Email" type="email">
+            <button class="btn btn-accent btn-sm" id="ldr-add-submit" onclick="leaderAddMember()">Add</button>
+            <button class="btn btn-outline btn-sm" onclick="toggleLeaderAddMember()">Cancel</button>
+          </div>
+          <div class="ldr-add-hint">New members join under you and get an invite to set their password.</div>
+          <div id="ldr-add-result" style="font-size:0.8rem;margin-top:0.4rem"></div>
         </div>
         <div id="ldr-people-content"></div>
       </section>

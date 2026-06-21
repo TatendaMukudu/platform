@@ -707,9 +707,17 @@ app.post('/api/auth/create-user', async (req, res) => {
   if (!creator) return res.status(403).json({ error: 'Creator not found' });
 
   const roleLevel = { superadmin:1, admin:2, coach:3, member:4 };
-  if (roleLevel[role] <= roleLevel[creator.role] && creator.role !== 'superadmin') {
+  // A leader (node / supervisor / group lead) may add plain MEMBERS under
+  // themselves even when their own role is 'member' — item C. They cannot create
+  // anyone above member, and the new member is forced into their subtree below.
+  const leaderAddingMember = role === 'member' && _isLeader(code, creatorId);
+  if (roleLevel[role] <= roleLevel[creator.role] && creator.role !== 'superadmin' && !leaderAddingMember) {
     return res.status(403).json({ error: 'You cannot create someone at or above your level' });
   }
+  // For non-admin leaders, force placement under themselves so they can never
+  // create a user outside their own subtree.
+  const isPrivileged = ['superadmin','admin','coach'].includes(creator.role);
+  const effectiveSupervisorId = isPrivileged ? (supervisorId || creatorId) : creatorId;
 
   // Build full name
   const fName = (firstName || '').trim();
@@ -740,7 +748,7 @@ app.post('/api/auth/create-user', async (req, res) => {
     email:        emailNorm,
     role,
     orgCode:      code,
-    supervisorId: supervisorId || creatorId,
+    supervisorId: effectiveSupervisorId,
     group:        group || '',
     passwordHash,
     passwordSet:  hasPassword,
