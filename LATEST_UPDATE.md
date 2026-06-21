@@ -1,39 +1,59 @@
-# Update — Group Copilot (first slice) shipped
+# Update — Copilot revised + how it survives the move to business
 
-**Merged to main:** `4a5571a` (deploying) · asset `?v=20260621g`
+## ✅ Shipped & deployed (`a57abf9`)
+Group Copilot reframed per spec — "help the group reach its goals", not monitoring:
+- **Signals-first**: computed from participation / activity / mood / goal signals;
+  NO message content sent to the AI.
+- **Aggregate-only**: suggested actions never name individuals ("3 members less
+  active — reach out"), advice not exposure.
+- **Dashboard not chatbot**: Health (directional + green/yellow/red), Participation %,
+  Goal Progress (directional), Engagement Trend. No scores.
+- **AI outputs**: suggested actions, discussion prompts (from goals/traits),
+  weekly reflection — all aggregate, via gateway + privacy gate.
+- **Consent gate**: lead must ENABLE Copilot; analysis only runs when on. Banner:
+  "Group Copilot is active. It helps group leaders understand engagement and
+  progress toward group goals." Shown to all only when active.
+- New: `PUT /api/groups/:groupId/copilot-settings` (lead enable/disable).
 
-A Teams-style Copilot for group leads, built on what we already have (group chat
-+ AI gateway + privacy gate + group goals/traits).
+---
 
-## What it does
-- **Lead opens a group** (Leader Workspace → My Groups → "💬 Open · Copilot",
-  or the admin Groups view) → taps **"Get a read"**.
-- Copilot returns: a **health summary** (how the group is tracking vs its goals),
-  **suggested prompts/feedback** the lead can post, and **who may need a nudge**.
-- Server: `GET /api/groups/:groupId/copilot` — lead-only; reads group
-  goals/traits + shared feed + member activity through the gateway + privacy gate.
+## Strategic: will this survive the move to business (Teams/email)?
+**Yes — and it gets stronger, BECAUSE we chose signals-first.**
 
-## Consent-first (the legal/ethical part)
-- A visible **"🤖 IntelliQ Copilot is in this group"** banner shows to EVERYONE,
-  never silent.
-- Copilot is **lead-gated** and **advises the lead only** — it summarises themes
-  and never quotes/attributes a member's words back to others.
-- Member private content **informs but is never disclosed** (privacy gate).
+### The trap (correctly spotted)
+If the Copilot depended on Platform owning the chat, it would be dead weight in
+companies that live in Teams/Outlook. Nobody migrates conversations to us.
 
-## How it connects
-- Uses the **group goals/traits** (shipped earlier) as the "what good looks like".
-- This is the on-ramp to **Phase 2**: group messages become signals the Copilot
-  (and the longitudinal memory) reason over.
+### Why we're safe
+The Copilot reads **signals, not messages**. Signals are channel-agnostic. The
+killer feature is "how is my team doing + what do I do next" — identical for a
+coach, pastor, or VP of Sales. Only the SIGNAL SOURCE changes.
 
-## To see it
-Fresh load once: `https://827l.onrender.com/?fresh=1`. Be a **lead** of a group
-(set in Members → Groups), open it, hit "Get a read".
+| | Sports / club / church (now) | Business (next) |
+|---|---|---|
+| Signals from | check-ins, app activity, our group chat | Teams/Graph, Outlook, calendar, Slack, project tools, surveys |
+| Examples | mood, attendance, message cadence | meeting attendance, response latency, calendar load, task completion |
+| Delivery | in Platform | Teams app/tab/bot, Outlook digest, or Platform |
 
-## Verification
-- `node --check` passes on server.js and app.js.
-- Not run live here (no DB/API key) — needs a real lead login.
+### The principle
+Platform is the **alignment layer**, not another comms tool. A normalized Signal
+stream feeds the Alignment Layer; the **source is a pluggable adapter**, and the
+read is delivered where the leader already works. Our group chat is just adapter #1.
 
-## Natural next steps
-- WhatsApp-style real-time group chat UI (richer conversation for the Copilot).
-- Copilot "assist in conversation" (draft a reply / meeting feedback) inline.
-- Phase 2 signals so the Copilot's reads compound over time.
+### Enterprise wedge
+- Don't fight Teams — sit on top of it: "keep using Teams; we tell you how your
+  people track against goals and what to do next."
+- Signals-first is also the enterprise privacy answer: metadata is far less
+  sensitive and easier to get admin consent for than message content.
+
+### Roadmap implication (Phase 2, reframed)
+The signals table = a **channel-agnostic ingestion contract** with source adapters:
+- Adapter #1: group chat / check-ins (built).
+- Adapter #2: survey/CSV or calendar import (cheap, proves the model).
+- Adapter #3: Microsoft Graph (Teams/Outlook) — OAuth + admin consent, metadata-first.
+
+The group-chat work is the beachhead source + reference implementation, not waste.
+
+## Decision
+Want me to design Phase 2 as this channel-agnostic Signal ingestion contract
+(so the Teams/email future is built-in from the start)?
