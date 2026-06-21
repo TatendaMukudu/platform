@@ -67,7 +67,7 @@ function scheduleSave() {
         assignedScenarios, memberResults, memberCheckins,
         memberGoals, weeklyAssessments, orgInterventions,
         orgNodes, orgMetrics, orgValues, orgGoals, userPermissions,
-        userAiProfiles, advisorThreads,
+        userAiProfiles, advisorThreads, orgSignals,
         activeSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
@@ -2588,6 +2588,74 @@ const memberCheckins    = {};
 const orgInterventions  = {};  // orgCode → [intervention, ...]
 const advisorThreads    = {};  // orgCode → [{ id, memberId, requesterId, requesterRole, question, answer, evidence, createdAt }]
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   UNIVERSAL SIGNAL INGESTION  (the input layer)
+   Product thesis: the more input the ecosystem ingests, the stronger the output.
+   Every input — check-in, voice film note, spreadsheet row, game stat, coach
+   observation, or an external feed (Teams / Google / Outlook) — normalises into
+   ONE Signal shape that the AI (Advisor, Group Copilot, memory) reasons over.
+   Sources are a registry so new connectors plug in without touching the core.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const orgSignals = {};  // orgCode → [ signal ]
+
+/* Source registry — declares known/plannable input sources + their defaults.
+   `integration:true` sources are OAuth connectors (built later) but the contract
+   is here now so the rest of the system can already reason about them. */
+const SIGNAL_SOURCES = {
+  checkin:   { label: 'Check-in',           modality: 'text',   defaultSensitivity: 'sensitive' },
+  note:      { label: 'Note / observation', modality: 'text',   defaultSensitivity: 'normal' },
+  voice:     { label: 'Voice note',         modality: 'audio',  defaultSensitivity: 'normal' },
+  film:      { label: 'Film note',          modality: 'text',   defaultSensitivity: 'normal' },
+  metric:    { label: 'Metric',             modality: 'number', defaultSensitivity: 'normal' },
+  sheet:     { label: 'Spreadsheet row',    modality: 'sheet',  defaultSensitivity: 'normal' },
+  gamestats: { label: 'Game stats',         modality: 'number', defaultSensitivity: 'public' },
+  document:  { label: 'Document',           modality: 'file',   defaultSensitivity: 'normal' },
+  external:  { label: 'External feed',      modality: 'data',   defaultSensitivity: 'normal' },
+  teams:     { label: 'Microsoft Teams',    modality: 'event',  defaultSensitivity: 'normal', integration: true },
+  google:    { label: 'Google Workspace',   modality: 'event',  defaultSensitivity: 'normal', integration: true },
+  outlook:   { label: 'Outlook / Email',    modality: 'event',  defaultSensitivity: 'normal', integration: true },
+};
+
+function signalId() { return 'sig_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7); }
+
+/* Normalise + store one raw signal. Returns the stored signal (or null if invalid). */
+function _ingestSignal(code, raw, createdBy) {
+  if (!raw || !raw.source) return null;
+  const src = SIGNAL_SOURCES[raw.source] || { modality: 'data', defaultSensitivity: 'normal' };
+  const text = raw.valueText != null ? String(raw.valueText) : '';
+  const sensitivity = raw.public ? 'public'
+    : raw.sensitivity || (text ? privacy.classifyText(text, { source: raw.source }) : src.defaultSensitivity);
+  const sig = {
+    id:          signalId(),
+    orgCode:     code,
+    ts:          raw.ts || new Date().toISOString(),
+    source:      raw.source,
+    modality:    raw.modality || src.modality || 'data',
+    subjectType: raw.subjectType || 'member',     // member | group | org
+    subjectId:   raw.subjectId || null,
+    category:    raw.category || null,            // perf-framework category (optional)
+    label:       raw.label != null ? String(raw.label).slice(0, 120) : null,
+    valueNum:    raw.valueNum != null && !isNaN(Number(raw.valueNum)) ? Number(raw.valueNum) : null,
+    valueText:   text.slice(0, 4000) || null,
+    data:        raw.data || null,                // structured payload (sheet row, event, etc.)
+    sensitivity,
+    public:      sensitivity === 'public',
+    createdBy:   createdBy || null,
+    createdAt:   new Date().toISOString(),
+  };
+  if (!orgSignals[code]) orgSignals[code] = [];
+  orgSignals[code].push(sig);
+  return sig;
+}
+
+/* Recent signals for a subject (used by the AI layer). */
+function _gatherSignals(code, subjectType, subjectId, limit = 40) {
+  return (orgSignals[code] || [])
+    .filter(s => s.subjectType === subjectType && (subjectId == null || s.subjectId === subjectId))
+    .sort((a, b) => new Date(b.ts) - new Date(a.ts))
+    .slice(0, limit);
+}
+
 // Key helpers — new code uses userId keys; legacy name keys still supported for reads
 function memberKey(orgCode, memberName) {
   return `${orgCode.toLowerCase().trim()}:${memberName.toLowerCase().trim()}`;
@@ -4778,6 +4846,24 @@ function _buildAdvisorContext(code, member, requesterUser) {
     (agg.memberPredictions?.[memberName] || []).forEach(p => citable.push(`Trajectory: ${p.prediction}`));
   } catch (_) { /* aggregation is best-effort here */ }
 
+  // ── Ingested signals (voice notes, metrics, game stats, sheets, feeds…) ───
+  // The universal input layer: public/normal signals are citable; sensitive ones
+  // inform reasoning only. This is how external data (e.g. strength numbers,
+  // public game stats, coach film notes) reaches the Advisor.
+  _gatherSignals(code, 'member', memberId, 30).forEach(s => {
+    const src   = SIGNAL_SOURCES[s.source]?.label || s.source;
+    const valid = s.valueText || (s.valueNum != null ? `${s.label ? s.label + ': ' : ''}${s.valueNum}` : null)
+                  || (s.data ? JSON.stringify(s.data).slice(0, 200) : null);
+    if (!valid) return;
+    const line = `${src}${s.label && s.valueText ? ` (${s.label})` : ''}: ${valid}`;
+    if (privacy.isPrivate(s.sensitivity)) {
+      privateInforming.push(line);
+      if (s.valueText) privateStrings.push(s.valueText.slice(0, 200));
+    } else {
+      citable.push(line);
+    }
+  });
+
   return { citable, privateInforming, privateStrings };
 }
 
@@ -4913,6 +4999,66 @@ app.get('/api/advisor/:memberId/threads', requireAuth, (req, res) => {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, 30);
   res.json({ threads });
+});
+
+/* ── GET /api/signals/sources — the input source registry ──────────────────── */
+app.get('/api/signals/sources', requireAuth, (req, res) => {
+  res.json({ sources: SIGNAL_SOURCES });
+});
+
+/* ── POST /api/signals/ingest — universal input endpoint ──────────────────────
+   Accepts one signal or { signals: [...] }. Any modality (text/number/voice
+   transcript/sheet row/event/external feed). Scoped: you may attach a signal to
+   yourself, or to a member/group you can see/lead. Sensitivity auto-classified. */
+app.post('/api/signals/ingest', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code  = orgCode;
+  const batch = Array.isArray(req.body?.signals) ? req.body.signals : [req.body];
+
+  const visible = new Set(getVisibleUserIds(code, userId));
+  const canAttach = (s) => {
+    if (s.subjectType === 'org') return _userHasPerm(code, userId, 'view_team') || orgUsers[code]?.[userId]?.role === 'superadmin';
+    if (s.subjectType === 'group') {
+      const g = (orgGroups[code] || []).find(x => x.id === s.subjectId);
+      return !!g && ((g.leadIds || []).includes(userId) || orgUsers[code]?.[userId]?.role === 'superadmin');
+    }
+    // member: self, or a member you can see
+    return s.subjectId === userId || visible.has(s.subjectId);
+  };
+
+  const stored = [];
+  for (const raw of batch) {
+    if (!raw || !raw.source) continue;
+    if (raw.subjectId && !canAttach(raw)) continue; // silently skip out-of-scope
+    const sig = _ingestSignal(code, raw, userId);
+    if (sig) stored.push({ id: sig.id, source: sig.source, modality: sig.modality, subjectId: sig.subjectId });
+  }
+  if (!stored.length) return res.status(400).json({ error: 'No valid in-scope signals to ingest.' });
+  scheduleSave();
+  res.json({ ok: true, ingested: stored.length, signals: stored });
+});
+
+/* ── GET /api/signals — query signals for a subject you can see ──────────────── */
+app.get('/api/signals', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = orgCode;
+  const { subjectType = 'member', subjectId } = req.query;
+
+  if (subjectType === 'member' && subjectId && subjectId !== userId) {
+    if (!getVisibleUserIds(code, userId).includes(subjectId)) {
+      return res.status(403).json({ error: 'Subject not in your visible scope' });
+    }
+  }
+  // Raw sensitive/restricted text is only returned to leaders/admins; members
+  // get their own. Public + normal always returned.
+  const isLeaderOrAdmin = _userHasPerm(code, userId, 'view_insights') || orgUsers[code]?.[userId]?.role === 'superadmin';
+  const signals = _gatherSignals(code, subjectType, subjectId, 100).map(s => {
+    if (privacy.isPrivate(s.sensitivity) && !isLeaderOrAdmin && s.subjectId !== userId) {
+      return { ...s, valueText: null, data: null, redacted: true };
+    }
+    return s;
+  });
+  res.json({ signals });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -5202,6 +5348,7 @@ function _loadAllStores(data) {
   Object.assign(orgInterventions, data.orgInterventions || {});
   Object.assign(userAiProfiles,   data.userAiProfiles   || {});
   Object.assign(advisorThreads,   data.advisorThreads   || {});
+  Object.assign(orgSignals,       data.orgSignals       || {});
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
   const _savedSessions = data.activeSessions || {};

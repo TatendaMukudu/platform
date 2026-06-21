@@ -4307,6 +4307,115 @@ async function loadAdvisorThreads(memberId){
   }
 }
 
+/* ── UNIVERSAL INPUT — log any data about a member (text / metric / voice) ─────
+   Feeds the universal Signal layer (POST /api/signals/ingest) which the Advisor
+   and Group Copilot reason over. Voice uses the browser's speech recognition —
+   no server transcription needed. The thesis: more input → stronger output. */
+let _logType = 'observation';
+let _logRec  = null;
+
+function openLogSignal() {
+  const mid = AppState.currentMemberId;
+  if (!mid) return;
+  const m = AppState.getMember(mid);
+  _showInlineModal(`
+    <div style="font-weight:700;margin-bottom:0.2rem">Log data for ${_escAdvisor(m?.name || 'member')}</div>
+    <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.8rem">Anything you log feeds IntelliQ's understanding — a film note (by voice), a metric, an observation, a public stat.</div>
+    <div style="display:flex;gap:0.4rem;margin-bottom:0.8rem">
+      <button class="btn btn-sm btn-accent"  id="sig-t-observation" onclick="_setLogType('observation')">Observation</button>
+      <button class="btn btn-sm btn-outline" id="sig-t-metric"      onclick="_setLogType('metric')">Metric</button>
+      <button class="btn btn-sm btn-outline" id="sig-t-voice"       onclick="_setLogType('voice')">🎤 Voice</button>
+    </div>
+    <div id="sig-fields"></div>
+    <div id="sig-result" style="font-size:0.8rem;margin-top:0.5rem"></div>
+    <div style="display:flex;gap:0.5rem;margin-top:0.9rem">
+      <button class="btn btn-accent btn-sm" onclick="submitLogSignal()">Save</button>
+      <button class="btn btn-outline btn-sm" onclick="_stopDictation();_closeInlineModal()">Cancel</button>
+    </div>`);
+  _setLogType('observation');
+}
+
+function _setLogType(t) {
+  _stopDictation();
+  _logType = t;
+  ['observation', 'metric', 'voice'].forEach(x => {
+    const b = document.getElementById('sig-t-' + x);
+    if (b) b.className = 'btn btn-sm ' + (x === t ? 'btn-accent' : 'btn-outline');
+  });
+  const f = document.getElementById('sig-fields');
+  if (!f) return;
+  if (t === 'metric') {
+    f.innerHTML = `
+      <input class="search-input" id="sig-label" placeholder="What (e.g. Squat 1RM, 40-yd dash)" style="width:100%;margin-bottom:0.5rem">
+      <input class="search-input" id="sig-num" type="number" step="any" placeholder="Value" style="width:100%">
+      <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.74rem;color:var(--text-muted);margin-top:0.5rem">
+        <input type="checkbox" id="sig-public"> Public stat — the AI may cite this openly</label>`;
+  } else if (t === 'voice') {
+    f.innerHTML = `
+      <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.4rem">
+        <button class="btn btn-outline btn-sm" id="sig-mic" onclick="_toggleDictation()">🎤 Start dictation</button>
+        <span id="sig-mic-state" style="font-size:0.72rem;color:var(--text-muted)"></span>
+      </div>
+      <textarea class="form-input" id="sig-text" rows="4" placeholder="Speak or type a film / voice note…" style="width:100%"></textarea>`;
+  } else {
+    f.innerHTML = `<textarea class="form-input" id="sig-text" rows="4" placeholder="An observation about this person…" style="width:100%"></textarea>`;
+  }
+}
+
+function _toggleDictation() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const stateEl = document.getElementById('sig-mic-state');
+  if (!SR) { if (stateEl) stateEl.textContent = 'Voice input not supported here — type instead.'; return; }
+  if (_logRec) { _stopDictation(); return; }
+  const ta = document.getElementById('sig-text');
+  const base = ta ? ta.value : '';
+  _logRec = new SR();
+  _logRec.continuous = true; _logRec.interimResults = true; _logRec.lang = 'en-US';
+  _logRec.onresult = (e) => {
+    let txt = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) txt += e.results[i][0].transcript;
+    if (ta) ta.value = (base + ' ' + txt).trim();
+  };
+  _logRec.onend = () => { const b = document.getElementById('sig-mic'); if (b) b.textContent = '🎤 Start dictation'; if (stateEl) stateEl.textContent = ''; _logRec = null; };
+  try { _logRec.start(); } catch (_) {}
+  const b = document.getElementById('sig-mic'); if (b) b.textContent = '⏹ Stop';
+  if (stateEl) stateEl.textContent = 'Listening…';
+}
+
+function _stopDictation() { if (_logRec) { try { _logRec.stop(); } catch (_) {} _logRec = null; } }
+
+async function submitLogSignal() {
+  const mid = AppState.currentMemberId;
+  const res = document.getElementById('sig-result');
+  if (!mid) return;
+  const body = { subjectType: 'member', subjectId: mid };
+
+  if (_logType === 'metric') {
+    const label = (document.getElementById('sig-label')?.value || '').trim();
+    const num   = document.getElementById('sig-num')?.value;
+    if (num === '' || num == null) { if (res) { res.style.color = 'var(--danger)'; res.textContent = 'Enter a value.'; } return; }
+    body.source = 'metric'; body.modality = 'number'; body.label = label; body.valueNum = Number(num);
+    body.public = !!document.getElementById('sig-public')?.checked;
+  } else {
+    const text = (document.getElementById('sig-text')?.value || '').trim();
+    if (!text) { if (res) { res.style.color = 'var(--danger)'; res.textContent = 'Add some text first.'; } return; }
+    body.source = _logType === 'voice' ? 'voice' : 'note';
+    body.modality = _logType === 'voice' ? 'audio' : 'text';
+    body.valueText = text;
+  }
+
+  _stopDictation();
+  try {
+    const r = await fetch('/api/signals/ingest', { method: 'POST', headers: Auth._headers(), body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Could not save');
+    if (res) { res.style.color = 'var(--success)'; res.textContent = '✓ Logged — IntelliQ will use this.'; }
+    setTimeout(_closeInlineModal, 800);
+  } catch (e) {
+    if (res) { res.style.color = 'var(--danger)'; res.textContent = '⚠ ' + e.message; }
+  }
+}
+
 /* ── NOTIFICATION PANEL ──────────────────────────────────── */
 function toggleNotifPanel(){
   document.getElementById('notif-panel').classList.toggle('open');
