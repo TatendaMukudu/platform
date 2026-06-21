@@ -1,59 +1,49 @@
-# Update — Copilot revised + how it survives the move to business
+# Update — Universal Input Layer baked in
 
-## ✅ Shipped & deployed (`a57abf9`)
-Group Copilot reframed per spec — "help the group reach its goals", not monitoring:
-- **Signals-first**: computed from participation / activity / mood / goal signals;
-  NO message content sent to the AI.
-- **Aggregate-only**: suggested actions never name individuals ("3 members less
-  active — reach out"), advice not exposure.
-- **Dashboard not chatbot**: Health (directional + green/yellow/red), Participation %,
-  Goal Progress (directional), Engagement Trend. No scores.
-- **AI outputs**: suggested actions, discussion prompts (from goals/traits),
-  weekly reflection — all aggregate, via gateway + privacy gate.
-- **Consent gate**: lead must ENABLE Copilot; analysis only runs when on. Banner:
-  "Group Copilot is active. It helps group leaders understand engagement and
-  progress toward group goals." Shown to all only when active.
-- New: `PUT /api/groups/:groupId/copilot-settings` (lead enable/disable).
+**Merged to main:** `03821cb` (deploying) · asset `?v=20260621i`
 
----
+Your thesis — **more input → stronger output** — is now a real architectural
+contract, additive and ready to navigate around.
 
-## Strategic: will this survive the move to business (Teams/email)?
-**Yes — and it gets stronger, BECAUSE we chose signals-first.**
+## What's in now
+**One Signal contract for any data, any modality.**
+- Normalized Signal: `{ source, modality, subjectType (member/group/org),
+  subjectId, category, label, valueNum, valueText, data, sensitivity, public }`.
+- Modalities: text · number · voice transcript · sheet row · event · file · feed.
+- **Source registry** (pluggable): check-in, note, voice, film, metric, sheet,
+  game stats, document, external feed — plus **Teams / Google / Outlook** declared
+  as future OAuth integrations so the rest of the system already accounts for them.
 
-### The trap (correctly spotted)
-If the Copilot depended on Platform owning the chat, it would be dead weight in
-companies that live in Teams/Outlook. Nobody migrates conversations to us.
+**APIs**
+- `POST /api/signals/ingest` — single or batch; scoped (self, or a member/group
+  you can see/lead); auto-classifies sensitivity; `public:true` = AI may cite.
+- `GET /api/signals`, `GET /api/signals/sources` — sensitive text redacted for
+  non-leaders.
 
-### Why we're safe
-The Copilot reads **signals, not messages**. Signals are channel-agnostic. The
-killer feature is "how is my team doing + what do I do next" — identical for a
-coach, pastor, or VP of Sales. Only the SIGNAL SOURCE changes.
+**AI consumption (input → output now)**
+- The Advisor already reasons over ingested signals: public/normal = citable,
+  sensitive = inform-only (privacy gate). So "your strength coach logged these
+  numbers / public game stats" flows straight into the advice.
 
-| | Sports / club / church (now) | Business (next) |
-|---|---|---|
-| Signals from | check-ins, app activity, our group chat | Teams/Graph, Outlook, calendar, Slack, project tools, surveys |
-| Examples | mood, attendance, message cadence | meeting attendance, response latency, calendar load, task completion |
-| Delivery | in Platform | Teams app/tab/bot, Outlook digest, or Platform |
+**Frontend proof (multi-modality)**
+- "＋ Log data" on a member profile: **Observation** (text), **Metric**
+  (label + value, optional *public*), and **🎤 Voice** (browser speech-to-text →
+  transcript). All land as signals.
 
-### The principle
-Platform is the **alignment layer**, not another comms tool. A normalized Signal
-stream feeds the Alignment Layer; the **source is a pluggable adapter**, and the
-read is delivered where the leader already works. Our group chat is just adapter #1.
+## How this answers the business/Teams question
+The Signal contract is **channel-agnostic**. Today's adapters: voice, metric,
+note, check-in. Tomorrow's: TeamBuilder-style sheet imports, public game feeds,
+and the big ones — **Microsoft Graph (Teams/Outlook)** and **Google Workspace** —
+plug into the SAME `ingest` contract. No rework; just new adapters.
 
-### Enterprise wedge
-- Don't fight Teams — sit on top of it: "keep using Teams; we tell you how your
-  people track against goals and what to do next."
-- Signals-first is also the enterprise privacy answer: metadata is far less
-  sensitive and easier to get admin consent for than message content.
+## Honest status / next adapters
+- Built now: in-app voice/text/metric + the contract + AI consumption.
+- Cheap next: CSV/Excel row import (SheetJS already in the app) → bulk signals;
+  public game-stats feed.
+- Bigger (need OAuth + your app registration): Microsoft Graph, Google. The
+  contract is ready for them.
+- Scale: move `orgSignals` from the JSONB blob to a Postgres table + embeddings
+  (the original Phase 2/3 step) once volume grows.
 
-### Roadmap implication (Phase 2, reframed)
-The signals table = a **channel-agnostic ingestion contract** with source adapters:
-- Adapter #1: group chat / check-ins (built).
-- Adapter #2: survey/CSV or calendar import (cheap, proves the model).
-- Adapter #3: Microsoft Graph (Teams/Outlook) — OAuth + admin consent, metadata-first.
-
-The group-chat work is the beachhead source + reference implementation, not waste.
-
-## Decision
-Want me to design Phase 2 as this channel-agnostic Signal ingestion contract
-(so the Teams/email future is built-in from the start)?
+Verified at `node --check`; live confirmation needs a real login (voice needs a
+browser that supports speech recognition — Chrome/Safari).
