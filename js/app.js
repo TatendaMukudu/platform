@@ -5618,10 +5618,14 @@ async function uploadDataSource(input) {
 
     // SMART IMPORT — AI auto-attributes rows/mentions to the right members.
     if (target === 'smart') {
-      if (res) { res.style.color = 'var(--text-muted)'; res.textContent = `🧠 Reading ${file.name} and matching members…`; }
+      const isVisual = parsed.kind === 'image' || parsed.kind === 'pdf';
+      if (res) { res.style.color = 'var(--text-muted)'; res.textContent = `🧠 ${isVisual ? 'Scanning' : 'Reading'} ${file.name} and matching members…`; }
+      const payload = isVisual
+        ? { fileName: file.name, public: isPublic, media: { kind: parsed.kind, mediaType: parsed.mediaType, data: parsed.data } }
+        : { fileName: file.name, public: isPublic, content: String(content) };
       const r = await fetch('/api/signals/import', {
         method: 'POST', headers: Auth._headers(),
-        body: JSON.stringify({ content: String(content), fileName: file.name, public: isPublic }),
+        body: JSON.stringify(payload),
       });
       const d = await r.json();
       if (!r.ok || !d.ok) throw new Error(d.error || 'Import failed');

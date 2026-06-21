@@ -5112,53 +5112,11 @@ function _matchMember(code, candidates, name) {
   return hit ? hit.id : null;
 }
 
-/* ── POST /api/signals/import — SMART import: auto-attribute a doc/sheet ───────
-   Sends the extracted file content + the requester's visible roster to the AI,
-   which pulls per-member metrics and notes, then files them as signals under the
-   right member. "Anything about a member in a doc" gets used and attributed. */
-app.post('/api/signals/import', requireAuth, async (req, res) => {
-  const { orgCode, userId } = req.iqSession;
-  const code     = orgCode;
-  const content  = String(req.body?.content || '').slice(0, 8000);
-  const fileName = String(req.body?.fileName || 'upload').slice(0, 120);
-  const isPublic = !!req.body?.public;
-  if (!content.trim()) return res.status(400).json({ error: 'No content to import.' });
-
-  // Visible roster for attribution (never attribute outside scope).
-  const roster = getVisibleUserIds(code, userId)
-    .map(id => orgUsers[code]?.[id]).filter(u => u && u.role !== 'superadmin')
-    .map(u => ({ id: u.id, name: (u.name || '').toLowerCase().trim(), first: (u.firstName || (u.name || '').split(' ')[0] || '').toLowerCase().trim() }));
-  if (!roster.length) return res.status(400).json({ error: 'No members in your scope to attribute data to.' });
-
-  const rosterList = roster.map(r => r.name).join(', ');
-  const system = [
-    `You extract structured, per-person data from a document or spreadsheet for a performance organisation. Attribute data ONLY to people in the provided roster — ignore anyone not on it. Be faithful to the source; do not invent numbers.`,
-    privacy.GATE_DIRECTIVE,
-  ].join('\n\n');
-  const user = [
-    `ROSTER (only attribute to these names): ${rosterList}`,
-    '',
-    `FILE: ${fileName}`,
-    'CONTENT:',
-    content,
-    '',
-    'Return ONLY JSON: {"members":[{"name":"<roster name>","metrics":[{"label":"e.g. Squat 1RM","value":"number or short text"}],"note":"<concise factual summary of anything else the doc says about this person, else empty>"}]}',
-  ].join('\n');
-
-  let parsed = null;
-  try {
-    parsed = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 900, schema: ['members'] });
-  } catch (err) {
-    console.warn('[signals/import] AI error:', err.message);
-    return res.status(502).json({ error: 'Import analysis failed. Try again.' });
-  }
-  if (!parsed || !Array.isArray(parsed.members)) {
-    return res.json({ ok: true, imported: 0, matched: [], unmatched: [], note: 'No per-member data found in this file.' });
-  }
-
+/* Attribute AI-extracted per-member data and ingest as signals (scope-safe). */
+function _attributeMembers(code, userId, members, roster, fileName, isPublic) {
   const matched = [], unmatched = [];
   let imported = 0;
-  parsed.members.slice(0, 60).forEach(m => {
+  (Array.isArray(members) ? members : []).slice(0, 60).forEach(m => {
     const mid = _matchMember(code, roster, m.name);
     if (!mid) { if (m.name) unmatched.push(m.name); return; }
     let count = 0;
@@ -5184,9 +5142,60 @@ app.post('/api/signals/import', requireAuth, async (req, res) => {
     }
     if (count) matched.push({ name: orgUsers[code]?.[mid]?.name || m.name, signals: count });
   });
-
   if (imported) scheduleSave();
-  res.json({ ok: true, imported, matched, unmatched });
+  return { imported, matched, unmatched };
+}
+
+const _IMPORT_SCHEMA_HINT = 'Return ONLY JSON: {"members":[{"name":"<roster name>","metrics":[{"label":"e.g. Squat 1RM","value":"number or short text"}],"note":"<concise factual summary of anything else about this person, else empty>"}]}';
+const _IMPORT_SYSTEM = `You extract structured, per-person data from a document, spreadsheet, or an IMAGE/scan of one, for a performance organisation. Attribute data ONLY to people in the provided roster — ignore anyone not on it. Read tables/columns carefully. Be faithful to the source; do not invent numbers.`;
+
+/* ── POST /api/signals/import — SMART import (text OR image/PDF via vision) ────
+   Accepts { content } (extracted text) OR { media:{kind:'image'|'pdf', mediaType,
+   data(base64)} } for scanned stat sheets. The AI maps rows/mentions to the
+   requester's VISIBLE roster and files metrics + notes under the right member. */
+app.post('/api/signals/import', requireAuth, async (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code     = orgCode;
+  const fileName = String(req.body?.fileName || 'upload').slice(0, 120);
+  const isPublic = !!req.body?.public;
+  const content  = String(req.body?.content || '').slice(0, 8000);
+  const media    = req.body?.media; // { kind:'image'|'pdf', mediaType, data }
+
+  if (!content.trim() && !(media && media.data)) {
+    return res.status(400).json({ error: 'No content to import.' });
+  }
+
+  const roster = getVisibleUserIds(code, userId)
+    .map(id => orgUsers[code]?.[id]).filter(u => u && u.role !== 'superadmin')
+    .map(u => ({ id: u.id, name: (u.name || '').toLowerCase().trim(), first: (u.firstName || (u.name || '').split(' ')[0] || '').toLowerCase().trim() }));
+  if (!roster.length) return res.status(400).json({ error: 'No members in your scope to attribute data to.' });
+
+  const rosterList = roster.map(r => r.name).join(', ');
+  const promptText = `ROSTER (only attribute to these names): ${rosterList}\n\nFILE: ${fileName}\n\n${_IMPORT_SCHEMA_HINT}`;
+
+  // Build messages: a vision block for image/PDF, else plain text content.
+  let messages;
+  if (media && media.data) {
+    const block = media.kind === 'pdf'
+      ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: media.data } }
+      : { type: 'image',    source: { type: 'base64', media_type: media.mediaType || 'image/jpeg', data: media.data } };
+    messages = [{ role: 'user', content: [ block, { type: 'text', text: promptText + '\n\nExtract the per-member data from the attached file.' } ] }];
+  } else {
+    messages = [{ role: 'user', content: `${promptText}\n\nCONTENT:\n${content}` }];
+  }
+
+  let parsed = null;
+  try {
+    parsed = await ai.completeJSON({ tier: 'reason', system: `${_IMPORT_SYSTEM}\n\n${privacy.GATE_DIRECTIVE}`, messages, maxTokens: 1100, schema: ['members'] });
+  } catch (err) {
+    console.warn('[signals/import] AI error:', err.message);
+    return res.status(502).json({ error: 'Import analysis failed. Try again.' });
+  }
+  if (!parsed || !Array.isArray(parsed.members)) {
+    return res.json({ ok: true, imported: 0, matched: [], unmatched: [], note: 'No per-member data found in this file.' });
+  }
+
+  res.json({ ok: true, ..._attributeMembers(code, userId, parsed.members, roster, fileName, isPublic) });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
