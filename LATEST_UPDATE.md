@@ -1,38 +1,35 @@
-# Latest Update — Org Tree buttons + how to make someone a leader
+# Latest Update — Safe Hardening Pass
 
-**Merged to main:** `e2d2927` (deploying)
+**Merged to main:** `163c451` (deploying)
 
-## The buttons are wired, not toys
-Verified in code:
-- **Assign People** has a blue **Leader** checkbox → writes node `leaderIds` →
-  grants the Leader Workspace. This is the path to making someone a leader.
-- + Child / + Sibling / Manage / Move all open editors that call the backend
-  (`/api/tree/node`).
-- People → Org Tree loads nodes via `OrgTree.load()` before rendering.
+You asked to make the code more robust ("throw exceptions everywhere"). The
+robust version of that is to *catch* at the boundaries and fail gracefully, not
+literally throw — so that's what this does.
 
-## Why they looked dead: stale cached index.html
-My no-cache fix only applies once Safari fetches a FRESH index.html — and it was
-serving the cached one (old JS). Break the cache ONCE:
+## Server (`server.js`)
+- **Process crash guards** — `unhandledRejection` / `uncaughtException` now log
+  loudly instead of taking the whole server down and signing everyone out.
+- **Global API error handler** — any error thrown in a route, or a malformed JSON
+  body, returns clean JSON (400/500) instead of crashing or leaking a stack trace.
+- **/api 404** — unknown endpoints return JSON, not the SPA HTML page.
+- **Real bug fixed:** request body limit was Express's default **100 KB**, which
+  silently rejects base64 image/PDF attachments. Raised to **25 MB**.
 
-**Open:**  `https://827l.onrender.com/?fresh=1`
+## Frontend
+- Already had global handlers (`window.onerror` + `unhandledrejection`) that show
+  a recovery overlay — verified, kept as-is.
+- (Earlier) Org Tree action buttons now toast "Tree still loading — refresh"
+  instead of silently doing nothing.
 
-(or Settings → Safari → Clear History and Website Data, or use a Private tab).
-After that, future deploys refresh automatically.
+## What this means
+A single bad input or async bug in one request can no longer crash the server or
+blank the app. Errors surface as messages/logs instead of silent failures.
 
-## How to make Tyler a leader
-From the screenshot, Tyler is a MEMBER of the "Coach" node — not a leader of
-anything, so he's correctly shown member nav. To promote him:
+## Verification
+- `node --check server.js` passes; error handlers registered after all routes.
+- Not run live here (no DB/API key) — deploys on Render.
 
-1. People → **Org Tree**
-2. On the node he should lead (e.g. **Player** or **Coach**) → **👥 Assign People**
-3. Tick the **blue "Leader"** box next to **Tyler Mukudu** → **Save**
-4. Tyler **logs out and back in** → Leader Workspace + Group Health appear.
-
-## Also fixed
-- Tree action buttons now show a "Tree still loading — refresh" toast instead of
-  silently doing nothing when node data isn't loaded yet.
-- Asset version bumped to `?v=20260621c`.
-
-## If buttons STILL do nothing after a Private-tab load
-Then it's a real bug, not cache. Tell me what happens when you tap (e.g. nothing
-at all vs. a flash) and I'll dig in.
+## Still pending your call
+- The **"People" → "Members"** rename: you didn't pick a scope yet. Tell me
+  "nav + titles only" or "all visible labels" and I'll do it. (Left untouched
+  for now to avoid a botched global rename.)
