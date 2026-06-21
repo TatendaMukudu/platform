@@ -1447,6 +1447,10 @@ const LEADER_GRANTS = {
      1. they lead >=1 org node   (orgNodes[].leaderIds / user.leadershipNodeIds)
      2. they supervise >=1 user  (legacy supervisorId tree)
      3. they lead >=1 group      (orgGroups[].leadIds)
+     4. they SIT IN A NODE THAT HAS SUB-NODES (hierarchy leadership) — i.e. their
+        node tier is above another. This makes the tree intuitive: a person in
+        "Coach" (which has child "Player") leads the Player branch automatically,
+        without anyone having to tick a separate "leader" box.
    This is what fixes "I'm a leader but the app treats me as a member": node
    leaderIds are only ever set by manually editing a node, so orgs built via
    onboarding (which sets supervisorId) were never recognized as having leaders. */
@@ -1457,6 +1461,17 @@ function _isLeader(orgCode, userId) {
   const users = orgUsers[orgCode] || {};
   if (Object.values(users).some(u => u.id !== userId && u.supervisorId === userId)) return true;
   if ((orgGroups[orgCode] || []).some(g => (g.leadIds || []).includes(userId))) return true;
+  if (_leadsViaHierarchy(orgCode, userId)) return true;
+  return false;
+}
+
+/* A user leads via hierarchy if any node they belong to (member or leader) has
+   at least one sub-node beneath it — their tier sits above another. */
+function _leadsViaHierarchy(orgCode, userId) {
+  const nodes = orgNodes[orgCode] || {};
+  for (const nid of getUserNodeIds(orgCode, userId)) {
+    if ((nodes[nid]?.childNodeIds || []).length) return true;
+  }
   return false;
 }
 
@@ -1625,15 +1640,23 @@ function getVisibleUserIds(orgCode, requestingUserId) {
   if (_userHasPerm(orgCode, requestingUserId, 'view_team')) {
     const visibleIds = new Set([requestingUserId]); // always include self
 
-    // (a) Node subtrees this user leads
     const allNodes = orgNodes[orgCode] || {};
+    const addPeople = nid => {
+      const n = allNodes[nid];
+      if (!n) return;
+      (n.memberIds || []).forEach(id => visibleIds.add(id));
+      (n.leaderIds || []).forEach(id => visibleIds.add(id));
+    };
+
+    // (a) Node subtrees this user LEADS — sees that node + all descendants
     getUserLeaderNodeIds(orgCode, requestingUserId).forEach(nid =>
-      getDescendantNodeIds(orgCode, nid).forEach(d => {
-        const n = allNodes[d];
-        if (!n) return;
-        (n.memberIds || []).forEach(id => visibleIds.add(id));
-        (n.leaderIds || []).forEach(id => visibleIds.add(id));
-      })
+      getDescendantNodeIds(orgCode, nid).forEach(addPeople)
+    );
+
+    // (a2) Hierarchy leadership — for any node this user belongs to, see the
+    // people in its DESCENDANT nodes (the tiers below), but not their own peers.
+    getUserNodeIds(orgCode, requestingUserId).forEach(nid =>
+      getDescendantNodeIds(orgCode, nid).forEach(d => { if (d !== nid) addPeople(d); })
     );
 
     // (b) Legacy supervisor subtree (everyone who reports up to this user)
