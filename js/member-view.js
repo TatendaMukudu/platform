@@ -1268,6 +1268,7 @@ const MemberApp = {
   async _renderNotesPage() {
     await this._loadMyGroups();
     this._populateNoteGroupSelector();
+    if (typeof IQComposer !== 'undefined') IQComposer.mountAll();
     await this._loadNotes();
   },
 
@@ -1359,6 +1360,25 @@ const MemberApp = {
         }),
       });
       const data = res.ok ? await res.json() : {};
+
+      // Attach any composer files as signals about the author (so the AI uses them).
+      if (typeof IQComposer !== 'undefined') {
+        const atts = IQComposer.takeAttachments('note-content');
+        for (const a of atts) {
+          try {
+            await fetch('/api/signals/ingest', {
+              method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+              body: JSON.stringify({
+                subjectType: 'member', subjectId: this._userId,
+                source: a.kind === 'xlsx' || a.kind === 'csv' ? 'sheet' : 'document',
+                modality: 'file', label: a.name,
+                valueText: (a.content || '').slice(0, 4000) || `Attached ${a.name}`,
+                sensitivity: this._noteType === 'private' ? 'sensitive' : 'normal',
+              }),
+            });
+          } catch (_) {}
+        }
+      }
 
       const noteEl = document.getElementById('note-content');
       if (noteEl) noteEl.value = '';

@@ -4419,6 +4419,90 @@ async function submitLogSignal() {
   }
 }
 
+/* ── IQComposer — one reusable input toolbar (📎 attach · 🎤 voice · text) ─────
+   Bind to any textarea: put <div data-iqcompose="<textareaId>"></div> after it and
+   call IQComposer.mountAll(). Dictation uses the browser; attachments are parsed
+   via AttachmentHandler and exposed through IQComposer.takeAttachments(id). */
+const IQComposer = {
+  _state: {},   // textareaId → { recording, attachments: [{name, kind, content, data, mediaType}] }
+
+  mountAll() {
+    document.querySelectorAll('[data-iqcompose]').forEach(host => {
+      const target = host.getAttribute('data-iqcompose');
+      if (host.dataset.iqMounted === '1') return;
+      host.dataset.iqMounted = '1';
+      host.innerHTML = `
+        <div class="iqc-bar">
+          <button type="button" class="iqc-btn" onclick="IQComposer.pickFile('${target}')">📎 Attach</button>
+          <button type="button" class="iqc-btn" id="iqc-mic-${target}" onclick="IQComposer.toggleVoice('${target}')">🎤 Voice</button>
+          <input type="file" id="iqc-file-${target}" style="display:none"
+            accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv"
+            onchange="IQComposer.onFile('${target}', this)">
+          <span class="iqc-state" id="iqc-state-${target}"></span>
+        </div>
+        <div class="iqc-chips" id="iqc-chips-${target}"></div>`;
+      if (!this._state[target]) this._state[target] = { recording: false, attachments: [] };
+    });
+  },
+
+  pickFile(id) { document.getElementById(`iqc-file-${id}`)?.click(); },
+
+  async onFile(id, input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const stateEl = document.getElementById(`iqc-state-${id}`);
+    if (typeof AttachmentHandler === 'undefined') { if (stateEl) stateEl.textContent = 'Attachments unavailable.'; return; }
+    if (stateEl) stateEl.textContent = `Reading ${file.name}…`;
+    try {
+      const parsed = await AttachmentHandler.process(file);
+      this._state[id].attachments.push({
+        name: file.name, kind: parsed.kind,
+        content: parsed.content || parsed.summary || '',
+        data: parsed.data || null, mediaType: parsed.mediaType || null,
+      });
+      if (stateEl) stateEl.textContent = '';
+      this._renderChips(id);
+    } catch (e) { if (stateEl) stateEl.textContent = `⚠ ${e.message}`; }
+    input.value = '';
+  },
+
+  _renderChips(id) {
+    const el = document.getElementById(`iqc-chips-${id}`);
+    if (!el) return;
+    el.innerHTML = (this._state[id].attachments || []).map((a, i) =>
+      `<span class="iqc-chip">📄 ${_escAdvisor(a.name)}<button class="iqc-chip-x" onclick="IQComposer.removeAttachment('${id}',${i})">×</button></span>`
+    ).join('');
+  },
+
+  removeAttachment(id, i) { this._state[id].attachments.splice(i, 1); this._renderChips(id); },
+
+  toggleVoice(id) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const stateEl = document.getElementById(`iqc-state-${id}`);
+    const micBtn  = document.getElementById(`iqc-mic-${id}`);
+    const st = this._state[id];
+    if (!SR) { if (stateEl) stateEl.textContent = 'Voice not supported — type instead.'; return; }
+    if (st._rec) { try { st._rec.stop(); } catch (_) {} st._rec = null; return; }
+    const ta = document.getElementById(id);
+    const base = ta ? ta.value : '';
+    const rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
+    rec.onresult = (e) => { let t = ''; for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript; if (ta) ta.value = (base + ' ' + t).trim(); };
+    rec.onend = () => { if (micBtn) micBtn.textContent = '🎤 Voice'; if (stateEl) stateEl.textContent = ''; st._rec = null; };
+    try { rec.start(); } catch (_) {}
+    st._rec = rec;
+    if (micBtn) micBtn.textContent = '⏹ Stop';
+    if (stateEl) stateEl.textContent = 'Listening…';
+  },
+
+  // Returns attachments and clears them (call on submit).
+  takeAttachments(id) {
+    const a = (this._state[id]?.attachments) || [];
+    if (this._state[id]) this._state[id].attachments = [];
+    this._renderChips(id);
+    return a;
+  },
+};
+
 /* ── NOTIFICATION PANEL ──────────────────────────────────── */
 function toggleNotifPanel(){
   document.getElementById('notif-panel').classList.toggle('open');
