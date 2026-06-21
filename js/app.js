@@ -599,6 +599,7 @@ function navigate(page){
   else if (page==='org-insights')       renderLeaderIntelligence();
   else if (page==='group-health')       renderGroupHealth();
   else if (page==='leader-groups')      renderLeaderGroups();
+  else if (page==='data-sources')       renderDataSources();
   else if (page==='assignments')        renderAssignments();
   // Management — org-wide
   else if (page==='org-health')         renderOrgHealth();
@@ -632,6 +633,7 @@ const PAGE_TITLES = {
   'org-insights':  'Intelligence',
   'group-health':  'Group Health',
   'leader-groups': 'My Groups',
+  'data-sources':  'Data Sources',
   // Organisation Health — management level
   'org-health':    'Organisation Health',
   // Intelligence
@@ -1222,6 +1224,7 @@ async function loadRealOrgData() {
     if (page === 'org-insights')      renderLeaderIntelligence();
     if (page === 'group-health')      renderGroupHealth();
     if (page === 'leader-groups')     renderLeaderGroups();
+    if (page === 'data-sources')      renderDataSources();
     if (page === 'org-health')        renderOrgHealth();
     if (page === 'leader-home')       renderLeaderHome();
     if (page === 'leader-people')     renderLeaderPeople();
@@ -5506,6 +5509,130 @@ async function _saveGroupAims(gid) {
     if (savedEl) { savedEl.style.color = 'var(--success)'; savedEl.textContent = '✓ Saved'; setTimeout(() => { if (savedEl) savedEl.textContent = ''; }, 1500); }
   } catch (err) {
     if (savedEl) { savedEl.style.color = 'var(--danger)'; savedEl.textContent = `⚠ ${err.message}`; }
+  }
+}
+
+/* ── Data Sources hub — the universal input UX ────────────────────────────────
+   Upload (stat sheets / Word / film logs / CSV / PDF) -> parsed to text ->
+   ingested as a signal; Connect cards for Teams/Google/Outlook (OAuth, declared);
+   and a transparency list of what IntelliQ can already use. */
+let _dsTargets = [];
+
+async function renderDataSources() {
+  const el = document.getElementById('data-sources-content');
+  if (!el) return;
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Loading…</div>`;
+
+  // Build the "attach to" target list (org + visible members).
+  try {
+    const r = await fetch('/api/workspace/visible-members', { headers: Auth._headers() });
+    const d = r.ok ? await r.json() : { members: [] };
+    _dsTargets = (d.members || []).map(m => ({ id: m.userId, name: m.name }));
+  } catch (_) { _dsTargets = []; }
+
+  const memberOpts = _dsTargets.map(t => `<option value="${t.id}">${_escAdvisor(t.name)}</option>`).join('');
+  const connectCard = (icon, name, note) => `
+    <div class="ds-connect">
+      <div class="ds-connect-top"><span class="ds-connect-icon">${icon}</span><span class="ds-connect-name">${name}</span></div>
+      <div class="ds-connect-note">${note}</div>
+      <button class="btn btn-outline btn-sm" onclick="showToast('${name} connector is coming — it will sync activity signals here.','info')">Connect</button>
+    </div>`;
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-label" style="margin-bottom:0.5rem">Upload data</div>
+      <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.7rem">
+        Stat sheets, film logs, Word docs, CSV, PDF, images. IntelliQ reads the content and uses it to advise.
+      </div>
+      <div class="ds-upload-row">
+        <select class="search-input" id="ds-target" style="max-width:220px">
+          <option value="org">📊 Whole organization</option>
+          ${memberOpts ? `<optgroup label="A member">${memberOpts}</optgroup>` : ''}
+        </select>
+        <label class="btn btn-accent btn-sm" style="cursor:pointer">
+          ＋ Choose file
+          <input type="file" id="ds-file" style="display:none"
+            accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv"
+            onchange="uploadDataSource(this)">
+        </label>
+        <label style="display:flex;align-items:center;gap:0.35rem;font-size:0.74rem;color:var(--text-muted)">
+          <input type="checkbox" id="ds-public"> Public (citable)
+        </label>
+      </div>
+      <div id="ds-upload-result" style="font-size:0.8rem;margin-top:0.5rem"></div>
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-label" style="margin-bottom:0.6rem">Connect a source</div>
+      <div class="ds-connect-grid">
+        ${connectCard('🟦', 'Microsoft Teams', 'Meeting attendance & activity signals (metadata).')}
+        ${connectCard('🔴', 'Google Workspace', 'Calendar & activity signals.')}
+        ${connectCard('📧', 'Outlook / Email', 'Engagement cadence signals (metadata).')}
+      </div>
+      <div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.6rem">Connectors sync <strong>signals, not message content</strong> — and require your org admin's consent.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-label" style="margin-bottom:0.6rem">What IntelliQ can use</div>
+      <div id="ds-recent"><div style="color:var(--text-muted);font-size:0.82rem">Loading…</div></div>
+    </div>`;
+
+  _loadDataSourcesRecent();
+}
+
+async function _loadDataSourcesRecent() {
+  const el = document.getElementById('ds-recent');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/signals/recent', { headers: Auth._headers() });
+    const d = await r.json();
+    const list = d.signals || [];
+    if (!list.length) { el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Nothing yet. Upload a file, log a note, or connect a source.</div>`; return; }
+    el.innerHTML = list.map(s => `
+      <div class="ds-recent-row">
+        <div class="ds-recent-main">
+          <span class="ds-recent-src">${_escAdvisor(s.sourceLabel)}</span>
+          <span class="ds-recent-snip">${_escAdvisor(s.snippet || '')}</span>
+        </div>
+        <div class="ds-recent-meta">${_escAdvisor(s.subject)}${s.public ? ' · public' : ''} · ${_escAdvisor(new Date(s.ts).toLocaleDateString())}</div>
+      </div>`).join('');
+  } catch (_) {
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Could not load.</div>`;
+  }
+}
+
+async function uploadDataSource(input) {
+  const file = input.files && input.files[0];
+  const res  = document.getElementById('ds-upload-result');
+  if (!file) return;
+  if (typeof AttachmentHandler === 'undefined') { if (res) { res.style.color = 'var(--danger)'; res.textContent = 'Uploader not available.'; } return; }
+  if (res) { res.style.color = 'var(--text-muted)'; res.textContent = `Reading ${file.name}…`; }
+
+  try {
+    const parsed = await AttachmentHandler.process(file);
+    const targetSel = document.getElementById('ds-target');
+    const target = targetSel ? targetSel.value : 'org';
+    const isPublic = !!document.getElementById('ds-public')?.checked;
+
+    const content = parsed.content || parsed.summary || `Uploaded ${file.name}`;
+    const source  = parsed.kind === 'xlsx' || parsed.kind === 'csv' ? 'sheet'
+                  : parsed.kind === 'image' || parsed.kind === 'pdf' ? 'document' : 'document';
+    const body = {
+      subjectType: target === 'org' ? 'org' : 'member',
+      subjectId:   target === 'org' ? null : target,
+      source, modality: parsed.kind === 'xlsx' || parsed.kind === 'csv' ? 'sheet' : 'file',
+      label:     file.name,
+      valueText: String(content).slice(0, 4000),
+      public:    isPublic,
+    };
+    const r = await fetch('/api/signals/ingest', { method: 'POST', headers: Auth._headers(), body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'Upload failed');
+    if (res) { res.style.color = 'var(--success)'; res.textContent = `✓ ${file.name} added — IntelliQ can now use it.`; }
+    input.value = '';
+    _loadDataSourcesRecent();
+  } catch (err) {
+    if (res) { res.style.color = 'var(--danger)'; res.textContent = `⚠ ${err.message}`; }
   }
 }
 

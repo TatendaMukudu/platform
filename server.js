@@ -5061,6 +5061,46 @@ app.get('/api/signals', requireAuth, (req, res) => {
   res.json({ signals });
 });
 
+/* ── GET /api/signals/recent — transparency list of what the AI can use ────────
+   Recent signals across the requester's scope (members they see + groups they
+   lead + org + things they logged). Powers the Data Sources "what's feeding the
+   AI" view. Enriched with subject + source labels; sensitive text summarised. */
+app.get('/api/signals/recent', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code    = orgCode;
+  const visible = new Set(getVisibleUserIds(code, userId));
+  const ledGroupIds = new Set((orgGroups[code] || []).filter(g => (g.leadIds || []).includes(userId)).map(g => g.id));
+
+  const inScope = s =>
+    s.createdBy === userId ||
+    (s.subjectType === 'org') ||
+    (s.subjectType === 'member' && s.subjectId && visible.has(s.subjectId)) ||
+    (s.subjectType === 'group'  && ledGroupIds.has(s.subjectId));
+
+  const subjectName = s => {
+    if (s.subjectType === 'org') return 'Organization';
+    if (s.subjectType === 'group') return (orgGroups[code] || []).find(g => g.id === s.subjectId)?.name || 'Group';
+    return orgUsers[code]?.[s.subjectId]?.name || 'Member';
+  };
+
+  const list = (orgSignals[code] || [])
+    .filter(inScope)
+    .sort((a, b) => new Date(b.ts) - new Date(a.ts))
+    .slice(0, 60)
+    .map(s => ({
+      id: s.id, ts: s.ts, source: s.source,
+      sourceLabel: SIGNAL_SOURCES[s.source]?.label || s.source,
+      modality: s.modality, sensitivity: s.sensitivity, public: s.public,
+      subjectType: s.subjectType, subject: subjectName(s),
+      label: s.label,
+      snippet: privacy.isPrivate(s.sensitivity)
+        ? '(private — informs the AI, not shown)'
+        : (s.valueText ? s.valueText.slice(0, 100) : (s.valueNum != null ? String(s.valueNum) : (s.label || s.sourceLabel))),
+    }));
+
+  res.json({ signals: list });
+});
+
 /* ═══════════════════════════════════════════════════════════════════════════
    LEARNING ENGINE — Patterns, Predictions, Effectiveness, Summary
    ═══════════════════════════════════════════════════════════════════════════ */

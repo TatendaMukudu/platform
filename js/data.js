@@ -117,6 +117,8 @@ const WORKSPACE_MODULES = [
   { section: null, id: 'group-health', icon: '📊', label: 'Group Health', leaderOnly: true, permission: 'view_insights' },
   // My Groups: set goals & traits for groups the leader LEADS (the TEAM frame)
   { section: null, id: 'leader-groups', icon: '🎯', label: 'My Groups',    leaderOnly: true },
+  // Data Sources: upload / connect / see what the AI can use (universal input)
+  { section: null, id: 'data-sources', icon: '🔌', label: 'Data Sources', leaderOnly: true },
 
   // ── Intelligence — analytics / AI (admin+ or explicit grant) ─────────
   { section: 'Intelligence', id: 'analytics', icon: '📊', label: 'Insights',           permission: 'view_analytics'   },

@@ -2214,3 +2214,19 @@ img { max-width: 100%; }
 .gd-health-k { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 0.2rem; }
 .gd-health-v { font-size: 0.92rem; font-weight: 700; display: flex; align-items: center; gap: 0.4rem; }
 .gd-health-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+
+/* ── Data Sources hub ──────────────────────────────────────── */
+.ds-upload-row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+.ds-connect-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.6rem; }
+.ds-connect { border: 1px solid var(--border); border-radius: 8px; padding: 0.7rem 0.8rem; display: flex; flex-direction: column; gap: 0.4rem; }
+.ds-connect-top { display: flex; align-items: center; gap: 0.4rem; }
+.ds-connect-icon { font-size: 1.1rem; }
+.ds-connect-name { font-weight: 700; font-size: 0.85rem; }
+.ds-connect-note { font-size: 0.72rem; color: var(--text-muted); flex: 1; }
+.ds-recent-row { display: flex; justify-content: space-between; gap: 0.8rem; padding: 0.5rem 0; border-bottom: 1px solid var(--border); }
+.ds-recent-row:last-child { border-bottom: none; }
+.ds-recent-main { min-width: 0; }
+.ds-recent-src { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--accent); margin-right: 0.4rem; }
+.ds-recent-snip { font-size: 0.82rem; color: var(--text-secondary); }
+.ds-recent-meta { font-size: 0.7rem; color: var(--text-muted); white-space: nowrap; flex-shrink: 0; text-align: right; }
+@media (max-width: 600px) { .ds-recent-row { flex-direction: column; gap: 0.2rem; } .ds-recent-meta { text-align: left; } }
