@@ -706,9 +706,29 @@ function initLogin() {
         showOnboardingFlow(); return;
       }
     }
-    launchApp();
-    loadRealOrgData();
-    _checkCoachDailyCheckin();
+    // Refresh leadership + permissions from the server before building the nav,
+    // so a returning (cached) session picks up the `leads` flag and current
+    // permissions. Merge only those fields to avoid clobbering profileComplete.
+    (async () => {
+      try {
+        const meRes = await fetch('/api/auth/me', { headers: Auth._headers() });
+        const me    = await meRes.json();
+        if (me.ok) {
+          Auth.permissions = me.permissions || Auth.permissions;
+          if (me.user) Auth.currentUser = {
+            ...Auth.currentUser,
+            leads:             me.user.leads,
+            leadershipNodeIds: me.user.leadershipNodeIds,
+            role:              me.user.role,
+          };
+          AppState.adminRole = Auth.ROLE_LABELS[Auth.currentUser?.role] || AppState.adminRole;
+          Auth.save();
+        }
+      } catch(e) { /* offline — fall back to cached session */ }
+      launchApp();
+      loadRealOrgData();
+      _checkCoachDailyCheckin();
+    })();
     return;
   }
 

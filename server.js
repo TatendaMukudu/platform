@@ -17,7 +17,14 @@ const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 app.use(express.json());
-app.use(express.static(path.join(__dirname)));
+// Serve static assets, but force browsers to revalidate HTML/JS/CSS on every load
+// (etag makes this cheap) so a Render redeploy is picked up on the next refresh
+// instead of a stale cached bundle — the cause of "I deployed but nothing changed".
+app.use(express.static(path.join(__dirname), {
+  setHeaders: (res, filePath) => {
+    if (/\.(html|js|css)$/i.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
+  },
+}));
 
 /* ── Persistence ──────────────────────────────────────────────────────────────
    All in-memory stores are persisted to Neon Postgres (via db.js).
