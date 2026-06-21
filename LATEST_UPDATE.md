@@ -1,33 +1,44 @@
-# Latest Update — Leader "My Members" is now a TREE
+# Update — Group Goals/Traits shipped + Group Copilot vision
 
-**Merged to main:** `c697784` (deploying)
+## ✅ Shipped & deployed (`2a39f05`)
+Group-level **goals & traits**, editable only by a group's **leads**:
+- Membership ≠ leadership — a plain member can LEAD an org-wide group (e.g. a
+  Bible study) and set its goals, while only belonging to other groups.
+- `PUT /api/groups/:groupId/aims` — lead-of-group (or admin) only.
+- Leader Workspace → **My Groups**: edit goals/traits for groups you lead;
+  read-only for groups you're only in; org values offered as quick-add traits.
 
-You asked: a leader should see only the sub-nodes below it, shown as a tree — not
-a flat list. Done.
+This is the alignment **TEAM frame** made real at the group level.
 
-## Server
-- New **`GET /api/workspace/my-tree`** — returns the leader's node tiers BELOW
-  them (nodes they explicitly lead + the direct children of their own node),
-  each node carrying its visible members, nested. Anyone visible but not in a
-  shown node lands in a "Directly under you" bucket.
-- Scoped server-side via `getVisibleUserIds` — a leader only ever gets the
-  branch beneath them, never sibling/other branches.
+---
 
-## Frontend
-- **My Members** now renders a hierarchical **tree**: each sub-node is a branch
-  with its members nested under it, subtree counts per node, indented by depth.
-- Search filters within the tree (empty branches hide while searching).
-- Tapping a member opens their profile (where the Advisor lives).
-- Old flat-list renderer removed.
+## Vision: Groups as WhatsApp + an AI Copilot (Teams-style)
+Groups become living spaces (chat) with an embedded Copilot that helps the lead.
 
-## So for Tyler (in "Coach")
-He'll see the **Player** node (and anything below it) as a tree with its members
-nested — not a flat list, and nothing from other branches.
+**Already in place to build on:**
+- Group chat/feed (`/api/groups/:groupId/feed`, messages incl. anonymous).
+- AI gateway + privacy gate + Advisor (a Group Copilot = the Advisor pointed at
+  a group instead of one person).
+- Group goals/traits (just shipped) = what "good" looks like for the group.
 
-## To see it
-Fresh load once: **`https://827l.onrender.com/?fresh=1`** (asset version bumped to
-`?v=20260621e`).
+**Copilot would:** summarize discussion, flag disengagement, draft prompts /
+feedback for the lead, check activity against the group's goals — informing the
+lead, never exposing members' private content.
 
-## Verification
-- `node --check` passes on server.js and app.js; single render function.
-- Not run live here — needs a leader login to confirm.
+### Non-negotiables (legal/ethical — monitoring conversations)
+- Visible **"🤖 Copilot is in this group"** banner — never silent.
+- Lead enables it; members are told; consent notice on join.
+- Reasons over the group to advise the lead; never quotes a member to others.
+- Sensitive content informs only, never disclosed; clean off switch.
+
+### Suggested first slice (small, safe, real)
+A **Group Copilot panel** for the lead: (1) short health/engagement read,
+(2) 2–3 suggested prompts/feedback, (3) "who might need a nudge" — through the
+privacy gate, with the AI-present banner. Reuses gateway + privacy gate +
+group aims. Meeting feedback / deeper monitoring come later.
+
+This is also the on-ramp to **Phase 2**: group messages become signals.
+
+## Decision needed
+Build the first-slice Group Copilot panel next? And confirm the consent/banner
+model is how you want it.
