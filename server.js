@@ -2429,6 +2429,13 @@ app.post('/api/notes', async (req, res) => {
     } catch(e) { /* non-critical */ }
   }
 
+  // Every note becomes a signal the AI can use (private/anonymous → inform-only).
+  _emitSignalSafe(note.orgCode, {
+    subjectType: 'member', subjectId: authorId, source: 'note',
+    modality: 'text', label: note.tag || null, valueText: content,
+    sensitivity: note.sensitivity,
+  }, authorId);
+
   scheduleSave();
   res.json({ ok: true, note: _sanitizeNote(note, authorId) });
 });
@@ -2604,6 +2611,8 @@ const orgSignals = {};  // orgCode → [ signal ]
 const SIGNAL_SOURCES = {
   checkin:   { label: 'Check-in',           modality: 'text',   defaultSensitivity: 'sensitive' },
   note:      { label: 'Note / observation', modality: 'text',   defaultSensitivity: 'normal' },
+  assessment:{ label: 'Assessment',         modality: 'text',   defaultSensitivity: 'normal' },
+  weekly:    { label: 'Weekly reflection',  modality: 'text',   defaultSensitivity: 'sensitive' },
   voice:     { label: 'Voice note',         modality: 'audio',  defaultSensitivity: 'normal' },
   film:      { label: 'Film note',          modality: 'text',   defaultSensitivity: 'normal' },
   metric:    { label: 'Metric',             modality: 'number', defaultSensitivity: 'normal' },
@@ -2646,6 +2655,20 @@ function _ingestSignal(code, raw, createdBy) {
   if (!orgSignals[code]) orgSignals[code] = [];
   orgSignals[code].push(sig);
   return sig;
+}
+
+/* Resolve a userId from a member name within an org (best-effort). */
+function _resolveUserIdByName(code, name) {
+  if (!name) return null;
+  const n = String(name).toLowerCase().trim();
+  const u = Object.values(orgUsers[code] || {}).find(u => (u.name || '').toLowerCase().trim() === n);
+  return u ? u.id : null;
+}
+
+/* Emit a signal from an input touchpoint — never throws (input flow must not
+   break if signal capture fails). This is how EVERY input becomes signal. */
+function _emitSignalSafe(code, raw, createdBy) {
+  try { return _ingestSignal(code, raw, createdBy); } catch (e) { console.warn('[signal] emit failed:', e.message); return null; }
 }
 
 /* Recent signals for a subject (used by the AI layer). */
@@ -2945,6 +2968,25 @@ app.post('/api/member/submit-result', (req, res) => {
     });
   }
 
+  // Assessment completion → signals: the score (citable) + what it revealed.
+  const _code = orgCode.toLowerCase().trim();
+  const _aid  = resolvedUserId || _resolveUserIdByName(_code, resolvedName);
+  if (_aid) {
+    const sc = result.score || result.dimensions || {};
+    if (sc.overall != null) _emitSignalSafe(_code, {
+      subjectType: 'member', subjectId: _aid, source: 'assessment', modality: 'number',
+      label: 'Assessment overall', valueNum: Number(sc.overall), sensitivity: 'normal',
+    }, _aid);
+    const parts = [];
+    if (sc.summary) parts.push(sc.summary);
+    if (Array.isArray(sc.strengths) && sc.strengths.length)   parts.push('Strengths: ' + sc.strengths.join(', '));
+    if (Array.isArray(sc.development) && sc.development.length) parts.push('Development: ' + sc.development.join(', '));
+    if (parts.length) _emitSignalSafe(_code, {
+      subjectType: 'member', subjectId: _aid, source: 'assessment', modality: 'text',
+      label: result.scenarioTitle || 'Assessment', valueText: parts.join(' · '), sensitivity: 'normal',
+    }, _aid);
+  }
+
   scheduleSave();
   res.json({ ok: true });
 });
@@ -2961,6 +3003,12 @@ app.post('/api/member/checkin', (req, res) => {
     date: new Date().toLocaleDateString('en-GB'),
     ts:   new Date().toISOString(),
   });
+  const _cid = _resolveUserIdByName((orgCode || '').toLowerCase().trim(), memberName);
+  if (_cid) _emitSignalSafe((orgCode || '').toLowerCase().trim(), {
+    subjectType: 'member', subjectId: _cid, source: 'checkin', modality: 'text',
+    valueNum: mood != null ? Number(mood) : null, valueText: note || null,
+    label: mood != null ? `Mood ${mood}/5` : null, sensitivity: 'sensitive',
+  }, _cid);
   scheduleSave();
   res.json({ ok: true });
 });
@@ -3176,6 +3224,13 @@ app.post('/api/checkin/freeform', async (req, res) => {
     ts:        new Date().toISOString(),
   };
   memberCheckins[key].push(checkin);
+
+  const _fid = memberId || _resolveUserIdByName(code, memberName);
+  if (_fid) _emitSignalSafe(code, {
+    subjectType: 'member', subjectId: _fid, source: 'checkin', modality: 'text',
+    valueNum: mood != null ? Number(mood) : null, valueText: text || null,
+    label: mood != null ? `Mood ${mood}/5` : null, sensitivity: 'sensitive',
+  }, _fid);
 
   const effectiveRole = role || 'member';
 
@@ -3418,6 +3473,15 @@ app.post('/api/weekly/submit', async (req, res) => {
     submittedAt: new Date().toISOString(),
   };
   weeklyAssessments[key].push(entry);
+
+  // Weekly reflection → signal (free text the AI can mine; inform-only).
+  const _wid = memberId || _resolveUserIdByName(code, memberName);
+  const _wtext = Object.values(data || {}).filter(Boolean).join(' · ').slice(0, 1500);
+  if (_wid && _wtext) _emitSignalSafe(code, {
+    subjectType: 'member', subjectId: _wid, source: 'weekly', modality: 'text',
+    valueText: _wtext, sensitivity: 'sensitive',
+  }, _wid);
+
   scheduleSave();
 
   res.json({ ok: true, aiResponse, week });
