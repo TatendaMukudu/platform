@@ -4120,16 +4120,20 @@ function setAdvisorQuestion(q){
 }
 
 function _renderAdvisorAnswer(data){
-  const lens = data.lens ? `<span class="advisor-lens">${_escAdvisor(data.lens)} lens</span>` : '';
+  const lens  = data.lens ? `<span class="advisor-lens">${_escAdvisor(data.lens)} lens</span>` : '';
+  const title = data.mode === 'briefing' ? '📋 Alignment Briefing' : '🤖 Advisor';
   return `<div class="advisor-answer">
-    <div class="advisor-answer-head">🤖 Advisor ${lens}</div>
+    <div class="advisor-answer-head">${title} ${lens}</div>
     <div class="advisor-answer-body">${_escAdvisor(data.answer).replace(/\n/g,'<br>')}</div>
   </div>`;
 }
 
-async function askAdvisor(){
+async function askAdvisor(mode){
+  mode = mode === 'briefing' ? 'briefing' : 'question';
   const input    = document.getElementById('pm-advisor-input');
-  const btn      = document.getElementById('pm-advisor-ask');
+  const askBtn   = document.getElementById('pm-advisor-ask');
+  const briefBtn = document.getElementById('pm-advisor-brief');
+  const btn      = mode === 'briefing' ? briefBtn : askBtn;
   const out      = document.getElementById('pm-advisor-response');
   const memberId = AppState.currentMemberId;
   const question = (input?.value || '').trim();
@@ -4139,31 +4143,35 @@ async function askAdvisor(){
     out.innerHTML = `<div class="advisor-error">⚠ No member selected.</div>`;
     return;
   }
-  if (!question){
+  if (mode === 'question' && !question){
     out.innerHTML = `<div class="advisor-error">Type a question or pick a suggestion above.</div>`;
     return;
   }
 
   const member  = AppState.getMember(memberId);
   const oldLabel = btn ? btn.textContent : '';
-  if (btn){ btn.disabled = true; btn.textContent = 'Thinking…'; }
-  out.innerHTML = `<div class="advisor-loading">🤖 IntelliQ is considering ${_escAdvisor(member?.name || 'this member')}…</div>`;
+  if (askBtn)   askBtn.disabled = true;
+  if (briefBtn) briefBtn.disabled = true;
+  if (btn) btn.textContent = mode === 'briefing' ? 'Building…' : 'Thinking…';
+  out.innerHTML = `<div class="advisor-loading">🤖 IntelliQ is ${mode === 'briefing' ? 'building a briefing on' : 'considering'} ${_escAdvisor(member?.name || 'this member')}…</div>`;
 
   try {
     const res  = await fetch(`/api/advisor/${encodeURIComponent(memberId)}/ask`, {
       method:  'POST',
       headers: Auth._headers(),
-      body:    JSON.stringify({ question }),
+      body:    JSON.stringify({ question, mode }),
     });
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error || 'Advisor unavailable');
     out.innerHTML = _renderAdvisorAnswer(data);
-    if (input) input.value = '';
+    if (mode === 'question' && input) input.value = '';
     loadAdvisorThreads(memberId); // refresh history with the new thread
   } catch (err){
     out.innerHTML = `<div class="advisor-error">⚠ ${_escAdvisor(err.message || 'Something went wrong.')} Please try again.</div>`;
   } finally {
-    if (btn){ btn.disabled = false; btn.textContent = oldLabel; }
+    if (askBtn)   askBtn.disabled = false;
+    if (briefBtn) briefBtn.disabled = false;
+    if (btn) btn.textContent = oldLabel;
   }
 }
 

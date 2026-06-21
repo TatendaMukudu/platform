@@ -4253,10 +4253,28 @@ function _buildAdvisorContext(code, member, requesterUser) {
   const privateInforming = [];
   const privateStrings   = [];
 
-  // ── Identity + goals (observable) ─────────────────────────────────────────
+  // ── Identity ──────────────────────────────────────────────────────────────
   citable.push(`Name: ${memberName}${member.role ? ` · role: ${member.role}` : ''}`);
+
+  // ── Alignment anchors — the three frames the advisor reasons across ────────
+  // These are STATED AIMS (not private). They are the references behaviour is
+  // measured against; they are never a hierarchy.
+  //  • Member aims  = the engine (intrinsic goals)
+  //  • Team context = the shared middle (group emphasis / culture)
+  //  • Org values   = the guardrails (ethical boundaries + identity)
   const goals = normalizeMemberGoals(memberGoals[userKey(code, memberId)] || memberGoals[memberKey(code, memberName)]);
-  if (goals.length) citable.push(`Stated goals: ${goals.map(g => g.title || g.text).filter(Boolean).join('; ')}`);
+  if (goals.length) {
+    citable.push(`MEMBER aim(s): ${goals.map(g => g.title || g.text).filter(Boolean).join('; ')}`);
+  } else {
+    citable.push('MEMBER aim(s): none stated yet — treat as UNANCHORED; the absence is itself the finding.');
+  }
+  (orgGroups[code] || [])
+    .filter(g => (g.memberIds || []).includes(memberId) || (g.leadIds || []).includes(memberId))
+    .forEach(g => citable.push(`TEAM context — ${g.name}${g.description ? `: ${g.description}` : ''}`));
+  const _orgValues = orgValues[code] || [];
+  if (_orgValues.length) citable.push(`ORG values (guardrails): ${_orgValues.join(', ')}`);
+  const _orgGoals = orgGoals[code] || [];
+  if (_orgGoals.length) citable.push(`ORG priorities: ${_orgGoals.map(g => g.text).filter(Boolean).slice(0, 4).join('; ')}`);
 
   // ── Check-ins: mood numbers citable, free text informs only ───────────────
   const checkins = [];
@@ -4349,12 +4367,29 @@ function _buildAdvisorContext(code, member, requesterUser) {
   return { citable, privateInforming, privateStrings };
 }
 
-const ADVISOR_SYSTEM = `You are the IntelliQ Individual Advisor — a performance-intelligence coach embedded in a member's profile. A leader asks how to support, develop, or lead this specific person. You answer with concrete, personal recommendations grounded in what IntelliQ has observed about THEM — never generic coaching advice.
-Rules:
-- Be specific to this person and this question. No platitudes.
+const ADVISOR_SYSTEM = `You are the IntelliQ Individual Advisor — embedded in ONE member's profile to help a leader support, develop, and lead THIS specific person. You are not a score machine. You never rank people and never output a number as a verdict.
+
+HOW YOU THINK — ALIGNMENT, NOT OBEDIENCE:
+Alignment is the coherence between what this person actually does over time and what they — and the communities they belong to — say they are trying to become. It is directional (are they becoming it?), never a fixed grade, and never "doing what the coach says." You reason across three frames, which are NOT a hierarchy:
+- MEMBER aims  = the engine (their own goals; intrinsic motivation is what actually drives durable growth).
+- TEAM context = the shared middle (group emphasis and culture).
+- ORG values   = the guardrails (ethical boundaries and identity).
+Optimize for: the member's own goals, pursued within org guardrails, integrated with team context.
+
+DIRECTIONAL LANGUAGE — NEVER SCORES:
+Describe trajectory with words, not numbers: converging, sustaining, stalled, diverging, unanchored (no stated aim yet), or unknown (not enough signal). Never say "62% aligned" or assign a grade.
+
+CONFLICT DOCTRINE:
+- MEMBER aim vs TEAM aim → seek INTEGRATION first: show how pursuing the team's aim also serves the member's own goal. If they genuinely conflict, name the honest tradeoff for the humans to decide — do not coerce toward the team.
+- TEAM vs ORG values → the org value is the guardrail and should win, but treat it as a culture issue for leadership, never as a mark against this individual.
+- Anchored to NOTHING → highest care, not the worst grade. Lead with curiosity; most often we simply never captured what they want.
+- Aligned across all three → reinforce and stretch (leadership / mentoring opportunities).
+
+OUTPUT RULES:
+- Be specific to this person. No platitudes, no generic coaching advice.
 - Recommend actions the requester can take, not descriptions of the data.
-- If evidence is thin, say so briefly and give your best-supported suggestion.
-- Reason from your understanding of the person; do not recite or quote source material.`;
+- Reason from your understanding of the person; do not recite or quote source material.
+- If a stated aim is missing, say so plainly — that absence is the finding, not a failure.`;
 
 /* ── POST /api/advisor/:memberId/ask ──────────────────────────────────────── */
 app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
@@ -4363,8 +4398,10 @@ app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
   const code        = (orgCode || '').toLowerCase().trim();
   const memberId    = req.params.memberId;
   const question    = (req.body?.question || '').trim();
+  const mode        = req.body?.mode === 'briefing' ? 'briefing' : 'question';
 
-  if (!question)  return res.status(400).json({ error: 'question required' });
+  // In briefing mode the question is optional (we generate a full briefing).
+  if (mode !== 'briefing' && !question) return res.status(400).json({ error: 'question required' });
   if (question.length > 600) return res.status(400).json({ error: 'question too long' });
 
   const requester = orgUsers[code]?.[requesterId];
@@ -4390,17 +4427,31 @@ app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
     lenses.lensDirective(lens),
   ].filter(Boolean).join('\n\n');
 
-  const userMsg = [
-    `QUESTION (from a ${lens?.label || requester.role}): ${question}`,
-    '',
-    privacy.buildContextBlock({ citable: ctx.citable, privateInforming: ctx.privateInforming }),
-    '',
-    'Answer in 3-5 sentences with specific, actionable guidance for this person.',
-  ].join('\n');
+  const contextBlock = privacy.buildContextBlock({ citable: ctx.citable, privateInforming: ctx.privateInforming });
+
+  const userMsg = mode === 'briefing'
+    ? [
+        `Produce an alignment briefing on ${member.name || 'this member'} for a ${lens?.label || requester.role}.`,
+        '',
+        contextBlock,
+        '',
+        'Write the briefing under these four short headings, a sentence or two each:',
+        '1. What we are seeing',
+        '2. Why it might be happening',
+        '3. How this aligns (member aims · team context · org values) — use directional words, no scores',
+        '4. What to try next',
+      ].join('\n')
+    : [
+        `QUESTION (from a ${lens?.label || requester.role}): ${question}`,
+        '',
+        contextBlock,
+        '',
+        'Answer in 3-5 sentences with specific, actionable guidance for this person, reasoning across their member/team/org aims where relevant. Use directional language, never scores.',
+      ].join('\n');
 
   let answer;
   try {
-    answer = await ai.complete({ tier: 'reason', system, user: userMsg, maxTokens: 400 });
+    answer = await ai.complete({ tier: 'reason', system, user: userMsg, maxTokens: mode === 'briefing' ? 600 : 400 });
   } catch (err) {
     console.error('[advisor] AI error:', err.message);
     return res.status(502).json({ error: 'Advisor unavailable right now. Please try again.' });
@@ -4416,7 +4467,9 @@ app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
     memberId, memberName: member.name || '',
     requesterId, requesterRole: requester.role,
     lens:          lens?.label || null,
-    question, answer,
+    mode,
+    question:      mode === 'briefing' ? 'Full alignment briefing' : question,
+    answer,
     createdAt:     new Date().toISOString(),
   };
   advisorThreads[code].push(thread);
@@ -4425,6 +4478,7 @@ app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
   res.json({
     ok: true,
     answer,
+    mode,
     lens: lens?.label || null,
     evidenceCount: ctx.citable.length,
     threadId: thread.id,

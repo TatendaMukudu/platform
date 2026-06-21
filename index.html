@@ -1206,7 +1206,10 @@
             placeholder="e.g. How do I motivate this person?"></textarea>
           <div class="advisor-actions">
             <div class="advisor-privacy">🔒 Advisor may use protected context to generate safe recommendations, but private notes are not revealed.</div>
-            <button class="btn btn-accent btn-sm" id="pm-advisor-ask" onclick="askAdvisor()">Ask Advisor</button>
+            <div class="advisor-btns">
+              <button class="btn btn-outline btn-sm" id="pm-advisor-brief" onclick="askAdvisor('briefing')">📋 Full Briefing</button>
+              <button class="btn btn-accent btn-sm" id="pm-advisor-ask" onclick="askAdvisor('question')">Ask Advisor</button>
+            </div>
           </div>
           <div id="pm-advisor-response" class="advisor-response"></div>
           <div style="margin-top:1.1rem">

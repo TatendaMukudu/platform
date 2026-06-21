@@ -2068,7 +2068,8 @@ img { max-width: 100%; }
   display: flex; justify-content: space-between; align-items: center;
   gap: 0.8rem; margin-top: 0.55rem;
 }
-.advisor-privacy { font-size: 0.68rem; color: var(--text-muted); line-height: 1.4; max-width: 72%; }
+.advisor-privacy { font-size: 0.68rem; color: var(--text-muted); line-height: 1.4; max-width: 60%; }
+.advisor-btns { display: flex; gap: 0.5rem; flex-shrink: 0; }
 .advisor-response { margin-top: 0.9rem; }
 .advisor-loading {
   font-size: 0.82rem; color: var(--text-secondary);
