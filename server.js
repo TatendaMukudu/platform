@@ -2183,7 +2183,7 @@ app.post('/api/groups/create', (req, res) => {
   if (!orgCode || !name) return res.status(400).json({ error: 'orgCode and name required' });
   const code = orgCode.toLowerCase().trim();
   if (!orgGroups[code]) orgGroups[code] = [];
-  const group = { id: groupId(), name, description: description || '', memberIds: memberIds || [], leadIds: leadIds || [], goals: [], traits: [], createdAt: new Date().toISOString() };
+  const group = { id: groupId(), name, description: description || '', memberIds: memberIds || [], leadIds: leadIds || [], goals: [], traits: [], copilotEnabled: false, createdAt: new Date().toISOString() };
   orgGroups[code].push(group);
   scheduleSave();
   res.json({ ok: true, group });
@@ -2243,11 +2243,27 @@ app.put('/api/groups/:groupId/aims', requireAuth, (req, res) => {
   res.json({ ok: true, group: g });
 });
 
-/* ── GET /api/groups/:groupId/copilot — lead-facing Group Copilot ─────────────
-   Reads the group's goals/traits + shared feed + member activity and gives the
-   LEAD a short read: health summary, suggested prompts, and who may need a nudge.
-   Through the privacy gate: reasons over the group, never quotes a member's words
-   back to others. Lead-only (members get the visible "Copilot is here" banner). */
+/* ── PUT /api/groups/:groupId/copilot-settings — lead enables/disables Copilot ─
+   The real consent gate: no analysis happens unless the lead turns it on. */
+app.put('/api/groups/:groupId/copilot-settings', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = orgCode;
+  const g    = (orgGroups[code] || []).find(g => g.id === req.params.groupId);
+  if (!g) return res.status(404).json({ error: 'Group not found' });
+  const isLead  = (g.leadIds || []).includes(userId);
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin' || _userHasPerm(code, userId, 'manage_settings');
+  if (!isLead && !isAdmin) return res.status(403).json({ error: 'Only a lead can change Copilot settings.' });
+  if (typeof req.body.enabled === 'boolean') g.copilotEnabled = req.body.enabled;
+  scheduleSave();
+  res.json({ ok: true, copilotEnabled: !!g.copilotEnabled });
+});
+
+/* ── GET /api/groups/:groupId/copilot — the Group Copilot (coach for the LEAD) ─
+   Positioned as "help the group reach its stated goals", NOT "monitoring".
+   SIGNALS-FIRST (participation / activity / goal signals — not message content),
+   AGGREGATE-ONLY (advice, never naming or exposing individuals), DIRECTIONAL
+   language (no scores). Through the AI gateway + privacy gate. Lead-only, and
+   only runs when the lead has enabled the Copilot for the group. */
 app.get('/api/groups/:groupId/copilot', requireAuth, async (req, res) => {
   const { orgCode, userId } = req.iqSession;
   const code = orgCode;
@@ -2258,69 +2274,106 @@ app.get('/api/groups/:groupId/copilot', requireAuth, async (req, res) => {
   const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin' || _userHasPerm(code, userId, 'view_analytics');
   if (!isLead && !isAdmin) return res.status(403).json({ error: 'Only a lead of this group can use the Copilot.' });
 
-  // Members of the group
+  if (!g.copilotEnabled) return res.json({ ok: true, enabled: false });
+
   const memberIds = [...new Set([...(g.memberIds || []), ...(g.leadIds || [])])].filter(id => id !== userId);
-  const now = Date.now();
+  const now    = Date.now();
+  const WEEK   = 7 * 86400000;
 
-  const citable = [
-    `Group: ${g.name} — ${memberIds.length} member(s).`,
-    g.goals?.length  ? `Group goals: ${g.goals.join('; ')}.`   : 'Group goals: none set yet.',
-    g.traits?.length ? `Group traits: ${g.traits.join(', ')}.` : 'Group traits: none set yet.',
-  ];
-  const nudges = [];
+  // ── SIGNALS (no message content) ──────────────────────────────────────────
+  let active7 = 0, activePrev = 0;            // members active this week / prior week
+  let quietCount = 0;                          // became/stayed quiet (10+ days)
+  let moodSum = 0, moodCnt = 0;
   memberIds.forEach(id => {
-    const u = orgUsers[code]?.[id];
-    if (!u) return;
+    const u = orgUsers[code]?.[id]; if (!u) return;
     const cks = memberCheckins[userKey(code, id)] || memberCheckins[memberKey(code, u.name || '')] || [];
-    const lastTs = cks.length ? new Date(cks[cks.length - 1].ts || cks[cks.length - 1].date).getTime() : null;
+    let a7 = false, aPrev = false, lastTs = null;
+    cks.forEach(c => {
+      const t = new Date(c.ts || c.date).getTime(); if (isNaN(t)) return;
+      lastTs = Math.max(lastTs || 0, t);
+      if (now - t < WEEK) a7 = true;
+      else if (now - t < 2 * WEEK) aPrev = true;
+      if (c.mood != null && now - t < 2 * WEEK) { moodSum += Number(c.mood); moodCnt++; }
+    });
+    if (a7) active7++;
+    if (aPrev) activePrev++;
     const days = lastTs ? Math.floor((now - lastTs) / 86400000) : null;
-    if (days === null) nudges.push({ name: u.name, reason: 'No check-in yet' });
-    else if (days >= 10) nudges.push({ name: u.name, reason: `Quiet for ${days} days` });
+    if (days === null || days >= 10) quietCount++;
   });
-  citable.push(`Activity: ${memberIds.length - nudges.length}/${memberIds.length} active recently.`);
 
-  // Recent shared feed (group messages + shared notes) — anonymous authors stripped.
-  const feed = [];
+  // Group message volume (count only — never content) this week vs prior
+  let msg7 = 0, msgPrev = 0;
   Object.values(orgMessages).forEach(m => {
-    if (m.orgCode === code && m.toType === 'group' && m.toId === g.id) {
-      feed.push({ t: m.createdAt, who: m.anonymous ? 'someone' : (m.fromName || 'member'), text: m.content });
-    }
+    if (m.orgCode !== code || m.toType !== 'group' || m.toId !== g.id) return;
+    const t = new Date(m.createdAt).getTime(); if (isNaN(t)) return;
+    if (now - t < WEEK) msg7++; else if (now - t < 2 * WEEK) msgPrev++;
   });
-  Object.values(orgNotes).forEach(n => {
-    if (n.orgCode === code && n.groupId === g.id && n.type !== 'private') {
-      feed.push({ t: n.createdAt, who: n.type === 'anonymous' ? 'someone' : (n.authorName || 'member'), text: n.content });
-    }
-  });
-  feed.sort((a, b) => new Date(b.t) - new Date(a.t));
-  const recent = feed.slice(0, 12);
-  recent.forEach(f => citable.push(`Feed — ${f.who}: ${String(f.text).slice(0, 160)}`));
+
+  const total       = memberIds.length;
+  const participation = total ? Math.round((active7 / total) * 100) : 0;
+  const recentAct   = active7 + msg7;
+  const priorAct    = activePrev + msgPrev;
+  const engagementTrend = priorAct === 0 ? (recentAct > 0 ? 'Increasing' : 'Quiet')
+    : recentAct > priorAct * 1.15 ? 'Increasing'
+    : recentAct < priorAct * 0.85 ? 'Decreasing' : 'Steady';
+
+  // Directional health (no score)
+  const health = total === 0 ? 'No members yet'
+    : participation >= 70 ? 'Sustaining'
+    : participation >= 40 ? 'Holding'
+    : 'Needs attention';
+  const healthColor = health === 'Sustaining' ? 'green' : health === 'Holding' ? 'yellow' : 'red';
+
+  // Goal progress (directional, heuristic until Phase 2 goal-progress signals)
+  const goalProgress = !(g.goals && g.goals.length) ? 'No goals set'
+    : participation >= 70 && engagementTrend !== 'Decreasing' ? 'Strong'
+    : participation >= 40 ? 'Moderate' : 'Early';
+
+  // ── AI: actions / prompts / reflection — from SIGNALS + goals/traits only ──
+  const signalBrief = [
+    `Group: ${g.name} (${total} members).`,
+    g.goals?.length  ? `Goals: ${g.goals.join('; ')}.`   : 'Goals: none set.',
+    g.traits?.length ? `Traits: ${g.traits.join(', ')}.` : 'Traits: none set.',
+    `Participation this week: ${participation}% (${active7}/${total}).`,
+    `Engagement trend: ${engagementTrend}.`,
+    `Members who have gone quiet (10+ days): ${quietCount}.`,
+    moodCnt ? `Recent average mood: ${Math.round((moodSum / moodCnt) * 10) / 10}/5.` : 'Mood: no recent data.',
+    `Goal progress (directional): ${goalProgress}.`,
+  ].join('\n');
 
   const system = [
-    `You are the IntelliQ Group Copilot, assisting the LEAD of a group (like Copilot in Teams). Help them run the group well against its stated goals and traits. Be specific and practical.`,
+    `You are the IntelliQ Group Copilot — a coach for the group's LEAD. Your job is to help the group move toward its stated goals. You are NOT a monitor and you do not surveil members.`,
     privacy.GATE_DIRECTIVE,
-    `Extra rule: you advise the lead only. Never quote or attribute a member's words back to others. Summarise themes, don't expose individuals.`,
+    `Hard rules: speak in AGGREGATE only — never name or single out an individual. Give the lead ADVICE, not exposure. Use directional language, never scores. Tie everything to the group's goals and traits.`,
   ].join('\n\n');
 
   const user = [
-    privacy.buildContextBlock({ citable, privateInforming: [] }),
+    'SIGNALS (counts and trends only — no message content):',
+    signalBrief,
     '',
-    'Return ONLY JSON: {"summary":"2-3 sentence read on how the group is doing vs its goals","prompts":["2-4 conversation prompts or feedback the lead could post"],"nudges":["who/what to follow up on, general"]}',
+    'Return ONLY JSON: {"actions":["1-3 aggregate suggested actions for the lead, e.g. \'Some members have gone quiet — reach out personally\'"],"prompts":["2-3 discussion prompts derived from the group goals/traits the lead could post"],"reflection":"one short weekly reflection: what may be helping vs slowing progress toward the goals"}',
   ].join('\n');
 
   let out = null;
   try {
-    out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 500, schema: ['summary'] });
+    out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 500, schema: ['actions'] });
   } catch (err) {
     console.warn('[group-copilot] AI error:', err.message);
   }
 
   res.json({
     ok: true,
+    enabled:   true,
     groupName: g.name,
-    summary:  out?.summary || 'Not enough activity yet for a meaningful read. Once members post or check in, the Copilot will summarise how the group is tracking against its goals.',
-    prompts:  Array.isArray(out?.prompts) ? out.prompts.slice(0, 4) : [],
-    nudges:   nudges.slice(0, 6),
-    hasGoals: !!(g.goals && g.goals.length),
+    health, healthColor,
+    participation,
+    goalProgress,
+    engagementTrend,
+    hasGoals:  !!(g.goals && g.goals.length),
+    actions:   Array.isArray(out?.actions) ? out.actions.slice(0, 3)
+               : (quietCount > 0 ? [`${quietCount} member(s) have become less active — consider reaching out personally to see how they're doing.`] : []),
+    prompts:   Array.isArray(out?.prompts) ? out.prompts.slice(0, 3) : [],
+    reflection: out?.reflection || null,
   });
 });
 

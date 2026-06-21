@@ -2207,3 +2207,10 @@ img { max-width: 100%; }
 .gd-copilot-sec-h { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 0.3rem; }
 .gd-copilot-sec ul { margin: 0; padding-left: 1.1rem; font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5; }
 .gd-copilot-foot { font-size: 0.68rem; color: var(--text-muted); margin-top: 0.7rem; font-style: italic; }
+
+/* ── Group Copilot dashboard (health grid) ─────────────────── */
+.gd-health-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin: 0.3rem 0 0.4rem; }
+.gd-health-cell { background: var(--surface-1, var(--bg)); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.6rem; }
+.gd-health-k { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 0.2rem; }
+.gd-health-v { font-size: 0.92rem; font-weight: 700; display: flex; align-items: center; gap: 0.4rem; }
+.gd-health-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex-shrink: 0; }

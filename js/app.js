@@ -3810,18 +3810,57 @@ async function openGroupDetail(gid) {
   document.getElementById('gd-sub').textContent   = `${group?.memberIds?.length || 0} members · shared notes & messages`;
   document.getElementById('gd-compose').value     = '';
 
-  // Copilot: visible AI-present banner for everyone; lead-only Copilot panel.
-  const meId    = Auth.currentUser?.id;
-  const isLead  = (group?.leadIds || []).includes(meId);
-  const banner  = document.getElementById('gd-copilot-banner');
-  const panel   = document.getElementById('gd-copilot');
-  const body    = document.getElementById('gd-copilot-body');
-  if (banner) banner.style.display = 'flex';   // never silent — always shown
-  if (panel)  panel.style.display  = isLead ? 'block' : 'none';
+  // Copilot: lead-only panel. Banner shows to everyone only when ACTIVE.
+  const meId   = Auth.currentUser?.id;
+  _gdIsLead    = (group?.leadIds || []).includes(meId) || Auth.isAdmin();
+  _gdCopilotOn = !!group?.copilotEnabled;
+  const banner = document.getElementById('gd-copilot-banner');
+  const panel  = document.getElementById('gd-copilot');
+  const body   = document.getElementById('gd-copilot-body');
+  if (banner) banner.style.display = _gdCopilotOn ? 'flex' : 'none';
+  if (panel)  panel.style.display  = _gdIsLead ? 'block' : 'none';
   if (body)   body.innerHTML = '';
+  if (_gdIsLead) _renderCopilotControls();
 
   openModal('group-detail-modal');
   await loadGroupFeed(gid);
+}
+
+let _gdIsLead = false, _gdCopilotOn = false;
+
+function _renderCopilotControls() {
+  const actions = document.getElementById('gd-copilot-actions');
+  const body    = document.getElementById('gd-copilot-body');
+  if (!actions) return;
+  actions.innerHTML = _gdCopilotOn
+    ? `<button class="btn btn-accent btn-sm" id="gd-copilot-btn" onclick="runGroupCopilot()">Get a read</button>
+       <button class="btn btn-outline btn-sm" onclick="toggleGroupCopilot(false)">Turn off</button>`
+    : `<button class="btn btn-accent btn-sm" onclick="toggleGroupCopilot(true)">Enable Copilot</button>`;
+  if (body && !_gdCopilotOn) {
+    body.innerHTML = `<div class="gd-copilot-tip">Group Copilot is off. When enabled, it helps you understand engagement and progress toward this group's goals — using activity signals, never reading out private messages. Members see a clear "Copilot is active" notice.</div>`;
+  }
+}
+
+async function toggleGroupCopilot(enabled) {
+  try {
+    const res = await fetch(`/api/groups/${encodeURIComponent(_currentGroupId)}/copilot-settings`, {
+      method: 'PUT', headers: Auth._headers(),
+      body: JSON.stringify({ orgCode: AppState.orgCode, enabled }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Could not update');
+    _gdCopilotOn = !!data.copilotEnabled;
+    const banner = document.getElementById('gd-copilot-banner');
+    if (banner) banner.style.display = _gdCopilotOn ? 'flex' : 'none';
+    _renderCopilotControls();
+    if (_gdCopilotOn) runGroupCopilot();
+    showToast(_gdCopilotOn ? 'Group Copilot enabled' : 'Group Copilot turned off', 'success');
+  } catch (err) { showToast(err.message, 'warning'); }
+}
+
+function _healthDot(color) {
+  const c = color === 'green' ? 'var(--success)' : color === 'yellow' ? 'var(--warning)' : 'var(--danger)';
+  return `<span class="gd-health-dot" style="background:${c}"></span>`;
 }
 
 async function runGroupCopilot() {
@@ -3829,21 +3868,28 @@ async function runGroupCopilot() {
   const body = document.getElementById('gd-copilot-body');
   if (!_currentGroupId || !body) return;
   const old = btn ? btn.textContent : '';
-  if (btn) { btn.disabled = true; btn.textContent = 'Thinking…'; }
-  body.innerHTML = `<div class="gd-copilot-loading">🤖 Reading the group…</div>`;
+  if (btn) { btn.disabled = true; btn.textContent = 'Reading…'; }
+  body.innerHTML = `<div class="gd-copilot-loading">🤖 Reading the group's signals…</div>`;
   try {
     const res  = await fetch(`/api/groups/${encodeURIComponent(_currentGroupId)}/copilot`, { headers: Auth._headers() });
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error || 'Copilot unavailable');
+    if (!data.enabled) { _gdCopilotOn = false; _renderCopilotControls(); return; }
 
+    const actions = (data.actions || []).map(a => `<li>${_escAdvisor(a)}</li>`).join('');
     const prompts = (data.prompts || []).map(p => `<li>${_escAdvisor(p)}</li>`).join('');
-    const nudges  = (data.nudges  || []).map(n => `<li><strong>${_escAdvisor(n.name)}</strong> — ${_escAdvisor(n.reason)}</li>`).join('');
     body.innerHTML = `
       ${!data.hasGoals ? `<div class="gd-copilot-tip">💡 Set this group's goals in Leader Workspace → My Groups for sharper guidance.</div>` : ''}
-      <div class="gd-copilot-summary">${_escAdvisor(data.summary).replace(/\n/g,'<br>')}</div>
-      ${prompts ? `<div class="gd-copilot-sec"><div class="gd-copilot-sec-h">Suggested prompts</div><ul>${prompts}</ul></div>` : ''}
-      ${nudges  ? `<div class="gd-copilot-sec"><div class="gd-copilot-sec-h">May need a nudge</div><ul>${nudges}</ul></div>` : ''}
-      <div class="gd-copilot-foot">Reasoned from the group's activity — individual private messages are never disclosed.</div>`;
+      <div class="gd-health-grid">
+        <div class="gd-health-cell"><div class="gd-health-k">Health</div><div class="gd-health-v">${_healthDot(data.healthColor)}${_escAdvisor(data.health)}</div></div>
+        <div class="gd-health-cell"><div class="gd-health-k">Participation</div><div class="gd-health-v">${data.participation}%</div></div>
+        <div class="gd-health-cell"><div class="gd-health-k">Goal Progress</div><div class="gd-health-v">${_escAdvisor(data.goalProgress)}</div></div>
+        <div class="gd-health-cell"><div class="gd-health-k">Engagement</div><div class="gd-health-v">${_escAdvisor(data.engagementTrend)}</div></div>
+      </div>
+      ${actions ? `<div class="gd-copilot-sec"><div class="gd-copilot-sec-h">Suggested actions</div><ul>${actions}</ul></div>` : ''}
+      ${prompts ? `<div class="gd-copilot-sec"><div class="gd-copilot-sec-h">Discussion prompts</div><ul>${prompts}</ul></div>` : ''}
+      ${data.reflection ? `<div class="gd-copilot-sec"><div class="gd-copilot-sec-h">Weekly reflection</div><div class="gd-copilot-summary">${_escAdvisor(data.reflection).replace(/\n/g,'<br>')}</div></div>` : ''}
+      <div class="gd-copilot-foot">Based on participation &amp; activity signals toward this group's goals. Individual members are never named or quoted.</div>`;
   } catch (err) {
     body.innerHTML = `<div class="gd-copilot-err">⚠ ${_escAdvisor(err.message || 'Something went wrong.')}</div>`;
   } finally {
