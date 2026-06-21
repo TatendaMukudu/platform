@@ -1,27 +1,37 @@
-# Latest Update — "People" → "Members" rename
+# Latest Update — Hierarchy Leadership (fixes "coach sees nothing")
 
-**Merged to main:** `b581c25` (deploying)
+**Merged to main:** `84d0148` (deploying)
 
-User-facing wording changed from "People" to "Members" for a more professional
-feel. **Labels only** — page IDs, route keys, function names, and container IDs
-are untouched, so nothing breaks.
+## The real problem with the structure
+Your tree is tiered: **Management → Coach → Player**. Tyler is a *member of* the
+"Coach" node — but being a member of a node never made you a *leader*. Leadership
+only came from being explicitly ticked as a node leader, supervising someone, or
+leading a group. So Tyler was correctly (but unintuitively) treated as a member.
 
-## Changed (visible)
-- Nav: **People → Members**, **My People → My Members**
-- Page titles + section headers updated to match
-- **Add Person → Add Member** (buttons, ➕ tooltip, onboard card + form title)
-- Leader buttons "View My People" / "My People →" → **My Members**
-- Asset version bumped to `?v=20260621d` so the new bundle loads
+## The fix: a tier above another tier = leadership
+- **`_leadsViaHierarchy`** — if any node you belong to has sub-nodes beneath it,
+  you lead that branch. So a person in "Coach" (which has child "Player")
+  automatically leads the Player tier. No separate "mark as leader" step.
+- **Visibility** now flows down the tiers: you see the people in the DESCENDANT
+  nodes of your node (the tiers below). Your own-node peers are NOT exposed —
+  only the levels beneath you.
+- Explicit "Leader" assignment and supervisor/group leadership still work too.
 
-## Left untouched (on purpose)
-- Code: `id="page-people"`, `navigate('people')`, `PAGE_TITLES.people` key,
-  `switchPeopleTab`, `renderPeople`, `leader-people` ids — all internal, renaming
-  them would break wiring for no benefit.
+## What Tyler should see now
+After deploy + a fresh load, Tyler (in "Coach") gets the **Leader Workspace**
+(Dashboard, My Members, Intelligence, Group Health) scoped to the Player tier
+below him.
 
-## To see it on your phone
-Load once with a cache-bust: **`https://827l.onrender.com/?fresh=1`**
-(after that, future deploys refresh automatically).
+## Important: Tyler must load fresh code once
+On Tyler's device: open **`https://827l.onrender.com/?fresh=1`** (or log out and
+back in). His returning session then re-checks leadership and the workspace
+appears.
+
+## Note on the model
+This makes node TIERS mean leadership (higher tier leads lower). If you ever want
+two peers in the same tier where neither leads the other, keep them in sibling
+nodes with no parent/child relationship.
 
 ## Verification
-- `node --check` passes on app.js and data.js.
-- No visible "People" / "Add Person" strings remain in the UI.
+- `node --check server.js` passes.
+- Not run live here — needs Tyler's fresh login to confirm.
