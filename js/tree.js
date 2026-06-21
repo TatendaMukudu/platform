@@ -270,7 +270,7 @@ const OrgTree = {
   ══════════════════════════════════════════════════════════ */
   openManageNode(nodeId) {
     const node = this._nodes[nodeId];
-    if (!node) return;
+    if (!node) { if (typeof showToast === 'function') showToast('Tree still loading — refresh and try again.', 'warning'); return; }
     _showInlineModal(`
       <div style="font-size:0.95rem;font-weight:700;margin-bottom:1rem">Manage node</div>
       <div class="form-group">
@@ -332,7 +332,7 @@ const OrgTree = {
   ══════════════════════════════════════════════════════════ */
   openMoveNode(nodeId) {
     const node = this._nodes[nodeId];
-    if (!node) return;
+    if (!node) { if (typeof showToast === 'function') showToast('Tree still loading — refresh and try again.', 'warning'); return; }
 
     // Exclude self and all descendants (can't move into own subtree)
     const descendants = this._getDescendantIds(nodeId);
@@ -388,7 +388,7 @@ const OrgTree = {
   ══════════════════════════════════════════════════════════ */
   openAssignPeople(nodeId) {
     const node    = this._nodes[nodeId];
-    if (!node) return;
+    if (!node) { if (typeof showToast === 'function') showToast('Tree still loading — refresh and try again.', 'warning'); return; }
     const members = (AppState?.members || [])
       .filter(m => m.role !== 'superadmin')
       .sort((a, b) => a.name.localeCompare(b.name));
