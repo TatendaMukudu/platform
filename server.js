@@ -872,26 +872,13 @@ app.get('/api/auth/me', (req, res) => {
 
   const org = orgMeta[session.orgCode];
 
-  // Resolve permissions: role defaults → node-leader promotion → explicit grants
-  const explicitGrants = userPermissions[session.orgCode]?.[session.userId] || {};
-  const roleDefaults   = _resolveRoleDefaults(user.role);
+  // Unified permission resolution (role defaults → leader grants → explicit).
+  // `leads` tells the client whether to show the Leader Workspace, and is true
+  // for node leaders, supervisor-tree leaders, AND group leads — see _isLeader.
+  const permissions = _effectivePermissions(session.orgCode, session.userId);
+  const leads       = _isLeader(session.orgCode, session.userId);
 
-  // If this user leads at least one org node, automatically grant the minimal
-  // set of leader-layer permissions regardless of their role.
-  // A member placed as a node leader should be able to see their subtree.
-  const isNodeLeader = (user.leadershipNodeIds || []).length > 0;
-  const nodeLeaderGrants = isNodeLeader ? {
-    view_team:        true,
-    review_checkins:  true,
-    view_insights:    true,
-    assign_scenarios: true,
-    view_reports:     true,
-    view_members:     true,   // needed to see the subtree member list
-  } : {};
-
-  const permissions = { ...roleDefaults, ...nodeLeaderGrants, ...explicitGrants };
-
-  res.json({ ok: true, user: { ...user, passwordHash: undefined }, org, permissions });
+  res.json({ ok: true, user: { ...user, passwordHash: undefined, leads }, org, permissions });
 });
 
 /* ── Permission defaults by role (fallback when no explicit grant) ───────── */
@@ -946,9 +933,7 @@ function requirePermission(perm) {
     // SuperAdmin bypasses all permission checks
     if (user.role === 'superadmin') { req.iqSession = session; return next(); }
 
-    const explicit = userPermissions[session.orgCode]?.[session.userId] || {};
-    const defaults = _resolveRoleDefaults(user.role);
-    const allowed  = explicit[perm] !== undefined ? explicit[perm] : (defaults[perm] || false);
+    const allowed = _effectivePermissions(session.orgCode, session.userId)[perm] === true;
 
     if (!allowed) return res.status(403).json({ error: `Permission denied: ${perm}` });
     req.iqSession = session;
@@ -1416,14 +1401,56 @@ app.delete('/api/tree/node/:nodeId', requirePermission('manage_tree'), (req, res
    Enforced server-side only — clients never receive hidden users.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* ── Leader grants — the scoped permission set a leader receives ─────────────
+   Applied to anyone detected as a leader (see _isLeader), on top of their role
+   defaults. Deliberately does NOT include org-wide admin powers (manage_*,
+   delete_members, manage_settings) — leaders manage their subtree, not the org. */
+const LEADER_GRANTS = {
+  view_team:        true,
+  review_checkins:  true,
+  view_insights:    true,
+  assign_scenarios: true,
+  view_reports:     true,
+  view_members:     true,
+};
+
+/* ── _isLeader — robust leadership detection across all three structures ──────
+   A user is a leader if ANY of these hold:
+     1. they lead >=1 org node   (orgNodes[].leaderIds / user.leadershipNodeIds)
+     2. they supervise >=1 user  (legacy supervisorId tree)
+     3. they lead >=1 group      (orgGroups[].leadIds)
+   This is what fixes "I'm a leader but the app treats me as a member": node
+   leaderIds are only ever set by manually editing a node, so orgs built via
+   onboarding (which sets supervisorId) were never recognized as having leaders. */
+function _isLeader(orgCode, userId) {
+  const user = orgUsers[orgCode]?.[userId];
+  if (!user) return false;
+  if ((user.leadershipNodeIds || []).length) return true;
+  const users = orgUsers[orgCode] || {};
+  if (Object.values(users).some(u => u.id !== userId && u.supervisorId === userId)) return true;
+  if ((orgGroups[orgCode] || []).some(g => (g.leadIds || []).includes(userId))) return true;
+  return false;
+}
+
+/* ── _effectivePermissions — single source of truth for what a user can do ────
+   roleDefaults -> leader grants (if a leader) -> explicit per-user overrides.
+   Used by /api/auth/me, _userHasPerm, and requirePermission so the client and
+   the server can never disagree about a user's permissions. */
+function _effectivePermissions(orgCode, userId) {
+  const user = orgUsers[orgCode]?.[userId];
+  if (!user) return {};
+  const roleDefaults = _resolveRoleDefaults(user.role);
+  const leaderGrants = _isLeader(orgCode, userId) ? LEADER_GRANTS : {};
+  const explicit     = userPermissions[orgCode]?.[userId] || {};
+  return { ...roleDefaults, ...leaderGrants, ...explicit };
+}
+
 /* ── Internal: resolve a single permission for any user ─────────────────── */
 function _userHasPerm(orgCode, userId, perm) {
   const user = orgUsers[orgCode]?.[userId];
   if (!user) return false;
   if (user.role === 'superadmin') return true;
-  const explicit = userPermissions[orgCode]?.[userId] || {};
-  const defaults = _resolveRoleDefaults(user.role);
-  return explicit[perm] !== undefined ? explicit[perm] : (defaults[perm] || false);
+  return _effectivePermissions(orgCode, userId)[perm] === true;
 }
 
 /* ── Get all node IDs where a user appears (as member OR leader) ────────── */
@@ -1510,6 +1537,24 @@ function _backfillUserNodeIds() {
   console.log(`[startup] _backfillUserNodeIds: processed ${userCount} user records`);
 }
 
+/* ── Collect all users below a user in the legacy supervisorId tree (BFS) ──── */
+function getSupervisedSubtreeIds(orgCode, userId) {
+  const users = orgUsers[orgCode] || {};
+  const childrenOf = {};
+  Object.values(users).forEach(u => {
+    if (u.supervisorId) (childrenOf[u.supervisorId] = childrenOf[u.supervisorId] || []).push(u.id);
+  });
+  const out   = new Set();
+  const queue = [...(childrenOf[userId] || [])];
+  while (queue.length) {
+    const id = queue.shift();
+    if (out.has(id)) continue;
+    out.add(id);
+    (childrenOf[id] || []).forEach(c => queue.push(c));
+  }
+  return [...out];
+}
+
 /* ── Get node IDs where a user is a LEADER (used for visibility scoping) ── */
 function getUserLeaderNodeIds(orgCode, userId) {
   const user = orgUsers[orgCode]?.[userId];
@@ -1546,32 +1591,31 @@ function getVisibleUserIds(orgCode, requestingUserId) {
     return Object.keys(orgUsers[orgCode] || {});
   }
 
-  // Rule 3 — view_team: see subtree of nodes this user LEADS
-  // Visibility flows through LEADERSHIP assignment only — being a plain member
-  // of a node does not grant visibility over that node's subtree.
+  // Rule 3 — view_team: see everyone below this user, composed across ALL three
+  // leadership structures (node subtree + legacy supervisor subtree + led groups)
+  // so visibility matches _isLeader detection regardless of how the org was built.
   if (_userHasPerm(orgCode, requestingUserId, 'view_team')) {
-    const myLeaderNodeIds = getUserLeaderNodeIds(orgCode, requestingUserId);
+    const visibleIds = new Set([requestingUserId]); // always include self
 
-    if (myLeaderNodeIds.length === 0) {
-      // Rule 3a — has permission but leads no nodes → only self
-      return [requestingUserId];
-    }
-
-    // Expand each led node to its full descendant set
-    const allNodeIds = new Set();
-    myLeaderNodeIds.forEach(nid =>
-      getDescendantNodeIds(orgCode, nid).forEach(d => allNodeIds.add(d))
+    // (a) Node subtrees this user leads
+    const allNodes = orgNodes[orgCode] || {};
+    getUserLeaderNodeIds(orgCode, requestingUserId).forEach(nid =>
+      getDescendantNodeIds(orgCode, nid).forEach(d => {
+        const n = allNodes[d];
+        if (!n) return;
+        (n.memberIds || []).forEach(id => visibleIds.add(id));
+        (n.leaderIds || []).forEach(id => visibleIds.add(id));
+      })
     );
 
-    // Collect every member + leader from all those nodes
-    const allNodes   = orgNodes[orgCode] || {};
-    const visibleIds = new Set([requestingUserId]); // always include self
-    allNodeIds.forEach(nid => {
-      const n = allNodes[nid];
-      if (!n) return;
-      (n.memberIds || []).forEach(id => visibleIds.add(id));
-      (n.leaderIds || []).forEach(id => visibleIds.add(id));
-    });
+    // (b) Legacy supervisor subtree (everyone who reports up to this user)
+    getSupervisedSubtreeIds(orgCode, requestingUserId).forEach(id => visibleIds.add(id));
+
+    // (c) Members of any group this user leads
+    (orgGroups[orgCode] || [])
+      .filter(g => (g.leadIds || []).includes(requestingUserId))
+      .forEach(g => (g.memberIds || []).forEach(id => visibleIds.add(id)));
+
     return [...visibleIds];
   }
 
