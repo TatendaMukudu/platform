@@ -5353,8 +5353,8 @@ async function renderLeaderHome() {
  * Full subtree member list with check-in status, role, and
  * links to profiles. No members outside the leader's subtree.
  * ── ────────────────────────────────────────────────────── */
-let _leaderPeopleMembers = [];
-let _leaderPeopleSearch  = '';
+let _leaderTree         = { tree: [], unassigned: [] };
+let _leaderPeopleSearch = '';
 
 async function renderLeaderPeople() {
   const el       = document.getElementById('ldr-people-content');
@@ -5364,21 +5364,118 @@ async function renderLeaderPeople() {
   el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Loading…</div>`;
 
   try {
-    const res  = await fetch('/api/workspace/visible-members', { headers: Auth._headers() });
+    const res  = await fetch('/api/workspace/my-tree', { headers: Auth._headers() });
     const data = res.ok ? await res.json() : { ok: false };
     if (!data.ok) throw new Error('Request failed');
 
-    _leaderPeopleMembers = data.members || [];
-    if (countEl) countEl.textContent = `${_leaderPeopleMembers.length} member${_leaderPeopleMembers.length !== 1 ? 's' : ''} in your scope`;
+    _leaderTree = { tree: data.tree || [], unassigned: data.unassigned || [] };
+    const n = data.totalVisible || 0;
+    if (countEl) countEl.textContent = `${n} member${n !== 1 ? 's' : ''} below you`;
     _renderLeaderPeopleList();
   } catch(e) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load people. Try refreshing.</p></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load your tree. Try refreshing.</p></div>`;
   }
 }
 
 function filterLeaderPeople(search) {
   _leaderPeopleSearch = (search || '').toLowerCase();
   _renderLeaderPeopleList();
+}
+
+// One member row (shared by tree nodes + unassigned bucket)
+function _leaderMemberRowHTML(m) {
+  const MOOD_ICONS = { 1:'😔', 2:'😕', 3:'😐', 4:'🙂', 5:'😄' };
+  const now       = Date.now();
+  const initials  = (m.name || '?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+  const roleLabel = Auth.ROLE_LABELS?.[m.role] || m.role || 'Member';
+  const mood      = m.latestCheckin?.mood;
+  const ckDate    = m.latestCheckin?.date || null;
+  const ckTs      = m.latestCheckin?.ts ? new Date(m.latestCheckin.ts).getTime() : null;
+  const daysSince = ckTs ? Math.floor((now - ckTs) / 86400000) : null;
+  const stale     = daysSince !== null && daysSince >= 7;
+  const isPending = !m.passwordSet;
+  return `
+    <div class="leader-member-row${stale && !isPending ? ' lm-row--stale' : ''}" onclick="showProfile('${m.userId}')" style="cursor:pointer">
+      <div class="lm-avatar">${initials}</div>
+      <div class="lm-info">
+        <div class="lm-name">${_escAdvisor(m.name)}
+          ${isPending  ? `<span class="lm-badge lm-badge--pending">PENDING</span>` : ''}
+          ${stale && !isPending ? `<span class="lm-badge lm-badge--warn">NO CHECK-IN ${daysSince}d</span>` : ''}
+        </div>
+        <div class="lm-meta">${_escAdvisor(roleLabel)}${m.email ? ' · ' + _escAdvisor(m.email) : ''}</div>
+      </div>
+      <div class="lm-checkin">
+        <div class="lm-mood" title="${ckDate ? 'Last check-in '+ckDate : 'No check-in yet'}">${MOOD_ICONS[mood] || '—'}</div>
+        <div class="lm-checkin-date">${ckDate || 'No check-in'}</div>
+      </div>
+    </div>`;
+}
+
+// Render one tree node (recursive). Returns '' if nothing matches the search.
+function _leaderNodeHTML(node, depth) {
+  const matches = m => !_leaderPeopleSearch
+    || m.name.toLowerCase().includes(_leaderPeopleSearch)
+    || (m.email || '').toLowerCase().includes(_leaderPeopleSearch);
+  const members  = (node.members || []).filter(matches);
+  const childHTML = (node.children || []).map(c => _leaderNodeHTML(c, depth + 1)).join('');
+  // Hide a node entirely if searching and it has no matches anywhere below.
+  if (_leaderPeopleSearch && !members.length && !childHTML) return '';
+  const count = _subtreeCount(node);
+  return `
+    <div class="ltree-node" style="margin-left:${depth ? 14 : 0}px">
+      <div class="ltree-node-head">
+        <span class="ltree-branch">${depth ? '└' : '▸'}</span>
+        <span class="ltree-node-name">${_escAdvisor(node.name)}</span>
+        <span class="ltree-node-count">${count}</span>
+      </div>
+      <div class="ltree-members">
+        ${members.map(_leaderMemberRowHTML).join('') || (members.length === 0 && !(node.children||[]).length ? `<div class="ltree-empty">No members here yet.</div>` : '')}
+      </div>
+      ${childHTML}
+    </div>`;
+}
+
+function _subtreeCount(node) {
+  let n = (node.members || []).length;
+  (node.children || []).forEach(c => { n += _subtreeCount(c); });
+  return n;
+}
+
+function _renderLeaderPeopleList() {
+  const el = document.getElementById('ldr-people-content');
+  if (!el) return;
+
+  const { tree, unassigned } = _leaderTree;
+  const hasAny = (tree && tree.length) || (unassigned && unassigned.length);
+
+  if (!hasAny) {
+    el.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">🌳</div>
+        <p>No tiers below you yet. Add a sub-node under your group in the Org Tree,
+           or use “＋ Add Member” to add someone directly under you.</p>
+      </div>`;
+    return;
+  }
+
+  const matches = m => !_leaderPeopleSearch
+    || m.name.toLowerCase().includes(_leaderPeopleSearch)
+    || (m.email || '').toLowerCase().includes(_leaderPeopleSearch);
+
+  const treeHTML = (tree || []).map(n => _leaderNodeHTML(n, 0)).join('');
+  const unMatched = (unassigned || []).filter(matches);
+  const unassignedHTML = unMatched.length ? `
+    <div class="ltree-node">
+      <div class="ltree-node-head">
+        <span class="ltree-branch">▸</span>
+        <span class="ltree-node-name">Directly under you</span>
+        <span class="ltree-node-count">${unMatched.length}</span>
+      </div>
+      <div class="ltree-members">${unMatched.map(_leaderMemberRowHTML).join('')}</div>
+    </div>` : '';
+
+  el.innerHTML = `<div class="ltree">${treeHTML}${unassignedHTML}</div>`
+    || `<div class="empty-state"><p>No matches.</p></div>`;
 }
 
 /* ── Add Member to my subtree (item C) ───────────────────────────────────────
@@ -5429,65 +5526,6 @@ async function leaderAddMember() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Add'; }
   }
-}
-
-function _renderLeaderPeopleList() {
-  const el = document.getElementById('ldr-people-content');
-  if (!el) return;
-
-  const MOOD_ICONS = { 1:'😔', 2:'😕', 3:'😐', 4:'🙂', 5:'😄' };
-  const filtered   = _leaderPeopleSearch
-    ? _leaderPeopleMembers.filter(m =>
-        m.name.toLowerCase().includes(_leaderPeopleSearch) ||
-        (m.email || '').toLowerCase().includes(_leaderPeopleSearch))
-    : _leaderPeopleMembers;
-
-  if (!filtered.length) {
-    el.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">👥</div>
-        <p>${_leaderPeopleMembers.length === 0
-          ? 'No members in your scope yet. An administrator needs to assign people to the nodes you lead.'
-          : 'No members match your search.'}</p>
-      </div>`;
-    return;
-  }
-
-  // Group: needs attention vs active vs pending
-  const now    = Date.now();
-  const week   = 7 * 86400 * 1000;
-
-  el.innerHTML = `
-    <div class="leader-member-list">
-      ${filtered.map(m => {
-        const initials  = (m.name || '?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-        const roleLabel = Auth.ROLE_LABELS?.[m.role] || m.role || 'Member';
-        const mood      = m.latestCheckin?.mood;
-        const ckDate    = m.latestCheckin?.date || null;
-        const ckTs      = m.latestCheckin?.ts ? new Date(m.latestCheckin.ts).getTime() : null;
-        const daysSince = ckTs ? Math.floor((now - ckTs) / 86400000) : null;
-        const stale     = daysSince !== null && daysSince >= 7;
-        const isPending = !m.passwordSet;
-
-        return `
-          <div class="leader-member-row${stale && !isPending ? ' lm-row--stale' : ''}">
-            <div class="lm-avatar">${initials}</div>
-            <div class="lm-info">
-              <div class="lm-name">
-                ${m.name}
-                ${isPending  ? `<span class="lm-badge lm-badge--pending">PENDING</span>` : ''}
-                ${stale && !isPending ? `<span class="lm-badge lm-badge--warn">NO CHECK-IN ${daysSince}d</span>` : ''}
-              </div>
-              <div class="lm-meta">${roleLabel}${m.email ? ' · ' + m.email : ''}</div>
-              ${(m.nodeIds||[]).length ? `<div class="lm-nodes">${m.nodeIds.length} node${m.nodeIds.length!==1?'s':''}</div>` : ''}
-            </div>
-            <div class="lm-checkin">
-              <div class="lm-mood" title="${ckDate ? 'Last check-in '+ckDate : 'No check-in yet'}">${MOOD_ICONS[mood] || '—'}</div>
-              <div class="lm-checkin-date">${ckDate || 'No check-in'}</div>
-            </div>
-          </div>`;
-      }).join('')}
-    </div>`;
 }
 
 /* ── LEADER INPUT TAB ────────────────────────────────────── */

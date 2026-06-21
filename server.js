@@ -1962,6 +1962,60 @@ app.get('/api/workspace/group-health', requireAuth, (req, res) => {
   });
 });
 
+/* ── GET /api/workspace/my-tree ───────────────────────────────────────────────
+   The leader's people as a TREE (the node tiers BELOW them), not a flat list.
+   Roots = nodes the leader explicitly leads + the direct children of nodes they
+   belong to. Each node carries its visible members; people visible to the leader
+   but not in any shown node land in an "unassigned" bucket. Scoped server-side. */
+function _leaderMemberCard(code, uid) {
+  const u = orgUsers[code]?.[uid];
+  if (!u || u.role === 'superadmin') return null;
+  const ck = memberCheckins[userKey(code, uid)] || memberCheckins[memberKey(code, u.name || '')] || [];
+  const last = ck.length ? ck[ck.length - 1] : null;
+  return {
+    userId: u.id, name: u.name || '', email: u.email || '', role: u.role || 'member',
+    passwordSet: u.passwordSet !== false,
+    latestCheckin: last ? { date: last.date || null, mood: last.mood || null, ts: last.ts || null } : null,
+  };
+}
+
+app.get('/api/workspace/my-tree', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = orgCode;
+  if (!_userHasPerm(code, userId, 'view_team')) {
+    return res.status(403).json({ error: 'Permission denied: view_team required' });
+  }
+
+  const nodes      = orgNodes[code] || {};
+  const visible    = new Set(getVisibleUserIds(code, userId));
+  visible.delete(userId);
+
+  // Root nodes to display: explicitly-led nodes + direct children of own nodes.
+  const roots = new Set(getUserLeaderNodeIds(code, userId));
+  getUserNodeIds(code, userId).forEach(nid =>
+    (nodes[nid]?.childNodeIds || []).forEach(c => roots.add(c))
+  );
+
+  const seenMembers = new Set();
+  const buildNode = (nid) => {
+    const n = nodes[nid];
+    if (!n) return null;
+    const ids = [...new Set([...(n.memberIds || []), ...(n.leaderIds || [])])]
+      .filter(id => visible.has(id));
+    const members = ids.map(id => { seenMembers.add(id); return _leaderMemberCard(code, id); }).filter(Boolean);
+    const children = (n.childNodeIds || []).map(buildNode).filter(Boolean);
+    return { nodeId: n.nodeId, name: n.name, members, children };
+  };
+
+  const tree = [...roots].map(buildNode).filter(Boolean);
+
+  // Visible members not placed in any shown node (e.g. added via supervisor).
+  const unassigned = [...visible].filter(id => !seenMembers.has(id))
+    .map(id => _leaderMemberCard(code, id)).filter(Boolean);
+
+  res.json({ ok: true, tree, unassigned, totalVisible: visible.size });
+});
+
 /* ═══════════════════════════════════════════════════════════════════════════
    SPRINT 2 — METRICS
    Three sources: org (superadmin-defined), shared (leader), personal (member)
