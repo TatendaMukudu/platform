@@ -3803,12 +3803,52 @@ async function deleteGroup(gid) {
 
 async function openGroupDetail(gid) {
   _currentGroupId = gid;
-  const group = _platformGroups.find(g => g.id === gid);
+  const group = (typeof _platformGroups !== 'undefined' && _platformGroups.find(g => g.id === gid))
+    || (_leaderGroups?.led || []).find(g => g.id === gid)
+    || (_leaderGroups?.member || []).find(g => g.id === gid);
   document.getElementById('gd-title').textContent = group?.name || 'Group';
   document.getElementById('gd-sub').textContent   = `${group?.memberIds?.length || 0} members · shared notes & messages`;
   document.getElementById('gd-compose').value     = '';
+
+  // Copilot: visible AI-present banner for everyone; lead-only Copilot panel.
+  const meId    = Auth.currentUser?.id;
+  const isLead  = (group?.leadIds || []).includes(meId);
+  const banner  = document.getElementById('gd-copilot-banner');
+  const panel   = document.getElementById('gd-copilot');
+  const body    = document.getElementById('gd-copilot-body');
+  if (banner) banner.style.display = 'flex';   // never silent — always shown
+  if (panel)  panel.style.display  = isLead ? 'block' : 'none';
+  if (body)   body.innerHTML = '';
+
   openModal('group-detail-modal');
   await loadGroupFeed(gid);
+}
+
+async function runGroupCopilot() {
+  const btn  = document.getElementById('gd-copilot-btn');
+  const body = document.getElementById('gd-copilot-body');
+  if (!_currentGroupId || !body) return;
+  const old = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Thinking…'; }
+  body.innerHTML = `<div class="gd-copilot-loading">🤖 Reading the group…</div>`;
+  try {
+    const res  = await fetch(`/api/groups/${encodeURIComponent(_currentGroupId)}/copilot`, { headers: Auth._headers() });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Copilot unavailable');
+
+    const prompts = (data.prompts || []).map(p => `<li>${_escAdvisor(p)}</li>`).join('');
+    const nudges  = (data.nudges  || []).map(n => `<li><strong>${_escAdvisor(n.name)}</strong> — ${_escAdvisor(n.reason)}</li>`).join('');
+    body.innerHTML = `
+      ${!data.hasGoals ? `<div class="gd-copilot-tip">💡 Set this group's goals in Leader Workspace → My Groups for sharper guidance.</div>` : ''}
+      <div class="gd-copilot-summary">${_escAdvisor(data.summary).replace(/\n/g,'<br>')}</div>
+      ${prompts ? `<div class="gd-copilot-sec"><div class="gd-copilot-sec-h">Suggested prompts</div><ul>${prompts}</ul></div>` : ''}
+      ${nudges  ? `<div class="gd-copilot-sec"><div class="gd-copilot-sec-h">May need a nudge</div><ul>${nudges}</ul></div>` : ''}
+      <div class="gd-copilot-foot">Reasoned from the group's activity — individual private messages are never disclosed.</div>`;
+  } catch (err) {
+    body.innerHTML = `<div class="gd-copilot-err">⚠ ${_escAdvisor(err.message || 'Something went wrong.')}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = old; }
+  }
 }
 
 async function loadGroupFeed(gid) {
@@ -5229,6 +5269,7 @@ function _renderLeaderGroups() {
     <div class="grp-card" data-gid="${g.id}">
       <div class="grp-head">
         <div class="grp-name">${_escAdvisor(g.name)} <span class="grp-leadtag">you lead</span></div>
+        <button class="btn btn-outline btn-sm" onclick="openGroupDetail('${g.id}')">💬 Open · Copilot</button>
       </div>
       <div class="grp-aim">
         <div class="grp-aim-label">🎯 Goals</div>

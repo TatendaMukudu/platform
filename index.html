@@ -1542,6 +1542,20 @@
     </div>
     <div class="modal-body" style="flex:1;overflow-y:auto">
 
+      <!-- AI-present banner — shown to everyone, never silent -->
+      <div id="gd-copilot-banner" class="gd-copilot-banner" style="display:none">
+        🤖 <span>IntelliQ Copilot is in this group — it helps the lead and never shares your private messages.</span>
+      </div>
+
+      <!-- Copilot panel — lead only -->
+      <div id="gd-copilot" class="gd-copilot" style="display:none">
+        <div class="gd-copilot-head">
+          <span>🤖 Group Copilot</span>
+          <button class="btn btn-outline btn-sm" id="gd-copilot-btn" onclick="runGroupCopilot()">Get a read</button>
+        </div>
+        <div id="gd-copilot-body" class="gd-copilot-body"></div>
+      </div>
+
       <!-- Compose message to group -->
       <div style="margin-bottom:1rem;padding:0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px">
         <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Send to Group</div>
@@ -1696,8 +1710,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260621f"></script>
-<script src="js/auth.js?v=20260621f"></script>
+<script src="js/data.js?v=20260621g"></script>
+<script src="js/auth.js?v=20260621g"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1765,14 +1779,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260621f"></script>
-<script src="js/ui.js?v=20260621f"></script>
-<script src="js/attachments.js?v=20260621f"></script>
-<script src="js/scenarios.js?v=20260621f"></script>
-<script src="js/chat.js?v=20260621f"></script>
-<script src="js/tree.js?v=20260621f"></script>
-<script src="js/app.js?v=20260621f"></script>
-<script src="js/member-view.js?v=20260621f"></script>
+<script src="js/charts.js?v=20260621g"></script>
+<script src="js/ui.js?v=20260621g"></script>
+<script src="js/attachments.js?v=20260621g"></script>
+<script src="js/scenarios.js?v=20260621g"></script>
+<script src="js/chat.js?v=20260621g"></script>
+<script src="js/tree.js?v=20260621g"></script>
+<script src="js/app.js?v=20260621g"></script>
+<script src="js/member-view.js?v=20260621g"></script>
 
 <script>
 function switchGrade(g){

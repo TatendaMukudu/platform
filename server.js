@@ -2243,6 +2243,87 @@ app.put('/api/groups/:groupId/aims', requireAuth, (req, res) => {
   res.json({ ok: true, group: g });
 });
 
+/* ── GET /api/groups/:groupId/copilot — lead-facing Group Copilot ─────────────
+   Reads the group's goals/traits + shared feed + member activity and gives the
+   LEAD a short read: health summary, suggested prompts, and who may need a nudge.
+   Through the privacy gate: reasons over the group, never quotes a member's words
+   back to others. Lead-only (members get the visible "Copilot is here" banner). */
+app.get('/api/groups/:groupId/copilot', requireAuth, async (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = orgCode;
+  const g    = (orgGroups[code] || []).find(g => g.id === req.params.groupId);
+  if (!g) return res.status(404).json({ error: 'Group not found' });
+
+  const isLead  = (g.leadIds || []).includes(userId);
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin' || _userHasPerm(code, userId, 'view_analytics');
+  if (!isLead && !isAdmin) return res.status(403).json({ error: 'Only a lead of this group can use the Copilot.' });
+
+  // Members of the group
+  const memberIds = [...new Set([...(g.memberIds || []), ...(g.leadIds || [])])].filter(id => id !== userId);
+  const now = Date.now();
+
+  const citable = [
+    `Group: ${g.name} — ${memberIds.length} member(s).`,
+    g.goals?.length  ? `Group goals: ${g.goals.join('; ')}.`   : 'Group goals: none set yet.',
+    g.traits?.length ? `Group traits: ${g.traits.join(', ')}.` : 'Group traits: none set yet.',
+  ];
+  const nudges = [];
+  memberIds.forEach(id => {
+    const u = orgUsers[code]?.[id];
+    if (!u) return;
+    const cks = memberCheckins[userKey(code, id)] || memberCheckins[memberKey(code, u.name || '')] || [];
+    const lastTs = cks.length ? new Date(cks[cks.length - 1].ts || cks[cks.length - 1].date).getTime() : null;
+    const days = lastTs ? Math.floor((now - lastTs) / 86400000) : null;
+    if (days === null) nudges.push({ name: u.name, reason: 'No check-in yet' });
+    else if (days >= 10) nudges.push({ name: u.name, reason: `Quiet for ${days} days` });
+  });
+  citable.push(`Activity: ${memberIds.length - nudges.length}/${memberIds.length} active recently.`);
+
+  // Recent shared feed (group messages + shared notes) — anonymous authors stripped.
+  const feed = [];
+  Object.values(orgMessages).forEach(m => {
+    if (m.orgCode === code && m.toType === 'group' && m.toId === g.id) {
+      feed.push({ t: m.createdAt, who: m.anonymous ? 'someone' : (m.fromName || 'member'), text: m.content });
+    }
+  });
+  Object.values(orgNotes).forEach(n => {
+    if (n.orgCode === code && n.groupId === g.id && n.type !== 'private') {
+      feed.push({ t: n.createdAt, who: n.type === 'anonymous' ? 'someone' : (n.authorName || 'member'), text: n.content });
+    }
+  });
+  feed.sort((a, b) => new Date(b.t) - new Date(a.t));
+  const recent = feed.slice(0, 12);
+  recent.forEach(f => citable.push(`Feed — ${f.who}: ${String(f.text).slice(0, 160)}`));
+
+  const system = [
+    `You are the IntelliQ Group Copilot, assisting the LEAD of a group (like Copilot in Teams). Help them run the group well against its stated goals and traits. Be specific and practical.`,
+    privacy.GATE_DIRECTIVE,
+    `Extra rule: you advise the lead only. Never quote or attribute a member's words back to others. Summarise themes, don't expose individuals.`,
+  ].join('\n\n');
+
+  const user = [
+    privacy.buildContextBlock({ citable, privateInforming: [] }),
+    '',
+    'Return ONLY JSON: {"summary":"2-3 sentence read on how the group is doing vs its goals","prompts":["2-4 conversation prompts or feedback the lead could post"],"nudges":["who/what to follow up on, general"]}',
+  ].join('\n');
+
+  let out = null;
+  try {
+    out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 500, schema: ['summary'] });
+  } catch (err) {
+    console.warn('[group-copilot] AI error:', err.message);
+  }
+
+  res.json({
+    ok: true,
+    groupName: g.name,
+    summary:  out?.summary || 'Not enough activity yet for a meaningful read. Once members post or check in, the Copilot will summarise how the group is tracking against its goals.',
+    prompts:  Array.isArray(out?.prompts) ? out.prompts.slice(0, 4) : [],
+    nudges:   nudges.slice(0, 6),
+    hasGoals: !!(g.goals && g.goals.length),
+  });
+});
+
 /* ── Delete group ─────────────────────────────────────────────────────────── */
 app.delete('/api/groups/:groupId', (req, res) => {
   const { orgCode } = req.body;
