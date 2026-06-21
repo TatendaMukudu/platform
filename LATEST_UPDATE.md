@@ -1,35 +1,42 @@
-# Update — Every input = signal + reusable multi-modal composer
+# Update — Signal Weighting (your anti-noise warning, built)
 
-**Merged to main:** `66edf64` (deploying) · asset `?v=20260621m`
+**Merged to main:** `bff2db4` (deploying) · asset `?v=20260621n`
 
-Two things shipped, both from "extract as much from input as possible" + "same
-composer layout (attach / voice / text) everywhere".
+You called it: "everything is a signal" must not become "everything is equally
+important." Weighting is now in, using your tiers.
 
-## 1. Every input touchpoint now emits a signal (`37e48cb`)
-Nothing is lost — each interaction flows into the universal Signal layer the
-Advisor & Copilot read:
-- **Notes** → note signal (private/anonymous = inform-only).
-- **Check-ins** (simple + freeform) → checkin signal (mood number + text).
-- **Assessment submit** → assessment signals (overall score citable + summary /
-  strengths / development).
-- **Weekly reflection** → weekly signal (free text).
-- Capture is wrapped so it never breaks the input flow; legacy name-only inputs
-  are mapped to a userId so they attach correctly.
+## The model
+- **STRONG (3):** assessment results, metrics, game stats, stat sheets — hard
+  outcomes.
+- **MEDIUM (2):** reflections, notes, check-ins, film/voice/documents.
+- **WEAK (1):** one-off external events / messages / comments.
 
-## 2. IQComposer — one reusable input bar (`66edf64`)
-The same composer you're using: **📎 Attach · 🎤 Voice · text**.
-- Drop-in: put `<div data-iqcompose="<textareaId>">` after any textarea and call
-  `IQComposer.mountAll()`.
-- Attach → parsed via the app's AttachmentHandler (Excel/Word/CSV/PDF/image).
-- Voice → browser speech-to-text straight into the textarea.
-- **Wired into member Notes** as the reference: attachments on a note become
-  signals about the author. The same hook now drops onto assessment replies,
-  check-ins, messages — anywhere — with one line.
+Stamped on every signal at ingest (`weight` + `weightNum`).
 
-## Next (same pattern, cheap)
-- Add `data-iqcompose` to the assessment reply + check-in composers.
-- Smart-attribute note/assessment attachments (route through /signals/import).
+## How the AI uses it
+- **Effective weight = base + repetition + recency.** A recurring source
+  ("repeated behaviour") and recent items get boosted — so a pattern outranks a
+  single strong data point, exactly as you framed it.
+- The Advisor **ranks signals by effective weight**, includes all strong/medium,
+  and **caps weak one-offs at 3** so reasoning stays signal-rich, not noisy.
+- Context lines are tagged `[strong]` / `[minor]`, and the Advisor is instructed:
+  *"weigh the evidence — a pattern across signals beats any single data point;
+  never build a judgement on one stray note."*
+
+## You can see it
+The Data Sources "What IntelliQ can use" list now shows a **weight dot**
+(green = strong, amber = medium, grey = weak) next to each signal.
+
+## Why this matters (your framing)
+This is what keeps the **longitudinal behaviour graph** meaningful: a low-mood
+check-in + a stressed reflection + dropping performance + fewer messages is a
+*pattern* (medium signals converging) the AI now weighs as significant — while a
+single off-hand note stays minor.
+
+## Still open
+- Proactive briefings + alerts (turn this weighted graph into push insight).
+- Real AI memory/profile (replace keyword threads) + embeddings for cross-member
+  patterns.
 - Microsoft Graph / Google connectors (need your app registration).
 
-Verified at node --check across files. Voice needs a speech-capable browser
-(Chrome/Safari); live check needs a login.
+Verified at node --check.
