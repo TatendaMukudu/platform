@@ -626,7 +626,7 @@ const PAGE_TITLES = {
   stats:        'Progress',
   // Leader Workspace — node leader scoped tools
   'leader-home':   'Leader Dashboard',
-  'leader-people': 'My People',
+  'leader-people': 'My Members',
   assignments:     'Assignments',
   'org-insights':  'Intelligence',
   'group-health':  'Group Health',
@@ -638,7 +638,7 @@ const PAGE_TITLES = {
   scenarios:    'Manage Assessments',
   // Management
   organisation: 'Organisation',
-  people:       'People',
+  people:       'Members',
   alerts:       'Alerts & Notifications',
   reports:      'Reports & Stat Sheets',
   settings:     'Platform Settings',
@@ -1581,7 +1581,7 @@ function _emptyStateHTML(_mode) {
         Add people to your organisation to start using IntelliQ — manually, by spreadsheet, invite, or join link.
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:0.6rem;justify-content:center">
-        <button class="btn btn-accent btn-sm" onclick="navigate('people');setTimeout(()=>switchPeopleTab('onboard'),100)">+ Add Person</button>
+        <button class="btn btn-accent btn-sm" onclick="navigate('people');setTimeout(()=>switchPeopleTab('onboard'),100)">+ Add Member</button>
         <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>{switchPeopleTab('onboard');_openOnboardSection('import')},100)">📁 Import</button>
         <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>{switchPeopleTab('onboard');_openOnboardSection('invite')},100)">✉ Invite</button>
         <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>{switchPeopleTab('onboard');_openOnboardSection('link')},100)">🔗 Join Link</button>
@@ -1741,7 +1741,7 @@ function renderMembers(){
         <div style="font-size:2rem;margin-bottom:0.5rem">👥</div>
         <div style="font-weight:600;margin-bottom:0.3rem">No members yet</div>
         <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:1rem">Add people via People → Onboard</div>
-        <button class="btn btn-accent btn-sm" onclick="navigate('people');switchPeopleTab('onboard')">+ Add Person</button>
+        <button class="btn btn-accent btn-sm" onclick="navigate('people');switchPeopleTab('onboard')">+ Add Member</button>
       </div>`;
     return;
   }
@@ -3300,7 +3300,7 @@ function renderOnboardHub() {
   el.innerHTML = `
     <!-- Method cards -->
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0.75rem;margin-bottom:1.5rem">
-      ${_onboardCard('add',    '👤', 'Add Person',         'Add one person with their email',   color)}
+      ${_onboardCard('add',    '👤', 'Add Member',         'Add one person with their email',   color)}
       ${_onboardCard('import', '📁', 'Import Spreadsheet', 'Upload a CSV or XLSX file',         color)}
       ${_onboardCard('invite', '✉',  'Invite by Email',    'Send personalised email invites',   color)}
       ${_onboardCard('link',   '🔗', 'Generate Join Link', 'Shareable self-registration link',  color)}
@@ -3340,7 +3340,7 @@ function _openOnboardSection(section) {
 
     el.innerHTML = `
       <div class="card" style="margin-bottom:0">
-        <div class="card-header"><div class="card-title">👤 Add Person</div></div>
+        <div class="card-header"><div class="card-title">👤 Add Member</div></div>
         <div class="card-body">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:0.7rem">
             <div><label class="form-label">FIRST NAME *</label><input id="ob-add-first" class="form-input" placeholder="First name" /></div>
@@ -4946,7 +4946,7 @@ async function renderLeaderIntelligence() {
           <div style="font-size:0.85rem;color:var(--text-primary);line-height:1.65">${ins.recommendedAction}</div>
           <div style="margin-top:0.8rem;display:flex;gap:0.5rem;flex-wrap:wrap">
             <button class="btn btn-sm btn-outline" onclick="navigate('assignments')">Assign Assessment</button>
-            <button class="btn btn-sm btn-outline" onclick="navigate('leader-people')">View My People</button>
+            <button class="btn btn-sm btn-outline" onclick="navigate('leader-people')">View My Members</button>
           </div>
         </div>` : ''}`;
 
@@ -5254,7 +5254,7 @@ async function renderLeaderHome() {
             in your subtree
           </div>
           <div style="margin-left:auto;display:flex;gap:0.5rem">
-            <button class="btn btn-sm btn-outline" onclick="navigate('leader-people')">My People →</button>
+            <button class="btn btn-sm btn-outline" onclick="navigate('leader-people')">My Members →</button>
             <button class="btn btn-sm btn-outline" onclick="navigate('assignments')">Assign →</button>
           </div>
         </div>

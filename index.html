@@ -185,7 +185,7 @@
         <div class="icon-btn" id="notif-btn" data-tip="Notifications" style="cursor:pointer">
           🔔 <div class="badge"></div>
         </div>
-        <div class="icon-btn" data-tip="Add Person" onclick="navigate('people');switchPeopleTab('onboard')" style="cursor:pointer">➕</div>
+        <div class="icon-btn" data-tip="Add Member" onclick="navigate('people');switchPeopleTab('onboard')" style="cursor:pointer">➕</div>
         <div style="font-size:0.8rem;color:var(--text-secondary);padding:0 0.5rem" id="topbar-org">Org</div>
         <!-- User account widget — sign out, name, email, role -->
         <div class="topbar-user-widget" id="topbar-user-widget">
@@ -221,7 +221,7 @@
           </div>
           <div style="display:flex;gap:0.5rem">
             <button class="btn btn-outline btn-sm" onclick="navigate('reports')">📋 Full Report</button>
-            <button class="btn btn-accent btn-sm" onclick="navigate('people');switchPeopleTab('onboard')">+ Add Person</button>
+            <button class="btn btn-accent btn-sm" onclick="navigate('people');switchPeopleTab('onboard')">+ Add Member</button>
           </div>
         </div>
 
@@ -305,7 +305,7 @@
             <div class="section-title">Members</div>
             <div class="section-sub" id="members-count">24 members</div>
           </div>
-          <button class="btn btn-accent btn-sm" onclick="navigate('people');switchPeopleTab('onboard')">+ Add Person</button>
+          <button class="btn btn-accent btn-sm" onclick="navigate('people');switchPeopleTab('onboard')">+ Add Member</button>
         </div>
 
         <div style="margin-bottom:1rem">
@@ -565,10 +565,10 @@
       <section class="page" id="page-people">
         <div class="section-header">
           <div>
-            <div class="section-title">People</div>
+            <div class="section-title">Members</div>
             <div class="section-sub" id="people-sub">Org structure, onboarding, and groups</div>
           </div>
-          <button class="btn btn-accent btn-sm" onclick="switchPeopleTab('onboard')">+ Add Person</button>
+          <button class="btn btn-accent btn-sm" onclick="switchPeopleTab('onboard')">+ Add Member</button>
         </div>
 
         <!-- Sub-tabs -->
@@ -1072,7 +1072,7 @@
       <section class="page" id="page-leader-people">
         <div class="section-header">
           <div>
-            <div class="section-title">My People</div>
+            <div class="section-title">My Members</div>
             <div class="section-sub" id="ldr-people-count">Who am I responsible for?</div>
           </div>
           <div style="display:flex;gap:0.5rem;align-items:center">
@@ -1685,8 +1685,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260621c"></script>
-<script src="js/auth.js?v=20260621c"></script>
+<script src="js/data.js?v=20260621d"></script>
+<script src="js/auth.js?v=20260621d"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1754,14 +1754,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260621c"></script>
-<script src="js/ui.js?v=20260621c"></script>
-<script src="js/attachments.js?v=20260621c"></script>
-<script src="js/scenarios.js?v=20260621c"></script>
-<script src="js/chat.js?v=20260621c"></script>
-<script src="js/tree.js?v=20260621c"></script>
-<script src="js/app.js?v=20260621c"></script>
-<script src="js/member-view.js?v=20260621c"></script>
+<script src="js/charts.js?v=20260621d"></script>
+<script src="js/ui.js?v=20260621d"></script>
+<script src="js/attachments.js?v=20260621d"></script>
+<script src="js/scenarios.js?v=20260621d"></script>
+<script src="js/chat.js?v=20260621d"></script>
+<script src="js/tree.js?v=20260621d"></script>
+<script src="js/app.js?v=20260621d"></script>
+<script src="js/member-view.js?v=20260621d"></script>
 
 <script>
 function switchGrade(g){

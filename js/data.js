@@ -109,7 +109,7 @@ const WORKSPACE_MODULES = [
   // leaderOnly: true means renderSidebar() gates this on Auth.isLeaderNode().
   // All data in these pages is scoped server-side to the leader's subtree.
   { section: 'Leader Workspace', id: 'leader-home',   icon: '👁',  label: 'Dashboard',    leaderOnly: true },
-  { section: null,                id: 'leader-people', icon: '👥', label: 'My People',    leaderOnly: true },
+  { section: null,                id: 'leader-people', icon: '👥', label: 'My Members',  leaderOnly: true },
   { section: null,                id: 'assignments',   icon: '📌', label: 'Assignments',  leaderOnly: true, permission: 'assign_scenarios' },
   // Intelligence: what IntelliQ is noticing — AI patterns, themes, follow-ups
   { section: null, id: 'org-insights', icon: '🧠', label: 'Intelligence', leaderOnly: true, permission: 'view_insights' },
@@ -124,7 +124,7 @@ const WORKSPACE_MODULES = [
   // ── Management — admin / superadmin ───────────────────────────────────
   { section: 'Management',  id: 'organisation', icon: '🏛️', label: 'Organisation',      permission: 'view_team'       },
   { section: null,           id: 'org-health',   icon: '🏥', label: 'Organisation Health', permission: 'view_analytics' },
-  { section: null,           id: 'people',       icon: '🏗️', label: 'People',              permission: 'view_members'    },
+  { section: null,           id: 'people',       icon: '🏗️', label: 'Members',             permission: 'view_members'    },
   { section: null,           id: 'alerts',       icon: '🔔', label: 'Alerts',               permission: 'view_members',   badge: true },
   { section: null,           id: 'reports',      icon: '📋', label: 'Reports',              permission: 'view_reports'    },
   { section: null,           id: 'settings',     icon: '⚙️', label: 'Settings',             permission: 'manage_settings' },
