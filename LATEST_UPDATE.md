@@ -1,40 +1,40 @@
-# Latest Update — D + C shipped (Leader Workspace complete)
+# Latest Update — Why the dashboard didn't change (two fixes)
 
-**Branch:** `claude/platform-work-summary-nmb0cm` → merged to **main** (deployed)
+**Merged to main:** `d0ab73d` (deploying on Render now)
 
-The leader-workspace trio (B → D → C) is now done and live.
+"Pushed but the leader dashboard looks the same" had two compounding causes — both now fixed.
 
-## B — Leader detection (already deployed earlier)
-Leaders are recognized across node leaderIds, the legacy supervisor tree, and
-group leads. They now see the Leader Workspace.
+## 1. The browser was running the OLD JavaScript
+`js/*.js` / css / html were served with default caching, so after a Render
+redeploy the browser kept the stale bundle (very common on mobile Safari).
+- Now sent with `Cache-Control: no-cache` (cheap — uses etag revalidation).
+- Added a `?v=` query to local script tags so THIS deploy is force-fetched.
 
-## D — Group Health (metrics on your group)
-- `GET /api/workspace/group-health` — subtree-scoped via getVisibleUserIds().
-- Aggregate: participation (7d/30d), wellbeing (mood + trend), engagement
-  (has-goal, set up), state distribution.
-- Per-member **directional state** (converging / sustaining / stalled / diverging /
-  unanchored / unknown) from mood trajectory + activity + goal — NO per-person score.
-- New "📊 Group Health" leader nav page; members ordered by attention need
-  (triage, not ranking); each clickable to their profile/Advisor.
+## 2. A returning session never re-checked leadership
+When you're already logged in, the app booted straight from cached localStorage
+and **never called `getMe()`** — so the new `leads` flag (from B) was never
+fetched and the Leader Workspace stayed hidden.
+- The restore path now refreshes `leads` + permissions + role from
+  `/api/auth/me` before building the nav (merging only those fields so it can't
+  wipe your onboarding state).
 
-## C — Add members to your subtree
-- `create-user` now lets a **leader** add a plain **member** under themselves,
-  even if the leader's own role is 'member'. New member is **forced into the
-  leader's subtree** (supervisorId = creator); leaders cannot create anyone above
-  member or place people outside their scope.
-- "＋ Add Member" inline form on the My People page (name + email → invite to set
-  password); list refreshes on success.
+## What to do on your phone (one time)
+The old files are still cached from before this fix, so do ONE of these once:
+- Fully close the browser tab and reopen the site, **or**
+- Log out and log back in.
 
-## Guardrails kept
-- No leaderboards / no per-person scores (alignment canon).
-- Leaders still do NOT get org-wide powers (manage_*, delete_members, settings,
-  billing, view_analytics). Everything stays subtree-scoped.
+After that you should see the **Leader Workspace** (Dashboard, My People,
+Intelligence, Group Health) — and future deploys will refresh automatically.
+
+## If it STILL shows member-only nav after that
+Then it's not a code/cache problem — it means the data has **no leadership link
+for your account** (you don't lead a node, supervise anyone, or lead a group).
+That's fixable; tell me and I'll help check:
+- What is your account's role? (member / coach / admin)
+- Does anyone report to you / are you assigned as a node or group leader?
+
+I can then either assign you as a leader of your group, or adjust your role.
 
 ## Verification
-- `node --check` passes on server.js, app.js, data.js.
-- Not run live here (no DB/API key). Real proof: log in as a leader → see Group
-  Health populate and add a member who lands under you.
-
-## Next options
-- Run the smoke test / click-through on the live deploy to confirm B/D/C.
-- Or proceed to Phase 2 (signals table + dual-write).
+- `node --check` passes on server.js and app.js.
+- Not run live here (no DB/API key) — needs your reload to confirm.
