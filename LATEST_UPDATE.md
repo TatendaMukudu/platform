@@ -1,41 +1,35 @@
-# Update — Smart Import (AI auto-attributes data to members)
+# Update — Smart Import via Vision (scanned sheets & PDFs)
 
-**Merged to main:** `8f337e1` (deploying) · asset `?v=20260621k`
+**Merged to main:** `17ed99f` (deploying) · asset `?v=20260621l`
 
-## What it does
-Upload a stat sheet, scouting doc, or any file → the AI reads it, figures out
-**which members it's about**, and files the right data under each one. "Anything
-about a member in a doc gets used and attributed."
+## What it adds
+Smart import now works on **images and PDFs**, not just text files. Upload a
+photo of a stat sheet, a scanned strength report, or a PDF table → Claude
+**reads the image**, extracts the per-member rows/metrics, and files them under
+the right members — same scope-safe attribution as the text path.
 
-- Stat sheet with a Name column + metric columns → per-member **metric** signals
-  (Squat 1RM, 40-yd time, etc.).
-- A Word/PDF/notes doc that mentions players → a concise **note** signal filed
-  under each mentioned member.
-- Everything then flows into the Advisor / Copilot automatically.
+- `POST /api/signals/import` now accepts `media:{kind:'image'|'pdf', mediaType,
+  data(base64)}` in addition to `content` text.
+- Sends a multimodal message (vision/document block) via the AI gateway; reuses
+  the same roster-matching + ingest, so nothing is attributed outside your scope.
+- UI: choosing "🧠 Auto-detect members" and uploading an image/PDF shows a
+  "Scanning…" state and reports who got what + unmatched names.
 
-## How it works
-- `POST /api/signals/import` sends the extracted file content + the requester's
-  **visible roster** to the AI (gateway, reason tier, privacy gate).
-- AI returns per-member `{ metrics[], note }`; server **fuzzy-matches** names to
-  userIds and ingests signals — **scope-safe** (never attributes outside the
-  people you can see) and faithful (won't invent numbers).
-- Returns **matched** (who got what) and **unmatched** (names it couldn't place)
-  so nothing is silently dropped.
+## Now covered end to end
+- Excel / CSV / Word / text → smart import (text).
+- **Image / PDF / scans → smart import (vision).** ← new
+- Voice / metric / observation → quick log.
+- Whole-file attach (org or one member) → plain upload.
+All land on the one Signal contract the Advisor & Group Copilot read.
 
-## UX
-Data Sources → Upload now defaults to **"🧠 Auto-detect members (smart import)"**.
-"Whole organization" and "specific member" remain for when you want the raw file
-kept as one source. Optional **public** flag carries through to imported metrics.
+## Notes
+- Uses the `reason` tier (Sonnet, auto-downshifts to Haiku) — both support vision;
+  PDF document blocks supported. Large files OK (25 MB body limit).
+- Quality depends on legibility + recognisable names; unmatched names are
+  reported so you can correct.
+- Verified at node --check; live check needs a leader login + a real image/PDF.
 
-## Status / notes
-- Works now for text-extractable files (Excel, CSV, Word, txt). Image/PDF upload
-  still attaches as a document (smart-extract from scanned PDFs/images is a
-  follow-up — would route through Claude vision).
-- Quality depends on the file having recognisable member names. Unmatched names
-  are reported so you can fix naming or assign manually.
-- Verified at node --check; live check needs a leader login + a real file.
-
-## Natural next steps
-- Image/PDF smart extract (vision) for scanned stat sheets.
-- Column-mapping preview ("this column = 40-yd dash") before import.
-- Microsoft Graph / Google connectors (need your app registration).
+## Remaining big rocks
+- Microsoft Graph (Teams/Outlook) + Google connectors — need your app
+  registration; contract is ready.
+- Move signals from JSON blob → Postgres + embeddings at volume.
