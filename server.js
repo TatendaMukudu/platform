@@ -5101,6 +5101,94 @@ app.get('/api/signals/recent', requireAuth, (req, res) => {
   res.json({ signals: list });
 });
 
+/* ── Match an extracted name to a visible member's userId (fuzzy, safe) ──────── */
+function _matchMember(code, candidates, name) {
+  if (!name) return null;
+  const n = String(name).toLowerCase().trim();
+  // exact full-name, then "contains", then first-name match
+  let hit = candidates.find(c => c.name === n);
+  if (!hit) hit = candidates.find(c => c.name.includes(n) || n.includes(c.name));
+  if (!hit) hit = candidates.find(c => c.first && (c.first === n || n.startsWith(c.first + ' ') || n.endsWith(' ' + c.first)));
+  return hit ? hit.id : null;
+}
+
+/* ── POST /api/signals/import — SMART import: auto-attribute a doc/sheet ───────
+   Sends the extracted file content + the requester's visible roster to the AI,
+   which pulls per-member metrics and notes, then files them as signals under the
+   right member. "Anything about a member in a doc" gets used and attributed. */
+app.post('/api/signals/import', requireAuth, async (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code     = orgCode;
+  const content  = String(req.body?.content || '').slice(0, 8000);
+  const fileName = String(req.body?.fileName || 'upload').slice(0, 120);
+  const isPublic = !!req.body?.public;
+  if (!content.trim()) return res.status(400).json({ error: 'No content to import.' });
+
+  // Visible roster for attribution (never attribute outside scope).
+  const roster = getVisibleUserIds(code, userId)
+    .map(id => orgUsers[code]?.[id]).filter(u => u && u.role !== 'superadmin')
+    .map(u => ({ id: u.id, name: (u.name || '').toLowerCase().trim(), first: (u.firstName || (u.name || '').split(' ')[0] || '').toLowerCase().trim() }));
+  if (!roster.length) return res.status(400).json({ error: 'No members in your scope to attribute data to.' });
+
+  const rosterList = roster.map(r => r.name).join(', ');
+  const system = [
+    `You extract structured, per-person data from a document or spreadsheet for a performance organisation. Attribute data ONLY to people in the provided roster — ignore anyone not on it. Be faithful to the source; do not invent numbers.`,
+    privacy.GATE_DIRECTIVE,
+  ].join('\n\n');
+  const user = [
+    `ROSTER (only attribute to these names): ${rosterList}`,
+    '',
+    `FILE: ${fileName}`,
+    'CONTENT:',
+    content,
+    '',
+    'Return ONLY JSON: {"members":[{"name":"<roster name>","metrics":[{"label":"e.g. Squat 1RM","value":"number or short text"}],"note":"<concise factual summary of anything else the doc says about this person, else empty>"}]}',
+  ].join('\n');
+
+  let parsed = null;
+  try {
+    parsed = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 900, schema: ['members'] });
+  } catch (err) {
+    console.warn('[signals/import] AI error:', err.message);
+    return res.status(502).json({ error: 'Import analysis failed. Try again.' });
+  }
+  if (!parsed || !Array.isArray(parsed.members)) {
+    return res.json({ ok: true, imported: 0, matched: [], unmatched: [], note: 'No per-member data found in this file.' });
+  }
+
+  const matched = [], unmatched = [];
+  let imported = 0;
+  parsed.members.slice(0, 60).forEach(m => {
+    const mid = _matchMember(code, roster, m.name);
+    if (!mid) { if (m.name) unmatched.push(m.name); return; }
+    let count = 0;
+    (Array.isArray(m.metrics) ? m.metrics : []).slice(0, 30).forEach(mt => {
+      if (!mt || (mt.label == null && mt.value == null)) return;
+      const num = Number(mt.value);
+      const sig = _ingestSignal(code, {
+        subjectType: 'member', subjectId: mid, source: 'sheet',
+        modality: isNaN(num) ? 'text' : 'number',
+        label: mt.label != null ? String(mt.label) : null,
+        valueNum: isNaN(num) ? null : num,
+        valueText: isNaN(num) ? (mt.value != null ? String(mt.value) : null) : null,
+        public: isPublic,
+      }, userId);
+      if (sig) { count++; imported++; }
+    });
+    if (m.note && String(m.note).trim()) {
+      const sig = _ingestSignal(code, {
+        subjectType: 'member', subjectId: mid, source: 'document',
+        modality: 'text', label: fileName, valueText: String(m.note), public: isPublic,
+      }, userId);
+      if (sig) { count++; imported++; }
+    }
+    if (count) matched.push({ name: orgUsers[code]?.[mid]?.name || m.name, signals: count });
+  });
+
+  if (imported) scheduleSave();
+  res.json({ ok: true, imported, matched, unmatched });
+});
+
 /* ═══════════════════════════════════════════════════════════════════════════
    LEARNING ENGINE — Patterns, Predictions, Effectiveness, Summary
    ═══════════════════════════════════════════════════════════════════════════ */

@@ -5545,9 +5545,10 @@ async function renderDataSources() {
         Stat sheets, film logs, Word docs, CSV, PDF, images. IntelliQ reads the content and uses it to advise.
       </div>
       <div class="ds-upload-row">
-        <select class="search-input" id="ds-target" style="max-width:220px">
+        <select class="search-input" id="ds-target" style="max-width:240px">
+          <option value="smart">🧠 Auto-detect members (smart import)</option>
           <option value="org">📊 Whole organization</option>
-          ${memberOpts ? `<optgroup label="A member">${memberOpts}</optgroup>` : ''}
+          ${memberOpts ? `<optgroup label="A specific member">${memberOpts}</optgroup>` : ''}
         </select>
         <label class="btn btn-accent btn-sm" style="cursor:pointer">
           ＋ Choose file
@@ -5611,10 +5612,33 @@ async function uploadDataSource(input) {
   try {
     const parsed = await AttachmentHandler.process(file);
     const targetSel = document.getElementById('ds-target');
-    const target = targetSel ? targetSel.value : 'org';
+    const target = targetSel ? targetSel.value : 'smart';
     const isPublic = !!document.getElementById('ds-public')?.checked;
-
     const content = parsed.content || parsed.summary || `Uploaded ${file.name}`;
+
+    // SMART IMPORT — AI auto-attributes rows/mentions to the right members.
+    if (target === 'smart') {
+      if (res) { res.style.color = 'var(--text-muted)'; res.textContent = `🧠 Reading ${file.name} and matching members…`; }
+      const r = await fetch('/api/signals/import', {
+        method: 'POST', headers: Auth._headers(),
+        body: JSON.stringify({ content: String(content), fileName: file.name, public: isPublic }),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || 'Import failed');
+      if (res) {
+        const matched = (d.matched || []).map(m => `${_escAdvisor(m.name)} (${m.signals})`).join(', ');
+        const un = (d.unmatched || []).length ? ` · not matched: ${(d.unmatched || []).map(_escAdvisor).join(', ')}` : '';
+        res.style.color = d.imported ? 'var(--success)' : 'var(--text-muted)';
+        res.innerHTML = d.imported
+          ? `✓ Imported ${d.imported} item(s) → ${matched}${un}`
+          : `No per-member data found. Try "Whole organization" to keep the whole file.${un}`;
+      }
+      input.value = '';
+      _loadDataSourcesRecent();
+      return;
+    }
+
+    // Plain ingest — attach the whole file to org or one member.
     const source  = parsed.kind === 'xlsx' || parsed.kind === 'csv' ? 'sheet'
                   : parsed.kind === 'image' || parsed.kind === 'pdf' ? 'document' : 'document';
     const body = {
