@@ -1,44 +1,39 @@
-# Update — Group Goals/Traits shipped + Group Copilot vision
+# Update — Group Copilot (first slice) shipped
 
-## ✅ Shipped & deployed (`2a39f05`)
-Group-level **goals & traits**, editable only by a group's **leads**:
-- Membership ≠ leadership — a plain member can LEAD an org-wide group (e.g. a
-  Bible study) and set its goals, while only belonging to other groups.
-- `PUT /api/groups/:groupId/aims` — lead-of-group (or admin) only.
-- Leader Workspace → **My Groups**: edit goals/traits for groups you lead;
-  read-only for groups you're only in; org values offered as quick-add traits.
+**Merged to main:** `4a5571a` (deploying) · asset `?v=20260621g`
 
-This is the alignment **TEAM frame** made real at the group level.
+A Teams-style Copilot for group leads, built on what we already have (group chat
++ AI gateway + privacy gate + group goals/traits).
 
----
+## What it does
+- **Lead opens a group** (Leader Workspace → My Groups → "💬 Open · Copilot",
+  or the admin Groups view) → taps **"Get a read"**.
+- Copilot returns: a **health summary** (how the group is tracking vs its goals),
+  **suggested prompts/feedback** the lead can post, and **who may need a nudge**.
+- Server: `GET /api/groups/:groupId/copilot` — lead-only; reads group
+  goals/traits + shared feed + member activity through the gateway + privacy gate.
 
-## Vision: Groups as WhatsApp + an AI Copilot (Teams-style)
-Groups become living spaces (chat) with an embedded Copilot that helps the lead.
+## Consent-first (the legal/ethical part)
+- A visible **"🤖 IntelliQ Copilot is in this group"** banner shows to EVERYONE,
+  never silent.
+- Copilot is **lead-gated** and **advises the lead only** — it summarises themes
+  and never quotes/attributes a member's words back to others.
+- Member private content **informs but is never disclosed** (privacy gate).
 
-**Already in place to build on:**
-- Group chat/feed (`/api/groups/:groupId/feed`, messages incl. anonymous).
-- AI gateway + privacy gate + Advisor (a Group Copilot = the Advisor pointed at
-  a group instead of one person).
-- Group goals/traits (just shipped) = what "good" looks like for the group.
+## How it connects
+- Uses the **group goals/traits** (shipped earlier) as the "what good looks like".
+- This is the on-ramp to **Phase 2**: group messages become signals the Copilot
+  (and the longitudinal memory) reason over.
 
-**Copilot would:** summarize discussion, flag disengagement, draft prompts /
-feedback for the lead, check activity against the group's goals — informing the
-lead, never exposing members' private content.
+## To see it
+Fresh load once: `https://827l.onrender.com/?fresh=1`. Be a **lead** of a group
+(set in Members → Groups), open it, hit "Get a read".
 
-### Non-negotiables (legal/ethical — monitoring conversations)
-- Visible **"🤖 Copilot is in this group"** banner — never silent.
-- Lead enables it; members are told; consent notice on join.
-- Reasons over the group to advise the lead; never quotes a member to others.
-- Sensitive content informs only, never disclosed; clean off switch.
+## Verification
+- `node --check` passes on server.js and app.js.
+- Not run live here (no DB/API key) — needs a real lead login.
 
-### Suggested first slice (small, safe, real)
-A **Group Copilot panel** for the lead: (1) short health/engagement read,
-(2) 2–3 suggested prompts/feedback, (3) "who might need a nudge" — through the
-privacy gate, with the AI-present banner. Reuses gateway + privacy gate +
-group aims. Meeting feedback / deeper monitoring come later.
-
-This is also the on-ramp to **Phase 2**: group messages become signals.
-
-## Decision needed
-Build the first-slice Group Copilot panel next? And confirm the consent/banner
-model is how you want it.
+## Natural next steps
+- WhatsApp-style real-time group chat UI (richer conversation for the Copilot).
+- Copilot "assist in conversation" (draft a reply / meeting feedback) inline.
+- Phase 2 signals so the Copilot's reads compound over time.
