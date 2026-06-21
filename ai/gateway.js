@@ -1,0 +1,113 @@
+/* ============================================================
+   ai/gateway.js — the single AI layer for IntelliQ + Platform
+
+   Every Claude call should eventually route through here so that
+   model choice, retries, cost control, and output validation live
+   in ONE place instead of being copy-pasted across server.js.
+
+   Tiers (override via env):
+     micro   → fast / cheap, ingestion-time micro-tasks (default Haiku)
+     reason  → higher-quality reasoning: advisor, learning synthesis
+               (default Sonnet, with automatic downshift to micro if
+                the configured model is unavailable on this account)
+
+   Phase 1: the Individual Advisor and note classification route
+   through this module. Existing call sites can be migrated
+   incrementally without changing their behavior.
+   ============================================================ */
+
+const Anthropic = require('@anthropic-ai/sdk');
+
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const MODELS = {
+  micro:  process.env.AI_MODEL_MICRO  || 'claude-haiku-4-5-20251001',
+  reason: process.env.AI_MODEL_REASON || 'claude-sonnet-4-6',
+};
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function _isModelUnavailable(err) {
+  const status = err?.status || err?.statusCode;
+  const msg    = (err?.message || '').toLowerCase();
+  return status === 404 || (/model/.test(msg) && /(not.*found|does not exist|unknown|invalid)/.test(msg));
+}
+
+/* ── complete ──────────────────────────────────────────────────────────────
+   Returns the assistant text (string). Retries network/5xx/429 with backoff.
+   If the chosen tier's model is unavailable, downshifts once to `micro`
+   so a misconfigured AI_MODEL_REASON degrades gracefully instead of 500ing.
+──────────────────────────────────────────────────────────────────────────── */
+async function complete({
+  tier = 'micro', model, system, messages, user,
+  maxTokens = 400, temperature, fallbackToMicro = true,
+}) {
+  const primary = model || MODELS[tier] || MODELS.micro;
+  const msgs    = messages || [{ role: 'user', content: user }];
+
+  const call = (m) => client.messages.create({
+    model: m,
+    max_tokens: maxTokens,
+    ...(temperature != null ? { temperature } : {}),
+    ...(system ? { system } : {}),
+    messages: msgs,
+  });
+
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const resp = await call(primary);
+      return resp.content?.[0]?.text?.trim() || '';
+    } catch (err) {
+      lastErr = err;
+
+      // Configured reasoning model not on this account → downshift once.
+      if (_isModelUnavailable(err) && fallbackToMicro && primary !== MODELS.micro) {
+        try {
+          const resp = await call(MODELS.micro);
+          return resp.content?.[0]?.text?.trim() || '';
+        } catch (err2) { lastErr = err2; }
+      }
+
+      const status = err?.status || err?.statusCode;
+      // Non-retryable client errors (other than rate limit) → stop.
+      if (status && status < 500 && status !== 429) break;
+      await sleep(400 * Math.pow(2, attempt));
+    }
+  }
+  throw lastErr;
+}
+
+/* ── parseJSON ─────────────────────────────────────────────────────────────
+   Tolerant JSON extraction — strips code fences and grabs the first object.
+──────────────────────────────────────────────────────────────────────────── */
+function parseJSON(text) {
+  if (!text) return null;
+  let t = String(text).trim()
+    .replace(/^```(?:json)?/i, '')
+    .replace(/```$/, '')
+    .trim();
+  try { return JSON.parse(t); } catch (_) {}
+  const m = t.match(/\{[\s\S]*\}/);
+  if (m) { try { return JSON.parse(m[0]); } catch (_) {} }
+  return null;
+}
+
+/* ── completeJSON ──────────────────────────────────────────────────────────
+   Like complete() but returns a parsed object (or null on parse failure).
+   Pass `schema` (array of required top-level keys) to validate — returns
+   null if any required key is missing so callers can fall back cleanly.
+──────────────────────────────────────────────────────────────────────────── */
+async function completeJSON(opts) {
+  const text = await complete(opts);
+  const obj  = parseJSON(text);
+  if (!obj) return null;
+  if (Array.isArray(opts.schema)) {
+    for (const key of opts.schema) {
+      if (!(key in obj)) return null;
+    }
+  }
+  return obj;
+}
+
+module.exports = { complete, completeJSON, parseJSON, MODELS, client };

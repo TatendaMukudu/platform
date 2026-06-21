@@ -6,6 +6,13 @@ const bcrypt    = require('bcryptjs');
 const fs        = require('fs');   // kept for store.json → Postgres one-time migration
 const db        = require('./db');
 
+/* ── AI layer (Phase 1) ──────────────────────────────────────────────────────
+   One gateway controls model choice / retries / validation; the privacy gate
+   enforces "private may inform, never reveal"; lenses shape advice by role. */
+const ai      = require('./ai/gateway');
+const privacy = require('./ai/privacy');
+const lenses  = require('./ai/lenses');
+
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -40,7 +47,7 @@ function scheduleSave() {
         assignedScenarios, memberResults, memberCheckins,
         memberGoals, weeklyAssessments, orgInterventions,
         orgNodes, orgMetrics, orgValues, orgGoals, userPermissions,
-        userAiProfiles,
+        userAiProfiles, advisorThreads,
         activeSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
@@ -1982,6 +1989,9 @@ app.post('/api/notes', async (req, res) => {
     authorId, authorName,
     content, type,
     tag: tag || null,
+    // Phase 1: classify sensitivity at write time so the privacy gate can act
+    // on it later (private may inform AI reasoning, never be revealed).
+    sensitivity: privacy.classifyText(content, { type, tag }),
     createdAt: new Date().toISOString(),
     aiResponse: null,
   };
@@ -2162,6 +2172,7 @@ const assignedScenarios = {};
 const memberResults     = {};
 const memberCheckins    = {};
 const orgInterventions  = {};  // orgCode → [intervention, ...]
+const advisorThreads    = {};  // orgCode → [{ id, memberId, requesterId, requesterRole, question, answer, evidence, createdAt }]
 
 // Key helpers — new code uses userId keys; legacy name keys still supported for reads
 function memberKey(orgCode, memberName) {
@@ -4219,6 +4230,224 @@ app.get('/api/intelliq/intervention-analysis', requireAuth, (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   INDIVIDUAL ADVISOR AI  (Phase 1)
+
+   A leader selects a member and asks a question ("How do I motivate them?",
+   "How do I improve accountability?"). The advisor reasons over everything
+   IntelliQ knows about that person — but through the Privacy Gate (private
+   may inform, never be revealed) and the requester's role Lens.
+
+   Built on EXISTING data only — no schema migration. Profile-backed reasoning
+   arrives in Phase 2 once the signals table exists.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Build the two-tier advisor context for a member from current stores.
+   Returns { citable[], privateInforming[], privateStrings[] } where
+   privateStrings are raw spans the redaction pass must never let through. */
+function _buildAdvisorContext(code, member, requesterUser) {
+  const memberId   = member.id;
+  const memberName = member.name || '';
+  const keys       = [userKey(code, memberId), memberKey(code, memberName)];
+
+  const citable          = [];
+  const privateInforming = [];
+  const privateStrings   = [];
+
+  // ── Identity + goals (observable) ─────────────────────────────────────────
+  citable.push(`Name: ${memberName}${member.role ? ` · role: ${member.role}` : ''}`);
+  const goals = normalizeMemberGoals(memberGoals[userKey(code, memberId)] || memberGoals[memberKey(code, memberName)]);
+  if (goals.length) citable.push(`Stated goals: ${goals.map(g => g.title || g.text).filter(Boolean).join('; ')}`);
+
+  // ── Check-ins: mood numbers citable, free text informs only ───────────────
+  const checkins = [];
+  const seen = new Set();
+  keys.forEach(k => (memberCheckins[k] || []).forEach(c => {
+    const ts = c.ts || c.date; if (!ts || seen.has(ts)) return; seen.add(ts);
+    checkins.push({ mood: c.mood != null ? Number(c.mood) : null, text: (c.text || c.note || '').trim(), ts });
+  }));
+  checkins.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+  const moods = checkins.filter(c => c.mood !== null).map(c => c.mood);
+  if (moods.length) {
+    const recent = moods.slice(0, 10);
+    const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
+    citable.push(`Recent mood: ${Math.round(avg * 10) / 10}/5 across ${recent.length} check-in(s); ${checkins.length} total.`);
+  } else {
+    citable.push('No check-in mood data yet.');
+  }
+  checkins.slice(0, 6).forEach(c => {
+    if (!c.text) return;
+    privateInforming.push(`Check-in note: ${c.text}`);
+    privateStrings.push(c.text);
+  });
+
+  // ── Weekly reflections: completion citable, text informs only ─────────────
+  let weeklyCount = 0;
+  Object.entries(weeklyAssessments).forEach(([key, entries]) => {
+    if (!key.startsWith(code + ':')) return;
+    (entries || []).forEach(e => {
+      if (e.memberName !== memberName && e.memberId !== memberId) return;
+      weeklyCount++;
+      const text = Object.values(e.data || {}).filter(Boolean).join(' | ').trim();
+      if (text) { privateInforming.push(`Weekly reflection: ${text.slice(0, 300)}`); privateStrings.push(text.slice(0, 300)); }
+    });
+  });
+  if (weeklyCount) citable.push(`Completed ${weeklyCount} weekly reflection(s).`);
+
+  // ── Assessment results: scores/strengths/development are citable ──────────
+  const results = [];
+  keys.forEach(k => (memberResults[k] || []).forEach(r => results.push(r)));
+  if (results.length) {
+    const last = results[results.length - 1]?.score || {};
+    const bits = [];
+    if (last.overall != null) bits.push(`latest overall ${last.overall}/100`);
+    if (Array.isArray(last.strengths) && last.strengths.length) bits.push(`strengths: ${last.strengths.slice(0, 3).join(', ')}`);
+    if (Array.isArray(last.development) && last.development.length) bits.push(`development areas: ${last.development.slice(0, 3).join(', ')}`);
+    citable.push(`Assessments completed: ${results.length}${bits.length ? ` (${bits.join('; ')})` : ''}.`);
+  }
+
+  // ── Memory profile: behavioral observations inform reasoning ──────────────
+  const mem = userAiProfiles[`${code}:${memberId}`];
+  if (mem) {
+    (mem.openThreads || []).filter(t => !t.resolved).slice(0, 5).forEach(t => {
+      privateInforming.push(`Recurring observation${t.occurrences > 1 ? ` (×${t.occurrences})` : ''}: ${t.text}`);
+      privateStrings.push(t.text);
+    });
+    (mem.priorFollowUps || []).filter(f => !f.resolved).slice(0, 3).forEach(f => {
+      privateInforming.push(`Open follow-up: ${f.commitment}`);
+    });
+  }
+
+  // ── Authored notes: private/restricted inform only; shared are citable ────
+  Object.values(orgNotes)
+    .filter(n => n.orgCode === code && n.authorId === memberId)
+    .forEach(n => {
+      const sens = n.sensitivity || privacy.classifyText(n.content, { type: n.type, tag: n.tag });
+      if (privacy.isPrivate(sens)) {
+        privateInforming.push(`Private note (${sens}): ${n.content.slice(0, 200)}`);
+        privateStrings.push(n.content.slice(0, 200));
+      } else {
+        citable.push(`Shared note: ${n.content.slice(0, 160)}`);
+      }
+    });
+
+  // ── Interventions targeting this member: coach actions are citable ────────
+  (orgInterventions[code] || [])
+    .filter(i => i.targetMember === memberName || i.targetMemberId === memberId)
+    .slice(-5)
+    .forEach(i => {
+      const out = i.outcome?.outcome ? ` → ${i.outcome.outcome}` : '';
+      citable.push(`Past action: ${i.action} [${i.status}]${out}`);
+    });
+
+  // ── Patterns + predictions from the aggregator (derived, citable) ─────────
+  try {
+    const agg = _aggregateOrgData(code);
+    (agg.memberPatterns?.[memberName] || []).forEach(p => citable.push(`Pattern: ${p.label || p.type} (${p.confidence || 'n/a'} confidence)`));
+    (agg.memberPredictions?.[memberName] || []).forEach(p => citable.push(`Trajectory: ${p.prediction}`));
+  } catch (_) { /* aggregation is best-effort here */ }
+
+  return { citable, privateInforming, privateStrings };
+}
+
+const ADVISOR_SYSTEM = `You are the IntelliQ Individual Advisor — a performance-intelligence coach embedded in a member's profile. A leader asks how to support, develop, or lead this specific person. You answer with concrete, personal recommendations grounded in what IntelliQ has observed about THEM — never generic coaching advice.
+Rules:
+- Be specific to this person and this question. No platitudes.
+- Recommend actions the requester can take, not descriptions of the data.
+- If evidence is thin, say so briefly and give your best-supported suggestion.
+- Reason from your understanding of the person; do not recite or quote source material.`;
+
+/* ── POST /api/advisor/:memberId/ask ──────────────────────────────────────── */
+app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
+  const { orgCode } = req.iqSession;
+  const requesterId = req.iqSession.userId;
+  const code        = (orgCode || '').toLowerCase().trim();
+  const memberId    = req.params.memberId;
+  const question    = (req.body?.question || '').trim();
+
+  if (!question)  return res.status(400).json({ error: 'question required' });
+  if (question.length > 600) return res.status(400).json({ error: 'question too long' });
+
+  const requester = orgUsers[code]?.[requesterId];
+  const member    = orgUsers[code]?.[memberId];
+  if (!requester) return res.status(401).json({ error: 'Requester not found' });
+  if (!member)    return res.status(404).json({ error: 'Member not found' });
+
+  // Permission: must be able to see this member AND have an insight permission.
+  const visible = getVisibleUserIds(code, requesterId);
+  if (!visible.includes(memberId)) return res.status(403).json({ error: 'Member not in your visible scope' });
+  const canAdvise = requester.role === 'superadmin'
+    || _userHasPerm(code, requesterId, 'view_insights')
+    || _userHasPerm(code, requesterId, 'review_checkins');
+  if (!canAdvise) return res.status(403).json({ error: 'Permission denied: view_insights required' });
+
+  // Build privacy-tiered context + role lens.
+  const ctx  = _buildAdvisorContext(code, member, requester);
+  const lens = lenses.lensFor(requester);
+
+  const system = [
+    ADVISOR_SYSTEM,
+    privacy.GATE_DIRECTIVE,
+    lenses.lensDirective(lens),
+  ].filter(Boolean).join('\n\n');
+
+  const userMsg = [
+    `QUESTION (from a ${lens?.label || requester.role}): ${question}`,
+    '',
+    privacy.buildContextBlock({ citable: ctx.citable, privateInforming: ctx.privateInforming }),
+    '',
+    'Answer in 3-5 sentences with specific, actionable guidance for this person.',
+  ].join('\n');
+
+  let answer;
+  try {
+    answer = await ai.complete({ tier: 'reason', system, user: userMsg, maxTokens: 400 });
+  } catch (err) {
+    console.error('[advisor] AI error:', err.message);
+    return res.status(502).json({ error: 'Advisor unavailable right now. Please try again.' });
+  }
+
+  // Last-line privacy defence.
+  answer = privacy.redact(answer, ctx.privateStrings);
+
+  // Persist the thread (non-sensitive: question + safe answer only).
+  if (!advisorThreads[code]) advisorThreads[code] = [];
+  const thread = {
+    id:            `adv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    memberId, memberName: member.name || '',
+    requesterId, requesterRole: requester.role,
+    lens:          lens?.label || null,
+    question, answer,
+    createdAt:     new Date().toISOString(),
+  };
+  advisorThreads[code].push(thread);
+  scheduleSave();
+
+  res.json({
+    ok: true,
+    answer,
+    lens: lens?.label || null,
+    evidenceCount: ctx.citable.length,
+    threadId: thread.id,
+  });
+});
+
+/* ── GET /api/advisor/:memberId/threads — prior advisor Q&A for a member ───── */
+app.get('/api/advisor/:memberId/threads', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code     = (orgCode || '').toLowerCase().trim();
+  const memberId = req.params.memberId;
+
+  const visible = getVisibleUserIds(code, userId);
+  if (!visible.includes(memberId)) return res.status(403).json({ error: 'Member not in your visible scope' });
+
+  const threads = (advisorThreads[code] || [])
+    .filter(t => t.memberId === memberId)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, 30);
+  res.json({ threads });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
    LEARNING ENGINE — Patterns, Predictions, Effectiveness, Summary
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -4504,6 +4733,7 @@ function _loadAllStores(data) {
   Object.assign(weeklyAssessments,data.weeklyAssessments|| {});
   Object.assign(orgInterventions, data.orgInterventions || {});
   Object.assign(userAiProfiles,   data.userAiProfiles   || {});
+  Object.assign(advisorThreads,   data.advisorThreads   || {});
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
   const _savedSessions = data.activeSessions || {};
