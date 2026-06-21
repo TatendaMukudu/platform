@@ -16,7 +16,20 @@ const lenses  = require('./ai/lenses');
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-app.use(express.json());
+/* ── Process-level crash guards ───────────────────────────────────────────────
+   A single unhandled async error should never take the whole server down and
+   sign everyone out. Log loudly; keep serving. (DB/boot failures still exit via
+   db.js — these guards are for in-flight request bugs.) */
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason && reason.stack ? reason.stack : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err && err.stack ? err.stack : err);
+});
+
+// 25mb so base64 rich-media (images/PDF) in chat/scenarios isn't rejected by the
+// default 100kb body limit — a real, silent failure mode for attachments.
+app.use(express.json({ limit: '25mb' }));
 // Serve static assets, but force browsers to revalidate HTML/JS/CSS on every load
 // (etag makes this cheap) so a Render redeploy is picked up on the next refresh
 // instead of a stale cached bundle — the cause of "I deployed but nothing changed".
@@ -4958,6 +4971,28 @@ function _loadAllStores(data) {
   }
   console.log(`[sessions] Restored ${Object.keys(activeSessions).length} active session(s) from Postgres`);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ROBUSTNESS — registered AFTER all routes.
+   - Unknown /api/* paths return a clean 404 JSON instead of the SPA HTML.
+   - Any error thrown in a route (or a malformed JSON body) is caught here and
+     returned as JSON instead of crashing the process or leaking a stack trace.
+   ═══════════════════════════════════════════════════════════════════════════ */
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: `Unknown API endpoint: ${req.method} ${req.path}` });
+});
+
+// eslint-disable-next-line no-unused-vars  (Express needs the 4-arg signature)
+app.use((err, req, res, next) => {
+  const status = err.status || err.statusCode || 500;
+  // Body-parser raises a 400 for malformed JSON — surface it cleanly.
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'Invalid JSON in request body.' });
+  }
+  console.error(`[error] ${req.method} ${req.originalUrl} →`, err.message);
+  if (res.headersSent) return next(err);
+  res.status(status).json({ error: status >= 500 ? 'Something went wrong on our end. Please try again.' : err.message });
+});
 
 const PORT = process.env.PORT || 3000;
 
