@@ -1,35 +1,46 @@
-# Update — Values + goal now REQUIRED to finish setup (org & member)
+# Update — AI memory/profile upgrade (real understanding, not keywords)
 
-**Merged to main:** `073e70c` (deploying) · asset `?v=20260621s`
+**Merged to main:** `599e566` (deploying) · asset `?v=20260621t`
 
-The AI's anchors can no longer be skipped on either side.
+The biggest intelligence upgrade: memory goes from keyword threads to an
+**AI-synthesised behavioral profile** per member.
 
-## Org setup
-- Must have **at least one core value AND one organisation goal** to finish.
-- Enforced in the wizard (can't approve without them) *and* on the server
-  (`complete-org-profile` rejects otherwise).
-- These already flow into the live stores the AI reads (from the last update).
+## What it is
+For each member, IntelliQ now builds an evolving **behavioral understanding**:
+- a **narrative** (2–4 sentences: who they are behaviourally, where they're trending),
+- **tendencies** (how they respond), **driven by** (motivators), **watch for**
+  (early signs), and a **trajectory** (converging / sustaining / stalled /
+  diverging / unanchored / unknown).
 
-## Member setup
-- Must have **a main goal AND at least one value** to finish.
-- The onboarding routes you back to the missing step; the server
-  (`complete-profile`) enforces it too.
+## How it's built (and kept safe)
+- Synthesised from the member's **weighted evidence** (signals, check-ins,
+  weeklies, assessments, notes, interventions) — strong/repeated evidence beats
+  one-offs.
+- Runs **through the privacy gate** + the org's and the member's own values
+  lenses. Sensitive detail *informs* it but is never exposed; any verbatim
+  private span is redacted. So the stored narrative is safe to show leaders.
+- Directional language, never scores.
 
-## Safety: repair path preserved
-Login re-sync (for members whose server record was lost) now posts
-`{ repair: true }` — the server re-affirms completion **without** re-validating or
-overwriting existing goals/values. This also fixes a latent bug where the old
-empty-body repair could blank a member's goals.
+## Kept fresh, not expensive
+- Cached on the member's memory record. Rebuilt only when **stale (>12h)** or when
+  **≥5 new signals** arrive. A "↻" button forces a rebuild.
 
-## Net effect
-Every org and every member now starts with the anchors the alignment engine
-needs — values (guardrails) and a goal (direction). No more "unanchored" members
-or value-less orgs slipping through, so the Advisor/Copilot/briefings always have
-a "north" to reason from.
+## Where you see it
+- **"What IntelliQ understands" card** at the top of the member's Advisor tab —
+  narrative + trajectory badge + tendency/motivator/watch-for chips.
+- The **Advisor now leads with this understanding**, so its answers reason from a
+  synthesised picture, not just raw context.
+- `GET /api/member/:memberId/profile` powers it (visible scope + view_insights).
+
+## Note
+Keyword capture still runs as raw material; the synthesised profile is the
+primary understanding now surfaced and reasoned from.
 
 ## Verification
-- `node --check` on server.js/app.js. Live check: try finishing setup with no
-  value/goal — it should stop you.
+- `node --check`. Live check: open a member with some history → the card fills
+  in; ask the Advisor and the answer should reflect the understanding.
 
 ## Still open
-- Per-group values lens; AI memory/profile upgrade; Graph/Google connectors.
+- Cross-member similarity ("members like this responded well to…") — needs
+  embeddings/Postgres.
+- Microsoft Graph / Google connectors (need your app registration).
