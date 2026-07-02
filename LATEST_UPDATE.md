@@ -1,38 +1,62 @@
-# Update — Stripped the presets: AI reasons from the org's OWN values
+# Update — Values flow to the AI (org + member), and the answers
 
-**Merged to main:** `38b4f02` (deploying) · asset `?v=20260621r`
+**Merged to main:** `c53fce7` (deploying)
 
-You called it: the org already enters its values, so there shouldn't be a
-separate worldview toggle. Done.
+## The real fix
+Both org AND member already *capture* values/goals/traits at setup — but the data
+sat in `organizationProfile` / `memberGoals` and **never reached the AI**. Now it does.
 
-## What changed
-- **Removed** the worldview presets (biblical/custom), the "AI Worldview" setting,
-  its endpoints and storage, and `ai/worldview.js`.
-- **New `ai/values.js`**: the AI builds its reasoning lens straight from
-  `orgValues` — the values the org enters at setup and edits in **Settings →
-  Values**. Empty when none are set.
-- Still wired into every AI surface: Advisor, Group Copilot, briefings, notes,
-  check-ins, weekly.
-- Same guardrails: the values shape HOW it reasons, never the wording — no
-  quoting, lecturing, or parroting.
+- **Org:** completing the org profile now flows approved **values → the live
+  values store**, goals → goals, metrics → metrics. So what you set at creation
+  actually drives the Advisor/Copilot/briefings. The org lens now also reasons
+  from **desired traits + "what success looks like,"** not just values.
+- **Member (parity — your "same on the user side"):** member-facing AI (Advisor,
+  notes, check-ins, weekly) now reasons from **the member's own goals, values,
+  strengths and growth areas** (captured at member onboarding). Guidance anchors
+  to what THEY are trying to become.
 
-## Effect
-Whatever an org lists as its values drives the AI's perspective:
-- A faith org listing "faith, grace, service, integrity" → grace-shaped, humane
-  guidance, no religious special-casing, no preaching.
-- A club listing "discipline, accountability, effort over ego" → the AI reasons
-  from that.
-One universal mechanism, entirely org-driven.
+Same guardrail throughout: values shape *reasoning*, never the wording.
 
-## Where values live
-- Captured with the org profile at setup, and editable any time in
-  **Settings → Values**. (Settings → Organisation now just links there.)
+---
+
+## Your questions, answered
+
+**What does an org need to run?**
+Minimum for the AI to be useful: **identity** (name + type/context), **values**
+(the guardrails), **at least one goal/priority**, and ideally **desired traits**
++ a **success definition**. The org wizard already collects all of these
+(describe → AI suggests → you approve). Values/goals were the ones not flowing
+through — now fixed.
+
+**What data should the AI capture?**
+Two kinds: (1) the **anchors** — org values/traits/goals and each member's own
+goals/values/strengths/growth (the "north" it measures against); and (2) the
+**signals** — every input (notes, check-ins, assessments, uploads, voice, stats),
+weighted. Anchors give meaning; signals give evidence.
+
+**Are traits & goals important?**
+Yes — they're essential, not optional. They're the *reference frames* the whole
+alignment engine measures against. Without goals/traits the AI can observe
+behaviour but has nothing to say whether someone is moving toward or away from
+anything. Values = guardrails, traits = what "good" looks like, goals =
+direction.
+
+**Can we do the same on the user side?**
+Done. Members already capture their goals, values, strengths and growth areas at
+onboarding; now the AI actually reasons from them for that person.
+
+---
+
+## On "make values an explicit step"
+It already is — the org wizard's review screen has **Core Values** as its first
+approval section, and member onboarding has a values step. The gap was purely
+that the approved values didn't reach the AI's live store. That's what this fix
+closes. (If you want values to be a *required* field before an org can finish
+setup, that's a small follow-up.)
 
 ## Verification
-- No residual worldview references; `node --check`; directive builder tested.
-- Live check: set/adjust values, then try the Advisor and feel the shift.
+- `node --check`; org + member directive builders tested.
 
 ## Still open
-- Per-group values (a group can lean on its own values on top of the org's).
-- AI memory/profile upgrade (replace keyword threads) + embeddings.
-- Microsoft Graph / Google connectors (need your app registration).
+- Make values a *required* setup field (optional hardening).
+- Per-group values lens; AI memory/profile upgrade; Graph/Google connectors.
