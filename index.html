@@ -1218,6 +1218,15 @@
           <button class="tab-btn" data-tab="coach">Leader Input</button>
           <button class="tab-btn" data-tab="insights">AI Insights</button>
           <button class="tab-btn" data-tab="advisor">Ask Advisor</button>
+          <button class="tab-btn" data-tab="data">Data</button>
+        </div>
+
+        <div class="tab-panel" data-panel="data">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.6rem">
+            <div style="font-size:0.8rem;color:var(--text-secondary)">Everything collected about this person — the AI reasons from all of it.</div>
+            <button class="btn btn-outline btn-sm" style="flex-shrink:0" onclick="openLogSignal()">＋ Log data</button>
+          </div>
+          <div id="pm-data-content"></div>
         </div>
 
         <div class="tab-panel active" data-panel="scores">
@@ -1737,8 +1746,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260621u"></script>
-<script src="js/auth.js?v=20260621u"></script>
+<script src="js/data.js?v=20260621v"></script>
+<script src="js/auth.js?v=20260621v"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1806,14 +1815,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260621u"></script>
-<script src="js/ui.js?v=20260621u"></script>
-<script src="js/attachments.js?v=20260621u"></script>
-<script src="js/scenarios.js?v=20260621u"></script>
-<script src="js/chat.js?v=20260621u"></script>
-<script src="js/tree.js?v=20260621u"></script>
-<script src="js/app.js?v=20260621u"></script>
-<script src="js/member-view.js?v=20260621u"></script>
+<script src="js/charts.js?v=20260621v"></script>
+<script src="js/ui.js?v=20260621v"></script>
+<script src="js/attachments.js?v=20260621v"></script>
+<script src="js/scenarios.js?v=20260621v"></script>
+<script src="js/chat.js?v=20260621v"></script>
+<script src="js/tree.js?v=20260621v"></script>
+<script src="js/app.js?v=20260621v"></script>
+<script src="js/member-view.js?v=20260621v"></script>
 
 <script>
 function switchGrade(g){

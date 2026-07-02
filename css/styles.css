@@ -2281,3 +2281,15 @@ img { max-width: 100%; }
 /* ── Behavioral profile: durable memory + follow-ups ───────── */
 .pm-profile-followup { border-color: var(--accent) !important; color: var(--accent) !important; }
 .pm-profile-priv { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.6rem; font-style: italic; }
+
+/* ── Member Data hub (profile → Data tab) ──────────────────── */
+.md-group { margin-bottom: 1rem; }
+.md-group-head { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 0.4rem; display: flex; align-items: center; gap: 0.4rem; }
+.md-count { font-size: 0.66rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 0.02rem 0.45rem; color: var(--text-muted); }
+.md-row { display: flex; gap: 0.55rem; align-items: flex-start; padding: 0.45rem 0; border-bottom: 1px solid var(--border); }
+.md-row:last-child { border-bottom: none; }
+.md-w { width: 7px; height: 7px; border-radius: 50%; margin-top: 0.35rem; flex-shrink: 0; }
+.md-body { min-width: 0; flex: 1; }
+.md-val { font-size: 0.83rem; color: var(--text-secondary); line-height: 1.5; }
+.md-private { color: var(--text-muted); font-style: italic; }
+.md-meta { font-size: 0.68rem; color: var(--text-muted); margin-top: 0.1rem; }

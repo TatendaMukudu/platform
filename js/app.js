@@ -4194,6 +4194,7 @@ function _showProfileInner(id, m){
   if (_advInput) _advInput.value = '';
   loadAdvisorThreads(id);
   loadBehavioralProfile(id);
+  loadMemberData(id);
 
   openModal('profile-modal');
 
@@ -4380,6 +4381,64 @@ async function loadBehavioralProfile(memberId, refresh){
   } catch (e) {
     el.innerHTML = `<div class="pm-profile-empty">Understanding unavailable right now.</div>`;
   }
+}
+
+/* ── Member Data hub — everything collected about a person, on their profile ───
+   Consolidated view of the member's signals (metrics, sheets, observations,
+   check-ins, assessments…). Sensitive items are shown locked — they inform the
+   AI but their detail isn't displayed. Same store the Advisor reasons from. */
+const _SIGNAL_LABELS = {
+  checkin: 'Check-ins', note: 'Notes & observations', assessment: 'Assessments',
+  weekly: 'Weekly reflections', voice: 'Voice notes', film: 'Film notes',
+  metric: 'Metrics', sheet: 'Spreadsheets', gamestats: 'Game stats',
+  document: 'Documents', external: 'External feeds', teams: 'Microsoft Teams',
+  google: 'Google', outlook: 'Outlook',
+};
+
+async function loadMemberData(memberId){
+  const el = document.getElementById('pm-data-content');
+  if (!el) return;
+  el.innerHTML = `<div style="padding:1rem;color:var(--text-muted);font-size:0.82rem">Loading…</div>`;
+  try {
+    const res = await fetch(`/api/signals?subjectType=member&subjectId=${encodeURIComponent(memberId)}`, { headers: Auth._headers() });
+    const d = await res.json();
+    const sigs = (d.signals || []).sort((a, b) => new Date(b.ts) - new Date(a.ts));
+    if (!sigs.length) {
+      el.innerHTML = `<div style="padding:1.2rem;color:var(--text-muted);font-size:0.82rem;text-align:center">Nothing collected yet. Upload a sheet, log an observation, or the member checks in — it all lands here for the AI to use.</div>`;
+      return;
+    }
+    const groups = {};
+    sigs.forEach(s => { (groups[s.source] = groups[s.source] || []).push(s); });
+    // Order groups: strongest sources first
+    const order = ['assessment','metric','gamestats','sheet','note','film','voice','weekly','checkin','document','external','teams','google','outlook'];
+    const keys = Object.keys(groups).sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
+    el.innerHTML = keys.map(src => `
+      <div class="md-group">
+        <div class="md-group-head">${_escAdvisor(_SIGNAL_LABELS[src] || src)} <span class="md-count">${groups[src].length}</span></div>
+        ${groups[src].slice(0, 25).map(_memberDataRow).join('')}
+      </div>`).join('');
+  } catch (e) {
+    el.innerHTML = `<div style="padding:1rem;color:var(--danger);font-size:0.82rem">Could not load data.</div>`;
+  }
+}
+
+function _memberDataRow(s){
+  const wc = s.weight === 'strong' ? 'var(--success)' : s.weight === 'medium' ? 'var(--warning)' : 'var(--text-muted)';
+  const when = s.ts ? new Date(s.ts).toLocaleDateString() : '';
+  const isPrivate = s.sensitivity === 'sensitive' || s.sensitivity === 'restricted' || s.redacted;
+  const val = isPrivate
+    ? `🔒 Private — informs the AI, not shown`
+    : (s.valueText ? _escAdvisor(String(s.valueText).slice(0, 160))
+       : (s.valueNum != null ? `${s.label ? _escAdvisor(s.label) + ': ' : ''}${s.valueNum}`
+          : _escAdvisor(s.label || '')));
+  return `
+    <div class="md-row">
+      <span class="md-w" style="background:${wc}" title="${s.weight || 'weak'} signal"></span>
+      <div class="md-body">
+        <div class="md-val${isPrivate ? ' md-private' : ''}">${val || '—'}</div>
+        <div class="md-meta">${s.public ? 'public · ' : ''}${_escAdvisor(when)}</div>
+      </div>
+    </div>`;
 }
 
 /* ── UNIVERSAL INPUT — log any data about a member (text / metric / voice) ─────
