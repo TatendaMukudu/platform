@@ -5816,6 +5816,9 @@ async function renderLeaderHome() {
     const moodEmoji      = avgMood ? (avgMood >= 4 ? '😊' : avgMood >= 3 ? '😐' : '😕') : '—';
 
     el.innerHTML = `
+      <!-- Proactive briefing + alerts (loads on open — not click-to-ask) -->
+      <div id="ldr-briefing" class="ldr-briefing-wrap"><div class="ldr-brief-loading">🤖 Reading this week's signals…</div></div>
+
       <!-- Scope indicator -->
       <div class="card" style="margin-bottom:1rem;border-color:rgba(124,90,245,0.25);background:rgba(124,90,245,0.04)">
         <div style="display:flex;align-items:center;gap:0.6rem;flex-wrap:wrap">
@@ -5913,8 +5916,46 @@ async function renderLeaderHome() {
           </button>
         </div>` : ''}`;
 
+    _loadLeaderBriefing();
+
   } catch(e) {
     el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load leader dashboard. Try refreshing.</p></div>`;
+  }
+}
+
+/* ── Proactive briefing + alert feed (fed by weighted signals) ────────────────
+   Auto-loads on the leader dashboard — the "what needs you" push, not pull. */
+async function _loadLeaderBriefing(refresh) {
+  const el = document.getElementById('ldr-briefing');
+  if (!el) return;
+  try {
+    const res  = await fetch(`/api/workspace/briefing${refresh ? '?refresh=1' : ''}`, { headers: Auth._headers() });
+    const d    = await res.json();
+    if (!res.ok || !d.ok) throw new Error(d.error || 'briefing failed');
+
+    const sevColor = s => s === 'high' ? 'var(--danger)' : s === 'medium' ? 'var(--warning)' : 'var(--text-muted)';
+    const alerts = (d.alerts || []).map(a => `
+      <div class="ldr-alert" onclick="showProfile('${a.memberId}')">
+        <span class="ldr-alert-dot" style="background:${sevColor(a.severity)}"></span>
+        <div class="ldr-alert-body">
+          <div class="ldr-alert-name">${_escAdvisor(a.name)} <span class="ldr-alert-reason">${_escAdvisor(a.reason)}</span></div>
+          ${a.action ? `<div class="ldr-alert-action">→ ${_escAdvisor(a.action)}</div>` : ''}
+        </div>
+      </div>`).join('');
+
+    el.innerHTML = `
+      <div class="ldr-brief-card">
+        <div class="ldr-brief-head">
+          <span>🤖 What needs you</span>
+          <button class="btn btn-outline btn-sm" onclick="_loadLeaderBriefing(true)">↻ Refresh</button>
+        </div>
+        ${d.briefing ? `<div class="ldr-brief-text">${_escAdvisor(d.briefing).replace(/\n/g,'<br>')}</div>` : ''}
+        ${alerts ? `<div class="ldr-alert-list">${alerts}</div>`
+                 : `<div class="ldr-brief-clear">✓ Nothing urgent right now — your group is steady.</div>`}
+        <div class="ldr-brief-foot">Weighs results & repeated patterns over one-off notes. Updated ${_escAdvisor(new Date(d.generatedAt).toLocaleString())}${d.cached ? ' · cached' : ''}.</div>
+      </div>`;
+  } catch (e) {
+    el.innerHTML = `<div class="ldr-brief-card"><div class="ldr-brief-clear" style="color:var(--text-muted)">Briefing unavailable right now.</div></div>`;
   }
 }
 

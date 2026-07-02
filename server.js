@@ -2016,6 +2016,118 @@ app.get('/api/workspace/my-tree', requireAuth, (req, res) => {
   res.json({ ok: true, tree, unassigned, totalVisible: visible.size });
 });
 
+/* ── GET /api/workspace/briefing — PROACTIVE "what needs you" feed ─────────────
+   Deterministic alerts (mood decline, gone quiet, dipped results, unanchored) +
+   an AI briefing synthesised from the WEIGHTED signal picture. Names members in
+   the alert list (leader's own management view); the narrative stays aggregate.
+   Cached per leader for 2h. This is the push, not the pull. */
+const leaderBriefingCache = {}; // `${code}:${userId}` → { data, ts }
+const BRIEFING_TTL = 2 * 60 * 60 * 1000;
+
+function _memberLastActivity(code, id, name) {
+  let last = 0;
+  [userKey(code, id), memberKey(code, name || '')].forEach(k =>
+    (memberCheckins[k] || []).forEach(c => { const t = new Date(c.ts || c.date).getTime(); if (!isNaN(t)) last = Math.max(last, t); }));
+  _gatherSignals(code, 'member', id, 40).forEach(s => { const t = new Date(s.ts).getTime(); if (!isNaN(t)) last = Math.max(last, t); });
+  return last || null;
+}
+
+function _memberAlert(code, u) {
+  const now = Date.now();
+  const cks = [];
+  [userKey(code, u.id), memberKey(code, u.name || '')].forEach(k =>
+    (memberCheckins[k] || []).forEach(c => { const t = new Date(c.ts || c.date).getTime(); if (!isNaN(t)) cks.push({ mood: c.mood != null ? Number(c.mood) : null, t }); }));
+  cks.sort((a, b) => a.t - b.t);
+  const lastAct = _memberLastActivity(code, u.id, u.name);
+  const days = lastAct ? Math.floor((now - lastAct) / 86400000) : null;
+  const hasGoal = normalizeMemberGoals(memberGoals[userKey(code, u.id)] || memberGoals[memberKey(code, u.name || '')]).length > 0;
+
+  // Gone quiet (weighted by how long)
+  if (days === null) return { severity: 'medium', reason: 'no activity yet', action: 'Invite them to their first check-in.' };
+  if (days >= 14)   return { severity: 'high',   reason: `quiet for ${days} days`, action: 'Reach out personally.' };
+
+  // Mood decline (recent vs prior) — a converging pattern, not one point
+  const moods = cks.filter(c => c.mood != null);
+  if (moods.length >= 3) {
+    const mid = Math.floor(moods.length / 2);
+    const avg = a => a.reduce((s, v) => s + v.mood, 0) / a.length;
+    const recent = avg(moods.slice(mid)), earlier = avg(moods.slice(0, mid));
+    if (recent < earlier - 0.5 && recent < 3) return { severity: 'high', reason: 'mood trending down', action: 'Check in — ask how they’re doing, listen first.' };
+    if (recent < 2.5) return { severity: 'medium', reason: 'low mood recently', action: 'A supportive conversation may help.' };
+  }
+
+  // Dipped result (strong signal)
+  const lowAssessment = _gatherSignals(code, 'member', u.id, 20)
+    .find(s => s.source === 'assessment' && s.valueNum != null && s.valueNum < 50 && (Date.now() - new Date(s.ts).getTime()) < 30 * 86400000);
+  if (lowAssessment) return { severity: 'medium', reason: 'a recent result dipped', action: 'Review the assessment together and set one focus.' };
+
+  if (days >= 10) return { severity: 'medium', reason: `quiet for ${days} days`, action: 'A quick nudge would help re-engage them.' };
+  if (!hasGoal)   return { severity: 'low', reason: 'no goal set yet', action: 'Help them anchor a personal goal.' };
+  return null;
+}
+
+app.get('/api/workspace/briefing', requireAuth, async (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = orgCode;
+  if (!_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+  const cacheKey = `${code}:${userId}`;
+  const cached = leaderBriefingCache[cacheKey];
+  if (cached && req.query.refresh !== '1' && Date.now() - cached.ts < BRIEFING_TTL) {
+    return res.json({ ...cached.data, cached: true });
+  }
+
+  const members = getVisibleUserIds(code, userId)
+    .map(id => orgUsers[code]?.[id]).filter(u => u && u.id !== userId && u.role !== 'superadmin');
+
+  const SEV = { high: 0, medium: 1, low: 2 };
+  const alerts = [];
+  let activeWeek = 0;
+  members.forEach(u => {
+    const last = _memberLastActivity(code, u.id, u.name);
+    if (last && Date.now() - last < 7 * 86400000) activeWeek++;
+    const a = _memberAlert(code, u);
+    if (a) alerts.push({ memberId: u.id, name: u.name, ...a });
+  });
+  alerts.sort((x, y) => SEV[x.severity] - SEV[y.severity]);
+  const topAlerts = alerts.slice(0, 8);
+
+  // AI briefing from the aggregate weighted picture (no individual names).
+  const highN = alerts.filter(a => a.severity === 'high').length;
+  const reasons = {};
+  alerts.forEach(a => { reasons[a.reason] = (reasons[a.reason] || 0) + 1; });
+  const reasonLine = Object.entries(reasons).map(([r, n]) => `${n}× ${r}`).join(', ');
+  const brief = [
+    `GROUP: ${members.length} members, ${activeWeek} active this week.`,
+    alerts.length ? `Attention flags: ${alerts.length} (${highN} high). Patterns: ${reasonLine}.` : 'No attention flags this week.',
+    'Signals are weighted: results and repeated patterns count more than one-off notes.',
+  ].join('\n');
+
+  let narrative = null;
+  try {
+    narrative = await ai.complete({
+      tier: 'reason', maxTokens: 220,
+      system: `You are IntelliQ, briefing a group's leader. In 2-4 sentences say what the week looks like and the ONE or TWO things to prioritise. Aggregate only — do not name individuals (the leader sees the named list separately). Directional, practical, warm. No scores.`,
+      user: brief,
+    });
+  } catch (_) { /* fall back to no narrative */ }
+
+  const data = {
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    memberCount: members.length,
+    activeThisWeek: activeWeek,
+    alerts: topAlerts,
+    highCount: highN,
+    briefing: narrative || (alerts.length
+      ? `${alerts.length} member(s) could use your attention this week — see the list below.`
+      : `Your group looks steady this week — ${activeWeek}/${members.length} active.`),
+  };
+  leaderBriefingCache[cacheKey] = { data, ts: Date.now() };
+  res.json(data);
+});
+
 /* ═══════════════════════════════════════════════════════════════════════════
    SPRINT 2 — METRICS
    Three sources: org (superadmin-defined), shared (leader), personal (member)

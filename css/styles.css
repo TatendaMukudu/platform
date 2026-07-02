@@ -2246,3 +2246,20 @@ img { max-width: 100%; }
 .ds-w-strong { background: var(--success); }
 .ds-w-medium { background: var(--warning); }
 .ds-w-weak   { background: var(--text-muted); }
+
+/* ── Leader proactive briefing + alerts ────────────────────── */
+.ldr-briefing-wrap { margin-bottom: 1rem; }
+.ldr-brief-loading { font-size: 0.82rem; color: var(--text-muted); padding: 0.8rem; }
+.ldr-brief-card { background: linear-gradient(180deg, rgba(124,90,245,0.07), rgba(124,90,245,0.02)); border: 1px solid rgba(124,90,245,0.3); border-radius: 12px; padding: 0.9rem 1rem; }
+.ldr-brief-head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 0.92rem; margin-bottom: 0.5rem; }
+.ldr-brief-text { font-size: 0.86rem; line-height: 1.6; color: var(--text-secondary); margin-bottom: 0.7rem; }
+.ldr-brief-clear { font-size: 0.84rem; color: var(--success); padding: 0.3rem 0; }
+.ldr-alert-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.ldr-alert { display: flex; gap: 0.6rem; align-items: flex-start; padding: 0.5rem 0.6rem; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--border); cursor: pointer; }
+.ldr-alert:hover { border-color: var(--accent); }
+.ldr-alert-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 0.35rem; flex-shrink: 0; }
+.ldr-alert-body { min-width: 0; }
+.ldr-alert-name { font-size: 0.85rem; font-weight: 600; }
+.ldr-alert-reason { font-weight: 400; color: var(--text-muted); font-size: 0.8rem; }
+.ldr-alert-action { font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.15rem; }
+.ldr-brief-foot { font-size: 0.68rem; color: var(--text-muted); margin-top: 0.7rem; font-style: italic; }
