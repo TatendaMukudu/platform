@@ -2263,3 +2263,17 @@ img { max-width: 100%; }
 .ldr-alert-reason { font-weight: 400; color: var(--text-muted); font-size: 0.8rem; }
 .ldr-alert-action { font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.15rem; }
 .ldr-brief-foot { font-size: 0.68rem; color: var(--text-muted); margin-top: 0.7rem; font-style: italic; }
+
+/* ── Behavioral profile (member profile → Advisor tab) ─────── */
+.pm-profile { margin-bottom: 0.9rem; }
+.pm-profile-loading, .pm-profile-empty { font-size: 0.8rem; color: var(--text-muted); padding: 0.6rem 0; }
+.pm-profile-card { background: linear-gradient(180deg, rgba(124,90,245,0.08), rgba(124,90,245,0.02)); border: 1px solid rgba(124,90,245,0.28); border-radius: 10px; padding: 0.8rem 0.9rem; }
+.pm-profile-head { display: flex; align-items: center; gap: 0.5rem; font-weight: 700; font-size: 0.86rem; margin-bottom: 0.5rem; }
+.pm-profile-traj { font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; border: 1px solid; border-radius: 999px; padding: 0.1rem 0.5rem; }
+.pm-profile-refresh { margin-left: auto; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.95rem; }
+.pm-profile-refresh:hover { color: var(--accent); }
+.pm-profile-narr { font-size: 0.85rem; line-height: 1.6; color: var(--text-secondary); margin-bottom: 0.5rem; }
+.pm-profile-row { display: flex; gap: 0.5rem; align-items: baseline; margin-top: 0.35rem; flex-wrap: wrap; }
+.pm-profile-k { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); flex-shrink: 0; min-width: 62px; }
+.pm-profile-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.pm-profile-chip { font-size: 0.74rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 0.12rem 0.5rem; color: var(--text-secondary); }

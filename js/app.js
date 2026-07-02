@@ -4193,6 +4193,7 @@ function _showProfileInner(id, m){
   const _advInput = document.getElementById('pm-advisor-input');
   if (_advInput) _advInput.value = '';
   loadAdvisorThreads(id);
+  loadBehavioralProfile(id);
 
   openModal('profile-modal');
 
@@ -4329,6 +4330,49 @@ async function loadAdvisorThreads(memberId){
       </div>`).join('');
   } catch (err){
     el.innerHTML = `<div class="advisor-muted">Could not load history.</div>`;
+  }
+}
+
+/* ── Behavioral profile — IntelliQ's evolving understanding of a member ──────── */
+const _PROFILE_TRAJ = {
+  converging:  { label: 'Converging', color: 'var(--success)' },
+  sustaining:  { label: 'Sustaining', color: 'var(--accent)'  },
+  stalled:     { label: 'Stalled',    color: 'var(--warning)' },
+  diverging:   { label: 'Diverging',  color: 'var(--danger)'  },
+  unanchored:  { label: 'Unanchored', color: 'var(--text-muted)' },
+  unknown:     { label: 'Building…',  color: 'var(--text-muted)' },
+};
+
+async function loadBehavioralProfile(memberId, refresh){
+  const el = document.getElementById('pm-profile');
+  if (!el) return;
+  el.innerHTML = `<div class="pm-profile-loading">🧠 IntelliQ is assembling what it understands…</div>`;
+  try {
+    const res  = await fetch(`/api/member/${encodeURIComponent(memberId)}/profile${refresh ? '?refresh=1' : ''}`, { headers: Auth._headers() });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'unavailable');
+    const p = data.profile;
+    if (!p || !p.narrative) {
+      el.innerHTML = `<div class="pm-profile-empty">Not enough to understand ${_escAdvisor(AppState.getMember(memberId)?.name || 'them')} yet — log data or run a check-in, and this fills in.</div>`;
+      return;
+    }
+    const tj = _PROFILE_TRAJ[p.trajectory] || _PROFILE_TRAJ.unknown;
+    const chips = (label, arr) => (arr && arr.length)
+      ? `<div class="pm-profile-row"><span class="pm-profile-k">${label}</span><span class="pm-profile-chips">${arr.map(x => `<span class="pm-profile-chip">${_escAdvisor(x)}</span>`).join('')}</span></div>` : '';
+    el.innerHTML = `
+      <div class="pm-profile-card">
+        <div class="pm-profile-head">
+          <span>🧠 What IntelliQ understands</span>
+          <span class="pm-profile-traj" style="color:${tj.color};border-color:${tj.color}55">${tj.label}</span>
+          <button class="pm-profile-refresh" title="Rebuild" onclick="loadBehavioralProfile('${memberId}', true)">↻</button>
+        </div>
+        <div class="pm-profile-narr">${_escAdvisor(p.narrative)}</div>
+        ${chips('Tends to', p.tendencies)}
+        ${chips('Driven by', p.motivators)}
+        ${chips('Watch for', p.watchFor)}
+      </div>`;
+  } catch (e) {
+    el.innerHTML = `<div class="pm-profile-empty">Understanding unavailable right now.</div>`;
   }
 }
 

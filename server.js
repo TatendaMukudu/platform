@@ -5132,6 +5132,102 @@ function _buildAdvisorContext(code, member, requesterUser) {
   return { citable, privateInforming, privateStrings };
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   BEHAVIORAL PROFILE — the AI's evolving understanding of a person
+   Synthesised from the member's weighted evidence THROUGH the privacy gate, so
+   the stored narrative is safe to show leaders (sensitive detail informs it but
+   is never exposed). Cached on the member's memory record; rebuilt as evidence
+   grows. Replaces keyword threads as the primary "understanding" the AI reasons
+   from. Directional language, no scores.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function _memberSignalCount(code, userId, name) {
+  return _gatherSignals(code, 'member', userId, 500).length
+    + (memberCheckins[userKey(code, userId)]?.length || 0)
+    + (memberCheckins[memberKey(code, name || '')]?.length || 0);
+}
+
+function _profileStale(profile, signalCount) {
+  if (!profile) return true;
+  if (Date.now() - new Date(profile.builtAt).getTime() > 12 * 60 * 60 * 1000) return true; // 12h
+  if (signalCount - (profile.signalBasis || 0) >= 5) return true;                            // meaningful new evidence
+  return false;
+}
+
+async function _buildBehavioralProfile(code, userId) {
+  const member = orgUsers[code]?.[userId];
+  if (!member) return null;
+  const mem = _getMemory(code, userId);
+  const ctx = _buildAdvisorContext(code, member, member);
+  const signalCount = _memberSignalCount(code, userId, member.name);
+
+  const digest = [
+    'OBSERVABLE EVIDENCE:',
+    ...ctx.citable,
+    ctx.privateInforming.length ? '\nPRIVATE (informs only — never reveal):' : '',
+    ...ctx.privateInforming,
+  ].filter(Boolean).join('\n');
+
+  const system = [
+    `You are IntelliQ, building a longitudinal BEHAVIORAL UNDERSTANDING of one person for the leaders who support them. Synthesise who this person is behaviourally — how they tend to respond, what drives them, their strengths, and their trajectory toward their OWN goals. This is a safe, shareable understanding written from evidence, not a data dump and not a verdict.`,
+    privacy.GATE_DIRECTIVE,
+    `Weigh strong and repeated evidence over one-off notes ([strong] beats [minor]). Use directional language, never scores. If evidence is thin, say so plainly and keep it brief.`,
+    _worldviewDirective(code),
+    _memberValuesDirective(code, userId),
+  ].filter(Boolean).join('\n\n');
+
+  const user = `PERSON: ${member.name}\n\n${digest}\n\nReturn ONLY JSON: {"narrative":"2-4 sentences: who they are behaviourally and where they're trending","tendencies":["how they tend to respond / behave"],"motivators":["what seems to drive or engage them"],"watchFor":["early signs worth watching"],"trajectory":"converging|sustaining|stalled|diverging|unanchored|unknown"}`;
+
+  let out = null;
+  try {
+    out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 600, schema: ['narrative'] });
+  } catch (err) { console.warn('[profile] AI error:', err.message); }
+  if (!out) return mem.profile || null;
+
+  // Redact any verbatim private span that slipped into the narrative.
+  const priv = ctx.privateStrings || [];
+  const clean = s => typeof s === 'string' ? privacy.redact(s, priv) : s;
+  mem.profile = {
+    narrative:  clean(out.narrative || ''),
+    tendencies: Array.isArray(out.tendencies) ? out.tendencies.map(clean).slice(0, 6) : [],
+    motivators: Array.isArray(out.motivators) ? out.motivators.map(clean).slice(0, 6) : [],
+    watchFor:   Array.isArray(out.watchFor)   ? out.watchFor.map(clean).slice(0, 6)   : [],
+    trajectory: out.trajectory || 'unknown',
+    builtAt:    new Date().toISOString(),
+    signalBasis: signalCount,
+  };
+  scheduleSave();
+  return mem.profile;
+}
+
+async function _getBehavioralProfile(code, userId, force) {
+  const member = orgUsers[code]?.[userId];
+  if (!member) return null;
+  const mem = _getMemory(code, userId);
+  const signalCount = _memberSignalCount(code, userId, member.name);
+  if (force || _profileStale(mem.profile, signalCount)) {
+    return await _buildBehavioralProfile(code, userId);
+  }
+  return mem.profile;
+}
+
+/* ── GET /api/member/:memberId/profile — the behavioral understanding ──────── */
+app.get('/api/member/:memberId/profile', requireAuth, async (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = (orgCode || '').toLowerCase().trim();
+  const memberId = req.params.memberId;
+  if (!getVisibleUserIds(code, userId).includes(memberId)) return res.status(403).json({ error: 'Member not in your visible scope' });
+  if (!(_userHasPerm(code, userId, 'view_insights') || _userHasPerm(code, userId, 'review_checkins') || orgUsers[code]?.[userId]?.role === 'superadmin')) {
+    return res.status(403).json({ error: 'Permission denied: view_insights required' });
+  }
+  try {
+    const profile = await _getBehavioralProfile(code, memberId, req.query.refresh === '1');
+    res.json({ ok: true, profile: profile || null });
+  } catch (err) {
+    console.error('[profile] error:', err.message);
+    res.status(502).json({ error: 'Could not build the profile right now.' });
+  }
+});
+
 const ADVISOR_SYSTEM = `You are the IntelliQ Individual Advisor — embedded in ONE member's profile to help a leader support, develop, and lead THIS specific person. You are not a score machine. You never rank people and never output a number as a verdict.
 
 HOW YOU THINK — ALIGNMENT, NOT OBEDIENCE:
@@ -5188,6 +5284,10 @@ app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
   // Build privacy-tiered context + role lens.
   const ctx  = _buildAdvisorContext(code, member, requester);
   const lens = lenses.lensFor(requester);
+
+  // Lead with the synthesised behavioral understanding (cached — no extra call).
+  const _prof = _getMemory(code, memberId).profile;
+  if (_prof?.narrative) ctx.citable.unshift(`[strong] Behavioral understanding: ${_prof.narrative}`);
 
   const system = [
     ADVISOR_SYSTEM,
