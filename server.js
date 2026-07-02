@@ -9,9 +9,10 @@ const db        = require('./db');
 /* ── AI layer (Phase 1) ──────────────────────────────────────────────────────
    One gateway controls model choice / retries / validation; the privacy gate
    enforces "private may inform, never reveal"; lenses shape advice by role. */
-const ai      = require('./ai/gateway');
-const privacy = require('./ai/privacy');
-const lenses  = require('./ai/lenses');
+const ai        = require('./ai/gateway');
+const privacy   = require('./ai/privacy');
+const lenses    = require('./ai/lenses');
+const worldview = require('./ai/worldview');
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -88,6 +89,13 @@ function isLegacyHash(h) { return h && !h.startsWith('$2b$') && !h.startsWith('$
 
 // Legacy hash used only for migration path — new code never calls this for new passwords
 function simpleHash(str) { let h = 0; for (const c of str) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h.toString(16); }
+
+/* The org's configured AI worldview directive (e.g. biblical values), or ''.
+   Prepended to AI system prompts so every surface reasons within it. */
+function _worldviewDirective(code) {
+  const w = orgMeta[(code || '').toLowerCase()]?.worldview;
+  return w ? worldview.directiveFor(w) : '';
+}
 
 function issueToken(userId, orgCode, role) {
   const token = generateToken();
@@ -2108,7 +2116,7 @@ app.get('/api/workspace/briefing', requireAuth, async (req, res) => {
   try {
     narrative = await ai.complete({
       tier: 'reason', maxTokens: 220,
-      system: `You are IntelliQ, briefing a group's leader. In 2-4 sentences say what the week looks like and the ONE or TWO things to prioritise. Aggregate only — do not name individuals (the leader sees the named list separately). Directional, practical, warm. No scores.`,
+      system: [`You are IntelliQ, briefing a group's leader. In 2-4 sentences say what the week looks like and the ONE or TWO things to prioritise. Aggregate only — do not name individuals (the leader sees the named list separately). Directional, practical, warm. No scores.`, _worldviewDirective(code)].filter(Boolean).join('\n\n'),
       user: brief,
     });
   } catch (_) { /* fall back to no narrative */ }
@@ -2457,7 +2465,8 @@ app.get('/api/groups/:groupId/copilot', requireAuth, async (req, res) => {
     `You are the IntelliQ Group Copilot — a coach for the group's LEAD. Your job is to help the group move toward its stated goals. You are NOT a monitor and you do not surveil members.`,
     privacy.GATE_DIRECTIVE,
     `Hard rules: speak in AGGREGATE only — never name or single out an individual. Give the lead ADVICE, not exposure. Use directional language, never scores. Tie everything to the group's goals and traits.`,
-  ].join('\n\n');
+    _worldviewDirective(code),
+  ].filter(Boolean).join('\n\n');
 
   const user = [
     'SIGNALS (counts and trends only — no message content):',
@@ -2534,7 +2543,7 @@ app.post('/api/notes', async (req, res) => {
     try {
       const response = await client.messages.create({
         model: 'claude-haiku-4-5-20251001', max_tokens: 100,
-        system: prompts[type] || prompts.private,
+        system: [prompts[type] || prompts.private, _worldviewDirective(note.orgCode)].filter(Boolean).join('\n\n'),
         messages: [{ role: 'user', content: userMsg }],
       });
       note.aiResponse = response.content[0]?.text?.trim() || null;
@@ -2694,6 +2703,27 @@ app.get('/api/groups/:groupId/feed', (req, res) => {
     .sort((a,b) => b.createdAt.localeCompare(a.createdAt));
 
   res.json({ notes, messages });
+});
+
+/* ── AI worldview (values framework) — org-level ─────────────────────────────
+   Lets an org make its AI reason with a specific set of values (e.g. biblical
+   wisdom). Default 'none' (universal). Read via /api/auth/me (on the org object).*/
+app.get('/api/org/worldviews', requireAuth, (req, res) => {
+  res.json({ worldviews: worldview.labels(), current: orgMeta[req.iqSession.orgCode]?.worldview || 'none' });
+});
+
+app.put('/api/org/worldview', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = orgCode;
+  const user = orgUsers[code]?.[userId];
+  const canManage = user?.role === 'superadmin' || _userHasPerm(code, userId, 'manage_settings');
+  if (!canManage) return res.status(403).json({ error: 'Only an admin can set the AI worldview.' });
+  const w = String(req.body?.worldview || 'none');
+  if (!worldview.isValid(w)) return res.status(400).json({ error: 'Unknown worldview.' });
+  if (!orgMeta[code]) orgMeta[code] = {};
+  orgMeta[code].worldview = w;
+  scheduleSave();
+  res.json({ ok: true, worldview: w });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -3424,7 +3454,7 @@ OUTPUT — valid JSON only, no markdown fencing, no extra text:
       const response = await client.messages.create({
         model:      'claude-haiku-4-5-20251001',
         max_tokens: 600,
-        system:     systemPrompt,
+        system:     [systemPrompt, _worldviewDirective(code)].filter(Boolean).join('\n\n'),
         messages:   [{ role: 'user', content: userContent }],
       });
 
@@ -3579,7 +3609,7 @@ app.post('/api/weekly/submit', async (req, res) => {
   try {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001', max_tokens: 150,
-      system: finalRolePrompts[roleKey],
+      system: [finalRolePrompts[roleKey], _worldviewDirective(code)].filter(Boolean).join('\n\n'),
       messages: [{ role: 'user', content: userMsg }],
     });
     aiResponse = response.content[0]?.text?.trim() || null;
@@ -5141,6 +5171,7 @@ app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
     ADVISOR_SYSTEM,
     privacy.GATE_DIRECTIVE,
     lenses.lensDirective(lens),
+    _worldviewDirective(code),
   ].filter(Boolean).join('\n\n');
 
   const contextBlock = privacy.buildContextBlock({ citable: ctx.citable, privateInforming: ctx.privateInforming });

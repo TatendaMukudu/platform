@@ -3029,6 +3029,35 @@ function renderSettings(){
 
   // Load values into textarea
   _loadValuesIntoTextarea();
+  _loadWorldview();
+}
+
+async function _loadWorldview(){
+  const sel = document.getElementById('settings-worldview');
+  if (!sel) return;
+  try {
+    const res = await fetch('/api/org/worldviews', { headers: Auth._headers() });
+    const d = await res.json();
+    const opts = d.worldviews || { none: 'Universal (no specific worldview)' };
+    sel.innerHTML = Object.entries(opts).map(([k, label]) =>
+      `<option value="${k}" ${k === (d.current || 'none') ? 'selected' : ''}>${label}</option>`).join('');
+  } catch(_) { sel.innerHTML = `<option value="none">Universal</option>`; }
+}
+
+async function saveWorldview(w){
+  const out = document.getElementById('settings-worldview-result');
+  if (out) { out.style.color = 'var(--text-muted)'; out.textContent = 'Saving…'; }
+  try {
+    const res = await fetch('/api/org/worldview', {
+      method: 'PUT', headers: Auth._headers(),
+      body: JSON.stringify({ orgCode: AppState.orgCode, worldview: w }),
+    });
+    const d = await res.json();
+    if (!res.ok || !d.ok) throw new Error(d.error || 'Could not save');
+    if (out) { out.style.color = 'var(--success)'; out.textContent = '✓ Saved — your AI now reasons from these values.'; }
+  } catch(e) {
+    if (out) { out.style.color = 'var(--danger)'; out.textContent = '⚠ ' + e.message; }
+  }
 }
 
 function switchSettingsTab(tab) {
