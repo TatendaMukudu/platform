@@ -9,10 +9,11 @@ const db        = require('./db');
 /* ── AI layer (Phase 1) ──────────────────────────────────────────────────────
    One gateway controls model choice / retries / validation; the privacy gate
    enforces "private may inform, never reveal"; lenses shape advice by role. */
-const ai        = require('./ai/gateway');
-const privacy   = require('./ai/privacy');
-const lenses    = require('./ai/lenses');
+const ai         = require('./ai/gateway');
+const privacy    = require('./ai/privacy');
+const lenses     = require('./ai/lenses');
 const valuesLens = require('./ai/values');
+const embeddings = require('./ai/embeddings');
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -5245,6 +5246,16 @@ For follow-ups: things a leader should gently check on later, phrased safely (e.
     signalBasis: signalCount,
   };
   scheduleSave();
+
+  // Cross-member vector (optional — gated on embeddings + pgvector). Fire-and-
+  // forget so it never blocks or breaks the profile response.
+  if (embeddings.enabled() && db.vectorsReady()) {
+    const summary = [mem.profile.narrative, ...(mem.profile.tendencies || []), ...(mem.profile.motivators || [])].filter(Boolean).join('. ');
+    embeddings.embed(summary)
+      .then(vec => vec && db.upsertMemberVector(code, userId, vec, summary))
+      .catch(e => console.warn('[profile] vector upsert failed:', e.message));
+  }
+
   return mem.profile;
 }
 
@@ -5292,7 +5303,7 @@ app.get('/api/member/:memberId/profile', requireAuth, async (req, res) => {
    had positive outcomes for that cohort (falls back to org-wide when the cohort
    has little intervention history). ANONYMOUS — never names other members.
    This is the flywheel first slice; embeddings/Postgres are the scale upgrade. */
-app.get('/api/member/:memberId/similar', requireAuth, (req, res) => {
+app.get('/api/member/:memberId/similar', requireAuth, async (req, res) => {
   const { orgCode, userId } = req.iqSession;
   const code = (orgCode || '').toLowerCase().trim();
   const memberId = req.params.memberId;
@@ -5303,23 +5314,41 @@ app.get('/api/member/:memberId/similar', requireAuth, (req, res) => {
   const member = orgUsers[code]?.[memberId];
   if (!member) return res.status(404).json({ error: 'Member not found' });
 
+  // Vector cohort (nearest neighbours) when pgvector + embeddings are live;
+  // otherwise rule-based pattern overlap below. Both stay anonymous.
+  let vectorCohort = null;
+  if (embeddings.enabled() && db.vectorsReady()) {
+    try {
+      const rows = await db.nearestMembers(code, memberId, 8);
+      const names = rows.map(r => orgUsers[code]?.[r.user_id]?.name).filter(Boolean);
+      if (names.length) vectorCohort = { set: new Set(names), method: 'embedding' };
+    } catch (e) { console.warn('[similar] vector query failed:', e.message); }
+  }
+
   let agg; try { agg = _aggregateOrgData(code); } catch (_) { agg = { memberPatterns: {}, memberPredictions: {} }; }
   const myPatterns = new Set((agg.memberPatterns?.[member.name] || []).map(p => p.type));
   const myTraj     = (agg.memberPredictions?.[member.name] || []).length > 0;
 
-  // Cohort: other members sharing at least one risk pattern (or a declining
-  // trajectory when this member has one). Names collected only to scope the
-  // intervention lookup — never returned.
-  const cohort = new Set();
+  // Cohort: nearest-neighbour (embeddings) when available, else members sharing a
+  // risk pattern / declining trajectory. Names only scope the intervention
+  // lookup — never returned. Anonymous either way.
   const sharedPatterns = new Set();
-  Object.entries(agg.memberPatterns || {}).forEach(([name, pats]) => {
-    if (name === member.name) return;
-    const shared = pats.map(p => p.type).filter(t => myPatterns.has(t));
-    if (shared.length) { cohort.add(name); shared.forEach(t => sharedPatterns.add(t)); }
-  });
-  if (myTraj) Object.entries(agg.memberPredictions || {}).forEach(([name, preds]) => {
-    if (name !== member.name && preds.length) cohort.add(name);
-  });
+  let cohort, method;
+  if (vectorCohort) {
+    cohort = vectorCohort.set;
+    method = 'embedding';
+  } else {
+    cohort = new Set();
+    method = 'pattern';
+    Object.entries(agg.memberPatterns || {}).forEach(([name, pats]) => {
+      if (name === member.name) return;
+      const shared = pats.map(p => p.type).filter(t => myPatterns.has(t));
+      if (shared.length) { cohort.add(name); shared.forEach(t => sharedPatterns.add(t)); }
+    });
+    if (myTraj) Object.entries(agg.memberPredictions || {}).forEach(([name, preds]) => {
+      if (name !== member.name && preds.length) cohort.add(name);
+    });
+  }
 
   // What has helped: measured, positive interventions — cohort-scoped if we have
   // enough, else org-wide. Aggregate by action type. Anonymous.
@@ -5340,6 +5369,7 @@ app.get('/api/member/:memberId/similar', requireAuth, (req, res) => {
     sharedPatterns: [...sharedPatterns],
     whatWorked: whatWorked.slice(0, 4),
     scope,
+    method,
     hasData: whatWorked.length > 0,
   });
 });
@@ -6037,6 +6067,15 @@ const PORT = process.env.PORT || 3000;
 
     // 5b. Derive user.assignedNodeIds / user.leadershipNodeIds from orgNodes
     _backfillUserNodeIds();
+
+    // 5c. Optional pgvector for cross-member similarity — only if embeddings are
+    //     configured. Fully non-fatal; disables itself and falls back otherwise.
+    if (embeddings.enabled()) {
+      try { await db.initVectors(embeddings.DIM); }
+      catch (e) { console.warn('[db] initVectors failed (non-fatal):', e.message); }
+    } else {
+      console.log('[db] embeddings not configured — cross-member similarity uses rule-based fallback');
+    }
 
     // 6. Start HTTP server
     app.listen(PORT, () => {

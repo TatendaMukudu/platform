@@ -132,4 +132,77 @@ async function saveMain(data) {
   );
 }
 
-module.exports = { init, loadMain, saveMain };
+/* ── pgvector (optional) ──────────────────────────────────────────────────── *
+   Cross-member similarity storage. Entirely non-fatal: if pgvector isn't
+   available (extension missing / permissions), it disables itself and the app
+   falls back to rule-based similarity. Enabled only after initVectors() succeeds
+   AND embeddings are configured (checked by the caller).
+   ─────────────────────────────────────────────────────────────────────────── */
+let _vectorsEnabled = false;
+
+async function initVectors(dim = 1536) {
+  const d = parseInt(dim, 10) || 1536;
+  let client;
+  try {
+    client = await pool.connect();
+    await client.query('CREATE EXTENSION IF NOT EXISTS vector');
+    await client.query(
+      `CREATE TABLE IF NOT EXISTS member_vectors (
+         org_code   TEXT NOT NULL,
+         user_id    TEXT NOT NULL,
+         embedding  vector(${d}) NOT NULL,
+         summary    TEXT,
+         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+         PRIMARY KEY (org_code, user_id)
+       )`
+    );
+    try {
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS member_vectors_emb_idx
+           ON member_vectors USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)`
+      );
+    } catch (_) { /* index is best-effort */ }
+    _vectorsEnabled = true;
+    console.log('[db] pgvector ready ✓ — cross-member similarity enabled');
+  } catch (err) {
+    _vectorsEnabled = false;
+    console.log('[db] pgvector not available — similarity uses rule-based fallback (' + err.message + ')');
+  } finally {
+    if (client) client.release();
+  }
+}
+
+function vectorsReady() { return _vectorsEnabled; }
+
+async function upsertMemberVector(orgCode, userId, embedding, summary) {
+  if (!_vectorsEnabled || !Array.isArray(embedding) || !embedding.length) return;
+  const vec = '[' + embedding.join(',') + ']';
+  await pool.query(
+    `INSERT INTO member_vectors (org_code, user_id, embedding, summary, updated_at)
+     VALUES ($1, $2, $3, $4, NOW())
+     ON CONFLICT (org_code, user_id)
+     DO UPDATE SET embedding = EXCLUDED.embedding, summary = EXCLUDED.summary, updated_at = NOW()`,
+    [orgCode, userId, vec, summary || null]
+  );
+}
+
+/* Nearest members by cosine distance. Returns [{ user_id, score }] (score 0..1). */
+async function nearestMembers(orgCode, userId, k = 8) {
+  if (!_vectorsEnabled) return [];
+  const res = await pool.query(
+    `SELECT user_id,
+            1 - (embedding <=> (SELECT embedding FROM member_vectors WHERE org_code = $1 AND user_id = $2)) AS score
+       FROM member_vectors
+      WHERE org_code = $1 AND user_id <> $2
+        AND EXISTS (SELECT 1 FROM member_vectors WHERE org_code = $1 AND user_id = $2)
+      ORDER BY embedding <=> (SELECT embedding FROM member_vectors WHERE org_code = $1 AND user_id = $2)
+      LIMIT $3`,
+    [orgCode, userId, k]
+  );
+  return res.rows || [];
+}
+
+module.exports = {
+  init, loadMain, saveMain,
+  initVectors, vectorsReady, upsertMemberVector, nearestMembers,
+};
