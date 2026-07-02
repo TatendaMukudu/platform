@@ -1,43 +1,46 @@
-# Update — Cross-member intelligence (v1) + profile-visibility confirmed
+# Update — Embeddings + pgvector foundation (gated, ready to switch on)
 
-**Merged to main:** `5bac721` (deploying) · asset `?v=20260621w`
+**Merged to main:** `fbbc5e1` (deploying)
 
-## Profile visibility (your rule) — already enforced
-- Behavioral profile + Data tab (`/api/signals`) both gate on
-  `getVisibleUserIds(...).includes(memberId)` → a **lead node only sees members
-  in its branch below it**.
-- **Admins/superadmins see everyone** (bypass via edit_members/superadmin).
-- Members have no `view_insights`, so they can't open profiles; and out-of-scope
-  members never load in a leader's lists.
-If you saw a case that violates this, point me at it and I'll fix that path.
+The scale version of cross-member similarity is now built and wired — but
+**dormant** until you provision it. With no embeddings key (current prod),
+nothing changes; the rule-based cohort keeps working.
 
-## Cross-member intelligence — v1 (works now, on existing data)
-"Members on a similar path, and what's helped them."
-- `GET /api/member/:id/similar`: builds a **cohort** sharing this member's risk
-  patterns / declining trajectory, then aggregates which **intervention types had
-  positive outcomes** for that cohort (falls back to org-wide when the cohort has
-  little history). **Anonymous** — no other member is ever named. Scope-gated.
-- Advisor tab shows a **"🔗 Similar patterns"** card: cohort size + what's tended
-  to help (e.g. "Private conversation · 3/4 positive"), with an honest empty state
-  until enough outcomes accrue.
+## What was built
+- **`ai/embeddings.js`** — embeds text via any OpenAI-compatible endpoint
+  (OpenAI, Voyage…). Off unless `EMBEDDINGS_API_KEY` is set.
+- **`db.js`** — `initVectors()` creates the `vector` extension, a
+  `member_vectors` table, and an ivfflat index. **Non-fatal**: if pgvector isn't
+  available it disables itself and logs — never blocks boot. Plus
+  `upsertMemberVector()` and `nearestMembers()` (cosine).
+- **Profile build** now fire-and-forget embeds each member's behavioural summary
+  and upserts the vector (when enabled).
+- **`/api/member/:id/similar`** uses **nearest-neighbour** cohort when live, else
+  the existing pattern-overlap cohort. Both anonymous. Same endpoint + UI.
 
-## The scale upgrade (embeddings + Postgres) — scoped, needs provisioning
-The v1 uses rule-based pattern overlap. The full version:
-1. **Postgres `signals` + `member_profiles` tables** with **pgvector** (move off
-   the single JSONB blob for these).
-2. **Embed** each member's behavioral profile (+ key signals) via an embeddings
-   API → store the vector.
-3. **Similarity = nearest-neighbour** on the profile embedding (ivfflat index) →
-   far better "who is genuinely similar" than shared-pattern matching.
-4. Recommendations ranked by **measured effectiveness for nearest neighbours**,
-   optionally **cross-org** (anonymised, opt-in) — the compounding moat.
-This needs: the DB provisioned + an embeddings provider key. Say the word and I'll
-build the migration + adapter behind the same endpoints (UI won't change).
+## To switch it on (your two inputs)
+1. **Neon/Postgres:** ensure `CREATE EXTENSION vector` is allowed (Neon supports
+   pgvector out of the box).
+2. **Embeddings key:** set these env vars on Render:
+   - `EMBEDDINGS_API_KEY` = your provider key (required)
+   - `EMBEDDINGS_URL` (default `https://api.openai.com/v1/embeddings`)
+   - `EMBEDDINGS_MODEL` (default `text-embedding-3-small`)
+   - `EMBEDDINGS_DIM` (default `1536` — must match the model)
+
+On next deploy it logs "pgvector ready ✓", profiles start embedding as they
+rebuild, and "Similar patterns" switches to true nearest-neighbour — no code or
+UI change. Until then it's invisible and safe.
+
+## Notes / honesty
+- I can't test the live pgvector path from here (no DB/key). The code follows the
+  standard node-pg + pgvector pattern; first real run on your deploy is the
+  confirmation.
+- Vectors populate as profiles rebuild (on profile open / staleness), so
+  similarity gets better over the first days after enabling.
 
 ## Verification
-- `node --check`. Live: open a member with shared risk patterns → the card
-  appears; sparse orgs see the honest "not enough history yet" state.
+- `node --check` on server.js/db.js/embeddings.js; module loads disabled without a key.
 
 ## Still open
-- Embeddings/Postgres migration (above) — the scale version of this + memory.
+- Turn it on (env above) — then optional anonymised cross-ORG learning.
 - Microsoft Graph / Google connectors (need your app registration).
