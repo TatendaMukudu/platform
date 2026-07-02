@@ -14,7 +14,13 @@
 
 const WORLDVIEWS = {
   none: {
-    label: 'Universal (no specific worldview)',
+    label: 'Universal (no specific values lens)',
+    directive: '',
+  },
+
+  custom: {
+    // Directive is built at runtime from the org's own stated values.
+    label: 'Custom — our own stated values',
     directive: '',
   },
 
@@ -42,4 +48,28 @@ function directiveFor(w) {
   return (WORLDVIEWS[w] && WORLDVIEWS[w].directive) || '';
 }
 
-module.exports = { WORLDVIEWS, labels, isValid, directiveFor };
+/* Wrap an org's own values statement in the same "reason from, don't preach"
+   framing used by the presets. */
+function _customDirective(text) {
+  const t = (text || '').trim().slice(0, 1500);
+  if (!t) return '';
+  return `WORLDVIEW — REASON FROM THIS ORGANISATION'S VALUES:
+Think and counsel from the values below. They shape HOW you reason and what you prioritise — not how you speak on the surface.
+
+OUR VALUES:
+${t}
+
+HARD RULES:
+- Let these values quietly guide your judgement, then give ordinary, warm, practical guidance in plain words.
+- Do not lecture, moralise, quote or name sources, or parrot the wording of the values statement. The perspective informs your thinking; it never becomes the wording of your answer.
+- Keep human dignity, growth, and honest-but-kind guidance at the centre.`;
+}
+
+/* The single entry point the app uses: resolve the directive for a given
+   worldview key (+ the org's custom text when key === 'custom'). */
+function buildDirective(worldviewKey, customText) {
+  if (worldviewKey === 'custom') return _customDirective(customText);
+  return directiveFor(worldviewKey);
+}
+
+module.exports = { WORLDVIEWS, labels, isValid, directiveFor, buildDirective };

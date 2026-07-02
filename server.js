@@ -93,8 +93,9 @@ function simpleHash(str) { let h = 0; for (const c of str) h = (h * 31 + c.charC
 /* The org's configured AI worldview directive (e.g. biblical values), or ''.
    Prepended to AI system prompts so every surface reasons within it. */
 function _worldviewDirective(code) {
-  const w = orgMeta[(code || '').toLowerCase()]?.worldview;
-  return w ? worldview.directiveFor(w) : '';
+  const meta = orgMeta[(code || '').toLowerCase()];
+  if (!meta || !meta.worldview) return '';
+  return worldview.buildDirective(meta.worldview, meta.worldviewValues);
 }
 
 function issueToken(userId, orgCode, role) {
@@ -2709,7 +2710,12 @@ app.get('/api/groups/:groupId/feed', (req, res) => {
    Lets an org make its AI reason with a specific set of values (e.g. biblical
    wisdom). Default 'none' (universal). Read via /api/auth/me (on the org object).*/
 app.get('/api/org/worldviews', requireAuth, (req, res) => {
-  res.json({ worldviews: worldview.labels(), current: orgMeta[req.iqSession.orgCode]?.worldview || 'none' });
+  const meta = orgMeta[req.iqSession.orgCode] || {};
+  res.json({
+    worldviews: worldview.labels(),
+    current:    meta.worldview || 'none',
+    values:     meta.worldviewValues || '',
+  });
 });
 
 app.put('/api/org/worldview', requireAuth, (req, res) => {
@@ -2717,13 +2723,14 @@ app.put('/api/org/worldview', requireAuth, (req, res) => {
   const code = orgCode;
   const user = orgUsers[code]?.[userId];
   const canManage = user?.role === 'superadmin' || _userHasPerm(code, userId, 'manage_settings');
-  if (!canManage) return res.status(403).json({ error: 'Only an admin can set the AI worldview.' });
+  if (!canManage) return res.status(403).json({ error: 'Only an admin can set the AI values lens.' });
   const w = String(req.body?.worldview || 'none');
-  if (!worldview.isValid(w)) return res.status(400).json({ error: 'Unknown worldview.' });
+  if (!worldview.isValid(w)) return res.status(400).json({ error: 'Unknown values lens.' });
   if (!orgMeta[code]) orgMeta[code] = {};
   orgMeta[code].worldview = w;
+  if (w === 'custom') orgMeta[code].worldviewValues = String(req.body?.values || '').slice(0, 1500);
   scheduleSave();
-  res.json({ ok: true, worldview: w });
+  res.json({ ok: true, worldview: w, values: orgMeta[code].worldviewValues || '' });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════

@@ -3038,19 +3038,38 @@ async function _loadWorldview(){
   try {
     const res = await fetch('/api/org/worldviews', { headers: Auth._headers() });
     const d = await res.json();
-    const opts = d.worldviews || { none: 'Universal (no specific worldview)' };
+    const opts = d.worldviews || { none: 'Universal (no specific values lens)' };
+    const cur  = d.current || 'none';
     sel.innerHTML = Object.entries(opts).map(([k, label]) =>
-      `<option value="${k}" ${k === (d.current || 'none') ? 'selected' : ''}>${label}</option>`).join('');
+      `<option value="${k}" ${k === cur ? 'selected' : ''}>${label}</option>`).join('');
+    const valEl = document.getElementById('settings-worldview-values');
+    if (valEl) valEl.value = d.values || '';
+    _toggleWorldviewCustom(cur === 'custom');
   } catch(_) { sel.innerHTML = `<option value="none">Universal</option>`; }
+}
+
+function _toggleWorldviewCustom(show){
+  const box = document.getElementById('settings-worldview-custom');
+  if (box) box.style.display = show ? 'block' : 'none';
+}
+
+// On dropdown change: for 'custom' just reveal the textarea (save via its button);
+// for any preset, save immediately.
+function onWorldviewChange(w){
+  if (w === 'custom') { _toggleWorldviewCustom(true); return; }
+  _toggleWorldviewCustom(false);
+  saveWorldview(w);
 }
 
 async function saveWorldview(w){
   const out = document.getElementById('settings-worldview-result');
+  const values = w === 'custom' ? (document.getElementById('settings-worldview-values')?.value || '').trim() : undefined;
+  if (w === 'custom' && !values) { if (out) { out.style.color = 'var(--danger)'; out.textContent = 'Describe your values first.'; } return; }
   if (out) { out.style.color = 'var(--text-muted)'; out.textContent = 'Saving…'; }
   try {
     const res = await fetch('/api/org/worldview', {
       method: 'PUT', headers: Auth._headers(),
-      body: JSON.stringify({ orgCode: AppState.orgCode, worldview: w }),
+      body: JSON.stringify({ orgCode: AppState.orgCode, worldview: w, values }),
     });
     const d = await res.json();
     if (!res.ok || !d.ok) throw new Error(d.error || 'Could not save');
