@@ -1,39 +1,43 @@
-# Update — Member profile is now a Data hub
+# Update — Cross-member intelligence (v1) + profile-visibility confirmed
 
-**Merged to main:** `e6f867e` (deploying) · asset `?v=20260621v`
+**Merged to main:** `5bac721` (deploying) · asset `?v=20260621w`
 
-## First, your question: did we already build "remember data"?
-Yes — in layers, and this uses them rather than duplicating:
-- **Signals** (`orgSignals`) — the universal per-member store. Every input lands
-  here: the strength coach's Excel (smart import → metric/sheet signals), what
-  another coach said (notes/observations), voice notes, check-ins, assessments.
-  Weighted, persistent, queryable. This IS the "keep all data about someone" DB.
-- **Behavioral profile** — the AI-synthesised understanding built from signals.
-- **Durable keyMemory** — significant facts/events that persist (bereavement case).
+## Profile visibility (your rule) — already enforced
+- Behavioral profile + Data tab (`/api/signals`) both gate on
+  `getVisibleUserIds(...).includes(memberId)` → a **lead node only sees members
+  in its branch below it**.
+- **Admins/superadmins see everyone** (bypass via edit_members/superadmin).
+- Members have no `view_insights`, so they can't open profiles; and out-of-scope
+  members never load in a leader's lists.
+If you saw a case that violates this, point me at it and I'll fix that path.
 
-The Advisor already reasons from all of it. What was missing was *seeing* it.
+## Cross-member intelligence — v1 (works now, on existing data)
+"Members on a similar path, and what's helped them."
+- `GET /api/member/:id/similar`: builds a **cohort** sharing this member's risk
+  patterns / declining trajectory, then aggregates which **intervention types had
+  positive outcomes** for that cohort (falls back to org-wide when the cohort has
+  little history). **Anonymous** — no other member is ever named. Scope-gated.
+- Advisor tab shows a **"🔗 Similar patterns"** card: cohort size + what's tended
+  to help (e.g. "Private conversation · 3/4 positive"), with an honest empty state
+  until enough outcomes accrue.
 
-## What shipped — a "Data" tab on the member profile
-Everything collected about a person, in one place:
-- Grouped by source (Assessments, Metrics, Game stats, Spreadsheets, Notes/
-  observations, Check-ins, Weekly, Voice/Film…), strongest sources first.
-- A **weight dot** per item (strong/medium/weak).
-- **"＋ Log data"** right there.
-- **Sensitive items shown locked** — "🔒 Private — informs the AI, not shown" —
-  so they inform reasoning without exposing detail (privacy law upheld).
-
-So: a strength coach uploads a weights sheet → it appears under **Metrics/
-Spreadsheets**; another coach's observation → under **Notes**; a private
-disclosure → a **locked** row that still feeds the profile + Advisor. The profile
-becomes the person's living record, and it's the same data the AI pulls from.
-
-## No new storage
-This is purely a view over the signals framework we already built — the data was
-always there and always used; now it's visible and organised.
+## The scale upgrade (embeddings + Postgres) — scoped, needs provisioning
+The v1 uses rule-based pattern overlap. The full version:
+1. **Postgres `signals` + `member_profiles` tables** with **pgvector** (move off
+   the single JSONB blob for these).
+2. **Embed** each member's behavioral profile (+ key signals) via an embeddings
+   API → store the vector.
+3. **Similarity = nearest-neighbour** on the profile embedding (ivfflat index) →
+   far better "who is genuinely similar" than shared-pattern matching.
+4. Recommendations ranked by **measured effectiveness for nearest neighbours**,
+   optionally **cross-org** (anonymised, opt-in) — the compounding moat.
+This needs: the DB provisioned + an embeddings provider key. Say the word and I'll
+build the migration + adapter behind the same endpoints (UI won't change).
 
 ## Verification
-- `node --check js/app.js`. Live: open a member → **Data** tab.
+- `node --check`. Live: open a member with shared risk patterns → the card
+  appears; sparse orgs see the honest "not enough history yet" state.
 
 ## Still open
-- Cross-member similarity ("members like this responded well to…") — embeddings/Postgres.
+- Embeddings/Postgres migration (above) — the scale version of this + memory.
 - Microsoft Graph / Google connectors (need your app registration).
