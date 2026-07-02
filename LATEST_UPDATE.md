@@ -1,46 +1,42 @@
-# Update — AI memory/profile upgrade (real understanding, not keywords)
+# Update — Memory strengthened: durable per-person record + check-ups
 
-**Merged to main:** `599e566` (deploying) · asset `?v=20260621t`
+**Merged to main:** `0e91997` (deploying) · asset `?v=20260621u`
 
-The biggest intelligence upgrade: memory goes from keyword threads to an
-**AI-synthesised behavioral profile** per member.
+Exactly what you described: memory is now a **persistent, accumulating record**
+per person — significant things are kept "ready to pull," and the AI checks up.
 
-## What it is
-For each member, IntelliQ now builds an evolving **behavioral understanding**:
-- a **narrative** (2–4 sentences: who they are behaviourally, where they're trending),
-- **tendencies** (how they respond), **driven by** (motivators), **watch for**
-  (early signs), and a **trajectory** (converging / sustaining / stalled /
-  diverging / unanchored / unknown).
+## What's new
+- **Durable memory (keyMemory):** the profile synthesis now also extracts
+  SIGNIFICANT, lasting facts/events — a family bereavement, an injury, a big
+  goal, a role change — and **accumulates** them in a per-member record that
+  **survives even after the raw signals age out**. Each item is tagged sensitive
+  or not, deduped, and bounded (sensitive kept longest).
+- **Continuity:** prior memory is fed back into every rebuild, so the AI keeps
+  remembering instead of starting over.
+- **Follow-ups (check-ups):** it also notes gentle, safely-phrased things to
+  check on later.
+- No extra AI cost — all part of the same profile pass.
 
-## How it's built (and kept safe)
-- Synthesised from the member's **weighted evidence** (signals, check-ins,
-  weeklies, assessments, notes, interventions) — strong/repeated evidence beats
-  one-offs.
-- Runs **through the privacy gate** + the org's and the member's own values
-  lenses. Sensitive detail *informs* it but is never exposed; any verbatim
-  private span is redacted. So the stored narrative is safe to show leaders.
-- Directional language, never scores.
+## How it's used (and kept safe)
+- Fed into the **Advisor** as `[strong] Remembered…`: sensitive items **inform
+  reasoning only, never exposed**; non-sensitive facts are citable.
+- Profile card now shows **"Remembers"**, **"Check in about"** (follow-ups), and
+  — when private matters are involved — a confidential note: *"Also informed by N
+  private matters, kept confidential, used only to support them."*
+- The leader never sees the raw private detail; they see that support is warranted
+  and a gentle nudge.
 
-## Kept fresh, not expensive
-- Cached on the member's memory record. Rebuilt only when **stale (>12h)** or when
-  **≥5 new signals** arrive. A "↻" button forces a rebuild.
-
-## Where you see it
-- **"What IntelliQ understands" card** at the top of the member's Advisor tab —
-  narrative + trajectory badge + tendency/motivator/watch-for chips.
-- The **Advisor now leads with this understanding**, so its answers reason from a
-  synthesised picture, not just raw context.
-- `GET /api/member/:memberId/profile` powers it (visible scope + view_insights).
-
-## Note
-Keyword capture still runs as raw material; the synthesised profile is the
-primary understanding now surfaced and reasoned from.
+## Your example, served
+A player mentions a death in the family in a **private note** → it's remembered,
+kept **sensitive**, informs the profile + a gentle follow-up ("a supportive
+check-in may help right now") — and the raw detail is never shown to anyone.
+It stays in the person's record, ready to inform care over time.
 
 ## Verification
-- `node --check`. Live check: open a member with some history → the card fills
-  in; ask the Advisor and the answer should reflect the understanding.
+- `node --check`. Live check: log a significant note on a member, rebuild the
+  profile (↻), and watch it appear under Remembers / Check in about (or as a
+  confidential "private matter" if sensitive).
 
 ## Still open
-- Cross-member similarity ("members like this responded well to…") — needs
-  embeddings/Postgres.
+- Cross-member similarity ("members like this responded well to…") — embeddings/Postgres.
 - Microsoft Graph / Google connectors (need your app registration).
