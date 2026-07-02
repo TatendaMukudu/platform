@@ -90,13 +90,23 @@ function isLegacyHash(h) { return h && !h.startsWith('$2b$') && !h.startsWith('$
 // Legacy hash used only for migration path — new code never calls this for new passwords
 function simpleHash(str) { let h = 0; for (const c of str) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h.toString(16); }
 
-/* A directive built from the ORG'S OWN values (entered at setup / Settings →
-   Values). Prepended to AI system prompts so every surface reasons from what the
-   organisation actually values — no presets, no worldview toggle. Empty when the
-   org hasn't set any values. */
+/* Directive built from the ORG's values, desired traits and success definition
+   (captured at setup, editable in Settings). Prepended to AI system prompts so
+   every surface reasons from what the organisation actually values. */
 function _worldviewDirective(code) {
   const c = (code || '').toLowerCase();
-  return valuesLens.valuesDirective(orgValues[c] || [], orgMeta[c]?.orgName);
+  const prof = orgMeta[c]?.organizationProfile || {};
+  const vals = (orgValues[c] && orgValues[c].length) ? orgValues[c] : (prof.values || []);
+  return valuesLens.orgDirective(vals, prof.behaviours || [], prof.successDefinition || '', orgMeta[c]?.orgName);
+}
+
+/* Directive built from a MEMBER's own goals/values/growth (member onboarding).
+   Used by member-facing AI so responses anchor to what THEY want to become. */
+function _memberValuesDirective(code, userId) {
+  if (!userId) return '';
+  const c = (code || '').toLowerCase();
+  const profile = memberGoals[userKey(c, userId)];
+  return valuesLens.memberDirective(profile, orgUsers[c]?.[userId]?.name);
 }
 
 function issueToken(userId, orgCode, role) {
@@ -1206,6 +1216,17 @@ app.post('/api/auth/complete-org-profile', requireAuth, (req, res) => {
     setBy: userId,
   };
   org.organizationProfileComplete = true;
+
+  // Flow the approved profile into the LIVE stores the app + AI actually read,
+  // so values/goals/metrics set at creation reach the Advisor, Copilot, etc.
+  const profile = org.organizationProfile;
+  if (profile.values.length) orgValues[code] = [...profile.values];
+  if (profile.goals.length && !(orgGoals[code] && orgGoals[code].length)) {
+    orgGoals[code] = profile.goals.map(g => ({ goalId: 'g_' + generateId(), text: String(g), createdAt: new Date().toISOString() }));
+  }
+  if (profile.metrics.length && !(orgMetrics[code] && orgMetrics[code].length)) {
+    orgMetrics[code] = profile.metrics.map((m, i) => ({ metricId: 'm_' + generateId(), name: String(m), source: 'org', order: i }));
+  }
 
   scheduleSave();
   res.json({ ok: true, org: { ...org } });
@@ -2545,7 +2566,7 @@ app.post('/api/notes', async (req, res) => {
     try {
       const response = await client.messages.create({
         model: 'claude-haiku-4-5-20251001', max_tokens: 100,
-        system: [prompts[type] || prompts.private, _worldviewDirective(note.orgCode)].filter(Boolean).join('\n\n'),
+        system: [prompts[type] || prompts.private, _worldviewDirective(note.orgCode), _memberValuesDirective(note.orgCode, authorId)].filter(Boolean).join('\n\n'),
         messages: [{ role: 'user', content: userMsg }],
       });
       note.aiResponse = response.content[0]?.text?.trim() || null;
@@ -3436,7 +3457,7 @@ OUTPUT — valid JSON only, no markdown fencing, no extra text:
       const response = await client.messages.create({
         model:      'claude-haiku-4-5-20251001',
         max_tokens: 600,
-        system:     [systemPrompt, _worldviewDirective(code)].filter(Boolean).join('\n\n'),
+        system:     [systemPrompt, _worldviewDirective(code), _memberValuesDirective(code, userId)].filter(Boolean).join('\n\n'),
         messages:   [{ role: 'user', content: userContent }],
       });
 
@@ -3591,7 +3612,7 @@ app.post('/api/weekly/submit', async (req, res) => {
   try {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001', max_tokens: 150,
-      system: [finalRolePrompts[roleKey], _worldviewDirective(code)].filter(Boolean).join('\n\n'),
+      system: [finalRolePrompts[roleKey], _worldviewDirective(code), _memberValuesDirective(code, userId)].filter(Boolean).join('\n\n'),
       messages: [{ role: 'user', content: userMsg }],
     });
     aiResponse = response.content[0]?.text?.trim() || null;
@@ -5154,6 +5175,7 @@ app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
     privacy.GATE_DIRECTIVE,
     lenses.lensDirective(lens),
     _worldviewDirective(code),
+    _memberValuesDirective(code, memberId),
   ].filter(Boolean).join('\n\n');
 
   const contextBlock = privacy.buildContextBlock({ citable: ctx.citable, privateInforming: ctx.privateInforming });
