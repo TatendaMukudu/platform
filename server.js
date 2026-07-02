@@ -1147,6 +1147,14 @@ app.post('/api/auth/complete-profile', requireAuth, (req, res) => {
   const user   = orgUsers[code]?.[userId];
   if (!user) return res.status(404).json({ error: 'User not found' });
 
+  // Repair path (login re-sync of an already-complete profile): just re-affirm
+  // completion — never re-validate or overwrite the existing goals/values.
+  if (req.body?.repair === true) {
+    user.profileComplete = true;
+    scheduleSave();
+    return res.json({ ok: true, user: { ...user, passwordHash: undefined } });
+  }
+
   const {
     mainGoals        = '',
     longTermGoals    = '',
@@ -1156,6 +1164,11 @@ app.post('/api/auth/complete-profile', requireAuth, (req, res) => {
     personalMetrics  = [],
     freeText         = '',
   } = req.body;
+
+  // Required anchors — a member needs a goal + at least one value.
+  const _mv = (Array.isArray(selectedValues) ? selectedValues : []).map(v => String(v).trim()).filter(Boolean);
+  if (!String(mainGoals || '').trim()) return res.status(400).json({ error: 'A main goal is required.' });
+  if (_mv.length < 1)                  return res.status(400).json({ error: 'At least one value is required.' });
 
   // Store profile data in memberGoals — extends existing structure
   const key = userKey(code, userId);
@@ -1203,6 +1216,12 @@ app.post('/api/auth/complete-org-profile', requireAuth, (req, res) => {
     behaviours        = [],
     metrics           = [],
   } = req.body;
+
+  // Required anchors — the AI reasons from these; an org can't finish without them.
+  const _vals  = (Array.isArray(values) ? values : []).map(v => String(v).trim()).filter(Boolean);
+  const _goals = (Array.isArray(goals)  ? goals  : []).map(g => String(g).trim()).filter(Boolean);
+  if (_vals.length < 1)  return res.status(400).json({ error: 'At least one core value is required.' });
+  if (_goals.length < 1) return res.status(400).json({ error: 'At least one organisation goal is required.' });
 
   // Save org profile — fully human-approved, nothing auto-locked
   org.organizationProfile = {

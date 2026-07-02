@@ -266,6 +266,18 @@ function _obSkip() {
 
 /* ── Submit all answers to server ────────────────────────────────────────── */
 async function _obSubmitProfile() {
+  // Required anchors — a member needs a goal + at least one value for the AI to
+  // reason from. Route back to the missing step instead of finishing.
+  const a = _ob.answers || {};
+  const hasGoal   = String(a.mainGoals || '').trim().length > 0;
+  const hasValues = Array.isArray(a.selectedValues) && a.selectedValues.filter(Boolean).length >= 1;
+  if (!hasGoal || !hasValues) {
+    _ob.step = !hasGoal ? 0 : 4; // mainGoals / selectedValues
+    _obRenderStep();
+    showToast(!hasGoal ? 'Please set your main goal to continue.' : 'Please choose at least one value to continue.', 'warning');
+    return;
+  }
+
   const nextBtn = document.getElementById('ob-next-btn');
   if (nextBtn) { nextBtn.disabled = true; nextBtn.textContent = 'Saving…'; }
 
@@ -527,6 +539,16 @@ async function _orgObSubmit() {
   const successEl = document.getElementById('org-ob-success');
   if (successEl) _orgOb.suggestions.successDefinition = successEl.value;
 
+  // Required anchors — the AI needs values + at least one goal to reason from.
+  const _vals  = (_orgOb.suggestions.values || []).filter(Boolean);
+  const _goals = (_orgOb.suggestions.goals  || []).filter(Boolean);
+  if (_vals.length < 1 || _goals.length < 1) {
+    const e = document.getElementById('org-ob-save-error');
+    const msg = _vals.length < 1 ? 'Add at least one core value before finishing.' : 'Add at least one organisation goal before finishing.';
+    if (e) { e.style.display = 'block'; e.textContent = msg; } else { showToast(msg, 'warning'); }
+    return;
+  }
+
   const errEl = document.getElementById('org-ob-save-error');
   const btn   = document.getElementById('org-ob-approve-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
@@ -775,7 +797,7 @@ async function handleLogin() {
         console.log('[ROUTE] repairing profileComplete on server (lost on server restart)');
         try {
           const _r = await fetch('/api/auth/complete-profile', {
-            method: 'POST', headers: Auth._headers(), body: JSON.stringify({}),
+            method: 'POST', headers: Auth._headers(), body: JSON.stringify({ repair: true }),
           });
           const _d = await _r.json();
           if (_d.ok) {
