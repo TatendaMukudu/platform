@@ -5053,6 +5053,13 @@ function _buildAdvisorContext(code, member, requesterUser) {
   // ── Memory profile: behavioral observations inform reasoning ──────────────
   const mem = userAiProfiles[`${code}:${memberId}`];
   if (mem) {
+    // Durable long-term memory (persists even after signals age out) — significant
+    // facts/events. Sensitive ones inform reasoning only; non-sensitive are citable.
+    (mem.keyMemory || []).forEach(k => {
+      const line = `[strong] Remembered${k.firstSeen ? ` (since ${k.firstSeen})` : ''}: ${k.text}`;
+      if (k.sensitive) { privateInforming.push(line); privateStrings.push(k.text); }
+      else citable.push(line);
+    });
     (mem.openThreads || []).filter(t => !t.resolved).slice(0, 5).forEach(t => {
       privateInforming.push(`Recurring observation${t.occurrences > 1 ? ` (×${t.occurrences})` : ''}: ${t.text}`);
       privateStrings.push(t.text);
@@ -5153,6 +5160,35 @@ function _profileStale(profile, signalCount) {
   return false;
 }
 
+/* Merge newly-extracted durable memories into the persistent record (dedupe by
+   keyword overlap), so significant facts survive even after signals age out. */
+function _mergeKeyMemory(mem, items) {
+  if (!Array.isArray(mem.keyMemory)) mem.keyMemory = [];
+  const today = new Date().toISOString().split('T')[0];
+  items.forEach(it => {
+    const text = String(it.text || '').trim();
+    if (!text) return;
+    const words = new Set(text.toLowerCase().split(/\W+/).filter(w => w.length > 3));
+    const dup = mem.keyMemory.find(k => {
+      const kw = new Set(k.text.toLowerCase().split(/\W+/).filter(w => w.length > 3));
+      const shared = [...words].filter(w => kw.has(w)).length;
+      return shared >= Math.ceil(words.size * 0.5);
+    });
+    if (dup) { dup.lastSeen = today; return; }
+    mem.keyMemory.push({
+      id: 'km_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+      text, kind: it.kind || 'fact',
+      sensitive: !!it.sensitive,
+      firstSeen: today, lastSeen: today,
+    });
+  });
+  // Keep the record bounded — drop oldest non-sensitive first.
+  if (mem.keyMemory.length > 40) {
+    mem.keyMemory.sort((a, b) => (a.sensitive === b.sensitive ? a.lastSeen.localeCompare(b.lastSeen) : a.sensitive ? 1 : -1));
+    mem.keyMemory = mem.keyMemory.slice(mem.keyMemory.length - 40);
+  }
+}
+
 async function _buildBehavioralProfile(code, userId) {
   const member = orgUsers[code]?.[userId];
   if (!member) return null;
@@ -5160,7 +5196,11 @@ async function _buildBehavioralProfile(code, userId) {
   const ctx = _buildAdvisorContext(code, member, member);
   const signalCount = _memberSignalCount(code, userId, member.name);
 
+  // Feed the durable record back in so the AI keeps continuity across rebuilds.
+  const remembered = (mem.keyMemory || []).map(k => `- ${k.text}${k.sensitive ? ' (sensitive)' : ''}`).join('\n');
+
   const digest = [
+    remembered ? 'ALREADY REMEMBERED (durable — keep and update):\n' + remembered + '\n' : '',
     'OBSERVABLE EVIDENCE:',
     ...ctx.citable,
     ctx.privateInforming.length ? '\nPRIVATE (informs only — never reveal):' : '',
@@ -5168,30 +5208,39 @@ async function _buildBehavioralProfile(code, userId) {
   ].filter(Boolean).join('\n');
 
   const system = [
-    `You are IntelliQ, building a longitudinal BEHAVIORAL UNDERSTANDING of one person for the leaders who support them. Synthesise who this person is behaviourally — how they tend to respond, what drives them, their strengths, and their trajectory toward their OWN goals. This is a safe, shareable understanding written from evidence, not a data dump and not a verdict.`,
+    `You are IntelliQ, maintaining a longitudinal understanding of one person for the leaders who support them. You (1) synthesise who they are behaviourally, (2) keep a durable memory of SIGNIFICANT facts and life events worth remembering long-term (e.g. a family bereavement, an injury, a big goal, a role change), and (3) note things worth checking up on. Safe, humane, evidence-based — not a data dump or a verdict.`,
     privacy.GATE_DIRECTIVE,
-    `Weigh strong and repeated evidence over one-off notes ([strong] beats [minor]). Use directional language, never scores. If evidence is thin, say so plainly and keep it brief.`,
+    `Weigh strong and repeated evidence over one-off notes ([strong] beats [minor]). Directional language, never scores.
+For durable memory: capture the SIGNIFICANT and lasting (life events, circumstances, big goals, recurring struggles) — not routine activity. Mark anything personal or sensitive with "sensitive": true; phrase it with care and never in a way that exposes private detail if surfaced.
+For follow-ups: things a leader should gently check on later, phrased safely (e.g. "a supportive check-in may help right now" — not the private reason).`,
     _worldviewDirective(code),
     _memberValuesDirective(code, userId),
   ].filter(Boolean).join('\n\n');
 
-  const user = `PERSON: ${member.name}\n\n${digest}\n\nReturn ONLY JSON: {"narrative":"2-4 sentences: who they are behaviourally and where they're trending","tendencies":["how they tend to respond / behave"],"motivators":["what seems to drive or engage them"],"watchFor":["early signs worth watching"],"trajectory":"converging|sustaining|stalled|diverging|unanchored|unknown"}`;
+  const user = `PERSON: ${member.name}\n\n${digest}\n\nReturn ONLY JSON: {"narrative":"2-4 sentences: who they are behaviourally and where they're trending","tendencies":["how they tend to respond"],"motivators":["what drives/engages them"],"watchFor":["early signs worth watching"],"trajectory":"converging|sustaining|stalled|diverging|unanchored|unknown","remember":[{"text":"a significant durable fact/event worth keeping","kind":"event|circumstance|goal|struggle|fact","sensitive":true|false}],"followUps":[{"text":"a gentle, safely-phrased thing to check on later"}]}`;
 
   let out = null;
   try {
-    out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 600, schema: ['narrative'] });
+    out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 800, schema: ['narrative'] });
   } catch (err) { console.warn('[profile] AI error:', err.message); }
   if (!out) return mem.profile || null;
 
-  // Redact any verbatim private span that slipped into the narrative.
+  // Redact any verbatim private span that slipped through.
   const priv = ctx.privateStrings || [];
   const clean = s => typeof s === 'string' ? privacy.redact(s, priv) : s;
+
+  // Accumulate durable memory (persists across rebuilds).
+  if (Array.isArray(out.remember)) {
+    _mergeKeyMemory(mem, out.remember.map(r => ({ ...r, text: clean(r.text || '') })).filter(r => r.text));
+  }
+
   mem.profile = {
     narrative:  clean(out.narrative || ''),
     tendencies: Array.isArray(out.tendencies) ? out.tendencies.map(clean).slice(0, 6) : [],
     motivators: Array.isArray(out.motivators) ? out.motivators.map(clean).slice(0, 6) : [],
     watchFor:   Array.isArray(out.watchFor)   ? out.watchFor.map(clean).slice(0, 6)   : [],
     trajectory: out.trajectory || 'unknown',
+    followUps:  Array.isArray(out.followUps)  ? out.followUps.map(f => clean(f.text || f)).filter(Boolean).slice(0, 4) : [],
     builtAt:    new Date().toISOString(),
     signalBasis: signalCount,
   };
@@ -5221,7 +5270,16 @@ app.get('/api/member/:memberId/profile', requireAuth, async (req, res) => {
   }
   try {
     const profile = await _getBehavioralProfile(code, memberId, req.query.refresh === '1');
-    res.json({ ok: true, profile: profile || null });
+    const mem = userAiProfiles[`${code}:${memberId}`] || {};
+    const km  = mem.keyMemory || [];
+    // Durable memory: non-sensitive facts are shown; sensitive personal matters
+    // are acknowledged (count) but their detail is never exposed to the leader.
+    res.json({
+      ok: true,
+      profile: profile || null,
+      remembered: km.filter(k => !k.sensitive).map(k => ({ text: k.text, since: k.firstSeen, kind: k.kind })),
+      privateMatters: km.filter(k => k.sensitive).length,
+    });
   } catch (err) {
     console.error('[profile] error:', err.message);
     res.status(502).json({ error: 'Could not build the profile right now.' });

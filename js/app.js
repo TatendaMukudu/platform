@@ -4359,6 +4359,9 @@ async function loadBehavioralProfile(memberId, refresh){
     const tj = _PROFILE_TRAJ[p.trajectory] || _PROFILE_TRAJ.unknown;
     const chips = (label, arr) => (arr && arr.length)
       ? `<div class="pm-profile-row"><span class="pm-profile-k">${label}</span><span class="pm-profile-chips">${arr.map(x => `<span class="pm-profile-chip">${_escAdvisor(x)}</span>`).join('')}</span></div>` : '';
+    const remembered = (data.remembered || []).map(r => r.text);
+    const followUps  = (p.followUps || []);
+    const priv = data.privateMatters || 0;
     el.innerHTML = `
       <div class="pm-profile-card">
         <div class="pm-profile-head">
@@ -4370,6 +4373,9 @@ async function loadBehavioralProfile(memberId, refresh){
         ${chips('Tends to', p.tendencies)}
         ${chips('Driven by', p.motivators)}
         ${chips('Watch for', p.watchFor)}
+        ${chips('Remembers', remembered)}
+        ${followUps.length ? `<div class="pm-profile-row"><span class="pm-profile-k">Check in about</span><span class="pm-profile-chips">${followUps.map(f => `<span class="pm-profile-chip pm-profile-followup">📌 ${_escAdvisor(f)}</span>`).join('')}</span></div>` : ''}
+        ${priv ? `<div class="pm-profile-priv">🔒 Also informed by ${priv} private matter${priv !== 1 ? 's' : ''} — kept confidential, used only to support them.</div>` : ''}
       </div>`;
   } catch (e) {
     el.innerHTML = `<div class="pm-profile-empty">Understanding unavailable right now.</div>`;

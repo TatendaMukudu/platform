@@ -2277,3 +2277,7 @@ img { max-width: 100%; }
 .pm-profile-k { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); flex-shrink: 0; min-width: 62px; }
 .pm-profile-chips { display: flex; flex-wrap: wrap; gap: 0.3rem; }
 .pm-profile-chip { font-size: 0.74rem; background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px; padding: 0.12rem 0.5rem; color: var(--text-secondary); }
+
+/* ── Behavioral profile: durable memory + follow-ups ───────── */
+.pm-profile-followup { border-color: var(--accent) !important; color: var(--accent) !important; }
+.pm-profile-priv { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.6rem; font-style: italic; }
