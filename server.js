@@ -5286,6 +5286,64 @@ app.get('/api/member/:memberId/profile', requireAuth, async (req, res) => {
   }
 });
 
+/* ── GET /api/member/:memberId/similar — cross-member intelligence (v1) ────────
+   "Members on a similar path, and what's helped them." Finds a cohort sharing
+   this member's risk patterns/trajectory, then aggregates which interventions
+   had positive outcomes for that cohort (falls back to org-wide when the cohort
+   has little intervention history). ANONYMOUS — never names other members.
+   This is the flywheel first slice; embeddings/Postgres are the scale upgrade. */
+app.get('/api/member/:memberId/similar', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = (orgCode || '').toLowerCase().trim();
+  const memberId = req.params.memberId;
+  if (!getVisibleUserIds(code, userId).includes(memberId)) return res.status(403).json({ error: 'Member not in your visible scope' });
+  if (!(_userHasPerm(code, userId, 'view_insights') || orgUsers[code]?.[userId]?.role === 'superadmin')) {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+  const member = orgUsers[code]?.[memberId];
+  if (!member) return res.status(404).json({ error: 'Member not found' });
+
+  let agg; try { agg = _aggregateOrgData(code); } catch (_) { agg = { memberPatterns: {}, memberPredictions: {} }; }
+  const myPatterns = new Set((agg.memberPatterns?.[member.name] || []).map(p => p.type));
+  const myTraj     = (agg.memberPredictions?.[member.name] || []).length > 0;
+
+  // Cohort: other members sharing at least one risk pattern (or a declining
+  // trajectory when this member has one). Names collected only to scope the
+  // intervention lookup — never returned.
+  const cohort = new Set();
+  const sharedPatterns = new Set();
+  Object.entries(agg.memberPatterns || {}).forEach(([name, pats]) => {
+    if (name === member.name) return;
+    const shared = pats.map(p => p.type).filter(t => myPatterns.has(t));
+    if (shared.length) { cohort.add(name); shared.forEach(t => sharedPatterns.add(t)); }
+  });
+  if (myTraj) Object.entries(agg.memberPredictions || {}).forEach(([name, preds]) => {
+    if (name !== member.name && preds.length) cohort.add(name);
+  });
+
+  // What has helped: measured, positive interventions — cohort-scoped if we have
+  // enough, else org-wide. Aggregate by action type. Anonymous.
+  const measured = (orgInterventions[code] || []).filter(i => i.status === 'completed' && i.outcome?.status === 'measured');
+  const tally = list => {
+    const by = {};
+    list.forEach(i => { const t = _categorizeAction(i.action); by[t] = by[t] || { positive: 0, total: 0 }; by[t].total++; if (i.outcome.outcome === 'positive') by[t].positive++; });
+    return Object.entries(by).map(([type, s]) => ({ type, positive: s.positive, total: s.total })).sort((a, b) => b.positive - a.positive);
+  };
+  const cohortIntns = measured.filter(i => cohort.has(i.targetMember));
+  let whatWorked = tally(cohortIntns);
+  let scope = 'cohort';
+  if (whatWorked.length === 0) { whatWorked = tally(measured); scope = 'org'; }
+
+  res.json({
+    ok: true,
+    cohortSize: cohort.size,
+    sharedPatterns: [...sharedPatterns],
+    whatWorked: whatWorked.slice(0, 4),
+    scope,
+    hasData: whatWorked.length > 0,
+  });
+});
+
 const ADVISOR_SYSTEM = `You are the IntelliQ Individual Advisor — embedded in ONE member's profile to help a leader support, develop, and lead THIS specific person. You are not a score machine. You never rank people and never output a number as a verdict.
 
 HOW YOU THINK — ALIGNMENT, NOT OBEDIENCE:

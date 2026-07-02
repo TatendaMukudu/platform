@@ -2293,3 +2293,12 @@ img { max-width: 100%; }
 .md-val { font-size: 0.83rem; color: var(--text-secondary); line-height: 1.5; }
 .md-private { color: var(--text-muted); font-style: italic; }
 .md-meta { font-size: 0.68rem; color: var(--text-muted); margin-top: 0.1rem; }
+
+/* ── Cross-member cohort card ──────────────────────────────── */
+.pm-similar { margin-bottom: 0.9rem; }
+.pm-similar-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 0.7rem 0.85rem; }
+.pm-similar-head { font-weight: 700; font-size: 0.83rem; margin-bottom: 0.4rem; }
+.pm-similar-sub { font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 0.4rem; }
+.pm-similar-list { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.pm-similar-chip { font-size: 0.74rem; background: var(--surface-1, var(--bg)); border: 1px solid var(--border); border-radius: 999px; padding: 0.15rem 0.55rem; color: var(--text-secondary); }
+.pm-similar-foot { font-size: 0.66rem; color: var(--text-muted); margin-top: 0.5rem; font-style: italic; }
