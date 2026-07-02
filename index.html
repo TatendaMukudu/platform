@@ -710,18 +710,14 @@
               <div class="card-body" id="settings-features"></div>
             </div>
             <div class="card">
-              <div class="card-header"><div class="card-title">🧭 AI Worldview &amp; Values</div></div>
+              <div class="card-header"><div class="card-title">🧭 AI &amp; Your Values</div></div>
               <div class="card-body">
-                <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.7rem">
-                  Choose the values your AI reasons and counsels from. This shapes the Advisor, Group Copilot, briefings and check-in responses across your organisation.
+                <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6">
+                  Your AI reasons from <strong>your organisation's values</strong> — the ones set here.
+                  The Advisor, Group Copilot, briefings and check-in responses all take on that perspective,
+                  without ever quoting or lecturing. Edit them in the <strong>Values</strong> tab.
                 </div>
-                <select class="search-input" id="settings-worldview" style="width:100%" onchange="onWorldviewChange(this.value)"></select>
-                <div id="settings-worldview-custom" style="display:none;margin-top:0.6rem">
-                  <textarea class="form-input" id="settings-worldview-values" rows="4" style="width:100%"
-                    placeholder="Describe your organisation's values in your own words — e.g. 'We value discipline, humility, looking out for each other, and effort over ego.' The AI reasons from these; it won't quote or lecture."></textarea>
-                  <button class="btn btn-accent btn-sm" style="margin-top:0.5rem" onclick="saveWorldview('custom')">Save values</button>
-                </div>
-                <div id="settings-worldview-result" style="font-size:0.78rem;margin-top:0.5rem"></div>
+                <button class="btn btn-outline btn-sm" style="margin-top:0.7rem" onclick="switchSettingsTab('values')">Edit values →</button>
               </div>
             </div>
           </div>
@@ -1740,8 +1736,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260621q"></script>
-<script src="js/auth.js?v=20260621q"></script>
+<script src="js/data.js?v=20260621r"></script>
+<script src="js/auth.js?v=20260621r"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1809,14 +1805,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260621q"></script>
-<script src="js/ui.js?v=20260621q"></script>
-<script src="js/attachments.js?v=20260621q"></script>
-<script src="js/scenarios.js?v=20260621q"></script>
-<script src="js/chat.js?v=20260621q"></script>
-<script src="js/tree.js?v=20260621q"></script>
-<script src="js/app.js?v=20260621q"></script>
-<script src="js/member-view.js?v=20260621q"></script>
+<script src="js/charts.js?v=20260621r"></script>
+<script src="js/ui.js?v=20260621r"></script>
+<script src="js/attachments.js?v=20260621r"></script>
+<script src="js/scenarios.js?v=20260621r"></script>
+<script src="js/chat.js?v=20260621r"></script>
+<script src="js/tree.js?v=20260621r"></script>
+<script src="js/app.js?v=20260621r"></script>
+<script src="js/member-view.js?v=20260621r"></script>
 
 <script>
 function switchGrade(g){

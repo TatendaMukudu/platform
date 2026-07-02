@@ -12,7 +12,7 @@ const db        = require('./db');
 const ai        = require('./ai/gateway');
 const privacy   = require('./ai/privacy');
 const lenses    = require('./ai/lenses');
-const worldview = require('./ai/worldview');
+const valuesLens = require('./ai/values');
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -90,12 +90,13 @@ function isLegacyHash(h) { return h && !h.startsWith('$2b$') && !h.startsWith('$
 // Legacy hash used only for migration path — new code never calls this for new passwords
 function simpleHash(str) { let h = 0; for (const c of str) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h.toString(16); }
 
-/* The org's configured AI worldview directive (e.g. biblical values), or ''.
-   Prepended to AI system prompts so every surface reasons within it. */
+/* A directive built from the ORG'S OWN values (entered at setup / Settings →
+   Values). Prepended to AI system prompts so every surface reasons from what the
+   organisation actually values — no presets, no worldview toggle. Empty when the
+   org hasn't set any values. */
 function _worldviewDirective(code) {
-  const meta = orgMeta[(code || '').toLowerCase()];
-  if (!meta || !meta.worldview) return '';
-  return worldview.buildDirective(meta.worldview, meta.worldviewValues);
+  const c = (code || '').toLowerCase();
+  return valuesLens.valuesDirective(orgValues[c] || [], orgMeta[c]?.orgName);
 }
 
 function issueToken(userId, orgCode, role) {
@@ -2706,32 +2707,6 @@ app.get('/api/groups/:groupId/feed', (req, res) => {
   res.json({ notes, messages });
 });
 
-/* ── AI worldview (values framework) — org-level ─────────────────────────────
-   Lets an org make its AI reason with a specific set of values (e.g. biblical
-   wisdom). Default 'none' (universal). Read via /api/auth/me (on the org object).*/
-app.get('/api/org/worldviews', requireAuth, (req, res) => {
-  const meta = orgMeta[req.iqSession.orgCode] || {};
-  res.json({
-    worldviews: worldview.labels(),
-    current:    meta.worldview || 'none',
-    values:     meta.worldviewValues || '',
-  });
-});
-
-app.put('/api/org/worldview', requireAuth, (req, res) => {
-  const { orgCode, userId } = req.iqSession;
-  const code = orgCode;
-  const user = orgUsers[code]?.[userId];
-  const canManage = user?.role === 'superadmin' || _userHasPerm(code, userId, 'manage_settings');
-  if (!canManage) return res.status(403).json({ error: 'Only an admin can set the AI values lens.' });
-  const w = String(req.body?.worldview || 'none');
-  if (!worldview.isValid(w)) return res.status(400).json({ error: 'Unknown values lens.' });
-  if (!orgMeta[code]) orgMeta[code] = {};
-  orgMeta[code].worldview = w;
-  if (w === 'custom') orgMeta[code].worldviewValues = String(req.body?.values || '').slice(0, 1500);
-  scheduleSave();
-  res.json({ ok: true, worldview: w, values: orgMeta[code].worldviewValues || '' });
-});
 
 /* ═══════════════════════════════════════════════════════════════════════════
    MEMBER APP — SHARED SESSION STORE
