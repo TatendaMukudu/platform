@@ -1,43 +1,38 @@
-# Update — Values Lens (presets + custom), evolved from the worldview toggle
+# Update — Stripped the presets: AI reasons from the org's OWN values
 
-**Merged to main:** `59cc4dd` (deploying) · asset `?v=20260621q`
+**Merged to main:** `38b4f02` (deploying) · asset `?v=20260621r`
 
-Per our discussion — the biblical toggle became a general **values lens**: an org
-either **defines its own values in its own words** or picks a **preset**, and the
-AI reasons from them. Bigger idea, same "reason from it, never preach or quote"
-framing, and far less brand risk than a single religious switch.
+You called it: the org already enters its values, so there shouldn't be a
+separate worldview toggle. Done.
 
 ## What changed
-- `ai/worldview.js` → `buildDirective(key, customText)`:
-  - **none** — universal (default).
-  - **biblical** — Christian values, reasoned (no scripture, no quoting).
-  - **custom** — wraps the org's *own* stated values in the same guardrails
-    (values guide judgement quietly; wording stays plain; no lecturing, quoting,
-    or parroting the values text).
-- Settings → Organisation → "AI Worldview & Values":
-  - Pick a preset → saves immediately.
-  - Pick **Custom** → a textarea appears; write your values → Save.
-- Server stores `worldviewValues` for custom; all AI surfaces (Advisor, Copilot,
-  briefings, notes, check-ins, weekly) use it.
+- **Removed** the worldview presets (biblical/custom), the "AI Worldview" setting,
+  its endpoints and storage, and `ai/worldview.js`.
+- **New `ai/values.js`**: the AI builds its reasoning lens straight from
+  `orgValues` — the values the org enters at setup and edits in **Settings →
+  Values**. Empty when none are set.
+- Still wired into every AI surface: Advisor, Group Copilot, briefings, notes,
+  check-ins, weekly.
+- Same guardrails: the values shape HOW it reasons, never the wording — no
+  quoting, lecturing, or parroting.
 
-## Why this is better (the honest version)
-- Once scripture is stripped, "Christian values" and "be humane/character-first"
-  produce nearly the same output — so the real value is letting an org point the
-  AI at *its* values. Custom makes that explicit and authentic (no guessing
-  someone's theology).
-- Future-proofs for any faith/philosophy/ethos without becoming a "worldview
-  marketplace," and a secular org gets value from the same machinery.
-- Stays opt-in and org-scoped — never Platform's identity.
+## Effect
+Whatever an org lists as its values drives the AI's perspective:
+- A faith org listing "faith, grace, service, integrity" → grace-shaped, humane
+  guidance, no religious special-casing, no preaching.
+- A club listing "discipline, accountability, effort over ego" → the AI reasons
+  from that.
+One universal mechanism, entirely org-driven.
 
-## To use it for your org
-Settings → Organisation → pick **Biblical**, or **Custom** and write your values.
+## Where values live
+- Captured with the org profile at setup, and editable any time in
+  **Settings → Values**. (Settings → Organisation now just links there.)
 
 ## Verification
-- `node --check`; directive-builder tests pass (custom + biblical).
-- Live check: set it, then try the Advisor on a tough question and see if the
-  tone reflects the values without getting preachy.
+- No residual worldview references; `node --check`; directive builder tested.
+- Live check: set/adjust values, then try the Advisor and feel the shift.
 
 ## Still open
-- Per-group values lens (a Bible study inside a secular org).
+- Per-group values (a group can lean on its own values on top of the org's).
 - AI memory/profile upgrade (replace keyword threads) + embeddings.
 - Microsoft Graph / Google connectors (need your app registration).
