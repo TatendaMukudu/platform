@@ -2079,7 +2079,13 @@ function _memberLastActivity(code, id, name) {
   let last = 0;
   [userKey(code, id), memberKey(code, name || '')].forEach(k =>
     (memberCheckins[k] || []).forEach(c => { const t = new Date(c.ts || c.date).getTime(); if (!isNaN(t)) last = Math.max(last, t); }));
-  _gatherSignals(code, 'member', id, 40).forEach(s => { const t = new Date(s.ts).getTime(); if (!isNaN(t)) last = Math.max(last, t); });
+  // Only the member's OWN inputs count as engagement. Data logged ABOUT them by a
+  // coach (observations, imported sheets) has createdBy !== the member, and must
+  // NOT mask disengagement — otherwise a "gone quiet" alert never fires for the
+  // very people it exists to surface.
+  _gatherSignals(code, 'member', id, 40)
+    .filter(s => s.createdBy === id)
+    .forEach(s => { const t = new Date(s.ts).getTime(); if (!isNaN(t)) last = Math.max(last, t); });
   return last || null;
 }
 
@@ -5105,13 +5111,18 @@ function _buildAdvisorContext(code, member, requesterUser) {
   // and recent hard outcomes outrank one-off notes. Strong/medium are included;
   // weak one-offs are capped to keep reasoning signal-rich, not noisy.
   const sigs = _gatherSignals(code, 'member', memberId, 60);
-  const srcCount = {};
-  sigs.forEach(s => { srcCount[s.source] = (srcCount[s.source] || 0) + 1; });
+  // "Repeated behaviour" means the MEMBER repeatedly did the same thing — so only
+  // count signals the member generated themselves. How many times a coach logged
+  // about them is coach activity, not member behaviour, and must not inflate weight.
+  const ownSrcCount = {};
+  sigs.forEach(s => { if (s.createdBy === memberId) ownSrcCount[s.source] = (ownSrcCount[s.source] || 0) + 1; });
   const nowTs = Date.now();
+  const baseW = s => s.weightNum != null ? s.weightNum : _signalBaseWeight(s.source);
+  // Effective weight drives ORDERING only (recurring + recent surface first)…
   const effective = s => {
-    let w = s.weightNum != null ? s.weightNum : _signalBaseWeight(s.source);
-    if ((srcCount[s.source] || 0) >= 3) w += 1;                       // repeated behaviour
-    if (nowTs - new Date(s.ts).getTime() < 14 * 86400000) w += 0.5;   // recent
+    let w = baseW(s);
+    if ((ownSrcCount[s.source] || 0) >= 3) w += 1;                   // member's own repeated behaviour
+    if (nowTs - new Date(s.ts).getTime() < 14 * 86400000) w += 0.5;  // recent
     return w;
   };
   const ranked = sigs
@@ -5119,8 +5130,10 @@ function _buildAdvisorContext(code, member, requesterUser) {
     .sort((a, b) => b.w - a.w || new Date(b.s.ts) - new Date(a.s.ts));
 
   let weakUsed = 0;
-  ranked.forEach(({ s, w }) => {
-    const tier = _weightTier(w);
+  ranked.forEach(({ s }) => {
+    // …but the strength LABEL reflects the source's TRUE weight, so a soft note is
+    // never dressed up as a hard outcome ([strong]) by recency/repetition alone.
+    const tier = _weightTier(baseW(s));
     if (tier === 'weak' && weakUsed >= 3) return;                     // cap noise
     if (tier === 'weak') weakUsed++;
     const src   = SIGNAL_SOURCES[s.source]?.label || s.source;
@@ -5172,8 +5185,14 @@ function _mergeKeyMemory(mem, items) {
     const words = new Set(text.toLowerCase().split(/\W+/).filter(w => w.length > 3));
     const dup = mem.keyMemory.find(k => {
       const kw = new Set(k.text.toLowerCase().split(/\W+/).filter(w => w.length > 3));
+      if (!kw.size || !words.size) return false;
+      // Treat as the SAME memory only on high overlap against the LARGER phrase.
+      // Measuring against the larger set (not the new one) and at 0.7 keeps
+      // distinct events that merely share common words apart — e.g. "father
+      // passed away" vs "mother passed away" (2/3 = 0.67) stay as two memories
+      // instead of the second silently overwriting the first.
       const shared = [...words].filter(w => kw.has(w)).length;
-      return shared >= Math.ceil(words.size * 0.5);
+      return shared >= Math.ceil(Math.max(words.size, kw.size) * 0.7);
     });
     if (dup) { dup.lastSeen = today; return; }
     mem.keyMemory.push({
@@ -5358,18 +5377,29 @@ app.get('/api/member/:memberId/similar', requireAuth, async (req, res) => {
     list.forEach(i => { const t = _categorizeAction(i.action); by[t] = by[t] || { positive: 0, total: 0 }; by[t].total++; if (i.outcome.outcome === 'positive') by[t].positive++; });
     return Object.entries(by).map(([type, s]) => ({ type, positive: s.positive, total: s.total })).sort((a, b) => b.positive - a.positive);
   };
-  const cohortIntns = measured.filter(i => cohort.has(i.targetMember));
-  let whatWorked = tally(cohortIntns);
+  // A cohort of one is not a cohort — and its "shared pattern" could point a
+  // leader straight at a single identifiable person, breaking the anonymity
+  // promise. Require at least MIN_COHORT before framing anything around it.
+  const MIN_COHORT = 2;
+  // Never present a single outcome (1/1) as if it were evidence — require a
+  // minimum sample before a "what helped" type is shown as guidance.
+  const MIN_SAMPLE = 2;
+  const cohortValid = cohort.size >= MIN_COHORT;
+
+  const cohortIntns = cohortValid ? measured.filter(i => cohort.has(i.targetMember)) : [];
+  let whatWorked = tally(cohortIntns).filter(w => w.total >= MIN_SAMPLE);
   let scope = 'cohort';
-  if (whatWorked.length === 0) { whatWorked = tally(measured); scope = 'org'; }
+  if (whatWorked.length === 0) { whatWorked = tally(measured).filter(w => w.total >= MIN_SAMPLE); scope = 'org'; }
+  const lowConfidence = whatWorked.length > 0 && whatWorked[0].total < 3;
 
   res.json({
     ok: true,
-    cohortSize: cohort.size,
-    sharedPatterns: [...sharedPatterns],
+    cohortSize: cohortValid ? cohort.size : 0,
+    sharedPatterns: cohortValid ? [...sharedPatterns] : [],
     whatWorked: whatWorked.slice(0, 4),
     scope,
     method,
+    lowConfidence,
     hasData: whatWorked.length > 0,
   });
 });

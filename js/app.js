@@ -4351,7 +4351,8 @@ async function loadSimilarCohort(memberId){
         <div class="pm-similar-head">🔗 Similar patterns${d.cohortSize ? ` · ${d.cohortSize} member${d.cohortSize !== 1 ? 's' : ''} on a similar path` : ''}</div>
         ${worked.length ? `
           <div class="pm-similar-sub">What's tended to help ${d.scope === 'cohort' ? 'them' : 'across the org'}:</div>
-          <div class="pm-similar-list">${worked.map(w => `<span class="pm-similar-chip">${_escAdvisor(w.type)} · ${w.positive}/${w.total} positive</span>`).join('')}</div>`
+          <div class="pm-similar-list">${worked.map(w => `<span class="pm-similar-chip">${_escAdvisor(w.type)} · ${w.positive}/${w.total} positive</span>`).join('')}</div>
+          ${d.lowConfidence ? `<div class="pm-similar-sub" style="opacity:0.75">Early signal — few outcomes so far; treat as a hint, not proof.</div>` : ''}`
         : `<div class="pm-similar-sub">Not enough intervention history yet to say what's helped — this sharpens as outcomes accrue.</div>`}
         <div class="pm-similar-foot">Anonymous — no other member is named.</div>
       </div>`;

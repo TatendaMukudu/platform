@@ -1,69 +1,60 @@
-# Update — Bug-hunt pass (pre-testing review)
+# Update — Logic-error pass (the "runs fine but wrong" bugs)
 
-You asked me to check for bugs before you're back in California to test. I did a
-full static review of everything we built this session — backend endpoints,
-permission/visibility model, the signal layer, memory/profile, the advisor
-context builder, group copilot, briefing, embeddings/pgvector, persistence, and
-the frontend wiring. Here's the honest result.
+You asked what *logical* errors the algorithm could have — the dangerous kind
+that never crash, they just hand a coach a confident wrong answer. I mapped them
+and fixed the clear-cut ones. Two design-judgment items are left for a deliberate
+pass (below).
 
-## Bugs found & fixed (2)
+## Fixed
 
-Both were the **same class**: a write that reported success even when the server
-call failed — so you'd be told it saved, lose your text, and (worse) sometimes
-get locked out of retrying.
+**#1 — Durable memory was collapsing distinct life events into one.**
+The dedupe merged two facts sharing ≥50% of their words. "father passed away" and
+"mother passed away" share 2/3 → they were fused, and the second was silently
+dropped. Now it only merges on high overlap (≥70%) measured against the *larger*
+phrase, so distinct events stay as separate memories. Verified: the two
+bereavements now stay apart; true restatements ("…passed away" → "…passed away
+yesterday") still merge.
 
-1. **Note save could falsely say "Note saved ✓"** (`js/member-view.js`).
-   If the POST failed (e.g. session expired → 401, or a 500), the code fell back
-   to an empty object, cleared your textarea, and showed the success toast — so
-   the note was gone and you thought it saved. Now a failed save throws, keeps
-   your text in the box, and shows "Could not save note."
+**#2 — "Activity" counted data logged *about* a member as activity *by* them.**
+A coach uploading a stat sheet made a disengaged athlete look "active this week,"
+suppressing the exact "gone quiet for 14 days" alert the feature exists to raise.
+Now only the member's *own* inputs (check-ins + things they logged, `createdBy ===
+them`) count as engagement.
 
-2. **Weekly reflection submit had the same false-success — and it was worse**
-   (`js/member-view.js`). On a failed submit it still marked the week complete in
-   local storage and hid the button, so you couldn't resubmit that week. Now a
-   failed submit shows the error and lets you try again; the week is only marked
-   complete on a real success.
+**#3 — The "repetition" weight boost rewarded how much the coach typed.**
+Three coach notes were treated as "repeated behaviour" and, with the recency bump,
+a soft note could be promoted to "[strong]" and outrank a real assessment result.
+Now: repetition counts only the member's *own* repeated inputs, and the strength
+label reflects the source's *true* weight — recency/repetition still push things up
+the ordering, but can no longer dress a note up as a hard outcome.
 
-## Reviewed and clean (no changes needed)
+**#4/#5 — "What helped similar members" over-claimed.**
+It could show a single outcome as "1/1 positive" like it was evidence, and a
+"cohort" of one identifiable person (breaking the anonymity promise). Now: a
+minimum sample of 2 before any result is shown, a minimum cohort of 2 before any
+cohort/shared-pattern framing is returned, and a visible "early signal — treat as
+a hint, not proof" caveat when outcomes are still thin.
 
-- **Permission / visibility** — `_isLeader`, `getVisibleUserIds`, and the profile
-  endpoints are consistent: a lead sees only their branch below; admins/superadmin
-  see all. The three leadership structures (nodes, supervisor tree, groups) all
-  compose correctly.
-- **Onboarding required-fields gate** — front and back match (goal + ≥1 value for
-  members; ≥1 value + ≥1 goal for orgs). The login "repair" path correctly
-  bypasses validation ONLY for users who already finished onboarding (durable
-  local flag), so existing users can't get locked out and new users can't skip it.
-- **Privacy model** — sensitive items inform the AI but the profile endpoint only
-  exposes a count ("informed by N private matters"), never the detail. The
-  last-line `redact()` defence is in place on advisor answers and profiles.
-- **Signal layer** — ingest/gather/weights are sound; weighting caps noise so a
-  one-off note never outweighs results. Fire-and-forget embedding can't throw
-  (gated + `.catch`).
-- **Async endpoints** — advisor, profile, similar, briefing, copilot, import all
-  guard nulls and wrap AI calls in try/catch with clean fallbacks. AI gateway
-  handles both `user` and vision `messages` paths and downshifts if the reason
-  model is unavailable.
-- **Persistence** — every new store (`userAiProfiles`, `advisorThreads`,
-  `orgSignals`) is both saved and hydrated on load. pgvector startup is fully
-  non-fatal.
+**#8 — The privacy classifier was a single point of failure.**
+It caught sensitive *topics* by keyword but missed first-person hardship with no
+keyword ("I've been struggling, can't cope", a breakup, money worries) — which
+then became quotable. Added a conservative SENSITIVE tier for personal/emotional
+disclosure (bias: when unsure, informs-only, never quotable) and closed a family
+gap ("passed away", "sibling"). Tuned to avoid false positives — "brotherhood"
+and performance notes stay citable. Verified with a spread of test phrases.
 
-## One thing I left alone (by design, flagging it)
+## Left for a deliberate pass (product-judgment, not clear bugs)
 
-The coach quick check-in shows "Check-in saved" optimistically even if the call
-fails (localStorage set up front, catch also says "saved"). That's a deliberate
-low-stakes optimistic pattern and pre-dates this session, so I didn't change it.
-Say the word if you'd rather it surface real errors too.
+- **#6 mood-decline detection** splits check-ins by count, not time, so an old low
+  patch vs a fine present can mis-fire on small samples. Needs a real
+  recency-weighted window — worth doing with you.
+- **#7 trajectory has no hysteresis** — the label can flip on noise between 12h
+  rebuilds. Wants a "don't change unless the evidence really moved" rule.
+- **#9 check-in double-count** and **#10 goal key-mismatch → false 'unanchored'**
+  are minor data-plumbing edges; low blast radius, easy to fold into #6/#7.
 
 ## Verification
-
-- `node --check` on `server.js` and `js/member-view.js` after the edits — both pass.
-- The fixes are behavioural on the failure path only; the success path is
-  unchanged, so nothing that works today changes.
-
-## Still open (needs you, not code)
-
-- Live testing on your deploy (California) — this pass makes that smoother but
-  isn't a substitute for it.
-- Turn on embeddings (env vars) if/when you want true nearest-neighbour cohorts.
-- Microsoft Graph / Google connectors (need your app registration).
+- `node --check` on server.js, js/app.js, js/member-view.js, ai/privacy.js — all pass.
+- Classifier behaviour tested directly (bereavement→restricted, hardship→sensitive,
+  brotherhood/PR→normal). Memory-merge logic traced against the exact family case.
+- All changes are on the failure/edge path; healthy inputs behave as before.

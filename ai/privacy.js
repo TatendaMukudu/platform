@@ -27,7 +27,23 @@ const RESTRICTED_RE = new RegExp([
   'counsel', 'therap', 'medical', 'medication', 'diagnos', 'injur',
   'mental health', 'suicid', 'self.harm', 'depress', 'anxiet', 'trauma',
   'abuse', 'grief', 'bereav', 'divorce', 'death', 'funeral',
-  'family', 'parent', 'mother', 'father', 'sick', 'illness', 'hospital',
+  'family', 'parent', 'mother', 'father', 'sibling',
+  'sick', 'illness', 'hospital', 'passed away',
+].join('|'), 'i');
+
+/* Personal / emotional disclosure that carries no "restricted" topic word but is
+   still nobody's business to quote back. Catches first-person hardship the topic
+   list misses ("I've been struggling", "can't cope", a breakup, money worries).
+   When in doubt we bias toward SENSITIVE — over-protecting only costs the advisor
+   the ability to QUOTE it; it can still reason from it. Under-protecting breaks
+   the product law. */
+const SENSITIVE_RE = new RegExp([
+  'struggl', 'overwhelm', 'stress', 'burn.?out', 'exhaust', 'can.?t cope', 'coping',
+  'break.?up', 'broke up', 'relationship', 'girlfriend', 'boyfriend', 'partner',
+  'lonel', 'alone', 'isolat', 'crying', 'can.?t sleep', 'sleepless',
+  'quit', 'giving up', 'give up', 'hopeless', 'worthless', 'ashamed', 'embarrass',
+  'scared', 'afraid', 'worried', 'anxious', 'panic',
+  'financ', 'money', 'rent', 'evict', 'debt', 'home life', 'at home', 'personal life',
 ].join('|'), 'i');
 
 /* classifyText — decide the sensitivity of a piece of text given its context.
@@ -37,6 +53,7 @@ function classifyText(text, ctx = {}) {
   if (RESTRICTED_RE.test(blob)) return SENSITIVITY.RESTRICTED;
   if (ctx.source === 'counselor' || ctx.source === 'trainer' || ctx.source === 'medical') return SENSITIVITY.RESTRICTED;
   if (ctx.type === 'private' || ctx.type === 'anonymous') return SENSITIVITY.SENSITIVE;
+  if (SENSITIVE_RE.test(blob)) return SENSITIVITY.SENSITIVE;
   return SENSITIVITY.NORMAL;
 }
 
