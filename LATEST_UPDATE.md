@@ -1,60 +1,65 @@
-# Update — Logic-error pass (the "runs fine but wrong" bugs)
+# Update — All remaining logic errors fixed
 
-You asked what *logical* errors the algorithm could have — the dangerous kind
-that never crash, they just hand a coach a confident wrong answer. I mapped them
-and fixed the clear-cut ones. Two design-judgment items are left for a deliberate
-pass (below).
+This closes out the logic-error list. #6, #7, #9, #10 are now done, on top of the
+five from the last pass. Nothing on the "runs fine but wrong" list is left open.
 
-## Fixed
+## Fixed this pass
 
-**#1 — Durable memory was collapsing distinct life events into one.**
-The dedupe merged two facts sharing ≥50% of their words. "father passed away" and
-"mother passed away" share 2/3 → they were fused, and the second was silently
-dropped. Now it only merges on high overlap (≥70%) measured against the *larger*
-phrase, so distinct events stay as separate memories. Verified: the two
-bereavements now stay apart; true restatements ("…passed away" → "…passed away
-yesterday") still merge.
+**#6 — Mood-decline detection now weighs time, not an arbitrary half-split.**
+It used to cut a member's whole check-in history in half by count and compare the
+two halves — so a low patch from months ago could still fire an alert today, and a
+1-vs-2-point comparison passed as a "trend." Now it compares the **last 14 days**
+to the **preceding ~4 weeks**, and requires **≥2 points in each window** before it
+will call a decline. Verified: an old-low/now-fine history returns *nothing*, a
+genuine recent dip returns *high*, one recent point returns *nothing*.
 
-**#2 — "Activity" counted data logged *about* a member as activity *by* them.**
-A coach uploading a stat sheet made a disengaged athlete look "active this week,"
-suppressing the exact "gone quiet for 14 days" alert the feature exists to raise.
-Now only the member's *own* inputs (check-ins + things they logged, `createdBy ===
-them`) count as engagement.
+**#7 — Trajectory no longer flips on noise.**
+The label (converging/sustaining/stalled/diverging) rebuilds every 12h and the
+model could wobble between them on the same evidence. Added hysteresis: the prior
+label is **held unless real new evidence accrued** since the last build (≥3 new
+signals), and a real label can never regress to "unknown" on a noisy rebuild. A
+leader now sees the direction change because the *person* changed, not because the
+model re-rolled.
 
-**#3 — The "repetition" weight boost rewarded how much the coach typed.**
-Three coach notes were treated as "repeated behaviour" and, with the recency bump,
-a soft note could be promoted to "[strong]" and outrank a real assessment result.
-Now: repetition counts only the member's *own* repeated inputs, and the strength
-label reflects the source's *true* weight — recency/repetition still push things up
-the ordering, but can no longer dress a note up as a hard outcome.
+**#9 — Check-in double-count removed.**
+`_memberSignalCount` summed entries under both the id-key and the legacy name-key,
+so a member with data under both (or where the keys collide) looked like they had
+more evidence than they did — triggering over-eager profile rebuilds. Now it
+counts **distinct** check-ins by timestamp. (Also deduped the same way inside the
+alert engine.)
 
-**#4/#5 — "What helped similar members" over-claimed.**
-It could show a single outcome as "1/1 positive" like it was evidence, and a
-"cohort" of one identifiable person (breaking the anonymity promise). Now: a
-minimum sample of 2 before any result is shown, a minimum cohort of 2 before any
-cohort/shared-pattern framing is returned, and a visible "early signal — treat as
-a hint, not proof" caveat when outcomes are still thin.
+**#10 — No more false "unanchored" from a key mismatch.**
+Goals live under a stable id-key (onboarding) or a legacy name-key. If a record
+was stranded under an unexpected/old key — e.g. after a name change — a member who
+*had* goals could read as "unanchored," and the advisor would treat that false
+absence as the finding. Added a resolver that checks the id-key, the current
+name-key, then recovers any record whose stored name matches. Used everywhere the
+"has a goal?" question is asked.
 
-**#8 — The privacy classifier was a single point of failure.**
-It caught sensitive *topics* by keyword but missed first-person hardship with no
-keyword ("I've been struggling, can't cope", a breakup, money worries) — which
-then became quotable. Added a conservative SENSITIVE tier for personal/emotional
-disclosure (bias: when unsure, informs-only, never quotable) and closed a family
-gap ("passed away", "sibling"). Tuned to avoid false positives — "brotherhood"
-and performance notes stay citable. Verified with a spread of test phrases.
+## Full logic-error list — status
 
-## Left for a deliberate pass (product-judgment, not clear bugs)
-
-- **#6 mood-decline detection** splits check-ins by count, not time, so an old low
-  patch vs a fine present can mis-fire on small samples. Needs a real
-  recency-weighted window — worth doing with you.
-- **#7 trajectory has no hysteresis** — the label can flip on noise between 12h
-  rebuilds. Wants a "don't change unless the evidence really moved" rule.
-- **#9 check-in double-count** and **#10 goal key-mismatch → false 'unanchored'**
-  are minor data-plumbing edges; low blast radius, easy to fold into #6/#7.
+| # | Issue | Status |
+|---|-------|--------|
+| 1 | Memory merged distinct life events | ✅ fixed |
+| 2 | Coach-logged data counted as member activity | ✅ fixed |
+| 3 | Repetition boost rewarded coach volume | ✅ fixed |
+| 4 | "1/1 positive" shown as evidence | ✅ fixed |
+| 5 | Cohort of one broke anonymity | ✅ fixed |
+| 6 | Mood decline split by count, not time | ✅ fixed |
+| 7 | Trajectory flipped on noise | ✅ fixed |
+| 8 | Privacy classifier missed keyword-free hardship | ✅ fixed |
+| 9 | Check-in double-count | ✅ fixed |
+| 10 | False "unanchored" from key mismatch | ✅ fixed |
 
 ## Verification
-- `node --check` on server.js, js/app.js, js/member-view.js, ai/privacy.js — all pass.
-- Classifier behaviour tested directly (bereavement→restricted, hardship→sensitive,
-  brotherhood/PR→normal). Memory-merge logic traced against the exact family case.
-- All changes are on the failure/edge path; healthy inputs behave as before.
+- `node --check` on server.js, js/app.js, js/member-view.js, ai/privacy.js — pass.
+- Mood-window logic tested directly against four scenarios (old-low, recent dip,
+  single point, low-flat) — all correct.
+- Trajectory hysteresis traced: holds on <3 new signals, accepts on ≥3, never
+  regresses to "unknown", accepts freely on first build.
+- All changes are on the edge/failure path; healthy inputs behave as before.
+
+## What's genuinely left (needs you, not code)
+- Live testing on your deploy.
+- Turn on embeddings (env vars) for true nearest-neighbour cohorts.
+- Microsoft Graph / Google connectors (your app registration).

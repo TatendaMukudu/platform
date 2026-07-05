@@ -1927,7 +1927,7 @@ function _memberDirection(code, u) {
   }));
   cks.sort((a, b) => a.t - b.t);
 
-  const hasGoal = normalizeMemberGoals(memberGoals[userKey(code, u.id)] || memberGoals[memberKey(code, u.name || '')]).length > 0;
+  const hasGoal = normalizeMemberGoals(_memberGoalsFor(code, u)).length > 0;
   const lastT   = cks.length ? cks[cks.length - 1].t : null;
   const daysSince = lastT != null ? Math.floor((Date.now() - lastT) / 86400000) : null;
 
@@ -2092,24 +2092,36 @@ function _memberLastActivity(code, id, name) {
 function _memberAlert(code, u) {
   const now = Date.now();
   const cks = [];
+  const seenTs = new Set();  // a check-in stored under both the id-key and the legacy name-key must count once
   [userKey(code, u.id), memberKey(code, u.name || '')].forEach(k =>
-    (memberCheckins[k] || []).forEach(c => { const t = new Date(c.ts || c.date).getTime(); if (!isNaN(t)) cks.push({ mood: c.mood != null ? Number(c.mood) : null, t }); }));
+    (memberCheckins[k] || []).forEach(c => {
+      const t = new Date(c.ts || c.date).getTime();
+      if (isNaN(t) || seenTs.has(t)) return;
+      seenTs.add(t);
+      cks.push({ mood: c.mood != null ? Number(c.mood) : null, t });
+    }));
   cks.sort((a, b) => a.t - b.t);
   const lastAct = _memberLastActivity(code, u.id, u.name);
   const days = lastAct ? Math.floor((now - lastAct) / 86400000) : null;
-  const hasGoal = normalizeMemberGoals(memberGoals[userKey(code, u.id)] || memberGoals[memberKey(code, u.name || '')]).length > 0;
+  const hasGoal = normalizeMemberGoals(_memberGoalsFor(code, u)).length > 0;
 
   // Gone quiet (weighted by how long)
   if (days === null) return { severity: 'medium', reason: 'no activity yet', action: 'Invite them to their first check-in.' };
   if (days >= 14)   return { severity: 'high',   reason: `quiet for ${days} days`, action: 'Reach out personally.' };
 
-  // Mood decline (recent vs prior) — a converging pattern, not one point
-  const moods = cks.filter(c => c.mood != null);
-  if (moods.length >= 3) {
-    const mid = Math.floor(moods.length / 2);
-    const avg = a => a.reduce((s, v) => s + v.mood, 0) / a.length;
-    const recent = avg(moods.slice(mid)), earlier = avg(moods.slice(0, mid));
-    if (recent < earlier - 0.5 && recent < 3) return { severity: 'high', reason: 'mood trending down', action: 'Check in — ask how they’re doing, listen first.' };
+  // Mood decline — compare the last 14 days to the preceding ~4 weeks, weighted by
+  // TIME not an arbitrary half-split of all history (which let an old low patch
+  // fire long after it mattered). Needs ≥2 points in each window to claim a trend,
+  // so it never calls a decline off one or two check-ins.
+  const avg = a => a.reduce((s, v) => s + v.mood, 0) / a.length;
+  const RECENT_MS = 14 * 86400000, PRIOR_MS = 42 * 86400000;
+  const recentPts = cks.filter(c => c.mood != null && now - c.t < RECENT_MS);
+  const priorPts  = cks.filter(c => c.mood != null && now - c.t >= RECENT_MS && now - c.t < PRIOR_MS);
+  if (recentPts.length >= 2) {
+    const recent = avg(recentPts);
+    if (priorPts.length >= 2 && recent < avg(priorPts) - 0.5 && recent < 3) {
+      return { severity: 'high', reason: 'mood trending down', action: 'Check in — ask how they’re doing, listen first.' };
+    }
     if (recent < 2.5) return { severity: 'medium', reason: 'low mood recently', action: 'A supportive conversation may help.' };
   }
 
@@ -3970,6 +3982,25 @@ function normalizeMemberGoals(goalData) {
   return [];
 }
 
+/* Resolve a member's raw goal record across every key shape it might live under:
+   the stable id-key (onboarding), the legacy name-key, and — as a last resort —
+   a record whose stored memberName matches (recovers goals stranded under an
+   unexpected/old key, e.g. after a name change). Without this, a member who DOES
+   have goals can read as "unanchored" purely from a key mismatch, and the advisor
+   then treats that false absence as the finding. */
+function _memberGoalsFor(code, u) {
+  if (!u) return null;
+  const direct = memberGoals[userKey(code, u.id)] || (u.name ? memberGoals[memberKey(code, u.name)] : null);
+  if (direct) return direct;
+  const nm = (u.name || '').toLowerCase().trim();
+  if (nm) {
+    for (const g of Object.values(memberGoals)) {
+      if (g && typeof g === 'object' && !Array.isArray(g) && (g.memberName || '').toLowerCase().trim() === nm) return g;
+    }
+  }
+  return null;
+}
+
 function _aggregateOrgData(code) {
   const users  = orgUsers[code]  || {};
   const meta   = orgMeta[code]   || {};
@@ -4996,7 +5027,7 @@ function _buildAdvisorContext(code, member, requesterUser) {
   //  • Member aims  = the engine (intrinsic goals)
   //  • Team context = the shared middle (group emphasis / culture)
   //  • Org values   = the guardrails (ethical boundaries + identity)
-  const goals = normalizeMemberGoals(memberGoals[userKey(code, memberId)] || memberGoals[memberKey(code, memberName)]);
+  const goals = normalizeMemberGoals(_memberGoalsFor(code, member));
   if (goals.length) {
     citable.push(`MEMBER aim(s): ${goals.map(g => g.title || g.text).filter(Boolean).join('; ')}`);
   } else {
@@ -5162,9 +5193,14 @@ function _buildAdvisorContext(code, member, requesterUser) {
    from. Directional language, no scores.
    ═══════════════════════════════════════════════════════════════════════════ */
 function _memberSignalCount(code, userId, name) {
-  return _gatherSignals(code, 'member', userId, 500).length
-    + (memberCheckins[userKey(code, userId)]?.length || 0)
-    + (memberCheckins[memberKey(code, name || '')]?.length || 0);
+  // Count DISTINCT check-ins across the id-key and the legacy name-key — a member
+  // with entries under both (or where the two keys collide) must not be counted
+  // twice, or the profile would look like it has more evidence than it does and
+  // rebuild too eagerly.
+  const seen = new Set();
+  [userKey(code, userId), memberKey(code, name || '')].forEach(k =>
+    (memberCheckins[k] || []).forEach(c => seen.add(c.ts || c.date || JSON.stringify(c))));
+  return _gatherSignals(code, 'member', userId, 500).length + seen.size;
 }
 
 function _profileStale(profile, signalCount) {
@@ -5254,12 +5290,28 @@ For follow-ups: things a leader should gently check on later, phrased safely (e.
     _mergeKeyMemory(mem, out.remember.map(r => ({ ...r, text: clean(r.text || '') })).filter(r => r.text));
   }
 
+  // Trajectory hysteresis — the label rebuilds every 12h and the model can wobble
+  // between converging/sustaining/stalled on the same evidence. Hold the prior
+  // label unless real new evidence accrued since the last build, and never let a
+  // real label regress to "unknown" on noise. A leader should see the direction
+  // change because the person changed, not because the model re-rolled.
+  const prevTraj  = mem.profile?.trajectory;
+  const prevBasis = mem.profile?.signalBasis || 0;
+  let trajectory  = out.trajectory || 'unknown';
+  if (prevTraj && prevTraj !== 'unknown') {
+    if (trajectory === 'unknown') {
+      trajectory = prevTraj;                                        // don't regress on a noisy rebuild
+    } else if (trajectory !== prevTraj && (signalCount - prevBasis) < 3) {
+      trajectory = prevTraj;                                        // hold unless the evidence really moved
+    }
+  }
+
   mem.profile = {
     narrative:  clean(out.narrative || ''),
     tendencies: Array.isArray(out.tendencies) ? out.tendencies.map(clean).slice(0, 6) : [],
     motivators: Array.isArray(out.motivators) ? out.motivators.map(clean).slice(0, 6) : [],
     watchFor:   Array.isArray(out.watchFor)   ? out.watchFor.map(clean).slice(0, 6)   : [],
-    trajectory: out.trajectory || 'unknown',
+    trajectory,
     followUps:  Array.isArray(out.followUps)  ? out.followUps.map(f => clean(f.text || f)).filter(Boolean).slice(0, 4) : [],
     builtAt:    new Date().toISOString(),
     signalBasis: signalCount,
