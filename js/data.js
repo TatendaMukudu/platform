@@ -108,21 +108,21 @@ const WORKSPACE_MODULES = [
   // ── Leader Workspace — only shown when user leads ≥1 node ────────────
   // leaderOnly: true means renderSidebar() gates this on Auth.isLeaderNode().
   // All data in these pages is scoped server-side to the leader's subtree.
-  { section: 'Leader Workspace', id: 'leader-home',   icon: '👁',  label: 'Dashboard',    leaderOnly: true },
+  // Intelligence is the leader's MAIN ENTRY — the daily briefing (who needs
+  // attention, why now, evidence, next action) + a group rollup. Folds in the
+  // old Group Health + leader Intelligence pages so there is ONE surface.
+  { section: 'Leader Workspace', id: 'leader-home',   icon: '🧠', label: 'Intelligence', leaderOnly: true },
   { section: null,                id: 'leader-people', icon: '👥', label: 'My Members',  leaderOnly: true },
   { section: null,                id: 'assignments',   icon: '📌', label: 'Assignments',  leaderOnly: true, permission: 'assign_scenarios' },
-  // Intelligence: what IntelliQ is noticing — AI patterns, themes, follow-ups
-  { section: null, id: 'org-insights', icon: '🧠', label: 'Intelligence', leaderOnly: true, permission: 'view_insights' },
-  // Group Health: quantitative metrics on the leader's own subtree (item D)
-  { section: null, id: 'group-health', icon: '📊', label: 'Group Health', leaderOnly: true, permission: 'view_insights' },
   // My Groups: set goals & traits for groups the leader LEADS (the TEAM frame)
   { section: null, id: 'leader-groups', icon: '🎯', label: 'My Groups',    leaderOnly: true },
   // Data Sources: upload / connect / see what the AI can use (universal input)
   { section: null, id: 'data-sources', icon: '🔌', label: 'Data Sources', leaderOnly: true },
 
   // ── Intelligence — analytics / AI (admin+ or explicit grant) ─────────
-  { section: 'Intelligence', id: 'analytics', icon: '📊', label: 'Insights',           permission: 'view_analytics'   },
-  { section: null,            id: 'intelliq',  icon: '🧠', label: 'Intelligence',       permission: 'view_analytics'   },
+  { section: 'Analytics', id: 'analytics', icon: '📊', label: 'Insights',        permission: 'view_analytics'   },
+  // Renamed from "Intelligence" so that word names ONE thing (the leader briefing).
+  { section: null,         id: 'intelliq',  icon: '⚙️', label: 'IntelliQ Engine', permission: 'view_analytics'   },
   { section: null,            id: 'scenarios', icon: '🎯', label: 'Manage Assessments', permission: 'assign_scenarios' },
 
   // ── Management — admin / superadmin ───────────────────────────────────

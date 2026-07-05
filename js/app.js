@@ -616,10 +616,11 @@ function navigate(page){
   else if (page==='inbox')        { if(typeof MemberApp!=='undefined') MemberApp._renderInbox(); }
   else if (page==='stats')        { if(typeof MemberApp!=='undefined') MemberApp._renderStats(); }
   // Leader Workspace — scoped to node leader's subtree
-  else if (page==='leader-home')        renderLeaderHome();
+  else if (page==='leader-home')        renderIntelligence();
   else if (page==='leader-people')      renderLeaderPeople();
-  else if (page==='org-insights')       renderLeaderIntelligence();
-  else if (page==='group-health')       renderGroupHealth();
+  // org-insights / group-health folded into the one Intelligence surface
+  else if (page==='org-insights')       return navigate('leader-home');
+  else if (page==='group-health')       return navigate('leader-home');
   else if (page==='leader-groups')      renderLeaderGroups();
   else if (page==='data-sources')       renderDataSources();
   else if (page==='assignments')        renderAssignments();
@@ -649,18 +650,18 @@ const PAGE_TITLES = {
   inbox:        'Inbox',
   stats:        'Progress',
   // Leader Workspace — node leader scoped tools
-  'leader-home':   'Leader Dashboard',
+  'leader-home':   'Intelligence',
   'leader-people': 'My Members',
   assignments:     'Assignments',
   'org-insights':  'Intelligence',
-  'group-health':  'Group Health',
+  'group-health':  'Intelligence',
   'leader-groups': 'My Groups',
   'data-sources':  'Data Sources',
   // Organisation Health — management level
   'org-health':    'Organisation Health',
   // Intelligence
   analytics:    'Insights',
-  intelliq:     'Intelligence',
+  intelliq:     'IntelliQ Engine',
   scenarios:    'Manage Assessments',
   // Management
   organisation: 'Organisation',
@@ -5915,6 +5916,112 @@ async function uploadDataSource(input) {
 /* ── Leader Dashboard ────────────────────────────────────── *
  * Answers: "Who needs my attention right now?"
  * ── ────────────────────────────────────────────────────── */
+/* ── PLATFORM INTELLIGENCE — the one consolidated leader surface ───────────────
+   Briefing = main entry. Renders who-needs-attention + why-now + evidence +
+   recommended action + the intervention loop (act → outcome → learning). Folds
+   the old Group Health / Org Health / Intelligence pages into one rollup strip.
+   Reuses the existing page-leader-home container. Private detail never shown. */
+const _INTEL_SEV = { high: '#f74f4f', medium: '#f7a84f', low: '#4f8ef7' };
+
+async function renderIntelligence(refresh) {
+  const el    = document.getElementById('ldr-home-content');
+  const title = document.getElementById('ldr-home-title');
+  const sub   = document.getElementById('ldr-home-sub');
+  if (!el) return;
+  if (title) title.textContent = 'Intelligence';
+  if (sub)   sub.textContent   = 'Who needs your attention — and why, now.';
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">🧠 Reading the signals…</div>`;
+  try {
+    const res = await fetch(`/api/intelligence/briefing${refresh ? '?refresh=1' : ''}`, { headers: Auth._headers() });
+    const d = await res.json();
+    if (!res.ok || !d.ok) throw new Error(d.error || 'unavailable');
+    const r = d.rollup || {};
+    const cap = s => String(s || '').replace(/^./, c => c.toUpperCase());
+    const momColor = r.momentum === 'softening' ? 'var(--danger)' : r.momentum === 'building' ? 'var(--success)' : 'var(--text-secondary)';
+    el.innerHTML = `
+      <div class="intel-summary">
+        <div class="intel-summary-icon">🧠</div>
+        <div class="intel-summary-text">${_escAdvisor(d.summary || '')}</div>
+        <button class="intel-refresh" title="Rebuild" onclick="renderIntelligence(true)">↻</button>
+      </div>
+      <div class="intel-rollup">
+        <div class="intel-stat"><span class="intel-stat-v">${r.memberCount || 0}</span><span class="intel-stat-l">members</span></div>
+        <div class="intel-stat"><span class="intel-stat-v">${r.activeThisWeek || 0}/${r.memberCount || 0}</span><span class="intel-stat-l">active this week</span></div>
+        <div class="intel-stat"><span class="intel-stat-v">${r.participation || 0}%</span><span class="intel-stat-l">participation</span></div>
+        <div class="intel-stat"><span class="intel-stat-v" style="color:${momColor}">${cap(r.momentum || 'steady')}</span><span class="intel-stat-l">momentum</span></div>
+      </div>
+      ${(d.items || []).length
+        ? `<div class="intel-list">${d.items.map(_intelCard).join('')}</div>`
+        : `<div class="intel-empty">Nothing needs your attention right now. When a pattern emerges, it appears here with the evidence and a suggested next step.</div>`}
+      <div class="intel-foot">Patterns &amp; early signals from weighted behavioural data — directional, not scores. Sensitive detail informs the reasoning but is never shown.</div>`;
+  } catch (e) {
+    el.innerHTML = `<div class="intel-empty">Intelligence unavailable right now.</div>`;
+  }
+}
+
+function _intelCard(it) {
+  const sevColor = _INTEL_SEV[it.severity] || '#4f8ef7';
+  const chips = (it.patterns || []).map(p =>
+    `<span class="intel-chip" title="${_escAdvisor(p.basis)} · ${p.confidence}">${_escAdvisor(p.label)}</span>`).join('');
+  const ev = (it.evidence || []).map(e => `<li>${_escAdvisor(e)}</li>`).join('');
+  return `
+    <div class="intel-card" style="border-left:3px solid ${sevColor}">
+      <div class="intel-card-head">
+        <span class="intel-card-name">${_escAdvisor(it.name)}</span>
+        <span class="intel-chips">${chips}</span>
+      </div>
+      <div class="intel-why"><strong>Why now:</strong> ${_escAdvisor(it.whyNow)}</div>
+      <details class="intel-ev"><summary>Evidence basis</summary><ul>${ev}</ul></details>
+      ${it.careFlag ? `<div class="intel-care">💙 There may be personal context here — lead with care. Details are kept private.</div>` : ''}
+      <div class="intel-action"><strong>Try:</strong> ${_escAdvisor(it.recommendedAction)}</div>
+      ${it.learnedNote ? `<div class="intel-learned">📈 ${_escAdvisor(it.learnedNote)}</div>` : ''}
+      <div class="intel-cta" id="intel-cta-${it.memberId}">
+        <button class="intel-btn" onclick="intelAct('${it.memberId}','${it.patternType || ''}',this)">I acted on this</button>
+        <button class="intel-btn intel-btn-ghost" onclick="showProfile('${it.memberId}')">Open profile</button>
+      </div>
+    </div>`;
+}
+
+async function intelAct(memberId, patternType, btn) {
+  const action = prompt('What did you do? A quick note of the action you took:');
+  if (!action || !action.trim()) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const res = await fetch('/api/intelligence/act', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
+      body: JSON.stringify({ orgCode: AppState.orgCode, memberId, patternType, action }),
+    });
+    const d = await res.json();
+    if (!res.ok || !d.ok) throw new Error(d.error || 'failed');
+    const cta = document.getElementById('intel-cta-' + memberId);
+    if (cta) cta.innerHTML = `
+      <span class="intel-logged">Logged ✓ — how did it go?</span>
+      <button class="intel-oc" onclick="intelOutcome('${d.interventionId}','positive',this)">👍 Helped</button>
+      <button class="intel-oc" onclick="intelOutcome('${d.interventionId}','neutral',this)">😐 No change</button>
+      <button class="intel-oc" onclick="intelOutcome('${d.interventionId}','negative',this)">👎 Worse</button>`;
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'I acted on this'; }
+    showToast('Could not log the action', 'warning');
+  }
+}
+
+async function intelOutcome(interventionId, outcome, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/intelligence/outcome', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
+      body: JSON.stringify({ orgCode: AppState.orgCode, interventionId, outcome }),
+    });
+    const d = await res.json();
+    if (!res.ok || !d.ok) throw new Error();
+    const p = btn?.parentElement;
+    if (p) p.innerHTML = `<span class="intel-logged">Outcome recorded ✓ — the system learns from this for similar patterns.</span>`;
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    showToast('Could not record the outcome', 'warning');
+  }
+}
+
 async function renderLeaderHome() {
   const el    = document.getElementById('ldr-home-content');
   const sub   = document.getElementById('ldr-home-sub');

@@ -2302,3 +2302,38 @@ img { max-width: 100%; }
 .pm-similar-list { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .pm-similar-chip { font-size: 0.74rem; background: var(--surface-1, var(--bg)); border: 1px solid var(--border); border-radius: 999px; padding: 0.15rem 0.55rem; color: var(--text-secondary); }
 .pm-similar-foot { font-size: 0.66rem; color: var(--text-muted); margin-top: 0.5rem; font-style: italic; }
+
+/* ── Platform Intelligence — the one leader briefing surface ─────────────────── */
+.intel-summary{display:flex;align-items:flex-start;gap:.7rem;background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:1rem 1.1rem;margin-bottom:1rem}
+.intel-summary-icon{font-size:1.4rem;line-height:1}
+.intel-summary-text{flex:1;font-size:.92rem;line-height:1.5;color:var(--text-primary)}
+.intel-refresh{background:none;border:1px solid var(--border);border-radius:8px;color:var(--text-muted);cursor:pointer;padding:.25rem .5rem;font-size:.9rem}
+.intel-refresh:hover{color:var(--text-primary);border-color:var(--accent)}
+.intel-rollup{display:flex;gap:.6rem;flex-wrap:wrap;margin-bottom:1.1rem}
+.intel-stat{flex:1;min-width:88px;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:.6rem .5rem;text-align:center}
+.intel-stat-v{display:block;font-size:1.15rem;font-weight:700;color:var(--text-primary)}
+.intel-stat-l{display:block;font-size:.68rem;color:var(--text-muted);margin-top:.15rem}
+.intel-list{display:flex;flex-direction:column;gap:.75rem}
+.intel-card{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:.9rem 1rem}
+.intel-card-head{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.5rem}
+.intel-card-name{font-weight:700;font-size:.98rem;color:var(--text-primary)}
+.intel-chips{display:flex;gap:.35rem;flex-wrap:wrap}
+.intel-chip{font-size:.7rem;font-weight:600;padding:.15rem .5rem;border-radius:20px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-secondary);cursor:help}
+.intel-why{font-size:.86rem;color:var(--text-secondary);margin-bottom:.45rem;line-height:1.45}
+.intel-ev{margin-bottom:.45rem}
+.intel-ev summary{font-size:.76rem;color:var(--text-muted);cursor:pointer}
+.intel-ev ul{margin:.4rem 0 0;padding-left:1.1rem}
+.intel-ev li{font-size:.78rem;color:var(--text-secondary);line-height:1.5}
+.intel-care{font-size:.78rem;background:rgba(79,142,247,.09);border:1px solid rgba(79,142,247,.25);border-radius:8px;padding:.4rem .6rem;color:var(--text-secondary);margin-bottom:.45rem}
+.intel-action{font-size:.86rem;color:var(--text-primary);margin-bottom:.4rem;line-height:1.45}
+.intel-learned{font-size:.78rem;color:var(--success);margin-bottom:.5rem}
+.intel-cta{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-top:.3rem}
+.intel-btn{font-size:.78rem;font-weight:600;padding:.35rem .7rem;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer}
+.intel-btn:hover{filter:brightness(1.05)}
+.intel-btn-ghost{background:none;color:var(--accent)}
+.intel-btn:disabled{opacity:.6;cursor:default}
+.intel-oc{font-size:.78rem;padding:.3rem .6rem;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-primary);cursor:pointer}
+.intel-oc:hover{border-color:var(--accent)}
+.intel-logged{font-size:.8rem;color:var(--text-secondary)}
+.intel-empty{padding:1.4rem;text-align:center;color:var(--text-muted);font-size:.85rem;background:var(--surface-1);border:1px dashed var(--border);border-radius:12px}
+.intel-foot{margin-top:1rem;font-size:.72rem;color:var(--text-muted);text-align:center;line-height:1.5}

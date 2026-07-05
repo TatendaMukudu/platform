@@ -14,6 +14,7 @@ const privacy    = require('./ai/privacy');
 const lenses     = require('./ai/lenses');
 const valuesLens = require('./ai/values');
 const embeddings = require('./ai/embeddings');
+const intel      = require('./ai/intelligence');
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -2195,6 +2196,243 @@ app.get('/api/workspace/briefing', requireAuth, async (req, res) => {
   };
   leaderBriefingCache[cacheKey] = { data, ts: Date.now() };
   res.json(data);
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PLATFORM INTELLIGENCE LOOP (v1)
+   Input → Signal → PATTERN → Judgment → Action → Outcome → Learning
+
+   ONE consolidated leader surface. The engine (ai/intelligence.js) is pure and
+   privacy-safe: it only ever receives DERIVED features (numbers, weights,
+   timestamps, directions, booleans) assembled here through the privacy gate —
+   never raw note/check-in text. Sensitive context enters only as a boolean flag.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const intelBriefingCache = {}; // `${code}:${userId}` → { data, ts }
+
+/* Deduped mood series for a member: [{ t(ms), mood(1-5) }] ascending. No text. */
+function _memberMoodSeries(code, u) {
+  const seen = new Set(); const out = [];
+  [userKey(code, u.id), memberKey(code, u.name || '')].forEach(k =>
+    (memberCheckins[k] || []).forEach(c => {
+      const t = new Date(c.ts || c.date).getTime();
+      if (isNaN(t) || seen.has(t) || c.mood == null) return;
+      seen.add(t); out.push({ t, mood: Number(c.mood) });
+    }));
+  return out.sort((a, b) => a.t - b.t);
+}
+
+/* Directional trajectory from a mood series: 'up' | 'down' | 'flat' | null. */
+function _trajectoryFromMood(series, now) {
+  const recent = series.filter(p => now - p.t <  intel.RECENT);
+  const prior  = series.filter(p => now - p.t >= intel.RECENT && now - p.t < intel.PRIOR);
+  if (recent.length < 2 || prior.length < 2) return null;
+  const ra = recent.reduce((s, p) => s + p.mood, 0) / recent.length;
+  const pa = prior.reduce((s, p) => s + p.mood, 0) / prior.length;
+  const d = ra - pa;
+  return d > 0.4 ? 'up' : d < -0.4 ? 'down' : 'flat';
+}
+
+/* Team trajectory: pooled mood direction of the member's first group's peers. */
+function _teamTrajectory(code, u, now) {
+  const g = (orgGroups[code] || []).find(x =>
+    (x.memberIds || []).includes(u.id) || (x.leadIds || []).includes(u.id));
+  if (!g) return null;
+  const peers = [...new Set([...(g.memberIds || []), ...(g.leadIds || [])])].filter(id => id !== u.id);
+  const pooled = [];
+  peers.forEach(id => {
+    const pu = orgUsers[code]?.[id]; if (!pu) return;
+    _memberMoodSeries(code, pu).forEach(p => pooled.push(p));
+  });
+  return _trajectoryFromMood(pooled.sort((a, b) => a.t - b.t), now);
+}
+
+/* Assemble the PRIVACY-SAFE feature set the engine reasons over. No raw text. */
+function _buildMemberIntelInput(code, u, now) {
+  const moodSeries = _memberMoodSeries(code, u);
+  const sigs = _gatherSignals(code, 'member', u.id, 80);
+  const signalSeries = sigs.map(s => ({
+    t: new Date(s.ts).getTime(),
+    source: s.source,
+    weight: s.weight || 'weak',
+    own: s.createdBy === u.id,
+  })).filter(s => !isNaN(s.t));
+
+  // Concern signals — timestamps only (low-mood check-ins + dipped results).
+  const concernSeries = [];
+  moodSeries.forEach(p => { if (p.mood <= 2) concernSeries.push({ t: p.t }); });
+  sigs.forEach(s => {
+    const t = new Date(s.ts).getTime();
+    if (!isNaN(t) && s.source === 'assessment' && s.valueNum != null && s.valueNum < 50) concernSeries.push({ t });
+  });
+
+  // "Helping / among-others" proxy — timestamps only: shared notes the member
+  // authored + messages they sent to a group. No content is read.
+  const helpingSeries = [];
+  Object.values(orgNotes).forEach(n => {
+    if (n.orgCode === code && n.authorId === u.id && n.type && n.type !== 'private') {
+      const t = new Date(n.createdAt).getTime(); if (!isNaN(t)) helpingSeries.push({ t });
+    }
+  });
+  Object.values(orgMessages).forEach(mm => {
+    if (mm.orgCode === code && mm._realFromId === u.id && mm.toType === 'group') {
+      const t = new Date(mm.createdAt).getTime(); if (!isNaN(t)) helpingSeries.push({ t });
+    }
+  });
+
+  const mem = userAiProfiles[`${code}:${u.id}`];
+  const hasSensitiveContext =
+    !!(mem?.keyMemory || []).some(k => k.sensitive) ||
+    sigs.some(s => privacy.isPrivate(s.sensitivity));
+
+  return {
+    id: u.id, name: u.name || 'This member', now,
+    moodSeries, signalSeries, concernSeries, helpingSeries,
+    lastActivityT: _memberLastActivity(code, u.id, u.name),
+    goalCount: normalizeMemberGoals(_memberGoalsFor(code, u)).length,
+    memberTrajectory: _trajectoryFromMood(moodSeries, now),
+    teamTrajectory:   _teamTrajectory(code, u, now),
+    hasSensitiveContext,
+  };
+}
+
+/* Close the loop: which action CATEGORY has helped each pattern, from the org's
+   own logged interventions + recorded/measured outcomes. */
+function _learningByPattern(code) {
+  const acc = {};
+  (orgInterventions[code] || []).forEach(i => {
+    const pt = i.patternType; if (!pt) return;
+    const oc = i.recordedOutcome || (i.outcome?.status === 'measured' ? i.outcome.outcome : null);
+    if (!oc) return;
+    const s = acc[pt] || (acc[pt] = { actions: {}, positive: 0, total: 0 });
+    s.total++; if (oc === 'positive') s.positive++;
+    const cat = _categorizeAction(i.action);
+    const a = s.actions[cat] || (s.actions[cat] = { label: cat, positive: 0, total: 0 });
+    a.total++; if (oc === 'positive') a.positive++;
+  });
+  const out = {};
+  Object.entries(acc).forEach(([pt, s]) => {
+    const best = Object.values(s.actions).sort((a, b) => b.positive - a.positive || b.total - a.total)[0];
+    out[pt] = { action: best ? best.label : null, positive: s.positive, total: s.total };
+  });
+  return out;
+}
+
+/* ── GET /api/intelligence/briefing — the ONE leader intelligence surface ─────
+   Consolidates: who-needs-attention + why-now + evidence + recommended action +
+   group rollup (folds the old Group Health / Org Health / Intelligence pages).
+   Privacy-safe throughout; the only AI call is the aggregate summary (gateway). */
+app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = orgCode;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+
+  const cacheKey = `${code}:${userId}`;
+  const cached = intelBriefingCache[cacheKey];
+  if (cached && req.query.refresh !== '1' && Date.now() - cached.ts < BRIEFING_TTL) {
+    return res.json({ ...cached.data, cached: true });
+  }
+
+  const now = Date.now();
+  const members = getVisibleUserIds(code, userId)
+    .map(id => orgUsers[code]?.[id]).filter(u => u && u.id !== userId && u.role !== 'superadmin');
+  const learning = _learningByPattern(code);
+
+  const items = []; let activeWeek = 0; const patternCounts = {};
+  members.forEach(u => {
+    let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { return; }
+    if (m.lastActivityT && now - m.lastActivityT < 7 * 86400000) activeWeek++;
+    const findings = intel.detectPatterns(m);
+    if (!findings.length) return;
+    findings.forEach(f => { patternCounts[f.type] = (patternCounts[f.type] || 0) + 1; });
+    const item = intel.composeBriefingItem(m, findings, learning);
+    if (item) items.push(item);
+  });
+  const SEV = { high: 0, medium: 1, low: 2 };
+  items.sort((a, b) => SEV[a.severity] - SEV[b.severity]);
+  const top = items.slice(0, 15);
+
+  const participation = members.length ? Math.round((activeWeek / members.length) * 100) : 0;
+  const drops = patternCounts.momentum_drop || 0, ups = patternCounts.quiet_improvement || 0;
+  const momentum = drops > ups ? 'softening' : ups > drops ? 'building' : 'steady';
+
+  let narrative = null;
+  try {
+    const brief = [
+      `${members.length} members, ${activeWeek} active this week (participation ${participation}%).`,
+      `Patterns noticed: ${Object.entries(patternCounts).map(([k, v]) => `${v}× ${intel.PATTERN_LABEL[k] || k}`).join(', ') || 'none'}.`,
+      `Overall momentum: ${momentum}.`,
+    ].join('\n');
+    narrative = await ai.complete({
+      tier: 'reason', maxTokens: 200,
+      system: [
+        `You are Platform Intelligence, briefing a leader in 2-3 sentences: the shape of the week and the ONE thing to prioritise. Aggregate only — NEVER name an individual (the leader sees the named list separately). Honest and directional — say "pattern" or "early signal", never "prediction" and never scores.`,
+        _worldviewDirective(code),
+      ].filter(Boolean).join('\n\n'),
+      user: brief,
+    });
+  } catch (_) { /* narrative is optional */ }
+
+  const data = {
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    summary: narrative || (top.length
+      ? `${top.length} member(s) show patterns worth a look this week.`
+      : `Your group looks steady — ${activeWeek}/${members.length} active, nothing flagged.`),
+    rollup: { memberCount: members.length, activeThisWeek: activeWeek, participation, momentum, patternCounts },
+    items: top,
+  };
+  intelBriefingCache[cacheKey] = { data, ts: Date.now() };
+  res.json(data);
+});
+
+/* ── POST /api/intelligence/act — leader logs an action taken on a briefing item.
+   Ties the intervention to the PATTERN so the loop can learn per-pattern. */
+app.post('/api/intelligence/act', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = orgCode;
+  const { memberId, patternType, action } = req.body || {};
+  if (!action || !String(action).trim()) return res.status(400).json({ error: 'action required' });
+  if (memberId && !getVisibleUserIds(code, userId).includes(memberId)) {
+    return res.status(403).json({ error: 'Member not in your visible scope' });
+  }
+  if (!orgInterventions[code]) orgInterventions[code] = [];
+  const intv = {
+    id: _intvId(), createdAt: new Date().toISOString(),
+    targetMember: orgUsers[code]?.[memberId]?.name || null,
+    targetMemberId: memberId || null, targetGroup: null,
+    action: String(action).slice(0, 300),
+    patternType: patternType || null,
+    urgency: 'medium', owner: userId, reason: 'briefing', evidence: [],
+    status: 'completed', acknowledgedAt: new Date().toISOString(),
+    completedAt: new Date().toISOString(), dismissedAt: null,
+    outcome: null, recordedOutcome: null,
+  };
+  orgInterventions[code].push(intv);
+  scheduleSave();
+  res.json({ ok: true, interventionId: intv.id });
+});
+
+/* ── POST /api/intelligence/outcome — leader records how an action went.
+   Explicit outcome (positive|neutral|negative) closes the learning loop. */
+app.post('/api/intelligence/outcome', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = orgCode;
+  const { interventionId, outcome } = req.body || {};
+  const VALID = ['positive', 'neutral', 'negative'];
+  if (!interventionId || !VALID.includes(outcome)) return res.status(400).json({ error: 'interventionId and valid outcome required' });
+  const intv = (orgInterventions[code] || []).find(i => i.id === interventionId);
+  if (!intv) return res.status(404).json({ error: 'Not found' });
+  if (intv.owner !== userId && orgUsers[code]?.[userId]?.role !== 'superadmin') {
+    return res.status(403).json({ error: 'Only the logger can record the outcome' });
+  }
+  intv.recordedOutcome = outcome;
+  intv.outcomeRecordedAt = new Date().toISOString();
+  intelBriefingCache[`${code}:${userId}`] = null; // learning changed — invalidate
+  scheduleSave();
+  res.json({ ok: true });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
