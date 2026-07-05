@@ -679,7 +679,8 @@ const MemberApp = {
           data:       payload,
         }),
       });
-      const result = res.ok ? await res.json() : {};
+      if (!res.ok) throw new Error('submit failed (' + res.status + ')');
+      const result = await res.json();
 
       localStorage.setItem(`iq_weekly_${this._currentWeek()}_${this._userId}`, '1');
       btn.style.display = 'none';
@@ -1359,7 +1360,8 @@ const MemberApp = {
           goals:      this.goals,
         }),
       });
-      const data = res.ok ? await res.json() : {};
+      if (!res.ok) throw new Error('save failed (' + res.status + ')');
+      const data = await res.json();
 
       // Attach any composer files as signals about the author (so the AI uses them).
       if (typeof IQComposer !== 'undefined') {
