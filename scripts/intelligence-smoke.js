@@ -66,5 +66,12 @@ ok('careFlag is a boolean, no detail', item && typeof item.careFlag === 'boolean
 ok('learning surfaces as an honest note', item && /quiet word/i.test(item.learnedNote || ''));
 ok('care-first default recommended action stands', item && /listen first/i.test(item.recommendedAction));
 
+// ── baseline_shift: fires from Behaviour-Engine deviations (compare to self) ──
+const shift = intel.detectPatterns({ now, id: 'h', name: 'H',
+  deviations: [{ label: 'contribution', direction: 'below', deviationPct: -65, recent: 1, normal: 4, confidence: 'clear', dimension: 'contribution' }] });
+ok('baseline_shift fires from deviations', shift.some(f => f.type === 'baseline_shift'));
+ok('no deviations → no baseline_shift',
+  !intel.detectPatterns({ now, id: 'h2', name: 'H2', deviations: [] }).some(f => f.type === 'baseline_shift'));
+
 console.log(`\nintelligence-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

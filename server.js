@@ -15,6 +15,7 @@ const lenses     = require('./ai/lenses');
 const valuesLens = require('./ai/values');
 const embeddings = require('./ai/embeddings');
 const intel      = require('./ai/intelligence');
+const baseline   = require('./ai/baseline');
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -2284,6 +2285,27 @@ function _buildMemberIntelInput(code, u, now) {
     !!(mem?.keyMemory || []).some(k => k.sensitive) ||
     sigs.some(s => privacy.isPrivate(s.sensitivity));
 
+  // ── Behaviour Engine (ai/baseline): compare the member to THEIR OWN normal ──
+  // Build weekly-rate + level series per behavioural dimension, then let the
+  // Behaviour Engine find deviations-from-self. All numeric — no text.
+  const checkinTs = []; const seenCk = new Set();
+  [userKey(code, u.id), memberKey(code, u.name || '')].forEach(k =>
+    (memberCheckins[k] || []).forEach(c => {
+      const t = new Date(c.ts || c.date).getTime();
+      if (!isNaN(t) && !seenCk.has(t)) { seenCk.add(t); checkinTs.push(t); }
+    }));
+  const ownSignalTs  = signalSeries.filter(s => s.own).map(s => s.t);
+  const reflectionTs = signalSeries.filter(s => s.own && (s.source === 'note' || s.source === 'weekly')).map(s => s.t);
+  const dimSeries = {
+    mood:               moodSeries.map(p => ({ t: p.t, v: p.mood })),
+    check_in_frequency: _weeklyCounts(checkinTs, now),
+    reflection_cadence: _weeklyCounts(reflectionTs, now),
+    contribution:       _weeklyCounts(ownSignalTs, now),
+    helping:            _weeklyCounts(helpingSeries.map(h => h.t), now),
+  };
+  let deviations = [], fingerprint = null;
+  try { const b = baseline.analyze(dimSeries, now); deviations = b.deviations; fingerprint = b.fingerprint; } catch (_) {}
+
   return {
     id: u.id, name: u.name || 'This member', now,
     moodSeries, signalSeries, concernSeries, helpingSeries,
@@ -2292,7 +2314,20 @@ function _buildMemberIntelInput(code, u, now) {
     memberTrajectory: _trajectoryFromMood(moodSeries, now),
     teamTrajectory:   _teamTrajectory(code, u, now),
     hasSensitiveContext,
+    deviations, fingerprint,
   };
+}
+
+/* Weekly event counts over a trailing window → one point per week [{t, v}].
+   Zero-fills quiet weeks (a drop to zero IS the signal). Feeds the Behaviour
+   Engine's rate dimensions. */
+function _weeklyCounts(times, now, weeks = 16) {
+  const buckets = new Array(weeks).fill(0);
+  (times || []).forEach(t => {
+    const w = Math.floor((now - t) / (7 * 86400000));
+    if (w >= 0 && w < weeks) buckets[w]++;
+  });
+  return buckets.map((v, i) => ({ t: now - (i * 7 + 3.5) * 86400000, v })).sort((a, b) => a.t - b.t);
 }
 
 /* Close the loop: which action CATEGORY has helped each pattern, from the org's

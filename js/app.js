@@ -5971,6 +5971,7 @@ function _intelCard(it) {
         <span class="intel-chips">${chips}</span>
       </div>
       <div class="intel-why"><strong>Why now:</strong> ${_escAdvisor(it.whyNow)}</div>
+      ${(it.deviations || []).length ? `<div class="intel-dev">${it.deviations.slice(0, 3).map(_intelDevChip).join('')}</div>` : ''}
       <details class="intel-ev"><summary>Evidence basis</summary><ul>${ev}</ul></details>
       ${it.careFlag ? `<div class="intel-care">💙 There may be personal context here — lead with care. Details are kept private.</div>` : ''}
       <div class="intel-action"><strong>Try:</strong> ${_escAdvisor(it.recommendedAction)}</div>
@@ -5980,6 +5981,15 @@ function _intelCard(it) {
         <button class="intel-btn intel-btn-ghost" onclick="showProfile('${it.memberId}')">Open profile</button>
       </div>
     </div>`;
+}
+
+/* Self-relative deviation chip — "vs their OWN normal", the Behaviour Engine view. */
+function _intelDevChip(d) {
+  const arrow = d.direction === 'below' ? '↓' : '↑';
+  const col = d.direction === 'below' ? 'var(--danger)' : 'var(--success)';
+  const pct = d.deviationPct != null ? `${Math.abs(d.deviationPct)}% ` : '';
+  return `<span class="intel-devchip" title="vs their own normal (${d.normal}); confidence ${d.confidence}">
+    <span style="color:${col}">${arrow}</span> ${_escAdvisor(d.label)} ${pct}${d.direction} their usual</span>`;
 }
 
 async function intelAct(memberId, patternType, btn) {

@@ -32,6 +32,7 @@ const conf   = n => (n >= 6 ? 'clear' : n >= 3 ? 'emerging' : 'tentative');
 const SEV_RANK = { high: 0, medium: 1, low: 2 };
 
 const PATTERN_LABEL = {
+  baseline_shift:         'Unusual for them',
   momentum_drop:          'Momentum dropping',
   quiet_improvement:      'Quiet improvement',
   repeated_concern:       'Repeated concern',
@@ -42,6 +43,7 @@ const PATTERN_LABEL = {
 /* Care-oriented default next actions (used when the org has no learned action for
    this pattern yet). Honest, human, non-coercive. */
 const DEFAULT_ACTION = {
+  baseline_shift:         'Ask what’s changed lately — this is a shift from their OWN normal, not a judgement. Lead with curiosity.',
   momentum_drop:          'A personal check-in — ask how they’re doing and listen first, before anything task-related.',
   quiet_improvement:      'Acknowledge the progress specifically — quiet gains fade fast without recognition.',
   repeated_concern:       'Sit down together, name the recurring theme, and agree one small shared focus.',
@@ -127,7 +129,22 @@ function invisibleLoad(m) {
   };
 }
 
-const DETECTORS = [momentumDrop, quietImprovement, repeatedConcern, memberTeamDivergence, invisibleLoad];
+/* Self-relative shift: consumes deviations from the Behavior Engine (ai/baseline)
+   — a change from the member's OWN normal, even if the absolute level looks fine.
+   The most valuable early signal, and the fairest (no cross-member comparison). */
+function baselineShift(m) {
+  const devs = (m.deviations || []).filter(d => d.confidence === 'clear' || d.confidence === 'emerging');
+  if (!devs.length) return null;
+  const top = devs[0];
+  const big = Math.abs(top.deviationPct || 0) >= 60;
+  const severity = (top.dimension === 'mood' && top.direction === 'below') ? 'high' : big ? 'medium' : 'low';
+  const basis = 'unusual for them — ' + devs.slice(0, 2)
+    .map(d => `${d.label} ${d.direction} their usual${d.deviationPct != null ? ` (${Math.abs(d.deviationPct)}%)` : ''}`)
+    .join('; ');
+  return { type: 'baseline_shift', severity, basis, confidence: top.confidence };
+}
+
+const DETECTORS = [baselineShift, momentumDrop, quietImprovement, repeatedConcern, memberTeamDivergence, invisibleLoad];
 
 /* Run all detectors over one member's features. Returns findings sorted by
    severity (most urgent first). Pure — safe to unit-test without a DB. */
@@ -172,6 +189,9 @@ function composeBriefingItem(m, findings, learning = {}) {
     // A soft, contentless nudge: there may be private context informing this.
     careFlag: !!m.hasSensitiveContext,
     patternType: top.type,
+    // Self-relative evidence (Behavior Engine) — the "vs their own normal" view.
+    deviations: (m.deviations || []).map(d => ({ label: d.label, direction: d.direction, deviationPct: d.deviationPct, recent: d.recent, normal: d.normal, confidence: d.confidence })),
+    fingerprint: m.fingerprint || null,
   };
 }
 

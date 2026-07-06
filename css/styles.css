@@ -2337,3 +2337,7 @@ img { max-width: 100%; }
 .intel-logged{font-size:.8rem;color:var(--text-secondary)}
 .intel-empty{padding:1.4rem;text-align:center;color:var(--text-muted);font-size:.85rem;background:var(--surface-1);border:1px dashed var(--border);border-radius:12px}
 .intel-foot{margin-top:1rem;font-size:.72rem;color:var(--text-muted);text-align:center;line-height:1.5}
+
+/* Behaviour Engine — self-relative deviation chips on a briefing card */
+.intel-dev{display:flex;gap:.4rem;flex-wrap:wrap;margin:-.15rem 0 .5rem}
+.intel-devchip{font-size:.72rem;font-weight:600;padding:.15rem .5rem;border-radius:20px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-secondary);cursor:help}
