@@ -63,6 +63,7 @@ function momentumDrop(m) {
   const prior  = pts.filter(p => m.now - p.t >= RECENT && m.now - p.t < PRIOR);
   if (recent.length < 2 || prior.length < 2) return null;
   const ra = avg(recent.map(p => p.mood)), pa = avg(prior.map(p => p.mood));
+  if (!Number.isFinite(ra) || !Number.isFinite(pa)) return null; // never surface NaN to a human
   const drop = pa - ra;
   if (drop < 0.5) return null;                                  // not a meaningful decline
   const severity = (ra < 2.5 || drop >= 1.2) ? 'high' : 'medium';
@@ -80,6 +81,7 @@ function quietImprovement(m) {
   const earlier = avg(pts.slice(0, mid).map(p => p.mood));
   const later   = avg(pts.slice(mid).map(p => p.mood));
   const rise = later - earlier;
+  if (!Number.isFinite(rise) || !Number.isFinite(later)) return null; // never surface NaN
   if (rise < 0.4 || later < 3) return null;                     // rising AND now in a good place
   // "Quiet" = little visible recognition: few strong/public signals about them.
   const visible = (m.signalSeries || []).filter(s => m.now - s.t < PRIOR && s.weight === 'strong').length;

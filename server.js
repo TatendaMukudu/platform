@@ -16,6 +16,7 @@ const valuesLens = require('./ai/values');
 const embeddings = require('./ai/embeddings');
 const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
+const agents     = require('./ai/agents');
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -2468,6 +2469,73 @@ app.post('/api/intelligence/outcome', requireAuth, (req, res) => {
   intelBriefingCache[`${code}:${userId}`] = null; // learning changed — invalidate
   scheduleSave();
   res.json({ ok: true });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   INTELLIQ — the PERSON'S OWN lens over the same kernel.
+   The record belongs to the individual: they see their OWN behavioural portrait,
+   what has shifted vs THEIR OWN normal, their values/goals, and a warm reflection
+   from the Coach agent. Self-owned, self-relative, never scored. Sensitive context
+   informs the reflection's tone but is never enumerated back at them.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const meRecordCache = {}; // `${code}:${userId}` → { data, ts }
+
+app.get('/api/me/record', requireAuth, async (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = orgCode;
+  const me = orgUsers[code]?.[userId];
+  if (!me) return res.status(404).json({ error: 'Not found' });
+
+  const cacheKey = `${code}:${userId}`;
+  const cached = meRecordCache[cacheKey];
+  if (cached && req.query.refresh !== '1' && Date.now() - cached.ts < BRIEFING_TTL) {
+    return res.json({ ...cached.data, cached: true });
+  }
+
+  const now = Date.now();
+  let m; try { m = _buildMemberIntelInput(code, me, now); } catch (_) { m = null; }
+
+  // Their own stated aims/values (person-authored core of the human model).
+  const goalRec = _memberGoalsFor(code, me) || {};
+  const goals  = normalizeMemberGoals(goalRec).map(g => g.title).filter(Boolean);
+  const values = Array.isArray(goalRec.selectedValues) ? goalRec.selectedValues.filter(Boolean) : [];
+
+  // Portrait = their behavioural fingerprint (self-relative normals). Never a score.
+  const portrait = m?.fingerprint || {};
+  const shifts   = (m?.deviations || []).map(d => ({ label: d.label, direction: d.direction, deviationPct: d.deviationPct, confidence: d.confidence }));
+  const trajectory = m?.memberTrajectory || null;
+
+  // The Coach agent reflects — warm, self-relative, values-anchored. Via the gateway.
+  let reflection = null;
+  const enoughToReflect = (m?.moodSeries?.length || 0) >= 1 || Object.keys(portrait).length > 0 || goals.length > 0;
+  if (enoughToReflect) {
+    try {
+      const { system, user } = agents.coachReflectionPrompt({
+        name: me.name, values, goals,
+        fingerprint: portrait, deviations: m?.deviations || [],
+        trajectory, hasSensitiveContext: !!m?.hasSensitiveContext,
+      });
+      reflection = await ai.complete({ tier: 'reason', system, user, maxTokens: 220 });
+      // Belt-and-suspenders: strip any private span that could have slipped in.
+      reflection = privacy.redact(reflection, m?.privateStrings || []);
+    } catch (_) { reflection = null; }
+  }
+
+  const data = {
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    name: me.name,
+    reflection: reflection || (goals.length
+      ? `You're just getting started here. As you check in and reflect, this becomes a clearer mirror of who you're becoming.`
+      : `Welcome. Name one thing you're working toward, and IntelliQ starts building an honest picture of your growth — just for you.`),
+    portrait,          // { dim: { label, normal } } — self-relative normals
+    shifts,            // what's different from THEIR own normal, lately
+    trajectory,        // directional word, never a score
+    values, goals,
+    ownedByYou: true,  // this record is theirs
+  };
+  meRecordCache[cacheKey] = { data, ts: Date.now() };
+  res.json(data);
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════

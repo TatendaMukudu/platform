@@ -2341,3 +2341,16 @@ img { max-width: 100%; }
 /* Behaviour Engine — self-relative deviation chips on a briefing card */
 .intel-dev{display:flex;gap:.4rem;flex-wrap:wrap;margin:-.15rem 0 .5rem}
 .intel-devchip{font-size:.72rem;font-weight:600;padding:.15rem .5rem;border-radius:20px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-secondary);cursor:help}
+
+/* IntelliQ mirror — the person's own record (warm, self-relative, never a score) */
+.iq-mirror{background:linear-gradient(180deg,rgba(124,90,245,0.08),rgba(124,90,245,0.02));border:1px solid rgba(124,90,245,0.25);border-radius:14px;padding:1rem 1.1rem;margin-bottom:0.8rem}
+.iq-mirror-title{font-size:0.72rem;font-weight:700;letter-spacing:.02em;color:var(--text-muted);margin-bottom:0.5rem;text-transform:uppercase}
+.iq-mirror-text{font-size:0.95rem;line-height:1.55;color:var(--text-primary)}
+.iq-portrait{display:flex;flex-wrap:wrap;gap:0.4rem;margin-top:0.7rem}
+.iq-portrait-chip{font-size:0.72rem;padding:0.15rem 0.55rem;border-radius:20px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-secondary)}
+.iq-shifts{margin-top:0.6rem;font-size:0.75rem;color:var(--text-muted);display:flex;flex-wrap:wrap;gap:0.35rem;align-items:center}
+.iq-shifts-label{color:var(--text-muted)}
+.iq-shift-chip{font-size:0.72rem;font-weight:600;padding:0.12rem 0.5rem;border-radius:20px;background:var(--surface-2);border:1px solid var(--border)}
+.iq-shift-below{color:var(--warning)}
+.iq-shift-above{color:var(--success)}
+.iq-mirror-foot{margin-top:0.7rem;font-size:0.68rem;color:var(--text-muted);line-height:1.45}

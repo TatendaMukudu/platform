@@ -313,17 +313,17 @@ const MemberApp = {
       ? Math.round(this.results.reduce((sum, r) => sum + r.score, 0) / this.results.length) : null;
     const streak   = this.checkins.length;
 
+    // IntelliQ is a mirror, not a scoreboard — no score, no streak. Direction
+    // (self-relative, filled by the record below) + honest counts.
     document.getElementById('home-stat-row').innerHTML = `
       <div class="stat-row">
         <div class="stat-pill">
-          <div class="stat-pill-val" style="color:${avgScore ? this._scoreColor(avgScore) : 'var(--text-muted)'}">
-            ${avgScore ?? '—'}
-          </div>
-          <div class="stat-pill-label">IntelliQ Score</div>
+          <div class="stat-pill-val" id="home-traj" style="font-size:1rem;color:var(--text-muted)">Building</div>
+          <div class="stat-pill-label">Your direction</div>
         </div>
         <div class="stat-pill">
-          <div class="stat-pill-val" style="color:var(--warning)">🔥 ${streak}</div>
-          <div class="stat-pill-label">Check-In Streak</div>
+          <div class="stat-pill-val">${this.checkins.length}</div>
+          <div class="stat-pill-label">Reflections</div>
         </div>
         <div class="stat-pill">
           <div class="stat-pill-val">${this.results.length}</div>
@@ -429,6 +429,45 @@ const MemberApp = {
     } else {
       recentEl.innerHTML = '';
     }
+
+    // ── IntelliQ mirror — the person's own record, from the kernel ──
+    this._loadIntelliQRecord();
+  },
+
+  /* The IntelliQ lens: a warm, self-relative reflection + the person's own
+     behavioural portrait. Their data, reflected to them — never a score, never
+     shared without consent. Renders into the home insight slot. */
+  async _loadIntelliQRecord() {
+    const el = document.getElementById('home-insight');
+    if (!el) return;
+    try {
+      const res = await fetch('/api/me/record', { headers: this._authHeaders() });
+      if (!res.ok) return;
+      const d = await res.json();
+      if (!d.ok) return;
+
+      const portraitChips = Object.values(d.portrait || {})
+        .map(f => `<span class="iq-portrait-chip">${this._escape(f.label)} · usually ${f.normal}</span>`).join('');
+      const shiftChips = (d.shifts || []).map(s => {
+        const arrow = s.direction === 'below' ? '↓' : '↑';
+        const pct = s.deviationPct != null ? Math.abs(s.deviationPct) + '% ' : '';
+        return `<span class="iq-shift-chip iq-shift-${s.direction}">${arrow} ${this._escape(s.label)} ${pct}${s.direction} your usual</span>`;
+      }).join('');
+
+      el.innerHTML = `
+        <div class="iq-mirror">
+          <div class="iq-mirror-title">🪞 What IntelliQ notices about you</div>
+          <div class="iq-mirror-text">${this._escape(d.reflection || '')}</div>
+          ${portraitChips ? `<div class="iq-portrait">${portraitChips}</div>` : ''}
+          ${shiftChips ? `<div class="iq-shifts"><span class="iq-shifts-label">Lately, vs your own normal:</span> ${shiftChips}</div>` : ''}
+          <div class="iq-mirror-foot">This is yours. It reflects you to you — never a score, and never shared without your say.</div>
+        </div>`;
+
+      const TRAJ = { converging:'Converging', sustaining:'Sustaining', up:'Rising', flat:'Steady',
+        down:'Dipping', diverging:'Diverging', stalled:'Stalled', unanchored:'Finding footing', unknown:'Building' };
+      const traj = document.getElementById('home-traj');
+      if (traj && d.trajectory) { traj.textContent = TRAJ[d.trajectory] || 'Building'; traj.style.color = 'var(--accent)'; }
+    } catch (_) { /* the mirror is optional — never block the home */ }
   },
 
   /* ── WEEKLY ASSESSMENT ──────────────────────────────────── */

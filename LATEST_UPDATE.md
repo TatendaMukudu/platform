@@ -1,90 +1,78 @@
-# Update — Platform Intelligence Loop v1 (shipped)
+# Update — Kernel Agents + the IntelliQ Mirror + a Quality Harness
 
-The pivot from "dashboard app" to "intelligence system," built as the smallest
-powerful version. **No new pages** — I consolidated three overlapping surfaces
-into one, and the only new code is the engine + one endpoint family.
+Built for quality, not speed. A coherent vertical slice of the frozen
+architecture: the kernel's cognitive agents are now a named layer, the person's
+own IntelliQ lens is real, and quality is now **measured**, not felt.
 
-The loop is now real end to end:
-**Input → Signal → Pattern → Judgment → Action → Outcome → Learning**
+## What I built
 
----
+### 1. The kernel agent layer — `ai/agents.js` (new)
+The kernel is now an explicit set of five named cognitive agents, each with one
+job and a shared honesty contract (evidence-backed · confidence-rated ·
+directional-never-scored · self-relative):
+- **Observer** "I notice" · **Historian** "I remember" · **Analyst** "I connect" ·
+  **Coach** "I reflect" · **Learner** "I improve".
+- This module owns the two pure-reasoning agents: `analyst()` (composes the
+  baseline + pattern engines into one assessment) and `coachReflectionPrompt()`
+  (the person-facing IntelliQ reflection — warm, self-relative, values-anchored).
+- Both lenses call the **same** agents; only the questions and the consent scope
+  differ. No raw text ever enters — inputs are privacy-safe features only.
 
-## Architecture
+### 2. The IntelliQ lens — the person's own record
+- **`GET /api/me/record`** (new): a person's *own* behavioural portrait
+  (self-relative "normals"), what's shifted vs **their own** normal lately, their
+  stated values/goals, and a warm reflection from the **Coach** agent (via the
+  gateway, redacted as a last line). It's theirs — self-owned, self-relative.
+- **Home is now a mirror, not a scoreboard.** Removed the "IntelliQ **Score**" and
+  the "🔥 streak" (the exact journaling-app anti-patterns) and replaced them with:
+  a warm "What IntelliQ notices about you" reflection, a self-relative portrait,
+  a "vs your own normal, lately" row, and a directional word ("your direction"),
+  never a number. Footer makes ownership explicit: *"This is yours… never a score,
+  never shared without your say."*
 
-- **`ai/intelligence.js` (new)** — a pure, testable pattern engine. Privacy by
-  construction: it receives ONLY derived features (mood numbers, signal
-  weights/timestamps, counts, directions, booleans) — **never raw text** — so it
-  structurally cannot quote or reveal a private note. Sensitive context enters
-  only as a boolean flag that softens tone.
-- **`server.js`** — `_buildMemberIntelInput()` assembles those safe features from
-  existing stores through the privacy gate; **one** endpoint
-  `GET /api/intelligence/briefing` consolidates who-needs-attention + why-now +
-  evidence + recommended action + a group rollup (folds the old Group/Org Health).
-  The intervention loop is closed with `/act` + `/outcome`, tied to the pattern.
-  The only AI call is the aggregate summary — routed through the existing gateway.
-- **Frontend** — one `renderIntelligence()` surface reusing the leader-home page.
-  Nav consolidated (below).
+### 3. Quality is now measured — `scripts/eval.js` (new)
+A golden-set harness over the deterministic kernel (the seed of the **Confidence
+Engine** you called a moat). Every case the kernel gets wrong becomes a permanent
+golden case, so it can only improve. **7/7 passing**, covering: self-relative dip
+fires, a naturally-quiet-but-stable person is *never* flagged (fairness), sparse
+history stays honestly "learning," genuine decline fires, learning only surfaces
+with ≥2 outcomes, the Coach prompt forbids scores — and **no output ever contains
+NaN**.
 
-## The 5 patterns (honest language — "pattern/early signal", never "prediction")
-1. **momentum_drop** — mood down over the last 2 weeks vs the prior ~4.
-2. **quiet_improvement** — rising steadily, now in a good place, little visible
-   recognition (the person to praise before they feel invisible).
-3. **repeated_concern** — ≥3 concern signals over ~6 weeks (recurring, not a
-   one-off).
-4. **member_team_divergence** — trending opposite to their team.
-5. **invisible_load** — actively supporting others while their own signals strain.
+### 4. A real quality bug the harness caught
+The pattern detectors could emit **"NaN/5"** to a human if a mood series was ever
+malformed (`drop < 0.5` let `NaN` slip through). Hardened `momentum_drop` and
+`quiet_improvement` with finite-number guards — the kernel now can never surface
+NaN. This is exactly why "best" needs measurement: it surfaced a defect that
+"works on my data" would have shipped.
 
-Each finding carries a **privacy-safe basis** (counts + direction only) and a
-**confidence** that is honest about volume: tentative (<3) · emerging (3–5) ·
-clear (6+). No fake ML.
-
-## Files changed
+## Files
 | File | Change |
 |---|---|
-| `ai/intelligence.js` | **new** — engine: 5 detectors + briefing composer |
-| `scripts/intelligence-smoke.js` | **new** — 13 checks, runs with plain `node` |
-| `server.js` | require + `_buildMemberIntelInput`, `_learningByPattern`, 3 endpoints |
-| `js/app.js` | `renderIntelligence` + card + `intelAct`/`intelOutcome`; dispatch + titles |
-| `js/data.js` | nav consolidation |
-| `css/styles.css` | intel-* styles |
-| `index.html` | asset cache-bust `?v=20260705i` |
+| `ai/agents.js` | **new** — the five-agent kernel layer (Analyst + Coach + contract) |
+| `scripts/eval.js` | **new** — golden-set quality harness (7 cases) |
+| `ai/intelligence.js` | NaN-safety guards in two detectors |
+| `server.js` | `require agents`; `GET /api/me/record` (IntelliQ lens) |
+| `js/member-view.js` | Home → IntelliQ mirror; removed score/streak; `_loadIntelliQRecord()` |
+| `css/styles.css` | `.iq-mirror` styles |
+| `index.html` | asset cache-bust `?v=20260705k` |
 
-## UX simplification (fewer surfaces, one entry)
-- Leader **main entry is now "Intelligence"** (the daily briefing).
-- **Removed** the duplicate leader nav items *Group Health* and *Intelligence
-  (org-insights)* — folded into the one briefing (old links redirect there).
-- **Renamed** the admin "Intelligence" page to **"IntelliQ Engine"** so the word
-  "Intelligence" names exactly one thing. "Organisation Health" now stands alone
-  (no more Group-vs-Org-Health confusion).
+## Verification
+- `node scripts/eval.js` → **7/7**; `baseline-smoke` **12/12**; `intelligence-smoke`
+  **15/15**; `node --check` on every changed file — all pass.
+- Not run against a live DB/AI key here — the reflection's AI copy is the only
+  part unproven until you run it live (the deterministic kernel is fully covered).
 
-## Privacy safeguards
-- Engine inputs contain **zero** raw text — verified by a smoke assertion that a
-  composed item has no `valueText/note/content/text` field.
-- Sensitive signals only set a boolean `careFlag` ("there may be personal context
-  — lead with care"); the detail is never sent.
-- The aggregate AI summary is instructed to **never name an individual** and runs
-  through the privacy-gated gateway.
-- The named per-member detail is deterministic (no AI), shown only to a leader
-  already scoped to that member.
+## Architecture preserved
+- One kernel, two lenses: `/api/me/record` (IntelliQ) and `/api/intelligence/*`
+  (Platform) call the same agents. Apps stay thin.
+- Privacy: agents see only features; the person's own reflection is redacted as a
+  belt-and-suspenders; sensitive context only softens tone, never enumerated.
+- No new pages. IntelliQ improved by *replacing* the scoreboard, not adding surface.
 
-## The learning loop
-- On a briefing card: **"I acted on this"** logs an intervention tied to the
-  pattern → then **👍 / 😐 / 👎** records the outcome.
-- `_learningByPattern()` aggregates outcomes per pattern, and the next briefing
-  surfaces *"here, X has tended to help with this pattern (n/m positive)"* — but
-  only after ≥2 measured outcomes, and it never overrides the care-first default.
-
-## Tests / smoke
-- `node scripts/intelligence-smoke.js` → **13/13** (each detector fires + stays
-  quiet correctly; honest-language check; privacy-by-construction check).
-- `node --check` on server.js, js/app.js, js/data.js — all pass.
-
-## Honest limits (v1)
-- Detectors are heuristics over real signals — deliberately conservative, honestly
-  labelled. Not statistical models.
-- Team trajectory is O(peers) per member — fine for pilot-size orgs, wants
-  precompute later.
-- Admins reach the briefing when they lead a node; a pure-superadmin org-wide
-  entry can come next.
-- **Not run against a live DB/AI key here** — engine is proven in isolation; the
-  end-to-end path is your California test.
+## What's next (same plan, quality bar)
+- Sharpen Platform: route the briefing through `agents.analyst` (DRY), tighten
+  "why now," add a golden case per pattern.
+- Stable-ID migration (T1) as its own tested ticket — deliberately deferred from a
+  blind big-bang; it needs a backfill + a live run to do safely.
+- Seed script + `LIVE_SETUP.md` so you can run the whole loop on real data.
