@@ -464,7 +464,7 @@ const MemberApp = {
           <div class="iq-mirror-text">${this._escape(d.reflection || '')}</div>
           ${portraitChips ? `<div class="iq-portrait">${portraitChips}</div>` : ''}
           ${shiftChips ? `<div class="iq-shifts"><span class="iq-shifts-label">Lately, vs your own normal:</span> ${shiftChips}</div>` : ''}
-          ${connLines ? `<div class="iq-conns">${connLines}</div>` : ''}
+          ${connLines ? `<div class="iq-conns">${connLines}<button class="iq-dismiss" onclick="MemberApp._dismissNoticing('connection')">not helpful</button></div>` : ''}
           <div class="iq-mirror-foot">This is yours. It reflects you to you — never a score, and never shared without your say.</div>
         </div>`;
 
@@ -473,6 +473,18 @@ const MemberApp = {
       const traj = document.getElementById('home-traj');
       if (traj && d.trajectory) { traj.textContent = TRAJ[d.trajectory] || 'Building'; traj.style.color = 'var(--accent)'; }
     } catch (_) { /* the mirror is optional — never block the home */ }
+  },
+
+  /* The person can teach the Confidence Engine too — their record, their say. */
+  async _dismissNoticing(type) {
+    try {
+      await fetch('/api/intelligence/notice-feedback', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ orgCode: this._orgCode, type, feedback: 'dismiss' }),
+      });
+    } catch (_) {}
+    const c = document.querySelector('.iq-conns');
+    if (c) c.innerHTML = `<span class="iq-conn-hint">Thanks — noted.</span>`;
   },
 
   /* ── WEEKLY ASSESSMENT ──────────────────────────────────── */

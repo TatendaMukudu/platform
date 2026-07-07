@@ -18,6 +18,8 @@ const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
 const packs      = require('./ai/packs');
+const confidence = require('./ai/confidence');
+const adapters   = require('./ai/adapters');
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -73,7 +75,7 @@ function scheduleSave() {
         assignedScenarios, memberResults, memberCheckins,
         memberGoals, weeklyAssessments, orgInterventions,
         orgNodes, orgMetrics, orgValues, orgGoals, userPermissions,
-        userAiProfiles, advisorThreads, orgSignals,
+        userAiProfiles, advisorThreads, orgSignals, noticeFeedback,
         activeSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
@@ -2211,6 +2213,15 @@ app.get('/api/workspace/briefing', requireAuth, async (req, res) => {
    never raw note/check-in text. Sensitive context enters only as a boolean flag.
    ═══════════════════════════════════════════════════════════════════════════ */
 const intelBriefingCache = {}; // `${code}:${userId}` → { data, ts }
+const noticeFeedback = {};     // orgCode → { noticingType → { useful, dismiss } } — the Confidence Engine's memory
+
+/* Confidence Engine read: per-noticing-type reliability, from humans' feedback. */
+function _reliabilityByType(code) {
+  const fb = noticeFeedback[code] || {};
+  const out = {};
+  Object.keys(fb).forEach(type => { out[type] = confidence.reliability(fb[type]); });
+  return out;
+}
 
 /* Deduped mood series for a member: [{ t(ms), mood(1-5) }] ascending. No text. */
 function _memberMoodSeries(code, u) {
@@ -2401,15 +2412,22 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
     .map(id => orgUsers[code]?.[id]).filter(u => u && u.id !== userId && u.role !== 'superadmin');
   const learning = _learningByPattern(code);
 
+  const reliabilityByType = _reliabilityByType(code);
   const items = []; let activeWeek = 0; const patternCounts = {};
   members.forEach(u => {
     let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { return; }
     if (m.lastActivityT && now - m.lastActivityT < 7 * 86400000) activeWeek++;
     const findings = intel.detectPatterns(m);
     if (!findings.length) return;
-    findings.forEach(f => { patternCounts[f.type] = (patternCounts[f.type] || 0) + 1; });
     const item = intel.composeBriefingItem(m, findings, learning);
-    if (item) items.push(item);
+    if (!item) return;
+    // Confidence Engine: suppress a noticing type that's earned enough feedback and
+    // proven mostly unhelpful here; label the rest honestly.
+    const rel = reliabilityByType[item.patternType];
+    if (!confidence.shouldSurface(rel)) return;
+    item.reliability = confidence.label(rel);
+    findings.forEach(f => { patternCounts[f.type] = (patternCounts[f.type] || 0) + 1; });
+    items.push(item);
   });
   const SEV = { high: 0, medium: 1, low: 2 };
   items.sort((a, b) => SEV[a.severity] - SEV[b.severity]);
@@ -2494,6 +2512,47 @@ app.post('/api/intelligence/outcome', requireAuth, (req, res) => {
   intelBriefingCache[`${code}:${userId}`] = null; // learning changed — invalidate
   scheduleSave();
   res.json({ ok: true });
+});
+
+/* ── POST /api/intelligence/notice-feedback — teach the Confidence Engine ──────
+   Either lens sends { type, feedback:'useful'|'dismiss' }. The kernel learns which
+   KINDS of noticing are actually useful here, and stops surfacing the ones that
+   aren't. This is how proactivity earns (or loses) the right to speak. */
+app.post('/api/intelligence/notice-feedback', requireAuth, (req, res) => {
+  const { orgCode } = req.iqSession;
+  const code = orgCode;
+  const { type, feedback } = req.body || {};
+  if (!type || !['useful', 'dismiss'].includes(feedback)) return res.status(400).json({ error: 'type and useful|dismiss required' });
+  if (!noticeFeedback[code]) noticeFeedback[code] = {};
+  const t = noticeFeedback[code][String(type)] || (noticeFeedback[code][String(type)] = { useful: 0, dismiss: 0 });
+  t[feedback]++;
+  // Feedback changes what should surface — clear caches so it takes effect now.
+  Object.keys(intelBriefingCache).forEach(k => { if (k.startsWith(code + ':')) intelBriefingCache[k] = null; });
+  Object.keys(meRecordCache).forEach(k => { if (k.startsWith(code + ':')) meRecordCache[k] = null; });
+  scheduleSave();
+  res.json({ ok: true, reliability: confidence.label(confidence.reliability(t)) });
+});
+
+/* ── POST /api/signals/import-csv — a source adapter in action ─────────────────
+   The "everything is a signal" contract: a spreadsheet becomes per-member metric
+   signals through the SAME attribution + scope-safety path as the smart import.
+   Body: { csv, fileName?, public? }. */
+app.post('/api/signals/import-csv', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = orgCode;
+  const csvText = String(req.body?.csv || '');
+  if (!csvText.trim()) return res.status(400).json({ error: 'csv content required' });
+
+  let parsed; try { parsed = adapters.csv(csvText); } catch (e) { return res.status(400).json({ error: 'Could not parse CSV: ' + e.message }); }
+  if (!parsed.members.length) return res.json({ ok: true, imported: 0, matched: [], unmatched: [], note: 'No member rows found (first column should be the member name).' });
+
+  const roster = getVisibleUserIds(code, userId)
+    .map(id => orgUsers[code]?.[id]).filter(u => u && u.role !== 'superadmin')
+    .map(u => ({ id: u.id, name: (u.name || '').toLowerCase().trim(), first: (u.firstName || (u.name || '').split(' ')[0] || '').toLowerCase().trim() }));
+  if (!roster.length) return res.status(400).json({ error: 'No members in your scope to attribute data to.' });
+
+  const result = _attributeMembers(code, userId, parsed.members, roster, String(req.body?.fileName || 'import.csv').slice(0, 120), !!req.body?.public);
+  res.json({ ok: true, ...result });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -6452,6 +6511,7 @@ function _loadAllStores(data) {
   Object.assign(userAiProfiles,   data.userAiProfiles   || {});
   Object.assign(advisorThreads,   data.advisorThreads   || {});
   Object.assign(orgSignals,       data.orgSignals       || {});
+  Object.assign(noticeFeedback,   data.noticeFeedback   || {});
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
   const _savedSessions = data.activeSessions || {};

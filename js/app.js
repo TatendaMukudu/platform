@@ -5968,7 +5968,7 @@ function _intelCard(it) {
     <div class="intel-card" style="border-left:3px solid ${sevColor}">
       <div class="intel-card-head">
         <span class="intel-card-name">${_escAdvisor(it.name)}</span>
-        <span class="intel-chips">${chips}</span>
+        <span class="intel-chips">${chips}${it.reliability && it.reliability !== 'calibrating' ? `<span class="intel-rel">${_escAdvisor(it.reliability)}</span>` : ''}</span>
       </div>
       <div class="intel-why"><strong>Why now:</strong> ${_escAdvisor(it.whyNow)}</div>
       ${(it.deviations || []).length ? `<div class="intel-dev">${it.deviations.slice(0, 3).map(_intelDevChip).join('')}</div>` : ''}
@@ -5980,6 +5980,7 @@ function _intelCard(it) {
       <div class="intel-cta" id="intel-cta-${it.memberId}">
         <button class="intel-btn" onclick="intelAct('${it.memberId}','${it.patternType || ''}',this)">I acted on this</button>
         <button class="intel-btn intel-btn-ghost" onclick="showProfile('${it.memberId}')">Open profile</button>
+        <button class="intel-btn intel-btn-ghost" title="Teaches the system this kind of flag isn't useful here" onclick="intelDismiss('${it.patternType || ''}','${it.memberId}',this)">Not useful</button>
       </div>
     </div>`;
 }
@@ -6004,6 +6005,8 @@ async function intelAct(memberId, patternType, btn) {
     });
     const d = await res.json();
     if (!res.ok || !d.ok) throw new Error(d.error || 'failed');
+    // Acting on a flag teaches the Confidence Engine it was useful.
+    if (patternType) intelNoticeFeedback(patternType, 'useful');
     const cta = document.getElementById('intel-cta-' + memberId);
     if (cta) cta.innerHTML = `
       <span class="intel-logged">Logged ✓ — how did it go?</span>
@@ -6014,6 +6017,23 @@ async function intelAct(memberId, patternType, btn) {
     if (btn) { btn.disabled = false; btn.textContent = 'I acted on this'; }
     showToast('Could not log the action', 'warning');
   }
+}
+
+/* Teach the Confidence Engine which kinds of noticing are useful here. */
+async function intelNoticeFeedback(type, feedback) {
+  if (!type) return;
+  try {
+    await fetch('/api/intelligence/notice-feedback', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
+      body: JSON.stringify({ orgCode: AppState.orgCode, type, feedback }),
+    });
+  } catch (_) { /* fire-and-forget */ }
+}
+
+async function intelDismiss(type, memberId, btn) {
+  intelNoticeFeedback(type, 'dismiss');
+  const card = btn?.closest('.intel-card');
+  if (card) { card.style.opacity = '0.45'; const cta = document.getElementById('intel-cta-' + memberId); if (cta) cta.innerHTML = `<span class="intel-logged">Noted — you'll see less of this kind here.</span>`; }
 }
 
 async function intelOutcome(interventionId, outcome, btn) {

@@ -122,6 +122,27 @@ const packs = require('../ai/packs');
 check('universal pack resolves and is not industry-specific',
   packs.resolvePack('anything').id === 'universal' && packs.resolvePack().dimensions.mood);
 
+// ── Confidence Engine: honest, evidence-gated ───────────────────────────────
+const confidence = require('../ai/confidence');
+check('thin feedback → calibrating, never claims reliability',
+  confidence.reliability({ useful: 1, dismiss: 0 }).tier === 'calibrating');
+check('mostly-useful with enough feedback → reliable',
+  confidence.reliability({ useful: 8, dismiss: 1 }).tier === 'reliable');
+check('mostly-dismissed type is suppressed (stops nagging)',
+  confidence.shouldSurface(confidence.reliability({ useful: 1, dismiss: 7 })) === false);
+check('a promising type is NOT suppressed',
+  confidence.shouldSurface(confidence.reliability({ useful: 5, dismiss: 4 })) === true);
+
+// ── Adapter: CSV → per-member signals, source-agnostic ──────────────────────
+const adapters = require('../ai/adapters');
+{
+  const csv = 'Name,Squat,Notes\nJordan Lee,140,strong week\nSam Fox,120,';
+  const out = adapters.csv(csv);
+  check('CSV adapter maps rows → members with metrics',
+    out.members.length === 2 && out.members[0].name === 'Jordan Lee'
+    && out.members[0].metrics.some(m => m.label === 'Squat' && m.value === 140));
+}
+
 console.log('Kernel quality eval — golden set\n');
 GOLDEN.forEach(c => {
   let ok = false;
