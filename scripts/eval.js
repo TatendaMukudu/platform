@@ -94,6 +94,34 @@ const GOLDEN = [
   },
 ];
 
+// ── cross-signal: co-moving shifted streams → a connection, never a cause ────
+const packs = require('../ai/packs');
+{
+  // Two streams that BOTH shift lately AND rise/fall together over the window.
+  const wk = (vals) => vals.map((v, i) => ({ t: ago((vals.length - i) * 7 - 3), v }));
+  const A = wk([5,5,5,5,5,5,5,5,5,5,2,2]);   // steady then drops
+  const B = wk([9,9,9,9,9,9,9,9,9,9,4,4]);   // steady then drops, in lockstep
+  const conns = agents.crossSignal([
+    { key: 'a', label: 'contribution', series: A },
+    { key: 'b', label: 'mood',         series: B },
+  ], now);
+  check('cross-signal connects co-moving shifted streams', conns.length >= 1 && conns[0].relation === 'together');
+  check('cross-signal never asserts a cause', !/\bcause|because|leads to|causes\b/i.test(JSON.stringify(conns)));
+
+  // Unrelated / non-shifting streams → no false connection.
+  const flatA = wk([5,5,5,5,5,5,5,5,5,5,5,5]);
+  const noise = wk([3,7,2,8,4,6,3,7,2,8,4,6]);
+  const none = agents.crossSignal([
+    { key: 'a', label: 'x', series: flatA },
+    { key: 'b', label: 'y', series: noise },
+  ], now);
+  check('cross-signal stays silent on unrelated/stable streams', none.length === 0);
+}
+
+// ── packs: universal + industry-agnostic ────────────────────────────────────
+check('universal pack resolves and is not industry-specific',
+  packs.resolvePack('anything').id === 'universal' && packs.resolvePack().dimensions.mood);
+
 console.log('Kernel quality eval — golden set\n');
 GOLDEN.forEach(c => {
   let ok = false;

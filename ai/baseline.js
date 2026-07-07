@@ -82,6 +82,25 @@ function detectDeviation(dimension, series, now) {
   return { dimension, label: meta.label, unusual, concerning, direction, normal: round1(normal), recent: round1(recent), deviationPct, confidence };
 }
 
+/* Generic self-relative shift for an ARBITRARY numeric stream (not tied to a named
+   dimension) — used by cross-signal reasoning so a stat sheet, a grade, or a KPI
+   can be compared to its own normal exactly like mood. Never a score. */
+function shift(series, now) {
+  const { normal, spread, points } = computeBaseline(series, now);
+  const recent = _median((series || []).filter(p => now - p.t < RECENT_MS).map(p => p.v));
+  if (normal == null || recent == null) {
+    return { unusual: false, confidence: 'learning', normal: null, recent: recent != null ? round1(recent) : null, direction: 'flat', deviationPct: null };
+  }
+  const diff = recent - normal;
+  return {
+    unusual: Math.abs(diff) > 2 * spread,
+    direction: diff > 0 ? 'above' : diff < 0 ? 'below' : 'flat',
+    normal: round1(normal), recent: round1(recent),
+    deviationPct: normal !== 0 ? Math.round((diff / Math.abs(normal)) * 100) : null,
+    confidence: points >= 12 ? 'clear' : points >= 8 ? 'emerging' : 'tentative',
+  };
+}
+
 /* The member's fingerprint (their normals) for display — self-relative, no text. */
 function fingerprint(dimensionSeries, now) {
   const out = {};
@@ -113,6 +132,6 @@ function phrase(dev) {
 }
 
 module.exports = {
-  analyze, detectDeviation, computeBaseline, fingerprint, phrase,
+  analyze, detectDeviation, computeBaseline, fingerprint, phrase, shift,
   DIMENSIONS, RECENT_MS, BASELINE_MS, MIN_POINTS,
 };

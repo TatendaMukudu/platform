@@ -454,12 +454,17 @@ const MemberApp = {
         return `<span class="iq-shift-chip iq-shift-${s.direction}">${arrow} ${this._escape(s.label)} ${pct}${s.direction} your usual</span>`;
       }).join('');
 
+      const connLines = (d.connections || []).slice(0, 2).map(c =>
+        `<div class="iq-conn">🔗 ${this._escape(c.a)} &amp; ${this._escape(c.b)} have been moving ${c.relation === 'inversely' ? 'in opposite directions' : 'together'} for you lately <span class="iq-conn-hint">— a connection worth noticing, not a cause</span></div>`
+      ).join('');
+
       el.innerHTML = `
         <div class="iq-mirror">
           <div class="iq-mirror-title">🪞 What IntelliQ notices about you</div>
           <div class="iq-mirror-text">${this._escape(d.reflection || '')}</div>
           ${portraitChips ? `<div class="iq-portrait">${portraitChips}</div>` : ''}
           ${shiftChips ? `<div class="iq-shifts"><span class="iq-shifts-label">Lately, vs your own normal:</span> ${shiftChips}</div>` : ''}
+          ${connLines ? `<div class="iq-conns">${connLines}</div>` : ''}
           <div class="iq-mirror-foot">This is yours. It reflects you to you — never a score, and never shared without your say.</div>
         </div>`;
 

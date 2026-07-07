@@ -194,6 +194,8 @@ function composeBriefingItem(m, findings, learning = {}) {
     // Self-relative evidence (Behavior Engine) — the "vs their own normal" view.
     deviations: (m.deviations || []).map(d => ({ label: d.label, direction: d.direction, deviationPct: d.deviationPct, recent: d.recent, normal: d.normal, confidence: d.confidence })),
     fingerprint: m.fingerprint || null,
+    // Cross-signal connections — things that moved together for them (never causal).
+    connections: m.connections || [],
   };
 }
 

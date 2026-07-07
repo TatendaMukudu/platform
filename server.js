@@ -17,6 +17,7 @@ const embeddings = require('./ai/embeddings');
 const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
+const packs      = require('./ai/packs');
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -2307,6 +2308,30 @@ function _buildMemberIntelInput(code, u, now) {
   let deviations = [], fingerprint = null;
   try { const b = baseline.analyze(dimSeries, now); deviations = b.deviations; fingerprint = b.fingerprint; } catch (_) {}
 
+  // ── Cross-signal reasoning (ai/agents): honest connections across ANY streams ──
+  // The five behavioural dimensions PLUS any raw numeric signal (a stat, a grade,
+  // attendance, a KPI) — self-relative, correlated over time. Domain-agnostic:
+  // it reasons over numbers-vs-self, not industry meaning. Connections, never causes.
+  const pack = packs.resolvePack(orgMeta[code]?.orgMode);
+  const streams = [
+    { key: 'mood',               label: packs.labelFor(pack, 'mood'),               series: dimSeries.mood },
+    { key: 'check_in_frequency', label: packs.labelFor(pack, 'check_in_frequency'), series: dimSeries.check_in_frequency },
+    { key: 'reflection_cadence', label: packs.labelFor(pack, 'reflection_cadence'), series: dimSeries.reflection_cadence },
+    { key: 'contribution',       label: packs.labelFor(pack, 'contribution'),       series: dimSeries.contribution },
+    { key: 'helping',            label: packs.labelFor(pack, 'helping'),            series: dimSeries.helping },
+  ];
+  const numeric = {};
+  sigs.forEach(s => {
+    if (s.valueNum == null) return;
+    const t = new Date(s.ts).getTime(); if (isNaN(t)) return;
+    const key = `${s.source}${s.label ? ':' + s.label : ''}`;
+    (numeric[key] = numeric[key] || { key, label: s.label || (SIGNAL_SOURCES[s.source]?.label || s.source), series: [] })
+      .series.push({ t, v: Number(s.valueNum) });
+  });
+  Object.values(numeric).forEach(st => { if (st.series.length >= 6) streams.push(st); });
+  let connections = [];
+  try { connections = agents.crossSignal(streams, now); } catch (_) {}
+
   return {
     id: u.id, name: u.name || 'This member', now,
     moodSeries, signalSeries, concernSeries, helpingSeries,
@@ -2315,7 +2340,7 @@ function _buildMemberIntelInput(code, u, now) {
     memberTrajectory: _trajectoryFromMood(moodSeries, now),
     teamTrajectory:   _teamTrajectory(code, u, now),
     hasSensitiveContext,
-    deviations, fingerprint,
+    deviations, fingerprint, connections,
   };
 }
 
@@ -2530,6 +2555,7 @@ app.get('/api/me/record', requireAuth, async (req, res) => {
       : `Welcome. Name one thing you're working toward, and IntelliQ starts building an honest picture of your growth — just for you.`),
     portrait,          // { dim: { label, normal } } — self-relative normals
     shifts,            // what's different from THEIR own normal, lately
+    connections: (m?.connections || []).map(c => ({ a: c.a, b: c.b, relation: c.relation, basis: c.basis, confidence: c.confidence })),
     trajectory,        // directional word, never a score
     values, goals,
     ownedByYou: true,  // this record is theirs

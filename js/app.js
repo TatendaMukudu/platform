@@ -5972,6 +5972,7 @@ function _intelCard(it) {
       </div>
       <div class="intel-why"><strong>Why now:</strong> ${_escAdvisor(it.whyNow)}</div>
       ${(it.deviations || []).length ? `<div class="intel-dev">${it.deviations.slice(0, 3).map(_intelDevChip).join('')}</div>` : ''}
+      ${(it.connections || []).length ? `<div class="intel-conn">🔗 ${_escAdvisor(it.connections[0].basis)} <span class="intel-conn-hint">(a connection, not a cause)</span></div>` : ''}
       <details class="intel-ev"><summary>Evidence basis</summary><ul>${ev}</ul></details>
       ${it.careFlag ? `<div class="intel-care">💙 There may be personal context here — lead with care. Details are kept private.</div>` : ''}
       <div class="intel-action"><strong>Try:</strong> ${_escAdvisor(it.recommendedAction)}</div>

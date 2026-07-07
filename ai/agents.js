@@ -27,6 +27,7 @@
    ============================================================ */
 
 const intelligence = require('./intelligence');
+const baseline     = require('./baseline');
 
 const AGENTS = {
   observer:  { role: 'I notice',   job: 'evidence → self-relative observations' },
@@ -89,6 +90,64 @@ function coachReflectionPrompt({ name, values = [], goals = [], fingerprint = {}
   return { system, user };
 }
 
+/* ── ANALYST · cross-signal ────────────────────────────────────────────────
+   "Discover connections humans never explicitly stated" — the honest version.
+   Given a person's numeric streams (behavioural dimensions AND any raw signal
+   stream — a stat, a grade, attendance, a KPI), find pairs that (a) each shifted
+   from their OWN normal lately and (b) actually co-move over the window. Surfaced
+   as a CONNECTION with confidence — never a causal claim, never a chain asserted
+   as fact. Works across any domain because it reasons over numbers vs self, not
+   over industry meaning.
+
+   streams: [{ key, label, series: [{ t, v }] }]   (self-relative; no text)
+   Returns: [{ a, b, relation:'together'|'inversely', strength, confidence, basis }]
+──────────────────────────────────────────────────────────────────────────── */
+const _WEEKS = 16;
+function _weeklyBucket(series, now) {
+  const sum = new Array(_WEEKS).fill(0), cnt = new Array(_WEEKS).fill(0);
+  (series || []).forEach(p => {
+    const w = Math.floor((now - p.t) / (7 * 86400000));
+    if (w >= 0 && w < _WEEKS) { sum[w] += p.v; cnt[w]++; }
+  });
+  return sum.map((s, i) => (cnt[i] ? s / cnt[i] : null));   // weekly mean, null if no data
+}
+function _pearson(a, b) {
+  const xs = [], ys = [];
+  for (let i = 0; i < a.length; i++) if (a[i] != null && b[i] != null) { xs.push(a[i]); ys.push(b[i]); }
+  const n = xs.length;
+  if (n < 6) return { r: 0, n };
+  const mx = xs.reduce((s, v) => s + v, 0) / n, my = ys.reduce((s, v) => s + v, 0) / n;
+  let num = 0, dx = 0, dy = 0;
+  for (let i = 0; i < n; i++) { const a1 = xs[i] - mx, b1 = ys[i] - my; num += a1 * b1; dx += a1 * a1; dy += b1 * b1; }
+  const den = Math.sqrt(dx * dy);
+  return { r: den === 0 ? 0 : num / den, n };
+}
+
+function crossSignal(streams, now, { minCorr = 0.6, max = 3 } = {}) {
+  const enriched = (streams || [])
+    .map(s => ({ ...s, shift: baseline.shift(s.series, now), weekly: _weeklyBucket(s.series, now) }))
+    .filter(s => s.shift.unusual);                    // only streams that moved from their own normal
+  const out = [];
+  for (let i = 0; i < enriched.length; i++) {
+    for (let j = i + 1; j < enriched.length; j++) {
+      const A = enriched[i], B = enriched[j];
+      const { r, n } = _pearson(A.weekly, B.weekly);
+      if (n < 6 || Math.abs(r) < minCorr) continue;   // needs real co-movement, not coincidence
+      const relation = r >= 0 ? 'together' : 'inversely';
+      const confidence = (n >= 12 && Math.abs(r) >= 0.75) ? 'clear' : n >= 8 ? 'emerging' : 'tentative';
+      out.push({
+        a: A.label, b: B.label, relation,
+        strength: Math.round(Math.abs(r) * 100) / 100, confidence,
+        basis: relation === 'together'
+          ? `${A.label} and ${B.label} have risen and fallen together for them lately`
+          : `for them lately, as ${A.label} moved one way, ${B.label} tended to move the other`,
+      });
+    }
+  }
+  // Strongest, most-evidenced first. These are connections to CONSIDER, not causes.
+  return out.sort((x, y) => y.strength - x.strength).slice(0, max);
+}
+
 /* Shared honest-language helper — one place, so every surface says it the same way. */
 function confidencePhrase(confidence) {
   return confidence === 'clear' ? 'a clear pattern'
@@ -97,4 +156,4 @@ function confidencePhrase(confidence) {
        : 'an early, tentative signal';
 }
 
-module.exports = { AGENTS, analyst, coachReflectionPrompt, confidencePhrase };
+module.exports = { AGENTS, analyst, crossSignal, coachReflectionPrompt, confidencePhrase };
