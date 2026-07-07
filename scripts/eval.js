@@ -143,6 +143,46 @@ const adapters = require('../ai/adapters');
     && out.members[0].metrics.some(m => m.label === 'Squat' && m.value === 140));
 }
 
+// ── Universal Pattern Engine: domain-free structures over typed primitives ───
+const primitives = require('../ai/primitives');
+{
+  const drop = (hi, lo) => { const s = []; for (let d = 90; d >= 20; d -= 5) s.push({ t: ago(d), v: hi }); [10, 6, 3, 1].forEach(d => s.push({ t: ago(d), v: lo })); return s; };
+  const rise = (lo, hi) => { const s = []; for (let d = 90; d >= 20; d -= 5) s.push({ t: ago(d), v: lo }); [10, 6, 3, 1].forEach(d => s.push({ t: ago(d), v: hi })); return s; };
+  const flat = (v) => { const s = []; for (let d = 90; d >= 1; d -= 5) s.push({ t: ago(d), v }); return s; };
+
+  // WITHDRAWAL fires on a declining participation stream — regardless of source/domain.
+  const w = primitives.structuralPatterns([{ key: 'p', label: 'attendance', primitive: 'participation', valence: 'up-good', series: drop(5, 1) }], now);
+  check('withdrawal fires on declining participation (any domain)', w.some(f => f.type === 'withdrawal'));
+
+  // Same logic, different domain vocabulary → same pattern (domain-agnostic proof).
+  const w2 = primitives.structuralPatterns([{ key: 'p', label: 'shift log-ins', primitive: 'participation', valence: 'up-good', series: drop(5, 1) }], now);
+  check('withdrawal is domain-agnostic (fires on any participation stream)', w2.some(f => f.type === 'withdrawal'));
+
+  // OVERLOAD: load up + wellbeing down.
+  const o = primitives.structuralPatterns([
+    { key: 'l', label: 'workload', primitive: 'load',  valence: 'up-good', series: rise(2, 8) },
+    { key: 's', label: 'wellbeing', primitive: 'state', valence: 'up-good', series: drop(8, 3) },
+  ], now);
+  check('overload fires when load rises while wellbeing falls', o.some(f => f.type === 'overload'));
+
+  // ISOLATION: relational declining.
+  const iso = primitives.structuralPatterns([{ key: 'r', label: 'communication', primitive: 'relational', valence: 'up-good', series: drop(6, 1) }], now);
+  check('isolation fires on thinning connection', iso.some(f => f.type === 'isolation'));
+
+  // Steady everything → no structural pattern (no false alarms).
+  const none = primitives.structuralPatterns([{ key: 'p', label: 'attendance', primitive: 'participation', valence: 'up-good', series: flat(5) }], now);
+  check('steady streams → no structural pattern', none.length === 0);
+
+  // No causal language anywhere.
+  check('structural patterns never assert a cause',
+    !/\bcause|because|leads to\b/i.test(JSON.stringify([...w, ...o, ...iso])));
+}
+
+// ── translation layer: source → universal primitive (industry-agnostic) ──────
+check('load-like fields map to the load primitive',
+  packs.primitiveForSignal('sheet', 'Weekly Training Load') === 'load');
+check('stress-like fields are down-good', packs.valenceFor('stress index') === 'down-good');
+
 console.log('Kernel quality eval — golden set\n');
 GOLDEN.forEach(c => {
   let ok = false;

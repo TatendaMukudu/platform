@@ -18,6 +18,7 @@ const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
 const packs      = require('./ai/packs');
+const primitives = require('./ai/primitives');
 const confidence = require('./ai/confidence');
 const adapters   = require('./ai/adapters');
 
@@ -2323,25 +2324,39 @@ function _buildMemberIntelInput(code, u, now) {
   // The five behavioural dimensions PLUS any raw numeric signal (a stat, a grade,
   // attendance, a KPI) — self-relative, correlated over time. Domain-agnostic:
   // it reasons over numbers-vs-self, not industry meaning. Connections, never causes.
+  // Streams are typed by universal PRIMITIVE + VALENCE (the domain→kernel mapping),
+  // so the pattern engine reasons about "a participation stream declining", not
+  // about "check-ins". The five behavioural dimensions PLUS any raw numeric signal.
   const pack = packs.resolvePack(orgMeta[code]?.orgMode);
   const streams = [
-    { key: 'mood',               label: packs.labelFor(pack, 'mood'),               series: dimSeries.mood },
-    { key: 'check_in_frequency', label: packs.labelFor(pack, 'check_in_frequency'), series: dimSeries.check_in_frequency },
-    { key: 'reflection_cadence', label: packs.labelFor(pack, 'reflection_cadence'), series: dimSeries.reflection_cadence },
-    { key: 'contribution',       label: packs.labelFor(pack, 'contribution'),       series: dimSeries.contribution },
-    { key: 'helping',            label: packs.labelFor(pack, 'helping'),            series: dimSeries.helping },
+    { key: 'mood',               label: packs.labelFor(pack, 'mood'),               primitive: 'state',         valence: 'up-good', series: dimSeries.mood },
+    { key: 'check_in_frequency', label: packs.labelFor(pack, 'check_in_frequency'), primitive: 'participation', valence: 'up-good', series: dimSeries.check_in_frequency },
+    { key: 'reflection_cadence', label: packs.labelFor(pack, 'reflection_cadence'), primitive: 'participation', valence: 'up-good', series: dimSeries.reflection_cadence },
+    { key: 'contribution',       label: packs.labelFor(pack, 'contribution'),       primitive: 'participation', valence: 'up-good', series: dimSeries.contribution },
+    { key: 'helping',            label: packs.labelFor(pack, 'helping'),            primitive: 'relational',    valence: 'up-good', series: dimSeries.helping },
   ];
   const numeric = {};
   sigs.forEach(s => {
     if (s.valueNum == null) return;
     const t = new Date(s.ts).getTime(); if (isNaN(t)) return;
     const key = `${s.source}${s.label ? ':' + s.label : ''}`;
-    (numeric[key] = numeric[key] || { key, label: s.label || (SIGNAL_SOURCES[s.source]?.label || s.source), series: [] })
-      .series.push({ t, v: Number(s.valueNum) });
+    const label = s.label || (SIGNAL_SOURCES[s.source]?.label || s.source);
+    (numeric[key] = numeric[key] || {
+      key, label,
+      // Signals may declare their own primitive/valence (best); else infer universally.
+      primitive: s.primitive || packs.primitiveForSignal(s.source, s.label),
+      valence:   s.valence   || packs.valenceFor(s.label),
+      series: [],
+    }).series.push({ t, v: Number(s.valueNum) });
   });
   Object.values(numeric).forEach(st => { if (st.series.length >= 6) streams.push(st); });
+
   let connections = [];
   try { connections = agents.crossSignal(streams, now); } catch (_) {}
+  // The Universal Pattern Engine: domain-free structures (withdrawal/isolation/
+  // overload/plateau) over the typed streams — same logic for any human system.
+  let structural = [];
+  try { structural = primitives.structuralPatterns(streams, now); } catch (_) {}
 
   return {
     id: u.id, name: u.name || 'This member', now,
@@ -2351,7 +2366,9 @@ function _buildMemberIntelInput(code, u, now) {
     memberTrajectory: _trajectoryFromMood(moodSeries, now),
     teamTrajectory:   _teamTrajectory(code, u, now),
     hasSensitiveContext,
-    deviations, fingerprint, connections,
+    deviations, fingerprint, connections, structural,
+    // The ephemeral relationship graph (honest: correlational, never causal).
+    streams: streams.map(s => ({ key: s.key, label: s.label, primitive: s.primitive })),
   };
 }
 
@@ -2417,10 +2434,15 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
   members.forEach(u => {
     let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { return; }
     if (m.lastActivityT && now - m.lastActivityT < 7 * 86400000) activeWeek++;
-    const findings = intel.detectPatterns(m);
+    // Kernel findings = self-relative/trajectory patterns + the universal structural
+    // patterns (withdrawal/isolation/overload/plateau), ranked together by severity.
+    const SEVR = { high: 0, medium: 1, low: 2 };
+    const findings = [...intel.detectPatterns(m), ...(m.structural || [])]
+      .sort((a, b) => SEVR[a.severity] - SEVR[b.severity]);
     if (!findings.length) return;
     const item = intel.composeBriefingItem(m, findings, learning);
     if (!item) return;
+    item.graph = { nodes: m.streams || [], edges: item.connections || [] }; // honest, correlational
     // Confidence Engine: suppress a noticing type that's earned enough feedback and
     // proven mostly unhelpful here; label the rest honestly.
     const rel = reliabilityByType[item.patternType];
@@ -2615,6 +2637,7 @@ app.get('/api/me/record', requireAuth, async (req, res) => {
     portrait,          // { dim: { label, normal } } — self-relative normals
     shifts,            // what's different from THEIR own normal, lately
     connections: (m?.connections || []).map(c => ({ a: c.a, b: c.b, relation: c.relation, basis: c.basis, confidence: c.confidence })),
+    patterns: (m?.structural || []).map(s => ({ type: s.type, basis: s.basis, confidence: s.confidence })),
     trajectory,        // directional word, never a score
     values, goals,
     ownedByYou: true,  // this record is theirs

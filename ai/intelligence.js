@@ -38,6 +38,11 @@ const PATTERN_LABEL = {
   repeated_concern:       'Repeated concern',
   member_team_divergence: 'Pulling away from the team',
   invisible_load:         'Carrying invisible load',
+  // Universal structural patterns (ai/primitives) — domain-free.
+  withdrawal:             'Pulling back',
+  isolation:              'Becoming isolated',
+  overload:               'Overload risk',
+  plateau:                'Plateau',
 };
 
 /* Care-oriented default next actions (used when the org has no learned action for
@@ -49,6 +54,10 @@ const DEFAULT_ACTION = {
   repeated_concern:       'Sit down together, name the recurring theme, and agree one small shared focus.',
   member_team_divergence: 'A 1:1 to understand what’s pulling them a different way from the group — integrate, don’t push.',
   invisible_load:         'Check they’re not carrying too much for others — offer to redistribute, or simply acknowledge the load.',
+  withdrawal:             'Reach out — participation is dropping from their own normal. Ask what changed, listen first.',
+  isolation:              'Reconnect them — their connection signals are thinning. A shared task or a peer check-in can help.',
+  overload:               'Ease the load — demand is up while wellbeing is down. Remove or defer something before pushing further.',
+  plateau:                'Change the stimulus — growth has flattened despite steady effort. Try a new challenge or approach.',
 };
 
 /* ── The five detectors ───────────────────────────────────────────────────────

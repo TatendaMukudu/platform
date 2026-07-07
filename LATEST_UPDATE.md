@@ -1,67 +1,64 @@
-# Update — Confidence Engine + Proactive Feedback + Source Adapters
+# Update — Universal Primitives + the Cross-Domain Pattern Engine
 
-"Do everything" — the remaining positives (#1 adapter, #4 proactive/feedback,
-#5 Confidence Engine) are built, additive, and quality-gated. The intelligence
-loop is now complete end-to-end: **notice → surface (confidence-gated) → feedback
-→ learn what's worth surfacing.**
+This commit made the kernel *more universal and simpler at the same time* — no new
+product surface. It now reasons about **primitive types**, not domain nouns, so the
+same intelligence fires for a classroom, a clinic, a sales floor, or a family.
 
-## What I built
+## What I built (and the two things I deliberately did NOT)
 
-### #5 · The Confidence Engine — `ai/confidence.js` (new)
-The system now tracks **where it's reliable** and says so honestly. Per kind of
-noticing it keeps a feedback tally and reports a tier: **calibrating** (below the
-feedback floor — never claims reliability), **promising**, **reliable**, or
-**unproven**. Two gates:
-- **label** — every surfaced noticing carries an honest reliability label.
-- **suppress** — a noticing type that has earned enough feedback AND proven mostly
-  unhelpful is quietly stood down. The kernel stops nagging about what doesn't land
-  *here* — the seed of "more proactive as confidence rises," and its inverse.
+### Built
+1. **Universal Primitive model — `ai/primitives.js` (new).** The kernel now exposes
+   a handful of universal concepts — *outcome, state, participation, relational,
+   capability, load, resource* — each with a **valence** (which way is "good", taken
+   from the aim, never hardcoded). Everything else is a derivation.
+2. **Translation layer — `ai/packs.js`.** `primitiveForSignal()` + `valenceFor()`
+   map any source/field into a primitive, universally (a "Weekly Training Load"
+   column → `load`; a "stress index" → `down-good`). Declared now; LLM-inferred +
+   human-confirmed later. **Domain data → universal primitives, then reasoning.**
+3. **Universal Pattern Engine.** Recognizes recurring structures that exist in every
+   human system, over typed streams — **withdrawal · isolation · overload · plateau**
+   — with evidence + confidence, never a cause. The *same code* fires whether the
+   declining participation stream is "check-ins," "attendance," or "shift log-ins."
+4. **Honest relationship graph.** Each briefing item now carries a `graph`
+   (`nodes` = the person's typed streams, `edges` = cross-signal connections) —
+   the ephemeral, **correlational** graph, exposed but never labelled causal.
 
-### #4 · Proactive feedback loop (both lenses)
-- **Platform briefing:** each flag shows its reliability label; a **"Not useful"**
-  control teaches the Confidence Engine (dismiss), and **acting on a flag** counts
-  as useful. Suppressed types stop appearing.
-- **IntelliQ mirror:** the person can mark a connection **"not helpful"** — their
-  record, their say. Both lenses feed the same Confidence Engine.
-- `POST /api/intelligence/notice-feedback { type, feedback }` — the teach signal.
-- Feedback is **persisted** (`noticeFeedback` store) so the kernel keeps learning
-  across restarts.
+### Deliberately NOT built (the challenge you asked for)
+- **A persistent "universal causal graph" — no.** Per the causal doc, a stored graph
+  of relationships inferred from signals is correlational fiction dressed as
+  knowledge. Causal license stays with the intervention ledger; the graph is
+  ephemeral and honest.
+- **The multi-modal translation layer — that's adapters, not kernel intelligence.**
+  It's OCR/ASR/parsers (already seeded by the CSV + vision adapters). Building it
+  wouldn't make the kernel smarter, so it's not in this commit.
 
-### #1 · Source adapters — `ai/adapters.js` (new) + CSV import
-The "everything is a signal" contract, made real: an adapter turns any source into
-the universal per-member shape the kernel already understands. Shipped a robust
-**CSV adapter** (quoted-field safe) + `POST /api/signals/import-csv` — a
-spreadsheet becomes per-member metric signals through the same attribution +
-scope-safety path as the smart import. New sources now need an adapter and
-**nothing else in the kernel**. (Pilot-ready: Alma/Kettering will have
-spreadsheets.)
+## How Advisor / Alignment / Signals fit (unchanged, clarified)
+- **Signals** = the substrate every primitive is built from.
+- **Alignment** = the aims + valence that define what "good" means for each stream.
+- **Advisor / Coach** = narrates the primitive-level assessment in the domain's
+  language on the way out. Same kernel; the vocabulary is a skin at both ends.
+
+## The simplification (more power, less complexity — your principle)
+The kernel no longer hardcodes five named dimensions; it reasons over *any typed
+stream*. Adding a domain now means declaring source→primitive mappings (an adapter),
+**never touching kernel logic.** Fewer concepts, broader reach.
 
 ## Files
 | File | Change |
 |---|---|
-| `ai/confidence.js` | **new** — Confidence Engine (reliability · suppress · label) |
-| `ai/adapters.js` | **new** — source adapters + CSV parser |
-| `server.js` | `noticeFeedback` store (persisted); `_reliabilityByType`; briefing gating+labels; `/notice-feedback`; `/signals/import-csv` |
-| `js/app.js` | reliability chip + Not-useful/act feedback on briefing cards |
-| `js/member-view.js` | "not helpful" on the mirror; feedback method |
-| `css/styles.css` | reliability + dismiss styles · `index.html` `?v=20260705m` |
-| `scripts/eval.js` | +5 golden cases (Confidence Engine + adapter) |
+| `ai/primitives.js` | **new** — universal primitives + the cross-domain Pattern Engine |
+| `ai/packs.js` | source→primitive translation (`primitiveForSignal`, `valenceFor`) |
+| `ai/intelligence.js` | labels + actions for withdrawal/isolation/overload/plateau |
+| `server.js` | typed streams (primitive+valence); structural patterns merged into briefing; honest graph on items + `/me/record` |
+| `scripts/eval.js` | +8 golden cases · `index.html` `?v=20260705n` |
 
 ## Verification
-- `node scripts/eval.js` → **16/16**; baseline **12/12**; intelligence **15/15**;
-  `node --check` on all changed files — clean.
-- Honesty guaranteed by test: thin feedback → "calibrating" (never claims
-  reliability); mostly-dismissed types are suppressed; a promising type is not.
-
-## The loop, now complete
-`Signal → Observe → Analyse (patterns · self-relative shifts · cross-signal
-connections) → surface via the two lenses, CONFIDENCE-GATED → human feedback
-(useful/dismiss/outcome) → Learn (what works + what's worth surfacing)` — one
-kernel, two lenses, five agents, no new pages, no industry lock-in.
+- `node scripts/eval.js` → **24/24**; baseline **12/12**; intelligence **15/15**;
+  `node --check` clean. Proven: patterns fire **domain-agnostically**, stay silent on
+  steady streams, and **never assert a cause**.
 
 ## Honest caveat
-- All deterministic logic is fully tested. Whether the *right* things get dismissed
-  vs kept is a real-data question — but the mechanism is conservative (it only
-  suppresses after ≥6 responses that are mostly negative), so it won't over-prune
-  early. The Confidence Engine gets genuinely valuable only once real people are
-  giving feedback — i.e. your pilot.
+- Overload/plateau only fire when the *typed* signals exist (a `load` stream, a
+  `capability` stream) — which mostly arrive via imports/adapters. So their real value
+  shows once a customer feeds more than check-ins. Withdrawal/isolation work on what
+  you already collect. The engine is universal; the *coverage* grows with the data.

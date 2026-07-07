@@ -51,6 +51,28 @@ const UNIVERSAL = {
   relationships: [],
 };
 
+/* Source → universal PRIMITIVE translation (the domain→kernel mapping). Signals
+   carry meaning as a primitive type, never as an industry noun. Declared here;
+   an unknown field can be inferred (LLM/embedding) + human-confirmed later. */
+const SOURCE_PRIMITIVE = {
+  assessment: 'outcome', gamestats: 'outcome', metric: 'outcome', sheet: 'outcome',
+  checkin: 'participation', note: 'participation', weekly: 'participation',
+  film: 'participation', voice: 'participation', document: 'participation',
+};
+/* Refine by the field's own name — universal heuristics, no industry words. */
+function primitiveForSignal(source, label) {
+  const l = String(label || '');
+  if (/load|workload|demand|hours|minutes|volume|caseload/i.test(l)) return 'load';
+  if (/skill|fitness|speed|strength|accuracy|rating|proficien|competen/i.test(l)) return 'capability';
+  if (/budget|cost|capacity|headcount|inventory|funds/i.test(l)) return 'resource';
+  return SOURCE_PRIMITIVE[source] || 'outcome';
+}
+/* Valence comes from meaning, not the kernel: which direction is "good". */
+function valenceFor(label) {
+  return /stress|fatigue|anxiety|pain|risk|error|absence|burnout|turnover|incident|defect/i.test(String(label || ''))
+    ? 'down-good' : 'up-good';
+}
+
 const PACKS = { universal: UNIVERSAL };
 
 /* Resolve the pack for an org. Today everything uses UNIVERSAL; an org's mode/type
@@ -64,4 +86,4 @@ function labelFor(pack, key) {
   return (pack.dimensions[key] && pack.dimensions[key].label) || key;
 }
 
-module.exports = { PACKS, UNIVERSAL, resolvePack, labelFor, UNIVERSAL_DIMENSIONS };
+module.exports = { PACKS, UNIVERSAL, resolvePack, labelFor, UNIVERSAL_DIMENSIONS, primitiveForSignal, valenceFor };
