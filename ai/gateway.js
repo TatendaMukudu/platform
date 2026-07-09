@@ -25,7 +25,41 @@ const MODELS = {
   reason: process.env.AI_MODEL_REASON || 'claude-sonnet-4-6',
 };
 
+/* ── Provider setup ──────────────────────────────────────────────────────────
+   Claude is the primary reasoner. OpenAI, if a key is present, is an automatic
+   FALLBACK — so a Claude outage / rate-limit / bad key never takes the product
+   down, and the app runs on EITHER key alone. (Embeddings live in ai/embeddings
+   and use OpenAI directly.) Nothing else in the app changes. */
+const HAVE_CLAUDE = !!process.env.ANTHROPIC_API_KEY;
+const OPENAI_KEY   = process.env.OPENAI_API_KEY || '';
+const OPENAI_URL   = process.env.OPENAI_URL   || 'https://api.openai.com/v1/chat/completions';
+const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const HAVE_OPENAI  = !!OPENAI_KEY;
+
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/* Only text messages can cross to the OpenAI fallback (vision blocks stay on Claude). */
+function _isTextOnly(msgs) {
+  return (msgs || []).every(m => typeof m.content === 'string');
+}
+
+/* OpenAI chat-completions via fetch — no extra SDK. Returns assistant text. */
+async function _openaiComplete({ system, msgs, maxTokens, temperature, model }) {
+  const messages = [];
+  if (system) messages.push({ role: 'system', content: system });
+  for (const m of msgs) messages.push({ role: m.role, content: m.content });
+  const res = await fetch(OPENAI_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_KEY}` },
+    body: JSON.stringify({
+      model: model || OPENAI_MODEL, max_tokens: maxTokens,
+      ...(temperature != null ? { temperature } : {}), messages,
+    }),
+  });
+  if (!res.ok) throw new Error('openai HTTP ' + res.status);
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content?.trim() || '';
+}
 
 function _isModelUnavailable(err) {
   const status = err?.status || err?.statusCode;
@@ -44,6 +78,11 @@ async function complete({
 }) {
   const primary = model || MODELS[tier] || MODELS.micro;
   const msgs    = messages || [{ role: 'user', content: user }];
+
+  // If there's no Claude key but there is an OpenAI key, run OpenAI directly.
+  if (!HAVE_CLAUDE && HAVE_OPENAI && _isTextOnly(msgs)) {
+    return _openaiComplete({ system, msgs, maxTokens, temperature });
+  }
 
   const call = (m) => client.messages.create({
     model: m,
@@ -74,6 +113,12 @@ async function complete({
       if (status && status < 500 && status !== 429) break;
       await sleep(400 * Math.pow(2, attempt));
     }
+  }
+
+  // Claude failed after retries → automatic OpenAI fallback (text only) if available.
+  if (HAVE_OPENAI && _isTextOnly(msgs)) {
+    try { return await _openaiComplete({ system, msgs, maxTokens, temperature }); }
+    catch (err3) { lastErr = err3; }
   }
   throw lastErr;
 }

@@ -12,7 +12,7 @@
      EMBEDDINGS_DIM       — default 1536 (must match the model + db column)
    ============================================================ */
 
-const KEY   = process.env.EMBEDDINGS_API_KEY || '';
+const KEY   = process.env.EMBEDDINGS_API_KEY || process.env.OPENAI_API_KEY || '';
 const URL   = process.env.EMBEDDINGS_URL   || 'https://api.openai.com/v1/embeddings';
 const MODEL = process.env.EMBEDDINGS_MODEL || 'text-embedding-3-small';
 const DIM   = parseInt(process.env.EMBEDDINGS_DIM || '1536', 10) || 1536;
