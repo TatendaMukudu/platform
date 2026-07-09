@@ -1508,6 +1508,8 @@ function renderSidebar(){
     WORKSPACE_MODULES.forEach(mod => {
       // leaderOnly items: only shown when the user leads at least one node
       if (mod.leaderOnly && !isLeader) return;
+      // A leader's single Home is the unified leader-home, so hide the member Home for them.
+      if (mod.hideForLeaders && isLeader) return;
       // Permission gate (null = always shown; check after leaderOnly so gates compose)
       if (mod.permission !== null && mod.permission !== undefined && !Auth.canDo(mod.permission)) return;
 

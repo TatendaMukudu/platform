@@ -96,42 +96,33 @@ function buildEmptyOrgStats(memberCount) {
    always-visible items).  renderSidebar() filters this list by Auth.canDo()
    so no hardcoded role/type branching ever appears in nav HTML.
    ─────────────────────────────────────────────────────────────────────── */
+// The simplified front door: Setup → Add → Home. Everything the app does is one
+// of three things — set up once, put in, or get out. Items removed from this list
+// are HIDDEN from nav only: their pages, routes, and backend are all intact and
+// one line away from returning (see the "hidden" note at the end). Maneuverable
+// by design — nothing is deleted, so nothing is dismally wrong.
 const WORKSPACE_MODULES = [
-  // ── My Space — visible to every authenticated user ────────────────────
-  { section: 'My Space', id: 'home',        icon: '🏠', label: 'Home',        permission: null },
-  { section: null,        id: 'assessments', icon: '🎯', label: 'Assessments', permission: null },
-  { section: null,        id: 'checkin',     icon: '💬', label: 'Check-In',    permission: null },
-  { section: null,        id: 'notes',       icon: '📝', label: 'Notes',       permission: null },
-  { section: null,        id: 'inbox',       icon: '📬', label: 'Inbox',       permission: null },
-  { section: null,        id: 'stats',       icon: '📊', label: 'Progress',    permission: null },
+  // ── My Space — every user. (A leader's Home is the unified leader-home,
+  //    so the member Home is hidden for them via hideForLeaders.) ──────────
+  { section: 'My Space', id: 'home',    icon: '🏠', label: 'Home',     permission: null, hideForLeaders: true },
+  { section: null,        id: 'checkin', icon: '💬', label: 'Check-In', permission: null },  // the "Add" input
+  { section: null,        id: 'notes',   icon: '📝', label: 'Notes',    permission: null },  // the "Add" input
+  { section: null,        id: 'inbox',   icon: '📬', label: 'Inbox',    permission: null },
 
-  // ── Leader Workspace — only shown when user leads ≥1 node ────────────
-  // leaderOnly: true means renderSidebar() gates this on Auth.isLeaderNode().
-  // All data in these pages is scoped server-side to the leader's subtree.
-  // Intelligence is the leader's MAIN ENTRY — the daily briefing (who needs
-  // attention, why now, evidence, next action) + a group rollup. Folds in the
-  // old Group Health + leader Intelligence pages so there is ONE surface.
-  { section: 'Leader Workspace', id: 'leader-home',   icon: '🏠', label: 'Home',       leaderOnly: true },
-  { section: null,                id: 'leader-people', icon: '👥', label: 'My People',   leaderOnly: true },
-  { section: null,                id: 'assignments',   icon: '📌', label: 'Assignments',  leaderOnly: true, permission: 'assign_scenarios' },
-  // My Groups: set goals & traits for groups the leader LEADS (the TEAM frame)
-  { section: null, id: 'leader-groups', icon: '🎯', label: 'My Groups',    leaderOnly: true },
-  // Data Sources: upload / connect / see what the AI can use (universal input)
-  { section: null, id: 'data-sources', icon: '🔌', label: 'Data Sources', leaderOnly: true },
+  // ── Team — shown when the user leads ≥1 node (scoped server-side) ───────
+  { section: 'Team', id: 'leader-home',   icon: '🏠', label: 'Home',      leaderOnly: true }, // You + your people
+  { section: null,    id: 'leader-people', icon: '👥', label: 'My People', leaderOnly: true },
 
-  // ── Intelligence — analytics / AI (admin+ or explicit grant) ─────────
-  { section: 'Analytics', id: 'analytics', icon: '📊', label: 'Insights',        permission: 'view_analytics'   },
-  // Renamed from "Intelligence" so that word names ONE thing (the leader briefing).
-  { section: null,         id: 'intelliq',  icon: '⚙️', label: 'IntelliQ Engine', permission: 'view_analytics'   },
-  { section: null,            id: 'scenarios', icon: '🎯', label: 'Manage Assessments', permission: 'assign_scenarios' },
+  // ── Setup — admin / superadmin (people · org aims & values · settings) ──
+  { section: 'Setup', id: 'people',       icon: '👤', label: 'People',       permission: 'view_members'    },
+  { section: null,     id: 'organisation', icon: '🏛️', label: 'Organisation', permission: 'view_team'       },
+  { section: null,     id: 'settings',     icon: '⚙️', label: 'Settings',     permission: 'manage_settings' },
 
-  // ── Management — admin / superadmin ───────────────────────────────────
-  { section: 'Management',  id: 'organisation', icon: '🏛️', label: 'Organisation',      permission: 'view_team'       },
-  { section: null,           id: 'org-health',   icon: '🏥', label: 'Organisation Health', permission: 'view_analytics' },
-  { section: null,           id: 'people',       icon: '🏗️', label: 'Members',             permission: 'view_members'    },
-  { section: null,           id: 'alerts',       icon: '🔔', label: 'Alerts',               permission: 'view_members',   badge: true },
-  { section: null,           id: 'reports',      icon: '📋', label: 'Reports',              permission: 'view_reports'    },
-  { section: null,           id: 'settings',     icon: '⚙️', label: 'Settings',             permission: 'manage_settings' },
+  // ── Hidden from nav, fully reachable + backend intact (restore any line) ──
+  //   assessments · stats · assignments · leader-groups · data-sources ·
+  //   analytics · intelliq · scenarios · org-health · alerts · reports
+  //   Their pages and data still work; outputs folded into Home/the briefing,
+  //   inputs folded into Check-In/Notes.
 ];
 
 /* ─────────────────────────────────────────────────────────────
