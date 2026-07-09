@@ -155,6 +155,67 @@ The parts already exist:
 
 ---
 
+## Part 3 — The agent as a *resource*: prompt → insight + tools + offered actions
+
+Extends Part 0. The agent isn't a reporter that answers and stops — it's an
+**on-demand resource that acts.** A natural-language prompt turns into three
+things: **(a)** insight pulled from the person's own data, **(b)** suggested
+tools (a chart, a focus area), and **(c) actions it offers to take for them** —
+always *offered*, never done unilaterally. It responds with a short menu of what
+it can do next, not a dead-end answer.
+
+### Two flagship interactions
+
+**Member — "How can I improve?"**
+The agent pulls from data and answers with a resource + a menu:
+> "Your strength numbers in the gym have been trending down over the last three
+> weeks. A few things I can do:
+> - Draft a request to the weight trainer for a session — you approve it, or I
+>   send it with what I'd suggest
+> - Show you the trend as a chart
+> - Point you at the two areas where you've dipped most"
+
+A path forward and support routed to the right person — not a dead-end score.
+
+**Lead node — "How is the team suffering?"**
+The agent assembles an analyst's breakdown: patterns across recent games, themes
+from what players have surfaced (**as themes and signal — never private quotes**),
+and where a **disjoint** shows up (e.g. the team's self-report diverges from
+results, or one group's load is up while morale is down). Then it offers:
+> - A graph of the divergence
+> - The two areas most worth focusing on
+> - A draft message to the group, or to one player, for you to approve
+
+A breakdown plus the tools to act — not a wall of dashboards to mine.
+
+### The disciplines that keep this a resource, not surveillance
+1. **Offer, then the human authorizes.** The agent drafts and proposes; it never
+   sends a message to a third party (trainer, player) or takes an outward action
+   without explicit approval. The human keeps the decision — the north star, and
+   what keeps the agent *trusted*.
+2. **The coach breakdown obeys the privacy law.** "What players have said"
+   surfaces as *patterns, themes, aggregate signal* — never quoted private or
+   sensitive disclosures, never individual attribution of protected content. A
+   member's sensitive content *informs* the pattern; it is never exposed upward.
+   **This is the exact line between resource and surveillance.**
+3. **Suggestions are earned, not fabricated.** "Your strength is down" only fires
+   when the data supports it (Confidence Engine gates it). No confident claims on
+   thin evidence.
+4. **Scoped by permission.** The actions the agent offers respect org structure —
+   who can request what, and who a message may route to.
+
+### What it's built on (mostly exists already)
+- Kernel patterns, cross-signal connections, deviations, structural patterns →
+  the "insight from data."
+- Messaging + signals + groups → the "offered actions" (draft a request, route
+  to a trainer/group).
+- Chart.js (already loaded) + `js/charts.js` → "show me a graph." When we build
+  these, use the dataviz design system so charts read as one coherent, accessible
+  set in light and dark.
+- Confidence Engine + privacy gate → disciplines 2 and 3 above.
+
+---
+
 ## Open questions for the council
 1. **Turn cap:** is 1 follow-up (Phase 1) the right first step, or go straight to
    2–3? (Founder taste call; I lean 1 — prove it's wanted before deepening.)
@@ -164,6 +225,16 @@ The parts already exist:
    fallback — agreed? Any case for GPT on the opener?
 4. **Voice (Phase 2):** in scope for the pilot, or after?
 5. **Anything here that breaks a product law** you'd flag before we build?
+6. **Action authorization (Part 3):** default to *draft-and-approve* for every
+   outward action (agent never auto-sends to a third party), or allow a
+   trusted-auto mode the user opts into per action type?
+7. **Coach-breakdown altitude:** what granularity of "what players have said"
+   stays firmly on the resource side of the privacy line — themes only? theme +
+   anonymized count? (Never individual attribution — agreed?)
+8. **Capability menu:** surface the agent's "here's what I can do" list
+   proactively (contextual to the prompt) or only when asked? (Ties to restraint.)
+9. **Charts on demand:** which visual vocabulary first — self-vs-own-baseline
+   trend, self-report-vs-result divergence, or load-vs-morale?
 
 **Division of labour if we proceed:** GPT on the conversation design / prompt
 architecture; Claude + Codex split implementation and review each other's diff;
