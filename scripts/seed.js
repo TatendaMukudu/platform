@@ -2,8 +2,9 @@
    scripts/seed.js — stand up a realistic demo squad
 
    Writes a complete demo org straight into the store (via db.saveMain) with ~6
-   weeks of back-dated check-ins + signals, engineered so the kernel produces a
-   real, varied briefing on first open — not empty screens.
+   MONTHS of back-dated check-ins + signals, engineered so the kernel produces a
+   real, varied briefing on first open — not empty screens. Long stable baselines,
+   with the story arcs playing out in the recent weeks.
 
    The story it creates (matches the product mockup):
      • Maya Chen   — went quiet (participation dropped)      → withdrawal
@@ -53,27 +54,27 @@ async function main() {
   const orgGroups = {}, orgValues = {}, orgGoals = {};
 
   orgMeta[CODE] = {
-    orgName: 'Demo Athletic Club', orgMode: '', createdAt: iso(dAgo(60)),
+    orgName: 'Demo Athletic Club', orgMode: '', createdAt: iso(dAgo(210)),
     organizationProfile: {
       description: 'A club focused on athlete development and wellbeing.',
       values: ['Consistency', 'Effort', 'Team-first', 'Honesty'],
       goals: ['Develop every athlete', 'Keep athletes healthy and engaged'],
       successDefinition: 'Athletes who grow and stay well.',
       behaviours: ['Shows up', 'Supports teammates', 'Reflects honestly'],
-      metrics: ['Training Load', 'Wellbeing'], setAt: iso(dAgo(58)), setBy: coachId,
+      metrics: ['Training Load', 'Wellbeing'], setAt: iso(dAgo(205)), setBy: coachId,
     },
     organizationProfileComplete: true,
   };
   orgValues[CODE] = ['Consistency', 'Effort', 'Team-first', 'Honesty'];
   orgGoals[CODE]  = [
-    { goalId: 'g_' + rid(), text: 'Develop every athlete', createdAt: iso(dAgo(58)) },
-    { goalId: 'g_' + rid(), text: 'Keep athletes healthy and engaged', createdAt: iso(dAgo(58)) },
+    { goalId: 'g_' + rid(), text: 'Develop every athlete', createdAt: iso(dAgo(205)) },
+    { goalId: 'g_' + rid(), text: 'Keep athletes healthy and engaged', createdAt: iso(dAgo(205)) },
   ];
 
   orgUsers[CODE][coachId] = {
     id: coachId, firstName: 'Alex', lastName: 'Rivera', name: 'Alex Rivera',
     email: 'coach@demo.club', role: 'superadmin', orgCode: CODE, supervisorId: null,
-    passwordHash: pass, passwordSet: true, status: 'active', createdAt: iso(dAgo(60)),
+    passwordHash: pass, passwordSet: true, status: 'active', createdAt: iso(dAgo(210)),
     levelId: 1, profileComplete: true,
   };
   emailIndex['coach@demo.club'] = { orgCode: CODE, userId: coachId };
@@ -102,7 +103,7 @@ async function main() {
     orgUsers[CODE][a.id] = {
       id: a.id, firstName: a.name.split(' ')[0], lastName: a.name.split(' ')[1] || '',
       name: a.name, email: a.email, role: 'member', orgCode: CODE, supervisorId: coachId,
-      passwordHash: pass, passwordSet: true, status: 'active', createdAt: iso(dAgo(50)),
+      passwordHash: pass, passwordSet: true, status: 'active', createdAt: iso(dAgo(200)),
       levelId: 2, profileComplete: true,
     };
     emailIndex[a.email] = { orgCode: CODE, userId: a.id };
@@ -110,34 +111,37 @@ async function main() {
       goal: `Grow as a ${a.pos.toLowerCase()} and be dependable for the squad`,
       mainGoals: `Grow as a ${a.pos.toLowerCase()}`, identity: 'A dependable teammate',
       selectedValues: ['Consistency', 'Effort', 'Team-first'], personalMetrics: [],
-      memberName: a.name, setAt: iso(dAgo(45)),
+      memberName: a.name, setAt: iso(dAgo(195)),
     };
 
-    // ~6 weeks of check-ins, shaped per story. day 42 → recent.
-    for (let d = 42; d >= 0; d -= 3) {
+    // ~6 months of check-ins (every 2–4 days). A long, stable baseline; the STORY
+    // plays out only in the recent weeks — so the kernel's self-relative read has
+    // real history to compare against and the recent shifts genuinely stand out.
+    for (let d = 182; d >= 0; d -= (2 + Math.floor(Math.random() * 3))) {
       let mood, text;
       if (a.kind === 'quiet') {
-        // strong + frequent early, then goes quiet (~last 9 days: nothing).
-        if (d <= 9) continue;
-        mood = d <= 14 ? 2 : 4;
-        text = d <= 14 ? 'Bit flat this week.' : 'Good session, felt sharp.';
+        if (d <= 9) continue;                          // went quiet ~9 days ago
+        mood = d <= 18 ? 2 : 4;
+        text = d <= 18 ? 'Bit flat lately, not sure why.' : 'Good session, felt sharp.';
       } else if (a.kind === 'overload') {
-        mood = d > 28 ? 4 : d > 14 ? 3 : 2;   // steady → dipping
-        text = d > 14 ? 'Training hard.' : 'Tired, legs heavy, not sleeping great.';
+        mood = d > 21 ? 4 : d > 10 ? 3 : 2;            // steady for months → dips last ~3 weeks
+        text = d > 21 ? 'Training hard, feeling strong.' : 'Tired, legs heavy, sleep is off.';
       } else if (a.kind === 'improving') {
-        mood = d > 28 ? 3 : d > 14 ? 4 : 5;   // rising
-        text = 'Working on my game, feeling steadier.';
+        mood = d > 28 ? 3 : d > 14 ? 4 : 5;            // rising over the last ~4 weeks
+        text = 'Working on my game — feeling steadier.';
       } else {
-        mood = 4; text = 'All good, normal week.';
+        mood = Math.random() < 0.15 ? 3 : 4;           // steady ~4 with a little honest noise
+        text = 'Normal week, all good.';
       }
-      checkin(a, dAgo(d + Math.floor(Math.random() * 2)), mood, text);
+      checkin(a, dAgo(d), mood, text);
     }
 
-    // Overload athlete: rising training-load metric (coach-logged, primitive=load).
+    // Overload athlete: a training-load metric — steady for months, rising recently.
     if (a.kind === 'overload') {
-      for (let i = 8; i >= 0; i--) {
-        const d = i * 5;                       // ~every 5 days, 40 days back
-        const load = Math.round(45 + (8 - i) * 6 + Math.random() * 4); // 45 → ~95
+      for (let d = 126; d >= 0; d -= 7) {
+        const load = d > 28
+          ? Math.round(48 + Math.random() * 6)                          // ~50 baseline for months
+          : Math.round(55 + ((28 - d) / 28) * 40 + Math.random() * 4);  // → ~95 in the last 4 weeks
         pushSig(a.id, coachId, 'metric', dAgo(d), load, null, 'Training Load', 'normal');
       }
     }
@@ -147,7 +151,7 @@ async function main() {
     id: 'grp_' + rid(), name: 'Varsity Squad', description: 'First team',
     memberIds: athletes.map(a => a.id), leadIds: [coachId],
     goals: ['Reach the regional final', 'Everyone healthy at season end'],
-    traits: ['Discipline', 'Team-first'], copilotEnabled: false, createdAt: iso(dAgo(50)),
+    traits: ['Discipline', 'Team-first'], copilotEnabled: false, createdAt: iso(dAgo(200)),
   }];
 
   const store = { orgMeta, orgUsers, emailIndex, memberGoals, memberCheckins, orgSignals, orgGroups, orgValues, orgGoals };
