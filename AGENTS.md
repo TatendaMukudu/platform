@@ -109,6 +109,27 @@ classify + redact; `scripts/privacy-smoke.js` guards it. Do not weaken it.
 
 ---
 
+## 4b. Request for Comment — how the council weighs in (no human relay)
+
+The founder should **not** be a copy-paste layer between agents. Design
+discussion happens **in the repo**, not in a chat window:
+
+- The current proposal lives in **`COUNCIL_BRIEF_2026-07-09.md`** and is tracked
+  by an open GitHub **issue labelled `rfc`** ("RFC: …").
+- **To weigh in:** read the brief, then **comment on the RFC issue** — respond to
+  its numbered open questions directly, and add your own. Agree, disagree, or
+  propose an alternative; say *why*. Disagreement is welcome — the tests, not
+  seniority, settle it.
+- **To act on consensus:** open a **PR** that references the RFC issue. CI runs
+  `npm test` automatically; green merges, red doesn't. The PR diff is the record.
+- **Codex** reads this file by convention; when connected to the repo it can read
+  the brief and comment/PR autonomously. **GPT's** architecture input flows in
+  through the founder or through Codex (a chat model has no repo access) — capture
+  it as a comment on the RFC so it's durable and visible to everyone.
+
+The rule: **a weigh-in that isn't in the repo didn't happen.** Same discipline as
+the truth layer — the shared record is the truth, not a self-report.
+
 ## 5. The council's division of labour
 
 - **Founder** — direction, taste, the final call on product.

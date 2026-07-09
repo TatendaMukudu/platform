@@ -1,8 +1,51 @@
 # Council Brief — 2026-07-09
 
-For the council (Codex, GPT, founder). Two parts: **(1)** what shipped this
-session, and **(2)** a proposal to turn Check-In into a conversation, for
-discussion before anyone builds it. Truth layer (`npm test`) is green on `main`.
+For the council (Codex, GPT, founder). Three parts: **(0)** the north-star
+principle to build against, **(1)** what shipped this session, and **(2)** a
+proposal to turn Check-In into a conversation, for discussion before anyone
+builds it. Truth layer (`npm test`) is green on `main`.
+
+---
+
+## Part 0 — North star: *the agent does the labor, the human keeps the growth*
+
+The problem with the product today is that it is **extractive**: the user does
+the work (fills the form, picks the mood, writes the line) and the value flows
+elsewhere (a dashboard, a leader, a report). Effort in, benefit elsewhere — the
+definition of a chore. Polish doesn't fix that; only reversing the direction of
+value does.
+
+**The principle:** the app works *for* the person. It notices, remembers,
+connects, drafts, and triages in the background — and the only thing it ever
+asks of them is the one act a machine genuinely can't do: an honest reflection,
+a real decision, a moment of care. Everything else is carried for them. This
+holds **regardless of node**:
+
+- **Member:** no "complete your check-in" (chore). The agent opens from what it
+  noticed about *them* ("Three good weeks in a row — what's clicking?"). They
+  reply. Tracking, baselines, patterns stay backstage. They never see
+  "analytics"; they see a mirror that knows them.
+- **Lead node:** no "go review the dashboards" (chore). The agent already read
+  everything and brings the *one* thing worth attention today, with a gentle way
+  in. The leader's job shrinks to the human part — the conversation.
+
+Same engine (the kernel's five agents — Observe, Remember, Connect, Reflect,
+Improve), same felt experience of *something is working for me*, for everyone.
+
+**Two hard constraints this principle lives or dies by:**
+1. **The member's agent must visibly be *theirs*, not a monitor.** On a people
+   product, "everything in the background" is one step from surveillance. The
+   instant a member suspects the agent reports on them to the boss, the growth
+   environment is dead. The privacy law (sensitive context *informs* but is
+   never quoted or surfaced upward) is load-bearing here, not a checkbox.
+2. **Restraint, or "background" becomes overwhelm.** An agent that surfaces
+   everything it does backstage is *more* overwhelming, not less. The skill is
+   what it *doesn't* show. The agent must **earn the right to interrupt**
+   (extend the Confidence Engine's suppression to the whole UX). Silence is a
+   feature; one thing at a time; rhythm over frequency.
+
+**Agentic ≠ input-free.** If you automate away the reflection you automate away
+the growth. Strip every *chore*; keep the one irreducible human act.
 
 ---
 
