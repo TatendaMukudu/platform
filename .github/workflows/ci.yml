@@ -1,0 +1,24 @@
+name: Truth Layer
+
+# Enforce the truth layer automatically — on every push and PR, for any author
+# (Claude, Codex, or human). Green merges; red doesn't. No memory required.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    name: npm test (syntax + all suites)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Tests are pure/deterministic (no DB, no API key), but install deps so
+      # syntax-checks of server.js/db.js and any future test needs resolve.
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run the truth layer
+        run: npm test
