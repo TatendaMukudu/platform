@@ -111,8 +111,8 @@ const WORKSPACE_MODULES = [
   // Intelligence is the leader's MAIN ENTRY — the daily briefing (who needs
   // attention, why now, evidence, next action) + a group rollup. Folds in the
   // old Group Health + leader Intelligence pages so there is ONE surface.
-  { section: 'Leader Workspace', id: 'leader-home',   icon: '🧠', label: 'Intelligence', leaderOnly: true },
-  { section: null,                id: 'leader-people', icon: '👥', label: 'My Members',  leaderOnly: true },
+  { section: 'Leader Workspace', id: 'leader-home',   icon: '🏠', label: 'Home',       leaderOnly: true },
+  { section: null,                id: 'leader-people', icon: '👥', label: 'My People',   leaderOnly: true },
   { section: null,                id: 'assignments',   icon: '📌', label: 'Assignments',  leaderOnly: true, permission: 'assign_scenarios' },
   // My Groups: set goals & traits for groups the leader LEADS (the TEAM frame)
   { section: null, id: 'leader-groups', icon: '🎯', label: 'My Groups',    leaderOnly: true },

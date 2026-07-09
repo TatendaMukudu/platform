@@ -1,64 +1,51 @@
-# Update — Universal Primitives + the Cross-Domain Pattern Engine
+# Update — The unified coach home (simple, athletics-framed)
 
-This commit made the kernel *more universal and simpler at the same time* — no new
-product surface. It now reasons about **primitive types**, not domain nouns, so the
-same intelligence fires for a classroom, a clinic, a sales floor, or a family.
+Took the mockup you approved and built it into the real product. Kept the
+leader-node privilege model exactly as it was — coaches see their squad, athletes
+see themselves, admins see all — and simplified the surface on top.
 
-## What I built (and the two things I deliberately did NOT)
+## What changed (frontend only — kernel untouched)
 
-### Built
-1. **Universal Primitive model — `ai/primitives.js` (new).** The kernel now exposes
-   a handful of universal concepts — *outcome, state, participation, relational,
-   capability, load, resource* — each with a **valence** (which way is "good", taken
-   from the aim, never hardcoded). Everything else is a derivation.
-2. **Translation layer — `ai/packs.js`.** `primitiveForSignal()` + `valenceFor()`
-   map any source/field into a primitive, universally (a "Weekly Training Load"
-   column → `load`; a "stress index" → `down-good`). Declared now; LLM-inferred +
-   human-confirmed later. **Domain data → universal primitives, then reasoning.**
-3. **Universal Pattern Engine.** Recognizes recurring structures that exist in every
-   human system, over typed streams — **withdrawal · isolation · overload · plateau**
-   — with evidence + confidence, never a cause. The *same code* fires whether the
-   declining participation stream is "check-ins," "attendance," or "shift log-ins."
-4. **Honest relationship graph.** Each briefing item now carries a `graph`
-   (`nodes` = the person's typed streams, `edges` = cross-signal connections) —
-   the ephemeral, **correlational** graph, exposed but never labelled causal.
+**One home, grown by responsibility.** The coach's landing (`leader-home`, now
+titled **"Home"**) is one calm screen with two zones:
+1. **You** — a compact version of the coach's *own* mirror (their reflection +
+   "Your direction: climbing"), pulled from `/api/me/record`. Because leaders
+   develop too — the split-identity confusion is now the feature: you're one
+   person who's developing, with a squad zone below if you lead people.
+2. **Your people** — the early-warning briefing (who needs you today, why, the
+   evidence, the next step, the learning loop) — unchanged logic, calmer framing.
 
-### Deliberately NOT built (the challenge you asked for)
-- **A persistent "universal causal graph" — no.** Per the causal doc, a stored graph
-  of relationships inferred from signals is correlational fiction dressed as
-  knowledge. Causal license stays with the intervention ledger; the graph is
-  ephemeral and honest.
-- **The multi-modal translation layer — that's adapters, not kernel intelligence.**
-  It's OCR/ASR/parsers (already seeded by the CSV + vision adapters). Building it
-  wouldn't make the kernel smarter, so it's not in this commit.
+**Athletics vocabulary as a skin** (`_v()`), consistent with the
+vocabulary-is-a-skin principle: in sports mode the UI says *athletes / squad*,
+elsewhere *members / team*. The kernel never changes; only the words do.
 
-## How Advisor / Alignment / Signals fit (unchanged, clarified)
-- **Signals** = the substrate every primitive is built from.
-- **Alignment** = the aims + valence that define what "good" means for each stream.
-- **Advisor / Coach** = narrates the primitive-level assessment in the domain's
-  language on the way out. Same kernel; the vocabulary is a skin at both ends.
+**Simpler nav:** the coach's main item is now **Home** (🏠), "My Members" → "My
+People". The permission gating (leaderOnly + grants) is untouched.
 
-## The simplification (more power, less complexity — your principle)
-The kernel no longer hardcodes five named dimensions; it reasons over *any typed
-stream*. Adding a domain now means declaring source→primitive mappings (an adapter),
-**never touching kernel logic.** Fewer concepts, broader reach.
+**Calmer copy, no scores:** "You, then your squad." · "Your athletes — 3 could use
+you today." · "each compared to a person's own normal — directional, never scores.
+Private detail informs the read but is never shown."
 
 ## Files
 | File | Change |
 |---|---|
-| `ai/primitives.js` | **new** — universal primitives + the cross-domain Pattern Engine |
-| `ai/packs.js` | source→primitive translation (`primitiveForSignal`, `valenceFor`) |
-| `ai/intelligence.js` | labels + actions for withdrawal/isolation/overload/plateau |
-| `server.js` | typed streams (primitive+valence); structural patterns merged into briefing; honest graph on items + `/me/record` |
-| `scripts/eval.js` | +8 golden cases · `index.html` `?v=20260705n` |
+| `js/app.js` | `renderIntelligence()` → unified You-strip + squad briefing; `_v()` vocab + trajectory words; titles |
+| `js/data.js` | nav: leader-home → "Home" 🏠; "My People" |
+| `css/styles.css` | `.intel-you` strip + `.intel-section` styles |
+| `index.html` | asset cache-bust `?v=20260705o` |
+
+## Preserved (as you asked)
+- The leader-node privilege model (`_isLeader`, `getVisibleUserIds`, LEADER_GRANTS)
+  — who-sees-whom is exactly as before.
+- The athlete's own home mirror (unchanged).
+- All kernel logic + the 24/24 quality harness (backend not touched).
 
 ## Verification
-- `node scripts/eval.js` → **24/24**; baseline **12/12**; intelligence **15/15**;
-  `node --check` clean. Proven: patterns fire **domain-agnostically**, stay silent on
-  steady streams, and **never assert a cause**.
+- `node --check` on app.js/data.js — clean; `node scripts/eval.js` → **24/24**
+  (kernel unchanged). Visual behaviour is best confirmed on your live deploy — the
+  "You" strip needs a real `/api/me/record` (a live DB + AI key) to show its
+  reflection; until then it falls back to a warm welcome line.
 
-## Honest caveat
-- Overload/plateau only fire when the *typed* signals exist (a `load` stream, a
-  `capability` stream) — which mostly arrive via imports/adapters. So their real value
-  shows once a customer feeds more than check-ins. Withdrawal/isolation work on what
-  you already collect. The engine is universal; the *coverage* grows with the data.
+## Design match
+This is the approved mockup, made real: one surface, two zones (You / your people),
+athletics-framed, no dashboard for the coach, no score for anyone.

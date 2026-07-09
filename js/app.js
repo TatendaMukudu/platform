@@ -650,8 +650,8 @@ const PAGE_TITLES = {
   inbox:        'Inbox',
   stats:        'Progress',
   // Leader Workspace — node leader scoped tools
-  'leader-home':   'Intelligence',
-  'leader-people': 'My Members',
+  'leader-home':   'Home',
+  'leader-people': 'My People',
   assignments:     'Assignments',
   'org-insights':  'Intelligence',
   'group-health':  'Intelligence',
@@ -5923,39 +5923,66 @@ async function uploadDataSource(input) {
    Reuses the existing page-leader-home container. Private detail never shown. */
 const _INTEL_SEV = { high: '#f74f4f', medium: '#f7a84f', low: '#4f8ef7' };
 
+/* Vocabulary is a skin over the kernel — athletics speaks "athletes/squad/coach". */
+const _VOCAB = {
+  sports:  { members: 'athletes', member: 'athlete', people: 'squad' },
+  _default:{ members: 'members',  member: 'member',  people: 'team'  },
+};
+function _v(key) { return (_VOCAB[AppState.mode] || _VOCAB._default)[key] || key; }
+const _TRAJ_WORD = { converging:'climbing', sustaining:'steady', up:'climbing', flat:'steady',
+  down:'dipping', diverging:'drifting', stalled:'stalled', unanchored:'finding footing', unknown:'building' };
+const _trajWord = t => _TRAJ_WORD[t] || 'building';
+
 async function renderIntelligence(refresh) {
   const el    = document.getElementById('ldr-home-content');
   const title = document.getElementById('ldr-home-title');
   const sub   = document.getElementById('ldr-home-sub');
   if (!el) return;
-  if (title) title.textContent = 'Intelligence';
-  if (sub)   sub.textContent   = 'Who needs your attention — and why, now.';
-  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">🧠 Reading the signals…</div>`;
+  if (title) title.textContent = 'Home';
+  if (sub)   sub.textContent   = `You, then your ${_v('people')}.`;
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">🧭 Reading the signals…</div>`;
   try {
-    const res = await fetch(`/api/intelligence/briefing${refresh ? '?refresh=1' : ''}`, { headers: Auth._headers() });
-    const d = await res.json();
-    if (!res.ok || !d.ok) throw new Error(d.error || 'unavailable');
-    const r = d.rollup || {};
+    // One surface, grown by responsibility: the coach's OWN mirror + who needs them.
+    const [briefRes, meRes] = await Promise.all([
+      fetch(`/api/intelligence/briefing${refresh ? '?refresh=1' : ''}`, { headers: Auth._headers() }),
+      fetch('/api/me/record', { headers: Auth._headers() }),
+    ]);
+    const d = await briefRes.json();
+    if (!briefRes.ok || !d.ok) throw new Error(d.error || 'unavailable');
+    const me = meRes.ok ? await meRes.json() : null;
+    const r  = d.rollup || {};
     const cap = s => String(s || '').replace(/^./, c => c.toUpperCase());
     const momColor = r.momentum === 'softening' ? 'var(--danger)' : r.momentum === 'building' ? 'var(--success)' : 'var(--text-secondary)';
+    const n = (d.items || []).length;
+
+    // "You" — the coach develops too (their own mirror, compact).
+    const youStrip = (me && me.ok && me.reflection) ? `
+      <div class="intel-you">
+        <div class="intel-you-label">◍ You · your own development</div>
+        <div class="intel-you-text">${_escAdvisor(me.reflection)}</div>
+        ${me.trajectory ? `<div class="intel-you-dir">Your direction: <b>${_escAdvisor(_trajWord(me.trajectory))}</b></div>` : ''}
+      </div>` : '';
+
     el.innerHTML = `
+      ${youStrip}
       <div class="intel-summary">
-        <div class="intel-summary-icon">🧠</div>
+        <div class="intel-summary-icon">🧭</div>
         <div class="intel-summary-text">${_escAdvisor(d.summary || '')}</div>
         <button class="intel-refresh" title="Rebuild" onclick="renderIntelligence(true)">↻</button>
       </div>
+      <div class="intel-section"><b>Your ${_v('members')}</b>${n ? ` — ${n} could use you today` : ' — all steady this week'}</div>
+      ${n
+        ? `<div class="intel-list">${d.items.map(_intelCard).join('')}</div>`
+        : `<div class="intel-empty">Nobody needs your attention right now. When a pattern emerges, it appears here with the evidence and a suggested next step.</div>`}
       <div class="intel-rollup">
-        <div class="intel-stat"><span class="intel-stat-v">${r.memberCount || 0}</span><span class="intel-stat-l">members</span></div>
+        <div class="intel-stat"><span class="intel-stat-v">${r.memberCount || 0}</span><span class="intel-stat-l">${_v('members')}</span></div>
         <div class="intel-stat"><span class="intel-stat-v">${r.activeThisWeek || 0}/${r.memberCount || 0}</span><span class="intel-stat-l">active this week</span></div>
         <div class="intel-stat"><span class="intel-stat-v">${r.participation || 0}%</span><span class="intel-stat-l">participation</span></div>
         <div class="intel-stat"><span class="intel-stat-v" style="color:${momColor}">${cap(r.momentum || 'steady')}</span><span class="intel-stat-l">momentum</span></div>
       </div>
-      ${(d.items || []).length
-        ? `<div class="intel-list">${d.items.map(_intelCard).join('')}</div>`
-        : `<div class="intel-empty">Nothing needs your attention right now. When a pattern emerges, it appears here with the evidence and a suggested next step.</div>`}
-      <div class="intel-foot">Patterns &amp; early signals from weighted behavioural data — directional, not scores. Sensitive detail informs the reasoning but is never shown.</div>`;
+      <div class="intel-foot">Patterns &amp; early signals, each compared to a person's own normal — directional, never scores. Private detail informs the read but is never shown.</div>`;
   } catch (e) {
-    el.innerHTML = `<div class="intel-empty">Intelligence unavailable right now.</div>`;
+    el.innerHTML = `<div class="intel-empty">Home unavailable right now.</div>`;
   }
 }
 

@@ -2366,3 +2366,13 @@ img { max-width: 100%; }
 .intel-rel{font-size:0.66rem;font-weight:600;padding:0.1rem 0.45rem;border-radius:20px;background:rgba(79,142,247,0.12);border:1px solid rgba(79,142,247,0.3);color:var(--accent)}
 .iq-dismiss{background:none;border:none;color:var(--text-muted);font-size:0.68rem;cursor:pointer;text-decoration:underline;padding:0.15rem 0;margin-top:0.2rem}
 .iq-dismiss:hover{color:var(--text-secondary)}
+
+/* Coach "You" strip — the leader's own mirror above their squad (unified home) */
+.intel-you{border:1px solid rgba(31,111,92,.28);border-radius:14px;padding:.85rem .95rem;margin-bottom:.9rem;
+  background:linear-gradient(180deg,rgba(31,111,92,.09),transparent);display:flex;flex-direction:column;gap:.45rem}
+.intel-you-label{font-size:.64rem;letter-spacing:.13em;text-transform:uppercase;color:var(--accent);font-weight:700}
+.intel-you-text{font-size:.9rem;line-height:1.5;color:var(--text-primary)}
+.intel-you-dir{font-size:.76rem;color:var(--text-muted)}
+.intel-you-dir b{color:var(--success);font-weight:600}
+.intel-section{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text-muted);font-weight:600;margin:.4rem 0 .55rem}
+.intel-section b{color:var(--text-primary)}
