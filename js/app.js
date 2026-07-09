@@ -5923,12 +5923,11 @@ async function uploadDataSource(input) {
    Reuses the existing page-leader-home container. Private detail never shown. */
 const _INTEL_SEV = { high: '#f74f4f', medium: '#f7a84f', low: '#4f8ef7' };
 
-/* Vocabulary is a skin over the kernel — athletics speaks "athletes/squad/coach". */
-const _VOCAB = {
-  sports:  { members: 'athletes', member: 'athlete', people: 'squad' },
-  _default:{ members: 'members',  member: 'member',  people: 'team'  },
-};
-function _v(key) { return (_VOCAB[AppState.mode] || _VOCAB._default)[key] || key; }
+/* Universal, human wording — the kernel is industry-agnostic, so the UI is too.
+   (No industry "modes": if an org ever wants its own term, it comes from THEIR
+   own words, not from us sorting them into a fixed bucket.) */
+const _VOCAB = { members: 'people', member: 'person', people: 'people' };
+function _v(key) { return _VOCAB[key] || key; }
 const _TRAJ_WORD = { converging:'climbing', sustaining:'steady', up:'climbing', flat:'steady',
   down:'dipping', diverging:'drifting', stalled:'stalled', unanchored:'finding footing', unknown:'building' };
 const _trajWord = t => _TRAJ_WORD[t] || 'building';
