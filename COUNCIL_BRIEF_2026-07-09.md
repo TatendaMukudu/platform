@@ -216,6 +216,59 @@ A breakdown plus the tools to act — not a wall of dashboards to mine.
 
 ---
 
+## Part 4 — Council decisions (2026-07-09): three ratified architectural additions
+
+GPT weighed in (via founder), approved the direction, and proposed three
+additions. Founder agrees; Claude concurs with the refinements below. These are
+now canon in `AGENTS.md §1`.
+
+### 4.1 Separate **Reason** from **Coach** in the kernel
+The kernel gains an explicit **Reason** stage — private internal cognition
+(confidence + causation discipline, may consult sensitive signals) — distinct
+from **Coach**, the *only* external face (warm, self-relative, privacy-gated).
+Spine becomes: **Observe → Remember → Connect → Reason → Coach → Learn.**
+> *Rule: the kernel reasons first; the person experiences coaching.* Reasoning is
+> backstage and never surfaced raw. This also sharpens privacy — the Reason layer
+> may use restricted signals; only the gated Coach output reaches a human.
+
+### 4.2 **Proactive by default** — the AI increasingly initiates
+The long-term default is the AI opening meaningful check-ins, not waiting for a
+form: *"You slept earlier than normal yesterday — how are you feeling?"* /
+*"Three weeks ago this would've stressed you; today you handled it differently —
+what changed?"* Those don't feel like prompts; they feel like being remembered.
+> *Claude's refinement (reconciles with the restraint law):* proactivity is the
+> **destination**, gated by the Confidence Engine + timing. Silence stays the
+> default *until earned*; the Person Model is what earns the right to open. So
+> Phase 1 still starts with one reactive follow-up, and the AI graduates to
+> proactive openers as its model of the person becomes reliable. Proactive ≠
+> frequent — it means *initiating when there's something worth saying.*
+
+### 4.3 The **Person Model** — every interaction updates the user's evolving model
+The biggest addition, and the competitive moat: **continuity.** Not LLM
+fine-tuning — structured *understanding* that compounds. Every conversation
+updates confidence, baseline, preferences, timing, coaching style, communication
+style, motivators, and what overwhelms them. After two years IntelliQ shouldn't
+just remember facts; it should understand the person's patterns better than any
+other software. This is the Learner stage, made first-class.
+> *Claude's additions:* (a) **governance** — the person can *see and correct*
+> their model (trust *and* accuracy); it's theirs. (b) **the two-product line** —
+> IntelliQ exposes the model to the individual; Platform sees org-level patterns
+> but **never** a member's private model. (c) **honesty** — the model asserts only
+> understanding it can evidence (confidence-gated), same law as everything else.
+
+### Product identity (council-ratified)
+- **IntelliQ** = lifelong *personal* intelligence (understands an individual over time).
+- **Platform** = *organisational* intelligence (understands teams and orgs).
+- **Kernel** = universal reasoning over signals from any domain — shared, not duplicated.
+
+### Truth-layer additions these imply
+- **Reason is private:** internal reasoning is never surfaced raw to a human.
+- **Person Model honesty:** it claims only evidenced understanding; it is
+  inspectable and correctable; Platform never receives a member's private model.
+- **Proactive openers** are confidence-gated and never quote sensitive content.
+
+---
+
 ## Open questions for the council
 1. **Turn cap:** is 1 follow-up (Phase 1) the right first step, or go straight to
    2–3? (Founder taste call; I lean 1 — prove it's wanted before deepening.)

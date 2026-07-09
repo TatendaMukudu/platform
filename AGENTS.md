@@ -33,8 +33,29 @@ The kernel is **domain-agnostic in LOGIC, domain-parameterised in METADATA**.
 It must reason over *any* typed stream (athletics today, anything tomorrow) —
 never hard-code an industry into the logic. "No logic, yes parameters."
 
-The five cognitive agents (`ai/agents.js`): **Observer** (notice), **Historian**
-(remember), **Analyst** (connect), **Coach** (reflect), **Learner** (improve).
+**Two products, one kernel** (council-ratified 2026-07-09):
+- **IntelliQ** — the *lifelong personal* intelligence that understands one
+  individual over time. Its Person Model is the person's; transparent to them.
+- **Platform** — the *organisational* intelligence that understands teams and
+  orgs. Sees patterns, never a member's private model.
+- **Kernel** — universal, reasons over signals regardless of source (school,
+  sport, work, life). Shared by both; duplicated by neither.
+
+**The cognitive spine (`ai/agents.js`).** Six stages, and one hard split —
+the kernel **reasons internally; the person experiences coaching**:
+**Observe** (notice) → **Remember** (historian) → **Connect** (analyst,
+associations) → **Reason** (private cognition: confidence + causation
+discipline, may use sensitive signals) → **Coach** (the *only* external face —
+warm, self-relative, privacy-gated conversation) → **Learn** (update the Person
+Model). Reasoning is backstage and never surfaced raw; coaching is what a human
+ever sees.
+
+**The Person Model (continuity = the moat).** Every interaction updates a
+persistent, per-person profile — baseline, confidence, *and* preferences,
+timing, coaching style that lands, communication style, what motivates them,
+what overwhelms them. Understanding, not fine-tuning. Confidence-gated (never
+claims understanding it can't evidence), inspectable and correctable by the
+person, and — for Platform — never exposed as private content upward.
 
 ---
 
