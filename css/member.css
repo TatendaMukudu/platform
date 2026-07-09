@@ -216,23 +216,14 @@
   color: var(--text-muted);
   margin-top: 4px;
 }
+/* Visual style comes from the shared input rule in styles.css; only the
+   multi-line sizing is specific here. */
 .note-input {
-  width: 100%;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: 0.95rem;
-  font-family: inherit;
-  padding: 0.8rem;
   resize: none;
-  outline: none;
   line-height: 1.6;
   min-height: 100px;
   margin-top: 0.5rem;
 }
-.note-input:focus { border-color: var(--accent); }
-.note-input::placeholder { color: var(--text-muted); }
 
 /* ── Stats page ────────────────────────────────────────────── */
 .dimension-row { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.7rem; }

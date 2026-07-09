@@ -639,6 +639,9 @@ function navigate(page){
   // Legacy aliases
   else if (page==='dashboard') renderDashboard();
   else if (page==='members')   renderMembers();
+
+  // Hydrate any line-icon slots the page just rendered.
+  if (typeof hydrateIcons === 'function') hydrateIcons(pg || document);
 }
 
 const PAGE_TITLES = {
@@ -1480,11 +1483,32 @@ function renderSidebar(){
 
   const badge = document.querySelector('.mode-badge');
   if (badge) {
-    badge.textContent = `${modeInfo.icon || '🏢'}  ${modeInfo.label}`;
-    badge.style.background = color+'22';
-    badge.style.color      = color;
-    badge.style.border     = `1px solid ${color}44`;
+    // Universal product — no industry "mode" label. Show the org, plainly.
+    badge.textContent = AppState.orgName || 'Platform';
+    badge.style.background = 'transparent';
+    badge.style.color      = 'var(--text-secondary)';
+    badge.style.border     = '1px solid var(--border)';
   }
+
+  // Topbar line-icons (injected once the app chrome is present).
+  if (typeof ICON !== 'undefined') {
+    const set = (sel, svg) => { const el = document.querySelector(sel); if (el && !el.dataset.iconSet) { el.innerHTML = svg; el.dataset.iconSet = '1'; } };
+    set('.topbar-search-icon', ICON.search);
+    set('.tb-ic-bell',         ICON.bell);
+    set('.tb-ic-add',          ICON.plus);
+  }
+  hydrateIcons();
+}
+
+/* Fill any <span class="ui-icon-slot" data-icon="key"> with its line icon.
+   Lets static/JS-rendered markup request an icon by name without inlining SVG. */
+function hydrateIcons(root) {
+  if (typeof ICON === 'undefined') return;
+  (root || document).querySelectorAll('.ui-icon-slot[data-icon]').forEach(el => {
+    if (el.dataset.iconSet) return;
+    const svg = ICON[el.dataset.icon];
+    if (svg) { el.innerHTML = svg; el.dataset.iconSet = '1'; }
+  });
 
   document.querySelector('.user-name').textContent = AppState.adminName;
   document.querySelector('.user-role').textContent = AppState.adminRole;

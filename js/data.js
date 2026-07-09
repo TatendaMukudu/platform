@@ -6,6 +6,26 @@
 
 const COLORS = ['#4f8ef7','#7c5af5','#0ecfb0','#f7b24f','#f74f7a','#4ff77a','#f74f4f','#b24ff7','#4fb8f7','#f7e44f'];
 
+/* ── Icon set — monochrome line icons (inherit currentColor) ───────────────
+   One consistent stroke-based family instead of coloured emoji, so the chrome
+   reads like a professional product. Used in nav and headings. */
+const _svg = inner => `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+const ICON = {
+  home:     _svg('<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/>'),
+  checkin:  _svg('<path d="M21 14.5a2 2 0 0 1-2 2H8l-4 3.5V5a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2z"/>'),
+  notes:    _svg('<path d="M15 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M8 13h8M8 17h5"/>'),
+  inbox:    _svg('<path d="M4 13h4l2 3h4l2-3h4"/><path d="M5 5h14l2.5 8v5a2 2 0 0 1-2 2H4.5a2 2 0 0 1-2-2v-5z"/>'),
+  people:   _svg('<circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16.5 5.3a3.2 3.2 0 0 1 0 6.4M21 20a6 6 0 0 0-3.8-5.6"/>'),
+  person:   _svg('<circle cx="12" cy="8" r="3.5"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/>'),
+  building: _svg('<path d="M4 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16"/><path d="M14 9h4a2 2 0 0 1 2 2v10"/><path d="M8 7h2M8 11h2M8 15h2M3 21h18"/>'),
+  settings: _svg('<path d="M4 21v-6M4 11V3M12 21v-8M12 9V3M20 21v-4M20 13V3"/><path d="M2 15h4M10 9h4M18 17h4"/>'),
+  bell:     _svg('<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>'),
+  search:   _svg('<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>'),
+  plus:     _svg('<path d="M12 5v14M5 12h14"/>'),
+  message:  _svg('<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-4-.9L3 21l1.9-4.9A8.4 8.4 0 1 1 21 11.5z"/>'),
+  spark:    _svg('<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.5 2.5M15.2 15.2l2.5 2.5M17.7 6.3l-2.5 2.5M8.8 15.2l-2.5 2.5"/>'),
+};
+
 /* ── Org mode display config ──────────────────────────────────────────────
    orgMode is kept as optional AI/reporting context only (Option B).
    Do NOT use for metrics, hierarchy, permissions, or UI branching.
@@ -104,19 +124,19 @@ function buildEmptyOrgStats(memberCount) {
 const WORKSPACE_MODULES = [
   // ── My Space — every user. (A leader's Home is the unified leader-home,
   //    so the member Home is hidden for them via hideForLeaders.) ──────────
-  { section: 'My Space', id: 'home',    icon: '🏠', label: 'Home',     permission: null, hideForLeaders: true },
-  { section: null,        id: 'checkin', icon: '💬', label: 'Check-In', permission: null },  // the "Add" input
-  { section: null,        id: 'notes',   icon: '📝', label: 'Notes',    permission: null },  // the "Add" input
-  { section: null,        id: 'inbox',   icon: '📬', label: 'Inbox',    permission: null },
+  { section: 'My Space', id: 'home',    icon: ICON.home,    label: 'Home',     permission: null, hideForLeaders: true },
+  { section: null,        id: 'checkin', icon: ICON.checkin, label: 'Check-In', permission: null },  // the "Add" input
+  { section: null,        id: 'notes',   icon: ICON.notes,   label: 'Notes',    permission: null },  // the "Add" input
+  { section: null,        id: 'inbox',   icon: ICON.inbox,   label: 'Inbox',    permission: null },
 
   // ── Team — shown when the user leads ≥1 node (scoped server-side) ───────
-  { section: 'Team', id: 'leader-home',   icon: '🏠', label: 'Home',      leaderOnly: true }, // You + your people
-  { section: null,    id: 'leader-people', icon: '👥', label: 'My People', leaderOnly: true },
+  { section: 'Team', id: 'leader-home',   icon: ICON.home,   label: 'Home',      leaderOnly: true }, // You + your people
+  { section: null,    id: 'leader-people', icon: ICON.people, label: 'My People', leaderOnly: true },
 
   // ── Setup — admin / superadmin (people · org aims & values · settings) ──
-  { section: 'Setup', id: 'people',       icon: '👤', label: 'People',       permission: 'view_members'    },
-  { section: null,     id: 'organisation', icon: '🏛️', label: 'Organisation', permission: 'view_team'       },
-  { section: null,     id: 'settings',     icon: '⚙️', label: 'Settings',     permission: 'manage_settings' },
+  { section: 'Setup', id: 'people',       icon: ICON.person,   label: 'People',       permission: 'view_members'    },
+  { section: null,     id: 'organisation', icon: ICON.building, label: 'Organisation', permission: 'view_team'       },
+  { section: null,     id: 'settings',     icon: ICON.settings, label: 'Settings',     permission: 'manage_settings' },
 
   // ── Hidden from nav, fully reachable + backend intact (restore any line) ──
   //   assessments · stats · assignments · leader-groups · data-sources ·

@@ -107,18 +107,33 @@ img { max-width: 100%; }
 
 .form-group { margin-bottom: 1.1rem; }
 .form-group label { display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.4rem; letter-spacing: 0.4px; }
-.form-control {
+/* One canonical input look — every text field, textarea and select across the
+   app shares it, so forms read as one system rather than a patchwork. */
+.form-control,
+.form-input,
+.search-input,
+.note-input {
   width: 100%;
-  padding: 0.7rem 1rem;
+  padding: 0.7rem 0.9rem;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: 0.9rem;
-  transition: border-color 0.2s;
+  font-family: inherit;
+  line-height: 1.5;
+  transition: border-color 0.15s;
 }
-.form-control:focus { border-color: var(--accent); }
-.form-control option { background: var(--bg-surface); }
+.form-control:focus,
+.form-input:focus,
+.search-input:focus,
+.note-input:focus { border-color: var(--accent); }
+.form-control::placeholder,
+.form-input::placeholder,
+.search-input::placeholder,
+.note-input::placeholder { color: var(--text-muted); }
+.form-control option,
+.form-input option { background: var(--bg-surface); }
 
 .org-grid {
   display: grid;
@@ -223,7 +238,11 @@ img { max-width: 100%; }
   transition: all 0.15s;
   position: relative;
 }
-.nav-item .nav-icon { font-size: 1rem; width: 20px; text-align: center; }
+.nav-item .nav-icon { width: 20px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+/* Shared line-icon sizing — inherits text colour, so it dims/highlights with nav state. */
+.ui-icon { width: 18px; height: 18px; display: inline-block; vertical-align: -3px; }
+.nav-item .nav-icon .ui-icon { width: 19px; height: 19px; opacity: 0.85; }
+.nav-item.active .nav-icon .ui-icon { opacity: 1; }
 .nav-item:hover { background: var(--bg-hover); color: var(--text-primary); }
 .nav-item.active { background: var(--accent-glow); color: var(--accent); }
 .nav-item.active::before {
@@ -874,6 +893,8 @@ img { max-width: 100%; }
   color: var(--text-muted);
 }
 .empty-state .empty-icon { font-size: 2.5rem; margin-bottom: 0.8rem; opacity: 0.4; }
+/* Line-icon variant for empty states — muted, no colour. */
+.empty-icon .ui-icon, .empty-card .ui-icon { width: 30px; height: 30px; opacity: 0.5; color: var(--text-muted); }
 .empty-state p { font-size: 0.85rem; }
 
 /* ── SCROLLABLE LIST ─────────────────────────────────────── */

@@ -4,8 +4,8 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Platform — IntelliQ Ecosystem</title>
-<link rel="stylesheet" href="css/styles.css"/>
-<link rel="stylesheet" href="css/member.css"/>
+<link rel="stylesheet" href="css/styles.css?v=20260709a"/>
+<link rel="stylesheet" href="css/member.css?v=20260709a"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -149,7 +149,7 @@
       </div>
     </div>
 
-    <div class="mode-badge" id="mode-badge">🎓 School</div>
+    <div class="mode-badge" id="mode-badge">Platform</div>
 
     <!-- Nav items are rendered dynamically by renderSidebar() in app.js -->
     <!-- using WORKSPACE_MODULES filtered by Auth.canDo() permissions.  -->
@@ -178,14 +178,14 @@
       <div class="topbar-title" id="topbar-page-title">Overview Dashboard</div>
       <div style="flex:1"></div>
       <div class="topbar-search">
-        <span style="color:var(--text-muted);font-size:0.9rem">🔍</span>
+        <span class="topbar-search-icon" style="color:var(--text-muted);display:inline-flex"></span>
         <input id="topbar-search-input" placeholder="Search members..."/>
       </div>
       <div class="topbar-actions">
         <div class="icon-btn" id="notif-btn" data-tip="Notifications" style="cursor:pointer">
-          🔔 <div class="badge"></div>
+          <span class="tb-ic-bell"></span> <div class="badge"></div>
         </div>
-        <div class="icon-btn" data-tip="Add Member" onclick="navigate('people');switchPeopleTab('onboard')" style="cursor:pointer">➕</div>
+        <div class="icon-btn tb-ic-add" data-tip="Add Member" onclick="navigate('people');switchPeopleTab('onboard')" style="cursor:pointer"></div>
         <div style="font-size:0.8rem;color:var(--text-secondary);padding:0 0.5rem" id="topbar-org">Org</div>
         <!-- User account widget — sign out, name, email, role -->
         <div class="topbar-user-widget" id="topbar-user-widget">
@@ -220,7 +220,7 @@
             <div class="section-sub">Real-time performance intelligence across your entire organization</div>
           </div>
           <div style="display:flex;gap:0.5rem">
-            <button class="btn btn-outline btn-sm" onclick="navigate('reports')">📋 Full Report</button>
+            <button class="btn btn-outline btn-sm" onclick="navigate('reports')">Full Report</button>
             <button class="btn btn-accent btn-sm" onclick="navigate('people');switchPeopleTab('onboard')">+ Add Member</button>
           </div>
         </div>
@@ -377,7 +377,7 @@
 
         <div class="card">
           <div class="card-header">
-            <div class="card-title">⚠️ At-Risk Members</div>
+            <div class="card-title">At-Risk Members</div>
             <span style="font-size:0.75rem;color:var(--text-secondary)">Members requiring immediate attention</span>
           </div>
           <div class="card-body" style="padding:0">
@@ -423,14 +423,14 @@
         <div class="card" style="margin-bottom:1rem" id="org-insights-card">
           <div class="card-header">
             <div>
-              <div class="card-title">🧠 What IntelliQ Knows</div>
+              <div class="card-title">What IntelliQ Knows</div>
               <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px" id="insights-meta">Not yet loaded</div>
             </div>
             <button class="btn btn-outline btn-sm" onclick="loadOrgInsights(true)">↻ Refresh</button>
           </div>
           <div class="card-body" id="org-insights-content">
             <div style="text-align:center;padding:1.5rem 0;color:var(--text-muted);font-size:0.82rem">
-              <div style="font-size:1.5rem;margin-bottom:0.5rem">🧠</div>
+              <div class="ui-icon-slot" data-icon="spark" style="display:inline-flex;justify-content:center;margin-bottom:0.5rem;color:var(--text-muted)"></div>
               Loading intelligence summary…
             </div>
           </div>
@@ -452,7 +452,7 @@
           </div>
           <div class="card-body" id="weekly-pulse-panel">
             <div style="text-align:center;padding:1.5rem 0;color:var(--text-muted);font-size:0.82rem">
-              <div style="font-size:1.5rem;margin-bottom:0.5rem">📋</div>
+              <div class="ui-icon-slot" data-icon="notes" style="display:inline-flex;justify-content:center;margin-bottom:0.5rem;color:var(--text-muted)"></div>
               Click Refresh to load this week's member reflections.
             </div>
           </div>
@@ -501,7 +501,7 @@
         <div class="card" style="margin-top:1rem">
           <div class="card-header">
             <div>
-              <div class="card-title">📋 Intervention Tracker</div>
+              <div class="card-title">Intervention Tracker</div>
               <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">Track whether recommended actions are taken and whether they work</div>
             </div>
             <div style="display:flex;gap:0.5rem;align-items:center">
@@ -519,7 +519,7 @@
         <!-- ── IntelliQ Learning ────────────────────────────────────────────── -->
         <div class="card" style="margin-top:1rem">
           <div class="card-header">
-            <div class="card-title">🧬 What IntelliQ Has Learned</div>
+            <div class="card-title">What IntelliQ Has Learned</div>
             <button class="btn btn-outline btn-sm" onclick="loadLearningSummary()">↻ Refresh</button>
           </div>
           <div class="card-body" id="learning-summary-content">
@@ -532,7 +532,7 @@
         <!-- ── Org Journey ──────────────────────────────────────────────────── -->
         <div class="card" style="margin-top:1rem">
           <div class="card-header">
-            <div class="card-title">📅 Org Journey</div>
+            <div class="card-title">Org Journey</div>
             <button class="btn btn-outline btn-sm" onclick="loadOrgTimeline()">Load Journey</button>
           </div>
           <div class="card-body" id="org-timeline-content">
@@ -710,7 +710,7 @@
               <div class="card-body" id="settings-features"></div>
             </div>
             <div class="card">
-              <div class="card-header"><div class="card-title">🧭 AI &amp; Your Values</div></div>
+              <div class="card-header"><div class="card-title">AI &amp; Your Values</div></div>
               <div class="card-body">
                 <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6">
                   Your AI reasons from <strong>your organisation's values</strong> — the ones set here.
@@ -732,7 +732,7 @@
                 <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">Define what you measure. These apply across all members and feed into AI analysis.</div>
               </div>
               <div style="display:flex;gap:0.5rem">
-                <button class="btn btn-outline btn-sm" onclick="renderMetricSuggest()">✨ AI Suggest</button>
+                <button class="btn btn-outline btn-sm" onclick="renderMetricSuggest()">AI Suggest</button>
                 <button class="btn btn-accent btn-sm" onclick="renderAddMetric()">+ Add Metric</button>
               </div>
             </div>
@@ -1006,20 +1006,20 @@
             <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.4rem">Tag <span style="font-weight:400">(optional)</span></div>
             <div style="display:flex;gap:0.35rem;flex-wrap:wrap" id="note-tags-row">
               <button class="note-tag-btn active" data-tag=""        onclick="MemberApp.selectNoteTag('')">None</button>
-              <button class="note-tag-btn" data-tag="Goals"    onclick="MemberApp.selectNoteTag('Goals')">🎯 Goals</button>
-              <button class="note-tag-btn" data-tag="Activity" onclick="MemberApp.selectNoteTag('Activity')">💪 Activity</button>
-              <button class="note-tag-btn" data-tag="Personal" onclick="MemberApp.selectNoteTag('Personal')">🧠 Personal</button>
-              <button class="note-tag-btn" data-tag="Team"     onclick="MemberApp.selectNoteTag('Team')">🤝 Team</button>
-              <button class="note-tag-btn" data-tag="Mental"   onclick="MemberApp.selectNoteTag('Mental')">🧘 Mental</button>
-              <button class="note-tag-btn" data-tag="Other"    onclick="MemberApp.selectNoteTag('Other')">📌 Other</button>
+              <button class="note-tag-btn" data-tag="Goals"    onclick="MemberApp.selectNoteTag('Goals')">Goals</button>
+              <button class="note-tag-btn" data-tag="Activity" onclick="MemberApp.selectNoteTag('Activity')">Activity</button>
+              <button class="note-tag-btn" data-tag="Personal" onclick="MemberApp.selectNoteTag('Personal')">Personal</button>
+              <button class="note-tag-btn" data-tag="Team"     onclick="MemberApp.selectNoteTag('Team')">Team</button>
+              <button class="note-tag-btn" data-tag="Mental"   onclick="MemberApp.selectNoteTag('Mental')">Mental</button>
+              <button class="note-tag-btn" data-tag="Other"    onclick="MemberApp.selectNoteTag('Other')">Other</button>
             </div>
           </div>
           <div style="margin-bottom:0.7rem">
             <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.4rem">Who sees this?</div>
             <div style="display:flex;gap:0.4rem;flex-wrap:wrap">
-              <button class="note-type-btn active" data-type="private"   onclick="MemberApp.selectNoteType('private')">🔒 Private</button>
-              <button class="note-type-btn"        data-type="shared"    onclick="MemberApp.selectNoteType('shared')">📤 Shared</button>
-              <button class="note-type-btn"        data-type="anonymous" onclick="MemberApp.selectNoteType('anonymous')">👤 Anonymous</button>
+              <button class="note-type-btn active" data-type="private"   onclick="MemberApp.selectNoteType('private')">Private</button>
+              <button class="note-type-btn"        data-type="shared"    onclick="MemberApp.selectNoteType('shared')">Shared</button>
+              <button class="note-type-btn"        data-type="anonymous" onclick="MemberApp.selectNoteType('anonymous')">Anonymous</button>
             </div>
             <div id="note-type-desc" style="font-size:0.74rem;color:var(--text-muted);margin-top:0.4rem">Only you and IntelliQ see this.</div>
           </div>
@@ -1044,12 +1044,12 @@
         </div>
         <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.6rem" id="notes-filter-row">
           <button class="note-tag-btn active" data-filter="All"      onclick="MemberApp._filterNotes('All')">All</button>
-          <button class="note-tag-btn" data-filter="Goals"    onclick="MemberApp._filterNotes('Goals')">🎯 Goals</button>
-          <button class="note-tag-btn" data-filter="Activity" onclick="MemberApp._filterNotes('Activity')">💪 Activity</button>
-          <button class="note-tag-btn" data-filter="Personal" onclick="MemberApp._filterNotes('Personal')">🧠 Personal</button>
-          <button class="note-tag-btn" data-filter="Team"     onclick="MemberApp._filterNotes('Team')">🤝 Team</button>
-          <button class="note-tag-btn" data-filter="Mental"   onclick="MemberApp._filterNotes('Mental')">🧘 Mental</button>
-          <button class="note-tag-btn" data-filter="Other"    onclick="MemberApp._filterNotes('Other')">📌 Other</button>
+          <button class="note-tag-btn" data-filter="Goals"    onclick="MemberApp._filterNotes('Goals')">Goals</button>
+          <button class="note-tag-btn" data-filter="Activity" onclick="MemberApp._filterNotes('Activity')">Activity</button>
+          <button class="note-tag-btn" data-filter="Personal" onclick="MemberApp._filterNotes('Personal')">Personal</button>
+          <button class="note-tag-btn" data-filter="Team"     onclick="MemberApp._filterNotes('Team')">Team</button>
+          <button class="note-tag-btn" data-filter="Mental"   onclick="MemberApp._filterNotes('Mental')">Mental</button>
+          <button class="note-tag-btn" data-filter="Other"    onclick="MemberApp._filterNotes('Other')">Other</button>
         </div>
         <div id="notes-list"></div>
       </section>
@@ -1063,7 +1063,7 @@
         </div>
         <div id="inbox-group-notice" style="display:none;margin-bottom:0.8rem">
           <div class="empty-card" style="padding:0.8rem 1rem;flex-direction:row;gap:0.6rem;text-align:left">
-            <span style="font-size:1.2rem">👥</span>
+            <span class="ui-icon-slot" data-icon="people" style="color:var(--text-muted);display:inline-flex;flex-shrink:0"></span>
             <div style="font-size:0.78rem;color:var(--text-muted);line-height:1.5">You're not in any groups yet. You'll see group messages once you've been added to one.</div>
           </div>
         </div>
@@ -1083,7 +1083,7 @@
           </div>
           <div style="display:flex;gap:0.4rem">
             <button class="btn-primary" style="flex:1;padding:0.6rem;font-size:0.83rem" onclick="MemberApp.sendMessage(false)">Send (Known)</button>
-            <button style="flex:1;padding:0.6rem;font-size:0.83rem;border-radius:10px;border:1px solid rgba(124,90,245,0.4);background:rgba(124,90,245,0.1);color:var(--accent);cursor:pointer;font-weight:600" onclick="MemberApp.sendMessage(true)">👤 Anonymous</button>
+            <button style="flex:1;padding:0.6rem;font-size:0.83rem;border-radius:10px;border:1px solid rgba(124,90,245,0.4);background:rgba(124,90,245,0.1);color:var(--accent);cursor:pointer;font-weight:600" onclick="MemberApp.sendMessage(true)">Anonymous</button>
           </div>
         </div>
         <div id="messages-list"></div>
@@ -1251,7 +1251,7 @@
 
         <div class="tab-panel" data-panel="insights">
           <div class="rec-box">
-            <div class="rec-title">🤖 IntelliQ AI Recommendations</div>
+            <div class="rec-title">IntelliQ AI Recommendations</div>
             <div id="pm-recs"></div>
           </div>
           <div style="margin-top:1rem">
@@ -1747,8 +1747,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260705r"></script>
-<script src="js/auth.js?v=20260705r"></script>
+<script src="js/data.js?v=20260709a"></script>
+<script src="js/auth.js?v=20260709a"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1816,14 +1816,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260705r"></script>
-<script src="js/ui.js?v=20260705r"></script>
-<script src="js/attachments.js?v=20260705r"></script>
-<script src="js/scenarios.js?v=20260705r"></script>
-<script src="js/chat.js?v=20260705r"></script>
-<script src="js/tree.js?v=20260705r"></script>
-<script src="js/app.js?v=20260705r"></script>
-<script src="js/member-view.js?v=20260705r"></script>
+<script src="js/charts.js?v=20260709a"></script>
+<script src="js/ui.js?v=20260709a"></script>
+<script src="js/attachments.js?v=20260709a"></script>
+<script src="js/scenarios.js?v=20260709a"></script>
+<script src="js/chat.js?v=20260709a"></script>
+<script src="js/tree.js?v=20260709a"></script>
+<script src="js/app.js?v=20260709a"></script>
+<script src="js/member-view.js?v=20260709a"></script>
 
 <script>
 function switchGrade(g){

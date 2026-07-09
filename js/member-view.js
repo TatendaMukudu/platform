@@ -367,7 +367,7 @@ const MemberApp = {
       } else if (this.checkins.length === 0) {
         insightEl.innerHTML = `
           <div class="empty-card" style="margin-bottom:0.8rem">
-            <div class="empty-icon">🧠</div>
+            <div class="empty-icon">${ICON.spark}</div>
             <div>Submit your first check-in and IntelliQ will start building a picture of your progress.</div>
           </div>`;
       } else {
@@ -401,7 +401,7 @@ const MemberApp = {
          </div>`
       : `<div class="card" style="cursor:pointer;border-color:rgba(124,90,245,0.35)" onclick="MemberApp.switchTab('checkin')">
            <div style="display:flex;align-items:center;gap:0.6rem">
-             <span style="font-size:1.3rem">💬</span>
+             <span class="ui-icon-slot" data-icon="checkin" style="color:var(--accent);display:inline-flex"></span>
              <div style="flex:1">
                <div style="font-size:0.85rem;font-weight:600">Daily check-in ready</div>
                <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">Takes 30 seconds — tap to start</div>
@@ -1220,7 +1220,7 @@ const MemberApp = {
     } else {
       html += `
         <div class="empty-card" style="margin-bottom:0.8rem">
-          <div class="empty-icon">💬</div>
+          <div class="empty-icon">${ICON.checkin}</div>
           <div>No check-ins yet. Start from the Check-In tab.</div>
         </div>`;
     }
@@ -1564,13 +1564,13 @@ const MemberApp = {
       const msgs = data.messages || [];
 
       if (!msgs.length) {
-        el.innerHTML = `<div class="empty-card"><div class="empty-icon">💬</div><div>No messages yet. Messages from your organisation and groups will appear here.</div></div>`;
+        el.innerHTML = `<div class="empty-card"><div class="empty-icon">${ICON.message}</div><div>No messages yet. Messages from your organisation and groups will appear here.</div></div>`;
         return;
       }
 
       el.innerHTML = msgs.map(m => {
         const isMine = m.fromId === this._userId;
-        const label  = m.anonymous ? '👤 Anonymous' : m.fromName;
+        const label  = m.anonymous ? 'Anonymous' : m.fromName;
         const target = m.toType === 'org' ? 'Whole Org' : (this._myGroups.find(g => g.id === m.toId)?.name || m.toId || '—');
         const time   = new Date(m.createdAt).toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
         return `
