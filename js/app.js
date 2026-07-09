@@ -6289,6 +6289,15 @@ async function _loadLeaderBriefing(refresh) {
 let _leaderTree         = { tree: [], unassigned: [] };
 let _leaderPeopleSearch = '';
 
+let _leaderStatus = {};        // userId → { status, topLabel } from the kernel roster
+let _peopleSummaryHTML = '';   // the calm counts strip, prepended to the tree
+const _PEOPLE_STATUS = {
+  attention: { label: 'Needs attention', cls: 'ps-attention' },
+  improving: { label: 'Improving',       cls: 'ps-improving' },
+  steady:    { label: 'Steady',          cls: 'ps-steady'    },
+  'no-data': { label: 'No data yet',      cls: 'ps-nodata'   },
+};
+
 async function renderLeaderPeople() {
   const el       = document.getElementById('ldr-people-content');
   const countEl  = document.getElementById('ldr-people-count');
@@ -6297,16 +6306,33 @@ async function renderLeaderPeople() {
   el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Loading…</div>`;
 
   try {
-    const res  = await fetch('/api/workspace/my-tree', { headers: Auth._headers() });
-    const data = res.ok ? await res.json() : { ok: false };
+    // Tree structure + the kernel's at-a-glance status for everyone in scope.
+    const [treeRes, rosRes] = await Promise.all([
+      fetch('/api/workspace/my-tree', { headers: Auth._headers() }),
+      fetch('/api/intelligence/roster', { headers: Auth._headers() }),
+    ]);
+    const data = treeRes.ok ? await treeRes.json() : { ok: false };
     if (!data.ok) throw new Error('Request failed');
+    const ros = rosRes.ok ? await rosRes.json() : { roster: [], counts: {}, count: 0 };
+
+    _leaderStatus = {};
+    (ros.roster || []).forEach(r => { _leaderStatus[r.id] = r; });
+
+    const c = ros.counts || {};
+    _peopleSummaryHTML = `
+      <div class="ppl-summary">
+        ${c.attention ? `<span class="ppl-sum ps-attention">${c.attention} need attention</span>` : ''}
+        ${c.improving ? `<span class="ppl-sum ps-improving">${c.improving} improving</span>` : ''}
+        <span class="ppl-sum ps-steady">${c.steady || 0} steady</span>
+        ${c['no-data'] ? `<span class="ppl-sum ps-nodata">${c['no-data']} no data yet</span>` : ''}
+      </div>`;
 
     _leaderTree = { tree: data.tree || [], unassigned: data.unassigned || [] };
-    const n = data.totalVisible || 0;
-    if (countEl) countEl.textContent = `${n} member${n !== 1 ? 's' : ''} below you`;
+    const n = data.totalVisible || ros.count || 0;
+    if (countEl) countEl.textContent = `${n} ${n !== 1 ? 'people' : 'person'}${ros.orgWide ? ' across the org' : ' below you'}`;
     _renderLeaderPeopleList();
   } catch(e) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load your tree. Try refreshing.</p></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load your people. Try refreshing.</p></div>`;
   }
 }
 
@@ -6317,29 +6343,24 @@ function filterLeaderPeople(search) {
 
 // One member row (shared by tree nodes + unassigned bucket)
 function _leaderMemberRowHTML(m) {
-  const MOOD_ICONS = { 1:'😔', 2:'😕', 3:'😐', 4:'🙂', 5:'😄' };
-  const now       = Date.now();
   const initials  = (m.name || '?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
   const roleLabel = Auth.ROLE_LABELS?.[m.role] || m.role || 'Member';
-  const mood      = m.latestCheckin?.mood;
-  const ckDate    = m.latestCheckin?.date || null;
-  const ckTs      = m.latestCheckin?.ts ? new Date(m.latestCheckin.ts).getTime() : null;
-  const daysSince = ckTs ? Math.floor((now - ckTs) / 86400000) : null;
-  const stale     = daysSince !== null && daysSince >= 7;
   const isPending = !m.passwordSet;
+  // The kernel's at-a-glance read for this person (self-relative, no score).
+  const st  = _leaderStatus[m.userId];
+  const ps  = st ? (_PEOPLE_STATUS[st.status] || _PEOPLE_STATUS['no-data']) : null;
+  const attn = st && st.status === 'attention';
   return `
-    <div class="leader-member-row${stale && !isPending ? ' lm-row--stale' : ''}" onclick="showProfile('${m.userId}')" style="cursor:pointer">
+    <div class="leader-member-row${attn ? ' lm-row--stale' : ''}" onclick="showProfile('${m.userId}')" style="cursor:pointer">
       <div class="lm-avatar">${initials}</div>
       <div class="lm-info">
         <div class="lm-name">${_escAdvisor(m.name)}
-          ${isPending  ? `<span class="lm-badge lm-badge--pending">PENDING</span>` : ''}
-          ${stale && !isPending ? `<span class="lm-badge lm-badge--warn">NO CHECK-IN ${daysSince}d</span>` : ''}
+          ${isPending ? `<span class="lm-badge lm-badge--pending">PENDING</span>` : ''}
         </div>
-        <div class="lm-meta">${_escAdvisor(roleLabel)}${m.email ? ' · ' + _escAdvisor(m.email) : ''}</div>
+        <div class="lm-meta">${_escAdvisor(roleLabel)}${st && st.topLabel ? ' · ' + _escAdvisor(st.topLabel) : (m.email ? ' · ' + _escAdvisor(m.email) : '')}</div>
       </div>
-      <div class="lm-checkin">
-        <div class="lm-mood" title="${ckDate ? 'Last check-in '+ckDate : 'No check-in yet'}">${MOOD_ICONS[mood] || '—'}</div>
-        <div class="lm-checkin-date">${ckDate || 'No check-in'}</div>
+      <div class="lm-status">
+        ${ps ? `<span class="ppl-chip ${ps.cls}">${ps.label}</span>` : `<span class="ppl-chip ps-nodata">—</span>`}
       </div>
     </div>`;
 }
@@ -6407,8 +6428,7 @@ function _renderLeaderPeopleList() {
       <div class="ltree-members">${unMatched.map(_leaderMemberRowHTML).join('')}</div>
     </div>` : '';
 
-  el.innerHTML = `<div class="ltree">${treeHTML}${unassignedHTML}</div>`
-    || `<div class="empty-state"><p>No matches.</p></div>`;
+  el.innerHTML = `${_peopleSummaryHTML || ''}<div class="ltree">${treeHTML}${unassignedHTML}</div>`;
 }
 
 /* ── Add Member to my subtree (item C) ───────────────────────────────────────

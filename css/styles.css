@@ -2376,3 +2376,13 @@ img { max-width: 100%; }
 .intel-you-dir b{color:var(--success);font-weight:600}
 .intel-section{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text-muted);font-weight:600;margin:.4rem 0 .55rem}
 .intel-section b{color:var(--text-primary)}
+
+/* My People — kernel status at a glance (roster insight, calm not dashboard) */
+.ppl-summary{display:flex;flex-wrap:wrap;gap:.5rem;margin:0 0 1rem;padding:0 .1rem}
+.ppl-sum{font-size:.74rem;font-weight:600;padding:.3rem .6rem;border-radius:20px;border:1px solid var(--border);background:var(--surface-1)}
+.lm-status{margin-left:auto;flex-shrink:0}
+.ppl-chip{font-size:.68rem;font-weight:600;padding:.2rem .55rem;border-radius:20px;white-space:nowrap;border:1px solid var(--border)}
+.ps-attention{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 40%,transparent);background:color-mix(in srgb,var(--danger) 8%,transparent)}
+.ps-improving{color:var(--success);border-color:color-mix(in srgb,var(--success) 40%,transparent);background:color-mix(in srgb,var(--success) 8%,transparent)}
+.ps-steady{color:var(--text-secondary)}
+.ps-nodata{color:var(--text-muted);border-style:dashed}

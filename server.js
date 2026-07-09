@@ -2489,6 +2489,57 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
   res.json(data);
 });
 
+/* ── GET /api/intelligence/roster — EVERYONE in scope, at-a-glance status ──────
+   The briefing shows who needs you *today*; the roster shows your whole tree
+   (org-wide for a superadmin) with a one-word kernel read each, so a leader can
+   scan everyone, not just the flagged few. Deterministic (no AI call), cached. */
+const rosterCache = {}; // `${code}:${userId}` → { data, ts }
+
+app.get('/api/intelligence/roster', requireAuth, (req, res) => {
+  const { orgCode, userId } = req.iqSession;
+  const code = orgCode;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+  const key = `${code}:${userId}`;
+  const cached = rosterCache[key];
+  if (cached && req.query.refresh !== '1' && Date.now() - cached.ts < BRIEFING_TTL) {
+    return res.json({ ...cached.data, cached: true });
+  }
+
+  const now = Date.now();
+  const members = getVisibleUserIds(code, userId)
+    .map(id => orgUsers[code]?.[id]).filter(u => u && u.id !== userId && u.role !== 'superadmin');
+
+  const counts = { attention: 0, improving: 0, steady: 0, 'no-data': 0 };
+  const roster = members.map(u => {
+    let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { m = null; }
+    const findings = m ? [...intel.detectPatterns(m), ...(m.structural || [])] : [];
+    const lastDays = m?.lastActivityT ? Math.floor((now - m.lastActivityT) / 86400000) : null;
+    const hasData = (m?.moodSeries?.length || 0) > 0 || (m?.signalSeries?.length || 0) > 0 || lastDays != null;
+
+    let status = 'steady', topLabel = null;
+    if (!hasData) { status = 'no-data'; }
+    else {
+      const urgent  = findings.find(f => f.severity === 'high') || findings.find(f => f.severity === 'medium');
+      const improve = findings.find(f => f.type === 'quiet_improvement');
+      if (urgent)       { status = 'attention'; topLabel = intel.PATTERN_LABEL[urgent.type] || urgent.type; }
+      else if (improve) { status = 'improving'; topLabel = 'Quietly improving'; }
+      else              { status = 'steady'; }
+    }
+    counts[status]++;
+    return { id: u.id, name: u.name || '', status, topLabel, lastActiveDays: lastDays };
+  });
+
+  const ORDER = { attention: 0, improving: 1, steady: 2, 'no-data': 3 };
+  roster.sort((a, b) => ORDER[a.status] - ORDER[b.status] || a.name.localeCompare(b.name));
+
+  const data = { ok: true, count: members.length, counts, roster, orgWide: isAdmin };
+  rosterCache[key] = { data, ts: Date.now() };
+  res.json(data);
+});
+
 /* ── POST /api/intelligence/act — leader logs an action taken on a briefing item.
    Ties the intervention to the PATTERN so the loop can learn per-pattern. */
 app.post('/api/intelligence/act', requireAuth, (req, res) => {
