@@ -998,9 +998,12 @@ function requirePermission(perm) {
 }
 
 /* ── Get org hierarchy tree ─────────────────────────────────────────────── */
-app.get('/api/auth/org-tree', (req, res) => {
-  const { orgCode } = req.query;
-  const code  = (orgCode || '').toLowerCase();
+app.get('/api/auth/org-tree', requireAuth, (req, res) => {
+  // SECURITY: was unauthenticated — anyone who knew an org code could enumerate
+  // the whole member directory (names, emails, roles). Now requires auth and is
+  // scoped to the caller's own org from the session. Fixed 2026-07-09.
+  const code  = req.iqSession.orgCode;
+  if (!code) return res.status(403).json({ error: 'Forbidden' });
   const users = orgUsers[code];
   if (!users) return res.status(404).json({ error: 'Org not found' });
 
@@ -3124,9 +3127,13 @@ app.post('/api/notes', async (req, res) => {
 
 /* ── Get notes — requires auth ───────────────────────────────────────────── */
 app.get('/api/notes', requireAuth, (req, res) => {
-  const { orgCode, requesterId, groupId: gid, type } = req.query;
-  if (!orgCode || !requesterId) return res.status(400).json({ error: 'missing fields' });
-  const code = orgCode.toLowerCase().trim();
+  const { groupId: gid, type } = req.query;
+  // SECURITY: identity comes from the session, never the query. Previously
+  // requesterId was read from the query, so any logged-in user could read
+  // another member's PRIVATE notes by passing their id (IDOR). Fixed 2026-07-09.
+  const code        = req.iqSession.orgCode;
+  const requesterId = req.iqSession.userId;
+  if (!code || !requesterId) return res.status(403).json({ error: 'Forbidden' });
 
   const myGroups = (orgGroups[code] || []).filter(g =>
     g.memberIds.includes(requesterId) || g.leadIds.includes(requesterId)
@@ -3190,9 +3197,13 @@ app.post('/api/messages/send', (req, res) => {
 
 /* ── Get messages — requires auth ────────────────────────────────────────── */
 app.get('/api/messages', requireAuth, (req, res) => {
-  const { orgCode, requesterId, groupId: gid, toType } = req.query;
-  if (!orgCode || !requesterId) return res.status(400).json({ error: 'missing fields' });
-  const code = orgCode.toLowerCase().trim();
+  const { groupId: gid, toType } = req.query;
+  // SECURITY: identity from the session, never the query — previously a
+  // caller-supplied requesterId let any logged-in user read another member's
+  // direct messages (IDOR). Fixed 2026-07-09.
+  const code        = req.iqSession.orgCode;
+  const requesterId = req.iqSession.userId;
+  if (!code || !requesterId) return res.status(403).json({ error: 'Forbidden' });
 
   const myGroups = (orgGroups[code] || []).filter(g =>
     g.memberIds.includes(requesterId) || g.leadIds.includes(requesterId)
@@ -3235,10 +3246,12 @@ function _sanitizeMsg(msg, requesterId) {
 }
 
 /* ── Group feed (shared + anonymous notes + messages) ────────────────────── */
-app.get('/api/groups/:groupId/feed', (req, res) => {
-  const { orgCode, requesterId } = req.query;
-  if (!orgCode || !requesterId) return res.status(400).json({ error: 'missing fields' });
-  const code = orgCode.toLowerCase().trim();
+app.get('/api/groups/:groupId/feed', requireAuth, (req, res) => {
+  // SECURITY: identity from the session, never the query. Was unauthenticated and
+  // trusted a caller-supplied requesterId for group-membership checks (IDOR).
+  const code        = req.iqSession.orgCode;
+  const requesterId = req.iqSession.userId;
+  if (!code || !requesterId) return res.status(403).json({ error: 'Forbidden' });
   const gid  = req.params.groupId;
 
   const groups = orgGroups[code] || [];
@@ -3478,9 +3491,14 @@ app.post('/api/auth/bulk-import', requireAuth, async (req, res) => {
 
 /* ── List active join/invite links ───────────────────────────────────── */
 app.get('/api/auth/join-links', requireAuth, (req, res) => {
-  const { orgCode } = req.query;
-  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
-  const code  = orgCode.toLowerCase().trim();
+  // SECURITY: invite links grant org access (at a role) — admin-only, own org.
+  // Was gated on requireAuth only, exposing them to any authenticated user.
+  const code   = req.iqSession.orgCode;
+  const userId = req.iqSession.userId;
+  const role   = orgUsers[code]?.[userId]?.role;
+  if (!code || !(role === 'superadmin' || role === 'admin' || _userHasPerm(code, userId, 'manage_settings'))) {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
   const now   = Date.now();
   const links = Object.entries(inviteTokens)
     .filter(([, t]) => t.orgCode === code && t.expiresAt > now)
@@ -3713,6 +3731,19 @@ app.post('/api/member/checkin', (req, res) => {
   res.json({ ok: true });
 });
 
+/* Leader-analytics gate. Returns { code, userId } when the session may view
+   org/member insight, else sends 403 and returns null. Identity ALWAYS comes
+   from the session — analytics endpoints must never authorize on a query orgCode. */
+function _requireInsight(req, res) {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!code || !userId) { res.status(403).json({ error: 'Forbidden' }); return null; }
+  const ok = _userHasPerm(code, userId, 'view_insights') ||
+             _userHasPerm(code, userId, 'review_checkins') ||
+             orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!ok) { res.status(403).json({ error: 'Insufficient permissions' }); return null; }
+  return { code, userId };
+}
+
 /* Shared privacy-safe projection of a check-in for any leader-facing surface.
    Check-in free-text is a personal disclosure (classified sensitive by default);
    sensitive/restricted entries are redacted to a contentless marker so leaders
@@ -3869,14 +3900,22 @@ app.post('/api/member/goals', (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/member/goals', (req, res) => {
-  const { orgCode, memberName, memberId } = req.query;
-  if (!orgCode || (!memberName && !memberId)) return res.status(400).json({ error: 'missing fields' });
-  const key = memberId
-    ? userKey(orgCode, memberId)
-    : memberKey(orgCode, memberName);
-  // Also try the other format as fallback (data may have been saved under either key)
-  const altKey = memberId ? memberKey(orgCode, memberName || '') : null;
+app.get('/api/member/goals', requireAuth, (req, res) => {
+  // SECURITY: was unauthenticated. Now auth'd and scoped — the member themselves,
+  // or a leader who has this member in scope. Fixed 2026-07-09.
+  const { memberName, memberId } = req.query;
+  const code = req.iqSession.orgCode;
+  if (!code || (!memberName && !memberId)) return res.status(400).json({ error: 'missing fields' });
+
+  const targetId = memberId || _resolveUserIdByName(code, memberName || '');
+  const isSelf   = targetId && targetId === req.iqSession.userId;
+  const canLead  = (_userHasPerm(code, req.iqSession.userId, 'view_insights') ||
+                    _userHasPerm(code, req.iqSession.userId, 'view_members')) &&
+                   targetId && getVisibleUserIds(code, req.iqSession.userId).includes(targetId);
+  if (!isSelf && !canLead) return res.status(403).json({ error: 'Insufficient permissions' });
+
+  const key    = memberId ? userKey(code, memberId) : memberKey(code, memberName);
+  const altKey = memberId ? memberKey(code, memberName || '') : null;
   res.json({ goals: memberGoals[key] || (altKey ? memberGoals[altKey] : null) || null });
 });
 
@@ -4815,9 +4854,9 @@ function _buildInsightPrompt(agg, orgCode) {
 }
 
 app.get('/api/intelliq/org-insights', requireAuth, async (req, res) => {
-  const { orgCode, refresh } = req.query;
-  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
-  const code = orgCode.toLowerCase().trim();
+  const { refresh } = req.query;
+  const g = _requireInsight(req, res); if (!g) return;
+  const code = g.code;  // session org — never trust a query orgCode for analytics
 
   const CACHE_TTL    = 60 * 60 * 1000;
   const cached       = orgInsightCache[code];
@@ -5360,9 +5399,17 @@ function _buildOrgTimeline(code) {
 
 /* ── GET member timeline ───────────────────────────────────────────────── */
 app.get('/api/intelliq/member-timeline', requireAuth, async (req, res) => {
-  const { orgCode, memberId, memberName, refresh } = req.query;
-  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
-  const code    = orgCode.toLowerCase().trim();
+  const { memberId, memberName, refresh } = req.query;
+  const g = _requireInsight(req, res); if (!g) return;
+  const code = g.code;  // session org — never trust a query orgCode for analytics
+
+  // SCOPE: the target member must be within the requester's visible subtree.
+  // A leader can only pull the timeline of someone they actually lead.
+  const targetId = memberId || _resolveUserIdByName(code, memberName || '');
+  if (!targetId || !getVisibleUserIds(code, g.userId).includes(targetId)) {
+    return res.status(403).json({ error: 'Member not in your scope' });
+  }
+
   const cacheKey = `${code}:${memberId || memberName || ''}`;
   const cached  = memberTimelineCache[cacheKey];
 
@@ -5388,9 +5435,10 @@ app.get('/api/intelliq/member-timeline', requireAuth, async (req, res) => {
 
 /* ── GET group timeline ────────────────────────────────────────────────── */
 app.get('/api/intelliq/group-timeline', requireAuth, (req, res) => {
-  const { orgCode, groupId, refresh } = req.query;
-  if (!orgCode || !groupId) return res.status(400).json({ error: 'orgCode and groupId required' });
-  const code  = orgCode.toLowerCase().trim();
+  const { groupId, refresh } = req.query;
+  if (!groupId) return res.status(400).json({ error: 'groupId required' });
+  const g = _requireInsight(req, res); if (!g) return;
+  const code  = g.code;  // session org — never trust a query orgCode for analytics
   const cacheKey = `${code}:${groupId}`;
   const cached = groupTimelineCache[cacheKey];
 
@@ -5489,9 +5537,8 @@ app.get('/api/intelliq/interventions', requireAuth, (req, res) => {
 
 /* ── GET intervention analysis + learning stats ─────────────────────────── */
 app.get('/api/intelliq/intervention-analysis', requireAuth, (req, res) => {
-  const { orgCode } = req.query;
-  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
-  const code = orgCode.toLowerCase().trim();
+  const g = _requireInsight(req, res); if (!g) return;
+  const code = g.code;  // session org — never trust a query orgCode for analytics
   const all  = orgInterventions[code] || [];
 
   const byStatus = { suggested: 0, acknowledged: 0, completed: 0, dismissed: 0 };
@@ -6344,9 +6391,8 @@ app.post('/api/signals/import', requireAuth, async (req, res) => {
 
 /* ── GET /api/intelliq/patterns — rule-based risk patterns for org ────────── */
 app.get('/api/intelliq/patterns', requireAuth, (req, res) => {
-  const { orgCode } = req.query;
-  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
-  const code = orgCode.toLowerCase().trim();
+  const g = _requireInsight(req, res); if (!g) return;
+  const code = g.code;  // session org — never trust a query orgCode for analytics
   const agg  = _aggregateOrgData(code);
 
   const flat = [];
@@ -6366,9 +6412,8 @@ app.get('/api/intelliq/patterns', requireAuth, (req, res) => {
 
 /* ── GET /api/intelliq/predictions — trajectory predictions ──────────────── */
 app.get('/api/intelliq/predictions', requireAuth, (req, res) => {
-  const { orgCode } = req.query;
-  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
-  const code = orgCode.toLowerCase().trim();
+  const g = _requireInsight(req, res); if (!g) return;
+  const code = g.code;  // session org — never trust a query orgCode for analytics
   const agg  = _aggregateOrgData(code);
 
   const flat = [];
@@ -6390,9 +6435,8 @@ app.get('/api/intelliq/predictions', requireAuth, (req, res) => {
 
 /* ── GET /api/intelliq/intervention-effectiveness — per-type breakdown ────── */
 app.get('/api/intelliq/intervention-effectiveness', requireAuth, (req, res) => {
-  const { orgCode } = req.query;
-  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
-  const code = orgCode.toLowerCase().trim();
+  const g = _requireInsight(req, res); if (!g) return;
+  const code = g.code;  // session org — never trust a query orgCode for analytics
   const all  = orgInterventions[code] || [];
 
   const measured = all.filter(i => i.status === 'completed' && i.outcome?.status === 'measured');
@@ -6432,9 +6476,9 @@ const LEARNING_CACHE_TTL   = 2 * 60 * 60 * 1000; // 2 hours
 
 /* ── GET /api/intelliq/learning-summary — org-level learning narrative ───── */
 app.get('/api/intelliq/learning-summary', requireAuth, async (req, res) => {
-  const { orgCode, refresh } = req.query;
-  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
-  const code   = orgCode.toLowerCase().trim();
+  const { refresh } = req.query;
+  const g = _requireInsight(req, res); if (!g) return;
+  const code   = g.code;  // session org — never trust a query orgCode for analytics
   const cached = learningSummaryCache[code];
   if (cached && refresh !== '1' && Date.now() - cached.generatedAt < LEARNING_CACHE_TTL) {
     return res.json({ ...cached.data, cached: true });

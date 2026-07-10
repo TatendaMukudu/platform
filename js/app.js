@@ -3759,7 +3759,7 @@ async function renderGroups() {
     }
 
     // Get all org users for display
-    const treeRes  = await fetch(`/api/auth/org-tree?orgCode=${encodeURIComponent(orgCode)}`);
+    const treeRes  = await fetch(`/api/auth/org-tree?orgCode=${encodeURIComponent(orgCode)}`, { headers: Auth._headers() });
     const treeData = treeRes.ok ? await treeRes.json() : { flat: [] };
     const allUsers = treeData.flat || [];
     const byId     = {};
@@ -3798,7 +3798,7 @@ async function renderGroups() {
 async function openCreateGroup() {
   // Populate member/lead lists from org tree
   const orgCode = Auth.currentUser?.orgCode || AppState.orgCode;
-  const treeRes  = await fetch(`/api/auth/org-tree?orgCode=${encodeURIComponent(orgCode)}`).catch(() => null);
+  const treeRes  = await fetch(`/api/auth/org-tree?orgCode=${encodeURIComponent(orgCode)}`, { headers: Auth._headers() }).catch(() => null);
   const treeData = treeRes?.ok ? await treeRes.json() : { flat: [] };
   const allUsers = (treeData.flat || []).filter(u => u.id !== Auth.currentUser?.id);
 
@@ -3958,7 +3958,7 @@ async function loadGroupFeed(gid) {
   const me      = Auth.currentUser?.id;
 
   try {
-    const res  = await fetch(`/api/groups/${gid}/feed?orgCode=${encodeURIComponent(orgCode)}&requesterId=${encodeURIComponent(me)}`);
+    const res  = await fetch(`/api/groups/${gid}/feed?orgCode=${encodeURIComponent(orgCode)}&requesterId=${encodeURIComponent(me)}`, { headers: Auth._headers() });
     const data = res.ok ? await res.json() : { notes: [], messages: [] };
 
     const allItems = [
