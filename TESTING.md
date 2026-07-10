@@ -21,9 +21,10 @@ purpose, so it's fast, hermetic, and identical on every machine and in CI.
 | `node --check` (all sources) | every `.js` parses | no broken commit ships |
 | `baseline-smoke.js` | 12 | self-relative baselines; fairness (a stable-low person is never flagged); honest "learning" on thin data |
 | `intelligence-smoke.js` | 15 | the 6 pattern detectors fire *and stay quiet* correctly; no scores |
-| `privacy-smoke.js` | 16 | **the privacy law** — sensitive/hardship classified as informs-only; team/performance text stays citable; redaction; the gate directive |
+| `privacy-smoke.js` | 18 | **the privacy law** — sensitive/hardship classified as informs-only; team/performance text stays citable; redaction; the gate directive; the leader check-in projection contract |
+| `person-model-smoke.js` | 18 | **the Person Model + Reason stage** — privacy-by-construction (no raw text stored), confidence-gated understanding, the org boundary (`publicProjection` leaks nothing), `reason()` is internal |
 | `eval.js` | 24 | the kernel golden set — patterns, cross-signal, confidence engine, packs, adapters, primitives |
-| `invariants.js` | 14 | **the product laws** (below), executable |
+| `invariants.js` | 19 | **the product laws** (below), executable |
 
 ## The product laws (in `invariants.js`)
 
@@ -39,6 +40,10 @@ These are non-negotiable. Breaking one turns the suite red:
    context is a contentless flag only.
 8. **Fairness** — a stable-but-low person is never flagged for being different.
 9. **Universality** — patterns fire on any typed stream, domain-free.
+10. **Person Model governance** — Platform never sees the private model
+    (`publicProjection` is contentless); the model stores no raw text.
+11. **Reason is internal** — the reasoning stage is flagged internal and never
+    graded; only the Coach's gated output reaches a human.
 
 ## The rule for every contributor
 
