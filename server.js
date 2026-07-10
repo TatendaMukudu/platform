@@ -3713,30 +3713,64 @@ app.post('/api/member/checkin', (req, res) => {
   res.json({ ok: true });
 });
 
-/* ── Platform pulls member results ─────────────────────────────────────── */
+/* Shared privacy-safe projection of a check-in for any leader-facing surface.
+   Check-in free-text is a personal disclosure (classified sensitive by default);
+   sensitive/restricted entries are redacted to a contentless marker so leaders
+   see engagement (mood, cadence) but never a member's private words. */
+function _safeCheckinEntry(c) {
+  const sens = privacy.classifyText(c.text || '', { source: 'checkin' });
+  const isPrivate = sens === 'sensitive' || sens === 'restricted';
+  return {
+    memberName: c.memberName, mood: c.mood, moodLabel: c.moodLabel,
+    role: c.role, date: c.date, ts: c.ts,
+    text: isPrivate ? null : c.text,
+    private: isPrivate,
+  };
+}
+
+/* ── Platform pulls member results ─────────────────────────────────────────
+   SECURITY (fixed 2026-07-09): was requireAuth-only, letting any logged-in user
+   read any member's raw check-ins by name. Now session-scoped and gated: the
+   member themselves, or a leader with review_checkins/view_insights within scope;
+   check-ins are privacy-filtered for the leader path. */
 app.get('/api/platform/member-results', requireAuth, (req, res) => {
-  const { orgCode, memberName } = req.query;
-  if (!orgCode || !memberName) return res.status(400).json({ error: 'missing fields' });
-  const key = memberKey(orgCode, memberName);
+  const { orgCode: code, userId } = req.iqSession;
+  const { memberName } = req.query;
+  if (!code || !memberName) return res.status(400).json({ error: 'missing fields' });
+
+  const target   = _resolveUserIdByName(code, memberName);
+  const isSelf   = target && target === userId;
+  const canLead  = _userHasPerm(code, userId, 'view_insights') || _userHasPerm(code, userId, 'review_checkins');
+  const inScope  = target && getVisibleUserIds(code, userId).includes(target);
+  if (!isSelf && !(canLead && inScope)) {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
+
+  const key      = memberKey(code, memberName);
+  const checkins = memberCheckins[key] || [];
   res.json({
-    results:  memberResults[key]  || [],
-    checkins: memberCheckins[key] || [],
+    results:  memberResults[key] || [],
+    // Self sees their own words; a leader sees the privacy-filtered projection.
+    checkins: isSelf ? checkins : checkins.map(_safeCheckinEntry),
   });
 });
 
-/* ── Platform pulls all results for org ─────────────────────────────────── */
+/* ── Platform pulls all results for org ─────────────────────────────────────
+   SECURITY (fixed 2026-07-09): was requireAuth-only. Now session-scoped, gated,
+   and limited to the caller's visible members. */
 app.get('/api/platform/org-results', requireAuth, (req, res) => {
-  const { orgCode } = req.query;
-  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
-  const code    = orgCode.toLowerCase().trim();
+  const { orgCode: code, userId } = req.iqSession;
+  if (!code || !userId) return res.status(403).json({ error: 'Forbidden' });
+  if (!_userHasPerm(code, userId, 'view_insights') && !_userHasPerm(code, userId, 'review_checkins')
+      && orgUsers[code]?.[userId]?.role !== 'superadmin') {
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  }
   const results = {};
-  Object.keys(memberResults).forEach(key => {
-    if (!key.startsWith(code + ':')) return;
-    const entries = memberResults[key];
-    if (!entries?.length) return;
-    // Use memberName from the entry; fall back to parsing the key
-    const name = entries[0]?.memberName || key.split(':').slice(1).join(':');
-    results[name] = entries;
+  getVisibleUserIds(code, userId).forEach(uid => {
+    const u = orgUsers[code]?.[uid];
+    if (!u || u.role === 'superadmin') return;
+    const entries = memberResults[userKey(code, uid)] || memberResults[memberKey(code, u.name || '')] || [];
+    if (entries.length) results[u.name || uid] = entries;
   });
   res.json({ results });
 });
@@ -3850,36 +3884,32 @@ app.get('/api/member/goals', (req, res) => {
    MEMORY ENGINE — Read / resolve user AI profile
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* GET /api/user/memory?orgCode=X&userId=Y — leader reads member memory */
+/* GET /api/user/memory — the person reads their OWN model.
+
+   PRIVACY GOVERNANCE (council-ratified 2026-07-09): a member's Person Model is
+   THEIRS. It is inspectable and correctable by the person, and Platform (leaders,
+   admins) NEVER receives it raw — org-level insight comes only from the
+   privacy-gated briefing, never from these private threads. So this endpoint is
+   strictly self-scoped: it ignores any userId in the query and returns only the
+   caller's own memory. There is no leader cross-read path, by construction. */
 app.get('/api/user/memory', requireAuth, (req, res) => {
-  const { orgCode, userId } = req.query;
-  if (!orgCode || !userId) return res.status(400).json({ error: 'orgCode and userId required' });
-  const code = orgCode.toLowerCase().trim();
-
-  // Must have view_insights permission or be a superadmin
-  const requester = orgUsers[code]?.[req.iqSession.userId];
-  if (!requester) return res.status(403).json({ error: 'Forbidden' });
-  const canView = requester.role === 'superadmin' || requester.role === 'admin' ||
-    (userPermissions[code]?.[req.iqSession.userId]?.view_insights === true);
-  if (!canView) return res.status(403).json({ error: 'Insufficient permissions' });
-
+  const code   = req.iqSession.orgCode;
+  const userId = req.iqSession.userId;
+  if (!code || !userId) return res.status(403).json({ error: 'Forbidden' });
   const mem = userAiProfiles[`${code}:${userId}`] || null;
   res.json({ memory: mem });
 });
 
-/* PUT /api/user/memory/resolve — mark a thread or follow-up as resolved */
+/* PUT /api/user/memory/resolve — the person corrects/resolves their OWN model.
+   Self-scoped for the same governance reason as the GET above. */
 app.put('/api/user/memory/resolve', requireAuth, (req, res) => {
-  const { orgCode, userId, threadId, followUpId } = req.body;
-  if (!orgCode || !userId || (!threadId && !followUpId)) {
-    return res.status(400).json({ error: 'orgCode, userId, and threadId or followUpId required' });
+  const { threadId, followUpId } = req.body;
+  if (!threadId && !followUpId) {
+    return res.status(400).json({ error: 'threadId or followUpId required' });
   }
-  const code = orgCode.toLowerCase().trim();
-
-  const requester = orgUsers[code]?.[req.iqSession.userId];
-  if (!requester) return res.status(403).json({ error: 'Forbidden' });
-  const canView = requester.role === 'superadmin' || requester.role === 'admin' ||
-    (userPermissions[code]?.[req.iqSession.userId]?.view_insights === true);
-  if (!canView) return res.status(403).json({ error: 'Insufficient permissions' });
+  const code   = req.iqSession.orgCode;
+  const userId = req.iqSession.userId;
+  if (!code || !userId) return res.status(403).json({ error: 'Forbidden' });
 
   const mem = _getMemory(code, userId);
   if (threadId) {
@@ -4072,17 +4102,28 @@ OUTPUT — valid JSON only, no markdown fencing, no extra text:
 
 /* ── Platform: pull all checkins for org — requires auth ────────────────── */
 app.get('/api/platform/org-checkins', requireAuth, (req, res) => {
-  const { orgCode } = req.query;
-  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
-  const code    = orgCode.toLowerCase().trim();
+  // SECURITY: session-scoped (never trust orgCode from the query), permission-
+  // gated, and scoped to the caller's visible members — same rules as
+  // team-insights. Previously this was requireAuth-only, which let any logged-in
+  // user read every member's raw check-in text across orgs. Fixed 2026-07-09.
+  const { orgCode: code, userId } = req.iqSession;
+  if (!code || !userId) return res.status(403).json({ error: 'Forbidden' });
+
+  const canViewInsights   = _userHasPerm(code, userId, 'view_insights');
+  const canReviewCheckins = _userHasPerm(code, userId, 'review_checkins');
+  if (!canViewInsights && !canReviewCheckins) {
+    return res.status(403).json({ error: 'Permission denied: view_insights or review_checkins required' });
+  }
+
+  // PRIVACY LAW: check-in free-text is redacted for sensitive/restricted entries
+  // via the shared _safeCheckinEntry projection — leaders see engagement, never
+  // a member's private words.
   const results = {};
-  Object.keys(memberCheckins).forEach(key => {
-    if (!key.startsWith(code + ':')) return;
-    const entries = memberCheckins[key];
-    if (!entries?.length) return;
-    // Use memberName stored inside the entry; fall back to key parsing for legacy data
-    const name = entries[0]?.memberName || key.split(':').slice(1).join(':');
-    if (name) results[name] = entries;
+  getVisibleUserIds(code, userId).forEach(uid => {
+    const u = orgUsers[code]?.[uid];
+    if (!u || u.role === 'superadmin') return;
+    const entries = memberCheckins[userKey(code, uid)] || memberCheckins[memberKey(code, u.name || '')] || [];
+    if (entries.length) results[u.name || uid] = entries.map(_safeCheckinEntry);
   });
   res.json({ checkins: results });
 });

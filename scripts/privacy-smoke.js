@@ -27,6 +27,13 @@ ok('sensitive is private', p.isPrivate('sensitive') === true);
 ok('restricted is private', p.isPrivate('restricted') === true);
 ok('normal is not private', p.isPrivate('normal') === false);
 
+// ── leader-facing check-in projection contract (server _safeCheckinEntry) ────
+// A hardship check-in is redacted from any leader surface; a neutral one shows.
+ok('hardship check-in → private (redacted for leaders)',
+   p.isPrivate(p.classifyText("really struggling to cope this week", { source: 'checkin' })) === true);
+ok('neutral check-in → normal (visible to leaders)',
+   p.isPrivate(p.classifyText("normal week, felt good at practice", { source: 'checkin' })) === false);
+
 // ── redact: strip long verbatim private spans, keep short common words ───────
 ok('redacts a long private span', p.redact('note: her father passed away suddenly here', ['her father passed away suddenly']).includes('[redacted'));
 ok('leaves short fragments alone', p.redact('he is ok today', ['ok']) === 'he is ok today');
