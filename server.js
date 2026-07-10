@@ -507,9 +507,12 @@ function _getMemory(orgCode, userId) {
       openThreads:    [],  // [{ id, text, source, date, occurrences, resolved }]
       recentThemes:   [],  // string[], max 10
       priorFollowUps: [],  // [{ id, commitment, source, date, resolved }]
+      model:          agents.personModel.blankModel(),  // the Person Model (self-owned, categorical tokens only)
       lastUpdated:    null,
     };
   }
+  // Back-fill the model for profiles created before it existed.
+  if (!userAiProfiles[key].model) userAiProfiles[key].model = agents.personModel.blankModel();
   return userAiProfiles[key];
 }
 
@@ -605,6 +608,22 @@ function _updateUserMemory(orgCode, userId, source, data) {
       changed = true;
     }
   }
+
+  // ── Person Model: accumulate structured, categorical understanding ────────
+  // Only ever categorical tokens (privacy-by-construction). Deterministic and
+  // wrapped so it can never break a check-in. Timing = when they engage; an
+  // overload/withdrawal read maps to what tends to overwhelm them.
+  try {
+    const hour = new Date().getHours();
+    const timing = hour < 11 ? 'morning' : hour < 16 ? 'midday' : hour < 21 ? 'evening' : 'night';
+    const obs = { timing };
+    const blob = `${data.watchOutFor || ''} ${(data.themes || []).join(' ')} ${data.suggestedNextAction || ''}`.toLowerCase();
+    if (/overload|too much|overwhelm|heavy|burnout|exhaust/.test(blob)) obs.overwhelmers = 'load';
+    else if (/isolat|withdraw|alone|disconnect/.test(blob))            obs.overwhelmers = 'isolation';
+    else if (/uncertain|unsure|unclear|confus/.test(blob))            obs.overwhelmers = 'uncertainty';
+    agents.personModel.update(mem.model || (mem.model = agents.personModel.blankModel()), obs);
+    changed = true;
+  } catch (_) { /* model update is best-effort; never blocks a check-in */ }
 
   if (changed) {
     // Cap open threads at 20 (keep most recent unresolved)
@@ -2670,10 +2689,13 @@ app.get('/api/me/record', requireAuth, async (req, res) => {
   const enoughToReflect = (m?.moodSeries?.length || 0) >= 1 || Object.keys(portrait).length > 0 || goals.length > 0;
   if (enoughToReflect) {
     try {
+      // The person's own confidence-gated understanding shapes STYLE only.
+      const understanding = agents.personModel.understanding(userAiProfiles[`${code}:${userId}`]?.model);
       const { system, user } = agents.coachReflectionPrompt({
         name: me.name, values, goals,
         fingerprint: portrait, deviations: m?.deviations || [],
         trajectory, hasSensitiveContext: !!m?.hasSensitiveContext,
+        understanding,
       });
       reflection = await ai.complete({ tier: 'reason', system, user, maxTokens: 220 });
       // Belt-and-suspenders: strip any private span that could have slipped in.

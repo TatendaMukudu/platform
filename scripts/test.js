@@ -41,6 +41,7 @@ const SUITES = [
   'baseline-smoke.js',
   'intelligence-smoke.js',
   'privacy-smoke.js',
+  'person-model-smoke.js',
   'eval.js',
   'invariants.js',
 ];

@@ -67,5 +67,21 @@ const w = primitives.structuralPatterns([{ key:'p', label:'shift log-ins', primi
   series: [...Array(9)].map((_,i)=>({t:ago(45-i*5),v:5})).concat([{t:ago(4),v:1},{t:ago(1),v:1}]) }], now);
 law('withdrawal fires on ANY participation stream (domain-free)', w.some(f => f.type === 'withdrawal'));
 
+// ── LAW 10 · Person Model governance — Platform never sees the private model. ─
+const personModel = require('../ai/person-model');
+let pmM = personModel.blankModel();
+['teammates','teammates','teammates'].forEach(() => personModel.update(pmM, { motivators:'teammates', communication:'gentle' }));
+const pmPub = JSON.stringify(personModel.publicProjection(pmM));
+law('publicProjection leaks no private token', !/teammates|gentle|progress|brief|direct/.test(pmPub));
+law('publicProjection is contentless (hasModel/interactions only)',
+    Object.keys(personModel.publicProjection(pmM)).sort().join(',') === 'hasModel,interactions');
+law('Person Model stores no raw text (disclosure ignored)',
+    Object.keys(personModel.update(personModel.blankModel(), { overwhelmers:'my mother passed away last week' }).overwhelmers).length === 0);
+
+// ── LAW 11 · Reason is internal cognition — flagged internal, never graded. ──
+const rj = agents.reason({ id:'z', name:'Z', now, moodSeries: dip, deviations: [] }, { model: pmM });
+law('reason output is flagged internal (backstage)', rj.internal === true);
+law('reason output carries no graded score', !/\b\d{1,3}\/100\b/.test(JSON.stringify(rj)));
+
 console.log(`\ninvariants: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

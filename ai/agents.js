@@ -28,13 +28,18 @@
 
 const intelligence = require('./intelligence');
 const baseline     = require('./baseline');
+const personModel  = require('./person-model');
 
+// The cognitive spine (council-ratified 2026-07-09). Six stages, one hard split:
+// the kernel REASONS internally; the person experiences COACHING. Reason may use
+// sensitive signals and is never surfaced raw; Coach is the only external face.
 const AGENTS = {
   observer:  { role: 'I notice',   job: 'evidence → self-relative observations' },
   historian: { role: 'I remember', job: 'observations → durable memory' },
-  analyst:   { role: 'I connect',  job: 'observations + memory → patterns & assessment' },
-  coach:     { role: 'I reflect',  job: 'assessment → guidance for a human' },
-  learner:   { role: 'I improve',  job: 'action → outcome → what-works' },
+  analyst:   { role: 'I connect',  job: 'observations + memory → patterns & connections' },
+  reasoner:  { role: 'I reason',   job: 'connections + understanding → a private judgment (internal)' },
+  coach:     { role: 'I reflect',  job: 'judgment → warm, gated guidance for a human' },
+  learner:   { role: 'I improve',  job: 'action → outcome → what-works + the Person Model' },
 };
 
 /* ── ANALYST ───────────────────────────────────────────────────────────────
@@ -48,16 +53,52 @@ function analyst(memberInput, learning = {}) {
   return { patterns, assessment };            // assessment is null when nothing fired
 }
 
+/* ── REASON (internal cognition — NEVER surfaced raw) ──────────────────────
+   The private judgment stage between Analyst (connect) and Coach (reflect).
+   It weighs the analyst's assessment, the person's confidence-gated Person Model
+   understanding, and whether sensitive context is present, into ONE internal
+   read: how confident we are and what to attend to. It MAY be informed by
+   sensitive signals; its output is marked `internal: true` and must never reach
+   a human verbatim — only the Coach, gated, turns it into words. Pure/testable. */
+function reason(memberInput, { learning = {}, model = null, hasSensitiveContext = false } = {}) {
+  const { patterns, assessment } = analyst(memberInput, learning);
+  const understood  = personModel.understanding(model);
+  const signalCount = (patterns || []).length;
+  // Honest confidence: never "clear" on a single thin signal; the evidenced
+  // Person Model is what lets a lone signal graduate from tentative to emerging.
+  const confidence = signalCount === 0 ? 'none'
+    : signalCount >= 2 ? 'clear'
+    : personModel.isEvidenced(model) ? 'emerging' : 'tentative';
+  return {
+    internal: true,                 // marker: backstage cognition, never shown raw
+    confidence,                     // none | tentative | emerging | clear
+    attendTo: (patterns || []).slice(0, 2).map(p => p.type).filter(Boolean),
+    understanding: understood,      // confidence-gated tokens (no text)
+    hasSensitiveContext: !!hasSensitiveContext,
+    assessment,                     // analyst's composed item (already privacy-safe)
+  };
+}
+
 /* ── COACH (person-facing) ─────────────────────────────────────────────────
    Builds the reflection prompt for IntelliQ — the person's OWN mirror. Warm,
    brief, self-relative, anchored in THEIR values and goals. Never scores, never
    ranks, never names private detail (sensitive context only softens tone).
    Returns { system, user } for the gateway; the caller runs it (single AI path).
    This is the IntelliQ magic, and its whole job is to make someone feel SEEN. */
-function coachReflectionPrompt({ name, values = [], goals = [], fingerprint = {}, deviations = [], trajectory, hasSensitiveContext = false }) {
+function coachReflectionPrompt({ name, values = [], goals = [], fingerprint = {}, deviations = [], trajectory, hasSensitiveContext = false, understanding = {} }) {
+  // Person Model adaptation — style only, never substance. These come from the
+  // confidence-gated model (categorical tokens, no text), so they only apply
+  // once we've genuinely learned the person. They shape emphasis, never honesty.
+  const styleHints = [];
+  if (understanding.communication?.value === 'brief')  styleHints.push('Keep it to 2 sentences — they respond to brevity.');
+  if (understanding.communication?.value === 'gentle') styleHints.push('Lean gentle — a soft touch lands best with them.');
+  if (understanding.coaching?.value === 'questioning') styleHints.push('Prefer an open question over a suggestion — they grow by reasoning it out themselves.');
+  if (understanding.motivators?.value)                 styleHints.push(`What tends to move them is ${understanding.motivators.value} — let that shape your emphasis, not your honesty.`);
+
   const system = [
     `You are IntelliQ — a personal reflection companion that belongs to ${name || 'this person'}. You are their MIRROR, not their judge. You help them see themselves clearly and grow into who THEY are trying to become.`,
     `Voice: warm, specific, unhurried, honest. Speak to them as "you". 2–3 sentences. Like someone who has paid close attention and genuinely cares.`,
+    styleHints.length ? `What you've learned about them over time (shape emphasis only):\n- ${styleHints.join('\n- ')}` : '',
     `Hard rules:
 - Reason from THEIR OWN values and goals — never impose outside standards.
 - Compare them only to THEIR OWN normal (self-relative). Never to other people.
@@ -156,4 +197,4 @@ function confidencePhrase(confidence) {
        : 'an early, tentative signal';
 }
 
-module.exports = { AGENTS, analyst, crossSignal, coachReflectionPrompt, confidencePhrase };
+module.exports = { AGENTS, analyst, reason, crossSignal, coachReflectionPrompt, confidencePhrase, personModel };
