@@ -22,3 +22,20 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Run the truth layer
         run: npm test
+
+  frontend-smoke:
+    name: frontend smoke (real browser, all pages)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      # Install the browser playwright-core will drive (script resolves it via
+      # chromium.executablePath()). --with-deps pulls the required system libs.
+      - name: Install Chromium
+        run: npx --yes playwright@1 install --with-deps chromium
+      - name: Boot the app in a real browser and click every page
+        run: npm run smoke:frontend
