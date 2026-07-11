@@ -566,3 +566,7 @@
 }
 .composer-mood-faces button:active   { transform: scale(0.9); }
 .composer-mood-faces button.selected { border-color: var(--accent); background: var(--accent-soft); }
+
+/* ── Notes options (tucked away for a clean default) ────────────────────── */
+.note-opt-label { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.4rem; }
+#note-content { min-height: 90px; }

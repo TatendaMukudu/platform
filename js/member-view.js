@@ -423,6 +423,12 @@ const MemberApp = {
     this._renderMeContext();
   },
 
+  /* Reveal/hide the Notes extras (tags, visibility, group) — clean by default. */
+  toggleNoteOptions() {
+    const el = document.getElementById('note-options');
+    if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  },
+
   /* Optional mood on the composer (tap-to-toggle). */
   composeMood(n) {
     this._composerMood = (this._composerMood === n) ? null : n;

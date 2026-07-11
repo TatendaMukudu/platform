@@ -4,8 +4,8 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Platform — IntelliQ Ecosystem</title>
-<link rel="stylesheet" href="css/styles.css?v=20260711d"/>
-<link rel="stylesheet" href="css/member.css?v=20260711d"/>
+<link rel="stylesheet" href="css/styles.css?v=20260711e"/>
+<link rel="stylesheet" href="css/member.css?v=20260711e"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -1028,14 +1028,20 @@
           <div class="page-header-title">Notes</div>
           <div class="page-header-sub">What do you want IntelliQ to remember?</div>
         </div>
-        <div class="card" style="margin-bottom:0.8rem">
-          <div class="card-label" style="margin-bottom:0.7rem">New Note</div>
-          <textarea class="form-input" id="note-content" rows="3" style="resize:none;margin-bottom:0.4rem"
-            placeholder="Write anything — a goal, a reflection, something you want to remember…"></textarea>
-          <div id="note-composer-tools" data-iqcompose="note-content" style="margin-bottom:0.6rem"></div>
-          <div style="margin-bottom:0.7rem">
-            <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.4rem">Tag <span style="font-weight:400">(optional)</span></div>
-            <div style="display:flex;gap:0.35rem;flex-wrap:wrap" id="note-tags-row">
+        <div class="card iq-composer" style="margin-bottom:1rem">
+          <div class="card-label">Add a note</div>
+          <textarea class="note-input" id="note-content"
+            placeholder="Anything you want to remember — a goal, a reflection, a thought. IntelliQ keeps it for you."></textarea>
+          <div id="note-composer-tools" data-iqcompose="note-content" style="margin:0.5rem 0"></div>
+          <div class="composer-actions">
+            <button class="btn-primary" id="notes-submit-btn" onclick="MemberApp.submitNote()">Add</button>
+            <button class="btn btn-outline btn-sm" type="button" onclick="MemberApp.toggleNoteOptions()">Options</button>
+            <span id="notes-status" style="font-size:0.78rem;color:var(--text-muted)"></span>
+          </div>
+          <!-- Extras stay out of the way until asked for — clean by default. -->
+          <div id="note-options" style="display:none;margin-top:0.9rem">
+            <div class="note-opt-label">Tag <span style="font-weight:400">(optional)</span></div>
+            <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.8rem" id="note-tags-row">
               <button class="note-tag-btn active" data-tag=""        onclick="MemberApp.selectNoteTag('')">None</button>
               <button class="note-tag-btn" data-tag="Goals"    onclick="MemberApp.selectNoteTag('Goals')">Goals</button>
               <button class="note-tag-btn" data-tag="Activity" onclick="MemberApp.selectNoteTag('Activity')">Activity</button>
@@ -1044,23 +1050,20 @@
               <button class="note-tag-btn" data-tag="Mental"   onclick="MemberApp.selectNoteTag('Mental')">Mental</button>
               <button class="note-tag-btn" data-tag="Other"    onclick="MemberApp.selectNoteTag('Other')">Other</button>
             </div>
-          </div>
-          <div style="margin-bottom:0.7rem">
-            <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.4rem">Who sees this?</div>
+            <div class="note-opt-label">Who sees this?</div>
             <div style="display:flex;gap:0.4rem;flex-wrap:wrap">
               <button class="note-type-btn active" data-type="private"   onclick="MemberApp.selectNoteType('private')">Private</button>
               <button class="note-type-btn"        data-type="shared"    onclick="MemberApp.selectNoteType('shared')">Shared</button>
               <button class="note-type-btn"        data-type="anonymous" onclick="MemberApp.selectNoteType('anonymous')">Anonymous</button>
             </div>
             <div id="note-type-desc" style="font-size:0.74rem;color:var(--text-muted);margin-top:0.4rem">Only you and IntelliQ see this.</div>
+            <div id="note-group-row" style="display:none;margin-top:0.6rem">
+              <div class="note-opt-label">Post to group</div>
+              <select class="form-input" id="note-group-id" style="font-size:0.82rem">
+                <option value="">— Select group —</option>
+              </select>
+            </div>
           </div>
-          <div id="note-group-row" style="display:none;margin-bottom:0.6rem">
-            <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.3rem">Post to group</div>
-            <select class="form-input" id="note-group-id" style="font-size:0.82rem">
-              <option value="">— Select group —</option>
-            </select>
-          </div>
-          <button class="btn-primary" id="notes-submit-btn" style="padding:0.6rem 1rem;font-size:0.85rem" onclick="MemberApp.submitNote()">Save Note</button>
         </div>
         <div id="note-ai-response" style="display:none;margin-bottom:0.8rem">
           <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06)">
@@ -1073,7 +1076,7 @@
             </div>
           </div>
         </div>
-        <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.6rem" id="notes-filter-row">
+        <div style="display:none;gap:0.35rem;flex-wrap:wrap;margin-bottom:0.6rem" id="notes-filter-row">
           <button class="note-tag-btn active" data-filter="All"      onclick="MemberApp._filterNotes('All')">All</button>
           <button class="note-tag-btn" data-filter="Goals"    onclick="MemberApp._filterNotes('Goals')">Goals</button>
           <button class="note-tag-btn" data-filter="Activity" onclick="MemberApp._filterNotes('Activity')">Activity</button>
@@ -1778,8 +1781,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260711d"></script>
-<script src="js/auth.js?v=20260711d"></script>
+<script src="js/data.js?v=20260711e"></script>
+<script src="js/auth.js?v=20260711e"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1847,14 +1850,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260711d"></script>
-<script src="js/ui.js?v=20260711d"></script>
-<script src="js/attachments.js?v=20260711d"></script>
-<script src="js/scenarios.js?v=20260711d"></script>
-<script src="js/chat.js?v=20260711d"></script>
-<script src="js/tree.js?v=20260711d"></script>
-<script src="js/app.js?v=20260711d"></script>
-<script src="js/member-view.js?v=20260711d"></script>
+<script src="js/charts.js?v=20260711e"></script>
+<script src="js/ui.js?v=20260711e"></script>
+<script src="js/attachments.js?v=20260711e"></script>
+<script src="js/scenarios.js?v=20260711e"></script>
+<script src="js/chat.js?v=20260711e"></script>
+<script src="js/tree.js?v=20260711e"></script>
+<script src="js/app.js?v=20260711e"></script>
+<script src="js/member-view.js?v=20260711e"></script>
 
 <script>
 function switchGrade(g){
