@@ -88,6 +88,20 @@ const server = app.listen(0, async () => {
     ok('a neutral check-in stays visible to the leader',
        aEntries.some(e => e.private === false && typeof e.text === 'string'));
 
+    // ── Phase 4: approve → execute → observe → learn loop (self-scoped) ──────
+    const appr = await call('/api/me/prepared/act', tokA, { method: 'POST', body: { text: 'A small, supportive focus this week.', type: 'momentum_drop', decision: 'approve' } });
+    ok('approving a prepared suggestion creates an active focus',
+       appr.status === 200 && appr.j?.ok === true && (appr.j.focuses || []).length >= 1);
+    const focusId = (appr.j.focuses || [])[0]?.id;
+    const ctx2 = await call('/api/me/context', tokA);
+    ok('the approved focus appears in the Me context', (ctx2.j?.focuses || []).some(f => f.id === focusId));
+    const out = await call('/api/me/focus/outcome', tokA, { method: 'POST', body: { focusId, outcome: 'helped' } });
+    ok('reporting an outcome closes the loop (Observe → Learn)', out.status === 200 && out.j?.ok === true);
+    const ctx3 = await call('/api/me/context', tokA);
+    ok('a resolved focus leaves the active list', !(ctx3.j?.focuses || []).some(f => f.id === focusId));
+    ok('outcome + focus endpoints reject a bad payload (400)',
+       (await call('/api/me/focus/outcome', tokA, { method: 'POST', body: { focusId: 'nope', outcome: 'weird' } })).status === 400);
+
   } catch (e) {
     fail++; console.log('  ✗ threw:', e.message);
   } finally {

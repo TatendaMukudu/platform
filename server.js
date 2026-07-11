@@ -507,12 +507,14 @@ function _getMemory(orgCode, userId) {
       openThreads:    [],  // [{ id, text, source, date, occurrences, resolved }]
       recentThemes:   [],  // string[], max 10
       priorFollowUps: [],  // [{ id, commitment, source, date, resolved }]
+      focuses:        [],  // [{ id, text, type, status:'active'|'done', outcome, createdAt }] — approved work
       model:          agents.personModel.blankModel(),  // the Person Model (self-owned, categorical tokens only)
       lastUpdated:    null,
     };
   }
-  // Back-fill the model for profiles created before it existed.
-  if (!userAiProfiles[key].model) userAiProfiles[key].model = agents.personModel.blankModel();
+  // Back-fill fields for profiles created before they existed.
+  if (!userAiProfiles[key].model)   userAiProfiles[key].model   = agents.personModel.blankModel();
+  if (!userAiProfiles[key].focuses) userAiProfiles[key].focuses = [];
   return userAiProfiles[key];
 }
 
@@ -2613,18 +2615,25 @@ app.post('/api/intelligence/outcome', requireAuth, (req, res) => {
    Either lens sends { type, feedback:'useful'|'dismiss' }. The kernel learns which
    KINDS of noticing are actually useful here, and stops surfacing the ones that
    aren't. This is how proactivity earns (or loses) the right to speak. */
+/* Record a useful/dismiss signal for a noticing TYPE and invalidate the caches
+   it affects. Shared by the leader feedback endpoint and the member Learn loop. */
+function _recordNoticeFeedback(code, type, feedback) {
+  if (!['useful', 'dismiss'].includes(feedback)) return null;
+  if (!noticeFeedback[code]) noticeFeedback[code] = {};
+  const t = noticeFeedback[code][String(type)] || (noticeFeedback[code][String(type)] = { useful: 0, dismiss: 0 });
+  t[feedback]++;
+  Object.keys(intelBriefingCache).forEach(k => { if (k.startsWith(code + ':')) intelBriefingCache[k] = null; });
+  Object.keys(meRecordCache).forEach(k => { if (k.startsWith(code + ':')) meRecordCache[k] = null; });
+  scheduleSave();
+  return t;
+}
+
 app.post('/api/intelligence/notice-feedback', requireAuth, (req, res) => {
   const { orgCode } = req.iqSession;
   const code = orgCode;
   const { type, feedback } = req.body || {};
   if (!type || !['useful', 'dismiss'].includes(feedback)) return res.status(400).json({ error: 'type and useful|dismiss required' });
-  if (!noticeFeedback[code]) noticeFeedback[code] = {};
-  const t = noticeFeedback[code][String(type)] || (noticeFeedback[code][String(type)] = { useful: 0, dismiss: 0 });
-  t[feedback]++;
-  // Feedback changes what should surface — clear caches so it takes effect now.
-  Object.keys(intelBriefingCache).forEach(k => { if (k.startsWith(code + ':')) intelBriefingCache[k] = null; });
-  Object.keys(meRecordCache).forEach(k => { if (k.startsWith(code + ':')) meRecordCache[k] = null; });
-  scheduleSave();
+  const t = _recordNoticeFeedback(code, type, feedback);
   res.json({ ok: true, reliability: confidence.label(confidence.reliability(t)) });
 });
 
@@ -2758,10 +2767,15 @@ app.get('/api/me/context', requireAuth, (req, res) => {
   const questions = (mem.openThreads || []).filter(t => !t.resolved).slice(0, 4)
     .map(t => ({ id: t.id, text: t.text }));
 
-  // Prepared — one gentle, approvable suggestion from the top signal.
+  // Prepared — one gentle, approvable suggestion from the top signal. Carries the
+  // pattern type so approving it can close the loop (Learn) later.
   const prepared = [];
   const top = (m?.structural || [])[0] || (m?.deviations || [])[0];
-  if (top) prepared.push({ text: top.type ? (intel.DEFAULT_ACTION[top.type] || 'A small, supportive focus this week.') : 'A small, supportive focus this week.' });
+  const activeFocusTexts = new Set((mem.focuses || []).filter(f => f.status === 'active').map(f => f.text));
+  if (top) {
+    const ptext = top.type ? (intel.DEFAULT_ACTION[top.type] || 'A small, supportive focus this week.') : 'A small, supportive focus this week.';
+    if (!activeFocusTexts.has(ptext)) prepared.push({ text: ptext, type: top.type || null });
+  }
 
   // A deterministic, honest opening line (no AI needed).
   const hour = new Date().getHours();
@@ -2775,8 +2789,12 @@ app.get('/api/me/context', requireAuth, (req, res) => {
   mem.lastSeen = new Date().toISOString();
   scheduleSave();
 
+  // Active focuses — approved work still in flight (the person's own commitments).
+  const focuses = (mem.focuses || []).filter(f => f.status === 'active')
+    .map(f => ({ id: f.id, text: f.text }));
+
   res.json({
-    ok: true, name: me.name, greeting, opening, newSince, noticed, questions, prepared,
+    ok: true, name: me.name, greeting, opening, newSince, noticed, questions, prepared, focuses,
     understanding: agents.personModel.understanding(mem.model),
     trajectory: m?.memberTrajectory || null,
   });
@@ -2828,6 +2846,61 @@ app.post('/api/compose', requireAuth, async (req, res) => {
     noticed,
     understanding: agents.personModel.understanding(_getMemory(code, userId).model),
   });
+});
+
+/* POST /api/me/prepared/act — approve (or dismiss) a prepared suggestion.
+   Approve → it becomes one of the person's own active focuses (the visible
+   Recommend → Approve → Execute step). Self-scoped. */
+app.post('/api/me/prepared/act', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const { text, type, decision } = req.body || {};
+  if (!code || !userId) return res.status(403).json({ error: 'Forbidden' });
+  if (!text || (decision !== 'approve' && decision !== 'dismiss')) {
+    return res.status(400).json({ error: 'text and decision (approve|dismiss) required' });
+  }
+  const mem = _getMemory(code, userId);
+  if (decision === 'approve') {
+    mem.focuses = mem.focuses || [];
+    mem.focuses.unshift({
+      id: 'foc_' + generateId(), text: String(text).slice(0, 300), type: type || null,
+      status: 'active', outcome: null, createdAt: new Date().toISOString(),
+    });
+  } else {
+    // Dismiss teaches the Confidence Engine this kind of nudge didn't land for them.
+    if (type) { try { _recordNoticeFeedback(code, type, 'dismiss'); } catch (_) {} }
+  }
+  mem.lastUpdated = new Date().toISOString();
+  scheduleSave();
+  res.json({ ok: true, focuses: (mem.focuses || []).filter(f => f.status === 'active').map(f => ({ id: f.id, text: f.text })) });
+});
+
+/* POST /api/me/focus/outcome — close the loop: report how an approved focus went.
+   Observe outcome → LEARN. Resolves the focus and teaches the Confidence Engine
+   (helped → useful; didn't → dismiss) for the pattern type that suggested it.
+   Self-scoped. This is the lifecycle's final step (…Execute → Observe → Learn). */
+app.post('/api/me/focus/outcome', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const { focusId, outcome } = req.body || {};
+  if (!code || !userId) return res.status(403).json({ error: 'Forbidden' });
+  if (!focusId || !['helped', 'no', 'mixed'].includes(outcome)) {
+    return res.status(400).json({ error: 'focusId and outcome (helped|no|mixed) required' });
+  }
+  const mem = _getMemory(code, userId);
+  const f = (mem.focuses || []).find(x => x.id === focusId);
+  if (!f) return res.status(404).json({ error: 'focus not found' });
+
+  f.status = 'done';
+  f.outcome = outcome;
+  f.resolvedAt = new Date().toISOString();
+
+  // LEARN — feed the Confidence Engine so what genuinely helps this person
+  // surfaces more, and what doesn't fades.
+  if (f.type && outcome !== 'mixed') {
+    try { _recordNoticeFeedback(code, f.type, outcome === 'helped' ? 'useful' : 'dismiss'); } catch (_) {}
+  }
+  mem.lastUpdated = new Date().toISOString();
+  scheduleSave();
+  res.json({ ok: true });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════

@@ -358,9 +358,69 @@ const MemberApp = {
           <button class="btn btn-outline btn-sm" onclick="MemberApp.resolveThread('${q.id}')">Resolved</button>
         </div>`).join('')}` : '';
 
-    if (prepEl) prepEl.innerHTML = (d.prepared && d.prepared.length) ? `
-      <div class="me-section-label">Prepared for you</div>
-      ${d.prepared.map(p => `<div class="card me-row"><div class="me-row-text">${this._escape(p.text)}</div></div>`).join('')}` : '';
+    // Prepared (approvable) + active focuses (report outcome) — the visible
+    // Recommend → Approve → Execute → Observe → Learn lifecycle.
+    this._prepared = d.prepared || [];
+    this._focuses  = d.focuses || [];
+    if (prepEl) {
+      let html = '';
+      if (this._prepared.length) {
+        html += `<div class="me-section-label">Prepared for you</div>` + this._prepared.map((p, i) => `
+          <div class="card me-row">
+            <div style="flex:1" class="me-row-text">${this._escape(p.text)}</div>
+            <div class="me-row-actions">
+              <button class="btn-primary btn-sm" onclick="MemberApp.approvePrepared(${i})">Approve</button>
+              <button class="btn btn-outline btn-sm" onclick="MemberApp.dismissPrepared(${i})">Not now</button>
+            </div>
+          </div>`).join('');
+      }
+      if (this._focuses.length) {
+        html += `<div class="me-section-label">Your focus</div>` + this._focuses.map(f => `
+          <div class="card me-row me-focus-row">
+            <div style="flex:1" class="me-row-text">${this._escape(f.text)}</div>
+            <div class="me-row-actions">
+              <button class="btn btn-outline btn-sm" onclick="MemberApp.focusOutcome('${f.id}','helped')">Helped</button>
+              <button class="btn btn-outline btn-sm" onclick="MemberApp.focusOutcome('${f.id}','no')">Didn't</button>
+            </div>
+          </div>`).join('');
+      }
+      prepEl.innerHTML = html;
+    }
+  },
+
+  /* Approve a prepared suggestion → it becomes one of your active focuses. */
+  async approvePrepared(i) {
+    const p = (this._prepared || [])[i]; if (!p) return;
+    try {
+      await fetch('/api/me/prepared/act', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ text: p.text, type: p.type || null, decision: 'approve' }),
+      });
+    } catch (_) {}
+    this._renderMeContext();
+  },
+
+  /* Dismiss a prepared suggestion (teaches IntelliQ this nudge didn't land). */
+  async dismissPrepared(i) {
+    const p = (this._prepared || [])[i]; if (!p) return;
+    try {
+      await fetch('/api/me/prepared/act', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ text: p.text, type: p.type || null, decision: 'dismiss' }),
+      });
+    } catch (_) {}
+    this._renderMeContext();
+  },
+
+  /* Close the loop on a focus — how did it go? (Observe outcome → Learn.) */
+  async focusOutcome(focusId, outcome) {
+    try {
+      await fetch('/api/me/focus/outcome', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ focusId, outcome }),
+      });
+    } catch (_) {}
+    this._renderMeContext();
   },
 
   /* The universal composer — one input; the AI decides what it is + what's next. */
