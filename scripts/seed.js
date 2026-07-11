@@ -154,7 +154,18 @@ async function main() {
     traits: ['Discipline', 'Team-first'], copilotEnabled: false, createdAt: iso(dAgo(200)),
   }];
 
-  const store = { orgMeta, orgUsers, emailIndex, memberGoals, memberCheckins, orgSignals, orgGroups, orgValues, orgGoals };
+  // Additive by default: merge the demo org INTO the existing store so we never
+  // wipe other orgs (e.g. a real pilot org). Set SEED_REPLACE=1 to overwrite.
+  const demo = { orgMeta, orgUsers, emailIndex, memberGoals, memberCheckins, orgSignals, orgGroups, orgValues, orgGoals };
+  let store = demo;
+  if (process.env.SEED_REPLACE !== '1') {
+    const existing = await db.loadMain();
+    store = { ...existing };
+    for (const [k, v] of Object.entries(demo)) store[k] = { ...(existing[k] || {}), ...v };
+    console.log('  (additive merge — existing orgs preserved; SEED_REPLACE=1 to overwrite)');
+  } else {
+    console.log('  (SEED_REPLACE=1 — overwriting the entire store)');
+  }
   await db.saveMain(store);
 
   const ckCount = Object.values(memberCheckins).reduce((n, a) => n + a.length, 0);
