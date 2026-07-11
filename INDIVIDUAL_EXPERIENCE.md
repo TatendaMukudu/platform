@@ -99,21 +99,85 @@ player; the coach sees themes, never private words").
 
 ---
 
-## Suggested phasing
+## Council round 2 (2026-07-09) — sharpening the identity
 
-- **Phase 1 (the wedge, buildable now):** one **universal composer** (text +
-  voice + file to start) feeding **one Space, "Me"**, with an **"already worked"
-  open-state** and **event-triggered** reasoning. Put it in front of ONE real
-  coach/athlete. Prove the composer's auto-understanding and the proactive
-  open-state actually land.
-- **Phase 2:** multiple Spaces; the input→reason→prepare→**approve**→execute
-  lifecycle made visible; the composer's confidence-gated routing + correction.
-- **Phase 3:** shared Spaces with explicit advocacy + per-participant permissions.
-- **Phase 4:** the connector zoo (calendar, health, connected apps) and richer
-  continuous reasoning.
+GPT weighed in (9.8/10) and pushed the identity sharper. Founder agrees; Claude
+concurs with the guardrails below. Now canon.
 
-Ship the *feeling* in Phase 1 with the smallest surface. Everything else earns
-its place from real use.
+### 1. Contexts, not storage Spaces
+A Space is not another place to store things — it is **a different version of the
+intelligence.** The kernel is identical; the *reasoning stance* changes with the
+context: Soccer → performance coach, Startup → cofounder, School → tutor. This is
+literally our **"no logic, yes parameters"** law at the UX level — the Domain Pack
+parameterises the kernel's stance. Far more valuable than folders.
+> *Claude's guardrail:* the persona is a **lens, not a license.** The stance
+> changes tone, priorities, vocabulary — never the product laws. Soccer-coach
+> IntelliQ still gives no scores, stays self-relative, stays privacy-gated.
+> "Context" is the architecture truth; the user-facing label can stay warm
+> ("your Soccer").
+
+### 2. The composer's positioning: "What happened?" not "What are you trying to do?"
+Every productivity app makes the user declare intent and structure first.
+IntelliQ asks only *what happened* and figures out the rest. That inversion is
+the monopoly feature.
+
+### 3. Proactive is the whole first experience
+The home screen **is** the briefing — no "Start typing…". *"Good evening. Since
+yesterday: recovery improved; tomorrow looks overloaded; a conflict between your
+goals and your calendar; your coach mentioned something worth discussing.
+Review?"* The user has done nothing; the software already has.
+
+### 4. Reasoning is the interface — chat is almost last
+A context opens as a reasoning surface: **Intelligence · Things I've noticed ·
+Questions · Suggestions · Pending approvals · Recent evidence · People · Goals ·
+History · Media · Chat** (chat last, on purpose). This is the UX consequence of
+the Reason/Coach split — reasoning is the product, chat is one capability.
+
+### 5. Memory is organised by reasoning, not chronology
+Not "Yesterday / Tuesday / Last week" — instead **Current priorities · Emerging
+patterns · Unresolved questions · Evidence · Contradictions · Decisions.** Humans
+think in people/goals/patterns/decisions, not transcripts. The kernel already
+produces this shape; the UI must expose it instead of a timeline.
+
+### 6. The lifecycle closes with LEARN
+`Input → Reason → Connect → Recommend → Approve → Execute →` **`Observe outcome →
+Learn → Update Person Model.`** Execution isn't the end — it creates new evidence
+that changes the model. This is what makes IntelliQ improve over *months* instead
+of just completing tasks. We built the pieces (Learner agent, the `/outcome`
+feedback, the Person Model update); the weak link is the **outcome signal** — it
+needs the human to report or the system to detect it. Nurture it.
+
+### 7. Epistemic honesty — the AI may admit uncertainty
+*"I have two competing explanations for why sales dropped — A and B. I need one
+more piece of evidence before I'm confident."* Rare in AI products, and it fits
+our Confidence Engine + correlation-not-cause + causal-ladder work.
+> *Claude's guardrail:* surface competing hypotheses only when the kernel
+> genuinely has divergent signals — gate it like everything else, or it becomes
+> theatre ("A: good; B: bad"). A destination feature, not Phase 1.
+
+### The sharpened identity (the 0.2 to a 10)
+Think in **contexts, not storage**; make **proactive intelligence the first thing
+every user experiences**; let **reasoning, not chat, be the primary interface**;
+**close the loop with learning from outcomes.** Then IntelliQ stops being "an AI
+productivity app" and becomes an OS that quietly understands every domain of your
+life and prepares work before you ask.
+
+---
+
+## Suggested phasing (council-agreed sequence)
+
+1. **Universal composer** — one input; the AI decides what it is.
+2. **One "Me" context** — a single reasoning stance to start.
+3. **Proactive home** — "I've already done the work" is the first screen.
+4. **Event-driven reasoning** — reason on new input / on entering a context (not a clock).
+5. **Approval workflow** — the Recommend → **Approve** → Execute step, visible.
+6. **Multi-context** — Soccer, School, Startup (each a reasoning stance, not a folder).
+7. **Shared contexts** — explicit advocacy + per-participant permissions.
+8. **Connectors + richer automation** — calendar, health, connected apps; the Learn loop deepens.
+
+This gets the **core feeling** into a real user's hands at step 3, with the
+smallest surface. Everything after earns its place from real use. Ship the
+feeling first; the cathedral comes later, one validated brick at a time.
 
 ---
 
@@ -126,10 +190,18 @@ its place from real use.
    input / on entering a Space), not a background clock?
 4. **Advocacy model:** how does the AI declare and enforce "whose side I'm on" in
    a shared Space, and how is that surfaced to every participant?
-5. **Phase-1 cut:** is composer + single "Me" Space + proactive open-state the
+5. **Phase-1 cut:** is composer + single "Me" context + proactive open-state the
    right smallest wedge, or is there a smaller one that still delivers the feeling?
-6. **What breaks a product law?** Anything here — especially shared-Space
+6. **What breaks a product law?** Anything here — especially shared-context
    summarisation — that the privacy tests must guard before we build it?
+7. **Context = reasoning stance:** should each context map to a Domain Pack that
+   parameterises the kernel's tone/priorities, with the product laws held
+   constant across all of them? (Claude's position: yes — persona is a lens,
+   never a license.)
+8. **Reasoning-first layout:** adopt the section order (Intelligence → … → Chat
+   last) as the standard context view, replacing the chronological timeline?
+9. **Epistemic honesty:** what's the evidence bar for surfacing competing
+   hypotheses so it never degrades into theatre?
 
 ---
 *Founder is not the relay — weigh in on the linked RFC issue. A weigh-in that
