@@ -6940,6 +6940,24 @@ if (require.main === module) (async () => {
     // 5. Repair emailIndex (handles any missing entries from loaded data)
     _rebuildEmailIndex();
 
+    // 5a2. Optional demo seed on boot — for hosts with no shell (e.g. Render free
+    //      tier). Set SEED_DEMO=1 to add the demo squad; idempotent (skips if the
+    //      demo org already exists) and additive (never wipes other orgs).
+    if (process.env.SEED_DEMO === '1') {
+      try {
+        const seed = require('./scripts/seed');
+        if (!orgMeta[seed.DEMO_CODE]) {
+          const demo = await seed.buildDemoStore();
+          _loadAllStores(demo);          // additive merge into the in-memory stores
+          _rebuildEmailIndex();
+          scheduleSave();
+          console.log(`[seed] SEED_DEMO=1 — demo squad added (${seed.DEMO_CODE}). Log in: coach@demo.club / maya@demo.club (demo1234).`);
+        } else {
+          console.log('[seed] SEED_DEMO=1 but demo org already present — skipping.');
+        }
+      } catch (e) { console.warn('[seed] boot seed failed (non-fatal):', e.message); }
+    }
+
     // 5b. Derive user.assignedNodeIds / user.leadershipNodeIds from orgNodes
     _backfillUserNodeIds();
 

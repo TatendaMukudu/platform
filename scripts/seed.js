@@ -34,8 +34,10 @@ const dstr = dt => dt.toLocaleDateString('en-GB');
 const ukey = uid => `${CODE}:${uid}`;
 const MOODLBL = { 1: 'Rough', 2: 'Low', 3: 'Okay', 4: 'Good', 5: 'Great' };
 
-async function main() {
-  await db.init();
+/* Pure builder — returns the demo org's store slice (no DB writes). Reused by the
+   CLI below and by the optional SEED_DEMO boot path in server.js (free tier has
+   no shell, so the demo is seedable via an env flag instead). */
+async function buildDemoStore() {
   const pass = await bcrypt.hash('demo1234', SALT);
 
   const coachId = rid();
@@ -154,31 +156,36 @@ async function main() {
     traits: ['Discipline', 'Team-first'], copilotEnabled: false, createdAt: iso(dAgo(200)),
   }];
 
-  // Additive by default: merge the demo org INTO the existing store so we never
-  // wipe other orgs (e.g. a real pilot org). Set SEED_REPLACE=1 to overwrite.
-  const demo = { orgMeta, orgUsers, emailIndex, memberGoals, memberCheckins, orgSignals, orgGroups, orgValues, orgGoals };
-  let store = demo;
-  if (process.env.SEED_REPLACE !== '1') {
-    const existing = await db.loadMain();
-    store = { ...existing };
-    for (const [k, v] of Object.entries(demo)) store[k] = { ...(existing[k] || {}), ...v };
-    console.log('  (additive merge — existing orgs preserved; SEED_REPLACE=1 to overwrite)');
-  } else {
-    console.log('  (SEED_REPLACE=1 — overwriting the entire store)');
-  }
-  await db.saveMain(store);
+  return { orgMeta, orgUsers, emailIndex, memberGoals, memberCheckins, orgSignals, orgGroups, orgValues, orgGoals };
+}
 
-  const ckCount = Object.values(memberCheckins).reduce((n, a) => n + a.length, 0);
+/* Merge a demo store slice into whatever's in `existing` (additive), unless
+   SEED_REPLACE=1. Returns the store to persist. Pure — no DB. */
+function mergeDemo(existing, demo, replace) {
+  if (replace) return demo;
+  const store = { ...existing };
+  for (const [k, v] of Object.entries(demo)) store[k] = { ...(existing[k] || {}), ...v };
+  return store;
+}
+
+const DEMO_CODE = CODE;
+
+async function main() {
+  await db.init();
+  const demo = await buildDemoStore();
+  const replace = process.env.SEED_REPLACE === '1';
+  const existing = replace ? {} : await db.loadMain();
+  await db.saveMain(mergeDemo(existing, demo, replace));
+
+  const ck = Object.values(demo.memberCheckins).reduce((n, a) => n + a.length, 0);
+  console.log(replace ? '  (SEED_REPLACE=1 — overwrote the entire store)' : '  (additive merge — existing orgs preserved)');
   console.log('');
-  console.log('✓ Seeded demo squad into the store.');
-  console.log(`  org: Demo Athletic Club (${CODE})`);
-  console.log(`  1 coach + ${athletes.length} athletes · ${ckCount} check-ins · ${orgSignals[CODE].length} signals`);
-  console.log('');
-  console.log('  Log in (password for all: demo1234):');
-  console.log('    Coach   → coach@demo.club');
-  console.log('    Athlete → maya@demo.club  (deshawn / priya / jordan / sam / chris @demo.club)');
+  console.log(`✓ Seeded demo squad · ${ck} check-ins · ${demo.orgSignals[CODE].length} signals`);
+  console.log('  Log in (password demo1234): coach@demo.club · maya@demo.club (deshawn/priya/jordan/sam/chris @demo.club)');
   console.log('');
   process.exit(0);
 }
 
-main().catch(err => { console.error('[seed] failed:', err); process.exit(1); });
+module.exports = { buildDemoStore, mergeDemo, DEMO_CODE };
+
+if (require.main === module) main().catch(err => { console.error('[seed] failed:', err); process.exit(1); });
