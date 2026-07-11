@@ -302,136 +302,133 @@ const MemberApp = {
   },
 
   /* ── HOME ───────────────────────────────────────────────── */
+  // ── The "Me" context — proactive, reasoning-first home (Individual Experience) ──
   _renderHome() {
-    const hour     = new Date().getHours();
+    const hour = new Date().getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-    document.getElementById('home-greeting').textContent = greeting;
-    document.getElementById('home-name').textContent     = this._name;
-    document.getElementById('home-org').textContent      = this._orgName;
+    const g = document.getElementById('home-greeting'); if (g) g.textContent = greeting;
+    const n = document.getElementById('home-name');     if (n) n.textContent = this._name;
+    // Reveal the voice affordance only where the browser supports it.
+    const mic = document.getElementById('composer-mic');
+    if (mic && (window.SpeechRecognition || window.webkitSpeechRecognition)) mic.style.display = '';
+    this._renderMeContext();
+  },
 
-    const avgScore = this.results.length
-      ? Math.round(this.results.reduce((sum, r) => sum + r.score, 0) / this.results.length) : null;
-    const streak   = this.checkins.length;
+  /* Fetch and render the proactive open-state: the kernel has "already worked".
+   Deterministic + privacy-safe — works with no AI key. */
+  async _renderMeContext() {
+    const briefEl = document.getElementById('me-briefing');
+    const notEl   = document.getElementById('me-noticed');
+    const qEl      = document.getElementById('me-questions');
+    const prepEl   = document.getElementById('me-prepared');
+    let d = null;
+    try {
+      const res = await fetch('/api/me/context', { headers: this._authHeaders() });
+      if (res.ok) d = await res.json();
+    } catch (_) {}
 
-    // IntelliQ is a mirror, not a scoreboard — no score, no streak. Direction
-    // (self-relative, filled by the record below) + honest counts.
-    document.getElementById('home-stat-row').innerHTML = `
-      <div class="stat-row">
-        <div class="stat-pill">
-          <div class="stat-pill-val" id="home-traj" style="font-size:1rem;color:var(--text-muted)">Building</div>
-          <div class="stat-pill-label">Your direction</div>
-        </div>
-        <div class="stat-pill">
-          <div class="stat-pill-val">${this.checkins.length}</div>
-          <div class="stat-pill-label">Reflections</div>
-        </div>
-        <div class="stat-pill">
-          <div class="stat-pill-val">${this.results.length}</div>
-          <div class="stat-pill-label">Completed</div>
-        </div>
+    if (!d || !d.ok) {
+      if (briefEl) briefEl.innerHTML = `<div class="card iq-briefing"><div class="iq-briefing-text">Welcome. Add anything on your mind below — IntelliQ takes it from there.</div></div>`;
+      [notEl, qEl, prepEl].forEach(e => { if (e) e.innerHTML = ''; });
+      return;
+    }
+
+    if (briefEl) briefEl.innerHTML = `
+      <div class="card iq-briefing">
+        <div class="iq-briefing-badge">IntelliQ · already reviewed</div>
+        <div class="iq-briefing-text">${this._escape(d.opening || '')}</div>
       </div>`;
 
-    this._renderWeeklyPrompt();
-
-    // ── Phase 4: Your Focus ──────────────────────────────────
-    const focusEl = document.getElementById('home-focus');
-    if (focusEl) {
-      if (this.goals?.goal) {
-        focusEl.innerHTML = `
-          <div class="card-label" style="margin-bottom:0.5rem">Your Focus</div>
-          <div class="card iq-focus-card" style="margin-bottom:0.8rem">
-            <div class="iq-focus-goal">
-              <span style="margin-right:0.4rem">🎯</span>
-              <span>${this._escape(this.goals.goal)}</span>
-            </div>
-            ${this.goals.identity ? `
-            <div class="iq-focus-identity">
-              Becoming: ${this._escape(this.goals.identity)}
-            </div>` : ''}
-          </div>`;
-      } else {
-        focusEl.innerHTML = '';
-      }
-    }
-
-    // ── Phase 4: Latest IntelliQ Insight ─────────────────────
-    const insightEl = document.getElementById('home-insight');
-    if (insightEl) {
-      const insight = this.latestInsight;
-      if (insight) {
-        insightEl.innerHTML = `<div class="card-label" style="margin-bottom:0.5rem">Latest IntelliQ Insight</div>`;
-        const wrapper = document.createElement('div');
-        wrapper.style.marginBottom = '0.8rem';
-        insightEl.appendChild(wrapper);
-        this._renderInsightPanel(wrapper, null, insight);
-      } else if (this.checkins.length === 0) {
-        insightEl.innerHTML = `
-          <div class="empty-card" style="margin-bottom:0.8rem">
-            <div class="empty-icon">${ICON.spark}</div>
-            <div>Submit your first check-in and IntelliQ will start building a picture of your progress.</div>
-          </div>`;
-      } else {
-        insightEl.innerHTML = '';
-      }
-    }
-
-    // ── Phase 4: Progress Signals ─────────────────────────────
-    const progressEl = document.getElementById('home-progress');
-    if (progressEl) {
-      progressEl.innerHTML = this._renderProgressSignals();
-    }
-
-    const pendingEl = document.getElementById('home-pending');
-    const pending   = this.pending.filter(s => s.status === 'pending');
-    pendingEl.innerHTML = pending.length
-      ? pending.slice(0, 3).map(sc => this._scenarioCardHTML(sc)).join('')
-      : `<div class="empty-card"><div class="empty-icon">🎯</div><div>No pending scenarios.<br>Check back after your next session.</div></div>`;
-
-    const checkinEl    = document.getElementById('home-checkin-prompt');
-    const checkedToday = this._checkedInToday();
-    checkinEl.innerHTML = checkedToday
-      ? `<div class="card" style="border-color:rgba(79,247,122,0.3)">
-           <div style="display:flex;align-items:center;gap:0.6rem">
-             <span style="font-size:1.3rem">✅</span>
-             <div>
-               <div style="font-size:0.85rem;font-weight:600">Check-in done for today</div>
-               <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">Come back tomorrow</div>
-             </div>
-           </div>
-         </div>`
-      : `<div class="card" style="cursor:pointer;border-color:rgba(124,90,245,0.35)" onclick="MemberApp.switchTab('checkin')">
-           <div style="display:flex;align-items:center;gap:0.6rem">
-             <span class="ui-icon-slot" data-icon="checkin" style="color:var(--accent);display:inline-flex"></span>
-             <div style="flex:1">
-               <div style="font-size:0.85rem;font-weight:600">Daily check-in ready</div>
-               <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">Takes 30 seconds — tap to start</div>
-             </div>
-             <span style="color:var(--text-muted)">›</span>
-           </div>
-         </div>`;
-
-    const recentEl = document.getElementById('home-recent-result');
-    if (this.results.length) {
-      const r = this.results[this.results.length - 1];
-      const { label, color } = this._scoreLabel(r.score);
-      recentEl.innerHTML = `
-        <div class="card-label" style="margin-bottom:0.5rem">Most Recent Score</div>
-        <div class="card" style="border-color:${color}44">
-          <div style="display:flex;align-items:center;gap:0.8rem">
-            <div class="result-score-ring" style="border-color:${color};color:${color}">${r.score}</div>
-            <div style="flex:1">
-              <div style="font-size:0.88rem;font-weight:700">${r.scenarioTitle}</div>
-              <div style="font-size:0.73rem;color:var(--text-muted);margin-top:2px">${r.domain} · ${r.date}</div>
-            </div>
-            <span class="diff-badge" style="color:${color};border-color:${color}44">${label}</span>
+    if (notEl) notEl.innerHTML = (d.noticed && d.noticed.length) ? `
+      <div class="me-section-label">Things I've noticed</div>
+      ${d.noticed.map(x => `
+        <div class="card me-row">
+          <span class="me-dot me-dot-${x.kind === 'pattern' ? 'pattern' : 'shift'}"></span>
+          <div style="flex:1">
+            <div class="me-row-text">${this._escape(x.text)}</div>
+            <div class="me-row-conf">${this._escape(x.confidence || '')}</div>
           </div>
-        </div>`;
-    } else {
-      recentEl.innerHTML = '';
-    }
+        </div>`).join('')}` : '';
 
-    // ── IntelliQ mirror — the person's own record, from the kernel ──
-    this._loadIntelliQRecord();
+    if (qEl) qEl.innerHTML = (d.questions && d.questions.length) ? `
+      <div class="me-section-label">Still open for you</div>
+      ${d.questions.map(q => `
+        <div class="card me-row">
+          <div style="flex:1" class="me-row-text">${this._escape(q.text)}</div>
+          <button class="btn btn-outline btn-sm" onclick="MemberApp.resolveThread('${q.id}')">Resolved</button>
+        </div>`).join('')}` : '';
+
+    if (prepEl) prepEl.innerHTML = (d.prepared && d.prepared.length) ? `
+      <div class="me-section-label">Prepared for you</div>
+      ${d.prepared.map(p => `<div class="card me-row"><div class="me-row-text">${this._escape(p.text)}</div></div>`).join('')}` : '';
+  },
+
+  /* The universal composer — one input; the AI decides what it is + what's next. */
+  async composeSubmit() {
+    const input   = document.getElementById('composer-input');
+    const statusEl = document.getElementById('composer-status');
+    const respEl   = document.getElementById('composer-response');
+    const text = (input?.value || '').trim();
+    if (!text) { if (statusEl) statusEl.textContent = 'Add a line first.'; return; }
+
+    const btn = document.getElementById('composer-add');
+    if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+    try {
+      const res = await fetch('/api/compose', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body:    JSON.stringify({ text }),
+      });
+      if (!res.ok) throw new Error('compose failed');
+      const d = await res.json();
+      if (input) input.value = '';
+      if (statusEl) statusEl.textContent = '';
+      if (respEl) {
+        respEl.style.display = 'block';
+        respEl.innerHTML = `
+          <div class="card iq-briefing" style="margin-top:0.7rem">
+            <div class="iq-briefing-badge">IntelliQ</div>
+            <div class="iq-briefing-text">${this._escape(d.acknowledgement || 'Added.')}</div>
+            ${(d.noticed && d.noticed.length) ? `<div class="me-compose-noticed">${d.noticed.map(t => `<div>• ${this._escape(t)}</div>`).join('')}</div>` : ''}
+          </div>`;
+      }
+      this._renderMeContext();  // refresh the proactive surface with the new input folded in
+    } catch (_) {
+      if (statusEl) statusEl.textContent = "Couldn't add that — try again.";
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Add'; }
+    }
+  },
+
+  /* Voice → text via the browser's SpeechRecognition (no backend; degrades if absent). */
+  composeVoice() {
+    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Rec) return;
+    const input    = document.getElementById('composer-input');
+    const statusEl = document.getElementById('composer-status');
+    const rec = new Rec();
+    rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 1;
+    if (statusEl) statusEl.textContent = 'Listening…';
+    rec.onresult = (e) => {
+      const t = e.results?.[0]?.[0]?.transcript || '';
+      if (input && t) input.value = (input.value ? input.value + ' ' : '') + t;
+      if (statusEl) statusEl.textContent = '';
+    };
+    rec.onerror = () => { if (statusEl) statusEl.textContent = ''; };
+    rec.onend   = () => { if (statusEl && statusEl.textContent === 'Listening…') statusEl.textContent = ''; };
+    try { rec.start(); } catch (_) {}
+  },
+
+  /* Resolve one of the person's own open threads (self-owned memory). */
+  async resolveThread(id) {
+    try {
+      await fetch('/api/user/memory/resolve', {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body:    JSON.stringify({ threadId: id }),
+      });
+    } catch (_) {}
+    this._renderMeContext();
   },
 
   /* The IntelliQ lens: a warm, self-relative reflection + the person's own

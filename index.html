@@ -4,8 +4,8 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>Platform — IntelliQ Ecosystem</title>
-<link rel="stylesheet" href="css/styles.css?v=20260709a"/>
-<link rel="stylesheet" href="css/member.css?v=20260709a"/>
+<link rel="stylesheet" href="css/styles.css?v=20260711a"/>
+<link rel="stylesheet" href="css/member.css?v=20260711a"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -917,21 +917,41 @@
            ════════════════════════════════════════════════════ -->
 
       <!-- ── HOME PAGE ─────────────────────────────────────── -->
+      <!-- ── "ME" CONTEXT (Individual Experience) — proactive, reasoning-first ── -->
       <section class="page" id="page-home">
         <div class="page-header">
           <div class="page-header-greeting" id="home-greeting">Good morning</div>
           <div class="page-header-title"    id="home-name">—</div>
-          <div class="page-header-sub"      id="home-org">—</div>
         </div>
-        <div id="home-stat-row"></div>
-        <div id="home-focus"></div>
-        <div id="home-insight"></div>
-        <div id="home-progress"></div>
-        <div class="card-label" style="margin-bottom:0.5rem">Pending Assessments</div>
-        <div id="home-pending"></div>
-        <div id="home-weekly-prompt"></div>
-        <div id="home-checkin-prompt"></div>
-        <div id="home-recent-result"></div>
+
+        <!-- Proactive open-state: "I've already done the work." -->
+        <div id="me-briefing"></div>
+
+        <!-- The universal composer — one input; the AI figures out the rest. -->
+        <div class="card iq-composer" id="me-composer">
+          <div class="card-label">What happened?</div>
+          <textarea class="note-input" id="composer-input"
+            placeholder="Add anything — a thought, something that happened, a note. IntelliQ takes it from here."></textarea>
+          <div class="composer-actions">
+            <button class="btn-primary" id="composer-add" onclick="MemberApp.composeSubmit()">Add</button>
+            <button class="btn btn-outline btn-sm" id="composer-mic" onclick="MemberApp.composeVoice()" style="display:none">
+              <span class="ui-icon-slot" data-icon="message" style="display:inline-flex"></span> Voice
+            </button>
+            <span id="composer-status" style="font-size:0.78rem;color:var(--text-muted)"></span>
+          </div>
+          <div id="composer-response" style="display:none"></div>
+        </div>
+
+        <!-- Reasoning-first sections (chat is not the interface — reasoning is). -->
+        <div id="me-noticed"></div>
+        <div id="me-questions"></div>
+        <div id="me-prepared"></div>
+
+        <!-- legacy home containers kept (hidden) so older render paths never throw -->
+        <div id="home-stat-row" style="display:none"></div>
+        <div id="home-focus" style="display:none"></div>
+        <div id="home-insight" style="display:none"></div>
+        <div id="home-weekly-prompt" style="display:none"></div>
       </section>
 
       <!-- ── ASSESSMENTS PAGE ───────────────────────────────── -->
@@ -1747,8 +1767,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260709a"></script>
-<script src="js/auth.js?v=20260709a"></script>
+<script src="js/data.js?v=20260711a"></script>
+<script src="js/auth.js?v=20260711a"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1816,14 +1836,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260709a"></script>
-<script src="js/ui.js?v=20260709a"></script>
-<script src="js/attachments.js?v=20260709a"></script>
-<script src="js/scenarios.js?v=20260709a"></script>
-<script src="js/chat.js?v=20260709a"></script>
-<script src="js/tree.js?v=20260709a"></script>
-<script src="js/app.js?v=20260709a"></script>
-<script src="js/member-view.js?v=20260709a"></script>
+<script src="js/charts.js?v=20260711a"></script>
+<script src="js/ui.js?v=20260711a"></script>
+<script src="js/attachments.js?v=20260711a"></script>
+<script src="js/scenarios.js?v=20260711a"></script>
+<script src="js/chat.js?v=20260711a"></script>
+<script src="js/tree.js?v=20260711a"></script>
+<script src="js/app.js?v=20260711a"></script>
+<script src="js/member-view.js?v=20260711a"></script>
 
 <script>
 function switchGrade(g){

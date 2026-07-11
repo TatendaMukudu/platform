@@ -534,3 +534,19 @@
     background: var(--bg);
   }
 }
+
+/* ── The "Me" context — proactive, reasoning-first home ─────────────────── */
+.iq-composer { margin-bottom: 1rem; }
+.composer-actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.6rem; }
+#composer-input { min-height: 68px; }
+.iq-briefing { border-color: rgba(124,90,245,0.28); background: rgba(124,90,245,0.06); margin-bottom: 1rem; }
+.iq-briefing-badge { font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--accent); margin-bottom: 0.4rem; }
+.iq-briefing-text { font-size: 0.9rem; line-height: 1.55; color: var(--text-primary); }
+.me-section-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); margin: 1rem 0 0.5rem; }
+.me-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; }
+.me-row-text { font-size: 0.86rem; color: var(--text-primary); line-height: 1.45; }
+.me-row-conf { font-size: 0.7rem; color: var(--text-muted); text-transform: capitalize; margin-top: 2px; }
+.me-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.me-dot-shift   { background: var(--warning, #f7b24f); }
+.me-dot-pattern { background: var(--accent); }
+.me-compose-noticed { margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.6; }

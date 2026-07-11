@@ -2722,6 +2722,114 @@ app.get('/api/me/record', requireAuth, async (req, res) => {
   res.json(data);
 });
 
+/* GET /api/me/context — the proactive "Me" context open-state (Individual
+   Experience Phase 1–3). Reasoning-first, self-owned, privacy-safe. The kernel
+   has "already worked": what changed since last visit, what it noticed
+   (self-relative), the person's own open questions, and a prepared suggestion.
+   Fully deterministic from the kernel — no AI key required, so it always works. */
+app.get('/api/me/context', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const me = orgUsers[code]?.[userId];
+  if (!me) return res.status(404).json({ error: 'Not found' });
+
+  const now = Date.now();
+  let m; try { m = _buildMemberIntelInput(code, me, now); } catch (_) { m = null; }
+  const mem = _getMemory(code, userId);
+
+  // Since last visit — deterministic. Count the person's OWN signals since then.
+  const lastSeen = mem.lastSeen ? new Date(mem.lastSeen).getTime() : null;
+  let newSince = 0;
+  try {
+    const mine = (orgSignals[code] || []).filter(s => s.subjectId === userId);
+    newSince = lastSeen ? mine.filter(s => new Date(s.ts).getTime() > lastSeen).length : 0;
+  } catch (_) {}
+
+  // What the kernel NOTICED — self-relative shifts + structural patterns. Gated,
+  // privacy-safe (labels/directions only, never raw text).
+  const noticed = [];
+  (m?.deviations || []).forEach(d => noticed.push({
+    kind: 'shift', text: `${d.label} is ${d.direction} your usual lately`, confidence: d.confidence || 'tentative',
+  }));
+  (m?.structural || []).forEach(s => noticed.push({
+    kind: 'pattern', text: intel.PATTERN_LABEL[s.type] || s.type, confidence: s.confidence || 'tentative',
+  }));
+
+  // The person's OWN open questions — self-owned memory threads (never leave them).
+  const questions = (mem.openThreads || []).filter(t => !t.resolved).slice(0, 4)
+    .map(t => ({ id: t.id, text: t.text }));
+
+  // Prepared — one gentle, approvable suggestion from the top signal.
+  const prepared = [];
+  const top = (m?.structural || [])[0] || (m?.deviations || [])[0];
+  if (top) prepared.push({ text: top.type ? (intel.DEFAULT_ACTION[top.type] || 'A small, supportive focus this week.') : 'A small, supportive focus this week.' });
+
+  // A deterministic, honest opening line (no AI needed).
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  let opening;
+  if (noticed.length)      opening = `Since you were last here, I looked over your week — ${noticed.length === 1 ? "there's one thing" : `there are ${noticed.length} things`} worth a moment.`;
+  else if (newSince > 0)   opening = `I've taken in ${newSince} new ${newSince === 1 ? 'thing' : 'things'} since your last visit and folded ${newSince === 1 ? 'it' : 'them'} into your picture.`;
+  else                     opening = `Nothing new demands your attention right now. Add anything on your mind and I'll take it from there.`;
+
+  // Mark this visit.
+  mem.lastSeen = new Date().toISOString();
+  scheduleSave();
+
+  res.json({
+    ok: true, name: me.name, greeting, opening, newSince, noticed, questions, prepared,
+    understanding: agents.personModel.understanding(mem.model),
+    trajectory: m?.memberTrajectory || null,
+  });
+});
+
+/* POST /api/compose — the universal composer (one input; the AI reasons over it).
+   v1: text. Stores as the person's own signal (sensitive by default), updates
+   their Person Model, reasons over the updated picture, and returns what it
+   understood + what it noticed. AI-optional: the "noticed" is real kernel output;
+   the acknowledgement degrades to an honest deterministic line without a key. */
+app.post('/api/compose', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const me   = orgUsers[code]?.[userId];
+  const text = (req.body?.text || '').trim();
+  if (!me) return res.status(404).json({ error: 'Not found' });
+  if (!text) return res.status(400).json({ error: 'text required' });
+  if (text.length > 4000) return res.status(400).json({ error: 'too long' });
+
+  // Store as the person's own check-in + signal. Free text is a personal
+  // disclosure → sensitive by default (the privacy gate treats it as such).
+  const key = userKey(code, userId);
+  if (!memberCheckins[key]) memberCheckins[key] = [];
+  memberCheckins[key].push({
+    memberName: me.name, text, mood: null, moodLabel: null,
+    role: me.role || 'member', orgMode: '', date: new Date().toLocaleDateString('en-GB'), ts: new Date().toISOString(),
+  });
+  try {
+    _emitSignalSafe(code, { subjectType:'member', subjectId:userId, source:'checkin', modality:'text',
+      valueNum:null, valueText:text, label:'Note', sensitivity:'sensitive' }, userId);
+  } catch (_) {}
+
+  // Update memory + Person Model (deterministic; wrapped so it can't break compose).
+  try {
+    const blob = text.toLowerCase();
+    const watch = /worr|stress|struggl|overwhelm|tired|anx|heavy|burnout|exhaust|isolat|alone/.test(blob) ? text.slice(0, 140) : null;
+    _updateUserMemory(code, userId, 'checkin', { watchOutFor: watch, themes: [] });
+  } catch (_) {}
+
+  // Reason freshly over the updated picture.
+  const now = Date.now();
+  let m; try { m = _buildMemberIntelInput(code, me, now); } catch (_) { m = null; }
+  const noticed = [];
+  (m?.deviations || []).slice(0, 2).forEach(d => noticed.push(`${d.label} is ${d.direction} your usual lately`));
+  (m?.structural || []).slice(0, 2).forEach(s => noticed.push(intel.PATTERN_LABEL[s.type] || s.type));
+
+  res.json({
+    ok: true,
+    acknowledgement: "Got it — I've added that and folded it into your picture.",
+    noticed,
+    understanding: agents.personModel.understanding(_getMemory(code, userId).model),
+  });
+});
+
 /* ═══════════════════════════════════════════════════════════════════════════
    SPRINT 2 — METRICS
    Three sources: org (superadmin-defined), shared (leader), personal (member)
