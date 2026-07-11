@@ -102,6 +102,21 @@ const server = app.listen(0, async () => {
     ok('outcome + focus endpoints reject a bad payload (400)',
        (await call('/api/me/focus/outcome', tokA, { method: 'POST', body: { focusId: 'nope', outcome: 'weird' } })).status === 400);
 
+    // ── GDPR: self-service data export (Art 15/20) ──────────────────────────
+    const exp = await call('/api/me/export', tokA);
+    ok('me/export returns the caller\'s own data bundle', exp.status === 200 && exp.j?.profile?.id === aId && Array.isArray(exp.j.checkins));
+    ok('me/export never leaks the password hash', exp.status === 200 && !('passwordHash' in (exp.j.profile || {})));
+
+    // ── GDPR: erasure fully deletes personal data (Art 17) ──────────────────
+    // A has check-ins + signals + memory from the compose calls above. Delete
+    // with data, then prove nothing about A survives in a leader's view.
+    const del = await call(`/api/auth/users/${aId}?deleteData=true`, tokCoach, { method: 'DELETE' });
+    ok('admin can erase a member with their data', del.status === 200);
+    const ocAfter = await call('/api/platform/org-checkins', tokCoach);
+    ok('erased member has NO check-ins left anywhere', !('Member A' in (ocAfter.j?.checkins || {})));
+    // A's token is still valid but the user record is gone → me/export 404s.
+    ok('erased member has no exportable data left', (await call('/api/me/export', tokA)).status === 404);
+
   } catch (e) {
     fail++; console.log('  ✗ threw:', e.message);
   } finally {

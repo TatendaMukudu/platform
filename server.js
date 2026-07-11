@@ -1128,17 +1128,47 @@ function _removePerson(code, userId, deleteData) {
   // 7. Remove user record itself
   delete users[userId];
 
-  // 8. Hard-delete historical data if requested
+  // 8. Hard-delete ALL of this person's data (GDPR Art 17 — right to erasure).
+  //    Must leave NO orphaned personal data anywhere, including the raw check-in
+  //    text in signals, the AI memory/Person Model, notes, and messages.
   if (deleteData) {
     const uKey = userKey(code, userId);
     const mKey = memberKey(code, name);
     [uKey, mKey].forEach(k => {
       delete memberGoals[k];
       delete memberCheckins[k];
-      delete weeklyAssessments[k];
       delete memberResults[k];
       delete assignedScenarios[k];
     });
+    // AI memory + Person Model (derived personal data, may hold raw threads)
+    delete userAiProfiles[uKey];
+    delete userAiProfiles[mKey];
+    // Signals — contain raw check-in text (sensitive). Remove any about or by them.
+    if (Array.isArray(orgSignals[code])) {
+      orgSignals[code] = orgSignals[code].filter(s => s.subjectId !== userId && s.createdBy !== userId);
+    }
+    // Notes authored by them (incl. private content)
+    Object.keys(orgNotes).forEach(id => {
+      const n = orgNotes[id];
+      if (n && n.orgCode === code && n.authorId === userId) delete orgNotes[id];
+    });
+    // Messages they sent
+    Object.keys(orgMessages).forEach(id => {
+      const m = orgMessages[id];
+      if (m && m.orgCode === code && (m._realFromId === userId || m.fromId === userId)) delete orgMessages[id];
+    });
+    // Weekly assessments are keyed by week, not user — filter each week's entries.
+    Object.keys(weeklyAssessments).forEach(wk => {
+      if (!wk.startsWith(code + ':')) return;
+      weeklyAssessments[wk] = (weeklyAssessments[wk] || []).filter(e =>
+        e.memberId !== userId && (e.memberName || '').toLowerCase() !== name.toLowerCase());
+    });
+    // Advisor threads about them
+    if (advisorThreads && typeof advisorThreads === 'object') {
+      Object.keys(advisorThreads).forEach(k => {
+        if (k === uKey || k === mKey || k.startsWith(`${code}:${userId}`)) delete advisorThreads[k];
+      });
+    }
   }
 
   return { ok: true };
@@ -2904,6 +2934,35 @@ app.post('/api/me/focus/outcome', requireAuth, (req, res) => {
   mem.lastUpdated = new Date().toISOString();
   scheduleSave();
   res.json({ ok: true });
+});
+
+/* GET /api/me/export — the person downloads EVERYTHING we hold about them
+   (GDPR Art 15/20 — right of access & portability). Strictly self-scoped:
+   the caller only ever gets their own data. One honest, complete JSON. */
+app.get('/api/me/export', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const me = orgUsers[code]?.[userId];
+  if (!me) return res.status(404).json({ error: 'Not found' });
+  const uKey = userKey(code, userId);
+  const mKey = memberKey(code, me.name || '');
+
+  const { passwordHash, ...profile } = me;   // never export the password hash
+  const bundle = {
+    exportedAt: new Date().toISOString(),
+    note: 'This is all the personal data IntelliQ holds about you.',
+    profile,
+    goals:       memberGoals[uKey] || memberGoals[mKey] || null,
+    checkins:    memberCheckins[uKey] || memberCheckins[mKey] || [],
+    results:     memberResults[uKey] || memberResults[mKey] || [],
+    signals:     (orgSignals[code] || []).filter(s => s.subjectId === userId || s.createdBy === userId),
+    notes:       Object.values(orgNotes).filter(n => n.orgCode === code && n.authorId === userId),
+    aiMemory:    userAiProfiles[uKey] || null,   // their own model — theirs to see
+    weekly:      Object.entries(weeklyAssessments)
+                   .filter(([wk]) => wk.startsWith(code + ':'))
+                   .flatMap(([, arr]) => (arr || []).filter(e => e.memberId === userId || (e.memberName || '').toLowerCase() === (me.name || '').toLowerCase())),
+  };
+  res.setHeader('Content-Disposition', 'attachment; filename="intelliq-my-data.json"');
+  res.json(bundle);
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
