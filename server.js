@@ -2809,21 +2809,24 @@ app.post('/api/compose', requireAuth, async (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const me   = orgUsers[code]?.[userId];
   const text = (req.body?.text || '').trim();
+  const moodRaw = Number(req.body?.mood);
+  const mood = Number.isInteger(moodRaw) && moodRaw >= 1 && moodRaw <= 5 ? moodRaw : null;  // optional
   if (!me) return res.status(404).json({ error: 'Not found' });
-  if (!text) return res.status(400).json({ error: 'text required' });
+  if (!text && !mood) return res.status(400).json({ error: 'text or mood required' });
   if (text.length > 4000) return res.status(400).json({ error: 'too long' });
 
   // Store as the person's own check-in + signal. Free text is a personal
   // disclosure → sensitive by default (the privacy gate treats it as such).
+  const moodLabels = { 1:'Rough', 2:'Low', 3:'Okay', 4:'Good', 5:'Great' };
   const key = userKey(code, userId);
   if (!memberCheckins[key]) memberCheckins[key] = [];
   memberCheckins[key].push({
-    memberName: me.name, text, mood: null, moodLabel: null,
+    memberName: me.name, text: text || null, mood, moodLabel: mood ? moodLabels[mood] : null,
     role: me.role || 'member', orgMode: '', date: new Date().toLocaleDateString('en-GB'), ts: new Date().toISOString(),
   });
   try {
     _emitSignalSafe(code, { subjectType:'member', subjectId:userId, source:'checkin', modality:'text',
-      valueNum:null, valueText:text, label:'Note', sensitivity:'sensitive' }, userId);
+      valueNum: mood, valueText: text || null, label: mood ? `Mood ${mood}/5` : 'Note', sensitivity:'sensitive' }, userId);
   } catch (_) {}
 
   // Update memory + Person Model (deterministic; wrapped so it can't break compose).

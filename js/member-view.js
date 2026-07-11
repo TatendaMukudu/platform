@@ -423,13 +423,22 @@ const MemberApp = {
     this._renderMeContext();
   },
 
+  /* Optional mood on the composer (tap-to-toggle). */
+  composeMood(n) {
+    this._composerMood = (this._composerMood === n) ? null : n;
+    document.querySelectorAll('#composer-mood .composer-mood-faces button').forEach(b => {
+      b.classList.toggle('selected', Number(b.dataset.m) === this._composerMood);
+    });
+  },
+
   /* The universal composer — one input; the AI decides what it is + what's next. */
   async composeSubmit() {
     const input   = document.getElementById('composer-input');
     const statusEl = document.getElementById('composer-status');
     const respEl   = document.getElementById('composer-response');
     const text = (input?.value || '').trim();
-    if (!text) { if (statusEl) statusEl.textContent = 'Add a line first.'; return; }
+    const mood = this._composerMood || null;
+    if (!text && !mood) { if (statusEl) statusEl.textContent = 'Add a line or tap a mood.'; return; }
 
     const btn = document.getElementById('composer-add');
     if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
@@ -437,11 +446,13 @@ const MemberApp = {
       const res = await fetch('/api/compose', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
-        body:    JSON.stringify({ text }),
+        body:    JSON.stringify({ text, mood }),
       });
       if (!res.ok) throw new Error('compose failed');
       const d = await res.json();
       if (input) input.value = '';
+      this._composerMood = null;
+      document.querySelectorAll('#composer-mood .composer-mood-faces button.selected').forEach(b => b.classList.remove('selected'));
       if (statusEl) statusEl.textContent = '';
       if (respEl) {
         respEl.style.display = 'block';

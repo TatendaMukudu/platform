@@ -125,8 +125,9 @@ const WORKSPACE_MODULES = [
   // ── My Space — every user. (A leader's Home is the unified leader-home,
   //    so the member Home is hidden for them via hideForLeaders.) ──────────
   { section: 'My Space', id: 'home',    icon: ICON.home,    label: 'Home',     permission: null, hideForLeaders: true },
-  { section: null,        id: 'checkin', icon: ICON.checkin, label: 'Check-In', permission: null },  // the "Add" input
-  { section: null,        id: 'notes',   icon: ICON.notes,   label: 'Notes',    permission: null },  // the "Add" input
+  // Check-In is folded into the Home composer (optional mood + "what happened?"),
+  // so it's no longer a separate nav item. The page still exists and is reachable.
+  { section: null,        id: 'notes',   icon: ICON.notes,   label: 'Notes',    permission: null },
   { section: null,        id: 'inbox',   icon: ICON.inbox,   label: 'Inbox',    permission: null },
 
   // ── Team — shown when the user leads ≥1 node (scoped server-side) ───────
