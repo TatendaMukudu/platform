@@ -44,6 +44,7 @@ const SUITES = [
   'person-model-smoke.js',
   'eval.js',
   'invariants.js',
+  'endpoint-smoke.js',   // boots the real app in-process (DB_OPTIONAL) — HTTP authz + Me context
 ];
 for (const s of SUITES) {
   step(`suite — ${s}`, () => {

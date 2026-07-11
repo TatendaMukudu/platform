@@ -6834,7 +6834,11 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 
-(async () => {
+// Export a minimal surface for the endpoint smoke test (in-process, DB_OPTIONAL).
+// Requiring this module never boots a listener — only running it directly does.
+module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken };
+
+if (require.main === module) (async () => {
   try {
     // 1. Connect to Postgres + create schema
     await db.init();

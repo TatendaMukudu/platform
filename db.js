@@ -18,8 +18,14 @@
 
 const { Pool } = require('pg');
 
+/* ── DB_OPTIONAL: in-memory test mode ─────────────────────────────────────────
+   When DB_OPTIONAL=1 (used by the endpoint smoke test), skip the fatal exit and
+   run with no Postgres — init/loadMain/saveMain become no-ops. Production is
+   unchanged: DATABASE_URL is set, DB_OPTIONAL is not, and the real pool is used. */
+const DB_OPTIONAL = process.env.DB_OPTIONAL === '1';
+
 /* ── Require DATABASE_URL before anything else ────────────────────────────── */
-if (!process.env.DATABASE_URL) {
+if (!process.env.DATABASE_URL && !DB_OPTIONAL) {
   console.error('');
   console.error('[db] ═══════════════════════════════════════════════════════');
   console.error('[db] FATAL: DATABASE_URL environment variable is not set.');
@@ -34,13 +40,13 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-const pool = new Pool({
+const pool = process.env.DATABASE_URL ? new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
   max: 5,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 8000,
-});
+}) : null;
 
 /* ── Schema ───────────────────────────────────────────────────────────────── */
 const SCHEMA_SQL = `
@@ -56,6 +62,7 @@ const SCHEMA_SQL = `
    Exits with code 1 on any failure — no partial starts.
    ─────────────────────────────────────────────────────────────────────────── */
 async function init() {
+  if (!pool) { console.log('[db] DB_OPTIONAL — running in-memory, no Postgres.'); return; }
   console.log('[db] Connecting to Neon Postgres...');
 
   let client;
@@ -89,6 +96,7 @@ async function init() {
    Exits on DB error — never returns partial/undefined data.
    ─────────────────────────────────────────────────────────────────────────── */
 async function loadMain() {
+  if (!pool) return {};
   try {
     const res = await pool.query(
       "SELECT store_value FROM iq_store WHERE store_key = 'main'"
@@ -122,6 +130,7 @@ async function loadMain() {
    Throws on error (caller should catch and log — non-fatal for the request).
    ─────────────────────────────────────────────────────────────────────────── */
 async function saveMain(data) {
+  if (!pool) return;
   await pool.query(
     `INSERT INTO iq_store (store_key, store_value, updated_at)
      VALUES ('main', $1, NOW())
@@ -141,6 +150,7 @@ async function saveMain(data) {
 let _vectorsEnabled = false;
 
 async function initVectors(dim = 1536) {
+  if (!pool) return;
   const d = parseInt(dim, 10) || 1536;
   let client;
   try {
