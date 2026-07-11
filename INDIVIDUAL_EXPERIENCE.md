@@ -166,14 +166,23 @@ life and prepares work before you ask.
 
 ## Suggested phasing (council-agreed sequence)
 
-1. **Universal composer** — one input; the AI decides what it is.
-2. **One "Me" context** — a single reasoning stance to start.
-3. **Proactive home** — "I've already done the work" is the first screen.
-4. **Event-driven reasoning** — reason on new input / on entering a context (not a clock).
-5. **Approval workflow** — the Recommend → **Approve** → Execute step, visible.
-6. **Multi-context** — Soccer, School, Startup (each a reasoning stance, not a folder).
+1. **Universal composer** — one input; the AI decides what it is.  ✅ **shipped**
+2. **One "Me" context** — a single reasoning stance to start.  ✅ **shipped**
+3. **Proactive home** — "I've already done the work" is the first screen.  ✅ **shipped**
+4. **Event-driven reasoning** — reason on new input / on entering a context.  ✅ **shipped**
+5. **Approval workflow** — Recommend → **Approve** → Execute → **Observe → Learn**.  ✅ **shipped**
+6. **Multi-context** — Soccer, School, Startup (each a reasoning stance, not a folder).  ⏸ **gated on open Q1/Q7**
 7. **Shared contexts** — explicit advocacy + per-participant permissions.
 8. **Connectors + richer automation** — calendar, health, connected apps; the Learn loop deepens.
+
+> **Why 6 is paused, not skipped.** Multi-context's whole value (per GPT) is that a
+> context is *a different version of the intelligence*, not a folder. Building it as
+> tagged storage would be exactly the "storage, not contexts" trap. Doing it right
+> needs the council's answer to **Q1** (one Person Model across contexts, or one per
+> context?) and **Q7** (context = a Domain Pack that re-parameterises the stance).
+> Those decisions define the whole design — so 1–5 ship and get validated first, and
+> 6 is built once the model question is settled. Everything through the approval +
+> learn loop is live and covered by the endpoint harness.
 
 This gets the **core feeling** into a real user's hands at step 3, with the
 smallest surface. Everything after earns its place from real use. Ship the
