@@ -1497,19 +1497,6 @@ function renderSidebar(){
     set('.tb-ic-bell',         ICON.bell);
     set('.tb-ic-add',          ICON.plus);
   }
-  hydrateIcons();
-}
-
-/* Fill any <span class="ui-icon-slot" data-icon="key"> with its line icon.
-   Lets static/JS-rendered markup request an icon by name without inlining SVG. */
-function hydrateIcons(root) {
-  if (typeof ICON === 'undefined') return;
-  (root || document).querySelectorAll('.ui-icon-slot[data-icon]').forEach(el => {
-    if (el.dataset.iconSet) return;
-    const svg = ICON[el.dataset.icon];
-    if (svg) { el.innerHTML = svg; el.dataset.iconSet = '1'; }
-  });
-
   document.querySelector('.user-name').textContent = AppState.adminName;
   document.querySelector('.user-role').textContent = AppState.adminRole;
   const av = document.querySelector('.sidebar-footer .user-avatar');
@@ -1561,7 +1548,22 @@ function hydrateIcons(root) {
     });
   }
 
+  hydrateIcons();
   updateAlertBadge();
+}
+
+/* Fill any <span class="ui-icon-slot" data-icon="key"> with its line icon.
+   Lets static/JS-rendered markup request an icon by name without inlining SVG.
+   Defensive: never throws — icon glitches must not break navigation. */
+function hydrateIcons(root) {
+  if (typeof ICON === 'undefined') return;
+  try {
+    (root || document).querySelectorAll('.ui-icon-slot[data-icon]').forEach(el => {
+      if (el.dataset.iconSet) return;
+      const svg = ICON[el.dataset.icon];
+      if (svg) { el.innerHTML = svg; el.dataset.iconSet = '1'; }
+    });
+  } catch (_) { /* icon hydration is cosmetic — never block the app */ }
 }
 
 function updateAlertBadge(){
