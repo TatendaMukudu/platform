@@ -46,7 +46,7 @@ function csv(text) {
       const label = headers[c]; const raw = cells[c] != null ? String(cells[c]).trim() : '';
       if (!label || raw === '') continue;
       const num = Number(raw);
-      metrics.push({ label, value: isNaN(num) ? raw : num });
+      metrics.push({ label, value: Number.isFinite(num) ? num : raw });   // Infinity/NaN → keep as text
     }
     if (metrics.length) members.push({ name, metrics });
   }

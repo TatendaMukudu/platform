@@ -83,5 +83,26 @@ const rj = agents.reason({ id:'z', name:'Z', now, moodSeries: dip, deviations: [
 law('reason output is flagged internal (backstage)', rj.internal === true);
 law('reason output carries no graded score', !/\b\d{1,3}\/100\b/.test(JSON.stringify(rj)));
 
+// ── LAW 12 · Robustness — dirty input (NaN/null/undefined/Infinity) never
+//    yields NaN or a bare "null%"/"undefined%" anywhere in kernel output. ─────
+const dirty = [
+  { t: ago(80), v: 5 }, { t: ago(70), v: NaN }, { t: ago(60), v: null },
+  { t: ago(50), v: 5 }, { t: ago(40), v: undefined }, { t: ago(35), v: Infinity },
+  { t: NaN,     v: 3 }, { t: ago(25), v: 2 }, { t: ago(20), v: 4 },
+  { t: ago(10), v: 2 }, { t: ago(5),  v: 2 }, { t: ago(2),  v: 2 },
+];
+const dDev    = baseline.detectDeviation('mood', dirty, now);
+const dShift  = baseline.shift(dirty, now);
+const dStruct = primitives.structuralPatterns([{ key:'x', label:'attendance', primitive:'participation', valence:'up-good', series: dirty }], now);
+const dCross  = agents.crossSignal([
+  { key:'a', label:'x', series: dirty },
+  { key:'b', label:'y', series: dirty.map(p => ({ t: p.t, v: (typeof p.v === 'number' ? p.v : 4) })) },
+], now);
+const dPats   = intel.detectPatterns({ id:'d', name:'D', now, moodSeries: dirty.map(p => ({ t:p.t, mood:p.v })), deviations: dDev.concerning ? [dDev] : [] });
+const dBlob   = JSON.stringify({ dDev, dShift, dStruct, dCross, dPats });
+law('dirty input never produces NaN anywhere', !/NaN/.test(dBlob));
+law('dirty input never produces a bare null%/undefined%', !/null%|undefined%/.test(dBlob) && !/undefined/.test(dBlob));
+law('dirty deviationPct is finite-or-null', dDev.deviationPct === null || Number.isFinite(dDev.deviationPct));
+
 console.log(`\ninvariants: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

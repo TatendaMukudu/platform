@@ -150,7 +150,7 @@ function baselineShift(m) {
   const big = Math.abs(top.deviationPct || 0) >= 60;
   const severity = (top.dimension === 'mood' && top.direction === 'below') ? 'high' : big ? 'medium' : 'low';
   const basis = 'unusual for them — ' + devs.slice(0, 2)
-    .map(d => `${d.label} ${d.direction} their usual${d.deviationPct != null ? ` (${Math.abs(d.deviationPct)}%)` : ''}`)
+    .map(d => `${d.label} ${d.direction} their usual${Number.isFinite(d.deviationPct) ? ` (${Math.abs(d.deviationPct)}%)` : ''}`)
     .join('; ');
   return { type: 'baseline_shift', severity, basis, confidence: top.confidence };
 }

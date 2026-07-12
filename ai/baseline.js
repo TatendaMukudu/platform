@@ -54,6 +54,7 @@ function _mad(a, med) {                       // median absolute deviation (robu
    EXCLUDES the recent window, so "normal" isn't contaminated by "lately". */
 function computeBaseline(series, now, recentMs = RECENT_MS) {
   const base = (series || [])
+    .filter(p => p && Number.isFinite(p.t) && Number.isFinite(p.v))   // reject dirty points
     .filter(p => now - p.t >= recentMs && now - p.t < recentMs + BASELINE_MS)
     .map(p => p.v);
   if (base.length < MIN_POINTS) return { normal: null, spread: null, points: base.length };
@@ -67,15 +68,16 @@ function computeBaseline(series, now, recentMs = RECENT_MS) {
 function detectDeviation(dimension, series, now) {
   const meta = DIMENSIONS[dimension] || { label: dimension, concernDir: 'both' };
   const { normal, spread, points } = computeBaseline(series, now);
-  const recent = _median((series || []).filter(p => now - p.t < RECENT_MS).map(p => p.v));
+  const recent = _median((series || []).filter(p => p && now - p.t < RECENT_MS && Number.isFinite(p.v)).map(p => p.v));
 
   if (normal == null || recent == null) {
-    return { dimension, label: meta.label, unusual: false, confidence: 'learning', normal: null, recent: recent != null ? round1(recent) : null };
+    return { dimension, label: meta.label, unusual: false, concerning: false, direction: 'flat',
+      confidence: 'learning', normal: null, recent: recent != null ? round1(recent) : null, deviationPct: null };
   }
   const diff = recent - normal;
   const unusual = Math.abs(diff) > 2 * spread;
   const direction = diff > 0 ? 'above' : diff < 0 ? 'below' : 'flat';
-  const deviationPct = normal !== 0 ? Math.round((diff / Math.abs(normal)) * 100) : null;
+  const deviationPct = (Number.isFinite(normal) && normal !== 0 && Number.isFinite(diff)) ? Math.round((diff / Math.abs(normal)) * 100) : null;
   const confidence = points >= 12 ? 'clear' : points >= 8 ? 'emerging' : 'tentative';
   // Only flag when the direction is one a leader should care about for this dim.
   const concerning = unusual && (meta.concernDir === 'both' || meta.concernDir === direction);
@@ -87,7 +89,7 @@ function detectDeviation(dimension, series, now) {
    can be compared to its own normal exactly like mood. Never a score. */
 function shift(series, now) {
   const { normal, spread, points } = computeBaseline(series, now);
-  const recent = _median((series || []).filter(p => now - p.t < RECENT_MS).map(p => p.v));
+  const recent = _median((series || []).filter(p => p && now - p.t < RECENT_MS && Number.isFinite(p.v)).map(p => p.v));
   if (normal == null || recent == null) {
     return { unusual: false, confidence: 'learning', normal: null, recent: recent != null ? round1(recent) : null, direction: 'flat', deviationPct: null };
   }
@@ -96,7 +98,7 @@ function shift(series, now) {
     unusual: Math.abs(diff) > 2 * spread,
     direction: diff > 0 ? 'above' : diff < 0 ? 'below' : 'flat',
     normal: round1(normal), recent: round1(recent),
-    deviationPct: normal !== 0 ? Math.round((diff / Math.abs(normal)) * 100) : null,
+    deviationPct: (Number.isFinite(normal) && normal !== 0 && Number.isFinite(diff)) ? Math.round((diff / Math.abs(normal)) * 100) : null,
     confidence: points >= 12 ? 'clear' : points >= 8 ? 'emerging' : 'tentative',
   };
 }

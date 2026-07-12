@@ -47,7 +47,7 @@ const STRUCTURE_ACTION = {
 
 const _sevFromPct = pct => { const a = Math.abs(pct || 0); return a >= 50 ? 'high' : a >= 25 ? 'medium' : 'low'; };
 const _minConf = (a, b) => { const rank = { tentative: 0, learning: 0, emerging: 1, clear: 2 }; return (rank[a] ?? 0) <= (rank[b] ?? 0) ? a : b; };
-const _pct = sh => (sh.deviationPct != null ? `${Math.abs(sh.deviationPct)}% ` : '');
+const _pct = sh => (Number.isFinite(sh.deviationPct) ? `${Math.abs(sh.deviationPct)}% ` : '');
 
 /* A stream got WORSE than its own normal (direction depends on valence). */
 function _declined(s) {

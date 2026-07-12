@@ -147,6 +147,7 @@ const _WEEKS = 16;
 function _weeklyBucket(series, now) {
   const sum = new Array(_WEEKS).fill(0), cnt = new Array(_WEEKS).fill(0);
   (series || []).forEach(p => {
+    if (!p || !Number.isFinite(p.t) || !Number.isFinite(p.v)) return;   // skip dirty points
     const w = Math.floor((now - p.t) / (7 * 86400000));
     if (w >= 0 && w < _WEEKS) { sum[w] += p.v; cnt[w]++; }
   });
@@ -154,7 +155,7 @@ function _weeklyBucket(series, now) {
 }
 function _pearson(a, b) {
   const xs = [], ys = [];
-  for (let i = 0; i < a.length; i++) if (a[i] != null && b[i] != null) { xs.push(a[i]); ys.push(b[i]); }
+  for (let i = 0; i < a.length; i++) if (Number.isFinite(a[i]) && Number.isFinite(b[i])) { xs.push(a[i]); ys.push(b[i]); }
   const n = xs.length;
   if (n < 6) return { r: 0, n };
   const mx = xs.reduce((s, v) => s + v, 0) / n, my = ys.reduce((s, v) => s + v, 0) / n;
