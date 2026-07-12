@@ -7029,22 +7029,27 @@ if (require.main === module) (async () => {
     // 5a2. Optional demo seed on boot — for hosts with no shell (e.g. Render free
     //      tier). Set SEED_DEMO=1 to add the demo squad; idempotent (skips if the
     //      demo org already exists) and additive (never wipes other orgs).
-    if (process.env.SEED_DEMO === '1' || process.env.SEED_DEMO === 'force') {
+    // Optional demo seeds on boot (no shell needed). SEED_DEMO → athletic squad,
+    // SEED_COMPANY → business team. '1' is idempotent; 'force' re-seeds.
+    const _seedOnBoot = async (flag, build, code, creds) => {
+      const v = process.env[flag];
+      if (v !== '1' && v !== 'force') return;
       try {
-        const seed  = require('./scripts/seed');
-        const force = process.env.SEED_DEMO === 'force';
-        if (force || !orgMeta[seed.DEMO_CODE]) {
-          const demo = await seed.buildDemoStore();
+        const seed = require('./scripts/seed');
+        if (v === 'force' || !orgMeta[code]) {
+          const demo = await seed[build]();
           _loadAllStores(demo);          // additive merge into the in-memory stores
           _rebuildEmailIndex();
           scheduleSave();
-          const n = Object.keys(demo.orgUsers[seed.DEMO_CODE] || {}).length;
-          console.log(`[seed] ✓ SEED_DEMO=${process.env.SEED_DEMO} — demo squad ready (${n} users in ${seed.DEMO_CODE}). Log in: coach@demo.club / maya@demo.club — password demo1234.`);
+          const n = Object.keys(demo.orgUsers[code] || {}).length;
+          console.log(`[seed] ✓ ${flag}=${v} — ready (${n} users in ${code}). ${creds}`);
         } else {
-          console.log('[seed] SEED_DEMO=1 but demo org already present — skipping (use SEED_DEMO=force to re-seed).');
+          console.log(`[seed] ${flag}=1 but ${code} already present — skipping (use ${flag}=force to re-seed).`);
         }
-      } catch (e) { console.warn('[seed] boot seed failed (non-fatal):', e.message); }
-    }
+      } catch (e) { console.warn(`[seed] ${flag} boot seed failed (non-fatal):`, e.message); }
+    };
+    await _seedOnBoot('SEED_DEMO',    'buildDemoStore',        require('./scripts/seed').DEMO_CODE,    'Log in: coach@demo.club / maya@demo.club — password demo1234.');
+    await _seedOnBoot('SEED_COMPANY', 'buildCompanyDemoStore', require('./scripts/seed').COMPANY_CODE, 'Log in: manager@atlas.demo / marcus@atlas.demo — password demo1234.');
 
     // 5b. Derive user.assignedNodeIds / user.leadershipNodeIds from orgNodes
     _backfillUserNodeIds();

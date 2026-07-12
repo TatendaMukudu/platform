@@ -159,6 +159,135 @@ async function buildDemoStore() {
   return { orgMeta, orgUsers, emailIndex, memberGoals, memberCheckins, orgSignals, orgGroups, orgValues, orgGoals };
 }
 
+/* ── COMPANY demo — the SAME kernel, a business domain ──────────────────────
+   Proves domain-agnosticism: identical arc shapes as the athletic squad, but
+   framed as a startup. The kernel should fire the same patterns (withdrawal,
+   overload, quiet_improvement, baseline_shift) with zero code changes — only the
+   vocabulary differs. "Workload" maps to the same LOAD primitive as "Training
+   Load", so overload still fires. Self-contained; leaves the athletic seed intact. */
+const COMPANY_CODE = 'demo-company';
+
+async function buildCompanyDemoStore() {
+  const pass = await bcrypt.hash('demo1234', SALT);
+  const C    = COMPANY_CODE;
+  const ck   = uid => `${C}:${uid}`;
+
+  const bossId = rid();
+  const staff = [
+    { key: 'nadia',  name: 'Nadia Okoro',    title: 'Engineer',     kind: 'quiet'     },
+    { key: 'marcus', name: 'Marcus Feld',    title: 'Engineer',     kind: 'overload'  },
+    { key: 'lena',   name: 'Lena Park',      title: 'Designer',     kind: 'improving' },
+    { key: 'raj',    name: 'Raj Malhotra',   title: 'PM',           kind: 'steady'    },
+    { key: 'tomas',  name: 'Tomas Vidal',    title: 'Engineer',     kind: 'steady'    },
+    { key: 'aisha',  name: 'Aisha Rahman',   title: 'Data',         kind: 'steady'    },
+  ].map(s => ({ ...s, id: rid(), email: `${s.key}@atlas.demo` }));
+
+  const orgMeta = {}, orgUsers = { [C]: {} }, emailIndex = {};
+  const memberGoals = {}, memberCheckins = {}, orgSignals = { [C]: [] };
+  const orgGroups = {}, orgValues = {}, orgGoals = {};
+
+  orgMeta[C] = {
+    orgName: 'Atlas Robotics', orgMode: '', createdAt: iso(dAgo(210)),
+    organizationProfile: {
+      description: 'An early-stage robotics startup shipping fast.',
+      values: ['Ownership', 'Craft', 'Candour', 'Momentum'],
+      goals: ['Ship the v2 launch', 'Keep the team healthy through crunch'],
+      successDefinition: 'People who do their best work and stay well.',
+      behaviours: ['Ships', 'Unblocks others', 'Communicates honestly'],
+      metrics: ['Workload', 'Wellbeing'], setAt: iso(dAgo(205)), setBy: bossId,
+    },
+    organizationProfileComplete: true,
+  };
+  orgValues[C] = ['Ownership', 'Craft', 'Candour', 'Momentum'];
+  orgGoals[C]  = [
+    { goalId: 'g_' + rid(), text: 'Ship the v2 launch', createdAt: iso(dAgo(205)) },
+    { goalId: 'g_' + rid(), text: 'Keep the team healthy through crunch', createdAt: iso(dAgo(205)) },
+  ];
+
+  orgUsers[C][bossId] = {
+    id: bossId, firstName: 'Dana', lastName: 'Cole', name: 'Dana Cole',
+    email: 'manager@atlas.demo', role: 'superadmin', orgCode: C, supervisorId: null,
+    passwordHash: pass, passwordSet: true, status: 'active', createdAt: iso(dAgo(210)),
+    levelId: 1, profileComplete: true,
+  };
+  emailIndex['manager@atlas.demo'] = { orgCode: C, userId: bossId };
+
+  const pushSig = (subjectId, createdBy, source, dt, valueNum, valueText, label, sensitivity) =>
+    orgSignals[C].push({
+      id: 'sig_' + rid(), orgCode: C, ts: iso(dt), source, modality: 'text',
+      subjectType: 'member', subjectId, category: null,
+      label: label || (valueNum != null ? `Mood ${valueNum}/5` : null),
+      valueNum: valueNum != null ? Number(valueNum) : null, valueText: valueText || null,
+      data: null, sensitivity: sensitivity || 'normal', public: false,
+      weightNum: source === 'metric' ? 3 : 2, weight: source === 'metric' ? 'strong' : 'medium',
+      createdBy, createdAt: iso(dt),
+    });
+
+  const checkin = (s, dt, mood, text) => {
+    const k = ck(s.id);
+    (memberCheckins[k] = memberCheckins[k] || []).push({
+      memberName: s.name, text, mood, moodLabel: MOODLBL[mood] || null,
+      role: 'member', orgMode: '', date: dstr(dt), ts: iso(dt),
+    });
+    pushSig(s.id, s.id, 'checkin', dt, mood, text, `Mood ${mood}/5`, 'sensitive');
+  };
+
+  staff.forEach(s => {
+    orgUsers[C][s.id] = {
+      id: s.id, firstName: s.name.split(' ')[0], lastName: s.name.split(' ')[1] || '',
+      name: s.name, email: s.email, role: 'member', orgCode: C, supervisorId: bossId,
+      passwordHash: pass, passwordSet: true, status: 'active', createdAt: iso(dAgo(200)),
+      levelId: 2, profileComplete: true,
+    };
+    emailIndex[s.email] = { orgCode: C, userId: s.id };
+    memberGoals[ck(s.id)] = {
+      goal: `Grow as a ${s.title} and be dependable for the team`,
+      mainGoals: `Grow as a ${s.title}`, identity: 'A dependable teammate',
+      selectedValues: ['Ownership', 'Craft', 'Candour'], personalMetrics: [],
+      memberName: s.name, setAt: iso(dAgo(195)),
+    };
+
+    for (let d = 182; d >= 0; d -= (2 + Math.floor(Math.random() * 3))) {
+      let mood, text;
+      if (s.kind === 'quiet') {
+        if (d <= 9) continue;                          // went quiet ~9 days ago
+        mood = d <= 18 ? 2 : 4;
+        text = d <= 18 ? 'Bit checked out lately, hard to focus.' : 'Shipped my tickets, solid week.';
+      } else if (s.kind === 'overload') {
+        mood = d > 21 ? 4 : d > 10 ? 3 : 2;
+        text = d > 21 ? 'Busy but on top of it.' : 'Swamped — working nights, running on empty.';
+      } else if (s.kind === 'improving') {
+        mood = d > 28 ? 3 : d > 14 ? 4 : 5;
+        text = 'Finding my groove — reviews going well.';
+      } else {
+        mood = Math.random() < 0.15 ? 3 : 4;
+        text = 'Normal sprint, nothing unusual.';
+      }
+      checkin(s, dAgo(d), mood, text);
+    }
+
+    // Overload employee: a WORKLOAD metric — steady for months, rising recently.
+    // "Workload" maps to the same LOAD primitive as "Training Load" → overload fires.
+    if (s.kind === 'overload') {
+      for (let d = 126; d >= 0; d -= 7) {
+        const load = d > 28
+          ? Math.round(45 + Math.random() * 6)
+          : Math.round(52 + ((28 - d) / 28) * 42 + Math.random() * 4);
+        pushSig(s.id, bossId, 'metric', dAgo(d), load, null, 'Workload', 'normal');
+      }
+    }
+  });
+
+  orgGroups[C] = [{
+    id: 'grp_' + rid(), name: 'Product Team', description: 'Core build team',
+    memberIds: staff.map(s => s.id), leadIds: [bossId],
+    goals: ['Ship v2', 'Sustainable pace'], traits: ['Ownership', 'Candour'],
+    copilotEnabled: false, createdAt: iso(dAgo(200)),
+  }];
+
+  return { orgMeta, orgUsers, emailIndex, memberGoals, memberCheckins, orgSignals, orgGroups, orgValues, orgGoals };
+}
+
 /* Merge a demo store slice into whatever's in `existing` (additive), unless
    SEED_REPLACE=1. Returns the store to persist. Pure — no DB. */
 function mergeDemo(existing, demo, replace) {
@@ -186,6 +315,6 @@ async function main() {
   process.exit(0);
 }
 
-module.exports = { buildDemoStore, mergeDemo, DEMO_CODE };
+module.exports = { buildDemoStore, buildCompanyDemoStore, mergeDemo, DEMO_CODE, COMPANY_CODE };
 
 if (require.main === module) main().catch(err => { console.error('[seed] failed:', err); process.exit(1); });
