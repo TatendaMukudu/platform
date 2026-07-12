@@ -73,5 +73,27 @@ ok('baseline_shift fires from deviations', shift.some(f => f.type === 'baseline_
 ok('no deviations → no baseline_shift',
   !intel.detectPatterns({ now, id: 'h2', name: 'H2', deviations: [] }).some(f => f.type === 'baseline_shift'));
 
+// ── recovering: was in a dip (~2), now climbing back (~4) — positive signal ──
+const rec = intel.detectPatterns({ now, id: 'r', name: 'R', deviations: [], moodSeries: [
+  { t: ago(40), mood: 2 }, { t: ago(35), mood: 2 }, { t: ago(30), mood: 2 }, { t: ago(25), mood: 3 },
+  { t: ago(10), mood: 4 }, { t: ago(6), mood: 4 }, { t: ago(2), mood: 4 },
+] });
+ok('recovering fires when climbing out of a dip', rec.some(f => f.type === 'recovering'));
+ok('recovering suppresses the generic quiet_improvement', !rec.some(f => f.type === 'quiet_improvement'));
+ok('recovering never fires as momentum_drop', !rec.some(f => f.type === 'momentum_drop'));
+// steady-good never counts as recovering (no prior dip):
+ok('steady-good does NOT fire recovering', !intel.detectPatterns({ now, id: 'r2', name: 'R2', deviations: [],
+  moodSeries: [ {t:ago(40),mood:4},{t:ago(30),mood:4},{t:ago(10),mood:4},{t:ago(2),mood:4} ] }).some(f => f.type === 'recovering'));
+
+// ── data_gap vs withdrawal: silence is distinct from reduced-but-present ─────
+const prims = require('../ai/primitives');
+const gap = prims.structuralPatterns([{ key:'p', label:'check-ins', primitive:'participation', valence:'up-good',
+  series: [...Array(10)].map((_, i) => ({ t: ago(90 - i * 7), v: 5 })) }], now);   // regular history, silent last 2 wks
+ok('data_gap fires when a regular person goes fully silent', gap.some(f => f.type === 'data_gap'));
+ok('data_gap does NOT double up as withdrawal', !gap.some(f => f.type === 'withdrawal'));
+const wd = prims.structuralPatterns([{ key:'p', label:'check-ins', primitive:'participation', valence:'up-good',
+  series: [...Array(9)].map((_, i) => ({ t: ago(60 - i * 6), v: 5 })).concat([{ t: ago(5), v: 1 }, { t: ago(2), v: 1 }]) }], now);
+ok('withdrawal (reduced-but-present) is distinct from data_gap', wd.some(f => f.type === 'withdrawal') && !wd.some(f => f.type === 'data_gap'));
+
 console.log(`\nintelligence-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

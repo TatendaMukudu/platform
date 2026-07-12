@@ -34,12 +34,14 @@ const PRIMITIVE = {
 
 const STRUCTURE_LABEL = {
   withdrawal: 'Pulling back',
+  data_gap:   'Gone quiet',
   isolation:  'Becoming isolated',
   overload:   'Overload risk',
   plateau:    'Plateau',
 };
 const STRUCTURE_ACTION = {
   withdrawal: 'Reach out — participation is dropping from their own normal. Ask what changed, listen first.',
+  data_gap:   'Reconnect, no assumptions — they were regular, then went quiet. A simple “thinking of you, how are things?” is enough.',
   isolation:  'Reconnect them — their connection signals are thinning. A shared task or a check-in with a peer can help.',
   overload:   'Ease the load — demand is up while wellbeing is down. Remove or defer something before pushing further.',
   plateau:    'Change the stimulus — growth has flattened despite steady effort. Try a new challenge or a different approach.',
@@ -66,10 +68,28 @@ function structuralPatterns(streams, now) {
   const of = p => S.filter(s => s.primitive === p);
   const out = [];
 
-  // WITHDRAWAL — a participation stream fell below their own normal.
+  // WITHDRAWAL — a participation stream is reduced-but-PRESENT vs their own normal.
+  // (_declined needs an unusual shift, which needs recent data — so a fully-silent
+  //  person never trips withdrawal; that case is data_gap below.)
   of(PRIMITIVE.PARTICIPATION).filter(_declined).slice(0, 1).forEach(s =>
     out.push({ type: 'withdrawal', severity: _sevFromPct(s.shift.deviationPct),
       basis: `participation (${s.label}) is ${_pct(s.shift)}below their usual`, confidence: s.shift.confidence }));
+
+  // DATA GAP — they have a real history but have gone SILENT lately. This is
+  // distinct from withdrawal (reduced-but-present): it's uncertainty, not a claim
+  // about their state — and without it a fully-silent person becomes INVISIBLE
+  // (nothing else fires on an empty recent window). Reconnect, don't diagnose.
+  const RECENT_MS = 14 * 86400000;
+  of(PRIMITIVE.PARTICIPATION).forEach(s => {
+    if (out.some(o => o.type === 'withdrawal' || o.type === 'data_gap')) return;
+    const b = baseline.computeBaseline(s.series, now);
+    const recentN = (s.series || []).filter(p => p && Number.isFinite(p.t) && now - p.t < RECENT_MS).length;
+    if (b.points >= baseline.MIN_POINTS && recentN === 0) {
+      out.push({ type: 'data_gap', severity: 'medium',
+        basis: `${s.label}: no activity in ~2 weeks, though they were regular before`,
+        confidence: b.points >= 12 ? 'emerging' : 'tentative' });
+    }
+  });
 
   // ISOLATION — a relational (connection) stream is thinning.
   of(PRIMITIVE.RELATIONAL).filter(_declined).slice(0, 1).forEach(s =>

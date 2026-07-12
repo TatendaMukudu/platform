@@ -38,8 +38,10 @@ const PATTERN_LABEL = {
   repeated_concern:       'Repeated concern',
   member_team_divergence: 'Pulling away from the team',
   invisible_load:         'Carrying invisible load',
+  recovering:             'Climbing back',
   // Universal structural patterns (ai/primitives) — domain-free.
   withdrawal:             'Pulling back',
+  data_gap:               'Gone quiet',
   isolation:              'Becoming isolated',
   overload:               'Overload risk',
   plateau:                'Plateau',
@@ -54,7 +56,9 @@ const DEFAULT_ACTION = {
   repeated_concern:       'Sit down together, name the recurring theme, and agree one small shared focus.',
   member_team_divergence: 'A 1:1 to understand what’s pulling them a different way from the group — integrate, don’t push.',
   invisible_load:         'Check they’re not carrying too much for others — offer to redistribute, or simply acknowledge the load.',
+  recovering:             'Acknowledge the turnaround — they’ve climbed out of a dip. Naming it out loud helps it hold.',
   withdrawal:             'Reach out — participation is dropping from their own normal. Ask what changed, listen first.',
+  data_gap:               'Reconnect, no assumptions — they were regular, then went quiet. A simple “thinking of you, how are things?” is enough.',
   isolation:              'Reconnect them — their connection signals are thinning. A shared task or a peer check-in can help.',
   overload:               'Ease the load — demand is up while wellbeing is down. Remove or defer something before pushing further.',
   plateau:                'Change the stimulus — growth has flattened despite steady effort. Try a new challenge or approach.',
@@ -99,6 +103,26 @@ function quietImprovement(m) {
     type: 'quiet_improvement', severity: 'low',
     basis: `mood up ${round1(rise)} over ~6 weeks with little visible recognition`,
     confidence: conf(pts.length),
+  };
+}
+
+/* RECOVERING — the positive close-the-loop. They were in a rough patch and are
+   now climbing back toward their normal. Surfaced so leaders see improvement, not
+   only problems — the tool should feel like it's rooting for people. */
+function recovering(m) {
+  const pts    = (m.moodSeries || []);
+  const recent = pts.filter(p => m.now - p.t <  RECENT);
+  const prior  = pts.filter(p => m.now - p.t >= RECENT && m.now - p.t < PRIOR);
+  if (recent.length < 2 || prior.length < 2) return null;
+  const ra = avg(recent.map(p => p.mood)), pa = avg(prior.map(p => p.mood));
+  if (!Number.isFinite(ra) || !Number.isFinite(pa)) return null;
+  const rise = ra - pa;
+  // Was a genuine dip (prior below okay), now climbed meaningfully and back to okay+.
+  if (pa >= 3 || rise < 0.5 || ra < 3) return null;
+  return {
+    type: 'recovering', severity: 'low',
+    basis: `mood back up to ${round1(ra)}/5 over the last two weeks, from ${round1(pa)}/5 before — climbing out of a dip`,
+    confidence: conf(recent.length + prior.length),
   };
 }
 
@@ -155,7 +179,7 @@ function baselineShift(m) {
   return { type: 'baseline_shift', severity, basis, confidence: top.confidence };
 }
 
-const DETECTORS = [baselineShift, momentumDrop, quietImprovement, repeatedConcern, memberTeamDivergence, invisibleLoad];
+const DETECTORS = [baselineShift, momentumDrop, quietImprovement, recovering, repeatedConcern, memberTeamDivergence, invisibleLoad];
 
 /* Run all detectors over one member's features. Returns findings sorted by
    severity (most urgent first). Pure — safe to unit-test without a DB. */
@@ -165,6 +189,12 @@ function detectPatterns(m) {
     let f = null;
     try { f = d(m); } catch (_) { f = null; }                  // one bad detector never breaks the briefing
     if (f) out.push(f);
+  }
+  // Recovering is the more specific positive signal (a climb out of a genuine dip);
+  // when it fires, drop the generic quiet_improvement so we don't double-count.
+  if (out.some(f => f.type === 'recovering')) {
+    const i = out.findIndex(f => f.type === 'quiet_improvement');
+    if (i >= 0) out.splice(i, 1);
   }
   return out.sort((a, b) => SEV_RANK[a.severity] - SEV_RANK[b.severity]);
 }
