@@ -7005,17 +7005,19 @@ if (require.main === module) (async () => {
     // 5a2. Optional demo seed on boot — for hosts with no shell (e.g. Render free
     //      tier). Set SEED_DEMO=1 to add the demo squad; idempotent (skips if the
     //      demo org already exists) and additive (never wipes other orgs).
-    if (process.env.SEED_DEMO === '1') {
+    if (process.env.SEED_DEMO === '1' || process.env.SEED_DEMO === 'force') {
       try {
-        const seed = require('./scripts/seed');
-        if (!orgMeta[seed.DEMO_CODE]) {
+        const seed  = require('./scripts/seed');
+        const force = process.env.SEED_DEMO === 'force';
+        if (force || !orgMeta[seed.DEMO_CODE]) {
           const demo = await seed.buildDemoStore();
           _loadAllStores(demo);          // additive merge into the in-memory stores
           _rebuildEmailIndex();
           scheduleSave();
-          console.log(`[seed] SEED_DEMO=1 — demo squad added (${seed.DEMO_CODE}). Log in: coach@demo.club / maya@demo.club (demo1234).`);
+          const n = Object.keys(demo.orgUsers[seed.DEMO_CODE] || {}).length;
+          console.log(`[seed] ✓ SEED_DEMO=${process.env.SEED_DEMO} — demo squad ready (${n} users in ${seed.DEMO_CODE}). Log in: coach@demo.club / maya@demo.club — password demo1234.`);
         } else {
-          console.log('[seed] SEED_DEMO=1 but demo org already present — skipping.');
+          console.log('[seed] SEED_DEMO=1 but demo org already present — skipping (use SEED_DEMO=force to re-seed).');
         }
       } catch (e) { console.warn('[seed] boot seed failed (non-fatal):', e.message); }
     }

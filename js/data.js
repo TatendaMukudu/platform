@@ -122,17 +122,17 @@ function buildEmptyOrgStats(memberCount) {
 // one line away from returning (see the "hidden" note at the end). Maneuverable
 // by design — nothing is deleted, so nothing is dismally wrong.
 const WORKSPACE_MODULES = [
-  // ── My Space — every user. (A leader's Home is the unified leader-home,
-  //    so the member Home is hidden for them via hideForLeaders.) ──────────
-  { section: 'My Space', id: 'home',    icon: ICON.home,    label: 'Home',     permission: null, hideForLeaders: true },
-  // Check-In is folded into the Home composer (optional mood + "what happened?"),
+  // ── My Space — EVERY user, leaders included. Their own proactive "Me" space
+  //    (composer + what IntelliQ noticed about THEM). "Regardless of node." ──
+  { section: 'My Space', id: 'home',    icon: ICON.home,    label: 'Me',     permission: null },
+  // Check-In is folded into the Me composer (optional mood + "what happened?"),
   // so it's no longer a separate nav item. The page still exists and is reachable.
   { section: null,        id: 'notes',   icon: ICON.notes,   label: 'Notes',    permission: null },
   { section: null,        id: 'inbox',   icon: ICON.inbox,   label: 'Inbox',    permission: null },
 
   // ── Team — shown when the user leads ≥1 node (scoped server-side) ───────
-  { section: 'Team', id: 'leader-home',   icon: ICON.home,   label: 'Home',      leaderOnly: true }, // You + your people
-  { section: null,    id: 'leader-people', icon: ICON.people, label: 'My People', leaderOnly: true },
+  { section: 'Team', id: 'leader-home',   icon: ICON.people, label: 'Team',      leaderOnly: true }, // the people they lead
+  { section: null,    id: 'leader-people', icon: ICON.person, label: 'My People', leaderOnly: true },
 
   // ── Setup — admin / superadmin (people · org aims & values · settings) ──
   { section: 'Setup', id: 'people',       icon: ICON.person,   label: 'People',       permission: 'view_members'    },
