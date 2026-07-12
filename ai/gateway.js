@@ -155,4 +155,8 @@ async function completeJSON(opts) {
   return obj;
 }
 
-module.exports = { complete, completeJSON, parseJSON, MODELS, client };
+// True when at least one model is configured — callers gate optional LLM prose
+// on this so that with no key they skip the call entirely (no network, no wait).
+function enabled() { return HAVE_CLAUDE || HAVE_OPENAI; }
+
+module.exports = { complete, completeJSON, parseJSON, MODELS, client, enabled };

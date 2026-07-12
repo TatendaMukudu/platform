@@ -2766,7 +2766,7 @@ app.get('/api/me/record', requireAuth, async (req, res) => {
    has "already worked": what changed since last visit, what it noticed
    (self-relative), the person's own open questions, and a prepared suggestion.
    Fully deterministic from the kernel — no AI key required, so it always works. */
-app.get('/api/me/context', requireAuth, (req, res) => {
+app.get('/api/me/context', requireAuth, async (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const me = orgUsers[code]?.[userId];
   if (!me) return res.status(404).json({ error: 'Not found' });
@@ -2814,6 +2814,20 @@ app.get('/api/me/context', requireAuth, (req, res) => {
   if (noticed.length)      opening = `Since you were last here, I looked over your week — ${noticed.length === 1 ? "there's one thing" : `there are ${noticed.length} things`} worth a moment.`;
   else if (newSince > 0)   opening = `I've taken in ${newSince} new ${newSince === 1 ? 'thing' : 'things'} since your last visit and folded ${newSince === 1 ? 'it' : 'them'} into your picture.`;
   else                     opening = `Nothing new demands your attention right now. Add anything on your mind and I'll take it from there.`;
+
+  // If a model is configured, let the Coach VOICE the opening warmly. The
+  // judgment stays deterministic above; the LLM only turns it into words.
+  // Privacy-safe: it sees labels/directions (never raw text) and is redacted.
+  // Skipped entirely with no key, so the endpoint stays fast and offline-safe.
+  if (ai.enabled()) {
+    try {
+      const obs = noticed.map(x => `- ${x.text}`).join('\n') || '- nothing notably different from their own normal lately';
+      const sys = `You are IntelliQ, ${me.name}'s private mirror. Write ONE warm, brief opening (max 2 sentences) that makes them feel seen. Speak to them as "you". Self-relative, no scores, no advice, no invented specifics.`;
+      const usr = `Observations about THEIR OWN recent patterns — never quote or state private detail:\n${obs}\n\nWrite the opening line only.`;
+      const line = await ai.complete({ tier: 'micro', system: sys, user: usr, maxTokens: 90 });
+      if (line && line.trim()) opening = privacy.redact(line.trim(), m?.privateStrings || []);
+    } catch (_) { /* keep the deterministic opening */ }
+  }
 
   // Mark this visit.
   mem.lastSeen = new Date().toISOString();
@@ -2873,9 +2887,19 @@ app.post('/api/compose', requireAuth, async (req, res) => {
   (m?.deviations || []).slice(0, 2).forEach(d => noticed.push(`${d.label} is ${d.direction} your usual lately`));
   (m?.structural || []).slice(0, 2).forEach(s => noticed.push(intel.PATTERN_LABEL[s.type] || s.type));
 
+  let acknowledgement = "Got it — I've added that and folded it into your picture.";
+  if (ai.enabled() && text) {
+    try {
+      const sys = `You are IntelliQ, ${me.name}'s private mirror. They just shared something with you. Reply in ONE warm, brief sentence that shows you genuinely understood — reflect their own words back gently. No advice, no scores, no platitudes. Speak to them as "you".`;
+      const line = await ai.complete({ tier: 'micro', system: sys, user: `They wrote: "${text}"\n\nAcknowledge warmly in one sentence.`, maxTokens: 80 });
+      // Self-facing (their own words reflected back to them) — no redaction needed.
+      if (line && line.trim()) acknowledgement = line.trim();
+    } catch (_) { /* keep the deterministic acknowledgement */ }
+  }
+
   res.json({
     ok: true,
-    acknowledgement: "Got it — I've added that and folded it into your picture.",
+    acknowledgement,
     noticed,
     understanding: agents.personModel.understanding(_getMemory(code, userId).model),
   });
