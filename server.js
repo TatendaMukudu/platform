@@ -2985,7 +2985,12 @@ app.get('/api/me/export', requireAuth, (req, res) => {
     goals:       memberGoals[uKey] || memberGoals[mKey] || null,
     checkins:    memberCheckins[uKey] || memberCheckins[mKey] || [],
     results:     memberResults[uKey] || memberResults[mKey] || [],
-    signals:     (orgSignals[code] || []).filter(s => s.subjectId === userId || s.createdBy === userId),
+    // A person's own signals — BUT exclude third-party welfare/safeguarding
+    // observations others recorded about them (sensitive, reporter-protected).
+    // GDPR Art 15(4): access must not adversely affect the rights of others.
+    signals: (orgSignals[code] || []).filter(s =>
+      (s.subjectId === userId || s.createdBy === userId) &&
+      !(s.source === 'observation' && s.createdBy !== userId && s.sensitivity !== 'normal')),
     notes:       Object.values(orgNotes).filter(n => n.orgCode === code && n.authorId === userId),
     aiMemory:    userAiProfiles[uKey] || null,   // their own model — theirs to see
     weekly:      Object.entries(weeklyAssessments)
@@ -3025,21 +3030,40 @@ app.post('/api/observe', requireAuth, (req, res) => {
   const leadsSubject = getVisibleUserIds(code, authorId).includes(subjectId) &&
     (_userHasPerm(code, authorId, 'view_insights') || _userHasPerm(code, authorId, 'view_members') ||
      author.role === 'superadmin' || subject.supervisorId === authorId);
+  const isPeer = !leadsSubject;
 
-  // Concerns/notes are leader-scoped; recognition is open to peers.
-  if (k !== 'recognition' && !leadsSubject) {
-    return res.status(403).json({ error: 'Only someone who leads this person can record a concern. Recognition is open to anyone.' });
+  // Permission + handling by kind:
+  //  • recognition — anyone, about anyone. Positive, surfaced to the subject.
+  //  • concern     — a LEADER files a scoped concern (weight strong). A PEER may
+  //    also raise one, but it is handled as a private SAFEGUARDING flag: low
+  //    weight (needs corroboration — one voice can't mark someone), sensitive
+  //    (informs the responsible leader only, never the subject or other peers),
+  //    reporter-protected, optionally anonymous. "See something, say something"
+  //    done safely — a peer cannot weaponise it, and a real welfare worry isn't lost.
+  //  • note        — a neutral record, for someone who leads the person only.
+  if (k === 'note' && isPeer) {
+    return res.status(403).json({ error: 'Notes are for someone who leads this person. Use recognition, or raise a concern.' });
   }
 
-  const sensitivity = k === 'recognition' ? 'normal' : 'sensitive';
-  const weightNum   = leadsSubject ? 3 : 2;                 // leader observation > peer observation
+  const anonymous     = req.body?.anonymous === true;
+  const peerSafeguard = isPeer && k === 'concern';
+  const sensitivity   = k === 'recognition' ? 'normal' : 'sensitive';
+  const weightNum     = k === 'recognition' ? (leadsSubject ? 3 : 2)
+                      : (leadsSubject ? 3 : 1);            // peer concern = low weight, corroboration-gated
   try {
     _emitSignalSafe(code, {
       subjectType: 'member', subjectId, source: 'observation', modality: 'text',
       valueNum: mNum, valueText: body || null,
       label: metricLabel ? String(metricLabel).slice(0, 120) : (k === 'recognition' ? 'Recognition' : 'Observation'),
       sensitivity, weightNum,
-      data: { kind, byName: k === 'recognition' ? author.name : undefined, byRole: author.role },
+      data: {
+        kind,
+        // Attribution only for positive recognition; concerns protect the reporter.
+        byName: (k === 'recognition' && !anonymous) ? author.name : undefined,
+        byRole: author.role,
+        peerReport: peerSafeguard || undefined,           // a peer welfare flag → corroboration-gated
+        reporterProtected: (k !== 'recognition' || anonymous) || undefined,
+      },
     }, authorId);
   } catch (e) { return res.status(500).json({ error: 'could not record' }); }
 
@@ -3048,7 +3072,13 @@ app.post('/api/observe', requireAuth, (req, res) => {
     Object.keys(meRecordCache).forEach(key => { if (key.startsWith(code + ':')) meRecordCache[key] = null; });
   }
   scheduleSave();
-  res.json({ ok: true, kind: k, weight: weightNum >= 3 ? 'strong' : 'medium' });
+  res.json({
+    ok: true, kind: k,
+    weight: weightNum >= 3 ? 'strong' : weightNum >= 2 ? 'medium' : 'low',
+    routed: peerSafeguard
+      ? 'Raised privately with the people responsible for their wellbeing. Thank you for looking out for them.'
+      : (k === 'recognition' ? 'Shared with them.' : 'Recorded.'),
+  });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════

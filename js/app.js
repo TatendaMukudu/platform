@@ -6387,8 +6387,62 @@ function _leaderMemberRowHTML(m) {
       </div>
       <div class="lm-status">
         ${ps ? `<span class="ppl-chip ${ps.cls}">${ps.label}</span>` : `<span class="ppl-chip ps-nodata">—</span>`}
+        <button class="lm-observe" title="Recognise or note"
+          onclick="event.stopPropagation();leaderObserve('${m.userId}','${(m.name||'').replace(/['"\\<>]/g,'')}')">Recognise</button>
       </div>
     </div>`;
+}
+
+/* Leader records an observation ABOUT a person — recognition (shared with them)
+   or a concern (kept private). A small self-contained modal; never throws. */
+function leaderObserve(userId, name) {
+  document.getElementById('observe-modal')?.remove();
+  const el = document.createElement('div');
+  el.id = 'observe-modal'; el.className = 'modal-overlay'; el.style.display = 'flex';
+  el.dataset.kind = 'recognition';
+  el.innerHTML = `
+    <div class="modal-card observe-card">
+      <div class="modal-title">Note about ${(name||'them').replace(/[<>]/g,'')}</div>
+      <div class="obs-kind" id="obs-kind">
+        <button data-k="recognition" class="active">Recognition</button>
+        <button data-k="concern">Concern</button>
+      </div>
+      <div class="obs-hint" id="obs-hint">Recognition is shared with them — a chance to make them feel seen.</div>
+      <textarea class="note-input" id="obs-text" placeholder="What did you notice?"></textarea>
+      <div class="composer-actions">
+        <button class="btn-primary" onclick="submitObserve('${userId}')">Send</button>
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('observe-modal')?.remove()">Cancel</button>
+        <span id="obs-status" style="font-size:0.78rem;color:var(--text-muted)"></span>
+      </div>
+    </div>`;
+  el.addEventListener('click', e => { if (e.target === el) el.remove(); });
+  document.body.appendChild(el);
+  el.querySelectorAll('#obs-kind button').forEach(b => b.onclick = () => {
+    el.querySelectorAll('#obs-kind button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active'); el.dataset.kind = b.dataset.k;
+    const hint = document.getElementById('obs-hint');
+    if (hint) hint.textContent = b.dataset.k === 'concern'
+      ? 'A concern stays private — it informs your read, it is never shown to them.'
+      : 'Recognition is shared with them — a chance to make them feel seen.';
+  });
+}
+
+async function submitObserve(userId) {
+  const el = document.getElementById('observe-modal');
+  const kind = el?.dataset.kind || 'recognition';
+  const text = (document.getElementById('obs-text')?.value || '').trim();
+  const status = document.getElementById('obs-status');
+  if (!text) { if (status) status.textContent = 'Add a line first.'; return; }
+  try {
+    const res = await fetch('/api/observe', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
+      body: JSON.stringify({ subjectId: userId, kind, text }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || 'failed');
+    if (status) status.textContent = d.routed || 'Recorded.';
+    setTimeout(() => document.getElementById('observe-modal')?.remove(), 1500);
+  } catch (e) { if (status) status.textContent = 'Could not send — try again.'; }
 }
 
 // Render one tree node (recursive). Returns '' if nothing matches the search.

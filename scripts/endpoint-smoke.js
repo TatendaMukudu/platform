@@ -130,8 +130,21 @@ const server = app.listen(0, async () => {
     // A peer (member) may recognise, but may NOT file a concern about a peer.
     const peerRec = await call('/api/observe', tokB, { method: 'POST', body: { subjectId: coachId, kind: 'recognition', text: 'Thanks for the support this week.' } });
     ok('a peer/member can record recognition (open to anyone)', peerRec.status === 200);
-    const peerConcern = await call('/api/observe', tokB, { method: 'POST', body: { subjectId: coachId, kind: 'concern', text: 'seems off' } });
-    ok('a peer CANNOT file a concern about someone they don\'t lead (403)', peerConcern.status === 403);
+    // A peer CAN raise a welfare concern — accepted, but handled as a private,
+    // low-weight, reporter-protected safeguarding flag (not a public accusation).
+    const peerConcern = await call('/api/observe', tokB, { method: 'POST', body: { subjectId: coachId, kind: 'concern', text: 'seems really down lately' } });
+    ok('a peer CAN raise a welfare concern (accepted, not blocked)', peerConcern.status === 200 && peerConcern.j?.weight === 'low');
+    ok('a peer concern is routed privately (reporter thanked, not exposed)', /privately|responsible/i.test(peerConcern.j?.routed || ''));
+    // The concern must NOT surface to its subject (the coach) as recognition, and
+    // must NOT appear in the subject's own data export (reporter protection).
+    const coachCtx = await call('/api/me/context', tokCoach);
+    ok('a peer concern never shows to its subject as recognition', !(coachCtx.j?.recognitions || []).some(r => /down lately/i.test(r.text)));
+    const coachExport = await call('/api/me/export', tokCoach);
+    const leakedConcern = (coachExport.j?.signals || []).some(s => (s.valueText || '').match(/down lately/i));
+    ok('a peer welfare report is excluded from the subject\'s export (GDPR Art 15(4))', !leakedConcern);
+    // A peer still cannot file a neutral "note" (that stays leader-only).
+    ok('a peer still cannot file a neutral note (leader-only)',
+       (await call('/api/observe', tokB, { method: 'POST', body: { subjectId: coachId, kind: 'note', text: 'x' } })).status === 403);
 
   } catch (e) {
     fail++; console.log('  ✗ threw:', e.message);
