@@ -78,7 +78,7 @@ function scheduleSave() {
         memberGoals, weeklyAssessments, orgInterventions,
         orgNodes, orgMetrics, orgValues, orgGoals, userPermissions,
         userAiProfiles, advisorThreads, orgSignals, noticeFeedback,
-        userConsents, connectedSources,
+        userConsents, connectedSources, pendingActions,
         activeSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
@@ -504,6 +504,7 @@ const userAiProfiles  = {};  // `orgCode:userId` → { openThreads, recentThemes
 // owns it; drawing external app data is gated on it and it is revocable at any time.
 const userConsents    = {};
 const connectedSources= {};  // `orgCode:userId` → { [sourceId]: { connectedAt, lastPull } }
+const pendingActions  = {};  // `orgCode:userId` → [{ id, action, summary, payload, status, createdAt }]
 const CONSENT_VERSION = '2026-07';
 const _consentKey = (code, uid) => `${code}:${uid}`;
 function _getConsents(code, uid) { const k = _consentKey(code, uid); return (userConsents[k] = userConsents[k] || {}); }
@@ -3182,77 +3183,136 @@ app.post('/api/me/sources/pull', requireAuth, (req, res) => {
   res.json({ ok: true, source: src.id, imported: emitted });
 });
 
-/* GET /api/org/divisions — the CEO / org-wide roll-up. Each division (a group of
-   people) is aggregated into a health read: what's going well, what needs
-   attention, how to optimise, and which unit had the best week. Privacy-safe by
-   construction: only COUNTS + pattern TYPES + division names — never a single
-   person's private detail (individuals stay with their direct leader, gated).
-   Gated to org-level insight (superadmin / view_insights). */
+/* ── The assistant: draft → APPROVE → execute. IntelliQ can act on your behalf
+   (schedule a meeting, send a generic email) — but ONLY after you approve, and
+   ONLY with write consent for that action. Nothing outward happens unilaterally.
+   The provider call (Google Calendar / Microsoft Graph / mail) is the OAuth
+   integration point; the draft + approval + consent gate are real today. */
+
+app.get('/api/me/actions', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const list = (pendingActions[_consentKey(code, userId)] || []).filter(a => a.status === 'pending');
+  res.json({ ok: true, actions: list, canDo: connectors.listActions() });
+});
+
+/* Draft an action (proposed by the user, or by IntelliQ on their behalf). Nothing
+   is performed here — it becomes a pending item awaiting the person's approval. */
+app.post('/api/me/actions', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const def = connectors.getAction(req.body?.action);
+  if (!def) return res.status(400).json({ error: 'unknown action' });
+  const prepared = def.prepare(req.body?.params || {});
+  if (!prepared.valid) return res.status(400).json({ error: prepared.error || 'invalid params' });
+  const key = _consentKey(code, userId);
+  const item = { id: 'act_' + generateId(), action: def.id, writeScope: def.writeScope,
+    summary: prepared.summary, payload: prepared.payload, status: 'pending', createdAt: new Date().toISOString() };
+  (pendingActions[key] = pendingActions[key] || []).push(item);
+  scheduleSave();
+  res.json({ ok: true, action: { id: item.id, action: item.action, summary: item.summary, needsConsent: !_hasConsent(code, userId, def.writeScope) } });
+});
+
+/* Approve → EXECUTE. Requires write consent for the action's scope. The actual
+   provider send is stubbed until OAuth; everything up to it is enforced. */
+app.post('/api/me/actions/:id/approve', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const list = pendingActions[_consentKey(code, userId)] || [];
+  const item = list.find(a => a.id === req.params.id && a.status === 'pending');
+  if (!item) return res.status(404).json({ error: 'action not found' });
+  if (!_hasConsent(code, userId, item.writeScope)) {
+    return res.status(403).json({ error: 'consent_required', scope: item.writeScope, message: `Grant ${item.writeScope} to let IntelliQ do this for you.` });
+  }
+  // ── Provider integration point (OAuth write). Stubbed: mark executed. ──
+  item.status = 'done'; item.executedAt = new Date().toISOString();
+  item.result = 'Executed (provider integration pending — no external send in this build).';
+  scheduleSave();
+  res.json({ ok: true, id: item.id, status: 'done', result: item.result });
+});
+
+app.post('/api/me/actions/:id/reject', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const list = pendingActions[_consentKey(code, userId)] || [];
+  const item = list.find(a => a.id === req.params.id && a.status === 'pending');
+  if (item) { item.status = 'rejected'; scheduleSave(); }
+  res.json({ ok: true });
+});
+
+/* Aggregate a SET of people into a privacy-safe unit read (counts + pattern
+   types + percentages only — never a name or private detail). Shared by the
+   overall range roll-up and each sub-unit. */
+const _POSITIVE_PATTERNS = new Set(['recovering', 'quiet_improvement']);
+function _aggregatePeople(code, ids, now, monday) {
+  const users = ids.map(id => orgUsers[code]?.[id]).filter(u => u && u.role !== 'superadmin');
+  const patternCounts = {}; let attention = 0, positive = 0, active = 0;
+  const traj = { up: 0, down: 0, steady: 0 };
+  const idSet = new Set(users.map(u => u.id));
+  users.forEach(u => {
+    let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { m = null; }
+    (m ? intel.detectPatterns(m) : []).forEach(p => {
+      patternCounts[p.type] = (patternCounts[p.type] || 0) + 1;
+      if (p.severity === 'high') attention++;
+      if (_POSITIVE_PATTERNS.has(p.type)) positive++;
+    });
+    const tr = m?.memberTrajectory; if (tr && traj[tr] != null) traj[tr]++;
+    const ck = memberCheckins[userKey(code, u.id)] || memberCheckins[memberKey(code, u.name || '')] || [];
+    if (ck.some(c => c.ts && new Date(c.ts) >= monday)) active++;
+  });
+  const recognition = (orgSignals[code] || []).filter(s =>
+    s.source === 'observation' && s.data && s.data.kind === 'recognition' &&
+    idSet.has(s.subjectId) && new Date(s.ts) >= monday).length;
+  const size = users.length;
+  const pct = n => size ? Math.round((n / size) * 100) : 0;
+  const status = size === 0 ? 'no-data'
+    : attention >= Math.ceil(size * 0.34) ? 'strained'
+    : positive >= attention ? 'thriving' : 'steady';
+  const topConcern = Object.entries(patternCounts).filter(([t]) => !_POSITIVE_PATTERNS.has(t)).sort((a, b) => b[1] - a[1])[0];
+  return {
+    size, active, status, attention, positive, recognition,
+    percent: { active: pct(active), needsAttention: pct(attention), doingWell: pct(positive) },
+    trajectory: traj.down > traj.up && traj.down >= traj.steady ? 'down' : traj.up > traj.steady ? 'up' : 'steady',
+    focus: topConcern ? (intel.PATTERN_LABEL[topConcern[0]] || topConcern[0]) : null,
+    focusAction: topConcern ? (intel.DEFAULT_ACTION[topConcern[0]] || null) : null,
+    momentum: positive * 2 + recognition - attention * 2,
+  };
+}
+
+/* GET /api/org/divisions — oversight roll-up for ANY leader, scoped to THEIR
+   range (their node + everything beneath it, all the way down — via
+   getVisibleUserIds). A head-of-department sees their whole sub-tree as
+   aggregate PERCENTAGES; the CEO sees the org. Privacy-safe: counts + pattern
+   types + percentages only, never a name or private detail. */
 app.get('/api/org/divisions', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
-  if (!(_userHasPerm(code, userId, 'view_insights') || orgUsers[code]?.[userId]?.role === 'superadmin')) {
-    return res.status(403).json({ error: 'Org-level insight requires view_insights.' });
+  const range = getVisibleUserIds(code, userId).filter(id => id !== userId);   // the people they oversee
+  if (range.length === 0 && !(orgUsers[code]?.[userId]?.role === 'superadmin')) {
+    return res.status(403).json({ error: 'This view is for leaders — it shows the people you oversee.' });
   }
   const now = Date.now();
   const monday = new Date(now); const dow = monday.getDay();
   monday.setDate(monday.getDate() - (dow === 0 ? 6 : dow - 1)); monday.setHours(0, 0, 0, 0);
+  const rangeSet = new Set(range);
 
-  const POSITIVE = new Set(['recovering', 'quiet_improvement']);
-  const divisions = (orgGroups[code] || []).map(g => {
-    const members = (g.memberIds || []).map(id => orgUsers[code]?.[id]).filter(u => u && u.role !== 'superadmin');
-    const patternCounts = {}; let attention = 0, positive = 0, active = 0;
-    const traj = { up: 0, down: 0, steady: 0 };
-    const memberIds = new Set(members.map(u => u.id));
-    members.forEach(u => {
-      let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { m = null; }
-      (m ? intel.detectPatterns(m) : []).forEach(p => {
-        patternCounts[p.type] = (patternCounts[p.type] || 0) + 1;
-        if (p.severity === 'high') attention++;
-        if (POSITIVE.has(p.type)) positive++;
-      });
-      const tr = m?.memberTrajectory; if (tr && traj[tr] != null) traj[tr]++;
-      const ck = memberCheckins[userKey(code, u.id)] || memberCheckins[memberKey(code, u.name || '')] || [];
-      if (ck.some(c => c.ts && new Date(c.ts) >= monday)) active++;
-    });
-    const recognition = (orgSignals[code] || []).filter(s =>
-      s.source === 'observation' && s.data && s.data.kind === 'recognition' &&
-      memberIds.has(s.subjectId) && new Date(s.ts) >= monday).length;
+  // Overall — everyone in this leader's range, as percentages.
+  const overall = _aggregatePeople(code, range, now, monday);
 
-    const size = members.length;
-    const status = size === 0 ? 'no-data'
-      : attention >= Math.ceil(size * 0.34) ? 'strained'
-      : positive >= attention ? 'thriving' : 'steady';
-    const topConcern = Object.entries(patternCounts)
-      .filter(([t]) => !POSITIVE.has(t)).sort((a, b) => b[1] - a[1])[0];
-    const momentum = positive * 2 + recognition - attention * 2;   // for "unit of the week"
-    return {
-      id: g.id, name: g.name, size, active, status,
-      attention, positive, recognition,
-      trajectory: traj.down > traj.up && traj.down >= traj.steady ? 'down' : traj.up > traj.steady ? 'up' : 'steady',
-      wellCount: positive + recognition,
-      focus: topConcern ? (intel.PATTERN_LABEL[topConcern[0]] || topConcern[0]) : null,
-      focusAction: topConcern ? (intel.DEFAULT_ACTION[topConcern[0]] || null) : null,
-      _momentum: momentum,
-    };
-  });
+  // Per sub-unit — only groups that intersect the range, only the visible members.
+  const units = (orgGroups[code] || [])
+    .map(g => ({ g, ids: (g.memberIds || []).filter(id => rangeSet.has(id)) }))
+    .filter(x => x.ids.length)
+    .map(({ g, ids }) => ({ id: g.id, name: g.name, ..._aggregatePeople(code, ids, now, monday) }));
 
   const STAT = { thriving: 0, steady: 1, strained: 2, 'no-data': 3 };
-  divisions.sort((a, b) => STAT[a.status] - STAT[b.status] || b._momentum - a._momentum);
-  const best = [...divisions].filter(d => d.size > 0).sort((a, b) => b._momentum - a._momentum)[0];
-  const unitOfWeek = best && (best.positive > 0 || best.recognition > 0) ? {
-    name: best.name,
-    why: `Best momentum this week — ${best.positive} climbing/quietly-improving${best.recognition ? `, ${best.recognition} recognitions` : ''}${best.attention ? `, only ${best.attention} needing attention` : ', nothing flagged'}.`,
-  } : null;
+  units.sort((a, b) => STAT[a.status] - STAT[b.status] || b.momentum - a.momentum);
+  const best = [...units].filter(u => u.size > 0).sort((a, b) => b.momentum - a.momentum)[0];
+  const unitOfWeek = best && (best.positive > 0 || best.recognition > 0)
+    ? { name: best.name, why: `Best momentum this week — ${best.percent.doingWell}% doing well${best.recognition ? `, ${best.recognition} recognitions` : ''}, ${best.percent.needsAttention}% needing attention.` }
+    : null;
 
   res.json({
     ok: true, generatedAt: new Date().toISOString(),
-    divisions: divisions.map(({ _momentum, ...d }) => d),
+    range: { people: overall.size, ...overall.percent, status: overall.status, trajectory: overall.trajectory, focus: overall.focus, focusAction: overall.focusAction },
+    divisions: units.map(({ momentum, ...u }) => u),
     unitOfWeek,
-    summary: {
-      total: divisions.length,
-      thriving: divisions.filter(d => d.status === 'thriving').length,
-      strained: divisions.filter(d => d.status === 'strained').length,
-    },
+    summary: { total: units.length, thriving: units.filter(u => u.status === 'thriving').length, strained: units.filter(u => u.status === 'strained').length },
   });
 });
 
@@ -7227,6 +7287,7 @@ function _loadAllStores(data) {
   Object.assign(advisorThreads,   data.advisorThreads   || {});
   Object.assign(userConsents,     data.userConsents     || {});
   Object.assign(connectedSources, data.connectedSources || {});
+  Object.assign(pendingActions,   data.pendingActions   || {});
   Object.assign(orgSignals,       data.orgSignals       || {});
   Object.assign(noticeFeedback,   data.noticeFeedback   || {});
   // Restore sessions, pruning any that expired while the server was down

@@ -32,6 +32,30 @@ function _perDay(items, label, primitive, valence) {
   }));
 }
 
+/* Write ACTIONS a connector can perform on the person's behalf (with a separate
+   write consent scope). The actual provider call is the integration point; here
+   we validate + shape the action. Each returns { summary } for the approval card. */
+const ACTIONS = {
+  schedule_meeting: {
+    id: 'schedule_meeting', label: 'Schedule a meeting', writeScope: 'external:calendar:write',
+    // params: { title, withWhom?, date?, durationMins? }
+    prepare(p = {}) {
+      const title = String(p.title || 'Meeting').slice(0, 140);
+      const when  = p.date ? String(p.date).slice(0, 40) : 'a time that works';
+      const who   = p.withWhom ? ` with ${String(p.withWhom).slice(0, 80)}` : '';
+      return { valid: true, summary: `Schedule “${title}”${who} — ${when} (${p.durationMins || 30} min).`, payload: { title, ...p } };
+    },
+  },
+  send_email: {
+    id: 'send_email', label: 'Send an email', writeScope: 'external:email:write',
+    // params: { to, subject, body }
+    prepare(p = {}) {
+      if (!p.to || !p.subject) return { valid: false, error: 'to + subject required' };
+      return { valid: true, summary: `Email “${String(p.subject).slice(0, 120)}” to ${String(p.to).slice(0, 120)}.`, payload: { to: p.to, subject: p.subject, body: String(p.body || '').slice(0, 4000) } };
+    },
+  },
+};
+
 const CONNECTORS = {
   calendar: {
     id: 'calendar', label: 'Calendar', scope: 'external:calendar',
@@ -66,5 +90,7 @@ function list() {
   return Object.values(CONNECTORS).map(c => ({ id: c.id, label: c.label, scope: c.scope, describes: c.describes }));
 }
 function get(id) { return CONNECTORS[id] || null; }
+function getAction(id) { return ACTIONS[id] || null; }
+function listActions() { return Object.values(ACTIONS).map(a => ({ id: a.id, label: a.label, writeScope: a.writeScope })); }
 
-module.exports = { CONNECTORS, list, get, _perDay };
+module.exports = { CONNECTORS, ACTIONS, list, get, getAction, listActions, _perDay };

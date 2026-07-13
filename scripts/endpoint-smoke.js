@@ -163,12 +163,21 @@ const server = app.listen(0, async () => {
     ok('after withdrawal, drawing is refused again',
        (await call('/api/me/sources/pull', tokB, { method: 'POST', body: { source: 'health', data: [] } })).status === 403);
 
-    // ── CEO divisional roll-up: org-level, gated, aggregate-only ────────────
+    // ── Oversight roll-up: scoped to a leader's range, aggregate percentages ──
     const divCoach = await call('/api/org/divisions', tokCoach);
-    ok('a CEO/superadmin gets the divisional roll-up', divCoach.status === 200 && Array.isArray(divCoach.j?.divisions) && divCoach.j?.summary);
-    ok('a plain member is denied the org roll-up (403)', (await call('/api/org/divisions', tokB)).status === 403);
-    ok('the roll-up carries no individual raw text (aggregate only)',
+    ok('a leader gets the oversight roll-up scoped to their range', divCoach.status === 200 && divCoach.j?.range && typeof divCoach.j.range.needsAttention === 'number');
+    ok('a plain member (oversees no one) is denied (403)', (await call('/api/org/divisions', tokB)).status === 403);
+    ok('the roll-up is aggregate-only (no names / raw text)',
        !/valueText|passwordHash/.test(JSON.stringify(divCoach.j || {})));
+
+    // ── Assistant: draft → approve (consent-gated) → execute ────────────────
+    const draft = await call('/api/me/actions', tokCoach, { method: 'POST', body: { action: 'schedule_meeting', params: { title: '1:1 with the team', durationMins: 30 } } });
+    ok('IntelliQ can draft an action (nothing sent yet)', draft.status === 200 && draft.j?.action?.needsConsent === true);
+    const actId = draft.j.action.id;
+    ok('approving WITHOUT write consent is refused', (await call(`/api/me/actions/${actId}/approve`, tokCoach, { method: 'POST' })).status === 403);
+    await call('/api/me/consent', tokCoach, { method: 'POST', body: { scope: 'external:calendar:write', granted: true } });
+    const done = await call(`/api/me/actions/${actId}/approve`, tokCoach, { method: 'POST' });
+    ok('approving WITH consent executes the action', done.status === 200 && done.j?.status === 'done');
 
   } catch (e) {
     fail++; console.log('  ✗ threw:', e.message);
