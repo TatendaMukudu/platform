@@ -3182,6 +3182,80 @@ app.post('/api/me/sources/pull', requireAuth, (req, res) => {
   res.json({ ok: true, source: src.id, imported: emitted });
 });
 
+/* GET /api/org/divisions — the CEO / org-wide roll-up. Each division (a group of
+   people) is aggregated into a health read: what's going well, what needs
+   attention, how to optimise, and which unit had the best week. Privacy-safe by
+   construction: only COUNTS + pattern TYPES + division names — never a single
+   person's private detail (individuals stay with their direct leader, gated).
+   Gated to org-level insight (superadmin / view_insights). */
+app.get('/api/org/divisions', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!(_userHasPerm(code, userId, 'view_insights') || orgUsers[code]?.[userId]?.role === 'superadmin')) {
+    return res.status(403).json({ error: 'Org-level insight requires view_insights.' });
+  }
+  const now = Date.now();
+  const monday = new Date(now); const dow = monday.getDay();
+  monday.setDate(monday.getDate() - (dow === 0 ? 6 : dow - 1)); monday.setHours(0, 0, 0, 0);
+
+  const POSITIVE = new Set(['recovering', 'quiet_improvement']);
+  const divisions = (orgGroups[code] || []).map(g => {
+    const members = (g.memberIds || []).map(id => orgUsers[code]?.[id]).filter(u => u && u.role !== 'superadmin');
+    const patternCounts = {}; let attention = 0, positive = 0, active = 0;
+    const traj = { up: 0, down: 0, steady: 0 };
+    const memberIds = new Set(members.map(u => u.id));
+    members.forEach(u => {
+      let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { m = null; }
+      (m ? intel.detectPatterns(m) : []).forEach(p => {
+        patternCounts[p.type] = (patternCounts[p.type] || 0) + 1;
+        if (p.severity === 'high') attention++;
+        if (POSITIVE.has(p.type)) positive++;
+      });
+      const tr = m?.memberTrajectory; if (tr && traj[tr] != null) traj[tr]++;
+      const ck = memberCheckins[userKey(code, u.id)] || memberCheckins[memberKey(code, u.name || '')] || [];
+      if (ck.some(c => c.ts && new Date(c.ts) >= monday)) active++;
+    });
+    const recognition = (orgSignals[code] || []).filter(s =>
+      s.source === 'observation' && s.data && s.data.kind === 'recognition' &&
+      memberIds.has(s.subjectId) && new Date(s.ts) >= monday).length;
+
+    const size = members.length;
+    const status = size === 0 ? 'no-data'
+      : attention >= Math.ceil(size * 0.34) ? 'strained'
+      : positive >= attention ? 'thriving' : 'steady';
+    const topConcern = Object.entries(patternCounts)
+      .filter(([t]) => !POSITIVE.has(t)).sort((a, b) => b[1] - a[1])[0];
+    const momentum = positive * 2 + recognition - attention * 2;   // for "unit of the week"
+    return {
+      id: g.id, name: g.name, size, active, status,
+      attention, positive, recognition,
+      trajectory: traj.down > traj.up && traj.down >= traj.steady ? 'down' : traj.up > traj.steady ? 'up' : 'steady',
+      wellCount: positive + recognition,
+      focus: topConcern ? (intel.PATTERN_LABEL[topConcern[0]] || topConcern[0]) : null,
+      focusAction: topConcern ? (intel.DEFAULT_ACTION[topConcern[0]] || null) : null,
+      _momentum: momentum,
+    };
+  });
+
+  const STAT = { thriving: 0, steady: 1, strained: 2, 'no-data': 3 };
+  divisions.sort((a, b) => STAT[a.status] - STAT[b.status] || b._momentum - a._momentum);
+  const best = [...divisions].filter(d => d.size > 0).sort((a, b) => b._momentum - a._momentum)[0];
+  const unitOfWeek = best && (best.positive > 0 || best.recognition > 0) ? {
+    name: best.name,
+    why: `Best momentum this week — ${best.positive} climbing/quietly-improving${best.recognition ? `, ${best.recognition} recognitions` : ''}${best.attention ? `, only ${best.attention} needing attention` : ', nothing flagged'}.`,
+  } : null;
+
+  res.json({
+    ok: true, generatedAt: new Date().toISOString(),
+    divisions: divisions.map(({ _momentum, ...d }) => d),
+    unitOfWeek,
+    summary: {
+      total: divisions.length,
+      thriving: divisions.filter(d => d.status === 'thriving').length,
+      strained: divisions.filter(d => d.status === 'strained').length,
+    },
+  });
+});
+
 /* ═══════════════════════════════════════════════════════════════════════════
    SPRINT 2 — METRICS
    Three sources: org (superadmin-defined), shared (leader), personal (member)

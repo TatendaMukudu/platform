@@ -163,6 +163,13 @@ const server = app.listen(0, async () => {
     ok('after withdrawal, drawing is refused again',
        (await call('/api/me/sources/pull', tokB, { method: 'POST', body: { source: 'health', data: [] } })).status === 403);
 
+    // ── CEO divisional roll-up: org-level, gated, aggregate-only ────────────
+    const divCoach = await call('/api/org/divisions', tokCoach);
+    ok('a CEO/superadmin gets the divisional roll-up', divCoach.status === 200 && Array.isArray(divCoach.j?.divisions) && divCoach.j?.summary);
+    ok('a plain member is denied the org roll-up (403)', (await call('/api/org/divisions', tokB)).status === 403);
+    ok('the roll-up carries no individual raw text (aggregate only)',
+       !/valueText|passwordHash/.test(JSON.stringify(divCoach.j || {})));
+
   } catch (e) {
     fail++; console.log('  ✗ threw:', e.message);
   } finally {
