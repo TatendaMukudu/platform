@@ -5965,9 +5965,9 @@ async function renderIntelligence(refresh) {
   const title = document.getElementById('ldr-home-title');
   const sub   = document.getElementById('ldr-home-sub');
   if (!el) return;
-  if (title) title.textContent = 'Home';
-  if (sub)   sub.textContent   = `You, then your ${_v('people')}.`;
-  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">🧭 Reading the signals…</div>`;
+  if (title) title.textContent = 'Team';
+  if (sub)   sub.textContent   = `The ${_v('people')} you lead — who needs your attention.`;
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Reading the signals…</div>`;
   try {
     // One surface, grown by responsibility: the coach's OWN mirror + who needs them.
     const [briefRes, meRes] = await Promise.all([
@@ -6115,8 +6115,8 @@ async function renderLeaderHome() {
 
   // Update header to name the scope
   const nodeNames = (Auth.currentUser?.leadershipNodeIds || []).length;
-  if (title) title.textContent = 'Leader Dashboard';
-  if (sub)   sub.textContent   = 'Who needs my attention?';
+  if (title) title.textContent = 'Team';
+  if (sub)   sub.textContent   = 'The people you lead — who needs your attention.';
 
   el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Loading…</div>`;
 
