@@ -339,6 +339,16 @@ const MemberApp = {
         <div class="iq-briefing-text">${this._escape(d.opening || '')}</div>
       </div>`;
 
+    // Recognition from others — a positive, human moment (the reason to open it).
+    const recEl = document.getElementById('me-recognition');
+    if (recEl) recEl.innerHTML = (d.recognitions && d.recognitions.length) ? `
+      <div class="me-section-label">You were noticed</div>
+      ${d.recognitions.map(r => `
+        <div class="card me-recognition-card">
+          <div class="me-row-text">${this._escape(r.text)}</div>
+          <div class="me-row-conf">— ${this._escape(r.by)}</div>
+        </div>`).join('')}` : '';
+
     if (notEl) notEl.innerHTML = (d.noticed && d.noticed.length) ? `
       <div class="me-section-label">Things I've noticed</div>
       ${d.noticed.map(x => `

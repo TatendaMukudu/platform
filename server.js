@@ -2837,8 +2837,15 @@ app.get('/api/me/context', requireAuth, async (req, res) => {
   const focuses = (mem.focuses || []).filter(f => f.status === 'active')
     .map(f => ({ id: f.id, text: f.text }));
 
+  // Recognition ABOUT them from others (leader or peer) — the draw-in: they open
+  // the app and find someone acknowledged them. Positive/attributed by design.
+  const recognitions = (orgSignals[code] || [])
+    .filter(s => s.subjectId === userId && s.source === 'observation' && s.data && s.data.kind === 'recognition')
+    .sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 3)
+    .map(s => ({ text: s.valueText || 'recognised your work', by: s.data.byName || 'Someone on your team', date: s.ts }));
+
   res.json({
-    ok: true, name: me.name, greeting, opening, newSince, noticed, questions, prepared, focuses,
+    ok: true, name: me.name, greeting, opening, newSince, noticed, questions, prepared, focuses, recognitions,
     understanding: agents.personModel.understanding(mem.model),
     trajectory: m?.memberTrajectory || null,
   });
@@ -2987,6 +2994,61 @@ app.get('/api/me/export', requireAuth, (req, res) => {
   };
   res.setHeader('Content-Disposition', 'attachment; filename="intelliq-my-data.json"');
   res.json(bundle);
+});
+
+/* POST /api/observe — record an observation ABOUT someone (the "works even if the
+   person never logs in" path + peer recognition). An observation is just a signal
+   with subjectId = the person and createdBy = the observer, so the kernel already
+   reasons over it by subject regardless of who authored it.
+
+   Directions supported (all "considered" by the kernel):
+     • leader → member (top-down)        • leader ↔ leader (peer)
+     • member ↔ member (lateral)         • member → leader (upward / 360)
+   Guardrails so it can't be weaponised:
+     • RECOGNITION (positive) — anyone in the org may record it about anyone; it's
+       surfaced to the subject (attribution kept). Dignity-preserving by design.
+     • CONCERN / NOTE — requires the author to actually lead/see the subject (scope);
+       stored SENSITIVE (informs the kernel, never shown to the subject or peers).
+       A peer cannot file a public "concern" about someone (no pile-ons).
+   Weight reflects the relationship: a leader's observation weighs more than a peer's. */
+app.post('/api/observe', requireAuth, (req, res) => {
+  const { orgCode: code, userId: authorId } = req.iqSession;
+  const { subjectId, kind, text, metricLabel, metricValue } = req.body || {};
+  const author  = orgUsers[code]?.[authorId];
+  const subject = orgUsers[code]?.[subjectId];
+  if (!author || !subject) return res.status(404).json({ error: 'Not found' });
+  const k = ['recognition', 'concern', 'note'].includes(kind) ? kind : 'note';
+  const body = String(text || '').trim();
+  const mNum = metricValue != null && Number.isFinite(Number(metricValue)) ? Number(metricValue) : null;
+  if (!body && mNum == null) return res.status(400).json({ error: 'text or a metric is required' });
+
+  const leadsSubject = getVisibleUserIds(code, authorId).includes(subjectId) &&
+    (_userHasPerm(code, authorId, 'view_insights') || _userHasPerm(code, authorId, 'view_members') ||
+     author.role === 'superadmin' || subject.supervisorId === authorId);
+
+  // Concerns/notes are leader-scoped; recognition is open to peers.
+  if (k !== 'recognition' && !leadsSubject) {
+    return res.status(403).json({ error: 'Only someone who leads this person can record a concern. Recognition is open to anyone.' });
+  }
+
+  const sensitivity = k === 'recognition' ? 'normal' : 'sensitive';
+  const weightNum   = leadsSubject ? 3 : 2;                 // leader observation > peer observation
+  try {
+    _emitSignalSafe(code, {
+      subjectType: 'member', subjectId, source: 'observation', modality: 'text',
+      valueNum: mNum, valueText: body || null,
+      label: metricLabel ? String(metricLabel).slice(0, 120) : (k === 'recognition' ? 'Recognition' : 'Observation'),
+      sensitivity, weightNum,
+      data: { kind, byName: k === 'recognition' ? author.name : undefined, byRole: author.role },
+    }, authorId);
+  } catch (e) { return res.status(500).json({ error: 'could not record' }); }
+
+  // Recognition is surfaced to the subject — clear their proactive cache so it shows.
+  if (k === 'recognition') {
+    Object.keys(meRecordCache).forEach(key => { if (key.startsWith(code + ':')) meRecordCache[key] = null; });
+  }
+  scheduleSave();
+  res.json({ ok: true, kind: k, weight: weightNum >= 3 ? 'strong' : 'medium' });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════

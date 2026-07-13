@@ -570,3 +570,7 @@
 /* ── Notes options (tucked away for a clean default) ────────────────────── */
 .note-opt-label { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.4rem; }
 #note-content { min-height: 90px; }
+
+/* ── Recognition (someone noticed you) — a warm, positive moment ─────────── */
+.me-recognition-card { border-color: rgba(14,207,176,0.32); background: rgba(14,207,176,0.06); margin-bottom: 0.5rem; }
+.me-recognition-card .me-row-conf { color: var(--accent2, #0ecfb0); margin-top: 4px; }

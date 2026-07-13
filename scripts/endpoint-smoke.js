@@ -117,6 +117,22 @@ const server = app.listen(0, async () => {
     // A's token is still valid but the user record is gone → me/export 404s.
     ok('erased member has no exportable data left', (await call('/api/me/export', tokA)).status === 404);
 
+    // ── Observation / recognition (works even if the subject never logs in) ──
+    // Re-seed a fresh member B is gone; use coach → B? B still exists. Coach recognises B.
+    const recSubject = bId;
+    const rec1 = await call('/api/observe', tokCoach, { method: 'POST', body: { subjectId: recSubject, kind: 'recognition', text: 'Great work leading the review today.' } });
+    ok('a leader can record recognition about a member', rec1.status === 200 && rec1.j?.ok === true);
+    // The recognition surfaces to the subject in their Me context.
+    const tokB = issueToken(bId, CODE, 'member');
+    const ctxB = await call('/api/me/context', tokB);
+    ok('recognition surfaces to the subject ("you were noticed")',
+       (ctxB.j?.recognitions || []).some(r => /great work/i.test(r.text)));
+    // A peer (member) may recognise, but may NOT file a concern about a peer.
+    const peerRec = await call('/api/observe', tokB, { method: 'POST', body: { subjectId: coachId, kind: 'recognition', text: 'Thanks for the support this week.' } });
+    ok('a peer/member can record recognition (open to anyone)', peerRec.status === 200);
+    const peerConcern = await call('/api/observe', tokB, { method: 'POST', body: { subjectId: coachId, kind: 'concern', text: 'seems off' } });
+    ok('a peer CANNOT file a concern about someone they don\'t lead (403)', peerConcern.status === 403);
+
   } catch (e) {
     fail++; console.log('  ✗ threw:', e.message);
   } finally {
