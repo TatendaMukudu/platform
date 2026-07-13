@@ -85,6 +85,31 @@ function scheduleSave() {
   }, 500);
 }
 
+/* ── Data retention (GDPR storage limitation) ─────────────────────────────────
+   Personal signals + check-ins older than the retention window are purged, so we
+   don't hold data longer than we need. Default 2 years; set RETENTION_DAYS to
+   override. Runs on boot and daily. Only removes OLD data — recent is untouched. */
+const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS, 10) > 0 ? parseInt(process.env.RETENTION_DAYS, 10) : 730;
+function _purgeExpired(retentionDays = RETENTION_DAYS) {
+  const cutoff = Date.now() - retentionDays * 86400000;
+  const keep = ts => { const t = ts ? new Date(ts).getTime() : NaN; return !Number.isFinite(t) || t >= cutoff; };
+  let removed = 0;
+  for (const code of Object.keys(orgSignals)) {
+    if (!Array.isArray(orgSignals[code])) continue;
+    const before = orgSignals[code].length;
+    orgSignals[code] = orgSignals[code].filter(s => keep(s.ts));
+    removed += before - orgSignals[code].length;
+  }
+  for (const k of Object.keys(memberCheckins)) {
+    if (!Array.isArray(memberCheckins[k])) continue;
+    const before = memberCheckins[k].length;
+    memberCheckins[k] = memberCheckins[k].filter(c => keep(c.ts));
+    removed += before - memberCheckins[k].length;
+  }
+  if (removed) { console.log(`[retention] purged ${removed} record(s) older than ${retentionDays}d`); scheduleSave(); }
+  return removed;
+}
+
 /* ── Session tokens ───────────────────────────────────────────────────────────
    Persisted to Postgres so tokens survive server restarts (Railway redeploys).
    Expired sessions are pruned before each save and on load.
@@ -7325,7 +7350,7 @@ const PORT = process.env.PORT || 3000;
 
 // Export a minimal surface for the endpoint smoke test (in-process, DB_OPTIONAL).
 // Requiring this module never boots a listener — only running it directly does.
-module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken };
+module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired };
 
 if (require.main === module) (async () => {
   try {
@@ -7393,12 +7418,18 @@ if (require.main === module) (async () => {
       console.log('[db] embeddings not configured — cross-member similarity uses rule-based fallback');
     }
 
+    // 5d. Data retention (GDPR storage limitation) — purge expired personal data
+    //     on boot, then daily. Runs only in the live server (never in test mode).
+    _purgeExpired();
+    setInterval(() => { try { _purgeExpired(); } catch (e) { console.warn('[retention] purge failed:', e.message); } }, 24 * 60 * 60 * 1000).unref();
+
     // 6. Start HTTP server
     app.listen(PORT, () => {
       console.log('');
       console.log(`[server] ✓ IntelliQ ready on port ${PORT}`);
       console.log(`[server]   API key: ${process.env.ANTHROPIC_API_KEY ? '✓ loaded' : '✗ MISSING — set ANTHROPIC_API_KEY'}`);
       console.log(`[server]   Persistence: Neon Postgres (DATABASE_URL)`);
+      console.log(`[server]   Retention: ${RETENTION_DAYS} days (RETENTION_DAYS to override)`);
       console.log('');
     });
 

@@ -11,7 +11,7 @@
 process.env.DB_OPTIONAL = '1';
 process.env.NODE_ENV    = 'test';
 
-const { app, _loadAllStores, _rebuildEmailIndex, issueToken } = require('../server.js');
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired } = require('../server.js');
 
 const CODE = 'testco';
 const iso  = new Date().toISOString();
@@ -178,6 +178,20 @@ const server = app.listen(0, async () => {
     await call('/api/me/consent', tokCoach, { method: 'POST', body: { scope: 'external:calendar:write', granted: true } });
     const done = await call(`/api/me/actions/${actId}/approve`, tokCoach, { method: 'POST' });
     ok('approving WITH consent executes the action', done.status === 200 && done.j?.status === 'done');
+
+    // ── Data retention: old personal data is purged, recent is kept (GDPR) ────
+    const oldTs    = new Date(Date.now() - 800 * 86400000).toISOString(); // > 730d
+    const freshTs  = new Date().toISOString();
+    _loadAllStores({ orgSignals: { [CODE]: [
+      { subjectId: bId, label: 'old', valueNum: 1, ts: oldTs },
+      { subjectId: bId, label: 'fresh', valueNum: 1, ts: freshTs },
+    ] } });
+    const purged = _purgeExpired();
+    ok('retention purges data past the window (>=1 old record removed)', purged >= 1);
+    const expB = await call('/api/me/export', tokB);
+    const sigLabels = (expB.j?.signals || []).map(s => s.label);
+    ok('retention keeps recent data and drops only the expired',
+       sigLabels.includes('fresh') && !sigLabels.includes('old'));
 
   } catch (e) {
     fail++; console.log('  ✗ threw:', e.message);
