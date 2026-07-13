@@ -146,6 +146,23 @@ const server = app.listen(0, async () => {
     ok('a peer still cannot file a neutral note (leader-only)',
        (await call('/api/observe', tokB, { method: 'POST', body: { subjectId: coachId, kind: 'note', text: 'x' } })).status === 403);
 
+    // ── Consent ledger + external app connector (GDPR: informed + revocable) ──
+    ok('connecting an app WITHOUT consent is refused',
+       (await call('/api/me/connect', tokB, { method: 'POST', body: { source: 'health' } })).status === 403);
+    const grant = await call('/api/me/consent', tokB, { method: 'POST', body: { scope: 'external:health', granted: true } });
+    ok('the person can grant consent for a source', grant.status === 200 && grant.j?.granted === true);
+    ok('connecting AFTER consent succeeds',
+       (await call('/api/me/connect', tokB, { method: 'POST', body: { source: 'health' } })).status === 200);
+    const pull = await call('/api/me/sources/pull', tokB, { method: 'POST', body: { source: 'health', data: [
+      { date: '2026-07-01', sleepHours: 6, steps: 8000 }, { date: '2026-07-02', sleepHours: 5, steps: 3000 } ] } });
+    ok('a connected+consented source draws data into signals', pull.status === 200 && pull.j?.imported >= 2);
+    // Withdraw consent → source disconnects and can no longer draw.
+    await call('/api/me/consent', tokB, { method: 'POST', body: { scope: 'external:health', granted: false } });
+    const srcs = await call('/api/me/sources', tokB);
+    ok('withdrawing consent disconnects the source', !(srcs.j?.sources || []).find(s => s.id === 'health')?.connected);
+    ok('after withdrawal, drawing is refused again',
+       (await call('/api/me/sources/pull', tokB, { method: 'POST', body: { source: 'health', data: [] } })).status === 403);
+
   } catch (e) {
     fail++; console.log('  ✗ threw:', e.message);
   } finally {

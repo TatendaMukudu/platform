@@ -21,6 +21,7 @@ const packs      = require('./ai/packs');
 const primitives = require('./ai/primitives');
 const confidence = require('./ai/confidence');
 const adapters   = require('./ai/adapters');
+const connectors = require('./ai/connectors');
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -77,6 +78,7 @@ function scheduleSave() {
         memberGoals, weeklyAssessments, orgInterventions,
         orgNodes, orgMetrics, orgValues, orgGoals, userPermissions,
         userAiProfiles, advisorThreads, orgSignals, noticeFeedback,
+        userConsents, connectedSources,
         activeSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
@@ -498,6 +500,14 @@ const userPermissions = {};  // orgCode → { userId → { perm → bool } }
 
 // ── Memory Engine ──────────────────────────────────────────────────────────
 const userAiProfiles  = {};  // `orgCode:userId` → { openThreads, recentThemes, priorFollowUps, lastUpdated }
+// Consent ledger (GDPR): `orgCode:userId` → { [scope]: { granted, at } }. The person
+// owns it; drawing external app data is gated on it and it is revocable at any time.
+const userConsents    = {};
+const connectedSources= {};  // `orgCode:userId` → { [sourceId]: { connectedAt, lastPull } }
+const CONSENT_VERSION = '2026-07';
+const _consentKey = (code, uid) => `${code}:${uid}`;
+function _getConsents(code, uid) { const k = _consentKey(code, uid); return (userConsents[k] = userConsents[k] || {}); }
+function _hasConsent(code, uid, scope) { return _getConsents(code, uid)[scope]?.granted === true; }
 
 /* Get or create a user's AI memory profile */
 function _getMemory(orgCode, userId) {
@@ -3079,6 +3089,97 @@ app.post('/api/observe', requireAuth, (req, res) => {
       ? 'Raised privately with the people responsible for their wellbeing. Thank you for looking out for them.'
       : (k === 'recognition' ? 'Shared with them.' : 'Recorded.'),
   });
+});
+
+/* ── CONSENT LEDGER + external app connectors (GDPR: informed, revocable) ─────
+   The person owns their consent. Drawing data from an external app requires
+   their explicit, recorded, revocable consent for that source — and it's always
+   THEIR OWN data (self-scoped). Withdraw any time → disconnect + stop drawing. */
+
+app.get('/api/me/consent', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  res.json({ ok: true, version: CONSENT_VERSION, consents: _getConsents(code, userId), connectors: connectors.list() });
+});
+
+app.post('/api/me/consent', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const { scope, granted } = req.body || {};
+  if (!scope || typeof scope !== 'string') return res.status(400).json({ error: 'scope required' });
+  const c = _getConsents(code, userId);
+  c[scope] = { granted: granted === true, at: new Date().toISOString(), version: CONSENT_VERSION };
+  // Revoking an external scope disconnects that source too (stop drawing at once).
+  if (granted !== true && scope.startsWith('external:')) {
+    const src = scope.slice('external:'.length);
+    const conn = connectedSources[_consentKey(code, userId)];
+    if (conn && conn[src]) delete conn[src];
+  }
+  scheduleSave();
+  res.json({ ok: true, scope, granted: c[scope].granted });
+});
+
+app.get('/api/me/sources', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const conn = connectedSources[_consentKey(code, userId)] || {};
+  res.json({ ok: true, sources: connectors.list().map(s => ({
+    ...s, consented: _hasConsent(code, userId, s.scope), connected: !!conn[s.id], lastPull: conn[s.id]?.lastPull || null,
+  })) });
+});
+
+/* Connect an external app — REQUIRES the person's consent for its scope first.
+   Self-scoped: you only ever connect YOUR OWN apps. (The OAuth token exchange is
+   the provider-specific integration point; the consent + mapping are real now.) */
+app.post('/api/me/connect', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const src = connectors.get(req.body?.source);
+  if (!src) return res.status(400).json({ error: 'unknown source' });
+  if (!_hasConsent(code, userId, src.scope)) {
+    return res.status(403).json({ error: 'consent_required', scope: src.scope, message: `Grant consent for "${src.label}" before connecting.` });
+  }
+  const key = _consentKey(code, userId);
+  const conn = connectedSources[key] = connectedSources[key] || {};
+  conn[src.id] = { connectedAt: new Date().toISOString(), lastPull: null };
+  scheduleSave();
+  res.json({ ok: true, source: src.id, connected: true });
+});
+
+app.delete('/api/me/connect/:source', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const conn = connectedSources[_consentKey(code, userId)] || {};
+  delete conn[req.params.source];
+  scheduleSave();
+  res.json({ ok: true, disconnected: req.params.source });
+});
+
+/* Draw data from a connected+consented source → universal signals (self only).
+   Accepts `data` (raw provider export) — the real-time OAuth auto-fetch is the
+   integration point. Data minimisation: connectors map to numeric signals only,
+   never raw content. */
+app.post('/api/me/sources/pull', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const src = connectors.get(req.body?.source);
+  if (!src) return res.status(400).json({ error: 'unknown source' });
+  if (!_hasConsent(code, userId, src.scope)) return res.status(403).json({ error: 'consent_required', scope: src.scope });
+  const conn = connectedSources[_consentKey(code, userId)] || {};
+  if (!conn[src.id]) return res.status(400).json({ error: 'not_connected' });
+
+  const raw = Array.isArray(req.body?.data) ? req.body.data.slice(0, 2000) : [];   // integration point / manual export
+  let signals = [];
+  try { signals = src.map(raw) || []; } catch (_) { signals = []; }
+  let emitted = 0;
+  for (const s of signals) {
+    if (!Number.isFinite(s.valueNum)) continue;
+    try {
+      _emitSignalSafe(code, {
+        subjectType: 'member', subjectId: userId, source: 'metric', modality: 'data',
+        valueNum: s.valueNum, label: s.label, ts: s.ts, sensitivity: 'normal',
+        data: { connector: src.id, primitive: s.primitive, valence: s.valence },
+      }, userId);
+      emitted++;
+    } catch (_) {}
+  }
+  conn[src.id].lastPull = new Date().toISOString();
+  scheduleSave();
+  res.json({ ok: true, source: src.id, imported: emitted });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -7050,6 +7151,8 @@ function _loadAllStores(data) {
   Object.assign(orgInterventions, data.orgInterventions || {});
   Object.assign(userAiProfiles,   data.userAiProfiles   || {});
   Object.assign(advisorThreads,   data.advisorThreads   || {});
+  Object.assign(userConsents,     data.userConsents     || {});
+  Object.assign(connectedSources, data.connectedSources || {});
   Object.assign(orgSignals,       data.orgSignals       || {});
   Object.assign(noticeFeedback,   data.noticeFeedback   || {});
   // Restore sessions, pruning any that expired while the server was down
