@@ -99,9 +99,9 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
   };
 
   try {
-    await runSession('member', member, ['home', 'checkin', 'notes', 'inbox']);
+    await runSession('member', member, ['home', 'checkin', 'notes', 'assessments', 'inbox']);
     // Coach now also has their own "Me" space (id 'home') alongside the team view.
-    await runSession('coach',  coach,  ['home', 'leader-home', 'leader-people', 'people', 'organisation', 'settings']);
+    await runSession('coach',  coach,  ['home', 'assessments', 'leader-home', 'leader-people', 'people', 'organisation', 'settings']);
   } catch (e) {
     fail++; console.log('  ✗ smoke threw:', e.message);
   } finally {

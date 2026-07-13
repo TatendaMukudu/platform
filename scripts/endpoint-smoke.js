@@ -193,6 +193,40 @@ const server = app.listen(0, async () => {
     ok('retention keeps recent data and drops only the expired',
        sigLabels.includes('fresh') && !sigLabels.includes('old'));
 
+    // ── Assessments: leader creates → assigns → member fills → leader returns ─
+    ok('a member cannot create an assessment template (403)',
+       (await call('/api/assessments/templates', tokB, { method: 'POST', body: { title: 'x' } })).status === 403);
+    const tpl = await call('/api/assessments/templates', tokCoach, { method: 'POST', body: {
+      title: 'Match film breakdown', kind: 'film', description: 'Break down the match the way we discussed.',
+      fields: [{ label: 'Key moments', hint: '3-5 clips' }, { label: 'What you saw', hint: '' }] } });
+    ok('a leader creates an assessment template', tpl.status === 200 && tpl.j?.template?.id);
+    const tplId = tpl.j.template.id;
+    ok('a member cannot assign to others (403)',
+       (await call('/api/assessments/assign', tokB, { method: 'POST', body: { templateId: tplId, assigneeIds: [coachId] } })).status === 403);
+    const asg = await call('/api/assessments/assign', tokCoach, { method: 'POST', body: { templateId: tplId, assigneeIds: [bId] } });
+    ok('a leader assigns the assessment to a member in range', asg.status === 200 && (asg.j?.assigned || []).length === 1);
+    const asgId = asg.j.assigned[0].id;
+    const bList = await call('/api/assessments', tokB);
+    ok('the assignee sees it in their queue (status assigned)',
+       (bList.j?.assigned || []).some(a => a.id === asgId && a.status === 'assigned'));
+    ok('a non-assignee cannot submit someone else\'s assessment (403)',
+       (await call(`/api/assessments/${asgId}/submit`, tokCoach, { method: 'POST', body: { response: {} } })).status === 403);
+    const sub = await call(`/api/assessments/${asgId}/submit`, tokB, { method: 'POST', body: { response: { 'Key moments': '3 clips', 'What you saw': 'good spacing' }, note: 'done' } });
+    ok('the assignee fills and returns it (status submitted)', sub.status === 200 && sub.j?.assignment?.status === 'submitted');
+    const ret = await call(`/api/assessments/${asgId}/return`, tokCoach, { method: 'POST', body: { feedback: 'Strong work', score: 82 } });
+    ok('the leader reviews it back with feedback + score', ret.status === 200 && ret.j?.assignment?.status === 'returned' && ret.j.assignment.score === 82);
+    const expScore = await call('/api/me/export', tokB);
+    ok('a returned score becomes a citable signal in the member\'s record',
+       (expScore.j?.signals || []).some(s => /Assessment score/.test(s.label) && s.valueNum === 82));
+    // Tutorials
+    ok('a member cannot pin a tutorial (403)',
+       (await call('/api/tutorials', tokB, { method: 'POST', body: { title: 'x' } })).status === 403);
+    const tut = await call('/api/tutorials', tokCoach, { method: 'POST', body: { title: 'How to break down film', body: 'Step 1...', kind: 'film' } });
+    ok('a leader pins a tutorial', tut.status === 200 && tut.j?.tutorial?.id);
+    const bList2 = await call('/api/assessments', tokB);
+    ok('a pinned tutorial is visible to everyone for reference',
+       (bList2.j?.tutorials || []).some(t => /break down film/i.test(t.title)));
+
   } catch (e) {
     fail++; console.log('  ✗ threw:', e.message);
   } finally {

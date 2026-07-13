@@ -1413,6 +1413,245 @@ const MemberApp = {
     await this._loadNotes();
   },
 
+  /* ══════════════════════════════════════════════════════════════════════
+     ASSESSMENTS — work a leader wants done a certain way (a spreadsheet, a
+     film breakdown, a way of playing). A leader creates + assigns; the assignee
+     fills and returns; the leader reviews. Tutorials are pinned how-to's anyone
+     can refer back to. Backed by /api/assessments.
+     ══════════════════════════════════════════════════════════════════════ */
+  _assessState: null,
+  _assessKindLabel: { spreadsheet: 'Spreadsheet', film: 'Film', play: 'Way of playing', skill: 'Skill', general: 'General' },
+
+  async _renderAssessments() {
+    const root = document.getElementById('assessments-root');
+    if (!root) return;
+    root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Loading…</div>`;
+    try {
+      const res = await fetch('/api/assessments', { headers: this._authHeaders() });
+      const d = await res.json();
+      this._assessState = d;
+      root.innerHTML = this._assessHtml(d);
+      if (typeof hydrateIcons === 'function') hydrateIcons(root);
+    } catch (e) {
+      root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Couldn't load assessments.</div>`;
+    }
+  },
+
+  _assessHtml(d) {
+    const esc = t => this._escape(t || '');
+    const kind = k => this._assessKindLabel[k] || 'General';
+    let html = '';
+
+    // ── Assigned to you ──────────────────────────────────────────────────
+    const assigned = d.assigned || [];
+    html += `<div class="card"><div class="card-label">Assigned to you</div>`;
+    if (!assigned.length) {
+      html += `<div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">Nothing assigned right now.</div>`;
+    } else {
+      html += assigned.map(a => {
+        const badge = a.status === 'returned'
+          ? `<span class="pill" style="background:rgba(14,207,176,0.15);color:#0ecfb0">Returned${a.score != null ? ' · ' + a.score : ''}</span>`
+          : a.status === 'submitted'
+          ? `<span class="pill" style="background:rgba(124,90,245,0.15);color:var(--accent)">Submitted</span>`
+          : `<span class="pill" style="background:rgba(247,178,79,0.15);color:#f7b24f">To do</span>`;
+        let body = '';
+        if (a.status === 'assigned') {
+          body = `<div style="margin-top:0.6rem">
+            ${(a.fields && a.fields.length ? a.fields : [{ label: 'Your response', hint: '' }]).map((f, i) => `
+              <div style="margin-bottom:0.5rem">
+                <div class="card-label" style="margin-bottom:2px">${esc(f.label)}</div>
+                ${f.hint ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:3px">${esc(f.hint)}</div>` : ''}
+                <textarea class="note-input" data-field="${esc(f.label)}" style="min-height:60px"></textarea>
+              </div>`).join('')}
+            <button class="btn-primary" onclick="MemberApp._assessSubmit('${a.id}', this)">Return it</button>
+          </div>`;
+        } else if (a.status === 'submitted') {
+          body = `<div style="margin-top:0.5rem;font-size:0.82rem;color:var(--text-muted)">Waiting for review from ${esc(a.assignerName)}.</div>`;
+        } else if (a.status === 'returned') {
+          body = `<div style="margin-top:0.5rem">
+            ${a.feedback ? `<div class="me-row-text" style="font-size:0.86rem"><strong>${esc(a.assignerName)}:</strong> ${esc(a.feedback)}</div>` : ''}
+            ${a.score != null ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:3px">Score: ${a.score}/100</div>` : ''}
+          </div>`;
+        }
+        return `<div class="me-row" style="display:block;padding:0.7rem 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:center;gap:0.5rem">
+            <div style="flex:1"><strong>${esc(a.title)}</strong> <span style="font-size:0.72rem;color:var(--text-muted)">· ${kind(a.kind)}</span></div>
+            ${badge}
+          </div>${body}</div>`;
+      }).join('');
+    }
+    html += `</div>`;
+
+    // ── Leader tools: create a template, assign, review returns ──────────
+    if (d.canCreate) {
+      html += `<div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div class="card-label" style="margin:0">Create an assessment</div>
+          <button class="btn-ghost" onclick="MemberApp._assessToggleCreate()">＋ New</button>
+        </div>
+        <div id="assess-create" style="display:none;margin-top:0.7rem">
+          <input class="form-input" id="assess-title" placeholder="Title — e.g. Match film breakdown" style="margin-bottom:0.5rem">
+          <select class="form-input" id="assess-kind" style="margin-bottom:0.5rem">
+            <option value="general">General</option>
+            <option value="spreadsheet">Spreadsheet</option>
+            <option value="film">Film</option>
+            <option value="play">Way of playing</option>
+            <option value="skill">Skill</option>
+          </select>
+          <textarea class="note-input" id="assess-desc" placeholder="How you want it done — the instructions." style="min-height:56px;margin-bottom:0.5rem"></textarea>
+          <textarea class="note-input" id="assess-fields" placeholder="Fields the person fills in — one per line (optional). e.g.\nKey moments\nWhat you saw" style="min-height:56px;margin-bottom:0.5rem"></textarea>
+          <button class="btn-primary" onclick="MemberApp._assessCreate(this)">Create</button>
+        </div>
+      </div>`;
+
+      // Existing templates → assign
+      const tpls = d.templates || [];
+      if (tpls.length) {
+        html += `<div class="card"><div class="card-label">Your assessments — assign to people</div>` +
+          tpls.map(t => `<div class="me-row" style="display:flex;align-items:center;gap:0.5rem;padding:0.55rem 0;border-bottom:1px solid var(--border)">
+            <div style="flex:1"><strong>${esc(t.title)}</strong> <span style="font-size:0.72rem;color:var(--text-muted)">· ${kind(t.kind)}</span></div>
+            <button class="btn-ghost" onclick="MemberApp._assessOpenAssign('${t.id}')">Assign</button>
+            <button class="btn-ghost" onclick="MemberApp._assessDeleteTemplate('${t.id}')" title="Delete" style="color:var(--text-muted)">✕</button>
+          </div>`).join('') +
+          `<div id="assess-assign-panel" style="display:none;margin-top:0.7rem"></div></div>`;
+      }
+
+      // Returns to review
+      const toReview = (d.issued || []).filter(a => a.status === 'submitted');
+      const reviewed = (d.issued || []).filter(a => a.status !== 'submitted');
+      html += `<div class="card"><div class="card-label">To review</div>`;
+      if (!toReview.length) html += `<div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">Nothing waiting.</div>`;
+      else html += toReview.map(a => `<div class="me-row" style="display:block;padding:0.7rem 0;border-bottom:1px solid var(--border)">
+        <div><strong>${esc(a.assigneeName)}</strong> — ${esc(a.title)}</div>
+        ${Object.entries(a.response || {}).map(([k, v]) => `<div style="margin-top:0.4rem"><div class="card-label" style="margin-bottom:1px">${esc(k)}</div><div class="me-row-text" style="font-size:0.84rem">${esc(v)}</div></div>`).join('')}
+        ${a.note ? `<div class="me-row-text" style="font-size:0.84rem;margin-top:0.3rem">${esc(a.note)}</div>` : ''}
+        <div style="margin-top:0.5rem;display:flex;gap:0.4rem;align-items:center">
+          <input class="form-input" data-return-fb="${a.id}" placeholder="Feedback" style="flex:1;margin:0">
+          <input class="form-input" data-return-score="${a.id}" placeholder="Score" type="number" min="0" max="100" style="width:80px;margin:0">
+          <button class="btn-primary" onclick="MemberApp._assessReturn('${a.id}', this)">Return</button>
+        </div></div>`).join('');
+      if (reviewed.length) html += `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.6rem">${reviewed.length} already returned.</div>`;
+      html += `</div>`;
+    }
+
+    // ── Tutorials (pinned how-to's) ──────────────────────────────────────
+    const tuts = d.tutorials || [];
+    html += `<div class="card"><div style="display:flex;align-items:center;justify-content:space-between">
+      <div class="card-label" style="margin:0">Pinned how-to's</div>
+      ${d.canCreate ? `<button class="btn-ghost" onclick="MemberApp._tutorialToggle()">＋ Pin</button>` : ''}</div>`;
+    if (d.canCreate) html += `<div id="tutorial-create" style="display:none;margin-top:0.7rem">
+      <input class="form-input" id="tutorial-title" placeholder="Title — e.g. How to break down film" style="margin-bottom:0.5rem">
+      <textarea class="note-input" id="tutorial-body" placeholder="The steps someone can refer back to." style="min-height:70px;margin-bottom:0.5rem"></textarea>
+      <input class="form-input" id="tutorial-url" placeholder="Link (optional)" style="margin-bottom:0.5rem">
+      <button class="btn-primary" onclick="MemberApp._tutorialPin(this)">Pin it</button></div>`;
+    if (!tuts.length) html += `<div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0;margin-top:0.4rem">No how-to's pinned yet.</div>`;
+    else html += tuts.map(t => `<details class="me-row" style="display:block;padding:0.6rem 0;border-bottom:1px solid var(--border)">
+      <summary style="cursor:pointer;font-weight:600">${esc(t.title)} <span style="font-size:0.72rem;color:var(--text-muted);font-weight:400">· ${kind(t.kind)}</span></summary>
+      ${t.body ? `<div class="me-row-text" style="font-size:0.85rem;margin-top:0.4rem;white-space:pre-wrap">${esc(t.body)}</div>` : ''}
+      ${t.url ? `<div style="margin-top:0.3rem"><a href="${esc(t.url)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:0.82rem">Open link ↗</a></div>` : ''}
+      ${d.canCreate ? `<button class="btn-ghost" onclick="MemberApp._tutorialDelete('${t.id}')" style="font-size:0.72rem;color:var(--text-muted);margin-top:0.3rem">Remove</button>` : ''}
+    </details>`).join('');
+    html += `</div>`;
+    return html;
+  },
+
+  _assessToggleCreate() { const el = document.getElementById('assess-create'); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; },
+  _tutorialToggle()     { const el = document.getElementById('tutorial-create'); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; },
+
+  async _assessCreate(btn) {
+    const title = (document.getElementById('assess-title')?.value || '').trim();
+    if (!title) { this.showToast('Give it a title', 'warning'); return; }
+    const kind = document.getElementById('assess-kind')?.value || 'general';
+    const description = (document.getElementById('assess-desc')?.value || '').trim();
+    const fields = (document.getElementById('assess-fields')?.value || '').split('\n').map(s => s.trim()).filter(Boolean).map(label => ({ label, hint: '' }));
+    if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+    try {
+      const res = await fetch('/api/assessments/templates', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ title, kind, description, fields }) });
+      if (!res.ok) throw new Error();
+      this.showToast('Assessment created ✓', 'success');
+      this._renderAssessments();
+    } catch (e) { this.showToast('Could not create', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Create'; } }
+  },
+
+  async _assessDeleteTemplate(id) {
+    if (!confirm('Delete this assessment?')) return;
+    try { await fetch('/api/assessments/templates/' + id, { method: 'DELETE', headers: this._authHeaders() }); this._renderAssessments(); } catch (e) {}
+  },
+
+  async _assessOpenAssign(templateId) {
+    const panel = document.getElementById('assess-assign-panel');
+    if (!panel) return;
+    panel.style.display = 'block';
+    panel.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Loading people…</div>`;
+    try {
+      const res = await fetch('/api/workspace/visible-members', { headers: this._authHeaders() });
+      const d = await res.json();
+      const people = (d.members || []).filter(m => m.userId !== this._userId);
+      if (!people.length) { panel.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">No one in your range to assign to.</div>`; return; }
+      panel.innerHTML = `<div class="card-label">Assign to</div>
+        <div style="max-height:180px;overflow:auto;margin-bottom:0.5rem">${people.map(p => `<label style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0;font-size:0.85rem"><input type="checkbox" value="${p.userId}" class="assess-assignee"> ${this._escape(p.name)}</label>`).join('')}</div>
+        <button class="btn-primary" onclick="MemberApp._assessDoAssign('${templateId}', this)">Assign</button>`;
+    } catch (e) { panel.innerHTML = `<div style="color:var(--text-muted)">Could not load people.</div>`; }
+  },
+
+  async _assessDoAssign(templateId, btn) {
+    const ids = Array.from(document.querySelectorAll('.assess-assignee:checked')).map(c => c.value);
+    if (!ids.length) { this.showToast('Pick at least one person', 'warning'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Assigning…'; }
+    try {
+      const res = await fetch('/api/assessments/assign', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ templateId, assigneeIds: ids }) });
+      if (!res.ok) throw new Error();
+      this.showToast(`Assigned to ${ids.length} ✓`, 'success');
+      this._renderAssessments();
+    } catch (e) { this.showToast('Could not assign', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Assign'; } }
+  },
+
+  async _assessSubmit(id, btn) {
+    const row = btn.closest('.me-row');
+    const response = {};
+    row.querySelectorAll('textarea[data-field]').forEach(t => { response[t.dataset.field] = t.value.trim(); });
+    if (!Object.values(response).some(v => v)) { this.showToast('Fill something in first', 'warning'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Returning…'; }
+    try {
+      const res = await fetch(`/api/assessments/${id}/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ response }) });
+      if (!res.ok) throw new Error();
+      this.showToast('Returned ✓', 'success');
+      this._renderAssessments();
+    } catch (e) { this.showToast('Could not return', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Return it'; } }
+  },
+
+  async _assessReturn(id, btn) {
+    const feedback = (document.querySelector(`[data-return-fb="${id}"]`)?.value || '').trim();
+    const scoreRaw = document.querySelector(`[data-return-score="${id}"]`)?.value;
+    const score = scoreRaw === '' || scoreRaw == null ? null : Number(scoreRaw);
+    if (btn) { btn.disabled = true; btn.textContent = 'Returning…'; }
+    try {
+      const res = await fetch(`/api/assessments/${id}/return`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ feedback, score }) });
+      if (!res.ok) throw new Error();
+      this.showToast('Sent back ✓', 'success');
+      this._renderAssessments();
+    } catch (e) { this.showToast('Could not return', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Return'; } }
+  },
+
+  async _tutorialPin(btn) {
+    const title = (document.getElementById('tutorial-title')?.value || '').trim();
+    if (!title) { this.showToast('Give it a title', 'warning'); return; }
+    const body = (document.getElementById('tutorial-body')?.value || '').trim();
+    const url  = (document.getElementById('tutorial-url')?.value || '').trim();
+    if (btn) { btn.disabled = true; btn.textContent = 'Pinning…'; }
+    try {
+      const res = await fetch('/api/tutorials', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ title, body, url }) });
+      if (!res.ok) throw new Error();
+      this.showToast('Pinned ✓', 'success');
+      this._renderAssessments();
+    } catch (e) { this.showToast('Could not pin', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Pin it'; } }
+  },
+
+  async _tutorialDelete(id) {
+    if (!confirm('Remove this how-to?')) return;
+    try { await fetch('/api/tutorials/' + id, { method: 'DELETE', headers: this._authHeaders() }); this._renderAssessments(); } catch (e) {}
+  },
+
   // Separate group-selector population helpers so each page only populates its own selectors
   _populateMsgGroupSelector() {
     const opts = this._myGroups.length

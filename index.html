@@ -973,9 +973,11 @@
           <div class="page-header-title">Assessments
             <span class="nav-badge" id="scenarios-badge" style="display:none;margin-left:0.4rem">0</span>
           </div>
-          <div class="page-header-sub">Assessments assigned to you</div>
+          <div class="page-header-sub">Work assigned to you, and how-to's to refer back to</div>
         </div>
-        <div id="scenarios-list"></div>
+        <div id="assessments-root"><div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Loading…</div></div>
+        <!-- legacy scenario list still reachable programmatically -->
+        <div id="scenarios-list" style="display:none"></div>
       </section>
 
       <!-- ── DAILY CHECK-IN PAGE ────────────────────────────── -->

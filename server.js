@@ -79,6 +79,7 @@ function scheduleSave() {
         orgNodes, orgMetrics, orgValues, orgGoals, userPermissions,
         userAiProfiles, advisorThreads, orgSignals, noticeFeedback,
         userConsents, connectedSources, pendingActions,
+        assessmentTemplates, assessmentAssignments, orgTutorials,
         activeSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
@@ -530,6 +531,13 @@ const userAiProfiles  = {};  // `orgCode:userId` → { openThreads, recentThemes
 const userConsents    = {};
 const connectedSources= {};  // `orgCode:userId` → { [sourceId]: { connectedAt, lastPull } }
 const pendingActions  = {};  // `orgCode:userId` → [{ id, action, summary, payload, status, createdAt }]
+// Assessments: a leader creates a TEMPLATE (a way they want something done — a
+// spreadsheet, film breakdown, a way of playing) and ASSIGNS it. The assignee
+// (leader or member) fills it and returns it; the assigner reviews. Tutorials are
+// pinned how-to references anyone can look back at. `orgCode` → [ ... ].
+const assessmentTemplates   = {};  // [{ id, title, description, kind, fields:[{label,hint}], createdBy, createdByName, createdAt }]
+const assessmentAssignments = {};  // [{ id, templateId, title, kind, fields, assignerId/Name, assigneeId/Name, status, response:{}, feedback, score, assignedAt, submittedAt, returnedAt }]
+const orgTutorials          = {};  // [{ id, title, body, url, kind, createdBy, createdByName, createdAt }]
 const CONSENT_VERSION = '2026-07';
 const _consentKey = (code, uid) => `${code}:${uid}`;
 function _getConsents(code, uid) { const k = _consentKey(code, uid); return (userConsents[k] = userConsents[k] || {}); }
@@ -1205,6 +1213,15 @@ function _removePerson(code, userId, deleteData) {
         if (k === uKey || k === mKey || k.startsWith(`${code}:${userId}`)) delete advisorThreads[k];
       });
     }
+    // Consent ledger, connected sources, pending assistant actions
+    [uKey, mKey].forEach(k => { delete userConsents[k]; delete connectedSources[k]; delete pendingActions[k]; });
+    // Assessments they authored or that were assigned to them (may hold their work)
+    if (Array.isArray(assessmentTemplates[code]))
+      assessmentTemplates[code] = assessmentTemplates[code].filter(t => t.createdBy !== userId);
+    if (Array.isArray(assessmentAssignments[code]))
+      assessmentAssignments[code] = assessmentAssignments[code].filter(a => a.assigneeId !== userId && a.assignerId !== userId);
+    if (Array.isArray(orgTutorials[code]))
+      orgTutorials[code] = orgTutorials[code].filter(t => t.createdBy !== userId);
   }
 
   return { ok: true };
@@ -3258,6 +3275,169 @@ app.post('/api/me/actions/:id/reject', requireAuth, (req, res) => {
   const list = pendingActions[_consentKey(code, userId)] || [];
   const item = list.find(a => a.id === req.params.id && a.status === 'pending');
   if (item) { item.status = 'rejected'; scheduleSave(); }
+  res.json({ ok: true });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ASSESSMENTS — a leader defines a way they want something done (a spreadsheet,
+   a film breakdown, a way of playing), assigns it, the assignee fills it and
+   returns it, the leader reviews. Completions feed the kernel as signals so an
+   assessment is not a dead form — it becomes part of the person's growth record.
+   TUTORIALS — pinned how-to references anyone can look back at.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const ASSESS_KINDS = ['spreadsheet', 'film', 'play', 'skill', 'general'];
+const _shortId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+function _publicAssignment(a) {
+  return { id: a.id, templateId: a.templateId, title: a.title, kind: a.kind, fields: a.fields,
+    assignerName: a.assignerName, assigneeName: a.assigneeName, assigneeId: a.assigneeId,
+    status: a.status, response: a.response || {}, note: a.note || '', feedback: a.feedback || '',
+    score: a.score ?? null, assignedAt: a.assignedAt, submittedAt: a.submittedAt || null, returnedAt: a.returnedAt || null };
+}
+
+/* GET /api/assessments — everything the caller needs for the tab, role-scoped. */
+app.get('/api/assessments', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const leader = _isLeader(code, userId);
+  const all = assessmentAssignments[code] || [];
+  res.json({
+    ok: true,
+    canCreate: leader,
+    templates: (assessmentTemplates[code] || []).map(t => ({ id: t.id, title: t.title, description: t.description, kind: t.kind, fields: t.fields, createdByName: t.createdByName })),
+    assigned: all.filter(a => a.assigneeId === userId).map(_publicAssignment),           // things I must fill
+    issued:   leader ? all.filter(a => a.assignerId === userId).map(_publicAssignment) : [], // things I gave out
+    tutorials: (orgTutorials[code] || []).map(t => ({ id: t.id, title: t.title, body: t.body, url: t.url, kind: t.kind, createdByName: t.createdByName, createdAt: t.createdAt })),
+  });
+});
+
+/* POST /api/assessments/templates — a leader defines an assessment. */
+app.post('/api/assessments/templates', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Only a leader can create assessments' });
+  const { title, description, kind, fields } = req.body || {};
+  if (!String(title || '').trim()) return res.status(400).json({ error: 'title required' });
+  const me = orgUsers[code]?.[userId];
+  const tpl = {
+    id: _shortId(), title: String(title).slice(0, 160).trim(),
+    description: String(description || '').slice(0, 2000),
+    kind: ASSESS_KINDS.includes(kind) ? kind : 'general',
+    fields: Array.isArray(fields) ? fields.slice(0, 30).map(f => ({ label: String(f?.label || '').slice(0, 160), hint: String(f?.hint || '').slice(0, 400) })).filter(f => f.label) : [],
+    createdBy: userId, createdByName: me?.name || 'Leader', createdAt: new Date().toISOString(),
+  };
+  (assessmentTemplates[code] = assessmentTemplates[code] || []).push(tpl);
+  scheduleSave();
+  res.json({ ok: true, template: tpl });
+});
+
+app.delete('/api/assessments/templates/:id', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const list = assessmentTemplates[code] || [];
+  const t = list.find(x => x.id === req.params.id);
+  if (!t) return res.status(404).json({ error: 'not found' });
+  if (t.createdBy !== userId && !_isLeader(code, userId)) return res.status(403).json({ error: 'not allowed' });
+  assessmentTemplates[code] = list.filter(x => x.id !== req.params.id);
+  scheduleSave();
+  res.json({ ok: true });
+});
+
+/* POST /api/assessments/assign — assign a template to people. A leader may assign
+   to anyone in their visible range; anyone may self-assign (assign to themselves). */
+app.post('/api/assessments/assign', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const { templateId, assigneeIds } = req.body || {};
+  const tpl = (assessmentTemplates[code] || []).find(t => t.id === templateId);
+  if (!tpl) return res.status(404).json({ error: 'template not found' });
+  const targets = Array.isArray(assigneeIds) && assigneeIds.length ? assigneeIds : [userId];
+  const leader = _isLeader(code, userId);
+  const inRange = new Set(getVisibleUserIds(code, userId));
+  const selfOnly = targets.every(id => id === userId);
+  if (!selfOnly && !leader) return res.status(403).json({ error: 'Only a leader can assign to others' });
+  const bad = targets.find(id => id !== userId && !inRange.has(id));
+  if (bad) return res.status(403).json({ error: 'assignee outside your range' });
+  const me = orgUsers[code]?.[userId];
+  const created = [];
+  targets.forEach(aid => {
+    const subj = orgUsers[code]?.[aid];
+    if (!subj) return;
+    const a = {
+      id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: tpl.fields,
+      assignerId: userId, assignerName: me?.name || 'Leader', assigneeId: aid, assigneeName: subj.name || 'Member',
+      status: 'assigned', response: {}, note: '', feedback: '', score: null,
+      assignedAt: new Date().toISOString(),
+    };
+    (assessmentAssignments[code] = assessmentAssignments[code] || []).push(a);
+    created.push(_publicAssignment(a));
+  });
+  scheduleSave();
+  res.json({ ok: true, assigned: created });
+});
+
+/* POST /api/assessments/:id/submit — the assignee fills it in and returns it. */
+app.post('/api/assessments/:id/submit', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const a = (assessmentAssignments[code] || []).find(x => x.id === req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  if (a.assigneeId !== userId) return res.status(403).json({ error: 'not your assessment' });
+  const { response, note } = req.body || {};
+  a.response = (response && typeof response === 'object') ? response : {};
+  a.note = String(note || '').slice(0, 4000);
+  a.status = 'submitted'; a.submittedAt = new Date().toISOString();
+  // Completing an assessment is a participation signal — the kernel learns the
+  // person engaged (never the private contents; just that it was done).
+  _emitSignalSafe(code, {
+    subjectType: 'member', subjectId: userId, source: 'assessment', modality: 'number',
+    label: `Assessment completed: ${a.title}`.slice(0, 120), valueNum: 1, primitive: 'participation', sensitivity: 'normal',
+  }, userId);
+  scheduleSave();
+  res.json({ ok: true, assignment: _publicAssignment(a) });
+});
+
+/* POST /api/assessments/:id/return — the assigner reviews: feedback + optional score. */
+app.post('/api/assessments/:id/return', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const a = (assessmentAssignments[code] || []).find(x => x.id === req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  const canReview = a.assignerId === userId || (_isLeader(code, userId) && new Set(getVisibleUserIds(code, userId)).has(a.assigneeId));
+  if (!canReview) return res.status(403).json({ error: 'not allowed' });
+  const { feedback, score } = req.body || {};
+  a.feedback = String(feedback || '').slice(0, 4000);
+  const s = Number(score);
+  a.score = Number.isFinite(s) ? Math.max(0, Math.min(100, s)) : a.score;
+  a.status = 'returned'; a.returnedAt = new Date().toISOString();
+  // A returned score is a citable capability signal about the subject.
+  if (Number.isFinite(a.score)) _emitSignalSafe(code, {
+    subjectType: 'member', subjectId: a.assigneeId, source: 'assessment', modality: 'number',
+    label: `Assessment score: ${a.title}`.slice(0, 120), valueNum: a.score, primitive: 'capability', sensitivity: 'normal',
+  }, userId);
+  scheduleSave();
+  res.json({ ok: true, assignment: _publicAssignment(a) });
+});
+
+/* Tutorials — pinned how-to references. Leaders pin; everyone can read. */
+app.post('/api/tutorials', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Only a leader can pin a tutorial' });
+  const { title, body, url, kind } = req.body || {};
+  if (!String(title || '').trim()) return res.status(400).json({ error: 'title required' });
+  const me = orgUsers[code]?.[userId];
+  const t = {
+    id: _shortId(), title: String(title).slice(0, 160).trim(),
+    body: String(body || '').slice(0, 5000), url: String(url || '').slice(0, 500),
+    kind: ASSESS_KINDS.includes(kind) ? kind : 'general',
+    createdBy: userId, createdByName: me?.name || 'Leader', createdAt: new Date().toISOString(),
+  };
+  (orgTutorials[code] = orgTutorials[code] || []).push(t);
+  scheduleSave();
+  res.json({ ok: true, tutorial: t });
+});
+
+app.delete('/api/tutorials/:id', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const list = orgTutorials[code] || [];
+  const t = list.find(x => x.id === req.params.id);
+  if (!t) return res.status(404).json({ error: 'not found' });
+  if (t.createdBy !== userId && !_isLeader(code, userId)) return res.status(403).json({ error: 'not allowed' });
+  orgTutorials[code] = list.filter(x => x.id !== req.params.id);
+  scheduleSave();
   res.json({ ok: true });
 });
 
@@ -7313,6 +7493,9 @@ function _loadAllStores(data) {
   Object.assign(userConsents,     data.userConsents     || {});
   Object.assign(connectedSources, data.connectedSources || {});
   Object.assign(pendingActions,   data.pendingActions   || {});
+  Object.assign(assessmentTemplates,   data.assessmentTemplates   || {});
+  Object.assign(assessmentAssignments, data.assessmentAssignments || {});
+  Object.assign(orgTutorials,          data.orgTutorials          || {});
   Object.assign(orgSignals,       data.orgSignals       || {});
   Object.assign(noticeFeedback,   data.noticeFeedback   || {});
   // Restore sessions, pruning any that expired while the server was down
