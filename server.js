@@ -3441,6 +3441,43 @@ app.delete('/api/tutorials/:id', requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+/* POST /api/admin/llm-selftest — prove the language model is connected and show
+   how it reasons on demo-style prompts. Admin-gated (manage_settings). No shell
+   needed: runs from the browser against whatever key the host has configured.
+   With no key, reports that the kernel is on its deterministic fallbacks. */
+app.post('/api/admin/llm-selftest', requirePermission('manage_settings'), async (req, res) => {
+  const status = {
+    enabled:   ai.enabled(),
+    models:    ai.MODELS,
+    providers: { claude: !!process.env.ANTHROPIC_API_KEY, openai: !!process.env.OPENAI_API_KEY },
+  };
+  if (!ai.enabled()) {
+    return res.json({ ok: true, status, results: [],
+      note: 'No language-model key is configured on this host. Set ANTHROPIC_API_KEY (or OPENAI_API_KEY) and the kernel will use it; until then it runs on its deterministic fallbacks.' });
+  }
+  // Two demo-shaped prompts — the kind of content the seeded orgs produce — one
+  // per tier, so you see both the fast path and the reasoning path.
+  const trials = [
+    { tier: 'micro', label: 'Check-in acknowledgement (fast tier)',
+      system: 'You are a supportive coach. Reply in ONE warm, genuine sentence. No emojis.',
+      user:   'A team member wrote: "Tough week — legs feel heavy but I got through every session." Acknowledge it warmly.' },
+    { tier: 'reason', label: 'Coaching reflection (reasoning tier)',
+      system: 'You are a thoughtful performance coach. In 2–3 sentences, reflect on what this pattern suggests and offer one gentle next step. No emojis, no lists.',
+      user:   "Over six weeks a player's participation stayed high, but their self-reported energy has drifted down three weeks running. What might be going on, and what's one supportive step?" },
+  ];
+  const results = [];
+  for (const t of trials) {
+    const started = Date.now();
+    try {
+      const out = await ai.complete({ tier: t.tier, system: t.system, user: t.user, maxTokens: 160 });
+      results.push({ label: t.label, tier: t.tier, model: ai.MODELS[t.tier], ms: Date.now() - started, ok: true, output: out });
+    } catch (e) {
+      results.push({ label: t.label, tier: t.tier, model: ai.MODELS[t.tier], ms: Date.now() - started, ok: false, error: e.message });
+    }
+  }
+  res.json({ ok: true, status, results });
+});
+
 /* Aggregate a SET of people into a privacy-safe unit read (counts + pattern
    types + percentages only — never a name or private detail). Shared by the
    overall range roll-up and each sub-unit. */

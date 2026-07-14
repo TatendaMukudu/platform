@@ -3084,6 +3084,40 @@ function renderSettings(){
   _loadValuesIntoTextarea();
 }
 
+/* Run the LLM self-test (admin) — proves the model is connected and shows how it
+   reasons on demo-style prompts. Renders provider/model status + each output. */
+async function runLlmSelfTest() {
+  const btn = document.getElementById('llm-selftest-btn');
+  const out = document.getElementById('llm-selftest-result');
+  if (!out) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Testing…'; }
+  out.innerHTML = `<div style="color:var(--text-muted)">Running…</div>`;
+  const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  try {
+    const r = await fetch('/api/admin/llm-selftest', { method: 'POST', headers: Auth._headers() });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'failed');
+    const s = d.status || {};
+    const prov = [s.providers?.claude ? 'Claude' : null, s.providers?.openai ? 'OpenAI' : null].filter(Boolean).join(' + ') || 'none';
+    let html = `<div style="padding:0.5rem 0.7rem;border:1px solid var(--border);border-radius:8px;margin-bottom:0.6rem">
+      <div><strong>Status:</strong> ${s.enabled ? '<span style="color:var(--success)">connected</span>' : '<span style="color:var(--danger)">no key</span>'}</div>
+      <div style="font-size:0.78rem;color:var(--text-muted);margin-top:2px">Providers: ${esc(prov)} · reason: ${esc(s.models?.reason || '—')} · micro: ${esc(s.models?.micro || '—')}</div>
+    </div>`;
+    if (d.note) html += `<div style="color:var(--text-secondary)">${esc(d.note)}</div>`;
+    (d.results || []).forEach(res => {
+      html += `<div style="padding:0.6rem 0.7rem;border:1px solid var(--border);border-radius:8px;margin-bottom:0.5rem">
+        <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">${esc(res.label)} · ${esc(res.model)} · ${res.ms}ms</div>
+        <div style="margin-top:0.4rem;line-height:1.5;color:${res.ok ? 'var(--text-primary)' : 'var(--danger)'}">${esc(res.ok ? res.output : res.error)}</div>
+      </div>`;
+    });
+    out.innerHTML = html;
+  } catch (e) {
+    out.innerHTML = `<div style="color:var(--danger)">Self-test failed: ${esc(e.message)}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Run LLM self-test'; }
+  }
+}
+
 function switchSettingsTab(tab) {
   ['org','metrics','values','goals','grade'].forEach(t => {
     const el  = document.getElementById(`settings-tab-${t}`);

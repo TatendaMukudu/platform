@@ -710,6 +710,17 @@
               <div class="card-body" id="settings-features"></div>
             </div>
             <div class="card">
+              <div class="card-header"><div class="card-title">AI / Kernel Intelligence</div></div>
+              <div class="card-body">
+                <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.7rem">
+                  Test whether the language model is connected and see how it reasons on demo-style prompts.
+                  With no key, the kernel runs on its deterministic fallbacks.
+                </div>
+                <button class="btn btn-accent btn-sm" id="llm-selftest-btn" onclick="runLlmSelfTest()">Run LLM self-test</button>
+                <div id="llm-selftest-result" style="margin-top:0.8rem;font-size:0.82rem"></div>
+              </div>
+            </div>
+            <div class="card">
               <div class="card-header"><div class="card-title">AI &amp; Your Values</div></div>
               <div class="card-body">
                 <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6">

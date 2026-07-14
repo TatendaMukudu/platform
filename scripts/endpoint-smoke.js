@@ -227,6 +227,15 @@ const server = app.listen(0, async () => {
     ok('a pinned tutorial is visible to everyone for reference',
        (bList2.j?.tutorials || []).some(t => /break down film/i.test(t.title)));
 
+    // ── LLM self-test: admin-gated, reports status (no key in test mode) ─────
+    ok('a plain member cannot run the LLM self-test (403)',
+       (await call('/api/admin/llm-selftest', tokB, { method: 'POST' })).status === 403);
+    const llm = await call('/api/admin/llm-selftest', tokCoach, { method: 'POST' });
+    ok('an admin can run the LLM self-test and gets a status report',
+       llm.status === 200 && llm.j?.ok === true && typeof llm.j.status?.enabled === 'boolean');
+    ok('with no key, the self-test reports deterministic-fallback mode (no crash)',
+       llm.j?.status?.enabled === false && Array.isArray(llm.j.results) && typeof llm.j.note === 'string');
+
   } catch (e) {
     fail++; console.log('  ✗ threw:', e.message);
   } finally {
