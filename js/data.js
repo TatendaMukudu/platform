@@ -25,6 +25,7 @@ const ICON = {
   message:  _svg('<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-4-.9L3 21l1.9-4.9A8.4 8.4 0 1 1 21 11.5z"/>'),
   spark:    _svg('<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.5 2.5M15.2 15.2l2.5 2.5M17.7 6.3l-2.5 2.5M8.8 15.2l-2.5 2.5"/>'),
   clipboard:_svg('<path d="M9 4h6a1 1 0 0 1 1 1v1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h1V5a1 1 0 0 1 1-1z"/><path d="M9 4a1 1 0 0 0-1 1v1h8V5a1 1 0 0 0-1-1"/><path d="m9 14 2 2 4-4"/>'),
+  plug:     _svg('<path d="M9 2v6M15 2v6"/><path d="M7 8h10v3a5 5 0 0 1-10 0z"/><path d="M12 16v6"/>'),
 };
 
 /* ── Org mode display config ──────────────────────────────────────────────
@@ -130,6 +131,7 @@ const WORKSPACE_MODULES = [
   // so it's no longer a separate nav item. The page still exists and is reachable.
   { section: null,        id: 'notes',   icon: ICON.notes,   label: 'Notes',    permission: null },
   { section: null,        id: 'assessments', icon: ICON.clipboard, label: 'Assessments', permission: null },
+  { section: null,        id: 'apps',    icon: ICON.plug,    label: 'Apps',     permission: null },
   { section: null,        id: 'inbox',   icon: ICON.inbox,   label: 'Inbox',    permission: null },
 
   // ── Team — shown when the user leads ≥1 node (scoped server-side) ───────

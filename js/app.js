@@ -611,6 +611,7 @@ function navigate(page){
   // My Space — every user
   if      (page==='home')         { if(typeof MemberApp!=='undefined') MemberApp._renderHome(); }
   else if (page==='assessments')  { if(typeof MemberApp!=='undefined') MemberApp._renderAssessments(); }
+  else if (page==='apps')         { if(typeof MemberApp!=='undefined') MemberApp._renderApps(); }
   else if (page==='checkin')      { if(typeof MemberApp!=='undefined') MemberApp._setupCheckinPrompt(); }
   else if (page==='notes')        { if(typeof MemberApp!=='undefined') MemberApp._renderNotesPage(); }
   else if (page==='inbox')        { if(typeof MemberApp!=='undefined') MemberApp._renderInbox(); }
@@ -648,6 +649,7 @@ const PAGE_TITLES = {
   // My Space — every user
   home:         'Home',
   assessments:  'Assessments',
+  apps:         'Apps',
   checkin:      'Check-In',
   notes:        'Notes',
   inbox:        'Inbox',

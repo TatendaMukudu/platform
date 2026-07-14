@@ -1652,6 +1652,89 @@ const MemberApp = {
     try { await fetch('/api/tutorials/' + id, { method: 'DELETE', headers: this._authHeaders() }); this._renderAssessments(); } catch (e) {}
   },
 
+  /* ══════════════════════════════════════════════════════════════════════
+     APPS — connect your OWN external apps (calendar / health / fitness) so
+     IntelliQ can use them. Consent-based and self-scoped: you only ever connect
+     your own data, and disconnecting withdraws consent and stops any drawing.
+     One click = grant consent + connect (the two real backend steps). Live OAuth
+     auto-sync is the provider integration point; the consent + mapping are real.
+     Backed by /api/me/sources · /api/me/consent · /api/me/connect.
+     ══════════════════════════════════════════════════════════════════════ */
+  _appIcon: { calendar: '🗓️', health: '❤️', fitness: '🏃' },
+
+  async _renderApps() {
+    const root = document.getElementById('apps-root');
+    if (!root) return;
+    root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Loading…</div>`;
+    try {
+      const res = await fetch('/api/me/sources', { headers: this._authHeaders() });
+      const d = await res.json();
+      const esc = t => this._escape(t || '');
+      const sources = d.sources || [];
+      let html = `<div class="card"><div class="card-label">Your apps</div>`;
+      html += sources.map(s => {
+        const connected = !!s.connected;
+        return `<div class="me-row" style="display:flex;align-items:flex-start;gap:0.7rem;padding:0.8rem 0;border-bottom:1px solid var(--border)">
+          <div style="font-size:1.4rem;line-height:1">${this._appIcon[s.id] || '🔌'}</div>
+          <div style="flex:1">
+            <div style="font-weight:700">${esc(s.label)} ${connected ? '<span class="pill" style="background:rgba(14,207,176,0.15);color:#0ecfb0;margin-left:4px">Connected</span>' : ''}</div>
+            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px">${esc(s.describes)}</div>
+          </div>
+          ${connected
+            ? `<button class="btn-ghost" onclick="MemberApp._appDisconnect('${s.id}','${esc(s.scope)}', this)">Disconnect</button>`
+            : `<button class="btn-primary" onclick="MemberApp._appConnect('${s.id}','${esc(s.scope)}', this)">Connect</button>`}
+        </div>`;
+      }).join('');
+      html += `</div>
+        <div class="card" style="margin-top:0.8rem">
+          <div class="card-label">How this works</div>
+          <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6">
+            IntelliQ only ever draws <strong>numbers</strong> from a connected app — how busy your
+            days are, sleep, activity, training load — <strong>never message content, titles, or
+            locations</strong>. Connecting records your consent; disconnecting withdraws it and stops
+            all drawing immediately. Live auto-sync arrives as each provider is switched on — your
+            consent is respected the whole way.
+          </div>
+        </div>`;
+      root.innerHTML = html;
+      if (typeof hydrateIcons === 'function') hydrateIcons(root);
+    } catch (e) {
+      root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Couldn't load your apps.</div>`;
+    }
+  },
+
+  async _appConnect(source, scope, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Connecting…'; }
+    try {
+      // Step 1 — record consent for this scope (informed + revocable).
+      const c = await fetch('/api/me/consent', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ scope, granted: true }) });
+      if (!c.ok) throw new Error();
+      // Step 2 — connect the source (now allowed).
+      const r = await fetch('/api/me/connect', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ source }) });
+      if (!r.ok) throw new Error();
+      this.showToast('Connected ✓ — you can disconnect any time', 'success');
+      this._renderApps();
+    } catch (e) {
+      this.showToast('Could not connect', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Connect'; }
+    }
+  },
+
+  async _appDisconnect(source, scope, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Disconnecting…'; }
+    try {
+      // Withdraw consent (this also disconnects the source server-side)…
+      await fetch('/api/me/consent', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ scope, granted: false }) });
+      // …and remove the connection explicitly for good measure.
+      await fetch('/api/me/connect/' + encodeURIComponent(source), { method: 'DELETE', headers: this._authHeaders() });
+      this.showToast('Disconnected — no more data is drawn', 'success');
+      this._renderApps();
+    } catch (e) {
+      this.showToast('Could not disconnect', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Disconnect'; }
+    }
+  },
+
   // Separate group-selector population helpers so each page only populates its own selectors
   _populateMsgGroupSelector() {
     const opts = this._myGroups.length
