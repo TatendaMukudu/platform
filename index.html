@@ -2,8 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
 <title>Platform — IntelliQ Ecosystem</title>
+<!-- Installable web app (Add to Home Screen) — iOS + Android, no store needed -->
+<link rel="manifest" href="/manifest.webmanifest"/>
+<meta name="theme-color" content="#0b0e14"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="IntelliQ"/>
+<link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
+<link rel="icon" type="image/png" href="/icons/icon-192.png"/>
 <link rel="stylesheet" href="css/styles.css?v=20260715a"/>
 <link rel="stylesheet" href="css/member.css?v=20260715a"/>
 <!-- Chart.js CDN -->
@@ -1888,6 +1897,16 @@
 <script src="js/tree.js?v=20260715a"></script>
 <script src="js/app.js?v=20260715a"></script>
 <script src="js/member-view.js?v=20260715a"></script>
+
+<!-- Register the service worker so the app is installable (Add to Home Screen)
+     and works offline. Network-first, so deploys are never stale. -->
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    });
+  }
+</script>
 
 <script>
 function switchGrade(g){
