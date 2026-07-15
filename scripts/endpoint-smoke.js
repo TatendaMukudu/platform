@@ -295,6 +295,18 @@ const server = app.listen(0, async () => {
     ok('a plain member cannot see the proactive watch (403)',
        (await call('/api/intelligence/watch', tokB)).status === 403);
 
+    // ── Prepared interventions: draft → approve → it lands in the person's queue ──
+    const prep = await call('/api/intelligence/prepare', tokCoach, { method: 'POST', body: { memberId: bId, kind: 'support' } });
+    ok('a leader can have IntelliQ PREPARE a supportive step (drafted, not sent)',
+       prep.status === 200 && prep.j?.draft?.title && typeof prep.j.draft.message === 'string');
+    ok('preparing a step for someone outside your range is refused',
+       (await call('/api/intelligence/prepare', tokB, { method: 'POST', body: { memberId: coachId } })).status === 403);
+    const deliver = await call('/api/intelligence/deliver', tokCoach, { method: 'POST', body: { memberId: bId, title: prep.j.draft.title, description: prep.j.draft.description, fields: prep.j.draft.fields } });
+    ok('approving delivers it as a real assignment in the person\'s queue', deliver.status === 200 && deliver.j?.assignment?.assigneeId === bId);
+    const bQueue = await call('/api/assessments', tokB);
+    ok('the delivered step actually appears for the person',
+       (bQueue.j?.assigned || []).some(a => a.id === deliver.j.assignment.id && a.status === 'assigned'));
+
     // ── LLM self-test: admin-gated, reports status (no key in test mode) ─────
     ok('a plain member cannot run the LLM self-test (403)',
        (await call('/api/admin/llm-selftest', tokB, { method: 'POST' })).status === 403);

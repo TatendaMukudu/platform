@@ -2053,13 +2053,88 @@ app.get('/api/intelligence/watch', requireAuth, (req, res) => {
     if (!findings.length) return;
     const item = intel.composeBriefingItem(m, findings);
     if (!item) return;
-    const row = { name: item.name, why: item.whyNow, action: item.recommendedAction, careFlag: item.careFlag, patternType: item.patternType, severity: item.severity };
+    const row = { memberId: item.memberId, name: item.name, why: item.whyNow, action: item.recommendedAction, careFlag: item.careFlag, patternType: item.patternType, severity: item.severity };
     // Positive momentum is worth surfacing too (recognise it, don't just fight fires).
     if (/improv|recover/i.test(item.patternType)) rising.push(row);
     else if (item.severity === 'high') attention.push(row);
     else emerging.push(row);
   });
   res.json({ ok: true, scanned: ids.length, emerging: emerging.slice(0, 8), attention: attention.slice(0, 8), rising: rising.slice(0, 6) });
+});
+
+/* ── POST /api/intelligence/prepare — "here's what I've already drafted" ────────
+   The leap from copilot to assistance: for a flagged person, IntelliQ DRAFTS a
+   concrete, supportive intervention (a short reflection the leader can send), so
+   the leader's only job is approve or edit. Nothing is saved or sent here — it's
+   a draft. Leader-scoped; the person is never told they were "flagged". */
+app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Leaders only' });
+  const memberId = String(req.body?.memberId || '');
+  if (!new Set(getVisibleUserIds(code, userId)).has(memberId)) return res.status(403).json({ error: 'not in your range' });
+  const subject = orgUsers[code]?.[memberId];
+  if (!subject) return res.status(404).json({ error: 'not found' });
+  const kind = req.body?.kind === 'recognition' ? 'recognition' : 'support';
+
+  let m = null; try { m = _buildMemberIntelInput(code, subject, Date.now()); } catch (_) {}
+  const findings = m ? intel.detectPatterns(m) : [];
+  const item = findings.length ? intel.composeBriefingItem(m, findings) : null;
+  const first = subject.name ? subject.name.split(' ')[0] : 'they';
+
+  // Deterministic, care-first fallback — always works.
+  const fallback = kind === 'recognition'
+    ? { title: 'Nice work lately', description: `A quick note of recognition for ${first}.`, fields: [{ label: 'What you did well', hint: '' }], message: `${first}, I've noticed real progress from you lately — keep it going.`, rationale: 'Recognising momentum reinforces it.' }
+    : { title: 'A quick reflection', description: `A short, supportive reflection for ${first} — no pressure, just a check-in.`, fields: [{ label: 'How are things going for you right now?', hint: 'Honestly — good or hard' }, { label: 'Anything getting in your way?', hint: '' }], message: `${first}, taking a moment to check in — how are things going, and is anything getting in your way?`, rationale: item ? `Because ${item.whyNow}` : 'A gentle check-in, before anything grows.' };
+
+  let out = null;
+  if (ai.enabled()) {
+    try {
+      const system = `${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ preparing a SUPPORTIVE intervention a leader can send to one of their people. It must feel caring, never like surveillance, and must NOT reveal any private detail or that the person was "flagged". Universal language for any organisation. Return JSON only: {"title": string(<=60), "description": string(1-2 sentences of gentle instructions), "fields": array of 1-3 {"label","hint"}, "message": string(a warm 1-2 sentence note to the person), "rationale": string(one sentence to the LEADER on why this helps)}. No emojis.`;
+      const ctx = item ? `Pattern (privacy-safe): ${item.whyNow}. Suggested direction: ${item.recommendedAction}.` : 'No strong pattern; keep it light and general.';
+      out = await ai.completeJSON({ tier: 'reason', system, user: `Person's first name: ${first}. Intent: ${kind}. ${ctx}`, maxTokens: 500, schema: ['title', 'message'] });
+    } catch (_) { out = null; }
+  }
+  const d = (out && out.title) ? out : fallback;
+  res.json({
+    ok: true, aiUsed: !!(out && out.title), memberId, memberName: subject.name || '',
+    draft: {
+      title: String(d.title || fallback.title).slice(0, 120),
+      description: String(d.description || '').slice(0, 1200),
+      fields: (Array.isArray(d.fields) ? d.fields : fallback.fields).slice(0, 5).map(f => ({ label: String(f?.label || '').slice(0, 160), hint: String(f?.hint || '').slice(0, 300) })).filter(f => f.label),
+      message: String(d.message || fallback.message).slice(0, 600),
+      rationale: String(d.rationale || fallback.rationale).slice(0, 300),
+    },
+  });
+});
+
+/* ── POST /api/intelligence/deliver — the leader approves; IntelliQ does it ─────
+   Creates the drafted reflection as a real assessment and assigns it to the person
+   (reusing the assessment rails), so it lands in their queue like any other work —
+   supportive, never labelled a "concern". One approval = the intervention happens. */
+app.post('/api/intelligence/deliver', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Leaders only' });
+  const memberId = String(req.body?.memberId || '');
+  if (!new Set(getVisibleUserIds(code, userId)).has(memberId)) return res.status(403).json({ error: 'not in your range' });
+  const subject = orgUsers[code]?.[memberId];
+  if (!subject) return res.status(404).json({ error: 'not found' });
+  const me = orgUsers[code]?.[userId];
+  const title = String(req.body?.title || 'A quick reflection').slice(0, 160).trim();
+  const description = String(req.body?.description || '').slice(0, 2000);
+  const fields = (Array.isArray(req.body?.fields) ? req.body.fields : [{ label: 'How are things going?' }])
+    .slice(0, 6).map(f => ({ label: String(f?.label || '').slice(0, 160), hint: String(f?.hint || '').slice(0, 300) })).filter(f => f.label);
+
+  const tpl = { id: _shortId(), title, description, kind: 'general', fields, createdBy: userId, createdByName: me?.name || 'Leader', createdAt: new Date().toISOString() };
+  (assessmentTemplates[code] = assessmentTemplates[code] || []).push(tpl);
+  const a = {
+    id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: tpl.fields,
+    assignerId: userId, assignerName: me?.name || 'Leader', assigneeId: memberId, assigneeName: subject.name || 'Member',
+    status: 'assigned', response: {}, note: '', feedback: '', score: null, assignedAt: new Date().toISOString(),
+    prepared: true,
+  };
+  (assessmentAssignments[code] = assessmentAssignments[code] || []).push(a);
+  scheduleSave();
+  res.json({ ok: true, assignment: _publicAssignment(a) });
 });
 
 /* ── GET /api/workspace/group-health ──────────────────────────────────────────

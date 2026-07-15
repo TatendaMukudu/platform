@@ -2426,3 +2426,13 @@ img { max-width: 100%; }
 .intel-watch-row { display: flex; gap: 0.5rem; align-items: flex-start; padding: 0.35rem 0; font-size: 0.85rem; line-height: 1.45; }
 .intel-watch-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
 .intel-watch-action { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }
+
+/* ── Prepared interventions ("here's what I've already drafted") ─────────────── */
+.intel-watch-prep { margin-top: 5px; background: transparent; border: 1px solid var(--border); color: var(--accent); border-radius: 7px; padding: 3px 9px; font-size: 0.74rem; font-weight: 600; cursor: pointer; }
+.intel-watch-prep:hover { border-color: var(--accent); background: rgba(124,90,245,0.08); }
+.intel-draft-card { margin-top: 0.5rem; border: 1px solid rgba(124,90,245,0.3); background: rgba(124,90,245,0.05); border-radius: 9px; padding: 0.6rem 0.7rem; }
+.intel-draft-label { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.4rem; }
+.intel-draft-msg { width: 100%; min-height: 54px; background: var(--surface-1, rgba(255,255,255,0.03)); border: 1px solid var(--border); border-radius: 7px; color: var(--text-primary); font-size: 0.84rem; padding: 0.5rem; resize: vertical; font-family: inherit; }
+.intel-draft-meta { font-size: 0.72rem; color: var(--text-muted); margin: 0.4rem 0; }
+.intel-draft-actions { display: flex; gap: 0.4rem; }
+.intel-draft-sent { font-size: 0.82rem; color: var(--accent2, #0ecfb0); padding: 0.3rem 0; }

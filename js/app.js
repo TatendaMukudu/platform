@@ -6074,32 +6074,90 @@ async function _renderTeamWatch() {
     const d = await res.json();
     if (!d.ok) return;
     const esc = _escAdvisor;
-    const item = (r, color) => `<div class="intel-watch-row">
+    const item = (r, color, intent) => `<div class="intel-watch-row" data-mid="${esc(r.memberId || '')}">
       <span class="intel-watch-dot" style="background:${color}"></span>
       <div style="flex:1"><strong>${esc(r.name)}</strong> — ${esc(r.why)}${r.careFlag ? ' <span title="private context informs this" style="opacity:0.7">·🔒</span>' : ''}
-        <div class="intel-watch-action">${esc(r.action)}</div></div>
+        <div class="intel-watch-action">${esc(r.action)}</div>
+        ${r.memberId ? `<button class="intel-watch-prep" onclick="prepareStep('${esc(r.memberId)}','${intent}',this)">${intent === 'recognition' ? 'Prepare recognition →' : 'Prepare a step →'}</button>` : ''}
+        <div class="intel-watch-draft" style="display:none"></div></div>
     </div>`;
     let html = '';
     if ((d.emerging || []).length) {
       html += `<div class="intel-watch-card intel-watch-emerging">
         <div class="intel-watch-head">Worth a look — before it grows</div>
-        ${d.emerging.map(r => item(r, '#f7a84f')).join('')}</div>`;
+        ${d.emerging.map(r => item(r, '#f7a84f', 'support')).join('')}</div>`;
     }
     if ((d.attention || []).length) {
       html += `<div class="intel-watch-card intel-watch-attention">
         <div class="intel-watch-head">Needs you now</div>
-        ${d.attention.map(r => item(r, '#f74f4f')).join('')}</div>`;
+        ${d.attention.map(r => item(r, '#f74f4f', 'support')).join('')}</div>`;
     }
     if ((d.rising || []).length) {
       html += `<div class="intel-watch-card intel-watch-rising">
         <div class="intel-watch-head">Going well — worth recognising</div>
-        ${d.rising.map(r => item(r, '#0ecfb0')).join('')}</div>`;
+        ${d.rising.map(r => item(r, '#0ecfb0', 'recognition')).join('')}</div>`;
     }
     if (!html && d.scanned) {
       html = `<div class="intel-watch-card"><div class="intel-watch-head" style="color:var(--text-muted)">Nothing emerging — all ${d.scanned} steady. IntelliQ will flag drift here before it shows in results.</div></div>`;
     }
     box.innerHTML = html;
   } catch (_) { /* non-fatal — the main read still shows */ }
+}
+
+/* "Here's what I've already drafted" — IntelliQ prepares a supportive intervention
+   for a flagged person; the leader approves or edits. One approval = it's sent. */
+async function prepareStep(memberId, intent, btn) {
+  const row = btn.closest('.intel-watch-row');
+  const draftBox = row?.querySelector('.intel-watch-draft');
+  if (!draftBox) return;
+  btn.disabled = true; btn.textContent = 'Drafting…';
+  try {
+    const res = await fetch('/api/intelligence/prepare', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
+      body: JSON.stringify({ memberId, kind: intent }),
+    });
+    const d = await res.json();
+    if (!res.ok || !d.ok) throw new Error();
+    const dr = d.draft || {};
+    const esc = _escAdvisor;
+    btn.style.display = 'none';
+    draftBox.style.display = 'block';
+    draftBox.innerHTML = `
+      <div class="intel-draft-card">
+        <div class="intel-draft-label">IntelliQ drafted this${dr.rationale ? ` — ${esc(dr.rationale)}` : ''}</div>
+        <textarea class="intel-draft-msg">${esc(dr.message || '')}</textarea>
+        <div class="intel-draft-meta">Sends as: <strong>${esc(dr.title)}</strong>${(dr.fields || []).length ? ` · ${dr.fields.length} short question${dr.fields.length !== 1 ? 's' : ''}` : ''}</div>
+        <div class="intel-draft-actions">
+          <button class="btn-primary btn-sm" onclick='deliverStep(${JSON.stringify(memberId)}, this)' data-draft='${esc(JSON.stringify(dr))}'>Approve &amp; send</button>
+          <button class="btn btn-outline btn-sm" onclick="this.closest('.intel-watch-draft').style.display='none'; this.closest('.intel-watch-row').querySelector('.intel-watch-prep').style.display=''">Not now</button>
+        </div>
+      </div>`;
+  } catch (e) {
+    btn.disabled = false; btn.textContent = intent === 'recognition' ? 'Prepare recognition →' : 'Prepare a step →';
+    if (typeof showToast === 'function') showToast('Could not draft', 'error');
+  }
+}
+
+async function deliverStep(memberId, btn) {
+  let dr = {}; try { dr = JSON.parse(btn.getAttribute('data-draft')); } catch (_) {}
+  const msgEl = btn.closest('.intel-draft-card')?.querySelector('.intel-draft-msg');
+  const message = msgEl ? msgEl.value.trim() : '';
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    // The edited message becomes the first field's context; deliver assigns it.
+    const fields = (dr.fields && dr.fields.length ? dr.fields : [{ label: 'How are things going?' }]);
+    const res = await fetch('/api/intelligence/deliver', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
+      body: JSON.stringify({ memberId, title: dr.title, description: (message ? message + '\n\n' : '') + (dr.description || ''), fields }),
+    });
+    if (!res.ok) throw new Error();
+    const card = btn.closest('.intel-watch-draft');
+    if (card) card.innerHTML = `<div class="intel-draft-sent">✓ Sent — it's in their queue now.</div>`;
+    if (typeof showToast === 'function') showToast('Sent ✓', 'success');
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Approve & send';
+    if (typeof showToast === 'function') showToast('Could not send', 'error');
+  }
 }
 
 function _intelCard(it) {
