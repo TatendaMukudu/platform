@@ -1475,7 +1475,7 @@ const MemberApp = {
      can refer back to. Backed by /api/assessments.
      ══════════════════════════════════════════════════════════════════════ */
   _assessState: null,
-  _assessKindLabel: { spreadsheet: 'Spreadsheet', film: 'Film', play: 'Way of playing', skill: 'Skill', general: 'General' },
+  _assessKindLabel: { spreadsheet: 'Data / spreadsheet', film: 'Video / recording', play: 'Approach / method', skill: 'Skill', general: 'General' },
 
   async _renderAssessments() {
     const root = document.getElementById('assessments-root');
@@ -1518,7 +1518,17 @@ const MemberApp = {
                 ${f.hint ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:3px">${esc(f.hint)}</div>` : ''}
                 <textarea class="note-input" data-field="${esc(f.label)}" style="min-height:60px"></textarea>
               </div>`).join('')}
-            <button class="btn-primary" onclick="MemberApp._assessSubmit('${a.id}', this)">Return it</button>
+            <div style="display:flex;gap:0.4rem;align-items:center">
+              <button class="btn-primary" onclick="MemberApp._assessSubmit('${a.id}', this)">Return it</button>
+              <button class="btn btn-outline btn-sm" onclick="MemberApp._assessDiscussToggle('${a.id}')">Discuss with IntelliQ</button>
+            </div>
+            <div id="assess-chat-${a.id}" style="display:none;margin-top:0.6rem">
+              <div id="assess-chat-log-${a.id}" style="font-size:0.82rem;line-height:1.5"></div>
+              <div style="display:flex;gap:0.4rem;margin-top:0.4rem">
+                <input class="form-input" id="assess-chat-in-${a.id}" placeholder="Ask how to approach it, or think out loud…" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')MemberApp._assessDiscussSend('${a.id}', this.nextElementSibling)">
+                <button class="btn-primary btn-sm" onclick="MemberApp._assessDiscussSend('${a.id}', this)">Send</button>
+              </div>
+            </div>
           </div>`;
         } else if (a.status === 'submitted') {
           body = `<div style="margin-top:0.5rem;font-size:0.82rem;color:var(--text-muted)">Waiting for review from ${esc(a.assignerName)}.</div>`;
@@ -1547,7 +1557,7 @@ const MemberApp = {
         <div id="assess-create" style="display:none;margin-top:0.7rem">
           <div style="padding:0.6rem 0.7rem;border:1px dashed var(--accent);border-radius:8px;margin-bottom:0.7rem;background:rgba(124,90,245,0.05)">
             <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.4rem">Describe the goal — IntelliQ reasons over your team's history (strengths, weak areas, past sessions) and builds the plan, who does what, and a sensible order.</div>
-            <textarea class="note-input" id="assess-goal" placeholder="e.g. a training session to practise a 4-3-3, or plan this week's engineering work on the auth refactor" style="min-height:52px;margin-bottom:0.4rem"></textarea>
+            <textarea class="note-input" id="assess-goal" placeholder="e.g. a plan to strengthen the group's weakest area this week, or prepare someone for a bigger responsibility" style="min-height:52px;margin-bottom:0.4rem"></textarea>
             <button class="btn-primary btn-sm" onclick="MemberApp._assessPlan(this)">✨ Plan it with me</button>
             <span id="assess-draft-status" style="font-size:0.74rem;color:var(--text-muted);margin-left:0.4rem"></span>
             <div id="assess-plan-out" style="margin-top:0.6rem"></div>
@@ -1555,9 +1565,9 @@ const MemberApp = {
           <input class="form-input" id="assess-title" placeholder="Title" style="margin-bottom:0.5rem">
           <select class="form-input" id="assess-kind" style="margin-bottom:0.5rem">
             <option value="general">General</option>
-            <option value="spreadsheet">Spreadsheet / data</option>
-            <option value="film">Film / video</option>
-            <option value="play">Way of working / playing</option>
+            <option value="spreadsheet">Data / spreadsheet</option>
+            <option value="film">Video / recording</option>
+            <option value="play">Approach / method</option>
             <option value="skill">Skill</option>
           </select>
           <textarea class="note-input" id="assess-desc" placeholder="How you want it done — the instructions." style="min-height:56px;margin-bottom:0.5rem"></textarea>
@@ -1592,7 +1602,15 @@ const MemberApp = {
           <input class="form-input" data-return-score="${a.id}" placeholder="Score" type="number" min="0" max="100" style="width:80px;margin:0">
           <button class="btn-primary" onclick="MemberApp._assessReturn('${a.id}', this)">Return</button>
         </div></div>`).join('');
-      if (reviewed.length) html += `<div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.6rem">${reviewed.length} already returned.</div>`;
+      const returnedList = reviewed.filter(a => a.status === 'returned');
+      if (returnedList.length) {
+        html += `<div class="card-label" style="margin-top:0.8rem">Returned — open to see their answers</div>`;
+        html += returnedList.map(a => `<details class="me-row" style="display:block;padding:0.5rem 0;border-bottom:1px solid var(--border)">
+          <summary style="cursor:pointer;font-size:0.86rem"><strong>${esc(a.assigneeName)}</strong> — ${esc(a.title)}${a.score != null ? ` <span style="color:var(--text-muted)">· ${a.score}/100</span>` : ''}</summary>
+          ${Object.entries(a.response || {}).map(([k, v]) => `<div style="margin-top:0.4rem"><div class="card-label" style="margin-bottom:1px">${esc(k)}</div><div class="me-row-text" style="font-size:0.84rem">${esc(v)}</div></div>`).join('') || '<div style="font-size:0.8rem;color:var(--text-muted);margin-top:0.3rem">No written answers.</div>'}
+          ${a.feedback ? `<div class="me-row-text" style="font-size:0.82rem;margin-top:0.4rem"><strong>Your feedback:</strong> ${esc(a.feedback)}</div>` : ''}
+        </details>`).join('');
+      }
       html += `</div>`;
     }
 
@@ -1602,7 +1620,7 @@ const MemberApp = {
       <div class="card-label" style="margin:0">Pinned how-to's</div>
       ${d.canCreate ? `<button class="btn-ghost" onclick="MemberApp._tutorialToggle()">＋ Pin</button>` : ''}</div>`;
     if (d.canCreate) html += `<div id="tutorial-create" style="display:none;margin-top:0.7rem">
-      <input class="form-input" id="tutorial-title" placeholder="Title — e.g. How to break down film" style="margin-bottom:0.5rem">
+      <input class="form-input" id="tutorial-title" placeholder="Title — e.g. How we do this properly" style="margin-bottom:0.5rem">
       <textarea class="note-input" id="tutorial-body" placeholder="The steps someone can refer back to." style="min-height:70px;margin-bottom:0.5rem"></textarea>
       <input class="form-input" id="tutorial-url" placeholder="Link (optional)" style="margin-bottom:0.5rem">
       <button class="btn-primary" onclick="MemberApp._tutorialPin(this)">Pin it</button></div>`;
@@ -1718,6 +1736,48 @@ const MemberApp = {
       this.showToast('Returned ✓', 'success');
       this._renderAssessments();
     } catch (e) { this.showToast('Could not return', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Return it'; } }
+  },
+
+  /* Interactive assignment — talk it through with IntelliQ, which knows what the
+     leader set. Keeps a short per-assignment history so it's a real conversation. */
+  _assessChat: {},
+  _assessDiscussToggle(id) {
+    const box = document.getElementById('assess-chat-' + id);
+    if (!box) return;
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    if (box.style.display === 'block') {
+      const log = document.getElementById('assess-chat-log-' + id);
+      if (log && !log.innerHTML) log.innerHTML = `<div style="color:var(--text-muted)">Ask me how to approach this, or think out loud — I know what your leader set.</div>`;
+      document.getElementById('assess-chat-in-' + id)?.focus();
+    }
+  },
+  async _assessDiscussSend(id, btn) {
+    const input = document.getElementById('assess-chat-in-' + id);
+    const log = document.getElementById('assess-chat-log-' + id);
+    const msg = (input?.value || '').trim();
+    if (!msg || !log) return;
+    const esc = t => this._escape(t || '');
+    this._assessChat[id] = this._assessChat[id] || [];
+    log.innerHTML += `<div style="margin:0.4rem 0"><strong>You:</strong> ${esc(msg)}</div>`;
+    this._assessChat[id].push({ role: 'user', content: msg });
+    if (input) input.value = '';
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    log.innerHTML += `<div id="assess-chat-pending-${id}" style="color:var(--text-muted);margin:0.2rem 0">IntelliQ is thinking…</div>`;
+    log.scrollTop = log.scrollHeight;
+    try {
+      const res = await fetch(`/api/assessments/${id}/discuss`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ message: msg, history: this._assessChat[id].slice(0, -1) }) });
+      const d = await res.json();
+      document.getElementById('assess-chat-pending-' + id)?.remove();
+      if (!res.ok || !d.ok) throw new Error();
+      log.innerHTML += `<div style="margin:0.4rem 0;color:var(--text-secondary)"><strong style="color:var(--accent)">IntelliQ:</strong> ${esc(d.reply)}</div>`;
+      this._assessChat[id].push({ role: 'assistant', content: d.reply });
+    } catch (e) {
+      document.getElementById('assess-chat-pending-' + id)?.remove();
+      log.innerHTML += `<div style="color:var(--danger);margin:0.3rem 0">Couldn't reach IntelliQ just now.</div>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+      log.scrollTop = log.scrollHeight;
+    }
   },
 
   async _assessReturn(id, btn) {

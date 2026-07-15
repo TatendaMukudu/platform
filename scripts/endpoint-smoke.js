@@ -248,7 +248,7 @@ const server = app.listen(0, async () => {
     // Planning agent — reasons over the team, returns insight + plan + allocation + sequence.
     ok('a member cannot use the planning agent (403)',
        (await call('/api/assessments/plan', tokB, { method: 'POST', body: { goal: 'x' } })).status === 403);
-    const plan = await call('/api/assessments/plan', tokCoach, { method: 'POST', body: { goal: 'a session to practise a 4-3-3, playing to strengths' } });
+    const plan = await call('/api/assessments/plan', tokCoach, { method: 'POST', body: { goal: 'strengthen the group\'s weakest area this week, playing to strengths' } });
     ok('the planning agent returns insight + a plan + an order',
        plan.status === 200 && typeof plan.j?.insight === 'string' && plan.j?.plan?.title && Array.isArray(plan.j.sequence) && plan.j.sequence.length >= 1);
     ok('allocation only ever names real people on the team (never invented)',
@@ -264,7 +264,13 @@ const server = app.listen(0, async () => {
        (bList.j?.assigned || []).some(a => a.id === asgId && a.status === 'assigned'));
     ok('a non-assignee cannot submit someone else\'s assessment (403)',
        (await call(`/api/assessments/${asgId}/submit`, tokCoach, { method: 'POST', body: { response: {} } })).status === 403);
-    const sub = await call(`/api/assessments/${asgId}/submit`, tokB, { method: 'POST', body: { response: { 'Key moments': '3 clips', 'What you saw': 'good spacing' }, note: 'done' } });
+    // Interactive assignment — the assignee can discuss it with the agent (before submitting).
+    const chat = await call(`/api/assessments/${asgId}/discuss`, tokB, { method: 'POST', body: { message: 'How should I approach this?' } });
+    ok('the assignee can discuss the assignment with IntelliQ (interactive)',
+       chat.status === 200 && typeof chat.j?.reply === 'string' && chat.j.reply.length > 0);
+    const strangerChat = await call(`/api/assessments/${asgId}/discuss`, tokA, { method: 'POST', body: { message: 'hi' } });
+    ok('an unrelated person cannot discuss the assignment', strangerChat.status === 403 || strangerChat.status === 404);
+    const sub = await call(`/api/assessments/${asgId}/submit`, tokB, { method: 'POST', body: { response: { 'What went well': 'clear progress', 'What was hard': 'time pressure' }, note: 'done' } });
     ok('the assignee fills and returns it (status submitted)', sub.status === 200 && sub.j?.assignment?.status === 'submitted');
     const ret = await call(`/api/assessments/${asgId}/return`, tokCoach, { method: 'POST', body: { feedback: 'Strong work', score: 82 } });
     ok('the leader reviews it back with feedback + score', ret.status === 200 && ret.j?.assignment?.status === 'returned' && ret.j.assignment.score === 82);

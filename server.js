@@ -3398,7 +3398,7 @@ app.post('/api/assessments/draft', requireAuth, async (req, res) => {
   let out = null;
   if (ai.enabled()) {
     try {
-      const system = 'You design clear, motivating assessments/reviews for any field (sport, work, study, health). Given a goal, return JSON only: {"title": string (<=80 chars), "kind": one of ["spreadsheet","film","play","skill","general"], "description": string (2-4 sentences of instructions, warm and specific, no emojis), "fields": array of 3-6 {"label": string, "hint": string} the person fills in}. Make it feel like a thoughtful coach designed it, not a form.';
+      const system = 'You design clear, motivating assessments and reviews for ANY kind of organisation or work. Given a goal, return JSON only: {"title": string (<=80 chars), "kind": one of ["spreadsheet","film","play","skill","general"], "description": string (2-4 sentences of instructions, warm and specific, no emojis), "fields": array of 3-6 {"label": string, "hint": string} the person fills in}. Make it feel like a thoughtful mentor designed it, not a form. Use neutral, universal language — no industry-specific jargon.';
       out = await ai.completeJSON({ tier: 'reason', system, user: `Goal: ${goal}`, maxTokens: 600, schema: ['title', 'fields'] });
     } catch (_) { out = null; }
   }
@@ -3496,13 +3496,13 @@ app.post('/api/assessments/plan', requireAuth, async (req, res) => {
   let out = null;
   if (ai.enabled()) {
     try {
-      const system = `${privacy.GATE_DIRECTIVE}\n\nYou are a planning coach for ANY field (sport, engineering, sales, study, health). You are given a leader's goal and PRIVACY-SAFE context about their team (categorical strengths/development, recent scores, trajectories, weak areas, past assessment averages). Reason over it and return JSON only:
+      const system = `${privacy.GATE_DIRECTIVE}\n\nYou are a planning partner for ANY kind of organisation or work. You are given a leader's goal and PRIVACY-SAFE context about the people they lead (categorical strengths/development, recent scores, trajectories, weak areas, past assessment averages). Reason over it and return JSON only:
 {"insight": string (2-3 sentences: where the team stands and what to strengthen, grounded in the data),
  "plan": {"title": string(<=80), "kind": one of ["spreadsheet","film","play","skill","general"], "description": string(2-4 sentences of instructions), "fields": array of 3-6 {"label","hint"}},
  "allocation": array of up to 12 {"name": (use ONLY names given), "suggestion": string (what this person should do / work on, from their strengths & development)},
  "sequence": array of 3-6 short ordered steps}
-Play to individual strengths, target real weak areas, and adapt to the specific people. No emojis.`;
-      const user = `Goal: ${goal}\n\nTeam context (privacy-safe):\n${JSON.stringify(ctx).slice(0, 6000)}`;
+Play to individual strengths, target real weak areas, and adapt to the specific people. Use neutral, universal language — no industry-specific jargon. No emojis.`;
+      const user = `Goal: ${goal}\n\nContext about the people (privacy-safe):\n${JSON.stringify(ctx).slice(0, 6000)}`;
       out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 1100, schema: ['insight', 'plan'] });
     } catch (_) { out = null; }
   }
@@ -3628,6 +3628,44 @@ app.post('/api/assessments/:id/return', requireAuth, (req, res) => {
   res.json({ ok: true, assignment: _publicAssignment(a) });
 });
 
+/* POST /api/assessments/:id/discuss — the assignment is a conversation, not a form.
+   The assignee (or the assigner) can talk it through with IntelliQ, which knows what
+   the leader set (title, instructions, kind, fields) and helps them think it through
+   — the "interactive, not a chore" experience. LLM-driven with a plain fallback. */
+app.post('/api/assessments/:id/discuss', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const a = (assessmentAssignments[code] || []).find(x => x.id === req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  const isAssignee = a.assigneeId === userId;
+  const canReview  = a.assignerId === userId || (_isLeader(code, userId) && new Set(getVisibleUserIds(code, userId)).has(a.assigneeId));
+  if (!isAssignee && !canReview) return res.status(403).json({ error: 'not allowed' });
+  const message = String(req.body?.message || '').slice(0, 2000).trim();
+  if (!message) return res.status(400).json({ error: 'message required' });
+  const history = Array.isArray(req.body?.history) ? req.body.history.slice(-8) : [];
+
+  const fieldList = (a.fields || []).map(f => f.label).join(', ') || 'your response';
+  let reply = isAssignee
+    ? `Start with what you actually did or saw, then be specific. For "${a.title}", the parts to cover are: ${fieldList}. Want to talk through any one of them?`
+    : `This is ${a.assigneeName}'s work on "${a.title}". Ask me to summarise their answers or compare them to what you set.`;
+
+  if (ai.enabled()) {
+    try {
+      const role = isAssignee
+        ? `You are IntelliQ, a supportive mentor helping the PERSON complete an assignment their leader set. Help them think it through and do it well — never do it for them, never invent facts about them. Warm, brief, concrete. No emojis.`
+        : `You are IntelliQ helping a LEADER reflect on someone's assignment. Be concise and neutral. No emojis.`;
+      const context = `Assignment: "${a.title}" (${a.kind}).\nInstructions the leader set: ${a.description || '(none)'}\nSections to fill: ${fieldList}.` +
+        (isAssignee && a.response && Object.keys(a.response).length ? `\nTheir current draft: ${Object.entries(a.response).map(([k, v]) => `${k}: ${v}`).join(' | ').slice(0, 800)}` : '');
+      const messages = [
+        ...history.filter(h => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string').map(h => ({ role: h.role, content: h.content.slice(0, 1000) })),
+        { role: 'user', content: message },
+      ];
+      const out = await ai.complete({ tier: 'reason', system: `${role}\n\n${context}`, messages, maxTokens: 300 });
+      if (out) reply = out;
+    } catch (_) {}
+  }
+  res.json({ ok: true, reply });
+});
+
 /* Tutorials — pinned how-to references. Leaders pin; everyone can read. */
 app.post('/api/tutorials', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
@@ -3678,8 +3716,8 @@ app.post('/api/admin/llm-selftest', requirePermission('manage_settings'), async 
       system: 'You are a supportive coach. Reply in ONE warm, genuine sentence. No emojis.',
       user:   'A team member wrote: "Tough week — legs feel heavy but I got through every session." Acknowledge it warmly.' },
     { tier: 'reason', label: 'Coaching reflection (reasoning tier)',
-      system: 'You are a thoughtful performance coach. In 2–3 sentences, reflect on what this pattern suggests and offer one gentle next step. No emojis, no lists.',
-      user:   "Over six weeks a player's participation stayed high, but their self-reported energy has drifted down three weeks running. What might be going on, and what's one supportive step?" },
+      system: 'You are a thoughtful performance mentor. In 2–3 sentences, reflect on what this pattern suggests and offer one gentle next step. No emojis, no lists.',
+      user:   "Over six weeks a person's participation stayed high, but their self-reported energy has drifted down three weeks running. What might be going on, and what's one supportive step?" },
   ];
   const results = [];
   for (const t of trials) {
