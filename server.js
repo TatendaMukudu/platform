@@ -3415,6 +3415,117 @@ app.post('/api/assessments/draft', requireAuth, async (req, res) => {
   });
 });
 
+/* Gather the PRIVACY-SAFE planning context a leader legitimately sees about their
+   team: per-person categorical strengths/development + recent score + trajectory,
+   the team's most common development areas, and how past assessments have gone.
+   Only aggregate/categorical/numeric data — never raw check-in text or anything
+   sensitive. This is what the planner reasons over. */
+function _gatherPlanningContext(code, userId) {
+  const ids = getVisibleUserIds(code, userId).filter(id => id !== userId);
+  const now = Date.now();
+  const team = [];
+  const devCount = {};
+  ids.forEach(id => {
+    const u = orgUsers[code]?.[id];
+    if (!u || u.role === 'superadmin') return;
+    const sigs = (orgSignals[code] || []).filter(s => s.subjectId === id && s.source === 'assessment');
+    const scores = sigs.filter(s => Number.isFinite(s.valueNum)).map(s => s.valueNum);
+    const recentScore = scores.length ? Math.round(scores.slice(-3).reduce((a, b) => a + b, 0) / Math.min(3, scores.length)) : null;
+    const strengths = [], development = [];
+    sigs.forEach(s => {
+      const t = s.valueText || '';
+      const sm = t.match(/Strengths:\s*([^·]+)/i); if (sm) sm[1].split(',').forEach(x => { const v = x.trim(); if (v) strengths.push(v); });
+      const dm = t.match(/Development:\s*([^·]+)/i); if (dm) dm[1].split(',').forEach(x => { const v = x.trim(); if (v) { development.push(v); devCount[v.toLowerCase()] = (devCount[v.toLowerCase()] || 0) + 1; } });
+    });
+    let trajectory = 'steady';
+    try {
+      const m = _buildMemberIntelInput(code, u, now);
+      const pats = m ? intel.detectPatterns(m) : [];
+      if (pats.some(p => p.severity === 'high')) trajectory = 'needs attention';
+      else if (pats.some(p => /improv|recover/i.test(p.type))) trajectory = 'improving';
+    } catch (_) {}
+    team.push({
+      name: u.name || 'Member', recentScore,
+      strengths: [...new Set(strengths)].slice(0, 4),
+      development: [...new Set(development)].slice(0, 4),
+      trajectory,
+    });
+  });
+  const weakAreas = Object.entries(devCount).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k]) => k);
+  const returned = (assessmentAssignments[code] || []).filter(a => a.status === 'returned' && Number.isFinite(a.score));
+  const byTitle = {};
+  returned.forEach(a => { (byTitle[a.title] = byTitle[a.title] || []).push(a.score); });
+  const pastAssessments = Object.entries(byTitle).map(([title, s]) => ({ title, avg: Math.round(s.reduce((x, y) => x + y, 0) / s.length), n: s.length }));
+  return { team, weakAreas, pastAssessments };
+}
+
+/* POST /api/assessments/plan — the planning agent. Reasons over the whole team's
+   history (strengths, weak areas, past assessments, trajectories) and a plain
+   goal, then returns: an INSIGHT (where the team stands), a PLAN (the assessment/
+   session to run), an ALLOCATION (who's suited to what / who needs focus), and a
+   SEQUENCE (a sensible order). LLM-reasoned when a key is present; a real
+   data-driven fallback otherwise. Nothing is saved — it fills the builder. */
+app.post('/api/assessments/plan', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Only a leader can plan' });
+  const goal = String(req.body?.goal || '').slice(0, 600).trim();
+  if (!goal) return res.status(400).json({ error: 'goal required' });
+  const ctx = _gatherPlanningContext(code, userId);
+
+  // Deterministic, data-driven fallback (also the no-LLM path).
+  const weak = ctx.weakAreas.slice(0, 3);
+  const strongAt = {};
+  ctx.team.forEach(p => (p.strengths || []).forEach(s => { (strongAt[s] = strongAt[s] || []).push(p.name); }));
+  const fallback = {
+    insight: ctx.team.length
+      ? `Across ${ctx.team.length} people${weak.length ? `, the most common area to strengthen is ${weak.join(', ')}` : ''}. ${ctx.team.filter(p => p.trajectory === 'needs attention').length} may need attention; ${ctx.team.filter(p => p.trajectory === 'improving').length} are trending up.`
+      : 'Not enough history yet — this plan is a starting point that will sharpen as assessments come in.',
+    plan: {
+      title: goal.length <= 60 ? goal.replace(/^\w/, c => c.toUpperCase()) : 'Weekly plan',
+      kind: 'general',
+      description: `Goal: ${goal}\n\nFocus where the group is weakest${weak.length ? ` (${weak.join(', ')})` : ''}. Play to individual strengths and give the people who are struggling a smaller, winnable version.`,
+      fields: [{ label: 'What to focus on', hint: '' }, { label: 'How we\'ll know it worked', hint: 'A concrete signal' }],
+    },
+    allocation: ctx.team.slice(0, 12).map(p => ({
+      name: p.name,
+      suggestion: (p.development && p.development.length) ? `Work on ${p.development[0]}` : (p.strengths && p.strengths.length) ? `Lead on ${p.strengths[0]}` : 'Give a clear, winnable task',
+    })),
+    sequence: ['Warm up / align on the goal', 'Core work on the weakest area', 'Apply it in a realistic scenario', 'Short review — what worked'],
+  };
+
+  let out = null;
+  if (ai.enabled()) {
+    try {
+      const system = `${privacy.GATE_DIRECTIVE}\n\nYou are a planning coach for ANY field (sport, engineering, sales, study, health). You are given a leader's goal and PRIVACY-SAFE context about their team (categorical strengths/development, recent scores, trajectories, weak areas, past assessment averages). Reason over it and return JSON only:
+{"insight": string (2-3 sentences: where the team stands and what to strengthen, grounded in the data),
+ "plan": {"title": string(<=80), "kind": one of ["spreadsheet","film","play","skill","general"], "description": string(2-4 sentences of instructions), "fields": array of 3-6 {"label","hint"}},
+ "allocation": array of up to 12 {"name": (use ONLY names given), "suggestion": string (what this person should do / work on, from their strengths & development)},
+ "sequence": array of 3-6 short ordered steps}
+Play to individual strengths, target real weak areas, and adapt to the specific people. No emojis.`;
+      const user = `Goal: ${goal}\n\nTeam context (privacy-safe):\n${JSON.stringify(ctx).slice(0, 6000)}`;
+      out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 1100, schema: ['insight', 'plan'] });
+    } catch (_) { out = null; }
+  }
+  const r = (out && out.plan && Array.isArray(out.plan.fields)) ? out : fallback;
+  // Constrain allocation names to the real team (never invent people).
+  const names = new Set(ctx.team.map(p => p.name));
+  const allocation = (r.allocation || fallback.allocation).filter(a => a && names.has(a.name)).slice(0, 12)
+    .map(a => ({ name: String(a.name).slice(0, 80), suggestion: String(a.suggestion || '').slice(0, 200) }));
+  res.json({
+    ok: true, aiUsed: !!(out && out !== fallback),
+    insight: String(r.insight || fallback.insight).slice(0, 800),
+    plan: {
+      title: String(r.plan.title || fallback.plan.title).slice(0, 160),
+      kind: ASSESS_KINDS.includes(r.plan.kind) ? r.plan.kind : 'general',
+      description: String(r.plan.description || '').slice(0, 2000),
+      fields: (r.plan.fields || []).slice(0, 12).map(f => ({ label: String(f?.label || '').slice(0, 160), hint: String(f?.hint || '').slice(0, 400) })).filter(f => f.label),
+    },
+    allocation: allocation.length ? allocation : fallback.allocation,
+    sequence: (Array.isArray(r.sequence) && r.sequence.length ? r.sequence : fallback.sequence).slice(0, 8).map(s => String(s).slice(0, 160)),
+    context: { teamSize: ctx.team.length, weakAreas: ctx.weakAreas.slice(0, 5), pastAssessments: ctx.pastAssessments.slice(0, 6) },
+  });
+});
+
 app.post('/api/assessments/templates', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Only a leader can create assessments' });

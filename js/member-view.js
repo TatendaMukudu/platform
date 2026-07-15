@@ -1546,10 +1546,11 @@ const MemberApp = {
         </div>
         <div id="assess-create" style="display:none;margin-top:0.7rem">
           <div style="padding:0.6rem 0.7rem;border:1px dashed var(--accent);border-radius:8px;margin-bottom:0.7rem;background:rgba(124,90,245,0.05)">
-            <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.4rem">Describe what you want in plain words and IntelliQ drafts it for you.</div>
-            <textarea class="note-input" id="assess-goal" placeholder="e.g. a weekly review that helps a new hire reflect on wins and blockers, or a training session focused on decision-making under pressure" style="min-height:52px;margin-bottom:0.4rem"></textarea>
-            <button class="btn-primary btn-sm" onclick="MemberApp._assessDraft(this)">✨ Draft it for me</button>
+            <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.4rem">Describe the goal — IntelliQ reasons over your team's history (strengths, weak areas, past sessions) and builds the plan, who does what, and a sensible order.</div>
+            <textarea class="note-input" id="assess-goal" placeholder="e.g. a training session to practise a 4-3-3, or plan this week's engineering work on the auth refactor" style="min-height:52px;margin-bottom:0.4rem"></textarea>
+            <button class="btn-primary btn-sm" onclick="MemberApp._assessPlan(this)">✨ Plan it with me</button>
             <span id="assess-draft-status" style="font-size:0.74rem;color:var(--text-muted);margin-left:0.4rem"></span>
+            <div id="assess-plan-out" style="margin-top:0.6rem"></div>
           </div>
           <input class="form-input" id="assess-title" placeholder="Title" style="margin-bottom:0.5rem">
           <select class="form-input" id="assess-kind" style="margin-bottom:0.5rem">
@@ -1634,30 +1635,41 @@ const MemberApp = {
     } catch (e) { this.showToast('Could not create', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Create'; } }
   },
 
-  /* Agentic builder — turn a plain-language goal into a drafted assessment and
-     fill the form. IntelliQ does the labor; the leader edits and creates. */
-  async _assessDraft(btn) {
+  /* The planning agent — reasons over the whole team's history and the goal, then
+     returns insight + a plan + who-does-what + a sensible order, and fills the
+     builder. IntelliQ does the reasoning; the leader edits and creates. */
+  async _assessPlan(btn) {
     const goal = (document.getElementById('assess-goal')?.value || '').trim();
     const status = document.getElementById('assess-draft-status');
-    if (!goal) { this.showToast('Describe what you want first', 'warning'); return; }
-    if (btn) { btn.disabled = true; btn.textContent = 'Drafting…'; }
-    if (status) status.textContent = 'IntelliQ is drafting…';
+    const out = document.getElementById('assess-plan-out');
+    if (!goal) { this.showToast('Describe the goal first', 'warning'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Reasoning…'; }
+    if (status) status.textContent = 'Reading your team\'s history…';
+    if (out) out.innerHTML = '';
+    const esc = t => this._escape(t || '');
     try {
-      const res = await fetch('/api/assessments/draft', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ goal }) });
+      const res = await fetch('/api/assessments/plan', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ goal }) });
       const d = await res.json();
       if (!res.ok || !d.ok) throw new Error(d.error || 'failed');
-      const dr = d.draft || {};
+      const p = d.plan || {};
       const setV = (id, v) => { const el = document.getElementById(id); if (el != null && v != null) el.value = v; };
-      setV('assess-title', dr.title);
-      setV('assess-kind', dr.kind);
-      setV('assess-desc', dr.description);
-      setV('assess-fields', (dr.fields || []).map(f => f.label).join('\n'));
-      if (status) status.textContent = d.aiUsed ? 'Drafted ✓ — edit anything, then Create.' : 'Drafted a starting point ✓ — edit and Create.';
+      setV('assess-title', p.title);
+      setV('assess-kind', p.kind);
+      setV('assess-desc', p.description);
+      setV('assess-fields', (p.fields || []).map(f => f.label).join('\n'));
+      // Render the reasoning: insight → allocation → sequence.
+      let html = '';
+      if (d.insight) html += `<div style="font-size:0.8rem;color:var(--text-secondary);line-height:1.55;margin-bottom:0.5rem"><strong>What the data says:</strong> ${esc(d.insight)}</div>`;
+      if ((d.allocation || []).length) html += `<div class="card-label" style="margin-bottom:3px">Who does what</div>` + d.allocation.map(a => `<div style="font-size:0.8rem;padding:2px 0"><strong>${esc(a.name)}</strong> — ${esc(a.suggestion)}</div>`).join('');
+      if ((d.sequence || []).length) html += `<div class="card-label" style="margin:0.5rem 0 3px">A sensible order</div>` + d.sequence.map((s, i) => `<div style="font-size:0.8rem;padding:1px 0">${i + 1}. ${esc(s)}</div>`).join('');
+      if (d.context && d.context.teamSize) html += `<div style="font-size:0.68rem;color:var(--text-muted);margin-top:0.4rem">Reasoned over ${d.context.teamSize} people${(d.context.weakAreas || []).length ? ` · common gap: ${esc(d.context.weakAreas.join(', '))}` : ''}. Numbers and categories only — never anyone's private words.</div>`;
+      if (out) out.innerHTML = html;
+      if (status) status.textContent = d.aiUsed ? 'Planned ✓ — edit anything, then Create.' : 'Planned from your data ✓ — edit and Create.';
     } catch (e) {
       if (status) status.textContent = '';
-      this.showToast('Could not draft — you can still fill it in manually', 'error');
+      this.showToast('Could not plan — you can still fill it in manually', 'error');
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = '✨ Draft it for me'; }
+      if (btn) { btn.disabled = false; btn.textContent = '✨ Plan it with me'; }
     }
   },
 

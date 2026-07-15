@@ -245,6 +245,14 @@ const server = app.listen(0, async () => {
     const adraft = await call('/api/assessments/draft', tokCoach, { method: 'POST', body: { goal: 'a weekly review that helps a new hire reflect on wins and blockers' } });
     ok('the builder drafts a real assessment from a plain-language goal',
        adraft.status === 200 && adraft.j?.draft?.title && Array.isArray(adraft.j.draft.fields) && adraft.j.draft.fields.length >= 1);
+    // Planning agent — reasons over the team, returns insight + plan + allocation + sequence.
+    ok('a member cannot use the planning agent (403)',
+       (await call('/api/assessments/plan', tokB, { method: 'POST', body: { goal: 'x' } })).status === 403);
+    const plan = await call('/api/assessments/plan', tokCoach, { method: 'POST', body: { goal: 'a session to practise a 4-3-3, playing to strengths' } });
+    ok('the planning agent returns insight + a plan + an order',
+       plan.status === 200 && typeof plan.j?.insight === 'string' && plan.j?.plan?.title && Array.isArray(plan.j.sequence) && plan.j.sequence.length >= 1);
+    ok('allocation only ever names real people on the team (never invented)',
+       Array.isArray(plan.j?.allocation) && plan.j.allocation.every(a => a.name === 'Member B' || a.name === 'Coach'));
     const tplId = tpl.j.template.id;
     ok('a member cannot assign to others (403)',
        (await call('/api/assessments/assign', tokB, { method: 'POST', body: { templateId: tplId, assigneeIds: [coachId] } })).status === 403);
