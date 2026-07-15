@@ -129,7 +129,8 @@ const WORKSPACE_MODULES = [
   { section: 'My Space', id: 'home',    icon: ICON.home,    label: 'Me',     permission: null },
   // Check-In is folded into the Me composer (optional mood + "what happened?"),
   // so it's no longer a separate nav item. The page still exists and is reachable.
-  { section: null,        id: 'notes',   icon: ICON.notes,   label: 'Notes',    permission: null },
+  // Notes now live INSIDE the Me space (no separate tab) — the page stays
+  // reachable for full options (tags / sharing) via navigate('notes').
   { section: null,        id: 'assessments', icon: ICON.clipboard, label: 'Assessments', permission: null },
   { section: null,        id: 'apps',    icon: ICON.plug,    label: 'Apps',     permission: null },
   { section: null,        id: 'inbox',   icon: ICON.inbox,   label: 'Inbox',    permission: null },

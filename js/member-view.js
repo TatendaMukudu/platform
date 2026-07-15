@@ -330,6 +330,7 @@ const MemberApp = {
     if (!d || !d.ok) {
       if (briefEl) briefEl.innerHTML = `<div class="card iq-briefing"><div class="iq-briefing-text">Welcome. Add anything on your mind below — IntelliQ takes it from there.</div></div>`;
       [notEl, qEl, prepEl].forEach(e => { if (e) e.innerHTML = ''; });
+      this._renderMeNotes();
       return;
     }
 
@@ -396,6 +397,60 @@ const MemberApp = {
       }
       prepEl.innerHTML = html;
     }
+    this._renderMeNotes();
+  },
+
+  /* Notes, clumped into the Me tab — your saved memory, right where you live.
+     The composer above is the main input; this is a quick note + a browse of
+     what you've kept. Full options (tags, sharing) open the Notes page. */
+  async _renderMeNotes() {
+    const el = document.getElementById('me-notes');
+    if (!el) return;
+    const esc = t => this._escape(t || '');
+    let notes = [];
+    try {
+      const res = await fetch(`/api/notes?orgCode=${encodeURIComponent(this._orgCode)}&requesterId=${encodeURIComponent(this._userId)}`, { headers: this._authHeaders() });
+      if (res.ok) { const data = await res.json(); notes = (data.notes || []).filter(n => n.authorId === this._userId); }
+    } catch (_) {}
+    const list = notes.slice(0, 6).map(n => {
+      const time = n.createdAt ? new Date(n.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+      return `<div class="card me-row" style="display:block;padding:0.7rem 0.9rem;margin-bottom:0.5rem">
+        <div class="me-row-text" style="font-size:0.84rem">${esc(n.content)}</div>
+        <div style="font-size:0.7rem;color:var(--text-muted);margin-top:3px">${esc(n.type)}${time ? ' · ' + time : ''}</div>
+      </div>`;
+    }).join('');
+    el.innerHTML = `
+      <div class="me-section-label" style="display:flex;align-items:center;justify-content:space-between">
+        <span>Notes</span>
+        <button class="btn-ghost" style="font-size:0.72rem" onclick="MemberApp._meNoteToggle()">＋ Note</button>
+      </div>
+      <div id="me-note-add" style="display:none;margin-bottom:0.6rem">
+        <textarea class="note-input" id="me-note-input" placeholder="A note to keep — only you and IntelliQ see it." style="min-height:56px;margin-bottom:0.4rem"></textarea>
+        <div style="display:flex;gap:0.4rem;align-items:center">
+          <button class="btn-primary btn-sm" onclick="MemberApp._meNoteSave(this)">Save note</button>
+          <button class="btn btn-outline btn-sm" onclick="navigate('notes')">More options</button>
+        </div>
+      </div>
+      ${notes.length
+        ? list + (notes.length > 6 ? `<button class="btn-ghost" style="font-size:0.74rem" onclick="navigate('notes')">See all ${notes.length}</button>` : '')
+        : `<div style="font-size:0.82rem;color:var(--text-muted)">No notes yet — keep a thought and IntelliQ remembers it.</div>`}`;
+  },
+
+  _meNoteToggle() { const el = document.getElementById('me-note-add'); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; },
+
+  async _meNoteSave(btn) {
+    const content = (document.getElementById('me-note-input')?.value || '').trim();
+    if (!content) { this.showToast('Write something first', 'warning'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    try {
+      const res = await fetch('/api/notes', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ orgCode: this._orgCode, authorId: this._userId, authorName: this._name, content, type: 'private', tag: null, groupId: null }),
+      });
+      if (!res.ok) throw new Error();
+      this.showToast('Saved ✓', 'success');
+      this._renderMeNotes();
+    } catch (e) { this.showToast('Could not save', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Save note'; } }
   },
 
   /* Approve a prepared suggestion → it becomes one of your active focuses. */
@@ -1665,13 +1720,26 @@ const MemberApp = {
   async _renderApps() {
     const root = document.getElementById('apps-root');
     if (!root) return;
+    const esc = t => this._escape(t || '');
     root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Loading…</div>`;
+    let res, d;
     try {
-      const res = await fetch('/api/me/sources', { headers: this._authHeaders() });
-      const d = await res.json();
-      const esc = t => this._escape(t || '');
+      res = await fetch('/api/me/sources', { headers: this._authHeaders() });
+      d = await res.json();
+    } catch (e) {
+      root.innerHTML = `<div class="card"><div style="color:var(--text-muted);font-size:0.85rem">Couldn't reach the server. <button class="btn-ghost" onclick="MemberApp._renderApps()">Try again</button></div></div>`;
+      return;
+    }
+    if (!res.ok || !d || !d.ok) {
+      root.innerHTML = `<div class="card"><div style="color:var(--text-muted);font-size:0.85rem">Couldn't load your apps${res && res.status === 401 ? ' — your session may have expired. Log in again.' : '.'} <button class="btn-ghost" onclick="MemberApp._renderApps()">Try again</button></div></div>`;
+      return;
+    }
+    {
       const sources = d.sources || [];
       let html = `<div class="card"><div class="card-label">Your apps</div>`;
+      if (!sources.length) {
+        html += `<div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">No apps available to connect yet. <button class="btn-ghost" onclick="MemberApp._renderApps()">Refresh</button></div>`;
+      }
       html += sources.map(s => {
         const connected = !!s.connected;
         return `<div class="me-row" style="display:flex;align-items:flex-start;gap:0.7rem;padding:0.8rem 0;border-bottom:1px solid var(--border)">
@@ -1689,17 +1757,14 @@ const MemberApp = {
         <div class="card" style="margin-top:0.8rem">
           <div class="card-label">How this works</div>
           <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6">
-            IntelliQ only ever draws <strong>numbers</strong> from a connected app — how busy your
-            days are, sleep, activity, training load — <strong>never message content, titles, or
-            locations</strong>. Connecting records your consent; disconnecting withdraws it and stops
-            all drawing immediately. Live auto-sync arrives as each provider is switched on — your
-            consent is respected the whole way.
+            When you connect an app, IntelliQ only ever reads <strong>numbers</strong> from it — never
+            your messages, event details, or locations. Connecting records your consent; disconnecting
+            withdraws it and stops all reading immediately. Live sync turns on for each app as it becomes
+            available, and your consent is respected the whole way.
           </div>
         </div>`;
       root.innerHTML = html;
       if (typeof hydrateIcons === 'function') hydrateIcons(root);
-    } catch (e) {
-      root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Couldn't load your apps.</div>`;
     }
   },
 

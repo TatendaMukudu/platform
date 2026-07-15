@@ -59,13 +59,13 @@ const ACTIONS = {
 const CONNECTORS = {
   calendar: {
     id: 'calendar', label: 'Calendar', scope: 'external:calendar',
-    describes: 'how busy your days are, from your calendar (counts only — never event details)',
+    describes: 'how busy your days are (counts only — never event details)',
     // raw: [{ date }] — one entry per event. We keep the COUNT per day, not titles.
     map(raw) { return _perDay(raw, 'Calendar load', 'load', 'down-good'); },
   },
   health: {
     id: 'health', label: 'Health', scope: 'external:health',
-    describes: 'sleep and activity from a health app (numbers only)',
+    describes: 'rest and activity levels (numbers only — never content)',
     // raw: [{ date, sleepHours?, steps? }]
     map(raw) {
       const out = [];
@@ -79,10 +79,10 @@ const CONNECTORS = {
     },
   },
   fitness: {
-    id: 'fitness', label: 'Training', scope: 'external:fitness',
-    describes: 'training load from a fitness app (session counts only)',
+    id: 'fitness', label: 'Activity', scope: 'external:fitness',
+    describes: 'exercise and activity, as session counts (numbers only)',
     // raw: [{ date }] — one entry per session.
-    map(raw) { return _perDay(raw, 'Training load', 'load', 'down-good'); },
+    map(raw) { return _perDay(raw, 'Activity load', 'load', 'down-good'); },
   },
 };
 
