@@ -3722,6 +3722,48 @@ Play to individual strengths, target real weak areas, and adapt to the specific 
   });
 });
 
+/* POST /api/assessments/plan/chat — the builder as a REASONING PARTNER, not a form.
+   A back-and-forth where IntelliQ grounds every suggestion in the team's data AND
+   pushes back when the leader's idea conflicts with it ("I'd be cautious assigning
+   that to Jordan — it's been a development area for them", "several people are
+   trending down, so a high-intensity plan may backfire"). When you converge on
+   something concrete, it returns a structured `plan` you can drop into the form. */
+app.post('/api/assessments/plan/chat', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Only a leader can plan' });
+  const message = String(req.body?.message || '').slice(0, 2000).trim();
+  if (!message) return res.status(400).json({ error: 'message required' });
+  const history = Array.isArray(req.body?.history) ? req.body.history.slice(-10) : [];
+  const ctx = _gatherPlanningContext(code, userId);
+
+  // Deterministic fallback — still grounded: name a real caution if one exists.
+  const weak = ctx.weakAreas.slice(0, 2);
+  const dipping = ctx.team.filter(p => p.trajectory === 'needs attention').map(p => p.name);
+  let reply = `Here's what the data says: ${ctx.team.length} people`;
+  if (weak.length) reply += `, most commonly working on ${weak.join(' and ')}`;
+  if (dipping.length) reply += `. I'd be cautious about anything high-intensity right now — ${dipping.slice(0, 3).join(', ')} ${dipping.length === 1 ? 'is' : 'are'} trending down`;
+  reply += '. Tell me the shape you have in mind and I\'ll pressure-test it against who\'s strong where.';
+
+  let out = null;
+  if (ai.enabled()) {
+    try {
+      const system = `${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ, a planning PARTNER for a leader in ANY kind of organisation. This is a conversation, not a form. Reason WITH them and ground every point in the PRIVACY-SAFE team context provided. Crucially: PUSH BACK when their idea conflicts with the data — be a thoughtful expert who disagrees when warranted, never a yes-man. Examples of good pushback: "I'd hold off assigning that to Jordan — it's been a development area, so they may struggle to execute it efficiently"; "several people are trending down, so a demanding session may set them back — consider a lighter version". Be specific, use only the names given, never invent data, never reveal private detail. Keep replies to 2-4 sentences unless proposing a plan.\n\nReturn JSON only: {"reply": string (your conversational response, including any pushback), "plan": null OR {"title","kind" one of ["spreadsheet","film","play","skill","general"],"description","fields":[{"label","hint"}]} — include a plan ONLY when you and the leader have converged on something concrete}.`;
+      const messages = [
+        ...history.filter(h => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string').map(h => ({ role: h.role, content: h.content.slice(0, 1500) })),
+        { role: 'user', content: `${message}\n\n[Team context — privacy-safe]: ${JSON.stringify(ctx).slice(0, 5000)}` },
+      ];
+      out = await ai.completeJSON({ tier: 'reason', messages, system, maxTokens: 900, schema: ['reply'] });
+    } catch (_) { out = null; }
+  }
+  const plan = (out && out.plan && out.plan.title) ? {
+    title: String(out.plan.title).slice(0, 160),
+    kind: ASSESS_KINDS.includes(out.plan.kind) ? out.plan.kind : 'general',
+    description: String(out.plan.description || '').slice(0, 2000),
+    fields: (Array.isArray(out.plan.fields) ? out.plan.fields : []).slice(0, 12).map(f => ({ label: String(f?.label || '').slice(0, 160), hint: String(f?.hint || '').slice(0, 400) })).filter(f => f.label),
+  } : null;
+  res.json({ ok: true, aiUsed: !!(out && out.reply), reply: String((out && out.reply) || reply).slice(0, 2000), plan });
+});
+
 app.post('/api/assessments/templates', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Only a leader can create assessments' });

@@ -1557,11 +1557,13 @@ const MemberApp = {
         </div>
         <div id="assess-create" style="display:none;margin-top:0.7rem">
           <div style="padding:0.6rem 0.7rem;border:1px dashed var(--accent);border-radius:8px;margin-bottom:0.7rem;background:rgba(124,90,245,0.05)">
-            <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.4rem">Describe the goal — IntelliQ reasons over your team's history (strengths, weak areas, past sessions) and builds the plan, who does what, and a sensible order.</div>
-            <textarea class="note-input" id="assess-goal" placeholder="e.g. a plan to strengthen the group's weakest area this week, or prepare someone for a bigger responsibility" style="min-height:52px;margin-bottom:0.4rem"></textarea>
-            <button class="btn-primary btn-sm" onclick="MemberApp._assessPlan(this)">Plan it with me</button>
-            <span id="assess-draft-status" style="font-size:0.74rem;color:var(--text-muted);margin-left:0.4rem"></span>
-            <div id="assess-plan-out" style="margin-top:0.6rem"></div>
+            <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.5rem">Think it through with IntelliQ. It reasons over your team's history — strengths, what people have struggled with, who's stretched — and will push back if an idea doesn't fit the data. When you agree on something, it drops it into the form below.</div>
+            <div id="assess-plan-out" style="max-height:280px;overflow:auto;margin-bottom:0.5rem"></div>
+            <div style="display:flex;gap:0.4rem">
+              <input class="form-input" id="assess-goal" placeholder="What are you trying to set up? Or challenge my thinking…" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')MemberApp._assessPlan(this.nextElementSibling)">
+              <button class="btn-primary btn-sm" onclick="MemberApp._assessPlan(this)">Send</button>
+            </div>
+            <span id="assess-draft-status" style="font-size:0.74rem;color:var(--text-muted)"></span>
           </div>
           <input class="form-input" id="assess-title" placeholder="Title" style="margin-bottom:0.5rem">
           <select class="form-input" id="assess-kind" style="margin-bottom:0.5rem">
@@ -1657,39 +1659,55 @@ const MemberApp = {
   /* The planning agent — reasons over the whole team's history and the goal, then
      returns insight + a plan + who-does-what + a sensible order, and fills the
      builder. IntelliQ does the reasoning; the leader edits and creates. */
+  /* The builder as a reasoning PARTNER — a back-and-forth where IntelliQ grounds
+     its suggestions in the team's data and pushes back when your idea conflicts
+     with it. When you converge on something concrete it offers "Use this plan". */
+  _planChat: [],
   async _assessPlan(btn) {
-    const goal = (document.getElementById('assess-goal')?.value || '').trim();
+    const input = document.getElementById('assess-goal');
     const status = document.getElementById('assess-draft-status');
     const out = document.getElementById('assess-plan-out');
-    if (!goal) { this.showToast('Describe the goal first', 'warning'); return; }
-    if (btn) { btn.disabled = true; btn.textContent = 'Reasoning…'; }
-    if (status) status.textContent = 'Reading your team\'s history…';
-    if (out) out.innerHTML = '';
+    const msg = (input?.value || '').trim();
+    if (!msg) { this.showToast('Say what you have in mind', 'warning'); return; }
     const esc = t => this._escape(t || '');
+    this._planChat = this._planChat || [];
+    if (out) out.innerHTML = (out.innerHTML || '') + `<div style="margin:0.5rem 0"><strong>You:</strong> ${esc(msg)}</div>`;
+    this._planChat.push({ role: 'user', content: msg });
+    if (input) input.value = '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Thinking…'; }
+    if (status) status.textContent = '';
+    if (out) { out.innerHTML += `<div id="plan-pending" style="color:var(--text-muted);margin:0.2rem 0">IntelliQ is reading your team's history…</div>`; out.scrollTop = out.scrollHeight; }
     try {
-      const res = await fetch('/api/assessments/plan', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ goal }) });
+      const res = await fetch('/api/assessments/plan/chat', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ message: msg, history: this._planChat.slice(0, -1) }) });
       const d = await res.json();
+      document.getElementById('plan-pending')?.remove();
       if (!res.ok || !d.ok) throw new Error(d.error || 'failed');
-      const p = d.plan || {};
-      const setV = (id, v) => { const el = document.getElementById(id); if (el != null && v != null) el.value = v; };
-      setV('assess-title', p.title);
-      setV('assess-kind', p.kind);
-      setV('assess-desc', p.description);
-      setV('assess-fields', (p.fields || []).map(f => f.label).join('\n'));
-      // Render the reasoning: insight → allocation → sequence.
-      let html = '';
-      if (d.insight) html += `<div style="font-size:0.8rem;color:var(--text-secondary);line-height:1.55;margin-bottom:0.5rem"><strong>What the data says:</strong> ${esc(d.insight)}</div>`;
-      if ((d.allocation || []).length) html += `<div class="card-label" style="margin-bottom:3px">Who does what</div>` + d.allocation.map(a => `<div style="font-size:0.8rem;padding:2px 0"><strong>${esc(a.name)}</strong> — ${esc(a.suggestion)}</div>`).join('');
-      if ((d.sequence || []).length) html += `<div class="card-label" style="margin:0.5rem 0 3px">A sensible order</div>` + d.sequence.map((s, i) => `<div style="font-size:0.8rem;padding:1px 0">${i + 1}. ${esc(s)}</div>`).join('');
-      if (d.context && d.context.teamSize) html += `<div style="font-size:0.68rem;color:var(--text-muted);margin-top:0.4rem">Reasoned over ${d.context.teamSize} people${(d.context.weakAreas || []).length ? ` · common gap: ${esc(d.context.weakAreas.join(', '))}` : ''}. Numbers and categories only — never anyone's private words.</div>`;
-      if (out) out.innerHTML = html;
-      if (status) status.textContent = d.aiUsed ? 'Planned ✓ — edit anything, then Create.' : 'Planned from your data ✓ — edit and Create.';
+      this._planChat.push({ role: 'assistant', content: d.reply });
+      let html = `<div style="margin:0.5rem 0;color:var(--text-secondary);line-height:1.55"><strong style="color:var(--accent)">IntelliQ:</strong> ${esc(d.reply)}</div>`;
+      if (d.plan && d.plan.title) {
+        this._planDraft = d.plan;
+        html += `<div style="border:1px dashed var(--accent);border-radius:8px;padding:0.5rem 0.6rem;margin:0.3rem 0">
+          <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.3rem">Proposed: <strong>${esc(d.plan.title)}</strong></div>
+          <button class="btn-primary btn-sm" onclick="MemberApp._assessUsePlan()">Use this plan</button>
+        </div>`;
+      }
+      if (out) { out.innerHTML += html; out.scrollTop = out.scrollHeight; }
     } catch (e) {
-      if (status) status.textContent = '';
-      this.showToast('Could not plan — you can still fill it in manually', 'error');
+      document.getElementById('plan-pending')?.remove();
+      if (out) out.innerHTML += `<div style="color:var(--danger);margin:0.3rem 0">Couldn't reach IntelliQ just now.</div>`;
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Plan it with me'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
     }
+  },
+
+  _assessUsePlan() {
+    const p = this._planDraft || {};
+    const setV = (id, v) => { const el = document.getElementById(id); if (el != null && v != null) el.value = v; };
+    setV('assess-title', p.title);
+    setV('assess-kind', p.kind);
+    setV('assess-desc', p.description);
+    setV('assess-fields', (p.fields || []).map(f => f.label).join('\n'));
+    this.showToast('Filled in — edit anything, then Create', 'success');
   },
 
   async _assessDeleteTemplate(id) {

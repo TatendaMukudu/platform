@@ -253,6 +253,12 @@ const server = app.listen(0, async () => {
        plan.status === 200 && typeof plan.j?.insight === 'string' && plan.j?.plan?.title && Array.isArray(plan.j.sequence) && plan.j.sequence.length >= 1);
     ok('allocation only ever names real people on the team (never invented)',
        Array.isArray(plan.j?.allocation) && plan.j.allocation.every(a => a.name === 'Member B' || a.name === 'Coach'));
+    // Conversational builder — reasons back, grounded in the team data.
+    const planChat = await call('/api/assessments/plan/chat', tokCoach, { method: 'POST', body: { message: 'I want to run a high-intensity session for everyone this week.' } });
+    ok('the builder reasons back conversationally (partner, not a form)',
+       planChat.status === 200 && typeof planChat.j?.reply === 'string' && planChat.j.reply.length > 0);
+    ok('a member cannot use the conversational builder (403)',
+       (await call('/api/assessments/plan/chat', tokB, { method: 'POST', body: { message: 'hi' } })).status === 403);
     const tplId = tpl.j.template.id;
     ok('a member cannot assign to others (403)',
        (await call('/api/assessments/assign', tokB, { method: 'POST', body: { templateId: tplId, assigneeIds: [coachId] } })).status === 403);
