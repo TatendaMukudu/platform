@@ -145,11 +145,15 @@ function _memberValuesDirective(code, userId) {
   return valuesLens.memberDirective(profile, orgUsers[c]?.[userId]?.name);
 }
 
+// Sessions last 30 days, and REFRESH on use (sliding expiry) — so anyone who
+// opens the app at least every few weeks stays logged in. A 24h token logged
+// pilot users out constantly ("session may have expired").
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 function issueToken(userId, orgCode, role) {
   const token = generateToken();
   activeSessions[token] = {
     userId, orgCode: (orgCode || '').toLowerCase(), role,
-    expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+    expiresAt: Date.now() + SESSION_TTL_MS,
   };
   scheduleSave(); // persist so this token survives a server restart
   return token;
@@ -160,6 +164,10 @@ function verifyToken(tokenStr) {
   const s = activeSessions[tokenStr];
   if (!s) return null;
   if (s.expiresAt < Date.now()) { delete activeSessions[tokenStr]; return null; }
+  // Sliding expiry: once past the halfway mark, extend the window on use so an
+  // active user is never logged out mid-use. Debounced-persisted via scheduleSave.
+  const remaining = s.expiresAt - Date.now();
+  if (remaining < SESSION_TTL_MS / 2) { s.expiresAt = Date.now() + SESSION_TTL_MS; scheduleSave(); }
   return s;
 }
 
@@ -3364,6 +3372,49 @@ app.get('/api/assessments', requireAuth, (req, res) => {
 });
 
 /* POST /api/assessments/templates — a leader defines an assessment. */
+/* POST /api/assessments/draft — the agentic builder. Give it a plain-language
+   goal ("a weekly review that helps a new hire reflect on wins and blockers")
+   and it drafts a real assessment: title, kind, instructions, and the fields to
+   fill. LLM-drafted when a key is present; a solid deterministic scaffold otherwise.
+   Nothing is saved — it just fills the form for the leader to edit and create. */
+app.post('/api/assessments/draft', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Only a leader can build assessments' });
+  const goal = String(req.body?.goal || '').slice(0, 600).trim();
+  if (!goal) return res.status(400).json({ error: 'goal required' });
+
+  // Deterministic scaffold — always works, and is the fallback with no LLM.
+  const fallback = {
+    title: goal.length <= 60 ? goal.replace(/^\w/, c => c.toUpperCase()) : 'New assessment',
+    kind: 'general',
+    description: `Purpose: ${goal}\n\nComplete each section thoughtfully — specifics are more useful than summaries.`,
+    fields: [
+      { label: 'What went well', hint: 'Concrete examples' },
+      { label: 'What was hard or got in the way', hint: 'Blockers, gaps' },
+      { label: 'What you\'ll do differently next', hint: 'One or two clear steps' },
+    ],
+  };
+
+  let out = null;
+  if (ai.enabled()) {
+    try {
+      const system = 'You design clear, motivating assessments/reviews for any field (sport, work, study, health). Given a goal, return JSON only: {"title": string (<=80 chars), "kind": one of ["spreadsheet","film","play","skill","general"], "description": string (2-4 sentences of instructions, warm and specific, no emojis), "fields": array of 3-6 {"label": string, "hint": string} the person fills in}. Make it feel like a thoughtful coach designed it, not a form.';
+      out = await ai.completeJSON({ tier: 'reason', system, user: `Goal: ${goal}`, maxTokens: 600, schema: ['title', 'fields'] });
+    } catch (_) { out = null; }
+  }
+  const d = out && Array.isArray(out.fields) && out.fields.length ? out : fallback;
+  res.json({
+    ok: true,
+    aiUsed: !!(out && out !== fallback),
+    draft: {
+      title: String(d.title || fallback.title).slice(0, 160),
+      kind: ASSESS_KINDS.includes(d.kind) ? d.kind : 'general',
+      description: String(d.description || '').slice(0, 2000),
+      fields: (d.fields || []).slice(0, 12).map(f => ({ label: String(f?.label || '').slice(0, 160), hint: String(f?.hint || '').slice(0, 400) })).filter(f => f.label),
+    },
+  });
+});
+
 app.post('/api/assessments/templates', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Only a leader can create assessments' });

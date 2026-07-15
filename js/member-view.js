@@ -1545,16 +1545,22 @@ const MemberApp = {
           <button class="btn-ghost" onclick="MemberApp._assessToggleCreate()">＋ New</button>
         </div>
         <div id="assess-create" style="display:none;margin-top:0.7rem">
-          <input class="form-input" id="assess-title" placeholder="Title — e.g. Match film breakdown" style="margin-bottom:0.5rem">
+          <div style="padding:0.6rem 0.7rem;border:1px dashed var(--accent);border-radius:8px;margin-bottom:0.7rem;background:rgba(124,90,245,0.05)">
+            <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.4rem">Describe what you want in plain words and IntelliQ drafts it for you.</div>
+            <textarea class="note-input" id="assess-goal" placeholder="e.g. a weekly review that helps a new hire reflect on wins and blockers, or a training session focused on decision-making under pressure" style="min-height:52px;margin-bottom:0.4rem"></textarea>
+            <button class="btn-primary btn-sm" onclick="MemberApp._assessDraft(this)">✨ Draft it for me</button>
+            <span id="assess-draft-status" style="font-size:0.74rem;color:var(--text-muted);margin-left:0.4rem"></span>
+          </div>
+          <input class="form-input" id="assess-title" placeholder="Title" style="margin-bottom:0.5rem">
           <select class="form-input" id="assess-kind" style="margin-bottom:0.5rem">
             <option value="general">General</option>
-            <option value="spreadsheet">Spreadsheet</option>
-            <option value="film">Film</option>
-            <option value="play">Way of playing</option>
+            <option value="spreadsheet">Spreadsheet / data</option>
+            <option value="film">Film / video</option>
+            <option value="play">Way of working / playing</option>
             <option value="skill">Skill</option>
           </select>
           <textarea class="note-input" id="assess-desc" placeholder="How you want it done — the instructions." style="min-height:56px;margin-bottom:0.5rem"></textarea>
-          <textarea class="note-input" id="assess-fields" placeholder="Fields the person fills in — one per line (optional). e.g.\nKey moments\nWhat you saw" style="min-height:56px;margin-bottom:0.5rem"></textarea>
+          <textarea class="note-input" id="assess-fields" placeholder="Fields the person fills in — one per line (optional)." style="min-height:56px;margin-bottom:0.5rem"></textarea>
           <button class="btn-primary" onclick="MemberApp._assessCreate(this)">Create</button>
         </div>
       </div>`;
@@ -1626,6 +1632,33 @@ const MemberApp = {
       this.showToast('Assessment created ✓', 'success');
       this._renderAssessments();
     } catch (e) { this.showToast('Could not create', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Create'; } }
+  },
+
+  /* Agentic builder — turn a plain-language goal into a drafted assessment and
+     fill the form. IntelliQ does the labor; the leader edits and creates. */
+  async _assessDraft(btn) {
+    const goal = (document.getElementById('assess-goal')?.value || '').trim();
+    const status = document.getElementById('assess-draft-status');
+    if (!goal) { this.showToast('Describe what you want first', 'warning'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Drafting…'; }
+    if (status) status.textContent = 'IntelliQ is drafting…';
+    try {
+      const res = await fetch('/api/assessments/draft', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ goal }) });
+      const d = await res.json();
+      if (!res.ok || !d.ok) throw new Error(d.error || 'failed');
+      const dr = d.draft || {};
+      const setV = (id, v) => { const el = document.getElementById(id); if (el != null && v != null) el.value = v; };
+      setV('assess-title', dr.title);
+      setV('assess-kind', dr.kind);
+      setV('assess-desc', dr.description);
+      setV('assess-fields', (dr.fields || []).map(f => f.label).join('\n'));
+      if (status) status.textContent = d.aiUsed ? 'Drafted ✓ — edit anything, then Create.' : 'Drafted a starting point ✓ — edit and Create.';
+    } catch (e) {
+      if (status) status.textContent = '';
+      this.showToast('Could not draft — you can still fill it in manually', 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '✨ Draft it for me'; }
+    }
   },
 
   async _assessDeleteTemplate(id) {

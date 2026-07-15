@@ -123,6 +123,30 @@ const CONNECTORS = {
     // raw: [{ date }] — one entry per session.
     map(raw) { return _perDay(raw, 'Activity load', 'load', 'down-good'); },
   },
+  // Generic connector — ANY software a team uses. You send dated numeric points
+  // with a label ({ date, label, value }); the kernel reasons over them like any
+  // other signal. This is how IntelliQ plugs into industry-specific tools (a CRM,
+  // an LMS, a machine-monitoring system, a stats platform) without a bespoke
+  // integration — still numbers only, so the privacy model is unchanged.
+  custom: {
+    id: 'custom', label: 'Other software', scope: 'external:custom', category: 'Your tools',
+    describes: 'connect any other tool your team uses — send it numbers (a score, a count, a rating) and IntelliQ reasons over them (numbers only)',
+    contribute: {
+      scope: 'external:custom:contribute',
+      describes: 'let those numbers become part of your growth record, alongside how you feel (numbers only, and you can see everything that crosses)',
+    },
+    // raw: [{ date, label?, value }] — generic dated numeric points.
+    map(raw) {
+      const out = [];
+      (raw || []).forEach(d => {
+        const v = d && Number(d.value);
+        if (!d || !d.date || !Number.isFinite(v)) return;
+        const ts = new Date(String(d.date).slice(0, 10) + 'T12:00:00Z').toISOString();
+        out.push({ label: String(d.label || 'Metric').slice(0, 60), valueNum: v, ts, primitive: 'capability', valence: 'up-good' });
+      });
+      return out;
+    },
+  },
 };
 
 function _publicConnector(c) {

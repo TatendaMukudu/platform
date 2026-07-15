@@ -4200,9 +4200,9 @@ function _showProfileInner(id, m){
   document.getElementById('pm-avatar').textContent  = m.initials;
   document.getElementById('pm-avatar').style.background = color;
   document.getElementById('pm-grade').innerHTML     = gradeBadgeHTML(m.iqGrade);
-  document.getElementById('pm-joined').textContent  = `Joined ${m.joinDate}`;
-  document.getElementById('pm-active').textContent  = `Active: ${m.lastActive}`;
-  document.getElementById('pm-streak').textContent  = `🔥 ${m.streak}-day streak`;
+  document.getElementById('pm-joined').textContent  = m.joinDate ? `Joined ${m.joinDate}` : '';
+  document.getElementById('pm-active').textContent  = m.lastActive ? `Active: ${m.lastActive}` : 'Not active yet';
+  document.getElementById('pm-streak').textContent  = m.streak ? `${m.streak}-day streak` : '';
   document.getElementById('pm-iq-ring').innerHTML   = iqRingHTML(m.iqScore, scoreColor(m.iqScore), 100);
   document.getElementById('pm-overall').textContent = m.overall ?? '—';
   document.getElementById('pm-wellness').innerHTML  = wellnessMeterHTML(m.wellnessScore);
@@ -4441,9 +4441,16 @@ async function loadBehavioralProfile(memberId, refresh){
   const els = ['pm-summary', 'pm-profile'].map(id => document.getElementById(id)).filter(Boolean);
   if (!els.length) return;
   const setAll = html => els.forEach(el => { el.innerHTML = html; });
-  setAll(`<div class="pm-profile-loading">🧠 IntelliQ is assembling what it understands…</div>`);
+  setAll(`<div class="pm-profile-loading">IntelliQ is assembling what it understands…</div>`);
   try {
-    const res  = await fetch(`/api/member/${encodeURIComponent(memberId)}/profile${refresh ? '?refresh=1' : ''}`, { headers: Auth._headers() });
+    // Never hang on "assembling…" — cap the wait and fall back gracefully.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 18000);
+    let res;
+    try {
+      res = await fetch(`/api/member/${encodeURIComponent(memberId)}/profile${refresh ? '?refresh=1' : ''}`, { headers: Auth._headers(), signal: ctrl.signal });
+    } finally { clearTimeout(timer); }
+    if (res.status === 401) { setAll(`<div class="pm-profile-empty">Your session expired — please log in again.</div>`); return; }
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error || 'unavailable');
     const p = data.profile;
@@ -4473,7 +4480,7 @@ async function loadBehavioralProfile(memberId, refresh){
         ${priv ? `<div class="pm-profile-priv">🔒 Also informed by ${priv} private matter${priv !== 1 ? 's' : ''} — kept confidential, used only to support them.</div>` : ''}
       </div>`);
   } catch (e) {
-    setAll(`<div class="pm-profile-empty">Understanding unavailable right now.</div>`);
+    setAll(`<div class="pm-profile-empty">Couldn't assemble the read just now. <button class="pm-profile-refresh" onclick="loadBehavioralProfile('${memberId}', true)">↻ Try again</button></div>`);
   }
 }
 

@@ -239,6 +239,12 @@ const server = app.listen(0, async () => {
       title: 'Match film breakdown', kind: 'film', description: 'Break down the match the way we discussed.',
       fields: [{ label: 'Key moments', hint: '3-5 clips' }, { label: 'What you saw', hint: '' }] } });
     ok('a leader creates an assessment template', tpl.status === 200 && tpl.j?.template?.id);
+    // Agentic builder: a plain-language goal drafts a real assessment (fallback w/o key).
+    ok('a member cannot use the agentic assessment builder (403)',
+       (await call('/api/assessments/draft', tokB, { method: 'POST', body: { goal: 'x' } })).status === 403);
+    const adraft = await call('/api/assessments/draft', tokCoach, { method: 'POST', body: { goal: 'a weekly review that helps a new hire reflect on wins and blockers' } });
+    ok('the builder drafts a real assessment from a plain-language goal',
+       adraft.status === 200 && adraft.j?.draft?.title && Array.isArray(adraft.j.draft.fields) && adraft.j.draft.fields.length >= 1);
     const tplId = tpl.j.template.id;
     ok('a member cannot assign to others (403)',
        (await call('/api/assessments/assign', tokB, { method: 'POST', body: { templateId: tplId, assigneeIds: [coachId] } })).status === 403);
