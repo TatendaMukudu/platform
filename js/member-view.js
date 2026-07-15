@@ -1715,7 +1715,7 @@ const MemberApp = {
      auto-sync is the provider integration point; the consent + mapping are real.
      Backed by /api/me/sources · /api/me/consent · /api/me/connect.
      ══════════════════════════════════════════════════════════════════════ */
-  _appIcon: { calendar: '🗓️', health: '❤️', fitness: '🏃' },
+  _appIcon: { calendar: '🗓️', email: '✉️', health: '❤️', fitness: '🏃' },
 
   async _renderApps() {
     const root = document.getElementById('apps-root');
@@ -1736,35 +1736,73 @@ const MemberApp = {
     }
     {
       const sources = d.sources || [];
-      let html = `<div class="card"><div class="card-label">Your apps</div>`;
-      if (!sources.length) {
-        html += `<div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">No apps available to connect yet. <button class="btn-ghost" onclick="MemberApp._renderApps()">Refresh</button></div>`;
-      }
-      html += sources.map(s => {
+      const row = s => {
         const connected = !!s.connected;
-        return `<div class="me-row" style="display:flex;align-items:flex-start;gap:0.7rem;padding:0.8rem 0;border-bottom:1px solid var(--border)">
-          <div style="font-size:1.4rem;line-height:1">${this._appIcon[s.id] || '🔌'}</div>
-          <div style="flex:1">
-            <div style="font-weight:700">${esc(s.label)} ${connected ? '<span class="pill" style="background:rgba(14,207,176,0.15);color:#0ecfb0;margin-left:4px">Connected</span>' : ''}</div>
-            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px">${esc(s.describes)}</div>
+        const assist = s.assist;
+        return `<div class="me-row" style="display:block;padding:0.8rem 0;border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:flex-start;gap:0.7rem">
+            <div style="font-size:1.4rem;line-height:1">${this._appIcon[s.id] || '🔌'}</div>
+            <div style="flex:1">
+              <div style="font-weight:700">${esc(s.label)} ${connected ? '<span class="pill" style="background:rgba(14,207,176,0.15);color:#0ecfb0;margin-left:4px">Connected</span>' : ''}</div>
+              <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px">${esc(s.describes)}</div>
+            </div>
+            ${connected
+              ? `<button class="btn-ghost" onclick="MemberApp._appDisconnect('${s.id}','${esc(s.scope)}', this)">Disconnect</button>`
+              : `<button class="btn-primary" onclick="MemberApp._appConnect('${s.id}','${esc(s.scope)}', this)">Connect</button>`}
           </div>
-          ${connected
-            ? `<button class="btn-ghost" onclick="MemberApp._appDisconnect('${s.id}','${esc(s.scope)}', this)">Disconnect</button>`
-            : `<button class="btn-primary" onclick="MemberApp._appConnect('${s.id}','${esc(s.scope)}', this)">Connect</button>`}
+          ${connected && assist ? `
+            <div style="margin-top:0.55rem;padding:0.55rem 0.7rem;border:1px dashed var(--border);border-radius:8px;display:flex;align-items:flex-start;gap:0.6rem">
+              <div style="flex:1;font-size:0.78rem;color:var(--text-secondary)">
+                <strong>Assistant</strong> ${s.assistConsented ? '<span class="pill" style="background:rgba(124,90,245,0.15);color:var(--accent);margin-left:2px">on</span>' : ''}<br>${esc(assist.describes)}
+              </div>
+              ${s.assistConsented
+                ? `<button class="btn-ghost" onclick="MemberApp._appAssist('${s.id}','${esc(assist.scope)}', false, this)">Turn off</button>`
+                : `<button class="btn-ghost" onclick="MemberApp._appAssist('${s.id}','${esc(assist.scope)}', true, this)">Allow</button>`}
+            </div>` : ''}
         </div>`;
-      }).join('');
-      html += `</div>
-        <div class="card" style="margin-top:0.8rem">
-          <div class="card-label">How this works</div>
+      };
+      // Group by category so different kinds of app read clearly (and so an
+      // industry can add its own group without any UI change).
+      const cats = {};
+      sources.forEach(s => { (cats[s.category || 'Other'] = cats[s.category || 'Other'] || []).push(s); });
+      let html = '';
+      if (!sources.length) {
+        html += `<div class="card"><div class="card-label">Your apps</div><div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">No apps available to connect yet. <button class="btn-ghost" onclick="MemberApp._renderApps()">Refresh</button></div></div>`;
+      }
+      Object.keys(cats).forEach(cat => {
+        html += `<div class="card"><div class="card-label">${esc(cat)}</div>${cats[cat].map(row).join('')}</div>`;
+      });
+      html += `
+        <div class="card" style="margin-top:0.2rem">
+          <div class="card-label">How this works — two layers, two permissions</div>
           <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6">
-            When you connect an app, IntelliQ only ever reads <strong>numbers</strong> from it — never
-            your messages, event details, or locations. Connecting records your consent; disconnecting
-            withdraws it and stops all reading immediately. Live sync turns on for each app as it becomes
-            available, and your consent is respected the whole way.
+            <strong>Insight</strong> reads <strong>only numbers</strong> — how busy your days are, activity
+            levels — and it's the <em>only</em> layer that can inform team-level patterns. It never includes
+            your messages, titles, or locations.<br><br>
+            <strong>Assistant</strong>, if you allow it, lets IntelliQ read fuller detail (times, titles,
+            locations) so it can act <em>for you</em> — schedule a meeting, prepare you for one, draft a
+            message you approve. This stays <strong>private to you and is never shown to your team</strong>.<br><br>
+            Each is a separate switch you control; turning one off stops it immediately. Different teams use
+            different apps — this list can be extended for your organisation.
           </div>
         </div>`;
       root.innerHTML = html;
       if (typeof hydrateIcons === 'function') hydrateIcons(root);
+    }
+  },
+
+  /* Grant/revoke the ASSISTANT tier for a connector — a separate consent that lets
+     IntelliQ use fuller detail to act for the person (never surfaced to the org). */
+  async _appAssist(source, scope, grant, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = grant ? 'Allowing…' : 'Turning off…'; }
+    try {
+      const r = await fetch('/api/me/consent', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ scope, granted: grant }) });
+      if (!r.ok) throw new Error();
+      this.showToast(grant ? 'Assistant allowed ✓' : 'Assistant turned off', 'success');
+      this._renderApps();
+    } catch (e) {
+      this.showToast('Could not update', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = grant ? 'Allow' : 'Turn off'; }
     }
   },
 

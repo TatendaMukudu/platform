@@ -56,15 +56,38 @@ const ACTIONS = {
   },
 };
 
+/* ── Two tiers of access, so richer data can help WITHOUT becoming surveillance ─
+   Every connector has an INSIGHT tier (`scope`) — numbers only, and the ONLY tier
+   that can ever inform org-facing patterns. Some connectors also offer an ASSIST
+   tier (`assist.scope`) — a SEPARATE, explicit consent that lets IntelliQ read
+   fuller detail (event times, titles, locations, attendees) so it can act for the
+   PERSON: schedule meetings, prepare them, draft messages. Assist data is used
+   only to help the individual, shown back only to them, and NEVER surfaced to the
+   org or folded into org-level signals. `category` lets the UI group apps and lets
+   different industries add their own without touching the kernel. */
 const CONNECTORS = {
   calendar: {
-    id: 'calendar', label: 'Calendar', scope: 'external:calendar',
+    id: 'calendar', label: 'Calendar', scope: 'external:calendar', category: 'Productivity',
     describes: 'how busy your days are (counts only — never event details)',
+    assist: {
+      scope: 'external:calendar:assist',
+      describes: 'let IntelliQ read event times, titles, and locations so it can schedule and prepare meetings for you (stays private to you)',
+    },
     // raw: [{ date }] — one entry per event. We keep the COUNT per day, not titles.
     map(raw) { return _perDay(raw, 'Calendar load', 'load', 'down-good'); },
   },
+  email: {
+    id: 'email', label: 'Email', scope: 'external:email', category: 'Productivity',
+    describes: 'how heavy your inbox is (message counts only — never content)',
+    assist: {
+      scope: 'external:email:assist',
+      describes: 'let IntelliQ draft and send routine emails on your behalf (each one you approve first; stays private to you)',
+    },
+    // raw: [{ date }] — one entry per message. Count per day, never subjects/bodies.
+    map(raw) { return _perDay(raw, 'Inbox load', 'load', 'down-good'); },
+  },
   health: {
-    id: 'health', label: 'Health', scope: 'external:health',
+    id: 'health', label: 'Health', scope: 'external:health', category: 'Wellbeing',
     describes: 'rest and activity levels (numbers only — never content)',
     // raw: [{ date, sleepHours?, steps? }]
     map(raw) {
@@ -79,16 +102,21 @@ const CONNECTORS = {
     },
   },
   fitness: {
-    id: 'fitness', label: 'Activity', scope: 'external:fitness',
+    id: 'fitness', label: 'Activity', scope: 'external:fitness', category: 'Wellbeing',
     describes: 'exercise and activity, as session counts (numbers only)',
     // raw: [{ date }] — one entry per session.
     map(raw) { return _perDay(raw, 'Activity load', 'load', 'down-good'); },
   },
 };
 
-function list() {
-  return Object.values(CONNECTORS).map(c => ({ id: c.id, label: c.label, scope: c.scope, describes: c.describes }));
+function _publicConnector(c) {
+  return {
+    id: c.id, label: c.label, scope: c.scope, describes: c.describes,
+    category: c.category || 'Other',
+    assist: c.assist ? { scope: c.assist.scope, describes: c.assist.describes } : null,
+  };
 }
+function list() { return Object.values(CONNECTORS).map(_publicConnector); }
 function get(id) { return CONNECTORS[id] || null; }
 function getAction(id) { return ACTIONS[id] || null; }
 function listActions() { return Object.values(ACTIONS).map(a => ({ id: a.id, label: a.label, writeScope: a.writeScope })); }

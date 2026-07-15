@@ -3165,6 +3165,7 @@ app.get('/api/me/sources', requireAuth, (req, res) => {
   const conn = connectedSources[_consentKey(code, userId)] || {};
   res.json({ ok: true, sources: connectors.list().map(s => ({
     ...s, consented: _hasConsent(code, userId, s.scope), connected: !!conn[s.id], lastPull: conn[s.id]?.lastPull || null,
+    assistConsented: s.assist ? _hasConsent(code, userId, s.assist.scope) : false,
   })) });
 });
 

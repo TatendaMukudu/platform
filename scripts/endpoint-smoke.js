@@ -163,6 +163,19 @@ const server = app.listen(0, async () => {
     ok('after withdrawal, drawing is refused again',
        (await call('/api/me/sources/pull', tokB, { method: 'POST', body: { source: 'health', data: [] } })).status === 403);
 
+    // ── Assistant tier: a SEPARATE consent, reported distinctly from insight ──
+    const srcs0 = await call('/api/me/sources', tokB);
+    const cal0 = (srcs0.j?.sources || []).find(s => s.id === 'calendar');
+    ok('a connector exposes a distinct assistant tier (its own scope)',
+       !!cal0?.assist && cal0.assist.scope === 'external:calendar:assist' && cal0.assistConsented === false);
+    await call('/api/me/consent', tokB, { method: 'POST', body: { scope: 'external:calendar:assist', granted: true } });
+    const srcs1 = await call('/api/me/sources', tokB);
+    const cal1 = (srcs1.j?.sources || []).find(s => s.id === 'calendar');
+    ok('granting the assistant tier is tracked separately from insight',
+       cal1?.assistConsented === true && cal1?.consented === false);
+    ok('connectors carry a category so different industries can group their apps',
+       (srcs1.j?.sources || []).every(s => typeof s.category === 'string' && s.category));
+
     // ── Oversight roll-up: scoped to a leader's range, aggregate percentages ──
     const divCoach = await call('/api/org/divisions', tokCoach);
     ok('a leader gets the oversight roll-up scoped to their range', divCoach.status === 200 && divCoach.j?.range && typeof divCoach.j.range.needsAttention === 'number');
