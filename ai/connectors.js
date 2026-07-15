@@ -73,6 +73,10 @@ const CONNECTORS = {
       scope: 'external:calendar:assist',
       describes: 'let IntelliQ read event times, titles, and locations so it can schedule and prepare meetings for you (stays private to you)',
     },
+    contribute: {
+      scope: 'external:calendar:contribute',
+      describes: 'let IntelliQ turn what it sees here into numbers for your growth record — combined with how you feel (numbers only, and you can see everything that crosses)',
+    },
     // raw: [{ date }] — one entry per event. We keep the COUNT per day, not titles.
     map(raw) { return _perDay(raw, 'Calendar load', 'load', 'down-good'); },
   },
@@ -83,12 +87,20 @@ const CONNECTORS = {
       scope: 'external:email:assist',
       describes: 'let IntelliQ draft and send routine emails on your behalf (each one you approve first; stays private to you)',
     },
+    contribute: {
+      scope: 'external:email:contribute',
+      describes: 'let IntelliQ turn inbox load into numbers for your growth record (numbers only, and you can see everything that crosses)',
+    },
     // raw: [{ date }] — one entry per message. Count per day, never subjects/bodies.
     map(raw) { return _perDay(raw, 'Inbox load', 'load', 'down-good'); },
   },
   health: {
     id: 'health', label: 'Health', scope: 'external:health', category: 'Wellbeing',
     describes: 'rest and activity levels (numbers only — never content)',
+    contribute: {
+      scope: 'external:health:contribute',
+      describes: 'let IntelliQ keep rest and activity as numbers in your growth record, alongside how you feel (numbers only, and you can see everything that crosses)',
+    },
     // raw: [{ date, sleepHours?, steps? }]
     map(raw) {
       const out = [];
@@ -104,6 +116,10 @@ const CONNECTORS = {
   fitness: {
     id: 'fitness', label: 'Activity', scope: 'external:fitness', category: 'Wellbeing',
     describes: 'exercise and activity, as session counts (numbers only)',
+    contribute: {
+      scope: 'external:fitness:contribute',
+      describes: 'let IntelliQ keep your training as numbers in your growth record, alongside how you feel (numbers only, and you can see everything that crosses)',
+    },
     // raw: [{ date }] — one entry per session.
     map(raw) { return _perDay(raw, 'Activity load', 'load', 'down-good'); },
   },
@@ -113,7 +129,8 @@ function _publicConnector(c) {
   return {
     id: c.id, label: c.label, scope: c.scope, describes: c.describes,
     category: c.category || 'Other',
-    assist: c.assist ? { scope: c.assist.scope, describes: c.assist.describes } : null,
+    assist:     c.assist     ? { scope: c.assist.scope,     describes: c.assist.describes }     : null,
+    contribute: c.contribute ? { scope: c.contribute.scope, describes: c.contribute.describes } : null,
   };
 }
 function list() { return Object.values(CONNECTORS).map(_publicConnector); }

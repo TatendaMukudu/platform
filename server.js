@@ -3165,7 +3165,8 @@ app.get('/api/me/sources', requireAuth, (req, res) => {
   const conn = connectedSources[_consentKey(code, userId)] || {};
   res.json({ ok: true, sources: connectors.list().map(s => ({
     ...s, consented: _hasConsent(code, userId, s.scope), connected: !!conn[s.id], lastPull: conn[s.id]?.lastPull || null,
-    assistConsented: s.assist ? _hasConsent(code, userId, s.assist.scope) : false,
+    assistConsented:     s.assist     ? _hasConsent(code, userId, s.assist.scope)     : false,
+    contributeConsented: s.contribute ? _hasConsent(code, userId, s.contribute.scope) : false,
   })) });
 });
 
@@ -3224,6 +3225,58 @@ app.post('/api/me/sources/pull', requireAuth, (req, res) => {
   conn[src.id].lastPull = new Date().toISOString();
   scheduleSave();
   res.json({ ok: true, source: src.id, imported: emitted });
+});
+
+/* ── CONTRIBUTE tier — the distillation membrane ──────────────────────────────
+   The third, separate consent: let what the assistant sees be turned into NUMBERS
+   for the person's own growth record (fused by the kernel with how they feel).
+   Four safeguards, all enforced here:
+     1. Explicit, separate permission — the connector's OWN `contribute.scope`
+        (never implied by insight or assist consent).
+     2. Numbers cross, content never — we run the connector's map() and store ONLY
+        {label, valueNum, ts}; the raw payload is dropped, never persisted.
+     3. Visible + revocable — every crossing is flagged `contributed:true` and the
+        person can list exactly what crossed via GET /api/me/contributions.
+     4. Org-safe — contributed signals are the same minimised numbers as insight;
+        the org still only ever sees aggregate patterns, never content. */
+app.post('/api/me/sources/contribute', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const src = connectors.get(req.body?.source);
+  if (!src || !src.contribute) return res.status(400).json({ error: 'source does not support contribute' });
+  if (!_hasConsent(code, userId, src.contribute.scope)) {
+    return res.status(403).json({ error: 'consent_required', scope: src.contribute.scope, message: `Turn on Contribute for "${src.label}" first.` });
+  }
+  const raw = Array.isArray(req.body?.data) ? req.body.data.slice(0, 2000) : [];
+  let distilled = [];
+  try { distilled = (src.map(raw) || []).filter(s => Number.isFinite(s.valueNum)); } catch (_) { distilled = []; }
+  // SAFEGUARD 2: only the mapped numbers are emitted — `raw` is never stored.
+  const crossed = [];
+  for (const s of distilled) {
+    try {
+      _emitSignalSafe(code, {
+        subjectType: 'member', subjectId: userId, source: 'contributed', modality: 'data',
+        valueNum: s.valueNum, label: s.label, ts: s.ts, sensitivity: 'normal',
+        contributed: true, data: { connector: src.id, primitive: s.primitive, valence: s.valence, contributed: true },
+      }, userId);
+      crossed.push({ label: s.label, valueNum: s.valueNum, ts: s.ts });
+    } catch (_) {}
+  }
+  scheduleSave();
+  // Return exactly what crossed — the audit the person sees immediately.
+  res.json({ ok: true, source: src.id, contributed: crossed.length, crossed });
+});
+
+/* GET /api/me/contributions — the visible audit: exactly the NUMBERS that the
+   Contribute tier moved into your record (never any content). Self-only. */
+app.get('/api/me/contributions', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const list = (orgSignals[code] || [])
+    .filter(s => (s.subjectId === userId || s.createdBy === userId) && (s.contributed === true || s.data?.contributed === true || s.source === 'contributed'))
+    .map(s => ({ label: s.valueText ? undefined : s.label || s.data?.connector, connector: s.data?.connector || null, valueNum: s.valueNum, ts: s.ts }))
+    .filter(x => Number.isFinite(x.valueNum))
+    .sort((a, b) => new Date(b.ts) - new Date(a.ts))
+    .slice(0, 200);
+  res.json({ ok: true, contributions: list });
 });
 
 /* ── The assistant: draft → APPROVE → execute. IntelliQ can act on your behalf

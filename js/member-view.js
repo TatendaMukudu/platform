@@ -1759,6 +1759,18 @@ const MemberApp = {
                 ? `<button class="btn-ghost" onclick="MemberApp._appAssist('${s.id}','${esc(assist.scope)}', false, this)">Turn off</button>`
                 : `<button class="btn-ghost" onclick="MemberApp._appAssist('${s.id}','${esc(assist.scope)}', true, this)">Allow</button>`}
             </div>` : ''}
+          ${connected && s.contribute ? `
+            <div style="margin-top:0.5rem;padding:0.55rem 0.7rem;border:1px dashed var(--border);border-radius:8px">
+              <div style="display:flex;align-items:flex-start;gap:0.6rem">
+                <div style="flex:1;font-size:0.78rem;color:var(--text-secondary)">
+                  <strong>Contribute to my record</strong> ${s.contributeConsented ? '<span class="pill" style="background:rgba(14,207,176,0.15);color:#0ecfb0;margin-left:2px">on</span>' : ''}<br>${esc(s.contribute.describes)}
+                </div>
+                ${s.contributeConsented
+                  ? `<button class="btn-ghost" onclick="MemberApp._appContribute('${s.id}','${esc(s.contribute.scope)}', false, this)">Turn off</button>`
+                  : `<button class="btn-ghost" onclick="MemberApp._appContribute('${s.id}','${esc(s.contribute.scope)}', true, this)">Allow</button>`}
+              </div>
+              ${s.contributeConsented ? `<button class="btn-ghost" style="font-size:0.72rem;margin-top:0.4rem" onclick="MemberApp._appSeeCrossed(this)">See exactly what's crossed</button><div class="me-crossed" style="display:none;margin-top:0.4rem"></div>` : ''}
+            </div>` : ''}
         </div>`;
       };
       // Group by category so different kinds of app read clearly (and so an
@@ -1774,20 +1786,60 @@ const MemberApp = {
       });
       html += `
         <div class="card" style="margin-top:0.2rem">
-          <div class="card-label">How this works — two layers, two permissions</div>
+          <div class="card-label">How this works — three layers, three permissions you control</div>
           <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6">
             <strong>Insight</strong> reads <strong>only numbers</strong> — how busy your days are, activity
-            levels — and it's the <em>only</em> layer that can inform team-level patterns. It never includes
-            your messages, titles, or locations.<br><br>
-            <strong>Assistant</strong>, if you allow it, lets IntelliQ read fuller detail (times, titles,
-            locations) so it can act <em>for you</em> — schedule a meeting, prepare you for one, draft a
-            message you approve. This stays <strong>private to you and is never shown to your team</strong>.<br><br>
-            Each is a separate switch you control; turning one off stops it immediately. Different teams use
-            different apps — this list can be extended for your organisation.
+            levels. It never includes your messages, titles, or locations.<br><br>
+            <strong>Assistant</strong>, if you allow it, reads fuller detail (times, titles, locations) so it
+            can act <em>for you</em> — schedule a meeting, prepare you for one, draft a message you approve.
+            This stays <strong>private to you and is never shown to your team</strong>.<br><br>
+            <strong>Contribute</strong>, if you allow it, turns what the assistant sees into <strong>numbers
+            only</strong> for your growth record — combined with how you feel, so IntelliQ understands you
+            better. The raw detail never crosses; only numbers do, you can see <em>exactly</em> what crossed,
+            and your team only ever sees aggregate patterns — never your content.<br><br>
+            Each is a separate switch; turning one off stops it immediately. Different teams use different
+            apps — this list can be extended for your organisation.
           </div>
         </div>`;
       root.innerHTML = html;
       if (typeof hydrateIcons === 'function') hydrateIcons(root);
+    }
+  },
+
+  /* Grant/revoke the CONTRIBUTE tier — the distillation membrane. Separate consent;
+     only numbers ever cross, and the person can see exactly what did. */
+  async _appContribute(source, scope, grant, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = grant ? 'Allowing…' : 'Turning off…'; }
+    try {
+      const r = await fetch('/api/me/consent', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ scope, granted: grant }) });
+      if (!r.ok) throw new Error();
+      this.showToast(grant ? 'Contribute allowed ✓' : 'Contribute turned off', 'success');
+      this._renderApps();
+    } catch (e) {
+      this.showToast('Could not update', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = grant ? 'Allow' : 'Turn off'; }
+    }
+  },
+
+  /* The visible audit — exactly the numbers the Contribute tier moved into the
+     record (never any content). Transparency is what makes it consent, not surveillance. */
+  async _appSeeCrossed(btn) {
+    const box = btn.parentElement.querySelector('.me-crossed');
+    if (!box) return;
+    if (box.style.display === 'block') { box.style.display = 'none'; return; }
+    box.style.display = 'block';
+    box.innerHTML = `<div style="color:var(--text-muted);font-size:0.74rem">Loading…</div>`;
+    try {
+      const r = await fetch('/api/me/contributions', { headers: this._authHeaders() });
+      const d = await r.json();
+      const rows = d.contributions || [];
+      if (!rows.length) { box.innerHTML = `<div style="color:var(--text-muted);font-size:0.74rem">Nothing has crossed yet — numbers appear here the moment they do.</div>`; return; }
+      box.innerHTML = rows.slice(0, 20).map(x => {
+        const when = x.ts ? new Date(x.ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+        return `<div style="font-size:0.74rem;color:var(--text-secondary);padding:2px 0">${this._escape(x.label || x.connector || 'number')}: <strong>${this._escape(String(x.valueNum))}</strong>${when ? ' · ' + when : ''}</div>`;
+      }).join('') + `<div style="font-size:0.68rem;color:var(--text-muted);margin-top:3px">Numbers only — never any content.</div>`;
+    } catch (e) {
+      box.innerHTML = `<div style="color:var(--danger);font-size:0.74rem">Couldn't load.</div>`;
     }
   },
 

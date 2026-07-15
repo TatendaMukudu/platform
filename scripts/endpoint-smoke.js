@@ -176,6 +176,32 @@ const server = app.listen(0, async () => {
     ok('connectors carry a category so different industries can group their apps',
        (srcs1.j?.sources || []).every(s => typeof s.category === 'string' && s.category));
 
+    // ── Contribute tier (the distillation membrane) — four safeguards ───────
+    // Safeguard 1: separate, explicit permission — refused without its own scope.
+    ok('contributing WITHOUT the contribute consent is refused (separate permission)',
+       (await call('/api/me/sources/contribute', tokB, { method: 'POST', body: { source: 'fitness', data: [{ date: '2026-07-01' }] } })).status === 403);
+    await call('/api/me/consent', tokB, { method: 'POST', body: { scope: 'external:fitness:contribute', granted: true } });
+    const cont = await call('/api/me/sources/contribute', tokB, { method: 'POST', body: { source: 'fitness', data: [
+      { date: '2026-07-01', note: 'felt strong, PB on squat' }, { date: '2026-07-01' }, { date: '2026-07-02' } ] } });
+    ok('with consent, contribute distills raw into numbers for the record', cont.status === 200 && cont.j?.contributed >= 1);
+    // Safeguard 2: numbers cross, content never — the returned audit has no text.
+    ok('contribute returns only numbers (no raw content crosses the membrane)',
+       (cont.j?.crossed || []).length > 0 && (cont.j.crossed).every(x => Number.isFinite(x.valueNum) && !('note' in x) && !('text' in x)));
+    // Safeguard 3: visible audit — the person can see exactly what crossed.
+    const audit = await call('/api/me/contributions', tokB);
+    ok('the person can list exactly what crossed (visible audit)',
+       audit.status === 200 && (audit.j?.contributions || []).some(x => Number.isFinite(x.valueNum)));
+    ok('the audit exposes numbers only — never note/subject/content fields',
+       (audit.j?.contributions || []).every(x => !('note' in x) && !('valueText' in x) && !('content' in x)));
+    // Safeguard 3b: revocable — turning it off blocks further contribution.
+    await call('/api/me/consent', tokB, { method: 'POST', body: { scope: 'external:fitness:contribute', granted: false } });
+    ok('turning Contribute off blocks further crossing (revocable)',
+       (await call('/api/me/sources/contribute', tokB, { method: 'POST', body: { source: 'fitness', data: [{ date: '2026-07-03' }] } })).status === 403);
+    // Safeguard 4: org-safe — contributed data is not third-party sensitive text.
+    const contSrcs = await call('/api/me/sources', tokB);
+    ok('contribute consent is tracked distinctly from insight and assist',
+       (contSrcs.j?.sources || []).find(s => s.id === 'fitness')?.contributeConsented === false);
+
     // ── Oversight roll-up: scoped to a leader's range, aggregate percentages ──
     const divCoach = await call('/api/org/divisions', tokCoach);
     ok('a leader gets the oversight roll-up scoped to their range', divCoach.status === 200 && divCoach.j?.range && typeof divCoach.j.range.needsAttention === 'number');
