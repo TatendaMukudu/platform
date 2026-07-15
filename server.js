@@ -2055,11 +2055,50 @@ app.get('/api/intelligence/watch', requireAuth, (req, res) => {
     if (!item) return;
     const row = { memberId: item.memberId, name: item.name, why: item.whyNow, action: item.recommendedAction, careFlag: item.careFlag, patternType: item.patternType, severity: item.severity };
     // Positive momentum is worth surfacing too (recognise it, don't just fight fires).
-    if (/improv|recover/i.test(item.patternType)) rising.push(row);
+    if (/improv|recover/i.test(item.patternType)) {
+      row.factors = _personStrengths(code, id);   // WHAT'S working (grounded, privacy-safe)
+      rising.push(row);
+    }
     else if (item.severity === 'high') attention.push(row);
     else emerging.push(row);
   });
   res.json({ ok: true, scanned: ids.length, emerging: emerging.slice(0, 8), attention: attention.slice(0, 8), rising: rising.slice(0, 6) });
+});
+
+/* A person's recurring strengths, pulled from their assessment signals — the
+   grounded "what's working" behind momentum (categorical tokens, never content). */
+function _personStrengths(code, id) {
+  const out = {};
+  (orgSignals[code] || []).forEach(s => {
+    if (s.subjectId !== id || s.source !== 'assessment') return;
+    const mm = (s.valueText || '').match(/Strengths:\s*([^·]+)/i);
+    if (mm) mm[1].split(',').forEach(x => { const v = x.trim(); if (v) out[v.toLowerCase()] = (out[v.toLowerCase()] || 0) + 1; });
+  });
+  return Object.entries(out).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k);
+}
+
+/* GET /api/intelligence/success — the flip side of the watch: the org's SUCCESS
+   patterns. Aggregates what's recurring among the people trending up, so a leader
+   can scale what works, not just fix what's broken. Leader-scoped, contentless. */
+app.get('/api/intelligence/success', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Leaders only' });
+  const ids = getVisibleUserIds(code, userId).filter(id => id !== userId);
+  const now = Date.now();
+  const risingPeople = [];
+  const factorCount = {};
+  ids.forEach(id => {
+    const u = orgUsers[code]?.[id];
+    if (!u || u.role === 'superadmin') return;
+    let m = null; try { m = _buildMemberIntelInput(code, u, now); } catch (_) {}
+    const findings = m ? intel.detectPatterns(m) : [];
+    if (!findings.some(f => /improv|recover/i.test(f.type))) return;
+    const factors = _personStrengths(code, id);
+    factors.forEach(f => { factorCount[f] = (factorCount[f] || 0) + 1; });
+    risingPeople.push({ memberId: id, name: u.name || '', factors });
+  });
+  const commonFactors = Object.entries(factorCount).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([factor, count]) => ({ factor, count }));
+  res.json({ ok: true, rising: risingPeople.slice(0, 8), commonFactors });
 });
 
 /* ── POST /api/intelligence/prepare — "here's what I've already drafted" ────────
@@ -2070,11 +2109,46 @@ app.get('/api/intelligence/watch', requireAuth, (req, res) => {
 app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Leaders only' });
+  const rawKind = req.body?.kind;
+  const kind = ['recognition', 'replicate'].includes(rawKind) ? rawKind : 'support';
+
+  // "Replicate" is team-wide — build a reflection that helps everyone grow a
+  // strength that's working for someone who's rising. No single subject.
+  if (kind === 'replicate') {
+    const factor = String(req.body?.factor || '').slice(0, 80).trim();
+    const sourceName = String(req.body?.sourceName || '').slice(0, 80).trim();
+    const first = sourceName ? sourceName.split(' ')[0] : 'someone on the team';
+    let out = null;
+    const fallback = {
+      title: factor ? `Building on what's working: ${factor}` : 'Building on what\'s working',
+      description: `A short reflection for everyone on how to grow ${factor || 'the habits that are helping the team right now'}.`,
+      fields: [{ label: `Where do you already do this well?`, hint: '' }, { label: `One way you could do more of it`, hint: '' }],
+      message: `We've seen ${factor || 'some real strengths'} making a difference lately — let's build it across the team.`,
+      rationale: `${first}'s momentum is partly down to ${factor || 'these habits'}; spreading it lifts everyone.`,
+    };
+    if (ai.enabled()) {
+      try {
+        const system = `${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ helping a leader SCALE a success pattern across their team. Given a strength that's working for someone who's improving, draft a short, positive reflection everyone can do to build that same strength. Universal language, any organisation, no names of the source person in the message, no emojis. Return JSON only: {"title": string(<=60), "description": string(1-2 sentences), "fields": array of 1-3 {"label","hint"}, "message": string(a warm 1-2 sentence note to the team), "rationale": string(one sentence to the LEADER)}.`;
+        out = await ai.completeJSON({ tier: 'reason', system, user: `Strength to spread: ${factor || '(general good habits)'}.`, maxTokens: 500, schema: ['title', 'message'] });
+      } catch (_) { out = null; }
+    }
+    const d = (out && out.title) ? out : fallback;
+    return res.json({
+      ok: true, aiUsed: !!(out && out.title), toTeam: true,
+      draft: {
+        title: String(d.title || fallback.title).slice(0, 120),
+        description: String(d.description || '').slice(0, 1200),
+        fields: (Array.isArray(d.fields) ? d.fields : fallback.fields).slice(0, 5).map(f => ({ label: String(f?.label || '').slice(0, 160), hint: String(f?.hint || '').slice(0, 300) })).filter(f => f.label),
+        message: String(d.message || fallback.message).slice(0, 600),
+        rationale: String(d.rationale || fallback.rationale).slice(0, 300),
+      },
+    });
+  }
+
   const memberId = String(req.body?.memberId || '');
   if (!new Set(getVisibleUserIds(code, userId)).has(memberId)) return res.status(403).json({ error: 'not in your range' });
   const subject = orgUsers[code]?.[memberId];
   if (!subject) return res.status(404).json({ error: 'not found' });
-  const kind = req.body?.kind === 'recognition' ? 'recognition' : 'support';
 
   let m = null; try { m = _buildMemberIntelInput(code, subject, Date.now()); } catch (_) {}
   const findings = m ? intel.detectPatterns(m) : [];
@@ -2114,11 +2188,21 @@ app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
 app.post('/api/intelligence/deliver', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Leaders only' });
-  const memberId = String(req.body?.memberId || '');
-  if (!new Set(getVisibleUserIds(code, userId)).has(memberId)) return res.status(403).json({ error: 'not in your range' });
-  const subject = orgUsers[code]?.[memberId];
-  if (!subject) return res.status(404).json({ error: 'not found' });
   const me = orgUsers[code]?.[userId];
+  const toTeam = req.body?.toTeam === true;
+
+  // Resolve the recipient list: one person, or the whole visible team.
+  let targets = [];
+  if (toTeam) {
+    targets = getVisibleUserIds(code, userId).filter(id => id !== userId).filter(id => { const u = orgUsers[code]?.[id]; return u && u.role !== 'superadmin'; });
+    if (!targets.length) return res.status(400).json({ error: 'no team members to send to' });
+  } else {
+    const memberId = String(req.body?.memberId || '');
+    if (!new Set(getVisibleUserIds(code, userId)).has(memberId)) return res.status(403).json({ error: 'not in your range' });
+    if (!orgUsers[code]?.[memberId]) return res.status(404).json({ error: 'not found' });
+    targets = [memberId];
+  }
+
   const title = String(req.body?.title || 'A quick reflection').slice(0, 160).trim();
   const description = String(req.body?.description || '').slice(0, 2000);
   const fields = (Array.isArray(req.body?.fields) ? req.body.fields : [{ label: 'How are things going?' }])
@@ -2126,15 +2210,21 @@ app.post('/api/intelligence/deliver', requireAuth, (req, res) => {
 
   const tpl = { id: _shortId(), title, description, kind: 'general', fields, createdBy: userId, createdByName: me?.name || 'Leader', createdAt: new Date().toISOString() };
   (assessmentTemplates[code] = assessmentTemplates[code] || []).push(tpl);
-  const a = {
-    id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: tpl.fields,
-    assignerId: userId, assignerName: me?.name || 'Leader', assigneeId: memberId, assigneeName: subject.name || 'Member',
-    status: 'assigned', response: {}, note: '', feedback: '', score: null, assignedAt: new Date().toISOString(),
-    prepared: true,
-  };
-  (assessmentAssignments[code] = assessmentAssignments[code] || []).push(a);
+  const created = [];
+  targets.forEach(mid => {
+    const subject = orgUsers[code]?.[mid];
+    if (!subject) return;
+    const a = {
+      id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: tpl.fields,
+      assignerId: userId, assignerName: me?.name || 'Leader', assigneeId: mid, assigneeName: subject.name || 'Member',
+      status: 'assigned', response: {}, note: '', feedback: '', score: null, assignedAt: new Date().toISOString(),
+      prepared: true,
+    };
+    (assessmentAssignments[code] = assessmentAssignments[code] || []).push(a);
+    created.push(_publicAssignment(a));
+  });
   scheduleSave();
-  res.json({ ok: true, assignment: _publicAssignment(a) });
+  res.json({ ok: true, sent: created.length, assignment: created[0] || null });
 });
 
 /* ── GET /api/workspace/group-health ──────────────────────────────────────────

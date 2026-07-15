@@ -307,6 +307,17 @@ const server = app.listen(0, async () => {
     ok('the delivered step actually appears for the person',
        (bQueue.j?.assigned || []).some(a => a.id === deliver.j.assignment.id && a.status === 'assigned'));
 
+    // ── Success patterns: what's working + replicate it across the team ─────
+    const success = await call('/api/intelligence/success', tokCoach);
+    ok('a leader gets the success-pattern surface (rising + common factors)',
+       success.status === 200 && Array.isArray(success.j?.rising) && Array.isArray(success.j?.commonFactors));
+    ok('the success surface never leaks raw content (contentless)',
+       !/valueText|passwordHash|"content"/.test(JSON.stringify(success.j || {})));
+    const repl = await call('/api/intelligence/prepare', tokCoach, { method: 'POST', body: { kind: 'replicate', factor: 'clear communication', sourceName: 'Member B' } });
+    ok('IntelliQ drafts a team-wide "replicate what works" step', repl.status === 200 && repl.j?.toTeam === true && repl.j?.draft?.title);
+    const teamSend = await call('/api/intelligence/deliver', tokCoach, { method: 'POST', body: { toTeam: true, title: repl.j.draft.title, description: repl.j.draft.description, fields: repl.j.draft.fields } });
+    ok('approving sends the replicate step to the whole team', teamSend.status === 200 && teamSend.j?.sent >= 1);
+
     // ── LLM self-test: admin-gated, reports status (no key in test mode) ─────
     ok('a plain member cannot run the LLM self-test (403)',
        (await call('/api/admin/llm-selftest', tokB, { method: 'POST' })).status === 403);

@@ -2436,3 +2436,4 @@ img { max-width: 100%; }
 .intel-draft-meta { font-size: 0.72rem; color: var(--text-muted); margin: 0.4rem 0; }
 .intel-draft-actions { display: flex; gap: 0.4rem; }
 .intel-draft-sent { font-size: 0.82rem; color: var(--accent2, #0ecfb0); padding: 0.3rem 0; }
+.intel-watch-why { font-size: 0.74rem; color: var(--accent2, #0ecfb0); margin-top: 3px; }

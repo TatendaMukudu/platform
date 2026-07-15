@@ -6074,13 +6074,20 @@ async function _renderTeamWatch() {
     const d = await res.json();
     if (!d.ok) return;
     const esc = _escAdvisor;
-    const item = (r, color, intent) => `<div class="intel-watch-row" data-mid="${esc(r.memberId || '')}">
+    const item = (r, color, intent) => {
+      const factors = (r.factors || []).filter(Boolean);
+      return `<div class="intel-watch-row" data-mid="${esc(r.memberId || '')}">
       <span class="intel-watch-dot" style="background:${color}"></span>
       <div style="flex:1"><strong>${esc(r.name)}</strong> — ${esc(r.why)}${r.careFlag ? ' <span title="private context informs this" style="opacity:0.7">·🔒</span>' : ''}
         <div class="intel-watch-action">${esc(r.action)}</div>
-        ${r.memberId ? `<button class="intel-watch-prep" onclick="prepareStep('${esc(r.memberId)}','${intent}',this)">${intent === 'recognition' ? 'Prepare recognition →' : 'Prepare a step →'}</button>` : ''}
+        ${factors.length ? `<div class="intel-watch-why">What's working: ${factors.map(f => esc(f)).join(', ')}</div>` : ''}
+        <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-top:4px">
+          ${r.memberId ? `<button class="intel-watch-prep" onclick="prepareStep('${esc(r.memberId)}','${intent}',this)">${intent === 'recognition' ? 'Prepare recognition →' : 'Prepare a step →'}</button>` : ''}
+          ${intent === 'recognition' && factors.length ? `<button class="intel-watch-prep" onclick="replicateStep('${esc(factors[0])}','${esc(r.name)}',this)">Replicate across the team →</button>` : ''}
+        </div>
         <div class="intel-watch-draft" style="display:none"></div></div>
     </div>`;
+    };
     let html = '';
     if ((d.emerging || []).length) {
       html += `<div class="intel-watch-card intel-watch-emerging">
@@ -6156,6 +6163,62 @@ async function deliverStep(memberId, btn) {
     if (typeof showToast === 'function') showToast('Sent ✓', 'success');
   } catch (e) {
     btn.disabled = false; btn.textContent = 'Approve & send';
+    if (typeof showToast === 'function') showToast('Could not send', 'error');
+  }
+}
+
+/* Scale a success pattern — IntelliQ drafts a team-wide reflection to build the
+   strength behind someone's momentum; the leader approves and it goes to everyone. */
+async function replicateStep(factor, sourceName, btn) {
+  const row = btn.closest('.intel-watch-row');
+  const draftBox = row?.querySelector('.intel-watch-draft');
+  if (!draftBox) return;
+  btn.disabled = true; btn.textContent = 'Drafting…';
+  try {
+    const res = await fetch('/api/intelligence/prepare', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
+      body: JSON.stringify({ kind: 'replicate', factor, sourceName }),
+    });
+    const d = await res.json();
+    if (!res.ok || !d.ok) throw new Error();
+    const dr = d.draft || {};
+    const esc = _escAdvisor;
+    draftBox.style.display = 'block';
+    draftBox.innerHTML = `
+      <div class="intel-draft-card">
+        <div class="intel-draft-label">IntelliQ drafted a team-wide step${dr.rationale ? ` — ${esc(dr.rationale)}` : ''}</div>
+        <textarea class="intel-draft-msg">${esc(dr.message || '')}</textarea>
+        <div class="intel-draft-meta">Sends to your whole team as: <strong>${esc(dr.title)}</strong></div>
+        <div class="intel-draft-actions">
+          <button class="btn-primary btn-sm" onclick='deliverTeam(this)' data-draft='${esc(JSON.stringify(dr))}'>Approve &amp; send to team</button>
+          <button class="btn btn-outline btn-sm" onclick="this.closest('.intel-watch-draft').style.display='none'">Not now</button>
+        </div>
+      </div>`;
+    btn.disabled = false; btn.textContent = 'Replicate across the team →';
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Replicate across the team →';
+    if (typeof showToast === 'function') showToast('Could not draft', 'error');
+  }
+}
+
+async function deliverTeam(btn) {
+  let dr = {}; try { dr = JSON.parse(btn.getAttribute('data-draft')); } catch (_) {}
+  const msgEl = btn.closest('.intel-draft-card')?.querySelector('.intel-draft-msg');
+  const message = msgEl ? msgEl.value.trim() : '';
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const fields = (dr.fields && dr.fields.length ? dr.fields : [{ label: 'How could you do more of this?' }]);
+    const res = await fetch('/api/intelligence/deliver', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
+      body: JSON.stringify({ toTeam: true, title: dr.title, description: (message ? message + '\n\n' : '') + (dr.description || ''), fields }),
+    });
+    const d = await res.json();
+    if (!res.ok || !d.ok) throw new Error();
+    const card = btn.closest('.intel-watch-draft');
+    if (card) card.innerHTML = `<div class="intel-draft-sent">✓ Sent to ${d.sent || 'the'} team member${d.sent === 1 ? '' : 's'} — it's in their queues now.</div>`;
+    if (typeof showToast === 'function') showToast('Sent to the team ✓', 'success');
+  } catch (e) {
+    btn.disabled = false; btn.textContent = 'Approve & send to team';
     if (typeof showToast === 'function') showToast('Could not send', 'error');
   }
 }
