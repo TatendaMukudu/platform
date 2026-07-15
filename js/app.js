@@ -6041,7 +6041,7 @@ async function renderIntelligence(refresh) {
       ${youStrip}
       <div id="team-watch"></div>
       <div class="intel-summary">
-        <div class="intel-summary-icon">🧭</div>
+        <div class="intel-summary-icon"></div>
         <div class="intel-summary-text">${_escAdvisor(d.summary || '')}</div>
         <button class="intel-refresh" title="Rebuild" onclick="renderIntelligence(true)">↻</button>
       </div>
@@ -6078,7 +6078,7 @@ async function _renderTeamWatch() {
       const factors = (r.factors || []).filter(Boolean);
       return `<div class="intel-watch-row" data-mid="${esc(r.memberId || '')}">
       <span class="intel-watch-dot" style="background:${color}"></span>
-      <div style="flex:1"><strong>${esc(r.name)}</strong> — ${esc(r.why)}${r.careFlag ? ' <span title="private context informs this" style="opacity:0.7">·🔒</span>' : ''}
+      <div style="flex:1"><strong>${esc(r.name)}</strong> — ${esc(r.why)}${r.careFlag ? ' <span title="private context informs this" style="opacity:0.6;font-size:0.72rem">· private context</span>' : ''}
         <div class="intel-watch-action">${esc(r.action)}</div>
         ${factors.length ? `<div class="intel-watch-why">What's working: ${factors.map(f => esc(f)).join(', ')}</div>` : ''}
         <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-top:4px">
@@ -6238,7 +6238,7 @@ function _intelCard(it) {
       ${(it.deviations || []).length ? `<div class="intel-dev">${it.deviations.slice(0, 3).map(_intelDevChip).join('')}</div>` : ''}
       ${(it.connections || []).length ? `<div class="intel-conn">🔗 ${_escAdvisor(it.connections[0].basis)} <span class="intel-conn-hint">(a connection, not a cause)</span></div>` : ''}
       <details class="intel-ev"><summary>Evidence basis</summary><ul>${ev}</ul></details>
-      ${it.careFlag ? `<div class="intel-care">💙 There may be personal context here — lead with care. Details are kept private.</div>` : ''}
+      ${it.careFlag ? `<div class="intel-care">There may be personal context here — lead with care. Details are kept private.</div>` : ''}
       <div class="intel-action"><strong>Try:</strong> ${_escAdvisor(it.recommendedAction)}</div>
       ${it.learnedNote ? `<div class="intel-learned">📈 ${_escAdvisor(it.learnedNote)}</div>` : ''}
       <div class="intel-cta" id="intel-cta-${it.memberId}">

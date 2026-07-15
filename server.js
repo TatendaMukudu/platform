@@ -2215,7 +2215,7 @@ app.post('/api/intelligence/deliver', requireAuth, (req, res) => {
     const subject = orgUsers[code]?.[mid];
     if (!subject) return;
     const a = {
-      id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: tpl.fields,
+      id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: tpl.fields, description: tpl.description || '',
       assignerId: userId, assignerName: me?.name || 'Leader', assigneeId: mid, assigneeName: subject.name || 'Member',
       status: 'assigned', response: {}, note: '', feedback: '', score: null, assignedAt: new Date().toISOString(),
       prepared: true,
@@ -3546,6 +3546,7 @@ const ASSESS_KINDS = ['spreadsheet', 'film', 'play', 'skill', 'general'];
 const _shortId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 function _publicAssignment(a) {
   return { id: a.id, templateId: a.templateId, title: a.title, kind: a.kind, fields: a.fields,
+    description: a.description || '',
     assignerName: a.assignerName, assigneeName: a.assigneeName, assigneeId: a.assigneeId,
     status: a.status, response: a.response || {}, note: a.note || '', feedback: a.feedback || '',
     score: a.score ?? null, assignedAt: a.assignedAt, submittedAt: a.submittedAt || null, returnedAt: a.returnedAt || null };
@@ -3770,7 +3771,7 @@ app.post('/api/assessments/assign', requireAuth, (req, res) => {
     const subj = orgUsers[code]?.[aid];
     if (!subj) return;
     const a = {
-      id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: tpl.fields,
+      id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: tpl.fields, description: tpl.description || '',
       assignerId: userId, assignerName: me?.name || 'Leader', assigneeId: aid, assigneeName: subj.name || 'Member',
       status: 'assigned', response: {}, note: '', feedback: '', score: null,
       assignedAt: new Date().toISOString(),
