@@ -2416,3 +2416,13 @@ img { max-width: 100%; }
 .obs-hint { font-size: 0.76rem; color: var(--text-muted); margin-bottom: 0.5rem; line-height: 1.5; }
 .lm-observe { margin-left: 0.5rem; padding: 0.25rem 0.55rem; font-size: 0.68rem; font-weight: 600; border-radius: 5px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer; }
 .lm-observe:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Proactive early-warning banner (Team view) ─────────────────────────────── */
+.intel-watch-card { border: 1px solid var(--border); border-radius: 12px; padding: 0.7rem 0.8rem; margin-bottom: 0.7rem; }
+.intel-watch-emerging  { border-color: rgba(247,168,79,0.40); background: rgba(247,168,79,0.06); }
+.intel-watch-attention { border-color: rgba(247,79,79,0.40);  background: rgba(247,79,79,0.06); }
+.intel-watch-rising    { border-color: rgba(14,207,176,0.35); background: rgba(14,207,176,0.05); }
+.intel-watch-head { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem; color: var(--text-secondary); }
+.intel-watch-row { display: flex; gap: 0.5rem; align-items: flex-start; padding: 0.35rem 0; font-size: 0.85rem; line-height: 1.45; }
+.intel-watch-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; }
+.intel-watch-action { font-size: 0.78rem; color: var(--text-muted); margin-top: 2px; }

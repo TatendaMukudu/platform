@@ -6039,6 +6039,7 @@ async function renderIntelligence(refresh) {
 
     el.innerHTML = `
       ${youStrip}
+      <div id="team-watch"></div>
       <div class="intel-summary">
         <div class="intel-summary-icon">🧭</div>
         <div class="intel-summary-text">${_escAdvisor(d.summary || '')}</div>
@@ -6055,9 +6056,50 @@ async function renderIntelligence(refresh) {
         <div class="intel-stat"><span class="intel-stat-v" style="color:${momColor}">${cap(r.momentum || 'steady')}</span><span class="intel-stat-l">momentum</span></div>
       </div>
       <div class="intel-foot">Patterns &amp; early signals, each compared to a person's own normal — directional, never scores. Private detail informs the read but is never shown.</div>`;
+    _renderTeamWatch();  // proactive early-warning banner, populated after the main read
   } catch (e) {
     el.innerHTML = `<div class="intel-empty">Home unavailable right now.</div>`;
   }
+}
+
+/* Proactive early-warning banner — "catch it before it becomes a problem." Fills
+   #team-watch with EMERGING concerns (before they grow), who needs a conversation
+   now, and who's rising. Contentless + care-first; private detail is never shown. */
+async function _renderTeamWatch() {
+  const box = document.getElementById('team-watch');
+  if (!box) return;
+  try {
+    const res = await fetch('/api/intelligence/watch', { headers: Auth._headers() });
+    if (!res.ok) return;
+    const d = await res.json();
+    if (!d.ok) return;
+    const esc = _escAdvisor;
+    const item = (r, color) => `<div class="intel-watch-row">
+      <span class="intel-watch-dot" style="background:${color}"></span>
+      <div style="flex:1"><strong>${esc(r.name)}</strong> — ${esc(r.why)}${r.careFlag ? ' <span title="private context informs this" style="opacity:0.7">·🔒</span>' : ''}
+        <div class="intel-watch-action">${esc(r.action)}</div></div>
+    </div>`;
+    let html = '';
+    if ((d.emerging || []).length) {
+      html += `<div class="intel-watch-card intel-watch-emerging">
+        <div class="intel-watch-head">Worth a look — before it grows</div>
+        ${d.emerging.map(r => item(r, '#f7a84f')).join('')}</div>`;
+    }
+    if ((d.attention || []).length) {
+      html += `<div class="intel-watch-card intel-watch-attention">
+        <div class="intel-watch-head">Needs you now</div>
+        ${d.attention.map(r => item(r, '#f74f4f')).join('')}</div>`;
+    }
+    if ((d.rising || []).length) {
+      html += `<div class="intel-watch-card intel-watch-rising">
+        <div class="intel-watch-head">Going well — worth recognising</div>
+        ${d.rising.map(r => item(r, '#0ecfb0')).join('')}</div>`;
+    }
+    if (!html && d.scanned) {
+      html = `<div class="intel-watch-card"><div class="intel-watch-head" style="color:var(--text-muted)">Nothing emerging — all ${d.scanned} steady. IntelliQ will flag drift here before it shows in results.</div></div>`;
+    }
+    box.innerHTML = html;
+  } catch (_) { /* non-fatal — the main read still shows */ }
 }
 
 function _intelCard(it) {

@@ -286,6 +286,15 @@ const server = app.listen(0, async () => {
     ok('a pinned tutorial is visible to everyone for reference',
        (bList2.j?.tutorials || []).some(t => /break down film/i.test(t.title)));
 
+    // ── Proactive early-warning: leader-scoped, contentless, splits emerging/now ──
+    const watch = await call('/api/intelligence/watch', tokCoach);
+    ok('a leader gets the proactive watch surface (emerging / attention / rising)',
+       watch.status === 200 && watch.j?.ok === true && Array.isArray(watch.j.emerging) && Array.isArray(watch.j.attention) && typeof watch.j.scanned === 'number');
+    ok('the watch surface never leaks raw content (contentless)',
+       !/valueText|passwordHash|"content"/.test(JSON.stringify(watch.j || {})));
+    ok('a plain member cannot see the proactive watch (403)',
+       (await call('/api/intelligence/watch', tokB)).status === 403);
+
     // ── LLM self-test: admin-gated, reports status (no key in test mode) ─────
     ok('a plain member cannot run the LLM self-test (403)',
        (await call('/api/admin/llm-selftest', tokB, { method: 'POST' })).status === 403);

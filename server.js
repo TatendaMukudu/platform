@@ -2032,6 +2032,36 @@ app.get('/api/workspace/team-insights', requireAuth, (req, res) => {
   });
 });
 
+/* ── GET /api/intelligence/watch — PROACTIVE early-warning for a leader ─────────
+   The "catch it before it becomes a problem" surface. Runs the kernel's pattern
+   detection over the people this leader is responsible for and splits findings:
+     • emerging   — medium/low severity: worth a look BEFORE it grows
+     • attention  — high severity: needs a conversation now
+   Each item is privacy-safe (contentless "why" + a care-first suggested action;
+   private context is only ever flagged, never shown). Leader-scoped. */
+app.get('/api/intelligence/watch', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Leaders only' });
+  const ids = getVisibleUserIds(code, userId).filter(id => id !== userId);
+  const now = Date.now();
+  const emerging = [], attention = [], rising = [];
+  ids.forEach(id => {
+    const u = orgUsers[code]?.[id];
+    if (!u || u.role === 'superadmin') return;
+    let m = null; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { m = null; }
+    const findings = m ? intel.detectPatterns(m) : [];
+    if (!findings.length) return;
+    const item = intel.composeBriefingItem(m, findings);
+    if (!item) return;
+    const row = { name: item.name, why: item.whyNow, action: item.recommendedAction, careFlag: item.careFlag, patternType: item.patternType, severity: item.severity };
+    // Positive momentum is worth surfacing too (recognise it, don't just fight fires).
+    if (/improv|recover/i.test(item.patternType)) rising.push(row);
+    else if (item.severity === 'high') attention.push(row);
+    else emerging.push(row);
+  });
+  res.json({ ok: true, scanned: ids.length, emerging: emerging.slice(0, 8), attention: attention.slice(0, 8), rising: rising.slice(0, 6) });
+});
+
 /* ── GET /api/workspace/group-health ──────────────────────────────────────────
    Item D — metrics on a leader's group, scoped to their subtree.
    Aggregate health (participation / wellbeing / engagement / completion) PLUS a
