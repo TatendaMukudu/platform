@@ -2108,7 +2108,7 @@ app.get('/api/intelligence/success', requireAuth, (req, res) => {
 /* A person's current DIRECTION, reduced to one of up / down / steady from the
    kernel's pattern detection. The shared read used by the assessment-learning
    loop — "did the people who did this assessment get better or worse after?" */
-function _memberDirection(code, u, now) {
+function _memberTrajDir(code, u, now) {
   let m = null; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { m = null; }
   const pats = m ? intel.detectPatterns(m) : [];
   if (!pats.length) return 'steady';
@@ -2133,7 +2133,7 @@ function _assessmentOutcomes(code, userId, now) {
   const dirOf = (id) => {
     if (dirCache[id] !== undefined) return dirCache[id];
     const u = orgUsers[code]?.[id];
-    return (dirCache[id] = u ? _memberDirection(code, u, now) : 'steady');
+    return (dirCache[id] = u ? _memberTrajDir(code, u, now) : 'steady');
   };
   const groups = {};
   returned.forEach(a => {
@@ -2187,7 +2187,7 @@ function _assessmentWhy(it) {
 function _memberAssessmentNudges(code, memberId, now) {
   const u = orgUsers[code]?.[memberId];
   if (!u) return [];
-  const dir = _memberDirection(code, u, now);
+  const dir = _memberTrajDir(code, u, now);
   const mine = (assessmentAssignments[code] || [])
     .filter(a => a.status === 'returned' && a.assigneeId === memberId);
   if (!mine.length) return [];
@@ -2238,7 +2238,40 @@ app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Leaders only' });
   const rawKind = req.body?.kind;
-  const kind = ['recognition', 'replicate'].includes(rawKind) ? rawKind : 'support';
+  const kind = ['recognition', 'replicate', 'plan'].includes(rawKind) ? rawKind : 'support';
+
+  // "Plan" is team-wide and forward-looking — the leader asked IntelliQ to put
+  // together a proactive session/plan for the week around a THEME (a shared weak
+  // area, a busy stretch ahead, or reworking something that's not landing). No
+  // single subject; it delivers to the whole team like the replicate flow.
+  if (kind === 'plan') {
+    const theme = String(req.body?.theme || '').slice(0, 120).trim();
+    const fallback = {
+      title: theme ? `This week's focus: ${theme}` : 'A proactive plan for the week',
+      description: `A short, shared plan to get ahead of ${theme || 'what the team is facing this week'} — everyone reflects, then we act on it together.`,
+      fields: [{ label: `What's your read on ${theme || 'this'} right now?`, hint: '' }, { label: 'One thing that would help you this week', hint: '' }],
+      message: `Getting ahead of ${theme || 'the week'} — take two minutes so we can plan around it together.`,
+      rationale: `Being proactive about ${theme || 'this'} now beats reacting to it later.`,
+    };
+    let out = null;
+    if (ai.enabled()) {
+      try {
+        const system = `${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ helping a leader be PROACTIVE — drafting a short, forward-looking plan the whole team engages with to get ahead of a theme (a shared development area, a busy period coming up, or a process that needs reworking). Universal language for any organisation, no names, no emojis. Return JSON only: {"title": string(<=60), "description": string(1-2 sentences), "fields": array of 1-3 {"label","hint"}, "message": string(a warm 1-2 sentence note to the team), "rationale": string(one sentence to the LEADER on why acting now helps)}.`;
+        out = await ai.completeJSON({ tier: 'reason', system, user: `Theme to plan around: ${theme || '(general week-ahead readiness)'}.`, maxTokens: 500, schema: ['title', 'message'] });
+      } catch (_) { out = null; }
+    }
+    const d = (out && out.title) ? out : fallback;
+    return res.json({
+      ok: true, aiUsed: !!(out && out.title), toTeam: true,
+      draft: {
+        title: String(d.title || fallback.title).slice(0, 120),
+        description: String(d.description || '').slice(0, 1200),
+        fields: (Array.isArray(d.fields) ? d.fields : fallback.fields).slice(0, 5).map(f => ({ label: String(f?.label || '').slice(0, 160), hint: String(f?.hint || '').slice(0, 300) })).filter(f => f.label),
+        message: String(d.message || fallback.message).slice(0, 600),
+        rationale: String(d.rationale || fallback.rationale).slice(0, 300),
+      },
+    });
+  }
 
   // "Replicate" is team-wide — build a reflection that helps everyone grow a
   // strength that's working for someone who's rising. No single subject.
@@ -2844,6 +2877,88 @@ function _learningByPattern(code) {
   return out;
 }
 
+/* ── The proactive prompt layer ───────────────────────────────────────────────
+   Turns what the kernel already knows into natural offers a leader can approve in
+   one tap — the "want me to…" voice: repeat what's working, rework what isn't, get
+   ahead of a shared weak area, assign a focused reflection to someone who's slipped,
+   or prepare for a busy stretch ahead. Every prompt is grounded in real signals
+   (outcomes, development areas, trajectory, upcoming events) and privacy-safe — it
+   only ever names the leader's OWN people, and each carries a CTA that routes to the
+   existing prepare→deliver rails, so approval makes it real. */
+function _leaderPrompts(code, userId, now) {
+  const slug = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'x';
+  const prompts = [];
+  const ids = getVisibleUserIds(code, userId).filter(id => id !== userId);
+  const members = ids.map(id => orgUsers[code]?.[id]).filter(u => u && u.role !== 'superadmin');
+
+  // 1) Assessment outcomes → repeat what's working / rework what isn't.
+  let outcomes; try { outcomes = _assessmentOutcomes(code, userId, now); } catch (_) { outcomes = { working: [], revisit: [] }; }
+  if (outcomes.working[0]) {
+    const w = outcomes.working[0];
+    prompts.push({ id: 'repeat-' + slug(w.title), tone: 'opportunity',
+      text: `"${w.title}" has lined up with people improving${w.rising ? ` — ${w.rising} trending up since` : ''}. Want me to build this week around running it again?`,
+      cta: { label: 'Draft the plan', action: 'plan', theme: w.title } });
+  }
+  if (outcomes.revisit[0]) {
+    const r = outcomes.revisit[0];
+    prompts.push({ id: 'rework-' + slug(r.title), tone: 'attention',
+      text: `"${r.title}" has preceded a dip${r.falling ? ` for ${r.falling}` : ''}. Want me to rework how it's run before it goes out again?`,
+      cta: { label: 'Rework it', action: 'plan', theme: `reworking ${r.title}` } });
+  }
+
+  // Development areas per member (categorical tokens from assessment signals only).
+  const devCount = {}, devByMember = {};
+  members.forEach(u => {
+    const toks = new Set();
+    (orgSignals[code] || []).forEach(s => {
+      if (s.subjectId !== u.id || s.source !== 'assessment') return;
+      const dm = (s.valueText || '').match(/Development:\s*([^·]+)/i);
+      if (dm) dm[1].split(',').forEach(x => { const v = x.trim().toLowerCase(); if (v) toks.add(v); });
+    });
+    toks.forEach(v => { devCount[v] = (devCount[v] || 0) + 1; });
+    devByMember[u.id] = toks;
+  });
+
+  // 2) A shared weak area across several people → a proactive plan for the week.
+  const topWeak = Object.entries(devCount).sort((a, b) => b[1] - a[1])[0];
+  if (topWeak && topWeak[1] >= 2) {
+    prompts.push({ id: 'team-weak-' + slug(topWeak[0]), tone: 'attention',
+      text: `${topWeak[1]} people have been working on ${topWeak[0]} lately. Want me to draft a proactive plan for the week to get ahead of it?`,
+      cta: { label: 'Draft a plan', action: 'plan', theme: topWeak[0] } });
+  }
+
+  // 3) One person who's a little weaker in an area and not trending up → assign them a focused reflection.
+  const cand = members.find(u => {
+    const dir = _memberTrajDir(code, u, now);
+    return (dir === 'down' || dir === 'steady') && devByMember[u.id] && devByMember[u.id].size;
+  });
+  if (cand) {
+    const first = (cand.name || 'They').split(' ')[0];
+    const area = [...devByMember[cand.id]][0];
+    prompts.push({ id: 'assign-' + cand.id, tone: 'opportunity',
+      text: `${first} has been a little weaker in ${area}. Want me to assign them a focused reflection on it?`,
+      cta: { label: `Assign to ${first}`, action: 'support', memberId: cand.id } });
+  }
+
+  // 4) A busy stretch ahead — only when REAL upcoming events are connected (lights
+  //    up once a calendar is linked; never fabricated).
+  const soon = now + 14 * 86400000;
+  let upcoming = 0;
+  (orgSignals[code] || []).forEach(s => {
+    const isEvent = s.modality === 'event' || /calendar|google|outlook|teams|fixture|event/i.test(s.source || '');
+    if (!isEvent) return;
+    const t = new Date(s.ts).getTime();
+    if (Number.isFinite(t) && t > now && t < soon) upcoming++;
+  });
+  if (upcoming >= 3) {
+    prompts.push({ id: 'busy-week', tone: 'attention',
+      text: `There are ${upcoming} things on the calendar over the next two weeks. Want me to put together sessions to prepare for it?`,
+      cta: { label: 'Draft sessions', action: 'plan', theme: 'a busy stretch coming up' } });
+  }
+
+  return prompts.slice(0, 4);
+}
+
 /* ── GET /api/intelligence/briefing — the ONE leader intelligence surface ─────
    Consolidates: who-needs-attention + why-now + evidence + recommended action +
    group rollup (folds the old Group Health / Org Health / Intelligence pages).
@@ -2922,6 +3037,7 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
       : `Your group looks steady — ${activeWeek}/${members.length} active, nothing flagged.`),
     rollup: { memberCount: members.length, activeThisWeek: activeWeek, participation, momentum, patternCounts },
     items: top,
+    prompts: (() => { try { return _leaderPrompts(code, userId, now); } catch (_) { return []; } })(),
   };
   intelBriefingCache[cacheKey] = { data, ts: Date.now() };
   res.json(data);

@@ -6086,6 +6086,7 @@ async function renderIntelligence(refresh) {
 
     el.innerHTML = `
       ${youStrip}
+      <div id="team-prompts"></div>
       <div id="team-watch"></div>
       <div class="intel-summary">
         <div class="intel-summary-icon"></div>
@@ -6103,9 +6104,73 @@ async function renderIntelligence(refresh) {
         <div class="intel-stat"><span class="intel-stat-v" style="color:${momColor}">${cap(r.momentum || 'steady')}</span><span class="intel-stat-l">momentum</span></div>
       </div>
       <div class="intel-foot">Patterns &amp; early signals, each compared to a person's own normal — directional, never scores. Private detail informs the read but is never shown.</div>`;
+    _renderTeamPrompts(d.prompts || []);  // "want me to…" — proactive offers the leader can approve in one tap
     _renderTeamWatch();  // proactive early-warning banner, populated after the main read
   } catch (e) {
     el.innerHTML = `<div class="intel-empty">Home unavailable right now.</div>`;
+  }
+}
+
+/* The proactive voice — "want me to…". Renders the briefing's prompt offers, each
+   with a one-tap CTA that drafts (a weekly plan, or a focused reflection for one
+   person) and lets the leader approve, edit, or dismiss. Grounded in real signals;
+   nothing is sent without approval. */
+function _renderTeamPrompts(prompts) {
+  const box = document.getElementById('team-prompts');
+  if (!box) return;
+  if (!prompts.length) { box.innerHTML = ''; return; }
+  const esc = _escAdvisor;
+  box.innerHTML = `<div class="intel-prompt-card">
+    <div class="intel-prompt-head">IntelliQ suggests</div>
+    ${prompts.map(p => `<div class="intel-prompt-row" data-tone="${esc(p.tone || '')}">
+      <div class="intel-prompt-text">${esc(p.text)}</div>
+      <div class="intel-prompt-actions">
+        <button class="intel-watch-prep" onclick='runPrompt(this)' data-cta='${esc(JSON.stringify(p.cta || {}))}'>${esc((p.cta && p.cta.label) || 'Draft it')} →</button>
+        <button class="btn btn-outline btn-sm" onclick="this.closest('.intel-prompt-row').style.display='none'">Not now</button>
+      </div>
+      <div class="intel-watch-draft" style="display:none"></div>
+    </div>`).join('')}
+  </div>`;
+}
+
+/* One CTA handler for every prompt: drafts via the prepare rails (a team plan, or a
+   supportive reflection for one person) and shows it inline for approval. */
+async function runPrompt(btn) {
+  let cta = {}; try { cta = JSON.parse(btn.getAttribute('data-cta')); } catch (_) {}
+  const row = btn.closest('.intel-prompt-row');
+  const draftBox = row?.querySelector('.intel-watch-draft');
+  if (!draftBox) return;
+  const isTeam = cta.action !== 'support';
+  const body = isTeam ? { kind: 'plan', theme: cta.theme || '' } : { kind: 'support', memberId: cta.memberId };
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Drafting…';
+  try {
+    const res = await fetch('/api/intelligence/prepare', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
+      body: JSON.stringify(body),
+    });
+    const d = await res.json();
+    if (!res.ok || !d.ok) throw new Error();
+    const dr = d.draft || {};
+    const esc = _escAdvisor;
+    btn.style.display = 'none';
+    draftBox.style.display = 'block';
+    const approve = isTeam
+      ? `<button class="btn-primary btn-sm" onclick='deliverTeam(this)' data-draft='${esc(JSON.stringify(dr))}'>Approve &amp; send to team</button>`
+      : `<button class="btn-primary btn-sm" onclick='deliverStep(${JSON.stringify(cta.memberId)}, this)' data-draft='${esc(JSON.stringify(dr))}'>Approve &amp; send</button>`;
+    draftBox.innerHTML = `
+      <div class="intel-draft-card">
+        <div class="intel-draft-label">IntelliQ drafted this${dr.rationale ? ` — ${esc(dr.rationale)}` : ''}</div>
+        <textarea class="intel-draft-msg">${esc(dr.message || '')}</textarea>
+        <div class="intel-draft-meta">${isTeam ? 'Sends to your whole team as' : 'Sends as'}: <strong>${esc(dr.title)}</strong>${(dr.fields || []).length ? ` · ${dr.fields.length} short question${dr.fields.length !== 1 ? 's' : ''}` : ''}</div>
+        <div class="intel-draft-actions">
+          ${approve}
+          <button class="btn btn-outline btn-sm" onclick="this.closest('.intel-prompt-row').style.display='none'">Not now</button>
+        </div>
+      </div>`;
+  } catch (e) {
+    btn.disabled = false; btn.textContent = orig;
+    if (typeof showToast === 'function') showToast('Could not draft', 'error');
   }
 }
 

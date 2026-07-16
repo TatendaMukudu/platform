@@ -2423,6 +2423,12 @@ img { max-width: 100%; }
 .lm-observe:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ── Proactive early-warning banner (Team view) ─────────────────────────────── */
+.intel-prompt-card { border: 1px solid rgba(124,90,245,0.30); background: rgba(124,90,245,0.05); border-radius: 12px; padding: 0.7rem 0.8rem; margin-bottom: 0.7rem; }
+.intel-prompt-head { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem; color: var(--accent); }
+.intel-prompt-row { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.intel-prompt-row:first-of-type { border-top: none; padding-top: 0.2rem; }
+.intel-prompt-text { font-size: 0.86rem; line-height: 1.5; color: var(--text-primary); margin-bottom: 0.4rem; }
+.intel-prompt-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
 .intel-watch-card { border: 1px solid var(--border); border-radius: 12px; padding: 0.7rem 0.8rem; margin-bottom: 0.7rem; }
 .intel-watch-emerging  { border-color: rgba(247,168,79,0.40); background: rgba(247,168,79,0.06); }
 .intel-watch-attention { border-color: rgba(247,79,79,0.40);  background: rgba(247,79,79,0.06); }

@@ -330,6 +330,18 @@ const server = app.listen(0, async () => {
     const teamSend = await call('/api/intelligence/deliver', tokCoach, { method: 'POST', body: { toTeam: true, title: repl.j.draft.title, description: repl.j.draft.description, fields: repl.j.draft.fields } });
     ok('approving sends the replicate step to the whole team', teamSend.status === 200 && teamSend.j?.sent >= 1);
 
+    // ── Proactive PLAN drafting + the "want me to…" prompts on the briefing ──
+    const teamPlan = await call('/api/intelligence/prepare', tokCoach, { method: 'POST', body: { kind: 'plan', theme: 'a busy week ahead' } });
+    ok('IntelliQ drafts a forward-looking team plan around a theme', teamPlan.status === 200 && teamPlan.j?.toTeam === true && teamPlan.j?.draft?.title && typeof teamPlan.j.draft.message === 'string');
+    ok('a plain member cannot ask IntelliQ to draft a plan (403)',
+       (await call('/api/intelligence/prepare', tokB, { method: 'POST', body: { kind: 'plan', theme: 'x' } })).status === 403);
+    const brief = await call('/api/intelligence/briefing', tokCoach);
+    ok('the leader briefing carries proactive prompts (want me to…)',
+       brief.status === 200 && Array.isArray(brief.j?.prompts));
+    ok('every prompt is actionable (has text + a CTA action) and contentless',
+       (brief.j?.prompts || []).every(p => typeof p.text === 'string' && p.cta && typeof p.cta.action === 'string') &&
+       !/valueText|passwordHash|"content"/.test(JSON.stringify(brief.j?.prompts || [])));
+
     // ── Assessment-learning loop: which assessments precede improvement/decline ──
     const working = await call('/api/intelligence/whats-working', tokCoach);
     ok('a leader gets the assessment-outcome report (working / revisit)',
