@@ -168,23 +168,60 @@ function enabled() { return HAVE_CLAUDE || HAVE_OPENAI; }
      { type:'pdf',   data(base64) }
      { type:'text',  text }                       (CSV/plain — inlined)
    Returns the model's text (callers may ask for JSON and parse it). */
-function canUnderstand() { return HAVE_CLAUDE; }
+// What can be read, by evidence kind: images/text ride EITHER provider (Claude
+// vision or OpenAI vision); native PDF is Claude-only. No arg → "anything readable".
+function canUnderstand(kind) {
+  if (kind === 'pdf') return HAVE_CLAUDE;
+  if (kind === 'image' || kind === 'text') return HAVE_CLAUDE || HAVE_OPENAI;
+  return HAVE_CLAUDE || HAVE_OPENAI;
+}
 async function understand({ system, prompt, media, maxTokens = 700 }) {
-  if (!HAVE_CLAUDE) throw new Error('understanding-unavailable');
-  const blocks = [{ type: 'text', text: prompt || 'Describe this and pull out what matters.' }];
-  if (media?.type === 'image' && media.data) {
-    blocks.push({ type: 'image', source: { type: 'base64', media_type: media.mimetype || 'image/png', data: media.data } });
-  } else if (media?.type === 'pdf' && media.data) {
-    blocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: media.data } });
-  } else if (media?.type === 'text' && media.text) {
-    blocks[0].text += `\n\n--- attached content ---\n${String(media.text).slice(0, 12000)}`;
+  const text = prompt || 'Describe this and pull out what matters.';
+
+  // Preferred path: Claude (handles image, native PDF, and inline text).
+  if (HAVE_CLAUDE) {
+    const blocks = [{ type: 'text', text }];
+    if (media?.type === 'image' && media.data) {
+      blocks.push({ type: 'image', source: { type: 'base64', media_type: media.mimetype || 'image/png', data: media.data } });
+    } else if (media?.type === 'pdf' && media.data) {
+      blocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: media.data } });
+    } else if (media?.type === 'text' && media.text) {
+      blocks[0].text += `\n\n--- attached content ---\n${String(media.text).slice(0, 12000)}`;
+    }
+    const resp = await client.messages.create({
+      model: MODELS.reason, max_tokens: maxTokens,
+      ...(system ? { system } : {}),
+      messages: [{ role: 'user', content: blocks }],
+    });
+    return resp.content?.[0]?.text?.trim() || '';
   }
-  const resp = await client.messages.create({
-    model: MODELS.reason, max_tokens: maxTokens,
-    ...(system ? { system } : {}),
-    messages: [{ role: 'user', content: blocks }],
-  });
-  return resp.content?.[0]?.text?.trim() || '';
+
+  // Fallback: OpenAI vision (images) or inline text. OpenAI can't take a raw PDF,
+  // so PDFs still require Claude — callers gate on canUnderstand('pdf').
+  if (HAVE_OPENAI) {
+    if (media?.type === 'pdf') throw new Error('pdf-needs-claude');
+    let content;
+    if (media?.type === 'image' && media.data) {
+      content = [{ type: 'text', text }, { type: 'image_url', image_url: { url: `data:${media.mimetype || 'image/png'};base64,${media.data}` } }];
+    } else if (media?.type === 'text' && media.text) {
+      content = `${text}\n\n--- attached content ---\n${String(media.text).slice(0, 12000)}`;
+    } else {
+      content = text;
+    }
+    const res = await fetch(OPENAI_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${OPENAI_KEY}` },
+      body: JSON.stringify({
+        model: OPENAI_MODEL, max_tokens: maxTokens,
+        messages: [...(system ? [{ role: 'system', content: system }] : []), { role: 'user', content }],
+      }),
+    });
+    if (!res.ok) throw new Error('openai-vision HTTP ' + res.status);
+    const j = await res.json();
+    return String(j.choices?.[0]?.message?.content || '').trim();
+  }
+
+  throw new Error('understanding-unavailable');
 }
 
 /* ── Speech-to-text ────────────────────────────────────────────────────────

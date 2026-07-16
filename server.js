@@ -3847,6 +3847,32 @@ function _studioThread(code, userId) {
   return studioThreads[k] || (studioThreads[k] = { messages: [], plans: [] });
 }
 
+/* What the Studio REMEMBERS, distilled for reasoning: what has tended to work and
+   what hasn't — for this org and this person — so IntelliQ reasons from evidence,
+   not a blank slate. Privacy-safe and visibility-scoped: titles/approaches and
+   aggregate direction only, never another individual's private detail. This is the
+   "knowing your org in and out — what's worked, what hasn't, and why" surface. */
+function _studioMemoryContext(code, userId) {
+  const parts = [];
+  // What returned work has tended to help / precede a dip (caller's own scope).
+  let oc; try { oc = _assessmentOutcomes(code, userId, Date.now()); } catch (_) { oc = { working: [], revisit: [] }; }
+  if (oc.working?.length) parts.push(`Has tended to help: ${oc.working.slice(0, 4).map(w => `"${w.title}"${w.avgScore != null ? ` (avg ${w.avgScore})` : ''}`).join(', ')}.`);
+  if (oc.revisit?.length) parts.push(`Has tended to precede a dip: ${oc.revisit.slice(0, 3).map(r => `"${r.title}"`).join(', ')}.`);
+  // Approaches the org has learned work (aggregate, measured outcomes, no names).
+  let learn; try { learn = _learningByPattern(code); } catch (_) { learn = {}; }
+  const worked = Object.entries(learn || {})
+    .filter(([, v]) => v && v.action && v.total >= 2 && v.positive / v.total >= 0.6)
+    .map(([pt, v]) => `for ${intel.PATTERN_LABEL[pt] || pt}, ${v.action} (helped ${v.positive}/${v.total})`);
+  if (worked.length) parts.push(`Approaches that have worked here before: ${worked.slice(0, 3).join('; ')}.`);
+  // This person's own footing — recurring strengths + plans they've completed.
+  const strengths = _personStrengths(code, userId);
+  if (strengths.length) parts.push(`Their recurring strengths: ${strengths.join(', ')}.`);
+  const th = studioThreads[`${code}:${userId}`];
+  const done = th ? th.plans.filter(p => p.done).length : 0;
+  if (done) parts.push(`They've completed ${done} plan${done > 1 ? 's' : ''} in the Studio so far.`);
+  return parts.join(' ');
+}
+
 /* GET /api/studio — the whole conversation-first surface for the caller. */
 app.get('/api/studio', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
@@ -3916,13 +3942,17 @@ app.post('/api/studio/chat', requireAuth, async (req, res) => {
     }
     if (!kind) {
       understandNote = 'I can read images, PDFs, and text/CSV directly right now — for a spreadsheet or Word doc, export it to PDF or CSV and I\'ll read it in full.';
-    } else if (!ai.canUnderstand()) {
-      understandNote = 'Reading files needs a Claude key — it\'s captured here, but tell me what\'s in it and I\'ll work with that for now.';
+    } else if (!ai.canUnderstand(kind)) {
+      understandNote = kind === 'pdf'
+        ? 'Reading PDFs needs a Claude key — it\'s captured here. Send it as an image or text, or tell me what\'s in it, and I\'ll work with that.'
+        : 'Reading files needs an AI key configured — it\'s captured here, but tell me what\'s in it and I\'ll work with that for now.';
     } else {
       try {
+        const emem = _studioMemoryContext(code, userId);
         const sys = [
-          `You are IntelliQ, reading a piece of evidence ${first} shared in their Studio (a ${kind}). Understand what it actually shows and how it bears on their work. Return JSON only: {"reply": string (2-4 sentences, warm and specific, what you see and one useful next step or question), "observations": array of up to 3 short factual notes worth remembering}. Never invent detail that isn't there. No emojis.`,
+          `You are IntelliQ, reading a piece of evidence ${first} shared in their Studio (a ${kind}). Understand what it actually shows and how it bears on their work. Where it's genuinely relevant, connect what you see to what's worked before (see MEMORY). Return JSON only: {"reply": string (2-4 sentences, warm and specific, what you see and one useful next step or question), "observations": array of up to 3 short factual notes worth remembering}. Never invent detail that isn't there. No emojis.`,
           _worldviewDirective(code),
+          emem ? `MEMORY — what's worked / hasn't: ${emem}` : '',
         ].filter(Boolean).join('\n\n');
         const raw = await ai.understand({ system: sys, prompt: `${message ? `They said: "${message}". ` : ''}Read the attached ${kind} ("${att.name || media?.name || 'file'}") and respond.`, media: payload, maxTokens: 700 });
         const parsed = ai.parseJSON(raw) || {};
@@ -3958,10 +3988,12 @@ app.post('/api/studio/chat', requireAuth, async (req, res) => {
         assignedTitles.length ? `Assigned to them right now: ${assignedTitles.slice(0, 5).join('; ')}.` : 'Nothing is assigned to them right now.',
         openPlans.length ? `Plans they're working on: ${openPlans.slice(0, 5).join('; ')}.` : 'No saved plans yet.',
       ].filter(Boolean).join(' ');
+      const memory = _studioMemoryContext(code, userId);
       const system = [
-        `You are IntelliQ, in ${first}'s personal Studio — a warm, sharp thinking partner, like a great chief of staff. This is a real conversation, not a form. Help them plan, reflect, and act. Be concise (1-4 sentences), concrete, proactive. When THIS turn amounts to a concrete plan or commitment worth keeping, capture it: set savePlan true and put a short, clear one-line version in planText, and phrase your reply so it feels natural ("I've turned that into a plan…") — don't make them click anything. Otherwise savePlan is false. Return JSON only: {"reply": string, "savePlan": boolean, "planText": string}. Never invent facts. Never reveal others' private data. No emojis.`,
+        `You are IntelliQ, in ${first}'s personal Studio — a warm, sharp thinking partner, like a great chief of staff. This is a real conversation, not a form. Help them plan, reflect, and act. Be concise (1-4 sentences), concrete, proactive. Reason from what has actually worked before (see MEMORY) — bring it in when it's genuinely relevant ("last time this kind of thing helped…"), never force it. When THIS turn amounts to a concrete plan or commitment worth keeping, capture it: set savePlan true and put a short, clear one-line version in planText, and phrase your reply so it feels natural ("I've turned that into a plan…") — don't make them click anything. Otherwise savePlan is false. Return JSON only: {"reply": string, "savePlan": boolean, "planText": string}. Never invent facts. Never reveal others' private data. No emojis.`,
         _worldviewDirective(code),
         `Context: ${ctx}`,
+        memory ? `MEMORY — what's worked / hasn't (reason from this): ${memory}` : '',
       ].filter(Boolean).join('\n\n');
       const out = await ai.completeJSON({ tier: 'reason', maxTokens: 300, system, messages: history, schema: ['reply'] });
       if (out && out.reply) {
