@@ -13,8 +13,8 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260716m"/>
-<link rel="stylesheet" href="css/member.css?v=20260716m"/>
+<link rel="stylesheet" href="css/styles.css?v=20260716n"/>
+<link rel="stylesheet" href="css/member.css?v=20260716n"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -972,7 +972,7 @@
         <!-- The universal composer — one input; the AI figures out the rest.
              Mood is optional and inline (no separate Check-In page). -->
         <div class="card iq-composer" id="me-composer">
-          <div class="card-label">What happened?</div>
+          <div class="card-label" id="composer-ask">What happened?</div>
           <div class="composer-mood" id="composer-mood">
             <span class="composer-mood-q">How are you? <span style="opacity:0.6">(optional)</span></span>
             <div class="composer-mood-faces">
@@ -1841,8 +1841,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260716m"></script>
-<script src="js/auth.js?v=20260716m"></script>
+<script src="js/data.js?v=20260716n"></script>
+<script src="js/auth.js?v=20260716n"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1910,14 +1910,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260716m"></script>
-<script src="js/ui.js?v=20260716m"></script>
-<script src="js/attachments.js?v=20260716m"></script>
-<script src="js/scenarios.js?v=20260716m"></script>
-<script src="js/chat.js?v=20260716m"></script>
-<script src="js/tree.js?v=20260716m"></script>
-<script src="js/app.js?v=20260716m"></script>
-<script src="js/member-view.js?v=20260716m"></script>
+<script src="js/charts.js?v=20260716n"></script>
+<script src="js/ui.js?v=20260716n"></script>
+<script src="js/attachments.js?v=20260716n"></script>
+<script src="js/scenarios.js?v=20260716n"></script>
+<script src="js/chat.js?v=20260716n"></script>
+<script src="js/tree.js?v=20260716n"></script>
+<script src="js/app.js?v=20260716n"></script>
+<script src="js/member-view.js?v=20260716n"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->

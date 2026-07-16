@@ -6245,7 +6245,7 @@ async function _renderDiscoveries() {
     if (!items.length) { box.innerHTML = ''; return; }
     const esc = _escAdvisor;
     box.innerHTML = `<div class="intel-watch-card intel-discoveries">
-      <div class="intel-watch-head">How your ${_v('organisation') || 'organisation'} learns</div>
+      <div class="intel-watch-head">How your ${d.scope === 'team' ? 'team' : 'organisation'} learns</div>
       ${items.map(it => `<div class="intel-discovery">
         <div class="intel-discovery-area">${esc(it.area)}</div>
         <div class="intel-discovery-text">${esc(it.statement)}</div>

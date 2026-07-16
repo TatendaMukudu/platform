@@ -57,6 +57,8 @@ const server = app.listen(0, async () => {
     // ── the "Me" context surface works for the member ────────────────────────
     const ctx = await call('/api/me/context', tokA);
     ok('me/context returns the proactive open-state', ctx.status === 200 && ctx.j?.ok === true && typeof ctx.j.opening === 'string');
+    ok('me/context carries an adaptive check-in question + returning flag',
+       typeof ctx.j?.ask === 'string' && ctx.j.ask.length > 0 && typeof ctx.j.returning === 'boolean');
 
     // ── Person Model / memory is self-only (governance) ──────────────────────
     const mem = await call('/api/user/memory', tokA);
@@ -355,6 +357,8 @@ const server = app.listen(0, async () => {
     const disc = await call('/api/intelligence/discoveries', tokCoach);
     ok('a leader gets the discoveries surface (how the org learns)',
        disc.status === 200 && disc.j?.ok === true && Array.isArray(disc.j.discoveries) && typeof disc.j.note === 'string');
+    ok('discoveries are scoped (organisation vs team) to who the leader manages',
+       disc.j?.scope === 'organisation' || disc.j?.scope === 'team');
     ok('discoveries never leak raw content', !/passwordHash|valueText|"content":/.test(JSON.stringify(disc.j || {})));
     ok('a plain member cannot see discoveries (403)',
        (await call('/api/intelligence/discoveries', tokB)).status === 403);

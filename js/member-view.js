@@ -343,6 +343,10 @@ const MemberApp = {
         <div class="iq-briefing-text">${this._escape(d.opening || '')}</div>
       </div>`;
 
+    // Adaptive check-in — the composer asks what fits where the person is right now.
+    const askEl = document.getElementById('composer-ask');
+    if (askEl && d.ask) askEl.textContent = d.ask;
+
     // Recognition from others — a positive, human moment (the reason to open it).
     const recEl = document.getElementById('me-recognition');
     if (recEl) recEl.innerHTML = (d.recognitions && d.recognitions.length) ? `

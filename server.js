@@ -2327,8 +2327,13 @@ app.get('/api/intelligence/discoveries', requireAuth, (req, res) => {
   if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Leaders only' });
   let discoveries = [];
   try { discoveries = _orgDiscoveries(code, userId, Date.now()); } catch (_) { discoveries = []; }
+  // Scope reflects who they manage — a director sees the whole org; a team lead sees
+  // their part of it, so their discoveries genuinely differ.
+  const visibleN = getVisibleUserIds(code, userId).length;
+  const totalN = Object.keys(orgUsers[code] || {}).length || 1;
+  const scope = visibleN >= totalN * 0.85 ? 'organisation' : 'team';
   res.json({
-    ok: true, discoveries,
+    ok: true, scope, discoveries,
     note: discoveries.length
       ? 'How your organisation learns — correlational patterns from real outcomes, not proof. Each needs a human read of when, where, and why.'
       : 'Not enough outcome history yet to spot how your organisation learns. As interventions and assessments accumulate, discoveries appear here.',
@@ -3454,19 +3459,41 @@ app.get('/api/me/context', requireAuth, async (req, res) => {
     if (!activeFocusTexts.has(ptext)) prepared.push({ text: ptext, type: top.type || null });
   }
 
+  // Returning from a quiet spell — perceive it as a positive (they came back), and
+  // acknowledge it warmly rather than treating the gap as a red mark.
+  const lastAct = _memberLastActivity(code, userId, me.name);
+  const quietDays = lastAct ? Math.floor((now - lastAct) / 86400000) : null;
+  const returning = quietDays != null && quietDays >= 10;
+
+  // Adaptive check-in — WHAT we ask adapts to where the person is (new, in a rough
+  // patch, climbing, returning, or steady) instead of the same weekly prompt for
+  // everyone. Deterministic and honest; the engine decides the question.
+  const created = me.createdAt ? new Date(me.createdAt).getTime() : null;
+  const tenureDays = created ? (now - created) / 86400000 : null;
+  const topPat = (m?.structural || [])[0] || (m?.deviations || [])[0];
+  const rough  = topPat && (topPat.severity === 'high' || /drop|concern|withdrawal|overload|decline/i.test(topPat.type || ''));
+  const rising = (m?.structural || []).some(s => /improv|recover/i.test(s.type));
+  let ask;
+  if (returning)                         ask = "It's been a little while — no pressure at all. How are things going right now?";
+  else if (tenureDays != null && tenureDays < 90) ask = "You're still settling in. What's one thing that's gone well, and one you're not sure about yet?";
+  else if (rough)                        ask = "How are you holding up this week — honestly? No wrong answer.";
+  else if (rising)                       ask = "You've been building nicely lately. What's been working that you want to keep doing?";
+  else                                   ask = "What happened this week that's worth noting?";
+
   // A deterministic, honest opening line (no AI needed).
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   let opening;
-  if (noticed.length)      opening = `Since you were last here, I looked over your week — ${noticed.length === 1 ? "there's one thing" : `there are ${noticed.length} things`} worth a moment.`;
+  if (returning)           opening = `Good to see you back${quietDays >= 14 ? ` — it's been about ${quietDays} days` : ''}. No pressure; whenever you're ready, tell me how things are.`;
+  else if (noticed.length) opening = `Since you were last here, I looked over your week — ${noticed.length === 1 ? "there's one thing" : `there are ${noticed.length} things`} worth a moment.`;
   else if (newSince > 0)   opening = `I've taken in ${newSince} new ${newSince === 1 ? 'thing' : 'things'} since your last visit and folded ${newSince === 1 ? 'it' : 'them'} into your picture.`;
   else                     opening = `Nothing new demands your attention right now. Add anything on your mind and I'll take it from there.`;
 
   // If a model is configured, let the Coach VOICE the opening warmly. The
   // judgment stays deterministic above; the LLM only turns it into words.
   // Privacy-safe: it sees labels/directions (never raw text) and is redacted.
-  // Skipped entirely with no key, so the endpoint stays fast and offline-safe.
-  if (ai.enabled()) {
+  // Skipped for a return (the warm fixed line is the point) and with no key.
+  if (ai.enabled() && !returning) {
     try {
       const obs = noticed.map(x => `- ${x.text}`).join('\n') || '- nothing notably different from their own normal lately';
       const sys = `You are IntelliQ, ${me.name}'s private mirror. Write ONE warm, brief opening (max 2 sentences) that makes them feel seen. Speak to them as "you". Self-relative, no scores, no advice, no invented specifics.`;
@@ -3492,7 +3519,7 @@ app.get('/api/me/context', requireAuth, async (req, res) => {
     .map(s => ({ text: s.valueText || 'recognised your work', by: s.data.byName || 'Someone on your team', date: s.ts }));
 
   res.json({
-    ok: true, name: me.name, greeting, opening, newSince, noticed, questions, prepared, focuses, recognitions,
+    ok: true, name: me.name, greeting, opening, ask, returning, quietDays, newSince, noticed, questions, prepared, focuses, recognitions,
     understanding: agents.personModel.understanding(mem.model),
     trajectory: m?.memberTrajectory || null,
   });
@@ -3513,6 +3540,14 @@ app.post('/api/compose', requireAuth, async (req, res) => {
   if (!text && !mood) return res.status(400).json({ error: 'text or mood required' });
   if (text.length > 4000) return res.status(400).json({ error: 'too long' });
 
+  // Is this a RETURN after a quiet spell? Measure the gap BEFORE recording the new
+  // check-in. A return is a positive (they came back) — but a low-mood return from
+  // someone who rarely logs is a higher-signal event, so we up-weight it.
+  const priorLast = _memberLastActivity(code, userId, me.name);
+  const returnGap = priorLast ? Math.floor((Date.now() - priorLast) / 86400000) : null;
+  const isReturn  = returnGap != null && returnGap >= 10;
+  const lowReturn = isReturn && mood != null && mood <= 2;
+
   // Store as the person's own check-in + signal. Free text is a personal
   // disclosure → sensitive by default (the privacy gate treats it as such).
   const moodLabels = { 1:'Rough', 2:'Low', 3:'Okay', 4:'Good', 5:'Great' };
@@ -3524,7 +3559,9 @@ app.post('/api/compose', requireAuth, async (req, res) => {
   });
   try {
     _emitSignalSafe(code, { subjectType:'member', subjectId:userId, source:'checkin', modality:'text',
-      valueNum: mood, valueText: text || null, label: mood ? `Mood ${mood}/5` : 'Note', sensitivity:'sensitive' }, userId);
+      valueNum: mood, valueText: text || null, label: mood ? `Mood ${mood}/5` : 'Note', sensitivity:'sensitive',
+      // A low-mood first return carries more weight than a routine daily check-in.
+      weightNum: lowReturn ? 3 : undefined, data: isReturn ? { firstReturn: true, quietDays: returnGap } : null }, userId);
   } catch (_) {}
 
   // Update memory + Person Model (deterministic; wrapped so it can't break compose).
@@ -3541,7 +3578,9 @@ app.post('/api/compose', requireAuth, async (req, res) => {
   (m?.deviations || []).slice(0, 2).forEach(d => noticed.push(`${d.label} is ${d.direction} your usual lately`));
   (m?.structural || []).slice(0, 2).forEach(s => noticed.push(intel.PATTERN_LABEL[s.type] || s.type));
 
-  let acknowledgement = "Got it — I've added that and folded it into your picture.";
+  let acknowledgement = isReturn
+    ? "Good to have you back — thanks for checking in after a bit of quiet. I've folded this in."
+    : "Got it — I've added that and folded it into your picture.";
   if (ai.enabled() && text) {
     try {
       const sys = `You are IntelliQ, ${me.name}'s private mirror. They just shared something with you. Reply in ONE warm, brief sentence that shows you genuinely understood — reflect their own words back gently. No advice, no scores, no platitudes. Speak to them as "you".`;

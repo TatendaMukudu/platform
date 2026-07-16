@@ -104,6 +104,10 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
     ok('assessments load for the coach (templates + issued)', assess.status === 200 && Array.isArray(assess.j?.templates));
     const studio = await timed('studio (coach)', '/api/studio', tokCoach);
     ok('the Studio opens with the coach\'s space', studio.status === 200 && studio.j?.ok === true);
+    const cDisc = await timed('discoveries (coach scope)', '/api/intelligence/discoveries', tokCoach);
+    console.log(`     director scope=${disc.j?.scope} (${(disc.j?.discoveries||[]).length}) · coach scope=${cDisc.j?.scope} (${(cDisc.j?.discoveries||[]).length})`);
+    ok('a coach\'s discoveries are TEAM-scoped and differ from the director\'s',
+       cDisc.j?.scope === 'team' && disc.j?.scope === 'organisation');
     const tokPlayer = issueToken(summary.samplePlayerId, CLUB_CODE, 'member');
     const pStudio = await timed('studio (player, with usage)', '/api/studio', tokPlayer);
     console.log(`     sample player Studio: ${(pStudio.j?.plans || []).length} plans · ${(pStudio.j?.messages || []).length} messages · ${(pStudio.j?.assigned || []).length} assigned`);
