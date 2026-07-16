@@ -4084,7 +4084,15 @@ app.get('/api/assessments', requireAuth, (req, res) => {
     const avgOutcome = scored.length ? Math.round(scored.reduce((s, a) => s + a.score, 0) / scored.length) : null;
     const times = uses.map(a => new Date(a.assignedAt).getTime()).filter(Number.isFinite);
     const lastUsed = times.length ? new Date(Math.max(...times)).toISOString() : null;
-    return { uses: uses.length, returned: scored.length, avgOutcome, lastUsed, verdict: verdictByTitle[(tpl.title || '').toLowerCase()] || null };
+    const verdict = verdictByTitle[(tpl.title || '').toLowerCase()] || null;
+    // Evidence-derived label — the org's own playbook, graded by what actually
+    // happened (never by ratings or popularity). Honest about sample size.
+    let evidence;
+    if (scored.length < 3)                                      evidence = 'Not enough data yet';
+    else if (verdict === 'working' || (avgOutcome != null && avgOutcome >= 70)) evidence = 'Works consistently';
+    else if (verdict === 'revisit' || (avgOutcome != null && avgOutcome < 50))  evidence = 'Needs redesign';
+    else                                                         evidence = 'Works sometimes';
+    return { uses: uses.length, returned: scored.length, avgOutcome, lastUsed, verdict, evidence, stage: tpl.stage || 'active' };
   };
   res.json({
     ok: true,
@@ -4324,6 +4332,21 @@ app.delete('/api/assessments/templates/:id', requireAuth, (req, res) => {
   assessmentTemplates[code] = list.filter(x => x.id !== req.params.id);
   scheduleSave();
   res.json({ ok: true });
+});
+
+/* POST /api/assessments/templates/:id/stage — curate the playbook. A leader marks a
+   template Experimental (trialling), Active (in the rotation), or Archived (retired
+   but kept for the record) — GitHub-releases-style curation of what the org runs. */
+app.post('/api/assessments/templates/:id/stage', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Leaders only' });
+  const t = (assessmentTemplates[code] || []).find(x => x.id === req.params.id);
+  if (!t) return res.status(404).json({ error: 'not found' });
+  const stage = String(req.body?.stage || '');
+  if (!['experimental', 'active', 'archived'].includes(stage)) return res.status(400).json({ error: 'stage must be experimental | active | archived' });
+  t.stage = stage;
+  scheduleSave();
+  res.json({ ok: true, stage });
 });
 
 /* POST /api/assessments/assign — assign a template to people. A leader may assign

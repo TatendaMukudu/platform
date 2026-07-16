@@ -367,6 +367,15 @@ const server = app.listen(0, async () => {
     const seededTpl = (tplList.j?.templates || []).find(t => Number.isFinite(t.uses));
     ok('assessment templates expose a track record (uses / avgOutcome / lastUsed / verdict)',
        tplList.status === 200 && seededTpl && 'avgOutcome' in seededTpl && 'lastUsed' in seededTpl && 'verdict' in seededTpl);
+    ok('templates carry an evidence label + playbook stage', seededTpl && typeof seededTpl.evidence === 'string' && typeof seededTpl.stage === 'string');
+    // Lifecycle curation — a leader archives a template; a member cannot.
+    const someTplId = (tplList.j?.templates || [])[0]?.id;
+    ok('a leader can move a template to a playbook stage (archive)',
+       someTplId && (await call(`/api/assessments/templates/${someTplId}/stage`, tokCoach, { method: 'POST', body: { stage: 'archived' } })).j?.stage === 'archived');
+    ok('an invalid stage is refused (400)',
+       someTplId && (await call(`/api/assessments/templates/${someTplId}/stage`, tokCoach, { method: 'POST', body: { stage: 'nope' } })).status === 400);
+    ok('a plain member cannot curate the playbook (403)',
+       someTplId && (await call(`/api/assessments/templates/${someTplId}/stage`, tokB, { method: 'POST', body: { stage: 'active' } })).status === 403);
     const schat = await call('/api/studio/chat', tokB, { method: 'POST', body: { message: 'I want to plan a calmer week and get one hard thing done.', savePlan: true } });
     ok('talking in the Studio returns a reply and saves the plan', schat.status === 200 && typeof schat.j?.reply === 'string' && schat.j.planSaved === true);
     ok('an empty Studio message is refused (400)', (await call('/api/studio/chat', tokB, { method: 'POST', body: {} })).status === 400);

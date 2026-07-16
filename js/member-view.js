@@ -1532,6 +1532,7 @@ const MemberApp = {
       ${proactive}
       <div class="studio-log" id="studio-log">${log}</div>
       ${planHtml}
+      <div id="studio-staged"></div>
       <div class="studio-input-row">
         <textarea class="form-input" id="studio-in" placeholder="Type, think a plan out loud, or attach a file…" rows="1"
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp._studioSend(this)}"></textarea>
@@ -1599,10 +1600,14 @@ const MemberApp = {
   async _studioSend(inputEl, media, attachment) {
     const input = inputEl || document.getElementById('studio-in');
     const message = (input?.value || '').trim();
+    // A staged attachment (chosen earlier) rides along with whatever they typed, so
+    // you can write a summary AND attach your notes in one message.
+    if (!media && this._studioStaged) { media = this._studioStaged.media; attachment = this._studioStaged.attachment; }
     if (!message && !media) return;
     const savePlan = !!document.getElementById('studio-saveplan')?.checked;
     if (message || media) this._studioAppend('you', message, media);
     if (input) input.value = '';
+    this._studioClearStaged();
     const pending = document.createElement('div');
     pending.className = 'conv-ai'; pending.style.opacity = '0.6';
     pending.textContent = attachment ? 'IntelliQ is reading it…' : 'IntelliQ is thinking…';
@@ -1641,7 +1646,18 @@ const MemberApp = {
       const b64 = String(dataUrl).includes(',') ? String(dataUrl).split(',')[1] : String(dataUrl);
       attachment = { name: media.name, mimetype: file.type || 'application/octet-stream', data: b64 };
     } catch (_) { attachment = null; }
-    await this._studioSend(document.getElementById('studio-in'), media, attachment);
+    if (!attachment) { this._studioAppend('assistant', 'Couldn\'t read that file — try again.'); return; }
+    // STAGE it (don't send yet) so they can add their own notes alongside it.
+    this._studioStaged = { media, attachment };
+    const chip = document.getElementById('studio-staged');
+    if (chip) chip.innerHTML = `<div class="studio-chip"><span class="studio-media-tag">${this._escape((media.kind || 'file').toUpperCase())}</span> ${this._escape(media.name)}<button class="studio-chip-x" title="Remove" onclick="MemberApp._studioClearStaged()">✕</button></div><div class="studio-chip-hint">Add a note if you like, then Send — they'll go together.</div>`;
+    const inp = document.getElementById('studio-in'); if (inp) inp.focus();
+  },
+
+  _studioClearStaged() {
+    this._studioStaged = null;
+    const chip = document.getElementById('studio-staged');
+    if (chip) chip.innerHTML = '';
   },
 
   async _studioRecordToggle(btn) {
@@ -1837,28 +1853,41 @@ const MemberApp = {
         </div>
       </div>`;
 
-      // Existing templates → assign, each with its track record (trusted? works? stale?)
+      // Existing templates → assign, each with its evidence label + playbook stage.
       const tpls = d.templates || [];
       if (tpls.length) {
-        const verdictPill = v => v === 'working'
-          ? `<span class="pill" style="background:rgba(14,207,176,0.15);color:#0ecfb0">Working</span>`
-          : v === 'revisit'
-          ? `<span class="pill" style="background:rgba(247,178,79,0.15);color:#f7b24f">Revisit</span>` : '';
-        html += `<div class="card"><div class="card-label">Your assessments — assign to people</div>` +
-          tpls.map(t => {
-            const meta = [];
-            if (t.avgOutcome != null) meta.push(`${t.avgOutcome} avg outcome`);
-            if (t.uses) meta.push(`used ${t.uses}×`);
-            meta.push(t.lastUsed ? `last used ${this._ago(t.lastUsed)}` : 'never used');
-            return `<div class="me-row" style="display:flex;align-items:center;gap:0.5rem;padding:0.55rem 0;border-bottom:1px solid var(--border)">
-              <div style="flex:1;min-width:0">
-                <div><strong>${esc(t.title)}</strong> <span style="font-size:0.72rem;color:var(--text-muted)">· ${kind(t.kind)}</span> ${verdictPill(t.verdict)}</div>
-                <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px">${meta.join(' · ')}</div>
-              </div>
-              <button class="btn-ghost" onclick="MemberApp._assessOpenAssign('${t.id}')">Assign</button>
-              <button class="btn-ghost" onclick="MemberApp._assessDeleteTemplate('${t.id}')" title="Delete" style="color:var(--text-muted)">Delete</button>
-            </div>`;
-          }).join('') +
+        const EVID = {
+          'Works consistently': '#0ecfb0', 'Works sometimes': 'var(--accent)',
+          'Needs redesign': '#f7b24f', 'Not enough data yet': 'var(--text-muted)',
+        };
+        const evidenceBadge = t => t.evidence ? `<span class="pill" style="background:${(EVID[t.evidence]||'var(--text-muted)')}22;color:${EVID[t.evidence]||'var(--text-muted)'}">${esc(t.evidence)}</span>` : '';
+        const stageTag = t => t.stage === 'experimental'
+          ? `<span class="pill" style="background:rgba(124,90,245,0.12);color:var(--accent)">Experimental</span>`
+          : t.stage === 'archived' ? `<span class="pill" style="background:rgba(127,127,127,0.15);color:var(--text-muted)">Archived</span>` : '';
+        const row = t => {
+          const meta = [];
+          if (t.avgOutcome != null) meta.push(`${t.avgOutcome} avg outcome`);
+          if (t.uses) meta.push(`used ${t.uses}×`);
+          meta.push(t.lastUsed ? `last used ${this._ago(t.lastUsed)}` : 'never used');
+          const archived = t.stage === 'archived';
+          return `<div class="me-row" style="display:flex;align-items:center;gap:0.5rem;padding:0.55rem 0;border-bottom:1px solid var(--border);${archived ? 'opacity:0.65' : ''}">
+            <div style="flex:1;min-width:0">
+              <div><strong>${esc(t.title)}</strong> <span style="font-size:0.72rem;color:var(--text-muted)">· ${kind(t.kind)}</span> ${evidenceBadge(t)} ${stageTag(t)}</div>
+              <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px">${meta.join(' · ')}</div>
+            </div>
+            ${archived ? '' : `<button class="btn-ghost" onclick="MemberApp._assessOpenAssign('${t.id}')">Assign</button>`}
+            <select class="assess-stage" title="Playbook stage" onchange="MemberApp._assessSetStage('${t.id}', this.value)">
+              <option value="active"${t.stage !== 'experimental' && t.stage !== 'archived' ? ' selected' : ''}>Active</option>
+              <option value="experimental"${t.stage === 'experimental' ? ' selected' : ''}>Experimental</option>
+              <option value="archived"${t.stage === 'archived' ? ' selected' : ''}>Archive</option>
+            </select>
+          </div>`;
+        };
+        const live = tpls.filter(t => t.stage !== 'archived');
+        const archived = tpls.filter(t => t.stage === 'archived');
+        html += `<div class="card"><div class="card-label">Your playbook — assign, and curate what works</div>` +
+          (live.length ? live.map(row).join('') : `<div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">Nothing active yet.</div>`) +
+          (archived.length ? `<details style="margin-top:0.5rem"><summary style="cursor:pointer;font-size:0.78rem;color:var(--text-muted)">Archived (${archived.length})</summary>${archived.map(row).join('')}</details>` : '') +
           `<div id="assess-assign-panel" style="display:none;margin-top:0.7rem"></div></div>`;
       }
 
@@ -1993,6 +2022,17 @@ const MemberApp = {
   async _assessDeleteTemplate(id) {
     if (!confirm('Delete this assessment?')) return;
     try { await fetch('/api/assessments/templates/' + id, { method: 'DELETE', headers: this._authHeaders() }); this._renderAssessments(); } catch (e) {}
+  },
+
+  // Curate the playbook — move a template between Active / Experimental / Archived.
+  async _assessSetStage(id, stage) {
+    try {
+      await fetch('/api/assessments/templates/' + id + '/stage', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ stage }),
+      });
+      this._renderAssessments();
+    } catch (e) {}
   },
 
   async _assessOpenAssign(templateId) {
