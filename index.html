@@ -13,8 +13,8 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260715a"/>
-<link rel="stylesheet" href="css/member.css?v=20260715a"/>
+<link rel="stylesheet" href="css/styles.css?v=20260716a"/>
+<link rel="stylesheet" href="css/member.css?v=20260716a"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -183,7 +183,7 @@
 
     <!-- TOPBAR -->
     <header class="topbar">
-      <button class="topbar-hamburger" id="topbar-hamburger" onclick="toggleSidebar()" aria-label="Open navigation menu" title="Menu">☰</button>
+      <button class="topbar-hamburger" id="topbar-hamburger" onclick="toggleSidebar()" aria-label="Open navigation menu" title="Menu"></button>
       <div class="topbar-title" id="topbar-page-title">Overview Dashboard</div>
       <div style="flex:1"></div>
       <div class="topbar-search">
@@ -351,7 +351,7 @@
             <div class="section-title">Analytics & Insights</div>
             <div class="section-sub">Deep intelligence across all metrics and groups</div>
           </div>
-          <button class="btn btn-outline btn-sm" onclick="exportReport()">⬇ Export</button>
+          <button class="btn btn-outline btn-sm" onclick="exportReport()">Export</button>
         </div>
 
         <div class="grid-2" style="margin-bottom:1rem">
@@ -560,7 +560,7 @@
               <div class="card-title" id="timeline-modal-title">Member Timeline</div>
               <div style="font-size:0.75rem;color:var(--text-secondary)" id="timeline-modal-sub">Loading…</div>
             </div>
-            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('member-timeline-modal').style.display='none'">✕ Close</button>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('member-timeline-modal').style.display='none'">Close</button>
           </div>
           <div id="member-timeline-content">
             <div style="text-align:center;padding:2rem;color:var(--text-muted)">Loading timeline…</div>
@@ -617,7 +617,7 @@
             <div class="section-title">Alerts & Notifications</div>
             <div class="section-sub"><span id="alerts-unread-count">0</span> unread alerts</div>
           </div>
-          <button class="btn btn-outline btn-sm" onclick="markAllRead()">✓ Mark All Read</button>
+          <button class="btn btn-outline btn-sm" onclick="markAllRead()">Mark All Read</button>
         </div>
 
         <div class="card">
@@ -634,7 +634,7 @@
             <div class="section-title">Reports & Stat Sheets</div>
             <div class="section-sub">Official performance documentation for your organization</div>
           </div>
-          <button class="btn btn-accent btn-sm" onclick="exportReport()">⬇ Export PDF</button>
+          <button class="btn btn-accent btn-sm" onclick="exportReport()">Export PDF</button>
         </div>
 
         <!-- Report header card -->
@@ -1029,7 +1029,7 @@
         </div>
         <div id="checkin-done" style="display:none;padding:0">
           <div class="card" style="border-color:rgba(79,247,122,0.3);text-align:center;padding:1.4rem 1rem">
-            <div style="font-size:2rem;margin-bottom:0.4rem">✅</div>
+            <div style="font-size:2rem;margin-bottom:0.4rem"></div>
             <div style="font-weight:700;font-size:0.9rem">Check-in done for today</div>
             <div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px">Come back tomorrow</div>
           </div>
@@ -1227,7 +1227,7 @@
       <div style="font-weight:600">Notifications</div>
       <div style="display:flex;gap:0.5rem;align-items:center">
         <button class="btn btn-outline btn-sm" onclick="markAllRead()">Mark all read</button>
-        <button class="icon-btn" id="notif-panel-close">✕</button>
+        <button class="icon-btn" id="notif-panel-close"></button>
       </div>
     </div>
     <div id="notif-panel-content" style="padding:0.5rem 0">
@@ -1254,7 +1254,7 @@
       </div>
       <div style="display:flex;align-items:center;gap:0.6rem">
         <div id="pm-grade"></div>
-        <button class="icon-btn" onclick="closeAllModals()">✕</button>
+        <button class="icon-btn" onclick="closeAllModals()"></button>
       </div>
     </div>
     <div class="modal-body">
@@ -1343,7 +1343,7 @@
             <div id="pm-chat-history"></div>
           </div>
           <div style="margin-top:0.8rem">
-            <button class="btn btn-outline btn-sm" onclick="ChatEngine.open(AppState.currentMemberId)">💬 Start AI Check-in</button>
+            <button class="btn btn-outline btn-sm" onclick="ChatEngine.open(AppState.currentMemberId)">Start AI Check-in</button>
           </div>
         </div>
 
@@ -1360,9 +1360,9 @@
           <textarea id="pm-advisor-input" class="advisor-input" rows="2"
             placeholder="e.g. How do I motivate this person?"></textarea>
           <div class="advisor-actions">
-            <div class="advisor-privacy">🔒 Advisor may use protected context to generate safe recommendations, but private notes are not revealed.</div>
+            <div class="advisor-privacy">Advisor may use protected context to generate safe recommendations, but private notes are not revealed.</div>
             <div class="advisor-btns">
-              <button class="btn btn-outline btn-sm" id="pm-advisor-brief" onclick="askAdvisor('briefing')">📋 Full Briefing</button>
+              <button class="btn btn-outline btn-sm" id="pm-advisor-brief" onclick="askAdvisor('briefing')">Full Briefing</button>
               <button class="btn btn-accent btn-sm" id="pm-advisor-ask" onclick="askAdvisor('question')">Ask Advisor</button>
             </div>
           </div>
@@ -1377,7 +1377,7 @@
     </div>
     <div class="modal-footer">
       <button class="btn btn-outline" onclick="closeAllModals()">Close</button>
-      <button class="btn btn-accent" onclick="showToast('Report generated','success')">📋 Generate Report</button>
+      <button class="btn btn-accent" onclick="showToast('Report generated','success')">Generate Report</button>
     </div>
   </div>
 </div>
@@ -1405,7 +1405,7 @@
         <div class="modal-title" id="acm-title">Respond to Alert</div>
         <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px" id="acm-sub"></div>
       </div>
-      <button class="icon-btn" onclick="closeAllModals()">✕</button>
+      <button class="icon-btn" onclick="closeAllModals()"></button>
     </div>
     <div style="padding:1.2rem;overflow-y:auto;max-height:75vh">
 
@@ -1444,7 +1444,7 @@
           ondragover="event.preventDefault();this.classList.add('drag-over')"
           ondragleave="this.classList.remove('drag-over')"
           ondrop="handleAlertDrop(event)">
-          <div style="font-size:1.4rem;margin-bottom:0.3rem">📎</div>
+          <div style="font-size:1.4rem;margin-bottom:0.3rem"></div>
           <div style="font-size:0.82rem;color:var(--text-secondary)">Drop file or click to upload</div>
           <div style="font-size:0.72rem;color:var(--text-muted);margin-top:3px">Images, PDF, Word, Excel, PowerPoint, CSV, Text</div>
         </div>
@@ -1483,18 +1483,18 @@
           <div id="acm-draft-probes"></div>
         </div>
         <div style="background:rgba(124,90,245,0.08);border:1px solid rgba(124,90,245,0.25);border-radius:8px;padding:0.8rem;margin-bottom:0.9rem">
-          <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;color:var(--accent);margin-bottom:0.3rem">🔒 Leader Note — Private</div>
+          <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;color:var(--accent);margin-bottom:0.3rem">Leader Note — Private</div>
           <div id="acm-draft-coachnote" style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6"></div>
         </div>
         <div style="display:flex;justify-content:flex-end">
-          <button class="btn btn-accent" onclick="approveAlertDraft()">✓ Approve &amp; Launch</button>
+          <button class="btn btn-accent" onclick="approveAlertDraft()">Approve &amp; Launch</button>
         </div>
       </div>
 
       <!-- Actions -->
       <div style="display:flex;justify-content:flex-end;gap:0.5rem" id="acm-actions">
         <button class="btn btn-outline" onclick="closeAllModals()">Cancel</button>
-        <button class="btn btn-accent" id="acm-draft-btn" onclick="draftAlertScenario()">✦ Draft Scenario with AI →</button>
+        <button class="btn btn-accent" id="acm-draft-btn" onclick="draftAlertScenario()">Draft Scenario with AI →</button>
       </div>
     </div>
   </div>
@@ -1513,7 +1513,7 @@
           <div style="font-size:0.72rem;color:var(--text-secondary)">Reflection Assistant · Confidential</div>
         </div>
       </div>
-      <button class="icon-btn" onclick="closeAllModals()">✕</button>
+      <button class="icon-btn" onclick="closeAllModals()"></button>
     </div>
     <div class="chat-messages-wrap">
       <div id="chat-messages"></div>
@@ -1537,7 +1537,7 @@
         <div class="modal-title">IntelliQ understood your org</div>
         <div class="modal-sub" id="org-intel-sub">Extracted from your description</div>
       </div>
-      <button class="modal-close" onclick="closeOrgIntelModal()">✕</button>
+      <button class="modal-close" onclick="closeOrgIntelModal()"></button>
     </div>
     <div class="modal-body">
 
@@ -1586,7 +1586,7 @@
         <div class="modal-title" id="ccc-title">Morning check-in</div>
         <div class="modal-sub" id="ccc-sub">Takes 60 seconds — IntelliQ reads this</div>
       </div>
-      <button class="modal-close" onclick="closeAllModals()">✕</button>
+      <button class="modal-close" onclick="closeAllModals()"></button>
     </div>
     <div class="modal-body">
       <div id="ccc-form">
@@ -1622,7 +1622,7 @@
   <div class="modal" style="max-width:520px;width:100%">
     <div class="modal-header">
       <div><div class="modal-title">Create Group</div><div class="modal-sub">Sub-team within your org</div></div>
-      <button class="modal-close" onclick="closeAllModals()">✕</button>
+      <button class="modal-close" onclick="closeAllModals()"></button>
     </div>
     <div class="modal-body">
       <div class="form-group">
@@ -1659,19 +1659,19 @@
         <div class="modal-title" id="gd-title">Group</div>
         <div class="modal-sub" id="gd-sub">Shared notes and messages</div>
       </div>
-      <button class="modal-close" onclick="closeAllModals()">✕</button>
+      <button class="modal-close" onclick="closeAllModals()"></button>
     </div>
     <div class="modal-body" style="flex:1;overflow-y:auto">
 
       <!-- AI-present banner — shown to everyone when active, never silent -->
       <div id="gd-copilot-banner" class="gd-copilot-banner" style="display:none">
-        🤖 <span><strong>Group Copilot is active.</strong> It helps group leaders understand engagement and progress toward group goals. Private member information is protected.</span>
+        <span><strong>Group Copilot is active.</strong> It helps group leaders understand engagement and progress toward group goals. Private member information is protected.</span>
       </div>
 
       <!-- Copilot panel — lead only -->
       <div id="gd-copilot" class="gd-copilot" style="display:none">
         <div class="gd-copilot-head">
-          <span>🤖 Group Copilot</span>
+          <span>Group Copilot</span>
           <span id="gd-copilot-actions"></span>
         </div>
         <div id="gd-copilot-body" class="gd-copilot-body"></div>
@@ -1684,7 +1684,7 @@
           placeholder="Write a message to this group…"></textarea>
         <div style="display:flex;justify-content:flex-end;gap:0.4rem">
           <button class="btn btn-outline btn-sm" onclick="sendGroupMessage(false)">Send (Known)</button>
-          <button class="btn btn-accent btn-sm" onclick="sendGroupMessage(true)">👤 Send Anonymously</button>
+          <button class="btn btn-accent btn-sm" onclick="sendGroupMessage(true)">Send Anonymously</button>
         </div>
       </div>
 
@@ -1816,7 +1816,7 @@
       placeholder="Type your response…"
       oninput="MemberApp.autoResizeInput(this)"
       onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.sendScenarioMessage();}"></textarea>
-    <button class="send-btn" id="sc-send-btn" onclick="MemberApp.sendScenarioMessage()">➤</button>
+    <button class="send-btn" id="sc-send-btn" onclick="MemberApp.sendScenarioMessage()"></button>
   </div>
 </div>
 
@@ -1831,8 +1831,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260715a"></script>
-<script src="js/auth.js?v=20260715a"></script>
+<script src="js/data.js?v=20260716a"></script>
+<script src="js/auth.js?v=20260716a"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1900,14 +1900,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260715a"></script>
-<script src="js/ui.js?v=20260715a"></script>
-<script src="js/attachments.js?v=20260715a"></script>
-<script src="js/scenarios.js?v=20260715a"></script>
-<script src="js/chat.js?v=20260715a"></script>
-<script src="js/tree.js?v=20260715a"></script>
-<script src="js/app.js?v=20260715a"></script>
-<script src="js/member-view.js?v=20260715a"></script>
+<script src="js/charts.js?v=20260716a"></script>
+<script src="js/ui.js?v=20260716a"></script>
+<script src="js/attachments.js?v=20260716a"></script>
+<script src="js/scenarios.js?v=20260716a"></script>
+<script src="js/chat.js?v=20260716a"></script>
+<script src="js/tree.js?v=20260716a"></script>
+<script src="js/app.js?v=20260716a"></script>
+<script src="js/member-view.js?v=20260716a"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->

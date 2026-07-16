@@ -294,12 +294,14 @@ img { max-width: 100%; }
 
 /* ── TOPBAR ──────────────────────────────────────────────── */
 .topbar {
-  height: var(--header-h);
+  height: calc(var(--header-h) + env(safe-area-inset-top, 0px));
+  padding-top: env(safe-area-inset-top, 0px);
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
-  padding: 0 1.5rem;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
   gap: 1rem;
   position: sticky; top: 0; z-index: 50;
 }

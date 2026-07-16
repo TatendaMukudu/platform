@@ -34,12 +34,12 @@ const ICON = {
    Metrics are defined per-org in the Metrics settings, not here.
 ─────────────────────────────────────────────────────────────────────────── */
 const ORG_MODES = {
-  school:     { label:'School',      icon:'🎓', color:'#4f8ef7' },
-  sports:     { label:'Sports Club', icon:'⚽', color:'#f74f7a' },
-  workplace:  { label:'Workplace',   icon:'🏢', color:'#4ff7b2' },
-  military:   { label:'Military',    icon:'🎖️', color:'#f7c44f' },
-  healthcare: { label:'Healthcare',  icon:'🏥', color:'#b24ff7' },
-  government: { label:'Government',  icon:'🏛️', color:'#4fb8f7' },
+  school:     { label:'School',      icon:'', color:'#4f8ef7' },
+  sports:     { label:'Sports Club', icon:'', color:'#f74f7a' },
+  workplace:  { label:'Workplace',   icon:'', color:'#4ff7b2' },
+  military:   { label:'Military',    icon:'', color:'#f7c44f' },
+  healthcare: { label:'Healthcare',  icon:'', color:'#b24ff7' },
+  government: { label:'Government',  icon:'', color:'#4fb8f7' },
 };
 
 const PLATFORM_GRADES = {

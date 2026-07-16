@@ -154,7 +154,7 @@ const MemberApp = {
       if (data.token) { Auth.token = data.token; Auth.save(); }
 
       this._afterAuth();
-      this.showToast('Password set ✓', 'success');
+      this.showToast('Password set ', 'success');
     } catch(err) {
       errEl.textContent   = err.message || 'Could not set password — try again.';
       errEl.style.display = 'block';
@@ -191,7 +191,7 @@ const MemberApp = {
     btn.textContent = 'Save & Continue →'; btn.disabled = false;
     this._showMain();
     this.loadPending();
-    this.showToast('Goal saved ✓', 'success');
+    this.showToast('Goal saved ', 'success');
   },
 
   skipGoals() {
@@ -448,7 +448,7 @@ const MemberApp = {
         body: JSON.stringify({ orgCode: this._orgCode, authorId: this._userId, authorName: this._name, content, type: 'private', tag: null, groupId: null }),
       });
       if (!res.ok) throw new Error();
-      this.showToast('Saved ✓', 'success');
+      this.showToast('Saved ', 'success');
       this._renderMeNotes();
     } catch (e) { this.showToast('Could not save', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Save note'; } }
   },
@@ -594,12 +594,12 @@ const MemberApp = {
       }).join('');
 
       const connLines = (d.connections || []).slice(0, 2).map(c =>
-        `<div class="iq-conn">🔗 ${this._escape(c.a)} &amp; ${this._escape(c.b)} have been moving ${c.relation === 'inversely' ? 'in opposite directions' : 'together'} for you lately <span class="iq-conn-hint">— a connection worth noticing, not a cause</span></div>`
+        `<div class="iq-conn">${this._escape(c.a)} &amp; ${this._escape(c.b)} have been moving ${c.relation === 'inversely' ? 'in opposite directions' : 'together'} for you lately <span class="iq-conn-hint">— a connection worth noticing, not a cause</span></div>`
       ).join('');
 
       el.innerHTML = `
         <div class="iq-mirror">
-          <div class="iq-mirror-title">🪞 What IntelliQ notices about you</div>
+          <div class="iq-mirror-title">What IntelliQ notices about you</div>
           <div class="iq-mirror-text">${this._escape(d.reflection || '')}</div>
           ${portraitChips ? `<div class="iq-portrait">${portraitChips}</div>` : ''}
           ${shiftChips ? `<div class="iq-shifts"><span class="iq-shifts-label">Lately, vs your own normal:</span> ${shiftChips}</div>` : ''}
@@ -645,7 +645,7 @@ const MemberApp = {
     el.innerHTML = `
       <div class="card" style="cursor:pointer;border-color:rgba(79,247,122,0.35);margin-bottom:0.8rem" onclick="MemberApp.startWeekly()">
         <div style="display:flex;align-items:center;gap:0.6rem">
-          <span style="font-size:1.3rem">📋</span>
+          <span style="font-size:1.3rem"></span>
           <div style="flex:1">
             <div style="font-size:0.85rem;font-weight:600">Weekly reflection ready</div>
             <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">2 minutes — IntelliQ synthesises everyone's input</div>
@@ -665,7 +665,7 @@ const MemberApp = {
     if (this.checkins.length < MIN_FOR_TREND) {
       return `
         <div class="empty-card" style="margin-bottom:0.8rem;padding:0.9rem">
-          <div class="empty-icon" style="font-size:1.2rem;margin-bottom:0.3rem">📈</div>
+          <div class="empty-icon" style="font-size:1.2rem;margin-bottom:0.3rem"></div>
           <div style="font-size:0.78rem">Complete a few check-ins so IntelliQ can identify patterns.</div>
         </div>`;
     }
@@ -684,11 +684,11 @@ const MemberApp = {
 
     let signal, signalColor, signalIcon;
     if (diff >= 0.8) {
-      signal = 'Improving';       signalColor = 'var(--success)'; signalIcon = '📈';
+      signal = 'Improving';       signalColor = 'var(--success)'; signalIcon = '';
     } else if (diff <= -0.8) {
-      signal = 'Needs attention'; signalColor = 'var(--danger)';  signalIcon = '📉';
+      signal = 'Needs attention'; signalColor = 'var(--danger)';  signalIcon = '';
     } else {
-      signal = 'Steady';          signalColor = 'var(--warning)'; signalIcon = '➡️';
+      signal = 'Steady';          signalColor = 'var(--warning)'; signalIcon = '';
     }
 
     // Streak: consecutive days with a check-in
@@ -706,7 +706,7 @@ const MemberApp = {
             </div>
           </div>
           <div class="iq-signal">
-            <div class="iq-signal-icon">🔥</div>
+            <div class="iq-signal-icon"></div>
             <div>
               <div class="iq-signal-label">${streak}</div>
               <div class="iq-signal-sub">Total check-ins</div>
@@ -714,7 +714,7 @@ const MemberApp = {
           </div>
           ${this.results.length ? `
           <div class="iq-signal">
-            <div class="iq-signal-icon">🎯</div>
+            <div class="iq-signal-icon"></div>
             <div>
               <div class="iq-signal-label">${this.results.length}</div>
               <div class="iq-signal-sub">Assessments done</div>
@@ -921,7 +921,7 @@ const MemberApp = {
       }).join('');
     }
     if (!pending.length && !done.length) {
-      html = `<div class="empty-card"><div class="empty-icon">🎯</div><div>No assessments assigned yet.<br>Assessments will appear here when assigned.</div></div>`;
+      html = `<div class="empty-card"><div class="empty-icon"></div><div>No assessments assigned yet.<br>Assessments will appear here when assigned.</div></div>`;
     }
     el.innerHTML = html;
   },
@@ -942,7 +942,7 @@ const MemberApp = {
       <div class="scenario-pending-card ${sc.fromAlert ? 'from-alert' : ''}"
            onclick="${done ? '' : `MemberApp.startScenario('${sc.id}')`}"
            style="${done ? 'opacity:0.6;cursor:default' : ''}">
-        <div class="sc-icon">${done ? '✅' : '🎯'}</div>
+        <div class="sc-icon">${done ? '' : ''}</div>
         <div class="sc-info">
           <div class="sc-title">${sc.title}</div>
           <div class="sc-meta">
@@ -1240,7 +1240,7 @@ const MemberApp = {
 
     document.getElementById('checkin-done').style.display = 'block';
     document.getElementById('checkin-form').style.display = 'none';
-    this.showToast('Check-in saved ✓', 'success');
+    this.showToast('Check-in saved ', 'success');
     this._renderHome();  // refreshes home with new insight + progress
   },
 
@@ -1284,12 +1284,12 @@ const MemberApp = {
           </div>` : ''}
         ${insight.suggestedNextAction ? `
           <div class="iq-insight-action">
-            <span class="iq-action-icon">👉</span>
+            <span class="iq-action-icon"></span>
             <span>${p(insight.suggestedNextAction)}</span>
           </div>` : ''}
         ${insight.goalConnection ? `
           <div class="iq-insight-detail goal-line">
-            <span style="margin-right:0.35rem">🎯</span>${p(insight.goalConnection)}
+            <span style="margin-right:0.35rem"></span>${p(insight.goalConnection)}
           </div>` : ''}
         ${insight.encouragement ? `
           <div class="iq-insight-detail encourage-line">
@@ -1297,7 +1297,7 @@ const MemberApp = {
           </div>` : ''}
         ${insight.watchOutFor ? `
           <div class="iq-insight-detail watch-line">
-            <span style="margin-right:0.35rem">⚠️</span>${p(insight.watchOutFor)}
+            <span style="margin-right:0.35rem"></span>${p(insight.watchOutFor)}
           </div>` : ''}
       </div>`;
   },
@@ -1313,7 +1313,7 @@ const MemberApp = {
         <div class="card" style="margin-bottom:0.8rem">
           <div class="card-label" style="margin-bottom:0.5rem">Your Focus</div>
           <div style="font-size:0.87rem;color:var(--text-primary);font-weight:600;line-height:1.5">
-            🎯 ${this._escape(this.goals.goal)}
+            ${this._escape(this.goals.goal)}
           </div>
           ${this.goals.identity ? `
           <div style="font-size:0.78rem;color:var(--text-secondary);line-height:1.5;margin-top:0.35rem">
@@ -1331,7 +1331,7 @@ const MemberApp = {
     }
 
     // ── 3. Check-In History ───────────────────────────────────
-    const moodIcons  = { 1:'😔', 2:'😕', 3:'😐', 4:'🙂', 5:'😄' };
+    const moodIcons  = { 1:'', 2:'', 3:'', 4:'', 5:'' };
     const moodColors = { 1:'var(--danger)', 2:'#f7b24f', 3:'var(--text-muted)', 4:'var(--success)', 5:'var(--success)' };
     if (this.checkins.length) {
       const recent = [...this.checkins].reverse().slice(0, 7);
@@ -1366,7 +1366,7 @@ const MemberApp = {
 
     // ── 4. Assessment / scenario stats ───────────────────────
     if (!this.results.length) {
-      html += `<div class="empty-card"><div class="empty-icon">📊</div><div>Complete an assessment to see your performance stats.</div></div>`;
+      html += `<div class="empty-card"><div class="empty-icon"></div><div>Complete an assessment to see your performance stats.</div></div>`;
       el.innerHTML = html;
     } else {
       const avgScore = Math.round(this.results.reduce((s, r) => s + r.score, 0) / this.results.length);
@@ -1592,7 +1592,7 @@ const MemberApp = {
           tpls.map(t => `<div class="me-row" style="display:flex;align-items:center;gap:0.5rem;padding:0.55rem 0;border-bottom:1px solid var(--border)">
             <div style="flex:1"><strong>${esc(t.title)}</strong> <span style="font-size:0.72rem;color:var(--text-muted)">· ${kind(t.kind)}</span></div>
             <button class="btn-ghost" onclick="MemberApp._assessOpenAssign('${t.id}')">Assign</button>
-            <button class="btn-ghost" onclick="MemberApp._assessDeleteTemplate('${t.id}')" title="Delete" style="color:var(--text-muted)">✕</button>
+            <button class="btn-ghost" onclick="MemberApp._assessDeleteTemplate('${t.id}')" title="Delete" style="color:var(--text-muted)"></button>
           </div>`).join('') +
           `<div id="assess-assign-panel" style="display:none;margin-top:0.7rem"></div></div>`;
       }
@@ -1660,7 +1660,7 @@ const MemberApp = {
     try {
       const res = await fetch('/api/assessments/templates', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ title, kind, description, guidance, fields }) });
       if (!res.ok) throw new Error();
-      this.showToast('Assessment created ✓', 'success');
+      this.showToast('Assessment created ', 'success');
       this._renderAssessments();
     } catch (e) { this.showToast('Could not create', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Create'; } }
   },
@@ -1747,7 +1747,7 @@ const MemberApp = {
     try {
       const res = await fetch('/api/assessments/assign', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ templateId, assigneeIds: ids }) });
       if (!res.ok) throw new Error();
-      this.showToast(`Assigned to ${ids.length} ✓`, 'success');
+      this.showToast(`Assigned to ${ids.length} `, 'success');
       this._renderAssessments();
     } catch (e) { this.showToast('Could not assign', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Assign'; } }
   },
@@ -1811,7 +1811,7 @@ const MemberApp = {
     try {
       const res = await fetch(`/api/assessments/${id}/return`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ feedback, score }) });
       if (!res.ok) throw new Error();
-      this.showToast('Sent back ✓', 'success');
+      this.showToast('Sent back ', 'success');
       this._renderAssessments();
     } catch (e) { this.showToast('Could not return', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Return'; } }
   },
@@ -1851,7 +1851,7 @@ const MemberApp = {
     try {
       const res = await fetch('/api/tutorials', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ title, body, url }) });
       if (!res.ok) throw new Error();
-      this.showToast('Pinned ✓', 'success');
+      this.showToast('Pinned ', 'success');
       this._renderAssessments();
     } catch (e) { this.showToast('Could not pin', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Pin it'; } }
   },
@@ -1869,7 +1869,7 @@ const MemberApp = {
      auto-sync is the provider integration point; the consent + mapping are real.
      Backed by /api/me/sources · /api/me/consent · /api/me/connect.
      ══════════════════════════════════════════════════════════════════════ */
-  _appIcon: { calendar: '🗓️', email: '✉️', health: '❤️', fitness: '🏃' },
+  _appIcon: { calendar: '', email: '', health: '', fitness: '' },
 
   async _renderApps() {
     const root = document.getElementById('apps-root');
@@ -1966,7 +1966,7 @@ const MemberApp = {
     try {
       const r = await fetch('/api/me/consent', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ scope, granted: grant }) });
       if (!r.ok) throw new Error();
-      this.showToast(grant ? 'Contribute allowed ✓' : 'Contribute turned off', 'success');
+      this.showToast(grant ? 'Contribute allowed ' : 'Contribute turned off', 'success');
       this._renderApps();
     } catch (e) {
       this.showToast('Could not update', 'error');
@@ -2003,7 +2003,7 @@ const MemberApp = {
     try {
       const r = await fetch('/api/me/consent', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ scope, granted: grant }) });
       if (!r.ok) throw new Error();
-      this.showToast(grant ? 'Assistant allowed ✓' : 'Assistant turned off', 'success');
+      this.showToast(grant ? 'Assistant allowed ' : 'Assistant turned off', 'success');
       this._renderApps();
     } catch (e) {
       this.showToast('Could not update', 'error');
@@ -2020,7 +2020,7 @@ const MemberApp = {
       // Step 2 — connect the source (now allowed).
       const r = await fetch('/api/me/connect', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ source }) });
       if (!r.ok) throw new Error();
-      this.showToast('Connected ✓ — you can disconnect any time', 'success');
+      this.showToast('Connected — you can disconnect any time', 'success');
       this._renderApps();
     } catch (e) {
       this.showToast('Could not connect', 'error');
@@ -2162,7 +2162,7 @@ const MemberApp = {
         const txtEl = document.getElementById('note-ai-text');
         if (aiEl && txtEl) { txtEl.textContent = data.note.aiResponse; aiEl.style.display = 'block'; }
       }
-      this.showToast('Note saved ✓', 'success');
+      this.showToast('Note saved ', 'success');
       this._loadNotes();
     } catch(e) {
       this.showToast('Could not save note', 'warning');
@@ -2198,18 +2198,18 @@ const MemberApp = {
       : this._cachedNotes.filter(n => n.tag === filter);
 
     if (!this._cachedNotes.length) {
-      el.innerHTML = `<div class="empty-card"><div class="empty-icon">📝</div><div>No notes yet. Write your first one above.</div></div>`;
+      el.innerHTML = `<div class="empty-card"><div class="empty-icon"></div><div>No notes yet. Write your first one above.</div></div>`;
       return;
     }
     if (!notes.length) {
-      el.innerHTML = `<div class="empty-card"><div class="empty-icon">🔍</div><div>No ${filter} notes yet.</div></div>`;
+      el.innerHTML = `<div class="empty-card"><div class="empty-icon"></div><div>No ${filter} notes yet.</div></div>`;
       return;
     }
 
-    const typeIcons  = { private:'🔒', shared:'📤', anonymous:'👤' };
+    const typeIcons  = { private:'', shared:'', anonymous:'' };
     const typeColors = { private:'var(--text-muted)', shared:'var(--accent)', anonymous:'var(--warning)' };
     el.innerHTML = notes.map(n => {
-      const icon     = typeIcons[n.type]  || '📝';
+      const icon     = typeIcons[n.type]  || '';
       const color    = typeColors[n.type] || 'var(--text-muted)';
       const time     = new Date(n.createdAt).toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
       const tagBadge = n.tag ? `<span class="note-tag-badge">${n.tag}</span>` : '';
@@ -2257,7 +2257,7 @@ const MemberApp = {
       }),
     });
     document.getElementById('msg-content').value = '';
-    this.showToast(anonymous ? 'Sent anonymously ✓' : 'Sent ✓', 'success');
+    this.showToast(anonymous ? 'Sent anonymously ' : 'Sent ', 'success');
     this._loadMessages();
   },
 
@@ -2271,7 +2271,7 @@ const MemberApp = {
         { headers: this._authHeaders() }
       );
       if (res.status === 401) {
-        el.innerHTML = `<div class="empty-card"><div class="empty-icon">🔒</div><div>Session expired — please log in again.</div></div>`;
+        el.innerHTML = `<div class="empty-card"><div class="empty-icon"></div><div>Session expired — please log in again.</div></div>`;
         return;
       }
       const data = res.ok ? await res.json() : { messages: [] };
@@ -2363,7 +2363,7 @@ const MemberApp = {
     const msgs = document.getElementById('sc-messages');
     const div  = document.createElement('div');
     div.className = 'mandated-banner';
-    div.innerHTML = `<strong>⚠ Important:</strong> What you've shared has been flagged for a trusted adult who cares about your wellbeing. You're not in trouble — someone will follow up with you.`;
+    div.innerHTML = `<strong>Important:</strong> What you've shared has been flagged for a trusted adult who cares about your wellbeing. You're not in trouble — someone will follow up with you.`;
     msgs.appendChild(div);
     msgs.scrollTop = msgs.scrollHeight;
   },

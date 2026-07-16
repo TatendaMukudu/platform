@@ -1155,7 +1155,7 @@ function _memberErrorHTML(err) {
   return `
     <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
                 min-height:100vh;padding:2rem;text-align:center;gap:1.2rem;background:#fff">
-      <div style="font-size:2.5rem">⚠️</div>
+      <div style="font-size:2.5rem"></div>
       <div style="font-weight:700;font-size:1.15rem;color:#111">Something went wrong loading your dashboard.</div>
       <div style="color:#666;font-size:0.85rem;max-width:320px;line-height:1.5">
         This is usually a temporary issue. Try refreshing — if it keeps happening, log out and back in.
@@ -1390,7 +1390,7 @@ async function regenerateMemberInvite(userId, email) {
       <div style="display:flex;gap:0.5rem;justify-content:flex-end">
         <button class="btn btn-outline btn-sm" onclick="_closeInlineModal()">Close</button>
         <button class="btn btn-accent btn-sm"
-          onclick="navigator.clipboard.writeText('${safeLink}').then(()=>showToast('Copied!','success'))">📋 Copy Link</button>
+          onclick="navigator.clipboard.writeText('${safeLink}').then(()=>showToast('Copied!','success'))">Copy Link</button>
       </div>`);
   } catch(e) {
     showToast(e.message || 'Could not generate link', 'warning');
@@ -1477,7 +1477,7 @@ function launchApp(){
 /* ── SIDEBAR ──────────────────────────────────────────────── */
 function renderSidebar(){
   const mode     = AppState.mode;
-  const modeInfo = ORG_MODES[mode] || { label: AppState.orgName || 'Platform', icon: '🏢', color: '#4f8ef7' };
+  const modeInfo = ORG_MODES[mode] || { label: AppState.orgName || 'Platform', icon: '', color: '#4f8ef7' };
   const color    = modeInfo.color || '#4f8ef7';
 
   document.querySelector('.sb-logo-text').textContent = 'Platform';
@@ -1634,16 +1634,16 @@ function _emptyStateHTML(_mode) {
   // Generic — no mode-specific terms
   return `
     <div style="text-align:center;padding:3rem 1rem;max-width:480px;margin:0 auto">
-      <div style="font-size:2.5rem;margin-bottom:1rem">🚀</div>
+      <div style="font-size:2.5rem;margin-bottom:1rem"></div>
       <div style="font-size:1.05rem;font-weight:700;color:var(--text-primary);margin-bottom:0.5rem">No members yet</div>
       <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1.5rem;line-height:1.6">
         Add people to your organisation to start using IntelliQ — manually, by spreadsheet, invite, or join link.
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:0.6rem;justify-content:center">
         <button class="btn btn-accent btn-sm" onclick="navigate('people');setTimeout(()=>switchPeopleTab('onboard'),100)">+ Add Member</button>
-        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>{switchPeopleTab('onboard');_openOnboardSection('import')},100)">📁 Import</button>
-        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>{switchPeopleTab('onboard');_openOnboardSection('invite')},100)">✉ Invite</button>
-        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>{switchPeopleTab('onboard');_openOnboardSection('link')},100)">🔗 Join Link</button>
+        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>{switchPeopleTab('onboard');_openOnboardSection('import')},100)">Import</button>
+        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>{switchPeopleTab('onboard');_openOnboardSection('invite')},100)">Invite</button>
+        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>{switchPeopleTab('onboard');_openOnboardSection('link')},100)">Join Link</button>
       </div>
     </div>`;
 }
@@ -1658,7 +1658,7 @@ function renderDashboard(){
     const statsGrid = document.getElementById('dash-stats');
     if (statsGrid) statsGrid.innerHTML = `
       <div style="grid-column:1/-1;text-align:center;padding:3rem 1rem">
-        <div style="font-size:2.5rem;margin-bottom:0.75rem">🚀</div>
+        <div style="font-size:2.5rem;margin-bottom:0.75rem"></div>
         <div style="font-size:1.1rem;font-weight:700;margin-bottom:0.4rem">Your platform is set up</div>
         <div style="font-size:0.85rem;color:var(--text-secondary);max-width:360px;margin:0 auto 1.2rem">
           Start by adding people to your organisation. Use <strong>People → Onboard</strong> to add them individually or by invite.
@@ -1797,7 +1797,7 @@ function renderMembers(){
     const grid = document.getElementById('members-grid');
     if (grid) grid.innerHTML = `
       <div style="grid-column:1/-1;text-align:center;padding:3rem 1rem">
-        <div style="font-size:2rem;margin-bottom:0.5rem">👥</div>
+        <div style="font-size:2rem;margin-bottom:0.5rem"></div>
         <div style="font-weight:600;margin-bottom:0.3rem">No members yet</div>
         <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:1rem">Add people via People → Onboard</div>
         <button class="btn btn-accent btn-sm" onclick="navigate('people');switchPeopleTab('onboard')">+ Add Member</button>
@@ -1821,7 +1821,7 @@ function renderMembers(){
   const grid = document.getElementById('members-grid');
   grid.innerHTML = filtered.length
     ? filtered.map(m => memberCardHTML(m, orgMetrics)).join('')
-    : `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">🔍</div><p>No members match your search.</p></div>`;
+    : `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon"></div><p>No members match your search.</p></div>`;
 }
 
 function filterMembers(group){
@@ -1988,10 +1988,10 @@ function renderIntelliQ(){
 
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0.7rem;margin-bottom:1.2rem">
       ${[
-        { label:'Open Warnings',   val: openAlerts.length,   color: openAlerts.length ? 'var(--warning)' : 'var(--success)', icon:'⚠' },
-        { label:'Unactioned Flags',val: unactioned.length,   color: unactioned.length > 2 ? 'var(--danger)' : unactioned.length ? 'var(--warning)' : 'var(--success)', icon:'🔔' },
-        { label:'At-Risk Members', val: atRiskMembers.length,color: atRiskMembers.length > 3 ? 'var(--danger)' : 'var(--warning)', icon:'🚨' },
-        { label:'Low Engagement',  val: noEngagement.length, color: noEngagement.length > 4 ? 'var(--warning)' : 'var(--text-secondary)', icon:'💤' },
+        { label:'Open Warnings',   val: openAlerts.length,   color: openAlerts.length ? 'var(--warning)' : 'var(--success)', icon:'' },
+        { label:'Unactioned Flags',val: unactioned.length,   color: unactioned.length > 2 ? 'var(--danger)' : unactioned.length ? 'var(--warning)' : 'var(--success)', icon:'' },
+        { label:'At-Risk Members', val: atRiskMembers.length,color: atRiskMembers.length > 3 ? 'var(--danger)' : 'var(--warning)', icon:'' },
+        { label:'Low Engagement',  val: noEngagement.length, color: noEngagement.length > 4 ? 'var(--warning)' : 'var(--text-secondary)', icon:'' },
       ].map(s => `
         <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:0.8rem;text-align:center">
           <div style="font-size:1.2rem">${s.icon}</div>
@@ -2015,7 +2015,7 @@ function renderIntelliQ(){
         </div>`;
       }).join('')}
       ${openAlerts.length > 4 ? `<div style="font-size:0.75rem;color:var(--accent);cursor:pointer;margin-top:0.3rem" onclick="navigate('alerts')">+ ${openAlerts.length-4} more — view all alerts →</div>` : ''}
-    ` : `<div style="font-size:0.82rem;color:var(--success);text-align:center;padding:1rem">✓ No open warnings — org looks healthy</div>`}`;
+    ` : `<div style="font-size:0.82rem;color:var(--success);text-align:center;padding:1rem">No open warnings — org looks healthy</div>`}`;
 
   setTimeout(()=>{
     // Radar for org average
@@ -2058,7 +2058,7 @@ async function loadOrgInsights(forceRefresh = false) {
 
   el.innerHTML = `
     <div style="text-align:center;padding:1.5rem 0;color:var(--text-muted);font-size:0.82rem">
-      <div style="font-size:1.4rem;margin-bottom:0.5rem">🧠</div>
+      <div style="font-size:1.4rem;margin-bottom:0.5rem"></div>
       IntelliQ is reading the data…
     </div>`;
 
@@ -2094,9 +2094,9 @@ function _renderOrgInsights(data, el) {
   }
 
   const urgencyColor = { high: 'var(--danger)', medium: 'var(--warning)', low: 'var(--text-secondary)' };
-  const urgencyIcon  = { high: '🔴', medium: '🟡', low: '⚪' };
+  const urgencyIcon  = { high: '', medium: '', low: '' };
   const trendColor   = { improving: 'var(--success)', stable: 'var(--text-secondary)', declining: 'var(--warning)', unknown: 'var(--text-muted)' };
-  const alignIcon    = { on_track: '✓', mixed: '~', off_track: '↗', no_goal: '○', unknown: '—' };
+  const alignIcon    = { on_track: '', mixed: '~', off_track: '↗', no_goal: '○', unknown: '—' };
   const alignColor   = { on_track: 'var(--success)', mixed: 'var(--warning)', off_track: 'var(--danger)', no_goal: 'var(--text-muted)', unknown: 'var(--text-muted)' };
   const evidenceLabel = { checkins: 'check-ins', weeklyAssessments: 'weeklies', goals: 'goals', assessmentScores: 'scores', notes: 'notes' };
 
@@ -2130,8 +2130,8 @@ function _renderOrgInsights(data, el) {
             <div style="flex:1">
               <div style="font-size:0.83rem;color:var(--text-primary);line-height:1.5;margin-bottom:0.3rem">${r.action}</div>
               ${r.reason ? `<div style="font-size:0.75rem;color:var(--text-secondary);line-height:1.45;margin-bottom:0.3rem">${r.reason}</div>` : ''}
-              ${r.predictedOutcome ? `<div style="font-size:0.73rem;color:#4fc88e;line-height:1.4;margin-bottom:0.2rem">✓ If acted on: ${r.predictedOutcome}</div>` : ''}
-              ${r.riskIfIgnored    ? `<div style="font-size:0.73rem;color:#f7a84f;line-height:1.4;margin-bottom:0.3rem">⚠ If ignored: ${r.riskIfIgnored}</div>` : ''}
+              ${r.predictedOutcome ? `<div style="font-size:0.73rem;color:#4fc88e;line-height:1.4;margin-bottom:0.2rem">If acted on: ${r.predictedOutcome}</div>` : ''}
+              ${r.riskIfIgnored    ? `<div style="font-size:0.73rem;color:#f7a84f;line-height:1.4;margin-bottom:0.3rem">If ignored: ${r.riskIfIgnored}</div>` : ''}
               <div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;margin-top:0.3rem">
                 ${r.confidence ? `<span style="background:${confChipColor};border:1px solid ${confChipBorder};border-radius:4px;padding:1px 6px;font-size:0.68rem;color:${confChipText};font-weight:600">${r.confidence} confidence</span>` : ''}
                 ${evidenceTags}
@@ -2150,18 +2150,18 @@ function _renderOrgInsights(data, el) {
   // ── 2b. Risk Patterns (from local pattern engine — always reliable) ───────
   if (data.patterns && data.patterns.length > 0) {
     const patternIconMap = {
-      BURNOUT_RISK:        '🔴',
-      DISENGAGEMENT_RISK:  '🟠',
-      CONFIDENCE_CONCERN:  '🟡',
-      ISOLATION_RISK:      '🟣',
-      GOAL_MISALIGNMENT:   '⚪',
+      BURNOUT_RISK:        '',
+      DISENGAGEMENT_RISK:  '',
+      CONFIDENCE_CONCERN:  '',
+      ISOLATION_RISK:      '',
+      GOAL_MISALIGNMENT:   '',
     };
     const patternConfColor = { high: '#f74f4f', medium: '#f7a84f', low: 'var(--text-muted)' };
-    html += `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">⚡ Risk Patterns Detected</div>`;
+    html += `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">Risk Patterns Detected</div>`;
     html += `<div style="margin-bottom:1rem">`;
     html += data.patterns.map(p => `
       <div style="display:flex;align-items:flex-start;gap:0.6rem;padding:0.5rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;margin-bottom:0.35rem">
-        <span style="flex-shrink:0;font-size:0.9rem">${patternIconMap[p.type] || '⚪'}</span>
+        <span style="flex-shrink:0;font-size:0.9rem">${patternIconMap[p.type] || ''}</span>
         <div style="flex:1">
           <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.15rem">
             <span style="font-size:0.82rem;font-weight:700;color:var(--text-primary)">${p.member}</span>
@@ -2179,7 +2179,7 @@ function _renderOrgInsights(data, el) {
     html += `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">Needs Attention</div>`;
     html += ai.atRisk.map(r => `
       <div style="display:flex;align-items:flex-start;gap:0.6rem;padding:0.6rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-left:3px solid ${urgencyColor[r.urgency]||'var(--border)'};border-radius:0 8px 8px 0;margin-bottom:0.4rem">
-        <span style="flex-shrink:0;margin-top:2px">${urgencyIcon[r.urgency]||'⚪'}</span>
+        <span style="flex-shrink:0;margin-top:2px">${urgencyIcon[r.urgency]||''}</span>
         <div>
           <span style="font-weight:700;font-size:0.85rem">${r.name}</span>
           <span style="color:var(--text-secondary);font-size:0.8rem;margin-left:0.4rem">${r.reason}</span>
@@ -2244,7 +2244,7 @@ function _renderOrgInsights(data, el) {
       const aColor = alignColor[p.goalAlignment] || 'var(--text-muted)';
       const aIcon  = alignIcon[p.goalAlignment]  || '—';
       const riskBadge = p.riskSignals?.length > 0
-        ? `<span style="background:rgba(247,79,79,0.1);border:1px solid rgba(247,79,79,0.25);border-radius:4px;padding:1px 6px;font-size:0.68rem;color:var(--danger);margin-left:0.3rem">⚠ risk</span>`
+        ? `<span style="background:rgba(247,79,79,0.1);border:1px solid rgba(247,79,79,0.25);border-radius:4px;padding:1px 6px;font-size:0.68rem;color:var(--danger);margin-left:0.3rem">risk</span>`
         : '';
       const profileId = `iq-profile-${idx}`;
       return `
@@ -2272,7 +2272,7 @@ function _renderOrgInsights(data, el) {
             <div style="margin-top:0.5rem;text-align:right">
               <button onclick="viewMemberTimelineByName('${p.name.replace(/'/g,"\\'")}'); event.stopPropagation();"
                 style="background:transparent;border:1px solid var(--border);border-radius:4px;padding:2px 8px;font-size:0.7rem;cursor:pointer;color:var(--text-muted)">
-                📅 View Timeline
+                View Timeline
               </button>
             </div>
           </div>
@@ -2299,7 +2299,7 @@ function _renderOrgInsights(data, el) {
             <span style="background:var(--surface-1);border:1px solid var(--border);border-radius:4px;padding:1px 6px;font-size:0.7rem">engagement: ${g.engagement}</span>
           </div>
           ${themes ? `<div style="font-size:0.73rem;color:var(--text-secondary);margin-bottom:0.3rem">Themes: ${themes}</div>` : ''}
-          ${risks  ? `<div style="font-size:0.73rem;color:var(--warning);margin-bottom:0.3rem">⚠ ${risks}</div>` : ''}
+          ${risks  ? `<div style="font-size:0.73rem;color:var(--warning);margin-bottom:0.3rem">${risks}</div>` : ''}
           ${attn   ? `<div style="font-size:0.73rem;color:var(--text-muted);margin-bottom:0.3rem">Attention: ${attn}</div>` : ''}
           ${g.suggestedAction ? `<div style="font-size:0.75rem;color:var(--accent);margin-top:0.4rem;border-top:1px solid var(--border);padding-top:0.35rem">→ ${g.suggestedAction}</div>` : ''}
         </div>`;
@@ -2316,7 +2316,7 @@ function _renderOrgInsights(data, el) {
         ${[
           { label: 'Team Mood', val: moodVal, sub: ai.moodTrend || '—', subColor: tColor },
           { label: 'Active', val: `${stats.activeThisWeek}/${stats.memberCount}`, sub: 'this week', subColor: 'var(--text-muted)' },
-          { label: 'Goals Set', val: `${stats.goalsSet}/${stats.memberCount}`, sub: stats.goalsSet === stats.memberCount ? 'all set ✓' : 'members', subColor: stats.goalsSet === stats.memberCount ? 'var(--success)' : 'var(--text-muted)' },
+          { label: 'Goals Set', val: `${stats.goalsSet}/${stats.memberCount}`, sub: stats.goalsSet === stats.memberCount ? 'all set ' : 'members', subColor: stats.goalsSet === stats.memberCount ? 'var(--success)' : 'var(--text-muted)' },
         ].map(s => `
           <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:0.65rem;text-align:center">
             <div style="font-size:1.2rem;font-weight:700;color:var(--text-primary)">${s.val}</div>
@@ -2334,7 +2334,7 @@ function _renderOrgInsights(data, el) {
   if (ai.memberHighlights?.length > 0) {
     html += ai.memberHighlights.map(h => `
       <div style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.5rem 0.8rem;background:rgba(79,247,122,0.05);border:1px solid rgba(79,247,122,0.18);border-radius:8px;font-size:0.8rem;margin-bottom:0.4rem">
-        <span style="flex-shrink:0">✨</span>
+        <span style="flex-shrink:0"></span>
         <div>
           <span style="font-weight:700">${h.name}</span>
           <span style="color:var(--text-secondary);margin-left:0.4rem">${h.note}</span>
@@ -2375,7 +2375,7 @@ async function trackRecommendation(idx) {
     if (!res.ok) throw new Error('Failed');
     // Visual feedback on the button
     const btn = document.getElementById(`track-btn-${idx}`);
-    if (btn) { btn.textContent = '✓ Tracked'; btn.disabled = true; btn.style.color = 'var(--success)'; }
+    if (btn) { btn.textContent = 'Tracked'; btn.disabled = true; btn.style.color = 'var(--success)'; }
     loadInterventions(); // Refresh tracker
   } catch(e) {
     alert('Could not track recommendation: ' + e.message);
@@ -2595,7 +2595,7 @@ function _renderLearningSummary(data, el) {
   }
 
   const ts = generatedAt ? new Date(generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
-  html += `<div style="font-size:0.67rem;color:var(--text-muted);margin-top:0.3rem">${cached ? '⚡ Cached' : '🔄 Live'} · Generated ${ts}</div>`;
+  html += `<div style="font-size:0.67rem;color:var(--text-muted);margin-top:0.3rem">${cached ? 'Cached' : 'Live'} · Generated ${ts}</div>`;
 
   el.innerHTML = html;
 }
@@ -2689,7 +2689,7 @@ function _renderMemberTimeline(data, el) {
     return;
   }
 
-  const typeIcon  = { goal_set: '🎯', checkin: '•', weekly_reflection: '📝', assessment: '📊', note: '💬', mood_improving: '↑', mood_declining: '↓', intervention_completed: '✓' };
+  const typeIcon  = { goal_set: '', checkin: '•', weekly_reflection: '', assessment: '', note: '', mood_improving: '↑', mood_declining: '↓', intervention_completed: '' };
   const typeColor = { goal_set: 'var(--accent)', checkin: 'var(--text-muted)', weekly_reflection: 'var(--text-secondary)', assessment: 'var(--accent)', note: 'var(--text-secondary)', mood_improving: 'var(--success)', mood_declining: 'var(--warning)', intervention_completed: 'var(--success)' };
 
   let html = '';
@@ -2737,7 +2737,7 @@ function renderAlerts(){
   document.getElementById('alerts-unread-count').textContent = AppState.getUnreadAlertCount();
 
   if (!alerts.length) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon">✅</div><p>No alerts — org looks healthy.</p></div>`;
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon"></div><p>No alerts — org looks healthy.</p></div>`;
     return;
   }
 
@@ -2756,8 +2756,8 @@ function renderAlerts(){
   };
 
   container.innerHTML =
-    sectionHTML('IntelliQ Early Warnings', '🧠', proactive) +
-    sectionHTML('Manual Flags & Notifications', '🔔', manual);
+    sectionHTML('IntelliQ Early Warnings', '', proactive) +
+    sectionHTML('Manual Flags & Notifications', '', manual);
 }
 
 function alertActionItemHTML(a, idx) {
@@ -2863,10 +2863,10 @@ async function handleAlertFileSelect(file) {
     _alertAttachment = await AttachmentHandler.process(file);
     preview.innerHTML = `
       <div style="display:flex;align-items:center;gap:0.6rem;padding:0.6rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:0.8rem">
-        <span>${AttachmentHandler.ICONS[_alertAttachment.kind] || '📎'}</span>
+        <span>${AttachmentHandler.ICONS[_alertAttachment.kind] || ''}</span>
         <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_alertAttachment.name}</span>
-        <span style="color:var(--success);font-size:0.72rem">✓ Ready</span>
-        <button onclick="_alertAttachment=null;document.getElementById('acm-attachment-preview').innerHTML=''" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:0.9rem">✕</button>
+        <span style="color:var(--success);font-size:0.72rem">Ready</span>
+        <button onclick="_alertAttachment=null;document.getElementById('acm-attachment-preview').innerHTML=''" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:0.9rem"></button>
       </div>
       ${_alertAttachment.kind === 'image' ? `<img src="${_alertAttachment.preview}" style="max-height:120px;border-radius:6px;margin-top:0.4rem"/>` : ''}`;
   } catch(e) {
@@ -2889,7 +2889,7 @@ function attachAlertEmbed() {
   _alertAttachment = embed;
   document.getElementById('acm-embed-preview').innerHTML = `
     <div style="margin-top:0.4rem">${embed.embedHTML}</div>
-    <div style="font-size:0.72rem;color:var(--success);margin-top:4px">✓ Will be shown to member during scenario</div>`;
+    <div style="font-size:0.72rem;color:var(--success);margin-top:4px">Will be shown to member during scenario</div>`;
 }
 
 async function draftAlertScenario() {
@@ -2900,7 +2900,7 @@ async function draftAlertScenario() {
 
   const memberId = member.id;
   const btn = document.getElementById('acm-draft-btn');
-  if (btn) { btn.textContent = '✦ Drafting…'; btn.disabled = true; }
+  if (btn) { btn.textContent = 'Drafting…'; btn.disabled = true; }
 
   // Build image payload if attachment is image/pdf
   let imagePayload = null;
@@ -2949,7 +2949,7 @@ async function draftAlertScenario() {
     document.getElementById('acm-draft-panel').style.display = 'block';
     document.getElementById('acm-actions').style.display     = 'none';
   } finally {
-    if (btn) { btn.textContent = '✦ Draft Scenario with AI →'; btn.disabled = false; }
+    if (btn) { btn.textContent = 'Draft Scenario with AI →'; btn.disabled = false; }
   }
 }
 
@@ -3056,7 +3056,7 @@ async function renderPeople() {
   } catch(e) {
     container.innerHTML = `
       <div style="padding:1.5rem;text-align:center;color:var(--text-muted);font-size:0.85rem">
-        <div style="font-size:1.2rem;margin-bottom:0.5rem">⚠️</div>
+        <div style="font-size:1.2rem;margin-bottom:0.5rem"></div>
         Could not load tree. <a href="#" onclick="renderPeople()" style="color:var(--accent)">Try again</a>
       </div>`;
   }
@@ -3065,7 +3065,7 @@ async function renderPeople() {
 /* ── SETTINGS PAGE ───────────────────────────────────────── */
 function renderSettings(){
   const mode  = AppState.mode;
-  const info  = ORG_MODES[mode] || { label: mode || 'Custom', icon: '🏢' };
+  const info  = ORG_MODES[mode] || { label: mode || 'Custom', icon: '' };
   const grade = AppState.grade;
 
   document.getElementById('settings-org-name').textContent  = AppState.orgName;
@@ -3076,7 +3076,7 @@ function renderSettings(){
   const features = PLATFORM_GRADES[grade]?.features || [];
   document.getElementById('settings-features').innerHTML = features.map(f=>`
     <div style="display:flex;align-items:center;gap:8px;padding:0.5rem 0;border-bottom:1px solid var(--border)">
-      <span style="color:var(--success);font-size:0.9rem">✓</span>
+      <span style="color:var(--success);font-size:0.9rem"></span>
       <span style="font-size:0.85rem">${f}</span>
     </div>`).join('');
 
@@ -3182,7 +3182,7 @@ async function renderMetricsSettings() {
     if (!AppState.orgMetrics.length) {
       el.innerHTML = `
         <div style="text-align:center;padding:1.5rem;color:var(--text-muted)">
-          <div style="font-size:1.5rem;margin-bottom:0.4rem">📏</div>
+          <div style="font-size:1.5rem;margin-bottom:0.4rem"></div>
           No metrics defined yet. Add your first metric or use AI Suggest.
         </div>`;
       return;
@@ -3193,7 +3193,7 @@ async function renderMetricsSettings() {
         <span style="flex:1;font-size:0.88rem;font-weight:500">${m.name}</span>
         <span style="font-size:0.72rem;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:1px 6px">${m.source || 'org'}</span>
         ${Auth.canDo('manage_metrics') ? `
-          <button onclick="deleteMetric('${m.metricId}')" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:0.85rem;padding:2px 4px" title="Delete">✕</button>` : ''}
+          <button onclick="deleteMetric('${m.metricId}')" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:0.85rem;padding:2px 4px" title="Delete"></button>` : ''}
       </div>`).join('');
   } catch(e) {
     el.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">Failed to load metrics.</div>`;
@@ -3231,7 +3231,7 @@ async function _submitAddMetric() {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
-    showToast(`"${name}" added ✓`, 'success');
+    showToast(`"${name}" added `, 'success');
     document.getElementById('settings-metric-form').innerHTML = '';
     renderMetricsSettings();
   } catch(e) { showToast(e.message, 'warning'); }
@@ -3251,7 +3251,7 @@ async function deleteMetric(metricId) {
 async function renderMetricSuggest() {
   const formEl = document.getElementById('settings-metric-form');
   if (!formEl) return;
-  formEl.innerHTML = `<div style="padding:1rem;color:var(--text-muted);font-size:0.82rem">✨ Asking IntelliQ to suggest metrics…</div>`;
+  formEl.innerHTML = `<div style="padding:1rem;color:var(--text-muted);font-size:0.82rem">Asking IntelliQ to suggest metrics…</div>`;
   try {
     const res  = await fetch('/api/metrics/suggest', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({}) });
     const data = await res.json();
@@ -3259,7 +3259,7 @@ async function renderMetricSuggest() {
     const suggestions = data.suggestions || [];
     formEl.innerHTML = `
       <div class="card">
-        <div class="card-header"><div class="card-title">✨ AI Metric Suggestions</div></div>
+        <div class="card-header"><div class="card-title">AI Metric Suggestions</div></div>
         <div class="card-body">
           <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.8rem">Select the ones that fit your org — you can always add more later.</div>
           ${suggestions.map((s,i)=>`
@@ -3294,7 +3294,7 @@ async function _addSuggestedMetrics() {
   }
   document.getElementById('settings-metric-form').innerHTML = '';
   renderMetricsSettings();
-  showToast(`${added} metric${added!==1?'s':''} added ✓`, 'success');
+  showToast(`${added} metric${added!==1?'s':''} added `, 'success');
 }
 
 /* ── VALUES SETTINGS ─────────────────────────────────────── */
@@ -3321,8 +3321,8 @@ async function saveOrgValues() {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
     AppState.orgValues = data.values;
-    if (status) { status.textContent = `Saved ${data.values.length} values ✓`; status.style.color = 'var(--success)'; }
-    showToast('Values saved ✓', 'success');
+    if (status) { status.textContent = `Saved ${data.values.length} values `; status.style.color = 'var(--success)'; }
+    showToast('Values saved ', 'success');
   } catch(e) {
     if (status) { status.textContent = e.message; status.style.color = 'var(--danger)'; }
   }
@@ -3345,7 +3345,7 @@ async function renderGoalsSettings() {
       <div style="display:flex;align-items:center;gap:0.6rem;padding:0.6rem 0;border-bottom:1px solid var(--border)">
         <span style="font-size:0.88rem;flex:1">${g.text}</span>
         <span style="font-size:0.72rem;color:var(--text-muted)">${g.status || 'active'}</span>
-        ${Auth.canDo('manage_goals') ? `<button onclick="deleteGoal('${g.goalId}')" style="background:none;border:none;cursor:pointer;color:var(--text-muted)">✕</button>` : ''}
+        ${Auth.canDo('manage_goals') ? `<button onclick="deleteGoal('${g.goalId}')" style="background:none;border:none;cursor:pointer;color:var(--text-muted)"></button>` : ''}
       </div>`).join('');
   } catch(e) {
     el.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">Failed to load goals.</div>`;
@@ -3383,7 +3383,7 @@ async function _submitAddGoal() {
     if (!data.ok) throw new Error(data.error);
     document.getElementById('settings-goal-form').innerHTML = '';
     renderGoalsSettings();
-    showToast('Goal added ✓', 'success');
+    showToast('Goal added ', 'success');
   } catch(e) { showToast(e.message, 'warning'); }
 }
 
@@ -3433,10 +3433,10 @@ function renderOnboardHub() {
   el.innerHTML = `
     <!-- Method cards -->
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0.75rem;margin-bottom:1.5rem">
-      ${_onboardCard('add',    '👤', 'Add Member',         'Add one person with their email',   color)}
-      ${_onboardCard('import', '📁', 'Import Spreadsheet', 'Upload a CSV or XLSX file',         color)}
-      ${_onboardCard('invite', '✉',  'Invite by Email',    'Send personalised email invites',   color)}
-      ${_onboardCard('link',   '🔗', 'Generate Join Link', 'Shareable self-registration link',  color)}
+      ${_onboardCard('add',    '', 'Add Member',         'Add one person with their email',   color)}
+      ${_onboardCard('import', '', 'Import Spreadsheet', 'Upload a CSV or XLSX file',         color)}
+      ${_onboardCard('invite', '',  'Invite by Email',    'Send personalised email invites',   color)}
+      ${_onboardCard('link',   '', 'Generate Join Link', 'Shareable self-registration link',  color)}
     </div>
 
     <!-- Active panel -->
@@ -3473,7 +3473,7 @@ function _openOnboardSection(section) {
 
     el.innerHTML = `
       <div class="card" style="margin-bottom:0">
-        <div class="card-header"><div class="card-title">👤 Add Member</div></div>
+        <div class="card-header"><div class="card-title">Add Member</div></div>
         <div class="card-body">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:0.7rem">
             <div><label class="form-label">FIRST NAME *</label><input id="ob-add-first" class="form-input" placeholder="First name" /></div>
@@ -3498,7 +3498,7 @@ function _openOnboardSection(section) {
   } else if (section === 'import') {
     el.innerHTML = `
       <div class="card" style="margin-bottom:0">
-        <div class="card-header"><div class="card-title">📁 Import Spreadsheet</div></div>
+        <div class="card-header"><div class="card-title">Import Spreadsheet</div></div>
         <div class="card-body">
           <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.8rem;line-height:1.6">
             Upload a <strong>CSV</strong> or <strong>XLSX</strong> file. Required columns: <code>name</code>, <code>email</code>. Optional: <code>role</code>, <code>group</code>/<code>department</code>.
@@ -3515,7 +3515,7 @@ function _openOnboardSection(section) {
   } else if (section === 'invite') {
     el.innerHTML = `
       <div class="card" style="margin-bottom:0">
-        <div class="card-header"><div class="card-title">✉ Invite by Email</div></div>
+        <div class="card-header"><div class="card-title">Invite by Email</div></div>
         <div class="card-body">
           <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
             Enter email addresses, one per line. Each gets a unique invite link to copy and share. (Email delivery is not yet active — you copy and send the link yourself.)
@@ -3536,7 +3536,7 @@ function _openOnboardSection(section) {
   } else if (section === 'link') {
     el.innerHTML = `
       <div class="card" style="margin-bottom:0">
-        <div class="card-header"><div class="card-title">🔗 Generate Join Link</div></div>
+        <div class="card-header"><div class="card-title">Generate Join Link</div></div>
         <div class="card-body">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:0.7rem">
             <div>
@@ -3624,18 +3624,18 @@ async function _submitAddPerson() {
 
     const safeLink = inviteLink.replace(/'/g, "\\'");
     if (resEl) resEl.innerHTML = `
-      <div style="color:var(--success);margin-bottom:0.4rem">✓ Account created for ${fullName}.</div>
+      <div style="color:var(--success);margin-bottom:0.4rem">Account created for ${fullName}.</div>
       ${inviteLink
         ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.3rem">Share this link so they can set their password:</div>
            <div style="font-family:monospace;font-size:0.72rem;color:var(--accent);word-break:break-all;margin-bottom:0.3rem">${inviteLink}</div>
-           <button onclick="navigator.clipboard.writeText('${safeLink}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.72rem">📋 Copy Invite Link</button>`
+           <button onclick="navigator.clipboard.writeText('${safeLink}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.72rem">Copy Invite Link</button>`
         : `<div style="font-size:0.78rem;color:var(--text-muted)">They can log in with their email once a password is set.</div>`
       }`;
     _addMemberToAppState({ ...data.user });
     // Clear fields
     ['ob-add-first','ob-add-last','ob-add-email'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     _renderOnboardRecent();
-    showToast(`${fullName} added ✓`, 'success');
+    showToast(`${fullName} added `, 'success');
   } catch(e) {
     if (resEl) resEl.textContent = e.message;
   }
@@ -3691,7 +3691,7 @@ async function _submitImport() {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Import failed');
-    if (resEl) resEl.innerHTML = `<span style="color:var(--success)">✓ ${data.created.length} imported${data.skipped.length ? `, ${data.skipped.length} skipped (already exist)` : ''}.</span>`;
+    if (resEl) resEl.innerHTML = `<span style="color:var(--success)">${data.created.length} imported${data.skipped.length ? `, ${data.skipped.length} skipped (already exist)` : ''}.</span>`;
     showToast(`${data.created.length} people imported`, 'success');
     await loadRealOrgData();
     _renderOnboardRecent();
@@ -3722,14 +3722,14 @@ async function _submitEmailInvites() {
   if (resEl) {
     resEl.innerHTML = results.length
       ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.5rem">
-           ⚠️ Email delivery is not yet active. Share these links directly with each person.
+           Email delivery is not yet active. Share these links directly with each person.
          </div>` +
         results.map(r => {
           const safeUrl = r.url.replace(/'/g, "\\'");
           return `<div style="margin-bottom:0.5rem;padding:0.5rem 0.7rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:0.78rem">
             <div style="font-weight:600;margin-bottom:0.2rem">Invite created for <span style="color:var(--accent)">${r.email}</span></div>
             <div style="font-family:monospace;font-size:0.72rem;color:var(--text-secondary);word-break:break-all;margin-bottom:0.3rem">${r.url}</div>
-            <button onclick="navigator.clipboard.writeText('${safeUrl}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.72rem">📋 Copy Link</button>
+            <button onclick="navigator.clipboard.writeText('${safeUrl}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.72rem">Copy Link</button>
           </div>`;
         }).join('')
       : '<span style="color:var(--danger)">Could not generate links.</span>';
@@ -3753,9 +3753,9 @@ async function _createJoinLink() {
     const fullUrl = `${window.location.origin}${data.url}`;
     if (resEl) resEl.innerHTML = `
       <div style="padding:0.6rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:0.8rem">
-        <div style="font-weight:700;color:var(--text-primary);margin-bottom:0.3rem">🔗 ${label || 'Join Link'} created</div>
+        <div style="font-weight:700;color:var(--text-primary);margin-bottom:0.3rem">${label || 'Join Link'} created</div>
         <div style="font-family:monospace;color:var(--accent);word-break:break-all;margin-bottom:0.4rem">${fullUrl}</div>
-        <button onclick="navigator.clipboard.writeText('${fullUrl}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm">📋 Copy Link</button>
+        <button onclick="navigator.clipboard.writeText('${fullUrl}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm">Copy Link</button>
       </div>`;
     showToast('Join link created', 'success');
     _loadJoinLinks();
@@ -3783,7 +3783,7 @@ async function _loadJoinLinks() {
               ${l.group ? `<span style="color:var(--text-muted)"> · ${l.group}</span>` : ''}
               <span style="color:var(--text-muted)"> · ${l.useCount}${l.usageLimit ? '/'+l.usageLimit : ''} uses · expires ${expires}</span>
             </div>
-            <button onclick="navigator.clipboard.writeText('${fullUrl}').then(()=>showToast('Copied','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px">📋 Copy</button>
+            <button onclick="navigator.clipboard.writeText('${fullUrl}').then(()=>showToast('Copied','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px">Copy</button>
           </div>
         </div>`;
       }).join('');
@@ -3829,7 +3829,7 @@ async function renderGroups() {
     if (!_platformGroups.length) {
       container.innerHTML = `
         <div style="text-align:center;padding:2.5rem 1rem;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius)">
-          <div style="font-size:2rem;margin-bottom:0.6rem">👥</div>
+          <div style="font-size:2rem;margin-bottom:0.6rem"></div>
           <div style="font-size:0.9rem;font-weight:600;margin-bottom:0.3rem">No groups yet</div>
           <div style="font-size:0.82rem;color:var(--text-secondary)">Create sub-groups within your org. People can be in multiple groups.</div>
         </div>`;
@@ -3857,7 +3857,7 @@ async function renderGroups() {
             <div style="display:flex;gap:0.4rem">
               <button class="btn btn-outline btn-sm" onclick="openGroupDetail('${g.id}')">View Feed</button>
               <button class="btn btn-outline btn-sm" onclick="openEditGroup('${g.id}')">Edit</button>
-              <button class="btn btn-sm" style="color:var(--danger);border-color:rgba(247,79,79,0.3);background:none" onclick="deleteGroup('${g.id}')">✕</button>
+              <button class="btn btn-sm" style="color:var(--danger);border-color:rgba(247,79,79,0.3);background:none" onclick="deleteGroup('${g.id}')"></button>
             </div>
           </div>
           <div style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center">
@@ -3999,7 +3999,7 @@ async function runGroupCopilot() {
   if (!_currentGroupId || !body) return;
   const old = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = 'Reading…'; }
-  body.innerHTML = `<div class="gd-copilot-loading">🤖 Reading the group's signals…</div>`;
+  body.innerHTML = `<div class="gd-copilot-loading">Reading the group's signals…</div>`;
   try {
     const res  = await fetch(`/api/groups/${encodeURIComponent(_currentGroupId)}/copilot`, { headers: Auth._headers() });
     const data = await res.json();
@@ -4009,7 +4009,7 @@ async function runGroupCopilot() {
     const actions = (data.actions || []).map(a => `<li>${_escAdvisor(a)}</li>`).join('');
     const prompts = (data.prompts || []).map(p => `<li>${_escAdvisor(p)}</li>`).join('');
     body.innerHTML = `
-      ${!data.hasGoals ? `<div class="gd-copilot-tip">💡 Set this group's goals in Leader Workspace → My Groups for sharper guidance.</div>` : ''}
+      ${!data.hasGoals ? `<div class="gd-copilot-tip">Set this group's goals in Leader Workspace → My Groups for sharper guidance.</div>` : ''}
       <div class="gd-health-grid">
         <div class="gd-health-cell"><div class="gd-health-k">Health</div><div class="gd-health-v">${_healthDot(data.healthColor)}${_escAdvisor(data.health)}</div></div>
         <div class="gd-health-cell"><div class="gd-health-k">Participation</div><div class="gd-health-v">${data.participation}%</div></div>
@@ -4021,7 +4021,7 @@ async function runGroupCopilot() {
       ${data.reflection ? `<div class="gd-copilot-sec"><div class="gd-copilot-sec-h">Weekly reflection</div><div class="gd-copilot-summary">${_escAdvisor(data.reflection).replace(/\n/g,'<br>')}</div></div>` : ''}
       <div class="gd-copilot-foot">Based on participation &amp; activity signals toward this group's goals. Individual members are never named or quoted.</div>`;
   } catch (err) {
-    body.innerHTML = `<div class="gd-copilot-err">⚠ ${_escAdvisor(err.message || 'Something went wrong.')}</div>`;
+    body.innerHTML = `<div class="gd-copilot-err">${_escAdvisor(err.message || 'Something went wrong.')}</div>`;
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = old; }
   }
@@ -4052,7 +4052,7 @@ async function loadGroupFeed(gid) {
     feedEl.innerHTML = allItems.map(item => {
       const isAnon   = item.anonymous || item.type === 'anonymous';
       const author   = isAnon ? 'Anonymous' : (item.authorName || item.fromName || '—');
-      const icon     = isAnon ? '👤' : (item._kind === 'note' ? '📝' : '💬');
+      const icon     = isAnon ? '' : (item._kind === 'note' ? '' : '');
       const typeLabel = item._kind === 'note' ? (item.type || 'shared') : 'message';
       const color    = ORG_MODES[AppState.mode].color;
       const time     = new Date(item.createdAt).toLocaleString('en-GB', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
@@ -4088,7 +4088,7 @@ async function sendGroupMessage(anonymous) {
   });
 
   document.getElementById('gd-compose').value = '';
-  showToast(anonymous ? 'Sent anonymously ✓' : 'Message sent ✓', 'success');
+  showToast(anonymous ? 'Sent anonymously ' : 'Message sent ', 'success');
   loadGroupFeed(_currentGroupId);
 }
 
@@ -4153,7 +4153,7 @@ async function loadWeeklyPulse() {
     if (!entries.length) {
       panel.innerHTML = `
         <div style="text-align:center;padding:1.5rem 0;color:var(--text-muted);font-size:0.82rem">
-          <div style="font-size:1.5rem;margin-bottom:0.5rem">📋</div>
+          <div style="font-size:1.5rem;margin-bottom:0.5rem"></div>
           No weekly reflections submitted yet for ${rawData.week || 'this week'}.<br>
           Members complete these in the IntelliQ app when they open it each week.
         </div>`;
@@ -4167,17 +4167,17 @@ async function loadWeeklyPulse() {
     if (synth) {
       html += `
         <div style="background:rgba(124,90,245,0.07);border:1px solid rgba(124,90,245,0.2);border-radius:10px;padding:0.9rem;margin-bottom:1rem">
-          <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin-bottom:0.6rem">🧠 IntelliQ Synthesis</div>
+          <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin-bottom:0.6rem">IntelliQ Synthesis</div>
           <div style="font-size:0.88rem;font-weight:600;color:var(--text-primary);margin-bottom:0.7rem">${synth.headline || ''}</div>
           ${synth.patterns?.length ? `
             <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:0.4rem">Patterns</div>
             ${synth.patterns.map(p => `<div style="font-size:0.8rem;color:var(--text-secondary);padding:3px 0">• ${p}</div>`).join('')}` : ''}
           ${synth.watchFor?.length ? `
             <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:var(--warning);margin:0.6rem 0 0.4rem">Watch For</div>
-            ${synth.watchFor.map(w => `<div style="font-size:0.8rem;color:var(--warning);padding:3px 0">⚠ ${w}</div>`).join('')}` : ''}
+            ${synth.watchFor.map(w => `<div style="font-size:0.8rem;color:var(--warning);padding:3px 0">${w}</div>`).join('')}` : ''}
           ${synth.positives?.length ? `
             <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:var(--success);margin:0.6rem 0 0.4rem">Positives</div>
-            ${synth.positives.map(p => `<div style="font-size:0.8rem;color:var(--success);padding:3px 0">✓ ${p}</div>`).join('')}` : ''}
+            ${synth.positives.map(p => `<div style="font-size:0.8rem;color:var(--success);padding:3px 0">${p}</div>`).join('')}` : ''}
           ${synth.recommendations?.length ? `
             <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:${color};margin:0.6rem 0 0.4rem">Recommended Actions</div>
             ${synth.recommendations.map((r,i) => `<div style="font-size:0.8rem;color:var(--text-secondary);padding:3px 0">${i+1}. ${r}</div>`).join('')}` : ''}
@@ -4223,7 +4223,7 @@ function showProfile(id){
     console.error('[showProfile] render error for', id, err);
     // Open the modal with a warning rather than crashing the whole app
     const recsEl = document.getElementById('pm-recs');
-    if (recsEl) recsEl.innerHTML = `<div style="padding:0.6rem;background:rgba(247,79,79,0.08);border:1px solid rgba(247,79,79,0.25);border-radius:6px;font-size:0.8rem;color:var(--danger)">⚠ Some profile data could not be displayed. This member may not have completed assessments yet.</div>`;
+    if (recsEl) recsEl.innerHTML = `<div style="padding:0.6rem;background:rgba(247,79,79,0.08);border:1px solid rgba(247,79,79,0.25);border-radius:6px;font-size:0.8rem;color:var(--danger)">Some profile data could not be displayed. This member may not have completed assessments yet.</div>`;
     openModal('profile-modal');
   }
 }
@@ -4366,7 +4366,7 @@ function setAdvisorQuestion(q){
 
 function _renderAdvisorAnswer(data){
   const lens  = data.lens ? `<span class="advisor-lens">${_escAdvisor(data.lens)} lens</span>` : '';
-  const title = data.mode === 'briefing' ? '📋 Alignment Briefing' : '🤖 Advisor';
+  const title = data.mode === 'briefing' ? 'Alignment Briefing' : 'Advisor';
   return `<div class="advisor-answer">
     <div class="advisor-answer-head">${title} ${lens}</div>
     <div class="advisor-answer-body">${_escAdvisor(data.answer).replace(/\n/g,'<br>')}</div>
@@ -4385,7 +4385,7 @@ async function askAdvisor(mode){
   if (!out) return;
 
   if (!memberId){
-    out.innerHTML = `<div class="advisor-error">⚠ No member selected.</div>`;
+    out.innerHTML = `<div class="advisor-error">No member selected.</div>`;
     return;
   }
   if (mode === 'question' && !question){
@@ -4398,7 +4398,7 @@ async function askAdvisor(mode){
   if (askBtn)   askBtn.disabled = true;
   if (briefBtn) briefBtn.disabled = true;
   if (btn) btn.textContent = mode === 'briefing' ? 'Building…' : 'Thinking…';
-  out.innerHTML = `<div class="advisor-loading">🤖 IntelliQ is ${mode === 'briefing' ? 'building a briefing on' : 'considering'} ${_escAdvisor(member?.name || 'this member')}…</div>`;
+  out.innerHTML = `<div class="advisor-loading">IntelliQ is ${mode === 'briefing' ? 'building a briefing on' : 'considering'} ${_escAdvisor(member?.name || 'this member')}…</div>`;
 
   try {
     const res  = await fetch(`/api/advisor/${encodeURIComponent(memberId)}/ask`, {
@@ -4412,7 +4412,7 @@ async function askAdvisor(mode){
     if (mode === 'question' && input) input.value = '';
     loadAdvisorThreads(memberId); // refresh history with the new thread
   } catch (err){
-    out.innerHTML = `<div class="advisor-error">⚠ ${_escAdvisor(err.message || 'Something went wrong.')} Please try again.</div>`;
+    out.innerHTML = `<div class="advisor-error">${_escAdvisor(err.message || 'Something went wrong.')} Please try again.</div>`;
   } finally {
     if (askBtn)   askBtn.disabled = false;
     if (briefBtn) briefBtn.disabled = false;
@@ -4453,7 +4453,7 @@ async function loadSimilarCohort(memberId){
     const worked = (d.whatWorked || []).filter(w => w.total > 0);
     el.innerHTML = `
       <div class="pm-similar-card">
-        <div class="pm-similar-head">🔗 Similar patterns${d.cohortSize ? ` · ${d.cohortSize} member${d.cohortSize !== 1 ? 's' : ''} on a similar path` : ''}</div>
+        <div class="pm-similar-head">Similar patterns${d.cohortSize ? ` · ${d.cohortSize} member${d.cohortSize !== 1 ? 's' : ''} on a similar path` : ''}</div>
         ${worked.length ? `
           <div class="pm-similar-sub">What's tended to help ${d.scope === 'cohort' ? 'them' : 'across the org'}:</div>
           <div class="pm-similar-list">${worked.map(w => `<span class="pm-similar-chip">${_escAdvisor(w.type)} · ${w.positive}/${w.total} positive</span>`).join('')}</div>
@@ -4507,7 +4507,7 @@ async function loadBehavioralProfile(memberId, refresh){
     setAll(`
       <div class="pm-profile-card">
         <div class="pm-profile-head">
-          <span>🧠 What IntelliQ understands</span>
+          <span>What IntelliQ understands</span>
           <span class="pm-profile-traj" style="color:${tj.color};border-color:${tj.color}55">${tj.label}</span>
           <button class="pm-profile-refresh" title="Rebuild" onclick="loadBehavioralProfile('${memberId}', true)">↻</button>
         </div>
@@ -4516,8 +4516,8 @@ async function loadBehavioralProfile(memberId, refresh){
         ${chips('Driven by', p.motivators)}
         ${chips('Watch for', p.watchFor)}
         ${chips('Remembers', remembered)}
-        ${followUps.length ? `<div class="pm-profile-row"><span class="pm-profile-k">Check in about</span><span class="pm-profile-chips">${followUps.map(f => `<span class="pm-profile-chip pm-profile-followup">📌 ${_escAdvisor(f)}</span>`).join('')}</span></div>` : ''}
-        ${priv ? `<div class="pm-profile-priv">🔒 Also informed by ${priv} private matter${priv !== 1 ? 's' : ''} — kept confidential, used only to support them.</div>` : ''}
+        ${followUps.length ? `<div class="pm-profile-row"><span class="pm-profile-k">Check in about</span><span class="pm-profile-chips">${followUps.map(f => `<span class="pm-profile-chip pm-profile-followup">${_escAdvisor(f)}</span>`).join('')}</span></div>` : ''}
+        ${priv ? `<div class="pm-profile-priv">Also informed by ${priv} private matter${priv !== 1 ? 's' : ''} — kept confidential, used only to support them.</div>` : ''}
       </div>`);
   } catch (e) {
     setAll(`<div class="pm-profile-empty">Couldn't assemble the read just now. <button class="pm-profile-refresh" onclick="loadBehavioralProfile('${memberId}', true)">↻ Try again</button></div>`);
@@ -4568,7 +4568,7 @@ function _memberDataRow(s){
   const when = s.ts ? new Date(s.ts).toLocaleDateString() : '';
   const isPrivate = s.sensitivity === 'sensitive' || s.sensitivity === 'restricted' || s.redacted;
   const val = isPrivate
-    ? `🔒 Private — informs the AI, not shown`
+    ? `Private — informs the AI, not shown`
     : (s.valueText ? _escAdvisor(String(s.valueText).slice(0, 160))
        : (s.valueNum != null ? `${s.label ? _escAdvisor(s.label) + ': ' : ''}${s.valueNum}`
           : _escAdvisor(s.label || '')));
@@ -4599,7 +4599,7 @@ function openLogSignal() {
     <div style="display:flex;gap:0.4rem;margin-bottom:0.8rem">
       <button class="btn btn-sm btn-accent"  id="sig-t-observation" onclick="_setLogType('observation')">Observation</button>
       <button class="btn btn-sm btn-outline" id="sig-t-metric"      onclick="_setLogType('metric')">Metric</button>
-      <button class="btn btn-sm btn-outline" id="sig-t-voice"       onclick="_setLogType('voice')">🎤 Voice</button>
+      <button class="btn btn-sm btn-outline" id="sig-t-voice"       onclick="_setLogType('voice')">Voice</button>
     </div>
     <div id="sig-fields"></div>
     <div id="sig-result" style="font-size:0.8rem;margin-top:0.5rem"></div>
@@ -4628,7 +4628,7 @@ function _setLogType(t) {
   } else if (t === 'voice') {
     f.innerHTML = `
       <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.4rem">
-        <button class="btn btn-outline btn-sm" id="sig-mic" onclick="_toggleDictation()">🎤 Start dictation</button>
+        <button class="btn btn-outline btn-sm" id="sig-mic" onclick="_toggleDictation()">Start dictation</button>
         <span id="sig-mic-state" style="font-size:0.72rem;color:var(--text-muted)"></span>
       </div>
       <textarea class="form-input" id="sig-text" rows="4" placeholder="Speak or type a film / voice note…" style="width:100%"></textarea>`;
@@ -4651,7 +4651,7 @@ function _toggleDictation() {
     for (let i = e.resultIndex; i < e.results.length; i++) txt += e.results[i][0].transcript;
     if (ta) ta.value = (base + ' ' + txt).trim();
   };
-  _logRec.onend = () => { const b = document.getElementById('sig-mic'); if (b) b.textContent = '🎤 Start dictation'; if (stateEl) stateEl.textContent = ''; _logRec = null; };
+  _logRec.onend = () => { const b = document.getElementById('sig-mic'); if (b) b.textContent = 'Start dictation'; if (stateEl) stateEl.textContent = ''; _logRec = null; };
   try { _logRec.start(); } catch (_) {}
   const b = document.getElementById('sig-mic'); if (b) b.textContent = '⏹ Stop';
   if (stateEl) stateEl.textContent = 'Listening…';
@@ -4684,14 +4684,14 @@ async function submitLogSignal() {
     const r = await fetch('/api/signals/ingest', { method: 'POST', headers: Auth._headers(), body: JSON.stringify(body) });
     const d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'Could not save');
-    if (res) { res.style.color = 'var(--success)'; res.textContent = '✓ Logged — IntelliQ will use this.'; }
+    if (res) { res.style.color = 'var(--success)'; res.textContent = 'Logged — IntelliQ will use this.'; }
     setTimeout(_closeInlineModal, 800);
   } catch (e) {
-    if (res) { res.style.color = 'var(--danger)'; res.textContent = '⚠ ' + e.message; }
+    if (res) { res.style.color = 'var(--danger)'; res.textContent = '' + e.message; }
   }
 }
 
-/* ── IQComposer — one reusable input toolbar (📎 attach · 🎤 voice · text) ─────
+/* ── IQComposer — one reusable input toolbar (attach · voice · text) ─────
    Bind to any textarea: put <div data-iqcompose="<textareaId>"></div> after it and
    call IQComposer.mountAll(). Dictation uses the browser; attachments are parsed
    via AttachmentHandler and exposed through IQComposer.takeAttachments(id). */
@@ -4705,8 +4705,8 @@ const IQComposer = {
       host.dataset.iqMounted = '1';
       host.innerHTML = `
         <div class="iqc-bar">
-          <button type="button" class="iqc-btn" onclick="IQComposer.pickFile('${target}')">📎 Attach</button>
-          <button type="button" class="iqc-btn" id="iqc-mic-${target}" onclick="IQComposer.toggleVoice('${target}')">🎤 Voice</button>
+          <button type="button" class="iqc-btn" onclick="IQComposer.pickFile('${target}')">Attach</button>
+          <button type="button" class="iqc-btn" id="iqc-mic-${target}" onclick="IQComposer.toggleVoice('${target}')">Voice</button>
           <input type="file" id="iqc-file-${target}" style="display:none"
             accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv"
             onchange="IQComposer.onFile('${target}', this)">
@@ -4734,7 +4734,7 @@ const IQComposer = {
       });
       if (stateEl) stateEl.textContent = '';
       this._renderChips(id);
-    } catch (e) { if (stateEl) stateEl.textContent = `⚠ ${e.message}`; }
+    } catch (e) { if (stateEl) stateEl.textContent = `${e.message}`; }
     input.value = '';
   },
 
@@ -4742,7 +4742,7 @@ const IQComposer = {
     const el = document.getElementById(`iqc-chips-${id}`);
     if (!el) return;
     el.innerHTML = (this._state[id].attachments || []).map((a, i) =>
-      `<span class="iqc-chip">📄 ${_escAdvisor(a.name)}<button class="iqc-chip-x" onclick="IQComposer.removeAttachment('${id}',${i})">×</button></span>`
+      `<span class="iqc-chip">${_escAdvisor(a.name)}<button class="iqc-chip-x" onclick="IQComposer.removeAttachment('${id}',${i})">×</button></span>`
     ).join('');
   },
 
@@ -4759,7 +4759,7 @@ const IQComposer = {
     const base = ta ? ta.value : '';
     const rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
     rec.onresult = (e) => { let t = ''; for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript; if (ta) ta.value = (base + ' ' + t).trim(); };
-    rec.onend = () => { if (micBtn) micBtn.textContent = '🎤 Voice'; if (stateEl) stateEl.textContent = ''; st._rec = null; };
+    rec.onend = () => { if (micBtn) micBtn.textContent = 'Voice'; if (stateEl) stateEl.textContent = ''; st._rec = null; };
     try { rec.start(); } catch (_) {}
     st._rec = rec;
     if (micBtn) micBtn.textContent = '⏹ Stop';
@@ -4854,13 +4854,13 @@ function renderScenarios() {
                 .map(m=>`<option value="${m.id}">${m.name}</option>`).join('')}
             </select>
             <button class="btn btn-accent btn-sm" onclick="launchScenario('${s.id}')">▶ Run Here</button>
-            <button class="btn btn-outline btn-sm" onclick="assignToMemberApp('${s.id}')" title="Send to member's app">📱 Assign</button>
+            <button class="btn btn-outline btn-sm" onclick="assignToMemberApp('${s.id}')" title="Send to member's app">Assign</button>
           </div>
         </div>
       </div>`;
   }).join('') : `
     <div style="padding:2.5rem 1rem;text-align:center;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius)">
-      <div style="font-size:2.5rem;margin-bottom:0.8rem">🎯</div>
+      <div style="font-size:2.5rem;margin-bottom:0.8rem"></div>
       <div style="font-size:0.95rem;font-weight:600;color:var(--text-primary);margin-bottom:0.4rem">No assessments yet</div>
       <div style="font-size:0.82rem;color:var(--text-secondary)">Write a brief above — the AI designs it, you approve it, then it runs with the member.</div>
     </div>`;
@@ -4898,7 +4898,7 @@ function renderScenarios() {
 
       <div style="display:flex;justify-content:flex-end">
         <button class="btn btn-accent" id="sc-draft-btn" onclick="draftScenario()">
-          ✦ Draft Assessment with AI →
+          Draft Assessment with AI →
         </button>
       </div>
     </div>
@@ -4930,13 +4930,13 @@ function renderScenarios() {
       </div>
 
       <div style="background:rgba(124,90,245,0.08);border:1px solid rgba(124,90,245,0.25);border-radius:8px;padding:0.9rem;margin-bottom:1rem">
-        <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin-bottom:0.4rem">🔒 Leader Note — Private</div>
+        <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin-bottom:0.4rem">Leader Note — Private</div>
         <div id="sc-draft-coachnote" style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6"></div>
       </div>
 
       <div style="display:flex;justify-content:flex-end;gap:0.5rem">
         <button class="btn btn-outline" onclick="document.getElementById('sc-draft-panel').style.display='none'">Cancel</button>
-        <button class="btn btn-accent" onclick="approveDraft()">✓ Approve &amp; Launch</button>
+        <button class="btn btn-accent" onclick="approveDraft()">Approve &amp; Launch</button>
       </div>
     </div>
 
@@ -5009,7 +5009,7 @@ async function draftScenario() {
   const memberId = member.id;
 
   const btn = document.getElementById('sc-draft-btn');
-  if (btn) { btn.textContent = '✦ Drafting…'; btn.disabled = true; }
+  if (btn) { btn.textContent = 'Drafting…'; btn.disabled = true; }
 
   try {
     const res = await fetch('/api/draft-scenario', {
@@ -5056,7 +5056,7 @@ async function draftScenario() {
       </div>`;
     document.getElementById('sc-draft-panel').style.display = 'block';
   } finally {
-    if (btn) { btn.textContent = '✦ Draft Scenario with AI →'; btn.disabled = false; }
+    if (btn) { btn.textContent = 'Draft Scenario with AI →'; btn.disabled = false; }
   }
 }
 
@@ -5129,7 +5129,7 @@ async function assignToMemberApp(scenarioId) {
       }),
     });
     if (!res.ok) throw new Error();
-    showToast(`Assigned to ${member.name.split(' ')[0]}'s app ✓`, 'success');
+    showToast(`Assigned to ${member.name.split(' ')[0]}'s app `, 'success');
   } catch(e) {
     showToast('Could not assign — server may be offline', 'warning');
   }
@@ -5159,7 +5159,7 @@ async function renderMyTeam() {
     if (countEl) countEl.textContent = `${_myTeamMembers.length} visible member${_myTeamMembers.length !== 1 ? 's' : ''}`;
     _renderMyTeamList();
   } catch(e) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load team — try refreshing.</p></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon"></div><p>Could not load team — try refreshing.</p></div>`;
   }
 }
 
@@ -5172,7 +5172,7 @@ function _renderMyTeamList() {
   const el = document.getElementById('myteam-content');
   if (!el) return;
 
-  const MOOD_ICONS = { 1:'😔', 2:'😕', 3:'😐', 4:'🙂', 5:'😄' };
+  const MOOD_ICONS = { 1:'', 2:'', 3:'', 4:'', 5:'' };
   const filtered   = _myTeamSearch
     ? _myTeamMembers.filter(m =>
         m.name.toLowerCase().includes(_myTeamSearch) ||
@@ -5182,7 +5182,7 @@ function _renderMyTeamList() {
   if (!filtered.length) {
     el.innerHTML = `
       <div class="empty-state">
-        <div class="empty-icon">👥</div>
+        <div class="empty-icon"></div>
         <p>${_myTeamMembers.length === 0
           ? 'No members visible yet. Ask an administrator to assign people to your area of responsibility.'
           : 'No members match your search.'}</p>
@@ -5235,7 +5235,7 @@ async function renderAssignments() {
   if (!members.length) {
     el.innerHTML = `
       <div class="empty-state">
-        <div class="empty-icon">📌</div>
+        <div class="empty-icon"></div>
         <p>No visible members to assign to yet. You'll be able to assign once members are added to your area.</p>
       </div>`;
     return;
@@ -5244,7 +5244,7 @@ async function renderAssignments() {
   if (!scenarios.length) {
     el.innerHTML = `
       <div class="empty-state">
-        <div class="empty-icon">🎯</div>
+        <div class="empty-icon"></div>
         <p>No assessments created yet.
           <a href="#" onclick="navigate('scenarios');return false" style="color:var(--accent)">
             Go to Assessments</a> to create one first.</p>
@@ -5302,7 +5302,7 @@ async function assignFromLeaderLayer(scenarioId) {
       }),
     });
     if (!res.ok) throw new Error();
-    showToast(`Assigned "${scenario.title}" to ${member.name.split(' ')[0]} ✓`, 'success');
+    showToast(`Assigned "${scenario.title}" to ${member.name.split(' ')[0]} `, 'success');
     const selEl = document.getElementById(`assign-sel-${scenarioId}`);
     if (selEl) selEl.value = '';  // reset selector after success
   } catch(e) {
@@ -5326,7 +5326,7 @@ async function renderTeamInsights() {
     if (data.notEnoughData) {
       el.innerHTML = `
         <div class="empty-state">
-          <div class="empty-icon">📊</div>
+          <div class="empty-icon"></div>
           <p>Not enough check-in data yet — ask your team to complete a few check-ins.</p>
           <div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.6rem">
             ${data.visibleCount} visible member${data.visibleCount !== 1 ? 's' : ''}
@@ -5337,7 +5337,7 @@ async function renderTeamInsights() {
     }
 
     const moodVal   = data.avgMood;
-    const moodEmoji = moodVal >= 4 ? '😊' : moodVal >= 3 ? '😐' : '😕';
+    const moodEmoji = moodVal >= 4 ? '' : moodVal >= 3 ? '' : '';
     const moodLabel = moodVal >= 4 ? 'Good'  : moodVal >= 3 ? 'Okay' : 'Low';
     const moodColor = moodVal >= 4 ? 'var(--success)' : moodVal >= 3 ? 'var(--warning)' : 'var(--danger)';
 
@@ -5360,7 +5360,7 @@ async function renderTeamInsights() {
       ${(data.needsAttention || []).length ? `
         <div class="card" style="margin-bottom:1rem;border-color:rgba(247,79,122,0.3)">
           <div class="card-header">
-            <div class="card-title" style="color:var(--danger)">⚠ Needs Attention (${data.needsAttention.length})</div>
+            <div class="card-title" style="color:var(--danger)">Needs Attention (${data.needsAttention.length})</div>
           </div>
           <div class="card-body" style="padding:0.6rem 1rem">
             ${data.needsAttention.map(m => `
@@ -5374,7 +5374,7 @@ async function renderTeamInsights() {
       ${data.recommendedAction ? `
         <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.04)">
           <div class="card-header">
-            <div class="card-title" style="color:var(--accent)">💡 Recommended Action</div>
+            <div class="card-title" style="color:var(--accent)">Recommended Action</div>
           </div>
           <div style="font-size:0.85rem;color:var(--text-primary);padding:0 1rem 1rem;line-height:1.65">
             ${data.recommendedAction}
@@ -5382,7 +5382,7 @@ async function renderTeamInsights() {
         </div>` : ''}`;
 
   } catch(e) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load team insights. Try refreshing.</p></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon"></div><p>Could not load team insights. Try refreshing.</p></div>`;
   }
 }
 
@@ -5412,7 +5412,7 @@ async function renderLeaderIntelligence() {
     const attn       = ins.needsAttention || [];
     const moodVal    = ins.avgMood;
     const moodColor  = v => v >= 4 ? 'var(--success)' : v >= 3 ? 'var(--warning)' : 'var(--danger)';
-    const moodEmoji  = moodVal ? (moodVal >= 4 ? '😊' : moodVal >= 3 ? '😐' : '😕') : null;
+    const moodEmoji  = moodVal ? (moodVal >= 4 ? '' : moodVal >= 3 ? '' : '') : null;
     const moodLabel  = moodVal ? (moodVal >= 4 ? 'Strong'  : moodVal >= 3 ? 'Mixed'   : 'Low')  : '—';
 
     // Derive engagement signals from member list
@@ -5425,21 +5425,21 @@ async function renderLeaderIntelligence() {
     const patterns = [];
     if (attn.length >= 2) {
       const lowMoodCount = attn.filter(a => /mood/i.test(a.reason)).length;
-      if (lowMoodCount >= 2) patterns.push({ icon: '📉', text: `${lowMoodCount} people showing low mood this week — check for common stressors.`, level: 'warning' });
+      if (lowMoodCount >= 2) patterns.push({ icon: '', text: `${lowMoodCount} people showing low mood this week — check for common stressors.`, level: 'warning' });
       const noCheckinCount = attn.filter(a => /check.in/i.test(a.reason)).length;
-      if (noCheckinCount >= 2) patterns.push({ icon: '🔇', text: `${noCheckinCount} people haven't checked in recently — engagement may be dropping.`, level: 'warning' });
+      if (noCheckinCount >= 2) patterns.push({ icon: '', text: `${noCheckinCount} people haven't checked in recently — engagement may be dropping.`, level: 'warning' });
     }
     if (silent.length > 0 && silent.length >= Math.ceil(members.length * 0.3)) {
       patterns.push({ icon: '⏸', text: `${silent.length} of ${members.length} people have been silent for 2+ weeks. Worth a direct check-in.`, level: 'warning' });
     }
     if (moodVal !== null && moodVal >= 4 && active.length >= Math.ceil(members.length * 0.6)) {
-      patterns.push({ icon: '📈', text: `Team energy is strong this week — ${active.length} people active, avg mood ${moodVal.toFixed(1)}. Good moment for a stretch challenge.`, level: 'positive' });
+      patterns.push({ icon: '', text: `Team energy is strong this week — ${active.length} people active, avg mood ${moodVal.toFixed(1)}. Good moment for a stretch challenge.`, level: 'positive' });
     }
     if (pending.length > 0) {
-      patterns.push({ icon: '🔑', text: `${pending.length} person${pending.length !== 1 ? 's' : ''} ${pending.length !== 1 ? 'have' : 'has'} not yet set up ${pending.length !== 1 ? 'their accounts' : 'their account'}.`, level: 'info' });
+      patterns.push({ icon: '', text: `${pending.length} person${pending.length !== 1 ? 's' : ''} ${pending.length !== 1 ? 'have' : 'has'} not yet set up ${pending.length !== 1 ? 'their accounts' : 'their account'}.`, level: 'info' });
     }
     if (patterns.length === 0 && !ins.notEnoughData) {
-      patterns.push({ icon: '✓', text: 'No significant patterns detected this week. Team looks stable.', level: 'positive' });
+      patterns.push({ icon: '', text: 'No significant patterns detected this week. Team looks stable.', level: 'positive' });
     }
 
     const levelColor = l => l === 'warning' ? 'var(--warning)' : l === 'positive' ? 'var(--success)' : 'var(--text-muted)';
@@ -5499,7 +5499,7 @@ async function renderLeaderIntelligence() {
       <!-- Recommended action -->
       ${ins.recommendedAction ? `
         <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.04)">
-          <div class="card-label" style="color:var(--accent);margin-bottom:0.4rem">💡 Recommended next action</div>
+          <div class="card-label" style="color:var(--accent);margin-bottom:0.4rem">Recommended next action</div>
           <div style="font-size:0.85rem;color:var(--text-primary);line-height:1.65">${ins.recommendedAction}</div>
           <div style="margin-top:0.8rem;display:flex;gap:0.5rem;flex-wrap:wrap">
             <button class="btn btn-sm btn-outline" onclick="navigate('assignments')">Assign Assessment</button>
@@ -5508,7 +5508,7 @@ async function renderLeaderIntelligence() {
         </div>` : ''}`;
 
   } catch(e) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load intelligence. Try refreshing.</p></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon"></div><p>Could not load intelligence. Try refreshing.</p></div>`;
   }
 }
 
@@ -5575,7 +5575,7 @@ async function renderOrgHealth() {
           ${_healthBar('Account set up',      members.length - pending, members.length, '#4f8ef7')}
           ${neverCk ? `
             <div style="font-size:0.78rem;color:var(--warning);margin-top:0.3rem">
-              ⚠ ${neverCk} member${neverCk !== 1 ? 's' : ''} ${neverCk !== 1 ? 'have' : 'has'} never checked in.
+              ${neverCk} member${neverCk !== 1 ? 's' : ''} ${neverCk !== 1 ? 'have' : 'has'} never checked in.
             </div>` : ''}
         </div>
       </div>
@@ -5612,12 +5612,12 @@ async function renderOrgHealth() {
       <!-- Recommended action -->
       ${ins.recommendedAction ? `
         <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.04)">
-          <div class="card-label" style="color:var(--accent);margin-bottom:0.3rem">💡 Suggested action</div>
+          <div class="card-label" style="color:var(--accent);margin-bottom:0.3rem">Suggested action</div>
           <div style="font-size:0.85rem;color:var(--text-primary);line-height:1.6">${ins.recommendedAction}</div>
         </div>` : ''}`;
 
   } catch(e) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load organisation health. Try refreshing.</p></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon"></div><p>Could not load organisation health. Try refreshing.</p></div>`;
   }
 }
 
@@ -5732,7 +5732,7 @@ async function renderGroupHealth() {
       </div>
     `;
   } catch (err) {
-    el.innerHTML = `<div class="card"><div style="font-size:0.85rem;color:var(--danger)">⚠ ${_escAdvisor(err.message || 'Could not load group health.')}</div></div>`;
+    el.innerHTML = `<div class="card"><div style="font-size:0.85rem;color:var(--danger)">${_escAdvisor(err.message || 'Could not load group health.')}</div></div>`;
   }
 }
 
@@ -5764,7 +5764,7 @@ async function renderLeaderGroups() {
     };
     _renderLeaderGroups();
   } catch (e) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load your groups.</p></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon"></div><p>Could not load your groups.</p></div>`;
   }
 }
 
@@ -5774,7 +5774,7 @@ function _renderLeaderGroups() {
   const { led, member } = _leaderGroups;
 
   if (!led.length && !member.length) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">🎯</div>
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon"></div>
       <p>You're not in any groups yet. An admin can create groups in Members → Groups and make you a lead.</p></div>`;
     return;
   }
@@ -5783,10 +5783,10 @@ function _renderLeaderGroups() {
     <div class="grp-card" data-gid="${g.id}">
       <div class="grp-head">
         <div class="grp-name">${_escAdvisor(g.name)} <span class="grp-leadtag">you lead</span></div>
-        <button class="btn btn-outline btn-sm" onclick="openGroupDetail('${g.id}')">💬 Open · Copilot</button>
+        <button class="btn btn-outline btn-sm" onclick="openGroupDetail('${g.id}')">Open · Copilot</button>
       </div>
       <div class="grp-aim">
-        <div class="grp-aim-label">🎯 Goals</div>
+        <div class="grp-aim-label">Goals</div>
         <div class="grp-chips" id="grp-goals-${g.id}">${(g.goals||[]).map(x => _aimChip(g.id,'goal',x)).join('') || '<span class="grp-none">None yet</span>'}</div>
         <div class="grp-add">
           <input class="search-input" id="grp-goal-in-${g.id}" placeholder="Add a goal…" onkeydown="if(event.key==='Enter')addGroupAim('${g.id}','goal')">
@@ -5794,7 +5794,7 @@ function _renderLeaderGroups() {
         </div>
       </div>
       <div class="grp-aim">
-        <div class="grp-aim-label">🧬 Traits</div>
+        <div class="grp-aim-label">Traits</div>
         <div class="grp-chips" id="grp-traits-${g.id}">${(g.traits||[]).map(x => _aimChip(g.id,'trait',x)).join('') || '<span class="grp-none">None yet</span>'}</div>
         <div class="grp-add">
           <input class="search-input" id="grp-trait-in-${g.id}" placeholder="Add a trait…" onkeydown="if(event.key==='Enter')addGroupAim('${g.id}','trait')">
@@ -5811,8 +5811,8 @@ function _renderLeaderGroups() {
       <div class="grp-card grp-card--ro">
         <div class="grp-name">${_escAdvisor(g.name)}</div>
         <div class="grp-ro-aims">
-          ${(g.goals||[]).length ? `🎯 ${(g.goals).map(_escAdvisor).join(', ')}` : ''}
-          ${(g.traits||[]).length ? `<br>🧬 ${(g.traits).map(_escAdvisor).join(', ')}` : ''}
+          ${(g.goals||[]).length ? `${(g.goals).map(_escAdvisor).join(', ')}` : ''}
+          ${(g.traits||[]).length ? `<br>${(g.traits).map(_escAdvisor).join(', ')}` : ''}
           ${!(g.goals||[]).length && !(g.traits||[]).length ? '<span class="grp-none">No goals or traits set by its lead yet.</span>' : ''}
         </div>
       </div>`).join('')}` : '';
@@ -5862,9 +5862,9 @@ async function _saveGroupAims(gid) {
     });
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error || 'Save failed');
-    if (savedEl) { savedEl.style.color = 'var(--success)'; savedEl.textContent = '✓ Saved'; setTimeout(() => { if (savedEl) savedEl.textContent = ''; }, 1500); }
+    if (savedEl) { savedEl.style.color = 'var(--success)'; savedEl.textContent = 'Saved'; setTimeout(() => { if (savedEl) savedEl.textContent = ''; }, 1500); }
   } catch (err) {
-    if (savedEl) { savedEl.style.color = 'var(--danger)'; savedEl.textContent = `⚠ ${err.message}`; }
+    if (savedEl) { savedEl.style.color = 'var(--danger)'; savedEl.textContent = `${err.message}`; }
   }
 }
 
@@ -5902,8 +5902,8 @@ async function renderDataSources() {
       </div>
       <div class="ds-upload-row">
         <select class="search-input" id="ds-target" style="max-width:240px">
-          <option value="smart">🧠 Auto-detect members (smart import)</option>
-          <option value="org">📊 Whole organization</option>
+          <option value="smart">Auto-detect members (smart import)</option>
+          <option value="org">Whole organization</option>
           ${memberOpts ? `<optgroup label="A specific member">${memberOpts}</optgroup>` : ''}
         </select>
         <label class="btn btn-accent btn-sm" style="cursor:pointer">
@@ -5922,9 +5922,9 @@ async function renderDataSources() {
     <div class="card" style="margin-bottom:1rem">
       <div class="card-label" style="margin-bottom:0.6rem">Connect a source</div>
       <div class="ds-connect-grid">
-        ${connectCard('🟦', 'Microsoft Teams', 'Meeting attendance & activity signals (metadata).')}
-        ${connectCard('🔴', 'Google Workspace', 'Calendar & activity signals.')}
-        ${connectCard('📧', 'Outlook / Email', 'Engagement cadence signals (metadata).')}
+        ${connectCard('', 'Microsoft Teams', 'Meeting attendance & activity signals (metadata).')}
+        ${connectCard('', 'Google Workspace', 'Calendar & activity signals.')}
+        ${connectCard('', 'Outlook / Email', 'Engagement cadence signals (metadata).')}
       </div>
       <div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.6rem">Connectors sync <strong>signals, not message content</strong> — and require your org admin's consent.</div>
     </div>
@@ -5976,7 +5976,7 @@ async function uploadDataSource(input) {
     // SMART IMPORT — AI auto-attributes rows/mentions to the right members.
     if (target === 'smart') {
       const isVisual = parsed.kind === 'image' || parsed.kind === 'pdf';
-      if (res) { res.style.color = 'var(--text-muted)'; res.textContent = `🧠 ${isVisual ? 'Scanning' : 'Reading'} ${file.name} and matching members…`; }
+      if (res) { res.style.color = 'var(--text-muted)'; res.textContent = `${isVisual ? 'Scanning' : 'Reading'} ${file.name} and matching members…`; }
       const payload = isVisual
         ? { fileName: file.name, public: isPublic, media: { kind: parsed.kind, mediaType: parsed.mediaType, data: parsed.data } }
         : { fileName: file.name, public: isPublic, content: String(content) };
@@ -5991,7 +5991,7 @@ async function uploadDataSource(input) {
         const un = (d.unmatched || []).length ? ` · not matched: ${(d.unmatched || []).map(_escAdvisor).join(', ')}` : '';
         res.style.color = d.imported ? 'var(--success)' : 'var(--text-muted)';
         res.innerHTML = d.imported
-          ? `✓ Imported ${d.imported} item(s) → ${matched}${un}`
+          ? `Imported ${d.imported} item(s) → ${matched}${un}`
           : `No per-member data found. Try "Whole organization" to keep the whole file.${un}`;
       }
       input.value = '';
@@ -6013,11 +6013,11 @@ async function uploadDataSource(input) {
     const r = await fetch('/api/signals/ingest', { method: 'POST', headers: Auth._headers(), body: JSON.stringify(body) });
     const d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'Upload failed');
-    if (res) { res.style.color = 'var(--success)'; res.textContent = `✓ ${file.name} added — IntelliQ can now use it.`; }
+    if (res) { res.style.color = 'var(--success)'; res.textContent = `${file.name} added — IntelliQ can now use it.`; }
     input.value = '';
     _loadDataSourcesRecent();
   } catch (err) {
-    if (res) { res.style.color = 'var(--danger)'; res.textContent = `⚠ ${err.message}`; }
+    if (res) { res.style.color = 'var(--danger)'; res.textContent = `${err.message}`; }
   }
 }
 
@@ -6199,8 +6199,8 @@ async function deliverStep(memberId, btn) {
     });
     if (!res.ok) throw new Error();
     const card = btn.closest('.intel-watch-draft');
-    if (card) card.innerHTML = `<div class="intel-draft-sent">✓ Sent — it's in their queue now.</div>`;
-    if (typeof showToast === 'function') showToast('Sent ✓', 'success');
+    if (card) card.innerHTML = `<div class="intel-draft-sent">Sent — it's in their queue now.</div>`;
+    if (typeof showToast === 'function') showToast('Sent ', 'success');
   } catch (e) {
     btn.disabled = false; btn.textContent = 'Approve & send';
     if (typeof showToast === 'function') showToast('Could not send', 'error');
@@ -6255,8 +6255,8 @@ async function deliverTeam(btn) {
     const d = await res.json();
     if (!res.ok || !d.ok) throw new Error();
     const card = btn.closest('.intel-watch-draft');
-    if (card) card.innerHTML = `<div class="intel-draft-sent">✓ Sent to ${d.sent || 'the'} team member${d.sent === 1 ? '' : 's'} — it's in their queues now.</div>`;
-    if (typeof showToast === 'function') showToast('Sent to the team ✓', 'success');
+    if (card) card.innerHTML = `<div class="intel-draft-sent">Sent to ${d.sent || 'the'} team member${d.sent === 1 ? '' : 's'} — it's in their queues now.</div>`;
+    if (typeof showToast === 'function') showToast('Sent to the team ', 'success');
   } catch (e) {
     btn.disabled = false; btn.textContent = 'Approve & send to team';
     if (typeof showToast === 'function') showToast('Could not send', 'error');
@@ -6276,11 +6276,11 @@ function _intelCard(it) {
       </div>
       <div class="intel-why"><strong>Why now:</strong> ${_escAdvisor(it.whyNow)}</div>
       ${(it.deviations || []).length ? `<div class="intel-dev">${it.deviations.slice(0, 3).map(_intelDevChip).join('')}</div>` : ''}
-      ${(it.connections || []).length ? `<div class="intel-conn">🔗 ${_escAdvisor(it.connections[0].basis)} <span class="intel-conn-hint">(a connection, not a cause)</span></div>` : ''}
+      ${(it.connections || []).length ? `<div class="intel-conn">${_escAdvisor(it.connections[0].basis)} <span class="intel-conn-hint">(a connection, not a cause)</span></div>` : ''}
       <details class="intel-ev"><summary>Evidence basis</summary><ul>${ev}</ul></details>
       ${it.careFlag ? `<div class="intel-care">There may be personal context here — lead with care. Details are kept private.</div>` : ''}
       <div class="intel-action"><strong>Try:</strong> ${_escAdvisor(it.recommendedAction)}</div>
-      ${it.learnedNote ? `<div class="intel-learned">📈 ${_escAdvisor(it.learnedNote)}</div>` : ''}
+      ${it.learnedNote ? `<div class="intel-learned">${_escAdvisor(it.learnedNote)}</div>` : ''}
       <div class="intel-cta" id="intel-cta-${it.memberId}">
         <button class="intel-btn" onclick="intelAct('${it.memberId}','${it.patternType || ''}',this)">I acted on this</button>
         <button class="intel-btn intel-btn-ghost" onclick="showProfile('${it.memberId}')">Open profile</button>
@@ -6313,10 +6313,10 @@ async function intelAct(memberId, patternType, btn) {
     if (patternType) intelNoticeFeedback(patternType, 'useful');
     const cta = document.getElementById('intel-cta-' + memberId);
     if (cta) cta.innerHTML = `
-      <span class="intel-logged">Logged ✓ — how did it go?</span>
-      <button class="intel-oc" onclick="intelOutcome('${d.interventionId}','positive',this)">👍 Helped</button>
-      <button class="intel-oc" onclick="intelOutcome('${d.interventionId}','neutral',this)">😐 No change</button>
-      <button class="intel-oc" onclick="intelOutcome('${d.interventionId}','negative',this)">👎 Worse</button>`;
+      <span class="intel-logged">Logged — how did it go?</span>
+      <button class="intel-oc" onclick="intelOutcome('${d.interventionId}','positive',this)">Helped</button>
+      <button class="intel-oc" onclick="intelOutcome('${d.interventionId}','neutral',this)">No change</button>
+      <button class="intel-oc" onclick="intelOutcome('${d.interventionId}','negative',this)">Worse</button>`;
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = 'I acted on this'; }
     showToast('Could not log the action', 'warning');
@@ -6350,7 +6350,7 @@ async function intelOutcome(interventionId, outcome, btn) {
     const d = await res.json();
     if (!res.ok || !d.ok) throw new Error();
     const p = btn?.parentElement;
-    if (p) p.innerHTML = `<span class="intel-logged">Outcome recorded ✓ — the system learns from this for similar patterns.</span>`;
+    if (p) p.innerHTML = `<span class="intel-logged">Outcome recorded — the system learns from this for similar patterns.</span>`;
   } catch (e) {
     if (btn) btn.disabled = false;
     showToast('Could not record the outcome', 'warning');
@@ -6383,7 +6383,7 @@ async function renderLeaderHome() {
 
     const members      = memb.members || [];
     const attn         = ins.needsAttention || [];
-    const MOOD_ICONS   = { 1:'😔', 2:'😕', 3:'😐', 4:'🙂', 5:'😄' };
+    const MOOD_ICONS   = { 1:'', 2:'', 3:'', 4:'', 5:'' };
     const moodColor    = v => v >= 4 ? 'var(--success)' : v >= 3 ? 'var(--warning)' : 'var(--danger)';
 
     // Sort: needs-attention first, then by most-recent check-in
@@ -6411,11 +6411,11 @@ async function renderLeaderHome() {
     // Stat bar
     const activeThisWeek = ins.activeThisWeek ?? 0;
     const avgMood        = ins.avgMood;
-    const moodEmoji      = avgMood ? (avgMood >= 4 ? '😊' : avgMood >= 3 ? '😐' : '😕') : '—';
+    const moodEmoji      = avgMood ? (avgMood >= 4 ? '' : avgMood >= 3 ? '' : '') : '—';
 
     el.innerHTML = `
       <!-- Proactive briefing + alerts (loads on open — not click-to-ask) -->
-      <div id="ldr-briefing" class="ldr-briefing-wrap"><div class="ldr-brief-loading">🤖 Reading this week's signals…</div></div>
+      <div id="ldr-briefing" class="ldr-briefing-wrap"><div class="ldr-brief-loading">Reading this week's signals…</div></div>
 
       <!-- Scope indicator -->
       <div class="card" style="margin-bottom:1rem;border-color:rgba(124,90,245,0.25);background:rgba(124,90,245,0.04)">
@@ -6434,7 +6434,7 @@ async function renderLeaderHome() {
       <!-- Attention needed -->
       ${attn.length ? `
         <div class="card" style="margin-bottom:1rem;border-color:rgba(247,79,122,0.4);background:rgba(247,79,122,0.04)">
-          <div class="card-label" style="color:var(--danger);margin-bottom:0.6rem">⚠ Needs Attention (${attn.length})</div>
+          <div class="card-label" style="color:var(--danger);margin-bottom:0.6rem">Needs Attention (${attn.length})</div>
           ${attn.map(m => `
             <div class="leader-attn-row">
               <span class="leader-attn-name">${m.name}</span>
@@ -6442,7 +6442,7 @@ async function renderLeaderHome() {
             </div>`).join('')}
         </div>` : `
         <div class="card" style="margin-bottom:1rem;border-color:rgba(79,247,122,0.3);background:rgba(79,247,122,0.04)">
-          <div style="font-size:0.85rem;color:var(--success);font-weight:600">✓ No immediate attention flags this week</div>
+          <div style="font-size:0.85rem;color:var(--success);font-weight:600">No immediate attention flags this week</div>
           <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem">
             ${ins.notEnoughData ? 'Not enough check-in data yet — encourage your team to check in.' :
               'Your team looks stable. Keep the momentum going.'}
@@ -6476,7 +6476,7 @@ async function renderLeaderHome() {
       <!-- Recommended action -->
       ${ins.recommendedAction ? `
         <div class="card" style="margin-bottom:1rem;border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.04)">
-          <div class="card-label" style="color:var(--accent);margin-bottom:0.4rem">💡 IntelliQ Suggests</div>
+          <div class="card-label" style="color:var(--accent);margin-bottom:0.4rem">IntelliQ Suggests</div>
           <div style="font-size:0.85rem;color:var(--text-primary);line-height:1.65">${ins.recommendedAction}</div>
         </div>` : ''}
 
@@ -6517,7 +6517,7 @@ async function renderLeaderHome() {
     _loadLeaderBriefing();
 
   } catch(e) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load leader dashboard. Try refreshing.</p></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon"></div><p>Could not load leader dashboard. Try refreshing.</p></div>`;
   }
 }
 
@@ -6544,12 +6544,12 @@ async function _loadLeaderBriefing(refresh) {
     el.innerHTML = `
       <div class="ldr-brief-card">
         <div class="ldr-brief-head">
-          <span>🤖 What needs you</span>
+          <span>What needs you</span>
           <button class="btn btn-outline btn-sm" onclick="_loadLeaderBriefing(true)">↻ Refresh</button>
         </div>
         ${d.briefing ? `<div class="ldr-brief-text">${_escAdvisor(d.briefing).replace(/\n/g,'<br>')}</div>` : ''}
         ${alerts ? `<div class="ldr-alert-list">${alerts}</div>`
-                 : `<div class="ldr-brief-clear">✓ Nothing urgent right now — your group is steady.</div>`}
+                 : `<div class="ldr-brief-clear">Nothing urgent right now — your group is steady.</div>`}
         <div class="ldr-brief-foot">Weighs results & repeated patterns over one-off notes. Updated ${_escAdvisor(new Date(d.generatedAt).toLocaleString())}${d.cached ? ' · cached' : ''}.</div>
       </div>`;
   } catch (e) {
@@ -6608,7 +6608,7 @@ async function renderLeaderPeople() {
     if (countEl) countEl.textContent = `${n} ${n !== 1 ? 'people' : 'person'}${ros.orgWide ? ' across the org' : ' below you'}`;
     _renderLeaderPeopleList();
   } catch(e) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⚠️</div><p>Could not load your people. Try refreshing.</p></div>`;
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon"></div><p>Could not load your people. Try refreshing.</p></div>`;
   }
 }
 
@@ -6735,7 +6735,7 @@ function _renderLeaderPeopleList() {
   if (!hasAny) {
     el.innerHTML = `
       <div class="empty-state">
-        <div class="empty-icon">🌳</div>
+        <div class="empty-icon"></div>
         <p>No tiers below you yet. Add a sub-node under your group in the Org Tree,
            or use “＋ Add Member” to add someone directly under you.</p>
       </div>`;
@@ -6800,12 +6800,12 @@ async function leaderAddMember() {
     if (!res.ok || !data.ok) throw new Error(data.error || 'Could not add member');
 
     out.style.color = 'var(--success)';
-    out.textContent = `✓ ${data.user.name} added under you.`;
+    out.textContent = `${data.user.name} added under you.`;
     ['ldr-add-first','ldr-add-last','ldr-add-email'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     renderLeaderPeople(); // refresh the list (now includes the new member)
   } catch (err) {
     out.style.color = 'var(--danger)';
-    out.textContent = `⚠ ${err.message}`;
+    out.textContent = `${err.message}`;
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Add'; }
   }
@@ -6830,7 +6830,7 @@ function renderCoachInputTab(memberId) {
             <span class="coach-log-author">${ci.author}</span>
           </div>
           ${ci.notes ? `<div class="coach-log-notes">${ci.notes}</div>` : ''}
-          ${ci.concern !== 'none' ? `<span class="coach-log-concern concern-${ci.concern}">${ci.concern === 'monitor' ? '⚠ Monitor' : '🔴 Urgent'}</span>` : ''}
+          ${ci.concern !== 'none' ? `<span class="coach-log-concern concern-${ci.concern}">${ci.concern === 'monitor' ? 'Monitor' : 'Urgent'}</span>` : ''}
           ${Object.keys(ci.scores || {}).length ? `
             <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.5rem">
               ${Object.entries(ci.scores).map(([k,v]) => `
@@ -6899,9 +6899,9 @@ function renderCoachInputTab(memberId) {
         <div>
           <label>CONCERN LEVEL</label>
           <div class="concern-selector">
-            <button class="concern-btn active-none" id="concern-none"    onclick="setConcernLevel('none')"   >✓ No Concern</button>
-            <button class="concern-btn"             id="concern-monitor" onclick="setConcernLevel('monitor')">⚠ Monitor</button>
-            <button class="concern-btn"             id="concern-urgent"  onclick="setConcernLevel('urgent')" >🔴 Urgent</button>
+            <button class="concern-btn active-none" id="concern-none"    onclick="setConcernLevel('none')"   >No Concern</button>
+            <button class="concern-btn"             id="concern-monitor" onclick="setConcernLevel('monitor')">Monitor</button>
+            <button class="concern-btn"             id="concern-urgent"  onclick="setConcernLevel('urgent')" >Urgent</button>
           </div>
         </div>
 
@@ -7091,7 +7091,7 @@ function _showGlobalError(message, err) {
     'padding:2rem','text-align:center','gap:1rem',
   ].join(';');
   panel.innerHTML = `
-    <div style="font-size:2.5rem">⚠️</div>
+    <div style="font-size:2.5rem"></div>
     <div style="font-weight:700;font-size:1.15rem;color:#111">Something went wrong loading IntelliQ.</div>
     <div style="color:#666;font-size:0.85rem;max-width:340px;line-height:1.5">${message || 'An unexpected error occurred. Please refresh or log out and try again.'}</div>
     <div style="display:flex;gap:0.75rem;flex-wrap:wrap;justify-content:center;margin-top:0.4rem">
@@ -7120,7 +7120,7 @@ function _showGlobalError(message, err) {
     copyBtn.addEventListener('click', () => {
       const text = document.getElementById('iq-err-detail')?.textContent || detail;
       navigator.clipboard?.writeText(text).then(() => {
-        copyBtn.textContent = 'Copied ✓';
+        copyBtn.textContent = 'Copied ';
         setTimeout(() => { copyBtn.textContent = 'Copy error details'; }, 2000);
       }).catch(() => { copyBtn.textContent = 'Copy failed'; });
     });
