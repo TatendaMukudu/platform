@@ -42,6 +42,8 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
   console.log(`  ${summary.orgName} (${summary.code})`);
   console.log(`  users ${summary.users} (players ${summary.players} · staff ${summary.staff}) · nodes ${summary.nodes}`);
   console.log(`  check-ins ${summary.checkins} · signals ${summary.signals} · assessments ${summary.assessments} · interventions ${summary.interventions}`);
+  console.log(`  studio: ${summary.studio.users} players + ${summary.studio.coaches} coaches used it · ${summary.studio.plans} plans (${summary.studio.completed} completed) · ${summary.studio.evidenceShown} showed evidence`);
+  console.log(`  logins (password ${summary.login.password}): director ${summary.login.director} · coach ${summary.login.firstTeamCoach} · player ${summary.login.samplePlayer}`);
 
   const server = app.listen(0);
   await new Promise(r => server.once('listening', r));
@@ -97,6 +99,10 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
     ok('assessments load for the coach (templates + issued)', assess.status === 200 && Array.isArray(assess.j?.templates));
     const studio = await timed('studio (coach)', '/api/studio', tokCoach);
     ok('the Studio opens with the coach\'s space', studio.status === 200 && studio.j?.ok === true);
+    const tokPlayer = issueToken(summary.samplePlayerId, CLUB_CODE, 'member');
+    const pStudio = await timed('studio (player, with usage)', '/api/studio', tokPlayer);
+    console.log(`     sample player Studio: ${(pStudio.j?.plans || []).length} plans · ${(pStudio.j?.messages || []).length} messages · ${(pStudio.j?.assigned || []).length} assigned`);
+    ok('a player\'s Studio carries their real plans + conversation', pStudio.status === 200 && (pStudio.j?.messages || []).length + (pStudio.j?.plans || []).length > 0);
 
     // pick a flagged member and pull their profile + nudges
     const flagged = (brief.j?.items || [])[0];

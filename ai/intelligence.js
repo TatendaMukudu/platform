@@ -96,9 +96,11 @@ function quietImprovement(m) {
   const rise = later - earlier;
   if (!Number.isFinite(rise) || !Number.isFinite(later)) return null; // never surface NaN
   if (rise < 0.4 || later < 3) return null;                     // rising AND now in a good place
-  // "Quiet" = little visible recognition: few strong/public signals about them.
-  const visible = (m.signalSeries || []).filter(s => m.now - s.t < PRIOR && s.weight === 'strong').length;
-  if (visible > 3) return null;                                 // already highly visible → not quiet
+  // "Quiet" = little recognition FROM OTHERS. Only strong signals someone else
+  // logged about them count — a person's OWN routine logging (a training-load
+  // metric, a self check-in) is not recognition and must not mask a quiet climb.
+  const visible = (m.signalSeries || []).filter(s => m.now - s.t < PRIOR && s.weight === 'strong' && !s.own).length;
+  if (visible > 3) return null;                                 // already highly recognised → not quiet
   return {
     type: 'quiet_improvement', severity: 'low',
     basis: `mood up ${round1(rise)} over ~6 weeks with little visible recognition`,

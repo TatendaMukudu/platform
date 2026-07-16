@@ -329,19 +329,61 @@ async function buildClubStore() {
     { title: 'The club\'s pressing principles', body: 'Trigger on the back-foot touch. Nearest player leads, the rest shift across.', kind: 'play' },
   ].forEach(t => orgTutorials[CODE].push({ id: rid(), title: t.title, body: t.body, url: '', kind: t.kind, createdBy: sportingDirector, createdByName: orgUsers[CODE][sportingDirector].name, createdAt: iso(dAgo(60)) }));
 
-  // ── A few Studio threads (plans + an evidence observation) ────────────────
-  allPlayers.slice(0, 12).forEach(pl => {
+  // ── Studio usage — spread across teams & levels, varied and realistic ─────
+  // Roughly 1 in 4 players actively uses their Studio: some just capture a plan,
+  // some think it through in a short chat, some show IntelliQ evidence (a clip, a
+  // GPS sheet, a whiteboard photo). A few coaches plan sessions there too.
+  const PLAYER_PLANS = [
+    'Two finishing sessions a week; review one clip after each match.',
+    'Protect sleep on match-minus-one — in bed by 10:30.',
+    'Add 10 minutes of weak-foot work before every session.',
+    'Watch one defensive-shape clip with the analyst on Mondays.',
+    'Hit my sprint-distance target in two of three sessions this week.',
+    'Do the full prehab routine after every training day.',
+  ];
+  let studioUsers = 0, studioPlans = 0, studioDone = 0, studioEvidence = 0, studioCoaches = 0;
+  allPlayers.forEach((pl, i) => {
+    if (i % 4 !== 0) return;                     // ~1 in 4 players
+    studioUsers++;
+    const chatty = i % 8 === 0;
+    const showsEvidence = ['improving', 'breakout', 'injury', 'dip'].includes(pl.arc) && i % 3 === 0;
+    const p1 = { id: rid(), text: PLAYER_PLANS[i % PLAYER_PLANS.length], ts: iso(dAgo(10 + (i % 6))), done: ['improving', 'breakout', 'steady'].includes(pl.arc) };
+    const p2 = { id: rid(), text: PLAYER_PLANS[(i + 3) % PLAYER_PLANS.length], ts: iso(dAgo(4 + (i % 5))), done: false };
+    studioPlans += 2; if (p1.done) studioDone++;
     studioThreads[ukey(pl.uid)] = {
-      messages: [
+      messages: chatty ? [
         { role: 'user', text: 'I want to be sharper in the final third this block.', ts: iso(dAgo(10)) },
         { role: 'assistant', text: 'Good focus. Let\'s make it concrete — one rep target and one review habit. I\'ve turned that into a plan.', ts: iso(dAgo(10)) },
+        { role: 'user', text: 'And I keep fading in the last 20 minutes.', ts: iso(dAgo(9)) },
+        { role: 'assistant', text: 'That reads as a conditioning + sleep pattern, not effort. Let\'s protect match-minus-one sleep and I\'ll watch your load with the staff.', ts: iso(dAgo(9)) },
+      ] : [
+        { role: 'user', text: p1.text, ts: p1.ts },
+        { role: 'assistant', text: 'Captured that as a plan — I\'ll keep it in front of you and check how it\'s going.', ts: p1.ts },
       ],
-      plans: [
-        { id: rid(), text: 'Two finishing sessions a week; review one clip after each match.', ts: iso(dAgo(10)), done: pl.arc === 'improving' },
-        { id: rid(), text: 'Protect sleep on match-minus-one (in bed by 10:30).', ts: iso(dAgo(6)), done: false },
-      ],
+      plans: [p1, p2],
     };
-    if (pl.arc === 'improving') pushSig(pl.uid, pl.uid, 'studio', dAgo(9), null, 'From image: whiteboard plan shows two extra finishing sessions', 'Studio evidence', 'normal');
+    if (showsEvidence) {
+      studioEvidence++;
+      const ev = pick([
+        'From image: whiteboard plan shows two extra finishing sessions',
+        'From spreadsheet: sprint distance up 8% over the last three sessions',
+        'From video: good weak-side run, late shot selection to sharpen',
+      ]);
+      pushSig(pl.uid, pl.uid, 'studio', dAgo(6 + (i % 4)), null, ev, 'Studio evidence', 'normal');
+    }
+    pushSig(pl.uid, pl.uid, 'studio', p1.ts && dAgo(10), null, `Planned: ${p1.text.slice(0, 60)}`, 'Studio input', 'normal');
+  });
+  // A few coaches use the Studio to plan sessions.
+  [firstTeamStaff.head, firstTeamStaff.asst].forEach((cid, k) => {
+    if (!cid) return; studioCoaches++;
+    studioThreads[ukey(cid)] = {
+      messages: [
+        { role: 'user', text: 'Plan a lighter week — a lot of the group are run down.', ts: iso(dAgo(5)) },
+        { role: 'assistant', text: 'Given the load trend I\'d cut sprint volume Tue/Thu and add a recovery day. I\'ve drafted the week as a plan.', ts: iso(dAgo(5)) },
+      ],
+      plans: [{ id: rid(), text: 'Deload week: recovery day Wed, reduced sprint volume, review Friday.', ts: iso(dAgo(5)), done: false }],
+    };
+    studioPlans++;
   });
 
   // ── A club-wide group (copilot-style) ─────────────────────────────────────
@@ -357,8 +399,14 @@ async function buildClubStore() {
       signals: orgSignals[CODE].length,
       assessments: assessmentAssignments[CODE].length,
       interventions: orgInterventions[CODE].length,
-      login: { director: orgUsers[CODE][sportingDirector].email, firstTeamCoach: orgUsers[CODE][firstTeamStaff.head].email, password: 'demo1234' },
-      directorId: sportingDirector, firstTeamCoachId: firstTeamStaff.head,
+      studio: { users: studioUsers, coaches: studioCoaches, plans: studioPlans + studioCoaches, completed: studioDone, evidenceShown: studioEvidence },
+      login: {
+        director: orgUsers[CODE][sportingDirector].email,
+        firstTeamCoach: orgUsers[CODE][firstTeamStaff.head].email,
+        samplePlayer: orgUsers[CODE][allPlayers[0].uid].email,
+        password: 'demo1234',
+      },
+      directorId: sportingDirector, firstTeamCoachId: firstTeamStaff.head, samplePlayerId: allPlayers[0].uid,
     },
   };
 }

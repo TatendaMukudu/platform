@@ -2814,6 +2814,12 @@ function _buildMemberIntelInput(code, u, now) {
   const numeric = {};
   sigs.forEach(s => {
     if (s.valueNum == null) return;
+    // Mood check-ins are ALREADY a first-class dimension (dimSeries.mood + the
+    // check-in cadence stream). Their per-value label ("Mood 4/5", "Mood 5/5")
+    // would otherwise fragment into one numeric stream PER mood value — so a person
+    // who shifts from 4s to 5s leaves a stale "Mood 4/5" stream that trips a false
+    // data_gap ("went quiet"). Skip them here: mood is not a raw external metric.
+    if (s.source === 'checkin') return;
     const t = new Date(s.ts).getTime(); if (isNaN(t)) return;
     const key = `${s.source}${s.label ? ':' + s.label : ''}`;
     const label = s.label || (SIGNAL_SOURCES[s.source]?.label || s.source);
