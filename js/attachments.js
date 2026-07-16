@@ -27,15 +27,17 @@ const AttachmentHandler = {
     'application/csv': 'csv',
   },
 
+  // Short text labels instead of emoji — kept per the no-emoji rule (moods and
+  // user-typed content are the only exceptions).
   ICONS: {
-    image:  '🖼️',
-    pdf:    '📄',
-    docx:   '📝',
-    xlsx:   '📊',
-    pptx:   '📽️',
-    text:   '📃',
-    csv:    '📊',
-    embed:  '🎬',
+    image:  'IMG',
+    pdf:    'PDF',
+    docx:   'DOC',
+    xlsx:   'XLS',
+    pptx:   'PPT',
+    text:   'TXT',
+    csv:    'CSV',
+    embed:  'LINK',
   },
 
   ACCEPT_ATTR: 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv',
@@ -231,9 +233,8 @@ const AttachmentHandler = {
     // For Hudl, Google Drive, and generic links — show a clickable banner
     return `<a href="${url}" target="_blank" rel="noopener"
       style="display:flex;align-items:center;gap:0.7rem;padding:0.9rem 1rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;text-decoration:none;color:var(--text-primary)">
-      <span style="font-size:1.4rem">${kind === 'hudl' ? '🏈' : kind === 'gdrive' || kind === 'gdocs' ? '📁' : '🔗'}</span>
       <div>
-        <div style="font-size:0.82rem;font-weight:600">${kind === 'hudl' ? 'Hudl Clip' : kind === 'gdrive' ? 'Google Drive File' : kind === 'gdocs' ? 'Google Doc/Slides' : 'Attached Link'}</div>
+        <div style="font-size:0.82rem;font-weight:600">${kind === 'hudl' ? 'Video clip' : kind === 'gdrive' ? 'Google Drive file' : kind === 'gdocs' ? 'Google Doc / Slides' : 'Attached link'}</div>
         <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px">Click to open in new tab →</div>
       </div>
     </a>`;

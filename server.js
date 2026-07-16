@@ -2878,30 +2878,31 @@ function _learningByPattern(code) {
 }
 
 /* ── The proactive prompt layer ───────────────────────────────────────────────
-   Turns what the kernel already knows into natural offers a leader can approve in
-   one tap — the "want me to…" voice: repeat what's working, rework what isn't, get
-   ahead of a shared weak area, assign a focused reflection to someone who's slipped,
-   or prepare for a busy stretch ahead. Every prompt is grounded in real signals
-   (outcomes, development areas, trajectory, upcoming events) and privacy-safe — it
-   only ever names the leader's OWN people, and each carries a CTA that routes to the
-   existing prepare→deliver rails, so approval makes it real. */
-function _leaderPrompts(code, userId, now) {
+   Grounded CANDIDATES the AI reasons over. Each is a real, privacy-safe fact about
+   the leader's OWN people (an outcome, a shared development area, a trajectory, an
+   upcoming stretch) paired with a structured CTA that routes to the prepare→deliver
+   rails. The AI (in _reasonedPrompts) decides which matter for THIS organisation and
+   phrases them in its voice — but the CTA stays deterministic, so nothing acted on
+   is ever fabricated. This function is the grounding; the reasoning sits above it. */
+function _promptCandidates(code, userId, now) {
   const slug = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'x';
-  const prompts = [];
+  const cands = [];
   const ids = getVisibleUserIds(code, userId).filter(id => id !== userId);
   const members = ids.map(id => orgUsers[code]?.[id]).filter(u => u && u.role !== 'superadmin');
 
-  // 1) Assessment outcomes → repeat what's working / rework what isn't.
+  // Assessment outcomes → repeat what's working / rework what isn't.
   let outcomes; try { outcomes = _assessmentOutcomes(code, userId, now); } catch (_) { outcomes = { working: [], revisit: [] }; }
   if (outcomes.working[0]) {
     const w = outcomes.working[0];
-    prompts.push({ id: 'repeat-' + slug(w.title), tone: 'opportunity',
+    cands.push({ id: 'repeat-' + slug(w.title), tone: 'opportunity',
+      basis: `The assessment "${w.title}" lines up with people improving${w.rising ? ` (${w.rising} trending up since)` : ''}${w.avgScore != null ? `, avg score ${w.avgScore}` : ''}. Running it again could help.`,
       text: `"${w.title}" has lined up with people improving${w.rising ? ` — ${w.rising} trending up since` : ''}. Want me to build this week around running it again?`,
       cta: { label: 'Draft the plan', action: 'plan', theme: w.title } });
   }
   if (outcomes.revisit[0]) {
     const r = outcomes.revisit[0];
-    prompts.push({ id: 'rework-' + slug(r.title), tone: 'attention',
+    cands.push({ id: 'rework-' + slug(r.title), tone: 'attention',
+      basis: `The assessment "${r.title}" preceded a dip${r.falling ? ` for ${r.falling} ${r.falling === 1 ? 'person' : 'people'}` : ''}${r.avgScore != null ? `, avg score ${r.avgScore}` : ''}. It may need reworking.`,
       text: `"${r.title}" has preceded a dip${r.falling ? ` for ${r.falling}` : ''}. Want me to rework how it's run before it goes out again?`,
       cta: { label: 'Rework it', action: 'plan', theme: `reworking ${r.title}` } });
   }
@@ -2919,29 +2920,30 @@ function _leaderPrompts(code, userId, now) {
     devByMember[u.id] = toks;
   });
 
-  // 2) A shared weak area across several people → a proactive plan for the week.
+  // A shared development area across several people → a proactive plan.
   const topWeak = Object.entries(devCount).sort((a, b) => b[1] - a[1])[0];
   if (topWeak && topWeak[1] >= 2) {
-    prompts.push({ id: 'team-weak-' + slug(topWeak[0]), tone: 'attention',
+    cands.push({ id: 'team-weak-' + slug(topWeak[0]), tone: 'attention',
+      basis: `${topWeak[1]} people have "${topWeak[0]}" as a development area right now — a shared theme worth getting ahead of.`,
       text: `${topWeak[1]} people have been working on ${topWeak[0]} lately. Want me to draft a proactive plan for the week to get ahead of it?`,
       cta: { label: 'Draft a plan', action: 'plan', theme: topWeak[0] } });
   }
 
-  // 3) One person who's a little weaker in an area and not trending up → assign them a focused reflection.
-  const cand = members.find(u => {
+  // People who are a little weaker in an area and not trending up → assign a focused reflection.
+  members.forEach(u => {
     const dir = _memberTrajDir(code, u, now);
-    return (dir === 'down' || dir === 'steady') && devByMember[u.id] && devByMember[u.id].size;
+    if ((dir === 'down' || dir === 'steady') && devByMember[u.id] && devByMember[u.id].size) {
+      const first = (u.name || 'They').split(' ')[0];
+      const area = [...devByMember[u.id]][0];
+      cands.push({ id: 'assign-' + u.id, tone: 'opportunity',
+        basis: `${first} has "${area}" as a development area and is ${dir === 'down' ? 'trending down' : 'holding steady, not improving'} — a focused reflection could help.`,
+        text: `${first} has been a little weaker in ${area}. Want me to assign them a focused reflection on it?`,
+        cta: { label: `Assign to ${first}`, action: 'support', memberId: u.id } });
+    }
   });
-  if (cand) {
-    const first = (cand.name || 'They').split(' ')[0];
-    const area = [...devByMember[cand.id]][0];
-    prompts.push({ id: 'assign-' + cand.id, tone: 'opportunity',
-      text: `${first} has been a little weaker in ${area}. Want me to assign them a focused reflection on it?`,
-      cta: { label: `Assign to ${first}`, action: 'support', memberId: cand.id } });
-  }
 
-  // 4) A busy stretch ahead — only when REAL upcoming events are connected (lights
-  //    up once a calendar is linked; never fabricated).
+  // A busy stretch ahead — only when REAL upcoming events are connected (lights up
+  // once a calendar is linked; never fabricated).
   const soon = now + 14 * 86400000;
   let upcoming = 0;
   (orgSignals[code] || []).forEach(s => {
@@ -2951,12 +2953,45 @@ function _leaderPrompts(code, userId, now) {
     if (Number.isFinite(t) && t > now && t < soon) upcoming++;
   });
   if (upcoming >= 3) {
-    prompts.push({ id: 'busy-week', tone: 'attention',
+    cands.push({ id: 'busy-week', tone: 'attention',
+      basis: `${upcoming} events are on the calendar in the next two weeks — a heavier-than-usual stretch to prepare for.`,
       text: `There are ${upcoming} things on the calendar over the next two weeks. Want me to put together sessions to prepare for it?`,
       cta: { label: 'Draft sessions', action: 'plan', theme: 'a busy stretch coming up' } });
   }
 
-  return prompts.slice(0, 4);
+  return cands;
+}
+
+/* The reasoning above the grounding. Hands the AI the grounded candidates plus the
+   org's own worldview, and lets it decide which genuinely matter for THIS
+   organisation and phrase each as a natural "want me to…" offer in the org's voice
+   — because what's proactive differs for every org. The structured CTA is preserved
+   verbatim from the candidate (never model-authored), so approval stays safe and
+   grounded. No AI key → the deterministic candidate text is used as-is. */
+async function _reasonedPrompts(code, userId, now) {
+  const cands = _promptCandidates(code, userId, now);
+  if (!cands.length) return [];
+  if (!ai.enabled()) return cands.slice(0, 4);
+  try {
+    const byId = Object.fromEntries(cands.map(c => [c.id, c]));
+    const list = cands.map(c => `- id: ${c.id}\n  fact: ${c.basis}`).join('\n');
+    const system = [
+      `You are IntelliQ, the proactive intelligence for a leader. You are given GROUNDED FACTS about their team (each with an id) and must decide which genuinely deserve the leader's attention THIS week, then phrase each as a short, natural "want me to…" offer in the organisation's own voice — the way a sharp chief of staff would raise it. What counts as proactive differs for every organisation; reason from the facts and the worldview, don't apply a template. Return JSON only: {"prompts":[{"id": <one of the given ids, unchanged>, "text": <=160 chars, a warm, specific offer phrased as a question the leader can say yes to>]}. Include only ids worth surfacing (0-4), most important first. Never invent facts, names, or ids beyond those given. No emojis.`,
+      _worldviewDirective(code),
+    ].filter(Boolean).join('\n\n');
+    const out = await ai.completeJSON({ tier: 'reason', system, user: `Grounded facts:\n${list}`, maxTokens: 500, schema: ['prompts'] });
+    const picked = Array.isArray(out?.prompts) ? out.prompts : [];
+    const result = [];
+    picked.forEach(p => {
+      const c = byId[p?.id];
+      if (!c) return;                          // model must reference a real, grounded candidate
+      const text = String(p?.text || c.text).slice(0, 220).trim() || c.text;
+      result.push({ id: c.id, tone: c.tone, text, cta: c.cta });  // CTA verbatim from grounding
+    });
+    return result.length ? result.slice(0, 4) : cands.slice(0, 4);
+  } catch (_) {
+    return cands.slice(0, 4);
+  }
 }
 
 /* ── GET /api/intelligence/briefing — the ONE leader intelligence surface ─────
@@ -3037,7 +3072,7 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
       : `Your group looks steady — ${activeWeek}/${members.length} active, nothing flagged.`),
     rollup: { memberCount: members.length, activeThisWeek: activeWeek, participation, momentum, patternCounts },
     items: top,
-    prompts: (() => { try { return _leaderPrompts(code, userId, now); } catch (_) { return []; } })(),
+    prompts: await (async () => { try { return await _reasonedPrompts(code, userId, now); } catch (_) { return []; } })(),
   };
   intelBriefingCache[cacheKey] = { data, ts: Date.now() };
   res.json(data);
