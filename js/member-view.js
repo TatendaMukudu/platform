@@ -323,7 +323,10 @@ const MemberApp = {
     const prepEl   = document.getElementById('me-prepared');
     let d = null;
     try {
-      const res = await fetch('/api/me/context', { headers: this._authHeaders() });
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12000);   // never hang the Me space
+      const res = await fetch('/api/me/context', { headers: this._authHeaders(), signal: ctrl.signal });
+      clearTimeout(timer);
       if (res.ok) d = await res.json();
     } catch (_) {}
 

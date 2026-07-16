@@ -6061,13 +6061,22 @@ async function renderIntelligence(refresh) {
   if (!el) return;
   if (title) title.textContent = 'Team';
   if (sub)   sub.textContent   = `The ${_v('people')} you lead — who needs your attention.`;
-  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Reading the signals…</div>`;
+  // Only blank to a spinner on the FIRST load (or an explicit refresh) — otherwise
+  // keep what's on screen so tapping Home never flashes to an empty/frozen state
+  // while the (sometimes slow) briefing loads.
+  const hadContent = el.querySelector('.intel-summary, .intel-list, .intel-you');
+  if (!hadContent || refresh) el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Reading the signals…</div>`;
+  // Never hang: if the briefing (which may run an AI call) is slow, bail to a clear
+  // retry instead of leaving Home stuck.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 14000);
   try {
     // One surface, grown by responsibility: the coach's OWN mirror + who needs them.
     const [briefRes, meRes] = await Promise.all([
-      fetch(`/api/intelligence/briefing${refresh ? '?refresh=1' : ''}`, { headers: Auth._headers() }),
-      fetch('/api/me/record', { headers: Auth._headers() }),
+      fetch(`/api/intelligence/briefing${refresh ? '?refresh=1' : ''}`, { headers: Auth._headers(), signal: ctrl.signal }),
+      fetch('/api/me/record', { headers: Auth._headers(), signal: ctrl.signal }),
     ]);
+    clearTimeout(timer);
     const d = await briefRes.json();
     if (!briefRes.ok || !d.ok) throw new Error(d.error || 'unavailable');
     const me = meRes.ok ? await meRes.json() : null;
@@ -6107,7 +6116,13 @@ async function renderIntelligence(refresh) {
     _renderTeamPrompts(d.prompts || []);  // "want me to…" — proactive offers the leader can approve in one tap
     _renderTeamWatch();  // proactive early-warning banner, populated after the main read
   } catch (e) {
-    el.innerHTML = `<div class="intel-empty">Home unavailable right now.</div>`;
+    clearTimeout(timer);
+    // Keep any existing content rather than wiping it; only show the fallback if the
+    // page is currently empty (first load failed or timed out).
+    if (!el.querySelector('.intel-summary, .intel-list, .intel-you')) {
+      const slow = e && e.name === 'AbortError';
+      el.innerHTML = `<div class="intel-empty">${slow ? 'This is taking longer than usual.' : 'Home is unavailable right now.'} <button class="intel-refresh" onclick="renderIntelligence(true)">↻ Try again</button></div>`;
+    }
   }
 }
 
