@@ -652,7 +652,7 @@ const PAGE_TITLES = {
   apps:         'Apps',
   checkin:      'Check-In',
   notes:        'Notes',
-  inbox:        'Inbox',
+  inbox:        'Updates',
   stats:        'Progress',
   // Leader Workspace — node leader scoped tools
   'leader-home':   'Home',

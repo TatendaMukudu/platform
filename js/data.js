@@ -133,7 +133,9 @@ const WORKSPACE_MODULES = [
   // reachable for full options (tags / sharing) via navigate('notes').
   { section: null,        id: 'assessments', icon: ICON.clipboard, label: 'Assessments', permission: null },
   { section: null,        id: 'apps',    icon: ICON.plug,    label: 'Apps',     permission: null },
-  { section: null,        id: 'inbox',   icon: ICON.inbox,   label: 'Inbox',    permission: null },
+  // Inbox demoted from the main nav — IntelliQ is the intelligence layer, not a
+  // messaging app (Teams / Slack / email own comms). Proactive "updates from
+  // IntelliQ" live in the Me space (noticed / prepared). The page stays reachable.
 
   // ── Team — shown when the user leads ≥1 node (scoped server-side) ───────
   { section: 'Team', id: 'leader-home',   icon: ICON.people, label: 'Team',      leaderOnly: true }, // the people they lead
