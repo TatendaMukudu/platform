@@ -3086,6 +3086,46 @@ function renderSettings(){
 
 /* Run the LLM self-test (admin) — proves the model is connected and shows how it
    reasons on demo-style prompts. Renders provider/model status + each output. */
+/* Universal ingest — show the org's connection details so any app can send data.
+   Renders the endpoint, token, and a copy-paste example. Generate/rotate on demand. */
+async function loadIngestToken(regen) {
+  const box = document.getElementById('ingest-token-box');
+  const btn = document.getElementById('ingest-token-btn');
+  if (!box) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+  try {
+    const res = await fetch('/api/org/ingest-token', {
+      method: regen ? 'POST' : 'GET', headers: Auth._headers(),
+    });
+    const d = await res.json();
+    if (!res.ok) throw new Error();
+    const esc = _escAdvisor;
+    const base = location.origin;
+    if (!d.token) {
+      box.innerHTML = `<div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.6rem">No token yet — generate one to start connecting apps.</div>
+        <button class="btn btn-accent btn-sm" onclick="loadIngestToken(true)">Generate token</button>`;
+    } else {
+      const example = `curl -X POST ${base}/api/ingest \\
+  -H "Authorization: Bearer ${d.token}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"records":[{"email":"person@org.com","label":"Soreness","value":7,"date":"2026-07-20"}]}'`;
+      box.innerHTML = `
+        <div style="font-size:0.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Endpoint</div>
+        <div style="font-family:monospace;font-size:0.8rem;margin-bottom:0.5rem;word-break:break-all">${esc(base)}/api/ingest</div>
+        <div style="font-size:0.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Token (keep secret)</div>
+        <div style="font-family:monospace;font-size:0.78rem;margin-bottom:0.5rem;word-break:break-all;background:rgba(127,127,127,0.08);padding:0.4rem 0.5rem;border-radius:6px">${esc(d.token)}</div>
+        <div style="font-size:0.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Example</div>
+        <pre style="font-size:0.72rem;white-space:pre-wrap;word-break:break-all;background:rgba(127,127,127,0.08);padding:0.5rem;border-radius:6px;margin:0.3rem 0 0.6rem">${esc(example)}</pre>
+        <div style="font-size:0.74rem;color:var(--text-muted);margin-bottom:0.5rem">Send numbers keyed to a member's email (or name). Records are matched to your people; anything non-numeric is ignored — numbers only.</div>
+        <button class="btn btn-outline btn-sm" onclick="loadIngestToken(true)">Regenerate token</button>`;
+    }
+    if (btn) btn.style.display = 'none';
+  } catch (e) {
+    box.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">Couldn't load connection details.</div>`;
+    if (btn) { btn.disabled = false; btn.textContent = 'Show connection details'; }
+  }
+}
+
 async function runLlmSelfTest() {
   const btn = document.getElementById('llm-selftest-btn');
   const out = document.getElementById('llm-selftest-result');

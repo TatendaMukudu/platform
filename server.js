@@ -79,7 +79,7 @@ function scheduleSave() {
         orgNodes, orgMetrics, orgValues, orgGoals, userPermissions,
         userAiProfiles, advisorThreads, orgSignals, noticeFeedback,
         userConsents, connectedSources, pendingActions,
-        assessmentTemplates, assessmentAssignments, orgTutorials,
+        assessmentTemplates, assessmentAssignments, orgTutorials, orgApiTokens,
         activeSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
@@ -546,6 +546,10 @@ const pendingActions  = {};  // `orgCode:userId` → [{ id, action, summary, pay
 const assessmentTemplates   = {};  // [{ id, title, description, kind, fields:[{label,hint}], createdBy, createdByName, createdAt }]
 const assessmentAssignments = {};  // [{ id, templateId, title, kind, fields, assignerId/Name, assigneeId/Name, status, response:{}, feedback, score, assignedAt, submittedAt, returnedAt }]
 const orgTutorials          = {};  // [{ id, title, body, url, kind, createdBy, createdByName, createdAt }]
+// Universal ingest — one authenticated pipe ANY app (in-house, SaaS, a script, a
+// no-code automation) can POST numeric data to. Per-org token → maps records to
+// members and emits universal signals, so we never build N bespoke integrations.
+const orgApiTokens          = {};  // orgCode → { token, createdAt, createdBy }
 const CONSENT_VERSION = '2026-07';
 const _consentKey = (code, uid) => `${code}:${uid}`;
 function _getConsents(code, uid) { const k = _consentKey(code, uid); return (userConsents[k] = userConsents[k] || {}); }
@@ -3968,6 +3972,76 @@ app.post('/api/admin/llm-selftest', requirePermission('manage_settings'), async 
     }
   }
   res.json({ ok: true, status, results });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   UNIVERSAL INGEST — how the algorithm connects to ANY app.
+
+   Instead of building a bespoke integration per app, we expose ONE authenticated
+   pipe. An org's admin generates a token; then anything — an in-house system, a
+   Google-Apps script, a CRM, a no-code automation (Zapier/Make), a nightly cron —
+   POSTs numeric records here and the kernel reasons over them like any other
+   signal. This is what makes "connect any app" real, especially for in-house
+   tools that have no OAuth. Numbers only (a score/count/rating), so the privacy
+   model is unchanged. OAuth "pull" connectors (Google, Microsoft) are just a
+   convenience layer that ends up calling this same ingestion.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* GET/POST /api/org/ingest-token — admin views or rotates the org's ingest token. */
+app.get('/api/org/ingest-token', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const t = orgApiTokens[code];
+  res.json({ ok: true, token: t?.token || null, createdAt: t?.createdAt || null, endpoint: '/api/ingest' });
+});
+app.post('/api/org/ingest-token', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const token = 'iq_ingest_' + generateToken() + generateToken();
+  orgApiTokens[code] = { token, createdAt: new Date().toISOString(), createdBy: req.iqSession.userId };
+  scheduleSave();
+  res.json({ ok: true, token, endpoint: '/api/ingest' });
+});
+
+function _orgByIngestToken(tok) {
+  if (!tok) return null;
+  for (const [code, v] of Object.entries(orgApiTokens)) if (v && v.token === tok) return code;
+  return null;
+}
+
+/* POST /api/ingest — the pipe. Auth by the org ingest token (NOT a user session).
+   Body: { records: [ { email? | name? | userId?, label, value, date? } ] } (or a
+   single record). Resolves each record to a member of that org and emits a numeric
+   signal. Anything non-numeric is ignored — numbers only, by design. */
+app.post('/api/ingest', (req, res) => {
+  const tok = (req.headers.authorization || '').replace('Bearer ', '').trim() || req.body?.token;
+  const code = _orgByIngestToken(tok);
+  if (!code) return res.status(401).json({ error: 'invalid ingest token' });
+  const source = String(req.body?.source || 'custom').slice(0, 40);
+  const records = Array.isArray(req.body?.records) ? req.body.records
+    : (req.body?.label != null ? [req.body] : []);
+  if (!records.length) return res.status(400).json({ error: 'no records', hint: 'send { records: [ { email, label, value, date? } ] }' });
+
+  const users = orgUsers[code] || {};
+  let imported = 0, unmatched = 0;
+  for (const r of records.slice(0, 2000)) {
+    const v = r && Number(r.value);
+    if (!r || !Number.isFinite(v)) continue;
+    // Resolve the subject: userId, then email, then exact name.
+    let uid = r.userId && users[r.userId] ? r.userId : null;
+    if (!uid && r.email) { const e = String(r.email).toLowerCase(); uid = Object.keys(users).find(k => (users[k].email || '').toLowerCase() === e) || null; }
+    if (!uid && r.name)  { const n = String(r.name).toLowerCase().trim(); uid = Object.keys(users).find(k => (users[k].name || '').toLowerCase().trim() === n) || null; }
+    if (!uid) { unmatched++; continue; }
+    const ts = r.date ? new Date(String(r.date).slice(0, 10) + 'T12:00:00Z').toISOString() : new Date().toISOString();
+    try {
+      _emitSignalSafe(code, {
+        subjectType: 'member', subjectId: uid, source, modality: 'data',
+        valueNum: v, label: String(r.label || 'Metric').slice(0, 80), ts, sensitivity: 'normal',
+        data: { connector: source, ingest: true },
+      }, uid);
+      imported++;
+    } catch (_) {}
+  }
+  if (imported) scheduleSave();
+  res.json({ ok: true, imported, unmatched });
 });
 
 /* Aggregate a SET of people into a privacy-safe unit read (counts + pattern
@@ -8025,6 +8099,7 @@ function _loadAllStores(data) {
   Object.assign(assessmentTemplates,   data.assessmentTemplates   || {});
   Object.assign(assessmentAssignments, data.assessmentAssignments || {});
   Object.assign(orgTutorials,          data.orgTutorials          || {});
+  Object.assign(orgApiTokens,          data.orgApiTokens          || {});
   Object.assign(orgSignals,       data.orgSignals       || {});
   Object.assign(noticeFeedback,   data.noticeFeedback   || {});
   // Restore sessions, pruning any that expired while the server was down

@@ -324,6 +324,23 @@ const server = app.listen(0, async () => {
     const teamSend = await call('/api/intelligence/deliver', tokCoach, { method: 'POST', body: { toTeam: true, title: repl.j.draft.title, description: repl.j.draft.description, fields: repl.j.draft.fields } });
     ok('approving sends the replicate step to the whole team', teamSend.status === 200 && teamSend.j?.sent >= 1);
 
+    // ── Universal ingest: one authenticated pipe any app can push data to ──
+    ok('a plain member cannot mint an org ingest token (403)',
+       (await call('/api/org/ingest-token', tokB, { method: 'POST' })).status === 403);
+    const mint = await call('/api/org/ingest-token', tokCoach, { method: 'POST' });
+    ok('an admin can mint an ingest token', mint.status === 200 && typeof mint.j?.token === 'string' && mint.j.token.startsWith('iq_ingest_'));
+    ok('ingest is refused without a valid token (401)',
+       (await call('/api/ingest', null, { method: 'POST', body: { records: [{ email: 'b@t.co', label: 'X', value: 5 }] } })).status === 401);
+    const ing = await call('/api/ingest', null, { method: 'POST', headers: { Authorization: 'Bearer ' + mint.j.token }, body: { records: [
+      { email: 'b@t.co', label: 'Soreness', value: 7, date: '2026-07-20' },
+      { email: 'nobody@t.co', label: 'X', value: 3 },
+      { email: 'b@t.co', label: 'NoNumber', value: 'abc' } ] } });
+    ok('a valid token ingests numeric records and reports matched/unmatched',
+       ing.status === 200 && ing.j?.imported === 1 && ing.j?.unmatched === 1);
+    const expIng = await call('/api/me/export', tokB);
+    ok('ingested data lands in the person\'s record as a signal',
+       (expIng.j?.signals || []).some(s => s.label === 'Soreness' && s.valueNum === 7));
+
     // ── LLM self-test: admin-gated, reports status (no key in test mode) ─────
     ok('a plain member cannot run the LLM self-test (403)',
        (await call('/api/admin/llm-selftest', tokB, { method: 'POST' })).status === 403);
