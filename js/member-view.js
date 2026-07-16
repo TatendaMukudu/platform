@@ -1578,8 +1578,9 @@ const MemberApp = {
             <option value="play">Approach / method</option>
             <option value="skill">Skill</option>
           </select>
-          <textarea class="note-input" id="assess-desc" placeholder="How you want it done — the instructions." style="min-height:56px;margin-bottom:0.5rem"></textarea>
-          <textarea class="note-input" id="assess-fields" placeholder="Fields the person fills in — one per line (optional)." style="min-height:56px;margin-bottom:0.5rem"></textarea>
+          <textarea class="note-input" id="assess-desc" placeholder="Short instructions the person sees." style="min-height:52px;margin-bottom:0.5rem"></textarea>
+          <textarea class="note-input" id="assess-guidance" placeholder="Teach IntelliQ how you want it done — your method, standard, or the way you'd coach it. IntelliQ tutors the person from this and grades against it, so you don't have to explain it every time." style="min-height:70px;margin-bottom:0.5rem"></textarea>
+          <textarea class="note-input" id="assess-fields" placeholder="Things for the person to cover — one per line (optional)." style="min-height:52px;margin-bottom:0.5rem"></textarea>
           <button class="btn-primary" onclick="MemberApp._assessCreate(this)">Create</button>
         </div>
       </div>`;
@@ -1605,6 +1606,8 @@ const MemberApp = {
         <div><strong>${esc(a.assigneeName)}</strong> — ${esc(a.title)}</div>
         ${Object.entries(a.response || {}).map(([k, v]) => `<div style="margin-top:0.4rem"><div class="card-label" style="margin-bottom:1px">${esc(k)}</div><div class="me-row-text" style="font-size:0.84rem">${esc(v)}</div></div>`).join('')}
         ${a.note ? `<div class="me-row-text" style="font-size:0.84rem;margin-top:0.3rem">${esc(a.note)}</div>` : ''}
+        <button class="btn-ghost" style="font-size:0.74rem;margin-top:0.4rem" onclick="MemberApp._assessSummarize('${a.id}', this)">IntelliQ: suggest a score &amp; summary</button>
+        <div id="assess-sum-${a.id}" style="font-size:0.8rem;color:var(--text-secondary);margin-top:0.3rem"></div>
         <div style="margin-top:0.5rem;display:flex;gap:0.4rem;align-items:center">
           <input class="form-input" data-return-fb="${a.id}" placeholder="Feedback" style="flex:1;margin:0">
           <input class="form-input" data-return-score="${a.id}" placeholder="Score" type="number" min="0" max="100" style="width:80px;margin:0">
@@ -1651,10 +1654,11 @@ const MemberApp = {
     if (!title) { this.showToast('Give it a title', 'warning'); return; }
     const kind = document.getElementById('assess-kind')?.value || 'general';
     const description = (document.getElementById('assess-desc')?.value || '').trim();
+    const guidance = (document.getElementById('assess-guidance')?.value || '').trim();
     const fields = (document.getElementById('assess-fields')?.value || '').split('\n').map(s => s.trim()).filter(Boolean).map(label => ({ label, hint: '' }));
     if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
     try {
-      const res = await fetch('/api/assessments/templates', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ title, kind, description, fields }) });
+      const res = await fetch('/api/assessments/templates', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ title, kind, description, guidance, fields }) });
       if (!res.ok) throw new Error();
       this.showToast('Assessment created ✓', 'success');
       this._renderAssessments();
@@ -1810,6 +1814,32 @@ const MemberApp = {
       this.showToast('Sent back ✓', 'success');
       this._renderAssessments();
     } catch (e) { this.showToast('Could not return', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Return'; } }
+  },
+
+  /* IntelliQ reads the responses, grades them against how the leader wanted it done,
+     and pre-fills a suggested summary + score. The leader edits before returning;
+     the raw answers stay published above. */
+  async _assessSummarize(id, btn) {
+    const box = document.getElementById('assess-sum-' + id);
+    if (btn) { btn.disabled = true; btn.textContent = 'Reading the responses…'; }
+    try {
+      const res = await fetch(`/api/assessments/${id}/summarize`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() } });
+      const d = await res.json();
+      if (!res.ok || !d.ok) throw new Error(d.error || 'failed');
+      const esc = t => this._escape(t || '');
+      const fb = document.querySelector(`[data-return-fb="${id}"]`);
+      const sc = document.querySelector(`[data-return-score="${id}"]`);
+      if (fb && !fb.value) fb.value = d.summary || '';
+      if (sc && d.score != null) sc.value = d.score;
+      let extra = '';
+      if ((d.strengths || []).length) extra += `<div><strong>Strengths:</strong> ${esc(d.strengths.join(', '))}</div>`;
+      if ((d.development || []).length) extra += `<div><strong>To develop:</strong> ${esc(d.development.join(', '))}</div>`;
+      if (box) box.innerHTML = `<div style="padding:0.4rem 0.5rem;border-left:2px solid var(--accent)">${esc(d.summary)}${d.score != null ? ` <em>(suggested ${d.score}/100)</em>` : ''}${extra}</div><div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px">Suggested — edit the feedback and score before returning.</div>`;
+    } catch (e) {
+      if (box) box.innerHTML = `<div style="color:var(--text-muted);font-size:0.78rem">Couldn't summarise${' '}${'—'} you can still write your own.</div>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'IntelliQ: suggest a score & summary'; }
+    }
   },
 
   async _tutorialPin(btn) {

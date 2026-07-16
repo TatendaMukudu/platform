@@ -2219,7 +2219,7 @@ app.post('/api/intelligence/deliver', requireAuth, (req, res) => {
     const subject = orgUsers[code]?.[mid];
     if (!subject) return;
     const a = {
-      id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: tpl.fields, description: tpl.description || '',
+      id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: tpl.fields, description: tpl.description || '', guidance: tpl.guidance || '',
       assignerId: userId, assignerName: me?.name || 'Leader', assigneeId: mid, assigneeName: subject.name || 'Member',
       status: 'assigned', response: {}, note: '', feedback: '', score: null, assignedAt: new Date().toISOString(),
       prepared: true,
@@ -3550,7 +3550,7 @@ const ASSESS_KINDS = ['spreadsheet', 'film', 'play', 'skill', 'general'];
 const _shortId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 function _publicAssignment(a) {
   return { id: a.id, templateId: a.templateId, title: a.title, kind: a.kind, fields: a.fields,
-    description: a.description || '',
+    description: a.description || '', guidance: a.guidance || '',
     assignerName: a.assignerName, assigneeName: a.assigneeName, assigneeId: a.assigneeId,
     status: a.status, response: a.response || {}, note: a.note || '', feedback: a.feedback || '',
     score: a.score ?? null, assignedAt: a.assignedAt, submittedAt: a.submittedAt || null, returnedAt: a.returnedAt || null };
@@ -3771,12 +3771,16 @@ app.post('/api/assessments/plan/chat', requireAuth, async (req, res) => {
 app.post('/api/assessments/templates', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Only a leader can create assessments' });
-  const { title, description, kind, fields } = req.body || {};
+  const { title, description, kind, fields, guidance } = req.body || {};
   if (!String(title || '').trim()) return res.status(400).json({ error: 'title required' });
   const me = orgUsers[code]?.[userId];
   const tpl = {
     id: _shortId(), title: String(title).slice(0, 160).trim(),
     description: String(description || '').slice(0, 2000),
+    // How the creator wants it done — the material IntelliQ tutors the assignee
+    // from AND grades against. This is the "teach the AI" / pinned-tutorial layer,
+    // living on the assessment itself.
+    guidance: String(guidance || '').slice(0, 4000),
     kind: ASSESS_KINDS.includes(kind) ? kind : 'general',
     fields: Array.isArray(fields) ? fields.slice(0, 30).map(f => ({ label: String(f?.label || '').slice(0, 160), hint: String(f?.hint || '').slice(0, 400) })).filter(f => f.label) : [],
     createdBy: userId, createdByName: me?.name || 'Leader', createdAt: new Date().toISOString(),
@@ -3817,7 +3821,7 @@ app.post('/api/assessments/assign', requireAuth, (req, res) => {
     const subj = orgUsers[code]?.[aid];
     if (!subj) return;
     const a = {
-      id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: tpl.fields, description: tpl.description || '',
+      id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: tpl.fields, description: tpl.description || '', guidance: tpl.guidance || '',
       assignerId: userId, assignerName: me?.name || 'Leader', assigneeId: aid, assigneeName: subj.name || 'Member',
       status: 'assigned', response: {}, note: '', feedback: '', score: null,
       assignedAt: new Date().toISOString(),
@@ -3870,6 +3874,39 @@ app.post('/api/assessments/:id/return', requireAuth, (req, res) => {
   res.json({ ok: true, assignment: _publicAssignment(a) });
 });
 
+/* POST /api/assessments/:id/summarize — IntelliQ reads the person's responses and,
+   grading against HOW THE LEADER WANTED IT DONE (the guidance), proposes a summary,
+   a reasoning score, and strengths/development. The leader edits and returns — the
+   raw responses are always kept and published alongside; this never replaces them. */
+app.post('/api/assessments/:id/summarize', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const a = (assessmentAssignments[code] || []).find(x => x.id === req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  const canReview = a.assignerId === userId || (_isLeader(code, userId) && new Set(getVisibleUserIds(code, userId)).has(a.assigneeId));
+  if (!canReview) return res.status(403).json({ error: 'not allowed' });
+  const answers = Object.entries(a.response || {}).map(([k, v]) => `${k}: ${v}`).join('\n');
+  if (!answers.trim()) return res.status(400).json({ error: 'no responses to summarise yet' });
+
+  const fallback = { summary: 'Responses received — review below and add your own read.', score: null, strengths: [], development: [] };
+  let out = null;
+  if (ai.enabled()) {
+    try {
+      const system = `You help a leader review someone's assignment. You are given HOW THE LEADER WANTED IT DONE and the person's actual responses. Judge the responses AGAINST the leader's stated method/expectation — not a generic standard. Be fair and specific. Return JSON only: {"summary": string (2-3 sentences the leader could send), "score": integer 0-100 (your honest reasoning score against the leader's expectation) or null if there isn't enough to score, "strengths": array of up to 3 short phrases, "development": array of up to 3 short phrases}. No emojis.`;
+      const user = `Assignment: "${a.title}".\nHow the leader wanted it done: ${a.guidance || a.description || '(not specified — judge on general quality and effort)'}\n\nThe person's responses:\n${answers.slice(0, 4000)}`;
+      out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 600, schema: ['summary'] });
+    } catch (_) { out = null; }
+  }
+  const d = out || fallback;
+  const sc = Number(d.score);
+  res.json({
+    ok: true, aiUsed: !!out,
+    summary: String(d.summary || fallback.summary).slice(0, 1200),
+    score: Number.isFinite(sc) ? Math.max(0, Math.min(100, Math.round(sc))) : null,
+    strengths: (Array.isArray(d.strengths) ? d.strengths : []).slice(0, 3).map(x => String(x).slice(0, 60)),
+    development: (Array.isArray(d.development) ? d.development : []).slice(0, 3).map(x => String(x).slice(0, 60)),
+  });
+});
+
 /* POST /api/assessments/:id/discuss — the assignment is a conversation, not a form.
    The assignee (or the assigner) can talk it through with IntelliQ, which knows what
    the leader set (title, instructions, kind, fields) and helps them think it through
@@ -3896,6 +3933,7 @@ app.post('/api/assessments/:id/discuss', requireAuth, async (req, res) => {
         ? `You are IntelliQ, having a warm, natural CONVERSATION with a person to help them reflect on an assignment their leader set. This is a chat, not a form — guide them gently through the areas below ONE AT A TIME: ask about the first, listen, acknowledge what they say, then move to the next when it feels natural. Ask a follow-up if an answer is thin. When you've covered everything, tell them warmly that they can hit "Send to [leader]" whenever they're ready. Keep each message to 1-3 sentences. Never do it for them, never invent facts about them, never reveal private data. No emojis.`
         : `You are IntelliQ helping a LEADER reflect on someone's assignment. Be concise and neutral. No emojis.`;
       const context = `Assignment: "${a.title}" (${a.kind}).\nInstructions the leader set: ${a.description || '(none)'}\nSections to fill: ${fieldList}.` +
+        (a.guidance ? `\n\nHOW THE LEADER WANTS THIS DONE (tutor the person from this — teach them this specific method/expectation, don't invent your own):\n${a.guidance}` : '') +
         (isAssignee && a.response && Object.keys(a.response).length ? `\nTheir current draft: ${Object.entries(a.response).map(([k, v]) => `${k}: ${v}`).join(' | ').slice(0, 800)}` : '');
       const messages = [
         ...history.filter(h => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string').map(h => ({ role: h.role, content: h.content.slice(0, 1000) })),

@@ -278,6 +278,12 @@ const server = app.listen(0, async () => {
     ok('an unrelated person cannot discuss the assignment', strangerChat.status === 403 || strangerChat.status === 404);
     const sub = await call(`/api/assessments/${asgId}/submit`, tokB, { method: 'POST', body: { response: { 'What went well': 'clear progress', 'What was hard': 'time pressure' }, note: 'done' } });
     ok('the assignee fills and returns it (status submitted)', sub.status === 200 && sub.j?.assignment?.status === 'submitted');
+    // IntelliQ reads the responses and proposes a summary + reasoning score (leader edits).
+    const summ = await call(`/api/assessments/${asgId}/summarize`, tokCoach, { method: 'POST' });
+    ok('IntelliQ summarises the responses and suggests a score for the leader',
+       summ.status === 200 && summ.j?.ok === true && typeof summ.j.summary === 'string');
+    ok('a plain member cannot summarise someone\'s assignment (403)',
+       (await call(`/api/assessments/${asgId}/summarize`, tokB, { method: 'POST' })).status === 403);
     const ret = await call(`/api/assessments/${asgId}/return`, tokCoach, { method: 'POST', body: { feedback: 'Strong work', score: 82 } });
     ok('the leader reviews it back with feedback + score', ret.status === 200 && ret.j?.assignment?.status === 'returned' && ret.j.assignment.score === 82);
     const expScore = await call('/api/me/export', tokB);
