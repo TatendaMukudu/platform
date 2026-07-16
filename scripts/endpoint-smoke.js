@@ -351,6 +351,13 @@ const server = app.listen(0, async () => {
        !/valueText|passwordHash|"content"/.test(JSON.stringify(working.j || {})));
     ok('a plain member cannot see the assessment-outcome report (403)',
        (await call('/api/intelligence/whats-working', tokB)).status === 403);
+    // Discoveries — how the org learns (leader-gated, contentless).
+    const disc = await call('/api/intelligence/discoveries', tokCoach);
+    ok('a leader gets the discoveries surface (how the org learns)',
+       disc.status === 200 && disc.j?.ok === true && Array.isArray(disc.j.discoveries) && typeof disc.j.note === 'string');
+    ok('discoveries never leak raw content', !/passwordHash|valueText|"content":/.test(JSON.stringify(disc.j || {})));
+    ok('a plain member cannot see discoveries (403)',
+       (await call('/api/intelligence/discoveries', tokB)).status === 403);
     // Per-member nudges ride along with the individual profile the leader sees.
     const prof = await call(`/api/member/${bId}/profile`, tokCoach);
     ok('the individual profile carries assessment nudges (repeat/revisit)',

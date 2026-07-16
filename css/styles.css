@@ -2448,3 +2448,9 @@ img { max-width: 100%; }
 .intel-draft-actions { display: flex; gap: 0.4rem; }
 .intel-draft-sent { font-size: 0.82rem; color: var(--accent2, #0ecfb0); padding: 0.3rem 0; }
 .intel-watch-why { font-size: 0.74rem; color: var(--accent2, #0ecfb0); margin-top: 3px; }
+.intel-discoveries { border-color: rgba(124,90,245,0.30); background: rgba(124,90,245,0.04); }
+.intel-discovery { padding: 0.5rem 0; border-top: 1px solid var(--border); }
+.intel-discovery:first-of-type { border-top: none; }
+.intel-discovery-area { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); margin-bottom: 2px; }
+.intel-discovery-text { font-size: 0.85rem; line-height: 1.45; color: var(--text-primary); }
+.intel-discovery-basis { font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; }

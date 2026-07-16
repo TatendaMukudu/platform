@@ -166,8 +166,12 @@ async function buildClubStore() {
       const u = orgUsers[CODE][uid];
       const arc = ARCS[i % ARCS.length];
       const pos = pick(POSN);
+      // ~1 in 5 are a recent intake (joined 30–85 days ago) — gives the Discoveries
+      // engine a "first 90 days" cohort to reason about.
+      const isNew = i % 5 === 2;
+      if (isNew) u.createdAt = iso(dAgo(30 + Math.floor(Math.random() * 55)));
       playerCount++;
-      allPlayers.push({ uid, u, arc, pos, teamName, nodeId, level, headId: head });
+      allPlayers.push({ uid, u, arc, pos, teamName, nodeId, level, headId: head, isNew });
 
       memberGoals[ukey(uid)] = {
         goal: `Establish myself as a ${pos.toLowerCase()} and hit the club's standards`,
@@ -321,6 +325,29 @@ async function buildClubStore() {
       recordedOutcome: positive ? 'positive' : 'negative', outcomeRecordedAt: iso(when),
     });
   }
+
+  // Tenure discovery seed: on the NEW intake, run recognition (works well early) and
+  // corrective (works poorly early) steps DATED after they joined — so the engine can
+  // discover "new people respond to recognition in their first 90 days".
+  allPlayers.filter(p => p.isNew).forEach(pl => {
+    const joined = new Date(pl.u.createdAt).getTime();
+    const mkIntv = (recognition) => {
+      const ageDays = Math.floor((Date.now() - joined) / 86400000);
+      const when = new Date(joined + Math.random() * (Date.now() - joined));   // after they joined
+      const positive = recognition ? Math.random() < 0.8 : Math.random() < 0.35;
+      orgInterventions[CODE].push({
+        id: 'intv_' + rid(), createdAt: when.toISOString(),
+        targetMember: pl.u.name, targetMemberId: pl.uid, targetGroup: null,
+        action: recognition ? 'Recognised their early progress in front of the group' : 'Gave direct corrective feedback on what to fix',
+        patternType: recognition ? 'quiet_improvement' : 'repeated_concern',
+        urgency: 'medium', owner: pl.headId, reason: 'briefing', evidence: [],
+        status: 'completed', acknowledgedAt: when.toISOString(), completedAt: when.toISOString(), dismissedAt: null,
+        outcome: { status: 'measured', outcome: positive ? 'positive' : 'negative', moodDelta: positive ? 0.6 : -0.3, changesDetected: [] },
+        recordedOutcome: positive ? 'positive' : 'negative', outcomeRecordedAt: when.toISOString(),
+      });
+    };
+    mkIntv(true); if (Math.random() < 0.8) mkIntv(false);
+  });
 
   // ── Pinned tutorials ──────────────────────────────────────────────────────
   [

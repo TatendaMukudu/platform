@@ -85,6 +85,11 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
     const success = await timed('success patterns', '/api/intelligence/success', tokDirector);
     ok('success surface returns rising people + common factors', success.status === 200 && Array.isArray(success.j?.rising));
 
+    const disc = await timed('discoveries (how the org learns)', '/api/intelligence/discoveries', tokDirector);
+    console.log(`     discoveries found: ${(disc.j?.discoveries || []).length}`);
+    (disc.j?.discoveries || []).slice(0, 4).forEach(d => console.log(`       • [${d.area}] ${d.statement} (${d.basis}, ${d.confidence})`));
+    ok('discoveries endpoint returns org-learning findings', disc.status === 200 && Array.isArray(disc.j?.discoveries));
+
     const roster = await timed('roster (everyone at a glance)', '/api/intelligence/roster', tokDirector);
     ok('roster covers the whole club', roster.status === 200);
 

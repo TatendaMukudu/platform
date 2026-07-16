@@ -2234,6 +2234,107 @@ app.get('/api/intelligence/whats-working', requireAuth, (req, res) => {
   });
 });
 
+/* ── The Discoveries engine ────────────────────────────────────────────────────
+   The leap past "what happened" and "what to do next": what has this ORGANISATION
+   learned about how IT learns? Not recommendations about a person — discoveries
+   about context. It segments real outcomes by tenure, approach, and team, and only
+   surfaces a finding when the effect is consistent AND the sample is big enough to
+   mean something. Honest and correlational throughout; contentless. Leader-scoped.
+   Examples it can find: "new people respond to recognition over correction in their
+   first 90 days"; "this reflection lines up with improvement specifically in the
+   U18s". These are the seeds of the org's own research. */
+function _interventionCategory(i) {
+  const a = (i.action || '').toLowerCase();
+  if (i.patternType === 'quiet_improvement' || i.patternType === 'recovering' || /recogni|acknowledge|praise|celebrat|nice work/.test(a)) return 'recognition';
+  return 'corrective';
+}
+function _orgDiscoveries(code, userId, now) {
+  const out = [];
+  const visible = new Set(getVisibleUserIds(code, userId));
+  const users = orgUsers[code] || {};
+
+  // A) Tenure × approach — do NEW people respond differently to recognition vs
+  //    corrective steps than ESTABLISHED people? (measured intervention outcomes)
+  const measured = (orgInterventions[code] || []).filter(i =>
+    i.status === 'completed' && i.targetMemberId && visible.has(i.targetMemberId) &&
+    (i.recordedOutcome || i.outcome?.status === 'measured'));
+  const seg = {};   // `${tenure}_${cat}` → { pos, total }
+  measured.forEach(i => {
+    const u = users[i.targetMemberId]; if (!u || !u.createdAt) return;
+    const tenureDays = (new Date(i.createdAt).getTime() - new Date(u.createdAt).getTime()) / 86400000;
+    if (!Number.isFinite(tenureDays)) return;
+    const tenure = tenureDays < 90 ? 'new' : 'established';
+    const cat = _interventionCategory(i);
+    const oc = i.recordedOutcome || i.outcome?.outcome;
+    const k = `${tenure}_${cat}`;
+    (seg[k] = seg[k] || { pos: 0, total: 0 }); seg[k].total++; if (oc === 'positive') seg[k].pos++;
+  });
+  const MIN_SEG = 4;
+  const rate = k => (seg[k] && seg[k].total >= MIN_SEG) ? Math.round(seg[k].pos / seg[k].total * 100) : null;
+  const nRec = rate('new_recognition'), nCorr = rate('new_corrective');
+  if (nRec != null && nCorr != null && Math.abs(nRec - nCorr) >= 20) {
+    const better = nRec >= nCorr ? 'recognition' : 'corrective steps';
+    const worse  = nRec >= nCorr ? 'corrective steps' : 'recognition';
+    out.push({
+      area: 'First 90 days',
+      statement: `New people respond better to ${better} than ${worse} in their first 90 days — ${better} helped ${Math.max(nRec, nCorr)}% of the time vs ${Math.min(nRec, nCorr)}%.`,
+      basis: `${seg['new_recognition'].total + seg['new_corrective'].total} measured steps on people in their first 90 days`,
+      confidence: (seg['new_recognition'].total + seg['new_corrective'].total) >= 12 ? 'emerging' : 'tentative',
+    });
+  }
+
+  // B) What works WHERE — an assessment that lines up with improvement in a specific
+  //    team (not org-wide). Same correlation as whats-working, but per node.
+  const nodes = orgNodes[code] || {};
+  Object.values(nodes).forEach(node => {
+    const memberIds = new Set((node.memberIds || []).filter(id => visible.has(id)));
+    if (memberIds.size < 5) return;
+    const returned = (assessmentAssignments[code] || []).filter(a => a.status === 'returned' && memberIds.has(a.assigneeId));
+    const byTitle = {};
+    returned.forEach(a => { (byTitle[a.title] = byTitle[a.title] || []).push(a); });
+    Object.entries(byTitle).forEach(([title, list]) => {
+      const ids = [...new Set(list.map(a => a.assigneeId))];
+      if (list.length < 5 || ids.length < 4) return;
+      let up = 0, down = 0;
+      ids.forEach(id => { const u = users[id]; const d = u ? _memberTrajDir(code, u, now) : 'steady'; if (d === 'up') up++; else if (d === 'down') down++; });
+      if (up >= 3 && up > down * 2) {
+        out.push({ area: node.name, statement: `"${title}" lines up with improvement specifically in the ${node.name} — ${up} of ${ids.length} who completed it are trending up.`, basis: `${list.length} completions in ${node.name}`, confidence: up >= 5 ? 'emerging' : 'tentative' });
+      } else if (down >= 3 && down > up * 2) {
+        out.push({ area: node.name, statement: `"${title}" has lined up with decline in the ${node.name} — ${down} of ${ids.length} who did it are trending down. Worth checking timing or fit here.`, basis: `${list.length} completions in ${node.name}`, confidence: down >= 5 ? 'emerging' : 'tentative' });
+      }
+    });
+  });
+
+  // C) Recognition vs correction, org-wide — the simplest, most robust discovery.
+  const allRec = (seg['new_recognition']?.total || 0) + (seg['established_recognition']?.total || 0);
+  const allCorr = (seg['new_corrective']?.total || 0) + (seg['established_corrective']?.total || 0);
+  if (allRec >= MIN_SEG && allCorr >= MIN_SEG) {
+    const recPos = (seg['new_recognition']?.pos || 0) + (seg['established_recognition']?.pos || 0);
+    const corrPos = (seg['new_corrective']?.pos || 0) + (seg['established_corrective']?.pos || 0);
+    const recRate = Math.round(recPos / allRec * 100), corrRate = Math.round(corrPos / allCorr * 100);
+    if (Math.abs(recRate - corrRate) >= 15 && !out.some(d => d.area === 'First 90 days')) {
+      out.push({ area: 'Across the org', statement: `${recRate >= corrRate ? 'Recognition' : 'Corrective steps'} have worked better here overall — ${Math.max(recRate, corrRate)}% vs ${Math.min(recRate, corrRate)}%.`, basis: `${allRec + allCorr} measured steps`, confidence: 'emerging' });
+    }
+  }
+
+  return out.slice(0, 6);
+}
+
+/* GET /api/intelligence/discoveries — how this org learns. Leader-scoped, honest,
+   correlational; each finding carries the numbers and sample behind it. */
+app.get('/api/intelligence/discoveries', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Leaders only' });
+  let discoveries = [];
+  try { discoveries = _orgDiscoveries(code, userId, Date.now()); } catch (_) { discoveries = []; }
+  res.json({
+    ok: true, discoveries,
+    note: discoveries.length
+      ? 'How your organisation learns — correlational patterns from real outcomes, not proof. Each needs a human read of when, where, and why.'
+      : 'Not enough outcome history yet to spot how your organisation learns. As interventions and assessments accumulate, discoveries appear here.',
+  });
+});
+
 /* ── POST /api/intelligence/prepare — "here's what I've already drafted" ────────
    The leap from copilot to assistance: for a flagged person, IntelliQ DRAFTS a
    concrete, supportive intervention (a short reflection the leader can send), so

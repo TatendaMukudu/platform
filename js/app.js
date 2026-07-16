@@ -6152,9 +6152,11 @@ async function renderIntelligence(refresh) {
         <div class="intel-stat"><span class="intel-stat-v">${r.participation || 0}%</span><span class="intel-stat-l">participation</span></div>
         <div class="intel-stat"><span class="intel-stat-v" style="color:${momColor}">${cap(r.momentum || 'steady')}</span><span class="intel-stat-l">momentum</span></div>
       </div>
+      <div id="org-discoveries"></div>
       <div class="intel-foot">Patterns &amp; early signals, each compared to a person's own normal — directional, never scores. Private detail informs the read but is never shown.</div>`;
     _renderTeamPrompts(d.prompts || []);  // "want me to…" — proactive offers the leader can approve in one tap
     _renderTeamWatch();  // proactive early-warning banner, populated after the main read
+    _renderDiscoveries();  // "how your organisation learns" — the research surface
   } catch (e) {
     clearTimeout(timer);
     // Keep any existing content rather than wiping it; only show the fallback if the
@@ -6227,6 +6229,31 @@ async function runPrompt(btn) {
     btn.disabled = false; btn.textContent = orig;
     if (typeof showToast === 'function') showToast('Could not draft', 'error');
   }
+}
+
+/* "How your organisation learns" — discoveries about CONTEXT (tenure, team,
+   approach), not about a person. The research surface: honest, correlational,
+   evidence-gated. Rendered quietly below the fold — it's insight, not an alert. */
+async function _renderDiscoveries() {
+  const box = document.getElementById('org-discoveries');
+  if (!box) return;
+  try {
+    const res = await fetch('/api/intelligence/discoveries', { headers: Auth._headers() });
+    if (!res.ok) return;
+    const d = await res.json();
+    const items = d.discoveries || [];
+    if (!items.length) { box.innerHTML = ''; return; }
+    const esc = _escAdvisor;
+    box.innerHTML = `<div class="intel-watch-card intel-discoveries">
+      <div class="intel-watch-head">How your ${_v('organisation') || 'organisation'} learns</div>
+      ${items.map(it => `<div class="intel-discovery">
+        <div class="intel-discovery-area">${esc(it.area)}</div>
+        <div class="intel-discovery-text">${esc(it.statement)}</div>
+        <div class="intel-discovery-basis">${esc(it.basis)} · ${esc(it.confidence)}</div>
+      </div>`).join('')}
+      <div class="intel-watch-why" style="margin-top:0.5rem">${esc(d.note || '')}</div>
+    </div>`;
+  } catch (_) { /* non-fatal */ }
 }
 
 /* Proactive early-warning banner — "catch it before it becomes a problem." Fills
