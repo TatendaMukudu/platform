@@ -88,6 +88,16 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
     const boundary = () => page.evaluate(() => document.body.innerText.includes('Something went wrong loading IntelliQ'));
     ok(`[${label}] app boots without the error boundary`, !(await boundary()));
 
+    // Nav must be REACHABLE: the mobile hamburger opens the sidebar drawer, so it
+    // must actually contain a visible glyph/icon — an empty button (e.g. a control
+    // glyph stripped by an over-eager emoji sweep) strands the user with no nav.
+    const navReachable = await page.evaluate(() => {
+      const h = document.getElementById('topbar-hamburger');
+      if (!h) return false;
+      return (h.querySelector('svg') || (h.textContent || '').trim().length > 0) ? true : false;
+    });
+    ok(`[${label}] the nav is reachable (hamburger has a visible control)`, navReachable);
+
     for (const p of pages) {
       await page.evaluate(pg => { if (typeof navigate === 'function') navigate(pg); }, p);
       await page.waitForTimeout(300);

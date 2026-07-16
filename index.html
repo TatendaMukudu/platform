@@ -13,8 +13,8 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260716f"/>
-<link rel="stylesheet" href="css/member.css?v=20260716f"/>
+<link rel="stylesheet" href="css/styles.css?v=20260716g"/>
+<link rel="stylesheet" href="css/member.css?v=20260716g"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -183,7 +183,7 @@
 
     <!-- TOPBAR -->
     <header class="topbar">
-      <button class="topbar-hamburger" id="topbar-hamburger" onclick="toggleSidebar()" aria-label="Open navigation menu" title="Menu"></button>
+      <button class="topbar-hamburger" id="topbar-hamburger" onclick="toggleSidebar()" aria-label="Open navigation menu" title="Menu"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
       <div class="topbar-title" id="topbar-page-title">Overview Dashboard</div>
       <div style="flex:1"></div>
       <div class="topbar-search">
@@ -1227,7 +1227,7 @@
       <div style="font-weight:600">Notifications</div>
       <div style="display:flex;gap:0.5rem;align-items:center">
         <button class="btn btn-outline btn-sm" onclick="markAllRead()">Mark all read</button>
-        <button class="icon-btn" id="notif-panel-close"></button>
+        <button class="icon-btn" id="notif-panel-close">×</button>
       </div>
     </div>
     <div id="notif-panel-content" style="padding:0.5rem 0">
@@ -1254,7 +1254,7 @@
       </div>
       <div style="display:flex;align-items:center;gap:0.6rem">
         <div id="pm-grade"></div>
-        <button class="icon-btn" onclick="closeAllModals()"></button>
+        <button class="icon-btn" onclick="closeAllModals()">×</button>
       </div>
     </div>
     <div class="modal-body">
@@ -1405,7 +1405,7 @@
         <div class="modal-title" id="acm-title">Respond to Alert</div>
         <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px" id="acm-sub"></div>
       </div>
-      <button class="icon-btn" onclick="closeAllModals()"></button>
+      <button class="icon-btn" onclick="closeAllModals()">×</button>
     </div>
     <div style="padding:1.2rem;overflow-y:auto;max-height:75vh">
 
@@ -1513,7 +1513,7 @@
           <div style="font-size:0.72rem;color:var(--text-secondary)">Reflection Assistant · Confidential</div>
         </div>
       </div>
-      <button class="icon-btn" onclick="closeAllModals()"></button>
+      <button class="icon-btn" onclick="closeAllModals()">×</button>
     </div>
     <div class="chat-messages-wrap">
       <div id="chat-messages"></div>
@@ -1537,7 +1537,7 @@
         <div class="modal-title">IntelliQ understood your org</div>
         <div class="modal-sub" id="org-intel-sub">Extracted from your description</div>
       </div>
-      <button class="modal-close" onclick="closeOrgIntelModal()"></button>
+      <button class="modal-close" onclick="closeOrgIntelModal()">×</button>
     </div>
     <div class="modal-body">
 
@@ -1586,7 +1586,7 @@
         <div class="modal-title" id="ccc-title">Morning check-in</div>
         <div class="modal-sub" id="ccc-sub">Takes 60 seconds — IntelliQ reads this</div>
       </div>
-      <button class="modal-close" onclick="closeAllModals()"></button>
+      <button class="modal-close" onclick="closeAllModals()">×</button>
     </div>
     <div class="modal-body">
       <div id="ccc-form">
@@ -1622,7 +1622,7 @@
   <div class="modal" style="max-width:520px;width:100%">
     <div class="modal-header">
       <div><div class="modal-title">Create Group</div><div class="modal-sub">Sub-team within your org</div></div>
-      <button class="modal-close" onclick="closeAllModals()"></button>
+      <button class="modal-close" onclick="closeAllModals()">×</button>
     </div>
     <div class="modal-body">
       <div class="form-group">
@@ -1659,7 +1659,7 @@
         <div class="modal-title" id="gd-title">Group</div>
         <div class="modal-sub" id="gd-sub">Shared notes and messages</div>
       </div>
-      <button class="modal-close" onclick="closeAllModals()"></button>
+      <button class="modal-close" onclick="closeAllModals()">×</button>
     </div>
     <div class="modal-body" style="flex:1;overflow-y:auto">
 
@@ -1816,7 +1816,7 @@
       placeholder="Type your response…"
       oninput="MemberApp.autoResizeInput(this)"
       onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.sendScenarioMessage();}"></textarea>
-    <button class="send-btn" id="sc-send-btn" onclick="MemberApp.sendScenarioMessage()"></button>
+    <button class="send-btn" id="sc-send-btn" onclick="MemberApp.sendScenarioMessage()"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg></button>
   </div>
 </div>
 
@@ -1831,8 +1831,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260716f"></script>
-<script src="js/auth.js?v=20260716f"></script>
+<script src="js/data.js?v=20260716g"></script>
+<script src="js/auth.js?v=20260716g"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1900,14 +1900,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260716f"></script>
-<script src="js/ui.js?v=20260716f"></script>
-<script src="js/attachments.js?v=20260716f"></script>
-<script src="js/scenarios.js?v=20260716f"></script>
-<script src="js/chat.js?v=20260716f"></script>
-<script src="js/tree.js?v=20260716f"></script>
-<script src="js/app.js?v=20260716f"></script>
-<script src="js/member-view.js?v=20260716f"></script>
+<script src="js/charts.js?v=20260716g"></script>
+<script src="js/ui.js?v=20260716g"></script>
+<script src="js/attachments.js?v=20260716g"></script>
+<script src="js/scenarios.js?v=20260716g"></script>
+<script src="js/chat.js?v=20260716g"></script>
+<script src="js/tree.js?v=20260716g"></script>
+<script src="js/app.js?v=20260716g"></script>
+<script src="js/member-view.js?v=20260716g"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->
