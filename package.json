@@ -10,7 +10,8 @@
     "seed": "node scripts/seed.js",
     "smoke:advisor": "node scripts/advisor-smoke.js",
     "smoke:frontend": "node scripts/frontend-smoke.js",
-    "smoke:llm": "node scripts/llm-smoke.js"
+    "smoke:llm": "node scripts/llm-smoke.js",
+    "demo:club": "node scripts/club-stress.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.3",

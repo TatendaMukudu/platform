@@ -4469,6 +4469,42 @@ app.delete('/api/tutorials/:id', requireAuth, (req, res) => {
    how it reasons on demo-style prompts. Admin-gated (manage_settings). No shell
    needed: runs from the browser against whatever key the host has configured.
    With no key, reports that the kernel is on its deterministic fallbacks. */
+/* ── POST /api/admin/seed-demo-club — install the full demo club for a click-through.
+   Builds "Trafford United FC" (fictional, ~226 people, ~1yr of data) and installs it
+   as its OWN org so you can log in and see every layer react at scale. Superadmin-
+   gated. Re-running replaces the club org's data (idempotent), never touches others. */
+app.post('/api/admin/seed-demo-club', requirePermission('manage_settings'), async (req, res) => {
+  try {
+    const { buildClubStore, CLUB_CODE } = require('./scripts/seed-club.js');
+    const { store, summary } = await buildClubStore();
+    // Each slice is keyed by the club's org code (except emailIndex, rebuilt below),
+    // so assigning replaces just the club org and leaves every other org intact.
+    Object.assign(orgMeta, store.orgMeta);
+    Object.assign(orgUsers, store.orgUsers);
+    Object.assign(orgNodes, store.orgNodes);
+    Object.assign(orgValues, store.orgValues);
+    Object.assign(orgGoals, store.orgGoals);
+    Object.assign(orgMetrics, store.orgMetrics);
+    Object.assign(userPermissions, store.userPermissions);
+    Object.assign(memberGoals, store.memberGoals);
+    Object.assign(memberCheckins, store.memberCheckins);
+    Object.assign(orgSignals, store.orgSignals);
+    Object.assign(assessmentTemplates, store.assessmentTemplates);
+    Object.assign(assessmentAssignments, store.assessmentAssignments);
+    Object.assign(orgTutorials, store.orgTutorials);
+    Object.assign(orgInterventions, store.orgInterventions);
+    Object.assign(studioThreads, store.studioThreads);
+    Object.assign(orgGroups, store.orgGroups);
+    _rebuildEmailIndex();
+    scheduleSave();
+    console.log(`[seed-demo-club] installed ${summary.orgName} (${summary.users} users, ${summary.checkins} check-ins)`);
+    res.json({ ok: true, summary, note: `Log in with ${summary.login.director} (or ${summary.login.firstTeamCoach}), password ${summary.login.password}, org code "${CLUB_CODE}".` });
+  } catch (e) {
+    console.error('[seed-demo-club] failed:', e.message);
+    res.status(500).json({ error: 'Could not seed the demo club: ' + e.message });
+  }
+});
+
 app.post('/api/admin/llm-selftest', requirePermission('manage_settings'), async (req, res) => {
   const status = {
     enabled:   ai.enabled(),
