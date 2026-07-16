@@ -1526,8 +1526,10 @@ const MemberApp = {
     </div>` : '';
 
     const recLabel = s.canTranscribe ? 'Record' : 'Record (voice)';
+    const proactive = s.proactive ? `<div class="studio-proactive">${esc(s.proactive)}</div>` : '';
     return `<div class="card studio-card">
       <div class="card-label">Studio · talk it through with IntelliQ</div>
+      ${proactive}
       <div class="studio-log" id="studio-log">${log}</div>
       ${planHtml}
       <div class="studio-input-row">
@@ -1549,6 +1551,19 @@ const MemberApp = {
   _studioScrollBottom() {
     const log = document.getElementById('studio-log');
     if (log) log.scrollTop = log.scrollHeight;
+  },
+
+  // Short relative time ("3 days ago", "today") for track-record lines.
+  _ago(iso) {
+    const t = new Date(iso).getTime();
+    if (!Number.isFinite(t)) return 'recently';
+    const days = Math.floor((Date.now() - t) / 86400000);
+    if (days <= 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 7) return `${days} days ago`;
+    if (days < 14) return 'last week';
+    if (days < 60) return `${Math.round(days / 7)} weeks ago`;
+    return `${Math.round(days / 30)} months ago`;
   },
 
   // Update only the plans strip (no full re-render) so the conversation stays put.
@@ -1822,15 +1837,28 @@ const MemberApp = {
         </div>
       </div>`;
 
-      // Existing templates → assign
+      // Existing templates → assign, each with its track record (trusted? works? stale?)
       const tpls = d.templates || [];
       if (tpls.length) {
+        const verdictPill = v => v === 'working'
+          ? `<span class="pill" style="background:rgba(14,207,176,0.15);color:#0ecfb0">Working</span>`
+          : v === 'revisit'
+          ? `<span class="pill" style="background:rgba(247,178,79,0.15);color:#f7b24f">Revisit</span>` : '';
         html += `<div class="card"><div class="card-label">Your assessments — assign to people</div>` +
-          tpls.map(t => `<div class="me-row" style="display:flex;align-items:center;gap:0.5rem;padding:0.55rem 0;border-bottom:1px solid var(--border)">
-            <div style="flex:1"><strong>${esc(t.title)}</strong> <span style="font-size:0.72rem;color:var(--text-muted)">· ${kind(t.kind)}</span></div>
-            <button class="btn-ghost" onclick="MemberApp._assessOpenAssign('${t.id}')">Assign</button>
-            <button class="btn-ghost" onclick="MemberApp._assessDeleteTemplate('${t.id}')" title="Delete" style="color:var(--text-muted)"></button>
-          </div>`).join('') +
+          tpls.map(t => {
+            const meta = [];
+            if (t.avgOutcome != null) meta.push(`${t.avgOutcome} avg outcome`);
+            if (t.uses) meta.push(`used ${t.uses}×`);
+            meta.push(t.lastUsed ? `last used ${this._ago(t.lastUsed)}` : 'never used');
+            return `<div class="me-row" style="display:flex;align-items:center;gap:0.5rem;padding:0.55rem 0;border-bottom:1px solid var(--border)">
+              <div style="flex:1;min-width:0">
+                <div><strong>${esc(t.title)}</strong> <span style="font-size:0.72rem;color:var(--text-muted)">· ${kind(t.kind)}</span> ${verdictPill(t.verdict)}</div>
+                <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px">${meta.join(' · ')}</div>
+              </div>
+              <button class="btn-ghost" onclick="MemberApp._assessOpenAssign('${t.id}')">Assign</button>
+              <button class="btn-ghost" onclick="MemberApp._assessDeleteTemplate('${t.id}')" title="Delete" style="color:var(--text-muted)">Delete</button>
+            </div>`;
+          }).join('') +
           `<div id="assess-assign-panel" style="display:none;margin-top:0.7rem"></div></div>`;
       }
 

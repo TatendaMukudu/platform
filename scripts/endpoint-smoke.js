@@ -361,6 +361,12 @@ const server = app.listen(0, async () => {
     const studio0 = await call('/api/studio', tokB);
     ok('the Studio returns the caller\'s space (opening, assigned, pins, plans)',
        studio0.status === 200 && studio0.j?.ok === true && Array.isArray(studio0.j.assigned) && Array.isArray(studio0.j.plans) && typeof studio0.j.canTranscribe === 'boolean');
+    ok('the Studio carries a proactive field (remembers where you left off)', 'proactive' in (studio0.j || {}));
+    // Assessment templates carry their track record (avg outcome / uses / last used).
+    const tplList = await call('/api/assessments', tokCoach);
+    const seededTpl = (tplList.j?.templates || []).find(t => Number.isFinite(t.uses));
+    ok('assessment templates expose a track record (uses / avgOutcome / lastUsed / verdict)',
+       tplList.status === 200 && seededTpl && 'avgOutcome' in seededTpl && 'lastUsed' in seededTpl && 'verdict' in seededTpl);
     const schat = await call('/api/studio/chat', tokB, { method: 'POST', body: { message: 'I want to plan a calmer week and get one hard thing done.', savePlan: true } });
     ok('talking in the Studio returns a reply and saves the plan', schat.status === 200 && typeof schat.j?.reply === 'string' && schat.j.planSaved === true);
     ok('an empty Studio message is refused (400)', (await call('/api/studio/chat', tokB, { method: 'POST', body: {} })).status === 400);

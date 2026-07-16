@@ -3889,6 +3889,18 @@ app.get('/api/studio', requireAuth, (req, res) => {
   const me = orgUsers[code]?.[userId];
   const first = (me?.name || 'there').split(' ')[0];
   const openPlans = th.plans.filter(p => !p.done);
+  // A PROACTIVE status, recomputed every visit — Studio remembers where you left
+  // off ("you completed two, one's still waiting") instead of starting cold.
+  const weekAgo = Date.now() - 7 * 86400000;
+  const doneRecently = th.plans.filter(p => p.done && p.ts && new Date(p.ts).getTime() > weekAgo - 30 * 86400000).length;
+  const parts = [];
+  if (openPlans.length) parts.push(`${openPlans.length} plan${openPlans.length > 1 ? 's' : ''} still open`);
+  if (doneRecently)     parts.push(`${doneRecently} completed`);
+  if (assigned.length)  parts.push(`${assigned.length} assigned thing${assigned.length > 1 ? 's' : ''} waiting`);
+  const proactive = parts.length
+    ? `Picking up where you left off — ${parts.join(', ')}. What should we focus on today?`
+    : null;
+  // The first-message greeting only for a brand-new Studio.
   let opening = null;
   if (!th.messages.length) {
     const bits = [];
@@ -3896,7 +3908,7 @@ app.get('/api/studio', requireAuth, (req, res) => {
     if (openPlans.length) bits.push(`${openPlans.length} plan${openPlans.length > 1 ? 's' : ''} in progress`);
     opening = `Hi ${first} — this is your Studio. ${bits.length ? `You've got ${bits.join(' and ')}. ` : ''}Tell me what you want to work on, think a plan out loud, or drop in a file, photo, or voice note. What's on your mind?`;
   }
-  res.json({ ok: true, opening, messages: th.messages.slice(-40), plans: openPlans, assigned, pins, canTranscribe: ai.canTranscribe() });
+  res.json({ ok: true, opening, proactive, messages: th.messages.slice(-40), plans: openPlans, assigned, pins, canTranscribe: ai.canTranscribe() });
 });
 
 /* POST /api/studio/chat — talk to IntelliQ in the Studio. Knows the caller's
@@ -4057,10 +4069,27 @@ app.get('/api/assessments', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const leader = _isLeader(code, userId);
   const all = assessmentAssignments[code] || [];
+  // Per-template track record — is it trusted, does it work, is it stale? Computed
+  // from real assignments: average returned outcome, how many times run, when last
+  // used, and the outcome verdict (does it line up with improvement or decline?).
+  let verdictByTitle = {};
+  try {
+    const oc = _assessmentOutcomes(code, userId, Date.now());
+    (oc.working || []).forEach(w => { verdictByTitle[w.title.toLowerCase()] = 'working'; });
+    (oc.revisit || []).forEach(r => { verdictByTitle[r.title.toLowerCase()] = 'revisit'; });
+  } catch (_) {}
+  const templateStats = (tpl) => {
+    const uses = all.filter(a => a.templateId === tpl.id);
+    const scored = uses.filter(a => a.status === 'returned' && Number.isFinite(a.score));
+    const avgOutcome = scored.length ? Math.round(scored.reduce((s, a) => s + a.score, 0) / scored.length) : null;
+    const times = uses.map(a => new Date(a.assignedAt).getTime()).filter(Number.isFinite);
+    const lastUsed = times.length ? new Date(Math.max(...times)).toISOString() : null;
+    return { uses: uses.length, returned: scored.length, avgOutcome, lastUsed, verdict: verdictByTitle[(tpl.title || '').toLowerCase()] || null };
+  };
   res.json({
     ok: true,
     canCreate: leader,
-    templates: (assessmentTemplates[code] || []).map(t => ({ id: t.id, title: t.title, description: t.description, kind: t.kind, fields: t.fields, createdByName: t.createdByName })),
+    templates: (assessmentTemplates[code] || []).map(t => ({ id: t.id, title: t.title, description: t.description, kind: t.kind, fields: t.fields, createdByName: t.createdByName, ...templateStats(t) })),
     assigned: all.filter(a => a.assigneeId === userId).map(_publicAssignment),           // things I must fill
     issued:   leader ? all.filter(a => a.assignerId === userId).map(_publicAssignment) : [], // things I gave out
     tutorials: (orgTutorials[code] || []).map(t => ({ id: t.id, title: t.title, body: t.body, url: t.url, kind: t.kind, createdByName: t.createdByName, createdAt: t.createdAt })),

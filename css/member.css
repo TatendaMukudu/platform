@@ -602,5 +602,6 @@
 .studio-attach { cursor: pointer; position: relative; }
 .studio-saveplan { font-size: 0.76rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.3rem; cursor: pointer; }
 .studio-media-tag { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.04em; padding: 1px 5px; border-radius: 4px; background: rgba(124,90,245,0.18); color: var(--accent); vertical-align: middle; }
+.studio-proactive { font-size: 0.82rem; line-height: 1.45; color: var(--text-secondary); background: rgba(124,90,245,0.06); border-left: 2px solid var(--accent); border-radius: 6px; padding: 0.45rem 0.6rem; margin: 0.2rem 0 0.5rem; }
 .studio-rec-status { font-size: 0.74rem; color: var(--text-muted); margin-top: 0.4rem; min-height: 1em; }
 #studio-rec-btn.recording { color: var(--danger); border-color: var(--danger); }
