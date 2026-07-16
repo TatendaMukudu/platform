@@ -4504,6 +4504,12 @@ async function loadBehavioralProfile(memberId, refresh){
     const remembered = (data.remembered || []).map(r => r.text);
     const followUps  = (p.followUps || []);
     const priv = data.privateMatters || 0;
+    const nudges = (data.assessmentNudges || []);
+    const nudgeHtml = nudges.length ? `<div class="pm-profile-nudges">${nudges.map(n => {
+      const col = n.tone === 'repeat' ? '#0ecfb0' : '#f7b24f';
+      const lead = n.tone === 'repeat' ? 'Repeat' : 'Revisit';
+      return `<div class="pm-profile-nudge" style="border-left:2px solid ${col}"><span class="pm-profile-nudge-tag" style="color:${col}">${lead}</span> ${_escAdvisor(n.text)}</div>`;
+    }).join('')}</div>` : '';
     setAll(`
       <div class="pm-profile-card">
         <div class="pm-profile-head">
@@ -4517,6 +4523,7 @@ async function loadBehavioralProfile(memberId, refresh){
         ${chips('Watch for', p.watchFor)}
         ${chips('Remembers', remembered)}
         ${followUps.length ? `<div class="pm-profile-row"><span class="pm-profile-k">Check in about</span><span class="pm-profile-chips">${followUps.map(f => `<span class="pm-profile-chip pm-profile-followup">${_escAdvisor(f)}</span>`).join('')}</span></div>` : ''}
+        ${nudgeHtml}
         ${priv ? `<div class="pm-profile-priv">Also informed by ${priv} private matter${priv !== 1 ? 's' : ''} — kept confidential, used only to support them.</div>` : ''}
       </div>`);
   } catch (e) {

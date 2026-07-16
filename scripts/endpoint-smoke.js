@@ -330,6 +330,20 @@ const server = app.listen(0, async () => {
     const teamSend = await call('/api/intelligence/deliver', tokCoach, { method: 'POST', body: { toTeam: true, title: repl.j.draft.title, description: repl.j.draft.description, fields: repl.j.draft.fields } });
     ok('approving sends the replicate step to the whole team', teamSend.status === 200 && teamSend.j?.sent >= 1);
 
+    // ── Assessment-learning loop: which assessments precede improvement/decline ──
+    const working = await call('/api/intelligence/whats-working', tokCoach);
+    ok('a leader gets the assessment-outcome report (working / revisit)',
+       working.status === 200 && working.j?.ok === true && Array.isArray(working.j.working) && Array.isArray(working.j.revisit) && typeof working.j.total === 'number');
+    ok('the returned assessment is counted as an outcome (total >= 1)', working.j?.total >= 1);
+    ok('the outcome report is grounded and contentless (no raw text/secrets)',
+       !/valueText|passwordHash|"content"/.test(JSON.stringify(working.j || {})));
+    ok('a plain member cannot see the assessment-outcome report (403)',
+       (await call('/api/intelligence/whats-working', tokB)).status === 403);
+    // Per-member nudges ride along with the individual profile the leader sees.
+    const prof = await call(`/api/member/${bId}/profile`, tokCoach);
+    ok('the individual profile carries assessment nudges (repeat/revisit)',
+       prof.status === 200 && Array.isArray(prof.j?.assessmentNudges));
+
     // ── Universal ingest: one authenticated pipe any app can push data to ──
     ok('a plain member cannot mint an org ingest token (403)',
        (await call('/api/org/ingest-token', tokB, { method: 'POST' })).status === 403);

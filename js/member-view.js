@@ -1487,8 +1487,46 @@ const MemberApp = {
       this._assessState = d;
       root.innerHTML = this._assessHtml(d);
       if (typeof hydrateIcons === 'function') hydrateIcons(root);
+      if (d.canCreate) this._loadAssessLearning();
     } catch (e) {
       root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Couldn't load assessments.</div>`;
+    }
+  },
+
+  // The assessment-learning loop, surfaced: which assessments precede improvement
+  // (repeat them) and which precede a dip (revisit them) — grounded in real
+  // trajectories and scores, honestly labelled correlational.
+  async _loadAssessLearning() {
+    const box = document.getElementById('assess-learning');
+    if (!box) return;
+    try {
+      const res = await fetch('/api/intelligence/whats-working', { headers: this._authHeaders() });
+      if (!res.ok) throw new Error('failed');
+      const d = await res.json();
+      const esc = t => this._escape(t || '');
+      if (!(d.working || []).length && !(d.revisit || []).length) {
+        box.innerHTML = `Not enough returned assessments yet to spot a pattern. As people complete and you return them, IntelliQ will learn which ones lift performance and which to rethink.`;
+        return;
+      }
+      let h = '';
+      if ((d.working || []).length) {
+        h += `<div class="card-label" style="color:#0ecfb0;margin-top:0.2rem">Repeat these</div>`;
+        h += d.working.map(i => `<div class="me-row" style="display:block;padding:0.5rem 0;border-bottom:1px solid var(--border)">
+          <div><strong>${esc(i.title)}</strong>${i.avgScore != null ? ` <span style="font-size:0.72rem;color:var(--text-muted)">· avg ${i.avgScore}</span>` : ''}</div>
+          <div class="me-row-text" style="font-size:0.82rem;color:var(--text-secondary);margin-top:2px">${esc(i.why)}</div>
+        </div>`).join('');
+      }
+      if ((d.revisit || []).length) {
+        h += `<div class="card-label" style="color:#f7b24f;margin-top:0.7rem">Worth revisiting</div>`;
+        h += d.revisit.map(i => `<div class="me-row" style="display:block;padding:0.5rem 0;border-bottom:1px solid var(--border)">
+          <div><strong>${esc(i.title)}</strong>${i.avgScore != null ? ` <span style="font-size:0.72rem;color:var(--text-muted)">· avg ${i.avgScore}</span>` : ''}</div>
+          <div class="me-row-text" style="font-size:0.82rem;color:var(--text-secondary);margin-top:2px">${esc(i.why)}</div>
+        </div>`).join('');
+      }
+      if (d.note) h += `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.5rem">${esc(d.note)}</div>`;
+      box.innerHTML = h;
+    } catch (e) {
+      box.innerHTML = `<span style="color:var(--text-muted)">Couldn't load outcomes right now.</span>`;
     }
   },
 
@@ -1623,6 +1661,12 @@ const MemberApp = {
         </details>`).join('');
       }
       html += `</div>`;
+
+      // ── What's working / worth revisiting — the assessment-learning loop ──
+      html += `<div class="card" id="assess-learning-card">
+        <div class="card-label">What's working — from real outcomes</div>
+        <div id="assess-learning" style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">Checking which assessments line up with people improving…</div>
+      </div>`;
     }
 
     // ── Tutorials (pinned how-to's) ──────────────────────────────────────

@@ -2304,6 +2304,9 @@ img { max-width: 100%; }
 /* ── Behavioral profile: durable memory + follow-ups ───────── */
 .pm-profile-followup { border-color: var(--accent) !important; color: var(--accent) !important; }
 .pm-profile-priv { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.6rem; font-style: italic; }
+.pm-profile-nudges { margin-top: 0.6rem; display: flex; flex-direction: column; gap: 0.4rem; }
+.pm-profile-nudge { font-size: 0.8rem; line-height: 1.5; color: var(--text-secondary); padding: 0.35rem 0.5rem; background: rgba(255,255,255,0.02); border-radius: 4px; }
+.pm-profile-nudge-tag { font-weight: 600; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em; margin-right: 0.3rem; }
 
 /* ── Member Data hub (profile → Data tab) ──────────────────── */
 .md-group { margin-bottom: 1rem; }

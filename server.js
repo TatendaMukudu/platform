@@ -2105,6 +2105,130 @@ app.get('/api/intelligence/success', requireAuth, (req, res) => {
   res.json({ ok: true, rising: risingPeople.slice(0, 8), commonFactors });
 });
 
+/* A person's current DIRECTION, reduced to one of up / down / steady from the
+   kernel's pattern detection. The shared read used by the assessment-learning
+   loop — "did the people who did this assessment get better or worse after?" */
+function _memberDirection(code, u, now) {
+  let m = null; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { m = null; }
+  const pats = m ? intel.detectPatterns(m) : [];
+  if (!pats.length) return 'steady';
+  if (pats.some(p => /improv|recover/i.test(p.type))) return 'up';
+  if (pats.some(p => p.severity === 'high' || /drop|concern|decline|shift/i.test(p.type))) return 'down';
+  return 'steady';
+}
+
+/* ── The assessment-learning loop ──────────────────────────────────────────────
+   Assessments and planning are the core that levels an org up or down, so their
+   OUTCOMES have to feed the kernel's memory. This correlates each returned
+   assessment (grouped by title) with where its assignees have trended SINCE, plus
+   the reasoning scores it produced — so IntelliQ can say "repeat this, it lines up
+   with people improving" or "revisit this, it preceded a drop". Honest and
+   correlational, never causal; leader-scoped over the caller's own people. Returns
+   per-title outcome objects the endpoint and the summaries both read. */
+function _assessmentOutcomes(code, userId, now) {
+  const visible = new Set(getVisibleUserIds(code, userId));
+  const returned = (assessmentAssignments[code] || [])
+    .filter(a => a.status === 'returned' && visible.has(a.assigneeId));
+  const dirCache = {};
+  const dirOf = (id) => {
+    if (dirCache[id] !== undefined) return dirCache[id];
+    const u = orgUsers[code]?.[id];
+    return (dirCache[id] = u ? _memberDirection(code, u, now) : 'steady');
+  };
+  const groups = {};
+  returned.forEach(a => {
+    const key = (a.title || 'Untitled').trim().toLowerCase();
+    const g = groups[key] || (groups[key] = { title: a.title || 'Untitled', scores: [], people: {}, lastReturnedAt: null, n: 0 });
+    g.n += 1;
+    if (Number.isFinite(a.score)) g.scores.push(a.score);
+    if (!g.lastReturnedAt || (a.returnedAt && a.returnedAt > g.lastReturnedAt)) g.lastReturnedAt = a.returnedAt || g.lastReturnedAt;
+    const name = a.assigneeName || orgUsers[code]?.[a.assigneeId]?.name || 'Someone';
+    g.people[a.assigneeId] = { name, dir: dirOf(a.assigneeId) };
+  });
+  const items = Object.values(groups).map(g => {
+    const ppl = Object.values(g.people);
+    const rising = ppl.filter(p => p.dir === 'up').length;
+    const falling = ppl.filter(p => p.dir === 'down').length;
+    const avgScore = g.scores.length ? Math.round(g.scores.reduce((a, b) => a + b, 0) / g.scores.length) : null;
+    // A composite verdict: direction of the people who did it, with score as tiebreak.
+    let verdict = 'neutral';
+    if (rising > falling || (rising === falling && avgScore != null && avgScore >= 70)) verdict = 'working';
+    else if (falling > rising || (rising === falling && avgScore != null && avgScore > 0 && avgScore < 50)) verdict = 'revisit';
+    return {
+      title: g.title, n: g.n, people: ppl.length, avgScore, lastReturnedAt: g.lastReturnedAt,
+      rising, falling, net: rising - falling, verdict,
+      who: ppl.map(p => p.name).slice(0, 8),
+    };
+  });
+  // Rank: strongest signal first (biggest net, then most people, then recency).
+  const rank = (x) => Math.abs(x.net) * 100 + x.people * 10 + (x.lastReturnedAt ? 1 : 0);
+  const working = items.filter(i => i.verdict === 'working').sort((a, b) => rank(b) - rank(a));
+  const revisit = items.filter(i => i.verdict === 'revisit').sort((a, b) => rank(b) - rank(a));
+  return { working, revisit, total: returned.length };
+}
+
+/* One short, honest sentence explaining WHY an outcome item is worth repeating or
+   revisiting — the when/who/how the user asked for, from real numbers only. */
+function _assessmentWhy(it) {
+  const when = it.lastReturnedAt ? new Date(it.lastReturnedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'recently';
+  const whoStr = it.who.length <= 3 ? it.who.join(', ') : `${it.who.slice(0, 3).join(', ')} and ${it.who.length - 3} more`;
+  const scorePart = it.avgScore != null ? ` Average reasoning score ${it.avgScore}.` : '';
+  if (it.verdict === 'working') {
+    const dir = it.rising ? `${it.rising} of them have trended up since` : 'scores held strong';
+    return `${whoStr} completed "${it.title}" (last on ${when}); ${dir}.${scorePart} It lines up with improvement — worth repeating.`;
+  }
+  const dir = it.falling ? `${it.falling} have trended down since` : 'scores came in low';
+  return `${whoStr} completed "${it.title}" (last on ${when}); ${dir}.${scorePart} It preceded a dip — worth revisiting how it's run.`;
+}
+
+/* Per-member assessment nudges — the same learning, but about ONE person, for the
+   individual summary: which assessments turned into a strength for them (repeat) and
+   which lined up with a dip (revisit). Short, grounded, correlational. */
+function _memberAssessmentNudges(code, memberId, now) {
+  const u = orgUsers[code]?.[memberId];
+  if (!u) return [];
+  const dir = _memberDirection(code, u, now);
+  const mine = (assessmentAssignments[code] || [])
+    .filter(a => a.status === 'returned' && a.assigneeId === memberId);
+  if (!mine.length) return [];
+  const byTitle = {};
+  mine.forEach(a => {
+    const g = byTitle[a.title] || (byTitle[a.title] = { title: a.title, scores: [], last: null, n: 0 });
+    g.n += 1;
+    if (Number.isFinite(a.score)) g.scores.push(a.score);
+    if (!g.last || (a.returnedAt && a.returnedAt > g.last)) g.last = a.returnedAt || g.last;
+  });
+  const first = (u.name || 'They').split(' ')[0];
+  const out = [];
+  Object.values(byTitle).forEach(g => {
+    const avg = g.scores.length ? Math.round(g.scores.reduce((a, b) => a + b, 0) / g.scores.length) : null;
+    const when = g.last ? new Date(g.last).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'recently';
+    if (dir === 'up' && (avg == null || avg >= 65)) {
+      out.push({ tone: 'repeat', title: g.title, text: `"${g.title}" landed well for ${first}${avg != null ? ` (score ${avg})` : ''} and they've trended up since ${when} — worth repeating.` });
+    } else if (dir === 'down' || (avg != null && avg < 45)) {
+      out.push({ tone: 'revisit', title: g.title, text: `"${g.title}" (last ${when}${avg != null ? `, score ${avg}` : ''}) lined up with a dip for ${first} — worth revisiting how it's run.` });
+    }
+  });
+  return out.slice(0, 3);
+}
+
+/* GET /api/intelligence/whats-working — the assessment-outcome report for a leader:
+   which assessments line up with people improving (repeat these) and which precede
+   a drop (revisit these), each with a grounded, correlational "why". Leader-scoped;
+   names are the leader's own team, scores are legitimate capability signals. */
+app.get('/api/intelligence/whats-working', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Leaders only' });
+  const { working, revisit, total } = _assessmentOutcomes(code, userId, Date.now());
+  res.json({
+    ok: true,
+    total,
+    working: working.slice(0, 6).map(i => ({ title: i.title, n: i.n, people: i.people, avgScore: i.avgScore, rising: i.rising, falling: i.falling, lastReturnedAt: i.lastReturnedAt, why: _assessmentWhy(i) })),
+    revisit: revisit.slice(0, 6).map(i => ({ title: i.title, n: i.n, people: i.people, avgScore: i.avgScore, rising: i.rising, falling: i.falling, lastReturnedAt: i.lastReturnedAt, why: _assessmentWhy(i) })),
+    note: 'Correlational, not proof — these are patterns worth acting on, checked against real trajectories and scores.',
+  });
+});
+
 /* ── POST /api/intelligence/prepare — "here's what I've already drafted" ────────
    The leap from copilot to assistance: for a flagged person, IntelliQ DRAFTS a
    concrete, supportive intervention (a short reflection the leader can send), so
@@ -7411,6 +7535,7 @@ app.get('/api/member/:memberId/profile', requireAuth, async (req, res) => {
       profile: profile || null,
       remembered: km.filter(k => !k.sensitive).map(k => ({ text: k.text, since: k.firstSeen, kind: k.kind })),
       privateMatters: km.filter(k => k.sensitive).length,
+      assessmentNudges: _memberAssessmentNudges(code, memberId, Date.now()),
     });
   } catch (err) {
     console.error('[profile] error:', err.message);
