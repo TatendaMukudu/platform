@@ -3893,7 +3893,7 @@ app.post('/api/assessments/:id/discuss', requireAuth, async (req, res) => {
   if (ai.enabled()) {
     try {
       const role = isAssignee
-        ? `You are IntelliQ, a supportive mentor helping the PERSON complete an assignment their leader set. Help them think it through and do it well — never do it for them, never invent facts about them. Warm, brief, concrete. No emojis.`
+        ? `You are IntelliQ, having a warm, natural CONVERSATION with a person to help them reflect on an assignment their leader set. This is a chat, not a form — guide them gently through the areas below ONE AT A TIME: ask about the first, listen, acknowledge what they say, then move to the next when it feels natural. Ask a follow-up if an answer is thin. When you've covered everything, tell them warmly that they can hit "Send to [leader]" whenever they're ready. Keep each message to 1-3 sentences. Never do it for them, never invent facts about them, never reveal private data. No emojis.`
         : `You are IntelliQ helping a LEADER reflect on someone's assignment. Be concise and neutral. No emojis.`;
       const context = `Assignment: "${a.title}" (${a.kind}).\nInstructions the leader set: ${a.description || '(none)'}\nSections to fill: ${fieldList}.` +
         (isAssignee && a.response && Object.keys(a.response).length ? `\nTheir current draft: ${Object.entries(a.response).map(([k, v]) => `${k}: ${v}`).join(' | ').slice(0, 800)}` : '');

@@ -1511,25 +1511,30 @@ const MemberApp = {
           : `<span class="pill" style="background:rgba(247,178,79,0.15);color:#f7b24f">To do</span>`;
         let body = '';
         if (a.status === 'assigned') {
+          const leaderFirst = esc((a.assignerName || 'Your leader').split(' ')[0]);
+          const firstAsk = (a.fields && a.fields.length) ? esc(a.fields[0].label) : 'How are things going with this?';
           body = `<div style="margin-top:0.6rem">
-            <div style="font-size:0.83rem;color:var(--text-secondary);line-height:1.5;margin-bottom:0.5rem">
-              ${esc(a.assignerName)} asked you to reflect on this. It's a conversation, not a form — talk it through with IntelliQ below, or just write. There are no wrong answers.
+            <div class="assess-conv" id="assess-chat-${a.id}">
+              <div id="assess-chat-log-${a.id}">
+                <div class="conv-ai"><strong>IntelliQ</strong>${leaderFirst} asked you to reflect on this — let's just talk it through, no pressure and no wrong answers.${a.description ? ` They said: <em>${esc(a.description)}</em>` : ''} To start: ${firstAsk.endsWith('?') ? firstAsk : firstAsk + '?'}</div>
+              </div>
             </div>
-            ${a.description ? `<div style="font-size:0.8rem;color:var(--text-muted);line-height:1.5;margin-bottom:0.6rem;white-space:pre-wrap;padding:0.5rem 0.6rem;border-left:2px solid var(--border)">${esc(a.description)}</div>` : ''}
-            <div style="display:flex;gap:0.4rem;margin-bottom:0.7rem">
-              <input class="form-input" id="assess-chat-in-${a.id}" placeholder="Ask how to approach it, or just think out loud…" style="flex:1;margin:0" onkeydown="if(event.key==='Enter'){MemberApp._assessDiscussShow('${a.id}');MemberApp._assessDiscussSend('${a.id}', this.nextElementSibling);}">
-              <button class="btn-primary btn-sm" onclick="MemberApp._assessDiscussShow('${a.id}');MemberApp._assessDiscussSend('${a.id}', this)">Talk it through</button>
+            <div style="display:flex;gap:0.4rem;margin:0.5rem 0">
+              <input class="form-input" id="assess-chat-in-${a.id}" placeholder="Type your reply…" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')MemberApp._assessDiscussSend('${a.id}', this.nextElementSibling)">
+              <button class="btn-primary btn-sm" onclick="MemberApp._assessDiscussSend('${a.id}', this)">Send</button>
             </div>
-            <div id="assess-chat-${a.id}" style="display:none;margin-bottom:0.6rem">
-              <div id="assess-chat-log-${a.id}" style="font-size:0.82rem;line-height:1.5"></div>
-            </div>
-            ${(a.fields && a.fields.length ? a.fields : [{ label: 'Your response', hint: '' }]).map((f, i) => `
-              <div style="margin-bottom:0.5rem">
-                <div class="card-label" style="margin-bottom:2px">${esc(f.label)}</div>
-                ${f.hint ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:3px">${esc(f.hint)}</div>` : ''}
-                <textarea class="note-input" data-field="${esc(f.label)}" style="min-height:60px"></textarea>
-              </div>`).join('')}
-            <button class="btn-primary" onclick="MemberApp._assessSubmit('${a.id}', this)">Send to ${esc((a.assignerName || 'them').split(' ')[0])}</button>
+            <details style="margin-bottom:0.5rem">
+              <summary style="cursor:pointer;font-size:0.78rem;color:var(--text-muted)">Prefer to just write? Fill it in directly</summary>
+              <div style="margin-top:0.5rem">
+                ${(a.fields && a.fields.length ? a.fields : [{ label: 'Your response', hint: '' }]).map((f) => `
+                  <div style="margin-bottom:0.5rem">
+                    <div class="card-label" style="margin-bottom:2px">${esc(f.label)}</div>
+                    ${f.hint ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:3px">${esc(f.hint)}</div>` : ''}
+                    <textarea class="note-input" data-field="${esc(f.label)}" style="min-height:60px"></textarea>
+                  </div>`).join('')}
+              </div>
+            </details>
+            <button class="btn-primary" onclick="MemberApp._assessSubmit('${a.id}', this)">Send to ${leaderFirst}</button>
           </div>`;
         } else if (a.status === 'submitted') {
           body = `<div style="margin-top:0.5rem;font-size:0.82rem;color:var(--text-muted)">Waiting for review from ${esc(a.assignerName)}.</div>`;
@@ -1746,8 +1751,11 @@ const MemberApp = {
   async _assessSubmit(id, btn) {
     const row = btn.closest('.me-row');
     const response = {};
-    row.querySelectorAll('textarea[data-field]').forEach(t => { response[t.dataset.field] = t.value.trim(); });
-    if (!Object.values(response).some(v => v)) { this.showToast('Fill something in first', 'warning'); return; }
+    row.querySelectorAll('textarea[data-field]').forEach(t => { if (t.value.trim()) response[t.dataset.field] = t.value.trim(); });
+    // The conversation IS the reflection — capture it so the leader sees the reasoning.
+    const chat = (this._assessChat[id] || []).filter(m => m.role === 'user');
+    if (chat.length) response['In their words (from the conversation)'] = chat.map(m => m.content).join('\n\n');
+    if (!Object.keys(response).length) { this.showToast('Say something to IntelliQ or fill it in first', 'warning'); return; }
     const orig = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
     try {
@@ -1758,15 +1766,10 @@ const MemberApp = {
     } catch (e) { this.showToast('Could not send', 'error'); if (btn) { btn.disabled = false; btn.textContent = orig; } }
   },
 
-  /* Interactive assignment — talk it through with IntelliQ, which knows what the
-     leader set. Keeps a short per-assignment history so it's a real conversation. */
+  /* The assignment as a full conversation — IntelliQ knows what the leader set and
+     guides the person through it, warmly, one thing at a time. The transcript
+     becomes their reflection on submit. */
   _assessChat: {},
-  _assessDiscussShow(id) {
-    const box = document.getElementById('assess-chat-' + id);
-    if (box) box.style.display = 'block';
-    const log = document.getElementById('assess-chat-log-' + id);
-    if (log && !log.innerHTML) log.innerHTML = `<div style="color:var(--text-muted)">I know what your leader set — ask me anything, or just start writing below.</div>`;
-  },
   async _assessDiscussSend(id, btn) {
     const input = document.getElementById('assess-chat-in-' + id);
     const log = document.getElementById('assess-chat-log-' + id);
@@ -1774,18 +1777,18 @@ const MemberApp = {
     if (!msg || !log) return;
     const esc = t => this._escape(t || '');
     this._assessChat[id] = this._assessChat[id] || [];
-    log.innerHTML += `<div style="margin:0.4rem 0"><strong>You:</strong> ${esc(msg)}</div>`;
+    log.innerHTML += `<div class="conv-you">${esc(msg)}</div>`;
     this._assessChat[id].push({ role: 'user', content: msg });
     if (input) input.value = '';
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
-    log.innerHTML += `<div id="assess-chat-pending-${id}" style="color:var(--text-muted);margin:0.2rem 0">IntelliQ is thinking…</div>`;
+    log.innerHTML += `<div id="assess-chat-pending-${id}" class="conv-ai" style="opacity:0.6">IntelliQ is thinking…</div>`;
     log.scrollTop = log.scrollHeight;
     try {
       const res = await fetch(`/api/assessments/${id}/discuss`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ message: msg, history: this._assessChat[id].slice(0, -1) }) });
       const d = await res.json();
       document.getElementById('assess-chat-pending-' + id)?.remove();
       if (!res.ok || !d.ok) throw new Error();
-      log.innerHTML += `<div style="margin:0.4rem 0;color:var(--text-secondary)"><strong style="color:var(--accent)">IntelliQ:</strong> ${esc(d.reply)}</div>`;
+      log.innerHTML += `<div class="conv-ai"><strong>IntelliQ</strong>${esc(d.reply)}</div>`;
       this._assessChat[id].push({ role: 'assistant', content: d.reply });
     } catch (e) {
       document.getElementById('assess-chat-pending-' + id)?.remove();

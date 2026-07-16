@@ -581,3 +581,10 @@
 .btn-ghost:hover { background: rgba(127,127,127,0.08); border-color: var(--accent); color: var(--text-primary); }
 .pill { display: inline-block; font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .empty-hint { font-size: 0.85rem; }
+
+/* ── Assessment as a conversation (chat-first fill) ─────────────────────────── */
+.assess-conv { max-height: 320px; overflow-y: auto; padding: 0.6rem; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1, rgba(255,255,255,0.02)); }
+.conv-ai, .conv-you { font-size: 0.85rem; line-height: 1.5; padding: 0.5rem 0.7rem; border-radius: 12px; margin: 0.35rem 0; max-width: 88%; }
+.conv-ai { background: rgba(124,90,245,0.08); border: 1px solid rgba(124,90,245,0.18); }
+.conv-ai strong { display: block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--accent); margin-bottom: 3px; }
+.conv-you { background: rgba(127,127,127,0.10); margin-left: auto; }
