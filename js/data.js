@@ -131,7 +131,7 @@ const WORKSPACE_MODULES = [
   // so it's no longer a separate nav item. The page still exists and is reachable.
   // Notes now live INSIDE the Me space (no separate tab) — the page stays
   // reachable for full options (tags / sharing) via navigate('notes').
-  { section: null,        id: 'assessments', icon: ICON.clipboard, label: 'Assessments', permission: null },
+  { section: null,        id: 'assessments', icon: ICON.clipboard, label: 'Studio', permission: null },
   { section: null,        id: 'apps',    icon: ICON.plug,    label: 'Apps',     permission: null },
   // Inbox demoted from the main nav — IntelliQ is the intelligence layer, not a
   // messaging app (Teams / Slack / email own comms). Proactive "updates from

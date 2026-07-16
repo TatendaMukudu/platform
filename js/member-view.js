@@ -1477,20 +1477,186 @@ const MemberApp = {
   _assessState: null,
   _assessKindLabel: { spreadsheet: 'Data / spreadsheet', film: 'Video / recording', play: 'Approach / method', skill: 'Skill', general: 'General' },
 
+  // The Studio is conversation-first: IntelliQ leads, and the caller's assigned
+  // work, pins, and leader tools sit below the chat as cards they can act on.
   async _renderAssessments() {
     const root = document.getElementById('assessments-root');
     if (!root) return;
     root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Loading…</div>`;
     try {
-      const res = await fetch('/api/assessments', { headers: this._authHeaders() });
-      const d = await res.json();
+      const [sRes, aRes] = await Promise.all([
+        fetch('/api/studio', { headers: this._authHeaders() }),
+        fetch('/api/assessments', { headers: this._authHeaders() }),
+      ]);
+      const s = sRes.ok ? await sRes.json() : { ok: false };
+      const d = await aRes.json();
       this._assessState = d;
-      root.innerHTML = this._assessHtml(d);
+      this._studioState = s;
+      root.innerHTML = (s && s.ok ? this._studioHtml(s) : '') + this._assessHtml(d);
       if (typeof hydrateIcons === 'function') hydrateIcons(root);
+      this._studioScrollBottom();
       if (d.canCreate) this._loadAssessLearning();
     } catch (e) {
-      root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Couldn't load assessments.</div>`;
+      root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Couldn't load your Studio.</div>`;
     }
+  },
+
+  // ── The Studio conversation — chat-first, with media + voice input ─────────
+  _studioState: null,
+  _studioRec: null,        // active MediaRecorder
+  _studioChunks: [],
+
+  _studioHtml(s) {
+    const esc = t => this._escape(t || '');
+    const msgs = s.messages || [];
+    let log = '';
+    if (s.opening) log += `<div class="conv-ai"><strong>IntelliQ</strong>${esc(s.opening)}</div>`;
+    log += msgs.map(m => m.role === 'assistant'
+      ? `<div class="conv-ai"><strong>IntelliQ</strong>${esc(m.text)}</div>`
+      : `<div class="conv-you">${m.media ? `<span class="studio-media-tag">${esc((m.media.kind || 'file').toUpperCase())}</span> ` : ''}${esc(m.text || (m.media ? m.media.name : ''))}</div>`
+    ).join('');
+
+    const plans = (s.plans || []);
+    const planHtml = plans.length ? `<div class="studio-plans">
+      <div class="card-label" style="margin-bottom:0.3rem">Your plans</div>
+      ${plans.map(p => `<div class="studio-plan"><button class="studio-plan-check" title="Mark done" onclick="MemberApp._studioPlanDone('${p.id}', this)">○</button><span>${esc(p.text)}</span></div>`).join('')}
+    </div>` : '';
+
+    const recLabel = s.canTranscribe ? 'Record' : 'Record (voice)';
+    return `<div class="card studio-card">
+      <div class="card-label">Studio · talk it through with IntelliQ</div>
+      <div class="studio-log" id="studio-log">${log}</div>
+      ${planHtml}
+      <div class="studio-input-row">
+        <textarea class="form-input" id="studio-in" placeholder="Type, think a plan out loud, or attach a file…" rows="1"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp._studioSend(this)}"></textarea>
+      </div>
+      <div class="studio-actions">
+        <label class="btn-ghost studio-attach" title="Attach a file or photo">Attach
+          <input type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv" style="display:none" onchange="MemberApp._studioAttach(this)">
+        </label>
+        <button class="btn-ghost" id="studio-rec-btn" onclick="MemberApp._studioRecordToggle(this)">${recLabel}</button>
+        <label class="studio-saveplan"><input type="checkbox" id="studio-saveplan"> Save as a plan</label>
+        <button class="btn-primary btn-sm" style="margin-left:auto" onclick="MemberApp._studioSend(document.getElementById('studio-in'))">Send</button>
+      </div>
+      <div id="studio-rec-status" class="studio-rec-status"></div>
+    </div>`;
+  },
+
+  _studioScrollBottom() {
+    const log = document.getElementById('studio-log');
+    if (log) log.scrollTop = log.scrollHeight;
+  },
+
+  _studioAppend(role, text, media) {
+    const log = document.getElementById('studio-log');
+    if (!log) return;
+    const esc = t => this._escape(t || '');
+    const div = document.createElement('div');
+    if (role === 'assistant') { div.className = 'conv-ai'; div.innerHTML = `<strong>IntelliQ</strong>${esc(text)}`; }
+    else { div.className = 'conv-you'; div.innerHTML = `${media ? `<span class="studio-media-tag">${esc((media.kind || 'file').toUpperCase())}</span> ` : ''}${esc(text || (media ? media.name : ''))}`; }
+    log.appendChild(div);
+    this._studioScrollBottom();
+  },
+
+  async _studioSend(inputEl, media) {
+    const input = inputEl || document.getElementById('studio-in');
+    const message = (input?.value || '').trim();
+    if (!message && !media) return;
+    const savePlan = !!document.getElementById('studio-saveplan')?.checked;
+    if (message || media) this._studioAppend('you', message, media);
+    if (input) input.value = '';
+    const pending = document.createElement('div');
+    pending.className = 'conv-ai'; pending.style.opacity = '0.6'; pending.textContent = 'IntelliQ is thinking…';
+    document.getElementById('studio-log')?.appendChild(pending); this._studioScrollBottom();
+    try {
+      const res = await fetch('/api/studio/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ message, media: media || undefined, savePlan }),
+      });
+      const d = await res.json();
+      pending.remove();
+      if (!res.ok || !d.ok) throw new Error();
+      this._studioAppend('assistant', d.reply);
+      const sp = document.getElementById('studio-saveplan'); if (sp) sp.checked = false;
+      if (d.planSaved) this._renderAssessments();  // refresh so the new plan shows
+    } catch (e) {
+      pending.remove();
+      this._studioAppend('assistant', 'Something went wrong sending that — try again in a moment.');
+    }
+  },
+
+  async _studioAttach(inputEl) {
+    const file = inputEl?.files?.[0];
+    if (!file) return;
+    inputEl.value = '';
+    const kind = /^image\//.test(file.type) ? 'photo' : (file.name.split('.').pop() || 'file').toLowerCase();
+    // v1: we register the attachment with the conversation (name + kind) so it
+    // feeds the kernel; full file storage rides the existing attachment rails.
+    await this._studioSend(document.getElementById('studio-in'), { name: file.name.slice(0, 160), kind });
+  },
+
+  async _studioRecordToggle(btn) {
+    const status = document.getElementById('studio-rec-status');
+    if (this._studioRec && this._studioRec.state === 'recording') {
+      this._studioRec.stop();
+      btn.textContent = 'Record';
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      if (status) status.textContent = 'Recording isn\'t supported on this device — type your note instead.';
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      this._studioChunks = [];
+      const rec = new MediaRecorder(stream);
+      this._studioRec = rec;
+      rec.ondataavailable = e => { if (e.data.size) this._studioChunks.push(e.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        const blob = new Blob(this._studioChunks, { type: rec.mimeType || 'audio/webm' });
+        await this._studioTranscribe(blob);
+      };
+      rec.start();
+      btn.textContent = 'Stop';
+      if (status) status.textContent = 'Recording… tap Stop when you\'re done.';
+    } catch (e) {
+      if (status) status.textContent = 'Couldn\'t access the mic — check permissions, or type your note.';
+    }
+  },
+
+  async _studioTranscribe(blob) {
+    const status = document.getElementById('studio-rec-status');
+    if (status) status.textContent = 'Transcribing…';
+    try {
+      const b64 = await new Promise((resolve, reject) => {
+        const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(blob);
+      });
+      const res = await fetch('/api/studio/transcribe', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ audio: b64, mimetype: blob.type || 'audio/webm' }),
+      });
+      const d = await res.json();
+      if (res.status === 503) { if (status) status.textContent = d.note || 'Voice transcription needs an OpenAI key — type your note for now.'; return; }
+      if (!res.ok || !d.ok) throw new Error();
+      if (status) status.textContent = '';
+      const input = document.getElementById('studio-in');
+      if (input) { input.value = (input.value ? input.value + ' ' : '') + (d.text || ''); input.focus(); }
+    } catch (e) {
+      if (status) status.textContent = 'Couldn\'t transcribe that — try again or type it.';
+    }
+  },
+
+  async _studioPlanDone(id, btn) {
+    try {
+      await fetch('/api/studio/plan/' + id, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ done: true }),
+      });
+      const row = btn.closest('.studio-plan');
+      if (row) { row.style.opacity = '0.5'; btn.textContent = '✓'; btn.disabled = true; }
+    } catch (e) {}
   },
 
   // The assessment-learning loop, surfaced: which assessments precede improvement

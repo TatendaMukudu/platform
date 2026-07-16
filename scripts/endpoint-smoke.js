@@ -356,6 +356,26 @@ const server = app.listen(0, async () => {
     ok('the individual profile carries assessment nudges (repeat/revisit)',
        prof.status === 200 && Array.isArray(prof.j?.assessmentNudges));
 
+    // ── The Studio: conversation-first space, media + planning feed the kernel ──
+    ok('the Studio requires auth (401 without a token)', (await call('/api/studio', null)).status === 401);
+    const studio0 = await call('/api/studio', tokB);
+    ok('the Studio returns the caller\'s space (opening, assigned, pins, plans)',
+       studio0.status === 200 && studio0.j?.ok === true && Array.isArray(studio0.j.assigned) && Array.isArray(studio0.j.plans) && typeof studio0.j.canTranscribe === 'boolean');
+    const schat = await call('/api/studio/chat', tokB, { method: 'POST', body: { message: 'I want to plan a calmer week and get one hard thing done.', savePlan: true } });
+    ok('talking in the Studio returns a reply and saves the plan', schat.status === 200 && typeof schat.j?.reply === 'string' && schat.j.planSaved === true);
+    ok('an empty Studio message is refused (400)', (await call('/api/studio/chat', tokB, { method: 'POST', body: {} })).status === 400);
+    const studio1 = await call('/api/studio', tokB);
+    const planId = (studio1.j?.plans || [])[0]?.id;
+    ok('the saved plan now shows in the Studio, and prior turns persist',
+       (studio1.j?.plans || []).length >= 1 && (studio1.j?.messages || []).length >= 2);
+    ok('a Studio input becomes a private kernel signal (planning counts)',
+       (await call('/api/me/export', tokB)).j?.signals?.some(s => s.source === 'studio'));
+    ok('marking a plan done clears it from the open list',
+       planId && (await call('/api/studio/plan/' + planId, tokB, { method: 'POST', body: { done: true } })).status === 200 &&
+       !((await call('/api/studio', tokB)).j?.plans || []).some(p => p.id === planId));
+    ok('voice transcription degrades honestly with no key (503, not a fake transcript)',
+       (await call('/api/studio/transcribe', tokB, { method: 'POST', body: { audio: 'AAAA', mimetype: 'audio/webm' } })).status === 503);
+
     // ── Universal ingest: one authenticated pipe any app can push data to ──
     ok('a plain member cannot mint an org ingest token (403)',
        (await call('/api/org/ingest-token', tokB, { method: 'POST' })).status === 403);

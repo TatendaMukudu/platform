@@ -588,3 +588,19 @@
 .conv-ai { background: rgba(124,90,245,0.08); border: 1px solid rgba(124,90,245,0.18); }
 .conv-ai strong { display: block; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--accent); margin-bottom: 3px; }
 .conv-you { background: rgba(127,127,127,0.10); margin-left: auto; }
+
+/* ── Studio (conversation-first) ─────────────────────────────── */
+.studio-card { padding: 0.9rem; }
+.studio-log { max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; padding: 0.2rem 0 0.4rem; }
+.studio-log .conv-ai, .studio-log .conv-you { max-width: 92%; }
+.studio-plans { margin: 0.4rem 0 0.2rem; }
+.studio-plan { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.84rem; padding: 0.25rem 0; }
+.studio-plan-check { background: none; border: none; color: var(--accent); font-size: 1rem; line-height: 1; cursor: pointer; padding: 0; margin-top: 1px; }
+.studio-input-row { margin-top: 0.5rem; }
+.studio-input-row textarea { width: 100%; resize: none; min-height: 42px; max-height: 140px; }
+.studio-actions { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+.studio-attach { cursor: pointer; position: relative; }
+.studio-saveplan { font-size: 0.76rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.3rem; cursor: pointer; }
+.studio-media-tag { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.04em; padding: 1px 5px; border-radius: 4px; background: rgba(124,90,245,0.18); color: var(--accent); vertical-align: middle; }
+.studio-rec-status { font-size: 0.74rem; color: var(--text-muted); margin-top: 0.4rem; min-height: 1em; }
+#studio-rec-btn.recording { color: var(--danger); border-color: var(--danger); }

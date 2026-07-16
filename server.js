@@ -80,7 +80,7 @@ function scheduleSave() {
         userAiProfiles, advisorThreads, orgSignals, noticeFeedback,
         userConsents, connectedSources, pendingActions,
         assessmentTemplates, assessmentAssignments, orgTutorials, orgApiTokens,
-        activeSessions,
+        studioThreads, activeSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -546,6 +546,11 @@ const pendingActions  = {};  // `orgCode:userId` → [{ id, action, summary, pay
 const assessmentTemplates   = {};  // [{ id, title, description, kind, fields:[{label,hint}], createdBy, createdByName, createdAt }]
 const assessmentAssignments = {};  // [{ id, templateId, title, kind, fields, assignerId/Name, assigneeId/Name, status, response:{}, feedback, score, assignedAt, submittedAt, returnedAt }]
 const orgTutorials          = {};  // [{ id, title, body, url, kind, createdBy, createdByName, createdAt }]
+// The Studio — each person's conversation-first space: a running chat with IntelliQ
+// plus the plans they capture there. Keyed `orgCode:userId`. Assigned work and pins
+// are read live from the assessment/tutorial stores; this holds the conversation and
+// the person's own planning items (which also emit kernel signals, so planning counts).
+const studioThreads         = {};  // `${code}:${userId}` → { messages:[{role,text,ts,media?}], plans:[{id,text,ts,done}] }
 // Universal ingest — one authenticated pipe ANY app (in-house, SaaS, a script, a
 // no-code automation) can POST numeric data to. Per-org token → maps records to
 // members and emits universal signals, so we never build N bespoke integrations.
@@ -3830,6 +3835,137 @@ function _publicAssignment(a) {
     status: a.status, response: a.response || {}, note: a.note || '', feedback: a.feedback || '',
     score: a.score ?? null, assignedAt: a.assignedAt, submittedAt: a.submittedAt || null, returnedAt: a.returnedAt || null };
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE STUDIO — a person's conversation-first space. One chat with IntelliQ that
+   holds three things: work assigned to them, pins sent to them, and their own
+   planning. They can type, drop in a file or photo, or record a voice note — and
+   everything they put in becomes a private kernel signal, so planning counts.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function _studioThread(code, userId) {
+  const k = `${code}:${userId}`;
+  return studioThreads[k] || (studioThreads[k] = { messages: [], plans: [] });
+}
+
+/* GET /api/studio — the whole conversation-first surface for the caller. */
+app.get('/api/studio', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const th = _studioThread(code, userId);
+  const all = assessmentAssignments[code] || [];
+  const assigned = all.filter(a => a.assigneeId === userId && a.status !== 'returned').map(_publicAssignment);
+  const pins = (orgTutorials[code] || []).map(t => ({ id: t.id, title: t.title, kind: t.kind, createdByName: t.createdByName }));
+  const me = orgUsers[code]?.[userId];
+  const first = (me?.name || 'there').split(' ')[0];
+  const openPlans = th.plans.filter(p => !p.done);
+  let opening = null;
+  if (!th.messages.length) {
+    const bits = [];
+    if (assigned.length) bits.push(`${assigned.length} thing${assigned.length > 1 ? 's' : ''} assigned to you`);
+    if (openPlans.length) bits.push(`${openPlans.length} plan${openPlans.length > 1 ? 's' : ''} in progress`);
+    opening = `Hi ${first} — this is your Studio. ${bits.length ? `You've got ${bits.join(' and ')}. ` : ''}Tell me what you want to work on, think a plan out loud, or drop in a file, photo, or voice note. What's on your mind?`;
+  }
+  res.json({ ok: true, opening, messages: th.messages.slice(-40), plans: openPlans, assigned, pins, canTranscribe: ai.canTranscribe() });
+});
+
+/* POST /api/studio/chat — talk to IntelliQ in the Studio. Knows the caller's
+   assigned work, pins, and plans; replies conversationally and can help them shape
+   a plan. Every user turn (text or media) is persisted AND emitted as a private
+   kernel signal, so what they plan and capture here informs their own trajectory. */
+app.post('/api/studio/chat', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const message = String(req.body?.message || '').slice(0, 4000).trim();
+  const media = (req.body?.media && typeof req.body.media === 'object')
+    ? { name: String(req.body.media.name || '').slice(0, 160), kind: String(req.body.media.kind || 'file').slice(0, 24) } : null;
+  const savePlan = req.body?.savePlan === true;
+  if (!message && !media) return res.status(400).json({ error: 'message or media required' });
+
+  const th = _studioThread(code, userId);
+  th.messages.push({ role: 'user', text: message, ts: new Date().toISOString(), media: media || undefined });
+
+  // Planning counts: the caller's own input becomes a private activity signal in the
+  // kernel (categorical/short — the org only ever sees aggregate patterns, never this).
+  if (message || media) _emitSignalSafe(code, {
+    subjectType: 'member', subjectId: userId, source: 'studio', modality: media ? 'media' : 'text',
+    valueText: ((media ? `[${media.kind}] ` : '') + (message || 'shared a file')).slice(0, 200),
+    label: 'Studio input', primitive: 'activity', sensitivity: 'normal',
+    data: { studio: true, media: media ? media.kind : undefined },
+  }, userId);
+
+  if (savePlan && message) th.plans.push({ id: _shortId(), text: message.slice(0, 400), ts: new Date().toISOString(), done: false });
+
+  const me = orgUsers[code]?.[userId];
+  const first = (me?.name || 'there').split(' ')[0];
+  const all = assessmentAssignments[code] || [];
+  const assignedTitles = all.filter(a => a.assigneeId === userId && a.status !== 'returned').map(a => a.title);
+  const openPlans = th.plans.filter(p => !p.done).map(p => p.text);
+
+  // Deterministic, always-works reply.
+  let reply = media
+    ? `Got it — I've saved ${media.name || 'that'} to your Studio and noted it. Want me to turn it into a plan, or add it to something you're already working on?`
+    : savePlan
+    ? `Saved that as a plan. Want to break it into steps, or leave it as-is for now?`
+    : assignedTitles.length
+    ? `Noted. You've also got "${assignedTitles[0]}" assigned — want to work on that, or keep going with this?`
+    : `Noted. Want me to help you shape this into a plan you can act on?`;
+
+  if (ai.enabled() && message) {
+    try {
+      const history = th.messages.slice(-10).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text || (m.media ? `[shared ${m.media.kind}]` : '') }));
+      const ctx = [
+        assignedTitles.length ? `Assigned to them right now: ${assignedTitles.slice(0, 5).join('; ')}.` : 'Nothing is assigned to them right now.',
+        openPlans.length ? `Plans they're working on: ${openPlans.slice(0, 5).join('; ')}.` : 'No saved plans yet.',
+        media ? `They just attached a ${media.kind} named "${media.name}".` : '',
+      ].filter(Boolean).join(' ');
+      const system = [
+        `You are IntelliQ, in ${first}'s personal Studio — a warm, sharp thinking partner, like a great chief of staff. This is a real conversation, not a form. Help them plan, reflect, and act on what they've been assigned or want to do. Be concise (1-4 sentences), concrete, and proactive: when they describe an intention, help shape it into a clear plan or next step, and offer to save it. Never invent facts about them or others. Never reveal anyone else's private data. No emojis.`,
+        _worldviewDirective(code),
+        `Context: ${ctx}`,
+      ].filter(Boolean).join('\n\n');
+      const out = await ai.complete({ tier: 'reason', maxTokens: 260, system, messages: history });
+      if (out && out.trim()) reply = out.trim();
+    } catch (_) { /* deterministic reply stands */ }
+  }
+
+  th.messages.push({ role: 'assistant', text: reply, ts: new Date().toISOString() });
+  scheduleSave();
+  res.json({ ok: true, reply, planSaved: savePlan && !!message });
+});
+
+/* POST /api/studio/plan/:id — mark one of the caller's plans done (or reopen). */
+app.post('/api/studio/plan/:id', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const th = _studioThread(code, userId);
+  const p = th.plans.find(x => x.id === req.params.id);
+  if (!p) return res.status(404).json({ error: 'not found' });
+  p.done = req.body?.done !== false;
+  if (p.done) _emitSignalSafe(code, {
+    subjectType: 'member', subjectId: userId, source: 'studio', modality: 'text',
+    valueText: `Completed a plan: ${p.text.slice(0, 120)}`, label: 'Studio plan done',
+    primitive: 'activity', sensitivity: 'normal', data: { studio: true, planDone: true },
+  }, userId);
+  scheduleSave();
+  res.json({ ok: true, plans: th.plans.filter(x => !x.done) });
+});
+
+/* POST /api/studio/transcribe — voice note → text (OpenAI Whisper). Only available
+   when an OpenAI key is set; otherwise it degrades honestly (the caller is told to
+   type it or that transcription needs a key) rather than fabricating a transcript. */
+app.post('/api/studio/transcribe', requireAuth, async (req, res) => {
+  if (!ai.canTranscribe()) return res.status(503).json({ error: 'transcription-unavailable', note: 'Voice transcription needs an OpenAI key. You can type your note for now.' });
+  const b64 = String(req.body?.audio || '');
+  const mimetype = String(req.body?.mimetype || 'audio/webm').slice(0, 60);
+  const data = b64.includes(',') ? b64.split(',')[1] : b64;
+  if (!data) return res.status(400).json({ error: 'audio required' });
+  let buffer; try { buffer = Buffer.from(data, 'base64'); } catch (_) { return res.status(400).json({ error: 'bad audio' }); }
+  if (!buffer.length || buffer.length > 25 * 1024 * 1024) return res.status(400).json({ error: 'audio too large or empty' });
+  try {
+    const ext = /wav/.test(mimetype) ? 'wav' : /mp4|m4a/.test(mimetype) ? 'm4a' : /mpeg|mp3/.test(mimetype) ? 'mp3' : 'webm';
+    const text = await ai.transcribe(buffer, { filename: `note.${ext}`, mimetype });
+    res.json({ ok: true, text });
+  } catch (e) {
+    res.status(502).json({ error: 'transcribe-failed', note: 'Could not transcribe that — try again or type it.' });
+  }
+});
 
 /* GET /api/assessments — everything the caller needs for the tab, role-scoped. */
 app.get('/api/assessments', requireAuth, (req, res) => {
@@ -8414,6 +8550,7 @@ function _loadAllStores(data) {
   Object.assign(assessmentAssignments, data.assessmentAssignments || {});
   Object.assign(orgTutorials,          data.orgTutorials          || {});
   Object.assign(orgApiTokens,          data.orgApiTokens          || {});
+  Object.assign(studioThreads,         data.studioThreads         || {});
   Object.assign(orgSignals,       data.orgSignals       || {});
   Object.assign(noticeFeedback,   data.noticeFeedback   || {});
   // Restore sessions, pruning any that expired while the server was down

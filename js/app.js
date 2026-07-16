@@ -648,7 +648,7 @@ function navigate(page){
 const PAGE_TITLES = {
   // My Space — every user
   home:         'Home',
-  assessments:  'Assessments',
+  assessments:  'Studio',
   apps:         'Apps',
   checkin:      'Check-In',
   notes:        'Notes',

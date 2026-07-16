@@ -159,4 +159,25 @@ async function completeJSON(opts) {
 // on this so that with no key they skip the call entirely (no network, no wait).
 function enabled() { return HAVE_CLAUDE || HAVE_OPENAI; }
 
-module.exports = { complete, completeJSON, parseJSON, MODELS, client, enabled };
+/* ── Speech-to-text ────────────────────────────────────────────────────────
+   Voice notes in the Studio are transcribed here. Claude has no audio path, so
+   this uses OpenAI Whisper and is only available when OPENAI_API_KEY is set —
+   callers check canTranscribe() and degrade honestly (capture the note, tell the
+   user transcription needs a key) rather than fabricating a transcript. */
+const OPENAI_TRANSCRIBE_URL   = process.env.OPENAI_TRANSCRIBE_URL || 'https://api.openai.com/v1/audio/transcriptions';
+const OPENAI_TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || 'whisper-1';
+function canTranscribe() { return HAVE_OPENAI; }
+async function transcribe(buffer, { filename = 'audio.webm', mimetype = 'audio/webm' } = {}) {
+  if (!HAVE_OPENAI) throw new Error('transcription-unavailable');
+  const fd = new FormData();
+  fd.append('file', new Blob([buffer], { type: mimetype }), filename);
+  fd.append('model', OPENAI_TRANSCRIBE_MODEL);
+  const res = await fetch(OPENAI_TRANSCRIBE_URL, {
+    method: 'POST', headers: { Authorization: `Bearer ${OPENAI_KEY}` }, body: fd,
+  });
+  if (!res.ok) throw new Error('transcribe HTTP ' + res.status);
+  const j = await res.json();
+  return String(j.text || '').trim();
+}
+
+module.exports = { complete, completeJSON, parseJSON, MODELS, client, enabled, canTranscribe, transcribe };
