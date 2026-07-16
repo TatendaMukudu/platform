@@ -3876,6 +3876,9 @@ app.post('/api/studio/chat', requireAuth, async (req, res) => {
   const message = String(req.body?.message || '').slice(0, 4000).trim();
   const media = (req.body?.media && typeof req.body.media === 'object')
     ? { name: String(req.body.media.name || '').slice(0, 160), kind: String(req.body.media.kind || 'file').slice(0, 24) } : null;
+  // The evidence itself (base64 + mimetype), kept only for this request so IntelliQ
+  // can actually READ it — never persisted raw in the thread.
+  const att = (req.body?.attachment && typeof req.body.attachment === 'object') ? req.body.attachment : null;
   const savePlan = req.body?.savePlan === true;
   if (!message && !media) return res.status(400).json({ error: 'message or media required' });
 
@@ -3891,44 +3894,88 @@ app.post('/api/studio/chat', requireAuth, async (req, res) => {
     data: { studio: true, media: media ? media.kind : undefined },
   }, userId);
 
-  if (savePlan && message) th.plans.push({ id: _shortId(), text: message.slice(0, 400), ts: new Date().toISOString(), done: false });
-
   const me = orgUsers[code]?.[userId];
   const first = (me?.name || 'there').split(' ')[0];
   const all = assessmentAssignments[code] || [];
   const assignedTitles = all.filter(a => a.assigneeId === userId && a.status !== 'returned').map(a => a.title);
   const openPlans = th.plans.filter(p => !p.done).map(p => p.text);
 
+  // ── If evidence was attached, READ it (vision / PDF / text) so the reply is
+  //    about what's actually in it. Understanding also enriches the kernel signal
+  //    and can surface a couple of grounded observations. ──────────────────────
+  let understanding = '';
+  let understandNote = '';
+  if (att && att.data) {
+    const mime = String(att.mimetype || '').toLowerCase();
+    let kind = null, payload = null;
+    if (mime.startsWith('image/')) { kind = 'image'; payload = { type: 'image', mimetype: mime, data: att.data }; }
+    else if (mime === 'application/pdf') { kind = 'pdf'; payload = { type: 'pdf', data: att.data }; }
+    else if (mime.startsWith('text/') || mime === 'application/csv') {
+      kind = 'text';
+      try { payload = { type: 'text', text: Buffer.from(att.data, 'base64').toString('utf8') }; } catch (_) { payload = null; }
+    }
+    if (!kind) {
+      understandNote = 'I can read images, PDFs, and text/CSV directly right now — for a spreadsheet or Word doc, export it to PDF or CSV and I\'ll read it in full.';
+    } else if (!ai.canUnderstand()) {
+      understandNote = 'Reading files needs a Claude key — it\'s captured here, but tell me what\'s in it and I\'ll work with that for now.';
+    } else {
+      try {
+        const sys = [
+          `You are IntelliQ, reading a piece of evidence ${first} shared in their Studio (a ${kind}). Understand what it actually shows and how it bears on their work. Return JSON only: {"reply": string (2-4 sentences, warm and specific, what you see and one useful next step or question), "observations": array of up to 3 short factual notes worth remembering}. Never invent detail that isn't there. No emojis.`,
+          _worldviewDirective(code),
+        ].filter(Boolean).join('\n\n');
+        const raw = await ai.understand({ system: sys, prompt: `${message ? `They said: "${message}". ` : ''}Read the attached ${kind} ("${att.name || media?.name || 'file'}") and respond.`, media: payload, maxTokens: 700 });
+        const parsed = ai.parseJSON(raw) || {};
+        understanding = String(parsed.reply || raw || '').slice(0, 1200);
+        const obs = Array.isArray(parsed.observations) ? parsed.observations.slice(0, 3).map(o => String(o).slice(0, 160)) : [];
+        obs.forEach(o => _emitSignalSafe(code, {
+          subjectType: 'member', subjectId: userId, source: 'studio', modality: 'media',
+          valueText: `From ${kind}: ${o}`, label: 'Studio evidence', primitive: 'observation', sensitivity: 'normal',
+          data: { studio: true, evidence: kind },
+        }, userId));
+      } catch (_) { understandNote = 'I had the file but couldn\'t read it just now — try again, or tell me what\'s in it.'; }
+    }
+  }
+
   // Deterministic, always-works reply.
-  let reply = media
-    ? `Got it — I've saved ${media.name || 'that'} to your Studio and noted it. Want me to turn it into a plan, or add it to something you're already working on?`
+  let reply = understanding
+    ? understanding
+    : media
+    ? `Got it — I've saved ${media.name || 'that'} to your Studio${understandNote ? '. ' + understandNote : ' and noted it. Want me to turn it into a plan, or add it to something you\'re already working on?'}`
     : savePlan
     ? `Saved that as a plan. Want to break it into steps, or leave it as-is for now?`
     : assignedTitles.length
     ? `Noted. You've also got "${assignedTitles[0]}" assigned — want to work on that, or keep going with this?`
     : `Noted. Want me to help you shape this into a plan you can act on?`;
 
-  if (ai.enabled() && message) {
+  // Plans emerge from the conversation — the model decides when a turn contains a
+  // plan worth keeping, so it feels like "I've turned that into a plan", not a form.
+  let planToSave = (savePlan && message) ? message.slice(0, 400) : null;
+  if (ai.enabled() && message && !understanding) {
     try {
       const history = th.messages.slice(-10).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text || (m.media ? `[shared ${m.media.kind}]` : '') }));
       const ctx = [
         assignedTitles.length ? `Assigned to them right now: ${assignedTitles.slice(0, 5).join('; ')}.` : 'Nothing is assigned to them right now.',
         openPlans.length ? `Plans they're working on: ${openPlans.slice(0, 5).join('; ')}.` : 'No saved plans yet.',
-        media ? `They just attached a ${media.kind} named "${media.name}".` : '',
       ].filter(Boolean).join(' ');
       const system = [
-        `You are IntelliQ, in ${first}'s personal Studio — a warm, sharp thinking partner, like a great chief of staff. This is a real conversation, not a form. Help them plan, reflect, and act on what they've been assigned or want to do. Be concise (1-4 sentences), concrete, and proactive: when they describe an intention, help shape it into a clear plan or next step, and offer to save it. Never invent facts about them or others. Never reveal anyone else's private data. No emojis.`,
+        `You are IntelliQ, in ${first}'s personal Studio — a warm, sharp thinking partner, like a great chief of staff. This is a real conversation, not a form. Help them plan, reflect, and act. Be concise (1-4 sentences), concrete, proactive. When THIS turn amounts to a concrete plan or commitment worth keeping, capture it: set savePlan true and put a short, clear one-line version in planText, and phrase your reply so it feels natural ("I've turned that into a plan…") — don't make them click anything. Otherwise savePlan is false. Return JSON only: {"reply": string, "savePlan": boolean, "planText": string}. Never invent facts. Never reveal others' private data. No emojis.`,
         _worldviewDirective(code),
         `Context: ${ctx}`,
       ].filter(Boolean).join('\n\n');
-      const out = await ai.complete({ tier: 'reason', maxTokens: 260, system, messages: history });
-      if (out && out.trim()) reply = out.trim();
+      const out = await ai.completeJSON({ tier: 'reason', maxTokens: 300, system, messages: history, schema: ['reply'] });
+      if (out && out.reply) {
+        reply = String(out.reply).slice(0, 1000).trim();
+        if (!planToSave && out.savePlan === true && out.planText) planToSave = String(out.planText).slice(0, 400);
+      }
     } catch (_) { /* deterministic reply stands */ }
   }
 
+  if (planToSave) th.plans.push({ id: _shortId(), text: planToSave, ts: new Date().toISOString(), done: false });
+
   th.messages.push({ role: 'assistant', text: reply, ts: new Date().toISOString() });
   scheduleSave();
-  res.json({ ok: true, reply, planSaved: savePlan && !!message });
+  res.json({ ok: true, reply, planSaved: !!planToSave, understood: !!understanding });
 });
 
 /* POST /api/studio/plan/:id — mark one of the caller's plans done (or reopen). */

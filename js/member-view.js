@@ -1548,6 +1548,25 @@ const MemberApp = {
     if (log) log.scrollTop = log.scrollHeight;
   },
 
+  // Update only the plans strip (no full re-render) so the conversation stays put.
+  async _studioRefreshPlans() {
+    try {
+      const res = await fetch('/api/studio', { headers: this._authHeaders() });
+      if (!res.ok) return;
+      const s = await res.json();
+      const esc = t => this._escape(t || '');
+      const plans = s.plans || [];
+      const html = plans.length ? `<div class="card-label" style="margin-bottom:0.3rem">Your plans</div>
+        ${plans.map(p => `<div class="studio-plan"><button class="studio-plan-check" title="Mark done" onclick="MemberApp._studioPlanDone('${p.id}', this)">○</button><span>${esc(p.text)}</span></div>`).join('')}` : '';
+      let strip = document.querySelector('.studio-plans');
+      if (!strip) {
+        const log = document.getElementById('studio-log');
+        if (log && html) { strip = document.createElement('div'); strip.className = 'studio-plans'; log.insertAdjacentElement('afterend', strip); }
+      }
+      if (strip) strip.innerHTML = html;
+    } catch (_) {}
+  },
+
   _studioAppend(role, text, media) {
     const log = document.getElementById('studio-log');
     if (!log) return;
@@ -1559,7 +1578,7 @@ const MemberApp = {
     this._studioScrollBottom();
   },
 
-  async _studioSend(inputEl, media) {
+  async _studioSend(inputEl, media, attachment) {
     const input = inputEl || document.getElementById('studio-in');
     const message = (input?.value || '').trim();
     if (!message && !media) return;
@@ -1567,19 +1586,22 @@ const MemberApp = {
     if (message || media) this._studioAppend('you', message, media);
     if (input) input.value = '';
     const pending = document.createElement('div');
-    pending.className = 'conv-ai'; pending.style.opacity = '0.6'; pending.textContent = 'IntelliQ is thinking…';
+    pending.className = 'conv-ai'; pending.style.opacity = '0.6';
+    pending.textContent = attachment ? 'IntelliQ is reading it…' : 'IntelliQ is thinking…';
     document.getElementById('studio-log')?.appendChild(pending); this._studioScrollBottom();
     try {
       const res = await fetch('/api/studio/chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
-        body: JSON.stringify({ message, media: media || undefined, savePlan }),
+        body: JSON.stringify({ message, media: media || undefined, attachment: attachment || undefined, savePlan }),
       });
       const d = await res.json();
       pending.remove();
       if (!res.ok || !d.ok) throw new Error();
       this._studioAppend('assistant', d.reply);
       const sp = document.getElementById('studio-saveplan'); if (sp) sp.checked = false;
-      if (d.planSaved) this._renderAssessments();  // refresh so the new plan shows
+      // Plans emerge from the conversation — the reply already names it, so we keep
+      // the chat as the primary object and just fold the new plan into the list.
+      if (d.planSaved) this._studioRefreshPlans();
     } catch (e) {
       pending.remove();
       this._studioAppend('assistant', 'Something went wrong sending that — try again in a moment.');
@@ -1590,10 +1612,18 @@ const MemberApp = {
     const file = inputEl?.files?.[0];
     if (!file) return;
     inputEl.value = '';
+    if (file.size > 12 * 1024 * 1024) { this._studioAppend('assistant', 'That file is a bit large for me to read (max ~12MB) — try a smaller version or a screenshot.'); return; }
     const kind = /^image\//.test(file.type) ? 'photo' : (file.name.split('.').pop() || 'file').toLowerCase();
-    // v1: we register the attachment with the conversation (name + kind) so it
-    // feeds the kernel; full file storage rides the existing attachment rails.
-    await this._studioSend(document.getElementById('studio-in'), { name: file.name.slice(0, 160), kind });
+    const media = { name: file.name.slice(0, 160), kind };
+    // Send the actual bytes so IntelliQ can READ it (vision / PDF / text), not just
+    // note that a file arrived.
+    let attachment = null;
+    try {
+      const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+      const b64 = String(dataUrl).includes(',') ? String(dataUrl).split(',')[1] : String(dataUrl);
+      attachment = { name: media.name, mimetype: file.type || 'application/octet-stream', data: b64 };
+    } catch (_) { attachment = null; }
+    await this._studioSend(document.getElementById('studio-in'), media, attachment);
   },
 
   async _studioRecordToggle(btn) {

@@ -159,6 +159,34 @@ async function completeJSON(opts) {
 // on this so that with no key they skip the call entirely (no network, no wait).
 function enabled() { return HAVE_CLAUDE || HAVE_OPENAI; }
 
+/* ── Evidence understanding (vision + documents) ───────────────────────────
+   People communicate through artifacts, not just text — a photo of a whiteboard,
+   a PDF report, a CSV of results. This reads them so the kernel gets the richer
+   signal. Vision and native PDF need Claude, so this is gated on a Claude key;
+   callers check canUnderstand() and degrade honestly. `media` is one of:
+     { type:'image', mimetype, data(base64) }
+     { type:'pdf',   data(base64) }
+     { type:'text',  text }                       (CSV/plain — inlined)
+   Returns the model's text (callers may ask for JSON and parse it). */
+function canUnderstand() { return HAVE_CLAUDE; }
+async function understand({ system, prompt, media, maxTokens = 700 }) {
+  if (!HAVE_CLAUDE) throw new Error('understanding-unavailable');
+  const blocks = [{ type: 'text', text: prompt || 'Describe this and pull out what matters.' }];
+  if (media?.type === 'image' && media.data) {
+    blocks.push({ type: 'image', source: { type: 'base64', media_type: media.mimetype || 'image/png', data: media.data } });
+  } else if (media?.type === 'pdf' && media.data) {
+    blocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: media.data } });
+  } else if (media?.type === 'text' && media.text) {
+    blocks[0].text += `\n\n--- attached content ---\n${String(media.text).slice(0, 12000)}`;
+  }
+  const resp = await client.messages.create({
+    model: MODELS.reason, max_tokens: maxTokens,
+    ...(system ? { system } : {}),
+    messages: [{ role: 'user', content: blocks }],
+  });
+  return resp.content?.[0]?.text?.trim() || '';
+}
+
 /* ── Speech-to-text ────────────────────────────────────────────────────────
    Voice notes in the Studio are transcribed here. Claude has no audio path, so
    this uses OpenAI Whisper and is only available when OPENAI_API_KEY is set —
@@ -180,4 +208,4 @@ async function transcribe(buffer, { filename = 'audio.webm', mimetype = 'audio/w
   return String(j.text || '').trim();
 }
 
-module.exports = { complete, completeJSON, parseJSON, MODELS, client, enabled, canTranscribe, transcribe };
+module.exports = { complete, completeJSON, parseJSON, MODELS, client, enabled, canTranscribe, transcribe, canUnderstand, understand };

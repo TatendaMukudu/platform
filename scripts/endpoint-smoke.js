@@ -375,6 +375,10 @@ const server = app.listen(0, async () => {
        !((await call('/api/studio', tokB)).j?.plans || []).some(p => p.id === planId));
     ok('voice transcription degrades honestly with no key (503, not a fake transcript)',
        (await call('/api/studio/transcribe', tokB, { method: 'POST', body: { audio: 'AAAA', mimetype: 'audio/webm' } })).status === 503);
+    const csv = Buffer.from('name,score\nA,80\nB,55\n').toString('base64');
+    const withFile = await call('/api/studio/chat', tokB, { method: 'POST', body: { message: 'Here are this week\'s numbers', media: { name: 'week.csv', kind: 'csv' }, attachment: { name: 'week.csv', mimetype: 'text/csv', data: csv } } });
+    ok('attaching evidence returns a reply and degrades honestly without a Claude key',
+       withFile.status === 200 && typeof withFile.j?.reply === 'string' && withFile.j.understood === false);
 
     // ── Universal ingest: one authenticated pipe any app can push data to ──
     ok('a plain member cannot mint an org ingest token (403)',
