@@ -3167,6 +3167,37 @@ async function runLlmSelfTest() {
   }
 }
 
+/* Install the full-scale demo club (admin) — a reliable in-app path that doesn't
+   depend on env vars or a redeploy. Creates its own org; sign in with the details
+   it returns. */
+async function seedDemoClub() {
+  const btn = document.getElementById('seed-club-btn');
+  const out = document.getElementById('seed-club-result');
+  if (!out) return;
+  const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  if (btn) { btn.disabled = true; btn.textContent = 'Building the club…'; }
+  out.innerHTML = `<div style="color:var(--text-muted)">Generating ~226 people and a year of data — this takes a few seconds…</div>`;
+  try {
+    const r = await fetch('/api/admin/seed-demo-club', { method: 'POST', headers: Auth._headers() });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'failed');
+    const s = d.summary || {};
+    const lg = s.login || {};
+    out.innerHTML = `<div style="padding:0.6rem 0.7rem;border:1px solid var(--success);border-radius:8px;background:rgba(14,207,176,0.06)">
+      <div style="color:var(--success);font-weight:600;margin-bottom:0.4rem">Loaded ${esc(s.orgName || 'the demo club')} — ${s.users || ''} people, ${s.checkins || ''} check-ins.</div>
+      <div style="font-size:0.82rem;line-height:1.7">Sign out, then log in (password <strong>${esc(lg.password || 'demo1234')}</strong>):<br>
+        Director — <strong>${esc(lg.director || 'director@trafford.fc')}</strong><br>
+        Coach — <strong>${esc(lg.firstTeamCoach || 'coach@trafford.fc')}</strong><br>
+        Player — <strong>${esc(lg.samplePlayer || 'player@trafford.fc')}</strong>
+      </div>
+    </div>`;
+  } catch (e) {
+    out.innerHTML = `<div style="color:var(--danger)">Could not load the demo club: ${esc(e.message)}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Load demo club'; }
+  }
+}
+
 function switchSettingsTab(tab) {
   ['org','metrics','values','goals','grade'].forEach(t => {
     const el  = document.getElementById(`settings-tab-${t}`);
