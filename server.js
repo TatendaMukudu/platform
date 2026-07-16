@@ -8765,6 +8765,24 @@ if (require.main === module) (async () => {
     await _seedOnBoot('SEED_DEMO',    'buildDemoStore',        require('./scripts/seed').DEMO_CODE,    'Log in: coach@demo.club / maya@demo.club — password demo1234.');
     await _seedOnBoot('SEED_COMPANY', 'buildCompanyDemoStore', require('./scripts/seed').COMPANY_CODE, 'Log in: manager@atlas.demo / marcus@atlas.demo — password demo1234.');
 
+    // SEED_CLUB → the full-scale demo club (Trafford United, ~226 people, ~1yr).
+    // '1' seeds once and skips if already present; 'force' re-seeds. Same idempotent,
+    // additive contract as the others, but its builder returns { store, summary }.
+    if (process.env.SEED_CLUB === '1' || process.env.SEED_CLUB === 'force') {
+      try {
+        const { buildClubStore, CLUB_CODE } = require('./scripts/seed-club');
+        if (process.env.SEED_CLUB === 'force' || !orgMeta[CLUB_CODE]) {
+          const { store, summary } = await buildClubStore();
+          _loadAllStores(store);        // additive merge into the in-memory stores
+          _rebuildEmailIndex();
+          scheduleSave();
+          console.log(`[seed] ✓ SEED_CLUB — ${summary.orgName} ready (${summary.users} users, org "${CLUB_CODE}"). Log in (password demo1234): director@trafford.fc · coach@trafford.fc · player@trafford.fc`);
+        } else {
+          console.log(`[seed] SEED_CLUB=1 but ${CLUB_CODE} already present — skipping (SEED_CLUB=force to re-seed).`);
+        }
+      } catch (e) { console.warn('[seed] SEED_CLUB boot seed failed (non-fatal):', e.message); }
+    }
+
     // 5b. Derive user.assignedNodeIds / user.leadershipNodeIds from orgNodes
     _backfillUserNodeIds();
 

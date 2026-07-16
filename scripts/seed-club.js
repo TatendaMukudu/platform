@@ -389,6 +389,15 @@ async function buildClubStore() {
   // ── A club-wide group (copilot-style) ─────────────────────────────────────
   orgGroups[CODE].push({ id: 'grp_' + rid(), name: 'First Team', description: 'Senior men\'s squad', memberIds: orgNodes[CODE][firstTeam].memberIds.slice(), leadIds: [firstTeamStaff.head], goals: ['Top-four finish', 'Everyone fit for the run-in'], traits: VALUES.slice(0, 3), copilotEnabled: false, createdAt: iso(dAgo(DAYS - 10)) });
 
+  // Give the three demo logins fixed, memorable emails so nobody has to dig through
+  // logs (everyone else keeps a realistic generated address).
+  [[sportingDirector, 'director@trafford.fc'], [firstTeamStaff.head, 'coach@trafford.fc'], [allPlayers[0].uid, 'player@trafford.fc']].forEach(([uid, em]) => {
+    const old = orgUsers[CODE][uid].email;
+    if (old && emailIndex[old]) delete emailIndex[old];
+    orgUsers[CODE][uid].email = em;
+    emailIndex[em] = { orgCode: CODE, userId: uid };
+  });
+
   return {
     store: { orgMeta, orgUsers, emailIndex, orgNodes, orgValues, orgGoals, orgMetrics, userPermissions, memberGoals, memberCheckins, orgSignals, assessmentTemplates, assessmentAssignments, orgTutorials, orgInterventions, studioThreads, orgGroups },
     summary: {
