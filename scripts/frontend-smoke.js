@@ -98,6 +98,26 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
     });
     ok(`[${label}] the nav is reachable (hamburger has a visible control)`, navReachable);
 
+    // The "press it 4 times" bug: open→navigate cycles left stale outside-click
+    // handlers that slammed the drawer shut on the next tap. After several cycles,
+    // one tap on the hamburger (its SVG child is the real target) must still OPEN it.
+    if (typeof (await page.evaluate(() => typeof toggleSidebar)) === 'string') {
+      const opensInOneTap = await page.evaluate(() => {
+        const sb = document.getElementById('sidebar');
+        for (let i = 0; i < 3; i++) { sb.classList.remove('open'); toggleSidebar(); navigate('home'); }
+        return true;
+      });
+      await page.waitForTimeout(40);  // let any close-handler timeouts attach
+      const stayedOpen = await page.evaluate(() => {
+        const sb = document.getElementById('sidebar');
+        sb.classList.remove('open');
+        const h = document.getElementById('topbar-hamburger');
+        (h.querySelector('svg') || h).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        return sb.classList.contains('open');
+      });
+      ok(`[${label}] the menu opens in a single tap (no stale close-handler leak)`, opensInOneTap && stayedOpen);
+    }
+
     for (const p of pages) {
       await page.evaluate(pg => { if (typeof navigate === 'function') navigate(pg); }, p);
       await page.waitForTimeout(300);

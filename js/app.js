@@ -603,8 +603,9 @@ function navigate(page){
   const pg = document.getElementById('page-'+page);
   if(pg) pg.classList.add('active');
   document.querySelectorAll(`.nav-item[data-page="${page}"]`).forEach(n=>n.classList.add('active'));
-  // Close mobile sidebar drawer on navigation
+  // Close mobile sidebar drawer on navigation (and clear its outside-click handler)
   document.getElementById('sidebar')?.classList.remove('open');
+  if (typeof _detachSidebarClose === 'function') _detachSidebarClose();
   AppState.currentPage = page;
   document.querySelector('.topbar-title').textContent = PAGE_TITLES[page] || 'Platform';
 
@@ -1611,21 +1612,29 @@ function toggleAdminAccountMenu() {
   }
 }
 
-/* ── Mobile sidebar toggle ───────────────────────────────────────────── */
+/* ── Mobile sidebar toggle ───────────────────────────────────────────────
+   ONE managed outside-click handler (never leaked/stacked). The hamburger check
+   uses closest() so a tap on the button's SVG child still counts as the hamburger
+   — otherwise the open tap is seen as an "outside" click and closes the drawer it
+   just opened, which forced repeated taps. */
+let _sidebarCloseHandler = null;
+function _detachSidebarClose() {
+  if (_sidebarCloseHandler) { document.removeEventListener('click', _sidebarCloseHandler); _sidebarCloseHandler = null; }
+}
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
   if (!sidebar) return;
   const opening = !sidebar.classList.contains('open');
   sidebar.classList.toggle('open', opening);
+  _detachSidebarClose();                      // clear any prior handler first
   if (opening) {
-    // Close when clicking outside
-    const close = (e) => {
-      if (!sidebar.contains(e.target) && e.target.id !== 'topbar-hamburger') {
-        sidebar.classList.remove('open');
-        document.removeEventListener('click', close);
-      }
+    _sidebarCloseHandler = (e) => {
+      if (e.target.closest && e.target.closest('#topbar-hamburger')) return;  // tap on hamburger (or its icon)
+      if (sidebar.contains(e.target)) return;                                  // tap inside the drawer
+      sidebar.classList.remove('open');
+      _detachSidebarClose();
     };
-    setTimeout(() => document.addEventListener('click', close), 10);
+    setTimeout(() => { if (_sidebarCloseHandler) document.addEventListener('click', _sidebarCloseHandler); }, 10);
   }
 }
 
