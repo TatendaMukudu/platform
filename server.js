@@ -1100,6 +1100,10 @@ app.post('/api/auth/join-invite', async (req, res) => {
     if (gObj && !gObj.memberIds.includes(userId)) gObj.memberIds.push(userId);
   }
   invite.useCount = (invite.useCount || 0) + 1;
+  // A new person exists → re-evaluate evidence that was held back unmatched. Any
+  // envelope that deterministically matches them now (email/id) resolves + promotes,
+  // preserving its original observed time. Fuzzy name matches are only proposed.
+  try { _reresolveUnmatched(code, { by: 'system', method: 'rule', reason: 'person created' }); } catch (_) {}
   scheduleSave();
 
   const org   = orgMeta[code];
@@ -5189,6 +5193,90 @@ function _recordEvidence(code, envInput, rawRecord) {
   return { stored: true, id: env.id, promotable: evidence.promotable(env), envelope: env };
 }
 
+/* ── The identity resolution LIFECYCLE ────────────────────────────────────────
+   unmatched → candidate discovered → probable/confirmed → resolution appended →
+   promotion reconsidered → kernel signal emitted EXACTLY once. Original envelopes
+   and raw records are never mutated destructively — resolution is APPENDED and the
+   observed time is always preserved so late-promoted history is never mistaken for
+   a new event. */
+
+/* Promote a resolved, active envelope to a kernel signal — at most once. The
+   signal's timestamp is the envelope's ORIGINAL observedAt, never "now", so old
+   evidence promoted late does not read as a fresh event (no false alerts). */
+function _promoteEvidence(code, env) {
+  if (!evidence.promotable(env)) return false;
+  const sig = _emitSignalSafe(code, {
+    subjectType: 'member', subjectId: env.subjectId, source: env.source, modality: 'data',
+    valueNum:  env.value != null ? env.value : null,
+    valueText: env.valueText || null,
+    label:     String(env.label || 'Metric').slice(0, 80),
+    ts:        env.observedAt || undefined,   // ← preserve observed time
+    sensitivity: env.visibility === 'private' ? 'sensitive' : (env.visibility || 'normal'),
+    data: { connector: env.source, ingest: true, source: { provider: env.provider, external_id: env.externalId || undefined, retrieved_at: env.retrievedAt, evidence_id: env.id } },
+  }, env.subjectId);
+  if (!sig) return false;
+  env.promoted = true; env.promotedAt = new Date().toISOString(); env.signalId = sig.id;
+  return true;
+}
+
+/* Append a resolution event and update the envelope's CURRENT identity. The event
+   preserves the from-state (full history is reconstructable). Keeps the dedupe
+   index correct because the key depends on subjectId. */
+function _appendResolution(code, env, patch) {
+  const seen = _evidenceSeen[code];
+  if (seen) seen.delete(evidence.dedupeKey(env));
+  const evt = evidence.resolutionEvent(env, patch);
+  env.resolutions = env.resolutions || [];
+  env.resolutions.push(evt);
+  env.subjectId  = evt.to.subjectId;
+  env.confidence = evt.to.confidence;
+  if (patch.status) env.status = patch.status;
+  env.resolvedBy = evt.by; env.resolvedMethod = evt.method; env.resolvedAt = evt.ts;
+  if (seen) seen.add(evidence.dedupeKey(env));
+  return evt;
+}
+
+/* Reconstruct an identity-resolvable record when the raw record is unavailable. */
+function _envelopeIdentityRecord(env) {
+  const r = {};
+  if (env.subjectRef) { if (env.subjectRef.includes('@')) r.email = env.subjectRef; else r.name = env.subjectRef; }
+  if (env.externalId) r.externalId = env.externalId;
+  return r;
+}
+
+/* Re-evaluate the org's UNMATCHED / conflict evidence against the CURRENT roster.
+   Deterministic identifiers (email / external id / member id) auto-confirm and
+   promote; a unique NAME match is PROPOSED as a candidate (never auto-confirmed, so
+   old evidence can't silently attach to a similarly named newcomer); an ambiguous
+   name stays a conflict. Called when the roster changes (person created, account
+   linked, sync completed) or on admin demand. */
+function _reresolveUnmatched(code, meta = {}) {
+  const users = orgUsers[code] || {};
+  const log = evidenceLog[code] || [];
+  const by = meta.by || 'system';
+  const reasonBase = meta.reason || 'roster change';
+  let confirmed = 0, promoted = 0, proposed = 0;
+  for (const env of log) {
+    if (env.promoted || env.status === 'rejected') continue;
+    if (env.confidence === 'confirmed') continue;   // already resolved deterministically
+    const raw = env.rawRef && rawEvidence[env.rawRef] ? rawEvidence[env.rawRef].record : null;
+    const rec = (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : _envelopeIdentityRecord(env);
+    const idr = connectorSDK.resolveIdentity(users, rec);
+    if (idr.confidence === 'confirmed' && idr.id) {
+      _appendResolution(code, env, { subjectId: idr.id, confidence: 'confirmed', by, method: 'deterministic', reason: `${reasonBase}: matched by ${idr.key}` });
+      confirmed++;
+      if (_promoteEvidence(code, env)) promoted++;
+    } else if (idr.confidence === 'probable' && idr.id) {
+      env.candidate = { subjectId: idr.id, key: idr.key || 'name', reason: 'possible name match — confirm before use', at: new Date().toISOString() };
+      proposed++;
+    } else if (idr.confidence === 'conflict') {
+      env.candidateNote = idr.ambiguous || 'ambiguous';
+    }
+  }
+  if (confirmed || proposed) scheduleSave();
+  return { confirmed, promoted, proposed };
+}
+
 function _ingestGeneric(code, payload, createdBy, opts = {}) {
   const source = String(opts.source || 'connector').slice(0, 40);
   const provider = opts.provider || source;
@@ -5200,17 +5288,6 @@ function _ingestGeneric(code, payload, createdBy, opts = {}) {
   else if (payload && Array.isArray(payload.data)) recs = payload.data;
   else if (payload && Array.isArray(payload.results)) recs = payload.results;
   else if (payload && typeof payload === 'object') recs = [payload];
-  // A promotable envelope becomes a kernel signal. The signal carries PROVENANCE
-  // that links back through the envelope to the raw immutable record.
-  const emit = (uid, label, value, date, externalId, evidenceId) => {
-    const v = Number(value); if (!Number.isFinite(v)) return false;
-    let ts; if (date) { const d = new Date(String(date)); if (!isNaN(d)) ts = d.toISOString(); }
-    try {
-      _emitSignalSafe(code, { subjectType: 'member', subjectId: uid, source, modality: 'data', valueNum: v, label: String(label || 'Metric').slice(0, 80), ts, sensitivity: 'normal',
-        data: { connector: source, ingest: true, source: { provider, external_id: externalId || undefined, retrieved_at: retrievedAt, evidence_id: evidenceId || undefined } } }, uid);
-      return true;
-    } catch (_) { return false; }
-  };
   const stats = { imported: 0, matched: 0, probable: 0, unmatched: 0, conflicts: 0, stored: 0, duplicates: 0 };
   const subjects = new Set(); const conflictNames = new Set();
   recs.slice(0, 3000).forEach(rec => {
@@ -5259,7 +5336,9 @@ function _ingestGeneric(code, payload, createdBy, opts = {}) {
       if (r.duplicate) { stats.duplicates++; return; }
       if (!r.stored) return;
       stats.stored++;
-      if (r.promotable && emit(uid, it.label, it.value, it.date, it.event || externalId, r.id)) { stats.imported++; any = true; }
+      // Promotion is a SEPARATE, once-only step off the stored envelope — the same
+      // path re-resolution uses later, so promotion logic lives in exactly one place.
+      if (r.promotable && _promoteEvidence(code, r.envelope)) { stats.imported++; any = true; }
     });
     if (any) subjects.add(uid);
   });
@@ -5310,13 +5389,93 @@ app.get('/api/evidence', requirePermission('manage_settings'), (req, res) => {
     observedAt: e.observedAt, retrievedAt: e.retrievedAt,
     confidence: e.confidence, status: e.status, visibility: e.visibility,
     mappingVersion: e.mappingVersion, rawRef: e.rawRef,
-    promoted: evidence.promotable(e),
+    promoted: !!e.promoted, promotedAt: e.promotedAt || null,
+    resolutions: (e.resolutions || []).length,
   }));
   const summary = { total: log.length,
-    promoted: log.filter(e => evidence.promotable(e)).length,
-    unmatched: log.filter(e => e.confidence === 'unmatched').length,
-    conflict:  log.filter(e => e.confidence === 'conflict').length };
+    promoted:  log.filter(e => e.promoted).length,
+    unmatched: log.filter(e => e.confidence === 'unmatched' && !e.promoted).length,
+    conflict:  log.filter(e => e.confidence === 'conflict' && !e.promoted).length };
   res.json({ ok: true, summary, evidence: rows });
+});
+
+/* ── Identity review queue + resolution actions ───────────────────────────────
+   The living lifecycle made visible + actionable. Admin-only. */
+app.get('/api/identity/review', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const users = orgUsers[code] || {};
+  const log = evidenceLog[code] || [];
+  const nameOf = id => users[id]?.name || id;
+  const brief = e => ({ id: e.id, provider: e.provider, source: e.source, type: e.type, label: e.label,
+    value: e.value, unit: e.unit, valueText: e.valueText, observedAt: e.observedAt, subjectRef: e.subjectRef, rawRef: e.rawRef });
+  // Recompute a live candidate against the CURRENT roster (deterministic first).
+  const liveCandidates = e => {
+    const raw = e.rawRef && rawEvidence[e.rawRef] ? rawEvidence[e.rawRef].record : _envelopeIdentityRecord(e);
+    const idr = connectorSDK.resolveIdentity(users, (raw && typeof raw === 'object' && !Array.isArray(raw)) ? raw : _envelopeIdentityRecord(e));
+    if (idr.id) return [{ subjectId: idr.id, name: nameOf(idr.id), confidence: idr.confidence, reason: `matched by ${idr.key}` }];
+    return [];
+  };
+  const unmatched = [], conflicts = [], probable = [], recentlyResolved = [];
+  for (const e of log) {
+    if (e.status === 'rejected') continue;
+    if (e.promoted) { if ((e.resolutions || []).length) recentlyResolved.push({ ...brief(e), subjectId: e.subjectId, subjectName: nameOf(e.subjectId), resolvedBy: e.resolvedBy, resolvedMethod: e.resolvedMethod, resolvedAt: e.resolvedAt }); continue; }
+    if (e.candidate) { probable.push({ ...brief(e), candidates: [{ subjectId: e.candidate.subjectId, name: nameOf(e.candidate.subjectId), reason: e.candidate.reason }] }); continue; }
+    if (e.confidence === 'conflict') { conflicts.push({ ...brief(e), note: e.candidateNote || 'name matched more than one person', candidates: [] }); continue; }
+    if (e.confidence === 'unmatched') { unmatched.push({ ...brief(e), candidates: liveCandidates(e) }); continue; }
+  }
+  const cap = a => a.slice(-100).reverse();
+  res.json({ ok: true,
+    counts: { unmatched: unmatched.length, conflicts: conflicts.length, probable: probable.length, recentlyResolved: recentlyResolved.length },
+    unmatched: cap(unmatched), conflicts: cap(conflicts), probable: cap(probable), recentlyResolved: cap(recentlyResolved) });
+});
+
+/* Run a re-resolution pass on demand (also runs automatically on roster changes). */
+app.post('/api/identity/reresolve', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  res.json({ ok: true, ..._reresolveUnmatched(code, { by: req.iqSession.userId, method: 'rule', reason: 'admin re-resolve' }) });
+});
+
+/* Admin CONFIRMS a specific person for a held-back envelope → resolve + promote once.
+   Fuzzy never confirms itself; this is where a human closes the loop. */
+app.post('/api/evidence/:id/resolve', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const env = (evidenceLog[code] || []).find(e => e.id === req.params.id);
+  if (!env) return res.status(404).json({ error: 'evidence not found' });
+  if (env.promoted) return res.status(409).json({ error: 'already resolved and promoted' });
+  const subjectId = String(req.body?.subjectId || '');
+  if (!orgUsers[code]?.[subjectId]) return res.status(400).json({ error: 'unknown subject' });
+  if (!new Set(getVisibleUserIds(code, req.iqSession.userId)).has(subjectId)) return res.status(403).json({ error: 'subject not in your range' });
+  _appendResolution(code, env, { subjectId, confidence: 'confirmed', by: req.iqSession.userId, method: 'admin', reason: String(req.body?.reason || 'admin confirmed').slice(0, 200) });
+  delete env.candidate; delete env.candidateNote;
+  const promoted = _promoteEvidence(code, env);
+  scheduleSave();
+  res.json({ ok: true, promoted, evidenceId: env.id, subjectId });
+});
+
+/* Admin dismisses a proposed/unmatched item (won't promote; drops out of the queue). */
+app.post('/api/evidence/:id/reject', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const env = (evidenceLog[code] || []).find(e => e.id === req.params.id);
+  if (!env) return res.status(404).json({ error: 'evidence not found' });
+  if (env.promoted) return res.status(409).json({ error: 'already promoted — reverse it instead' });
+  delete env.candidate; delete env.candidateNote;
+  _appendResolution(code, env, { subjectId: null, confidence: env.confidence === 'conflict' ? 'conflict' : 'unmatched', by: req.iqSession.userId, method: 'admin', status: 'rejected', reason: String(req.body?.reason || 'admin rejected').slice(0, 200) });
+  scheduleSave();
+  res.json({ ok: true, evidenceId: env.id });
+});
+
+/* REVERSAL — undo a resolution: remove the emitted signal and return the envelope
+   to unmatched so it can be re-resolved. Real, not cosmetic. */
+app.post('/api/evidence/:id/reverse', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const env = (evidenceLog[code] || []).find(e => e.id === req.params.id);
+  if (!env) return res.status(404).json({ error: 'evidence not found' });
+  if (!env.promoted) return res.status(409).json({ error: 'not promoted' });
+  if (env.signalId && Array.isArray(orgSignals[code])) orgSignals[code] = orgSignals[code].filter(s => s.id !== env.signalId);
+  _appendResolution(code, env, { subjectId: null, confidence: 'unmatched', by: req.iqSession.userId, method: 'reversal', reason: String(req.body?.reason || 'admin reversed').slice(0, 200) });
+  env.promoted = false; env.signalId = null; env.promotedAt = null;
+  scheduleSave();
+  res.json({ ok: true, evidenceId: env.id });
 });
 
 /* ── Connections: connect to anything with a URL. The org configures a source; the
@@ -5371,6 +5530,9 @@ async function _runConnection(code, conn) {
     let data; try { data = await resp.json(); } catch (_) { conn.lastStatus = 'error — response was not JSON'; scheduleSave(); return { error: 'not json' }; }
     if (conn.jsonPath) { try { data = String(conn.jsonPath).split('.').reduce((o, k) => (o == null ? o : o[k]), data); } catch (_) {} }
     const r = _ingestGeneric(code, data, conn.createdBy, { source: conn.source || conn.name || 'connector', provider: conn.oauth?.provider || conn.source, mapping: conn.mapping || undefined, defaultSubjectId: conn.oauth?.subject === 'self' ? conn.createdBy : undefined });
+    // A completed sync may have brought a directory/roster with it — re-evaluate any
+    // previously-unmatched evidence against the now-current roster.
+    try { _reresolveUnmatched(code, { by: 'system', method: 'rule', reason: 'sync completed' }); } catch (_) {}
     const verified = conn.mapping ? '' : ' (auto-mapped — inspect to verify)';
     conn.lastStatus = `ok — ${r.imported} data point${r.imported === 1 ? '' : 's'} across ${r.subjects} ${r.subjects === 1 ? 'person' : 'people'}${r.conflicts ? `, ${r.conflicts} ambiguous (skipped)` : ''}${r.unmatched ? `, ${r.unmatched} unmatched` : ''}${verified}`;
     conn.lastCount = r.imported; scheduleSave();
@@ -9662,8 +9824,8 @@ const PORT = process.env.PORT || 3000;
 module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired,
   // exported for the truth layer: proves the role ladder never invents a title
   _subjectRoleContext, _domainDirective,
-  // exported for the truth layer: the canonical evidence boundary
-  _ingestGeneric, _recordEvidence, evidenceLog, rawEvidence };
+  // exported for the truth layer: the canonical evidence boundary + identity lifecycle
+  _ingestGeneric, _recordEvidence, _reresolveUnmatched, _promoteEvidence, evidenceLog, rawEvidence, orgSignals, orgUsers };
 
 if (require.main === module) (async () => {
   try {

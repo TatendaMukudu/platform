@@ -485,6 +485,30 @@ const server = app.listen(0, async () => {
     ok('the first send imports; an identical re-send is deduped (imported 0)',
        dup1.j?.imported === 1 && dup2.j?.imported === 0 && dup2.j?.duplicates >= 1);
 
+    // ── Identity review queue + resolution lifecycle ──────────────────────────
+    // Ingest a record for a name that doesn't exist → it lands as unmatched.
+    await call('/api/ingest', null, { method: 'POST', headers: { Authorization: 'Bearer ' + mint.j.token }, body: { source: 'roster', records: [{ email: 'ghost@t.co', label: 'MysteryLoad', value: 55, date: '2026-05-01' }] } });
+    const review = await call('/api/identity/review', tokCoach);
+    ok('the identity review queue is admin-visible with the four buckets',
+       review.status === 200 && review.j?.counts && Array.isArray(review.j.unmatched) && review.j.unmatched.some(e => e.subjectRef === 'ghost@t.co'));
+    ok('a plain member cannot see the identity review queue (403)',
+       (await call('/api/identity/review', tokB)).status === 403);
+    const ghost = review.j.unmatched.find(e => e.subjectRef === 'ghost@t.co');
+    ok('a plain member cannot resolve evidence (403)',
+       (await call(`/api/evidence/${ghost.id}/resolve`, tokB, { method: 'POST', body: { subjectId: bId } })).status === 403);
+    // Admin confirms the person → resolve + promote once, preserving observed time.
+    const resolved = await call(`/api/evidence/${ghost.id}/resolve`, tokCoach, { method: 'POST', body: { subjectId: bId } });
+    ok('an admin can confirm a subject and it promotes to a signal',
+       resolved.status === 200 && resolved.j?.promoted === true && resolved.j.subjectId === bId);
+    ok('the late-promoted signal keeps its ORIGINAL observed date (no false alert)',
+       (await call('/api/me/export', tokB)).j?.signals?.some(s => s.label === 'MysteryLoad' && String(s.ts).startsWith('2026-05-01')));
+    ok('resolving an already-promoted envelope again is refused (promote-once)',
+       (await call(`/api/evidence/${ghost.id}/resolve`, tokCoach, { method: 'POST', body: { subjectId: bId } })).status === 409);
+    // Reversal removes the emitted signal and returns the envelope to unmatched.
+    const reversed = await call(`/api/evidence/${ghost.id}/reverse`, tokCoach, { method: 'POST', body: { reason: 'wrong person' } });
+    ok('an admin can reverse a resolution (real: the signal is removed)',
+       reversed.status === 200 && !(await call('/api/me/export', tokB)).j?.signals?.some(s => s.label === 'MysteryLoad'));
+
     // ── Connections: connect to anything with a URL (admin-gated, SSRF-guarded) ──
     ok('a plain member cannot create a connection (403)',
        (await call('/api/connections', tokB, { method: 'POST', body: { url: 'https://example.com/data' } })).status === 403);
