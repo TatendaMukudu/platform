@@ -3583,9 +3583,17 @@ app.post('/api/compose', requireAuth, async (req, res) => {
     : "Got it — I've added that and folded it into your picture.";
   if (ai.enabled() && text) {
     try {
-      const sys = `You are IntelliQ, ${me.name}'s private mirror. They just shared something with you. Reply in ONE warm, brief sentence that shows you genuinely understood — reflect their own words back gently. No advice, no scores, no platitudes. Speak to them as "you".`;
-      const line = await ai.complete({ tier: 'micro', system: sys, user: `They wrote: "${text}"\n\nAcknowledge warmly in one sentence.`, maxTokens: 80 });
-      // Self-facing (their own words reflected back to them) — no redaction needed.
+      const first = (me.name || 'there').split(' ')[0];
+      const memberRead = _studioMemberRead(code, userId, now);
+      const noticedLine = noticed.length ? `What you just noticed about them (privacy-safe, self-relative): ${noticed.join('; ')}.` : '';
+      const sys = [
+        `You are IntelliQ, ${first}'s private mirror and coach — self-facing, warm, and honest. They just shared something. First show you genuinely understood. Then, IF it warrants it (a problem, a goal, a question, a hard week), give a specific, honest read grounded in what you actually know about them, and one or two concrete things that would help — never generic advice. If it's just a passing note, a warm sentence is enough; don't force coaching. MATCH THEIR TONE AND WORDS — mirror how they talk; if they're casual, be casual. Be real, never a platitude. 1-4 sentences. If you don't have the data to be specific, say so plainly rather than inventing. Speak to them as "you". Never a score as a verdict. No emojis.`,
+        _worldviewDirective(code),
+        memberRead ? `WHAT YOU KNOW ABOUT THEM (use it, be specific): ${memberRead}` : '',
+        noticedLine,
+      ].filter(Boolean).join('\n\n');
+      const line = await ai.complete({ tier: 'reason', system: sys, user: `They wrote: "${text}".${mood ? ` Their mood: ${mood}/5.` : ''}\n\nRespond in their voice.`, maxTokens: 320 });
+      // Self-facing (their own record, reflected back to them) — no redaction needed.
       if (line && line.trim()) acknowledgement = line.trim();
     } catch (_) { /* keep the deterministic acknowledgement */ }
   }
@@ -4184,7 +4192,7 @@ app.post('/api/studio/chat', requireAuth, async (req, res) => {
       `Also: ${ctx}`,
     ].filter(Boolean).join('\n\n');
     const system = [
-      `You are IntelliQ, ${first}'s coach in their private workspace — a sharp, supportive thinking partner who actually knows their record. When they raise something (a weakness, a goal, a question), give a GENUINELY USEFUL, specific answer: name what you actually see in their data, connect it to their development areas, strengths, and what's worked here before, and give two or three concrete next steps they can start this week. Be a real coach — substantive but tight (3-6 sentences), warm, direct, plainly said. Ground everything in what you know; if you genuinely lack the data to be specific, say so honestly and ask the ONE question that would let you help. When the exchange lands on something concrete to do, capture it as 1-3 short, checkable steps in "planSteps" and set savePlan true, phrasing your reply so it feels natural — never make them click. Otherwise planSteps is empty. Return JSON only: {"reply": string, "savePlan": boolean, "planSteps": array of short imperative strings}. Never invent facts about them or the team. No emojis.`,
+      `You are IntelliQ, ${first}'s coach in their private workspace — a sharp, supportive thinking partner who actually knows their record. When they raise something (a weakness, a goal, a question), give a GENUINELY USEFUL, specific answer: name what you actually see in their data, connect it to their development areas, strengths, and what's worked here before, and give two or three concrete next steps they can start this week. Be a real coach — substantive but tight (3-6 sentences), warm, direct, plainly said. MATCH THEIR TONE AND WORDS: mirror how they actually talk — if they're casual or use slang, be casual back; if they're formal, meet that. Don't sound like a corporate memo. Ground everything in what you know; if you genuinely lack the data to be specific, say so honestly and ask the ONE question that would let you help. When the exchange lands on something concrete to do, capture it as 1-3 short, checkable steps in "planSteps" and set savePlan true, phrasing your reply so it feels natural — never make them click. Otherwise planSteps is empty. Return JSON only: {"reply": string, "savePlan": boolean, "planSteps": array of short imperative strings}. Never invent facts about them or the team. No emojis.`,
       grounding,
     ].join('\n\n');
     try {
@@ -4709,6 +4717,25 @@ app.delete('/api/tutorials/:id', requireAuth, (req, res) => {
    how it reasons on demo-style prompts. Admin-gated (manage_settings). No shell
    needed: runs from the browser against whatever key the host has configured.
    With no key, reports that the kernel is on its deterministic fallbacks. */
+/* ── GET /api/health — public status. Booleans only, never secrets. Lets anyone
+   confirm at a glance whether the AI keys are wired (visit it in a browser). */
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    ai: {
+      enabled: ai.enabled(),
+      claude:  !!process.env.ANTHROPIC_API_KEY,
+      openai:  !!process.env.OPENAI_API_KEY,
+    },
+    voice:     ai.canTranscribe(),   // OpenAI Whisper for voice notes
+    readsFiles: ai.canUnderstand(),  // vision / PDF understanding
+    reasoning: ai.enabled()
+      ? 'connected — replies are grounded and reasoned'
+      : 'no key — running on deterministic fallbacks (set ANTHROPIC_API_KEY)',
+    time: new Date().toISOString(),
+  });
+});
+
 /* ── POST /api/admin/seed-demo-club — install the full demo club for a click-through.
    Builds "Trafford United FC" (fictional, ~226 people, ~1yr of data) and installs it
    as its OWN org so you can log in and see every layer react at scale. Superadmin-

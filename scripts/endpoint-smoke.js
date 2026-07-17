@@ -50,6 +50,12 @@ const server = app.listen(0, async () => {
   };
 
   try {
+    // ── public health (no auth) reports AI wiring as booleans, no secrets ──────
+    const health = await call('/api/health', null);
+    ok('health is public and reports AI status without leaking secrets',
+       health.status === 200 && health.j?.ok === true && typeof health.j.ai?.enabled === 'boolean' && typeof health.j.ai?.claude === 'boolean' &&
+       !/sk-[A-Za-z0-9]|"[A-Za-z0-9_-]{25,}"/.test(JSON.stringify(health.j)));
+
     // ── requireAuth ──────────────────────────────────────────────────────────
     ok('me/context requires auth (401 without a token)', (await call('/api/me/context', null)).status === 401);
     ok('org-tree requires auth (401 without a token)',   (await call('/api/auth/org-tree', null)).status === 401);
