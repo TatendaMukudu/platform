@@ -3092,7 +3092,65 @@ function renderSettings(){
   // Load values into textarea
   _loadValuesIntoTextarea();
   if (typeof loadConnections === 'function') loadConnections();
+  if (typeof loadOAuthCatalog === 'function') loadOAuthCatalog();
 }
+
+/* Connect real apps by login (OAuth) — Strava, Google, Teams, Hudl, Fitbit… */
+async function loadOAuthCatalog() {
+  const box = document.getElementById('oauth-catalog');
+  if (!box) return;
+  const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  try {
+    const r = await fetch('/api/oauth/catalog', { headers: Auth._headers() });
+    if (!r.ok) { box.innerHTML = ''; return; }
+    const d = await r.json();
+    const rd = document.getElementById('oauth-redirect');
+    if (rd) rd.innerHTML = `Redirect URL to register: <code style="user-select:all">${esc(d.redirectUri)}</code>`;
+    box.innerHTML = (d.catalog || []).map(p => `<div style="border:1px solid var(--border);border-radius:8px;padding:0.55rem 0.7rem;margin-bottom:0.4rem">
+      <div style="display:flex;align-items:center;gap:0.5rem">
+        <div style="flex:1"><strong>${esc(p.label)}</strong> ${p.configured ? '<span class="pill" style="background:rgba(14,207,176,0.15);color:#0ecfb0;font-size:0.68rem">Set up</span>' : `<span style="font-size:0.72rem;color:var(--text-muted)">via ${esc(p.docs)}</span>`}</div>
+        ${p.configured
+          ? `<button class="btn btn-accent btn-sm" onclick="oauthConnect('${p.key}')">Connect</button>`
+          : `<button class="btn btn-outline btn-sm" onclick="document.getElementById('oauth-setup-${p.key}').style.display=document.getElementById('oauth-setup-${p.key}').style.display==='none'?'block':'none'">Set up</button>`}
+      </div>
+      <div id="oauth-setup-${p.key}" style="display:none;margin-top:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
+        <input class="form-input" id="oauth-cid-${p.key}" placeholder="Client ID">
+        <input class="form-input" id="oauth-secret-${p.key}" placeholder="Client secret" type="password">
+        ${p.custom ? `<input class="form-input" id="oauth-authurl-${p.key}" placeholder="Authorize URL">
+          <input class="form-input" id="oauth-tokenurl-${p.key}" placeholder="Token URL">
+          <input class="form-input" id="oauth-dataurl-${p.key}" placeholder="Data URL (JSON)">
+          <input class="form-input" id="oauth-scope-${p.key}" placeholder="Scopes (space or comma separated)">` : ''}
+        <button class="btn btn-accent btn-sm" onclick="oauthSaveApp('${p.key}', ${p.custom})">Save</button>
+      </div>
+    </div>`).join('');
+  } catch (e) { box.innerHTML = ''; }
+}
+async function oauthSaveApp(provider, custom) {
+  const status = document.getElementById('oauth-status');
+  const v = id => (document.getElementById(id)?.value || '').trim();
+  const body = { provider, clientId: v('oauth-cid-' + provider), clientSecret: v('oauth-secret-' + provider) };
+  if (custom) { body.authorizeUrl = v('oauth-authurl-' + provider); body.tokenUrl = v('oauth-tokenurl-' + provider); body.dataUrl = v('oauth-dataurl-' + provider); body.scope = v('oauth-scope-' + provider); }
+  if (!body.clientId || !body.clientSecret) { if (status) status.innerHTML = '<span style="color:var(--danger)">Client ID and secret are required.</span>'; return; }
+  try {
+    const r = await fetch('/api/oauth/app', { method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() }, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'failed');
+    if (status) status.innerHTML = '<span style="color:var(--success)">Saved — you can connect now.</span>';
+    loadOAuthCatalog();
+  } catch (e) { if (status) status.innerHTML = `<span style="color:var(--danger)">${String(e.message).replace(/</g, '&lt;')}</span>`; }
+}
+async function oauthConnect(provider) {
+  const status = document.getElementById('oauth-status');
+  try {
+    const r = await fetch(`/api/oauth/${provider}/start`, { method: 'POST', headers: Auth._headers() });
+    const d = await r.json();
+    if (!r.ok || !d.authorizeUrl) throw new Error(d.error || 'failed');
+    window.open(d.authorizeUrl, '_blank');
+    if (status) status.innerHTML = '<span style="color:var(--text-muted)">A login window opened — approve access there, then come back and Sync.</span>';
+    setTimeout(() => { if (typeof loadConnections === 'function') loadConnections(); }, 4000);
+  } catch (e) { if (status) status.innerHTML = `<span style="color:var(--danger)">${String(e.message).replace(/</g, '&lt;')}</span>`; }
+}
+
 
 /* Connections — connect to anything with a data URL; IntelliQ polls + deciphers it. */
 async function loadConnections() {

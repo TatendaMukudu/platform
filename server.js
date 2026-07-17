@@ -81,7 +81,7 @@ function scheduleSave() {
         userAiProfiles, advisorThreads, orgSignals, noticeFeedback,
         userConsents, connectedSources, pendingActions,
         assessmentTemplates, assessmentAssignments, orgTutorials, orgApiTokens,
-        orgConnections, studioThreads, activeSessions,
+        orgConnections, orgOAuthApps, studioThreads, activeSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -559,7 +559,24 @@ const orgApiTokens          = {};  // orgCode → { token, createdAt, createdBy 
 // Universal connectors — a connection to ANY system that has a URL or can push a
 // webhook. The org configures {url, auth, schedule}; the server polls it and the
 // generic mapper deciphers whatever JSON comes back into signals. No per-vendor code.
-const orgConnections        = {};  // orgCode → [ { id, name, url, method, headers, scheduleHours, source, jsonPath, lastRun, lastStatus, lastCount, createdBy, createdAt } ]
+const orgConnections        = {};  // orgCode → [ { id, name, url, method, headers, scheduleHours, source, jsonPath, oauth?, lastRun, lastStatus, lastCount, createdBy, createdAt } ]
+// OAuth2 app credentials the org registered with each provider (client id/secret
+// obtained from the provider's developer console). orgCode → { provider → {clientId, clientSecret} }.
+const orgOAuthApps          = {};
+const oauthPending          = {};  // state → { code(org), userId, provider, ts }
+
+/* The provider catalog. Every one of these is a standard OAuth2 authorization-code
+   flow — only the URLs, scopes, and default data endpoint differ. Adding a new app
+   is data, not code. `subject:'self'` means the data is about the person who
+   connected (a wearable); the poll attributes it to them. */
+const OAUTH_PROVIDERS = {
+  strava:    { label: 'Strava',            authorizeUrl: 'https://www.strava.com/oauth/authorize',                          tokenUrl: 'https://www.strava.com/oauth/token',                          scope: 'read,activity:read_all', dataUrl: 'https://www.strava.com/api/v3/athlete/activities?per_page=30', subject: 'self', docs: 'strava.com/settings/api' },
+  google:    { label: 'Google Workspace',  authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',                    tokenUrl: 'https://oauth2.googleapis.com/token',                          scope: 'https://www.googleapis.com/auth/spreadsheets.readonly', dataUrl: '', subject: 'self', extraAuth: { access_type: 'offline', prompt: 'consent' }, docs: 'console.cloud.google.com' },
+  microsoft: { label: 'Microsoft 365 / Teams', authorizeUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize', tokenUrl: 'https://login.microsoftonline.com/common/oauth2/v2.0/token', scope: 'offline_access User.Read', dataUrl: 'https://graph.microsoft.com/v1.0/me', subject: 'self', docs: 'portal.azure.com' },
+  fitbit:    { label: 'Fitbit',            authorizeUrl: 'https://www.fitbit.com/oauth2/authorize',                         tokenUrl: 'https://api.fitbit.com/oauth2/token',                         scope: 'activity heartrate sleep profile', dataUrl: 'https://api.fitbit.com/1/user/-/activities/date/today.json', subject: 'self', docs: 'dev.fitbit.com' },
+  hudl:      { label: 'Hudl',              authorizeUrl: 'https://www.hudl.com/oauth2/authorize',                           tokenUrl: 'https://www.hudl.com/oauth2/token',                           scope: 'read', dataUrl: '', subject: 'self', docs: 'hudl.com developer access' },
+  custom:    { label: 'Any OAuth2 app',    authorizeUrl: '', tokenUrl: '', scope: '', dataUrl: '', subject: 'self', docs: 'the app\'s API docs' },
+};
 const CONSENT_VERSION = '2026-07';
 const _consentKey = (code, uid) => `${code}:${uid}`;
 function _getConsents(code, uid) { const k = _consentKey(code, uid); return (userConsents[k] = userConsents[k] || {}); }
@@ -5064,17 +5081,44 @@ function _urlIsSafe(url) {
     return true;
   } catch (_) { return false; }
 }
+/* Refresh an OAuth2 access token when it's expired (standard refresh_token grant). */
+async function _oauthRefresh(code, conn) {
+  const oa = conn.oauth; const prov = OAUTH_PROVIDERS[oa.provider]; const app = orgOAuthApps[code]?.[oa.provider];
+  if (!oa.refreshToken || !prov || !app) return false;
+  try {
+    const body = new URLSearchParams({ grant_type: 'refresh_token', refresh_token: oa.refreshToken, client_id: app.clientId, client_secret: app.clientSecret });
+    const resp = await fetch(oa.tokenUrl || prov.tokenUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, body });
+    if (!resp.ok) return false;
+    const j = await resp.json();
+    if (!j.access_token) return false;
+    oa.accessToken = j.access_token;
+    if (j.refresh_token) oa.refreshToken = j.refresh_token;
+    oa.expiresAt = j.expires_in ? Date.now() + (j.expires_in - 60) * 1000 : (oa.expiresAt || 0);
+    scheduleSave();
+    return true;
+  } catch (_) { return false; }
+}
 async function _runConnection(code, conn) {
   conn.lastRun = new Date().toISOString();
+  const headers = { ...(conn.headers || {}) };
+  // OAuth connections: refresh the token if it's expired, then send it as a bearer.
+  if (conn.oauth) {
+    if (!conn.oauth.accessToken || (conn.oauth.expiresAt && Date.now() > conn.oauth.expiresAt)) {
+      const ok = await _oauthRefresh(code, conn);
+      if (!ok && (!conn.oauth.accessToken || Date.now() > (conn.oauth.expiresAt || 0))) { conn.lastStatus = 'needs reconnect — token expired'; scheduleSave(); return { error: 'token expired' }; }
+    }
+    headers.Authorization = `Bearer ${conn.oauth.accessToken}`;
+  }
+  if (!conn.url) { conn.lastStatus = 'no data URL set for this connection'; scheduleSave(); return { error: 'no url' }; }
   if (!_urlIsSafe(conn.url)) { conn.lastStatus = 'blocked — unsafe or private URL'; scheduleSave(); return { error: 'unsafe url' }; }
   try {
     const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 15000);
-    const resp = await fetch(conn.url, { method: conn.method || 'GET', headers: conn.headers || {}, signal: ctrl.signal });
+    const resp = await fetch(conn.url, { method: conn.method || 'GET', headers, signal: ctrl.signal });
     clearTimeout(timer);
     if (!resp.ok) { conn.lastStatus = `error — HTTP ${resp.status}`; scheduleSave(); return { error: `HTTP ${resp.status}` }; }
     let data; try { data = await resp.json(); } catch (_) { conn.lastStatus = 'error — response was not JSON'; scheduleSave(); return { error: 'not json' }; }
     if (conn.jsonPath) { try { data = String(conn.jsonPath).split('.').reduce((o, k) => (o == null ? o : o[k]), data); } catch (_) {} }
-    const r = _ingestGeneric(code, data, conn.createdBy, { source: conn.source || conn.name || 'connector' });
+    const r = _ingestGeneric(code, data, conn.createdBy, { source: conn.source || conn.name || 'connector', defaultSubjectId: conn.oauth?.subject === 'self' ? conn.createdBy : undefined });
     conn.lastStatus = `ok — ${r.imported} data point${r.imported === 1 ? '' : 's'} across ${r.subjects} ${r.subjects === 1 ? 'person' : 'people'}${r.unmatched ? `, ${r.unmatched} unmatched` : ''}`;
     conn.lastCount = r.imported; scheduleSave();
     return r;
@@ -5114,6 +5158,106 @@ app.post('/api/connections/:id/run', requirePermission('manage_settings'), async
   if (!conn) return res.status(404).json({ error: 'not found' });
   const r = await _runConnection(code, conn);
   res.json({ ok: !r.error, result: r, connection: _publicConnection(conn) });
+});
+
+/* ── OAuth2: connect real apps (Strava, Google, Microsoft/Teams, Hudl, Fitbit…) ──
+   One generic authorization-code flow serves every provider — only the catalog
+   entry differs. The org registers the app once with the provider and stores the
+   client id/secret; a person then connects by logging in. Tokens are refreshed
+   automatically and the connection is polled through the same mapper. */
+function _publicBaseUrl(req) {
+  if (process.env.PUBLIC_URL) return process.env.PUBLIC_URL.replace(/\/$/, '');
+  const proto = (req.headers['x-forwarded-proto'] || 'https').split(',')[0];
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  return `${proto}://${host}`;
+}
+
+/* GET /api/oauth/catalog — the providers, and whether each is set up in this org. */
+app.get('/api/oauth/catalog', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const apps = orgOAuthApps[code] || {};
+  const catalog = Object.entries(OAUTH_PROVIDERS).map(([key, p]) => ({
+    key, label: p.label, docs: p.docs, configured: !!(apps[key] && apps[key].clientId),
+    custom: key === 'custom',
+  }));
+  res.json({ ok: true, catalog, redirectUri: `${_publicBaseUrl(req)}/api/oauth/callback` });
+});
+
+/* POST /api/oauth/app — store the org's client id/secret for a provider (from the
+   provider's developer console). For 'custom', also the authorize/token/data URLs. */
+app.post('/api/oauth/app', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const { provider, clientId, clientSecret, authorizeUrl, tokenUrl, dataUrl, scope } = req.body || {};
+  if (!OAUTH_PROVIDERS[provider]) return res.status(400).json({ error: 'unknown provider' });
+  if (!clientId || !clientSecret) return res.status(400).json({ error: 'clientId and clientSecret are required' });
+  (orgOAuthApps[code] = orgOAuthApps[code] || {})[provider] = {
+    clientId: String(clientId).slice(0, 200), clientSecret: String(clientSecret).slice(0, 400),
+    authorizeUrl: authorizeUrl ? String(authorizeUrl).slice(0, 400) : undefined,
+    tokenUrl: tokenUrl ? String(tokenUrl).slice(0, 400) : undefined,
+    dataUrl: dataUrl ? String(dataUrl).slice(0, 600) : undefined,
+    scope: scope ? String(scope).slice(0, 300) : undefined,
+  };
+  scheduleSave();
+  res.json({ ok: true, configured: true });
+});
+
+/* POST /api/oauth/:provider/start — returns the provider's login URL to open. Authed
+   via header (a browser redirect can't carry our bearer token), so the client opens
+   the returned URL itself. */
+app.post('/api/oauth/:provider/start', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode; const userId = req.iqSession.userId;
+  const provider = req.params.provider;
+  const prov = OAUTH_PROVIDERS[provider]; const app = orgOAuthApps[code]?.[provider];
+  if (!prov) return res.status(400).json({ error: 'unknown provider' });
+  if (!app || !app.clientId) return res.status(400).json({ error: `Add your ${prov.label} client id/secret first.` });
+  const authorizeUrl = app.authorizeUrl || prov.authorizeUrl;
+  if (!authorizeUrl) return res.status(400).json({ error: 'No authorize URL configured for this provider.' });
+  const state = _shortId() + _shortId();
+  oauthPending[state] = { code, userId, provider, ts: Date.now() };
+  // prune old pending states
+  for (const [k, v] of Object.entries(oauthPending)) if (Date.now() - v.ts > 15 * 60 * 1000) delete oauthPending[k];
+  const params = new URLSearchParams({
+    client_id: app.clientId, response_type: 'code', redirect_uri: `${_publicBaseUrl(req)}/api/oauth/callback`,
+    scope: app.scope || prov.scope || '', state,
+    ...(prov.extraAuth || {}),
+  });
+  res.json({ ok: true, authorizeUrl: `${authorizeUrl}?${params.toString()}` });
+});
+
+/* GET /api/oauth/callback — the provider redirects the person's browser here after
+   they approve. We exchange the code for tokens and create a polled connection. */
+app.get('/api/oauth/callback', async (req, res) => {
+  const { code: authCode, state, error } = req.query;
+  const page = (msg, ok) => `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:system-ui;background:#131019;color:#ece9f4;display:grid;place-items:center;height:100vh;margin:0;text-align:center;padding:1.5rem"><div><div style="font-size:2rem;margin-bottom:0.5rem">${ok ? '✓' : '—'}</div><div style="font-size:1.05rem;max-width:30ch">${msg}</div><div style="color:#837c94;font-size:0.85rem;margin-top:1rem">You can close this window.</div></div></body>`;
+  if (error) return res.status(400).send(page('Connection was declined.', false));
+  const pend = state && oauthPending[state];
+  if (!pend || !authCode) return res.status(400).send(page('This connection link has expired — start again from Settings.', false));
+  delete oauthPending[state];
+  const { code, userId, provider } = pend;
+  const prov = OAUTH_PROVIDERS[provider]; const app = orgOAuthApps[code]?.[provider];
+  if (!prov || !app) return res.status(400).send(page('That provider is no longer set up.', false));
+  try {
+    const body = new URLSearchParams({
+      grant_type: 'authorization_code', code: String(authCode), client_id: app.clientId, client_secret: app.clientSecret,
+      redirect_uri: `${_publicBaseUrl(req)}/api/oauth/callback`,
+    });
+    const tr = await fetch(app.tokenUrl || prov.tokenUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, body });
+    const tj = await tr.json().catch(() => ({}));
+    if (!tr.ok || !tj.access_token) return res.status(400).send(page(`Couldn't complete the ${prov.label} connection. Check the client id/secret and redirect URL.`, false));
+    const conn = {
+      id: 'conn_' + _shortId(), name: prov.label, url: app.dataUrl || prov.dataUrl || '', method: 'GET', headers: {},
+      scheduleHours: 12, source: provider, jsonPath: null,
+      oauth: { provider, subject: prov.subject || 'self', accessToken: tj.access_token, refreshToken: tj.refresh_token || null, expiresAt: tj.expires_in ? Date.now() + (tj.expires_in - 60) * 1000 : 0, tokenUrl: app.tokenUrl || prov.tokenUrl },
+      createdBy: userId, createdAt: new Date().toISOString(), lastRun: null, lastStatus: 'connected — first sync pending', lastCount: 0,
+    };
+    (orgConnections[code] = orgConnections[code] || []).push(conn);
+    scheduleSave();
+    // First sync in the background (don't block the browser response).
+    if (conn.url) _runConnection(code, conn).catch(() => {});
+    res.send(page(`${prov.label} connected. Its data will now flow into IntelliQ.`, true));
+  } catch (e) {
+    res.status(500).send(page('Something went wrong finishing the connection. Try again.', false));
+  }
 });
 
 /* Aggregate a SET of people into a privacy-safe unit read (counts + pattern
@@ -9174,6 +9318,7 @@ function _loadAllStores(data) {
   Object.assign(orgTutorials,          data.orgTutorials          || {});
   Object.assign(orgApiTokens,          data.orgApiTokens          || {});
   Object.assign(orgConnections,        data.orgConnections        || {});
+  Object.assign(orgOAuthApps,          data.orgOAuthApps          || {});
   Object.assign(studioThreads,         data.studioThreads         || {});
   Object.assign(orgSignals,       data.orgSignals       || {});
   Object.assign(noticeFeedback,   data.noticeFeedback   || {});

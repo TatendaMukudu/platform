@@ -471,6 +471,25 @@ const server = app.listen(0, async () => {
     ok('an admin can delete a connection',
        (await call(`/api/connections/${conn.j.connection.id}`, tokCoach, { method: 'DELETE' })).status === 200);
 
+    // ── OAuth2: one generic flow for Strava / Google / Microsoft / Hudl / Fitbit ──
+    const cat = await call('/api/oauth/catalog', tokCoach);
+    ok('the OAuth catalog lists real providers + a redirect URI',
+       cat.status === 200 && Array.isArray(cat.j?.catalog) && cat.j.catalog.some(p => p.key === 'strava') && typeof cat.j.redirectUri === 'string');
+    ok('a plain member cannot see the OAuth catalog (403)', (await call('/api/oauth/catalog', tokB)).status === 403);
+    ok('connecting before the app is registered is refused with a clear message',
+       (await call('/api/oauth/strava/start', tokCoach, { method: 'POST' })).status === 400);
+    const setApp = await call('/api/oauth/app', tokCoach, { method: 'POST', body: { provider: 'strava', clientId: 'cid123', clientSecret: 'secret456' } });
+    ok('an admin registers a provider\'s client id/secret', setApp.status === 200 && setApp.j?.configured === true);
+    const start = await call('/api/oauth/strava/start', tokCoach, { method: 'POST' });
+    ok('starting the flow returns a real provider login URL (client_id + state)',
+       start.status === 200 && /strava\.com\/oauth\/authorize/.test(start.j?.authorizeUrl || '') && /client_id=cid123/.test(start.j.authorizeUrl) && /state=/.test(start.j.authorizeUrl));
+    ok('the catalog now shows Strava as configured',
+       (await call('/api/oauth/catalog', tokCoach)).j?.catalog?.some(p => p.key === 'strava' && p.configured === true));
+    ok('client secrets are never returned by the catalog',
+       !/secret456/.test(JSON.stringify((await call('/api/oauth/catalog', tokCoach)).j || {})));
+    const cb = await call('/api/oauth/callback?state=bogus&code=x', null);
+    ok('the OAuth callback rejects an unknown state (expired link)', cb.status === 400);
+
     // ── LLM self-test: admin-gated, reports status (no key in test mode) ─────
     ok('a plain member cannot run the LLM self-test (403)',
        (await call('/api/admin/llm-selftest', tokB, { method: 'POST' })).status === 403);
