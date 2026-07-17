@@ -446,6 +446,30 @@ const server = app.listen(0, async () => {
     const expIng = await call('/api/me/export', tokB);
     ok('ingested data lands in the person\'s record as a signal',
        (expIng.j?.signals || []).some(s => s.label === 'Soreness' && s.valueNum === 7));
+    // The universal mapper: a WIDE row in any shape (person + several numbers) works.
+    const wide = await call('/api/ingest', null, { method: 'POST', headers: { Authorization: 'Bearer ' + mint.j.token }, body: { source: 'anyapp', records: [{ email: 'b@t.co', sprint: 7.4, passes: 51, turnovers: 2 }] } });
+    ok('the universal mapper deciphers ANY shape (a wide row → several signals)',
+       wide.status === 200 && wide.j?.imported === 3 && wide.j?.people === 1);
+    ok('mapped numbers land as signals under their own field names',
+       (await call('/api/me/export', tokB)).j?.signals?.some(s => /sprint|passes|turnovers/i.test(s.label || '') && s.source === 'anyapp'));
+
+    // ── Connections: connect to anything with a URL (admin-gated, SSRF-guarded) ──
+    ok('a plain member cannot create a connection (403)',
+       (await call('/api/connections', tokB, { method: 'POST', body: { url: 'https://example.com/data' } })).status === 403);
+    ok('a private/internal URL is refused (SSRF guard)',
+       (await call('/api/connections', tokCoach, { method: 'POST', body: { name: 'x', url: 'http://169.254.169.254/latest' } })).status === 400);
+    const conn = await call('/api/connections', tokCoach, { method: 'POST', body: { name: 'GPS vendor', url: 'https://example.com/api/gps', scheduleHours: 12, source: 'gps' } });
+    ok('an admin can create a connection to any public URL', conn.status === 200 && conn.j?.connection?.id && conn.j.connection.scheduleHours === 12);
+    ok('connections list never leaks the auth header VALUES (keys only)',
+       (await call('/api/connections', tokCoach)).j?.connections?.some(c => c.id === conn.j.connection.id) &&
+       !/authorization"?\s*:\s*"?Bearer/i.test(JSON.stringify((await call('/api/connections', tokCoach)).j || {})));
+    const runConn = await call(`/api/connections/${conn.j.connection.id}/run`, tokCoach, { method: 'POST' });
+    ok('running a connection reports a status (reachability handled gracefully)',
+       runConn.status === 200 && typeof runConn.j?.connection?.lastStatus === 'string');
+    ok('a plain member cannot delete a connection (403)',
+       (await call(`/api/connections/${conn.j.connection.id}`, tokB, { method: 'DELETE' })).status === 403);
+    ok('an admin can delete a connection',
+       (await call(`/api/connections/${conn.j.connection.id}`, tokCoach, { method: 'DELETE' })).status === 200);
 
     // ── LLM self-test: admin-gated, reports status (no key in test mode) ─────
     ok('a plain member cannot run the LLM self-test (403)',

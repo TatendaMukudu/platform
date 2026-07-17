@@ -3091,6 +3091,68 @@ function renderSettings(){
 
   // Load values into textarea
   _loadValuesIntoTextarea();
+  if (typeof loadConnections === 'function') loadConnections();
+}
+
+/* Connections — connect to anything with a data URL; IntelliQ polls + deciphers it. */
+async function loadConnections() {
+  const box = document.getElementById('connections-list');
+  if (!box) return;
+  const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  try {
+    const r = await fetch('/api/connections', { headers: Auth._headers() });
+    if (!r.ok) { box.innerHTML = ''; return; }
+    const d = await r.json();
+    const list = d.connections || [];
+    if (!list.length) { box.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">No connections yet.</div>`; return; }
+    box.innerHTML = list.map(c => `<div style="border:1px solid var(--border);border-radius:8px;padding:0.55rem 0.7rem;margin-bottom:0.4rem">
+      <div style="display:flex;align-items:center;gap:0.5rem">
+        <div style="flex:1;min-width:0"><strong>${esc(c.name)}</strong> <span style="font-size:0.72rem;color:var(--text-muted)">· every ${c.scheduleHours}h</span>
+          <div style="font-size:0.72rem;color:var(--text-muted);word-break:break-all">${esc(c.url)}</div>
+          <div style="font-size:0.72rem;color:var(--text-secondary);margin-top:2px">${esc(c.lastStatus)}</div>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="runConnection('${c.id}')">Sync now</button>
+        <button class="btn-ghost" title="Remove" onclick="deleteConnection('${c.id}')" style="color:var(--text-muted)">✕</button>
+      </div>
+    </div>`).join('');
+  } catch (e) { box.innerHTML = ''; }
+}
+async function addConnection() {
+  const btn = document.getElementById('conn-add-btn');
+  const status = document.getElementById('connections-status');
+  const name = (document.getElementById('conn-name')?.value || '').trim();
+  const url = (document.getElementById('conn-url')?.value || '').trim();
+  const auth = (document.getElementById('conn-auth')?.value || '').trim();
+  const scheduleHours = Number(document.getElementById('conn-hours')?.value) || 24;
+  const jsonPath = (document.getElementById('conn-path')?.value || '').trim();
+  if (!url) { if (status) status.innerHTML = '<span style="color:var(--danger)">A data URL is required.</span>'; return; }
+  const headers = auth ? { Authorization: auth } : {};
+  if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
+  try {
+    const r = await fetch('/api/connections', { method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() }, body: JSON.stringify({ name, url, headers, scheduleHours, source: name, jsonPath: jsonPath || undefined }) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'failed');
+    ['conn-name', 'conn-url', 'conn-auth', 'conn-path'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    if (status) status.innerHTML = '<span style="color:var(--success)">Added — syncing now…</span>';
+    await loadConnections();
+    await runConnection(d.connection.id);
+  } catch (e) {
+    if (status) status.innerHTML = `<span style="color:var(--danger)">${String(e.message).replace(/</g, '&lt;')}</span>`;
+  } finally { if (btn) { btn.disabled = false; btn.textContent = 'Add & test'; } }
+}
+async function runConnection(id) {
+  const status = document.getElementById('connections-status');
+  if (status) status.innerHTML = '<span style="color:var(--text-muted)">Syncing…</span>';
+  try {
+    const r = await fetch(`/api/connections/${id}/run`, { method: 'POST', headers: Auth._headers() });
+    const d = await r.json();
+    if (status) status.innerHTML = d.connection ? `<span style="color:${d.ok ? 'var(--success)' : 'var(--danger)'}">${String(d.connection.lastStatus).replace(/</g, '&lt;')}</span>` : '';
+    loadConnections();
+  } catch (e) { if (status) status.innerHTML = '<span style="color:var(--danger)">Could not sync.</span>'; }
+}
+async function deleteConnection(id) {
+  if (!confirm('Remove this connection?')) return;
+  try { await fetch(`/api/connections/${id}`, { method: 'DELETE', headers: Auth._headers() }); loadConnections(); } catch (e) {}
 }
 
 /* Run the LLM self-test (admin) — proves the model is connected and shows how it

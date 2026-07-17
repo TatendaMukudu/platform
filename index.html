@@ -13,8 +13,8 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260716q"/>
-<link rel="stylesheet" href="css/member.css?v=20260716q"/>
+<link rel="stylesheet" href="css/styles.css?v=20260716r"/>
+<link rel="stylesheet" href="css/member.css?v=20260716r"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -747,6 +747,31 @@
                 </div>
                 <div id="ingest-token-box"></div>
                 <button class="btn btn-outline btn-sm" id="ingest-token-btn" onclick="loadIngestToken()">Show connection details</button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header"><div class="card-title">Connect anything (auto-sync)</div></div>
+              <div class="card-body">
+                <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+                  Point IntelliQ at any system that has a data URL — a GPS provider, a wearable API, a Google Sheet published as JSON, an in-house endpoint. It polls on your schedule and deciphers whatever comes back into signals, matching each record to the right person by name or email. No integration to build.
+                </div>
+                <div id="connections-list" style="margin-bottom:0.7rem"></div>
+                <details id="connection-add">
+                  <summary style="cursor:pointer;font-size:0.84rem;color:var(--accent);margin-bottom:0.5rem">＋ Add a connection</summary>
+                  <div style="display:flex;flex-direction:column;gap:0.4rem;margin-top:0.5rem">
+                    <input class="form-input" id="conn-name" placeholder="Name — e.g. GPS vendor, Wearables API">
+                    <input class="form-input" id="conn-url" placeholder="Data URL (https://…) returning JSON">
+                    <input class="form-input" id="conn-auth" placeholder="Auth header value (optional) — e.g. Bearer abc123">
+                    <div style="display:flex;gap:0.4rem;align-items:center">
+                      <span style="font-size:0.8rem;color:var(--text-muted)">Sync every</span>
+                      <input class="form-input" id="conn-hours" type="number" min="1" max="168" value="24" style="width:80px">
+                      <span style="font-size:0.8rem;color:var(--text-muted)">hours</span>
+                    </div>
+                    <input class="form-input" id="conn-path" placeholder="JSON path to the records (optional) — e.g. data.rows">
+                    <button class="btn btn-accent btn-sm" id="conn-add-btn" onclick="addConnection()">Add &amp; test</button>
+                  </div>
+                </details>
+                <div id="connections-status" style="font-size:0.8rem;margin-top:0.5rem"></div>
               </div>
             </div>
             <div class="card">
@@ -1841,8 +1866,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260716q"></script>
-<script src="js/auth.js?v=20260716q"></script>
+<script src="js/data.js?v=20260716r"></script>
+<script src="js/auth.js?v=20260716r"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1910,14 +1935,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260716q"></script>
-<script src="js/ui.js?v=20260716q"></script>
-<script src="js/attachments.js?v=20260716q"></script>
-<script src="js/scenarios.js?v=20260716q"></script>
-<script src="js/chat.js?v=20260716q"></script>
-<script src="js/tree.js?v=20260716q"></script>
-<script src="js/app.js?v=20260716q"></script>
-<script src="js/member-view.js?v=20260716q"></script>
+<script src="js/charts.js?v=20260716r"></script>
+<script src="js/ui.js?v=20260716r"></script>
+<script src="js/attachments.js?v=20260716r"></script>
+<script src="js/scenarios.js?v=20260716r"></script>
+<script src="js/chat.js?v=20260716r"></script>
+<script src="js/tree.js?v=20260716r"></script>
+<script src="js/app.js?v=20260716r"></script>
+<script src="js/member-view.js?v=20260716r"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->

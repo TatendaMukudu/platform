@@ -81,7 +81,7 @@ function scheduleSave() {
         userAiProfiles, advisorThreads, orgSignals, noticeFeedback,
         userConsents, connectedSources, pendingActions,
         assessmentTemplates, assessmentAssignments, orgTutorials, orgApiTokens,
-        studioThreads, activeSessions,
+        orgConnections, studioThreads, activeSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -556,6 +556,10 @@ const studioThreads         = {};  // `${code}:${userId}` → { messages:[{role,
 // no-code automation) can POST numeric data to. Per-org token → maps records to
 // members and emits universal signals, so we never build N bespoke integrations.
 const orgApiTokens          = {};  // orgCode → { token, createdAt, createdBy }
+// Universal connectors — a connection to ANY system that has a URL or can push a
+// webhook. The org configures {url, auth, schedule}; the server polls it and the
+// generic mapper deciphers whatever JSON comes back into signals. No per-vendor code.
+const orgConnections        = {};  // orgCode → [ { id, name, url, method, headers, scheduleHours, source, jsonPath, lastRun, lastStatus, lastCount, createdBy, createdAt } ]
 const CONSENT_VERSION = '2026-07';
 const _consentKey = (code, uid) => `${code}:${uid}`;
 function _getConsents(code, uid) { const k = _consentKey(code, uid); return (userConsents[k] = userConsents[k] || {}); }
@@ -4970,37 +4974,146 @@ function _orgByIngestToken(tok) {
    Body: { records: [ { email? | name? | userId?, label, value, date? } ] } (or a
    single record). Resolves each record to a member of that org and emits a numeric
    signal. Anything non-numeric is ignored — numbers only, by design. */
+/* ── The universal mapper — turn ANY JSON into signals ─────────────────────────
+   The heart of "connect to anything": whatever shape of data arrives, find the
+   PERSON and the NUMBERS in it. Handles a clean {email,label,value}, a wide row
+   {email, sprint:7, passes:44}, an array of either, or {records|data:[...]} — and
+   resolves the subject by userId / email / name / common role keys. */
+const _SUBJECT_KEYS = ['userid', 'id', 'email', 'mail', 'emailaddress', 'name', 'fullname', 'player', 'member', 'athlete', 'employee', 'student', 'user', 'person'];
+const _META_KEYS    = ['date', 'ts', 'timestamp', 'time', 'label', 'value', 'unit'];
+function _resolveSubjectId(code, rec) {
+  const users = orgUsers[code] || {};
+  const norm = k => String(k).toLowerCase().replace(/[\s_-]/g, '');
+  const find = (keys) => { for (const k of Object.keys(rec)) if (keys.includes(norm(k))) { const v = rec[k]; if (v != null && v !== '') return String(v); } return null; };
+  const uidRaw = find(['userid', 'id', 'user']);
+  if (uidRaw && users[uidRaw]) return uidRaw;
+  const email = find(['email', 'mail', 'emailaddress']);
+  if (email) { const e = email.toLowerCase(); const id = Object.keys(users).find(k => (users[k].email || '').toLowerCase() === e); if (id) return id; }
+  const name = find(['name', 'fullname', 'player', 'member', 'athlete', 'employee', 'student', 'person']);
+  if (name) { const n = name.toLowerCase().trim(); const id = Object.keys(users).find(k => (users[k].name || '').toLowerCase().trim() === n); if (id) return id; }
+  return null;
+}
+function _ingestGeneric(code, payload, createdBy, opts = {}) {
+  const source = String(opts.source || 'connector').slice(0, 40);
+  let recs = [];
+  if (Array.isArray(payload)) recs = payload;
+  else if (payload && Array.isArray(payload.records)) recs = payload.records;
+  else if (payload && Array.isArray(payload.data)) recs = payload.data;
+  else if (payload && Array.isArray(payload.results)) recs = payload.results;
+  else if (payload && typeof payload === 'object') recs = [payload];
+  const emit = (uid, label, value, date) => {
+    const v = Number(value); if (!Number.isFinite(v)) return false;
+    let ts; if (date) { const d = new Date(String(date)); if (!isNaN(d)) ts = d.toISOString(); }
+    try {
+      _emitSignalSafe(code, { subjectType: 'member', subjectId: uid, source, modality: 'data', valueNum: v, label: String(label || 'Metric').slice(0, 80), ts, sensitivity: 'normal', data: { connector: source, ingest: true } }, uid);
+      return true;
+    } catch (_) { return false; }
+  };
+  let imported = 0, unmatched = 0; const subjects = new Set();
+  recs.slice(0, 3000).forEach(rec => {
+    if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return;
+    const uid = _resolveSubjectId(code, rec) || (opts.defaultSubjectId && orgUsers[code]?.[opts.defaultSubjectId] ? opts.defaultSubjectId : null);
+    if (!uid) { unmatched++; return; }
+    const date = rec.date || rec.ts || rec.timestamp || rec.time || null;
+    if (rec.label != null && rec.value != null) {
+      if (emit(uid, rec.label, rec.value, date)) { imported++; subjects.add(uid); }
+      return;
+    }
+    let any = false;
+    for (const [k, val] of Object.entries(rec)) {
+      const norm = k.toLowerCase().replace(/[\s_-]/g, '');
+      if (_META_KEYS.includes(k.toLowerCase()) || _SUBJECT_KEYS.includes(norm)) continue;
+      const num = typeof val === 'number' ? val : (typeof val === 'string' && /^-?\d+(?:\.\d+)?$/.test(val.trim()) ? Number(val.trim()) : null);
+      if (num == null) continue;
+      if (emit(uid, k, num, date)) { imported++; any = true; }
+    }
+    if (any) subjects.add(uid);
+  });
+  if (imported) scheduleSave();
+  return { imported, unmatched, subjects: subjects.size };
+}
+
+/* POST /api/ingest — the push door. Any app / webhook / script POSTs data in ANY
+   shape; the universal mapper deciphers it. Authed by the per-org ingest token. */
 app.post('/api/ingest', (req, res) => {
   const tok = (req.headers.authorization || '').replace('Bearer ', '').trim() || req.body?.token;
   const code = _orgByIngestToken(tok);
   if (!code) return res.status(401).json({ error: 'invalid ingest token' });
   const source = String(req.body?.source || 'custom').slice(0, 40);
-  const records = Array.isArray(req.body?.records) ? req.body.records
-    : (req.body?.label != null ? [req.body] : []);
-  if (!records.length) return res.status(400).json({ error: 'no records', hint: 'send { records: [ { email, label, value, date? } ] }' });
+  // Accept the whole body (minus the token/source envelope) in whatever shape it is.
+  const payload = (req.body?.records || req.body?.data || req.body?.results)
+    ? req.body
+    : (Array.isArray(req.body) ? req.body : { ...req.body });
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) { delete payload.token; delete payload.source; }
+  const r = _ingestGeneric(code, payload, null, { source });
+  if (!r.imported && !r.unmatched) return res.status(400).json({ error: 'no usable data found', hint: 'send JSON containing a person (email/name/userId) and one or more numbers' });
+  res.json({ ok: true, imported: r.imported, unmatched: r.unmatched, people: r.subjects });
+});
 
-  const users = orgUsers[code] || {};
-  let imported = 0, unmatched = 0;
-  for (const r of records.slice(0, 2000)) {
-    const v = r && Number(r.value);
-    if (!r || !Number.isFinite(v)) continue;
-    // Resolve the subject: userId, then email, then exact name.
-    let uid = r.userId && users[r.userId] ? r.userId : null;
-    if (!uid && r.email) { const e = String(r.email).toLowerCase(); uid = Object.keys(users).find(k => (users[k].email || '').toLowerCase() === e) || null; }
-    if (!uid && r.name)  { const n = String(r.name).toLowerCase().trim(); uid = Object.keys(users).find(k => (users[k].name || '').toLowerCase().trim() === n) || null; }
-    if (!uid) { unmatched++; continue; }
-    const ts = r.date ? new Date(String(r.date).slice(0, 10) + 'T12:00:00Z').toISOString() : new Date().toISOString();
-    try {
-      _emitSignalSafe(code, {
-        subjectType: 'member', subjectId: uid, source, modality: 'data',
-        valueNum: v, label: String(r.label || 'Metric').slice(0, 80), ts, sensitivity: 'normal',
-        data: { connector: source, ingest: true },
-      }, uid);
-      imported++;
-    } catch (_) {}
-  }
-  if (imported) scheduleSave();
-  res.json({ ok: true, imported, unmatched });
+/* ── Connections: connect to anything with a URL. The org configures a source; the
+   server polls it on a schedule and the mapper turns whatever comes back into
+   signals. SSRF-guarded and admin-only. ──────────────────────────────────────── */
+function _urlIsSafe(url) {
+  try {
+    const u = new URL(url);
+    if (!/^https?:$/.test(u.protocol)) return false;
+    const h = u.hostname.toLowerCase();
+    if (['localhost', '0.0.0.0', '::1', '[::1]'].includes(h)) return false;
+    if (/^127\.|^10\.|^192\.168\.|^169\.254\./.test(h)) return false;
+    if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
+    return true;
+  } catch (_) { return false; }
+}
+async function _runConnection(code, conn) {
+  conn.lastRun = new Date().toISOString();
+  if (!_urlIsSafe(conn.url)) { conn.lastStatus = 'blocked — unsafe or private URL'; scheduleSave(); return { error: 'unsafe url' }; }
+  try {
+    const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 15000);
+    const resp = await fetch(conn.url, { method: conn.method || 'GET', headers: conn.headers || {}, signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!resp.ok) { conn.lastStatus = `error — HTTP ${resp.status}`; scheduleSave(); return { error: `HTTP ${resp.status}` }; }
+    let data; try { data = await resp.json(); } catch (_) { conn.lastStatus = 'error — response was not JSON'; scheduleSave(); return { error: 'not json' }; }
+    if (conn.jsonPath) { try { data = String(conn.jsonPath).split('.').reduce((o, k) => (o == null ? o : o[k]), data); } catch (_) {} }
+    const r = _ingestGeneric(code, data, conn.createdBy, { source: conn.source || conn.name || 'connector' });
+    conn.lastStatus = `ok — ${r.imported} data point${r.imported === 1 ? '' : 's'} across ${r.subjects} ${r.subjects === 1 ? 'person' : 'people'}${r.unmatched ? `, ${r.unmatched} unmatched` : ''}`;
+    conn.lastCount = r.imported; scheduleSave();
+    return r;
+  } catch (e) { conn.lastStatus = 'failed — ' + String(e.message || 'error').slice(0, 70); scheduleSave(); return { error: e.message }; }
+}
+const _publicConnection = c => ({ id: c.id, name: c.name, url: c.url, method: c.method || 'GET', scheduleHours: c.scheduleHours, source: c.source, jsonPath: c.jsonPath || null, headerKeys: Object.keys(c.headers || {}), lastRun: c.lastRun || null, lastStatus: c.lastStatus || 'never run', lastCount: c.lastCount || 0 });
+
+app.get('/api/connections', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  res.json({ ok: true, connections: (orgConnections[code] || []).map(_publicConnection) });
+});
+app.post('/api/connections', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const { name, url, method, headers, scheduleHours, source, jsonPath } = req.body || {};
+  if (!url || !_urlIsSafe(String(url))) return res.status(400).json({ error: 'A valid public https URL is required.' });
+  const conn = {
+    id: 'conn_' + _shortId(), name: String(name || 'Connection').slice(0, 80), url: String(url).slice(0, 600),
+    method: /^post$/i.test(method) ? 'POST' : 'GET',
+    headers: (headers && typeof headers === 'object') ? Object.fromEntries(Object.entries(headers).slice(0, 10).map(([k, v]) => [String(k).slice(0, 60), String(v).slice(0, 400)])) : {},
+    scheduleHours: Math.max(1, Math.min(168, Number(scheduleHours) || 24)),
+    source: String(source || name || 'connector').slice(0, 40), jsonPath: jsonPath ? String(jsonPath).slice(0, 120) : null,
+    createdBy: req.iqSession.userId, createdAt: new Date().toISOString(), lastRun: null, lastStatus: 'never run', lastCount: 0,
+  };
+  (orgConnections[code] = orgConnections[code] || []).push(conn);
+  scheduleSave();
+  res.json({ ok: true, connection: _publicConnection(conn) });
+});
+app.delete('/api/connections/:id', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  orgConnections[code] = (orgConnections[code] || []).filter(c => c.id !== req.params.id);
+  scheduleSave();
+  res.json({ ok: true });
+});
+app.post('/api/connections/:id/run', requirePermission('manage_settings'), async (req, res) => {
+  const code = req.iqSession.orgCode;
+  const conn = (orgConnections[code] || []).find(c => c.id === req.params.id);
+  if (!conn) return res.status(404).json({ error: 'not found' });
+  const r = await _runConnection(code, conn);
+  res.json({ ok: !r.error, result: r, connection: _publicConnection(conn) });
 });
 
 /* Aggregate a SET of people into a privacy-safe unit read (counts + pattern
@@ -9060,6 +9173,7 @@ function _loadAllStores(data) {
   Object.assign(assessmentAssignments, data.assessmentAssignments || {});
   Object.assign(orgTutorials,          data.orgTutorials          || {});
   Object.assign(orgApiTokens,          data.orgApiTokens          || {});
+  Object.assign(orgConnections,        data.orgConnections        || {});
   Object.assign(studioThreads,         data.studioThreads         || {});
   Object.assign(orgSignals,       data.orgSignals       || {});
   Object.assign(noticeFeedback,   data.noticeFeedback   || {});
@@ -9188,6 +9302,18 @@ if (require.main === module) (async () => {
     //     on boot, then daily. Runs only in the live server (never in test mode).
     _purgeExpired();
     setInterval(() => { try { _purgeExpired(); } catch (e) { console.warn('[retention] purge failed:', e.message); } }, 24 * 60 * 60 * 1000).unref();
+
+    // Connection poller — every 20 min, run any connection whose schedule is due.
+    setInterval(async () => {
+      const now = Date.now();
+      for (const [code, list] of Object.entries(orgConnections)) {
+        for (const conn of (list || [])) {
+          const dueMs = (conn.scheduleHours || 24) * 3600000;
+          const last = conn.lastRun ? new Date(conn.lastRun).getTime() : 0;
+          if (now - last >= dueMs) { try { await _runConnection(code, conn); } catch (_) {} }
+        }
+      }
+    }, 20 * 60 * 1000).unref();
 
     // 6. Start HTTP server
     app.listen(PORT, () => {
