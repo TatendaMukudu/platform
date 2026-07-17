@@ -156,30 +156,46 @@ function _resolvedDomain(code) {
   return packs.resolveDomain(org?.orgMode, org?.domain);
 }
 
-/* Coarse, HONEST role classification for the person in focus. We don't invent
-   precise titles the data doesn't carry — we only assert "this is staff/leadership,
-   not a {person}" when the model would otherwise mislabel a coach as a player.
-   A plain member returns null, so the domain's person word applies to them. */
-function _roleWordFor(code, userId) {
-  if (!userId) return null;
+/* An EXPLICIT semantic role/title a user actually carries (not a permission tier).
+   None of these fields exist in the current data model, but honouring them keeps
+   the rule "explicit role → use it" true the moment a connector or admin supplies
+   one, without ever inventing a title. */
+function _explicitRoleTitle(u) {
+  const t = u && (u.title || u.position || u.jobTitle || u.roleTitle);
+  return (typeof t === 'string' && t.trim()) ? t.trim().slice(0, 40) : null;
+}
+
+/* Resolve how to refer to the subject WITHOUT manufacturing a profession from
+   permissions. The ladder (see ARCHITECTURE.md "Role sensitivity"):
+     1. explicit role/title present            → use it verbatim
+     2. staff-tier role assigned by the org     → "a staff member" (domain-neutral;
+        (coach/admin/superadmin)                   the assigned tier, not a guessed job)
+     3. leadership certain, no explicit role    → suppress the generic noun, use name
+        (a member who leads — captain OR staff)    (avoidGeneric; NO title invented)
+     4. otherwise (a plain member)              → generic person noun is correct
+   Returns { subjectRole, avoidGeneric }. */
+function _subjectRoleContext(code, userId) {
+  if (!userId) return { subjectRole: null, avoidGeneric: false };
   const c = (code || '').toLowerCase();
   const u = orgUsers[c]?.[userId];
-  if (!u) return null;
-  if (u.role === 'superadmin' || u.role === 'admin') return 'a member of staff / leadership';
-  if (u.role === 'coach') return 'a coach or staff member';
-  if (_isLeader(c, userId)) return 'a member of staff';
-  return null;  // plain member → the domain person word is correct for them
+  if (!u) return { subjectRole: null, avoidGeneric: false };
+  const explicit = _explicitRoleTitle(u);
+  if (explicit) return { subjectRole: explicit, avoidGeneric: false };
+  if (u.role === 'coach' || u.role === 'admin' || u.role === 'superadmin') return { subjectRole: 'a staff member', avoidGeneric: false };
+  if (_isLeader(c, userId)) return { subjectRole: null, avoidGeneric: true };
+  return { subjectRole: null, avoidGeneric: false };
 }
 
 /* The one call every AI entry point makes. Resolves the org's domain, derives the
-   subject's role when a userId is given, and returns the compact language directive
-   (empty string in universal mode with no role nuance — costs nothing). */
+   subject's role context when a userId is given (never inventing a title), and
+   returns the compact language directive (empty in universal mode with no role
+   nuance — costs nothing). A caller may pass subjectRole explicitly to override. */
 function _domainDirective(code, opts = {}) {
   const domain = _resolvedDomain(code);
-  const subjectRole = opts.subjectRole !== undefined
-    ? opts.subjectRole
-    : (opts.userId ? _roleWordFor(code, opts.userId) : null);
-  return packs.domainDirective(domain, { subjectRole, concepts: opts.concepts });
+  let subjectRole = null, avoidGeneric = false;
+  if (opts.subjectRole !== undefined) subjectRole = opts.subjectRole;
+  else if (opts.userId) ({ subjectRole, avoidGeneric } = _subjectRoleContext(code, opts.userId));
+  return packs.domainDirective(domain, { subjectRole, avoidGenericForSubject: avoidGeneric, concepts: opts.concepts });
 }
 
 /* Audit stamp recorded alongside generated prose so historical outputs remain
@@ -234,24 +250,19 @@ function requireAuth(req, res, next) {
 }
 
 /* ─── REFLECTION SYSTEM PROMPT ─────────────────────────────────────────── */
-function buildReflectionPrompt(orgMode, orgName, orgValues = [], orgMetrics = [], orgProfile = {}) {
-  const verticalCtx = {
-    school:     'students in a school environment. Academic pressure, peer relationships, behaviour, and moral development are common themes.',
-    sports:     'athletes in a sports club. Performance pressure, team dynamics, coaching relationships, and mental resilience are common themes.',
-    workplace:  'employees in a workplace. Professional conduct, leadership, team conflict, stress, and work-life balance are common themes.',
-    military:   'personnel in a military unit. Discipline, command decisions, ethics under pressure, and stress management are common themes.',
-    healthcare: 'healthcare workers. Patient care decisions, ethical dilemmas, burnout, and high-stakes stress are common themes.',
-    government: 'government officials and public servants. Policy decisions, integrity, public accountability, and crisis management are common themes.',
-  };
-
-  // Prefer rich org description over generic vertical tag
+/* NOTE: this prompt is deliberately VERTICAL-NEUTRAL. Organisational language
+   (player/student/team-member…) is supplied by the shared _domainDirective at the
+   call site — never by an orgMode branch embedded here. See ARCHITECTURE.md
+   ("Organisational language"). orgMode is no longer a parameter: what the model
+   should know about the org comes from its OWN description (orgSummary) plus the
+   resolved domain, not a hard-coded industry template. */
+function buildReflectionPrompt(orgName, orgValues = [], orgMetrics = [], orgProfile = {}) {
+  // Prefer the org's OWN description; otherwise stay generic. No industry template.
   let contextLine;
   if (orgProfile.orgSummary) {
     contextLine = `You are speaking with members of ${orgName}. About this organisation: ${orgProfile.orgSummary}`;
     if (orgProfile.orgEnvironment)      contextLine += ` Environment: ${orgProfile.orgEnvironment}`;
     if (orgProfile.orgSuccessDefinition) contextLine += ` Success looks like: ${orgProfile.orgSuccessDefinition}`;
-  } else if (orgMode && verticalCtx[orgMode]) {
-    contextLine = `You are speaking with ${verticalCtx[orgMode]}`;
   } else {
     contextLine = `You are speaking with individuals in a professional or institutional environment.`;
   }
@@ -290,7 +301,10 @@ Catch nuanced language — "I've been in a really dark place" or "I just don't s
 }
 
 /* ─── SCENARIO SYSTEM PROMPT ────────────────────────────────────────────── */
-function buildScenarioPrompt(orgMode, orgName, title, context, memberName, difficulty, opening = null, probes = null, orgValues = [], orgMetrics = [], orgProfile = {}) {
+/* Also vertical-neutral: the org is described by its OWN summary (a fact), and any
+   organisational language comes from the shared _domainDirective at the call site,
+   not from an orgMode tag. */
+function buildScenarioPrompt(orgName, title, context, memberName, difficulty, opening = null, probes = null, orgValues = [], orgMetrics = [], orgProfile = {}) {
   const difficultyNote = {
     easy:   'Start with a clear, straightforward situation. Keep the stakes moderate.',
     medium: 'Present a situation with genuine tension and no obvious right answer.',
@@ -299,7 +313,7 @@ function buildScenarioPrompt(orgMode, orgName, title, context, memberName, diffi
 
   const orgCtxLine = orgProfile.orgSummary
     ? `ORGANISATION: ${orgName} — ${orgProfile.orgSummary}${orgProfile.orgEnvironment ? ' ' + orgProfile.orgEnvironment : ''}`
-    : `ORGANISATION: ${orgName}${orgMode ? ' (type: ' + orgMode + ')' : ''}`;
+    : `ORGANISATION: ${orgName}`;
 
   return `You are the IntelliQ Scenario Facilitator — an intelligent evaluator running a live decision-making assessment in the IntelliQ platform used by ${orgName}.
 
@@ -368,7 +382,6 @@ app.post('/api/chat', async (req, res) => {
     if (promptType === 'scenario') {
       const sc = scenarioRunContext || {};
       systemPrompt = buildScenarioPrompt(
-        orgMode || orgProfile.orgMode || '',
         orgName  || 'your organisation',
         sc.title || 'Decision Making',
         sc.context || 'A general situational assessment',
@@ -382,7 +395,7 @@ app.post('/api/chat', async (req, res) => {
       );
     } else {
       const memBlock = userId ? _buildMemoryBlock(code, userId) : '';
-      systemPrompt = buildReflectionPrompt(orgMode || orgProfile.orgMode || '', orgName || 'your organisation', values, metrics, orgProfile);
+      systemPrompt = buildReflectionPrompt(orgName || 'your organisation', values, metrics, orgProfile);
       if (memBlock) systemPrompt += memBlock;
       if (scenarioContext) {
         systemPrompt += `\n\nSCENARIO JUST COMPLETED:\nTitle: ${scenarioContext.title}\nScore: ${scenarioContext.score}/100 (${scenarioContext.label})\n`;
@@ -448,9 +461,11 @@ app.post('/api/draft-scenario', requireAuth, async (req, res) => {
   const code = (orgCode || req.iqSession?.orgCode || '').toLowerCase();
   const profile = orgMeta[code] || {};
 
+  // Vertical-neutral: describe the org by its OWN summary; organisational language
+  // is carried by _domainDirective(code) appended to the system prompt below.
   const orgCtx = profile.orgSummary
     ? `ORGANISATION: ${orgName || profile.orgName || 'an organisation'} — ${profile.orgSummary}`
-    : `ORGANISATION TYPE: ${orgMode || profile.orgMode || 'general'}`;
+    : `ORGANISATION: ${orgName || profile.orgName || 'an organisation'}`;
 
   const systemPrompt = `You are an expert scenario designer for IntelliQ, a performance intelligence platform used by ${orgName || 'an organisation'}.
 
@@ -477,8 +492,7 @@ RULES:
 - The opening must feel real and specific
 - Do not make the right answer obvious
 - The probes should escalate
-- The coachNote is private — never shown to the member
-- Adapt language and context to the organisation type`;
+- The coachNote is private — never shown to the member`;
 
   const userContent = hasImage
     ? [
@@ -520,8 +534,6 @@ app.post('/api/coach-debrief', async (req, res) => {
 You are writing a private debrief for a ${coachRole || 'leader/supervisor'} — NOT for the member. The member will never see this.
 
 Your job: analyse ${memberName}'s responses to the "${scenarioTitle}" scenario and give the leader practical, specific guidance.
-
-ORGANISATION TYPE: ${orgMode || 'general'}
 
 OUTPUT FORMAT — valid JSON only:
 {
@@ -9528,7 +9540,9 @@ const PORT = process.env.PORT || 3000;
 
 // Export a minimal surface for the endpoint smoke test (in-process, DB_OPTIONAL).
 // Requiring this module never boots a listener — only running it directly does.
-module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired };
+module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired,
+  // exported for the truth layer: proves the role ladder never invents a title
+  _subjectRoleContext, _domainDirective };
 
 if (require.main === module) (async () => {
   try {

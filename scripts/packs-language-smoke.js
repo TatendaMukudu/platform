@@ -38,12 +38,20 @@ const custom = packs.domainDirective(packs.resolveDomain('school', { pack: 'educ
 ok('a custom word (scholar) overrides the pack default (student) in the directive',
    /"scholar"/.test(custom) && !/→ "student"/.test(custom));
 
-// ── 3. Role sensitivity — a coach is not a "player" ─────────────────────────
-const coachDir = dir('sports', { subjectRole: 'a coach or staff member' });
-ok('a known non-athlete role suppresses the generic person word for the subject',
-   /a coach or staff member/.test(coachDir) && /not a "player"/.test(coachDir));
+// ── 3. Role sensitivity — a non-athlete is not a "player" ───────────────────
+const staffDir = dir('sports', { subjectRole: 'a staff member' });
+ok('a known staff role suppresses the generic person word for the subject',
+   /a staff member/.test(staffDir) && /not a "player"/.test(staffDir));
 ok('the base directive still instructs respecting each subject\'s ACTUAL role',
    /respect each subject's ACTUAL role/i.test(sports));
+
+// avoidGenericForSubject: leadership certain but role unknown (e.g. a captain) —
+// the directive must SUPPRESS the generic noun WITHOUT inventing a profession.
+const avoidDir = dir('sports', { avoidGenericForSubject: true });
+ok('the title-free suppression signal tells the model not to assume "player"',
+   /do not assume the generic term "player"/i.test(avoidDir) && /use their .*name/i.test(avoidDir));
+ok('the suppression signal never manufactures a profession/title',
+   !/\b(coach|manager|director|analyst|physio|teacher|staff member)\b/i.test(avoidDir.split('Do not assume')[1] || ''));
 
 // ── 4. No blind replacement; named structures + meaning preserved ───────────
 ok('directive forbids mechanical find-and-replace',

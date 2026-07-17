@@ -201,8 +201,14 @@ function domainCatalog() {
        mode unchanged and free).
 
    opts:
-     subjectRole — actual role of the person in focus ('a coach', 'a director'…),
-                   when known. Suppresses calling them the generic person word.
+     subjectRole — the person-in-focus's ACTUAL role ('a staff member', an explicit
+                   title…), when it is genuinely known. Suppresses the generic person
+                   word for them. NEVER pass a profession inferred from permissions.
+     avoidGenericForSubject — a weaker, TITLE-FREE signal: leadership context is
+                   certain but no explicit role is known (e.g. a member who leads a
+                   group — possibly a captain, possibly staff). Tells the model not
+                   to *assume* the generic noun for this subject and to use their
+                   name, WITHOUT inventing a profession.
      concepts    — primitives relevant to this generation (defaults to the everyday
                    set). Pass a subset to trim tokens further. */
 function domainDirective(domain, opts = {}) {
@@ -221,7 +227,9 @@ function domainDirective(domain, opts = {}) {
     .map(k => `${MEANS[k] || k} → "${v[k]}"`);
   const roleLine = opts.subjectRole
     ? `The person in focus here is ${opts.subjectRole}, not ${v.person ? `a "${v.person}"` : 'a generic member'} — refer to them by that role or by name, never by the generic term.`
-    : '';
+    : (opts.avoidGenericForSubject
+      ? `Do not assume the generic term${v.person ? ` "${v.person}"` : ''} applies to the person in focus — their exact role isn't given here; use their actual role if it is stated elsewhere, otherwise their name.`
+      : '');
   if (!pairs.length && !roleLine) return '';   // universal + no role nuance → add nothing
 
   const label = String(domain.label || 'this').trim();
