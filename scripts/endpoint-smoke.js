@@ -658,6 +658,25 @@ const server = app.listen(0, async () => {
        evaluated.j?.action?.status === 'evaluated' && evaluated.j.action.evaluation && evaluated.j.action.stage === 'learn');
     ok('the action queue lists actions for a leader', (await call('/api/actions', tokCoach)).j?.actions?.some(a => a.id === exActId));
 
+    // ── Calendar: the first PRODUCTION capability, same contract, ALLOW path ──
+    const calProp = await call('/api/actions/propose', tokCoach, { method: 'POST', body: { capability: 'calendar', title: 'Weekly sync', attendees: [bId] } });
+    ok('calendar plugs into the SAME contract (grounded recommend, verb create)',
+       calProp.status === 200 && calProp.j?.action?.capability === 'calendar' && calProp.j.action.verb === 'create' && typeof calProp.j.action.rationale === 'string');
+    ok('scheduling a meeting is ALLOWED by policy (no approval needed, unlike interventions)',
+       calProp.j.action.policy?.allowed === true);
+    const calId = calProp.j.action.id;
+    const calDraft = await call(`/api/actions/${calId}/draft`, tokCoach, { method: 'POST' });
+    ok('the draft produces an agenda + proposed time', typeof calDraft.j?.action?.draft?.agenda === 'string' && !!calDraft.j.action.draft.start);
+    const calExec = await call(`/api/actions/${calId}/execute`, tokCoach, { method: 'POST' });
+    ok('an allowed calendar action executes directly (no approval step) and creates an event',
+       calExec.j?.action?.status === 'executed' && calExec.j.action.execution?.effect === 'calendar_event');
+    ok('the created event is visible on the calendar', (await call('/api/calendar', tokCoach)).j?.events?.some(e => e.title === 'Weekly sync'));
+    const calObs = await call(`/api/actions/${calId}/observe`, tokCoach, { method: 'POST', body: { attended: [bId] } });
+    ok('attendance is observed', calObs.j?.action?.observation?.attended === 1 && calObs.j.action.observation.invited === 1);
+    const calEval = await call(`/api/actions/${calId}/evaluate`, tokCoach, { method: 'POST' });
+    ok('calendar closes the SAME loop: did it reduce blockers? (evaluate → learn)',
+       calEval.j?.action?.status === 'evaluated' && calEval.j.action.evaluation && 'blockersBefore' in calEval.j.action.evaluation);
+
     // A DENY policy hard-blocks execution (deny wins even with approval).
     await call('/api/policies', tokCoach, { method: 'POST', body: { rule: { effect: 'deny', capability: 'intervention', verb: 'create', stage: 'execute', note: 'test deny' } } });
     const p2 = await call('/api/actions/propose', tokCoach, { method: 'POST', body: { capability: 'intervention', subjectId: bId } });

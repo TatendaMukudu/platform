@@ -92,7 +92,7 @@ function scheduleSave() {
         orgConnections, orgOAuthApps, studioThreads, activeSessions,
         rawEvidence, evidenceLog, orgMappings,
         syncRuns, failedRecords, webhookDeliveries,
-        orgPolicies, actionsLog,
+        orgPolicies, actionsLog, orgCalendar,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -660,6 +660,10 @@ const _syncLocks            = {};   // connId → true  (in-process guard: one r
 const orgPolicies           = {};
 const actionsLog            = {};
 const ACTIONS_CAP           = 500;
+// Calendar — the first PRODUCTION capability. The store is provider-agnostic; the
+// internal adapter writes here, and a real provider (Google/Microsoft) is just
+// another adapter registered against the SAME capability. No new architecture.
+const orgCalendar           = {};  // orgCode → [ event ]
 // OAuth2 app credentials the org registered with each provider (client id/secret
 // obtained from the provider's developer console). orgCode → { provider → {clientId, clientSecret} }.
 const orgOAuthApps          = {};
@@ -6129,11 +6133,31 @@ function _policiesFor(code) {
   return orgPolicies[c];
 }
 
+/* Calendar ADAPTERS — a provider is just an adapter behind the SAME capability. The
+   internal adapter writes to our own store; a Google/Microsoft adapter would register
+   here and translate to the provider API. The capability code never changes. */
+const _CALENDAR_ADAPTERS = {
+  internal: {
+    create(code, ev) {
+      const rec = { id: 'cal_' + generateId(), title: ev.title, start: ev.start, end: ev.end || null,
+        attendees: Array.isArray(ev.attendees) ? ev.attendees : [], agenda: ev.agenda || '', groupRef: ev.groupRef || null,
+        createdBy: ev.createdBy || 'system', createdAt: new Date().toISOString(), status: 'scheduled', attendance: {} };
+      (orgCalendar[code] = orgCalendar[code] || []).push(rec);
+      return rec;
+    },
+    get(code, id) { return (orgCalendar[code] || []).find(e => e.id === id) || null; },
+  },
+};
+function _calendarAdapter(code) {
+  // A connection could pin a provider adapter; default to internal.
+  return _CALENDAR_ADAPTERS.internal;
+}
+
 /* The CAPABILITY REGISTRY. A capability plugs stage executors into the universal
-   contract — no bespoke endpoints. The reference `intervention` capability is fully
-   INTERNAL and safe (it prepares a supportive action for a person and then measures
-   whether it helped), proving the whole loop before any external provider is wired.
-   Each executor returns a patch merged onto the action. */
+   contract — no bespoke endpoints, no private truth logic, no policy exemptions.
+   `intervention` is the internal reference; `calendar` is the first PRODUCTION edge —
+   both are the SAME shape (recommend→draft→execute→observe→evaluate). Each executor
+   returns a patch merged onto the action. */
 const _CAPABILITIES = {
   intervention: {
     verbs: ['create'], category: null, authority: 'execute',
@@ -6179,6 +6203,59 @@ const _CAPABILITIES = {
       const b = avg(before), a = avg(after);
       const improved = (b != null && a != null) ? a > b : null;
       return { evaluation: { improved, before: b, after: a, basis: `${before.length} before / ${after.length} after`, reportedOutcome: action.observation?.outcome || null, at: new Date().toISOString() } };
+    },
+  },
+
+  /* CALENDAR — the first PRODUCTION capability. Reads through the Truth Pipeline,
+     recommends a meeting when the evidence warrants it, drafts an agenda, creates the
+     event (policy: calendar.create is ALLOWed by the default constitution — no
+     approval needed, in contrast to interventions), observes attendance, and
+     evaluates whether it actually reduced blockers. A real provider is just a
+     different adapter; the loop below is unchanged. */
+  calendar: {
+    verbs: ['create'], category: null, authority: 'execute',
+    // RECOMMEND — "this meeting should probably happen", grounded in the group's signals.
+    recommend(code, { groupRef, actorId, context }) {
+      const title = String(context?.title || '').slice(0, 120) || 'Team sync';
+      // Ground it: a heavier-than-usual stretch or emerging blockers in the group.
+      let why = 'to align on priorities', evidenceRefs = [];
+      try {
+        const recent = (orgSignals[code] || []).filter(s => /block|overdue|delay|stuck|load|workload/i.test(s.label || '')).slice(-5);
+        if (recent.length) { why = 'blockers and load are building — a short alignment would help'; evidenceRefs = recent.map(s => s.id); }
+      } catch (_) {}
+      return { rationale: `A "${title}" meeting looks worthwhile — ${why}.`, evidenceRefs, groupRef: groupRef || context?.groupRef || null,
+        draft: { title, attendees: Array.isArray(context?.attendees) ? context.attendees.slice(0, 40) : [] } };
+    },
+    // DRAFT — a concrete agenda + proposed time (deterministic; AI-enrichable later).
+    draft(code, action) {
+      const title = action.draft?.title || 'Team sync';
+      const start = action.draft?.start || new Date(Date.now() + 86400000).toISOString();   // default: tomorrow
+      const agenda = action.draft?.agenda || `1. Where we stand\n2. Blockers to clear\n3. Priorities for the week\n4. Owners + next steps`;
+      return { draft: { ...(action.draft || {}), title, start, agenda, kind: 'calendar' } };
+    },
+    // EXECUTE — create the event via the adapter (internal here; a provider is an edge).
+    execute(code, action) {
+      const ev = _calendarAdapter(code).create(code, {
+        title: action.draft?.title, start: action.draft?.start, end: action.draft?.end,
+        agenda: action.draft?.agenda, attendees: action.draft?.attendees, groupRef: action.groupRef, createdBy: action.actorId });
+      return { execution: { done: true, effect: 'calendar_event', ref: ev.id, at: new Date().toISOString() } };
+    },
+    // OBSERVE — attendance (who actually showed up), fed in or read from the provider.
+    observe(code, action, input) {
+      const ev = _calendarAdapter(code).get(code, action.execution?.ref);
+      const attended = Array.isArray(input?.attended) ? input.attended : [];
+      if (ev) { attended.forEach(uid => { ev.attendance[uid] = true; }); ev.status = 'occurred'; }
+      const invited = (ev?.attendees || []).length || 0;
+      return { observation: { attended: attended.length, invited, rate: invited ? attended.length / invited : null, at: new Date().toISOString() } };
+    },
+    // EVALUATE — did it reduce blockers? Compare blocker-signals before vs after.
+    evaluate(code, action) {
+      const at = action.execution?.at ? new Date(action.execution.at).getTime() : Date.now();
+      const blockers = (orgSignals[code] || []).filter(s => /block|overdue|delay|stuck/i.test(s.label || ''));
+      const before = blockers.filter(s => new Date(s.ts).getTime() < at).length;
+      const after = blockers.filter(s => new Date(s.ts).getTime() >= at).length;
+      const improved = (before || after) ? after < before : null;
+      return { evaluation: { improved, blockersBefore: before, blockersAfter: after, attendanceRate: action.observation?.rate ?? null, basis: 'blocker signals before vs after', at: new Date().toISOString() } };
     },
   },
 };
@@ -6259,14 +6336,14 @@ app.get('/api/actions/:id', requireAuth, (req, res) => {
 app.post('/api/actions/propose', requireAuth, (req, res) => {
   const code = req.iqSession.orgCode, userId = req.iqSession.userId;
   if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
-  const { capability, verb, subjectId, category, amount, tags } = req.body || {};
+  const { capability, verb, subjectId, groupRef, category, amount, tags } = req.body || {};
   const cap = _CAPABILITIES[capability];
   if (!cap) return res.status(400).json({ error: 'unknown capability' });
   if (subjectId && !new Set(getVisibleUserIds(code, userId)).has(subjectId)) return res.status(403).json({ error: 'subject not in your range' });
-  const rec = cap.recommend ? cap.recommend(code, { subjectId, actorId: userId }) : {};
+  const rec = cap.recommend ? cap.recommend(code, { subjectId, groupRef, actorId: userId, context: req.body }) : {};
   const action = actionLib.buildAction({ id: 'act_' + generateId(), org: code, capability, verb: verb || cap.verbs[0], authority: cap.authority,
-    actorId: userId, subjectId: rec.subjectId || subjectId, category: category || cap.category, amount, tags,
-    rationale: rec.rationale, evidenceRefs: rec.evidenceRefs, status: 'proposed' });
+    actorId: userId, subjectId: rec.subjectId || subjectId, groupRef: rec.groupRef || groupRef, category: category || cap.category, amount, tags,
+    rationale: rec.rationale, evidenceRefs: rec.evidenceRefs, draft: rec.draft || null, status: 'proposed' });
   action.policy = _policyCheck(code, action, 'execute', req.iqSession.role);   // preview the eventual gate
   const list = _actionsFor(code); list.push(action);
   if (list.length > ACTIONS_CAP) list.splice(0, list.length - ACTIONS_CAP);
@@ -6357,6 +6434,18 @@ app.post('/api/actions/:id/evaluate', requireAuth, (req, res) => {
     valueText: `evaluated ${a.capability}: improved=${a.evaluation.improved}`, sensitivity: 'normal', data: { action: a.id, evaluation: a.evaluation } });
   _actAudit(a, 'learn', userId); scheduleSave();
   res.json({ ok: true, action: a });
+});
+
+/* Calendar visibility — the events the execution layer scheduled (leader-scoped).
+   Calendar needs NO bespoke action endpoints: it runs through /api/actions/* like
+   every capability. This is the only read surface it adds. */
+app.get('/api/calendar', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode;
+  if (!_isLeader(code, req.iqSession.userId)) return res.status(403).json({ error: 'leaders only' });
+  const events = (orgCalendar[code] || []).slice(-100).reverse().map(e => ({
+    id: e.id, title: e.title, start: e.start, end: e.end, status: e.status,
+    invited: (e.attendees || []).length, attended: Object.keys(e.attendance || {}).length, agenda: e.agenda }));
+  res.json({ ok: true, events });
 });
 
 /* POST /api/connections/:id/inspect — fetch a SAMPLE, propose a mapping contract for
@@ -10575,6 +10664,7 @@ function _loadAllStores(data) {
   Object.assign(webhookDeliveries,data.webhookDeliveries|| {});
   Object.assign(orgPolicies,      data.orgPolicies      || {});
   Object.assign(actionsLog,       data.actionsLog       || {});
+  Object.assign(orgCalendar,      data.orgCalendar      || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -10622,7 +10712,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _runConnection, _processBatch, _markDeletedAtSource, _newSyncRun, _recordFailure, _openFailures,
   syncRuns, failedRecords, webhookDeliveries, orgConnections, _syncLocks,
   // exported for the truth layer: the execution layer
-  orgPolicies, actionsLog, _policiesFor, orgInterventions };
+  orgPolicies, actionsLog, _policiesFor, orgInterventions, orgCalendar };
 
 if (require.main === module) (async () => {
   try {
