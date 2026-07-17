@@ -11,6 +11,7 @@ const Auth = {
   currentOrg:   null,
   token:        null,
   permissions:  null,  // Sprint 2: loaded from server via getMe()
+  domain:       null,  // adaptive display language { id, label, vocab } from /api/auth/me
 
   ROLE_LABELS: {
     superadmin: 'Super Admin',
@@ -31,11 +32,13 @@ const Auth = {
     const saved = localStorage.getItem('iq_auth');
     if (saved) {
       try {
-        const { user, org, token, permissions } = JSON.parse(saved);
+        const { user, org, token, permissions, domain } = JSON.parse(saved);
         this.currentUser = user;
         this.currentOrg  = org;
         this.token       = token || null;
         this.permissions = permissions || null;
+        this.domain      = domain || null;
+        if (typeof applyDomainVocab === 'function') applyDomainVocab(domain);
         return true; // already logged in
       } catch(e) { localStorage.removeItem('iq_auth'); }
     }
@@ -48,6 +51,7 @@ const Auth = {
       org:         this.currentOrg,
       token:       this.token,
       permissions: this.permissions,
+      domain:      this.domain,
     }));
   },
 
@@ -175,6 +179,8 @@ const Auth = {
     this.currentUser = data.user;
     this.currentOrg  = data.org;
     this.permissions = data.permissions || null;
+    this.domain      = data.domain || this.domain;
+    if (typeof applyDomainVocab === 'function') applyDomainVocab(this.domain);
     this.save();
     return data;
   },

@@ -1039,7 +1039,12 @@ app.get('/api/auth/me', (req, res) => {
   const permissions = _effectivePermissions(session.orgCode, session.userId);
   const leads       = _isLeader(session.orgCode, session.userId);
 
-  res.json({ ok: true, user: { ...user, passwordHash: undefined, leads }, org, permissions });
+  // Adaptive display language: the kernel stores universal primitives; the client
+  // renders them in this org's words (player/student/team-member…). Driven from
+  // the org's domain pack + any custom overrides — never hard-coded in the UI.
+  const domain = packs.resolveDomain(org?.orgMode, org?.domain);
+
+  res.json({ ok: true, user: { ...user, passwordHash: undefined, leads }, org, permissions, domain });
 });
 
 /* ── Permission defaults by role (fallback when no explicit grant) ───────── */
@@ -1404,6 +1409,44 @@ app.post('/api/auth/complete-org-profile', requireAuth, (req, res) => {
 
   scheduleSave();
   res.json({ ok: true, org: { ...org } });
+});
+
+/* ── Domain pack (adaptive display language) ──────────────────────────────── *
+ *  The kernel stores universal primitives; each org renders them in its own
+ *  words. GET returns the catalog + this org's currently-resolved vocabulary;
+ *  POST lets an admin choose a pack and/or set custom words. Display only — this
+ *  never changes what the kernel reasons over, only what humans read.
+ * ─────────────────────────────────────────────────────────────────────────── */
+app.get('/api/org/domain', requireAuth, (req, res) => {
+  const org = orgMeta[req.iqSession.orgCode] || {};
+  res.json({
+    ok: true,
+    catalog: packs.domainCatalog(),
+    current: packs.resolveDomain(org.orgMode, org.domain),
+    config:  org.domain || {},
+  });
+});
+
+app.post('/api/org/domain', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode;
+  const org  = orgMeta[code];
+  if (!org) return res.status(404).json({ error: 'Organisation not found' });
+  const perms = _effectivePermissions(code, req.iqSession.userId);
+  if (!perms.manage_settings) return res.status(403).json({ error: 'You do not have permission to change organisation settings.' });
+
+  const { pack, vocab } = req.body || {};
+  const cfg = {};
+  if (pack && packs.DOMAIN_VOCAB[pack]) cfg.pack = pack;
+  if (vocab && typeof vocab === 'object') {
+    const clean = {};
+    for (const k of Object.keys(vocab)) {
+      if (typeof vocab[k] === 'string' && vocab[k].trim()) clean[k] = vocab[k].trim().slice(0, 40);
+    }
+    if (Object.keys(clean).length) cfg.vocab = clean;
+  }
+  org.domain = cfg;
+  scheduleSave();
+  res.json({ ok: true, current: packs.resolveDomain(org.orgMode, org.domain), config: cfg });
 });
 
 /* ── AI suggestions for org setup wizard ─────────────────────────────────── *

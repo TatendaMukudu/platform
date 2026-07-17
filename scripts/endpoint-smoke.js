@@ -500,6 +500,25 @@ const server = app.listen(0, async () => {
     const cb = await call('/api/oauth/callback?state=bogus&code=x', null);
     ok('the OAuth callback rejects an unknown state (expired link)', cb.status === 400);
 
+    // ── Domain packs: adaptive display language (kernel stays universal) ─────
+    const meDom = await call('/api/auth/me', tokB);
+    ok('auth/me carries a resolved domain vocabulary (person/group words)',
+       meDom.status === 200 && meDom.j?.domain && typeof meDom.j.domain.vocab?.person === 'string' && typeof meDom.j.domain.vocab?.group === 'string');
+    const domCat = await call('/api/org/domain', tokCoach);
+    ok('domain catalog lists the packs with sample words',
+       domCat.status === 200 && Array.isArray(domCat.j?.catalog) && domCat.j.catalog.some(p => p.id === 'sports') && domCat.j.catalog.every(p => p.sample?.person));
+    ok('a plain member cannot change the org display language (403)',
+       (await call('/api/org/domain', tokB, { method: 'POST', body: { pack: 'sports' } })).status === 403);
+    const setDom = await call('/api/org/domain', tokCoach, { method: 'POST', body: { pack: 'sports' } });
+    ok('an admin can select a domain pack and it renders in that vocabulary',
+       setDom.status === 200 && setDom.j?.current?.id === 'sports' && setDom.j.current.vocab.person === 'player' && setDom.j.current.vocab.group === 'team');
+    const afterSet = await call('/api/auth/me', tokB);
+    ok('the chosen pack now flows through auth/me to every user',
+       afterSet.j?.domain?.id === 'sports' && afterSet.j.domain.vocab.people === 'players');
+    const setCustom = await call('/api/org/domain', tokCoach, { method: 'POST', body: { pack: 'education', vocab: { person: 'scholar' } } });
+    ok('a custom word overrides the pack default (org is never boxed in)',
+       setCustom.j?.current?.id === 'education' && setCustom.j.current.vocab.person === 'scholar' && setCustom.j.current.vocab.group === 'class');
+
     // ── LLM self-test: admin-gated, reports status (no key in test mode) ─────
     ok('a plain member cannot run the LLM self-test (403)',
        (await call('/api/admin/llm-selftest', tokB, { method: 'POST' })).status === 403);

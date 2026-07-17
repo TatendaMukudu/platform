@@ -27,7 +27,7 @@ console.log('\n=== Connector SDK harness ===\n');
 ok('all reference manifests are valid against the capability contract',
    Object.values(sdk.MANIFESTS).every(m => sdk.validateManifest(m)));
 ok('a manifest with an unknown capability is rejected',
-   !sdk.validateManifest({ provider: 'x', authentication: 'oauth2', capabilities: ['email.read', 'nonsense.capability'] }));
+   !sdk.validateManifest({ provider: 'x', authentication: 'oauth2', capabilities: ['communication.read', 'nonsense.capability'] }));
 
 // ── Identity resolution WITH confidence (never silently merge) ──
 ok('email match → confirmed', sdk.resolveIdentity(users, { email: 'tatenda@club.fc', minutes: 84 }).confidence === 'confirmed');

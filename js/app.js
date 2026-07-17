@@ -754,6 +754,7 @@ function initLogin() {
             leadershipNodeIds: me.user.leadershipNodeIds,
             role:              me.user.role,
           };
+          if (me.domain) { Auth.domain = me.domain; applyDomainVocab(me.domain); }
           AppState.adminRole = Auth.ROLE_LABELS[Auth.currentUser?.role] || AppState.adminRole;
           Auth.save();
         }
@@ -3093,6 +3094,43 @@ function renderSettings(){
   _loadValuesIntoTextarea();
   if (typeof loadConnections === 'function') loadConnections();
   if (typeof loadOAuthCatalog === 'function') loadOAuthCatalog();
+  if (typeof loadDomainCatalog === 'function') loadDomainCatalog();
+}
+
+/* Display language (domain pack) — the same kernel, the org's own words. Renders
+   the catalog with the current pack highlighted; picking one re-renders the whole
+   app in that vocabulary. Admin-only; the server enforces manage_settings. */
+async function loadDomainCatalog() {
+  const box = document.getElementById('domain-catalog');
+  if (!box) return;
+  const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  try {
+    const r = await fetch('/api/org/domain', { headers: Auth._headers() });
+    if (!r.ok) { box.innerHTML = ''; return; }
+    const d = await r.json();
+    const currentId = d.current?.id || 'universal';
+    box.innerHTML = (d.catalog || []).map(p => {
+      const on = p.id === currentId;
+      const s = p.sample || {};
+      return `<button class="btn ${on ? 'btn-accent' : 'btn-outline'} btn-sm" style="text-align:left;justify-content:flex-start" onclick="setDomain('${p.id}')">
+        <span style="font-weight:600">${esc(p.label)}</span>
+        <span style="font-size:0.72rem;color:${on ? 'inherit' : 'var(--text-muted)'};margin-left:0.5rem">${esc(s.person)} · ${esc(s.group)} · ${esc(s.event)}</span>
+        ${on ? '<span style="margin-left:auto;font-size:0.72rem">current</span>' : ''}
+      </button>`;
+    }).join('');
+  } catch (e) { box.innerHTML = ''; }
+}
+async function setDomain(pack) {
+  const status = document.getElementById('domain-status');
+  if (status) status.innerHTML = '<span style="color:var(--text-muted)">Updating…</span>';
+  try {
+    const r = await fetch('/api/org/domain', { method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() }, body: JSON.stringify({ pack }) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'failed');
+    Auth.domain = d.current; applyDomainVocab(d.current); Auth.save();
+    if (status) status.innerHTML = `<span style="color:var(--success)">Now showing ${d.current.label} language.</span>`;
+    loadDomainCatalog();
+  } catch (e) { if (status) status.innerHTML = `<span style="color:var(--danger)">${String(e.message).replace(/</g,'&lt;')}</span>`; }
 }
 
 /* Connect real apps by login (OAuth) — Strava, Google, Teams, Hudl, Fitbit… */
@@ -6205,11 +6243,19 @@ async function uploadDataSource(input) {
    Reuses the existing page-leader-home container. Private detail never shown. */
 const _INTEL_SEV = { high: '#f74f4f', medium: '#f7a84f', low: '#4f8ef7' };
 
-/* Universal, human wording — the kernel is industry-agnostic, so the UI is too.
-   (No industry "modes": if an org ever wants its own term, it comes from THEIR
-   own words, not from us sorting them into a fixed bucket.) */
-const _VOCAB = { members: 'people', member: 'person', people: 'people' };
+/* Adaptive display language. The kernel stores universal primitives; the UI shows
+   them in the org's own words (player/student/team-member…). `_VOCAB` is seeded
+   with the universal defaults and REPLACED by the org's resolved domain vocabulary
+   from /api/auth/me (see applyDomainVocab). An org's custom words win — never a
+   fixed industry bucket. */
+let _VOCAB = { members: 'people', member: 'person', people: 'people' };
 function _v(key) { return _VOCAB[key] || key; }
+/* Load the org's resolved domain vocabulary. Keeps the universal defaults for any
+   key the pack doesn't override, so the UI never shows a blank noun. */
+function applyDomainVocab(domain) {
+  if (!domain || !domain.vocab) return;
+  _VOCAB = { members: 'people', member: 'person', people: 'people', ...domain.vocab };
+}
 const _TRAJ_WORD = { converging:'climbing', sustaining:'steady', up:'climbing', flat:'steady',
   down:'dipping', diverging:'drifting', stalled:'stalled', unanchored:'finding footing', unknown:'building' };
 const _trajWord = t => _TRAJ_WORD[t] || 'building';
