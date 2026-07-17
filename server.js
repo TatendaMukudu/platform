@@ -4015,7 +4015,37 @@ function _studioMemoryContext(code, userId) {
   if (strengths.length) parts.push(`Their recurring strengths: ${strengths.join(', ')}.`);
   const th = studioThreads[`${code}:${userId}`];
   const done = th ? th.plans.filter(p => p.done).length : 0;
-  if (done) parts.push(`They've completed ${done} plan${done > 1 ? 's' : ''} in the Studio so far.`);
+  if (done) parts.push(`They've completed ${done} plan${done > 1 ? 's' : ''} in the workspace so far.`);
+  return parts.join(' ');
+}
+
+/* What IntelliQ actually KNOWS about this person, so its coaching is grounded in
+   their record — their aim, their reviewed strengths and development areas, where
+   they're trending, and their recent results. This is their OWN data in their OWN
+   workspace, so it's used in full (never another person's private detail). */
+function _studioMemberRead(code, userId, now) {
+  const u = orgUsers[code]?.[userId];
+  if (!u) return '';
+  const parts = [];
+  const g = memberGoals[userKey(code, userId)];
+  if (g) {
+    const aim = g.mainGoals || g.goal; if (aim) parts.push(`Their stated aim: ${String(aim).slice(0, 140)}.`);
+    if (g.identity) parts.push(`Who they're trying to be: ${String(g.identity).slice(0, 100)}.`);
+  }
+  const strengths = _personStrengths(code, userId);
+  if (strengths.length) parts.push(`Recurring strengths in their reviews: ${strengths.join(', ')}.`);
+  const devCount = {};
+  (orgSignals[code] || []).forEach(s => {
+    if (s.subjectId !== userId || s.source !== 'assessment') return;
+    const dm = (s.valueText || '').match(/Development:\s*([^·]+)/i);
+    if (dm) dm[1].split(',').forEach(x => { const v = x.trim().toLowerCase(); if (v) devCount[v] = (devCount[v] || 0) + 1; });
+  });
+  const dev = Object.entries(devCount).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k);
+  if (dev.length) parts.push(`Development areas they've been working on: ${dev.join(', ')}.`);
+  let dir = 'steady'; try { dir = _memberTrajDir(code, u, now); } catch (_) {}
+  parts.push(`Recent trajectory: ${dir === 'up' ? 'trending up' : dir === 'down' ? 'in a dip' : 'steady'}.`);
+  const returned = (assessmentAssignments[code] || []).filter(a => a.assigneeId === userId && a.status === 'returned' && Number.isFinite(a.score)).slice(-4);
+  if (returned.length) parts.push(`Recent reviews: ${returned.map(a => `"${a.title}" (${a.score})`).join(', ')}.`);
   return parts.join(' ');
 }
 
@@ -4138,30 +4168,42 @@ app.post('/api/studio/chat', requireAuth, async (req, res) => {
 
   // Plans emerge from the conversation — the model decides when a turn contains a
   // plan worth keeping, so it feels like "I've turned that into a plan", not a form.
-  let planToSave = (savePlan && message) ? message.slice(0, 400) : null;
+  let plansToSave = (savePlan && message) ? [message.slice(0, 400)] : [];
   if (ai.enabled() && message && !understanding) {
+    const history = th.messages.slice(-10).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text || (m.media ? `[shared ${m.media.kind}]` : '') }));
+    const ctx = [
+      assignedTitles.length ? `Assigned to them right now: ${assignedTitles.slice(0, 5).join('; ')}.` : 'Nothing is assigned to them right now.',
+      openPlans.length ? `Plans they're working on: ${openPlans.slice(0, 5).join('; ')}.` : 'No saved plans yet.',
+    ].filter(Boolean).join(' ');
+    const memberRead = _studioMemberRead(code, userId, Date.now());
+    const memory = _studioMemoryContext(code, userId);
+    const grounding = [
+      _worldviewDirective(code),
+      memberRead ? `WHAT YOU KNOW ABOUT ${first.toUpperCase()} (use it — be specific): ${memberRead}` : '',
+      memory ? `WHAT'S WORKED HERE BEFORE (reason from this): ${memory}` : '',
+      `Also: ${ctx}`,
+    ].filter(Boolean).join('\n\n');
+    const system = [
+      `You are IntelliQ, ${first}'s coach in their private workspace — a sharp, supportive thinking partner who actually knows their record. When they raise something (a weakness, a goal, a question), give a GENUINELY USEFUL, specific answer: name what you actually see in their data, connect it to their development areas, strengths, and what's worked here before, and give two or three concrete next steps they can start this week. Be a real coach — substantive but tight (3-6 sentences), warm, direct, plainly said. Ground everything in what you know; if you genuinely lack the data to be specific, say so honestly and ask the ONE question that would let you help. When the exchange lands on something concrete to do, capture it as 1-3 short, checkable steps in "planSteps" and set savePlan true, phrasing your reply so it feels natural — never make them click. Otherwise planSteps is empty. Return JSON only: {"reply": string, "savePlan": boolean, "planSteps": array of short imperative strings}. Never invent facts about them or the team. No emojis.`,
+      grounding,
+    ].join('\n\n');
     try {
-      const history = th.messages.slice(-10).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text || (m.media ? `[shared ${m.media.kind}]` : '') }));
-      const ctx = [
-        assignedTitles.length ? `Assigned to them right now: ${assignedTitles.slice(0, 5).join('; ')}.` : 'Nothing is assigned to them right now.',
-        openPlans.length ? `Plans they're working on: ${openPlans.slice(0, 5).join('; ')}.` : 'No saved plans yet.',
-      ].filter(Boolean).join(' ');
-      const memory = _studioMemoryContext(code, userId);
-      const system = [
-        `You are IntelliQ, in ${first}'s personal Studio — a warm, sharp thinking partner, like a great chief of staff. This is a real conversation, not a form. Help them plan, reflect, and act. Be concise (1-4 sentences), concrete, proactive. Reason from what has actually worked before (see MEMORY) — bring it in when it's genuinely relevant ("last time this kind of thing helped…"), never force it. When THIS turn amounts to a concrete plan or commitment worth keeping, capture it: set savePlan true and put a short, clear one-line version in planText, and phrase your reply so it feels natural ("I've turned that into a plan…") — don't make them click anything. Otherwise savePlan is false. Return JSON only: {"reply": string, "savePlan": boolean, "planText": string}. Never invent facts. Never reveal others' private data. No emojis.`,
-        _worldviewDirective(code),
-        `Context: ${ctx}`,
-        memory ? `MEMORY — what's worked / hasn't (reason from this): ${memory}` : '',
-      ].filter(Boolean).join('\n\n');
-      const out = await ai.completeJSON({ tier: 'reason', maxTokens: 300, system, messages: history, schema: ['reply'] });
+      const out = await ai.completeJSON({ tier: 'reason', maxTokens: 650, system, messages: history, schema: ['reply'] });
       if (out && out.reply) {
-        reply = String(out.reply).slice(0, 1000).trim();
-        if (!planToSave && out.savePlan === true && out.planText) planToSave = String(out.planText).slice(0, 400);
+        reply = String(out.reply).slice(0, 1400).trim();
+        const steps = Array.isArray(out.planSteps) ? out.planSteps : (out.planText ? [out.planText] : []);
+        if (out.savePlan === true) steps.slice(0, 3).forEach(s => { const t = String(s || '').slice(0, 300).trim(); if (t) plansToSave.push(t); });
+      } else {
+        // JSON didn't parse — still give a real, grounded answer (just no structured
+        // plan capture this turn) rather than dropping to the thin deterministic line.
+        const line = await ai.complete({ tier: 'reason', maxTokens: 500, system: `You are IntelliQ, ${first}'s coach. Give a specific, useful, grounded answer in 3-6 sentences with two or three concrete next steps. No emojis.\n\n${grounding}`, messages: history });
+        if (line && line.trim()) reply = line.trim().slice(0, 1400);
       }
     } catch (_) { /* deterministic reply stands */ }
   }
 
-  if (planToSave) th.plans.push({ id: _shortId(), text: planToSave, ts: new Date().toISOString(), done: false });
+  plansToSave.forEach(t => th.plans.push({ id: _shortId(), text: t, ts: new Date().toISOString(), done: false }));
+  const planToSave = plansToSave.length ? plansToSave[0] : null;
 
   th.messages.push({ role: 'assistant', text: reply, ts: new Date().toISOString() });
   scheduleSave();

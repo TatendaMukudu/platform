@@ -1531,8 +1531,8 @@ const MemberApp = {
 
     const recLabel = s.canTranscribe ? 'Record' : 'Record (voice)';
     const proactive = s.proactive ? `<div class="studio-proactive">${esc(s.proactive)}</div>` : '';
-    return `<div class="card studio-card">
-      <div class="card-label">MyWorkspace · talk it through with IntelliQ</div>
+    return `<details class="card studio-card collapse-card" open>
+      <summary class="card-label">MyWorkspace · talk it through with IntelliQ</summary>
       ${proactive}
       <div class="studio-log" id="studio-log">${log}</div>
       ${planHtml}
@@ -1550,7 +1550,7 @@ const MemberApp = {
         <button class="btn-primary btn-sm" style="margin-left:auto" onclick="MemberApp._studioSend(document.getElementById('studio-in'))">Send</button>
       </div>
       <div id="studio-rec-status" class="studio-rec-status"></div>
-    </div>`;
+    </details>`;
   },
 
   _studioScrollBottom() {
