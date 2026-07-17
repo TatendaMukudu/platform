@@ -518,6 +518,14 @@ const server = app.listen(0, async () => {
     const setCustom = await call('/api/org/domain', tokCoach, { method: 'POST', body: { pack: 'education', vocab: { person: 'scholar' } } });
     ok('a custom word overrides the pack default (org is never boxed in)',
        setCustom.j?.current?.id === 'education' && setCustom.j.current.vocab.person === 'scholar' && setCustom.j.current.vocab.group === 'class');
+    // A generated surface carries the vocabulary audit stamp AND, with no AI key,
+    // its deterministic copy already speaks the pack's language (never hard-coded).
+    await call('/api/org/domain', tokCoach, { method: 'POST', body: { pack: 'education' } });
+    const briefDom = await call('/api/intelligence/briefing?refresh=1', tokCoach);
+    ok('generated output is stamped with the vocabulary context (prompt audit)',
+       briefDom.j?.domain?.pack === 'education' && typeof briefDom.j.domain.vocabVersion === 'string');
+    ok('deterministic (no-AI) briefing copy uses the pack vocabulary (class/student), not generic nouns',
+       /class|student/i.test(String(briefDom.j?.summary || '')) && !/\bgroup\b/i.test(String(briefDom.j?.summary || '')));
 
     // ── LLM self-test: admin-gated, reports status (no key in test mode) ─────
     ok('a plain member cannot run the LLM self-test (403)',

@@ -185,8 +185,70 @@ function domainCatalog() {
   }));
 }
 
+/* ── The prompt-context builder (the ONE place domain language is expressed) ──
+   Converts a resolved domain (+ the role of the person in focus, if known) into a
+   COMPACT instruction the model receives as ORGANISATIONAL CONTEXT — never a
+   find-and-replace command. Every AI entry point calls this rather than embedding
+   its own copy, so the guidance is consistent and lives in exactly one place.
+
+   Design constraints (from the spec):
+     • semantic guidance, not blind replacement
+     • role-sensitive (a coach is not a "player")
+     • preserves named structures + custom words
+     • never changes a claim's meaning, source, or confidence
+     • token-controlled: only the concepts relevant to THIS generation, and NOTHING
+       at all when the pack adds no words over universal wording (keeps universal
+       mode unchanged and free).
+
+   opts:
+     subjectRole — actual role of the person in focus ('a coach', 'a director'…),
+                   when known. Suppresses calling them the generic person word.
+     concepts    — primitives relevant to this generation (defaults to the everyday
+                   set). Pass a subset to trim tokens further. */
+function domainDirective(domain, opts = {}) {
+  if (!domain || !domain.vocab) return '';
+  const v = domain.vocab;
+  const uni = DOMAIN_VOCAB.universal;
+  const concepts = opts.concepts || ['person', 'group', 'event', 'observation', 'metric', 'commitment', 'intervention', 'outcome'];
+  const MEANS = {
+    person: 'a member of the organisation', group: 'a group of them',
+    event: 'a scheduled event', observation: 'a recorded note or piece of feedback',
+    metric: 'a tracked measure', commitment: 'a commitment or target',
+    intervention: 'a support action', outcome: 'a result',
+  };
+  const pairs = concepts
+    .filter(k => v[k] && v[k] !== uni[k])   // only where the pack actually renames it
+    .map(k => `${MEANS[k] || k} → "${v[k]}"`);
+  const roleLine = opts.subjectRole
+    ? `The person in focus here is ${opts.subjectRole}, not ${v.person ? `a "${v.person}"` : 'a generic member'} — refer to them by that role or by name, never by the generic term.`
+    : '';
+  if (!pairs.length && !roleLine) return '';   // universal + no role nuance → add nothing
+
+  const label = String(domain.label || 'this').trim();
+  const art = /^[aeiou]/i.test(label) ? 'an' : 'a';
+  return [
+    `ORGANISATION LANGUAGE — this is ${art} ${label} organisation.`,
+    pairs.length ? `Use its everyday words naturally when you mean the matching concept: ${pairs.join('; ')}.` : '',
+    `Treat this as CONTEXT, not a find-and-replace rule: do not mechanically swap every "person", "group" or "event". Not everyone is ${v.person ? `a "${v.person}"` : 'the same'} — respect each subject's ACTUAL role (coach, analyst, physio, director, teacher, counsellor, parent, manager, and so on) and use it, or their name, when you know it.`,
+    `Preserve the organisation's own named teams, groups, roles and workflows exactly as given; the org's custom words always win over any default.`,
+    `Wording never changes meaning: a renamed note is still an observation (not a verified fact), and the confidence, source and status of every claim are unchanged.`,
+    roleLine,
+  ].filter(Boolean).join(' ');
+}
+
+/* A short, stable fingerprint of the vocabulary a generation ran under — stored
+   alongside generated prose so historical outputs stay attributable to the words
+   in effect at the time, even after an org later changes its display language. */
+function vocabVersion(domain) {
+  if (!domain || !domain.vocab) return 'none';
+  const s = (domain.id || 'universal') + '|' + Object.keys(domain.vocab).sort().map(k => `${k}=${domain.vocab[k]}`).join(',');
+  let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return `${domain.id || 'universal'}.${h.toString(36)}`;
+}
+
 module.exports = {
   PACKS, UNIVERSAL, resolvePack, labelFor, UNIVERSAL_DIMENSIONS,
   primitiveForSignal, valenceFor,
   DOMAIN_VOCAB, DOMAIN_LABELS, DOMAIN_IDS, resolveDomain, domainCatalog,
+  domainDirective, vocabVersion,
 };

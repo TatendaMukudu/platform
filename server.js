@@ -147,6 +147,56 @@ function _memberValuesDirective(code, userId) {
   return valuesLens.memberDirective(profile, orgUsers[c]?.[userId]?.name);
 }
 
+/* ── Domain language (the org's own voice) ────────────────────────────────────
+   The kernel stores universal primitives; these helpers let generated PROSE speak
+   the organisation's language. All three sit on top of the single shared builder
+   in ai/packs.js, so the instruction is never duplicated across prompt sites. */
+function _resolvedDomain(code) {
+  const org = orgMeta[(code || '').toLowerCase()];
+  return packs.resolveDomain(org?.orgMode, org?.domain);
+}
+
+/* Coarse, HONEST role classification for the person in focus. We don't invent
+   precise titles the data doesn't carry — we only assert "this is staff/leadership,
+   not a {person}" when the model would otherwise mislabel a coach as a player.
+   A plain member returns null, so the domain's person word applies to them. */
+function _roleWordFor(code, userId) {
+  if (!userId) return null;
+  const c = (code || '').toLowerCase();
+  const u = orgUsers[c]?.[userId];
+  if (!u) return null;
+  if (u.role === 'superadmin' || u.role === 'admin') return 'a member of staff / leadership';
+  if (u.role === 'coach') return 'a coach or staff member';
+  if (_isLeader(c, userId)) return 'a member of staff';
+  return null;  // plain member → the domain person word is correct for them
+}
+
+/* The one call every AI entry point makes. Resolves the org's domain, derives the
+   subject's role when a userId is given, and returns the compact language directive
+   (empty string in universal mode with no role nuance — costs nothing). */
+function _domainDirective(code, opts = {}) {
+  const domain = _resolvedDomain(code);
+  const subjectRole = opts.subjectRole !== undefined
+    ? opts.subjectRole
+    : (opts.userId ? _roleWordFor(code, opts.userId) : null);
+  return packs.domainDirective(domain, { subjectRole, concepts: opts.concepts });
+}
+
+/* Audit stamp recorded alongside generated prose so historical outputs remain
+   attributable to the vocabulary in effect when they were produced. */
+function _domainStamp(code) {
+  const d = _resolvedDomain(code);
+  return { pack: d.id, vocabVersion: packs.vocabVersion(d) };
+}
+
+/* Server-side vocabulary lookup — the counterpart of the frontend _v(). Used by
+   DETERMINISTIC fallback copy so a no-AI briefing/insight still speaks the org's
+   language ("players"/"squad") instead of hard-coded generic nouns. */
+function _vc(code, key) {
+  const d = _resolvedDomain(code);
+  return (d.vocab && d.vocab[key]) || key;
+}
+
 // Sessions last 30 days, and REFRESH on use (sliding expiry) — so anyone who
 // opens the app at least every few weeks stays logged in. A 24h token logged
 // pilot users out constantly ("session may have expired").
@@ -362,7 +412,7 @@ app.post('/api/chat', async (req, res) => {
     const response = await client.messages.create({
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 500,
-      system:     systemPrompt,
+      system:     [systemPrompt, _domainDirective(code, { userId })].filter(Boolean).join('\n\n'),
       messages:   apiMessages,
     });
 
@@ -441,7 +491,7 @@ RULES:
     const response = await client.messages.create({
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 700,
-      system:     systemPrompt,
+      system:     [systemPrompt, _domainDirective(code)].filter(Boolean).join('\n\n'),
       messages:   [{ role: 'user', content: userContent }],
     });
 
@@ -494,7 +544,7 @@ Be honest. Be specific. Reference what ${memberName} actually said. Do not give 
     const response = await client.messages.create({
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 600,
-      system:     systemPrompt,
+      system:     [systemPrompt, packs.domainDirective(packs.resolveDomain(orgMode))].filter(Boolean).join('\n\n'),
       messages:   [{
         role:    'user',
         content: `SCORES: Ethical Reasoning ${scores.ethical_reasoning}, Stakeholder Awareness ${scores.stakeholder_awareness}, Pressure Response ${scores.pressure_response}, Self Awareness ${scores.self_awareness}, Overall ${scores.overall}\n\nCONVERSATION:\n${conversationText}`,
@@ -2425,7 +2475,7 @@ app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
     const theme = String(req.body?.theme || '').slice(0, 120).trim();
     const fallback = {
       title: theme ? `This week's focus: ${theme}` : 'A proactive plan for the week',
-      description: `A short, shared plan to get ahead of ${theme || 'what the team is facing this week'} — everyone reflects, then we act on it together.`,
+      description: `A short, shared plan to get ahead of ${theme || `what the ${_vc(code, 'group')} is facing this week`} — everyone reflects, then we act on it together.`,
       fields: [{ label: `What's your read on ${theme || 'this'} right now?`, hint: '' }, { label: 'One thing that would help you this week', hint: '' }],
       message: `Getting ahead of ${theme || 'the week'} — take two minutes so we can plan around it together.`,
       rationale: `Being proactive about ${theme || 'this'} now beats reacting to it later.`,
@@ -2433,7 +2483,7 @@ app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
     let out = null;
     if (ai.enabled()) {
       try {
-        const system = `${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ helping a leader be PROACTIVE — drafting a short, forward-looking plan the whole team engages with to get ahead of a theme (a shared development area, a busy period coming up, or a process that needs reworking). Universal language for any organisation, no names, no emojis. Return JSON only: {"title": string(<=60), "description": string(1-2 sentences), "fields": array of 1-3 {"label","hint"}, "message": string(a warm 1-2 sentence note to the team), "rationale": string(one sentence to the LEADER on why acting now helps)}.`;
+        const system = [`${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ helping a leader be PROACTIVE — drafting a short, forward-looking plan the whole team engages with to get ahead of a theme (a shared development area, a busy period coming up, or a process that needs reworking). No names, no emojis. Return JSON only: {"title": string(<=60), "description": string(1-2 sentences), "fields": array of 1-3 {"label","hint"}, "message": string(a warm 1-2 sentence note to the team), "rationale": string(one sentence to the LEADER on why acting now helps)}.`, _domainDirective(code)].filter(Boolean).join('\n\n');
         out = await ai.completeJSON({ tier: 'reason', system, user: `Theme to plan around: ${theme || '(general week-ahead readiness)'}.`, maxTokens: 500, schema: ['title', 'message'] });
       } catch (_) { out = null; }
     }
@@ -2455,18 +2505,18 @@ app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
   if (kind === 'replicate') {
     const factor = String(req.body?.factor || '').slice(0, 80).trim();
     const sourceName = String(req.body?.sourceName || '').slice(0, 80).trim();
-    const first = sourceName ? sourceName.split(' ')[0] : 'someone on the team';
+    const first = sourceName ? sourceName.split(' ')[0] : `someone on the ${_vc(code, 'group')}`;
     let out = null;
     const fallback = {
       title: factor ? `Building on what's working: ${factor}` : 'Building on what\'s working',
-      description: `A short reflection for everyone on how to grow ${factor || 'the habits that are helping the team right now'}.`,
+      description: `A short reflection for everyone on how to grow ${factor || `the habits that are helping the ${_vc(code, 'group')} right now`}.`,
       fields: [{ label: `Where do you already do this well?`, hint: '' }, { label: `One way you could do more of it`, hint: '' }],
-      message: `We've seen ${factor || 'some real strengths'} making a difference lately — let's build it across the team.`,
+      message: `We've seen ${factor || 'some real strengths'} making a difference lately — let's build it across the ${_vc(code, 'group')}.`,
       rationale: `${first}'s momentum is partly down to ${factor || 'these habits'}; spreading it lifts everyone.`,
     };
     if (ai.enabled()) {
       try {
-        const system = `${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ helping a leader SCALE a success pattern across their team. Given a strength that's working for someone who's improving, draft a short, positive reflection everyone can do to build that same strength. Universal language, any organisation, no names of the source person in the message, no emojis. Return JSON only: {"title": string(<=60), "description": string(1-2 sentences), "fields": array of 1-3 {"label","hint"}, "message": string(a warm 1-2 sentence note to the team), "rationale": string(one sentence to the LEADER)}.`;
+        const system = [`${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ helping a leader SCALE a success pattern across their team. Given a strength that's working for someone who's improving, draft a short, positive reflection everyone can do to build that same strength. No names of the source person in the message, no emojis. Return JSON only: {"title": string(<=60), "description": string(1-2 sentences), "fields": array of 1-3 {"label","hint"}, "message": string(a warm 1-2 sentence note to the team), "rationale": string(one sentence to the LEADER)}.`, _domainDirective(code)].filter(Boolean).join('\n\n');
         out = await ai.completeJSON({ tier: 'reason', system, user: `Strength to spread: ${factor || '(general good habits)'}.`, maxTokens: 500, schema: ['title', 'message'] });
       } catch (_) { out = null; }
     }
@@ -2501,7 +2551,7 @@ app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
   let out = null;
   if (ai.enabled()) {
     try {
-      const system = `${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ preparing a SUPPORTIVE intervention a leader can send to one of their people. It must feel caring, never like surveillance, and must NOT reveal any private detail or that the person was "flagged". Universal language for any organisation. Return JSON only: {"title": string(<=60), "description": string(1-2 sentences of gentle instructions), "fields": array of 1-3 {"label","hint"}, "message": string(a warm 1-2 sentence note to the person), "rationale": string(one sentence to the LEADER on why this helps)}. No emojis.`;
+      const system = [`${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ preparing a SUPPORTIVE intervention a leader can send to one of their people. It must feel caring, never like surveillance, and must NOT reveal any private detail or that the person was "flagged". Return JSON only: {"title": string(<=60), "description": string(1-2 sentences of gentle instructions), "fields": array of 1-3 {"label","hint"}, "message": string(a warm 1-2 sentence note to the person), "rationale": string(one sentence to the LEADER on why this helps)}. No emojis.`, _domainDirective(code, { userId: memberId })].filter(Boolean).join('\n\n');
       const ctx = item ? `Pattern (privacy-safe): ${item.whyNow}. Suggested direction: ${item.recommendedAction}.` : 'No strong pattern; keep it light and general.';
       out = await ai.completeJSON({ tier: 'reason', system, user: `Person's first name: ${first}. Intent: ${kind}. ${ctx}`, maxTokens: 500, schema: ['title', 'message'] });
     } catch (_) { out = null; }
@@ -2832,7 +2882,7 @@ app.get('/api/workspace/briefing', requireAuth, async (req, res) => {
   try {
     narrative = await ai.complete({
       tier: 'reason', maxTokens: 220,
-      system: [`You are IntelliQ, briefing a group's leader. In 2-4 sentences say what the week looks like and the ONE or TWO things to prioritise. Aggregate only — do not name individuals (the leader sees the named list separately). Directional, practical, warm. No scores.`, _worldviewDirective(code)].filter(Boolean).join('\n\n'),
+      system: [`You are IntelliQ, briefing a group's leader. In 2-4 sentences say what the week looks like and the ONE or TWO things to prioritise. Aggregate only — do not name individuals (the leader sees the named list separately). Directional, practical, warm. No scores.`, _worldviewDirective(code), _domainDirective(code)].filter(Boolean).join('\n\n'),
       user: brief,
     });
   } catch (_) { /* fall back to no narrative */ }
@@ -2840,6 +2890,7 @@ app.get('/api/workspace/briefing', requireAuth, async (req, res) => {
   const data = {
     ok: true,
     generatedAt: new Date().toISOString(),
+    domain: _domainStamp(code),
     memberCount: members.length,
     activeThisWeek: activeWeek,
     alerts: topAlerts,
@@ -3161,6 +3212,7 @@ async function _reasonedPrompts(code, userId, now) {
     const system = [
       `You are IntelliQ, the proactive intelligence for a leader. You are given GROUNDED FACTS about their team (each with an id) and must decide which genuinely deserve the leader's attention THIS week, then phrase each as a short, natural "want me to…" offer in the organisation's own voice — the way a sharp chief of staff would raise it. What counts as proactive differs for every organisation; reason from the facts and the worldview, don't apply a template. Return JSON only: {"prompts":[{"id": <one of the given ids, unchanged>, "text": <=160 chars, a warm, specific offer phrased as a question the leader can say yes to>]}. Include only ids worth surfacing (0-4), most important first. Never invent facts, names, or ids beyond those given. No emojis.`,
       _worldviewDirective(code),
+      _domainDirective(code),
     ].filter(Boolean).join('\n\n');
     const out = await ai.completeJSON({ tier: 'reason', system, user: `Grounded facts:\n${list}`, maxTokens: 500, schema: ['prompts'] });
     const picked = Array.isArray(out?.prompts) ? out.prompts : [];
@@ -3242,6 +3294,7 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
       system: [
         `You are Platform Intelligence, briefing a leader in 2-3 sentences: the shape of the week and the ONE thing to prioritise. Aggregate only — NEVER name an individual (the leader sees the named list separately). Honest and directional — say "pattern" or "early signal", never "prediction" and never scores.`,
         _worldviewDirective(code),
+        _domainDirective(code),
       ].filter(Boolean).join('\n\n'),
       user: brief,
     });
@@ -3250,9 +3303,10 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
   const data = {
     ok: true,
     generatedAt: new Date().toISOString(),
+    domain: _domainStamp(code),
     summary: narrative || (top.length
-      ? `${top.length} member(s) show patterns worth a look this week.`
-      : `Your group looks steady — ${activeWeek}/${members.length} active, nothing flagged.`),
+      ? `${top.length} ${_vc(code, top.length === 1 ? 'member' : 'members')} show patterns worth a look this week.`
+      : `Your ${_vc(code, 'group')} looks steady — ${activeWeek}/${members.length} active, nothing flagged.`),
     rollup: { memberCount: members.length, activeThisWeek: activeWeek, participation, momentum, patternCounts },
     items: top,
     prompts: await (async () => { try { return await _reasonedPrompts(code, userId, now); } catch (_) { return []; } })(),
@@ -3454,7 +3508,7 @@ app.get('/api/me/record', requireAuth, async (req, res) => {
         trajectory, hasSensitiveContext: !!m?.hasSensitiveContext,
         understanding,
       });
-      reflection = await ai.complete({ tier: 'reason', system, user, maxTokens: 220 });
+      reflection = await ai.complete({ tier: 'reason', system: [system, _domainDirective(code, { userId })].filter(Boolean).join('\n\n'), user, maxTokens: 220 });
       // Belt-and-suspenders: strip any private span that could have slipped in.
       reflection = privacy.redact(reflection, m?.privateStrings || []);
     } catch (_) { reflection = null; }
@@ -3463,6 +3517,7 @@ app.get('/api/me/record', requireAuth, async (req, res) => {
   const data = {
     ok: true,
     generatedAt: new Date().toISOString(),
+    domain: _domainStamp(code),
     name: me.name,
     reflection: reflection || (goals.length
       ? `You're just getting started here. As you check in and reflect, this becomes a clearer mirror of who you're becoming.`
@@ -3655,6 +3710,7 @@ app.post('/api/compose', requireAuth, async (req, res) => {
       const sys = [
         `You are IntelliQ, ${first}'s private mirror and coach — self-facing, warm, and honest. They just shared something. First show you genuinely understood. Then, IF it warrants it (a problem, a goal, a question, a hard week), give a specific, honest read grounded in what you actually know about them, and one or two concrete things that would help — never generic advice. If it's just a passing note, a warm sentence is enough; don't force coaching. MATCH THEIR TONE AND WORDS — mirror how they talk; if they're casual, be casual. Be real, never a platitude. 1-4 sentences. If you don't have the data to be specific, say so plainly rather than inventing. Speak to them as "you". Never a score as a verdict. No emojis.`,
         _worldviewDirective(code),
+        _domainDirective(code, { userId }),
         memberRead ? `WHAT YOU KNOW ABOUT THEM (use it, be specific): ${memberRead}` : '',
         noticedLine,
       ].filter(Boolean).join('\n\n');
@@ -4322,6 +4378,7 @@ app.post('/api/studio/chat', requireAuth, async (req, res) => {
         const sys = [
           `You are IntelliQ, reading a piece of evidence ${first} shared in their workspace (a ${kind}). Understand what it actually shows and how it bears on their work; connect it to what's worked before when relevant (see MEMORY). ALSO extract every number worth tracking — a stat, a score, a distance, a count, a percentage — faithfully, never invented. Return JSON only: {"reply": string (2-4 sentences, warm and specific, what you see and one useful next step), "observations": array of up to 3 short factual notes, "metrics": array of up to 15 {"label": short string, "value": number}}. No emojis.`,
           _worldviewDirective(code),
+          _domainDirective(code, { userId }),
           emem ? `MEMORY — what's worked / hasn't: ${emem}` : '',
         ].filter(Boolean).join('\n\n');
         const raw = await ai.understand({ system: sys, prompt: `${message ? `They said: "${message}". ` : ''}Read the attached ${kind} ("${att.name || media?.name || 'file'}"), respond, and pull out the numbers.`, media: payload, maxTokens: 900 });
@@ -4380,6 +4437,7 @@ app.post('/api/studio/chat', requireAuth, async (req, res) => {
     const memory = _studioMemoryContext(code, userId);
     const grounding = [
       _worldviewDirective(code),
+      _domainDirective(code, { userId }),
       memberRead ? `WHAT YOU KNOW ABOUT ${first.toUpperCase()} (use it — be specific): ${memberRead}` : '',
       memory ? `WHAT'S WORKED HERE BEFORE (reason from this): ${memory}` : '',
       `Also: ${ctx}`,
@@ -4514,7 +4572,7 @@ app.post('/api/assessments/draft', requireAuth, async (req, res) => {
   let out = null;
   if (ai.enabled()) {
     try {
-      const system = 'You design clear, motivating assessments and reviews for ANY kind of organisation or work. Given a goal, return JSON only: {"title": string (<=80 chars), "kind": one of ["spreadsheet","film","play","skill","general"], "description": string (2-4 sentences of instructions, warm and specific, no emojis), "fields": array of 3-6 {"label": string, "hint": string} the person fills in}. Make it feel like a thoughtful mentor designed it, not a form. Use neutral, universal language — no industry-specific jargon.';
+      const system = ['You design clear, motivating assessments and reviews for ANY kind of organisation or work. Given a goal, return JSON only: {"title": string (<=80 chars), "kind": one of ["spreadsheet","film","play","skill","general"], "description": string (2-4 sentences of instructions, warm and specific, no emojis), "fields": array of 3-6 {"label": string, "hint": string} the person fills in}. Make it feel like a thoughtful mentor designed it, not a form.', _domainDirective(code)].filter(Boolean).join('\n\n');
       out = await ai.completeJSON({ tier: 'reason', system, user: `Goal: ${goal}`, maxTokens: 600, schema: ['title', 'fields'] });
     } catch (_) { out = null; }
   }
@@ -4612,12 +4670,12 @@ app.post('/api/assessments/plan', requireAuth, async (req, res) => {
   let out = null;
   if (ai.enabled()) {
     try {
-      const system = `${privacy.GATE_DIRECTIVE}\n\nYou are a planning partner for ANY kind of organisation or work. You are given a leader's goal and PRIVACY-SAFE context about the people they lead (categorical strengths/development, recent scores, trajectories, weak areas, past assessment averages). Reason over it and return JSON only:
+      const system = [`${privacy.GATE_DIRECTIVE}\n\nYou are a planning partner for ANY kind of organisation or work. You are given a leader's goal and PRIVACY-SAFE context about the people they lead (categorical strengths/development, recent scores, trajectories, weak areas, past assessment averages). Reason over it and return JSON only:
 {"insight": string (2-3 sentences: where the team stands and what to strengthen, grounded in the data),
  "plan": {"title": string(<=80), "kind": one of ["spreadsheet","film","play","skill","general"], "description": string(2-4 sentences of instructions), "fields": array of 3-6 {"label","hint"}},
  "allocation": array of up to 12 {"name": (use ONLY names given), "suggestion": string (what this person should do / work on, from their strengths & development)},
  "sequence": array of 3-6 short ordered steps}
-Play to individual strengths, target real weak areas, and adapt to the specific people. Use neutral, universal language — no industry-specific jargon. No emojis.`;
+Play to individual strengths, target real weak areas, and adapt to the specific people. No emojis.`, _domainDirective(code)].filter(Boolean).join('\n\n');
       const user = `Goal: ${goal}\n\nContext about the people (privacy-safe):\n${JSON.stringify(ctx).slice(0, 6000)}`;
       out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 1100, schema: ['insight', 'plan'] });
     } catch (_) { out = null; }
@@ -4667,7 +4725,7 @@ app.post('/api/assessments/plan/chat', requireAuth, async (req, res) => {
   let out = null;
   if (ai.enabled()) {
     try {
-      const system = `${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ, a planning PARTNER for a leader in ANY kind of organisation. This is a conversation, not a form. Reason WITH them and ground every point in the PRIVACY-SAFE team context provided. Crucially: PUSH BACK when their idea conflicts with the data — be a thoughtful expert who disagrees when warranted, never a yes-man. Examples of good pushback: "I'd hold off assigning that to Jordan — it's been a development area, so they may struggle to execute it efficiently"; "several people are trending down, so a demanding session may set them back — consider a lighter version". Be specific, use only the names given, never invent data, never reveal private detail. Keep replies to 2-4 sentences unless proposing a plan.\n\nReturn JSON only: {"reply": string (your conversational response, including any pushback), "plan": null OR {"title","kind" one of ["spreadsheet","film","play","skill","general"],"description","fields":[{"label","hint"}]} — include a plan ONLY when you and the leader have converged on something concrete}.`;
+      const system = [`${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ, a planning PARTNER for a leader in ANY kind of organisation. This is a conversation, not a form. Reason WITH them and ground every point in the PRIVACY-SAFE team context provided. Crucially: PUSH BACK when their idea conflicts with the data — be a thoughtful expert who disagrees when warranted, never a yes-man. Examples of good pushback: "I'd hold off assigning that to Jordan — it's been a development area, so they may struggle to execute it efficiently"; "several people are trending down, so a demanding session may set them back — consider a lighter version". Be specific, use only the names given, never invent data, never reveal private detail. Keep replies to 2-4 sentences unless proposing a plan.\n\nReturn JSON only: {"reply": string (your conversational response, including any pushback), "plan": null OR {"title","kind" one of ["spreadsheet","film","play","skill","general"],"description","fields":[{"label","hint"}]} — include a plan ONLY when you and the leader have converged on something concrete}.`, _domainDirective(code)].filter(Boolean).join('\n\n');
       const messages = [
         ...history.filter(h => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string').map(h => ({ role: h.role, content: h.content.slice(0, 1500) })),
         { role: 'user', content: `${message}\n\n[Team context — privacy-safe]: ${JSON.stringify(ctx).slice(0, 5000)}` },
@@ -4822,7 +4880,7 @@ app.post('/api/assessments/:id/summarize', requireAuth, async (req, res) => {
   let out = null;
   if (ai.enabled()) {
     try {
-      const system = `You help a leader review someone's assignment. You are given HOW THE LEADER WANTED IT DONE and the person's actual responses. Judge the responses AGAINST the leader's stated method/expectation — not a generic standard. Be fair and specific. Return JSON only: {"summary": string (2-3 sentences the leader could send), "score": integer 0-100 (your honest reasoning score against the leader's expectation) or null if there isn't enough to score, "strengths": array of up to 3 short phrases, "development": array of up to 3 short phrases}. No emojis.`;
+      const system = [`You help a leader review someone's assignment. You are given HOW THE LEADER WANTED IT DONE and the person's actual responses. Judge the responses AGAINST the leader's stated method/expectation — not a generic standard. Be fair and specific. Return JSON only: {"summary": string (2-3 sentences the leader could send), "score": integer 0-100 (your honest reasoning score against the leader's expectation) or null if there isn't enough to score, "strengths": array of up to 3 short phrases, "development": array of up to 3 short phrases}. No emojis.`, _domainDirective(code, { userId: a.assigneeId })].filter(Boolean).join('\n\n');
       const user = `Assignment: "${a.title}".\nHow the leader wanted it done: ${a.guidance || a.description || '(not specified — judge on general quality and effort)'}\n\nThe person's responses:\n${answers.slice(0, 4000)}`;
       out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 600, schema: ['summary'] });
     } catch (_) { out = null; }
@@ -4870,7 +4928,7 @@ app.post('/api/assessments/:id/discuss', requireAuth, async (req, res) => {
         ...history.filter(h => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string').map(h => ({ role: h.role, content: h.content.slice(0, 1000) })),
         { role: 'user', content: message },
       ];
-      const out = await ai.complete({ tier: 'reason', system: `${role}\n\n${context}`, messages, maxTokens: 300 });
+      const out = await ai.complete({ tier: 'reason', system: [`${role}\n\n${context}`, _domainDirective(code, { userId: a.assigneeId })].filter(Boolean).join('\n\n'), messages, maxTokens: 300 });
       if (out) reply = out;
     } catch (_) {}
   }
@@ -5776,6 +5834,7 @@ app.get('/api/groups/:groupId/copilot', requireAuth, async (req, res) => {
     privacy.GATE_DIRECTIVE,
     `Hard rules: speak in AGGREGATE only — never name or single out an individual. Give the lead ADVICE, not exposure. Use directional language, never scores. Tie everything to the group's goals and traits.`,
     _worldviewDirective(code),
+    _domainDirective(code),
   ].filter(Boolean).join('\n\n');
 
   const user = [
@@ -5853,7 +5912,7 @@ app.post('/api/notes', async (req, res) => {
     try {
       const response = await client.messages.create({
         model: 'claude-haiku-4-5-20251001', max_tokens: 100,
-        system: [prompts[type] || prompts.private, _worldviewDirective(note.orgCode), _memberValuesDirective(note.orgCode, authorId)].filter(Boolean).join('\n\n'),
+        system: [prompts[type] || prompts.private, _worldviewDirective(note.orgCode), _domainDirective(note.orgCode, { userId: authorId }), _memberValuesDirective(note.orgCode, authorId)].filter(Boolean).join('\n\n'),
         messages: [{ role: 'user', content: userMsg }],
       });
       note.aiResponse = response.content[0]?.text?.trim() || null;
@@ -6776,7 +6835,7 @@ ${memoryBlock}
 RULES:
 - Observe only what the member explicitly shared — never project or extrapolate
 - If this is their first check-in, acknowledge it honestly ("This is your first check-in — patterns will emerge over time")
-- Keep language generic — no sports-specific, school-specific, or workplace-specific wording unless the member used those words themselves
+- Use the organisation's own vocabulary naturally (see ORGANISATION LANGUAGE below) — but never invent domain detail the member didn't share
 - suggestedNextAction must be concrete and specific to TODAY's check-in — not generic advice
 - watchOutFor: only include if there is a genuine signal (avoidance language, persistent low mood, contradictions) — otherwise null
 - goalConnection: only include if a goal is set and today's check-in has a real connection to it — otherwise null
@@ -6810,7 +6869,7 @@ OUTPUT — valid JSON only, no markdown fencing, no extra text:
       const response = await client.messages.create({
         model:      'claude-haiku-4-5-20251001',
         max_tokens: 600,
-        system:     [systemPrompt, _worldviewDirective(code), _memberValuesDirective(code, userId)].filter(Boolean).join('\n\n'),
+        system:     [systemPrompt, _worldviewDirective(code), _domainDirective(code, { userId }), _memberValuesDirective(code, userId)].filter(Boolean).join('\n\n'),
         messages:   [{ role: 'user', content: userContent }],
       });
 
@@ -6871,7 +6930,7 @@ OUTPUT — valid JSON only, no markdown fencing, no extra text:
     const response = await client.messages.create({
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 150,
-      system:     systemPrompt,
+      system:     [systemPrompt, _worldviewDirective(code), _domainDirective(code, { userId })].filter(Boolean).join('\n\n'),
       messages:   [{ role: 'user', content: userContent }],
     });
     const aiResponse = response.content[0]?.text?.trim() || '';
@@ -6976,7 +7035,7 @@ app.post('/api/weekly/submit', async (req, res) => {
   try {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001', max_tokens: 150,
-      system: [finalRolePrompts[roleKey], _worldviewDirective(code), _memberValuesDirective(code, userId)].filter(Boolean).join('\n\n'),
+      system: [finalRolePrompts[roleKey], _worldviewDirective(code), _domainDirective(code, { userId }), _memberValuesDirective(code, userId)].filter(Boolean).join('\n\n'),
       messages: [{ role: 'user', content: userMsg }],
     });
     aiResponse = response.content[0]?.text?.trim() || null;
@@ -7075,7 +7134,7 @@ Be specific and grounded — only say what the data actually supports. Do not in
   try {
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001', max_tokens: 600,
-      system: systemPrompt,
+      system: [systemPrompt, _domainDirective(orgCode)].filter(Boolean).join('\n\n'),
       messages: [{ role: 'user', content: `Week: ${w}\nOrg: ${orgName}\n\n${inputsText}` }],
     });
     const raw = response.content[0]?.text || '';
@@ -7639,7 +7698,7 @@ app.get('/api/intelliq/org-insights', requireAuth, async (req, res) => {
 
   if (!hasAnyData || agg.memberCount === 0) {
     const result = {
-      generatedAt: new Date().toISOString(), cached: false, stats,
+      generatedAt: new Date().toISOString(), cached: false, stats, domain: _domainStamp(code),
       ai: _noDataFallback(agg),
     };
     orgInsightCache[code] = { data: result, generatedAt: Date.now() };
@@ -7749,7 +7808,7 @@ CRITICAL RULES:
     const response = await client.messages.create({
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 2400,
-      system:     SYSTEM,
+      system:     [SYSTEM, _domainDirective(code)].filter(Boolean).join('\n\n'),
       messages:   [{ role: 'user', content: _buildInsightPrompt(agg, code) }],
     });
     const raw = (response.content[0]?.text || '').replace(/```json\n?|\n?```/g, '').trim();
@@ -7766,7 +7825,7 @@ CRITICAL RULES:
   const flatPredictions = Object.entries(agg.memberPredictions || {})
     .flatMap(([name, preds]) => preds.map(p => ({ member: name, ...p })));
 
-  const result = { generatedAt: new Date().toISOString(), cached: false, stats, ai, patterns: flatPatterns, predictions: flatPredictions };
+  const result = { generatedAt: new Date().toISOString(), cached: false, stats, domain: _domainStamp(code), ai, patterns: flatPatterns, predictions: flatPredictions };
   orgInsightCache[code] = { data: result, generatedAt: Date.now() };
   res.json(result);
 });
@@ -8028,7 +8087,7 @@ async function _buildMemberTimeline(code, userId, memberName) {
       try {
         const r = await client.messages.create({
           model: 'claude-haiku-4-5-20251001', max_tokens: 80,
-          system: `Write ONE sentence (max 20 words) summarising what this data shows about a member during this month. Past tense. Specific. No fluff.`,
+          system: [`Write ONE sentence (max 20 words) summarising what this data shows about a member during this month. Past tense. Specific. No fluff.`, _domainDirective(code, { userId })].filter(Boolean).join('\n\n'),
           messages: [{ role: 'user', content: `${memberName} — ${label}: ${brief}` }],
         });
         narrative = r.content[0]?.text?.trim() || null;
@@ -8604,6 +8663,7 @@ async function _buildBehavioralProfile(code, userId) {
 For durable memory: capture the SIGNIFICANT and lasting (life events, circumstances, big goals, recurring struggles) — not routine activity. Mark anything personal or sensitive with "sensitive": true; phrase it with care and never in a way that exposes private detail if surfaced.
 For follow-ups: things a leader should gently check on later, phrased safely (e.g. "a supportive check-in may help right now" — not the private reason).`,
     _worldviewDirective(code),
+    _domainDirective(code, { userId }),
     _memberValuesDirective(code, userId),
   ].filter(Boolean).join('\n\n');
 
@@ -8649,6 +8709,9 @@ For follow-ups: things a leader should gently check on later, phrased safely (e.
     followUps:  Array.isArray(out.followUps)  ? out.followUps.map(f => clean(f.text || f)).filter(Boolean).slice(0, 4) : [],
     builtAt:    new Date().toISOString(),
     signalBasis: signalCount,
+    // Audit: the vocabulary context this prose was generated under, so it stays
+    // attributable even if the org later changes its display language.
+    domain:     _domainStamp(code),
   };
   scheduleSave();
 
@@ -8857,6 +8920,7 @@ app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
     privacy.GATE_DIRECTIVE,
     lenses.lensDirective(lens),
     _worldviewDirective(code),
+    _domainDirective(code, { userId: memberId }),
     _memberValuesDirective(code, memberId),
   ].filter(Boolean).join('\n\n');
 
@@ -9289,7 +9353,7 @@ app.get('/api/intelliq/learning-summary', requireAuth, async (req, res) => {
     const response = await client.messages.create({
       model:      'claude-haiku-4-5-20251001',
       max_tokens: 200,
-      system:     `You are IntelliQ, a learning intelligence system. You receive a summary of what an org has done and what has worked. Write 3-4 short sentences that describe what IntelliQ has learned about this specific organisation over time: what intervention approaches work best, what patterns recur, and what the trajectory looks like. Be specific. Be honest about limited data. Do not be generic. Do not use headers or bullet points. Write as one flowing paragraph.`,
+      system:     [`You are IntelliQ, a learning intelligence system. You receive a summary of what an org has done and what has worked. Write 3-4 short sentences that describe what IntelliQ has learned about this specific organisation over time: what intervention approaches work best, what patterns recur, and what the trajectory looks like. Be specific. Be honest about limited data. Do not be generic. Do not use headers or bullet points. Write as one flowing paragraph.`, _domainDirective(code)].filter(Boolean).join('\n\n'),
       messages:   [{ role: 'user', content: learningBrief }],
     });
     narrative = response.content[0]?.text?.trim() || null;
@@ -9300,6 +9364,7 @@ app.get('/api/intelliq/learning-summary', requireAuth, async (req, res) => {
   const result = {
     generatedAt:     new Date().toISOString(),
     cached:          false,
+    domain:          _domainStamp(code),
     orgName:         agg.meta.orgName || code,
     narrative:       narrative || `IntelliQ is building its understanding of this organisation. ${intStats.total} intervention(s) tracked so far. More data will unlock richer learning.`,
     interventions:   intStats,
