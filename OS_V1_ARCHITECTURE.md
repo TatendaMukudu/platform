@@ -74,6 +74,32 @@ Nothing becomes organisational truth until it has crossed this boundary.
 
 ---
 
+### The three reasoning boundaries (cross-cutting invariant)
+
+Reasoning is never one generic model call. It is three separate, typed stages, and no
+service may quietly do another's job (`lib/reasoning.js`):
+
+```
+raw input → PRE-KERNEL → canonical evidence → KERNEL → derived evidence →
+POST-KERNEL → authorised experience/action
+```
+
+- **Pre-kernel** (InputInterpretation) turns raw material into claim-bounded canonical
+  evidence. It may classify, extract claims, assign provenance, propose visibility. It
+  may **not** conclude a pattern, infer causation, or promote a model interpretation
+  into observed fact. "Sam seemed distracted / said it was too much / asked to move
+  Friday" is valid; "confirmed overload" is not. A model transformation must preserve
+  its raw source.
+- **Kernel** reasons only over **policy-admissible canonical evidence** (never raw).
+  Every output retains **basis evidence IDs**, a confidence, and its limitations.
+- **Post-kernel** (Experience/Action) turns an authorised kernel result into an
+  experience. It may choose audience, channel, wording, timing. It may **not** add
+  facts, **raise confidence**, drop a limitation, or cite evidence outside the
+  audience's authorised set.
+
+We store **inspectable reasoning artifacts** (result, basis, confidence, limitations,
+policy context, provenance, decision state) — **never private chain-of-thought**.
+
 ### 3. Universal Kernel — how reality is understood
 
 **Contract.** The kernel reasons only over **universal primitives** (state,

@@ -686,6 +686,21 @@ const server = app.listen(0, async () => {
     ok('a DENY policy hard-blocks execution even after approval', blocked.status === 403 && blocked.j?.decision?.denied === true);
     await call('/api/policies/reset', tokCoach, { method: 'POST' });
 
+    // ── MyWorkspace: one conversation-first surface; deterministic, visible privacy ─
+    const classify = await call('/api/workspace/classify', tokB, { method: 'POST', body: { text: "I'm exhausted and struggling to cope" } });
+    ok('IntelliQ SUGGESTS a classification (private, assist-only) — a proposal, not applied',
+       classify.j?.suggestion?.scope === 'personal_private' && classify.j.suggestion.aiUsage === 'private_assistance_only' && classify.j.suggestion.confidence === 'suggested');
+    const capPriv = await call('/api/workspace', tokB, { method: 'POST', body: { text: "I'm exhausted this week", scope: 'personal_private', purpose: 'reflection' } });
+    ok('a personal-private reflection is captured but informs the org NOTHING (no evidence)',
+       capPriv.status === 200 && capPriv.j?.becameEvidence === 0 && capPriv.j.informsOrg === false && capPriv.j.item.aiUsage === 'private_assistance_only');
+    const capObs = await call('/api/workspace', tokB, { method: 'POST', body: { text: 'Delivered the security review on time', scope: 'organizational', purpose: 'observation', visibility: 'manager', aiUsage: 'may_be_cited' } });
+    ok('a permitted organisational observation becomes canonical evidence', capObs.j?.becameEvidence >= 1 && capObs.j.informsOrg === true);
+    const wsList = await call('/api/workspace', tokB);
+    ok('the workspace is SELF-scoped and returns the owner\'s items', wsList.status === 200 && wsList.j?.items?.length >= 2);
+    ok('the "me" lens surfaces the private reflection; it never leaks to another user',
+       (await call('/api/workspace?lens=me', tokB)).j?.items?.some(i => i.scope === 'personal_private') &&
+       !(await call('/api/workspace', tokCoach)).j?.items?.some(i => i.text === "I'm exhausted this week"));
+
     // ── LLM self-test: admin-gated, reports status (no key in test mode) ─────
     ok('a plain member cannot run the LLM self-test (403)',
        (await call('/api/admin/llm-selftest', tokB, { method: 'POST' })).status === 403);

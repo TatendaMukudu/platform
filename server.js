@@ -30,6 +30,8 @@ const mappingLib = require('./lib/mapping');     // the mapping approval lifecyc
 const syncLib    = require('./lib/sync');        // sync reliability — classification, backoff, health, staleness
 const policyLib  = require('./lib/policy');      // the organisational constitution — what the assistant may DO
 const actionLib  = require('./lib/action');      // the universal Action Contract — the Execution Layer spine
+const workspaceLib = require('./lib/workspace'); // the unified personal workspace — typed, scoped items
+const reasoning  = require('./lib/reasoning');   // the three reasoning boundaries — pre-kernel / kernel / post-kernel
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -92,7 +94,7 @@ function scheduleSave() {
         orgConnections, orgOAuthApps, studioThreads, activeSessions,
         rawEvidence, evidenceLog, orgMappings,
         syncRuns, failedRecords, webhookDeliveries,
-        orgPolicies, actionsLog, orgCalendar,
+        orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -664,6 +666,15 @@ const ACTIONS_CAP           = 500;
 // internal adapter writes here, and a real provider (Google/Microsoft) is just
 // another adapter registered against the SAME capability. No new architecture.
 const orgCalendar           = {};  // orgCode → [ event ]
+// MyWorkspace — ONE personal operating surface. Every input is a typed, scoped item
+// (see lib/workspace.js). Keyed by owner; privacy is explicit and deterministic.
+const workspaceItems        = {};  // `${orgCode}:${userId}` → [ item ]
+const WORKSPACE_CAP         = 1000;
+// Reasoning artifacts — the INSPECTABLE trace of every pre-kernel transformation,
+// kernel derivation, and meaningful post-kernel decision (never chain-of-thought).
+// See lib/reasoning.js. This is what makes the three boundaries auditable.
+const reasoningArtifacts    = {};  // orgCode → [ artifact ]
+const REASONING_CAP         = 4000;
 // OAuth2 app credentials the org registered with each provider (client id/secret
 // obtained from the provider's developer console). orgCode → { provider → {clientId, clientSecret} }.
 const orgOAuthApps          = {};
@@ -6448,6 +6459,166 @@ app.get('/api/calendar', requireAuth, (req, res) => {
   res.json({ ok: true, events });
 });
 
+/* ═══ THE THREE REASONING BOUNDARIES ══════════════════════════════════════════
+   raw input → PRE-KERNEL → canonical evidence → KERNEL → derived evidence →
+   POST-KERNEL → authorised experience/action. Each stage is a separate, typed
+   service; none may quietly do another's job. Every meaningful step is recorded as
+   an inspectable reasoning ARTIFACT (never chain-of-thought). See lib/reasoning.js. */
+function _recordArtifact(code, input) {
+  const art = reasoning.buildArtifact({ ...input, org: code, id: 'ra_' + generateId() });
+  const list = reasoningArtifacts[code] || (reasoningArtifacts[code] = []);
+  list.push(art);
+  if (list.length > REASONING_CAP) list.splice(0, list.length - REASONING_CAP);
+  return art;
+}
+
+/* Split raw text into bounded CLAIMS with a derivation + a floor-capped confidence.
+   Deterministic; a model may enrich wording but structure (and the "never confirmed"
+   rule) lives here so admissibility never depends on a model call. */
+function _extractClaims(text) {
+  const parts = String(text || '').split(/(?:[.!?]+|\band\b|\bbut\b|,\s*)/i).map(s => s.trim()).filter(s => s.length > 3);
+  return parts.map(s => {
+    const l = s.toLowerCase();
+    let type = 'observation', derivation = 'observed', confidence = 'medium';
+    if (/\b(said|told|mentioned|reported|asked me)\b/.test(l)) { type = 'statement'; derivation = 'reported'; confidence = 'low'; }
+    else if (/\b(asked|request|move|reschedule|can we|could we|wants? to)\b/.test(l)) { type = 'request'; derivation = 'requested'; confidence = 'low'; }
+    else if (/\b(seem|appeared|looked|felt|sounds?)\b/.test(l)) { type = 'observation'; derivation = 'observed'; confidence = 'low'; }
+    else if (/\b\d+(\.\d+)?\s?(%|kg|km|hours?|mins?|points?|reps?)\b/.test(l)) { type = 'measurement'; derivation = 'measured'; confidence = 'high'; }
+    else if (/\b(i will|i'll|by (monday|tuesday|wednesday|thursday|friday|tomorrow|next week)|deadline|commit)\b/.test(l)) { type = 'commitment'; derivation = 'requested'; confidence = 'medium'; }
+    return { text: s.slice(0, 400), type, derivation, confidence };
+  });
+}
+/* Strip conclusory framing so a pre-kernel claim can never assert a confirmed
+   pattern/cause ("confirmed overload" → "reported that it was too much"). */
+function _downgradeClaim(claim) {
+  return { ...claim, derivation: 'reported', confidence: 'low',
+    text: claim.text.replace(/\b(confirmed|is (overloaded|burned out|declining|withdrawing))\b/gi, 'reported difficulty').replace(/\bbecause of\b|\bcaused by\b|\bdue to\b/gi, 'possibly related to') };
+}
+
+/* A. PRE-KERNEL — InputInterpretationService. Raw text/workspace item → claim-bounded
+   canonical evidence, preserving the raw source + transformation provenance. NEVER a
+   confirmed conclusion or a longitudinal pattern. Personal-private material is
+   interpreted for the OWNER only and never becomes organisational evidence. */
+function _interpretInput(code, opts = {}) {
+  const { text, ownerId, subjectId, rawRef, by, item } = opts;
+  const orgFacing = !item || workspaceLib.informsOrgReasoning(item);
+  const canBeEvidence = item ? workspaceLib.becomesEvidence(item) : true;
+  const claims = _extractClaims(text).map(c => reasoning.claimIsAdmissible(c) ? c : _downgradeClaim(c));
+  const artifacts = [], evidenceIds = [];
+  claims.forEach(claim => {
+    const art = _recordArtifact(code, { stage: 'pre_kernel', type: 'transformed_evidence', derivation: claim.derivation,
+      result: { text: claim.text, claimType: claim.type }, confidence: claim.confidence, rawRef,
+      provenanceBy: by || ownerId || 'system', provenanceKind: opts.byModel ? 'model' : 'rule',
+      limitations: claim.confidence === 'confirmed' ? [] : ['single report — unverified at capture'] });
+    const check = reasoning.preKernelValid(art);
+    if (!check.ok) { art.rejected = check.errors; return; }   // invalid pre-kernel output never proceeds
+    // Only org-facing, explicitly-permitted observation/measurement claims cross into
+    // canonical EVIDENCE. Private reflections inform the owner but never the org.
+    if (orgFacing && canBeEvidence && (claim.type === 'observation' || claim.type === 'measurement' || claim.type === 'statement')) {
+      const r = _recordEvidence(code, { provider: 'workspace', source: 'workspace', subjectRef: null, subjectId: subjectId || null,
+        type: 'observation', label: `Observation (${claim.type})`, valueText: claim.text,
+        observedAt: new Date().toISOString(), retrievedAt: new Date().toISOString(),
+        confidence: subjectId ? 'confirmed' : 'unmatched', visibility: workspaceLib.signalSensitivity(item) === 'sensitive' ? 'sensitive' : 'normal' }, { rawText: text });
+      if (r.stored) { evidenceIds.push(r.id); art.result.evidenceId = r.id; if (r.promotable) _promoteEvidence(code, r.envelope); }
+    }
+  });
+  return { artifacts, evidenceIds, claims };
+}
+
+/* B. KERNEL EVIDENCE GATEWAY — the ONLY door to kernel reasoning. Returns canonical
+   evidence envelopes only (never raw capability records), and only those admissible
+   under policy/visibility. If it isn't a validated canonical envelope, it cannot
+   pass. */
+function _kernelEvidence(code, opts = {}) {
+  const log = evidenceLog[code] || [];
+  return log.filter(env => {
+    if (opts.subjectId && env.subjectId !== opts.subjectId) return false;
+    // admissibility: active + promoted (i.e. it already crossed the truth boundary)
+    return env.status === 'active' && env.promoted === true;
+  }).map(env => ({ evidenceId: env.id, subjectId: env.subjectId, type: env.type, label: env.label, value: env.value, valueText: env.valueText, observedAt: env.observedAt, visibility: env.visibility, __canonical: true }));
+}
+/* Guard used by the gateway + tests: a raw capability record is NOT canonical. */
+function _isCanonicalEvidence(x) { return !!x && x.__canonical === true && !!x.evidenceId; }
+
+/* Record a KERNEL derivation as an artifact — enforces that it carries basis IDs. */
+function _recordKernelDerivation(code, { type, result, basis, confidence, limitations, detector }) {
+  const art = _recordArtifact(code, { stage: 'kernel', type: type || 'derived_pattern', derivation: 'pattern',
+    result, basis: basis || [], confidence: confidence || 'low', limitations: limitations || [], provenanceBy: detector || 'kernel', provenanceKind: 'rule' });
+  const check = reasoning.kernelOutputValid(art);
+  if (!check.ok) { art.rejected = check.errors; }
+  return art;
+}
+
+/* C. POST-KERNEL — ExperienceReasoningService. Turns a kernel result into an
+   audience-appropriate experience WITHOUT exceeding its strength, dropping its
+   limitations, inventing facts, or citing evidence the audience can't see. */
+function _composeForAudience(code, kernelArtifact, audience = {}) {
+  const authorised = new Set((_kernelEvidence(code, { subjectId: audience.subjectId }) || []).map(e => e.evidenceId));
+  // Only cite basis the audience is authorised to see.
+  const cites = (kernelArtifact.basis || []).filter(id => authorised.has(id));
+  const out = {
+    confidence: kernelArtifact.confidence,                 // never raised
+    limitations: [...(kernelArtifact.limitations || [])],  // preserved
+    cites,
+    text: audience.text || '',
+    addedFactualClaim: false,
+  };
+  const check = reasoning.postKernelBounded(kernelArtifact, out, [...authorised]);
+  const art = _recordArtifact(code, { stage: 'post_kernel', type: 'presentation_decision', derivation: 'decision',
+    result: { audience: audience.role || 'member', cites: out.cites, text: out.text }, basis: kernelArtifact.basis || [],
+    confidence: out.confidence, limitations: out.limitations, audienceScope: audience.role || 'member',
+    policyContext: check.ok ? 'bounded' : 'REJECTED: ' + check.errors.join('; ') });
+  return { output: out, artifact: art, ok: check.ok, errors: check.errors };
+}
+
+/* ═══ MYWORKSPACE — one conversation-first personal operating surface ══════════
+   Every input becomes a TYPED, SCOPED object with explicit ownership, visibility and
+   AI-use permissions. IntelliQ SUGGESTS a classification; the person confirms. Privacy
+   is deterministic and visible — a personal-private item supports the individual and
+   is never exposed, quoted, or turned into organisational evidence unless permitted. */
+function _wsKey(code, userId) { return `${(code || '').toLowerCase()}:${userId}`; }
+
+/* Suggest (never apply) a classification for a captured input. */
+app.post('/api/workspace/classify', requireAuth, (req, res) => {
+  res.json({ ok: true, suggestion: workspaceLib.suggestClassification(String(req.body?.text || '')) });
+});
+
+/* Capture an item with its EXPLICIT (confirmed) classification. Routes through the
+   PRE-KERNEL boundary — never straight to the kernel. */
+app.post('/api/workspace', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  if (!b.text && !b.media) return res.status(400).json({ error: 'text or media required' });
+  const item = workspaceLib.buildItem({ id: 'ws_' + generateId(), org: code, ownerId: userId,
+    text: b.text, media: b.media || null, scope: b.scope, purpose: b.purpose, visibility: b.visibility,
+    aiUsage: b.aiUsage, audience: b.audience, classifiedBy: b.classifiedBy });
+  const list = workspaceItems[_wsKey(code, userId)] || (workspaceItems[_wsKey(code, userId)] = []);
+  list.push(item);
+  if (list.length > WORKSPACE_CAP) list.splice(0, list.length - WORKSPACE_CAP);
+  // Pre-kernel interpretation. Private items inform only the owner; permitted items
+  // may become canonical evidence for the org — all deterministically, from `item`.
+  let interp = { evidenceIds: [] };
+  try { interp = _interpretInput(code, { text: item.text, ownerId: userId, subjectId: item.purpose === 'observation' ? null : userId, item }); } catch (_) {}
+  scheduleSave();
+  res.json({ ok: true, item, becameEvidence: interp.evidenceIds.length, informsOrg: workspaceLib.informsOrgReasoning(item) });
+});
+
+/* The owner's surface — SELF ONLY. Lenses are views over the same items, not separate
+   systems. */
+app.get('/api/workspace', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const lens = String(req.query.lens || 'all');
+  let items = (workspaceItems[_wsKey(code, userId)] || []).slice().reverse();
+  const byLens = {
+    me:      i => i.scope === 'personal_private' || i.purpose === 'reflection',
+    work:    i => ['organizational', 'team', 'specific_people'].includes(i.scope) || ['task', 'commitment', 'observation'].includes(i.purpose),
+    notes:   i => i.purpose === 'note' || i.purpose === 'observation',
+    plans:   i => i.purpose === 'plan' || i.purpose === 'commitment',
+  };
+  if (byLens[lens]) items = items.filter(byLens[lens]);
+  res.json({ ok: true, lens, items: items.slice(0, 200), vocab: { scopes: workspaceLib.SCOPES, purposes: workspaceLib.PURPOSES, visibilities: workspaceLib.VISIBILITIES, aiUses: workspaceLib.AI_USES } });
+});
+
 /* POST /api/connections/:id/inspect — fetch a SAMPLE, propose a mapping contract for
    the admin to verify (the safe workflow: inspect → AI proposes → admin confirms →
    versioned mapping → all future data validated against it). Nothing is stored yet. */
@@ -10665,6 +10836,8 @@ function _loadAllStores(data) {
   Object.assign(orgPolicies,      data.orgPolicies      || {});
   Object.assign(actionsLog,       data.actionsLog       || {});
   Object.assign(orgCalendar,      data.orgCalendar      || {});
+  Object.assign(workspaceItems,   data.workspaceItems   || {});
+  Object.assign(reasoningArtifacts, data.reasoningArtifacts || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -10712,7 +10885,10 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _runConnection, _processBatch, _markDeletedAtSource, _newSyncRun, _recordFailure, _openFailures,
   syncRuns, failedRecords, webhookDeliveries, orgConnections, _syncLocks,
   // exported for the truth layer: the execution layer
-  orgPolicies, actionsLog, _policiesFor, orgInterventions, orgCalendar };
+  orgPolicies, actionsLog, _policiesFor, orgInterventions, orgCalendar,
+  // exported for the truth layer: reasoning boundaries + workspace
+  _interpretInput, _kernelEvidence, _isCanonicalEvidence, _recordKernelDerivation, _composeForAudience,
+  reasoningArtifacts, workspaceItems };
 
 if (require.main === module) (async () => {
   try {
