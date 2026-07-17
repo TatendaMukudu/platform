@@ -407,10 +407,14 @@ const server = app.listen(0, async () => {
        !((await call('/api/studio', tokB)).j?.plans || []).some(p => p.id === planId));
     ok('voice transcription degrades honestly with no key (503, not a fake transcript)',
        (await call('/api/studio/transcribe', tokB, { method: 'POST', body: { audio: 'AAAA', mimetype: 'audio/webm' } })).status === 503);
-    const csv = Buffer.from('name,score\nA,80\nB,55\n').toString('base64');
+    // "Our strength is data in" — a spreadsheet/stat block is deciphered into real
+    // numeric signals WITHOUT any AI key (deterministic extraction), never thrown away.
+    const csv = Buffer.from('metric,value\nsprint distance,2.1\npasses,45\nturnovers,3\n').toString('base64');
     const withFile = await call('/api/studio/chat', tokB, { method: 'POST', body: { message: 'Here are this week\'s numbers', media: { name: 'week.csv', kind: 'csv' }, attachment: { name: 'week.csv', mimetype: 'text/csv', data: csv } } });
-    ok('attaching evidence returns a reply and degrades honestly without a Claude key',
-       withFile.status === 200 && typeof withFile.j?.reply === 'string' && withFile.j.understood === false);
+    ok('attaching a spreadsheet returns a reply confirming the numbers were captured',
+       withFile.status === 200 && typeof withFile.j?.reply === 'string' && /pulled\s+\d+\s+number/i.test(withFile.j.reply));
+    ok('extracted numbers become real metric signals the kernel can reason over',
+       (await call('/api/me/export', tokB)).j?.signals?.some(s => s.source === 'metric' && s.data?.extracted && Number.isFinite(s.valueNum)));
 
     // ── Universal ingest: one authenticated pipe any app can push data to ──
     ok('a plain member cannot mint an org ingest token (403)',

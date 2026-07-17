@@ -4027,6 +4027,27 @@ function _studioMemoryContext(code, userId) {
   return parts.join(' ');
 }
 
+/* Pull structured numbers out of freeform text / CSV WITHOUT any AI — a spreadsheet
+   or a pasted stat line becomes real metrics. "label: 45", "label = 45", "label,45",
+   or a two-column CSV row all count. Nothing plugged in gets thrown away. */
+function _extractMetricsFromText(text) {
+  const out = [];
+  String(text || '').split(/\r?\n/).slice(0, 300).forEach(line => {
+    let label = null, value = null;
+    let m = line.match(/^\s*([A-Za-z][A-Za-z0-9 _\-\/%().]{1,46}?)\s*[:=]\s*(-?\d+(?:\.\d+)?)\s*[%a-zA-Z\/]{0,6}\s*$/);
+    if (m) { label = m[1]; value = Number(m[2]); }
+    else {
+      const c = line.split(',');
+      if (c.length === 2 && /[A-Za-z]/.test(c[0]) && /^-?\d+(?:\.\d+)?$/.test(c[1].trim())) { label = c[0]; value = Number(c[1].trim()); }
+    }
+    if (label && Number.isFinite(value)) {
+      const clean = label.trim().replace(/\s+/g, ' ').slice(0, 60);
+      if (clean && !/^\d/.test(clean)) out.push({ label: clean, value });
+    }
+  });
+  return out.slice(0, 40);
+}
+
 /* What IntelliQ actually KNOWS about this person, so its coaching is grounded in
    their record — their aim, their reviewed strengths and development areas, where
    they're trending, and their recent results. This is their OWN data in their OWN
@@ -4122,44 +4143,69 @@ app.post('/api/studio/chat', requireAuth, async (req, res) => {
   const assignedTitles = all.filter(a => a.assigneeId === userId && a.status !== 'returned').map(a => a.title);
   const openPlans = th.plans.filter(p => !p.done).map(p => p.text);
 
-  // ── If evidence was attached, READ it (vision / PDF / text) so the reply is
-  //    about what's actually in it. Understanding also enriches the kernel signal
-  //    and can surface a couple of grounded observations. ──────────────────────
+  // ── If evidence was attached, READ it AND DECIPHER IT INTO NUMBERS. Reading gives
+  //    a grounded reply; the extracted metrics become real numeric signals the kernel
+  //    reasons over (trajectory, load, capability). Nothing plugged in is thrown away.
   let understanding = '';
   let understandNote = '';
+  let capturedMetrics = [];   // [{label, value}]
   if (att && att.data) {
     const mime = String(att.mimetype || '').toLowerCase();
-    let kind = null, payload = null;
+    let kind = null, payload = null, plainText = null;
     if (mime.startsWith('image/')) { kind = 'image'; payload = { type: 'image', mimetype: mime, data: att.data }; }
     else if (mime === 'application/pdf') { kind = 'pdf'; payload = { type: 'pdf', data: att.data }; }
     else if (mime.startsWith('text/') || mime === 'application/csv') {
       kind = 'text';
-      try { payload = { type: 'text', text: Buffer.from(att.data, 'base64').toString('utf8') }; } catch (_) { payload = null; }
+      try { plainText = Buffer.from(att.data, 'base64').toString('utf8'); payload = { type: 'text', text: plainText }; } catch (_) { payload = null; }
     }
+
+    // Deterministic extraction from text/CSV runs regardless of any AI key — a
+    // coach's spreadsheet or a pasted stat block is deciphered on the spot.
+    if (plainText) capturedMetrics = _extractMetricsFromText(plainText);
+
     if (!kind) {
-      understandNote = 'I can read images, PDFs, and text/CSV directly right now — for a spreadsheet or Word doc, export it to PDF or CSV and I\'ll read it in full.';
-    } else if (!ai.canUnderstand(kind)) {
+      understandNote = 'I can read images, PDFs, and text/CSV directly right now — for an Excel or Word file, export it to PDF or CSV and I\'ll read it in full.';
+    } else if (!ai.canUnderstand(kind) && !capturedMetrics.length) {
       understandNote = kind === 'pdf'
         ? 'Reading PDFs needs a Claude key — it\'s captured here. Send it as an image or text, or tell me what\'s in it, and I\'ll work with that.'
         : 'Reading files needs an AI key configured — it\'s captured here, but tell me what\'s in it and I\'ll work with that for now.';
-    } else {
+    } else if (ai.canUnderstand(kind)) {
       try {
         const emem = _studioMemoryContext(code, userId);
         const sys = [
-          `You are IntelliQ, reading a piece of evidence ${first} shared in their Studio (a ${kind}). Understand what it actually shows and how it bears on their work. Where it's genuinely relevant, connect what you see to what's worked before (see MEMORY). Return JSON only: {"reply": string (2-4 sentences, warm and specific, what you see and one useful next step or question), "observations": array of up to 3 short factual notes worth remembering}. Never invent detail that isn't there. No emojis.`,
+          `You are IntelliQ, reading a piece of evidence ${first} shared in their workspace (a ${kind}). Understand what it actually shows and how it bears on their work; connect it to what's worked before when relevant (see MEMORY). ALSO extract every number worth tracking — a stat, a score, a distance, a count, a percentage — faithfully, never invented. Return JSON only: {"reply": string (2-4 sentences, warm and specific, what you see and one useful next step), "observations": array of up to 3 short factual notes, "metrics": array of up to 15 {"label": short string, "value": number}}. No emojis.`,
           _worldviewDirective(code),
           emem ? `MEMORY — what's worked / hasn't: ${emem}` : '',
         ].filter(Boolean).join('\n\n');
-        const raw = await ai.understand({ system: sys, prompt: `${message ? `They said: "${message}". ` : ''}Read the attached ${kind} ("${att.name || media?.name || 'file'}") and respond.`, media: payload, maxTokens: 700 });
+        const raw = await ai.understand({ system: sys, prompt: `${message ? `They said: "${message}". ` : ''}Read the attached ${kind} ("${att.name || media?.name || 'file'}"), respond, and pull out the numbers.`, media: payload, maxTokens: 900 });
         const parsed = ai.parseJSON(raw) || {};
         understanding = String(parsed.reply || raw || '').slice(0, 1200);
-        const obs = Array.isArray(parsed.observations) ? parsed.observations.slice(0, 3).map(o => String(o).slice(0, 160)) : [];
-        obs.forEach(o => _emitSignalSafe(code, {
+        (Array.isArray(parsed.observations) ? parsed.observations.slice(0, 3) : []).forEach(o => _emitSignalSafe(code, {
           subjectType: 'member', subjectId: userId, source: 'studio', modality: 'media',
-          valueText: `From ${kind}: ${o}`, label: 'Studio evidence', primitive: 'observation', sensitivity: 'normal',
+          valueText: `From ${kind}: ${String(o).slice(0, 160)}`, label: 'Studio evidence', primitive: 'observation', sensitivity: 'normal',
           data: { studio: true, evidence: kind },
         }, userId));
-      } catch (_) { understandNote = 'I had the file but couldn\'t read it just now — try again, or tell me what\'s in it.'; }
+        // Merge AI-read metrics (dedupe by label; deterministic ones already found win).
+        const seen = new Set(capturedMetrics.map(x => x.label.toLowerCase()));
+        (Array.isArray(parsed.metrics) ? parsed.metrics : []).forEach(mm => {
+          const label = String(mm?.label || '').trim().slice(0, 60); const value = Number(mm?.value);
+          if (label && Number.isFinite(value) && !seen.has(label.toLowerCase())) { seen.add(label.toLowerCase()); capturedMetrics.push({ label, value }); }
+        });
+      } catch (_) { if (!capturedMetrics.length) understandNote = 'I had the file but couldn\'t read it just now — try again, or tell me what\'s in it.'; }
+    }
+
+    // Emit every captured number as a real metric signal — this is the "data in" that
+    // the kernel then trends, correlates, and reasons over going forward.
+    capturedMetrics = capturedMetrics.slice(0, 20);
+    capturedMetrics.forEach(mm => _emitSignalSafe(code, {
+      subjectType: 'member', subjectId: userId, source: 'metric', modality: 'data',
+      valueNum: mm.value, label: mm.label.slice(0, 80), sensitivity: 'normal',
+      data: { studio: true, evidence: kind, extracted: true, name: att.name || media?.name || null },
+    }, userId));
+    if (capturedMetrics.length) {
+      const preview = capturedMetrics.slice(0, 4).map(mm => `${mm.label} ${mm.value}`).join(', ');
+      const tail = `I pulled ${capturedMetrics.length} number${capturedMetrics.length > 1 ? 's' : ''} from that${preview ? ` — ${preview}${capturedMetrics.length > 4 ? '…' : ''}` : ''} — I'm tracking ${capturedMetrics.length > 1 ? 'them' : 'it'} now, so they'll shape what I notice going forward.`;
+      understanding = understanding ? `${understanding} ${tail}` : tail;
     }
   }
 
