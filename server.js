@@ -6501,8 +6501,10 @@ function _downgradeClaim(claim) {
    interpreted for the OWNER only and never becomes organisational evidence. */
 function _interpretInput(code, opts = {}) {
   const { text, ownerId, subjectId, rawRef, by, item } = opts;
+  const vis = item ? workspaceLib.canonicalVisibility(item) : 'normal';   // private | sensitive | normal
+  const isPrivate = vis === 'private';
   const orgFacing = !item || workspaceLib.informsOrgReasoning(item);
-  const canBeEvidence = item ? workspaceLib.becomesEvidence(item) : true;
+  const evidenceWorthy = !item || workspaceLib.producesEvidence(item);
   const claims = _extractClaims(text).map(c => reasoning.claimIsAdmissible(c) ? c : _downgradeClaim(c));
   const artifacts = [], evidenceIds = [];
   claims.forEach(claim => {
@@ -6512,30 +6514,68 @@ function _interpretInput(code, opts = {}) {
       limitations: claim.confidence === 'confirmed' ? [] : ['single report — unverified at capture'] });
     const check = reasoning.preKernelValid(art);
     if (!check.ok) { art.rejected = check.errors; return; }   // invalid pre-kernel output never proceeds
-    // Only org-facing, explicitly-permitted observation/measurement claims cross into
-    // canonical EVIDENCE. Private reflections inform the owner but never the org.
-    if (orgFacing && canBeEvidence && (claim.type === 'observation' || claim.type === 'measurement' || claim.type === 'statement')) {
-      const r = _recordEvidence(code, { provider: 'workspace', source: 'workspace', subjectRef: null, subjectId: subjectId || null,
-        type: 'observation', label: `Observation (${claim.type})`, valueText: claim.text,
-        observedAt: new Date().toISOString(), retrievedAt: new Date().toISOString(),
-        confidence: subjectId ? 'confirmed' : 'unmatched', visibility: workspaceLib.signalSensitivity(item) === 'sensitive' ? 'sensitive' : 'normal' }, { rawText: text });
-      if (r.stored) { evidenceIds.push(r.id); art.result.evidenceId = r.id; if (r.promotable) _promoteEvidence(code, r.envelope); }
-    }
+    if (!evidenceWorthy) return;
+    // CORRECTION: meaningful content ALWAYS becomes canonical evidence. What changes is
+    // its VISIBILITY and whether it emits an organisational signal:
+    //   • private  → PRIVATE canonical evidence (owner-only), NO org signal, personal
+    //                reasoning only. Kept so IntelliQ can remember + assist the owner.
+    //   • org      → canonical evidence + (if permitted) an org signal.
+    // A private claim is the owner's memory (all types); an org claim must be an
+    // observation/measurement/statement.
+    const admit = isPrivate ? true : ['observation', 'measurement', 'statement'].includes(claim.type);
+    if (!admit) return;
+    const evSubject = isPrivate ? ownerId : (subjectId || null);
+    // A text reflection's factual identity IS its text — derive a stable key from it so
+    // two distinct claims from one input don't collide, while an identical re-capture
+    // dedups (a correction shares the item id but changes the text).
+    let th = 0; for (const ch of String(claim.text)) th = (th * 31 + ch.charCodeAt(0)) >>> 0;
+    const claimKey = `${item ? item.id : 'ws'}#${th.toString(36)}`;
+    const r = _recordEvidence(code, {
+      provider: 'workspace', source: 'workspace', subjectId: evSubject, externalId: claimKey,
+      ownerRef: isPrivate ? ownerId : null, workspaceItemId: item ? item.id : null,
+      type: claim.type === 'measurement' ? 'metric' : 'observation',
+      label: isPrivate ? `Private reflection (${claim.type})` : `Observation (${claim.type})`,
+      valueText: claim.text,
+      // Stable observed-time per item (its capture time), so re-interpreting the SAME
+      // item dedups/supersedes deterministically rather than forking by millisecond.
+      observedAt: (item && item.createdAt) || new Date().toISOString(), retrievedAt: new Date().toISOString(),
+      confidence: evSubject ? 'confirmed' : 'unmatched', visibility: vis,
+    }, { rawText: text, workspaceItemId: item ? item.id : null });
+    if (!r.stored) return;
+    evidenceIds.push(r.id); art.result.evidenceId = r.id;
+    // ORG signal ONLY for org-facing evidence. Private evidence is canonical but emits
+    // NO organisational signal — it never enters organisational reasoning.
+    if (orgFacing && !isPrivate && r.promotable) _promoteEvidence(code, r.envelope);
   });
   return { artifacts, evidenceIds, claims };
 }
 
 /* B. KERNEL EVIDENCE GATEWAY — the ONLY door to kernel reasoning. Returns canonical
-   evidence envelopes only (never raw capability records), and only those admissible
-   under policy/visibility. If it isn't a validated canonical envelope, it cannot
-   pass. */
+   evidence envelopes only (never raw capability records), and PURPOSE-SCOPED: private
+   evidence is excluded BEFORE any unauthorised context is built (never retrieved then
+   filtered). A canonical record may be admissible for one purpose and not another. */
+const PERSONAL_PURPOSES = ['personal_assistance', 'personal_memory', 'personal_planning', 'outcome_evaluation'];
+const ORG_PURPOSES = ['workspace_shared_reasoning', 'leader_support', 'group_reasoning', 'organisation_reasoning'];
 function _kernelEvidence(code, opts = {}) {
+  const purpose = opts.purpose || 'organisation_reasoning';
+  const personal = PERSONAL_PURPOSES.includes(purpose);
+  const viewerId = opts.viewerId || null;
   const log = evidenceLog[code] || [];
   return log.filter(env => {
+    if (env.status !== 'active') return false;
     if (opts.subjectId && env.subjectId !== opts.subjectId) return false;
-    // admissibility: active + promoted (i.e. it already crossed the truth boundary)
-    return env.status === 'active' && env.promoted === true;
-  }).map(env => ({ evidenceId: env.id, subjectId: env.subjectId, type: env.type, label: env.label, value: env.value, valueText: env.valueText, observedAt: env.observedAt, visibility: env.visibility, __canonical: true }));
+    if (personal) {
+      // Personal reasoning: the owner's own material. Private → only its owner.
+      if (env.visibility === 'private') return !!viewerId && env.ownerRef === viewerId;
+      return (env.subjectId && env.subjectId === viewerId) || (env.ownerRef && env.ownerRef === viewerId);
+    }
+    // ORGANISATIONAL purposes: private evidence NEVER passes; the rest must have
+    // crossed the org truth boundary (promoted).
+    if (env.visibility === 'private') return false;
+    return env.promoted === true;
+  }).map(env => ({ evidenceId: env.id, subjectId: env.subjectId, ownerRef: env.ownerRef || null, type: env.type,
+    label: env.label, value: env.value, valueText: env.valueText, observedAt: env.observedAt,
+    visibility: env.visibility, purpose, __canonical: true }));
 }
 /* Guard used by the gateway + tests: a raw capability record is NOT canonical. */
 function _isCanonicalEvidence(x) { return !!x && x.__canonical === true && !!x.evidenceId; }
@@ -6549,11 +6589,43 @@ function _recordKernelDerivation(code, { type, result, basis, confidence, limita
   return art;
 }
 
+/* The visibility ceiling a DERIVED output inherits from its basis — the most
+   restrictive of any basis evidence. Derived evidence can never be broader than its
+   narrowest input (no broadening exceptions for personal_private in this commit). */
+function _inheritedVisibility(code, basisIds) {
+  const log = evidenceLog[code] || [];
+  const order = { private: 3, sensitive: 2, normal: 1 };
+  let worst = 'normal', owner = null;
+  (basisIds || []).forEach(id => {
+    const env = log.find(e => e.id === id);
+    if (env && order[env.visibility] > order[worst]) { worst = env.visibility; owner = env.ownerRef || owner; }
+    else if (env && env.visibility === 'private' && !owner) owner = env.ownerRef;
+  });
+  return { visibility: worst, ownerRef: worst === 'private' ? owner : null };
+}
+/* Record CANONICAL DERIVED evidence (a personal pattern/recommendation) inheriting an
+   owner-only ceiling when any basis is private. It goes back through the SAME store —
+   there is no separate personal-memory path outside canonical evidence. */
+function _recordDerivedEvidence(code, { subjectId, ownerId, type, label, valueText, basisIds, confidence }) {
+  const inh = _inheritedVisibility(code, basisIds);
+  const r = _recordEvidence(code, {
+    provider: 'kernel', source: 'derived', subjectId: subjectId || ownerId || null,
+    ownerRef: inh.visibility === 'private' ? (inh.ownerRef || ownerId) : null,
+    type: type || 'observation', label: label || 'Derived pattern', valueText: valueText || '',
+    observedAt: new Date().toISOString(), retrievedAt: new Date().toISOString(),
+    confidence: 'confirmed', visibility: inh.visibility, derivedFrom: basisIds || [],
+  }, { derivedFrom: basisIds });
+  return r;
+}
+
 /* C. POST-KERNEL — ExperienceReasoningService. Turns a kernel result into an
    audience-appropriate experience WITHOUT exceeding its strength, dropping its
    limitations, inventing facts, or citing evidence the audience can't see. */
 function _composeForAudience(code, kernelArtifact, audience = {}) {
-  const authorised = new Set((_kernelEvidence(code, { subjectId: audience.subjectId }) || []).map(e => e.evidenceId));
+  // Purpose-scope the authorised citation set to the AUDIENCE: an owner reasoning
+  // about themselves may see their private basis; a leader may not.
+  const purpose = audience.purpose || (audience.role && audience.role !== 'member' ? 'leader_support' : 'personal_assistance');
+  const authorised = new Set((_kernelEvidence(code, { subjectId: audience.subjectId, purpose, viewerId: audience.viewerId || audience.subjectId }) || []).map(e => e.evidenceId));
   // Only cite basis the audience is authorised to see.
   const cites = (kernelArtifact.basis || []).filter(id => authorised.has(id));
   const out = {
@@ -6617,6 +6689,30 @@ app.get('/api/workspace', requireAuth, (req, res) => {
   };
   if (byLens[lens]) items = items.filter(byLens[lens]);
   res.json({ ok: true, lens, items: items.slice(0, 200), vocab: { scopes: workspaceLib.SCOPES, purposes: workspaceLib.PURPOSES, visibilities: workspaceLib.VISIBILITIES, aiUses: workspaceLib.AI_USES } });
+});
+
+/* Deleting a workspace item removes its canonical evidence from ACTIVE reasoning
+   (lifecycle 'deleted'), without rewriting raw history. Self-only. */
+function _deleteWorkspaceEvidence(code, itemId) {
+  let n = 0;
+  for (const env of (evidenceLog[code] || [])) {
+    if (env.workspaceItemId !== itemId || env.status === 'deleted') continue;
+    const seen = _evidenceSeen[code]; if (seen) seen.delete(evidence.dedupeKey(env));
+    env.status = 'deleted'; env.deletedAtSource = new Date().toISOString();
+    if (env.promoted) _withdrawSignal(code, env);
+    n++;
+  }
+  return n;
+}
+app.delete('/api/workspace/:id', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const list = workspaceItems[_wsKey(code, userId)] || [];
+  const item = list.find(i => i.id === req.params.id);
+  if (!item) return res.status(404).json({ error: 'not found' });   // self-only: not in caller's list → 404
+  item.deleted = true; item.deletedAt = new Date().toISOString();
+  const removed = _deleteWorkspaceEvidence(code, item.id);
+  scheduleSave();
+  res.json({ ok: true, removedEvidence: removed });
 });
 
 /* POST /api/connections/:id/inspect — fetch a SAMPLE, propose a mapping contract for
@@ -10888,7 +10984,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   orgPolicies, actionsLog, _policiesFor, orgInterventions, orgCalendar,
   // exported for the truth layer: reasoning boundaries + workspace
   _interpretInput, _kernelEvidence, _isCanonicalEvidence, _recordKernelDerivation, _composeForAudience,
-  reasoningArtifacts, workspaceItems };
+  _recordDerivedEvidence, _deleteWorkspaceEvidence, reasoningArtifacts, workspaceItems };
 
 if (require.main === module) (async () => {
   try {

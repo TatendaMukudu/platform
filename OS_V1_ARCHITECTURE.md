@@ -100,6 +100,18 @@ POST-KERNEL → authorised experience/action
 We store **inspectable reasoning artifacts** (result, basis, confidence, limitations,
 policy context, provenance, decision state) — **never private chain-of-thought**.
 
+**Private canonical evidence (correction).** Privacy governs evidence *consumption* and
+*visibility* — it does not exempt meaningful AI-used data from canonicalisation. A
+`personal_private` item that IntelliQ stores/remembers/uses becomes **private canonical
+evidence** (owner-only) so it can power the owner's personal reasoning — while staying
+structurally excluded from all organisational reasoning. The kernel gateway is
+**purpose-scoped**: `personal_assistance / personal_memory / personal_planning`
+retrieve private evidence for its owner; `leader_support / group_reasoning /
+organisation_reasoning` exclude it **before any context is built**. Private evidence
+emits no organisational signal, is never citable to leaders, and derived evidence
+inherits its owner-only ceiling (derived output can never be broader than its narrowest
+basis). There is **no raw personal-memory path** outside canonical evidence.
+
 ### 3. Universal Kernel — how reality is understood
 
 **Contract.** The kernel reasons only over **universal primitives** (state,

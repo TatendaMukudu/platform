@@ -691,8 +691,8 @@ const server = app.listen(0, async () => {
     ok('IntelliQ SUGGESTS a classification (private, assist-only) — a proposal, not applied',
        classify.j?.suggestion?.scope === 'personal_private' && classify.j.suggestion.aiUsage === 'private_assistance_only' && classify.j.suggestion.confidence === 'suggested');
     const capPriv = await call('/api/workspace', tokB, { method: 'POST', body: { text: "I'm exhausted this week", scope: 'personal_private', purpose: 'reflection' } });
-    ok('a personal-private reflection is captured but informs the org NOTHING (no evidence)',
-       capPriv.status === 200 && capPriv.j?.becameEvidence === 0 && capPriv.j.informsOrg === false && capPriv.j.item.aiUsage === 'private_assistance_only');
+    ok('a personal-private reflection becomes PRIVATE canonical evidence but informs the org NOTHING',
+       capPriv.status === 200 && capPriv.j?.becameEvidence >= 1 && capPriv.j.informsOrg === false && capPriv.j.item.aiUsage === 'private_assistance_only');
     const capObs = await call('/api/workspace', tokB, { method: 'POST', body: { text: 'Delivered the security review on time', scope: 'organizational', purpose: 'observation', visibility: 'manager', aiUsage: 'may_be_cited' } });
     ok('a permitted organisational observation becomes canonical evidence', capObs.j?.becameEvidence >= 1 && capObs.j.informsOrg === true);
     const wsList = await call('/api/workspace', tokB);

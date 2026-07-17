@@ -57,6 +57,7 @@ const SUITES = [
   'reasoning-smoke.js',          // the three reasoning boundaries: pre-kernel/kernel/post-kernel (pure)
   'workspace-smoke.js',          // the unified workspace item model: typed, scoped, deterministic privacy (pure)
   'reasoning-boundaries-smoke.js', // the 10 architectural invariants, end to end
+  'private-evidence-smoke.js',   // the 18 private-canonical-evidence invariants (owner-only, purpose-scoped)
   'connector-harness.js',  // the Connector SDK: identity/confidence + mapping contracts
   'endpoint-smoke.js',   // boots the real app in-process (DB_OPTIONAL) — HTTP authz + Me context
 ];

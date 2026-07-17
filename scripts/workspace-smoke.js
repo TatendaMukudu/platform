@@ -29,19 +29,22 @@ ok('a personal_private item is FORCED to assist-only + only-me (even if asked ot
    priv.aiUsage === 'private_assistance_only' && priv.visibility === 'only_me');
 
 // ── Enforcement predicates (the single source of truth) ─────────────────────
-ok('a personal_private item never informs org reasoning', !w.informsOrgReasoning(priv));
-ok('a personal_private item is never citable to leaders', !w.citableToLeaders(priv));
-ok('a personal_private item never becomes evidence', !w.becomesEvidence(priv));
-ok('a personal_private item emits NO org signal (no sensitivity)', w.signalSensitivity(priv) === null);
+const privRef = w.buildItem({ org: 'CO', ownerId: 'u1', text: 'a hard week', scope: 'personal_private', purpose: 'reflection' });
+ok('a personal_private item never informs org reasoning', !w.informsOrgReasoning(privRef));
+ok('a personal_private item is never citable to leaders', !w.citableToLeaders(privRef));
+ok('a personal_private item is never ORGANISATIONAL evidence', !w.becomesOrgEvidence(privRef));
+ok('a meaningful personal_private item DOES become PRIVATE canonical evidence (owner-only)', w.becomesPrivateEvidence(privRef));
+ok('private evidence carries the "private" canonical visibility', w.canonicalVisibility(privRef) === 'private');
+ok('a personal_private item emits NO org signal (no sensitivity)', w.signalSensitivity(privRef) === null);
 
 const obs = w.buildItem({ org: 'CO', ownerId: 'u1', text: 'Jordan missed deadlines', scope: 'organizational', purpose: 'observation', visibility: 'manager', aiUsage: 'may_be_cited' });
 ok('a permitted organisational observation informs the org', w.informsOrgReasoning(obs));
-ok('a permitted observation is citable to leaders and can become evidence', w.citableToLeaders(obs) && w.becomesEvidence(obs));
+ok('a permitted observation is citable to leaders and can become org evidence', w.citableToLeaders(obs) && w.becomesOrgEvidence(obs));
 ok('a citable observation maps to a NORMAL signal sensitivity', w.signalSensitivity(obs) === 'normal');
 
 const shared = w.buildItem({ org: 'CO', ownerId: 'u1', text: 'my plan', scope: 'personal_shared', purpose: 'plan', aiUsage: 'may_inform_recommendations' });
-ok('a may_inform item informs the org but is NOT citable and NOT evidence',
-   w.informsOrgReasoning(shared) && !w.citableToLeaders(shared) && !w.becomesEvidence(shared) && w.signalSensitivity(shared) === 'sensitive');
+ok('a may_inform item informs the org but is NOT citable and NOT org evidence',
+   w.informsOrgReasoning(shared) && !w.citableToLeaders(shared) && !w.becomesOrgEvidence(shared) && w.signalSensitivity(shared) === 'sensitive');
 
 // ── Visibility ──────────────────────────────────────────────────────────────
 ok('the owner can always see their own item', w.visibleTo(priv, { userId: 'u1', role: 'member' }));

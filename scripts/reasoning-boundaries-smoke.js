@@ -77,12 +77,13 @@ ok('9. no stored artifact contains chain-of-thought fields',
    arts().every(a => !('chainOfThought' in a) && !('reasoning' in a) && !('thought' in a)));
 
 // (10) Action and outcome evidence return to the kernel through the canonical gateway.
-// A private reflection must NOT reach the kernel; a permitted observation must.
+// CORRECTED: a private reflection DOES become canonical evidence — private, owner-only —
+// but never enters ORGANISATIONAL reasoning. A permitted observation returns via the gateway.
 const privItem = wlib.buildItem({ org: CODE, ownerId: 'sam', text: "I'm exhausted and struggling", scope: 'personal_private' });
-const beforeEv = (evidenceLog[CODE] || []).length;
 _interpretInput(CODE, { text: privItem.text, ownerId: 'sam', subjectId: 'sam', item: privItem });
-ok('10. a personal-private reflection creates NO canonical evidence (owner-only)',
-   (evidenceLog[CODE] || []).length === beforeEv);
+ok('10. a personal-private reflection becomes PRIVATE canonical evidence (owner-only), not org',
+   (evidenceLog[CODE] || []).some(e => e.visibility === 'private' && e.ownerRef === 'sam') &&
+   _kernelEvidence(CODE, { subjectId: 'sam', purpose: 'organisation_reasoning' }).every(e => e.visibility !== 'private'));
 const permitted = wlib.buildItem({ org: CODE, ownerId: 'lead', text: 'Sam delivered the report on time', scope: 'organizational', purpose: 'observation', visibility: 'manager', aiUsage: 'may_be_cited' });
 _interpretInput(CODE, { text: permitted.text, ownerId: 'lead', subjectId: 'sam', item: permitted });
 ok('10. a permitted observation DOES return to the kernel as canonical evidence via the gateway',
