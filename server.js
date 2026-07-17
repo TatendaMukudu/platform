@@ -6675,12 +6675,12 @@ app.post('/api/workspace', requireAuth, (req, res) => {
   res.json({ ok: true, item, becameEvidence: interp.evidenceIds.length, informsOrg: workspaceLib.informsOrgReasoning(item) });
 });
 
-/* The owner's surface — SELF ONLY. Lenses are views over the same items, not separate
-   systems. */
-app.get('/api/workspace', requireAuth, (req, res) => {
+/* The owner's surface — SELF ONLY. Lenses are VIEWS (projections) over the same
+   items, not separate stores. Filtering can only narrow, never broaden, visibility. */
+function _workspaceLens(req, res) {
   const { orgCode: code, userId } = req.iqSession;
   const lens = String(req.query.lens || 'all');
-  let items = (workspaceItems[_wsKey(code, userId)] || []).slice().reverse();
+  let items = (workspaceItems[_wsKey(code, userId)] || []).filter(i => !i.deleted).reverse();
   const byLens = {
     me:      i => i.scope === 'personal_private' || i.purpose === 'reflection',
     work:    i => ['organizational', 'team', 'specific_people'].includes(i.scope) || ['task', 'commitment', 'observation'].includes(i.purpose),
@@ -6689,7 +6689,9 @@ app.get('/api/workspace', requireAuth, (req, res) => {
   };
   if (byLens[lens]) items = items.filter(byLens[lens]);
   res.json({ ok: true, lens, items: items.slice(0, 200), vocab: { scopes: workspaceLib.SCOPES, purposes: workspaceLib.PURPOSES, visibilities: workspaceLib.VISIBILITIES, aiUses: workspaceLib.AI_USES } });
-});
+}
+app.get('/api/workspace', requireAuth, _workspaceLens);
+app.get('/api/workspace/items', requireAuth, _workspaceLens);
 
 /* Deleting a workspace item removes its canonical evidence from ACTIVE reasoning
    (lifecycle 'deleted'), without rewriting raw history. Self-only. */
@@ -6713,6 +6715,117 @@ app.delete('/api/workspace/:id', requireAuth, (req, res) => {
   const removed = _deleteWorkspaceEvidence(code, item.id);
   scheduleSave();
   res.json({ ok: true, removedEvidence: removed });
+});
+
+/* ── The conversation-first EXPERIENCE surfaces — all intelligence flows through
+   the purpose-scoped gateway + post-kernel selection, never raw items. Workspace
+   items are used only as display projections. ────────────────────────────────── */
+
+/* POST-KERNEL attention selection: build grounded, traceable candidates from the
+   owner's admissible evidence + projections, then select a restrained few. Every
+   factual item keeps its basis evidence IDs; nothing is invented. */
+function _composeToday(code, userId) {
+  // Personal purpose — the owner's own admissible evidence (includes their private).
+  const ev = _kernelEvidence(code, { purpose: 'personal_assistance', viewerId: userId });
+  const items = (workspaceItems[_wsKey(code, userId)] || []).filter(i => !i.deleted);
+  const now = Date.now();
+  const cand = [];
+  // Reassurance grounded in real private evidence (a "kept private" confirmation).
+  const privateEv = ev.filter(e => e.visibility === 'private');
+  if (privateEv.length) cand.push({ kind: 'privacy', confidence: 'confirmed',
+    text: `You marked ${privateEv.length} thing${privateEv.length === 1 ? '' : 's'} private. ${privateEv.length === 1 ? 'It has' : "They've"} stayed private — used only to assist you.`,
+    basis: privateEv.slice(0, 5).map(e => e.evidenceId) });
+  // Open commitments (projection; the count is a display fact, phrased as a question).
+  const commitments = items.filter(i => i.purpose === 'commitment');
+  if (commitments.length) cand.push({ kind: 'commitment', confidence: 'medium',
+    text: `You have ${commitments.length} open commitment${commitments.length === 1 ? '' : 's'}. Want to review what's still outstanding?`, basis: [] });
+  // Actions awaiting the owner (from the execution layer).
+  const awaiting = (actionsLog[code] || []).filter(a => a.actorId === userId && a.status === 'awaiting_approval');
+  if (awaiting.length) cand.push({ kind: 'action', confidence: 'confirmed',
+    text: `${awaiting.length} action${awaiting.length === 1 ? '' : 's'} ${awaiting.length === 1 ? 'is' : 'are'} waiting on your approval.`, basis: [] });
+  // Recent captures worth a nudge.
+  const recent = ev.filter(e => now - new Date(e.observedAt).getTime() < 3 * 86400000);
+  if (recent.length && cand.length < 2) cand.push({ kind: 'recent', confidence: 'confirmed',
+    text: `You've captured ${recent.length} thing${recent.length === 1 ? '' : 's'} recently — IntelliQ is keeping them in mind.`, basis: recent.slice(0, 3).map(e => e.evidenceId) });
+  // Post-kernel selection: a small number, de-duplicated by kind, capped.
+  const seen = new Set();
+  return cand.filter(c => (seen.has(c.kind) ? false : (seen.add(c.kind), true))).slice(0, 3);
+}
+
+app.get('/api/workspace/today', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const user = orgUsers[code]?.[userId];
+  const first = user?.name ? user.name.split(' ')[0] : 'there';
+  const attention = _composeToday(code, userId);
+  const items = (workspaceItems[_wsKey(code, userId)] || []).filter(i => !i.deleted);
+  const continuing = items.filter(i => ['plan', 'commitment', 'task'].includes(i.purpose)).slice(0, 5)
+    .map(i => ({ id: i.id, text: i.text.slice(0, 160), purpose: i.purpose, visibility: i.visibility }));
+  const recentlyChanged = items.slice(-5).reverse()
+    .map(i => ({ id: i.id, text: i.text.slice(0, 160), purpose: i.purpose, visibility: i.visibility, at: i.createdAt }));
+  const orientation = attention.length
+    ? `Good to see you, ${first}. Here's what IntelliQ is keeping an eye on.`
+    : `Good to see you, ${first}. Nothing needs you right now — capture anything you want IntelliQ to remember.`;
+  res.json({ ok: true, orientation, attention, continuing, recentlyChanged });
+});
+
+/* Conversation. Determines the viewer + reasoning PURPOSE, pulls evidence through
+   the gateway, and composes a bounded answer that cites ONLY authorised evidence.
+   Deterministic + grounded (AI-enrichable); prefers a question when support is thin. */
+app.post('/api/workspace/ask', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const q = String(req.body?.question || '').toLowerCase().trim();
+  if (!q) return res.status(400).json({ error: 'question required' });
+  // Work/org-scoped questions exclude private evidence BEFORE context is built.
+  const workScoped = /\b(team|org|organisation|organization|project|shared|everyone|department|colleague)\b/.test(q);
+  const purpose = workScoped ? 'workspace_shared_reasoning' : 'personal_assistance';
+  const ev = _kernelEvidence(code, { purpose, viewerId: userId, subjectId: workScoped ? undefined : userId });
+  const authorised = ev.map(e => e.evidenceId);
+
+  let answer = '', cites = [], confidence = 'medium', limitations = [];
+  const priv = ev.filter(e => e.visibility === 'private');
+  if (/what.*(private|only me)|is.*private/.test(q)) {
+    answer = priv.length
+      ? `You have ${priv.length} private item${priv.length === 1 ? '' : 's'}. Only you can see ${priv.length === 1 ? 'it' : 'them'}; ${priv.length === 1 ? "it's" : "they're"} used only to assist you and never inform organisational reasoning.`
+      : `Nothing here is marked private right now.`;
+    cites = priv.slice(0, 8).map(e => e.evidenceId); confidence = 'confirmed';
+  } else if (/what.*chang|since (yesterday|last)/.test(q)) {
+    const recent = ev.slice(-5);
+    answer = recent.length ? `Recently you captured: ${recent.map(e => '“' + String(e.valueText || e.label).slice(0, 60) + '”').join('; ')}.` : `Nothing new has been captured recently.`;
+    cites = recent.map(e => e.evidenceId); confidence = 'confirmed';
+  } else if (/focus|what should i|attention|priorit/.test(q)) {
+    const att = _composeToday(code, userId);
+    answer = att.length ? att.map(a => a.text).join(' ') : `Nothing is pressing right now. A good moment to plan ahead or capture something.`;
+    cites = att.flatMap(a => a.basis); confidence = 'medium';
+    limitations = ['based only on what you have captured so far'];
+  } else if (/putting off|avoid|overdue|stuck|blocked/.test(q)) {
+    const items = (workspaceItems[_wsKey(code, userId)] || []).filter(i => !i.deleted && ['commitment', 'task'].includes(i.purpose));
+    answer = items.length ? `You have ${items.length} open item${items.length === 1 ? '' : 's'} that may need attention. Want to go through them?` : `Nothing looks stuck right now.`;
+    confidence = 'low'; limitations = ['I can only see what you have captured — not everything'];
+  } else {
+    // Insufficient support → prefer a grounded clarification over a confident answer.
+    answer = ev.length
+      ? `I can reason over ${ev.length} thing${ev.length === 1 ? '' : 's'} you've shared. Could you say a bit more about what you'd like — to plan, review, or capture something?`
+      : `I don't have enough captured yet to answer that well. Tell me what's on your mind and I'll remember it.`;
+    confidence = ev.length ? 'low' : 'none';
+    limitations = ['limited context'];
+  }
+
+  // Post-kernel bounding — cite only authorised evidence; record the decision artifact.
+  const kernelArt = _recordKernelDerivation(code, { type: 'recommendation', result: { question: q }, basis: authorised.length ? authorised.slice(0, 20) : ['none'], confidence, limitations });
+  const composed = _composeForAudience(code, kernelArt, { role: 'member', subjectId: userId, viewerId: userId, purpose, text: answer });
+  const boundedCites = cites.filter(id => authorised.includes(id));
+  res.json({ ok: true, answer, purpose, confidence, limitations, cites: boundedCites, bounded: composed.ok });
+});
+
+/* A readable timeline of meaningful activity (owner-only; projections + actions). */
+app.get('/api/workspace/history', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const items = (workspaceItems[_wsKey(code, userId)] || []).map(i => ({
+    id: i.id, kind: 'capture', text: i.text.slice(0, 160), purpose: i.purpose, visibility: i.visibility, at: i.createdAt, deleted: !!i.deleted }));
+  const acts = (actionsLog[code] || []).filter(a => a.actorId === userId).map(a => ({
+    id: a.id, kind: 'action', text: `${a.capability}.${a.verb}`, status: a.status, at: a.updatedAt }));
+  const timeline = [...items, ...acts].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 100);
+  res.json({ ok: true, timeline });
 });
 
 /* POST /api/connections/:id/inspect — fetch a SAMPLE, propose a mapping contract for
