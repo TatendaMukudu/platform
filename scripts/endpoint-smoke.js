@@ -625,6 +625,48 @@ const server = app.listen(0, async () => {
     ok('deterministic (no-AI) briefing copy uses the pack vocabulary (class/student), not generic nouns',
        /class|student/i.test(String(briefDom.j?.summary || '')) && !/\bgroup\b/i.test(String(briefDom.j?.summary || '')));
 
+    // ── The Execution Layer: policy engine + the recommend→…→learn action loop ─
+    ok('the org constitution (policies) is admin-visible', (await call('/api/policies', tokCoach)).j?.policies?.some(p => p.effect === 'deny' && p.capability === 'calendar'));
+    ok('a plain member cannot read the policies (403)', (await call('/api/policies', tokB)).status === 403);
+    ok('policy dry-run: sending an email needs approval', (await call('/api/policies/evaluate', tokCoach, { method: 'POST', body: { capability: 'email', verb: 'send', stage: 'execute' } })).j?.decision?.requiresApproval === true);
+    ok('policy dry-run: deleting a meeting is denied', (await call('/api/policies/evaluate', tokCoach, { method: 'POST', body: { capability: 'calendar', verb: 'delete', stage: 'execute' } })).j?.decision?.denied === true);
+
+    ok('a plain member cannot propose an action (leaders only)',
+       (await call('/api/actions/propose', tokB, { method: 'POST', body: { capability: 'intervention', subjectId: bId } })).status === 403);
+    const propose = await call('/api/actions/propose', tokCoach, { method: 'POST', body: { capability: 'intervention', subjectId: bId } });
+    ok('a leader can propose a grounded intervention (recommend, with a policy preview)',
+       propose.status === 200 && propose.j?.action?.stage === 'recommend' && typeof propose.j.action.rationale === 'string' && propose.j.action.policy?.requiresApproval === true);
+    const exActId = propose.j.action.id;
+    const drafted = await call(`/api/actions/${exActId}/draft`, tokCoach, { method: 'POST' });
+    ok('drafting produces the exact content to review (nothing outward yet)',
+       drafted.j?.action?.stage === 'draft' && typeof drafted.j.action.draft?.message === 'string');
+    // Executing before approval is refused by the constitution.
+    const early = await call(`/api/actions/${exActId}/execute`, tokCoach, { method: 'POST' });
+    ok('executing before approval is refused (policy: require_approval)', early.status === 409);
+    ok('a plain member cannot approve an action (needs manage_settings)',
+       (await call(`/api/actions/${exActId}/approve`, tokB, { method: 'POST' })).status === 403);
+    ok('a human approves the action', (await call(`/api/actions/${exActId}/approve`, tokCoach, { method: 'POST' })).j?.action?.status === 'approved');
+    const executed = await call(`/api/actions/${exActId}/execute`, tokCoach, { method: 'POST' });
+    ok('after approval the action executes (the only outward step)',
+       executed.j?.action?.status === 'executed' && executed.j.action.execution?.done === true);
+    ok('a prepared intervention actually landed as the execution effect',
+       executed.j.action.execution?.effect === 'prepared_intervention');
+    const observed = await call(`/api/actions/${exActId}/observe`, tokCoach, { method: 'POST', body: { outcome: 'helped' } });
+    ok('the outcome is observed (what actually happened)', observed.j?.action?.observation?.outcome === 'helped');
+    const evaluated = await call(`/api/actions/${exActId}/evaluate`, tokCoach, { method: 'POST' });
+    ok('the loop closes: IntelliQ EVALUATES whether it improved anything + learns',
+       evaluated.j?.action?.status === 'evaluated' && evaluated.j.action.evaluation && evaluated.j.action.stage === 'learn');
+    ok('the action queue lists actions for a leader', (await call('/api/actions', tokCoach)).j?.actions?.some(a => a.id === exActId));
+
+    // A DENY policy hard-blocks execution (deny wins even with approval).
+    await call('/api/policies', tokCoach, { method: 'POST', body: { rule: { effect: 'deny', capability: 'intervention', verb: 'create', stage: 'execute', note: 'test deny' } } });
+    const p2 = await call('/api/actions/propose', tokCoach, { method: 'POST', body: { capability: 'intervention', subjectId: bId } });
+    await call(`/api/actions/${p2.j.action.id}/draft`, tokCoach, { method: 'POST' });
+    await call(`/api/actions/${p2.j.action.id}/approve`, tokCoach, { method: 'POST' });
+    const blocked = await call(`/api/actions/${p2.j.action.id}/execute`, tokCoach, { method: 'POST' });
+    ok('a DENY policy hard-blocks execution even after approval', blocked.status === 403 && blocked.j?.decision?.denied === true);
+    await call('/api/policies/reset', tokCoach, { method: 'POST' });
+
     // ── LLM self-test: admin-gated, reports status (no key in test mode) ─────
     ok('a plain member cannot run the LLM self-test (403)',
        (await call('/api/admin/llm-selftest', tokB, { method: 'POST' })).status === 403);

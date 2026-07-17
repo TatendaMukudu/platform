@@ -1,4 +1,31 @@
-# Architecture — Organisational language
+# Architecture — IntelliQ OS
+
+Four layers move reality into IntelliQ and let IntelliQ act back on it, all built as
+universal contracts (one kernel; domain-specific behaviour at the edges):
+
+```
+Outside world → Connections → Truth Pipeline → Kernel → Execution Layer → Outside world
+```
+
+**Truth Pipeline** (bringing reality in — trustworthy by construction):
+`raw record → approved meaning (mapping) → resolved identity → canonical evidence →
+kernel signal`. Modules: `lib/evidence.js` (envelope), `lib/connector-sdk.js` +
+identity re-resolution, `lib/mapping.js` (approval lifecycle), `lib/sync.js` (durable
+sync runs, health, dead-letter).
+
+**Execution Layer** (letting IntelliQ participate — `lib/action.js` + `lib/policy.js`):
+every capability is one contract —
+`recommend → draft → confirm → execute → observe → evaluate → learn` — with three
+authority levels (recommend / draft / execute). Before any outward or destructive
+step, the **Policy Engine** (the org's constitution) decides
+`allow / require_approval / deny / escalate`. The loop closes on *evaluate* — did the
+action actually improve the organisation? — and feeds that back to the kernel. Read,
+reason, and act are separate authorities. A capability plugs stage executors into the
+registry; no capability gets bespoke endpoints or its own truth logic.
+
+---
+
+# Organisational language
 
 The single rule that keeps IntelliQ universal at its core while speaking every
 organisation's own voice. Three concerns are kept **separate on purpose**:

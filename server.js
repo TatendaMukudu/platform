@@ -28,6 +28,8 @@ const connectorSDK = require('./lib/connector-sdk');   // capability contract, i
 const evidence   = require('./lib/evidence');   // the canonical evidence envelope — the connector↔kernel boundary
 const mappingLib = require('./lib/mapping');     // the mapping approval lifecycle — the interpretation boundary
 const syncLib    = require('./lib/sync');        // sync reliability — classification, backoff, health, staleness
+const policyLib  = require('./lib/policy');      // the organisational constitution — what the assistant may DO
+const actionLib  = require('./lib/action');      // the universal Action Contract — the Execution Layer spine
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -90,6 +92,7 @@ function scheduleSave() {
         orgConnections, orgOAuthApps, studioThreads, activeSessions,
         rawEvidence, evidenceLog, orgMappings,
         syncRuns, failedRecords, webhookDeliveries,
+        orgPolicies, actionsLog,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -651,6 +654,12 @@ const failedRecords         = {};
 const webhookDeliveries     = {};
 const SYNC_RUN_CAP          = 200;  // keep the last N runs per org
 const _syncLocks            = {};   // connId → true  (in-process guard: one run per connection at a time)
+// The EXECUTION LAYER — where IntelliQ participates in reality (not just reads it).
+//   orgPolicies: orgCode → [ rule ]  (the organisational constitution; what the AI may DO)
+//   actionsLog:  orgCode → [ action ] (every action through recommend→…→learn, audited)
+const orgPolicies           = {};
+const actionsLog            = {};
+const ACTIONS_CAP           = 500;
 // OAuth2 app credentials the org registered with each provider (client id/secret
 // obtained from the provider's developer console). orgCode → { provider → {clientId, clientSecret} }.
 const orgOAuthApps          = {};
@@ -6108,6 +6117,248 @@ app.post('/api/webhooks/:code/:connId', (req, res) => {
   }
 });
 
+/* ═══ THE EXECUTION LAYER ══════════════════════════════════════════════════════
+   Where IntelliQ participates in reality, not just reads it. Every capability is an
+   implementation of the SAME contract (recommend→draft→confirm→execute→observe→
+   evaluate→learn), and every outward/destructive step is checked against the org's
+   POLICIES first. Reading, reasoning, and acting are separate authorities. */
+
+function _policiesFor(code) {
+  const c = (code || '').toLowerCase();
+  if (!orgPolicies[c]) orgPolicies[c] = policyLib.defaultPolicies();
+  return orgPolicies[c];
+}
+
+/* The CAPABILITY REGISTRY. A capability plugs stage executors into the universal
+   contract — no bespoke endpoints. The reference `intervention` capability is fully
+   INTERNAL and safe (it prepares a supportive action for a person and then measures
+   whether it helped), proving the whole loop before any external provider is wired.
+   Each executor returns a patch merged onto the action. */
+const _CAPABILITIES = {
+  intervention: {
+    verbs: ['create'], category: null, authority: 'execute',
+    // RECOMMEND — grounded in the person's kernel signals (why now).
+    recommend(code, { subjectId, actorId }) {
+      const subject = orgUsers[code]?.[subjectId];
+      const first = subject?.name ? subject.name.split(' ')[0] : 'they';
+      let whyNow = 'a supportive check-in', evidenceRefs = [];
+      try {
+        const m = _buildMemberIntelInput(code, subject, Date.now());
+        const findings = m ? intel.detectPatterns(m) : [];
+        if (findings.length) { const item = intel.composeBriefingItem(m, findings); whyNow = item.whyNow; }
+        evidenceRefs = _gatherSignals(code, 'member', subjectId, 5).map(s => s.id);
+      } catch (_) {}
+      return { rationale: `${first} could use support — ${whyNow}.`, evidenceRefs, subjectId };
+    },
+    // DRAFT — the exact content a human will approve (deterministic; AI-enrichable).
+    draft(code, action) {
+      const subject = orgUsers[code]?.[action.subjectId];
+      const first = subject?.name ? subject.name.split(' ')[0] : 'there';
+      return { draft: { title: 'A supportive check-in', message: `${first}, taking a moment to check in — how are things going, and is there anything I can help with?`, kind: 'intervention' } };
+    },
+    // EXECUTE — INTERNAL, safe: prepare the intervention in the person's space. No
+    // external side effect; this is the reference effect the loop measures.
+    execute(code, action) {
+      const rec = { id: 'iv_' + generateId(), subjectId: action.subjectId, message: action.draft?.message || '', createdBy: action.actorId, createdAt: new Date().toISOString(), from: 'execution-layer' };
+      (orgInterventions[code] = orgInterventions[code] || []).push(rec);
+      return { execution: { done: true, effect: 'prepared_intervention', ref: rec.id, at: new Date().toISOString() } };
+    },
+    // OBSERVE — what actually happened (reported outcome).
+    observe(code, action, input) {
+      const outcome = ['helped', 'no_change', 'worse'].includes(input?.outcome) ? input.outcome : 'no_change';
+      return { observation: { outcome, note: String(input?.note || '').slice(0, 500), at: new Date().toISOString() } };
+    },
+    // EVALUATE — did it actually improve anything? Compare the person's mood signals
+    // before vs after the action. THIS is the loop nobody else closes.
+    evaluate(code, action) {
+      const at = action.execution?.at ? new Date(action.execution.at).getTime() : Date.now();
+      const moods = _gatherSignals(code, 'member', action.subjectId, 40).filter(s => s.source === 'checkin' && s.valueNum != null);
+      const before = moods.filter(s => new Date(s.ts).getTime() < at).slice(0, 5);
+      const after = moods.filter(s => new Date(s.ts).getTime() >= at).slice(0, 5);
+      const avg = a => a.length ? a.reduce((x, s) => x + s.valueNum, 0) / a.length : null;
+      const b = avg(before), a = avg(after);
+      const improved = (b != null && a != null) ? a > b : null;
+      return { evaluation: { improved, before: b, after: a, basis: `${before.length} before / ${after.length} after`, reportedOutcome: action.observation?.outcome || null, at: new Date().toISOString() } };
+    },
+  },
+};
+
+function _actionsFor(code) { return actionsLog[code] || (actionsLog[code] = []); }
+function _actionById(code, id) { return (actionsLog[code] || []).find(a => a.id === id); }
+function _actAudit(a, stage, by, extra) { a.audit.push({ stage, by: by || 'system', at: new Date().toISOString(), ...(extra || {}) }); a.updatedAt = new Date().toISOString(); }
+
+/* Evaluate an action against the constitution for a given stage. */
+function _policyCheck(code, action, stage, actorRole) {
+  return policyLib.evaluate(_policiesFor(code), {
+    capability: action.capability, verb: action.verb, stage,
+    amount: action.amount, category: action.category, tags: action.tags, actorRole,
+  });
+}
+
+/* ── Policy (the constitution) — admin-managed ──────────────────────────────── */
+app.get('/api/policies', requirePermission('manage_settings'), (req, res) => {
+  res.json({ ok: true, policies: _policiesFor(req.iqSession.orgCode), effects: policyLib.EFFECTS });
+});
+/* Dry-run: "what would you be allowed to do?" — transparency for admins + the UI. */
+app.post('/api/policies/evaluate', requirePermission('manage_settings'), (req, res) => {
+  const b = req.body || {};
+  res.json({ ok: true, decision: policyLib.evaluate(_policiesFor(req.iqSession.orgCode), { capability: b.capability, verb: b.verb, stage: b.stage || 'execute', amount: b.amount, category: b.category, tags: b.tags, actorRole: b.actorRole }) });
+});
+app.post('/api/policies', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode; const r = req.body?.rule || {};
+  if (!policyLib.EFFECTS.includes(r.effect)) return res.status(400).json({ error: 'invalid effect' });
+  const list = _policiesFor(code);
+  const rule = { id: r.id && list.some(x => x.id === r.id) ? r.id : ('pol_' + generateId()),
+    effect: r.effect, capability: String(r.capability || '*').slice(0, 40), verb: String(r.verb || '*').slice(0, 40),
+    stage: String(r.stage || 'execute').slice(0, 20),
+    conditions: (r.conditions && typeof r.conditions === 'object') ? r.conditions : null,
+    escalateTo: r.escalateTo || null, note: String(r.note || '').slice(0, 200), enabled: r.enabled !== false, builtin: false };
+  const idx = list.findIndex(x => x.id === rule.id);
+  if (idx >= 0) { if (list[idx].builtin) return res.status(409).json({ error: 'a built-in rule can be disabled but not edited' }); list[idx] = rule; }
+  else list.push(rule);
+  scheduleSave();
+  res.json({ ok: true, rule, policies: list });
+});
+app.post('/api/policies/:id/toggle', requirePermission('manage_settings'), (req, res) => {
+  const rule = _policiesFor(req.iqSession.orgCode).find(r => r.id === req.params.id);
+  if (!rule) return res.status(404).json({ error: 'not found' });
+  rule.enabled = !rule.enabled; scheduleSave();
+  res.json({ ok: true, rule });
+});
+app.delete('/api/policies/:id', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode; const list = _policiesFor(code);
+  const rule = list.find(r => r.id === req.params.id);
+  if (!rule) return res.status(404).json({ error: 'not found' });
+  if (rule.builtin) return res.status(409).json({ error: 'a built-in rule can be disabled, not deleted' });
+  orgPolicies[code] = list.filter(r => r.id !== req.params.id); scheduleSave();
+  res.json({ ok: true });
+});
+app.post('/api/policies/reset', requirePermission('manage_settings'), (req, res) => {
+  orgPolicies[req.iqSession.orgCode] = policyLib.defaultPolicies(); scheduleSave();
+  res.json({ ok: true, policies: orgPolicies[req.iqSession.orgCode] });
+});
+
+/* ── Actions — the universal execution orchestrator ─────────────────────────── */
+app.get('/api/actions', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode;
+  if (!_isLeader(code, req.iqSession.userId)) return res.status(403).json({ error: 'leaders only' });
+  const status = req.query.status;
+  const rows = _actionsFor(code).filter(a => !status || a.status === status).slice(-100).reverse().map(actionLib.summarize);
+  res.json({ ok: true, actions: rows });
+});
+app.get('/api/actions/:id', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode;
+  if (!_isLeader(code, req.iqSession.userId)) return res.status(403).json({ error: 'leaders only' });
+  const a = _actionById(code, req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  res.json({ ok: true, action: a });
+});
+
+/* PROPOSE — the capability RECOMMENDS (grounded), and we snapshot the policy decision
+   for the intended authority so the human sees up front what will/won't be allowed. */
+app.post('/api/actions/propose', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode, userId = req.iqSession.userId;
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+  const { capability, verb, subjectId, category, amount, tags } = req.body || {};
+  const cap = _CAPABILITIES[capability];
+  if (!cap) return res.status(400).json({ error: 'unknown capability' });
+  if (subjectId && !new Set(getVisibleUserIds(code, userId)).has(subjectId)) return res.status(403).json({ error: 'subject not in your range' });
+  const rec = cap.recommend ? cap.recommend(code, { subjectId, actorId: userId }) : {};
+  const action = actionLib.buildAction({ id: 'act_' + generateId(), org: code, capability, verb: verb || cap.verbs[0], authority: cap.authority,
+    actorId: userId, subjectId: rec.subjectId || subjectId, category: category || cap.category, amount, tags,
+    rationale: rec.rationale, evidenceRefs: rec.evidenceRefs, status: 'proposed' });
+  action.policy = _policyCheck(code, action, 'execute', req.iqSession.role);   // preview the eventual gate
+  const list = _actionsFor(code); list.push(action);
+  if (list.length > ACTIONS_CAP) list.splice(0, list.length - ACTIONS_CAP);
+  scheduleSave();
+  res.json({ ok: true, action });
+});
+
+/* DRAFT — produce the exact content a human will review. Still nothing outward. */
+app.post('/api/actions/:id/draft', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode, userId = req.iqSession.userId;
+  const a = _actionById(code, req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+  if (!actionLib.canAdvance(a.stage, 'draft') && a.stage !== 'draft') return res.status(409).json({ error: `cannot draft from ${a.stage}` });
+  const cap = _CAPABILITIES[a.capability];
+  const patch = cap.draft ? cap.draft(code, a) : {};
+  Object.assign(a, patch); a.stage = 'draft'; a.status = 'drafted';
+  a.policy = _policyCheck(code, a, 'execute', req.iqSession.role);
+  _actAudit(a, 'draft', userId); scheduleSave();
+  res.json({ ok: true, action: a });
+});
+
+/* APPROVE — a human authorises. Records the approval that a require_approval /
+   escalate policy demands. */
+app.post('/api/actions/:id/approve', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const a = _actionById(code, req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  a.approvals.push({ by: req.iqSession.userId, at: new Date().toISOString(), note: String(req.body?.note || '').slice(0, 200) });
+  a.stage = 'confirm'; a.status = 'approved';
+  _actAudit(a, 'confirm', req.iqSession.userId, { approval: true }); scheduleSave();
+  res.json({ ok: true, action: a });
+});
+app.post('/api/actions/:id/reject', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode, userId = req.iqSession.userId;
+  const a = _actionById(code, req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+  a.status = 'rejected'; a.stage = 'rejected'; _actAudit(a, 'rejected', userId, { reason: String(req.body?.reason || '').slice(0, 200) }); scheduleSave();
+  res.json({ ok: true, action: a });
+});
+
+/* EXECUTE — the only outward step. Policy-gated: DENY → refused; require_approval /
+   escalate → must be approved first; allow → proceeds. Reading and drafting never
+   reached here. */
+app.post('/api/actions/:id/execute', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode, userId = req.iqSession.userId;
+  const a = _actionById(code, req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+  if (a.status === 'executed') return res.status(409).json({ error: 'already executed' });
+  const decision = _policyCheck(code, a, 'execute', req.iqSession.role);
+  a.policy = decision;
+  if (decision.denied) { _actAudit(a, 'blocked', userId, { reason: decision.reason }); a.status = 'blocked'; scheduleSave(); return res.status(403).json({ error: 'policy forbids this action', decision }); }
+  if (decision.requiresApproval && !a.approvals.length) { a.status = 'awaiting_approval'; _actAudit(a, 'awaiting_approval', userId); scheduleSave(); return res.status(409).json({ error: decision.escalate ? `must be escalated to ${decision.escalateTo}` : 'approval required before executing', decision }); }
+  const cap = _CAPABILITIES[a.capability];
+  try {
+    const patch = cap.execute ? cap.execute(code, a) : { execution: { done: true, effect: 'noop', at: new Date().toISOString() } };
+    Object.assign(a, patch); a.stage = 'observe'; a.status = 'executed';
+    _actAudit(a, 'execute', userId, { policy: decision.effect }); scheduleSave();
+    res.json({ ok: true, action: a });
+  } catch (e) { a.status = 'failed'; _actAudit(a, 'failed', userId, { error: e.message }); scheduleSave(); res.status(500).json({ error: 'execution failed: ' + e.message }); }
+});
+
+/* OBSERVE → EVALUATE → LEARN — the feedback loop that closes on organisational
+   improvement (the part almost every assistant skips). */
+app.post('/api/actions/:id/observe', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode, userId = req.iqSession.userId;
+  const a = _actionById(code, req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+  if (a.status !== 'executed' && a.stage !== 'observe') return res.status(409).json({ error: 'observe only after execute' });
+  const cap = _CAPABILITIES[a.capability];
+  Object.assign(a, cap.observe ? cap.observe(code, a, req.body || {}) : {}); a.stage = 'evaluate';
+  _actAudit(a, 'observe', userId); scheduleSave();
+  res.json({ ok: true, action: a });
+});
+app.post('/api/actions/:id/evaluate', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode, userId = req.iqSession.userId;
+  const a = _actionById(code, req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+  const cap = _CAPABILITIES[a.capability];
+  Object.assign(a, cap.evaluate ? cap.evaluate(code, a) : {}); a.stage = 'learn'; a.status = 'evaluated';
+  // LEARN — a durable signal back to the kernel: did this intervention help?
+  if (a.evaluation) _emitSignalSafe(code, { subjectType: 'org', subjectId: null, source: 'external', modality: 'data',
+    label: `Action outcome: ${a.capability}.${a.verb}`, valueNum: a.evaluation.improved === true ? 1 : a.evaluation.improved === false ? 0 : null,
+    valueText: `evaluated ${a.capability}: improved=${a.evaluation.improved}`, sensitivity: 'normal', data: { action: a.id, evaluation: a.evaluation } });
+  _actAudit(a, 'learn', userId); scheduleSave();
+  res.json({ ok: true, action: a });
+});
+
 /* POST /api/connections/:id/inspect — fetch a SAMPLE, propose a mapping contract for
    the admin to verify (the safe workflow: inspect → AI proposes → admin confirms →
    versioned mapping → all future data validated against it). Nothing is stored yet. */
@@ -10322,6 +10573,8 @@ function _loadAllStores(data) {
   Object.assign(syncRuns,         data.syncRuns         || {});
   Object.assign(failedRecords,    data.failedRecords    || {});
   Object.assign(webhookDeliveries,data.webhookDeliveries|| {});
+  Object.assign(orgPolicies,      data.orgPolicies      || {});
+  Object.assign(actionsLog,       data.actionsLog       || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -10367,7 +10620,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _proposeMapping, _reprocessHeld, _activeMapping, orgMappings,
   // exported for the truth layer: sync reliability
   _runConnection, _processBatch, _markDeletedAtSource, _newSyncRun, _recordFailure, _openFailures,
-  syncRuns, failedRecords, webhookDeliveries, orgConnections, _syncLocks };
+  syncRuns, failedRecords, webhookDeliveries, orgConnections, _syncLocks,
+  // exported for the truth layer: the execution layer
+  orgPolicies, actionsLog, _policiesFor, orgInterventions };
 
 if (require.main === module) (async () => {
   try {

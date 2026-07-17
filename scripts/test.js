@@ -52,6 +52,8 @@ const SUITES = [
   'mapping-lifecycle-smoke.js',  // the mapping approval lifecycle end to end (hold→approve→activate→reprocess)
   'sync-smoke.js',               // sync reliability primitives (pure): classify/backoff/rate-limit/health/staleness
   'sync-reliability-smoke.js',   // sync reliability invariants: idempotent replay, correction, deletion, concurrency
+  'policy-smoke.js',             // the organisational constitution: what the assistant may DO (pure)
+  'action-smoke.js',             // the universal action contract: recommend→…→learn stage machine (pure)
   'connector-harness.js',  // the Connector SDK: identity/confidence + mapping contracts
   'endpoint-smoke.js',   // boots the real app in-process (DB_OPTIONAL) — HTTP authz + Me context
 ];

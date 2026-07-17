@@ -3096,6 +3096,51 @@ function renderSettings(){
   if (typeof loadOAuthCatalog === 'function') loadOAuthCatalog();
   if (typeof loadDomainCatalog === 'function') loadDomainCatalog();
   if (typeof loadMappings === 'function') loadMappings();
+  if (typeof loadPolicies === 'function') loadPolicies();
+}
+
+/* The organisational constitution — the rules IntelliQ follows before acting. */
+const _POLICY_COLOR = { allow:'#0ecfb0', require_approval:'#f7a84f', escalate:'#4f8ef7', deny:'#f74f4f' };
+const _POLICY_LABEL = { allow:'may', require_approval:'needs approval', escalate:'must escalate', deny:'may never' };
+async function loadPolicies() {
+  const box = document.getElementById('policies-list');
+  if (!box) return;
+  const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  try {
+    const d = await (await fetch('/api/policies', { headers: Auth._headers() })).json();
+    const list = d.policies || [];
+    box.innerHTML = list.map(p => {
+      const c = _POLICY_COLOR[p.effect] || '#9aa';
+      const cond = p.conditions ? Object.entries(p.conditions).map(([k,v]) => `${esc(k)}: ${esc(Array.isArray(v)?v.join('/'):v)}`).join(', ') : '';
+      return `<div style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0;border-bottom:1px solid var(--border);font-size:0.8rem;${p.enabled===false?'opacity:0.45':''}">
+        <span class="pill" style="background:${c}22;color:${c};font-size:0.66rem;padding:1px 7px;border-radius:10px;white-space:nowrap">${esc(_POLICY_LABEL[p.effect]||p.effect)}</span>
+        <span style="flex:1;min-width:0"><b>${esc(p.capability)}${p.verb&&p.verb!=='*'?'.'+esc(p.verb):''}</b> <span style="color:var(--text-muted)">${esc(p.stage||'')}${cond?' · '+cond:''}</span>${p.note?`<div style="font-size:0.72rem;color:var(--text-muted)">${esc(p.note)}</div>`:''}</span>
+        <button class="btn-ghost btn-sm" style="font-size:0.72rem" onclick="togglePolicy('${p.id}')">${p.enabled===false?'enable':'disable'}</button>
+        ${p.builtin?'':`<button class="btn-ghost btn-sm" style="font-size:0.72rem;color:var(--danger)" onclick="deletePolicy('${p.id}')">✕</button>`}
+      </div>`;
+    }).join('') + `
+      <details style="margin-top:0.6rem"><summary style="cursor:pointer;font-size:0.82rem;color:var(--accent)">＋ Add a rule</summary>
+        <div style="display:flex;flex-direction:column;gap:0.35rem;margin-top:0.5rem">
+          <select class="form-input" id="pol-effect"><option value="allow">may (allow)</option><option value="require_approval">needs approval</option><option value="deny">may never (deny)</option><option value="escalate">must escalate</option></select>
+          <input class="form-input" id="pol-cap" placeholder="capability — e.g. email, calendar, * ">
+          <input class="form-input" id="pol-verb" placeholder="verb — e.g. send, create, * ">
+          <input class="form-input" id="pol-note" placeholder="note (optional)">
+          <button class="btn btn-accent btn-sm" onclick="addPolicy()">Add rule</button>
+        </div>
+      </details>`;
+  } catch (e) { box.innerHTML = ''; }
+}
+async function _polAction(url, opts) {
+  const status = document.getElementById('policies-status');
+  try { const r = await fetch(url, { headers: Auth._headers(), ...opts }); if (!r.ok) throw new Error((await r.json()).error||'failed'); loadPolicies(); }
+  catch (e) { if (status) status.innerHTML = `<span style="color:var(--danger)">${String(e.message).replace(/</g,'&lt;')}</span>`; }
+}
+function togglePolicy(id) { _polAction(`/api/policies/${id}/toggle`, { method: 'POST' }); }
+function deletePolicy(id) { if (confirm('Remove this rule?')) _polAction(`/api/policies/${id}`, { method: 'DELETE' }); }
+function resetPolicies() { if (confirm('Restore the default constitution? Custom rules will be removed.')) _polAction('/api/policies/reset', { method: 'POST' }); }
+function addPolicy() {
+  const v = id => (document.getElementById(id)?.value || '').trim();
+  _polAction('/api/policies', { method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() }, body: JSON.stringify({ rule: { effect: v('pol-effect'), capability: v('pol-cap') || '*', verb: v('pol-verb') || '*', stage: 'execute', note: v('pol-note') } }) });
 }
 
 /* Data mappings — the interpretation boundary UI. Four focused areas: awaiting
