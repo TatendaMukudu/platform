@@ -25,6 +25,7 @@ const connectors = require('./ai/connectors');
 const office     = require('./lib/office');   // dependency-free .xlsx / .docx reading
 const connectorSDK = require('./lib/connector-sdk');   // capability contract, identity resolution, mappings
 const evidence   = require('./lib/evidence');   // the canonical evidence envelope — the connector↔kernel boundary
+const mappingLib = require('./lib/mapping');     // the mapping approval lifecycle — the interpretation boundary
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -84,7 +85,7 @@ function scheduleSave() {
         userConsents, connectedSources, pendingActions,
         assessmentTemplates, assessmentAssignments, orgTutorials, orgApiTokens,
         orgConnections, orgOAuthApps, studioThreads, activeSessions,
-        rawEvidence, evidenceLog,
+        rawEvidence, evidenceLog, orgMappings,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -651,6 +652,10 @@ const rawEvidence           = {};  // rawRef → { org, provider, receivedAt, re
 const evidenceLog           = {};  // orgCode → [ envelope ]
 const _evidenceSeen         = {};  // orgCode → Set(dedupeKey)  (rebuilt on load; dedupe index)
 const EVIDENCE_LOG_CAP      = 8000; // per-org retention cap for the in-memory/blob log
+// The Mapping Approval layer — the interpretation boundary. A registry of VERSIONED
+// mapping contracts per org. Only an ACTIVE version may promote evidence; editing an
+// approved version forks a new draft (versions are immutable). See lib/mapping.js.
+const orgMappings           = {};  // orgCode → [ mappingVersion ]
 
 /* The provider catalog. Every one of these is a standard OAuth2 authorization-code
    flow — only the URLs, scopes, and default data endpoint differ. Adding a new app
@@ -5277,6 +5282,89 @@ function _reresolveUnmatched(code, meta = {}) {
   return { confirmed, promoted, proposed };
 }
 
+/* ── The MAPPING APPROVAL lifecycle ───────────────────────────────────────────
+   draft → proposed → approved → active → superseded/retired. Only an ACTIVE mapping
+   may create canonical evidence; versions are immutable (editing forks a new draft);
+   activating a version never silently reinterprets history (reprocessing is explicit). */
+function _mappingsFor(code) { return orgMappings[code] || (orgMappings[code] = []); }
+function _activeMapping(code, provider) {
+  return _mappingsFor(code).find(m => m.provider === provider && m.status === 'active') || null;
+}
+function _mappingById(code, id) { return _mappingsFor(code).find(m => m.id === id) || null; }
+function _nextMappingVersion(code, provider) {
+  return Math.max(0, ..._mappingsFor(code).filter(m => m.provider === provider).map(m => m.version || 0)) + 1;
+}
+
+/* Create a PROPOSED draft mapping from sample records (AI/generic inspection may
+   propose meaning — but this can never promote until an admin approves + activates). */
+function _proposeMapping(code, provider, records, meta = {}) {
+  const proposed = connectorSDK.proposeMapping(records);
+  if (!proposed) return null;
+  const fp = mappingLib.schemaFingerprint(records);
+  const m = {
+    id: 'map_' + generateId(),
+    org: code, provider, connector: meta.connector || provider,
+    sourceObject: meta.sourceObject || provider,
+    schemaFingerprint: fp.hash, schemaFields: fp.fields, schemaTypes: fp.types,
+    subjectField: proposed.subjectField, dateField: proposed.dateField, eventField: proposed.eventField,
+    groupField: proposed.groupField || null,
+    fields: (proposed.fields || []).map(f => ({ from: f.from, primitive: f.primitive || 'metric', evidenceType: 'metric', label: f.label || f.from, unit: null, transform: null, include: f.include !== false })),
+    requiredFields: [proposed.subjectField, ...(proposed.fields || []).filter(f => f.include !== false).map(f => f.from)].filter(Boolean),
+    optionalFields: [proposed.dateField, proposed.eventField].filter(Boolean),
+    identityStrategy: meta.identityStrategy || 'auto',
+    visibilityDefault: meta.visibilityDefault || 'normal',
+    proposedBy: meta.by || 'system', approvedBy: null, approvedAt: null,
+    testSample: (Array.isArray(records) ? records : [records]).slice(0, 3),
+    expectedOutput: null,
+    version: _nextMappingVersion(code, provider), status: 'proposed',
+    createdAt: new Date().toISOString(),
+  };
+  m.expectedOutput = mappingLib.preview(m.testSample, m).samples.map(s => s.output);
+  _mappingsFor(code).push(m);
+  scheduleSave();
+  return m;
+}
+
+/* Reprocess HELD evidence for a provider by INTERPRETING each retained raw record
+   under the now-ACTIVE mapping → canonical envelopes (+ promotion where identity
+   resolves). EXPLICIT: activating a mapping never auto-reinterprets history — this
+   is the deliberate replay. The original observed time is preserved throughout, so
+   historical data is never read as a new event. */
+function _reprocessHeld(code, provider, by) {
+  const active = _activeMapping(code, provider);
+  if (!active) return { reprocessed: 0, created: 0, promoted: 0, error: 'no active mapping' };
+  const users = orgUsers[code] || {};
+  let reprocessed = 0, created = 0, promoted = 0;
+  for (const env of [...(evidenceLog[code] || [])]) {
+    if (env.provider !== provider || env.status !== 'held' || !env.heldBatch) continue;
+    const raw = env.rawRef && rawEvidence[env.rawRef] ? rawEvidence[env.rawRef].record : null;
+    if (!raw || typeof raw !== 'object') { continue; }
+    const idr = connectorSDK.resolveIdentity(users, raw);
+    let uid = idr.id, confidence = idr.confidence;
+    mappingLib.applyMapping(raw, active).forEach(it => {
+      const r = _recordEvidence(code, {
+        provider, source: env.source, externalId: it.event || env.externalId,
+        subjectRef: env.subjectRef, subjectId: uid || null, groupRef: env.groupRef,
+        type: it.type, label: it.label, value: it.value, unit: it.unit || null,
+        observedAt: it.date || env.observedAt, retrievedAt: env.retrievedAt,   // ← preserve observed time
+        confidence, visibility: active.visibilityDefault || 'normal', mappingVersion: active.version,
+      }, raw);
+      if (!r.stored) return;
+      r.envelope.mappingId = active.id;
+      created++;
+      if (r.promotable && _promoteEvidence(code, r.envelope)) promoted++;
+    });
+    env.status = 'superseded';   // the held placeholder has been interpreted
+    reprocessed++;
+  }
+  if (reprocessed) scheduleSave();
+  return { reprocessed, created, promoted };
+}
+
+const _subjectRefOf = rec => String(rec.email || rec.mail || rec.name || rec.player || rec.member || rec.athlete || rec.employee || rec.student || rec.userId || rec.id || '').slice(0, 200) || null;
+const _externalIdOf = rec => rec.event || rec.eventId || rec.fixture || rec.externalId || rec.id || null;
+const _groupRefOf   = rec => { const g = rec.group || rec.team || rec.department || rec.class || rec.cohort || null; return g ? String(g) : null; };
+
 function _ingestGeneric(code, payload, createdBy, opts = {}) {
   const source = String(opts.source || 'connector').slice(0, 40);
   const provider = opts.provider || source;
@@ -5288,11 +5376,51 @@ function _ingestGeneric(code, payload, createdBy, opts = {}) {
   else if (payload && Array.isArray(payload.data)) recs = payload.data;
   else if (payload && Array.isArray(payload.results)) recs = payload.results;
   else if (payload && typeof payload === 'object') recs = [payload];
-  const stats = { imported: 0, matched: 0, probable: 0, unmatched: 0, conflicts: 0, stored: 0, duplicates: 0 };
+
+  // ── The INTERPRETATION BOUNDARY (connectors only) ─────────────────────────
+  // Only an ACTIVE approved mapping may create canonical evidence. Without one we
+  // HOLD (retain raw for inspection) and PROPOSE a mapping; if the schema drifted we
+  // PAUSE and never guess. The first-party push door (no requireApprovedMapping) uses
+  // its documented canonical contract and is unaffected.
+  let activeMap = null, driftInfo = null, gate = 'promote';
+  if (opts.requireApprovedMapping) {
+    activeMap = _activeMapping(code, provider);
+    if (!activeMap) gate = 'hold';
+    else { driftInfo = mappingLib.detectDrift(recs, activeMap); if (driftInfo.drifted) gate = 'drift'; }
+  }
+
+  const stats = { imported: 0, matched: 0, probable: 0, unmatched: 0, conflicts: 0, stored: 0, duplicates: 0, held: 0 };
   const subjects = new Set(); const conflictNames = new Set();
+
+  if (gate === 'hold' || gate === 'drift') {
+    // Retain the raw records + a HELD placeholder each — never promoted. Meaning is
+    // not approved, so we do not interpret into metrics yet; reprocessing does that.
+    recs.slice(0, 3000).forEach(rec => {
+      if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return;
+      const idr = connectorSDK.resolveIdentity(users, rec);
+      const r = _recordEvidence(code, {
+        provider, source, externalId: _externalIdOf(rec), subjectRef: _subjectRefOf(rec),
+        subjectId: null, groupRef: _groupRefOf(rec), type: 'document',
+        label: gate === 'drift' ? 'Held — source schema changed' : 'Held — awaiting mapping approval',
+        valueText: JSON.stringify(rec).slice(0, 2000), observedAt: rec.date || rec.ts || rec.timestamp || null,
+        retrievedAt, confidence: idr.confidence, visibility: 'normal', status: 'held',
+      }, rec);
+      if (r.duplicate) stats.duplicates++;
+      else if (r.stored) { r.envelope.heldBatch = true; stats.held++; }
+    });
+    // Propose a mapping for review if none is already pending for this provider.
+    const pending = _mappingsFor(code).find(m => m.provider === provider && ['proposed', 'draft', 'approved'].includes(m.status));
+    const proposal = (gate === 'hold' && !pending && recs.length) ? _proposeMapping(code, provider, recs, { by: createdBy || 'system', connector: opts.connector, sourceObject: opts.sourceObject }) : null;
+    if (stats.held || stats.duplicates) scheduleSave();
+    return { imported: 0, stored: stats.held, held: stats.held, duplicates: stats.duplicates,
+      matched: 0, probable: 0, unmatched: 0, conflicts: 0, subjects: 0, conflictNames: [],
+      needsMapping: gate === 'hold', drift: gate === 'drift' ? driftInfo : null,
+      mappingProposed: proposal ? proposal.id : (pending ? pending.id : null) };
+  }
+
+  // ── PROMOTE path — active approved mapping, or the ungated first-party door ──
   recs.slice(0, 3000).forEach(rec => {
     if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return;
-    // Resolve WITH confidence — never silently merge an ambiguous match.
     const idr = connectorSDK.resolveIdentity(users, rec);
     let uid = idr.id, confidence = idr.confidence;
     if (confidence === 'conflict') { stats.conflicts++; if (idr.ambiguous) conflictNames.add(idr.ambiguous); }
@@ -5301,13 +5429,14 @@ function _ingestGeneric(code, payload, createdBy, opts = {}) {
     else if (confidence === 'probable') stats.probable++;
     else if (confidence === 'unmatched') stats.unmatched++;
 
-    const externalId = rec.event || rec.eventId || rec.fixture || rec.externalId || rec.id || null;
-    const subjectRef = String(rec.email || rec.mail || rec.name || rec.player || rec.member || rec.athlete || rec.employee || rec.student || rec.userId || rec.id || '').slice(0, 200) || null;
-    const groupRefRaw = rec.group || rec.team || rec.department || rec.class || rec.cohort || null;
+    const externalId = _externalIdOf(rec);
+    const subjectRef = _subjectRefOf(rec);
+    const groupRef = _groupRefOf(rec);
 
-    // A VERIFIED mapping is applied deterministically; otherwise the wide/clean read.
+    // An APPROVED mapping is applied deterministically (saved rules only); otherwise
+    // the first-party canonical/wide read.
     let items;
-    if (opts.mapping) items = connectorSDK.applyMapping(rec, opts.mapping);
+    if (activeMap) items = mappingLib.applyMapping(rec, activeMap);
     else {
       items = [];
       const date = rec.date || rec.ts || rec.timestamp || rec.time || null;
@@ -5321,29 +5450,25 @@ function _ingestGeneric(code, payload, createdBy, opts = {}) {
     }
     let any = false;
     items.forEach(it => {
-      // EVERY item crosses the canonical envelope FIRST — stored (with provenance +
-      // identity confidence), deduped, and validated — before it can reach the
-      // kernel. Unmatched/conflict evidence is stored too (auditable, re-resolvable),
-      // just never promoted to a signal.
       const r = _recordEvidence(code, {
         provider, source, externalId: it.event || externalId,
-        subjectRef, subjectId: uid || null, groupRef: groupRefRaw ? String(groupRefRaw) : null,
+        subjectRef, subjectId: uid || null, groupRef,
         type: evidence.EVIDENCE_TYPES.includes(it.type) ? it.type : 'metric',
         label: it.label, value: it.value, unit: it.unit || null,
-        observedAt: it.date || null, retrievedAt, confidence, visibility: 'normal',
-        mappingVersion: opts.mapping ? (opts.mapping.version || null) : null,
+        observedAt: it.date || null, retrievedAt, confidence,
+        visibility: activeMap ? (activeMap.visibilityDefault || 'normal') : 'normal',
+        mappingVersion: activeMap ? activeMap.version : null,
       }, rec);
       if (r.duplicate) { stats.duplicates++; return; }
       if (!r.stored) return;
+      if (activeMap) r.envelope.mappingId = activeMap.id;
       stats.stored++;
-      // Promotion is a SEPARATE, once-only step off the stored envelope — the same
-      // path re-resolution uses later, so promotion logic lives in exactly one place.
       if (r.promotable && _promoteEvidence(code, r.envelope)) { stats.imported++; any = true; }
     });
     if (any) subjects.add(uid);
   });
   if (stats.stored) scheduleSave();
-  return { imported: stats.imported, subjects: subjects.size, matched: stats.matched, probable: stats.probable, unmatched: stats.unmatched, conflicts: stats.conflicts, stored: stats.stored, duplicates: stats.duplicates, conflictNames: [...conflictNames].slice(0, 6) };
+  return { imported: stats.imported, subjects: subjects.size, matched: stats.matched, probable: stats.probable, unmatched: stats.unmatched, conflicts: stats.conflicts, stored: stats.stored, duplicates: stats.duplicates, held: stats.held, conflictNames: [...conflictNames].slice(0, 6) };
 }
 
 /* POST /api/ingest — the push door. Any app / webhook / script POSTs data in ANY
@@ -5478,6 +5603,142 @@ app.post('/api/evidence/:id/reverse', requirePermission('manage_settings'), (req
   res.json({ ok: true, evidenceId: env.id });
 });
 
+/* ═══ MAPPING APPROVAL LIFECYCLE ═══════════════════════════════════════════════
+   draft → proposed → approved → active → superseded/retired. Admin-gated + audited.
+   Only ACTIVE mappings promote; versions are immutable (edit forks a draft);
+   activation never auto-reinterprets history (reprocessing is a separate action). */
+function _publicMapping(m) {
+  return { id: m.id, provider: m.provider, connector: m.connector, sourceObject: m.sourceObject,
+    version: m.version, status: m.status, schemaFingerprint: m.schemaFingerprint,
+    subjectField: m.subjectField, dateField: m.dateField, eventField: m.eventField,
+    fields: m.fields, requiredFields: m.requiredFields, optionalFields: m.optionalFields,
+    identityStrategy: m.identityStrategy, visibilityDefault: m.visibilityDefault,
+    proposedBy: m.proposedBy, approvedBy: m.approvedBy, approvedAt: m.approvedAt,
+    testSample: m.testSample, expectedOutput: m.expectedOutput,
+    rejected: !!m.rejected, createdAt: m.createdAt, audit: m.audit || [] };
+}
+function _mapAudit(m, action, by) { (m.audit = m.audit || []).push({ action, by, ts: new Date().toISOString() }); }
+
+/* Version history for a provider (or all) — the "version history" UI area. */
+app.get('/api/mappings', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const all = _mappingsFor(code);
+  const provider = req.query.provider;
+  const rows = (provider ? all.filter(m => m.provider === provider) : all).map(_publicMapping);
+  res.json({ ok: true, mappings: rows,
+    awaiting: all.filter(m => m.status === 'proposed' || m.status === 'draft').length,
+    active: all.filter(m => m.status === 'active').length });
+});
+
+/* "Mappings awaiting review" UI area. */
+app.get('/api/mappings/awaiting', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  res.json({ ok: true, mappings: _mappingsFor(code).filter(m => m.status === 'proposed' || m.status === 'draft' || m.status === 'approved').map(_publicMapping) });
+});
+
+app.get('/api/mappings/:id', requirePermission('manage_settings'), (req, res) => {
+  const m = _mappingById(req.iqSession.orgCode, req.params.id);
+  if (!m) return res.status(404).json({ error: 'mapping not found' });
+  res.json({ ok: true, mapping: _publicMapping(m) });
+});
+
+/* "Transformation preview" UI area — sample records → canonical output, before approval. */
+app.post('/api/mappings/:id/preview', requirePermission('manage_settings'), (req, res) => {
+  const m = _mappingById(req.iqSession.orgCode, req.params.id);
+  if (!m) return res.status(404).json({ error: 'mapping not found' });
+  const records = Array.isArray(req.body?.records) && req.body.records.length ? req.body.records : (m.testSample || []);
+  const preview = mappingLib.preview(records, m, 8);
+  const drift = mappingLib.detectDrift(records, m);
+  res.json({ ok: true, preview, drift });
+});
+
+/* Approve a proposed/draft mapping (does NOT activate). Permission-gated + audited. */
+app.post('/api/mappings/:id/approve', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const m = _mappingById(code, req.params.id);
+  if (!m) return res.status(404).json({ error: 'mapping not found' });
+  if (m.status !== 'proposed' && m.status !== 'draft') return res.status(409).json({ error: `cannot approve a ${m.status} mapping` });
+  m.status = 'approved'; m.approvedBy = req.iqSession.userId; m.approvedAt = new Date().toISOString();
+  _mapAudit(m, 'approve', req.iqSession.userId); scheduleSave();
+  res.json({ ok: true, mapping: _publicMapping(m) });
+});
+
+/* Activate an approved (or previously superseded → rollback) version. Supersedes the
+   current active for the same provider. Does NOT reprocess history (that's explicit). */
+app.post('/api/mappings/:id/activate', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const m = _mappingById(code, req.params.id);
+  if (!m) return res.status(404).json({ error: 'mapping not found' });
+  if (m.rejected) return res.status(409).json({ error: 'mapping was rejected' });
+  if (m.status !== 'approved' && m.status !== 'superseded') return res.status(409).json({ error: `only an approved or superseded version can be activated (this is ${m.status})` });
+  const prior = _activeMapping(code, m.provider);
+  if (prior && prior.id !== m.id) { prior.status = 'superseded'; _mapAudit(prior, 'superseded', req.iqSession.userId); }
+  m.status = 'active'; _mapAudit(m, 'activate', req.iqSession.userId); scheduleSave();
+  res.json({ ok: true, mapping: _publicMapping(m), superseded: prior && prior.id !== m.id ? prior.id : null });
+});
+
+/* Roll back to the most recent previously-active (superseded) version for a provider,
+   restoring it without mutating any history. */
+app.post('/api/mappings/:provider/rollback', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode; const provider = req.params.provider;
+  const prev = _mappingsFor(code).filter(m => m.provider === provider && m.status === 'superseded').sort((a, b) => b.version - a.version)[0];
+  if (!prev) return res.status(404).json({ error: 'no previous version to roll back to' });
+  const cur = _activeMapping(code, provider);
+  if (cur) { cur.status = 'superseded'; _mapAudit(cur, 'rolled-back-from', req.iqSession.userId); }
+  prev.status = 'active'; _mapAudit(prev, 'rollback-activate', req.iqSession.userId); scheduleSave();
+  res.json({ ok: true, mapping: _publicMapping(prev), from: cur ? cur.id : null });
+});
+
+/* Retire the active mapping — stops FUTURE promotion; keeps all prior evidence. */
+app.post('/api/mappings/:id/retire', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const m = _mappingById(code, req.params.id);
+  if (!m) return res.status(404).json({ error: 'mapping not found' });
+  m.status = 'retired'; _mapAudit(m, 'retire', req.iqSession.userId); scheduleSave();
+  res.json({ ok: true, mapping: _publicMapping(m) });
+});
+
+/* Reject a proposal — it produces no evidence or signals; held records stay held. */
+app.post('/api/mappings/:id/reject', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const m = _mappingById(code, req.params.id);
+  if (!m) return res.status(404).json({ error: 'mapping not found' });
+  if (m.status === 'active') return res.status(409).json({ error: 'retire an active mapping instead of rejecting' });
+  m.status = 'retired'; m.rejected = true; _mapAudit(m, 'reject', req.iqSession.userId); scheduleSave();
+  res.json({ ok: true, mapping: _publicMapping(m) });
+});
+
+/* Edit → FORK a new draft version (immutability: approved contracts are never mutated). */
+app.post('/api/mappings/:id/edit', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const m = _mappingById(code, req.params.id);
+  if (!m) return res.status(404).json({ error: 'mapping not found' });
+  const patch = req.body?.patch || {};
+  const draft = JSON.parse(JSON.stringify(m));
+  draft.id = 'map_' + generateId();
+  draft.version = _nextMappingVersion(code, m.provider);
+  draft.status = 'draft'; draft.rejected = false;
+  draft.approvedBy = null; draft.approvedAt = null; draft.proposedBy = req.iqSession.userId;
+  draft.forkedFrom = m.id; draft.audit = [{ action: 'fork', by: req.iqSession.userId, ts: new Date().toISOString() }];
+  if (Array.isArray(patch.fields)) draft.fields = patch.fields.map(f => ({ from: String(f.from || '').slice(0, 60), primitive: 'metric', evidenceType: evidence.EVIDENCE_TYPES.includes(f.evidenceType) ? f.evidenceType : 'metric', label: String(f.label || f.from || 'Metric').slice(0, 80), unit: f.unit ? String(f.unit).slice(0, 24) : null, transform: (f.transform && typeof f.transform === 'object') ? f.transform : null, include: f.include !== false }));
+  if (patch.subjectField !== undefined) draft.subjectField = patch.subjectField;
+  if (patch.dateField !== undefined) draft.dateField = patch.dateField;
+  if (patch.identityStrategy) draft.identityStrategy = patch.identityStrategy;
+  if (patch.visibilityDefault) draft.visibilityDefault = patch.visibilityDefault;
+  draft.expectedOutput = mappingLib.preview(draft.testSample || [], draft).samples.map(s => s.output);
+  _mappingsFor(code).push(draft); scheduleSave();
+  res.json({ ok: true, mapping: _publicMapping(draft) });
+});
+
+/* Explicit REPROCESS — interpret held records under the active mapping (deliberate
+   replay; preserves observed time). Never automatic on activation. */
+app.post('/api/mappings/:provider/reprocess', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const r = _reprocessHeld(code, req.params.provider, req.iqSession.userId);
+  if (r.error) return res.status(409).json(r);
+  res.json({ ok: true, ...r });
+});
+
 /* ── Connections: connect to anything with a URL. The org configures a source; the
    server polls it on a schedule and the mapper turns whatever comes back into
    signals. SSRF-guarded and admin-only. ──────────────────────────────────────── */
@@ -5529,12 +5790,17 @@ async function _runConnection(code, conn) {
     if (!resp.ok) { conn.lastStatus = `error — HTTP ${resp.status}`; scheduleSave(); return { error: `HTTP ${resp.status}` }; }
     let data; try { data = await resp.json(); } catch (_) { conn.lastStatus = 'error — response was not JSON'; scheduleSave(); return { error: 'not json' }; }
     if (conn.jsonPath) { try { data = String(conn.jsonPath).split('.').reduce((o, k) => (o == null ? o : o[k]), data); } catch (_) {} }
-    const r = _ingestGeneric(code, data, conn.createdBy, { source: conn.source || conn.name || 'connector', provider: conn.oauth?.provider || conn.source, mapping: conn.mapping || undefined, defaultSubjectId: conn.oauth?.subject === 'self' ? conn.createdBy : undefined });
+    // Connector data crosses the INTERPRETATION BOUNDARY: it can only promote under
+    // an APPROVED, ACTIVE mapping. Otherwise it's held for review (raw retained) or
+    // paused on schema drift.
+    const provider = conn.oauth?.provider || conn.source || conn.name || 'connector';
+    const r = _ingestGeneric(code, data, conn.createdBy, { source: conn.source || conn.name || 'connector', provider, requireApprovedMapping: true, connector: conn.id, sourceObject: conn.url, defaultSubjectId: conn.oauth?.subject === 'self' ? conn.createdBy : undefined });
     // A completed sync may have brought a directory/roster with it — re-evaluate any
     // previously-unmatched evidence against the now-current roster.
     try { _reresolveUnmatched(code, { by: 'system', method: 'rule', reason: 'sync completed' }); } catch (_) {}
-    const verified = conn.mapping ? '' : ' (auto-mapped — inspect to verify)';
-    conn.lastStatus = `ok — ${r.imported} data point${r.imported === 1 ? '' : 's'} across ${r.subjects} ${r.subjects === 1 ? 'person' : 'people'}${r.conflicts ? `, ${r.conflicts} ambiguous (skipped)` : ''}${r.unmatched ? `, ${r.unmatched} unmatched` : ''}${verified}`;
+    if (r.drift) conn.lastStatus = `paused — source schema changed (${[...(r.drift.missing||[]), ...(r.drift.identityMissing?['identity field']:[])].slice(0,3).join(', ') || 'fields changed'}). Review the mapping.`;
+    else if (r.needsMapping) conn.lastStatus = `held — ${r.held} record${r.held === 1 ? '' : 's'} retained. A mapping is proposed and awaiting approval before anything is used.`;
+    else conn.lastStatus = `ok — ${r.imported} data point${r.imported === 1 ? '' : 's'} across ${r.subjects} ${r.subjects === 1 ? 'person' : 'people'}${r.conflicts ? `, ${r.conflicts} ambiguous (skipped)` : ''}${r.unmatched ? `, ${r.unmatched} unmatched` : ''}`;
     conn.lastCount = r.imported; scheduleSave();
     return r;
   } catch (e) { conn.lastStatus = 'failed — ' + String(e.message || 'error').slice(0, 70); scheduleSave(); return { error: e.message }; }
@@ -9785,6 +10051,7 @@ function _loadAllStores(data) {
   Object.assign(noticeFeedback,   data.noticeFeedback   || {});
   Object.assign(rawEvidence,      data.rawEvidence      || {});
   Object.assign(evidenceLog,      data.evidenceLog      || {});
+  Object.assign(orgMappings,      data.orgMappings      || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -9825,7 +10092,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: proves the role ladder never invents a title
   _subjectRoleContext, _domainDirective,
   // exported for the truth layer: the canonical evidence boundary + identity lifecycle
-  _ingestGeneric, _recordEvidence, _reresolveUnmatched, _promoteEvidence, evidenceLog, rawEvidence, orgSignals, orgUsers };
+  _ingestGeneric, _recordEvidence, _reresolveUnmatched, _promoteEvidence, evidenceLog, rawEvidence, orgSignals, orgUsers,
+  // exported for the truth layer: the mapping approval lifecycle
+  _proposeMapping, _reprocessHeld, _activeMapping, orgMappings };
 
 if (require.main === module) (async () => {
   try {

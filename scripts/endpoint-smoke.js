@@ -11,7 +11,7 @@
 process.env.DB_OPTIONAL = '1';
 process.env.NODE_ENV    = 'test';
 
-const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired } = require('../server.js');
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired, orgMappings } = require('../server.js');
 
 const CODE = 'testco';
 const iso  = new Date().toISOString();
@@ -508,6 +508,33 @@ const server = app.listen(0, async () => {
     const reversed = await call(`/api/evidence/${ghost.id}/reverse`, tokCoach, { method: 'POST', body: { reason: 'wrong person' } });
     ok('an admin can reverse a resolution (real: the signal is removed)',
        reversed.status === 200 && !(await call('/api/me/export', tokB)).j?.signals?.some(s => s.label === 'MysteryLoad'));
+
+    // ── Mapping approval lifecycle (interpretation boundary) ──────────────────
+    // Seed a proposed mapping directly (a connector run would create one on hold).
+    (orgMappings[CODE] = orgMappings[CODE] || []).push({
+      id: 'map_test1', org: CODE, provider: 'vendorX', connector: 'vendorX', sourceObject: 'vendorX',
+      schemaFingerprint: 'abc', schemaFields: ['email', 'load'], schemaTypes: { email: 'str', load: 'num' },
+      subjectField: 'email', dateField: 'date', eventField: null,
+      fields: [{ from: 'load', primitive: 'metric', evidenceType: 'metric', label: 'Load', unit: 'au', transform: { scale: 2 }, include: true }],
+      requiredFields: ['email', 'load'], optionalFields: ['date'], identityStrategy: 'email', visibilityDefault: 'normal',
+      proposedBy: 'system', approvedBy: null, approvedAt: null,
+      testSample: [{ email: 'b@t.co', load: 5, date: '2026-06-01' }], expectedOutput: null,
+      version: 1, status: 'proposed', createdAt: new Date().toISOString(), audit: [],
+    });
+    ok('a plain member cannot see the mapping registry (403)', (await call('/api/mappings', tokB)).status === 403);
+    const mList = await call('/api/mappings', tokCoach);
+    ok('the mapping version history is admin-visible', mList.status === 200 && mList.j.mappings.some(m => m.id === 'map_test1'));
+    const awaiting = await call('/api/mappings/awaiting', tokCoach);
+    ok('the awaiting-review queue lists the proposed mapping', awaiting.j?.mappings?.some(m => m.id === 'map_test1' && m.status === 'proposed'));
+    const prev = await call('/api/mappings/map_test1/preview', tokCoach, { method: 'POST', body: {} });
+    ok('preview transforms the sample deterministically (load 5 × scale 2 → 10)',
+       prev.status === 200 && prev.j?.preview?.samples?.[0]?.output?.[0]?.value === 10);
+    ok('a plain member cannot approve a mapping (403)', (await call('/api/mappings/map_test1/approve', tokB, { method: 'POST' })).status === 403);
+    ok('an admin can approve a proposed mapping', (await call('/api/mappings/map_test1/approve', tokCoach, { method: 'POST' })).j?.mapping?.status === 'approved');
+    ok('an admin can activate an approved mapping', (await call('/api/mappings/map_test1/activate', tokCoach, { method: 'POST' })).j?.mapping?.status === 'active');
+    const edited = await call('/api/mappings/map_test1/edit', tokCoach, { method: 'POST', body: { patch: { visibilityDefault: 'sensitive' } } });
+    ok('editing an active mapping forks a NEW draft version (immutability)',
+       edited.j?.mapping?.status === 'draft' && edited.j.mapping.version === 2 && edited.j.mapping.id !== 'map_test1');
 
     // ── Connections: connect to anything with a URL (admin-gated, SSRF-guarded) ──
     ok('a plain member cannot create a connection (403)',

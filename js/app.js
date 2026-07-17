@@ -3095,6 +3095,97 @@ function renderSettings(){
   if (typeof loadConnections === 'function') loadConnections();
   if (typeof loadOAuthCatalog === 'function') loadOAuthCatalog();
   if (typeof loadDomainCatalog === 'function') loadDomainCatalog();
+  if (typeof loadMappings === 'function') loadMappings();
+}
+
+/* Data mappings — the interpretation boundary UI. Four focused areas: awaiting
+   review, transformation preview, validation/drift, and version history with
+   activate / retire / rollback. Practical, not a visual no-code designer. */
+const _MAP_BADGE = { proposed:'#f7a84f', draft:'#4f8ef7', approved:'#0ecfb0', active:'#0ecfb0', superseded:'#9aa', retired:'#9aa' };
+async function loadMappings() {
+  const box = document.getElementById('mappings-list');
+  if (!box) return;
+  const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  try {
+    const r = await fetch('/api/mappings', { headers: Auth._headers() });
+    if (!r.ok) { box.innerHTML = ''; return; }
+    const d = await r.json();
+    const list = d.mappings || [];
+    if (!list.length) { box.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">No connector mappings yet. When you connect a source, IntelliQ proposes one here for your review.</div>`; return; }
+    // Group by provider; newest version first.
+    const byProv = {};
+    list.forEach(m => (byProv[m.provider] = byProv[m.provider] || []).push(m));
+    box.innerHTML = Object.entries(byProv).map(([prov, versions]) => {
+      versions.sort((a,b) => b.version - a.version);
+      const hasSuperseded = versions.some(v => v.status === 'superseded');
+      return `<div style="border:1px solid var(--border);border-radius:8px;padding:0.6rem 0.7rem;margin-bottom:0.5rem">
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.4rem">
+          <strong>${esc(prov)}</strong>
+          ${hasSuperseded ? `<button class="btn-ghost" style="margin-left:auto;font-size:0.72rem;color:var(--accent)" onclick="mappingAction('${esc(prov)}','rollback')">Roll back</button>` : ''}
+        </div>
+        ${versions.map(m => {
+          const c = _MAP_BADGE[m.status] || '#9aa';
+          const acts = [];
+          if (m.status === 'proposed' || m.status === 'draft') { acts.push(`<button class="btn btn-accent btn-sm" onclick="mappingReview('${m.id}')">Review</button>`); acts.push(`<button class="btn btn-outline btn-sm" onclick="mappingAction('${m.id}','approve')">Approve</button>`); acts.push(`<button class="btn-ghost" style="color:var(--danger);font-size:0.74rem" onclick="mappingAction('${m.id}','reject')">Reject</button>`); }
+          if (m.status === 'approved') { acts.push(`<button class="btn btn-accent btn-sm" onclick="mappingAction('${m.id}','activate')">Activate</button>`); acts.push(`<button class="btn btn-outline btn-sm" onclick="mappingReview('${m.id}')">Preview</button>`); }
+          if (m.status === 'active') { acts.push(`<button class="btn btn-outline btn-sm" onclick="mappingReprocess('${esc(prov)}')">Reprocess held</button>`); acts.push(`<button class="btn-ghost" style="font-size:0.74rem" onclick="mappingAction('${m.id}','retire')">Retire</button>`); }
+          return `<div style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0;font-size:0.8rem;flex-wrap:wrap">
+            <span style="font-family:monospace">v${m.version}</span>
+            <span class="pill" style="background:${c}22;color:${c};font-size:0.68rem;padding:1px 7px;border-radius:10px">${esc(m.status)}${m.rejected ? ' · rejected' : ''}</span>
+            <span style="color:var(--text-muted);font-size:0.72rem">${(m.fields||[]).length} field${(m.fields||[]).length===1?'':'s'}${m.approvedBy ? ' · approved' : ''}</span>
+            <span style="margin-left:auto;display:flex;gap:0.3rem;flex-wrap:wrap">${acts.join('')}</span>
+          </div>
+          <div id="map-review-${m.id}" style="display:none"></div>`;
+        }).join('')}
+      </div>`;
+    }).join('');
+  } catch (e) { box.innerHTML = ''; }
+}
+/* Transformation preview + validation/drift for one mapping (show before approve). */
+async function mappingReview(id) {
+  const panel = document.getElementById(`map-review-${id}`);
+  if (!panel) return;
+  if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+  const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  panel.style.display = 'block';
+  panel.innerHTML = `<div style="color:var(--text-muted);font-size:0.78rem;padding:0.3rem 0">Loading preview…</div>`;
+  try {
+    const r = await fetch(`/api/mappings/${id}/preview`, { method: 'POST', headers: { 'Content-Type':'application/json', ...Auth._headers() }, body: '{}' });
+    const d = await r.json();
+    const samples = d.preview?.samples || [];
+    const drift = d.drift || {};
+    const driftMsg = drift.drifted
+      ? `<div style="color:var(--danger);font-size:0.76rem;margin:0.3rem 0">⚠ Schema changed: ${[...(drift.missing||[]).map(f=>`field "${esc(f)}" missing`), ...(drift.typeChanged||[]).map(t=>`"${esc(t.field)}" no longer numeric`), ...(drift.identityMissing?['identity field missing']:[])].join('; ')}. Ingestion is paused until re-reviewed.</div>`
+      : `<div style="color:var(--success);font-size:0.76rem;margin:0.3rem 0">✓ Schema matches — no drift.</div>`;
+    panel.innerHTML = driftMsg + samples.slice(0,3).map(s => `
+      <div style="border-top:1px solid var(--border);padding:0.4rem 0;font-size:0.74rem">
+        <div style="color:var(--text-muted)">in: <code>${esc(JSON.stringify(s.input)).slice(0,200)}</code></div>
+        <div>out: ${(s.output||[]).map(o => `<span class="pill" style="background:rgba(79,142,247,0.14);font-size:0.7rem;padding:1px 6px;border-radius:8px;margin-right:3px">${esc(o.label)} = ${esc(o.value)}${o.unit?(' '+esc(o.unit)):''}</span>`).join('') || '<span style="color:var(--text-muted)">— nothing extracted —</span>'}</div>
+      </div>`).join('');
+  } catch (e) { panel.innerHTML = `<div style="color:var(--danger);font-size:0.78rem">Couldn't load preview.</div>`; }
+}
+async function mappingAction(idOrProv, action) {
+  const status = document.getElementById('mappings-status');
+  if (action === 'reject' && !confirm('Reject this proposal? Held data stays held; nothing is imported.')) return;
+  if (status) status.innerHTML = '<span style="color:var(--text-muted)">Working…</span>';
+  try {
+    const r = await fetch(`/api/mappings/${idOrProv}/${action}`, { method: 'POST', headers: Auth._headers() });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'failed');
+    if (status) status.innerHTML = `<span style="color:var(--success)">Done — ${action}.</span>`;
+    loadMappings();
+  } catch (e) { if (status) status.innerHTML = `<span style="color:var(--danger)">${String(e.message).replace(/</g,'&lt;')}</span>`; }
+}
+async function mappingReprocess(provider) {
+  const status = document.getElementById('mappings-status');
+  if (status) status.innerHTML = '<span style="color:var(--text-muted)">Reprocessing held records…</span>';
+  try {
+    const r = await fetch(`/api/mappings/${provider}/reprocess`, { method: 'POST', headers: Auth._headers() });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || 'failed');
+    if (status) status.innerHTML = `<span style="color:var(--success)">Reprocessed ${d.reprocessed||0} held record(s) → ${d.promoted||0} added.</span>`;
+    loadMappings();
+  } catch (e) { if (status) status.innerHTML = `<span style="color:var(--danger)">${String(e.message).replace(/</g,'&lt;')}</span>`; }
 }
 
 /* Display language (domain pack) — the same kernel, the org's own words. Renders

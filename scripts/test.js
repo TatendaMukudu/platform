@@ -48,6 +48,8 @@ const SUITES = [
   'domain-cleanup-smoke.js', // one language source: no legacy vertical prose; role ladder invents no titles
   'evidence-smoke.js',     // the canonical evidence envelope: normalise/validate/dedupe/promote
   'identity-reresolve-smoke.js', // the identity lifecycle: held-back evidence resolves + promotes once
+  'mapping-smoke.js',            // the mapping contract: fingerprint/drift/transform/gate (pure)
+  'mapping-lifecycle-smoke.js',  // the mapping approval lifecycle end to end (hold→approve→activate→reprocess)
   'connector-harness.js',  // the Connector SDK: identity/confidence + mapping contracts
   'endpoint-smoke.js',   // boots the real app in-process (DB_OPTIONAL) — HTTP authz + Me context
 ];

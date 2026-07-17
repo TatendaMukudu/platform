@@ -13,8 +13,8 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260716t"/>
-<link rel="stylesheet" href="css/member.css?v=20260716t"/>
+<link rel="stylesheet" href="css/styles.css?v=20260716u"/>
+<link rel="stylesheet" href="css/member.css?v=20260716u"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -793,6 +793,17 @@
                 <div id="oauth-redirect" style="font-size:0.76rem;color:var(--text-muted);margin-bottom:0.6rem"></div>
                 <div id="oauth-catalog"></div>
                 <div id="oauth-status" style="font-size:0.8rem;margin-top:0.5rem"></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header"><div class="card-title">Data mappings (interpretation boundary)</div></div>
+              <div class="card-body">
+                <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+                  Connector data is never guessed into your record. IntelliQ proposes what each source's fields mean; you review and approve a versioned mapping, and only then does that data become part of your organisation's truth. Data is safely held until you approve.
+                </div>
+                <div id="mappings-status" style="font-size:0.8rem;margin-bottom:0.6rem"></div>
+                <div id="mappings-list"></div>
+                <button class="btn btn-outline btn-sm" onclick="loadMappings()">Refresh mappings</button>
               </div>
             </div>
             <div class="card">
@@ -1887,8 +1898,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260716t"></script>
-<script src="js/auth.js?v=20260716t"></script>
+<script src="js/data.js?v=20260716u"></script>
+<script src="js/auth.js?v=20260716u"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1956,14 +1967,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260716t"></script>
-<script src="js/ui.js?v=20260716t"></script>
-<script src="js/attachments.js?v=20260716t"></script>
-<script src="js/scenarios.js?v=20260716t"></script>
-<script src="js/chat.js?v=20260716t"></script>
-<script src="js/tree.js?v=20260716t"></script>
-<script src="js/app.js?v=20260716t"></script>
-<script src="js/member-view.js?v=20260716t"></script>
+<script src="js/charts.js?v=20260716u"></script>
+<script src="js/ui.js?v=20260716u"></script>
+<script src="js/attachments.js?v=20260716u"></script>
+<script src="js/scenarios.js?v=20260716u"></script>
+<script src="js/chat.js?v=20260716u"></script>
+<script src="js/tree.js?v=20260716u"></script>
+<script src="js/app.js?v=20260716u"></script>
+<script src="js/member-view.js?v=20260716u"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->
