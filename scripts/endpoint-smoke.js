@@ -549,6 +549,31 @@ const server = app.listen(0, async () => {
     const runConn = await call(`/api/connections/${conn.j.connection.id}/run`, tokCoach, { method: 'POST' });
     ok('running a connection reports a status (reachability handled gracefully)',
        runConn.status === 200 && typeof runConn.j?.connection?.lastStatus === 'string');
+
+    // ── Sync reliability: health, run history, controls, dead-letter, webhooks ──
+    const cid = conn.j.connection.id;
+    const connHealth = await call(`/api/connections/${cid}/health`, tokCoach);
+    ok('a connection exposes a health status + reason + staleness',
+       connHealth.status === 200 && typeof connHealth.j?.health?.status === 'string' && typeof connHealth.j?.health?.reason === 'string' && !!connHealth.j?.staleness);
+    ok('a plain member cannot see connection health (403)', (await call(`/api/connections/${cid}/health`, tokB)).status === 403);
+    ok('run history is recorded and admin-visible',
+       (await call(`/api/connections/${cid}/runs`, tokCoach)).j?.runs?.length >= 1);
+    const connPaused = await call(`/api/connections/${cid}/pause`, tokCoach, { method: 'POST', body: { reason: 'maintenance' } });
+    ok('an admin can pause a connection → health becomes paused',
+       connPaused.j?.connection?.health === 'paused' && connPaused.j.connection.paused === true);
+    ok('a paused connection does not run', (await call(`/api/connections/${cid}/run`, tokCoach, { method: 'POST' })).j?.result?.skipped === true);
+    ok('an admin can resume a connection', (await call(`/api/connections/${cid}/resume`, tokCoach, { method: 'POST' })).j?.connection?.paused === false);
+    ok('an admin can reset the cursor (audited)', (await call(`/api/connections/${cid}/cursor/reset`, tokCoach, { method: 'POST' })).status === 200);
+    ok('a plain member cannot view the dead-letter queue (403)', (await call('/api/failures', tokB)).status === 403);
+    ok('the dead-letter queue is admin-visible + org-scoped', (await call('/api/failures', tokCoach)).status === 200);
+    // Webhooks: challenge echo, dedupe, and same-path processing (no secret set → open).
+    const whChallenge = await call(`/api/webhooks/${CODE}/${cid}`, null, { method: 'POST', body: { type: 'url_verification', challenge: 'echo123' } });
+    ok('a webhook verification challenge is echoed back', whChallenge.j?.challenge === 'echo123');
+    const wh1 = await call(`/api/webhooks/${CODE}/${cid}`, null, { method: 'POST', headers: { 'X-Delivery-Id': 'dlv1' }, body: { records: [{ email: 'b@t.co', x: 1 }] } });
+    const wh2 = await call(`/api/webhooks/${CODE}/${cid}`, null, { method: 'POST', headers: { 'X-Delivery-Id': 'dlv1' }, body: { records: [{ email: 'b@t.co', x: 1 }] } });
+    ok('a duplicate webhook delivery id is ignored (idempotent)', wh1.j?.received === true && wh2.j?.duplicate === true);
+    ok('an unknown webhook connection is rejected', (await call(`/api/webhooks/${CODE}/conn_nope`, null, { method: 'POST', body: {} })).status === 404);
+
     ok('a plain member cannot delete a connection (403)',
        (await call(`/api/connections/${conn.j.connection.id}`, tokB, { method: 'DELETE' })).status === 403);
     ok('an admin can delete a connection',

@@ -50,6 +50,8 @@ const SUITES = [
   'identity-reresolve-smoke.js', // the identity lifecycle: held-back evidence resolves + promotes once
   'mapping-smoke.js',            // the mapping contract: fingerprint/drift/transform/gate (pure)
   'mapping-lifecycle-smoke.js',  // the mapping approval lifecycle end to end (hold→approve→activate→reprocess)
+  'sync-smoke.js',               // sync reliability primitives (pure): classify/backoff/rate-limit/health/staleness
+  'sync-reliability-smoke.js',   // sync reliability invariants: idempotent replay, correction, deletion, concurrency
   'connector-harness.js',  // the Connector SDK: identity/confidence + mapping contracts
   'endpoint-smoke.js',   // boots the real app in-process (DB_OPTIONAL) — HTTP authz + Me context
 ];

@@ -3292,17 +3292,80 @@ async function loadConnections() {
     const d = await r.json();
     const list = d.connections || [];
     if (!list.length) { box.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">No connections yet.</div>`; return; }
-    box.innerHTML = list.map(c => `<div style="border:1px solid var(--border);border-radius:8px;padding:0.55rem 0.7rem;margin-bottom:0.4rem">
-      <div style="display:flex;align-items:center;gap:0.5rem">
-        <div style="flex:1;min-width:0"><strong>${esc(c.name)}</strong> <span style="font-size:0.72rem;color:var(--text-muted)">· every ${c.scheduleHours}h</span>
-          <div style="font-size:0.72rem;color:var(--text-muted);word-break:break-all">${esc(c.url)}</div>
-          <div style="font-size:0.72rem;color:var(--text-secondary);margin-top:2px">${esc(c.lastStatus)}</div>
-        </div>
-        <button class="btn btn-outline btn-sm" onclick="runConnection('${c.id}')">Sync now</button>
-        <button class="btn-ghost" title="Remove" onclick="deleteConnection('${c.id}')" style="color:var(--text-muted)">✕</button>
+    const ago = t => { if (!t) return 'never'; const s = (Date.now() - new Date(t).getTime())/1000; if (s<60) return 'just now'; if (s<3600) return Math.round(s/60)+'m ago'; if (s<86400) return Math.round(s/3600)+'h ago'; return Math.round(s/86400)+'d ago'; };
+    const soon = t => { if (!t) return '—'; const s = (new Date(t).getTime() - Date.now())/1000; if (s<=0) return 'now'; if (s<3600) return 'in '+Math.round(s/60)+'m'; return 'in '+Math.round(s/3600)+'h'; };
+    box.innerHTML = list.map(c => {
+      const hc = _HEALTH_COLOR[c.health] || '#9aa';
+      return `<div style="border:1px solid var(--border);border-radius:8px;padding:0.6rem 0.7rem;margin-bottom:0.5rem">
+      <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+        <span style="width:8px;height:8px;border-radius:50%;background:${hc};flex:none"></span>
+        <strong>${esc(c.name)}</strong>
+        <span class="pill" style="background:${hc}22;color:${hc};font-size:0.68rem;padding:1px 7px;border-radius:10px">${esc(c.health || 'unknown')}</span>
+        <span style="margin-left:auto;font-size:0.72rem;color:var(--text-muted)">every ${c.scheduleHours}h</span>
       </div>
-    </div>`).join('');
+      <div style="font-size:0.74rem;color:var(--text-secondary);margin-top:3px">${esc(c.healthReason || c.lastStatus || '')}</div>
+      <div style="font-size:0.72rem;color:var(--text-muted);margin-top:3px;display:flex;gap:0.9rem;flex-wrap:wrap">
+        <span>last ok: <b>${ago(c.lastCompletedSync)}</b></span>
+        <span>next: <b>${c.paused ? 'paused' : soon(c.nextAttemptAt) === '—' ? 'scheduled' : soon(c.nextAttemptAt)}</b></span>
+        <span>added: <b>${c.lastCount||0}</b></span>
+        ${c.failures ? `<span style="color:var(--danger)">failed: <b>${c.failures}</b></span>` : ''}
+      </div>
+      <div style="display:flex;gap:0.35rem;margin-top:0.5rem;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" onclick="runConnection('${c.id}')">Sync now</button>
+        ${c.paused
+          ? `<button class="btn btn-accent btn-sm" onclick="connControl('${c.id}','resume')">Resume</button>`
+          : `<button class="btn-ghost btn-sm" style="font-size:0.76rem" onclick="connControl('${c.id}','pause')">Pause</button>`}
+        <button class="btn-ghost btn-sm" style="font-size:0.76rem" onclick="connRuns('${c.id}')">History</button>
+        ${c.failures ? `<button class="btn-ghost btn-sm" style="font-size:0.76rem;color:var(--danger)" onclick="connReplay('${c.id}')">Replay failed</button>` : ''}
+        <button class="btn-ghost btn-sm" title="Reset cursor" style="font-size:0.76rem;color:var(--text-muted)" onclick="connControl('${c.id}','cursor/reset')">Reset cursor</button>
+        <button class="btn-ghost" title="Remove" onclick="deleteConnection('${c.id}')" style="color:var(--text-muted);margin-left:auto">✕</button>
+      </div>
+      <div id="conn-runs-${c.id}" style="display:none;margin-top:0.5rem"></div>
+    </div>`; }).join('');
   } catch (e) { box.innerHTML = ''; }
+}
+const _HEALTH_COLOR = { healthy:'#0ecfb0', syncing:'#4f8ef7', degraded:'#f7a84f', action_required:'#f74f4f', paused:'#9aa', disconnected:'#f74f4f' };
+async function connControl(id, action) {
+  const status = document.getElementById('connections-status');
+  try {
+    const r = await fetch(`/api/connections/${id}/${action}`, { method: 'POST', headers: Auth._headers() });
+    if (!r.ok) throw new Error((await r.json()).error || 'failed');
+    if (status) status.innerHTML = `<span style="color:var(--success)">Done — ${action.replace('/',' ')}.</span>`;
+    loadConnections();
+  } catch (e) { if (status) status.innerHTML = `<span style="color:var(--danger)">${String(e.message).replace(/</g,'&lt;')}</span>`; }
+}
+async function connRuns(id) {
+  const panel = document.getElementById(`conn-runs-${id}`);
+  if (!panel) return;
+  if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  panel.innerHTML = `<div style="color:var(--text-muted);font-size:0.76rem">Loading run history…</div>`;
+  try {
+    const d = await (await fetch(`/api/connections/${id}/runs`, { headers: Auth._headers() })).json();
+    const runs = d.runs || [];
+    if (!runs.length) { panel.innerHTML = `<div style="color:var(--text-muted);font-size:0.76rem">No runs yet.</div>`; return; }
+    panel.innerHTML = runs.slice(0, 8).map(r => {
+      const m = r.metrics || {};
+      const c = r.status === 'completed' ? '#0ecfb0' : r.status === 'failed' ? '#f74f4f' : r.status === 'paused' ? '#f7a84f' : '#9aa';
+      return `<div style="border-top:1px solid var(--border);padding:0.35rem 0;font-size:0.73rem;display:flex;gap:0.6rem;flex-wrap:wrap">
+        <span class="pill" style="background:${c}22;color:${c};padding:0 6px;border-radius:8px">${esc(r.status)}</span>
+        <span style="color:var(--text-muted)">${esc(r.trigger)}</span>
+        <span>fetched ${m.fetched||0} · promoted ${m.promoted||0} · held ${m.held||0} · dup ${m.duplicates||0}${m.deletions?` · del ${m.deletions}`:''}</span>
+        ${r.error ? `<span style="color:var(--danger)">${esc(r.error)}</span>` : ''}
+        <span style="margin-left:auto;color:var(--text-muted)">${r.latencyMs!=null?r.latencyMs+'ms':''}</span>
+      </div>`;
+    }).join('');
+  } catch (e) { panel.innerHTML = `<div style="color:var(--danger);font-size:0.76rem">Couldn't load runs.</div>`; }
+}
+async function connReplay(id) {
+  const status = document.getElementById('connections-status');
+  if (status) status.innerHTML = '<span style="color:var(--text-muted)">Replaying failed records…</span>';
+  try {
+    const d = await (await fetch(`/api/connections/${id}/failures/retry`, { method: 'POST', headers: Auth._headers() })).json();
+    if (status) status.innerHTML = `<span style="color:var(--success)">Replayed ${d.replayed||0} of ${d.attempted||0} failed record(s).</span>`;
+    loadConnections();
+  } catch (e) { if (status) status.innerHTML = '<span style="color:var(--danger)">Replay failed.</span>'; }
 }
 async function addConnection() {
   const btn = document.getElementById('conn-add-btn');

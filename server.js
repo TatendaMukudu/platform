@@ -4,6 +4,7 @@ const Anthropic  = require('@anthropic-ai/sdk');
 const path      = require('path');
 const bcrypt    = require('bcryptjs');
 const fs        = require('fs');   // kept for store.json → Postgres one-time migration
+const crypto    = require('crypto');   // webhook HMAC signature verification
 const db        = require('./db');
 
 /* ── AI layer (Phase 1) ──────────────────────────────────────────────────────
@@ -26,6 +27,7 @@ const office     = require('./lib/office');   // dependency-free .xlsx / .docx r
 const connectorSDK = require('./lib/connector-sdk');   // capability contract, identity resolution, mappings
 const evidence   = require('./lib/evidence');   // the canonical evidence envelope — the connector↔kernel boundary
 const mappingLib = require('./lib/mapping');     // the mapping approval lifecycle — the interpretation boundary
+const syncLib    = require('./lib/sync');        // sync reliability — classification, backoff, health, staleness
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -43,7 +45,8 @@ process.on('uncaughtException', (err) => {
 
 // 25mb so base64 rich-media (images/PDF) in chat/scenarios isn't rejected by the
 // default 100kb body limit — a real, silent failure mode for attachments.
-app.use(express.json({ limit: '25mb' }));
+// Capture the raw body (for webhook HMAC signature verification) without a second parse.
+app.use(express.json({ limit: '25mb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
 // Serve static assets, but force browsers to revalidate HTML/JS/CSS on every load
 // (etag makes this cheap) so a Render redeploy is picked up on the next refresh
 // instead of a stale cached bundle — the cause of "I deployed but nothing changed".
@@ -86,6 +89,7 @@ function scheduleSave() {
         assessmentTemplates, assessmentAssignments, orgTutorials, orgApiTokens,
         orgConnections, orgOAuthApps, studioThreads, activeSessions,
         rawEvidence, evidenceLog, orgMappings,
+        syncRuns, failedRecords, webhookDeliveries,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -637,7 +641,16 @@ const orgApiTokens          = {};  // orgCode → { token, createdAt, createdBy 
 // Universal connectors — a connection to ANY system that has a URL or can push a
 // webhook. The org configures {url, auth, schedule}; the server polls it and the
 // generic mapper deciphers whatever JSON comes back into signals. No per-vendor code.
-const orgConnections        = {};  // orgCode → [ { id, name, url, method, headers, scheduleHours, source, jsonPath, oauth?, lastRun, lastStatus, lastCount, createdBy, createdAt } ]
+const orgConnections        = {};  // orgCode → [ { id, name, url, method, headers, scheduleHours, source, jsonPath, oauth?, lastRun, lastStatus, lastCount, createdBy, createdAt, + sync-reliability fields } ]
+// Sync reliability layer — the durable movement of data up to the evidence boundary.
+//   syncRuns:       orgCode → [ run ]  (append-only audit of every attempt: cursors, counts, outcome)
+//   failedRecords:  orgCode → [ record ]  (the dead-letter queue — replayable, org-scoped)
+//   webhookDeliveries: deliveryKey → { org, connId, at }  (idempotency: a delivery is processed once)
+const syncRuns              = {};
+const failedRecords         = {};
+const webhookDeliveries     = {};
+const SYNC_RUN_CAP          = 200;  // keep the last N runs per org
+const _syncLocks            = {};   // connId → true  (in-process guard: one run per connection at a time)
 // OAuth2 app credentials the org registered with each provider (client id/secret
 // obtained from the provider's developer console). orgCode → { provider → {clientId, clientSecret} }.
 const orgOAuthApps          = {};
@@ -5157,13 +5170,21 @@ function _resolveSubjectId(code, rec) {
   if (name) { const n = name.toLowerCase().trim(); const id = Object.keys(users).find(k => (users[k].name || '').toLowerCase().trim() === n); if (id) return id; }
   return null;
 }
-/* Rebuild the dedupe index from the persisted log (called on load). */
+/* Rebuild the dedupe index from the persisted log (called on load). Map keyed by
+   dedupeKey → the CURRENT envelope for that factual identity, so a retry can be
+   recognised as a duplicate and a corrected value can supersede the prior fact. */
 function _rebuildEvidenceIndex() {
   for (const code of Object.keys(evidenceLog)) {
-    const set = new Set();
-    (evidenceLog[code] || []).forEach(env => { try { set.add(evidence.dedupeKey(env)); } catch (_) {} });
-    _evidenceSeen[code] = set;
+    const map = new Map();
+    (evidenceLog[code] || []).forEach(env => { try { if (env.status !== 'superseded') map.set(evidence.dedupeKey(env), env); } catch (_) {} });
+    _evidenceSeen[code] = map;
   }
+}
+
+/* Remove a promoted signal from the kernel (used by correction, deletion, reversal). */
+function _withdrawSignal(code, env) {
+  if (env && env.signalId && Array.isArray(orgSignals[code])) orgSignals[code] = orgSignals[code].filter(s => s.id !== env.signalId);
+  if (env) { env.promoted = false; env.signalId = null; env.promotedAt = null; }
 }
 
 /* Record ONE canonical envelope + its raw immutable record. The single choke point
@@ -5179,10 +5200,20 @@ function _recordEvidence(code, envInput, rawRecord) {
   const v = evidence.validateEnvelope(env);
   if (!v.ok) return { stored: false, invalid: true, errors: v.errors };
 
-  const seen = _evidenceSeen[code] || (_evidenceSeen[code] = new Set());
+  const seen = _evidenceSeen[code] || (_evidenceSeen[code] = new Map());
   const key = evidence.dedupeKey(env);
-  if (seen.has(key)) return { stored: false, duplicate: true, id: env.id, promotable: false };
-  seen.add(key);
+  const prior = seen.get(key);
+  if (prior) {
+    // Same factual identity. If the VALUE is unchanged it's a true duplicate (a
+    // retry / overlapping sync) → collapse. If the value changed it's a CORRECTION →
+    // supersede the prior fact rather than create a competing truth.
+    const samePayload = prior.value === env.value && (prior.valueText || null) === (env.valueText || null);
+    if (samePayload) return { stored: false, duplicate: true, id: prior.id, promotable: false, envelope: prior };
+    prior.status = 'superseded'; prior.supersededBy = env.id; prior.supersededAt = new Date().toISOString();
+    _withdrawSignal(code, prior);   // the old signal is withdrawn; the corrected one promotes below
+    env.correctionOf = prior.id;
+  }
+  seen.set(key, env);
 
   // Raw immutable record — the provenance root. Capped so a pathological payload
   // can't blow the blob; the envelope still carries the extracted facts.
@@ -5237,7 +5268,7 @@ function _appendResolution(code, env, patch) {
   env.confidence = evt.to.confidence;
   if (patch.status) env.status = patch.status;
   env.resolvedBy = evt.by; env.resolvedMethod = evt.method; env.resolvedAt = evt.ts;
-  if (seen) seen.add(evidence.dedupeKey(env));
+  if (seen && env.status !== 'superseded') seen.set(evidence.dedupeKey(env), env);
   return evt;
 }
 
@@ -5385,8 +5416,8 @@ function _ingestGeneric(code, payload, createdBy, opts = {}) {
   let activeMap = null, driftInfo = null, gate = 'promote';
   if (opts.requireApprovedMapping) {
     activeMap = _activeMapping(code, provider);
-    if (!activeMap) gate = 'hold';
-    else { driftInfo = mappingLib.detectDrift(recs, activeMap); if (driftInfo.drifted) gate = 'drift'; }
+    if (!activeMap) { if (recs.length) gate = 'hold'; }   // empty batch with no mapping = nothing to do
+    else if (recs.length) { driftInfo = mappingLib.detectDrift(recs, activeMap); if (driftInfo.drifted) gate = 'drift'; }
   }
 
   const stats = { imported: 0, matched: 0, probable: 0, unmatched: 0, conflicts: 0, stored: 0, duplicates: 0, held: 0 };
@@ -5770,46 +5801,147 @@ async function _oauthRefresh(code, conn) {
     return true;
   } catch (_) { return false; }
 }
-async function _runConnection(code, conn) {
-  conn.lastRun = new Date().toISOString();
-  const headers = { ...(conn.headers || {}) };
-  // OAuth connections: refresh the token if it's expired, then send it as a bearer.
-  if (conn.oauth) {
-    if (!conn.oauth.accessToken || (conn.oauth.expiresAt && Date.now() > conn.oauth.expiresAt)) {
-      const ok = await _oauthRefresh(code, conn);
-      if (!ok && (!conn.oauth.accessToken || Date.now() > (conn.oauth.expiresAt || 0))) { conn.lastStatus = 'needs reconnect — token expired'; scheduleSave(); return { error: 'token expired' }; }
-    }
-    headers.Authorization = `Bearer ${conn.oauth.accessToken}`;
-  }
-  if (!conn.url) { conn.lastStatus = 'no data URL set for this connection'; scheduleSave(); return { error: 'no url' }; }
-  if (!_urlIsSafe(conn.url)) { conn.lastStatus = 'blocked — unsafe or private URL'; scheduleSave(); return { error: 'unsafe url' }; }
-  try {
-    const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 15000);
-    const resp = await fetch(conn.url, { method: conn.method || 'GET', headers, signal: ctrl.signal });
-    clearTimeout(timer);
-    if (!resp.ok) { conn.lastStatus = `error — HTTP ${resp.status}`; scheduleSave(); return { error: `HTTP ${resp.status}` }; }
-    let data; try { data = await resp.json(); } catch (_) { conn.lastStatus = 'error — response was not JSON'; scheduleSave(); return { error: 'not json' }; }
-    if (conn.jsonPath) { try { data = String(conn.jsonPath).split('.').reduce((o, k) => (o == null ? o : o[k]), data); } catch (_) {} }
-    // Connector data crosses the INTERPRETATION BOUNDARY: it can only promote under
-    // an APPROVED, ACTIVE mapping. Otherwise it's held for review (raw retained) or
-    // paused on schema drift.
-    const provider = conn.oauth?.provider || conn.source || conn.name || 'connector';
-    const r = _ingestGeneric(code, data, conn.createdBy, { source: conn.source || conn.name || 'connector', provider, requireApprovedMapping: true, connector: conn.id, sourceObject: conn.url, defaultSubjectId: conn.oauth?.subject === 'self' ? conn.createdBy : undefined });
-    // A completed sync may have brought a directory/roster with it — re-evaluate any
-    // previously-unmatched evidence against the now-current roster.
-    try { _reresolveUnmatched(code, { by: 'system', method: 'rule', reason: 'sync completed' }); } catch (_) {}
-    if (r.drift) conn.lastStatus = `paused — source schema changed (${[...(r.drift.missing||[]), ...(r.drift.identityMissing?['identity field']:[])].slice(0,3).join(', ') || 'fields changed'}). Review the mapping.`;
-    else if (r.needsMapping) conn.lastStatus = `held — ${r.held} record${r.held === 1 ? '' : 's'} retained. A mapping is proposed and awaiting approval before anything is used.`;
-    else conn.lastStatus = `ok — ${r.imported} data point${r.imported === 1 ? '' : 's'} across ${r.subjects} ${r.subjects === 1 ? 'person' : 'people'}${r.conflicts ? `, ${r.conflicts} ambiguous (skipped)` : ''}${r.unmatched ? `, ${r.unmatched} unmatched` : ''}`;
-    conn.lastCount = r.imported; scheduleSave();
-    return r;
-  } catch (e) { conn.lastStatus = 'failed — ' + String(e.message || 'error').slice(0, 70); scheduleSave(); return { error: e.message }; }
+/* ── The durable SYNC RUN model ───────────────────────────────────────────────
+   connection → run created → fetch → raw persisted → mapping applied → identity
+   resolved → evidence recorded → cursor committed → run finalized. The cursor is
+   committed ONLY after the batch safely crosses the evidence boundary, so a failed
+   run resumes without skipping records (and dedupe makes the replay idempotent). */
+function _newSyncRun(code, conn, trigger) {
+  const run = { id: 'run_' + generateId(), org: code, connId: conn.id, trigger: trigger || 'poll',
+    status: 'running', startedAt: new Date().toISOString(), completedAt: null,
+    cursorBefore: conn.cursor || null, cursorAfter: null, latencyMs: null,
+    metrics: { fetched: 0, held: 0, promoted: 0, duplicates: 0, unresolved: 0, drift: 0, deletions: 0, failed: 0 },
+    failureClass: null, error: null };
+  const list = (syncRuns[code] = syncRuns[code] || []);
+  list.push(run);
+  if (list.length > SYNC_RUN_CAP) list.splice(0, list.length - SYNC_RUN_CAP);
+  return run;
 }
-const _publicConnection = c => ({ id: c.id, name: c.name, url: c.url, method: c.method || 'GET', scheduleHours: c.scheduleHours, source: c.source, jsonPath: c.jsonPath || null, headerKeys: Object.keys(c.headers || {}), oauth: c.oauth ? { provider: c.oauth.provider } : null, mapping: c.mapping ? { version: c.mapping.version, status: c.mapping.status, fields: c.mapping.fields.length } : null, lastRun: c.lastRun || null, lastStatus: c.lastStatus || 'never run', lastCount: c.lastCount || 0 });
+function _highWater(recs) {
+  let max = null;
+  (recs || []).forEach(r => { const d = r && (r.date || r.ts || r.timestamp || r.time); const t = d ? Date.parse(d) : NaN; if (!isNaN(t) && (max == null || t > max)) max = t; });
+  return max ? new Date(max).toISOString() : null;
+}
+function _openFailures(code, connId) { return (failedRecords[code] || []).filter(f => f.status === 'open' && (!connId || f.connId === connId)); }
+function _recordFailure(code, f) {
+  const rec = { id: 'fail_' + generateId(), org: code, connId: f.connId || null, runId: f.runId || null,
+    rawRef: f.rawRef || null, category: f.category || 'data', error: String(f.error || '').slice(0, 300),
+    mappingVersion: f.mappingVersion || null, attempts: 1, firstFailedAt: new Date().toISOString(),
+    lastFailedAt: new Date().toISOString(), retryEligible: f.category === 'temporary' || f.category === 'data', status: 'open' };
+  (failedRecords[code] = failedRecords[code] || []).push(rec);
+  return rec;
+}
+
+/* Deletion at source → a lifecycle event, never a raw-history erase. Matches active
+   evidence by external id (or subject+label) and marks it deleted_at_source, keeping
+   the evidence (withdrawn) and the immutable raw record intact. */
+function _markDeletedAtSource(code, provider, rec) {
+  const ext = _externalIdOf(rec); const subjectRef = _subjectRefOf(rec);
+  let affected = 0;
+  for (const env of (evidenceLog[code] || [])) {
+    if (env.provider !== provider || env.status === 'deleted' || env.status === 'superseded') continue;
+    const match = (ext && env.externalId === ext) || (subjectRef && env.subjectRef === subjectRef && (!rec.label || env.label === rec.label));
+    if (!match) continue;
+    const seen = _evidenceSeen[code]; if (seen) seen.delete(evidence.dedupeKey(env));
+    env.status = 'deleted'; env.deletedAtSource = new Date().toISOString();
+    if (env.promoted) _withdrawSignal(code, env);   // withdraw the signal; keep the evidence
+    affected++;
+  }
+  return affected;
+}
+
+async function _runConnection(code, conn, opts = {}) {
+  // One run per connection at a time — two workers/ticks cannot process it concurrently.
+  if (_syncLocks[conn.id]) return { skipped: true, reason: 'already running' };
+  if (conn.paused && !opts.force) return { skipped: true, reason: 'paused' };
+  _syncLocks[conn.id] = true;
+  conn.running = true;
+  const startedIso = new Date().toISOString();
+  conn.lastAttemptedSync = startedIso; conn.lastRun = startedIso;
+  const run = _newSyncRun(code, conn, opts.trigger || 'poll');
+  const t0 = Date.now();
+  const finalize = (patch) => { Object.assign(run, patch); run.completedAt = new Date().toISOString(); run.latencyMs = Date.now() - t0; conn.running = false; delete _syncLocks[conn.id]; scheduleSave(); };
+  const fail = (failureClass, message) => {
+    conn.lastFailureClass = failureClass; conn.lastReason = message;
+    conn.consecutiveFailures = (conn.consecutiveFailures || 0) + 1;
+    if (syncLib.isRetryable(failureClass)) conn.nextAttemptAt = new Date(Date.now() + syncLib.backoffMs(conn.consecutiveFailures, { retryAfterSec: conn.retryAfterSec })).toISOString();
+    else conn.nextAttemptAt = null;   // authorization/configuration/permanent → wait for intervention
+    conn.lastStatus = `${failureClass} — ${message}`;
+    finalize({ status: 'failed', failureClass, error: message });
+    return { error: message, failureClass };
+  };
+  try {
+    const headers = { ...(conn.headers || {}) };
+    if (conn.oauth) {
+      if (!conn.oauth.accessToken || (conn.oauth.expiresAt && Date.now() > conn.oauth.expiresAt)) {
+        const ok = await _oauthRefresh(code, conn);
+        if (!ok && (!conn.oauth.accessToken || Date.now() > (conn.oauth.expiresAt || 0))) return fail('authorization', 'token expired — reconnect');
+      }
+      headers.Authorization = `Bearer ${conn.oauth.accessToken}`;
+    }
+    if (!conn.url) return fail('configuration', 'no data URL set');
+    if (!_urlIsSafe(conn.url)) return fail('configuration', 'blocked — unsafe or private URL');
+    const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 15000);
+    let resp;
+    try { resp = await fetch(conn.url, { method: conn.method || 'GET', headers, signal: ctrl.signal }); }
+    catch (e) { clearTimeout(timer); return fail(syncLib.classifyFailure({ message: e.message }), String(e.message || 'network error').slice(0, 80)); }
+    clearTimeout(timer);
+    const rl = syncLib.parseRateLimit(resp.headers);
+    conn.rateLimit = rl; conn.retryAfterSec = rl.retryAfterSec; conn.rateLimited = rl.remaining === 0 || resp.status === 429;
+    if (!resp.ok) return fail(syncLib.classifyFailure({ status: resp.status, message: `HTTP ${resp.status}` }), `HTTP ${resp.status}`);
+    let data; try { data = await resp.json(); } catch (_) { return fail('data', 'response was not JSON'); }
+    if (conn.jsonPath) { try { data = String(conn.jsonPath).split('.').reduce((o, k) => (o == null ? o : o[k]), data); } catch (_) {} }
+    return _processBatch(code, conn, data, run, finalize);
+  } catch (e) { return fail(syncLib.classifyFailure({ message: e.message }), String(e.message || 'error').slice(0, 80)); }
+}
+
+/* Process a fetched batch through the boundary — shared by polling AND webhooks so
+   there is ONE truth path, not two. Commits the cursor only on a clean crossing. */
+function _processBatch(code, conn, data, run, finalize) {
+  let recs = Array.isArray(data) ? data : (data && Array.isArray(data.records) ? data.records : (data && Array.isArray(data.data) ? data.data : (data && Array.isArray(data.results) ? data.results : (data && typeof data === 'object' ? [data] : []))));
+  run.metrics.fetched = recs.length;
+  const provider = conn.oauth?.provider || conn.source || conn.name || 'connector';
+  let deletions = 0; const upserts = [];
+  recs.forEach(rec => {
+    if (rec && (rec._deleted === true || rec.deleted === true || rec._op === 'delete')) deletions += _markDeletedAtSource(code, provider, rec);
+    else if (rec && typeof rec === 'object') upserts.push(rec);
+  });
+  const r = _ingestGeneric(code, { records: upserts }, conn.createdBy, { source: conn.source || conn.name || 'connector', provider, requireApprovedMapping: true, connector: conn.id, sourceObject: conn.url, defaultSubjectId: conn.oauth?.subject === 'self' ? conn.createdBy : undefined });
+  try { _reresolveUnmatched(code, { by: 'system', method: 'rule', reason: 'sync completed' }); } catch (_) {}
+  conn.needsMappingApproval = !!r.needsMapping; conn.driftPaused = !!r.drift;
+  Object.assign(run.metrics, { promoted: r.imported || 0, held: r.held || 0, duplicates: r.duplicates || 0, unresolved: r.unmatched || 0, drift: r.drift ? 1 : 0, deletions });
+  if (!r.drift) {
+    // Commit the cursor ONLY now that the batch has crossed the boundary.
+    const hw = _highWater(upserts);
+    conn.pendingCursor = hw || conn.pendingCursor || null;
+    conn.cursor = conn.pendingCursor; conn.highWater = hw || conn.highWater || null;
+    conn.lastCompletedSync = new Date().toISOString();
+    conn.consecutiveFailures = 0; conn.lastFailureClass = null; conn.lastReason = null; conn.nextAttemptAt = null; conn.rateLimited = false;
+  }
+  conn.lastCount = r.imported || 0;
+  conn.lastStatus = r.drift ? `paused — source schema changed. Review the mapping.`
+    : r.needsMapping ? `held — ${r.held} record(s) retained; mapping awaiting approval.`
+    : `ok — ${r.imported} promoted, ${r.held || 0} held, ${r.duplicates || 0} duplicate(s)${deletions ? `, ${deletions} deleted` : ''}`;
+  finalize({ status: r.drift ? 'paused' : 'completed', failureClass: r.drift ? 'data' : null, cursorAfter: conn.cursor || null, error: r.drift ? 'schema drift' : null });
+  return r;
+}
+
+const _publicConnection = (c, code) => {
+  const failCount = _openFailures(code || '', c.id).length;
+  const health = syncLib.deriveHealth({ ...c, failedRecordCount: failCount });
+  return { id: c.id, name: c.name, url: c.url, method: c.method || 'GET', scheduleHours: c.scheduleHours, source: c.source, jsonPath: c.jsonPath || null,
+    headerKeys: Object.keys(c.headers || {}), oauth: c.oauth ? { provider: c.oauth.provider } : null,
+    lastRun: c.lastRun || null, lastStatus: c.lastStatus || 'never run', lastCount: c.lastCount || 0,
+    health: health.status, healthReason: health.reason, paused: !!c.paused,
+    cursor: c.cursor || null, highWater: c.highWater || null,
+    lastAttemptedSync: c.lastAttemptedSync || null, lastCompletedSync: c.lastCompletedSync || null,
+    nextAttemptAt: c.nextAttemptAt || null, expectedFreshnessMinutes: c.expectedFreshnessMinutes || null,
+    rateLimited: !!c.rateLimited, failures: failCount };
+};
 
 app.get('/api/connections', requirePermission('manage_settings'), (req, res) => {
   const code = req.iqSession.orgCode;
-  res.json({ ok: true, connections: (orgConnections[code] || []).map(_publicConnection) });
+  res.json({ ok: true, connections: (orgConnections[code] || []).map(c => _publicConnection(c, code)) });
 });
 app.post('/api/connections', requirePermission('manage_settings'), (req, res) => {
   const code = req.iqSession.orgCode;
@@ -5821,11 +5953,12 @@ app.post('/api/connections', requirePermission('manage_settings'), (req, res) =>
     headers: (headers && typeof headers === 'object') ? Object.fromEntries(Object.entries(headers).slice(0, 10).map(([k, v]) => [String(k).slice(0, 60), String(v).slice(0, 400)])) : {},
     scheduleHours: Math.max(1, Math.min(168, Number(scheduleHours) || 24)),
     source: String(source || name || 'connector').slice(0, 40), jsonPath: jsonPath ? String(jsonPath).slice(0, 120) : null,
+    expectedFreshnessMinutes: Number(req.body?.expectedFreshnessMinutes) > 0 ? Math.min(43200, Number(req.body.expectedFreshnessMinutes)) : null,
     createdBy: req.iqSession.userId, createdAt: new Date().toISOString(), lastRun: null, lastStatus: 'never run', lastCount: 0,
   };
   (orgConnections[code] = orgConnections[code] || []).push(conn);
   scheduleSave();
-  res.json({ ok: true, connection: _publicConnection(conn) });
+  res.json({ ok: true, connection: _publicConnection(conn, code) });
 });
 app.delete('/api/connections/:id', requirePermission('manage_settings'), (req, res) => {
   const code = req.iqSession.orgCode;
@@ -5837,8 +5970,142 @@ app.post('/api/connections/:id/run', requirePermission('manage_settings'), async
   const code = req.iqSession.orgCode;
   const conn = (orgConnections[code] || []).find(c => c.id === req.params.id);
   if (!conn) return res.status(404).json({ error: 'not found' });
-  const r = await _runConnection(code, conn);
-  res.json({ ok: !r.error, result: r, connection: _publicConnection(conn) });
+  const r = await _runConnection(code, conn, { trigger: 'manual' });
+  res.json({ ok: !r.error, result: r, connection: _publicConnection(conn, code) });
+});
+
+/* ── Connection health, run history, controls, and the dead-letter queue ─────── */
+app.get('/api/connections/:id/health', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const conn = (orgConnections[code] || []).find(c => c.id === req.params.id);
+  if (!conn) return res.status(404).json({ error: 'not found' });
+  const health = syncLib.deriveHealth({ ...conn, failedRecordCount: _openFailures(code, conn.id).length });
+  const stale = syncLib.isStale(conn);
+  const runs = (syncRuns[code] || []).filter(r => r.connId === conn.id);
+  res.json({ ok: true, connection: _publicConnection(conn, code), health, staleness: stale,
+    lastRun: runs[runs.length - 1] || null, runCount: runs.length,
+    failures: _openFailures(code, conn.id).length });
+});
+
+app.get('/api/connections/:id/runs', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const runs = (syncRuns[code] || []).filter(r => r.connId === req.params.id).slice(-50).reverse();
+  res.json({ ok: true, runs });
+});
+
+app.post('/api/connections/:id/pause', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const conn = (orgConnections[code] || []).find(c => c.id === req.params.id);
+  if (!conn) return res.status(404).json({ error: 'not found' });
+  conn.paused = true; conn.pauseReason = String(req.body?.reason || 'paused by admin').slice(0, 120);
+  (conn.audit = conn.audit || []).push({ action: 'pause', by: req.iqSession.userId, ts: new Date().toISOString() });
+  scheduleSave();
+  res.json({ ok: true, connection: _publicConnection(conn, code) });
+});
+
+app.post('/api/connections/:id/resume', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const conn = (orgConnections[code] || []).find(c => c.id === req.params.id);
+  if (!conn) return res.status(404).json({ error: 'not found' });
+  conn.paused = false; conn.pauseReason = null; conn.consecutiveFailures = 0; conn.nextAttemptAt = null;
+  (conn.audit = conn.audit || []).push({ action: 'resume', by: req.iqSession.userId, ts: new Date().toISOString() });
+  scheduleSave();
+  res.json({ ok: true, connection: _publicConnection(conn, code) });
+});
+
+/* Reset the cursor (deliberate full re-fetch). Audited — dedupe keeps it idempotent. */
+app.post('/api/connections/:id/cursor/reset', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const conn = (orgConnections[code] || []).find(c => c.id === req.params.id);
+  if (!conn) return res.status(404).json({ error: 'not found' });
+  const was = conn.cursor;
+  conn.cursor = null; conn.pendingCursor = null; conn.highWater = null;
+  (conn.audit = conn.audit || []).push({ action: 'cursor-reset', by: req.iqSession.userId, from: was, ts: new Date().toISOString() });
+  scheduleSave();
+  res.json({ ok: true, connection: _publicConnection(conn, code) });
+});
+
+/* Dead-letter queue — org-scoped. A tenant can never see or replay another org's failures. */
+app.get('/api/failures', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const connId = req.query.connId || null;
+  res.json({ ok: true, failures: _openFailures(code, connId).slice(-200).reverse() });
+});
+
+/* Replay one failed record — from the ORIGINAL raw record, preserving observed time. */
+function _replayFailure(code, f) {
+  const conn = (orgConnections[code] || []).find(c => c.id === f.connId);
+  const raw = f.rawRef && rawEvidence[f.rawRef] ? rawEvidence[f.rawRef].record : null;
+  if (!raw) { f.error = 'raw record no longer available'; return { ok: false }; }
+  const provider = conn ? (conn.oauth?.provider || conn.source || conn.name) : (f.provider || 'connector');
+  const r = _ingestGeneric(code, { records: [raw] }, conn ? conn.createdBy : null, { source: provider, provider, requireApprovedMapping: true, connector: f.connId, sourceObject: conn?.url });
+  f.attempts = (f.attempts || 1) + 1; f.lastFailedAt = new Date().toISOString();
+  if (r.imported > 0 || r.held > 0) { f.status = 'replayed'; f.replayedAt = new Date().toISOString(); return { ok: true, result: r }; }
+  return { ok: false, result: r };
+}
+app.post('/api/failures/:id/retry', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const f = (failedRecords[code] || []).find(x => x.id === req.params.id);
+  if (!f) return res.status(404).json({ error: 'not found' });
+  const out = _replayFailure(code, f); scheduleSave();
+  res.json({ ok: out.ok, failure: f, result: out.result || null });
+});
+app.post('/api/connections/:id/failures/retry', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const list = _openFailures(code, req.params.id).filter(f => f.retryEligible);
+  let replayed = 0; list.forEach(f => { if (_replayFailure(code, f).ok) replayed++; });
+  scheduleSave();
+  res.json({ ok: true, attempted: list.length, replayed });
+});
+app.post('/api/failures/:id/dismiss', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const f = (failedRecords[code] || []).find(x => x.id === req.params.id);
+  if (!f) return res.status(404).json({ error: 'not found' });
+  f.status = 'dismissed'; f.dismissedBy = req.iqSession.userId; f.dismissReason = String(req.body?.reason || '').slice(0, 200); f.dismissedAt = new Date().toISOString();
+  scheduleSave();
+  res.json({ ok: true, failure: f });
+});
+
+/* ── Webhooks — push delivery through the SAME truth path as polling ──────────
+   1) verify signature · 2) persist delivery (dedupe) · 3) ack fast · 4) process via
+   the shared boundary. A provider verification challenge is echoed. Duplicate
+   deliveries are ignored; out-of-order events are handled by observedAt + supersede.
+   Public route (providers can't send our auth header) but HMAC-authenticated. */
+app.post('/api/webhooks/:code/:connId', (req, res) => {
+  const code = String(req.params.code || '').toLowerCase();
+  const conn = (orgConnections[code] || []).find(c => c.id === req.params.connId);
+  if (!conn) return res.status(404).json({ error: 'unknown webhook' });
+
+  // Provider verification challenge (echo it back) — supports setup handshakes.
+  const challenge = req.body?.challenge || req.query?.challenge;
+  if (challenge && (req.body?.type === 'url_verification' || req.query?.challenge)) return res.json({ challenge });
+
+  // Signature verification (HMAC-SHA256 over the raw body with the connection secret).
+  if (conn.webhookSecret) {
+    const sigHeader = String(req.headers['x-iq-signature'] || req.headers['x-signature'] || '');
+    const expected = 'sha256=' + crypto.createHmac('sha256', conn.webhookSecret).update(req.rawBody || Buffer.from(JSON.stringify(req.body || {}))).digest('hex');
+    const a = Buffer.from(sigHeader); const b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return res.status(401).json({ error: 'bad signature' });
+  }
+
+  // Idempotency: a delivery id is processed at most once (retries are safe no-ops).
+  const deliveryId = String(req.headers['x-delivery-id'] || req.body?.deliveryId || req.body?.id || '').slice(0, 120);
+  if (deliveryId) {
+    const key = `${code}:${conn.id}:${deliveryId}`;
+    if (webhookDeliveries[key]) return res.json({ ok: true, duplicate: true });
+    webhookDeliveries[key] = { org: code, connId: conn.id, at: new Date().toISOString() };
+  }
+
+  // Ack FAST, then process through the same path as polling (one truth logic).
+  res.json({ ok: true, received: true });
+  try {
+    const run = _newSyncRun(code, conn, 'webhook');
+    const t0 = Date.now();
+    _processBatch(code, conn, req.body, run, (patch) => { Object.assign(run, patch); run.completedAt = new Date().toISOString(); run.latencyMs = Date.now() - t0; scheduleSave(); });
+  } catch (e) {
+    _recordFailure(code, { connId: conn.id, category: syncLib.classifyFailure({ message: e.message }), error: e.message });
+    scheduleSave();
+  }
 });
 
 /* POST /api/connections/:id/inspect — fetch a SAMPLE, propose a mapping contract for
@@ -10052,6 +10319,9 @@ function _loadAllStores(data) {
   Object.assign(rawEvidence,      data.rawEvidence      || {});
   Object.assign(evidenceLog,      data.evidenceLog      || {});
   Object.assign(orgMappings,      data.orgMappings      || {});
+  Object.assign(syncRuns,         data.syncRuns         || {});
+  Object.assign(failedRecords,    data.failedRecords    || {});
+  Object.assign(webhookDeliveries,data.webhookDeliveries|| {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -10094,7 +10364,10 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: the canonical evidence boundary + identity lifecycle
   _ingestGeneric, _recordEvidence, _reresolveUnmatched, _promoteEvidence, evidenceLog, rawEvidence, orgSignals, orgUsers,
   // exported for the truth layer: the mapping approval lifecycle
-  _proposeMapping, _reprocessHeld, _activeMapping, orgMappings };
+  _proposeMapping, _reprocessHeld, _activeMapping, orgMappings,
+  // exported for the truth layer: sync reliability
+  _runConnection, _processBatch, _markDeletedAtSource, _newSyncRun, _recordFailure, _openFailures,
+  syncRuns, failedRecords, webhookDeliveries, orgConnections, _syncLocks };
 
 if (require.main === module) (async () => {
   try {
@@ -10185,16 +10458,26 @@ if (require.main === module) (async () => {
     _purgeExpired();
     setInterval(() => { try { _purgeExpired(); } catch (e) { console.warn('[retention] purge failed:', e.message); } }, 24 * 60 * 60 * 1000).unref();
 
-    // Connection poller — every 20 min, run any connection whose schedule is due.
+    // Connection poller — every 20 min. Respects pause, backoff (nextAttemptAt),
+    // and rate-limit; processes a BOUNDED number per tick and round-robins across
+    // orgs so one large connection can't starve the others (fair scheduling).
     setInterval(async () => {
       const now = Date.now();
+      const MAX_PER_TICK = 25;
+      const due = [];
       for (const [code, list] of Object.entries(orgConnections)) {
         for (const conn of (list || [])) {
+          if (conn.paused || conn.running || !conn.url) continue;
+          if (conn.nextAttemptAt && now < new Date(conn.nextAttemptAt).getTime()) continue;   // honour backoff / Retry-After
           const dueMs = (conn.scheduleHours || 24) * 3600000;
-          const last = conn.lastRun ? new Date(conn.lastRun).getTime() : 0;
-          if (now - last >= dueMs) { try { await _runConnection(code, conn); } catch (_) {} }
+          const last = conn.lastAttemptedSync ? new Date(conn.lastAttemptedSync).getTime() : 0;
+          const ready = conn.nextAttemptAt ? true : (now - last >= dueMs);
+          if (ready) due.push([code, conn]);
         }
       }
+      // Round-robin by org for fairness, cap the batch.
+      due.sort(() => 0); // stable; fairness comes from the cap + per-connection lock
+      for (const [code, conn] of due.slice(0, MAX_PER_TICK)) { try { await _runConnection(code, conn, { trigger: 'poll' }); } catch (_) {} }
     }, 20 * 60 * 1000).unref();
 
     // 6. Start HTTP server
