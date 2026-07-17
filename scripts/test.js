@@ -46,6 +46,7 @@ const SUITES = [
   'invariants.js',
   'packs-language-smoke.js', // domain LANGUAGE pass: org-voice directives, role-sensitivity, audit
   'domain-cleanup-smoke.js', // one language source: no legacy vertical prose; role ladder invents no titles
+  'evidence-smoke.js',     // the canonical evidence envelope: normalise/validate/dedupe/promote
   'connector-harness.js',  // the Connector SDK: identity/confidence + mapping contracts
   'endpoint-smoke.js',   // boots the real app in-process (DB_OPTIONAL) — HTTP authz + Me context
 ];

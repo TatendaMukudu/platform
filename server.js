@@ -24,6 +24,7 @@ const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
 const office     = require('./lib/office');   // dependency-free .xlsx / .docx reading
 const connectorSDK = require('./lib/connector-sdk');   // capability contract, identity resolution, mappings
+const evidence   = require('./lib/evidence');   // the canonical evidence envelope — the connector↔kernel boundary
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -83,6 +84,7 @@ function scheduleSave() {
         userConsents, connectedSources, pendingActions,
         assessmentTemplates, assessmentAssignments, orgTutorials, orgApiTokens,
         orgConnections, orgOAuthApps, studioThreads, activeSessions,
+        rawEvidence, evidenceLog,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -109,6 +111,18 @@ function _purgeExpired(retentionDays = RETENTION_DAYS) {
     memberCheckins[k] = memberCheckins[k].filter(c => keep(c.ts));
     removed += before - memberCheckins[k].length;
   }
+  // Canonical evidence + its raw immutable records age out on the same window.
+  for (const code of Object.keys(evidenceLog)) {
+    if (!Array.isArray(evidenceLog[code])) continue;
+    const before = evidenceLog[code].length;
+    evidenceLog[code] = evidenceLog[code].filter(env => {
+      if (keep(env.observedAt || env.createdAt)) return true;
+      if (env.rawRef) delete rawEvidence[env.rawRef];
+      return false;
+    });
+    removed += before - evidenceLog[code].length;
+  }
+  if (typeof _rebuildEvidenceIndex === 'function') _rebuildEvidenceIndex();
   if (removed) { console.log(`[retention] purged ${removed} record(s) older than ${retentionDays}d`); scheduleSave(); }
   return removed;
 }
@@ -627,6 +641,16 @@ const orgConnections        = {};  // orgCode → [ { id, name, url, method, hea
 // obtained from the provider's developer console). orgCode → { provider → {clientId, clientSecret} }.
 const orgOAuthApps          = {};
 const oauthPending          = {};  // state → { code(org), userId, provider, ts }
+// The Canonical Evidence layer — the universal boundary every connector crosses.
+//   rawEvidence:  id → the ORIGINAL source record, stored verbatim and NEVER mutated
+//                 (the immutable provenance root every envelope points back to).
+//   evidenceLog:  orgCode → [ envelope ] (append-only; see lib/evidence.js). The
+//                 kernel signal is DERIVED from a promotable envelope, so the log is
+//                 the audit trail of exactly what entered organisational truth.
+const rawEvidence           = {};  // rawRef → { org, provider, receivedAt, record }
+const evidenceLog           = {};  // orgCode → [ envelope ]
+const _evidenceSeen         = {};  // orgCode → Set(dedupeKey)  (rebuilt on load; dedupe index)
+const EVIDENCE_LOG_CAP      = 8000; // per-org retention cap for the in-memory/blob log
 
 /* The provider catalog. Every one of these is a standard OAuth2 authorization-code
    flow — only the URLs, scopes, and default data endpoint differ. Adding a new app
@@ -5124,6 +5148,47 @@ function _resolveSubjectId(code, rec) {
   if (name) { const n = name.toLowerCase().trim(); const id = Object.keys(users).find(k => (users[k].name || '').toLowerCase().trim() === n); if (id) return id; }
   return null;
 }
+/* Rebuild the dedupe index from the persisted log (called on load). */
+function _rebuildEvidenceIndex() {
+  for (const code of Object.keys(evidenceLog)) {
+    const set = new Set();
+    (evidenceLog[code] || []).forEach(env => { try { set.add(evidence.dedupeKey(env)); } catch (_) {} });
+    _evidenceSeen[code] = set;
+  }
+}
+
+/* Record ONE canonical envelope + its raw immutable record. The single choke point
+   through which all incoming information becomes stored evidence:
+     • the original record is stored verbatim (rawEvidence) and never mutated
+     • the envelope is validated against the contract before it's kept
+     • duplicates (webhook retries, overlapping syncs) collapse via dedupeKey
+   Returns { stored, duplicate, invalid, id, promotable }. Storing NEVER emits a
+   signal — promotion to the kernel is a separate, explicit step. */
+function _recordEvidence(code, envInput, rawRecord) {
+  const rawRef = 'ev_' + generateId();
+  const env = evidence.buildEnvelope({ ...envInput, org: code, id: rawRef, rawRef });
+  const v = evidence.validateEnvelope(env);
+  if (!v.ok) return { stored: false, invalid: true, errors: v.errors };
+
+  const seen = _evidenceSeen[code] || (_evidenceSeen[code] = new Set());
+  const key = evidence.dedupeKey(env);
+  if (seen.has(key)) return { stored: false, duplicate: true, id: env.id, promotable: false };
+  seen.add(key);
+
+  // Raw immutable record — the provenance root. Capped so a pathological payload
+  // can't blow the blob; the envelope still carries the extracted facts.
+  rawEvidence[rawRef] = { org: code, provider: env.provider, receivedAt: env.retrievedAt,
+    record: JSON.parse(JSON.stringify(rawRecord ?? envInput.data ?? null)) };
+
+  const log = evidenceLog[code] || (evidenceLog[code] = []);
+  log.push(env);
+  if (log.length > EVIDENCE_LOG_CAP) {
+    const dropped = log.splice(0, log.length - EVIDENCE_LOG_CAP);
+    dropped.forEach(d => { if (d.rawRef) delete rawEvidence[d.rawRef]; });
+  }
+  return { stored: true, id: env.id, promotable: evidence.promotable(env), envelope: env };
+}
+
 function _ingestGeneric(code, payload, createdBy, opts = {}) {
   const source = String(opts.source || 'connector').slice(0, 40);
   const provider = opts.provider || source;
@@ -5135,28 +5200,34 @@ function _ingestGeneric(code, payload, createdBy, opts = {}) {
   else if (payload && Array.isArray(payload.data)) recs = payload.data;
   else if (payload && Array.isArray(payload.results)) recs = payload.results;
   else if (payload && typeof payload === 'object') recs = [payload];
-  // Every emitted signal carries PROVENANCE — a link back to the original evidence.
-  const emit = (uid, label, value, date, externalId) => {
+  // A promotable envelope becomes a kernel signal. The signal carries PROVENANCE
+  // that links back through the envelope to the raw immutable record.
+  const emit = (uid, label, value, date, externalId, evidenceId) => {
     const v = Number(value); if (!Number.isFinite(v)) return false;
     let ts; if (date) { const d = new Date(String(date)); if (!isNaN(d)) ts = d.toISOString(); }
     try {
       _emitSignalSafe(code, { subjectType: 'member', subjectId: uid, source, modality: 'data', valueNum: v, label: String(label || 'Metric').slice(0, 80), ts, sensitivity: 'normal',
-        data: { connector: source, ingest: true, source: { provider, external_id: externalId || undefined, retrieved_at: retrievedAt } } }, uid);
+        data: { connector: source, ingest: true, source: { provider, external_id: externalId || undefined, retrieved_at: retrievedAt, evidence_id: evidenceId || undefined } } }, uid);
       return true;
     } catch (_) { return false; }
   };
-  const stats = { imported: 0, matched: 0, probable: 0, unmatched: 0, conflicts: 0 };
+  const stats = { imported: 0, matched: 0, probable: 0, unmatched: 0, conflicts: 0, stored: 0, duplicates: 0 };
   const subjects = new Set(); const conflictNames = new Set();
   recs.slice(0, 3000).forEach(rec => {
     if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return;
     // Resolve WITH confidence — never silently merge an ambiguous match.
     const idr = connectorSDK.resolveIdentity(users, rec);
-    if (idr.confidence === 'conflict') { stats.conflicts++; if (idr.ambiguous) conflictNames.add(idr.ambiguous); return; }
-    let uid = idr.id;
-    if (!uid && opts.defaultSubjectId && users[opts.defaultSubjectId]) uid = opts.defaultSubjectId;
-    if (!uid) { stats.unmatched++; return; }
-    if (idr.confidence === 'confirmed') stats.matched++; else if (idr.confidence === 'probable') stats.probable++;
+    let uid = idr.id, confidence = idr.confidence;
+    if (confidence === 'conflict') { stats.conflicts++; if (idr.ambiguous) conflictNames.add(idr.ambiguous); }
+    else if (!uid && opts.defaultSubjectId && users[opts.defaultSubjectId]) { uid = opts.defaultSubjectId; confidence = 'probable'; }
+    if (confidence === 'confirmed') stats.matched++;
+    else if (confidence === 'probable') stats.probable++;
+    else if (confidence === 'unmatched') stats.unmatched++;
+
     const externalId = rec.event || rec.eventId || rec.fixture || rec.externalId || rec.id || null;
+    const subjectRef = String(rec.email || rec.mail || rec.name || rec.player || rec.member || rec.athlete || rec.employee || rec.student || rec.userId || rec.id || '').slice(0, 200) || null;
+    const groupRefRaw = rec.group || rec.team || rec.department || rec.class || rec.cohort || null;
+
     // A VERIFIED mapping is applied deterministically; otherwise the wide/clean read.
     let items;
     if (opts.mapping) items = connectorSDK.applyMapping(rec, opts.mapping);
@@ -5172,11 +5243,28 @@ function _ingestGeneric(code, payload, createdBy, opts = {}) {
       }
     }
     let any = false;
-    items.forEach(it => { if (emit(uid, it.label, it.value, it.date, it.event || externalId)) { stats.imported++; any = true; } });
+    items.forEach(it => {
+      // EVERY item crosses the canonical envelope FIRST — stored (with provenance +
+      // identity confidence), deduped, and validated — before it can reach the
+      // kernel. Unmatched/conflict evidence is stored too (auditable, re-resolvable),
+      // just never promoted to a signal.
+      const r = _recordEvidence(code, {
+        provider, source, externalId: it.event || externalId,
+        subjectRef, subjectId: uid || null, groupRef: groupRefRaw ? String(groupRefRaw) : null,
+        type: evidence.EVIDENCE_TYPES.includes(it.type) ? it.type : 'metric',
+        label: it.label, value: it.value, unit: it.unit || null,
+        observedAt: it.date || null, retrievedAt, confidence, visibility: 'normal',
+        mappingVersion: opts.mapping ? (opts.mapping.version || null) : null,
+      }, rec);
+      if (r.duplicate) { stats.duplicates++; return; }
+      if (!r.stored) return;
+      stats.stored++;
+      if (r.promotable && emit(uid, it.label, it.value, it.date, it.event || externalId, r.id)) { stats.imported++; any = true; }
+    });
     if (any) subjects.add(uid);
   });
-  if (stats.imported) scheduleSave();
-  return { imported: stats.imported, subjects: subjects.size, matched: stats.matched, probable: stats.probable, unmatched: stats.unmatched, conflicts: stats.conflicts, conflictNames: [...conflictNames].slice(0, 6) };
+  if (stats.stored) scheduleSave();
+  return { imported: stats.imported, subjects: subjects.size, matched: stats.matched, probable: stats.probable, unmatched: stats.unmatched, conflicts: stats.conflicts, stored: stats.stored, duplicates: stats.duplicates, conflictNames: [...conflictNames].slice(0, 6) };
 }
 
 /* POST /api/ingest — the push door. Any app / webhook / script POSTs data in ANY
@@ -5192,15 +5280,43 @@ app.post('/api/ingest', (req, res) => {
     : (Array.isArray(req.body) ? req.body : { ...req.body });
   if (payload && typeof payload === 'object' && !Array.isArray(payload)) { delete payload.token; delete payload.source; }
   const r = _ingestGeneric(code, payload, null, { source, provider: source });
-  if (!r.imported && !r.unmatched && !r.conflicts) return res.status(400).json({ error: 'no usable data found', hint: 'send JSON containing a person (email/name/userId) and one or more numbers' });
-  res.json({ ok: true, imported: r.imported, people: r.subjects, matched: r.matched, probable: r.probable, unmatched: r.unmatched, conflicts: r.conflicts, conflictNames: r.conflictNames });
+  if (!r.stored && !r.duplicates && !r.unmatched && !r.conflicts) return res.status(400).json({ error: 'no usable data found', hint: 'send JSON containing a person (email/name/userId) and one or more numbers' });
+  res.json({ ok: true, imported: r.imported, people: r.subjects, matched: r.matched, probable: r.probable, unmatched: r.unmatched, conflicts: r.conflicts, stored: r.stored, duplicates: r.duplicates, conflictNames: r.conflictNames });
 });
 
 /* GET /api/connectors/manifest — the capability contract: the universal data model,
    the read/action capabilities, and the reference connector manifests. This is the
    published surface an org (or a future connector author) builds against. */
 app.get('/api/connectors/manifest', requirePermission('manage_settings'), (req, res) => {
-  res.json({ ok: true, primitives: connectorSDK.PRIMITIVES, capabilities: connectorSDK.CAPABILITIES, connectors: connectorSDK.MANIFESTS });
+  res.json({ ok: true, primitives: connectorSDK.PRIMITIVES, capabilities: connectorSDK.CAPABILITIES,
+    connectors: connectorSDK.MANIFESTS, evidenceTypes: evidence.EVIDENCE_TYPES,
+    confidenceStates: evidence.CONFIDENCE_STATES, lifecycleStates: evidence.LIFECYCLE_STATES });
+});
+
+/* GET /api/evidence — the audit trail of the canonical evidence layer. Every record
+   that crossed the boundary, with its identity confidence, promotion status, and a
+   pointer to the raw immutable record. Admin-only; content is summarised (no private
+   payload dump) so it's safe to review. This is how an org SEES what entered — or was
+   held back from — its organisational truth. */
+app.get('/api/evidence', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const log = evidenceLog[code] || [];
+  const filterConf = req.query.confidence;   // e.g. ?confidence=unmatched to review what was held back
+  const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 100));
+  const rows = log.filter(e => !filterConf || e.confidence === filterConf).slice(-limit).reverse().map(e => ({
+    id: e.id, provider: e.provider, source: e.source, externalId: e.externalId,
+    subjectId: e.subjectId, subjectRef: e.subjectRef, groupRef: e.groupRef,
+    type: e.type, label: e.label, value: e.value, unit: e.unit,
+    observedAt: e.observedAt, retrievedAt: e.retrievedAt,
+    confidence: e.confidence, status: e.status, visibility: e.visibility,
+    mappingVersion: e.mappingVersion, rawRef: e.rawRef,
+    promoted: evidence.promotable(e),
+  }));
+  const summary = { total: log.length,
+    promoted: log.filter(e => evidence.promotable(e)).length,
+    unmatched: log.filter(e => e.confidence === 'unmatched').length,
+    conflict:  log.filter(e => e.confidence === 'conflict').length };
+  res.json({ ok: true, summary, evidence: rows });
 });
 
 /* ── Connections: connect to anything with a URL. The org configures a source; the
@@ -9505,6 +9621,9 @@ function _loadAllStores(data) {
   Object.assign(studioThreads,         data.studioThreads         || {});
   Object.assign(orgSignals,       data.orgSignals       || {});
   Object.assign(noticeFeedback,   data.noticeFeedback   || {});
+  Object.assign(rawEvidence,      data.rawEvidence      || {});
+  Object.assign(evidenceLog,      data.evidenceLog      || {});
+  _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
   const _savedSessions = data.activeSessions || {};
@@ -9542,7 +9661,9 @@ const PORT = process.env.PORT || 3000;
 // Requiring this module never boots a listener — only running it directly does.
 module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired,
   // exported for the truth layer: proves the role ladder never invents a title
-  _subjectRoleContext, _domainDirective };
+  _subjectRoleContext, _domainDirective,
+  // exported for the truth layer: the canonical evidence boundary
+  _ingestGeneric, _recordEvidence, evidenceLog, rawEvidence };
 
 if (require.main === module) (async () => {
   try {

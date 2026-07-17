@@ -462,6 +462,28 @@ const server = app.listen(0, async () => {
     const man = await call('/api/connectors/manifest', tokCoach);
     ok('the connector manifest publishes the capability contract',
        man.status === 200 && Array.isArray(man.j?.primitives) && man.j.primitives.includes('observation') && man.j?.capabilities?.read?.includes('calendar.read') && man.j?.connectors?.strava);
+    ok('the manifest also publishes the evidence contract (types + confidence + lifecycle)',
+       Array.isArray(man.j?.evidenceTypes) && man.j.evidenceTypes.includes('metric') && man.j?.confidenceStates?.includes('unmatched') && man.j?.lifecycleStates?.includes('superseded'));
+
+    // ── Canonical evidence layer: every record crosses the envelope boundary ──
+    const evAll = await call('/api/evidence', tokCoach);
+    ok('the evidence audit trail is admin-visible and summarised',
+       evAll.status === 200 && evAll.j?.summary && typeof evAll.j.summary.total === 'number' && Array.isArray(evAll.j.evidence));
+    ok('a plain member cannot read the evidence audit trail (403)',
+       (await call('/api/evidence', tokB)).status === 403);
+    ok('every promoted signal traces back to a stored envelope (id + confidence + rawRef)',
+       evAll.j.evidence.some(e => e.provider === 'anyapp' && e.subjectId === bId && e.rawRef && (e.confidence === 'confirmed' || e.confidence === 'probable') && e.promoted === true));
+    ok('the promoted signal carries the evidence id in its provenance',
+       (await call('/api/me/export', tokB)).j?.signals?.some(s => s.source === 'anyapp' && s.data?.source?.evidence_id));
+    // Unmatched people are STORED (auditable, re-resolvable) but never promoted.
+    const evUnmatched = await call('/api/evidence?confidence=unmatched', tokCoach);
+    ok('unmatched evidence is retained for audit but not promoted to a signal',
+       evUnmatched.j?.evidence?.length >= 1 && evUnmatched.j.evidence.every(e => e.promoted === false && !e.subjectId));
+    // Deduplication: an identical re-send collapses (webhook retry / overlapping sync).
+    const dup1 = await call('/api/ingest', null, { method: 'POST', headers: { Authorization: 'Bearer ' + mint.j.token }, body: { source: 'dedup', records: [{ email: 'b@t.co', label: 'DedupTest', value: 42, date: '2026-07-22' }] } });
+    const dup2 = await call('/api/ingest', null, { method: 'POST', headers: { Authorization: 'Bearer ' + mint.j.token }, body: { source: 'dedup', records: [{ email: 'b@t.co', label: 'DedupTest', value: 42, date: '2026-07-22' }] } });
+    ok('the first send imports; an identical re-send is deduped (imported 0)',
+       dup1.j?.imported === 1 && dup2.j?.imported === 0 && dup2.j?.duplicates >= 1);
 
     // ── Connections: connect to anything with a URL (admin-gated, SSRF-guarded) ──
     ok('a plain member cannot create a connection (403)',
