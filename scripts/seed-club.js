@@ -230,6 +230,15 @@ async function buildClubStore() {
       pushSig(u.id, u.id, 'metric', dAgo(d), Math.max(5, load), null, 'Training Load', 'normal');
       if (d % 14 === 0) pushSig(u.id, u.id, 'metric', dAgo(d), Math.max(3, 7 + jit(2)), null, 'Sleep', 'normal');
     }
+    // Match-style performance data — the kind you'd extract from a stats screenshot
+    // or a GPS export. Trends with the arc so the kernel has real capability/output
+    // streams to reason over (final-third passes rise for improvers, dip for dips).
+    for (let d = Math.min(DAYS, 140); d >= 0; d -= 7) {
+      const ftBase = (arc === 'improving' || arc === 'breakout') ? (d > 28 ? 55 : 72)
+        : arc === 'dip' ? (d > 21 ? 66 : 52) : 62;
+      pushSig(u.id, u.id, 'metric', dAgo(d), Math.max(20, ftBase + jit(7)), null, 'Final-third passes', 'normal');
+      pushSig(u.id, u.id, 'metric', dAgo(d), Math.max(4, (arc === 'overload' ? 11 : 9) + jit(1.5)), null, 'Sprint distance (km)', 'normal');
+    }
   }
 
   // ── Build every squad ─────────────────────────────────────────────────────

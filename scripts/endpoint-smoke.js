@@ -415,6 +415,20 @@ const server = app.listen(0, async () => {
        withFile.status === 200 && typeof withFile.j?.reply === 'string' && /pulled\s+\d+\s+number/i.test(withFile.j.reply));
     ok('extracted numbers become real metric signals the kernel can reason over',
        (await call('/api/me/export', tokB)).j?.signals?.some(s => s.source === 'metric' && s.data?.extracted && Number.isFinite(s.valueNum)));
+    // Named team-import: a leader uploads a roster table → each row maps to a member.
+    const roster = Buffer.from('email,sprint,passes\nb@t.co,7.2,44\ncoach@t.co,9.1,60\nnobody@x.co,5,5\n').toString('base64');
+    const imp = await call('/api/studio/chat', tokCoach, { method: 'POST', body: { message: 'team GPS export', media: { name: 'squad.csv', kind: 'csv' }, attachment: { name: 'squad.csv', mimetype: 'text/csv', data: roster } } });
+    ok('a leader\'s team spreadsheet imports per-person and reports matched/unmatched',
+       imp.status === 200 && imp.j?.imported && imp.j.imported.importedMembers >= 2 && imp.j.imported.totalMetrics >= 4 && (imp.j.imported.unmatched || []).length === 1);
+    ok('imported team metrics land on the RIGHT member\'s record',
+       (await call('/api/me/export', tokB)).j?.signals?.some(s => s.source === 'metric' && /sprint|passes/i.test(s.label || '') && s.data?.imported));
+    // Office: Excel and Word are read with no dependencies (unit round-trip).
+    const office = require('../lib/office');
+    const zip = (ents) => { const L=[],C=[]; let o=0; for(const[n,d]of ents){const nb=Buffer.from(n),db=Buffer.isBuffer(d)?d:Buffer.from(d);const lh=Buffer.alloc(30);lh.writeUInt32LE(0x04034b50,0);lh.writeUInt16LE(20,4);lh.writeUInt32LE(db.length,18);lh.writeUInt32LE(db.length,22);lh.writeUInt16LE(nb.length,26);L.push(Buffer.concat([lh,nb,db]));const cd=Buffer.alloc(46);cd.writeUInt32LE(0x02014b50,0);cd.writeUInt32LE(db.length,20);cd.writeUInt32LE(db.length,24);cd.writeUInt16LE(nb.length,28);cd.writeUInt32LE(o,42);C.push(Buffer.concat([cd,nb]));o+=lh.length+nb.length+db.length;} const cdB=Buffer.concat(C),lB=Buffer.concat(L);const e=Buffer.alloc(22);e.writeUInt32LE(0x06054b50,0);e.writeUInt16LE(ents.length,8);e.writeUInt16LE(ents.length,10);e.writeUInt32LE(cdB.length,12);e.writeUInt32LE(lB.length,16);return Buffer.concat([lB,cdB,e]); };
+    const xlsx = zip([['xl/sharedStrings.xml','<sst><si><t>passes</t></si></sst>'],['xl/worksheets/sheet1.xml','<worksheet><sheetData><row r="1"><c r="A1" t="s"><v>0</v></c></row><row r="2"><c r="A2"><v>45</v></c></row></sheetData></worksheet>']]);
+    ok('Excel (.xlsx) is read with no dependencies', /passes[\s\S]*45/.test(office.xlsxToText(xlsx) || ''));
+    const docx = zip([['word/document.xml','<w:document><w:body><w:p><w:r><w:t>Recovery plan</w:t></w:r></w:p></w:body></w:document>']]);
+    ok('Word (.docx) is read with no dependencies', /Recovery plan/.test(office.docxToText(docx) || ''));
 
     // ── Universal ingest: one authenticated pipe any app can push data to ──
     ok('a plain member cannot mint an org ingest token (403)',

@@ -22,6 +22,7 @@ const primitives = require('./ai/primitives');
 const confidence = require('./ai/confidence');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
+const office     = require('./lib/office');   // dependency-free .xlsx / .docx reading
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -4048,6 +4049,59 @@ function _extractMetricsFromText(text) {
   return out.slice(0, 40);
 }
 
+/* Named team-import: a coach uploads a table with a name/email column and metric
+   columns; each row is mapped to the right member (within the uploader's visible
+   scope) and every numeric column becomes a signal for THAT person. One upload →
+   data across the whole squad. Returns a summary, or null if it isn't a roster
+   table. Only members the uploader can legitimately see are written to. */
+function _importTeamTable(code, uploaderId, text) {
+  const lines = String(text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length < 3) return null;                       // need a header + ≥2 rows
+  const rows = lines.slice(0, 400).map(l => l.split(',').map(c => c.trim()));
+  const header = rows[0].map(h => h.toLowerCase());
+  const emailCol = header.findIndex(h => /e-?mail/.test(h));
+  const nameCol  = header.findIndex(h => /\b(name|player|member|athlete|person|employee|student)\b/.test(h));
+  const keyCol = emailCol >= 0 ? emailCol : nameCol;
+  if (keyCol < 0) return null;
+  const dataRows = rows.slice(1);
+  const numCols = [];
+  header.forEach((h, ci) => {
+    if (ci === keyCol) return;
+    const vals = dataRows.map(r => r[ci]).filter(v => v);
+    const numeric = vals.filter(v => /^-?\d+(?:\.\d+)?$/.test(v)).length;
+    if (vals.length >= 2 && numeric / vals.length >= 0.6) numCols.push(ci);
+  });
+  if (!numCols.length) return null;
+  const visible = new Set(getVisibleUserIds(code, uploaderId));
+  const users = orgUsers[code] || {};
+  const findId = (val) => {
+    const v = val.toLowerCase();
+    if (emailCol >= 0) { const id = Object.keys(users).find(k => (users[k].email || '').toLowerCase() === v); if (id) return id; }
+    return Object.keys(users).find(k => (users[k].name || '').toLowerCase().trim() === v.trim()) || null;
+  };
+  let importedMembers = 0, totalMetrics = 0; const unmatched = [];
+  dataRows.forEach(r => {
+    const keyVal = (r[keyCol] || '').trim();
+    if (!keyVal) return;
+    const uid = findId(keyVal);
+    if (!uid || !visible.has(uid)) { unmatched.push(keyVal.slice(0, 40)); return; }
+    let any = false;
+    numCols.forEach(ci => {
+      const v = Number(r[ci]); if (!Number.isFinite(v)) return;
+      _emitSignalSafe(code, {
+        subjectType: 'member', subjectId: uid, source: 'metric', modality: 'data',
+        valueNum: v, label: (header[ci] || 'Metric').slice(0, 80), sensitivity: 'normal',
+        data: { imported: true, extracted: true },
+      }, uploaderId);
+      totalMetrics++; any = true;
+    });
+    if (any) importedMembers++;
+  });
+  if (!importedMembers) return null;
+  scheduleSave();
+  return { importedMembers, totalMetrics, columns: numCols.map(ci => header[ci]).slice(0, 8), unmatched: unmatched.slice(0, 6) };
+}
+
 /* What IntelliQ actually KNOWS about this person, so its coaching is grounded in
    their record — their aim, their reviewed strengths and development areas, where
    they're trending, and their recent results. This is their OWN data in their OWN
@@ -4149,23 +4203,51 @@ app.post('/api/studio/chat', requireAuth, async (req, res) => {
   let understanding = '';
   let understandNote = '';
   let capturedMetrics = [];   // [{label, value}]
+  let teamImport = null;
   if (att && att.data) {
     const mime = String(att.mimetype || '').toLowerCase();
+    const fname = String(att.name || media?.name || '').toLowerCase();
+    const isXlsx = /spreadsheetml|excel/.test(mime) || /\.xlsx?$/.test(fname);
+    const isDocx = /wordprocessingml/.test(mime) || /\.docx?$/.test(fname);
     let kind = null, payload = null, plainText = null;
     if (mime.startsWith('image/')) { kind = 'image'; payload = { type: 'image', mimetype: mime, data: att.data }; }
     else if (mime === 'application/pdf') { kind = 'pdf'; payload = { type: 'pdf', data: att.data }; }
+    else if (isXlsx) {
+      // Excel → CSV-style text, read with no dependencies, then the same pipeline.
+      kind = 'text';
+      try { plainText = office.xlsxToText(Buffer.from(att.data, 'base64')); if (plainText) payload = { type: 'text', text: plainText }; } catch (_) {}
+      if (!plainText) understandNote = 'I couldn\'t read that Excel file — re-save it as .xlsx or export a CSV and I\'ll read it in full.';
+    }
+    else if (isDocx) {
+      kind = 'text';
+      try { plainText = office.docxToText(Buffer.from(att.data, 'base64')); if (plainText) payload = { type: 'text', text: plainText }; } catch (_) {}
+      if (!plainText) understandNote = 'I couldn\'t read that Word file — re-save it as .docx or paste the text.';
+    }
     else if (mime.startsWith('text/') || mime === 'application/csv') {
       kind = 'text';
       try { plainText = Buffer.from(att.data, 'base64').toString('utf8'); payload = { type: 'text', text: plainText }; } catch (_) { payload = null; }
     }
 
-    // Deterministic extraction from text/CSV runs regardless of any AI key — a
-    // coach's spreadsheet or a pasted stat block is deciphered on the spot.
-    if (plainText) capturedMetrics = _extractMetricsFromText(plainText);
+    // A table with a name/email column + metric columns → import across the squad,
+    // one row per person (leaders only, and only for people they can see).
+    if (plainText && _isLeader(code, userId)) {
+      try { teamImport = _importTeamTable(code, userId, plainText); } catch (_) { teamImport = null; }
+    }
 
-    if (!kind) {
-      understandNote = 'I can read images, PDFs, and text/CSV directly right now — for an Excel or Word file, export it to PDF or CSV and I\'ll read it in full.';
-    } else if (!ai.canUnderstand(kind) && !capturedMetrics.length) {
+    // A roster import already wrote the numbers per-person. Otherwise, decipher this
+    // as ONE person's data (deterministic — no AI key needed).
+    if (teamImport) {
+      const cols = (teamImport.columns || []).join(', ');
+      understanding = `Imported ${teamImport.totalMetrics} data point${teamImport.totalMetrics !== 1 ? 's' : ''} across ${teamImport.importedMembers} ${teamImport.importedMembers > 1 ? 'people' : 'person'}${cols ? ` (${cols})` : ''} — each is now on that person's own record, so it'll shape what I notice for them.${teamImport.unmatched.length ? ` I couldn't match: ${teamImport.unmatched.join(', ')} — check the name or email.` : ''}`;
+    } else if (plainText) {
+      capturedMetrics = _extractMetricsFromText(plainText);
+    }
+
+    if (teamImport) {
+      /* handled above — skip single-person understanding */
+    } else if (!kind) {
+      understandNote = 'I can read images, PDFs, Excel, Word, and text/CSV. This type I couldn\'t open — paste the text and I\'ll take it.';
+    } else if (!ai.canUnderstand(kind) && !capturedMetrics.length && !understandNote) {
       understandNote = kind === 'pdf'
         ? 'Reading PDFs needs a Claude key — it\'s captured here. Send it as an image or text, or tell me what\'s in it, and I\'ll work with that.'
         : 'Reading files needs an AI key configured — it\'s captured here, but tell me what\'s in it and I\'ll work with that for now.';
@@ -4261,7 +4343,7 @@ app.post('/api/studio/chat', requireAuth, async (req, res) => {
 
   th.messages.push({ role: 'assistant', text: reply, ts: new Date().toISOString() });
   scheduleSave();
-  res.json({ ok: true, reply, planSaved: !!planToSave, understood: !!understanding });
+  res.json({ ok: true, reply, planSaved: !!planToSave, understood: !!understanding, imported: teamImport || undefined, metricsCaptured: capturedMetrics.length });
 });
 
 /* POST /api/studio/plan/:id — mark one of the caller's plans done (or reopen). */
