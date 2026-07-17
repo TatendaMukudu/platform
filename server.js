@@ -4046,7 +4046,7 @@ app.get('/api/studio', requireAuth, (req, res) => {
     const bits = [];
     if (assigned.length) bits.push(`${assigned.length} thing${assigned.length > 1 ? 's' : ''} assigned to you`);
     if (openPlans.length) bits.push(`${openPlans.length} plan${openPlans.length > 1 ? 's' : ''} in progress`);
-    opening = `Hi ${first} — this is your Studio. ${bits.length ? `You've got ${bits.join(' and ')}. ` : ''}Tell me what you want to work on, think a plan out loud, or drop in a file, photo, or voice note. What's on your mind?`;
+    opening = `Hi ${first} — this is your workspace. ${bits.length ? `You've got ${bits.join(' and ')}. ` : ''}Tell me what you want to work on, think a plan out loud, or drop in a file, photo, or voice note. What's on your mind?`;
   }
   res.json({ ok: true, opening, proactive, messages: th.messages.slice(-40), plans: openPlans, assigned, pins, canTranscribe: ai.canTranscribe() });
 });
@@ -4129,7 +4129,7 @@ app.post('/api/studio/chat', requireAuth, async (req, res) => {
   let reply = understanding
     ? understanding
     : media
-    ? `Got it — I've saved ${media.name || 'that'} to your Studio${understandNote ? '. ' + understandNote : ' and noted it. Want me to turn it into a plan, or add it to something you\'re already working on?'}`
+    ? `Got it — I've saved ${media.name || 'that'} to your workspace${understandNote ? '. ' + understandNote : ' and noted it. Want me to turn it into a plan, or add it to something you\'re already working on?'}`
     : savePlan
     ? `Saved that as a plan. Want to break it into steps, or leave it as-is for now?`
     : assignedTitles.length

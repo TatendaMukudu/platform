@@ -649,7 +649,7 @@ function navigate(page){
 const PAGE_TITLES = {
   // My Space — every user
   home:         'Home',
-  assessments:  'Studio',
+  assessments:  'MyWorkspace',
   apps:         'Apps',
   checkin:      'Check-In',
   notes:        'Notes',
@@ -6142,10 +6142,9 @@ async function renderIntelligence(refresh) {
         <div class="intel-summary-text">${_escAdvisor(d.summary || '')}</div>
         <button class="intel-refresh" title="Rebuild" onclick="renderIntelligence(true)">↻</button>
       </div>
-      <div class="intel-section"><b>Your ${_v('members')}</b>${n ? ` — ${n} could use you today` : ' — all steady this week'}</div>
       ${n
-        ? `<div class="intel-list">${d.items.map(_intelCard).join('')}</div>`
-        : `<div class="intel-empty">Nobody needs your attention right now. When a pattern emerges, it appears here with the evidence and a suggested next step.</div>`}
+        ? `<details class="intel-collapse" open><summary class="intel-section"><b>Your ${_v('members')}</b> — ${n} could use you today</summary><div class="intel-list">${d.items.map(_intelCard).join('')}</div></details>`
+        : `<div class="intel-section"><b>Your ${_v('members')}</b> — all steady this week</div><div class="intel-empty">Nobody needs your attention right now. When a pattern emerges, it appears here with the evidence and a suggested next step.</div>`}
       <div class="intel-rollup">
         <div class="intel-stat"><span class="intel-stat-v">${r.memberCount || 0}</span><span class="intel-stat-l">${_v('members')}</span></div>
         <div class="intel-stat"><span class="intel-stat-v">${r.activeThisWeek || 0}/${r.memberCount || 0}</span><span class="intel-stat-l">active this week</span></div>
@@ -6282,22 +6281,14 @@ async function _renderTeamWatch() {
         <div class="intel-watch-draft" style="display:none"></div></div>
     </div>`;
     };
+    // Each category is a collapsible so a long watch list doesn't dominate the page.
+    const cat = (rows, cls, head, color, intent, open) => rows.length
+      ? `<details class="intel-watch-card ${cls} intel-collapse"${open ? ' open' : ''}><summary class="intel-watch-head">${head} <span class="collapse-count">${rows.length}</span></summary>${rows.map(r => item(r, color, intent)).join('')}</details>`
+      : '';
     let html = '';
-    if ((d.emerging || []).length) {
-      html += `<div class="intel-watch-card intel-watch-emerging">
-        <div class="intel-watch-head">Worth a look — before it grows</div>
-        ${d.emerging.map(r => item(r, '#f7a84f', 'support')).join('')}</div>`;
-    }
-    if ((d.attention || []).length) {
-      html += `<div class="intel-watch-card intel-watch-attention">
-        <div class="intel-watch-head">Needs you now</div>
-        ${d.attention.map(r => item(r, '#f74f4f', 'support')).join('')}</div>`;
-    }
-    if ((d.rising || []).length) {
-      html += `<div class="intel-watch-card intel-watch-rising">
-        <div class="intel-watch-head">Going well — worth recognising</div>
-        ${d.rising.map(r => item(r, '#0ecfb0', 'recognition')).join('')}</div>`;
-    }
+    html += cat(d.attention || [], 'intel-watch-attention', 'Needs you now', '#f74f4f', 'support', true);
+    html += cat(d.emerging || [], 'intel-watch-emerging', 'Worth a look — before it grows', '#f7a84f', 'support', true);
+    html += cat(d.rising || [], 'intel-watch-rising', 'Going well — worth recognising', '#0ecfb0', 'recognition', false);
     if (!html && d.scanned) {
       html = `<div class="intel-watch-card"><div class="intel-watch-head" style="color:var(--text-muted)">Nothing emerging — all ${d.scanned} steady. IntelliQ will flag drift here before it shows in results.</div></div>`;
     }

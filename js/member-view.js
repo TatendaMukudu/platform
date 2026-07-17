@@ -1504,7 +1504,7 @@ const MemberApp = {
       this._studioScrollBottom();
       if (d.canCreate) this._loadAssessLearning();
     } catch (e) {
-      root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Couldn't load your Studio.</div>`;
+      root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Couldn't load your workspace.</div>`;
     }
   },
 
@@ -1532,7 +1532,7 @@ const MemberApp = {
     const recLabel = s.canTranscribe ? 'Record' : 'Record (voice)';
     const proactive = s.proactive ? `<div class="studio-proactive">${esc(s.proactive)}</div>` : '';
     return `<div class="card studio-card">
-      <div class="card-label">Studio · talk it through with IntelliQ</div>
+      <div class="card-label">MyWorkspace · talk it through with IntelliQ</div>
       ${proactive}
       <div class="studio-log" id="studio-log">${log}</div>
       ${planHtml}
@@ -1771,7 +1771,7 @@ const MemberApp = {
 
     // ── Assigned to you ──────────────────────────────────────────────────
     const assigned = d.assigned || [];
-    html += `<div class="card"><div class="card-label">Assigned to you</div>`;
+    html += `<details class="card collapse-card" open><summary class="card-label">Assigned to you${assigned.length ? ` <span class="collapse-count">${assigned.length}</span>` : ''}</summary>`;
     if (!assigned.length) {
       html += `<div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">Nothing assigned right now.</div>`;
     } else {
@@ -1823,7 +1823,7 @@ const MemberApp = {
           </div>${body}</div>`;
       }).join('');
     }
-    html += `</div>`;
+    html += `</details>`;
 
     // ── Leader tools: create a template, assign, review returns ──────────
     if (d.canCreate) {
@@ -1889,16 +1889,16 @@ const MemberApp = {
         };
         const live = tpls.filter(t => t.stage !== 'archived');
         const archived = tpls.filter(t => t.stage === 'archived');
-        html += `<div class="card"><div class="card-label">Your playbook — assign, and curate what works</div>` +
+        html += `<details class="card collapse-card" open><summary class="card-label">Your playbook — assign, and curate what works <span class="collapse-count">${live.length}</span></summary>` +
           (live.length ? live.map(row).join('') : `<div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">Nothing active yet.</div>`) +
           (archived.length ? `<details style="margin-top:0.5rem"><summary style="cursor:pointer;font-size:0.78rem;color:var(--text-muted)">Archived (${archived.length})</summary>${archived.map(row).join('')}</details>` : '') +
-          `<div id="assess-assign-panel" style="display:none;margin-top:0.7rem"></div></div>`;
+          `<div id="assess-assign-panel" style="display:none;margin-top:0.7rem"></div></details>`;
       }
 
       // Returns to review
       const toReview = (d.issued || []).filter(a => a.status === 'submitted');
       const reviewed = (d.issued || []).filter(a => a.status !== 'submitted');
-      html += `<div class="card"><div class="card-label">To review</div>`;
+      html += `<details class="card collapse-card"${toReview.length ? ' open' : ''}><summary class="card-label">To review${toReview.length ? ` <span class="collapse-count">${toReview.length}</span>` : ''}</summary>`;
       if (!toReview.length) html += `<div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">Nothing waiting.</div>`;
       else html += toReview.map(a => `<div class="me-row" style="display:block;padding:0.7rem 0;border-bottom:1px solid var(--border)">
         <div><strong>${esc(a.assigneeName)}</strong> — ${esc(a.title)}</div>
@@ -1920,20 +1920,19 @@ const MemberApp = {
           ${a.feedback ? `<div class="me-row-text" style="font-size:0.82rem;margin-top:0.4rem"><strong>Your feedback:</strong> ${esc(a.feedback)}</div>` : ''}
         </details>`).join('');
       }
-      html += `</div>`;
+      html += `</details>`;
 
       // ── What's working / worth revisiting — the assessment-learning loop ──
-      html += `<div class="card" id="assess-learning-card">
-        <div class="card-label">What's working — from real outcomes</div>
+      html += `<details class="card collapse-card" id="assess-learning-card">
+        <summary class="card-label">What's working — from real outcomes</summary>
         <div id="assess-learning" style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">Checking which assessments line up with people improving…</div>
-      </div>`;
+      </details>`;
     }
 
     // ── Tutorials (pinned how-to's) ──────────────────────────────────────
     const tuts = d.tutorials || [];
-    html += `<div class="card"><div style="display:flex;align-items:center;justify-content:space-between">
-      <div class="card-label" style="margin:0">Pinned how-to's</div>
-      ${d.canCreate ? `<button class="btn-ghost" onclick="MemberApp._tutorialToggle()">＋ Pin</button>` : ''}</div>`;
+    html += `<details class="card collapse-card"${tuts.length ? '' : ' open'}><summary class="card-label">Pinned how-to's${tuts.length ? ` <span class="collapse-count">${tuts.length}</span>` : ''}</summary>`;
+    if (d.canCreate) html += `<button class="btn-ghost" onclick="MemberApp._tutorialToggle()" style="margin-bottom:0.4rem">＋ Pin a how-to</button>`;
     if (d.canCreate) html += `<div id="tutorial-create" style="display:none;margin-top:0.7rem">
       <input class="form-input" id="tutorial-title" placeholder="Title — e.g. How we do this properly" style="margin-bottom:0.5rem">
       <textarea class="note-input" id="tutorial-body" placeholder="The steps someone can refer back to." style="min-height:70px;margin-bottom:0.5rem"></textarea>
@@ -1946,7 +1945,7 @@ const MemberApp = {
       ${t.url ? `<div style="margin-top:0.3rem"><a href="${esc(t.url)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:0.82rem">Open link ↗</a></div>` : ''}
       ${d.canCreate ? `<button class="btn-ghost" onclick="MemberApp._tutorialDelete('${t.id}')" style="font-size:0.72rem;color:var(--text-muted);margin-top:0.3rem">Remove</button>` : ''}
     </details>`).join('');
-    html += `</div>`;
+    html += `</details>`;
     return html;
   },
 

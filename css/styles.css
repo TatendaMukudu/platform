@@ -2448,6 +2448,12 @@ img { max-width: 100%; }
 .intel-draft-actions { display: flex; gap: 0.4rem; }
 .intel-draft-sent { font-size: 0.82rem; color: var(--accent2, #0ecfb0); padding: 0.3rem 0; }
 .intel-watch-why { font-size: 0.74rem; color: var(--accent2, #0ecfb0); margin-top: 3px; }
+/* Collapsible intelligence sections — keep the Team view scannable, not endless. */
+details.intel-collapse > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 0.5rem; }
+details.intel-collapse > summary::-webkit-details-marker { display: none; }
+details.intel-collapse > summary::after { content: '\25B8'; margin-left: auto; color: var(--text-muted); font-size: 0.8rem; transition: transform 0.15s ease; }
+details.intel-collapse[open] > summary::after { transform: rotate(90deg); }
+.collapse-count { font-weight: 400; color: var(--text-muted); font-size: 0.78rem; }
 .intel-discoveries { border-color: rgba(124,90,245,0.30); background: rgba(124,90,245,0.04); }
 .intel-discovery { padding: 0.5rem 0; border-top: 1px solid var(--border); }
 .intel-discovery:first-of-type { border-top: none; }
