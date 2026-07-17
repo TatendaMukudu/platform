@@ -23,6 +23,7 @@ const confidence = require('./ai/confidence');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
 const office     = require('./lib/office');   // dependency-free .xlsx / .docx reading
+const connectorSDK = require('./lib/connector-sdk');   // capability contract, identity resolution, mappings
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -5012,42 +5013,57 @@ function _resolveSubjectId(code, rec) {
 }
 function _ingestGeneric(code, payload, createdBy, opts = {}) {
   const source = String(opts.source || 'connector').slice(0, 40);
+  const provider = opts.provider || source;
+  const users = orgUsers[code] || {};
+  const retrievedAt = new Date().toISOString();
   let recs = [];
   if (Array.isArray(payload)) recs = payload;
   else if (payload && Array.isArray(payload.records)) recs = payload.records;
   else if (payload && Array.isArray(payload.data)) recs = payload.data;
   else if (payload && Array.isArray(payload.results)) recs = payload.results;
   else if (payload && typeof payload === 'object') recs = [payload];
-  const emit = (uid, label, value, date) => {
+  // Every emitted signal carries PROVENANCE — a link back to the original evidence.
+  const emit = (uid, label, value, date, externalId) => {
     const v = Number(value); if (!Number.isFinite(v)) return false;
     let ts; if (date) { const d = new Date(String(date)); if (!isNaN(d)) ts = d.toISOString(); }
     try {
-      _emitSignalSafe(code, { subjectType: 'member', subjectId: uid, source, modality: 'data', valueNum: v, label: String(label || 'Metric').slice(0, 80), ts, sensitivity: 'normal', data: { connector: source, ingest: true } }, uid);
+      _emitSignalSafe(code, { subjectType: 'member', subjectId: uid, source, modality: 'data', valueNum: v, label: String(label || 'Metric').slice(0, 80), ts, sensitivity: 'normal',
+        data: { connector: source, ingest: true, source: { provider, external_id: externalId || undefined, retrieved_at: retrievedAt } } }, uid);
       return true;
     } catch (_) { return false; }
   };
-  let imported = 0, unmatched = 0; const subjects = new Set();
+  const stats = { imported: 0, matched: 0, probable: 0, unmatched: 0, conflicts: 0 };
+  const subjects = new Set(); const conflictNames = new Set();
   recs.slice(0, 3000).forEach(rec => {
     if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return;
-    const uid = _resolveSubjectId(code, rec) || (opts.defaultSubjectId && orgUsers[code]?.[opts.defaultSubjectId] ? opts.defaultSubjectId : null);
-    if (!uid) { unmatched++; return; }
-    const date = rec.date || rec.ts || rec.timestamp || rec.time || null;
-    if (rec.label != null && rec.value != null) {
-      if (emit(uid, rec.label, rec.value, date)) { imported++; subjects.add(uid); }
-      return;
+    // Resolve WITH confidence — never silently merge an ambiguous match.
+    const idr = connectorSDK.resolveIdentity(users, rec);
+    if (idr.confidence === 'conflict') { stats.conflicts++; if (idr.ambiguous) conflictNames.add(idr.ambiguous); return; }
+    let uid = idr.id;
+    if (!uid && opts.defaultSubjectId && users[opts.defaultSubjectId]) uid = opts.defaultSubjectId;
+    if (!uid) { stats.unmatched++; return; }
+    if (idr.confidence === 'confirmed') stats.matched++; else if (idr.confidence === 'probable') stats.probable++;
+    const externalId = rec.event || rec.eventId || rec.fixture || rec.externalId || rec.id || null;
+    // A VERIFIED mapping is applied deterministically; otherwise the wide/clean read.
+    let items;
+    if (opts.mapping) items = connectorSDK.applyMapping(rec, opts.mapping);
+    else {
+      items = [];
+      const date = rec.date || rec.ts || rec.timestamp || rec.time || null;
+      if (rec.label != null && rec.value != null) items.push({ label: rec.label, value: rec.value, date, event: externalId });
+      else for (const [k, val] of Object.entries(rec)) {
+        const norm = k.toLowerCase().replace(/[\s_-]/g, '');
+        if (_META_KEYS.includes(k.toLowerCase()) || _SUBJECT_KEYS.includes(norm)) continue;
+        const num = typeof val === 'number' ? val : (typeof val === 'string' && /^-?\d+(?:\.\d+)?$/.test(val.trim()) ? Number(val.trim()) : null);
+        if (num != null) items.push({ label: k, value: num, date, event: externalId });
+      }
     }
     let any = false;
-    for (const [k, val] of Object.entries(rec)) {
-      const norm = k.toLowerCase().replace(/[\s_-]/g, '');
-      if (_META_KEYS.includes(k.toLowerCase()) || _SUBJECT_KEYS.includes(norm)) continue;
-      const num = typeof val === 'number' ? val : (typeof val === 'string' && /^-?\d+(?:\.\d+)?$/.test(val.trim()) ? Number(val.trim()) : null);
-      if (num == null) continue;
-      if (emit(uid, k, num, date)) { imported++; any = true; }
-    }
+    items.forEach(it => { if (emit(uid, it.label, it.value, it.date, it.event || externalId)) { stats.imported++; any = true; } });
     if (any) subjects.add(uid);
   });
-  if (imported) scheduleSave();
-  return { imported, unmatched, subjects: subjects.size };
+  if (stats.imported) scheduleSave();
+  return { imported: stats.imported, subjects: subjects.size, matched: stats.matched, probable: stats.probable, unmatched: stats.unmatched, conflicts: stats.conflicts, conflictNames: [...conflictNames].slice(0, 6) };
 }
 
 /* POST /api/ingest — the push door. Any app / webhook / script POSTs data in ANY
@@ -5062,9 +5078,16 @@ app.post('/api/ingest', (req, res) => {
     ? req.body
     : (Array.isArray(req.body) ? req.body : { ...req.body });
   if (payload && typeof payload === 'object' && !Array.isArray(payload)) { delete payload.token; delete payload.source; }
-  const r = _ingestGeneric(code, payload, null, { source });
-  if (!r.imported && !r.unmatched) return res.status(400).json({ error: 'no usable data found', hint: 'send JSON containing a person (email/name/userId) and one or more numbers' });
-  res.json({ ok: true, imported: r.imported, unmatched: r.unmatched, people: r.subjects });
+  const r = _ingestGeneric(code, payload, null, { source, provider: source });
+  if (!r.imported && !r.unmatched && !r.conflicts) return res.status(400).json({ error: 'no usable data found', hint: 'send JSON containing a person (email/name/userId) and one or more numbers' });
+  res.json({ ok: true, imported: r.imported, people: r.subjects, matched: r.matched, probable: r.probable, unmatched: r.unmatched, conflicts: r.conflicts, conflictNames: r.conflictNames });
+});
+
+/* GET /api/connectors/manifest — the capability contract: the universal data model,
+   the read/action capabilities, and the reference connector manifests. This is the
+   published surface an org (or a future connector author) builds against. */
+app.get('/api/connectors/manifest', requirePermission('manage_settings'), (req, res) => {
+  res.json({ ok: true, primitives: connectorSDK.PRIMITIVES, capabilities: connectorSDK.CAPABILITIES, connectors: connectorSDK.MANIFESTS });
 });
 
 /* ── Connections: connect to anything with a URL. The org configures a source; the
@@ -5118,13 +5141,14 @@ async function _runConnection(code, conn) {
     if (!resp.ok) { conn.lastStatus = `error — HTTP ${resp.status}`; scheduleSave(); return { error: `HTTP ${resp.status}` }; }
     let data; try { data = await resp.json(); } catch (_) { conn.lastStatus = 'error — response was not JSON'; scheduleSave(); return { error: 'not json' }; }
     if (conn.jsonPath) { try { data = String(conn.jsonPath).split('.').reduce((o, k) => (o == null ? o : o[k]), data); } catch (_) {} }
-    const r = _ingestGeneric(code, data, conn.createdBy, { source: conn.source || conn.name || 'connector', defaultSubjectId: conn.oauth?.subject === 'self' ? conn.createdBy : undefined });
-    conn.lastStatus = `ok — ${r.imported} data point${r.imported === 1 ? '' : 's'} across ${r.subjects} ${r.subjects === 1 ? 'person' : 'people'}${r.unmatched ? `, ${r.unmatched} unmatched` : ''}`;
+    const r = _ingestGeneric(code, data, conn.createdBy, { source: conn.source || conn.name || 'connector', provider: conn.oauth?.provider || conn.source, mapping: conn.mapping || undefined, defaultSubjectId: conn.oauth?.subject === 'self' ? conn.createdBy : undefined });
+    const verified = conn.mapping ? '' : ' (auto-mapped — inspect to verify)';
+    conn.lastStatus = `ok — ${r.imported} data point${r.imported === 1 ? '' : 's'} across ${r.subjects} ${r.subjects === 1 ? 'person' : 'people'}${r.conflicts ? `, ${r.conflicts} ambiguous (skipped)` : ''}${r.unmatched ? `, ${r.unmatched} unmatched` : ''}${verified}`;
     conn.lastCount = r.imported; scheduleSave();
     return r;
   } catch (e) { conn.lastStatus = 'failed — ' + String(e.message || 'error').slice(0, 70); scheduleSave(); return { error: e.message }; }
 }
-const _publicConnection = c => ({ id: c.id, name: c.name, url: c.url, method: c.method || 'GET', scheduleHours: c.scheduleHours, source: c.source, jsonPath: c.jsonPath || null, headerKeys: Object.keys(c.headers || {}), lastRun: c.lastRun || null, lastStatus: c.lastStatus || 'never run', lastCount: c.lastCount || 0 });
+const _publicConnection = c => ({ id: c.id, name: c.name, url: c.url, method: c.method || 'GET', scheduleHours: c.scheduleHours, source: c.source, jsonPath: c.jsonPath || null, headerKeys: Object.keys(c.headers || {}), oauth: c.oauth ? { provider: c.oauth.provider } : null, mapping: c.mapping ? { version: c.mapping.version, status: c.mapping.status, fields: c.mapping.fields.length } : null, lastRun: c.lastRun || null, lastStatus: c.lastStatus || 'never run', lastCount: c.lastCount || 0 });
 
 app.get('/api/connections', requirePermission('manage_settings'), (req, res) => {
   const code = req.iqSession.orgCode;
@@ -5158,6 +5182,45 @@ app.post('/api/connections/:id/run', requirePermission('manage_settings'), async
   if (!conn) return res.status(404).json({ error: 'not found' });
   const r = await _runConnection(code, conn);
   res.json({ ok: !r.error, result: r, connection: _publicConnection(conn) });
+});
+
+/* POST /api/connections/:id/inspect — fetch a SAMPLE, propose a mapping contract for
+   the admin to verify (the safe workflow: inspect → AI proposes → admin confirms →
+   versioned mapping → all future data validated against it). Nothing is stored yet. */
+app.post('/api/connections/:id/inspect', requirePermission('manage_settings'), async (req, res) => {
+  const code = req.iqSession.orgCode;
+  const conn = (orgConnections[code] || []).find(c => c.id === req.params.id);
+  if (!conn) return res.status(404).json({ error: 'not found' });
+  if (!conn.url || !_urlIsSafe(conn.url)) return res.status(400).json({ error: 'connection has no reachable URL to sample' });
+  try {
+    const headers = { ...(conn.headers || {}) };
+    if (conn.oauth?.accessToken) headers.Authorization = `Bearer ${conn.oauth.accessToken}`;
+    const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 15000);
+    const resp = await fetch(conn.url, { method: conn.method || 'GET', headers, signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!resp.ok) return res.status(400).json({ error: `sample failed — HTTP ${resp.status}` });
+    let data = await resp.json();
+    if (conn.jsonPath) { try { data = String(conn.jsonPath).split('.').reduce((o, k) => (o == null ? o : o[k]), data); } catch (_) {} }
+    const recs = Array.isArray(data) ? data : (data.records || data.data || data.results || [data]);
+    const mapping = connectorSDK.proposeMapping(recs);
+    if (!mapping) return res.status(400).json({ error: 'couldn\'t find a person + numbers in the sample', sample: recs.slice(0, 2) });
+    res.json({ ok: true, mapping, sample: recs.slice(0, 3) });
+  } catch (e) { res.status(502).json({ error: 'inspect failed — ' + String(e.message).slice(0, 80) }); }
+});
+
+/* POST /api/connections/:id/mapping — save the admin-VERIFIED mapping contract (a
+   versioned agreement). From then on the connection applies it deterministically. */
+app.post('/api/connections/:id/mapping', requirePermission('manage_settings'), (req, res) => {
+  const code = req.iqSession.orgCode;
+  const conn = (orgConnections[code] || []).find(c => c.id === req.params.id);
+  if (!conn) return res.status(404).json({ error: 'not found' });
+  const m = req.body?.mapping;
+  if (!m || !m.subjectField || !Array.isArray(m.fields)) return res.status(400).json({ error: 'a mapping with subjectField + fields is required' });
+  conn.mapping = { version: (conn.mapping?.version || 0) + 1, status: 'verified', verifiedBy: req.iqSession.userId, verifiedAt: new Date().toISOString(),
+    subjectField: String(m.subjectField).slice(0, 60), dateField: m.dateField ? String(m.dateField).slice(0, 60) : null, eventField: m.eventField ? String(m.eventField).slice(0, 60) : null,
+    fields: (m.fields || []).slice(0, 60).map(f => ({ from: String(f.from || '').slice(0, 60), primitive: connectorSDK.PRIMITIVES.includes(f.primitive) ? f.primitive : 'metric', label: String(f.label || f.from || 'Metric').slice(0, 80), include: f.include !== false })) };
+  scheduleSave();
+  res.json({ ok: true, mapping: conn.mapping });
 });
 
 /* ── OAuth2: connect real apps (Strava, Google, Microsoft/Teams, Hudl, Fitbit…) ──

@@ -44,6 +44,7 @@ const SUITES = [
   'person-model-smoke.js',
   'eval.js',
   'invariants.js',
+  'connector-harness.js',  // the Connector SDK: identity/confidence + mapping contracts
   'endpoint-smoke.js',   // boots the real app in-process (DB_OPTIONAL) — HTTP authz + Me context
 ];
 for (const s of SUITES) {

@@ -452,6 +452,16 @@ const server = app.listen(0, async () => {
        wide.status === 200 && wide.j?.imported === 3 && wide.j?.people === 1);
     ok('mapped numbers land as signals under their own field names',
        (await call('/api/me/export', tokB)).j?.signals?.some(s => /sprint|passes|turnovers/i.test(s.label || '') && s.source === 'anyapp'));
+    ok('ingested signals carry provenance (source provider + retrieved_at)',
+       (await call('/api/me/export', tokB)).j?.signals?.some(s => s.source === 'anyapp' && s.data?.source?.provider && s.data.source.retrieved_at));
+    // Identity resolution surfaces confidence — an ambiguous name is skipped, never merged.
+    const amb = await call('/api/ingest', null, { method: 'POST', headers: { Authorization: 'Bearer ' + mint.j.token }, body: { source: 'anyapp', records: [{ email: 'b@t.co', rpe: 6 }, { name: 'Nobody Real', rpe: 5 }] } });
+    ok('unresolved people are reported, not silently written',
+       amb.status === 200 && amb.j?.unmatched >= 1 && amb.j?.matched >= 1);
+    // The capability contract is published.
+    const man = await call('/api/connectors/manifest', tokCoach);
+    ok('the connector manifest publishes the capability contract',
+       man.status === 200 && Array.isArray(man.j?.primitives) && man.j.primitives.includes('observation') && man.j?.capabilities?.read?.includes('calendar.read') && man.j?.connectors?.strava);
 
     // ── Connections: connect to anything with a URL (admin-gated, SSRF-guarded) ──
     ok('a plain member cannot create a connection (403)',
