@@ -32,6 +32,7 @@ const policyLib  = require('./lib/policy');      // the organisational constitut
 const actionLib  = require('./lib/action');      // the universal Action Contract — the Execution Layer spine
 const workspaceLib = require('./lib/workspace'); // the unified personal workspace — typed, scoped items
 const reasoning  = require('./lib/reasoning');   // the three reasoning boundaries — pre-kernel / kernel / post-kernel
+const capAdapters = require('./lib/adapters');   // capability → canonical evidence adapters (legacy convergence)
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -3756,16 +3757,21 @@ app.post('/api/compose', requireAuth, async (req, res) => {
   const moodLabels = { 1:'Rough', 2:'Low', 3:'Okay', 4:'Good', 5:'Great' };
   const key = userKey(code, userId);
   if (!memberCheckins[key]) memberCheckins[key] = [];
-  memberCheckins[key].push({
+  const _ciRec = {
+    id: 'ci_' + generateId(),
     memberName: me.name, text: text || null, mood, moodLabel: mood ? moodLabels[mood] : null,
     role: me.role || 'member', orgMode: '', date: new Date().toLocaleDateString('en-GB'), ts: new Date().toISOString(),
-  });
+  };
+  memberCheckins[key].push(_ciRec);
   try {
     _emitSignalSafe(code, { subjectType:'member', subjectId:userId, source:'checkin', modality:'text',
       valueNum: mood, valueText: text || null, label: mood ? `Mood ${mood}/5` : 'Note', sensitivity:'sensitive',
       // A low-mood first return carries more weight than a routine daily check-in.
       weightNum: lowReturn ? 3 : undefined, data: isReturn ? { firstReturn: true, quietDays: returnGap } : null }, userId);
   } catch (_) {}
+  // CONVERGENCE: the same check-in also becomes claim-bounded canonical evidence
+  // (the authoritative source for reasoning; a hardship note stays owner-only-private).
+  try { _canonicaliseCheckin(code, userId, _ciRec); } catch (_) {}
 
   // Update memory + Person Model (deterministic; wrapped so it can't break compose).
   try {
@@ -6642,6 +6648,99 @@ function _composeForAudience(code, kernelArtifact, audience = {}) {
     policyContext: check.ok ? 'bounded' : 'REJECTED: ' + check.errors.join('; ') });
   return { output: out, artifact: art, ok: check.ok, errors: check.errors };
 }
+
+/* ═══ LEGACY CONVERGENCE — one truth layer, one context builder ════════════════
+   Legacy capabilities (check-in, Studio, assessments) keep their operational records
+   and surfaces but no longer own independent truth. An ADAPTER translates each record
+   into claim-bounded canonical evidence (idempotent via a stable source key); the ONE
+   shared CONTEXT BUILDER assembles reasoning context ONLY through the purpose-scoped
+   gateway. No capability builds AI context from raw repositories. */
+
+/* Record adapter outputs as canonical evidence — idempotent (the adapter's stable
+   externalId means a replay dedups rather than forking a real-world event). Private
+   inputs never promote to an organisational signal. */
+function _ingestAdapterEvidence(code, inputs) {
+  let recorded = 0, duplicates = 0;
+  (inputs || []).forEach(inp => {
+    const r = _recordEvidence(code, {
+      provider: inp.provider, source: inp.source, externalId: inp.externalId,
+      subjectId: inp.subjectId, ownerRef: inp.ownerRef, type: inp.type, label: inp.label,
+      value: inp.value, unit: inp.unit, valueText: inp.valueText,
+      observedAt: inp.observedAt, retrievedAt: inp.retrievedAt,
+      // Envelope `confidence` is IDENTITY confidence — never the claim's epistemic
+      // strength (that lives in the raw record's `strength`).
+      confidence: inp.subjectId ? 'confirmed' : 'unmatched', visibility: inp.visibility,
+    }, { adapter: inp.provider, derivation: inp.derivation, strength: inp.confidence, context: inp.context, provenanceKind: inp.provenanceKind });
+    if (r.duplicate) { duplicates++; return; }
+    if (!r.stored) return;
+    recorded++;
+    // Org-facing (non-private) evidence with a resolved subject promotes to a signal.
+    if (inp.visibility !== 'private' && r.promotable) _promoteEvidence(code, r.envelope);
+  });
+  if (recorded) scheduleSave();
+  return { recorded, duplicates };
+}
+
+/* THE shared reasoning-context builder. Every migrated capability calls this instead
+   of assembling context from raw repositories. Enforces purpose-scoped gateway access
+   (private excluded before context for org purposes), records what entered context,
+   and returns canonical evidence only. */
+function _canonicalContext(opts = {}) {
+  const { code, viewerId, purpose, subjectId } = opts;
+  const ev = _kernelEvidence(code, { purpose: purpose || 'personal_assistance', viewerId, subjectId });
+  // Record which evidence entered the model context (auditable; not chain-of-thought).
+  _recordArtifact(code, { stage: 'kernel', type: 'derived_pattern', derivation: 'pattern',
+    result: { contextFor: purpose, subject: subjectId || null, size: ev.length }, basis: ev.map(e => e.evidenceId).slice(0, 50),
+    confidence: 'low', limitations: ['context assembly, not a conclusion'], provenanceBy: 'context-builder' });
+  return ev;
+}
+
+/* Emit canonical evidence for a check-in via the adapter (compatibility dual-write —
+   the legacy signal remains for existing charts; canonical is authoritative for
+   reasoning). Hardship notes are treated as PRIVATE (owner-only). */
+function _canonicaliseCheckin(code, subjectId, rec) {
+  if (!subjectId) return { recorded: 0, duplicates: 0 };
+  const sensitiveNote = rec && (rec.note || rec.text) ? privacy.classifyText(rec.note || rec.text, { source: 'checkin' }) === 'sensitive' : false;
+  // Adapter default: sensitive (informs org aggregate, never quoted). Then ONLY a
+  // hardship note is escalated to private (owner-only) — the mood rating stays sensitive.
+  const inputs = capAdapters.CheckInAdapter.toCanonicalEvidence(rec, { subjectId, private: false, now: new Date().toISOString() });
+  inputs.forEach(i => { if (i.label === 'Check-in note' && sensitiveNote) { i.visibility = 'private'; i.ownerRef = subjectId; } });
+  return _ingestAdapterEvidence(code, inputs);
+}
+
+/* Idempotent BACKFILL — run the adapters over existing operational records so history
+   becomes canonical evidence. Retry-safe (dedupe), privacy-preserving (never broadens),
+   timestamp-preserving. Returns an audit report. */
+function _backfillCanonical(code, opts = {}) {
+  const report = { checkins: 0, assessments: 0, recorded: 0, duplicates: 0, dryRun: !!opts.dryRun };
+  const users = orgUsers[code] || {};
+  // Check-ins (keyed by `${code}:${userId}` or legacy `${code}:${name}`).
+  for (const key of Object.keys(memberCheckins)) {
+    if (!key.startsWith(code + ':')) continue;
+    const idPart = key.slice(code.length + 1);
+    const subjectId = users[idPart] ? idPart : _resolveUserIdByName(code, idPart);
+    (memberCheckins[key] || []).forEach(rec => {
+      report.checkins++;
+      if (opts.dryRun || !subjectId) return;
+      const sensitiveNote = (rec.note || rec.text) ? privacy.classifyText(rec.note || rec.text, { source: 'checkin' }) === 'sensitive' : false;
+      const inputs = capAdapters.CheckInAdapter.toCanonicalEvidence(rec, { subjectId, private: false, now: rec.ts });
+      inputs.forEach(i => { if (i.label === 'Check-in note' && sensitiveNote) { i.visibility = 'private'; i.ownerRef = subjectId; } });
+      const r = _ingestAdapterEvidence(code, inputs); report.recorded += r.recorded; report.duplicates += r.duplicates;
+    });
+  }
+  // Returned assessments → score evidence (with rubric/evaluator retained).
+  (assessmentAssignments[code] || []).forEach(a => {
+    if (a.status !== 'returned' || !Number.isFinite(Number(a.score))) return;
+    report.assessments++;
+    if (opts.dryRun) return;
+    const r = _ingestAdapterEvidence(code, capAdapters.AssessmentAdapter.toCanonicalEvidence(a, { now: a.returnedAt }));
+    report.recorded += r.recorded; report.duplicates += r.duplicates;
+  });
+  return report;
+}
+app.post('/api/admin/backfill-canonical', requirePermission('manage_settings'), (req, res) => {
+  res.json({ ok: true, report: _backfillCanonical(req.iqSession.orgCode, { dryRun: req.body?.dryRun === true }) });
+});
 
 /* ═══ MYWORKSPACE — one conversation-first personal operating surface ══════════
    Every input becomes a TYPED, SCOPED object with explicit ownership, visibility and
@@ -11097,7 +11196,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   orgPolicies, actionsLog, _policiesFor, orgInterventions, orgCalendar,
   // exported for the truth layer: reasoning boundaries + workspace
   _interpretInput, _kernelEvidence, _isCanonicalEvidence, _recordKernelDerivation, _composeForAudience,
-  _recordDerivedEvidence, _deleteWorkspaceEvidence, reasoningArtifacts, workspaceItems };
+  _recordDerivedEvidence, _deleteWorkspaceEvidence, reasoningArtifacts, workspaceItems,
+  // exported for the truth layer: legacy convergence
+  _ingestAdapterEvidence, _canonicalContext, _backfillCanonical, _canonicaliseCheckin, memberCheckins, assessmentAssignments };
 
 if (require.main === module) (async () => {
   try {
