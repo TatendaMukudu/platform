@@ -164,7 +164,7 @@ ok('38. the canonical mood reader reads the evidence log, not raw check-in rows 
 ok('39. the freeform insight builder no longer derives a trend from raw prior rows',
    freeformSrc.length > 0 && !freeformSrc.includes('recentMoodStr') && freeformSrc.includes('_checkinKernelState'));
 ok('40. compatibility signal writes are labelled non-authoritative with named consumers',
-   /COMPATIBILITY WRITE \(non-authoritative\)/.test(src) && /behaviour-engine participation cadence/.test(src));
+   /COMPATIBILITY WRITE \(non-authoritative\)/.test(src) && /behaviour-engine participation\s+cadence/.test(src));
 // The mood series is read at the TOP of each function; inspect that opening window so
 // the slice never bleeds into a later function that legitimately reads raw rows.
 const openWindow = (marker, n = 700) => { const s = src.indexOf(marker); return s >= 0 ? src.slice(s, s + n) : ''; };
@@ -186,15 +186,15 @@ ok('41. a check-in recommendation becomes canonical derived evidence', ev().leng
 const recEnv = ev().find(e => e.id === recDerived.id);
 ok('42. a recommendation does NOT auto-promote (no self-reinforcing org signal)', recEnv.promoted !== true);
 ok('43. a recommendation grounded in non-private basis is not private', recEnv.visibility !== 'private');
-// Active intervention suppresses a duplicate recommendation.
+// Active intervention suppresses a duplicate recommendation (same concern type).
 (orgInterventions[CODE] = orgInterventions[CODE] || []).push({ id: 'iv1', targetMemberId: 'sam', patternType: 'repeated_concern', status: 'active', outcome: null, recordedOutcome: null });
-const ivActive = _checkinInterventionState(CODE, 'sam', leaderState.patterns);
+const ivActive = _checkinInterventionState(CODE, 'sam', leaderState);
 ok('44. an active intervention suppresses a duplicate recommendation', ivActive.activeIntervention === true && ivActive.recommend === false);
 ok('45. a completed action does not imply a successful outcome (no auto-de-escalation)',
-   (() => { orgInterventions[CODE] = [{ id: 'iv2', targetMemberId: 'sam', patternType: 'repeated_concern', status: 'completed', outcome: null, recordedOutcome: null }]; return _checkinInterventionState(CODE, 'sam', leaderState.patterns).deEscalate === false; })());
-ok('46. recovery evidence de-escalates a prior concern', _checkinInterventionState(CODE, 'rec', stRec.patterns).deEscalate === true || stRec.patterns.some(p => p.type === 'recovering'));
-ok('47. a recorded positive outcome resolves/de-escalates the thread',
-   (() => { orgInterventions[CODE] = [{ id: 'iv3', targetMemberId: 'sam', patternType: 'repeated_concern', status: 'completed', recordedOutcome: 'improved' }]; return _checkinInterventionState(CODE, 'sam', leaderState.patterns).deEscalate === true; })());
+   (() => { orgInterventions[CODE] = [{ id: 'iv2', targetMemberId: 'sam', patternType: 'repeated_concern', status: 'completed', outcome: null, recordedOutcome: null }]; return _checkinInterventionState(CODE, 'sam', leaderState).deEscalate === false; })());
+ok('46. confident recovery evidence de-escalates a prior concern', _checkinInterventionState(CODE, 'rec', stRec).deEscalate === true);
+ok('47. a recorded positive outcome de-escalates when there is no fresh deterioration',
+   (() => { orgInterventions[CODE] = [{ id: 'iv3', targetMemberId: 'rec', patternType: 'repeated_concern', status: 'completed', recordedOutcome: 'improved' }]; return _checkinInterventionState(CODE, 'rec', stRec).deEscalate === true; })());
 
 // ─────────────────────────────────────────────────────────────────────────────
 // G. BACKFILL — idempotent, privacy-preserving, reconciled
@@ -226,7 +226,7 @@ ok('E2E-B. repeated below-baseline reports → diverging + grounded, non-causal 
 // C. Recovery de-escalation.
 ok('E2E-C. recovery: converging/recovering state de-escalates a prior alert',
    (stRec.trajectory === 'converging' || stRec.patterns.some(p => p.type === 'recovering'))
-   && _checkinInterventionState(CODE, 'rec', stRec.patterns).deEscalate === true);
+   && (() => { orgInterventions[CODE] = []; return _checkinInterventionState(CODE, 'rec', stRec).deEscalate === true; })());
 // D. Data gap → no negative assumption.
 ok('E2E-D. data gap: no recent check-ins → data_gap limitation, never disengagement/distress',
    stGap.trajectory === 'unknown' && stGap.patterns.some(p => p.type === 'data_gap') && stGap.limitations.some(l => /not evidence of a negative state/i.test(l)));

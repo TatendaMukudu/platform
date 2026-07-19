@@ -3762,7 +3762,6 @@ app.post('/api/compose', requireAuth, async (req, res) => {
   const priorLast = _memberLastActivity(code, userId, me.name);
   const returnGap = priorLast ? Math.floor((Date.now() - priorLast) / 86400000) : null;
   const isReturn  = returnGap != null && returnGap >= 10;
-  const lowReturn = isReturn && mood != null && mood <= 2;
 
   // Store as the person's own check-in + signal. Free text is a personal
   // disclosure → sensitive by default (the privacy gate treats it as such).
@@ -3775,12 +3774,12 @@ app.post('/api/compose', requireAuth, async (req, res) => {
     role: me.role || 'member', orgMode: '', date: new Date().toLocaleDateString('en-GB'), ts: new Date().toISOString(),
   };
   memberCheckins[key].push(_ciRec);
-  try {
-    _emitSignalSafe(code, { subjectType:'member', subjectId:userId, source:'checkin', modality:'text',
-      valueNum: mood, valueText: text || null, label: mood ? `Mood ${mood}/5` : 'Note', sensitivity:'sensitive',
-      // A low-mood first return carries more weight than a routine daily check-in.
-      weightNum: lowReturn ? 3 : undefined, data: isReturn ? { firstReturn: true, quietDays: returnGap } : null }, userId);
-  } catch (_) {}
+  // COMPATIBILITY WRITE (non-authoritative): a CONTENTLESS participation marker only —
+  // no mood value, no text, no mood-derived weight (see the frozen contract).
+  _emitCheckinParticipationSignal(code, userId, {
+    firstReturn: isReturn, quietDays: returnGap,
+    sensitivePresent: text ? privacy.isPrivate(privacy.classifyText(text, { source: 'checkin' })) : false,
+  });
   // CONVERGENCE: the same check-in also becomes claim-bounded canonical evidence
   // (the authoritative source for reasoning; a hardship note stays owner-only-private).
   try { _canonicaliseCheckin(code, userId, _ciRec); } catch (_) {}
@@ -6708,20 +6707,121 @@ function _canonicalContext(opts = {}) {
   return ev;
 }
 
+/* ── FROZEN COMPATIBILITY-SIGNAL CONTRACT (non-authoritative) ──────────────────
+   The check-in compatibility signal is a PARTICIPATION marker only. It carries exactly:
+     • a timestamp (the signal record's ts),
+     • a participation occurrence (source 'checkin', modality 'participation'),
+     • a CONTENTLESS sensitivity-PRESENCE flag (that sensitive content exists, not what).
+   It MUST NOT carry: a mood value, note/concern text, a trajectory, or any semantic
+   inference (including a mood-derived weight). All longitudinal reasoning uses canonical
+   evidence + the kernel. A frozen-contract test guards this so a future change cannot
+   quietly re-add mood/content here. Named consumer: behaviour-engine participation
+   cadence + last-activity + the contentless hasSensitiveContext flag. */
+const CHECKIN_SIGNAL_CONTRACT = Object.freeze({
+  allowedKeys: Object.freeze(['subjectType', 'subjectId', 'source', 'modality', 'label', 'sensitivity', 'data']),
+  forbiddenKeys: Object.freeze(['valueNum', 'valueText', 'weightNum', 'trajectory', 'concern', 'mood']),
+});
+function _emitCheckinParticipationSignal(code, subjectId, opts = {}) {
+  if (!subjectId) return null;
+  const payload = {
+    subjectType: 'member', subjectId, source: 'checkin', modality: 'participation',
+    label: 'Check-in', sensitivity: opts.sensitivePresent ? 'sensitive' : 'normal',
+    // Participation metadata only — a "returned after a quiet spell" event, never mood.
+    data: opts.firstReturn ? { firstReturn: true, quietDays: opts.quietDays } : null,
+  };
+  // Contract guard (defence-in-depth): never let a forbidden field through.
+  CHECKIN_SIGNAL_CONTRACT.forbiddenKeys.forEach(k => { if (k in payload) delete payload[k]; });
+  try { return _emitSignalSafe(code, payload, subjectId); } catch (_) { return null; }
+}
+
 /* Emit canonical evidence for a check-in via the adapter (compatibility dual-write —
    the legacy signal remains for existing charts; canonical is authoritative for
    reasoning). Hardship notes are treated as PRIVATE (owner-only). */
 function _canonicaliseCheckin(code, subjectId, rec) {
   if (!subjectId) return { recorded: 0, duplicates: 0 };
+  const noteText = rec && (rec.note || rec.text) || '';
   // A hardship note is owner-only-private when it is sensitive OR restricted (isPrivate
   // covers both — a restricted disclosure must be protected at least as much, not less).
-  const sensitiveNote = rec && (rec.note || rec.text) ? privacy.isPrivate(privacy.classifyText(rec.note || rec.text, { source: 'checkin' })) : false;
+  const category = noteText ? privacy.classifyText(noteText, { source: 'checkin' }) : 'normal';
+  const sensitiveNote = noteText ? privacy.isPrivate(category) : false;
+  // Log the classification DECISION for observability — category + outcome + length, but
+  // NEVER the substance. Lets ops inspect false positives/negatives without reading notes.
+  if (noteText) _logCheckinClassification(code, { subjectId, category, madePrivate: sensitiveNote, length: noteText.length });
   // Adapter default: sensitive (informs org aggregate, never quoted). Then ONLY a
   // hardship note is escalated to private (owner-only) — the mood rating stays sensitive.
   const inputs = capAdapters.CheckInAdapter.toCanonicalEvidence(rec, { subjectId, private: false, now: new Date().toISOString() });
   inputs.forEach(i => { if (i.label === 'Check-in note' && sensitiveNote) { i.visibility = 'private'; i.ownerRef = subjectId; } });
   return _ingestAdapterEvidence(code, inputs);
 }
+
+/* Contentless classification audit — records the DECISION (category/outcome/length),
+   never the note text. Bounded ring buffer so it can't grow unbounded. */
+const checkinClassificationLog = {};
+function _logCheckinClassification(code, entry) {
+  const list = checkinClassificationLog[code] || (checkinClassificationLog[code] = []);
+  list.push({ at: new Date().toISOString(), subjectId: entry.subjectId, category: entry.category,
+    madePrivate: !!entry.madePrivate, length: entry.length | 0 });
+  if (list.length > 2000) list.splice(0, list.length - 2000);
+}
+/* Aggregate classification decisions (contentless) so ops can watch the classifier's
+   private-vs-normal balance and spot drift — starving org reasoning, or under-protecting. */
+function _checkinClassificationAudit(code) {
+  const list = checkinClassificationLog[code] || [];
+  const byCategory = { normal: 0, sensitive: 0, restricted: 0 };
+  let madePrivate = 0;
+  list.forEach(e => { byCategory[e.category] = (byCategory[e.category] || 0) + 1; if (e.madePrivate) madePrivate++; });
+  const total = list.length;
+  return { total, byCategory, madePrivate, normalShare: total ? Math.round((byCategory.normal / total) * 100) : 0,
+    privateShare: total ? Math.round((madePrivate / total) * 100) : 0 };
+}
+
+/* OBSERVABILITY — flag MATERIAL DISAGREEMENT between the raw aggregate dashboard (which
+   still averages raw check-in rows) and the canonical aggregate reconstruction (per-member
+   kernel state). The aggregation rules differ, so a gap is not proof either is wrong — but
+   a leader seeing "team stable" while several members' kernel states report deterioration
+   erodes trust. This DIAGNOSES the gap; it never silently forces the surfaces to match. */
+function _checkinAggregateReconciliation(code, opts = {}) {
+  const now = opts.now || Date.now();
+  const WINDOW = 30 * 86400000;
+  const members = Object.values(orgUsers[code] || {}).filter(u => u.role !== 'superadmin');
+  // RAW dashboard method — average of raw check-in mood rows in the window.
+  let rawSum = 0, rawCnt = 0;
+  members.forEach(u => {
+    [userKey(code, u.id), memberKey(code, u.name || '')].forEach(k => (memberCheckins[k] || []).forEach(c => {
+      const t = new Date(c.ts || c.date).getTime();
+      if (c.mood != null && !isNaN(t) && now - t < WINDOW) { rawSum += Number(c.mood); rawCnt++; }
+    }));
+  });
+  const rawAvg = rawCnt ? rawSum / rawCnt : null;
+  // CANONICAL reconstruction — per-member kernel state (org purpose) + canonical mood avg.
+  let canSum = 0, canCnt = 0, diverging = 0, recovering = 0;
+  members.forEach(u => {
+    _canonicalMoodSeries(code, u.id).forEach(p => { if (now - p.t < WINDOW) { canSum += p.mood; canCnt++; } });
+    const st = _checkinKernelState(code, u.id, { purpose: 'organisation_reasoning', viewerId: null, now });
+    if (st.trajectory === 'diverging') diverging++;
+    if (st.patterns.some(p => p.type === 'recovering')) recovering++;
+  });
+  const canonicalAvg = canCnt ? canSum / canCnt : null;
+  const avgDelta = (rawAvg != null && canonicalAvg != null) ? Math.round((rawAvg - canonicalAvg) * 100) / 100 : null;
+  const rawSaysStable = rawAvg != null && rawAvg >= 3;
+  // Material disagreement: the dashboard reads "stable" while ≥1 member is diverging, or
+  // the two averages diverge by more than half a point (different populations/windows).
+  const disagreement = (rawSaysStable && diverging >= 1) || (avgDelta != null && Math.abs(avgDelta) >= 0.5);
+  return { rawAvg: rawAvg != null ? Math.round(rawAvg * 100) / 100 : null,
+    canonicalAvg: canonicalAvg != null ? Math.round(canonicalAvg * 100) / 100 : null,
+    avgDelta, rawSaysStable, membersDiverging: diverging, membersRecovering: recovering,
+    disagreement, note: disagreement
+      ? 'Raw dashboard and canonical reconstruction disagree materially — investigate before trusting the aggregate.'
+      : 'Raw dashboard and canonical reconstruction are consistent.' };
+}
+
+/* Admin diagnostics (never expose note substance — counts + decisions only). */
+app.get('/api/admin/checkin-reconciliation', requirePermission('view_insights'), (req, res) => {
+  res.json({ ok: true, reconciliation: _checkinAggregateReconciliation(req.iqSession.orgCode) });
+});
+app.get('/api/admin/checkin-classification-audit', requirePermission('view_insights'), (req, res) => {
+  res.json({ ok: true, audit: _checkinClassificationAudit(req.iqSession.orgCode) });
+});
 
 /* Idempotent BACKFILL — run the adapters over existing operational records so history
    becomes canonical evidence. Retry-safe (dedupe), privacy-preserving (never broadens),
@@ -6834,20 +6934,52 @@ function _checkinKernelState(code, subjectId, opts = {}) {
     trajectory, patterns, confidence, limitations, basisEvidenceIds, counterEvidenceIds: [], kernelArt };
 }
 
-/* Intervention lifecycle for a check-in concern: an ACTIVE intervention suppresses a
-   duplicate recommendation; a RECOVERY pattern (or a positive recorded outcome)
-   de-escalates. Reads the org's own logged interventions — never invents a diagnosis. */
-function _checkinInterventionState(code, subjectId, patterns) {
-  const list = (orgInterventions[code] || []).filter(i => i.targetMemberId === subjectId);
-  const active = list.find(i => i.status && !['completed', 'dismissed'].includes(i.status));
-  const recovered = patterns.some(p => p.type === 'recovering')
+/* Intervention lifecycle for a check-in concern. The kernel suppresses DUPLICATE action,
+   never genuinely new deterioration. Edge cases handled explicitly:
+     • a NEW, distinct concern (a pattern type the active intervention does not target)
+       still recommends, even while another intervention is active;
+     • fresh deterioration (a current diverging trajectory / momentum drop) overrides an
+       earlier recovery — it never de-escalates while the person is declining again;
+     • recovery must be CONFIDENT (a 'clear' recovering pattern or a recorded 'improved'
+       outcome) — a low-confidence recovery does not de-escalate on its own;
+     • a mood recovery does NOT resolve a differently-scoped intervention (e.g. one aimed
+       at workload) — success is dimension-matched, not administrative;
+     • a completed-but-not-improved intervention does not imply success.
+   Accepts the kernel STATE ({ patterns, trajectory }). Never invents a diagnosis. */
+// The three mood-decline patterns are FACETS of one mood concern, so a mood-targeted (or
+// untyped) intervention covers all of them. A concern OUTSIDE this family (a different
+// dimension, e.g. a future overload/withdrawal type) is genuinely distinct and uncovered.
+const CHECKIN_MOOD_CONCERNS = ['repeated_concern', 'momentum_drop', 'baseline_shift'];
+const CHECKIN_CONCERN_TYPES = [...CHECKIN_MOOD_CONCERNS, 'overload_hypothesis', 'withdrawal', 'invisible_load'];
+const CHECKIN_MOOD_PATTERNS = [...CHECKIN_MOOD_CONCERNS, 'recovering'];
+function _checkinInterventionState(code, subjectId, state) {
+  const patterns   = (state && state.patterns) || [];
+  const trajectory = state && state.trajectory;
+  const list   = (orgInterventions[code] || []).filter(i => i.targetMemberId === subjectId);
+  const active = list.filter(i => i.status && !['completed', 'dismissed'].includes(i.status));
+  const activeTypes = new Set(active.map(i => i.patternType).filter(Boolean));
+  const moodFamily = new Set(CHECKIN_MOOD_CONCERNS);
+  const concerns = patterns.filter(p => CHECKIN_CONCERN_TYPES.includes(p.type));
+  // An active mood/untyped intervention covers the whole mood-concern family; a concern of
+  // a DIFFERENT dimension needs an intervention of its own type to be "covered".
+  const activeCoversMood = active.some(i => !i.patternType || moodFamily.has(i.patternType));
+  const covered = c => moodFamily.has(c.type) ? activeCoversMood : activeTypes.has(c.type);
+  const uncoveredConcerns = concerns.filter(c => !covered(c));
+  // Fresh deterioration = currently declining, not a stale flag.
+  const freshDeterioration = trajectory === 'diverging' || concerns.some(c => c.type === 'momentum_drop');
+  // Recovery must be confident and not contradicted by a fresh decline.
+  const confidentRecovery = patterns.some(p => p.type === 'recovering' && ['clear', 'medium', 'high', 'confirmed'].includes(p.confidence))
     || list.some(i => i.recordedOutcome === 'improved' || i.outcome === 'improved');
-  const hasConcern = patterns.some(p => ['repeated_concern', 'momentum_drop', 'baseline_shift'].includes(p.type));
+  // A mood recovery must not de-escalate an intervention scoped to a non-mood dimension.
+  const activeNonMoodScoped = active.some(i => i.patternType && !CHECKIN_MOOD_PATTERNS.includes(i.patternType));
+  const deEscalate = confidentRecovery && !freshDeterioration && !activeNonMoodScoped;
   return {
-    activeIntervention: !!active,
-    suppressDuplicateRecommendation: !!active && hasConcern,
-    deEscalate: recovered,
-    recommend: hasConcern && !active && !recovered,
+    activeIntervention: active.length > 0,
+    // Suppress a duplicate only when every current concern is already covered.
+    suppressDuplicateRecommendation: concerns.length > 0 && uncoveredConcerns.length === 0 && active.length > 0,
+    deEscalate,
+    // A genuinely new/uncovered concern still recommends — suppress duplicate, not new decline.
+    recommend: uncoveredConcerns.length > 0 && !deEscalate,
   };
 }
 
@@ -6856,7 +6988,7 @@ function _checkinInterventionState(code, subjectId, patterns) {
 app.get('/api/checkin/me/intelligence', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const st  = _checkinKernelState(code, userId, { purpose: 'personal_assistance', viewerId: userId });
-  const iv  = _checkinInterventionState(code, userId, st.patterns);
+  const iv  = _checkinInterventionState(code, userId, st);
   const lines = [];
   if (!st.moodSeries.length) lines.push('No check-in mood captured yet — patterns will emerge as you check in.');
   else if (st.trajectory === 'diverging') lines.push('Your recent check-ins are trending below your usual. Would you like to adjust this week’s plan?');
@@ -6884,7 +7016,7 @@ app.get('/api/checkin/:memberId/intelligence', requireAuth, (req, res) => {
     return res.status(403).json({ error: 'Permission denied: view_insights required' });
 
   const st = _checkinKernelState(code, memberId, { purpose: 'leader_support', viewerId: userId });
-  const iv = _checkinInterventionState(code, memberId, st.patterns);
+  const iv = _checkinInterventionState(code, memberId, st);
   let text, recommend = false;
   if (!st.moodSeries.length) text = 'No authorised check-in evidence yet — nothing to conclude.';
   else if (iv.deEscalate) text = 'Recent authorised check-in evidence suggests improvement; a previously raised concern can be de-escalated.';
@@ -8337,15 +8469,12 @@ app.post('/api/member/checkin', (req, res) => {
   };
   memberCheckins[key].push(_ciRec);
   const _cid = _resolveUserIdByName(code, memberName);
-  // COMPATIBILITY WRITE (non-authoritative): the legacy orgSignal is retained ONLY for
-  // unmigrated multi-stream consumers (behaviour-engine participation cadence + last-
-  // activity, mood charts). No check-in INTELLIGENCE reads it — longitudinal reasoning
-  // uses canonical evidence below. Do not add new reasoning consumers of this signal.
-  if (_cid) _emitSignalSafe(code, {
-    subjectType: 'member', subjectId: _cid, source: 'checkin', modality: 'text',
-    valueNum: mood != null ? Number(mood) : null, valueText: note || null,
-    label: mood != null ? `Mood ${mood}/5` : null, sensitivity: 'sensitive',
-  }, _cid);
+  // COMPATIBILITY WRITE (non-authoritative): a CONTENTLESS participation marker only
+  // (frozen contract) — no mood value, no text. Named consumer: behaviour-engine
+  // participation cadence + last-activity. No check-in INTELLIGENCE reads it.
+  if (_cid) _emitCheckinParticipationSignal(code, _cid, {
+    sensitivePresent: note ? privacy.isPrivate(privacy.classifyText(note, { source: 'checkin' })) : false,
+  });
   // AUTHORITATIVE: the check-in becomes claim-bounded canonical evidence (a hardship
   // note stays owner-only-private; the mood rating is sensitive + org-aggregable).
   if (_cid) { try { _canonicaliseCheckin(code, _cid, _ciRec); } catch (_) {} }
@@ -8618,13 +8747,11 @@ app.post('/api/checkin/freeform', async (req, res) => {
   memberCheckins[key].push(checkin);
 
   const _fid = memberId || _resolveUserIdByName(code, memberName);
-  // COMPATIBILITY WRITE (non-authoritative) — see /api/member/checkin. Retained only for
-  // unmigrated multi-stream consumers; no check-in intelligence reads this signal.
-  if (_fid) _emitSignalSafe(code, {
-    subjectType: 'member', subjectId: _fid, source: 'checkin', modality: 'text',
-    valueNum: mood != null ? Number(mood) : null, valueText: text || null,
-    label: mood != null ? `Mood ${mood}/5` : null, sensitivity: 'sensitive',
-  }, _fid);
+  // COMPATIBILITY WRITE (non-authoritative) — a CONTENTLESS participation marker only
+  // (frozen contract); no mood value, no text. See /api/member/checkin.
+  if (_fid) _emitCheckinParticipationSignal(code, _fid, {
+    sensitivePresent: text ? privacy.isPrivate(privacy.classifyText(text, { source: 'checkin' })) : false,
+  });
   // AUTHORITATIVE: claim-bounded canonical evidence (hardship note stays owner-only).
   if (_fid) { try { _canonicaliseCheckin(code, _fid, checkin); } catch (_) {} }
 
@@ -11503,7 +11630,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: the member-advisor migration (canonical + kernel + post-kernel)
   _advisorKernelReasoning, advisorThreads, orgGroups, orgValues, orgGoals,
   // exported for the truth layer: the daily check-in migration (canonical-only intelligence)
-  _checkinKernelState, _canonicalMoodSeries, _memberMoodSeries, _isSourceEvidence, _checkinInterventionState, orgInterventions };
+  _checkinKernelState, _canonicalMoodSeries, _memberMoodSeries, _isSourceEvidence, _checkinInterventionState, orgInterventions,
+  // exported for the truth layer: check-in hardening (frozen signal, reconciliation, classification audit)
+  _emitCheckinParticipationSignal, CHECKIN_SIGNAL_CONTRACT, _checkinAggregateReconciliation, _checkinClassificationAudit, checkinClassificationLog };
 
 if (require.main === module) (async () => {
   try {

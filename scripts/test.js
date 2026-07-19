@@ -63,6 +63,7 @@ const SUITES = [
   'legacy-convergence-smoke.js', // legacy paths converge on canonical evidence (check-in/backfill/context)
   'advisor-migration-smoke.js',  // the member advisor on canonical evidence + kernel + post-kernel (privacy-critical)
   'checkin-migration-smoke.js',  // the daily check-in: canonical-only intelligence, kernel trends, self-feed protection
+  'checkin-hardening-smoke.js',  // post-migration watch-items: frozen signal, reconciliation, classification audit, intervention edges
   'connector-harness.js',  // the Connector SDK: identity/confidence + mapping contracts
   'endpoint-smoke.js',   // boots the real app in-process (DB_OPTIONAL) — HTTP authz + Me context
 ];
