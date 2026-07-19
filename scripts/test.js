@@ -61,6 +61,7 @@ const SUITES = [
   'workspace-experience-smoke.js', // MyWorkspace experience boundaries (today/ask/lenses via the gateway)
   'adapters-smoke.js',           // capability → canonical evidence adapters (pure)
   'legacy-convergence-smoke.js', // legacy paths converge on canonical evidence (check-in/backfill/context)
+  'advisor-migration-smoke.js',  // the member advisor on canonical evidence + kernel + post-kernel (privacy-critical)
   'connector-harness.js',  // the Connector SDK: identity/confidence + mapping contracts
   'endpoint-smoke.js',   // boots the real app in-process (DB_OPTIONAL) — HTTP authz + Me context
 ];

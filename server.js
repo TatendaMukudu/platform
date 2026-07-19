@@ -10523,6 +10523,94 @@ OUTPUT RULES:
 - Reason from your understanding of the person; do not recite or quote source material.
 - If a stated aim is missing, say so plainly — that absence is the finding, not a failure.`;
 
+/* ── MEMBER ADVISOR — canonical evidence · kernel reasoning · post-kernel bounds ──
+   The advisor is a privacy-critical surface. It NEVER assembles truth from raw member
+   signals, NEVER reads private evidence, and the LLM NEVER becomes a second kernel:
+     1. RETRIEVE — only leader-authorised CANONICAL evidence, through the shared gateway
+        at purpose `leader_support`. Private evidence is excluded BEFORE any context is
+        built, so the advisor cannot see it and therefore cannot leak it.
+     2. KERNEL   — member state (directional trajectory) is reconstructed here, over the
+        authorised evidence, retaining the basis evidence IDs + confidence + limitations.
+     3. CONTEXT  — normal evidence is quotable; SENSITIVE evidence informs the model but
+        is never quoted (privacy law); anchors (member aims / team context / org values)
+        are reference FRAMES, not evidence. Behavioural truth comes only from evidence.
+   The endpoint then records the recommendation as canonical DERIVED evidence and bounds
+   the answer through the POST-KERNEL boundary (cite only what the leader may see). */
+function _advisorKernelReasoning(code, member, requesterId) {
+  const memberId = member.id;
+  // 1. RETRIEVE — leader-authorised canonical evidence only (private excluded upstream).
+  const evidence = _canonicalContext({ code, viewerId: requesterId, purpose: 'leader_support', subjectId: memberId });
+
+  // 2. KERNEL STATE — directional trajectory reconstructed from canonical metrics.
+  const moods = evidence.filter(e => e.type === 'metric' && /mood/i.test(e.label || '') && Number.isFinite(Number(e.value)))
+    .sort((a, b) => new Date(a.observedAt || 0) - new Date(b.observedAt || 0));
+  const scores = evidence.filter(e => e.type === 'metric' && /assessment/i.test(e.label || '') && Number.isFinite(Number(e.value)))
+    .sort((a, b) => new Date(a.observedAt || 0) - new Date(b.observedAt || 0));
+  const observations = evidence.filter(e => e.type === 'observation');
+
+  const goals    = normalizeMemberGoals(_memberGoalsFor(code, member));
+  const anchored = goals.length > 0;
+
+  // Directional words, never scores: compare the recent half of ratings to the earlier.
+  let trajectory = 'unknown', confidence = 'low';
+  const limitations = ['reconstructed only from captured, leader-authorised evidence — not the whole person'];
+  if (moods.length >= 4) {
+    const vals = moods.map(m => Number(m.value));
+    const half = Math.floor(vals.length / 2);
+    const avg  = a => a.reduce((x, y) => x + y, 0) / a.length;
+    const delta = avg(vals.slice(half)) - avg(vals.slice(0, half));
+    trajectory = delta > 0.4 ? 'converging' : delta < -0.4 ? 'diverging' : 'sustaining';
+    confidence = 'medium';
+  } else if (moods.length >= 1) {
+    limitations.push('too few check-ins to establish a trajectory');
+  } else if (!anchored) {
+    trajectory = 'unanchored';
+    limitations.push('no stated member aim captured yet — the absence is itself the finding');
+  }
+
+  // 3. BASIS — the evidence IDs the kernel state rests on (retained on the artifact).
+  const basis = evidence.map(e => e.evidenceId);
+  const kernelArt = _recordKernelDerivation(code, {
+    type: 'derived_pattern',
+    result: { subject: memberId, trajectory, anchored, moodCount: moods.length, scoreCount: scores.length, observationCount: observations.length },
+    basis: basis.length ? basis : ['none'],
+    confidence, limitations, detector: 'advisor-kernel',
+  });
+
+  // 4. CONTEXT TIERS — normal evidence is quotable; sensitive INFORMS only (never quoted),
+  //    per the privacy law; private is already gone (gateway-excluded before we got here).
+  const citable = [], informing = [], informingStrings = [];
+  citable.push(`Name: ${member.name || ''}${member.role ? ` · role: ${member.role}` : ''}`);
+  citable.push(anchored
+    ? `MEMBER aim(s): ${goals.map(g => g.title || g.text).filter(Boolean).join('; ')}`
+    : 'MEMBER aim(s): none stated yet — treat as UNANCHORED; the absence is itself the finding.');
+  (orgGroups[code] || [])
+    .filter(g => (g.memberIds || []).includes(memberId) || (g.leadIds || []).includes(memberId))
+    .forEach(g => citable.push(`TEAM context — ${g.name}${g.description ? `: ${g.description}` : ''}`));
+  if ((orgValues[code] || []).length) citable.push(`ORG values (guardrails): ${orgValues[code].join(', ')}`);
+  if ((orgGoals[code] || []).length)  citable.push(`ORG priorities: ${orgGoals[code].map(g => g.text).filter(Boolean).slice(0, 4).join('; ')}`);
+
+  // The directional kernel state — words, never a grade.
+  citable.push(`Kernel state: trajectory ${trajectory} (confidence ${confidence}) across ${moods.length} mood check-in(s), ${scores.length} assessment(s), ${observations.length} observation(s).`);
+  if (moods.length) {
+    const recent = moods.slice(-10).map(m => Number(m.value));
+    citable.push(`Recent mood: ${Math.round((recent.reduce((a, b) => a + b, 0) / recent.length) * 10) / 10}/5 across ${recent.length} check-in(s) (aggregate).`);
+  } else {
+    citable.push('No check-in mood data yet.');
+  }
+  scores.slice(-3).forEach(s => citable.push(`${s.label}: ${s.value}/100.`));
+
+  // Free-text observations: normal → quotable; sensitive → informs reasoning, never quoted.
+  observations.forEach(o => {
+    const line = String(o.valueText || o.label || '').trim();
+    if (!line) return;
+    if (o.visibility === 'normal') citable.push(`Observation: ${line.slice(0, 200)}`);
+    else { informing.push(`Observation (informs only): ${line.slice(0, 200)}`); informingStrings.push(line.slice(0, 200)); }
+  });
+
+  return { evidence, citable, informing, informingStrings, kernelArt, basis, trajectory, confidence };
+}
+
 /* ── POST /api/advisor/:memberId/ask ──────────────────────────────────────── */
 app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
   const { orgCode } = req.iqSession;
@@ -10549,13 +10637,10 @@ app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
     || _userHasPerm(code, requesterId, 'review_checkins');
   if (!canAdvise) return res.status(403).json({ error: 'Permission denied: view_insights required' });
 
-  // Build privacy-tiered context + role lens.
-  const ctx  = _buildAdvisorContext(code, member, requester);
+  // RETRIEVE + KERNEL — leader-authorised canonical evidence only, member state
+  // reconstructed in the kernel. No raw signals, no legacy memory, no private evidence.
+  const kr   = _advisorKernelReasoning(code, member, requesterId);
   const lens = lenses.lensFor(requester);
-
-  // Lead with the synthesised behavioral understanding (cached — no extra call).
-  const _prof = _getMemory(code, memberId).profile;
-  if (_prof?.narrative) ctx.citable.unshift(`[strong] Behavioral understanding: ${_prof.narrative}`);
 
   const system = [
     ADVISOR_SYSTEM,
@@ -10566,7 +10651,7 @@ app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
     _memberValuesDirective(code, memberId),
   ].filter(Boolean).join('\n\n');
 
-  const contextBlock = privacy.buildContextBlock({ citable: ctx.citable, privateInforming: ctx.privateInforming });
+  const contextBlock = privacy.buildContextBlock({ citable: kr.citable, privateInforming: kr.informing });
 
   const userMsg = mode === 'briefing'
     ? [
@@ -10596,10 +10681,30 @@ app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
     return res.status(502).json({ error: 'Advisor unavailable right now. Please try again.' });
   }
 
-  // Last-line privacy defence.
-  answer = privacy.redact(answer, ctx.privateStrings);
+  // Last-line privacy defence — strip any sensitive informing span that survived into
+  // the output (private material never reached the model, so it cannot be here).
+  answer = privacy.redact(answer, kr.informingStrings);
 
-  // Persist the thread (non-sensitive: question + safe answer only).
+  // Record the recommendation as canonical DERIVED evidence (meaningful output only),
+  // grounded in the kernel basis. It inherits an org-safe visibility ceiling from its
+  // basis and does NOT auto-promote — it never recursively feeds itself back as truth.
+  let recEvidenceId = null;
+  if (answer && answer.trim().length > 40 && kr.basis.length) {
+    const rec = _recordDerivedEvidence(code, {
+      subjectId: memberId, type: 'observation',
+      label: mode === 'briefing' ? 'Advisor briefing' : 'Advisor recommendation',
+      valueText: answer.slice(0, 600), basisIds: kr.basis,
+    });
+    recEvidenceId = rec && rec.id ? rec.id : null;
+  }
+
+  // POST-KERNEL — bound the answer to the kernel result and the leader's authorised set;
+  // cites only evidence the leader may see, never raising confidence or dropping limits.
+  const composed = _composeForAudience(code, kr.kernelArt, {
+    role: requester.role, subjectId: memberId, viewerId: requesterId, purpose: 'leader_support', text: answer,
+  });
+
+  // Persist the thread (non-sensitive: question + bounded answer + provenance only).
   if (!advisorThreads[code]) advisorThreads[code] = [];
   const thread = {
     id:            `adv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
@@ -10609,6 +10714,9 @@ app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
     mode,
     question:      mode === 'briefing' ? 'Full alignment briefing' : question,
     answer,
+    trajectory:    kr.trajectory,
+    cites:         composed.output.cites,
+    recEvidenceId,
     createdAt:     new Date().toISOString(),
   };
   advisorThreads[code].push(thread);
@@ -10619,7 +10727,11 @@ app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
     answer,
     mode,
     lens: lens?.label || null,
-    evidenceCount: ctx.citable.length,
+    evidenceCount: kr.basis.length,
+    trajectory: kr.trajectory,
+    confidence: kr.confidence,
+    cites: composed.output.cites,
+    bounded: composed.ok,
     threadId: thread.id,
   });
 });
@@ -11198,7 +11310,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _interpretInput, _kernelEvidence, _isCanonicalEvidence, _recordKernelDerivation, _composeForAudience,
   _recordDerivedEvidence, _deleteWorkspaceEvidence, reasoningArtifacts, workspaceItems,
   // exported for the truth layer: legacy convergence
-  _ingestAdapterEvidence, _canonicalContext, _backfillCanonical, _canonicaliseCheckin, memberCheckins, assessmentAssignments };
+  _ingestAdapterEvidence, _canonicalContext, _backfillCanonical, _canonicaliseCheckin, memberCheckins, assessmentAssignments,
+  // exported for the truth layer: the member-advisor migration (canonical + kernel + post-kernel)
+  _advisorKernelReasoning, advisorThreads, orgGroups, orgValues, orgGoals };
 
 if (require.main === module) (async () => {
   try {
