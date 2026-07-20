@@ -69,6 +69,7 @@ const SUITES = [
   'scenario-convergence-smoke.js', // scenario/memberResults converge onto the same canonical assessment model; legacy value-signal cutover
   'assessment-presentation-smoke.js', // server-supplied assessment presentation state; frontend no longer judges a raw score
   'assistant-runtime-smoke.js',    // unified MyWorkspace assistant runtime: one composer, bounded turn, confirmable proposals
+  'assistant-interface-smoke.js',  // unified MyWorkspace INTERFACE: one composer/identity, lenses as bounded hints, confirmable proposal cards
   'connector-harness.js',  // the Connector SDK: identity/confidence + mapping contracts
   'endpoint-smoke.js',   // boots the real app in-process (DB_OPTIONAL) — HTTP authz + Me context
 ];

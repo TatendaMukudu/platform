@@ -7703,10 +7703,30 @@ function _assistantContext(code, userId) {
 /* The unified assistant turn. Returns the bounded interpretation artifact, the context artifact,
    and the ONE response contract (insight + proposals) — all post-kernel bounded. Persists only
    the turn artifact + reasoning artifacts; NOTHING is written to a capability store here. */
-function _assistantTurn(code, userId, text) {
+const ASSISTANT_LENSES = ['today', 'me', 'work', 'notes', 'plans', 'history'];
+/* The active lens is a BOUNDED CONTEXT HINT — it re-emphasises which grounded claim / proposal
+   leads, but uses the SAME context assembler and the SAME truth path. It never creates a
+   separate assistant, thread or context. */
+function _lensPrioritize(lens, groundedClaims, proposals) {
+  const propOrder = {
+    today:   ['calendar_draft', 'checkin_proposal', 'capture'],
+    me:      ['checkin_proposal', 'capture', 'calendar_draft'],
+    work:    ['capture', 'calendar_draft', 'checkin_proposal'],
+    notes:   ['capture', 'checkin_proposal', 'calendar_draft'],
+    plans:   ['capture', 'calendar_draft', 'checkin_proposal'],
+    history: ['capture', 'checkin_proposal', 'calendar_draft'],
+  }[lens];
+  if (propOrder) proposals.sort((a, b) => {
+    const ai = propOrder.indexOf(a.actionType), bi = propOrder.indexOf(b.actionType);
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+  });
+  return proposals;
+}
+function _assistantTurn(code, userId, text, lens) {
+  lens = ASSISTANT_LENSES.includes(lens) ? lens : null;
   const interp = _assistantInterpret(code, userId, text);
   const context = _assistantContext(code, userId);
-  const proposals = _assistantProposals(code, userId, interp, context);
+  const proposals = _lensPrioritize(lens, [], _assistantProposals(code, userId, interp, context));
   interp.proposedActions = proposals.map(p => ({ id: p.id, actionType: p.actionType, capability: p.capability, visibility: p.visibility, requiredApproval: p.requiredApproval }));
 
   // Kernel derivation (grounded) — basis IDs retained; never chain-of-thought.
@@ -7736,10 +7756,13 @@ function _assistantTurn(code, userId, text) {
   // Post-kernel bound (cite only owner-authorised basis; never raise confidence / drop limits).
   const composed = _composeForAudience(code, kernelArt, { role: 'member', subjectId: userId, viewerId: userId, purpose: 'personal_assistance', text: responseText });
 
+  const publicProposals = proposals.map(p => ({ id: p.id, actionType: p.actionType, capability: p.capability, label: p.label,
+    visibility: p.visibility, why: p.why, requiredApproval: p.requiredApproval, changesPersistentState: p.actionType !== 'checkin_proposal' || true, draftOnly: p.actionType === 'calendar_draft', policyResult: p.policyResult }));
   const response = {
-    responseText, mode, groundedClaims, inferred, limitations: context.limitations,
-    proposedActions: proposals.map(p => ({ id: p.id, actionType: p.actionType, capability: p.capability, label: p.label,
-      visibility: p.visibility, why: p.why, requiredApproval: p.requiredApproval, policyResult: p.policyResult })),
+    responseText, mode, lens: lens || null, groundedClaims, inferred, limitations: context.limitations,
+    proposedActions: publicProposals,
+    // A SMALL prioritised default set (≤2, lens-ordered); the rest stay behind "more".
+    primaryActions: publicProposals.slice(0, 2), moreActions: publicProposals.slice(2),
     privacyNotice, followUpState: proposals.some(p => p.actionType === 'checkin_proposal') ? 'a personalised check-in is proposed (not yet registered)' : 'none',
     bounded: composed.ok, cites: composed.output.cites,
   };
@@ -7749,7 +7772,7 @@ function _assistantTurn(code, userId, text) {
   const key = _wsKey(code, userId);
   const rawRef = 'raw_' + generateId();
   interp.originalInputRef = rawRef;
-  const turn = { ...interp, rawInput: String(text || '').slice(0, 4000), _proposals: proposals, context, response, corrections: [] };
+  const turn = { ...interp, lens: lens || null, rawInput: String(text || '').slice(0, 4000), _proposals: proposals, context, response, corrections: [] };
   delete turn.intents; delete turn.sensitivity;                    // keep the returned artifact bounded/clean
   const list = assistantTurns[key] || (assistantTurns[key] = []);
   list.push(turn);
@@ -7767,8 +7790,9 @@ app.post('/api/assistant/turn', requireAuth, (req, res) => {
   const text = String(req.body?.text || '').trim();
   if (!text) return res.status(400).json({ error: 'text required' });
   if (text.length > 4000) return res.status(400).json({ error: 'too long' });
-  const r = _assistantTurn(code, userId, text);
-  res.json({ ok: true, turnId: r.turn.turnId, interpretation: r.interpretation, context: r.context, response: r.response });
+  // The active MyWorkspace lens is a BOUNDED context hint (emphasis only, same truth path).
+  const r = _assistantTurn(code, userId, text, req.body?.lens);
+  res.json({ ok: true, turnId: r.turn.turnId, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response });
 });
 
 /* GET /api/assistant/turn/:turnId — inspect the bounded interpretation artifact (self-only). */

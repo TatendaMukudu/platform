@@ -311,6 +311,8 @@ const MemberApp = {
     // Reveal the voice affordance only where the browser supports it.
     const mic = document.getElementById('composer-mic');
     if (mic && (window.SpeechRecognition || window.webkitSpeechRecognition)) mic.style.display = '';
+    // The unified MyWorkspace assistant surface is the primary home experience.
+    try { this._renderMyWorkspace(this._wsActiveLens || 'today'); } catch (_) {}
     this._renderMeContext();
   },
 
@@ -2659,51 +2661,161 @@ const MemberApp = {
     } catch (_) { return null; }
   },
 
-  /* ── Unified IntelliQ assistant (MyWorkspace, one composer) ──────────────────
-     Routes ONE composer input through the unified assistant runtime: a grounded response
-     + confirmable action PROPOSALS + a clear privacy notice. Nothing persists until the user
-     confirms a proposal; visibility never increases without an explicit confirm. Renders into
-     `targetEl` (defaults to #iq-assistant-out). Returns the response contract. */
-  async assistantTurn(text, targetEl) {
-    const out = targetEl || document.getElementById('iq-assistant-out');
-    try {
-      const r = await fetch('/api/assistant/turn', { method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ text }) });
-      const j = await r.json();
-      if (!j || !j.ok) { if (out) out.textContent = 'Sorry — I couldn\'t process that just now.'; return null; }
-      this._lastTurnId = j.turnId;
-      if (out) out.innerHTML = this._renderAssistant(j);
-      return j;
-    } catch (_) { if (out) out.textContent = 'Sorry — I couldn\'t reach IntelliQ just now.'; return null; }
+  /* ═══ UNIFIED MYWORKSPACE — one assistant, one composer, contextual lenses ═════
+     ONE persistent composer wired to POST /api/assistant/turn, ONE continuous IntelliQ
+     conversation, and lenses (Today/Me/Work/Notes/Plans/History) that are BOUNDED context
+     HINTS over the same runtime — never separate assistants, threads or truth paths. Nothing
+     persists until the user confirms a proposal; personal input is private by default and its
+     audience never increases without an explicit confirmation. There is no Studio or separate
+     Advisor identity — every response is IntelliQ. */
+  _wsLenses: ['today', 'me', 'work', 'notes', 'plans', 'history'],
+
+  _renderMyWorkspace(lens) {
+    const el = document.getElementById('iq-myworkspace');
+    if (!el) return;
+    this._wsActiveLens = this._wsLenses.includes(lens) ? lens : (this._wsActiveLens || 'today');
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const tabs = this._wsLenses.map(L =>
+      `<button class="iq-lens${L === this._wsActiveLens ? ' is-active' : ''}" data-lens="${L}" onclick="MemberApp.wsSetLens('${L}')">${L[0].toUpperCase() + L.slice(1)}</button>`).join('');
+    el.innerHTML = `
+      <div class="iq-ws-head"><div class="iq-ws-title">MyWorkspace</div>
+        <div class="iq-ws-sub">One IntelliQ. Say anything — a thought, a plan, a question. Nothing is shared unless you say so.</div></div>
+      <div class="iq-lensbar" id="iq-lensbar">${tabs}</div>
+      <div class="iq-attention" id="iq-attention"><div class="card-label">Needs you</div><div class="iq-att-list">Loading…</div></div>
+      <div class="iq-conversation" id="iq-conversation"></div>
+      <div class="iq-composer">
+        <textarea id="iq-composer-input" class="note-input" rows="2" placeholder="Talk to IntelliQ — a note, a plan, a question, anything. It stays private by default."></textarea>
+        <button class="btn-primary" onclick="MemberApp.wsSend()">Send</button>
+      </div>`;
+    this._loadAttention();
   },
 
+  wsSetLens(lens) {
+    // A lens is a bounded context HINT — same composer, same conversation, same runtime.
+    if (!this._wsLenses.includes(lens)) return;
+    this._wsActiveLens = lens;
+    document.querySelectorAll('#iq-lensbar .iq-lens').forEach(b => b.classList.toggle('is-active', b.getAttribute('data-lens') === lens));
+    this._loadAttention();
+  },
+
+  async _loadAttention() {
+    const box = document.querySelector('#iq-attention .iq-att-list');
+    if (!box) return;
+    try {
+      const r = await fetch('/api/workspace/today', { headers: this._authHeaders() });
+      const j = await r.json();
+      const items = (j.attention || []).slice(0, 3);   // ≈3 high-value items
+      const esc = s => this._escape(String(s == null ? '' : s));
+      box.innerHTML = items.length
+        ? items.map(a => `<button class="iq-att-item" onclick="MemberApp.wsAttentionInto(${JSON.stringify(esc(a.text)).replace(/"/g, '&quot;')})">${esc(a.text)}</button>`).join('')
+        : `<div class="iq-att-empty">Nothing needs you right now.</div>`;
+    } catch (_) { box.innerHTML = ''; }
+  },
+
+  // Selecting an attention item brings it INTO the same assistant conversation.
+  wsAttentionInto(text) { const i = document.getElementById('iq-composer-input'); if (i) i.value = text; this.wsSend(); },
+
+  async wsSend() {
+    const input = document.getElementById('iq-composer-input');
+    const text = (input?.value || '').trim();
+    if (!text) return;
+    const thread = document.getElementById('iq-conversation');
+    const esc = s => this._escape(String(s == null ? '' : s));
+    if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">${esc(text)}</div><div class="iq-msg iq-msg-iq" id="iq-pending">IntelliQ is thinking…</div>`);
+    if (input) input.value = '';
+    const j = await this.assistantTurn(text);
+    const pend = document.getElementById('iq-pending');
+    if (pend) { pend.removeAttribute('id'); pend.innerHTML = j ? this._renderAssistant(j) : 'Sorry — I couldn\'t process that just now.'; }
+    if (thread) thread.scrollTop = thread.scrollHeight;
+  },
+
+  /* Routes ONE composer input through the unified runtime WITH the active lens as a bounded
+     hint. Returns the response contract; never persists anything (proposals await confirmation). */
+  async assistantTurn(text, targetEl) {
+    try {
+      const r = await fetch('/api/assistant/turn', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ text, lens: this._wsActiveLens || undefined }) });
+      const j = await r.json();
+      if (!j || !j.ok) return null;
+      this._lastTurnId = j.turnId;
+      if (targetEl) targetEl.innerHTML = this._renderAssistant(j);
+      return j;
+    } catch (_) { return null; }
+  },
+
+  // One IntelliQ voice. Distinguishes grounded vs suggested; shows privacy clearly; renders a
+  // SMALL prioritised proposal set (primary + "More options"); confirm / correct / dismiss.
   _renderAssistant(j) {
     const esc = s => this._escape(String(s == null ? '' : s));
     const r = j.response || {};
-    const props = (r.proposedActions || []).map(p =>
-      `<div class="iq-proposal" data-proposal="${esc(p.id)}">
-         <div class="iq-proposal-label">${esc(p.label)}</div>
-         <div class="iq-proposal-why" style="font-size:0.78rem;color:var(--text-muted)">${esc(p.why)}${p.visibility === 'only_me' ? ' · <strong>private</strong>' : ''}</div>
-         <button onclick="MemberApp.confirmProposal('${esc(j.turnId)}','${esc(p.id)}')">Confirm</button>
-         <button onclick="MemberApp.correctProposal('${esc(j.turnId)}','${esc(p.id)}')">Not quite</button>
-       </div>`).join('');
-    return `<div class="iq-response"><p>${esc(r.responseText)}</p>
-      ${r.privacyNotice ? `<div class="iq-privacy" style="font-size:0.78rem;color:var(--accent)">${esc(r.privacyNotice)}</div>` : ''}
-      ${props ? `<div class="iq-proposals"><div class="card-label">Proposals (nothing happens until you confirm)</div>${props}</div>` : ''}</div>`;
+    const priv = v => v === 'only_me'
+      ? '<span class="iq-badge iq-badge-private">Private</span>'
+      : '<span class="iq-badge iq-badge-share">Confirm to share</span>';
+    const card = (p) => {
+      if (p.actionType === 'checkin_proposal') return this._renderCheckinProposal(j.turnId, p);
+      const state = p.draftOnly ? '<span class="iq-badge iq-badge-draft">Draft only — not scheduled</span>' : '';
+      return `<div class="iq-proposal" data-proposal="${esc(p.id)}">
+        <div class="iq-proposal-top"><span class="iq-proposal-label">${esc(p.label)}</span> ${priv(p.visibility)} ${state}</div>
+        <div class="iq-proposal-why">${esc(p.why)}</div>
+        <div class="iq-proposal-actions">
+          <button class="btn-primary btn-sm" onclick="MemberApp.confirmProposal('${esc(j.turnId)}','${esc(p.id)}')">Confirm</button>
+          <button class="btn btn-outline btn-sm" onclick="MemberApp.correctProposal('${esc(j.turnId)}','${esc(p.id)}')">Edit / Correct</button>
+          <button class="btn-ghost btn-sm" onclick="MemberApp.dismissProposal('${esc(p.id)}')">Dismiss</button>
+        </div></div>`;
+    };
+    const primary = (r.primaryActions || r.proposedActions || []).map(card).join('');
+    const more = (r.moreActions || []).map(card).join('');
+    return `<div class="iq-response">
+      <p class="iq-response-text">${esc(r.responseText)}</p>
+      ${(r.groundedClaims || []).length ? `<div class="iq-grounded">${(r.groundedClaims || []).slice(0, 1).map(c => `<span class="iq-tag">grounded</span> ${esc(c.text)}`).join('')}</div>` : ''}
+      ${r.privacyNotice ? `<div class="iq-privacy">${esc(r.privacyNotice)}</div>` : ''}
+      ${primary ? `<div class="iq-proposals"><div class="card-label">Suggestions — nothing happens until you confirm</div>${primary}
+        ${more ? `<details class="iq-more"><summary>More options</summary>${more}</details>` : ''}</div>` : ''}
+    </div>`;
+  },
+
+  // Personalized check-in: what it relates to, when, whether the topic is referenced, expiry.
+  _renderCheckinProposal(turnId, p) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const when = p.why ? esc(p.why) : 'a follow-up';
+    return `<div class="iq-proposal iq-checkin" data-proposal="${esc(p.id)}">
+      <div class="iq-proposal-top"><span class="iq-proposal-label">Personalised check-in</span> <span class="iq-badge iq-badge-private">Private</span></div>
+      <div class="iq-proposal-why">${when}. IntelliQ will reference this gently — never the sensitive detail.</div>
+      <div class="iq-proposal-actions">
+        <button class="btn-primary btn-sm" onclick="MemberApp.confirmProposal('${esc(turnId)}','${esc(p.id)}')">Confirm</button>
+        <button class="btn btn-outline btn-sm" onclick="MemberApp.correctProposal('${esc(turnId)}','${esc(p.id)}','change the date')">Change timing</button>
+        <button class="btn btn-outline btn-sm" onclick="MemberApp.correctProposal('${esc(turnId)}','${esc(p.id)}','keep the wording general')">Generalise</button>
+        <button class="btn-ghost btn-sm" onclick="MemberApp.correctProposal('${esc(turnId)}','${esc(p.id)}','do not remind me')">Reject</button>
+      </div></div>`;
   },
 
   async confirmProposal(turnId, proposalId, overrides) {
     const r = await fetch(`/api/assistant/turn/${turnId}/confirm`, { method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, overrides: overrides || {} }) });
-    return r.json();
+    const j = await r.json();
+    if (r.status === 409 && /visibility_increase/.test(j.error || '')) {
+      // Explicit confirmation required to increase audience — never silent.
+      if (window.confirm(`Make this visible to ${j.to}? It's private right now.`))
+        return this.confirmProposal(turnId, proposalId, { ...(overrides || {}), confirmVisibilityIncrease: true });
+      return j;
+    }
+    const cardEl = document.querySelector(`[data-proposal="${proposalId}"]`);
+    if (cardEl && j.ok) cardEl.innerHTML = `<div class="iq-confirmed">✓ ${this._escape(j.confirmed === 'calendar_draft' ? 'Draft created — not scheduled' : (j.confirmed || 'done'))}</div>`;
+    return j;
   },
   async correctProposal(turnId, proposalId, correction) {
     const c = correction || window.prompt('What should I change? (e.g. "just a note", "keep this private", "do not remind me")');
     if (!c) return null;
     const r = await fetch(`/api/assistant/turn/${turnId}/correct`, { method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, correction: c }) });
-    return r.json();
+    const j = await r.json();
+    const cardEl = document.querySelector(`[data-proposal="${proposalId}"]`);
+    if (cardEl && j.ok) cardEl.querySelector('.iq-proposal-why')?.insertAdjacentHTML('beforeend', ` <em class="iq-corrected">(updated: ${this._escape((j.applied || []).join(', ') || 'noted')})</em>`);
+    return j;
   },
+  // Dismiss is a client-side hide of a proposal — nothing was persisted, so nothing to undo.
+  dismissProposal(proposalId) { const el = document.querySelector(`[data-proposal="${proposalId}"]`); if (el) el.remove(); },
 
   _svgRing(score, color, size = 100) {
     const r    = size * 0.38;
