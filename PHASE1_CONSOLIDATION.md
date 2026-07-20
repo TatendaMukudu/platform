@@ -14,7 +14,7 @@ below is the map; the checklist is the order.
 | # | Legacy surface | Where | Duplicates / bypasses | Risk to cut |
 |---|----------------|-------|-----------------------|-------------|
 | A | **Old `MyWorkspace` composer** (app.js) | `js/app.js` object + `navigate('assessments')` | A 2nd composer (`mw-input`, own lenses, `ask`, `capture`) twinning the unified `#iq-myworkspace` on Home | **done** ✅ |
-| B | **`/api/workspace/ask`** rule-based Q&A | `server.js:7524` | A 2nd question-answering *truth path* parallel to `_assistantTurn` (own work-scope detection + private-inventory answers) | medium — needs Q&A folded into the runtime; covered by `workspace-experience-smoke` |
+| B | **`/api/workspace/ask`** rule-based Q&A | `server.js:7524` | A 2nd question-answering *truth path* parallel to `_assistantTurn` (own work-scope detection + private-inventory answers) | **done** ✅ |
 | C | **Studio** chat surface | `/api/studio*` (server) + `_studioHtml`/`_renderAssessments` (member-view) | A 2nd conversational assistant identity + thread for assigned work | high — 78 refs; assigned-work help must move into the one assistant under the assigned-work boundary (recognise intent, no direct writes) |
 | D | **me-composer** (mood) | `/api/compose` (server) + `#me-composer` (index.html) + `member-view.js:526` | A 2nd capture path (mood/"what happened") outside the unified turn | medium — mood capture must be absorbed by the runtime, not dropped |
 | E | **Individual Advisor AI** | `/api/advisor/:memberId/ask` + threads; app.js profile modal | A 2nd chat surface (leader→member). Already canonical (kernel + post-kernel, 45 tests) but still a separate thread/identity | medium — fold the leader "ask about member" into the one runtime with a leader audience, preserving privacy guarantees |
@@ -31,10 +31,13 @@ or add bespoke capability logic. Consolidate onto the canonical implementation o
   (222 lines); route the "MyWorkspace" nav slot to `MemberApp._renderAssessments()` (the assigned-work
   surface). Result: one composer/one runtime on Home ("Me"). Guarded by `assistant-interface-smoke`
   (P1 checks). **Shipped.**
-- [ ] **B — fold `/api/workspace/ask` into `_assistantTurn`.** Give the unified runtime the Q&A
-  behaviour ask has today (work-scope purpose selection + grounded private-inventory answers), then
-  make `/api/workspace/ask` a thin shim over `_assistantTurn` (or repoint its now-orphaned callers).
-  Update `workspace-experience-smoke` to assert answers come from the one runtime. One truth path.
+- [x] **B — fold `/api/workspace/ask` into the one question-answering path.** Extracted the Q&A
+  reasoning into a single hoisted helper `_assistantAnswer(code, userId, question)` (work-scope purpose
+  selection + grounded private-inventory / what-changed / focus / stuck answers, post-kernel bounded).
+  BOTH the unified `_assistantTurn` (when the input carries a `question` intent → `response.qa`) and the
+  `/api/workspace/ask` endpoint (now a thin shim) call it — one reasoning implementation, one truth path.
+  Guarded by `assistant-interface-smoke` (the shim and the turn produce the SAME answer; work-scoped
+  questions exclude private evidence). `workspace-experience-smoke` stays green unchanged. **Shipped.**
 - [ ] **D — absorb the me-composer mood capture into the unified turn.** Move optional mood /
   "what happened" into the one composer's interpretation → proposal path; retire `#me-composer` and
   `/api/compose`'s duplicate capture. Keep the check-in intelligence pipeline intact.
@@ -48,8 +51,9 @@ or add bespoke capability logic. Consolidate onto the canonical implementation o
 - [ ] **F — retire remaining `memberResults` raw display reads** once the canonical projection covers them.
 
 ## Coexistence still in place (documented debt)
-- `/api/workspace/ask` (server) — now **UI-orphaned** after cut A; retained only because it is still
-  test-covered. Folds into `_assistantTurn` in cut B.
+- `/api/workspace/ask` (server) — now a **thin shim** over the one `_assistantAnswer` helper (cut B);
+  no parallel reasoning remains. The endpoint can be retired entirely once no client depends on the
+  legacy `{answer,…}` shape.
 - `#me-composer` + `/api/compose` — mood capture; folds in cut D.
 - Studio (`/api/studio*`) — assigned-work chat; folds in cut C.
 

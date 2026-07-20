@@ -105,6 +105,17 @@ const server = app.listen(0, async () => {
     const att = await call('/api/workspace/today');
     ok('17. a small attention set is available via the authorised Today projection', att.status === 200 && Array.isArray(att.j.attention));
 
+    // ── P1(B). Questions are answered by the SAME runtime — /ask and the turn share one path ─
+    const askEP  = await call('/api/workspace/ask', { method: 'POST', body: { question: 'what should I focus on?' } });
+    const askTurn = await turn('What should I focus on?', 'today');
+    ok('P1. asking a question in the unified turn returns a grounded answer (qa) via the one path',
+       !!askTurn.j.response.qa && typeof askTurn.j.response.qa.answer === 'string' && askTurn.j.response.qa.answer.length > 0);
+    ok('P1. the /api/workspace/ask shim and the unified turn produce the SAME answer (one reasoning impl)',
+       askEP.status === 200 && askEP.j.answer === askTurn.j.response.qa.answer && askEP.j.purpose === askTurn.j.response.qa.purpose);
+    const askWorkTurn = await turn('What changed for the team project?', 'work');
+    ok('P1. a work-scoped question uses a non-personal purpose (private excluded before context)',
+       askWorkTurn.j.response.qa?.purpose === 'workspace_shared_reasoning' && askWorkTurn.j.response.qa?.bounded === true);
+
     // ─────────────── Static frontend guards (no browser harness) ───────────────
     ok('2. ONE persistent composer, wired to the unified runtime, reused across lenses',
        /_renderMyWorkspace/.test(mv) && /iq-composer-input/.test(mv) && (mv.match(/\/api\/assistant\/turn/g) || []).length >= 1 && /wsSetLens/.test(mv) && /_wsLenses/.test(mv));

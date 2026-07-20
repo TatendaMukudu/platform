@@ -71,10 +71,18 @@ referenced gently, never quoted). An active topic is not resurfaced. Generic fal
 grounded context is thin.
 
 ## Response contract
-`{ responseText, mode: insight|assist|combined, groundedClaims[], inferred[], limitations[],
-proposedActions[], privacyNotice, followUpState }`. One coherent IntelliQ voice. It distinguishes
+`{ responseText, mode: insight|assist|answer|combined, groundedClaims[], inferred[], limitations[],
+proposedActions[], qa, privacyNotice, followUpState }`. One coherent IntelliQ voice. It distinguishes
 what the user said, what evidence supports, what is inferred, what is only a suggestion, and what
 needs confirmation. Internal capability routing is not surfaced unless it helps the user approve.
+
+When the input carries a **question** intent, the turn answers it through the ONE
+question-answering path — the hoisted helper `_assistantAnswer(code, userId, question)` — and
+returns `qa: { answer, purpose, confidence, limitations, cites, bounded }`. The same helper backs the
+`/api/workspace/ask` compatibility shim, so there is a single reasoning implementation, not a parallel
+truth path. Work/org-scoped questions select `workspace_shared_reasoning` (private evidence excluded
+before context); personal questions are owner-scoped. Answers are post-kernel bounded (cite only
+authorised evidence, never raise confidence or drop limitations).
 
 ## The unified MyWorkspace interface (Slice 1 — UI)
 One surface (`#iq-myworkspace`, mounted at the top of the member home) presents the runtime as a

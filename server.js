@@ -7521,11 +7521,14 @@ app.get('/api/workspace/today', requireAuth, (req, res) => {
 /* Conversation. Determines the viewer + reasoning PURPOSE, pulls evidence through
    the gateway, and composes a bounded answer that cites ONLY authorised evidence.
    Deterministic + grounded (AI-enrichable); prefers a question when support is thin. */
-app.post('/api/workspace/ask', requireAuth, (req, res) => {
-  const { orgCode: code, userId } = req.iqSession;
-  const q = String(req.body?.question || '').toLowerCase().trim();
-  if (!q) return res.status(400).json({ error: 'question required' });
-  // Work/org-scoped questions exclude private evidence BEFORE context is built.
+/* ONE grounded question-answering path over the workspace. Used BOTH by the unified assistant
+   turn (when the input carries a question intent) and by the /api/workspace/ask compatibility
+   endpoint, so there is a SINGLE reasoning implementation — no parallel truth path. Work/org-scoped
+   questions exclude private evidence BEFORE context is built; personal questions are owner-scoped.
+   Post-kernel bounded: cites only authorised evidence, never raises confidence or drops limits. */
+function _assistantAnswer(code, userId, question) {
+  const q = String(question || '').toLowerCase().trim();
+  if (!q) return null;
   const workScoped = /\b(team|org|organisation|organization|project|shared|everyone|department|colleague)\b/.test(q);
   const purpose = workScoped ? 'workspace_shared_reasoning' : 'personal_assistance';
   const ev = _kernelEvidence(code, { purpose, viewerId: userId, subjectId: workScoped ? undefined : userId });
@@ -7564,7 +7567,17 @@ app.post('/api/workspace/ask', requireAuth, (req, res) => {
   const kernelArt = _recordKernelDerivation(code, { type: 'recommendation', result: { question: q }, basis: authorised.length ? authorised.slice(0, 20) : ['none'], confidence, limitations });
   const composed = _composeForAudience(code, kernelArt, { role: 'member', subjectId: userId, viewerId: userId, purpose, text: answer });
   const boundedCites = cites.filter(id => authorised.includes(id));
-  res.json({ ok: true, answer, purpose, confidence, limitations, cites: boundedCites, bounded: composed.ok });
+  return { answer, purpose, confidence, limitations, cites: boundedCites, bounded: composed.ok };
+}
+
+/* /api/workspace/ask — a thin compatibility shim over the ONE question-answering path
+   (_assistantAnswer). Retained for the workspace-experience contract; the unified assistant
+   turn answers questions through the same helper. No parallel reasoning lives here. */
+app.post('/api/workspace/ask', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const a = _assistantAnswer(code, userId, req.body?.question);
+  if (!a) return res.status(400).json({ error: 'question required' });
+  res.json({ ok: true, ...a });
 });
 
 /* A readable timeline of meaningful activity (owner-only; projections + actions). */
@@ -7741,16 +7754,22 @@ function _assistantTurn(code, userId, text, lens) {
   if (context.checkinTrajectory && context.checkinTrajectory !== 'unknown') groundedClaims.push({ text: `Your recent check-ins read ${context.checkinTrajectory}.`, basisIds: [] });
   if (interp.candidateClaims.length) inferred.push({ text: `You seem to be describing ${interp.suggestedPrivacy.purpose === 'reflection' ? 'something personal' : 'a ' + interp.suggestedPrivacy.purpose}.` });
 
+  // A question in the SAME input is answered through the ONE question-answering path
+  // (_assistantAnswer) — not a separate endpoint or reasoning implementation.
+  const qa = interp.intents.some(i => i.type === 'question') ? _assistantAnswer(code, userId, text) : null;
+
   const hasInsight = groundedClaims.length > 0;
   const hasAction = proposals.length > 0;
-  const mode = hasInsight && hasAction ? 'combined' : hasAction ? 'assist' : 'insight';
+  const hasAnswer = !!(qa && qa.answer);
+  const mode = hasAnswer && hasAction ? 'combined' : hasAnswer ? 'answer' : hasInsight && hasAction ? 'combined' : hasAction ? 'assist' : 'insight';
   const privacyNotice = interp.suggestedPrivacy.visibility === 'only_me'
     ? 'Kept private — only you can see this. I won\'t share it or increase its audience without you saying so.'
     : 'This classification can be shared; confirm before it becomes visible to anyone else.';
   const parts = [];
-  if (hasInsight) parts.push(groundedClaims[0].text);
+  if (hasAnswer) parts.push(qa.answer);
+  else if (hasInsight) parts.push(groundedClaims[0].text);
   if (hasAction) parts.push(`I can ${proposals.map(p => p.label.toLowerCase()).join(', or ')} — say the word and I'll do it. Nothing happens until you confirm.`);
-  if (!hasInsight && !hasAction) parts.push('Noted. Tell me what you\'d like me to do with this, or ask me anything.');
+  if (!hasInsight && !hasAction && !hasAnswer) parts.push('Noted. Tell me what you\'d like me to do with this, or ask me anything.');
   const responseText = parts.join(' ');
 
   // Post-kernel bound (cite only owner-authorised basis; never raise confidence / drop limits).
@@ -7764,6 +7783,8 @@ function _assistantTurn(code, userId, text, lens) {
     // A SMALL prioritised default set (≤2, lens-ordered); the rest stay behind "more".
     primaryActions: publicProposals.slice(0, 2), moreActions: publicProposals.slice(2),
     privacyNotice, followUpState: proposals.some(p => p.actionType === 'checkin_proposal') ? 'a personalised check-in is proposed (not yet registered)' : 'none',
+    // A grounded answer when the input carried a question — from the ONE question-answering path.
+    qa: qa ? { answer: qa.answer, purpose: qa.purpose, confidence: qa.confidence, limitations: qa.limitations, cites: qa.cites, bounded: qa.bounded } : null,
     bounded: composed.ok, cites: composed.output.cites,
   };
 
