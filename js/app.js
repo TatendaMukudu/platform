@@ -4688,12 +4688,10 @@ function _showProfileInner(id, m){
           <span style="color:${scoreColor(v)};font-weight:600">${v}</span></div>`).join('')
     : `<div style="font-size:0.78rem;color:var(--text-muted);padding:0.4rem 0">No history yet.</div>`;
 
-  // Advisor tab (Phase 1) — additive; reset UI and load prior threads
-  renderAdvisorChips();
-  const _advResp  = document.getElementById('pm-advisor-response');
-  if (_advResp)  _advResp.innerHTML = '';
-  const _advInput = document.getElementById('pm-advisor-input');
-  if (_advInput) _advInput.value = '';
+  // Member-support tab (Cut E) — the "Ask IntelliQ" entry routes into the ONE composer; the panel
+  // shows the read-only legacy advisor archive for this member.
+  const _askIq = document.getElementById('pm-ask-iq');
+  if (_askIq) { const m = AppState.getMember(id); _askIq.onclick = () => MemberApp.askAboutMember(id, m && m.name); }
   loadAdvisorThreads(id);
   loadBehavioralProfile(id);
   loadMemberData(id);
@@ -4741,81 +4739,12 @@ function _escAdvisor(s){
     .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-const ADVISOR_CHIPS = [
-  'How do I motivate this person?',
-  'How should I hold them accountable?',
-  'How should I approach them right now?',
-  'What leadership opportunity fits them?',
-];
-
-function renderAdvisorChips(){
-  const el = document.getElementById('pm-advisor-chips');
-  if (!el) return;
-  el.innerHTML = ADVISOR_CHIPS.map(q =>
-    `<button type="button" class="advisor-chip" data-q="${_escAdvisor(q)}" onclick="setAdvisorQuestion(this.dataset.q)">${_escAdvisor(q)}</button>`
-  ).join('');
-}
-
-function setAdvisorQuestion(q){
-  const input = document.getElementById('pm-advisor-input');
-  if (input){ input.value = q; input.focus(); }
-}
-
-function _renderAdvisorAnswer(data){
-  const lens  = data.lens ? `<span class="advisor-lens">${_escAdvisor(data.lens)} lens</span>` : '';
-  const title = data.mode === 'briefing' ? 'Alignment Briefing' : 'Advisor';
-  return `<div class="advisor-answer">
-    <div class="advisor-answer-head">${title} ${lens}</div>
-    <div class="advisor-answer-body">${_escAdvisor(data.answer).replace(/\n/g,'<br>')}</div>
-  </div>`;
-}
-
-async function askAdvisor(mode){
-  mode = mode === 'briefing' ? 'briefing' : 'question';
-  const input    = document.getElementById('pm-advisor-input');
-  const askBtn   = document.getElementById('pm-advisor-ask');
-  const briefBtn = document.getElementById('pm-advisor-brief');
-  const btn      = mode === 'briefing' ? briefBtn : askBtn;
-  const out      = document.getElementById('pm-advisor-response');
-  const memberId = AppState.currentMemberId;
-  const question = (input?.value || '').trim();
-  if (!out) return;
-
-  if (!memberId){
-    out.innerHTML = `<div class="advisor-error">No member selected.</div>`;
-    return;
-  }
-  if (mode === 'question' && !question){
-    out.innerHTML = `<div class="advisor-error">Type a question or pick a suggestion above.</div>`;
-    return;
-  }
-
-  const member  = AppState.getMember(memberId);
-  const oldLabel = btn ? btn.textContent : '';
-  if (askBtn)   askBtn.disabled = true;
-  if (briefBtn) briefBtn.disabled = true;
-  if (btn) btn.textContent = mode === 'briefing' ? 'Building…' : 'Thinking…';
-  out.innerHTML = `<div class="advisor-loading">IntelliQ is ${mode === 'briefing' ? 'building a briefing on' : 'considering'} ${_escAdvisor(member?.name || 'this member')}…</div>`;
-
-  try {
-    const res  = await fetch(`/api/advisor/${encodeURIComponent(memberId)}/ask`, {
-      method:  'POST',
-      headers: Auth._headers(),
-      body:    JSON.stringify({ question, mode }),
-    });
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || 'Advisor unavailable');
-    out.innerHTML = _renderAdvisorAnswer(data);
-    if (mode === 'question' && input) input.value = '';
-    loadAdvisorThreads(memberId); // refresh history with the new thread
-  } catch (err){
-    out.innerHTML = `<div class="advisor-error">${_escAdvisor(err.message || 'Something went wrong.')} Please try again.</div>`;
-  } finally {
-    if (askBtn)   askBtn.disabled = false;
-    if (briefBtn) briefBtn.disabled = false;
-    if (btn) btn.textContent = oldLabel;
-  }
-}
+/* [REMOVED] The Individual Advisor composer (ADVISOR_CHIPS / renderAdvisorChips /
+   setAdvisorQuestion / _renderAdvisorAnswer / askAdvisor) — Phase-1 Cut E. There is no separate
+   Advisor assistant/composer/identity. A leader asks about a member through the ONE IntelliQ
+   composer: the member profile's "Ask IntelliQ" entry calls MemberApp.askAboutMember(id, name),
+   which routes into #iq-myworkspace with an explicit, server-validated member subject (a visible
+   chip, clearable). loadAdvisorThreads below is retained as a READ-ONLY legacy archive view. */
 
 async function loadAdvisorThreads(memberId){
   const el = document.getElementById('pm-advisor-history');

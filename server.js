@@ -7549,10 +7549,98 @@ function _lensPrioritize(lens, groundedClaims, proposals) {
   });
   return proposals;
 }
+/* LEADER-SUPPORT subject resolution (Cut E). Validates a subject member SERVER-SIDE against
+   org membership, active organisation, the requester's visible scope, and the insight permission —
+   never trusting a frontend-supplied id. EVERY failure mode (unknown / unauthorised / cross-org /
+   no-permission) returns the SAME `unavailable`, so the response can never leak whether a member
+   exists or is out of scope. A subject is ONLY ever set from this explicit, validated id — never
+   inferred from pronouns, page history or stale frontend state. */
+function _resolveLeaderSubject(code, requesterId, subjectMemberId) {
+  if (!subjectMemberId) return { ok: false, reason: 'none' };
+  const requester = orgUsers[code]?.[requesterId];
+  const member    = orgUsers[code]?.[String(subjectMemberId)];
+  if (!requester || !member) return { ok: false, reason: 'unavailable' };
+  if ((member.orgCode || code) !== (requester.orgCode || code)) return { ok: false, reason: 'unavailable' };  // cross-org: no leak
+  let visible = []; try { visible = getVisibleUserIds(code, requesterId) || []; } catch (_) {}
+  if (!visible.includes(String(subjectMemberId))) return { ok: false, reason: 'unavailable' };
+  const canAdvise = requester.role === 'superadmin' || _userHasPerm(code, requesterId, 'view_insights') || _userHasPerm(code, requesterId, 'review_checkins');
+  if (!canAdvise) return { ok: false, reason: 'unavailable' };
+  return { ok: true, member };
+}
+/* A leader-support turn — the SAME assistant runtime with a member-support context. Reuses the
+   EXISTING advisor kernel (_advisorKernelReasoning: leader-authorised canonical evidence only,
+   private excluded upstream, sensitive INFORMS-not-quoted, directional trajectory) and bounds the
+   answer post-kernel via _composeForAudience(purpose:leader_support). Produces the canonical
+   response contract. Assistance-only: a leader question NEVER writes member/org truth. */
+function _leaderSupportTurn(code, requesterId, text, lens, interp, member) {
+  const kr = _advisorKernelReasoning(code, member, requesterId);
+  const first = String(member.name || 'this member').split(' ')[0];
+  // Deterministic, GROUNDED summary from the kernel's CITABLE tier only (sensitive `informing` is
+  // never placed in text; private evidence never reached the kernel). Directional words, no scores.
+  const groundedClaims = kr.citable.map(line => ({ text: String(line).slice(0, 240), basisIds: kr.basis.slice(0, 8) }));
+  const inferred = [{ text: `Directional read: ${first}'s trajectory is ${kr.trajectory} (confidence ${kr.confidence}) — a direction, not a score.` }];
+  const limitations = (kr.kernelArt && kr.kernelArt.limitations) || ['reconstructed only from captured, leader-authorised evidence — not the whole person'];
+  const lead = `Support view for ${member.name || 'this member'} — based only on what you're authorised to see. Trajectory: ${kr.trajectory} (confidence ${kr.confidence}).`;
+  const detail = kr.citable.filter(l => /^(Kernel state|Recent mood|Latest assessment|Assessment trajectory|Observation|MEMBER aim|TEAM context|ORG)/.test(l)).slice(0, 4).join(' ');
+  let responseText = [lead, detail, `What I can't see (private disclosures) is never part of this.`].filter(Boolean).join(' ');
+  responseText = privacy.redact(responseText, kr.informingStrings);   // defence-in-depth (informing/sensitive never in citable anyway)
+
+  const composed = _composeForAudience(code, kr.kernelArt, { role: (orgUsers[code]?.[requesterId]?.role) || 'member', subjectId: member.id, viewerId: requesterId, purpose: 'leader_support', text: responseText });
+  const response = {
+    responseText, mode: 'leader_support', lens: lens || null,
+    groundedClaims, inferred, limitations,
+    proposedActions: [], primaryActions: [], moreActions: [],   // assistance-only; consequential actions use existing proposal pathways
+    privacyNotice: `Member support for ${member.name || 'this member'}: based only on evidence you're authorised to use. Private disclosures are excluded and never revealed — including by implication.`,
+    followUpState: 'none', qa: null, assignedWork: null,
+    subject: { memberId: member.id, name: member.name || null, purpose: 'leader_support' },
+    trajectory: kr.trajectory, confidence: kr.confidence, evidenceCount: kr.basis.length,
+    bounded: composed.ok, cites: composed.output.cites,
+  };
+  // Store the turn with EXPLICIT subject + purpose metadata (its own bounded artifact).
+  const key = _wsKey(code, requesterId);
+  const rawRef = 'raw_' + generateId();
+  const turn = { turnId: interp.turnId, userId: requesterId, organisationId: code, createdAt: new Date().toISOString(),
+    originalInputRef: rawRef, rawInput: String(text || '').slice(0, 4000), lens: lens || null,
+    audience: 'leader', purpose: 'leader_support', subjectMemberId: member.id,
+    candidateIntents: interp.candidateIntents, candidateClaims: interp.candidateClaims,
+    _proposals: [], context: { purpose: 'leader_support', subjectMemberId: member.id, basisIds: kr.basis, visibilityEligibility: 'leader-authorised', confidence: kr.confidence, limitations }, response, corrections: [] };
+  const list = assistantTurns[key] || (assistantTurns[key] = []);
+  list.push(turn);
+  if (list.length > ASSISTANT_CAP) list.splice(0, list.length - ASSISTANT_CAP);
+  scheduleSave();
+  return { turn, response,
+    interpretation: { turnId: interp.turnId, originalInputRef: rawRef, candidateIntents: interp.candidateIntents, candidateClaims: interp.candidateClaims, suggestedPrivacy: interp.suggestedPrivacy, proposedActions: [], confidence: kr.confidence, ambiguities: [], limitations },
+    context: { purpose: 'leader_support', subjectMemberId: member.id, basisIds: kr.basis, visibilityEligibility: 'leader-authorised', confidence: kr.confidence, limitations } };
+}
+/* A requested subject that failed validation → NO context, NO existence leak (identical for
+   unknown / unauthorised / cross-org / no-permission). The turn produces a bounded, empty answer. */
+function _leaderSupportUnavailable(code, requesterId, text, lens, interp) {
+  const rawRef = 'raw_' + generateId();
+  const response = {
+    responseText: `I don't have authorised support context for that member. If you meant someone on your team, open their profile and choose “Ask IntelliQ”.`,
+    mode: 'leader_support', lens: lens || null, groundedClaims: [], inferred: [], limitations: ['no authorised member-support context for the requested subject'],
+    proposedActions: [], primaryActions: [], moreActions: [], privacyNotice: 'No member context is active.', followUpState: 'none', qa: null, assignedWork: null,
+    subject: null, trajectory: null, confidence: 'none', evidenceCount: 0, bounded: true, cites: [],
+  };
+  const key = _wsKey(code, requesterId);
+  const turn = { turnId: interp.turnId, userId: requesterId, organisationId: code, createdAt: new Date().toISOString(), originalInputRef: rawRef, rawInput: String(text || '').slice(0, 4000), lens: lens || null, audience: 'leader', purpose: 'leader_support', subjectMemberId: null, candidateIntents: interp.candidateIntents, candidateClaims: [], _proposals: [], context: { purpose: 'leader_support', subjectMemberId: null, basisIds: [], visibilityEligibility: 'leader-authorised', confidence: 'none', limitations: response.limitations }, response, corrections: [] };
+  (assistantTurns[key] || (assistantTurns[key] = [])).push(turn);
+  scheduleSave();
+  return { turn, response, interpretation: { turnId: interp.turnId, originalInputRef: rawRef, candidateIntents: interp.candidateIntents, candidateClaims: [], suggestedPrivacy: interp.suggestedPrivacy, proposedActions: [], confidence: 'none', ambiguities: [], limitations: response.limitations }, context: turn.context };
+}
 function _assistantTurn(code, userId, text, lens, opts = {}) {
   lens = ASSISTANT_LENSES.includes(lens) ? lens : null;
   const workItemId = opts.workItemId ? String(opts.workItemId).slice(0, 80) : null;
   const interp = _assistantInterpret(code, userId, text);
+  // Leader-support (Cut E): an EXPLICIT, server-validated subject routes through the SAME runtime
+  // with a member-support context + the existing advisor kernel. A subject is NEVER inferred from
+  // the message text — only from opts.subjectMemberId, revalidated here on every turn.
+  if (opts.subjectMemberId != null) {
+    const subjectReq = _resolveLeaderSubject(code, userId, opts.subjectMemberId);
+    return subjectReq.ok
+      ? _leaderSupportTurn(code, userId, text, lens, interp, subjectReq.member)
+      : _leaderSupportUnavailable(code, userId, text, lens, interp);
+  }
   const context = _assistantContext(code, userId);
   // Assigned-work is AUTHORISED CONTEXT (Cut C) — assembled only when an assigned-work intent or a
   // focused work item is present; owner-scoped, released-fields-only (see _assignedWorkContext).
@@ -7664,7 +7752,9 @@ app.post('/api/assistant/turn', requireAuth, (req, res) => {
   if (text.length > 4000) return res.status(400).json({ error: 'too long' });
   // The active MyWorkspace lens is a BOUNDED context hint (emphasis only, same truth path).
   // An optional workItemId focuses authorised assigned-work context (from clicking a work card).
-  const r = _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId });
+  // An optional subjectMemberId requests LEADER-SUPPORT context — validated server-side, never
+  // trusted from the client (see _resolveLeaderSubject); absent → a general personal turn.
+  const r = _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId });
   res.json({ ok: true, turnId: r.turn.turnId, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response });
 });
 
@@ -11388,32 +11478,9 @@ app.get('/api/member/:memberId/similar', requireAuth, async (req, res) => {
   });
 });
 
-const ADVISOR_SYSTEM = `You are the IntelliQ Individual Advisor — embedded in ONE member's profile to help a leader support, develop, and lead THIS specific person. You are not a score machine. You never rank people and never output a number as a verdict.
-
-HOW YOU THINK — ALIGNMENT, NOT OBEDIENCE:
-Alignment is the coherence between what this person actually does over time and what they — and the communities they belong to — say they are trying to become. It is directional (are they becoming it?), never a fixed grade, and never "doing what the coach says." You reason across three frames, which are NOT a hierarchy:
-- MEMBER aims  = the engine (their own goals; intrinsic motivation is what actually drives durable growth).
-- TEAM context = the shared middle (group emphasis and culture).
-- ORG values   = the guardrails (ethical boundaries and identity).
-Optimize for: the member's own goals, pursued within org guardrails, integrated with team context.
-
-DIRECTIONAL LANGUAGE — NEVER SCORES:
-Describe trajectory with words, not numbers: converging, sustaining, stalled, diverging, unanchored (no stated aim yet), or unknown (not enough signal). Never say "62% aligned" or assign a grade.
-
-WEIGH THE EVIDENCE:
-Not all signals are equal. Lean on [strong] signals (results, metrics, attendance, repeated behaviour, long-term trends) and converging patterns across several signals. Treat [minor] one-offs (a single note/message) lightly — never build a judgement on one of them. A pattern across signals beats any single data point.
-
-CONFLICT DOCTRINE:
-- MEMBER aim vs TEAM aim → seek INTEGRATION first: show how pursuing the team's aim also serves the member's own goal. If they genuinely conflict, name the honest tradeoff for the humans to decide — do not coerce toward the team.
-- TEAM vs ORG values → the org value is the guardrail and should win, but treat it as a culture issue for leadership, never as a mark against this individual.
-- Anchored to NOTHING → highest care, not the worst grade. Lead with curiosity; most often we simply never captured what they want.
-- Aligned across all three → reinforce and stretch (leadership / mentoring opportunities).
-
-OUTPUT RULES:
-- Be specific to this person. No platitudes, no generic coaching advice.
-- Recommend actions the requester can take, not descriptions of the data.
-- Reason from your understanding of the person; do not recite or quote source material.
-- If a stated aim is missing, say so plainly — that absence is the finding, not a failure.`;
+/* [REMOVED] ADVISOR_SYSTEM prompt (the separate Advisor identity) — Cut E. The reasoning kernel
+   _advisorKernelReasoning is preserved; leader-support answers are built deterministically from its
+   grounded citable tier through the canonical assistant response contract (no separate persona). */
 
 /* ── MEMBER ADVISOR — canonical evidence · kernel reasoning · post-kernel bounds ──
    The advisor is a privacy-critical surface. It NEVER assembles truth from raw member
@@ -11517,130 +11584,12 @@ function _advisorKernelReasoning(code, member, requesterId) {
   return { evidence, citable, informing, informingStrings, kernelArt, basis, trajectory, confidence };
 }
 
-/* ── POST /api/advisor/:memberId/ask ──────────────────────────────────────── */
-app.post('/api/advisor/:memberId/ask', requireAuth, async (req, res) => {
-  const { orgCode } = req.iqSession;
-  const requesterId = req.iqSession.userId;
-  const code        = (orgCode || '').toLowerCase().trim();
-  const memberId    = req.params.memberId;
-  const question    = (req.body?.question || '').trim();
-  const mode        = req.body?.mode === 'briefing' ? 'briefing' : 'question';
-
-  // In briefing mode the question is optional (we generate a full briefing).
-  if (mode !== 'briefing' && !question) return res.status(400).json({ error: 'question required' });
-  if (question.length > 600) return res.status(400).json({ error: 'question too long' });
-
-  const requester = orgUsers[code]?.[requesterId];
-  const member    = orgUsers[code]?.[memberId];
-  if (!requester) return res.status(401).json({ error: 'Requester not found' });
-  if (!member)    return res.status(404).json({ error: 'Member not found' });
-
-  // Permission: must be able to see this member AND have an insight permission.
-  const visible = getVisibleUserIds(code, requesterId);
-  if (!visible.includes(memberId)) return res.status(403).json({ error: 'Member not in your visible scope' });
-  const canAdvise = requester.role === 'superadmin'
-    || _userHasPerm(code, requesterId, 'view_insights')
-    || _userHasPerm(code, requesterId, 'review_checkins');
-  if (!canAdvise) return res.status(403).json({ error: 'Permission denied: view_insights required' });
-
-  // RETRIEVE + KERNEL — leader-authorised canonical evidence only, member state
-  // reconstructed in the kernel. No raw signals, no legacy memory, no private evidence.
-  const kr   = _advisorKernelReasoning(code, member, requesterId);
-  const lens = lenses.lensFor(requester);
-
-  const system = [
-    ADVISOR_SYSTEM,
-    privacy.GATE_DIRECTIVE,
-    lenses.lensDirective(lens),
-    _worldviewDirective(code),
-    _domainDirective(code, { userId: memberId }),
-    _memberValuesDirective(code, memberId),
-  ].filter(Boolean).join('\n\n');
-
-  const contextBlock = privacy.buildContextBlock({ citable: kr.citable, privateInforming: kr.informing });
-
-  const userMsg = mode === 'briefing'
-    ? [
-        `Produce an alignment briefing on ${member.name || 'this member'} for a ${lens?.label || requester.role}.`,
-        '',
-        contextBlock,
-        '',
-        'Write the briefing under these four short headings, a sentence or two each:',
-        '1. What we are seeing',
-        '2. Why it might be happening',
-        '3. How this aligns (member aims · team context · org values) — use directional words, no scores',
-        '4. What to try next',
-      ].join('\n')
-    : [
-        `QUESTION (from a ${lens?.label || requester.role}): ${question}`,
-        '',
-        contextBlock,
-        '',
-        'Answer in 3-5 sentences with specific, actionable guidance for this person, reasoning across their member/team/org aims where relevant. Use directional language, never scores.',
-      ].join('\n');
-
-  let answer;
-  try {
-    answer = await ai.complete({ tier: 'reason', system, user: userMsg, maxTokens: mode === 'briefing' ? 600 : 400 });
-  } catch (err) {
-    console.error('[advisor] AI error:', err.message);
-    return res.status(502).json({ error: 'Advisor unavailable right now. Please try again.' });
-  }
-
-  // Last-line privacy defence — strip any sensitive informing span that survived into
-  // the output (private material never reached the model, so it cannot be here).
-  answer = privacy.redact(answer, kr.informingStrings);
-
-  // Record the recommendation as canonical DERIVED evidence (meaningful output only),
-  // grounded in the kernel basis. It inherits an org-safe visibility ceiling from its
-  // basis and does NOT auto-promote — it never recursively feeds itself back as truth.
-  let recEvidenceId = null;
-  if (answer && answer.trim().length > 40 && kr.basis.length) {
-    const rec = _recordDerivedEvidence(code, {
-      subjectId: memberId, type: 'observation',
-      label: mode === 'briefing' ? 'Advisor briefing' : 'Advisor recommendation',
-      valueText: answer.slice(0, 600), basisIds: kr.basis,
-    });
-    recEvidenceId = rec && rec.id ? rec.id : null;
-  }
-
-  // POST-KERNEL — bound the answer to the kernel result and the leader's authorised set;
-  // cites only evidence the leader may see, never raising confidence or dropping limits.
-  const composed = _composeForAudience(code, kr.kernelArt, {
-    role: requester.role, subjectId: memberId, viewerId: requesterId, purpose: 'leader_support', text: answer,
-  });
-
-  // Persist the thread (non-sensitive: question + bounded answer + provenance only).
-  if (!advisorThreads[code]) advisorThreads[code] = [];
-  const thread = {
-    id:            `adv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    memberId, memberName: member.name || '',
-    requesterId, requesterRole: requester.role,
-    lens:          lens?.label || null,
-    mode,
-    question:      mode === 'briefing' ? 'Full alignment briefing' : question,
-    answer,
-    trajectory:    kr.trajectory,
-    cites:         composed.output.cites,
-    recEvidenceId,
-    createdAt:     new Date().toISOString(),
-  };
-  advisorThreads[code].push(thread);
-  scheduleSave();
-
-  res.json({
-    ok: true,
-    answer,
-    mode,
-    lens: lens?.label || null,
-    evidenceCount: kr.basis.length,
-    trajectory: kr.trajectory,
-    confidence: kr.confidence,
-    cites: composed.output.cites,
-    bounded: composed.ok,
-    threadId: thread.id,
-  });
-});
+/* [REMOVED] POST /api/advisor/:memberId/ask — Phase-1 Cut E. The Individual Advisor is no longer a
+   separate assistant/route/prompt. Leader-support flows through the ONE runtime: POST /api/assistant/turn
+   with a server-validated subjectMemberId → _leaderSupportTurn → the SAME _advisorKernelReasoning kernel
+   (leader-authorised canonical evidence only, private excluded, sensitive informs-not-quoted, directional
+   trajectory) → _composeForAudience(leader_support). Assistance-only; no independent reasoning here.
+   GET /api/advisor/:memberId/threads is retained below as a READ-ONLY legacy archive (no reasoning). */
 
 /* ── GET /api/advisor/:memberId/threads — prior advisor Q&A for a member ───── */
 app.get('/api/advisor/:memberId/threads', requireAuth, (req, res) => {

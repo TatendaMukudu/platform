@@ -20,12 +20,17 @@ const { app, _loadAllStores, _rebuildEmailIndex, issueToken } = srv;
 
 const CODE = 'asif';
 const iso = new Date().toISOString();
-const me = 'me', other = 'other';
+const me = 'me', other = 'other', boss = 'boss', sam = 'sam';
+const OTHERORG = 'asif2';
 _loadAllStores({
-  orgMeta:  { [CODE]: { orgName: 'IF Co', createdAt: iso } },
+  orgMeta:  { [CODE]: { orgName: 'IF Co', createdAt: iso }, [OTHERORG]: { orgName: 'IF2', createdAt: iso } },
   orgUsers: { [CODE]: {
     [me]:    { id: me,    name: 'Me',    email: 'me@if.co',    role: 'member', orgCode: CODE, status: 'active' },
-    [other]: { id: other, name: 'Other', email: 'other@if.co', role: 'member', orgCode: CODE, status: 'active' } } },
+    [other]: { id: other, name: 'Other', email: 'other@if.co', role: 'member', orgCode: CODE, status: 'active' },
+    // Cut E: a leader (boss) who supervises sam, plus a cross-org member (never selectable).
+    [boss]:  { id: boss,  name: 'Boss',  email: 'boss@if.co',  role: 'admin',  orgCode: CODE, status: 'active' },
+    [sam]:   { id: sam,   name: 'Sam Rivers', email: 'sam@if.co', role: 'member', orgCode: CODE, status: 'active', supervisorId: boss } },
+    [OTHERORG]: { ext1: { id: 'ext1', name: 'Ext One', email: 'e@if2.co', role: 'member', orgCode: OTHERORG, status: 'active' } } },
   // Cut C: assigned work as records — one open to me, one returned (feedback+score released) to me,
   // and one that belongs to someone else (must never appear in my authorised context).
   assessmentAssignments: { [CODE]: [
@@ -35,6 +40,7 @@ _loadAllStores({
 });
 _rebuildEmailIndex();
 const tokMe = issueToken(me, CODE, 'member');
+const tokBoss = issueToken(boss, CODE, 'admin');
 
 let pass = 0, fail = 0;
 const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n); } };
@@ -49,6 +55,13 @@ const server = app.listen(0, async () => {
     let j = null; try { j = await r.json(); } catch (_) {} return { status: r.status, j };
   };
   const turn = (text, lens) => call('/api/assistant/turn', { method: 'POST', body: { text, lens } });
+  // Leader (boss) authenticated calls, for Cut E member-support tests.
+  const callBoss = async (p, opts = {}) => {
+    const headers = { Authorization: `Bearer ${tokBoss}` }; if (opts.body) headers['Content-Type'] = 'application/json';
+    const r = await fetch(baseUrl + p, { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+    let j = null; try { j = await r.json(); } catch (_) {} return { status: r.status, j };
+  };
+  const bossTurn = (text, subjectMemberId) => callBoss('/api/assistant/turn', { method: 'POST', body: { text, subjectMemberId } });
 
   try {
     console.log('\n=== Unified MyWorkspace interface ===\n');
@@ -217,6 +230,50 @@ const server = app.listen(0, async () => {
     ok('C(reg). a general turn with NO work item does not carry or act on assigned work',
        cStale.j.response.assignedWork === null && !hasSubmit(cStale));
 
+    // ─────────────── Cut E: Individual Advisor folded into the ONE assistant (leader support) ───────────────
+    // seed a declining mood series for sam so the kernel has a trajectory
+    for (let i = 0; i < 4; i++) await srv._recordCheckin(CODE, sam, { mood: [4, 3, 2, 1][i] });
+    // sam privately captures hardship (owner-only) — must NEVER enter leader-support context
+    await call('/api/workspace', { method: 'POST', body: { text: 'secretly I want to quit', scope: 'personal_private', purpose: 'reflection', visibility: 'only_me' } })
+      .catch(() => {});
+
+    const e1 = await bossTurn('how can I support sam', sam);
+    ok('E1. a leader-support question routes through /api/assistant/turn (unified endpoint, leader_support mode)',
+       e1.status === 200 && e1.j.response.mode === 'leader_support' && e1.j.response.subject && e1.j.response.subject.memberId === sam);
+    ok('E15. leader-support uses the canonical response contract (grounded/inferred/limitations/actions/privacyNotice)',
+       Array.isArray(e1.j.response.groundedClaims) && Array.isArray(e1.j.response.inferred) && Array.isArray(e1.j.response.limitations) && Array.isArray(e1.j.response.primaryActions) && typeof e1.j.response.privacyNotice === 'string');
+    ok('E13. directional trajectory, never a hidden numeric score', ['converging', 'sustaining', 'stalled', 'diverging', 'unanchored', 'unknown'].includes(e1.j.response.trajectory) && !/\b\d{1,3}%/.test(e1.j.response.responseText));
+    ok('E9/regression. private member evidence never enters leader-support (no hardship leak in text or cites)',
+       !/secretly|quit/i.test(JSON.stringify(e1.j.response)));
+    ok('E16/E17. a leader question is assistance-only — it creates NO writes/proposals', e1.j.response.proposedActions.length === 0);
+    ok('E5. the subject is server-VALIDATED (context.purpose leader_support + subject basis present)',
+       e1.j.context.purpose === 'leader_support' && Array.isArray(e1.j.context.basisIds));
+
+    // E8 — foreign / cross-org / unknown subject reveals nothing, identically (no existence leak).
+    const eCross = await bossTurn('how is this person', 'ext1');
+    const eUnknown = await bossTurn('how is this person', 'ghost_id');
+    ok('E8. a cross-org subject reveals nothing (no context, no existence leak)', eCross.j.response.subject === null && eCross.j.response.evidenceCount === 0);
+    ok('E8. unknown and cross-org subjects return the SAME unavailable response (no distinguishing leak)',
+       eUnknown.j.response.subject === null && eUnknown.j.response.responseText === eCross.j.response.responseText);
+    // a member without insight permission gets no member context
+    const eNoPerm = await turn('how is sam');   // tokMe is a plain member; also no subjectMemberId
+    ok('E. a plain member turn is personal (never leader_support)', eNoPerm.j.response.mode !== 'leader_support' && eNoPerm.j.context.purpose === 'personal_assistance');
+    const eMemberSubj = await call('/api/assistant/turn', { method: 'POST', body: { text: 'how is sam', subjectMemberId: sam } });  // member tries subject
+    ok('E5. a requester without insight permission gets NO member context even with a subject id', eMemberSubj.j.response.subject === null);
+
+    // E6/E7 — context bleed: A→B fully replaces; a general turn never reuses a prior subject.
+    const eA = await bossTurn('support view', sam);
+    const eB = await bossTurn('support view', other);   // 'other' is in boss's org; boss is admin so visible
+    ok('E6. switching subject A→B fully replaces the subject (no bleed)',
+       eA.j.response.subject.memberId === sam && (eB.j.response.subject ? eB.j.response.subject.memberId === other : true));
+    const eGen = await callBoss('/api/assistant/turn', { method: 'POST', body: { text: 'what should the team focus on' } });  // NO subjectMemberId
+    ok('E7. a general leader turn (no subject) does NOT reuse a prior member subject',
+       !eGen.j.response.subject && eGen.j.context.purpose === 'personal_assistance');
+    // E10/regression — "what did they tell privately" with no subject resolves no member, leaks nothing.
+    const ePriv = await callBoss('/api/assistant/turn', { method: 'POST', body: { text: 'what did they tell IntelliQ privately?' } });
+    ok('E10/regression. pronoun-without-subject resolves no member and leaks no private content',
+       !ePriv.j.response.subject && !/secretly|quit/i.test(JSON.stringify(ePriv.j.response)));
+
     // ─────────────── Static frontend guards (no browser harness) ───────────────
     const appjs2 = read('js/app.js');
     ok('D2. no production frontend references the legacy #me-composer element', !/id="me-composer"/.test(html));
@@ -234,6 +291,15 @@ const server = app.listen(0, async () => {
        !/class="assess-conv"|_assessDiscussSend\(/.test(mv) && !/assessments\/\$\{[^}]*\}\/discuss/.test(mv));
     ok('C. assigned work routes INTO the one composer (askAboutWork → wsSend context) and renders submit_work',
        /askAboutWork\(/.test(mv) && /_wsWorkItemId/.test(mv) && /_renderSubmitWork/.test(mv));
+    // Cut E static guards — no separate Advisor composer/identity; leader support is the one composer.
+    ok('E2/E3. no production frontend Advisor composer remains (askAdvisor/renderAdvisorChips/_renderAdvisorAnswer gone)',
+       !/function askAdvisor\(|function renderAdvisorChips\(|function _renderAdvisorAnswer\(|askAdvisor\('/.test(appjs2) && !/id="pm-advisor-input"|onclick="askAdvisor/.test(html));
+    ok('E2. no production frontend calls the Advisor ask endpoint (/api/advisor/:id/ask)',
+       !/\/api\/advisor\/[^']*\/ask|advisor\/\$\{[^}]*\}\/ask/.test(appjs2));
+    ok('E4. leader "Ask IntelliQ" routes into the one composer with an explicit, clearable member subject',
+       /askAboutMember\(/.test(mv) && /_wsSubjectMemberId/.test(mv) && /clearSubject\(/.test(mv) && /id="iq-subject"/.test(mv) && /id="pm-ask-iq"/.test(html));
+    ok('E. the member subject is cleared on fresh render and on lens change (no silent stale context)',
+       /_wsSubjectMemberId = null/.test(mv) && /wsSetLens\(lens\)/.test(mv) && /this\.clearSubject\(\)/.test(mv));
     ok('2. ONE persistent composer, wired to the unified runtime, reused across lenses',
        /_renderMyWorkspace/.test(mv) && /iq-composer-input/.test(mv) && (mv.match(/\/api\/assistant\/turn/g) || []).length >= 1 && /wsSetLens/.test(mv) && /_wsLenses/.test(mv));
     ok('2b. the composer container is mounted in the member home (index.html)', /id="iq-myworkspace"/.test(html));

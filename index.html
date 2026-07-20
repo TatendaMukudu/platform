@@ -1367,7 +1367,7 @@
           <button class="tab-btn" data-tab="devplan">Dev Plan</button>
           <button class="tab-btn" data-tab="coach">Leader Input</button>
           <button class="tab-btn" data-tab="insights">AI Insights</button>
-          <button class="tab-btn" data-tab="advisor">Ask Advisor</button>
+          <button class="tab-btn" data-tab="advisor">Ask IntelliQ</button>
           <button class="tab-btn" data-tab="data">Data</button>
         </div>
 
@@ -1416,25 +1416,17 @@
         <div class="tab-panel" data-panel="advisor">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.6rem;margin-bottom:0.75rem">
             <div style="font-size:0.8rem;color:var(--text-secondary)">
-              Ask IntelliQ how to support, develop, or lead this person. Answers are specific to them.
+              Ask IntelliQ how to support, develop, or lead this person — in the one IntelliQ composer,
+              with this member set as context. Answers use only what you're authorised to see; private
+              disclosures are never included.
             </div>
             <button class="btn btn-outline btn-sm" style="flex-shrink:0" onclick="openLogSignal()">＋ Log data</button>
           </div>
           <div id="pm-profile" class="pm-profile"></div>
           <div id="pm-similar" class="pm-similar"></div>
-          <div id="pm-advisor-chips" class="advisor-chips"></div>
-          <textarea id="pm-advisor-input" class="advisor-input" rows="2"
-            placeholder="e.g. How do I motivate this person?"></textarea>
-          <div class="advisor-actions">
-            <div class="advisor-privacy">Advisor may use protected context to generate safe recommendations, but private notes are not revealed.</div>
-            <div class="advisor-btns">
-              <button class="btn btn-outline btn-sm" id="pm-advisor-brief" onclick="askAdvisor('briefing')">Full Briefing</button>
-              <button class="btn btn-accent btn-sm" id="pm-advisor-ask" onclick="askAdvisor('question')">Ask Advisor</button>
-            </div>
-          </div>
-          <div id="pm-advisor-response" class="advisor-response"></div>
-          <div style="margin-top:1.1rem">
-            <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Previous questions</div>
+          <button class="btn btn-accent" id="pm-ask-iq" style="margin:0.4rem 0 0.9rem">Ask IntelliQ about this member</button>
+          <div style="margin-top:0.6rem">
+            <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Past IntelliQ support notes (archive)</div>
             <div id="pm-advisor-history"></div>
           </div>
         </div>

@@ -1461,6 +1461,29 @@ const MemberApp = {
   },
   clearWorkCtx() { this._wsWorkItemId = null; const chip = document.getElementById('iq-workctx'); if (chip) chip.innerHTML = ''; },
 
+  /* LEADER-SUPPORT entry point (Cut E). From an authorised member profile, route INTO the one
+     IntelliQ composer with an EXPLICIT member subject (revalidated server-side every turn). Shows a
+     visible member chip with a clear "exit" control — the context is never silently active. */
+  askAboutMember(memberId, name) {
+    this._wsSubjectMemberId = memberId || null;
+    this._wsSubjectName = name || null;
+    try { if (typeof closeAllModals === 'function') closeAllModals(); } catch (_) {}
+    try { if (typeof navigate === 'function') navigate('home'); } catch (_) {}
+    setTimeout(() => {
+      const i = document.getElementById('iq-composer-input');
+      if (i) { i.value = `How can I support ${name || 'this member'}?`; i.focus(); }
+      this._renderSubjectChip();
+    }, 60);
+  },
+  _renderSubjectChip() {
+    const chip = document.getElementById('iq-subject');
+    if (!chip) return;
+    chip.innerHTML = this._wsSubjectMemberId
+      ? `<span class="iq-subject-chip"><span class="iq-subject-dot"></span>Member support: <strong>${this._escape(this._wsSubjectName || 'member')}</strong> · answers use only what you're authorised to see <button onclick="MemberApp.clearSubject()" title="Exit member support">Exit</button></span>`
+      : '';
+  },
+  clearSubject() { this._wsSubjectMemberId = null; this._wsSubjectName = null; this._renderSubjectChip(); },
+
   // [REMOVED] Studio conversation UI (_studioHtml + _studioSend/_studioAppend/_studioAttach/
   // _studioRecord*/_studioPlanDone/_studioScrollBottom/_studioRefreshPlans) — Phase-1 Cut C.
   // The member no longer experiences a second assistant/composer/thread. Assistance flows
@@ -2370,6 +2393,9 @@ const MemberApp = {
   _renderMyWorkspace(lens) {
     const el = document.getElementById('iq-myworkspace');
     if (!el) return;
+    // Fresh render (e.g. navigating to Home) CLEARS any stale member/work context — a member
+    // subject is never silently carried across navigation (Cut E). askAboutMember sets it after.
+    this._wsSubjectMemberId = null; this._wsSubjectName = null; this._wsWorkItemId = null;
     this._wsActiveLens = this._wsLenses.includes(lens) ? lens : (this._wsActiveLens || 'today');
     const esc = s => this._escape(String(s == null ? '' : s));
     const tabs = this._wsLenses.map(L =>
@@ -2380,18 +2406,22 @@ const MemberApp = {
       <div class="iq-lensbar" id="iq-lensbar">${tabs}</div>
       <div class="iq-attention" id="iq-attention"><div class="card-label">Needs you</div><div class="iq-att-list">Loading…</div></div>
       <div class="iq-conversation" id="iq-conversation"></div>
+      <div class="iq-subject" id="iq-subject"></div>
       <div class="iq-workctx" id="iq-workctx"></div>
       <div class="iq-composer">
         <textarea id="iq-composer-input" class="note-input" rows="2" placeholder="Talk to IntelliQ — a note, a plan, a question, anything. It stays private by default."></textarea>
         <button class="btn-primary" onclick="MemberApp.wsSend()">Send</button>
       </div>`;
     this._loadAttention();
+    this._renderSubjectChip();
   },
 
   wsSetLens(lens) {
-    // A lens is a bounded context HINT — same composer, same conversation, same runtime.
+    // A lens is a bounded context HINT — same composer, same conversation, same runtime. Switching
+    // lens is a GENERAL-context move, so it exits any active member-support subject (never silent).
     if (!this._wsLenses.includes(lens)) return;
     this._wsActiveLens = lens;
+    this.clearSubject();
     document.querySelectorAll('#iq-lensbar .iq-lens').forEach(b => b.classList.toggle('is-active', b.getAttribute('data-lens') === lens));
     this._loadAttention();
   },
@@ -2433,7 +2463,9 @@ const MemberApp = {
     try {
       const r = await fetch('/api/assistant/turn', { method: 'POST',
         headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
-        body: JSON.stringify({ text, lens: this._wsActiveLens || undefined, workItemId: this._wsWorkItemId || undefined }) });
+        // subjectMemberId requests LEADER-SUPPORT context — server-validated every turn; the chip
+        // makes it explicit, and it is only ever set from an authorised profile entry point.
+        body: JSON.stringify({ text, lens: this._wsActiveLens || undefined, workItemId: this._wsWorkItemId || undefined, subjectMemberId: this._wsSubjectMemberId || undefined }) });
       const j = await r.json();
       if (!j || !j.ok) return null;
       this._lastTurnId = j.turnId;

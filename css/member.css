@@ -661,6 +661,11 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .iq-workctx-chip{display:inline-flex;align-items:center;gap:0.4rem;font-size:0.74rem;padding:2px 9px;border-radius:9px;background:rgba(124,90,245,0.12);color:var(--accent,#7c5af5)}
 .iq-workctx-chip button{background:none;border:none;color:inherit;cursor:pointer;font-size:0.8rem;line-height:1}
 .iq-submit-effect{font-size:0.76rem;color:var(--text-secondary);margin:0.3rem 0 0.4rem;padding:0.4rem 0.55rem;border-left:2px solid var(--accent,#7c5af5);background:rgba(127,127,127,0.06);border-radius:0 6px 6px 0;line-height:1.5}
+/* Leader member-support subject chip (Cut E) — explicit, visible, clearable context header. */
+.iq-subject{margin:0.2rem 0}
+.iq-subject-chip{display:inline-flex;align-items:center;gap:0.45rem;font-size:0.76rem;padding:4px 11px;border-radius:10px;background:rgba(124,90,245,0.12);color:var(--text-primary);border:1px solid rgba(124,90,245,0.3)}
+.iq-subject-dot{width:7px;height:7px;border-radius:50%;background:var(--accent,#7c5af5);flex:none}
+.iq-subject-chip button{margin-left:0.3rem;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);cursor:pointer;font-size:0.7rem;padding:1px 7px}
 .iq-composer{display:flex;gap:0.5rem;align-items:flex-end;position:sticky;bottom:0;background:var(--bg,#fff);padding-top:0.4rem}
 .iq-composer textarea{flex:1;resize:vertical}
 @media (prefers-color-scheme:dark){

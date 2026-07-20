@@ -165,9 +165,45 @@ into it (`askAboutWork` → focuses the composer, stages a `workItemId`).
   preserved for re-wiring as an authorised attachment capability (documented interface exception —
   not pretended-consolidated). Leader review (`/api/assessments/:id/summarize`) is unchanged (leader-side).
 
+## Leader support (Individual Advisor folded into the one assistant — Cut E)
+A leader uses the **same** IntelliQ assistant with an explicit member-support context — not a separate
+Advisor identity, composer, prompt, or runtime. **Unified identity does not mean unified access: the
+assistant's available evidence changes strictly by requester, purpose, subject and policy.**
+
+- **Audience / purpose.** A turn carrying a `subjectMemberId` is a leader-support turn
+  (`mode: 'leader_support'`, `context.purpose: 'leader_support'`). Without one, the turn is a general
+  `personal_assistance` turn.
+- **Explicit subject selection.** The subject is set only from an authorised entry point (the member
+  profile's "Ask IntelliQ" → `askAboutMember`), shown as a visible, clearable chip, and **revalidated
+  server-side every turn** by `_resolveLeaderSubject` (org membership · active org · requester's visible
+  scope · `view_insights`/`review_checkins`/superadmin). A frontend id is never trusted; a subject is
+  never inferred from pronouns, history, or stale state; it is cleared on fresh render and lens change.
+- **Authorised evidence retrieval.** `_leaderSupportTurn` reuses the unchanged `_advisorKernelReasoning`:
+  evidence via `_canonicalContext({purpose:'leader_support', viewerId, subjectId})` — **private
+  owner-only evidence is excluded before context exists**; **sensitive evidence informs reasoning but is
+  never quoted** (the `informing` tier, redacted from output defence-in-depth); normal evidence is
+  citable. Basis IDs, confidence and limitations stay inspectable.
+- **Directional trajectory.** Reconstructed as words (converging / sustaining / stalled / diverging /
+  unanchored / unknown) — **never a hidden numeric score**. Member aims, team context and org values are
+  reference frames, not fabricated evidence.
+- **Limitations** state when evidence is sparse, stale or absent (the absence of a stated aim is itself
+  the finding). Post-kernel `_composeForAudience(leader_support)` cites only authorised evidence and
+  never raises confidence or drops limits. The response never reveals excluded evidence by implication —
+  the exclusion of private material is never itself disclosed.
+- **Assistance vs. action.** A leader question is **assistance-only** — it produces no writes. It never
+  creates feedback, interventions, assessments, notes, calendar events, or visibility changes; consequential
+  leader actions keep their existing proposal pathways.
+- **No existence leak.** Unknown / unauthorised / cross-org / no-permission subjects all return the same
+  bounded `unavailable` response with no context.
+- **History.** Legacy Advisor threads are a read-only archive (`GET /api/advisor/:memberId/threads`, no
+  reasoning); new leader-support turns live in the unified thread store with explicit audience/purpose/
+  subject metadata.
+
 ## Tests
 `scripts/assistant-runtime-smoke.js` (30 checks) proves the runtime's 21 invariants + 2 auth checks.
-`scripts/assistant-interface-smoke.js` (46 checks) proves the interface contract: every lens routes
+`scripts/advisor-migration-smoke.js` (45 checks) — the privacy-critical leader-support kernel +
+post-kernel guarantees — remain green and unchanged (route-source checks re-pointed at `_leaderSupportTurn`).
+`scripts/assistant-interface-smoke.js` (79 checks) proves the interface contract: every lens routes
 through the one endpoint, lens is a bounded hint (identical basis, only emphasis reorders), one
 IntelliQ identity/one composer/one thread, small prioritised set + More options, private-by-default,
 calendar draft-only, confirm/correct/dismiss, explicit visibility-increase confirmation, generic

@@ -159,14 +159,20 @@ ok('37. a recommendation from PRIVATE basis inherits owner-only visibility', pri
 // ─────────────────────────────────────────────────────────────────────────────
 // F. LEGACY-PATH REMOVAL — the advisor endpoint no longer reads raw signals
 // ─────────────────────────────────────────────────────────────────────────────
+// Cut E: the separate /api/advisor/:memberId/ask route is retired. Leader-support now lives in the
+// unified runtime's _leaderSupportTurn — assert the SAME kernel/post-kernel boundary there, and that
+// the legacy route is gone (no independent Advisor runtime remains).
 const src = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-const askStart = src.indexOf("app.post('/api/advisor/:memberId/ask'");
-const askEnd   = src.indexOf("app.get('/api/advisor/:memberId/threads'");
-const askBody  = src.slice(askStart, askEnd);
-ok('38. the advisor endpoint no longer calls _buildAdvisorContext', askStart > 0 && !askBody.includes('_buildAdvisorContext'));
-ok('39. the advisor endpoint no longer calls _getMemory', !askBody.includes('_getMemory'));
-ok('40. the advisor endpoint does not read raw signals (_gatherSignals/_buildMemberIntelInput)', !askBody.includes('_gatherSignals') && !askBody.includes('_buildMemberIntelInput'));
-ok('41. the advisor endpoint routes through _advisorKernelReasoning + _composeForAudience', askBody.includes('_advisorKernelReasoning') && askBody.includes('_composeForAudience'));
+const lsStart = src.indexOf('function _leaderSupportTurn');
+const lsEnd   = src.indexOf('function _leaderSupportUnavailable');
+const lsBody  = src.slice(lsStart, lsEnd);
+ok('38. the retired POST /api/advisor/:memberId/ask route no longer exists', !src.includes("app.post('/api/advisor/:memberId/ask'"));
+ok('39. leader-support reasoning reads no legacy memory / no raw signals (_getMemory/_gatherSignals/_buildMemberIntelInput)',
+   lsStart > 0 && !lsBody.includes('_getMemory') && !lsBody.includes('_gatherSignals') && !lsBody.includes('_buildMemberIntelInput') && !lsBody.includes('_buildAdvisorContext'));
+ok('40. leader-support is reached ONLY through a server-validated subject (_resolveLeaderSubject)',
+   src.includes('function _resolveLeaderSubject') && src.includes('_resolveLeaderSubject(code, userId, opts.subjectMemberId)'));
+ok('41. leader-support routes through _advisorKernelReasoning + _composeForAudience (kernel + post-kernel preserved)',
+   lsBody.includes('_advisorKernelReasoning') && lsBody.includes('_composeForAudience') && /purpose: 'leader_support'/.test(lsBody));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // G. e2e PROOFS — trajectory reconstruction, empty state, isolation

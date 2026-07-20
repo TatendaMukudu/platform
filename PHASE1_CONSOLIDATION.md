@@ -17,7 +17,7 @@ below is the map; the checklist is the order.
 | B | **`/api/workspace/ask`** rule-based Q&A | `server.js:7524` | A 2nd question-answering *truth path* parallel to `_assistantTurn` (own work-scope detection + private-inventory answers) | **done** ✅ |
 | C | **Studio** chat surface | `/api/studio*` (server) + `_studioHtml`/`_renderAssessments` (member-view) | A 2nd conversational assistant identity + thread for assigned work | **done** ✅ |
 | D | **me-composer** (mood) | `/api/compose` (server) + `#me-composer` (index.html) + `member-view.js:526` | A 2nd capture path (mood/"what happened") outside the unified turn | **done** ✅ |
-| E | **Individual Advisor AI** | `/api/advisor/:memberId/ask` + threads; app.js profile modal | A 2nd chat surface (leader→member). Already canonical (kernel + post-kernel, 45 tests) but still a separate thread/identity | medium — fold the leader "ask about member" into the one runtime with a leader audience, preserving privacy guarantees |
+| E | **Individual Advisor AI** | `/api/advisor/:memberId/ask` + threads; app.js profile modal | A 2nd chat surface (leader→member). Already canonical (kernel + post-kernel, 45 tests) but still a separate thread/identity | **done** ✅ |
 | F | **`memberResults` raw display projections** | `server.js` (several reads) | Display reads that bypass the canonical assessment projection | low/medium — display-only; retire once the canonical projection covers the fields (see ASSISTANT_RUNTIME.md report 4) |
 | G | **Two nav systems** | app.js `navigate()` + `MemberApp.switchTab` pageMap | Parallel routers that disagreed about what `assessments` shows | low — converge routing once surfaces A–D are unified |
 
@@ -52,8 +52,11 @@ or add bespoke capability logic. Consolidate onto the canonical implementation o
   **assistance** (explain/status — no writes), and offers a confirmable **`submit_work`** proposal
   executed by the existing `_submitAssignment` capability — the assistant never writes assessment truth.
   See the Cut C section below. **Shipped.**
-- [ ] **E — fold the Individual Advisor into the one runtime** with a leader audience, preserving the
-  canonical evidence + kernel + post-kernel privacy guarantees the 45 advisor tests lock in.
+- [x] **E — fold the Individual Advisor into the one runtime** with a leader audience. A
+  server-validated `subjectMemberId` on `/api/assistant/turn` → `_leaderSupportTurn`, which reuses the
+  **unchanged** `_advisorKernelReasoning` kernel + `_composeForAudience(leader_support)` post-kernel
+  bound. The separate `/api/advisor/:memberId/ask` route, the `ADVISOR_SYSTEM` persona prompt, and the
+  Advisor composer are removed; the 45 privacy tests are preserved. See the Cut E section below. **Shipped.**
 - [ ] **G — converge the two nav routers** once A–E land; one page router, permission-based.
 - [ ] **F — retire remaining `memberResults` raw display reads** once the canonical projection covers them.
 
@@ -170,12 +173,73 @@ stale-context regression, static guards). `endpoint-smoke` 223 → **217** (Stud
 discuss authorisation migrated to the unified turn; metric-extraction + team-import migrated to
 capability-level; office round-trip kept). All assessment/privacy suites green.
 
+## Cut E — Individual Advisor / leader support (detail)
+
+**Removed (assistant identity):**
+- `POST /api/advisor/:memberId/ask` — the separate Advisor route/runtime.
+- `ADVISOR_SYSTEM` — the "You are the Individual Advisor" persona prompt (a separate identity).
+- Frontend Advisor composer: `askAdvisor`, `renderAdvisorChips`, `setAdvisorQuestion`,
+  `_renderAdvisorAnswer`, `ADVISOR_CHIPS`, and the profile-modal Advisor input/chips/response.
+
+**Preserved (kernel + privacy — unchanged):**
+- **`_advisorKernelReasoning`** — the leader-support kernel: retrieves ONLY leader-authorised canonical
+  evidence via `_canonicalContext({purpose:'leader_support', viewerId, subjectId})` (private excluded
+  upstream), reconstructs a **directional trajectory** (never a score), tiers evidence
+  (citable / informing-not-quoted / private-excluded), retains basis IDs + confidence + limitations.
+- `_composeForAudience(purpose:'leader_support')` post-kernel bound (cites only authorised evidence,
+  never raises confidence or drops limits) and `privacy.redact` defence-in-depth. **All 45
+  advisor-migration privacy tests pass unchanged** (they exercise the kernel + post-kernel directly;
+  only the 4 route-source checks were re-pointed at `_leaderSupportTurn`, assertions un-weakened).
+
+**Unified runtime path** — `_assistantTurn(…, {subjectMemberId})`: when a subject id is present it is
+validated by **`_resolveLeaderSubject`** (org membership · active org · requester's visible scope ·
+`view_insights`/`review_checkins`/superadmin) and, on success, routed to `_leaderSupportTurn`
+(mode `leader_support`, canonical response contract: grounded claims from the kernel citable tier,
+directional `inferred`, `limitations`, empty `primaryActions`, a leader-support `privacyNotice`,
+`subject` metadata, post-kernel `cites`). A separate `_assistantAdvisorAnswer` end-to-end runtime was
+**not** created; the kernel differs by reasoning task, the identity and response contract do not.
+
+**Explicit subject-context model** — one identity, explicit context (not an invisible audience switch):
+- The subject is set ONLY from an authorised entry point (`MemberApp.askAboutMember(id, name)` from the
+  member profile's "Ask IntelliQ"), carried as `subjectMemberId`, and **revalidated server-side every
+  turn** — a frontend id is never trusted.
+- A visible **member chip** (`#iq-subject`) shows the active subject + "answers use only what you're
+  authorised to see" + an **Exit** control. Never silently active.
+- The subject is **cleared on fresh Home render and on lens change**; a general turn (no subject) is
+  `personal_assistance` and can never reuse a stale member. A subject is **never inferred** from
+  pronouns, page history, or stale state.
+
+**No existence leak** — unknown / unauthorised / cross-org / no-permission subjects ALL return the same
+`unavailable` response with no context, so the reply cannot reveal whether a member exists or is in scope.
+
+**No-direct-writes** — a leader question is assistance-only (empty proposals). It never creates
+feedback, interventions, assessments, notes, calendar events, or visibility changes. (The former
+Advisor route auto-recorded a derived-evidence artifact on every ask; the unified leader-support turn
+**does not** — a tightening toward pure assistance. Consequential leader actions keep their existing
+proposal pathways.)
+
+**History** — legacy `advisorThreads` are retained as a **read-only archive**: `GET /api/advisor/
+:memberId/threads` (authorised by visible scope, no reasoning) still serves them, surfaced as "Past
+IntelliQ support notes (archive)" in the profile. New leader-support turns live in `assistantTurns`
+with explicit `audience:'leader'`, `purpose:'leader_support'`, `subjectMemberId` metadata — subject
+and audience boundaries retained; no records merged or rewritten.
+
+**Deferred (leader-side, not this cut):** leader team-import UI and leader assessment management remain
+as-is (they do not depend on the Advisor runtime); their interface work stays deferred and documented.
+
+**Test evidence:** `assistant-interface-smoke` 62 → **79** (E1–E17 + regressions: leader_support via the
+one endpoint, canonical contract, directional-not-score, private-never-leaks, assistance-only,
+server-validated subject, cross-org/unknown no-leak-parity, A→B no bleed, general-turn-no-stale-subject,
+pronoun-no-subject-no-leak, static guards). `advisor-migration-smoke` **45/45** preserved. Full truth
+layer green.
+
 ## Coexistence still in place (documented debt)
 - `/api/workspace/ask` (server) — a **thin shim** over the one `_assistantAnswer` helper (cut B);
   no parallel reasoning remains. Retire once no client depends on the legacy `{answer,…}` shape.
 - Attachment-ingestion UI + voice, and leader team-import UI — capabilities preserved as functions,
-  their entry points deferred (see Cut C deferred exceptions above).
-- `studioThreads` — read-only archive of legacy Studio conversations (not surfaced).
+  their entry points deferred (see Cut C / Cut E deferred exceptions).
+- `studioThreads` and `advisorThreads` — read-only archives of legacy Studio / Advisor conversations
+  (served read-only, no live runtime).
 
 Every proactive/learning capability (Phases 2–3) is built **only after** the truth path is single —
 a proactive insight that could be generated by two different runtimes is not trustworthy.
