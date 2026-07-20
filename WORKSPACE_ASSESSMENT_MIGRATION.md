@@ -66,5 +66,65 @@ slice will point the advisor at `_assessmentEvidenceFor`.
 proves: commitment/submission/revision/assessment/observation emission, append-only + revision
 lineage, complete-object assessment, kernel progress reasoning, privacy classification,
 canonical/legacy consistency, single-signal (no double count), backwards-compatible projection,
-and the single-adapter path. Full truth layer green (advisor 45, check-in 59, adapters 12,
-evidence 21, endpoints 222, all suites).
+and the single-adapter path.
+
+---
+
+# Slice 2 — Complete-Assessment consumption in the unified assistant
+
+**Scope:** connect the MyWorkspace assistant/advisor and the relevant numeric reasoning to the
+complete canonical Assessment lifecycle. Evidence consumption only — no scenario/`memberResults`
+convergence.
+
+## What changed
+- **Authorised complete-assessment reader** — `_assessmentEvidenceFor` is documented + hardened
+  as an authorised reader (org boundary, subject, purpose, visibility, authorship); a private
+  assessment is admitted only for its owner under a personal purpose, never for leader/org.
+- **Bounded assessment kernel state** — `_assessmentKernelState(code, subjectId, {purpose, viewerId})`
+  reconstructs the developmental journey from commitment/submission/revision/assessment/observation
+  evidence: latest complete assessment, comparable history, score + scale, rubric, assessor,
+  feedback themes (dimensions, never raw text), iterations, feedback-acted-upon, what changed,
+  direction (`improvement | decline | stable | incomparable | unknown`), confidence, limitations,
+  and basis IDs. Assessments are compared only when scale **and** rubric match; otherwise
+  `incomparable`. A missing scale/rubric yields a limitation, not an interpretation.
+- **Scale-aware reasoning** — the naked `score < 50` concern (which assumed a percentage) is
+  replaced, in `_buildMemberIntelInput` and `_memberAlert`, by `_assessmentConcerns`: a score
+  below **half of its own scale**, read from canonical evidence. `45/50` no longer triggers the
+  rule that `45/100` does; an unknown scale raises no false concern.
+- **Advisor integration** — `_advisorKernelReasoning` now consumes the complete Assessment
+  (scale-aware, journey-aware) instead of a `/100`-hardcoded score; feedback is surfaced as
+  themes and "acted upon", never as quoted text. Assessment basis IDs join the kernel artifact.
+
+## Double-counting audit (proven)
+One real assessment is counted **once** in each place: the legacy value signal (unchanged) feeds
+the self-relative numeric streams; concern detection reads **only** canonical assessments
+(scale-aware); the assistant reads the complete object. No path counts the same assessment twice.
+Canonical assessments remain **unpromoted**, so they never enter the numeric/aggregate streams
+alongside the legacy signal.
+
+## Privacy
+Three boundaries preserved: private assessments/submissions excluded before leader-support kernel
+state is formed; owner may use their own under personal assistance; raw feedback / submission text
+is never quoted through the assistant (only structural themes). The feedback observation is
+unpromoted, so it is not reachable through the gateway either.
+
+## Tests
+`scripts/assessment-consumption-smoke.js` (16 checks) proves all 12 invariants:
+live-without-backfill, score+scale together, `45/50 ≠ 45/100`, incomparable rubrics, revision
+responds-to-feedback, private excluded from leader-support, sensitive feedback not quoted,
+no double-count, missing scale→limitation, inspectable basis IDs, and unchanged non-assessment
+advisor behaviour. Full truth layer green (advisor 45, check-in 59, workspace-assessment 30,
+assessment-consumption 16, endpoints 222, adapters 12, evidence 21, all suites).
+
+## Remaining consumers still dependent on legacy score signals
+- **`_buildMemberIntelInput` numeric capability streams** (`agents.crossSignal` /
+  `primitives.structuralPatterns`) still read the legacy `source:'assessment'` value signal —
+  intentionally, because they reason **self-relatively** (value vs the member's own baseline), so
+  they are scale-safe and must not be double-fed by promoting canonical assessments.
+- **`_personStrengths` / `_studioMemberRead` development-area parsing** still regex-parse
+  `Strengths:/Development:` from the legacy **scenario** (`memberResults`) `source:'assessment'`
+  text signals — that is the scenario/`memberResults` representation, deferred to the next slice.
+- The **legacy return score signal** is preserved for the above self-relative streams and remains
+  non-authoritative.
+Severing these requires the scenario/`memberResults` convergence (next slice) so a single
+canonical representation feeds every consumer.

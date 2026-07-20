@@ -2906,9 +2906,10 @@ function _memberAlert(code, u) {
     if (recent < 2.5) return { severity: 'medium', reason: 'low mood recently', action: 'A supportive conversation may help.' };
   }
 
-  // Dipped result (strong signal)
-  const lowAssessment = _gatherSignals(code, 'member', u.id, 20)
-    .find(s => s.source === 'assessment' && s.valueNum != null && s.valueNum < 50 && (Date.now() - new Date(s.ts).getTime()) < 30 * 86400000);
+  // Dipped result — SCALE-AWARE from canonical assessment evidence (a score below half of
+  // its OWN scale), not the naked `valueNum < 50` percentage assumption on the legacy signal.
+  const lowAssessment = _assessmentConcerns(code, u.id)
+    .some(c => (Date.now() - c.t) < 30 * 86400000);
   if (lowAssessment) return { severity: 'medium', reason: 'a recent result dipped', action: 'Review the assessment together and set one focus.' };
 
   if (days >= 10) return { severity: 'medium', reason: `quiet for ${days} days`, action: 'A quick nudge would help re-engage them.' };
@@ -3071,12 +3072,12 @@ function _buildMemberIntelInput(code, u, now) {
   })).filter(s => !isNaN(s.t));
 
   // Concern signals — timestamps only (low-mood check-ins + dipped results).
+  // MIGRATED: a dipped assessment is now SCALE-AWARE from CANONICAL evidence (a score below
+  // half of its OWN scale) — never the naked `valueNum < 50` on the legacy signal, which
+  // wrongly assumed a percentage. An unknown scale raises no false concern.
   const concernSeries = [];
   moodSeries.forEach(p => { if (p.mood <= 2) concernSeries.push({ t: p.t }); });
-  sigs.forEach(s => {
-    const t = new Date(s.ts).getTime();
-    if (!isNaN(t) && s.source === 'assessment' && s.valueNum != null && s.valueNum < 50) concernSeries.push({ t });
-  });
+  try { _assessmentConcerns(code, u.id).forEach(c => concernSeries.push({ t: c.t })); } catch (_) {}
 
   // "Helping / among-others" proxy — timestamps only: shared notes the member
   // authored + messages they sent to a group. No content is read.
@@ -6828,9 +6829,13 @@ function _canonicaliseAssessment(code, a) {
   return _ingestAdapterEvidence(code, capAdapters.AssessmentAdapter.assessment(a, { now: new Date().toISOString(), submissionId }));
 }
 
-/* THE complete-Assessment reader. Reads canonical assessment evidence DIRECTLY (like the
-   mood series) so reasoning consumes the whole object — assessor, rubric, scale, feedback —
-   never an isolated number. Purpose-scoped: private/owner rules mirror the gateway. */
+/* THE authorised complete-Assessment reader. Reads canonical assessment evidence DIRECTLY
+   (like the mood series) so reasoning consumes the whole object — assessor, rubric, scale,
+   feedback — never an isolated number. It is NOT an unrestricted raw reader: it enforces
+   the ORG boundary (evidenceLog[code]), the SUBJECT, the PURPOSE, and VISIBILITY — a private
+   assessment is admitted only for the owner under a personal purpose, and never for a
+   leader-facing purpose. Authorship (assessorId) is preserved. Requester scope (can this
+   viewer see this subject) is enforced by the calling endpoint; pass requesterId for audit. */
 function _assessmentEvidenceFor(code, subjectId, opts = {}) {
   const purpose = opts.purpose || 'leader_support';
   const personal = PERSONAL_PURPOSES.includes(purpose);
@@ -6840,10 +6845,11 @@ function _assessmentEvidenceFor(code, subjectId, opts = {}) {
     if (env.status !== 'active') return false;
     if (!(env.attributes && env.attributes.primitive === 'assessment')) return false;
     if (subjectId && env.subjectId !== subjectId) return false;
+    // Private assessment → owner-only, personal purpose only. Leader/org purposes NEVER see it.
     if (env.visibility === 'private') return personal && !!viewerId && env.ownerRef === viewerId;
-    return true;   // assessments are normal-visibility work judgements
+    return true;   // normal/sensitive work judgements are admissible for the scoped purpose
   }).map(env => ({
-    evidenceId: env.id, subjectId: env.subjectId, observedAt: env.observedAt,
+    evidenceId: env.id, subjectId: env.subjectId, observedAt: env.observedAt, visibility: env.visibility,
     assessmentId: env.attributes.assessmentId, submissionId: env.attributes.submissionId,
     assessorId: env.attributes.assessorId, rubric: env.attributes.rubric,
     score: env.attributes.score != null ? env.attributes.score : env.value, scoreScale: env.attributes.scoreScale,
@@ -6851,6 +6857,92 @@ function _assessmentEvidenceFor(code, subjectId, opts = {}) {
     limitations: env.attributes.limitations, title: (env.label || '').replace(/^Assessment score:\s*/, ''),
     __canonical: true,
   })).sort((x, y) => new Date(x.observedAt) - new Date(y.observedAt));
+}
+
+/* The numeric ceiling of a score scale ('0-100' → 100, '0-50' → 50); null when unknown. */
+function _scaleMax(scale) {
+  const m = String(scale || '').match(/(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)/);
+  return m ? Number(m[2]) : null;
+}
+/* Two assessments are comparable only when they share a scale AND a rubric — never compare
+   across incompatible scales/rubrics/purposes. */
+function _assessmentComparableKey(a) {
+  const rubric = String(a.rubric || '').toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 80);
+  return `${a.scoreScale || '?'}::${rubric || '?'}`;
+}
+/* Scale-aware LOW-assessment concern timestamps from CANONICAL assessments (never the naked
+   legacy signal): a score below HALF of its OWN scale. So 45/50 and 45/100 are judged on
+   their own scales, and an unknown scale raises NO false concern (a limitation, not a flag). */
+function _assessmentConcerns(code, subjectId) {
+  return _assessmentEvidenceFor(code, subjectId, { purpose: 'organisation_reasoning' })
+    .filter(a => { const max = _scaleMax(a.scoreScale); return max && Number.isFinite(a.score) && a.score < max * 0.5; })
+    .map(a => ({ t: new Date(a.observedAt).getTime(), evidenceId: a.evidenceId }));
+}
+
+/* BOUNDED ASSESSMENT KERNEL STATE — the developmental journey reconstructed from canonical
+   commitment/submission/revision/assessment/observation evidence (never a naked score).
+   Purpose-scoped (private excluded before the state is formed for leader/org purposes).
+   Never compares assessments with incompatible scales/rubrics; retains basis IDs + limits. */
+function _assessmentKernelState(code, subjectId, opts = {}) {
+  const purpose  = opts.purpose || 'leader_support';
+  const viewerId = opts.viewerId || null;
+  const personal = PERSONAL_PURPOSES.includes(purpose);
+  const log = evidenceLog[code] || [];
+  const admit = env => {
+    if (env.status !== 'active' || env.subjectId !== subjectId) return false;
+    if (env.visibility === 'private') return personal && !!viewerId && env.ownerRef === viewerId;
+    return true;
+  };
+  const byPrim = p => log.filter(e => e.attributes && e.attributes.primitive === p && admit(e));
+  const assessments = _assessmentEvidenceFor(code, subjectId, { purpose, viewerId });   // complete, purpose-scoped
+  const submissions = byPrim('submission');
+  const revisions   = byPrim('revision');
+  const observations = byPrim('observation');
+
+  const latest = assessments.length ? assessments[assessments.length - 1] : null;
+  const comparable = latest ? assessments.filter(a => _assessmentComparableKey(a) === _assessmentComparableKey(latest)) : [];
+
+  let direction = 'unknown', confidence = null;
+  const limitations = [];
+  if (!latest) { limitations.push('no assessment evidence yet'); }
+  else if (!latest.scoreScale || !latest.rubric) { limitations.push('assessment is missing its scale or rubric — no interpretation drawn'); }
+  else if (comparable.length >= 2) {
+    const first = comparable[0].score, last = comparable[comparable.length - 1].score;
+    const max = _scaleMax(latest.scoreScale) || 100;
+    const thr = max * 0.05;                                   // 5% of the scale
+    direction = (last - first) > thr ? 'improvement' : (last - first) < -thr ? 'decline' : 'stable';
+    confidence = comparable.length >= 3 ? 'medium' : 'low';
+  } else if (assessments.length >= 2) {
+    direction = 'incomparable';
+    limitations.push('assessments used different scales or rubrics — a direct comparison is not established');
+  } else {
+    limitations.push('only one assessment — no comparison possible');
+  }
+
+  const feedbackActedUpon = revisions.some(r => r.attributes && r.attributes.respondsToAssessmentId);
+  const latestAssignmentId = latest ? String(latest.assessmentId || '').replace(/^as_/, '') : null;
+  const iterations = latestAssignmentId
+    ? submissions.filter(s => s.attributes.assignmentId === latestAssignmentId).length
+    : submissions.length;
+  // Feedback THEMES = the dimensions assessed (structural), never the raw feedback text.
+  const feedbackThemes = [...new Set(observations.map(o => o.attributes && o.attributes.dimension).filter(Boolean))].slice(0, 5);
+  let whatChanged = null;
+  if (feedbackActedUpon && iterations >= 2) whatChanged = `resubmitted (iteration ${iterations}) after feedback${feedbackThemes.length ? ` on ${feedbackThemes[0]}` : ''}`;
+
+  const basisIds = [...assessments.map(a => a.evidenceId), ...submissions.map(s => s.id),
+    ...revisions.map(r => r.id), ...observations.map(o => o.id)];
+
+  const kernelArt = _recordKernelDerivation(code, {
+    type: 'derived_pattern',
+    result: { subject: subjectId, direction,
+      latest: latest ? { score: latest.score, scoreScale: latest.scoreScale, hasRubric: !!latest.rubric } : null,
+      assessmentCount: assessments.length, comparableCount: comparable.length, iterations, feedbackActedUpon, feedbackThemes },
+    basis: basisIds.length ? basisIds : ['none'],
+    confidence: confidence || 'low', limitations, detector: 'assessment-kernel',
+  });
+
+  return { subjectId, purpose, latest, assessments, comparable, direction, confidence,
+    iterations, feedbackActedUpon, feedbackThemes, whatChanged, limitations, basisIds, kernelArt };
 }
 
 /* Kernel reasoning over one assignment's canonical evidence. Answers the four questions
@@ -10982,8 +11074,10 @@ function _advisorKernelReasoning(code, member, requesterId) {
   // 2. KERNEL STATE — directional trajectory reconstructed from canonical metrics.
   const moods = evidence.filter(e => e.type === 'metric' && /mood/i.test(e.label || '') && Number.isFinite(Number(e.value)))
     .sort((a, b) => new Date(a.observedAt || 0) - new Date(b.observedAt || 0));
-  const scores = evidence.filter(e => e.type === 'metric' && /assessment/i.test(e.label || '') && Number.isFinite(Number(e.value)))
-    .sort((a, b) => new Date(a.observedAt || 0) - new Date(b.observedAt || 0));
+  // Assessment reasoning consumes the COMPLETE canonical Assessment lifecycle (scale-aware,
+  // journey-aware), never a naked score. Private assessments/submissions are excluded here
+  // because the purpose is leader_support. Raw feedback text is never quoted — only structure.
+  const assess = _assessmentKernelState(code, memberId, { purpose: 'leader_support', viewerId: requesterId });
   const observations = evidence.filter(e => e.type === 'observation');
 
   const goals    = normalizeMemberGoals(_memberGoalsFor(code, member));
@@ -11006,11 +11100,12 @@ function _advisorKernelReasoning(code, member, requesterId) {
     limitations.push('no stated member aim captured yet — the absence is itself the finding');
   }
 
-  // 3. BASIS — the evidence IDs the kernel state rests on (retained on the artifact).
-  const basis = evidence.map(e => e.evidenceId);
+  // 3. BASIS — the evidence IDs the kernel state rests on (mood context + assessment journey).
+  const basis = [...evidence.map(e => e.evidenceId), ...assess.basisIds];
   const kernelArt = _recordKernelDerivation(code, {
     type: 'derived_pattern',
-    result: { subject: memberId, trajectory, anchored, moodCount: moods.length, scoreCount: scores.length, observationCount: observations.length },
+    result: { subject: memberId, trajectory, anchored, moodCount: moods.length,
+      assessmentCount: assess.assessments.length, assessmentDirection: assess.direction, observationCount: observations.length },
     basis: basis.length ? basis : ['none'],
     confidence, limitations, detector: 'advisor-kernel',
   });
@@ -11029,14 +11124,25 @@ function _advisorKernelReasoning(code, member, requesterId) {
   if ((orgGoals[code] || []).length)  citable.push(`ORG priorities: ${orgGoals[code].map(g => g.text).filter(Boolean).slice(0, 4).join('; ')}`);
 
   // The directional kernel state — words, never a grade.
-  citable.push(`Kernel state: trajectory ${trajectory} (confidence ${confidence}) across ${moods.length} mood check-in(s), ${scores.length} assessment(s), ${observations.length} observation(s).`);
+  citable.push(`Kernel state: trajectory ${trajectory} (confidence ${confidence}) across ${moods.length} mood check-in(s), ${assess.assessments.length} assessment(s), ${observations.length} observation(s).`);
   if (moods.length) {
     const recent = moods.slice(-10).map(m => Number(m.value));
     citable.push(`Recent mood: ${Math.round((recent.reduce((a, b) => a + b, 0) / recent.length) * 10) / 10}/5 across ${recent.length} check-in(s) (aggregate).`);
   } else {
     citable.push('No check-in mood data yet.');
   }
-  scores.slice(-3).forEach(s => citable.push(`${s.label}: ${s.value}/100.`));
+  // Assessment — SCALE-AWARE, journey-aware, and NEVER quoting the raw feedback text.
+  if (assess.latest) {
+    const L = assess.latest, max = _scaleMax(L.scoreScale);
+    citable.push(`Latest assessment: ${L.score}${max ? '/' + max : (L.scoreScale ? ' (' + L.scoreScale + ')' : '')}${L.rubric ? ` · rubric: ${String(L.rubric).slice(0, 80)}` : ' · no rubric on record'}.`);
+    const dirWord = { improvement: 'improving across comparable attempts', decline: 'declining across comparable attempts',
+      stable: 'stable across comparable attempts', incomparable: 'not directly comparable (different scale/rubric)',
+      unknown: 'no comparison established yet' }[assess.direction];
+    citable.push(`Assessment trajectory: ${dirWord}${assess.confidence ? ` (confidence ${assess.confidence})` : ''}.`);
+    if (assess.feedbackActedUpon) citable.push(`Feedback was acted on: ${assess.whatChanged || 'a revision followed the feedback'} — but the outcome may not yet be reassessed.`);
+    if (assess.feedbackThemes.length) citable.push(`Feedback dimensions (themes only, not quoted): ${assess.feedbackThemes.join(', ')}.`);
+    assess.limitations.forEach(l => citable.push(`Assessment limitation: ${l}.`));
+  }
 
   // Free-text observations: normal → quotable; sensitive → informs reasoning, never quoted.
   observations.forEach(o => {
@@ -11756,7 +11862,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: check-in hardening (frozen signal, reconciliation, classification audit)
   _emitCheckinParticipationSignal, CHECKIN_SIGNAL_CONTRACT, _checkinAggregateReconciliation, _checkinClassificationAudit, checkinClassificationLog,
   // exported for the truth layer: assigned-work → canonical evidence (MyWorkspace)
-  _canonicaliseCommitment, _canonicaliseSubmission, _canonicaliseAssessment, _assessmentEvidenceFor, _assignmentProgress };
+  _canonicaliseCommitment, _canonicaliseSubmission, _canonicaliseAssessment, _assessmentEvidenceFor, _assignmentProgress,
+  // exported for the truth layer: complete-assessment consumption (scale-aware kernel state)
+  _assessmentKernelState, _assessmentConcerns, _scaleMax, _assessmentComparableKey, _buildMemberIntelInput };
 
 if (require.main === module) (async () => {
   try {
