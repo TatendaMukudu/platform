@@ -122,6 +122,15 @@ const server = app.listen(0, async () => {
     ok('  · a visibility increase goes through the explicit confirmation mechanism', /confirmVisibilityIncrease/.test(mv));
     ok('  · a small default set with a "More options" affordance', /More options/.test(mv) && /moreActions/.test(mv));
 
+    // ─── Phase 1 (finish the OS): exactly one member composer surface ──────────
+    const appjs = read('js/app.js');
+    ok('P1. the duplicate app.js MyWorkspace composer is removed (one composer object)',
+       !/const\s+MyWorkspace\s*=\s*\{/.test(appjs) && !/window\.MyWorkspace\s*=/.test(appjs) && /\[REMOVED\] MyWorkspace/.test(appjs));
+    ok('P1. the second composer input (mw-input) no longer exists in app.js',
+       !/id="mw-input"|getElementById\('mw-input'\)/.test(appjs));
+    ok('P1. the "MyWorkspace" nav slot routes to the assigned-work surface, not a 2nd composer',
+       /page==='assessments'\)\s*\{\s*if\(typeof MemberApp[^}]*_renderAssessments\(\)/.test(appjs) && !/MyWorkspace\.render\(\)/.test(appjs));
+
     console.log(`\n=== assistant-interface-smoke: ${pass} passed, ${fail} failed ===\n`);
     server.close(() => process.exit(fail ? 1 : 0));
   } catch (e) { console.error(e); server.close(() => process.exit(1)); }
