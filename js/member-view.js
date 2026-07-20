@@ -1109,7 +1109,10 @@ const MemberApp = {
         scenarioId: this._scenario.id,
         result,
       }),
-    }).catch(() => {});
+    })
+      // After the result is canonicalised server-side, load the SERVER-supplied verdict.
+      .then(() => this._loadAssessmentPresentation(this._userId))
+      .catch(() => {});
 
     const msgs = document.getElementById('sc-messages');
     const dims = ['ethical_reasoning','stakeholder_awareness','pressure_response','self_awareness'];
@@ -1122,8 +1125,8 @@ const MemberApp = {
       <div class="results-header-title">Scenario Complete</div>
       <div class="results-header-sub">Here's how you did, ${this._escape(this._name)}</div>
       <div class="score-ring-large">${this._svgRing(score.overall, color, 120)}</div>
-      <div style="font-size:1rem;font-weight:700;margin-bottom:0.3rem;color:${color}">${label}</div>
-      <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:1.5rem">Overall IntelliQ Score</div>
+      <div data-assessment-verdict style="font-size:1rem;font-weight:700;margin-bottom:0.3rem;color:${color}">${this._escape(label)}</div>
+      <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:1.5rem">Overall IntelliQ Score${score.overall != null ? ` · ${score.overall}/100` : ''}</div>
       ${score.summary ? `<div class="results-summary"><div class="card-label" style="margin-bottom:0.4rem">Assessment</div><p>${this._escape(score.summary)}</p></div>` : ''}
       <div class="dim-grid">
         ${dims.map(d => `
@@ -2623,18 +2626,37 @@ const MemberApp = {
     if (badge) { badge.textContent = count; badge.style.display = count ? 'inline' : 'none'; }
   },
 
+  // NEUTRALIZED: the client no longer derives a colour or a verdict from a raw score. Numbers
+  // render neutrally; the authoritative verdict/label/colour come from the server assessment
+  // presentation state (see _loadAssessmentPresentation + verdictStyle).
   _scoreColor(v) {
-    if (v >= 80) return '#4ff77a';
-    if (v >= 65) return '#4f8ef7';
-    if (v >= 50) return '#f7b24f';
-    return '#f74f4f';
+    return (v === null || v === undefined) ? 'var(--text-muted)' : 'var(--text)';
   },
 
   _scoreLabel(v) {
-    if (v >= 85) return { label: 'Exceptional', color: '#4ff77a' };
-    if (v >= 70) return { label: 'Strong',      color: '#4f8ef7' };
-    if (v >= 55) return { label: 'Developing',  color: '#f7b24f' };
-    return              { label: 'Needs Work',  color: '#f74f4f' };
+    // No threshold verdict. A neutral, non-judgmental placeholder; server verdict is authoritative.
+    return { label: (v == null ? 'Score unavailable' : `Score ${v} recorded`), color: 'var(--text)' };
+  },
+
+  /* Fetch the SERVER-SUPPLIED assessment presentation state for a member and render its verdict
+     into any [data-assessment-verdict] slot. The client maps the bounded verdict enum to a badge
+     style via verdictStyle — it never maps a raw score to a judgment. Fallback (no presentation):
+     the raw score + scale is shown with "interpretation unavailable", never a client verdict. */
+  async _loadAssessmentPresentation(memberId) {
+    try {
+      const r = await fetch(`/api/assessments/${memberId || this._userId}/presentation`, { headers: this._authHeaders() });
+      if (!r.ok) return null;
+      const j = await r.json();
+      const p = j && j.presentation;
+      if (!p) return null;
+      document.querySelectorAll('[data-assessment-verdict]').forEach(el => {
+        const st = (typeof verdictStyle === 'function') ? verdictStyle(p.verdict) : { color: 'var(--text)', text: p.label };
+        el.textContent = p.label || st.text;
+        el.style.color = st.color;
+        if (p.scoreDisplay) el.setAttribute('title', p.scoreDisplay);
+      });
+      return p;
+    } catch (_) { return null; }
   },
 
   _svgRing(score, color, size = 100) {

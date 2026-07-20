@@ -2,19 +2,36 @@
    PLATFORM — UI COMPONENTS & HELPERS
    ============================================================ */
 
-/* ── COLOUR UTILS ────────────────────────────────────────── */
+/* ── SCORE PRESENTATION ───────────────────────────────────────
+   Score MEANING is SERVER-SUPPLIED. The client renders truth; it must never derive a verdict
+   or a judgment colour from a raw number (a number alone is not a verdict, and the client does
+   not know the scale/rubric/comparability). These render numbers NEUTRALLY; assessment meaning
+   comes from the server assessment presentation state (verdict → verdictStyle). */
 function scoreColor(v){
-  if (v === null || v === undefined) return 'var(--text-muted)';
-  if(v >= 80) return 'var(--success)';
-  if(v >= 60) return 'var(--accent4)';
-  return 'var(--danger)';
+  // NEUTRALIZED: no score threshold → colour. Numbers render neutrally; only a SERVER verdict
+  // may carry a semantic colour (see verdictStyle).
+  return (v === null || v === undefined) ? 'var(--text-muted)' : 'var(--text)';
 }
-function scoreLabel(v){
-  if(v >= 85) return 'Excellent';
-  if(v >= 70) return 'Good';
-  if(v >= 55) return 'Average';
-  return 'Needs Support';
+function scoreLabel(){
+  // NEUTRALIZED: qualitative verdicts are server-supplied (assessmentPresentationState.verdict),
+  // never threshold-derived on the client.
+  return '';
 }
+/* The ONLY sanctioned score-to-visual mapping: a BOUNDED SERVER verdict (already scale-,
+   rubric- and comparability-aware) → a badge style. Never maps a raw score. */
+const VERDICT_STYLE = {
+  strong:              { color: 'var(--success)',    text: 'Strong result' },
+  meeting_expectation: { color: 'var(--success)',    text: 'Meeting expectation' },
+  improving:           { color: 'var(--success)',    text: 'Improving' },
+  stable:              { color: 'var(--accent4)',    text: 'Stable' },
+  developing:          { color: 'var(--accent4)',    text: 'Developing' },
+  incomparable:        { color: 'var(--text-muted)', text: 'Not directly comparable' },
+  uninterpreted:       { color: 'var(--text-muted)', text: 'Interpretation unavailable' },
+  unknown:             { color: 'var(--text-muted)', text: 'No assessment yet' },
+  declining:           { color: 'var(--danger)',     text: 'Declining' },
+  concern:             { color: 'var(--danger)',     text: 'Needs attention' },
+};
+function verdictStyle(verdict){ return VERDICT_STYLE[verdict] || VERDICT_STYLE.unknown; }
 function alertDotColor(type){
   return type==='danger'?'red' : type==='warning'?'yellow' : 'green';
 }
@@ -231,7 +248,9 @@ function generateRecommendation(member, metrics){
       recs.push(`Wellness score of ${member.wellnessScore} requires attention. Recommend a structured wellbeing check-in programme.`);
     }
     if (member.iqScore != null) {
-      recs.push(`IntelliQ score of ${member.iqScore} indicates ${scoreLabel(member.iqScore).toLowerCase()} decision intelligence. ${member.iqScore < 70 ? 'Additional scenario training is advised.' : 'Consider advanced scenario modules.'}`);
+      // NEUTRALIZED: no client-side verdict/threshold from the raw score — state it factually
+      // and defer interpretation to the server assessment presentation state.
+      recs.push(`IntelliQ score of ${member.iqScore} recorded from scenario practice. Open the assessment breakdown for the server-supplied interpretation and next steps.`);
     }
 
     return recs;

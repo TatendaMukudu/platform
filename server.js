@@ -5009,6 +5009,24 @@ app.post('/api/assessments/:id/return', requireAuth, (req, res) => {
   res.json({ ok: true, assignment: _publicAssignment(a) });
 });
 
+/* GET /api/assessments/:memberId/presentation — the SERVER-SUPPLIED assessment presentation
+   state. Authorised + purpose-scoped: the member gets their own (personal assistance, may
+   include their private assessments); a leader gets leader-support (private excluded before the
+   state is formed). The frontend renders this verdict/label — it never re-judges a raw score. */
+app.get('/api/assessments/:memberId/presentation', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const memberId = req.params.memberId;
+  if (!orgUsers[code]?.[memberId]) return res.status(404).json({ error: 'Member not found' });
+  const isSelf = memberId === userId;
+  if (!isSelf) {
+    if (!getVisibleUserIds(code, userId).includes(memberId)) return res.status(403).json({ error: 'Member not in your visible scope' });
+    if (!(orgUsers[code]?.[userId]?.role === 'superadmin' || _userHasPerm(code, userId, 'view_insights') || _userHasPerm(code, userId, 'review_checkins')))
+      return res.status(403).json({ error: 'Permission denied: view_insights required' });
+  }
+  const purpose = isSelf ? 'personal_assistance' : 'leader_support';
+  res.json({ ok: true, presentation: _assessmentPresentationState(code, memberId, { purpose, viewerId: userId }) });
+});
+
 /* POST /api/assessments/:id/summarize — IntelliQ reads the person's responses and,
    grading against HOW THE LEADER WANTED IT DONE (the guidance), proposes a summary,
    a reasoning score, and strengths/development. The leader edits and returns — the
@@ -6997,6 +7015,53 @@ function _assessmentKernelState(code, subjectId, opts = {}) {
 
   return { subjectId, purpose, latest, assessments, comparable, direction, confidence,
     iterations, feedbackActedUpon, feedbackThemes, whatChanged, limitations, basisIds, kernelArt };
+}
+
+/* SERVER-SUPPLIED ASSESSMENT PRESENTATION STATE — a bounded, audience-safe projection of the
+   assessment kernel state. The frontend RENDERS this; it must never re-derive a verdict from a
+   raw score. The verdict is a small ENUM (scale-aware, so 45/50 ≠ 45/100), scoreDisplay keeps
+   the original score + its own scale (never assumes /100), and no raw feedback/response text is
+   exposed. Created only after authorised, purpose-scoped retrieval (private excluded for leaders). */
+const ASSESSMENT_VERDICTS = ['strong', 'meeting_expectation', 'developing', 'concern', 'improving', 'declining', 'stable', 'incomparable', 'uninterpreted', 'unknown'];
+function _assessmentPresentationState(code, subjectId, opts = {}) {
+  const st = _assessmentKernelState(code, subjectId, opts);
+  const L = st.latest;
+  const max = L ? _scaleMax(L.scoreScale) : null;
+  let verdict = 'unknown';
+  if (!L) verdict = 'unknown';
+  else if (!L.scoreScale || !L.rubric || max == null) verdict = 'uninterpreted';
+  else if (st.direction === 'improvement') verdict = 'improving';
+  else if (st.direction === 'decline') verdict = 'declining';
+  else if (st.direction === 'stable') verdict = 'stable';
+  else if (st.direction === 'incomparable') verdict = 'incomparable';
+  else {                                        // single comparable-less assessment → point-in-time, SCALE-AWARE
+    const ratio = L.score / max;
+    verdict = ratio >= 0.85 ? 'strong' : ratio >= 0.6 ? 'meeting_expectation' : ratio >= 0.4 ? 'developing' : 'concern';
+  }
+  const LABEL = {
+    strong: 'Strong result', meeting_expectation: 'Meeting the expectation for this rubric',
+    developing: 'Developing against this rubric', concern: 'Below the expectation for this rubric',
+    improving: 'Improving across comparable attempts', declining: 'Declining across comparable attempts',
+    stable: 'Stable across comparable attempts', incomparable: 'Different rubric — not directly comparable',
+    uninterpreted: 'Score recorded — scale/rubric unavailable', unknown: 'No assessment recorded yet',
+  };
+  let label = LABEL[verdict];
+  if (L && st.feedbackActedUpon) label += ' · feedback acted on, outcome not yet reassessed';
+  const scoreDisplay = !L ? null
+    : (max != null ? `${L.score} / ${max}` : 'Score recorded — scale unavailable');
+  return {
+    subjectId, assessmentId: L ? L.assessmentId : null,
+    scoreDisplay, verdict, label,
+    direction: st.direction,
+    comparable: st.comparable.length >= 2,
+    confidence: st.confidence,
+    limitations: st.limitations,
+    basisIds: st.basisIds,
+    revisionState: { iterations: st.iterations, feedbackActedUpon: st.feedbackActedUpon, whatChanged: st.whatChanged },
+    feedbackActedUpon: st.feedbackActedUpon,
+    // Themes are the assessed DIMENSIONS only (structural) — never raw feedback text.
+    feedbackThemes: st.feedbackThemes,
+  };
 }
 
 /* Kernel reasoning over one assignment's canonical evidence. Answers the four questions
@@ -11938,7 +12003,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: complete-assessment consumption (scale-aware kernel state)
   _assessmentKernelState, _assessmentConcerns, _scaleMax, _assessmentComparableKey, _buildMemberIntelInput,
   // exported for the truth layer: scenario/memberResults assessment convergence
-  _canonicaliseScenarioResult, _capabilityObservations, _capabilityDims, _personStrengths, memberResults };
+  _canonicaliseScenarioResult, _capabilityObservations, _capabilityDims, _personStrengths, memberResults,
+  // exported for the truth layer: server-supplied assessment PRESENTATION state
+  _assessmentPresentationState, ASSESSMENT_VERDICTS };
 
 if (require.main === module) (async () => {
   try {

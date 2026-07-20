@@ -212,3 +212,67 @@ workspace-assessment 30, advisor 45, check-in 59, endpoints 222, all suites).
 - **Frontend `_scoreLabel`/`_scoreColor`** still derive a client-side qualitative label from a score
   (flagged in the original inventory) — a separate frontend concern, not touched here.
 No unidentified legacy value-signal consumer remains in the reasoning paths.
+
+---
+
+# Slice 4 — Server-supplied assessment presentation state
+
+**Scope:** remove client-side qualitative judgment of assessment scores. Assessment *meaning*
+is supplied by the authorised server/kernel state; the frontend renders it. Presentation-truth
+migration, not a frontend redesign.
+
+## Frontend score-interpretation inventory
+- **Qualitative interpretation (migrated):** `scoreLabel` (ui.js), `_scoreLabel`/`_scoreColor`
+  (member-view.js), `getScoreLabel` (scenarios.js) — threshold → verdict word / judgment colour.
+- **`/100` scale assumption:** member result copy, timeline — now the presentation carries the
+  real scale; legitimate numeric display of assignment scores (scale genuinely 100) is preserved.
+- **Dashboard aggregate colour (`scoreColor`, app.js):** `iqScore`/`wellnessScore` are non-canonical
+  KPIs, not assessment scores — see remaining boundary.
+
+## Server presentation contract
+`_assessmentPresentationState(code, subjectId, {purpose, viewerId})`, derived from the assessment
+kernel state, exposed at `GET /api/assessments/:memberId/presentation` (authorised: self →
+personal_assistance; leader → leader_support with visible scope + `view_insights`). Bounded,
+audience-safe shape: `{ assessmentId, scoreDisplay, verdict, label, direction, comparable,
+confidence, limitations, basisIds, revisionState, feedbackActedUpon, feedbackThemes }`.
+- **verdict** — a bounded enum (`strong · meeting_expectation · developing · concern · improving ·
+  declining · stable · incomparable · uninterpreted · unknown`). Scale-aware: `45/50` → `strong`,
+  `45/100` → `developing`. Comparability-aware: different rubric → `incomparable`. Missing
+  scale/rubric → `uninterpreted`.
+- **scoreDisplay** — keeps the original score + its own scale (`45 / 50`, `82 / 100`), or
+  `Score recorded — scale unavailable`. Never assumes `/100`.
+- No raw feedback / response text; `feedbackThemes` are assessed *dimensions* only. Private
+  assessments are excluded before a leader-facing state is formed; owner-only under personal
+  assistance.
+
+## Frontend migration
+- `scoreLabel`, `getScoreLabel`, `_scoreLabel`, `_scoreColor` **neutralized** — they no longer
+  derive a verdict/colour from a raw score (they render the number neutrally). `scoreColor`
+  returns a neutral colour (no threshold judgment).
+- The **only** sanctioned score-to-visual mapping is `verdictStyle(verdict)` in ui.js — it maps a
+  bounded **server** verdict to a badge style, never a raw score.
+- `_loadAssessmentPresentation()` fetches the server state and fills `[data-assessment-verdict]`
+  slots (member result screen). Fallback with no presentation: raw score + scale +
+  "interpretation unavailable", never a client verdict.
+
+## Tests
+`scripts/assessment-presentation-smoke.js` (23 checks) proves all 15 invariants: `45/50 ≠ 45/100`,
+no `/100` assumption, incomparable rubrics, missing scale → limitation, raw score without verdict,
+client thresholds/colours removed (static source guards), `verdictStyle` from server verdicts only,
+improving state, feedback-acted-upon accuracy, private excluded from leader presentation, no raw
+feedback surfaced, one contract for assigned-work + scenario, and endpoint authorization — with
+assigned-work / advisor / check-in behaviour unchanged. Full truth layer green.
+
+## Final report — remaining frontend-created developmental judgments
+- **Dashboard aggregate KPIs** (`iqScore`, `wellnessScore`, `overall`, per-metric `scores[k]`) in
+  `js/app.js` are coloured via `scoreColor`, which is now **neutral** (no threshold judgment) — so
+  no verdict is created there, but these are **non-canonical aggregate metrics**, not assessment
+  scores. Giving them their own server-supplied interpretation is a separate follow-up (not an
+  assessment-score judgment).
+- **Mood labels** (`moodVal >= 4 ? 'Strong'…`, app.js/member-view) are check-in presentation, out
+  of scope (and check-in logic must not change here).
+- **Chart legends** (e.g. wellness doughnut `['Excellent','Good',…]`) are static category labels,
+  not score→verdict.
+No client-side qualitative judgment of an **assessment score** remains; assessment meaning is
+server-supplied. The next boundary is the raw `memberResults` display-projection migration and the
+MyWorkspace interface changes — deferred as instructed.

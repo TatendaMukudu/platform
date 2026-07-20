@@ -308,10 +308,10 @@ const ScenarioEngine = {
   },
 
   getScoreLabel(score) {
-    if (score >= 85) return { label: 'Exceptional', color: '#0ecfb0' };
-    if (score >= 70) return { label: 'Strong',      color: '#4f8ef7' };
-    if (score >= 55) return { label: 'Developing',  color: '#f7b24f' };
-    return             { label: 'Needs Work',    color: '#f74f7a' };
+    // NEUTRALIZED: no client-side verdict from a raw score. The scenario result is scored
+    // server-side and canonicalised; the authoritative verdict/label comes from the assessment
+    // presentation state (verdictStyle). This returns a NEUTRAL, non-judgmental presentation.
+    return { label: (score == null ? 'Score unavailable' : `Score ${score} recorded`), color: 'var(--text)' };
   },
 
   _updateCounter() {
