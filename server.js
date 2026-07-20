@@ -2686,12 +2686,16 @@ app.post('/api/intelligence/deliver', requireAuth, (req, res) => {
     const subject = orgUsers[code]?.[mid];
     if (!subject) return;
     const a = {
-      id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: tpl.fields, description: tpl.description || '', guidance: tpl.guidance || '',
+      // Criteria are SNAPSHOTTED (deep-copied) + versioned at issue, so a later template
+      // edit can never rewrite a historical expectation.
+      id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: JSON.parse(JSON.stringify(tpl.fields || [])),
+      description: tpl.description || '', guidance: tpl.guidance || '', criteriaVersion: 1,
       assignerId: userId, assignerName: me?.name || 'Leader', assigneeId: mid, assigneeName: subject.name || 'Member',
-      status: 'assigned', response: {}, note: '', feedback: '', score: null, assignedAt: new Date().toISOString(),
+      status: 'assigned', response: {}, note: '', feedback: '', score: null, submissions: [], assignedAt: new Date().toISOString(),
       prepared: true,
     };
     (assessmentAssignments[code] = assessmentAssignments[code] || []).push(a);
+    try { _canonicaliseCommitment(code, a); } catch (_) {}
     created.push(_publicAssignment(a));
   });
   scheduleSave();
@@ -4347,8 +4351,17 @@ function _studioMemberRead(code, userId, now) {
   if (dev.length) parts.push(`Development areas they've been working on: ${dev.join(', ')}.`);
   let dir = 'steady'; try { dir = _memberTrajDir(code, u, now); } catch (_) {}
   parts.push(`Recent trajectory: ${dir === 'up' ? 'trending up' : dir === 'down' ? 'in a dip' : 'steady'}.`);
-  const returned = (assessmentAssignments[code] || []).filter(a => a.assigneeId === userId && a.status === 'returned' && Number.isFinite(a.score)).slice(-4);
-  if (returned.length) parts.push(`Recent reviews: ${returned.map(a => `"${a.title}" (${a.score})`).join(', ')}.`);
+  // Recent reviews consume the COMPLETE canonical Assessment (score kept with its scale +
+  // basis), not a naked number pulled from the raw record. Falls back to the raw record only
+  // if nothing has been canonicalised yet (backwards compatible during migration).
+  let reviews = [];
+  try { reviews = _assessmentEvidenceFor(code, userId, { purpose: 'personal_assistance', viewerId: userId }).slice(-4); } catch (_) {}
+  if (reviews.length) {
+    parts.push(`Recent reviews: ${reviews.map(a => `"${a.title}" (${a.score}${a.scoreScale ? '/' + String(a.scoreScale).split('-').pop() : ''})`).join(', ')}.`);
+  } else {
+    const returned = (assessmentAssignments[code] || []).filter(a => a.assigneeId === userId && a.status === 'returned' && Number.isFinite(a.score)).slice(-4);
+    if (returned.length) parts.push(`Recent reviews: ${returned.map(a => `"${a.title}" (${a.score})`).join(', ')}.`);
+  }
   return parts.join(' ');
 }
 
@@ -4404,10 +4417,13 @@ app.post('/api/studio/chat', requireAuth, async (req, res) => {
 
   // Planning counts: the caller's own input becomes a private activity signal in the
   // kernel (categorical/short — the org only ever sees aggregate patterns, never this).
+  // Sensitivity is CLASSIFIED, never hard-coded: a hardship disclosed in a MyWorkspace
+  // capture must inform reasoning but stay under the same privacy policy as a check-in.
   if (message || media) _emitSignalSafe(code, {
     subjectType: 'member', subjectId: userId, source: 'studio', modality: media ? 'media' : 'text',
     valueText: ((media ? `[${media.kind}] ` : '') + (message || 'shared a file')).slice(0, 200),
-    label: 'Studio input', primitive: 'activity', sensitivity: 'normal',
+    label: 'Studio input', primitive: 'activity',
+    sensitivity: message ? privacy.classifyText(message, { source: 'workspace' }) : 'normal',
     data: { studio: true, media: media ? media.kind : undefined },
   }, userId);
 
@@ -4909,12 +4925,16 @@ app.post('/api/assessments/assign', requireAuth, (req, res) => {
     const subj = orgUsers[code]?.[aid];
     if (!subj) return;
     const a = {
-      id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: tpl.fields, description: tpl.description || '', guidance: tpl.guidance || '',
+      // Criteria SNAPSHOTTED (deep-copied) + versioned at issue — a later template edit
+      // can never rewrite this assignment's historical expectation.
+      id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind, fields: JSON.parse(JSON.stringify(tpl.fields || [])),
+      description: tpl.description || '', guidance: tpl.guidance || '', criteriaVersion: 1,
       assignerId: userId, assignerName: me?.name || 'Leader', assigneeId: aid, assigneeName: subj.name || 'Member',
-      status: 'assigned', response: {}, note: '', feedback: '', score: null,
+      status: 'assigned', response: {}, note: '', feedback: '', score: null, submissions: [],
       assignedAt: new Date().toISOString(),
     };
     (assessmentAssignments[code] = assessmentAssignments[code] || []).push(a);
+    try { _canonicaliseCommitment(code, a); } catch (_) {}
     created.push(_publicAssignment(a));
   });
   scheduleSave();
@@ -4928,17 +4948,32 @@ app.post('/api/assessments/:id/submit', requireAuth, (req, res) => {
   if (!a) return res.status(404).json({ error: 'not found' });
   if (a.assigneeId !== userId) return res.status(403).json({ error: 'not your assessment' });
   const { response, note } = req.body || {};
-  a.response = (response && typeof response === 'object') ? response : {};
-  a.note = String(note || '').slice(0, 4000);
-  a.status = 'submitted'; a.submittedAt = new Date().toISOString();
-  // Completing an assessment is a participation signal — the kernel learns the
-  // person engaged (never the private contents; just that it was done).
+  const resp = (response && typeof response === 'object') ? response : {};
+  const noteText = String(note || '').slice(0, 4000);
+  // APPEND-ONLY submissions. A resubmission never overwrites — it is a REVISION linked to
+  // the prior submission (and to the assessment it answers, if the work had been returned).
+  a.submissions = a.submissions || [];
+  const prior = a.submissions.length ? a.submissions[a.submissions.length - 1] : null;
+  const wasReturned = a.status === 'returned';
+  const sub = {
+    id: 'sub_' + _shortId(), response: resp, note: noteText, submittedAt: new Date().toISOString(),
+    iteration: a.submissions.length + 1,
+    revisionOf: prior ? prior.id : null,
+    respondsToAssessmentId: wasReturned ? `as_${a.id}` : null,
+  };
+  a.submissions.push(sub);
+  // Latest snapshot kept on the record for backwards compatibility (_publicAssignment etc.).
+  a.response = resp; a.note = noteText;
+  a.status = 'submitted'; a.submittedAt = sub.submittedAt;
+  // BACKWARDS COMPAT: completion is still a participation signal (contentless).
   _emitSignalSafe(code, {
     subjectType: 'member', subjectId: userId, source: 'assessment', modality: 'number',
     label: `Assessment completed: ${a.title}`.slice(0, 120), valueNum: 1, primitive: 'participation', sensitivity: 'normal',
   }, userId);
+  // AUTHORITATIVE: the submission (and, on resubmit, a revision) becomes canonical evidence.
+  try { _canonicaliseSubmission(code, a, sub); } catch (_) {}
   scheduleSave();
-  res.json({ ok: true, assignment: _publicAssignment(a) });
+  res.json({ ok: true, assignment: _publicAssignment(a), iteration: sub.iteration });
 });
 
 /* POST /api/assessments/:id/return — the assigner reviews: feedback + optional score. */
@@ -4953,11 +4988,15 @@ app.post('/api/assessments/:id/return', requireAuth, (req, res) => {
   const s = Number(score);
   a.score = Number.isFinite(s) ? Math.max(0, Math.min(100, s)) : a.score;
   a.status = 'returned'; a.returnedAt = new Date().toISOString();
-  // A returned score is a citable capability signal about the subject.
+  // BACKWARDS COMPAT: the legacy capability signal is preserved unchanged (numeric streams,
+  // concern trigger, _personStrengths all keep working) — non-authoritative during migration.
   if (Number.isFinite(a.score)) _emitSignalSafe(code, {
     subjectType: 'member', subjectId: a.assigneeId, source: 'assessment', modality: 'number',
     label: `Assessment score: ${a.title}`.slice(0, 120), valueNum: a.score, primitive: 'capability', sensitivity: 'normal',
   }, userId);
+  // AUTHORITATIVE: the complete canonical Assessment (assessor · rubric · scale · feedback ·
+  // submissionId) + the feedback as an authored observation — emitted LIVE, never a naked number.
+  try { _canonicaliseAssessment(code, a); } catch (_) {}
   scheduleSave();
   res.json({ ok: true, assignment: _publicAssignment(a) });
 });
@@ -6593,7 +6632,7 @@ function _kernelEvidence(code, opts = {}) {
     return env.promoted === true;
   }).map(env => ({ evidenceId: env.id, subjectId: env.subjectId, ownerRef: env.ownerRef || null, type: env.type,
     label: env.label, value: env.value, valueText: env.valueText, observedAt: env.observedAt,
-    visibility: env.visibility, purpose, __canonical: true }));
+    visibility: env.visibility, attributes: env.attributes || null, purpose, __canonical: true }));
 }
 /* Guard used by the gateway + tests: a raw capability record is NOT canonical. */
 function _isCanonicalEvidence(x) { return !!x && x.__canonical === true && !!x.evidenceId; }
@@ -6682,12 +6721,15 @@ function _ingestAdapterEvidence(code, inputs) {
       // Envelope `confidence` is IDENTITY confidence — never the claim's epistemic
       // strength (that lives in the raw record's `strength`).
       confidence: inp.subjectId ? 'confirmed' : 'unmatched', visibility: inp.visibility,
+      // The COMPLETE structured primitive object (e.g. an Assessment) rides on the envelope.
+      attributes: inp.attributes || null,
     }, { adapter: inp.provider, derivation: inp.derivation, strength: inp.confidence, context: inp.context, provenanceKind: inp.provenanceKind });
     if (r.duplicate) { duplicates++; return; }
     if (!r.stored) return;
     recorded++;
-    // Org-facing (non-private) evidence with a resolved subject promotes to a signal.
-    if (inp.visibility !== 'private' && r.promotable) _promoteEvidence(code, r.envelope);
+    // Org-facing (non-private) evidence with a resolved subject promotes to a legacy signal —
+    // UNLESS the claim opts out (lifecycle claims are canonical evidence only, not signals).
+    if (inp.promote !== false && inp.visibility !== 'private' && r.promotable) _promoteEvidence(code, r.envelope);
   });
   if (recorded) scheduleSave();
   return { recorded, duplicates };
@@ -6752,6 +6794,86 @@ function _canonicaliseCheckin(code, subjectId, rec) {
   const inputs = capAdapters.CheckInAdapter.toCanonicalEvidence(rec, { subjectId, private: false, now: new Date().toISOString() });
   inputs.forEach(i => { if (i.label === 'Check-in note' && sensitiveNote) { i.visibility = 'private'; i.ownerRef = subjectId; } });
   return _ingestAdapterEvidence(code, inputs);
+}
+
+/* ═══ ASSIGNED WORK → CANONICAL EVIDENCE (MyWorkspace) ═════════════════════════
+   The assign → submit → assess → revise lifecycle becomes claim-bounded canonical
+   evidence through the SAME AssessmentAdapter used by the backfill (one code path, no
+   parallel logic). Legacy signals are preserved for backwards compatibility; the score
+   claim promotes to the equivalent legacy signal, so downstream numeric reasoning is
+   unchanged while the COMPLETE Assessment object becomes available for canonical reasoning. */
+
+/* An issued assignment becomes a canonical commitment. */
+function _canonicaliseCommitment(code, a) {
+  if (!a || !a.assigneeId) return { recorded: 0, duplicates: 0 };
+  return _ingestAdapterEvidence(code, capAdapters.AssessmentAdapter.commitment(a, { now: new Date().toISOString() }));
+}
+
+/* A submission becomes canonical evidence (append-only). A resubmission also emits a
+   revision claim linking it to the prior submission. Privacy is CLASSIFIED, never
+   hard-coded: a hardship disclosed in a submission note becomes sensitive. */
+function _canonicaliseSubmission(code, a, sub) {
+  if (!a || !sub || !a.assigneeId) return { recorded: 0, duplicates: 0 };
+  const note = sub.note || '';
+  const category = note ? privacy.classifyText(note, { source: 'workspace' }) : 'normal';
+  const visibility = note && privacy.isPrivate(category) ? 'sensitive' : 'normal';   // informs, never quoted
+  return _ingestAdapterEvidence(code, capAdapters.AssessmentAdapter.submission(a, sub, { now: new Date().toISOString(), visibility }));
+}
+
+/* A returned review becomes a COMPLETE canonical Assessment (assessor · rubric · scale ·
+   feedback · submissionId) plus the feedback as an authored observation — emitted LIVE. */
+function _canonicaliseAssessment(code, a) {
+  if (!a || a.status !== 'returned' || !Number.isFinite(Number(a.score))) return { recorded: 0, duplicates: 0 };
+  const submissionId = Array.isArray(a.submissions) && a.submissions.length ? a.submissions[a.submissions.length - 1].id : a.id;
+  return _ingestAdapterEvidence(code, capAdapters.AssessmentAdapter.assessment(a, { now: new Date().toISOString(), submissionId }));
+}
+
+/* THE complete-Assessment reader. Reads canonical assessment evidence DIRECTLY (like the
+   mood series) so reasoning consumes the whole object — assessor, rubric, scale, feedback —
+   never an isolated number. Purpose-scoped: private/owner rules mirror the gateway. */
+function _assessmentEvidenceFor(code, subjectId, opts = {}) {
+  const purpose = opts.purpose || 'leader_support';
+  const personal = PERSONAL_PURPOSES.includes(purpose);
+  const viewerId = opts.viewerId || null;
+  const log = evidenceLog[code] || [];
+  return log.filter(env => {
+    if (env.status !== 'active') return false;
+    if (!(env.attributes && env.attributes.primitive === 'assessment')) return false;
+    if (subjectId && env.subjectId !== subjectId) return false;
+    if (env.visibility === 'private') return personal && !!viewerId && env.ownerRef === viewerId;
+    return true;   // assessments are normal-visibility work judgements
+  }).map(env => ({
+    evidenceId: env.id, subjectId: env.subjectId, observedAt: env.observedAt,
+    assessmentId: env.attributes.assessmentId, submissionId: env.attributes.submissionId,
+    assessorId: env.attributes.assessorId, rubric: env.attributes.rubric,
+    score: env.attributes.score != null ? env.attributes.score : env.value, scoreScale: env.attributes.scoreScale,
+    qualitativeFeedback: env.attributes.qualitativeFeedback, confidence: env.attributes.confidence,
+    limitations: env.attributes.limitations, title: (env.label || '').replace(/^Assessment score:\s*/, ''),
+    __canonical: true,
+  })).sort((x, y) => new Date(x.observedAt) - new Date(y.observedAt));
+}
+
+/* Kernel reasoning over one assignment's canonical evidence. Answers the four questions
+   the migration requires — did they improve, did they respond to feedback, what changed,
+   how many iterations — from submissions/revisions/assessments, never from a bare status. */
+function _assignmentProgress(code, assignmentId, subjectId) {
+  const log = evidenceLog[code] || [];
+  const attrs = t => log.filter(e => e.status === 'active' && e.attributes && e.attributes.primitive === t
+    && (e.attributes.assignmentId === assignmentId));
+  const submissions = attrs('submission').sort((a, b) => new Date(a.observedAt) - new Date(b.observedAt));
+  const revisions   = attrs('revision');
+  const assessments = (_assessmentEvidenceFor(code, subjectId, { purpose: 'leader_support' }) || [])
+    .filter(a => a.assessmentId === `as_${assignmentId}`);
+  const scores = assessments.map(a => a.score).filter(Number.isFinite);
+  const improved = scores.length >= 2 ? (scores[scores.length - 1] > scores[0]) : null;
+  return {
+    assignmentId,
+    iterations: submissions.length,
+    respondedToFeedback: revisions.some(r => r.attributes.respondsToAssessmentId) || revisions.length > 0,
+    improved,
+    scoreTrend: scores,
+    limitations: scores.length < 2 ? ['not enough scored iterations to judge improvement'] : [],
+  };
 }
 
 /* Contentless classification audit — records the DECISION (category/outcome/length),
@@ -11632,7 +11754,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: the daily check-in migration (canonical-only intelligence)
   _checkinKernelState, _canonicalMoodSeries, _memberMoodSeries, _isSourceEvidence, _checkinInterventionState, orgInterventions,
   // exported for the truth layer: check-in hardening (frozen signal, reconciliation, classification audit)
-  _emitCheckinParticipationSignal, CHECKIN_SIGNAL_CONTRACT, _checkinAggregateReconciliation, _checkinClassificationAudit, checkinClassificationLog };
+  _emitCheckinParticipationSignal, CHECKIN_SIGNAL_CONTRACT, _checkinAggregateReconciliation, _checkinClassificationAudit, checkinClassificationLog,
+  // exported for the truth layer: assigned-work → canonical evidence (MyWorkspace)
+  _canonicaliseCommitment, _canonicaliseSubmission, _canonicaliseAssessment, _assessmentEvidenceFor, _assignmentProgress };
 
 if (require.main === module) (async () => {
   try {
