@@ -1427,248 +1427,44 @@ const MemberApp = {
   _assessState: null,
   _assessKindLabel: { spreadsheet: 'Data / spreadsheet', film: 'Video / recording', play: 'Approach / method', skill: 'Skill', general: 'General' },
 
-  // The Studio is conversation-first: IntelliQ leads, and the caller's assigned
-  // work, pins, and leader tools sit below the chat as cards they can act on.
+  // Assigned work is RECORDS + contextual views (Cut C) — NOT a second assistant. The Studio
+  // chat is gone: assistance flows through the one IntelliQ composer on Home (an "Ask IntelliQ"
+  // action on each item focuses that composer with authorised work context). This surface shows
+  // the member's assigned work, released feedback/scores, drafts and submission history.
   async _renderAssessments() {
     const root = document.getElementById('assessments-root');
     if (!root) return;
     root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Loading…</div>`;
     try {
-      const [sRes, aRes] = await Promise.all([
-        fetch('/api/studio', { headers: this._authHeaders() }),
-        fetch('/api/assessments', { headers: this._authHeaders() }),
-      ]);
-      const s = sRes.ok ? await sRes.json() : { ok: false };
-      const d = await aRes.json();
+      const d = await (await fetch('/api/assessments', { headers: this._authHeaders() })).json();
       this._assessState = d;
-      this._studioState = s;
-      root.innerHTML = (s && s.ok ? this._studioHtml(s) : '') + this._assessHtml(d);
+      root.innerHTML = this._assessHtml(d);
       if (typeof hydrateIcons === 'function') hydrateIcons(root);
-      this._studioScrollBottom();
       if (d.canCreate) this._loadAssessLearning();
     } catch (e) {
-      root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Couldn't load your workspace.</div>`;
+      root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Couldn't load your assigned work.</div>`;
     }
   },
 
-  // ── The Studio conversation — chat-first, with media + voice input ─────────
-  _studioState: null,
-  _studioRec: null,        // active MediaRecorder
-  _studioChunks: [],
-
-  _studioHtml(s) {
-    const esc = t => this._escape(t || '');
-    const msgs = s.messages || [];
-    let log = '';
-    if (s.opening) log += `<div class="conv-ai"><strong>IntelliQ</strong>${esc(s.opening)}</div>`;
-    log += msgs.map(m => m.role === 'assistant'
-      ? `<div class="conv-ai"><strong>IntelliQ</strong>${esc(m.text)}</div>`
-      : `<div class="conv-you">${m.media ? `<span class="studio-media-tag">${esc((m.media.kind || 'file').toUpperCase())}</span> ` : ''}${esc(m.text || (m.media ? m.media.name : ''))}</div>`
-    ).join('');
-
-    const plans = (s.plans || []);
-    const planHtml = plans.length ? `<div class="studio-plans">
-      <div class="card-label" style="margin-bottom:0.3rem">Your plans</div>
-      ${plans.map(p => `<div class="studio-plan"><button class="studio-plan-check" title="Mark done" onclick="MemberApp._studioPlanDone('${p.id}', this)">○</button><span>${esc(p.text)}</span></div>`).join('')}
-    </div>` : '';
-
-    const recLabel = s.canTranscribe ? 'Record' : 'Record (voice)';
-    const proactive = s.proactive ? `<div class="studio-proactive">${esc(s.proactive)}</div>` : '';
-    return `<details class="card studio-card collapse-card" open>
-      <summary class="card-label">MyWorkspace · talk it through with IntelliQ</summary>
-      ${proactive}
-      <div class="studio-log" id="studio-log">${log}</div>
-      ${planHtml}
-      <div id="studio-staged"></div>
-      <div class="studio-input-row">
-        <textarea class="form-input" id="studio-in" placeholder="Type, think a plan out loud, or attach a file…" rows="1"
-          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp._studioSend(this)}"></textarea>
-      </div>
-      <div class="studio-actions">
-        <label class="btn-ghost studio-attach" title="Attach a file or photo">Attach
-          <input type="file" accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv" style="display:none" onchange="MemberApp._studioAttach(this)">
-        </label>
-        <button class="btn-ghost" id="studio-rec-btn" onclick="MemberApp._studioRecordToggle(this)">${recLabel}</button>
-        <label class="studio-saveplan"><input type="checkbox" id="studio-saveplan"> Save as a plan</label>
-        <button class="btn-primary btn-sm" style="margin-left:auto" onclick="MemberApp._studioSend(document.getElementById('studio-in'))">Send</button>
-      </div>
-      <div id="studio-rec-status" class="studio-rec-status"></div>
-    </details>`;
+  /* Route an assigned-work item INTO the one IntelliQ composer (no second chat). Navigates Home,
+     focuses the unified composer, and stages a bounded work reference so the next turn carries
+     authorised assigned-work context (workItemId) — assistance, never a direct write. */
+  askAboutWork(workItemId, title) {
+    this._wsWorkItemId = workItemId || null;
+    try { if (typeof navigate === 'function') navigate('home'); } catch (_) {}
+    setTimeout(() => {
+      const i = document.getElementById('iq-composer-input');
+      if (i) { i.value = `Help me with my assigned work: “${title || 'this item'}”.`; i.focus(); }
+      const chip = document.getElementById('iq-workctx');
+      if (chip) chip.innerHTML = workItemId ? `<span class="iq-workctx-chip">Assigned work in context: ${this._escape(title || workItemId)} <button onclick="MemberApp.clearWorkCtx()" title="Clear">✕</button></span>` : '';
+    }, 60);
   },
+  clearWorkCtx() { this._wsWorkItemId = null; const chip = document.getElementById('iq-workctx'); if (chip) chip.innerHTML = ''; },
 
-  _studioScrollBottom() {
-    const log = document.getElementById('studio-log');
-    if (log) log.scrollTop = log.scrollHeight;
-  },
-
-  // Short relative time ("3 days ago", "today") for track-record lines.
-  _ago(iso) {
-    const t = new Date(iso).getTime();
-    if (!Number.isFinite(t)) return 'recently';
-    const days = Math.floor((Date.now() - t) / 86400000);
-    if (days <= 0) return 'today';
-    if (days === 1) return 'yesterday';
-    if (days < 7) return `${days} days ago`;
-    if (days < 14) return 'last week';
-    if (days < 60) return `${Math.round(days / 7)} weeks ago`;
-    return `${Math.round(days / 30)} months ago`;
-  },
-
-  // Update only the plans strip (no full re-render) so the conversation stays put.
-  async _studioRefreshPlans() {
-    try {
-      const res = await fetch('/api/studio', { headers: this._authHeaders() });
-      if (!res.ok) return;
-      const s = await res.json();
-      const esc = t => this._escape(t || '');
-      const plans = s.plans || [];
-      const html = plans.length ? `<div class="card-label" style="margin-bottom:0.3rem">Your plans</div>
-        ${plans.map(p => `<div class="studio-plan"><button class="studio-plan-check" title="Mark done" onclick="MemberApp._studioPlanDone('${p.id}', this)">○</button><span>${esc(p.text)}</span></div>`).join('')}` : '';
-      let strip = document.querySelector('.studio-plans');
-      if (!strip) {
-        const log = document.getElementById('studio-log');
-        if (log && html) { strip = document.createElement('div'); strip.className = 'studio-plans'; log.insertAdjacentElement('afterend', strip); }
-      }
-      if (strip) strip.innerHTML = html;
-    } catch (_) {}
-  },
-
-  _studioAppend(role, text, media) {
-    const log = document.getElementById('studio-log');
-    if (!log) return;
-    const esc = t => this._escape(t || '');
-    const div = document.createElement('div');
-    if (role === 'assistant') { div.className = 'conv-ai'; div.innerHTML = `<strong>IntelliQ</strong>${esc(text)}`; }
-    else { div.className = 'conv-you'; div.innerHTML = `${media ? `<span class="studio-media-tag">${esc((media.kind || 'file').toUpperCase())}</span> ` : ''}${esc(text || (media ? media.name : ''))}`; }
-    log.appendChild(div);
-    this._studioScrollBottom();
-  },
-
-  async _studioSend(inputEl, media, attachment) {
-    const input = inputEl || document.getElementById('studio-in');
-    const message = (input?.value || '').trim();
-    // A staged attachment (chosen earlier) rides along with whatever they typed, so
-    // you can write a summary AND attach your notes in one message.
-    if (!media && this._studioStaged) { media = this._studioStaged.media; attachment = this._studioStaged.attachment; }
-    if (!message && !media) return;
-    const savePlan = !!document.getElementById('studio-saveplan')?.checked;
-    if (message || media) this._studioAppend('you', message, media);
-    if (input) input.value = '';
-    this._studioClearStaged();
-    const pending = document.createElement('div');
-    pending.className = 'conv-ai'; pending.style.opacity = '0.6';
-    pending.textContent = attachment ? 'IntelliQ is reading it…' : 'IntelliQ is thinking…';
-    document.getElementById('studio-log')?.appendChild(pending); this._studioScrollBottom();
-    try {
-      const res = await fetch('/api/studio/chat', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
-        body: JSON.stringify({ message, media: media || undefined, attachment: attachment || undefined, savePlan }),
-      });
-      const d = await res.json();
-      pending.remove();
-      if (!res.ok || !d.ok) throw new Error();
-      this._studioAppend('assistant', d.reply);
-      const sp = document.getElementById('studio-saveplan'); if (sp) sp.checked = false;
-      // Plans emerge from the conversation — the reply already names it, so we keep
-      // the chat as the primary object and just fold the new plan into the list.
-      if (d.planSaved) this._studioRefreshPlans();
-    } catch (e) {
-      pending.remove();
-      this._studioAppend('assistant', 'Something went wrong sending that — try again in a moment.');
-    }
-  },
-
-  async _studioAttach(inputEl) {
-    const file = inputEl?.files?.[0];
-    if (!file) return;
-    inputEl.value = '';
-    if (file.size > 12 * 1024 * 1024) { this._studioAppend('assistant', 'That file is a bit large for me to read (max ~12MB) — try a smaller version or a screenshot.'); return; }
-    const kind = /^image\//.test(file.type) ? 'photo' : (file.name.split('.').pop() || 'file').toLowerCase();
-    const media = { name: file.name.slice(0, 160), kind };
-    // Send the actual bytes so IntelliQ can READ it (vision / PDF / text), not just
-    // note that a file arrived.
-    let attachment = null;
-    try {
-      const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
-      const b64 = String(dataUrl).includes(',') ? String(dataUrl).split(',')[1] : String(dataUrl);
-      attachment = { name: media.name, mimetype: file.type || 'application/octet-stream', data: b64 };
-    } catch (_) { attachment = null; }
-    if (!attachment) { this._studioAppend('assistant', 'Couldn\'t read that file — try again.'); return; }
-    // STAGE it (don't send yet) so they can add their own notes alongside it.
-    this._studioStaged = { media, attachment };
-    const chip = document.getElementById('studio-staged');
-    if (chip) chip.innerHTML = `<div class="studio-chip"><span class="studio-media-tag">${this._escape((media.kind || 'file').toUpperCase())}</span> ${this._escape(media.name)}<button class="studio-chip-x" title="Remove" onclick="MemberApp._studioClearStaged()">✕</button></div><div class="studio-chip-hint">Add a note if you like, then Send — they'll go together.</div>`;
-    const inp = document.getElementById('studio-in'); if (inp) inp.focus();
-  },
-
-  _studioClearStaged() {
-    this._studioStaged = null;
-    const chip = document.getElementById('studio-staged');
-    if (chip) chip.innerHTML = '';
-  },
-
-  async _studioRecordToggle(btn) {
-    const status = document.getElementById('studio-rec-status');
-    if (this._studioRec && this._studioRec.state === 'recording') {
-      this._studioRec.stop();
-      btn.textContent = 'Record';
-      return;
-    }
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      if (status) status.textContent = 'Recording isn\'t supported on this device — type your note instead.';
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      this._studioChunks = [];
-      const rec = new MediaRecorder(stream);
-      this._studioRec = rec;
-      rec.ondataavailable = e => { if (e.data.size) this._studioChunks.push(e.data); };
-      rec.onstop = async () => {
-        stream.getTracks().forEach(t => t.stop());
-        const blob = new Blob(this._studioChunks, { type: rec.mimeType || 'audio/webm' });
-        await this._studioTranscribe(blob);
-      };
-      rec.start();
-      btn.textContent = 'Stop';
-      if (status) status.textContent = 'Recording… tap Stop when you\'re done.';
-    } catch (e) {
-      if (status) status.textContent = 'Couldn\'t access the mic — check permissions, or type your note.';
-    }
-  },
-
-  async _studioTranscribe(blob) {
-    const status = document.getElementById('studio-rec-status');
-    if (status) status.textContent = 'Transcribing…';
-    try {
-      const b64 = await new Promise((resolve, reject) => {
-        const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(blob);
-      });
-      const res = await fetch('/api/studio/transcribe', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
-        body: JSON.stringify({ audio: b64, mimetype: blob.type || 'audio/webm' }),
-      });
-      const d = await res.json();
-      if (res.status === 503) { if (status) status.textContent = d.note || 'Voice transcription needs an OpenAI key — type your note for now.'; return; }
-      if (!res.ok || !d.ok) throw new Error();
-      if (status) status.textContent = '';
-      const input = document.getElementById('studio-in');
-      if (input) { input.value = (input.value ? input.value + ' ' : '') + (d.text || ''); input.focus(); }
-    } catch (e) {
-      if (status) status.textContent = 'Couldn\'t transcribe that — try again or type it.';
-    }
-  },
-
-  async _studioPlanDone(id, btn) {
-    try {
-      await fetch('/api/studio/plan/' + id, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
-        body: JSON.stringify({ done: true }),
-      });
-      const row = btn.closest('.studio-plan');
-      if (row) { row.style.opacity = '0.5'; btn.textContent = '✓'; btn.disabled = true; }
-    } catch (e) {}
-  },
+  // [REMOVED] Studio conversation UI (_studioHtml + _studioSend/_studioAppend/_studioAttach/
+  // _studioRecord*/_studioPlanDone/_studioScrollBottom/_studioRefreshPlans) — Phase-1 Cut C.
+  // The member no longer experiences a second assistant/composer/thread. Assistance flows
+  // through the ONE IntelliQ composer (askAboutWork routes an item into it with work context).
 
   // The assessment-learning loop, surfaced: which assessments precede improvement
   // (repeat them) and which precede a dip (revisit them) — grounded in real
@@ -1727,28 +1523,19 @@ const MemberApp = {
         let body = '';
         if (a.status === 'assigned') {
           const leaderFirst = esc((a.assignerName || 'Your leader').split(' ')[0]);
-          const firstAsk = (a.fields && a.fields.length) ? esc(a.fields[0].label) : 'How are things going with this?';
+          // Assistance is the ONE IntelliQ composer (no per-item chat). The record capability —
+          // filling and submitting the response — stays here as a form.
           body = `<div style="margin-top:0.6rem">
-            <div class="assess-conv" id="assess-chat-${a.id}">
-              <div id="assess-chat-log-${a.id}">
-                <div class="conv-ai"><strong>IntelliQ</strong>${leaderFirst} asked you to reflect on this — let's just talk it through, no pressure and no wrong answers.${a.description ? ` They said: <em>${esc(a.description)}</em>` : ''} To start: ${firstAsk.endsWith('?') ? firstAsk : firstAsk + '?'}</div>
-              </div>
+            ${a.description ? `<div class="me-row-text" style="font-size:0.84rem;color:var(--text-secondary);margin-bottom:0.5rem"><strong>${leaderFirst}:</strong> ${esc(a.description)}</div>` : ''}
+            <button class="btn btn-outline btn-sm" style="margin-bottom:0.6rem" onclick="MemberApp.askAboutWork('${a.id}', ${JSON.stringify(a.title)})">Ask IntelliQ about this</button>
+            <div style="margin-top:0.2rem">
+              ${(a.fields && a.fields.length ? a.fields : [{ label: 'Your response', hint: '' }]).map((f) => `
+                <div style="margin-bottom:0.5rem">
+                  <div class="card-label" style="margin-bottom:2px">${esc(f.label)}</div>
+                  ${f.hint ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:3px">${esc(f.hint)}</div>` : ''}
+                  <textarea class="note-input" data-field="${esc(f.label)}" style="min-height:60px"></textarea>
+                </div>`).join('')}
             </div>
-            <div style="display:flex;gap:0.4rem;margin:0.5rem 0">
-              <input class="form-input" id="assess-chat-in-${a.id}" placeholder="Type your reply…" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')MemberApp._assessDiscussSend('${a.id}', this.nextElementSibling)">
-              <button class="btn-primary btn-sm" onclick="MemberApp._assessDiscussSend('${a.id}', this)">Send</button>
-            </div>
-            <details style="margin-bottom:0.5rem">
-              <summary style="cursor:pointer;font-size:0.78rem;color:var(--text-muted)">Prefer to just write? Fill it in directly</summary>
-              <div style="margin-top:0.5rem">
-                ${(a.fields && a.fields.length ? a.fields : [{ label: 'Your response', hint: '' }]).map((f) => `
-                  <div style="margin-bottom:0.5rem">
-                    <div class="card-label" style="margin-bottom:2px">${esc(f.label)}</div>
-                    ${f.hint ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:3px">${esc(f.hint)}</div>` : ''}
-                    <textarea class="note-input" data-field="${esc(f.label)}" style="min-height:60px"></textarea>
-                  </div>`).join('')}
-              </div>
-            </details>
             <button class="btn-primary" onclick="MemberApp._assessSubmit('${a.id}', this)">Send to ${leaderFirst}</button>
           </div>`;
         } else if (a.status === 'submitted') {
@@ -1757,6 +1544,7 @@ const MemberApp = {
           body = `<div style="margin-top:0.5rem">
             ${a.feedback ? `<div class="me-row-text" style="font-size:0.86rem"><strong>${esc(a.assignerName)}:</strong> ${esc(a.feedback)}</div>` : ''}
             ${a.score != null ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:3px">Score: ${a.score}/100</div>` : ''}
+            <button class="btn btn-outline btn-sm" style="margin-top:0.5rem" onclick="MemberApp.askAboutWork('${a.id}', ${JSON.stringify(a.title)})">Ask IntelliQ about this feedback</button>
           </div>`;
         }
         return `<div class="me-row" style="display:block;padding:0.7rem 0;border-bottom:1px solid var(--border)">
@@ -2027,38 +1815,9 @@ const MemberApp = {
     } catch (e) { this.showToast('Could not send', 'error'); if (btn) { btn.disabled = false; btn.textContent = orig; } }
   },
 
-  /* The assignment as a full conversation — IntelliQ knows what the leader set and
-     guides the person through it, warmly, one thing at a time. The transcript
-     becomes their reflection on submit. */
-  _assessChat: {},
-  async _assessDiscussSend(id, btn) {
-    const input = document.getElementById('assess-chat-in-' + id);
-    const log = document.getElementById('assess-chat-log-' + id);
-    const msg = (input?.value || '').trim();
-    if (!msg || !log) return;
-    const esc = t => this._escape(t || '');
-    this._assessChat[id] = this._assessChat[id] || [];
-    log.innerHTML += `<div class="conv-you">${esc(msg)}</div>`;
-    this._assessChat[id].push({ role: 'user', content: msg });
-    if (input) input.value = '';
-    if (btn) { btn.disabled = true; btn.textContent = '…'; }
-    log.innerHTML += `<div id="assess-chat-pending-${id}" class="conv-ai" style="opacity:0.6">IntelliQ is thinking…</div>`;
-    log.scrollTop = log.scrollHeight;
-    try {
-      const res = await fetch(`/api/assessments/${id}/discuss`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ message: msg, history: this._assessChat[id].slice(0, -1) }) });
-      const d = await res.json();
-      document.getElementById('assess-chat-pending-' + id)?.remove();
-      if (!res.ok || !d.ok) throw new Error();
-      log.innerHTML += `<div class="conv-ai"><strong>IntelliQ</strong>${esc(d.reply)}</div>`;
-      this._assessChat[id].push({ role: 'assistant', content: d.reply });
-    } catch (e) {
-      document.getElementById('assess-chat-pending-' + id)?.remove();
-      log.innerHTML += `<div style="color:var(--danger);margin:0.3rem 0">Couldn't reach IntelliQ just now.</div>`;
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
-      log.scrollTop = log.scrollHeight;
-    }
-  },
+  /* [REMOVED] _assessDiscussSend / _assessChat — the per-item assignment chat (a second
+     conversational shell), Phase-1 Cut C. Assistance is the ONE IntelliQ composer now
+     (askAboutWork routes an assigned item into it with authorised work context). */
 
   async _assessReturn(id, btn) {
     const feedback = (document.querySelector(`[data-return-fb="${id}"]`)?.value || '').trim();
@@ -2621,6 +2380,7 @@ const MemberApp = {
       <div class="iq-lensbar" id="iq-lensbar">${tabs}</div>
       <div class="iq-attention" id="iq-attention"><div class="card-label">Needs you</div><div class="iq-att-list">Loading…</div></div>
       <div class="iq-conversation" id="iq-conversation"></div>
+      <div class="iq-workctx" id="iq-workctx"></div>
       <div class="iq-composer">
         <textarea id="iq-composer-input" class="note-input" rows="2" placeholder="Talk to IntelliQ — a note, a plan, a question, anything. It stays private by default."></textarea>
         <button class="btn-primary" onclick="MemberApp.wsSend()">Send</button>
@@ -2673,7 +2433,7 @@ const MemberApp = {
     try {
       const r = await fetch('/api/assistant/turn', { method: 'POST',
         headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
-        body: JSON.stringify({ text, lens: this._wsActiveLens || undefined }) });
+        body: JSON.stringify({ text, lens: this._wsActiveLens || undefined, workItemId: this._wsWorkItemId || undefined }) });
       const j = await r.json();
       if (!j || !j.ok) return null;
       this._lastTurnId = j.turnId;
@@ -2693,6 +2453,7 @@ const MemberApp = {
     const card = (p) => {
       if (p.actionType === 'checkin_proposal') return this._renderCheckinProposal(j.turnId, p);
       if (p.actionType === 'checkin_log')      return this._renderCheckinLog(j.turnId, p);
+      if (p.actionType === 'submit_work')      return this._renderSubmitWork(j.turnId, p);
       const state = p.draftOnly ? '<span class="iq-badge iq-badge-draft">Draft only — not scheduled</span>' : '';
       return `<div class="iq-proposal" data-proposal="${esc(p.id)}">
         <div class="iq-proposal-top"><span class="iq-proposal-label">${esc(p.label)}</span> ${priv(p.visibility)} ${state}</div>
@@ -2750,6 +2511,28 @@ const MemberApp = {
       </div></div>`;
   },
 
+  /* Assigned-work SUBMIT proposal (Cut C) — shows the EXACT effect before confirming: the work
+     item, what is submitted, the resulting status, that review is triggered, and reversibility.
+     Executes through the existing assessment capability; the assistant never writes directly. */
+  _renderSubmitWork(turnId, p) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const e = p.effect || {};
+    const eff = `<div class="iq-submit-effect">
+      <div>Work item: <strong>${esc(p.workItem?.title || 'assigned work')}</strong></div>
+      <div>Submits: ${esc(e.whatIsSubmitted || 'your response')}</div>
+      <div>Then: status → <strong>${esc(e.resultingStatus || 'submitted')}</strong>${e.triggersReview ? ' · sends to your reviewer' : ''}${e.reversible === false ? ' · not reversible' : ''}</div>
+    </div>`;
+    const val = p.validation ? `<div class="iq-proposal-amb">${esc(p.validation)}</div>` : '';
+    return `<div class="iq-proposal iq-submit-work" data-proposal="${esc(p.id)}">
+      <div class="iq-proposal-top"><span class="iq-proposal-label">${esc(p.label)}</span> <span class="iq-badge iq-badge-share">Sends to reviewer</span></div>
+      <div class="iq-proposal-why">${esc(p.why)}</div>
+      ${eff}${val}
+      <div class="iq-proposal-actions">
+        <button class="btn-primary btn-sm" onclick="MemberApp.confirmProposal('${esc(turnId)}','${esc(p.id)}')">Confirm &amp; submit</button>
+        <button class="btn-ghost btn-sm" onclick="MemberApp.dismissProposal('${esc(p.id)}')">Dismiss</button>
+      </div></div>`;
+  },
+
   async confirmProposal(turnId, proposalId, overrides) {
     const r = await fetch(`/api/assistant/turn/${turnId}/confirm`, { method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, overrides: overrides || {} }) });
@@ -2768,6 +2551,10 @@ const MemberApp = {
         const noticed = (o.noticed && o.noticed.length) ? `<div class="iq-checkin-noticed">${o.noticed.map(t => `<div>• ${this._escape(t)}</div>`).join('')}</div>` : '';
         cardEl.innerHTML = `<div class="iq-confirmed">✓ Logged as today's check-in — kept private.</div>` +
           (o.acknowledgement ? `<div class="iq-checkin-ack">${this._escape(o.acknowledgement)}</div>${noticed}` : '');
+      } else if (j.confirmed === 'submit_work') {
+        this._wsWorkItemId = null;  // clear the focused work context after submitting
+        const chip = document.getElementById('iq-workctx'); if (chip) chip.innerHTML = '';
+        cardEl.innerHTML = `<div class="iq-confirmed">✓ Submitted “${this._escape(j.assignment?.title || 'your work')}” for review${j.iteration ? ` (submission #${j.iteration})` : ''}.</div>`;
       } else {
         cardEl.innerHTML = `<div class="iq-confirmed">✓ ${this._escape(j.confirmed === 'calendar_draft' ? 'Draft created — not scheduled' : (j.confirmed || 'done'))}</div>`;
       }

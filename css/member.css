@@ -656,6 +656,11 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .iq-proposal-amb{font-size:0.72rem;color:var(--text-muted);font-style:italic;margin-bottom:0.4rem}
 .iq-checkin-ack{margin-top:0.4rem;font-size:0.85rem;color:var(--text-primary);line-height:1.45}
 .iq-checkin-noticed{margin-top:0.3rem;font-size:0.78rem;color:var(--text-muted)}
+/* Assigned-work in the one composer (Cut C) — work-context chip + submit-effect preview. */
+.iq-workctx{margin:0.2rem 0}
+.iq-workctx-chip{display:inline-flex;align-items:center;gap:0.4rem;font-size:0.74rem;padding:2px 9px;border-radius:9px;background:rgba(124,90,245,0.12);color:var(--accent,#7c5af5)}
+.iq-workctx-chip button{background:none;border:none;color:inherit;cursor:pointer;font-size:0.8rem;line-height:1}
+.iq-submit-effect{font-size:0.76rem;color:var(--text-secondary);margin:0.3rem 0 0.4rem;padding:0.4rem 0.55rem;border-left:2px solid var(--accent,#7c5af5);background:rgba(127,127,127,0.06);border-radius:0 6px 6px 0;line-height:1.5}
 .iq-composer{display:flex;gap:0.5rem;align-items:flex-end;position:sticky;bottom:0;background:var(--bg,#fff);padding-top:0.4rem}
 .iq-composer textarea{flex:1;resize:vertical}
 @media (prefers-color-scheme:dark){

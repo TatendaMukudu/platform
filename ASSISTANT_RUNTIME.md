@@ -136,6 +136,35 @@ Honest limitation: free-text detection is conservative and may decline when inte
 The legacy `#me-composer` and `POST /api/compose` route are **removed**; `_recordCheckin` is the
 single path to a check-in (tests seed fixtures via that helper).
 
+## Assigned work (Studio folded into the one assistant — Cut C)
+Assigned work is **authorised context + records**, never a second assistant. The Studio chat and the
+per-item assignment chat are removed; help flows through the one composer. An assigned-work card routes
+into it (`askAboutWork` → focuses the composer, stages a `workItemId`).
+
+- **Authorised context** — `_assignedWorkContext(code, userId, workItemId?)` supplies the member's OWN
+  assignments only, for personal assistance. Feedback and score appear ONLY once **released**
+  (status `returned`); unreleased reviewer deliberation is never stored on the member record, and a
+  foreign/unknown work-item id yields no items (no leak). Basis IDs = the authorised assignment ids;
+  carried on the response as a bounded `assignedWork` extension (not a second runtime contract).
+- **Intents** (bounded, inspectable): `assigned_work_help` (explain/understand/plan/status) and
+  `assigned_work_submit` (an explicit submit request). Both are gated by there being an authorised item.
+- **Assistance vs. action.** Assistance needs no confirmation — a grounded explanation of
+  instructions/criteria/status/**released** feedback+score (`_assignedWorkExplain`), never inventing
+  criteria/feedback/scores, never asserting a hidden decision. An ambiguous target asks *which item*
+  (follow-up) rather than guessing. A write is a confirmable **`submit_work`** proposal that states the
+  exact effect (work item · what is submitted · resulting status · review triggered · not reversible ·
+  validation if nothing saved), executed on confirm by the existing **`_submitAssignment`** capability.
+- **No-direct-writes boundary.** The assistant never writes organisation-owned assessment truth
+  (definitions, criteria, scores, feedback, approval, completion). Only the existing capability, via an
+  explicit confirmed proposal, persists a change; the confirmed-guard makes it at-most-once.
+- **Draft / save / submit.** The assistant may generate draft text in the thread (clearly not saved or
+  submitted); the assessment model has no separate draft store, so no `save_draft` is fabricated.
+  `submit_work` submits the member's **existing saved response** (never blanks it) and only after confirm.
+- **Attachments / voice.** The Studio upload/voice UI is deferred; the ingestion functions
+  (`_extractMetricsFromText` / office parsing / `ai.transcribe`) and leader `_importTeamTable` are
+  preserved for re-wiring as an authorised attachment capability (documented interface exception —
+  not pretended-consolidated). Leader review (`/api/assessments/:id/summarize`) is unchanged (leader-side).
+
 ## Tests
 `scripts/assistant-runtime-smoke.js` (30 checks) proves the runtime's 21 invariants + 2 auth checks.
 `scripts/assistant-interface-smoke.js` (46 checks) proves the interface contract: every lens routes

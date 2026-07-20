@@ -4233,43 +4233,8 @@ function _publicAssignment(a) {
     score: a.score ?? null, assignedAt: a.assignedAt, submittedAt: a.submittedAt || null, returnedAt: a.returnedAt || null };
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
-   THE STUDIO — a person's conversation-first space. One chat with IntelliQ that
-   holds three things: work assigned to them, pins sent to them, and their own
-   planning. They can type, drop in a file or photo, or record a voice note — and
-   everything they put in becomes a private kernel signal, so planning counts.
-   ═══════════════════════════════════════════════════════════════════════════ */
-function _studioThread(code, userId) {
-  const k = `${code}:${userId}`;
-  return studioThreads[k] || (studioThreads[k] = { messages: [], plans: [] });
-}
-
-/* What the Studio REMEMBERS, distilled for reasoning: what has tended to work and
-   what hasn't — for this org and this person — so IntelliQ reasons from evidence,
-   not a blank slate. Privacy-safe and visibility-scoped: titles/approaches and
-   aggregate direction only, never another individual's private detail. This is the
-   "knowing your org in and out — what's worked, what hasn't, and why" surface. */
-function _studioMemoryContext(code, userId) {
-  const parts = [];
-  // What returned work has tended to help / precede a dip (caller's own scope).
-  let oc; try { oc = _assessmentOutcomes(code, userId, Date.now()); } catch (_) { oc = { working: [], revisit: [] }; }
-  if (oc.working?.length) parts.push(`Has tended to help: ${oc.working.slice(0, 4).map(w => `"${w.title}"${w.avgScore != null ? ` (avg ${w.avgScore})` : ''}`).join(', ')}.`);
-  if (oc.revisit?.length) parts.push(`Has tended to precede a dip: ${oc.revisit.slice(0, 3).map(r => `"${r.title}"`).join(', ')}.`);
-  // Approaches the org has learned work (aggregate, measured outcomes, no names).
-  let learn; try { learn = _learningByPattern(code); } catch (_) { learn = {}; }
-  const worked = Object.entries(learn || {})
-    .filter(([, v]) => v && v.action && v.total >= 2 && v.positive / v.total >= 0.6)
-    .map(([pt, v]) => `for ${intel.PATTERN_LABEL[pt] || pt}, ${v.action} (helped ${v.positive}/${v.total})`);
-  if (worked.length) parts.push(`Approaches that have worked here before: ${worked.slice(0, 3).join('; ')}.`);
-  // This person's own footing — recurring strengths + plans they've completed.
-  const strengths = _personStrengths(code, userId);
-  if (strengths.length) parts.push(`Their recurring strengths: ${strengths.join(', ')}.`);
-  const th = studioThreads[`${code}:${userId}`];
-  const done = th ? th.plans.filter(p => p.done).length : 0;
-  if (done) parts.push(`They've completed ${done} plan${done > 1 ? 's' : ''} in the workspace so far.`);
-  return parts.join(' ');
-}
-
+/* [REMOVED] Studio conversation helpers (_studioThread / _studioMemoryContext) — Cut C.
+   studioThreads store retained as a read-only archive (load/save intact; not surfaced live). */
 /* Pull structured numbers out of freeform text / CSV WITHOUT any AI — a spreadsheet
    or a pasted stat line becomes real metrics. "label: 45", "label = 45", "label,45",
    or a two-column CSV row all count. Nothing plugged in gets thrown away. */
@@ -4379,260 +4344,14 @@ function _studioMemberRead(code, userId, now) {
   return parts.join(' ');
 }
 
-/* GET /api/studio — the whole conversation-first surface for the caller. */
-app.get('/api/studio', requireAuth, (req, res) => {
-  const { orgCode: code, userId } = req.iqSession;
-  const th = _studioThread(code, userId);
-  const all = assessmentAssignments[code] || [];
-  const assigned = all.filter(a => a.assigneeId === userId && a.status !== 'returned').map(_publicAssignment);
-  const pins = (orgTutorials[code] || []).map(t => ({ id: t.id, title: t.title, kind: t.kind, createdByName: t.createdByName }));
-  const me = orgUsers[code]?.[userId];
-  const first = (me?.name || 'there').split(' ')[0];
-  const openPlans = th.plans.filter(p => !p.done);
-  // A PROACTIVE status, recomputed every visit — Studio remembers where you left
-  // off ("you completed two, one's still waiting") instead of starting cold.
-  const weekAgo = Date.now() - 7 * 86400000;
-  const doneRecently = th.plans.filter(p => p.done && p.ts && new Date(p.ts).getTime() > weekAgo - 30 * 86400000).length;
-  const parts = [];
-  if (openPlans.length) parts.push(`${openPlans.length} plan${openPlans.length > 1 ? 's' : ''} still open`);
-  if (doneRecently)     parts.push(`${doneRecently} completed`);
-  if (assigned.length)  parts.push(`${assigned.length} assigned thing${assigned.length > 1 ? 's' : ''} waiting`);
-  const proactive = parts.length
-    ? `Picking up where you left off — ${parts.join(', ')}. What should we focus on today?`
-    : null;
-  // The first-message greeting only for a brand-new Studio.
-  let opening = null;
-  if (!th.messages.length) {
-    const bits = [];
-    if (assigned.length) bits.push(`${assigned.length} thing${assigned.length > 1 ? 's' : ''} assigned to you`);
-    if (openPlans.length) bits.push(`${openPlans.length} plan${openPlans.length > 1 ? 's' : ''} in progress`);
-    opening = `Hi ${first} — this is your workspace. ${bits.length ? `You've got ${bits.join(' and ')}. ` : ''}Tell me what you want to work on, think a plan out loud, or drop in a file, photo, or voice note. What's on your mind?`;
-  }
-  res.json({ ok: true, opening, proactive, messages: th.messages.slice(-40), plans: openPlans, assigned, pins, canTranscribe: ai.canTranscribe() });
-});
-
-/* POST /api/studio/chat — talk to IntelliQ in the Studio. Knows the caller's
-   assigned work, pins, and plans; replies conversationally and can help them shape
-   a plan. Every user turn (text or media) is persisted AND emitted as a private
-   kernel signal, so what they plan and capture here informs their own trajectory. */
-app.post('/api/studio/chat', requireAuth, async (req, res) => {
-  const { orgCode: code, userId } = req.iqSession;
-  const message = String(req.body?.message || '').slice(0, 4000).trim();
-  const media = (req.body?.media && typeof req.body.media === 'object')
-    ? { name: String(req.body.media.name || '').slice(0, 160), kind: String(req.body.media.kind || 'file').slice(0, 24) } : null;
-  // The evidence itself (base64 + mimetype), kept only for this request so IntelliQ
-  // can actually READ it — never persisted raw in the thread.
-  const att = (req.body?.attachment && typeof req.body.attachment === 'object') ? req.body.attachment : null;
-  const savePlan = req.body?.savePlan === true;
-  if (!message && !media) return res.status(400).json({ error: 'message or media required' });
-
-  const th = _studioThread(code, userId);
-  th.messages.push({ role: 'user', text: message, ts: new Date().toISOString(), media: media || undefined });
-
-  // Planning counts: the caller's own input becomes a private activity signal in the
-  // kernel (categorical/short — the org only ever sees aggregate patterns, never this).
-  // Sensitivity is CLASSIFIED, never hard-coded: a hardship disclosed in a MyWorkspace
-  // capture must inform reasoning but stay under the same privacy policy as a check-in.
-  if (message || media) _emitSignalSafe(code, {
-    subjectType: 'member', subjectId: userId, source: 'studio', modality: media ? 'media' : 'text',
-    valueText: ((media ? `[${media.kind}] ` : '') + (message || 'shared a file')).slice(0, 200),
-    label: 'Studio input', primitive: 'activity',
-    sensitivity: message ? privacy.classifyText(message, { source: 'workspace' }) : 'normal',
-    data: { studio: true, media: media ? media.kind : undefined },
-  }, userId);
-
-  const me = orgUsers[code]?.[userId];
-  const first = (me?.name || 'there').split(' ')[0];
-  const all = assessmentAssignments[code] || [];
-  const assignedTitles = all.filter(a => a.assigneeId === userId && a.status !== 'returned').map(a => a.title);
-  const openPlans = th.plans.filter(p => !p.done).map(p => p.text);
-
-  // ── If evidence was attached, READ it AND DECIPHER IT INTO NUMBERS. Reading gives
-  //    a grounded reply; the extracted metrics become real numeric signals the kernel
-  //    reasons over (trajectory, load, capability). Nothing plugged in is thrown away.
-  let understanding = '';
-  let understandNote = '';
-  let capturedMetrics = [];   // [{label, value}]
-  let teamImport = null;
-  if (att && att.data) {
-    const mime = String(att.mimetype || '').toLowerCase();
-    const fname = String(att.name || media?.name || '').toLowerCase();
-    const isXlsx = /spreadsheetml|excel/.test(mime) || /\.xlsx?$/.test(fname);
-    const isDocx = /wordprocessingml/.test(mime) || /\.docx?$/.test(fname);
-    let kind = null, payload = null, plainText = null;
-    if (mime.startsWith('image/')) { kind = 'image'; payload = { type: 'image', mimetype: mime, data: att.data }; }
-    else if (mime === 'application/pdf') { kind = 'pdf'; payload = { type: 'pdf', data: att.data }; }
-    else if (isXlsx) {
-      // Excel → CSV-style text, read with no dependencies, then the same pipeline.
-      kind = 'text';
-      try { plainText = office.xlsxToText(Buffer.from(att.data, 'base64')); if (plainText) payload = { type: 'text', text: plainText }; } catch (_) {}
-      if (!plainText) understandNote = 'I couldn\'t read that Excel file — re-save it as .xlsx or export a CSV and I\'ll read it in full.';
-    }
-    else if (isDocx) {
-      kind = 'text';
-      try { plainText = office.docxToText(Buffer.from(att.data, 'base64')); if (plainText) payload = { type: 'text', text: plainText }; } catch (_) {}
-      if (!plainText) understandNote = 'I couldn\'t read that Word file — re-save it as .docx or paste the text.';
-    }
-    else if (mime.startsWith('text/') || mime === 'application/csv') {
-      kind = 'text';
-      try { plainText = Buffer.from(att.data, 'base64').toString('utf8'); payload = { type: 'text', text: plainText }; } catch (_) { payload = null; }
-    }
-
-    // A table with a name/email column + metric columns → import across the squad,
-    // one row per person (leaders only, and only for people they can see).
-    if (plainText && _isLeader(code, userId)) {
-      try { teamImport = _importTeamTable(code, userId, plainText); } catch (_) { teamImport = null; }
-    }
-
-    // A roster import already wrote the numbers per-person. Otherwise, decipher this
-    // as ONE person's data (deterministic — no AI key needed).
-    if (teamImport) {
-      const cols = (teamImport.columns || []).join(', ');
-      understanding = `Imported ${teamImport.totalMetrics} data point${teamImport.totalMetrics !== 1 ? 's' : ''} across ${teamImport.importedMembers} ${teamImport.importedMembers > 1 ? 'people' : 'person'}${cols ? ` (${cols})` : ''} — each is now on that person's own record, so it'll shape what I notice for them.${teamImport.unmatched.length ? ` I couldn't match: ${teamImport.unmatched.join(', ')} — check the name or email.` : ''}`;
-    } else if (plainText) {
-      capturedMetrics = _extractMetricsFromText(plainText);
-    }
-
-    if (teamImport) {
-      /* handled above — skip single-person understanding */
-    } else if (!kind) {
-      understandNote = 'I can read images, PDFs, Excel, Word, and text/CSV. This type I couldn\'t open — paste the text and I\'ll take it.';
-    } else if (!ai.canUnderstand(kind) && !capturedMetrics.length && !understandNote) {
-      understandNote = kind === 'pdf'
-        ? 'Reading PDFs needs a Claude key — it\'s captured here. Send it as an image or text, or tell me what\'s in it, and I\'ll work with that.'
-        : 'Reading files needs an AI key configured — it\'s captured here, but tell me what\'s in it and I\'ll work with that for now.';
-    } else if (ai.canUnderstand(kind)) {
-      try {
-        const emem = _studioMemoryContext(code, userId);
-        const sys = [
-          `You are IntelliQ, reading a piece of evidence ${first} shared in their workspace (a ${kind}). Understand what it actually shows and how it bears on their work; connect it to what's worked before when relevant (see MEMORY). ALSO extract every number worth tracking — a stat, a score, a distance, a count, a percentage — faithfully, never invented. Return JSON only: {"reply": string (2-4 sentences, warm and specific, what you see and one useful next step), "observations": array of up to 3 short factual notes, "metrics": array of up to 15 {"label": short string, "value": number}}. No emojis.`,
-          _worldviewDirective(code),
-          _domainDirective(code, { userId }),
-          emem ? `MEMORY — what's worked / hasn't: ${emem}` : '',
-        ].filter(Boolean).join('\n\n');
-        const raw = await ai.understand({ system: sys, prompt: `${message ? `They said: "${message}". ` : ''}Read the attached ${kind} ("${att.name || media?.name || 'file'}"), respond, and pull out the numbers.`, media: payload, maxTokens: 900 });
-        const parsed = ai.parseJSON(raw) || {};
-        understanding = String(parsed.reply || raw || '').slice(0, 1200);
-        (Array.isArray(parsed.observations) ? parsed.observations.slice(0, 3) : []).forEach(o => _emitSignalSafe(code, {
-          subjectType: 'member', subjectId: userId, source: 'studio', modality: 'media',
-          valueText: `From ${kind}: ${String(o).slice(0, 160)}`, label: 'Studio evidence', primitive: 'observation', sensitivity: 'normal',
-          data: { studio: true, evidence: kind },
-        }, userId));
-        // Merge AI-read metrics (dedupe by label; deterministic ones already found win).
-        const seen = new Set(capturedMetrics.map(x => x.label.toLowerCase()));
-        (Array.isArray(parsed.metrics) ? parsed.metrics : []).forEach(mm => {
-          const label = String(mm?.label || '').trim().slice(0, 60); const value = Number(mm?.value);
-          if (label && Number.isFinite(value) && !seen.has(label.toLowerCase())) { seen.add(label.toLowerCase()); capturedMetrics.push({ label, value }); }
-        });
-      } catch (_) { if (!capturedMetrics.length) understandNote = 'I had the file but couldn\'t read it just now — try again, or tell me what\'s in it.'; }
-    }
-
-    // Emit every captured number as a real metric signal — this is the "data in" that
-    // the kernel then trends, correlates, and reasons over going forward.
-    capturedMetrics = capturedMetrics.slice(0, 20);
-    capturedMetrics.forEach(mm => _emitSignalSafe(code, {
-      subjectType: 'member', subjectId: userId, source: 'metric', modality: 'data',
-      valueNum: mm.value, label: mm.label.slice(0, 80), sensitivity: 'normal',
-      data: { studio: true, evidence: kind, extracted: true, name: att.name || media?.name || null },
-    }, userId));
-    if (capturedMetrics.length) {
-      const preview = capturedMetrics.slice(0, 4).map(mm => `${mm.label} ${mm.value}`).join(', ');
-      const tail = `I pulled ${capturedMetrics.length} number${capturedMetrics.length > 1 ? 's' : ''} from that${preview ? ` — ${preview}${capturedMetrics.length > 4 ? '…' : ''}` : ''} — I'm tracking ${capturedMetrics.length > 1 ? 'them' : 'it'} now, so they'll shape what I notice going forward.`;
-      understanding = understanding ? `${understanding} ${tail}` : tail;
-    }
-  }
-
-  // Deterministic, always-works reply.
-  let reply = understanding
-    ? understanding
-    : media
-    ? `Got it — I've saved ${media.name || 'that'} to your workspace${understandNote ? '. ' + understandNote : ' and noted it. Want me to turn it into a plan, or add it to something you\'re already working on?'}`
-    : savePlan
-    ? `Saved that as a plan. Want to break it into steps, or leave it as-is for now?`
-    : assignedTitles.length
-    ? `Noted. You've also got "${assignedTitles[0]}" assigned — want to work on that, or keep going with this?`
-    : `Noted. Want me to help you shape this into a plan you can act on?`;
-
-  // Plans emerge from the conversation — the model decides when a turn contains a
-  // plan worth keeping, so it feels like "I've turned that into a plan", not a form.
-  let plansToSave = (savePlan && message) ? [message.slice(0, 400)] : [];
-  if (ai.enabled() && message && !understanding) {
-    const history = th.messages.slice(-10).map(m => ({ role: m.role === 'assistant' ? 'assistant' : 'user', content: m.text || (m.media ? `[shared ${m.media.kind}]` : '') }));
-    const ctx = [
-      assignedTitles.length ? `Assigned to them right now: ${assignedTitles.slice(0, 5).join('; ')}.` : 'Nothing is assigned to them right now.',
-      openPlans.length ? `Plans they're working on: ${openPlans.slice(0, 5).join('; ')}.` : 'No saved plans yet.',
-    ].filter(Boolean).join(' ');
-    const memberRead = _studioMemberRead(code, userId, Date.now());
-    const memory = _studioMemoryContext(code, userId);
-    const grounding = [
-      _worldviewDirective(code),
-      _domainDirective(code, { userId }),
-      memberRead ? `WHAT YOU KNOW ABOUT ${first.toUpperCase()} (use it — be specific): ${memberRead}` : '',
-      memory ? `WHAT'S WORKED HERE BEFORE (reason from this): ${memory}` : '',
-      `Also: ${ctx}`,
-    ].filter(Boolean).join('\n\n');
-    const system = [
-      `You are IntelliQ, ${first}'s coach in their private workspace — a sharp, supportive thinking partner who actually knows their record. When they raise something (a weakness, a goal, a question), give a GENUINELY USEFUL, specific answer: name what you actually see in their data, connect it to their development areas, strengths, and what's worked here before, and give two or three concrete next steps they can start this week. Be a real coach — substantive but tight (3-6 sentences), warm, direct, plainly said. MATCH THEIR TONE AND WORDS: mirror how they actually talk — if they're casual or use slang, be casual back; if they're formal, meet that. Don't sound like a corporate memo. Ground everything in what you know; if you genuinely lack the data to be specific, say so honestly and ask the ONE question that would let you help. When the exchange lands on something concrete to do, capture it as 1-3 short, checkable steps in "planSteps" and set savePlan true, phrasing your reply so it feels natural — never make them click. Otherwise planSteps is empty. Return JSON only: {"reply": string, "savePlan": boolean, "planSteps": array of short imperative strings}. Never invent facts about them or the team. No emojis.`,
-      grounding,
-    ].join('\n\n');
-    try {
-      const out = await ai.completeJSON({ tier: 'reason', maxTokens: 650, system, messages: history, schema: ['reply'] });
-      if (out && out.reply) {
-        reply = String(out.reply).slice(0, 1400).trim();
-        const steps = Array.isArray(out.planSteps) ? out.planSteps : (out.planText ? [out.planText] : []);
-        if (out.savePlan === true) steps.slice(0, 3).forEach(s => { const t = String(s || '').slice(0, 300).trim(); if (t) plansToSave.push(t); });
-      } else {
-        // JSON didn't parse — still give a real, grounded answer (just no structured
-        // plan capture this turn) rather than dropping to the thin deterministic line.
-        const line = await ai.complete({ tier: 'reason', maxTokens: 500, system: `You are IntelliQ, ${first}'s coach. Give a specific, useful, grounded answer in 3-6 sentences with two or three concrete next steps. No emojis.\n\n${grounding}`, messages: history });
-        if (line && line.trim()) reply = line.trim().slice(0, 1400);
-      }
-    } catch (_) { /* deterministic reply stands */ }
-  }
-
-  plansToSave.forEach(t => th.plans.push({ id: _shortId(), text: t, ts: new Date().toISOString(), done: false }));
-  const planToSave = plansToSave.length ? plansToSave[0] : null;
-
-  th.messages.push({ role: 'assistant', text: reply, ts: new Date().toISOString() });
-  scheduleSave();
-  res.json({ ok: true, reply, planSaved: !!planToSave, understood: !!understanding, imported: teamImport || undefined, metricsCaptured: capturedMetrics.length });
-});
-
-/* POST /api/studio/plan/:id — mark one of the caller's plans done (or reopen). */
-app.post('/api/studio/plan/:id', requireAuth, (req, res) => {
-  const { orgCode: code, userId } = req.iqSession;
-  const th = _studioThread(code, userId);
-  const p = th.plans.find(x => x.id === req.params.id);
-  if (!p) return res.status(404).json({ error: 'not found' });
-  p.done = req.body?.done !== false;
-  if (p.done) _emitSignalSafe(code, {
-    subjectType: 'member', subjectId: userId, source: 'studio', modality: 'text',
-    valueText: `Completed a plan: ${p.text.slice(0, 120)}`, label: 'Studio plan done',
-    primitive: 'activity', sensitivity: 'normal', data: { studio: true, planDone: true },
-  }, userId);
-  scheduleSave();
-  res.json({ ok: true, plans: th.plans.filter(x => !x.done) });
-});
-
-/* POST /api/studio/transcribe — voice note → text (OpenAI Whisper). Only available
-   when an OpenAI key is set; otherwise it degrades honestly (the caller is told to
-   type it or that transcription needs a key) rather than fabricating a transcript. */
-app.post('/api/studio/transcribe', requireAuth, async (req, res) => {
-  if (!ai.canTranscribe()) return res.status(503).json({ error: 'transcription-unavailable', note: 'Voice transcription needs an OpenAI key. You can type your note for now.' });
-  const b64 = String(req.body?.audio || '');
-  const mimetype = String(req.body?.mimetype || 'audio/webm').slice(0, 60);
-  const data = b64.includes(',') ? b64.split(',')[1] : b64;
-  if (!data) return res.status(400).json({ error: 'audio required' });
-  let buffer; try { buffer = Buffer.from(data, 'base64'); } catch (_) { return res.status(400).json({ error: 'bad audio' }); }
-  if (!buffer.length || buffer.length > 25 * 1024 * 1024) return res.status(400).json({ error: 'audio too large or empty' });
-  try {
-    const ext = /wav/.test(mimetype) ? 'wav' : /mp4|m4a/.test(mimetype) ? 'm4a' : /mpeg|mp3/.test(mimetype) ? 'mp3' : 'webm';
-    const text = await ai.transcribe(buffer, { filename: `note.${ext}`, mimetype });
-    res.json({ ok: true, text });
-  } catch (e) {
-    res.status(502).json({ error: 'transcribe-failed', note: 'Could not transcribe that — try again or type it.' });
-  }
-});
+/* [REMOVED] Studio routes (GET /api/studio, POST /api/studio/chat, /studio/plan/:id,
+   /studio/transcribe) — Phase-1 Cut C. The Studio was a SECOND assistant identity/composer/
+   conversation. It is folded into the ONE IntelliQ runtime: assigned work is now authorised
+   CONTEXT + records (see /api/assessments and _assignedWorkContext), assistance flows through
+   /api/assistant/turn (assigned_work intents), and writes are confirmable proposals executed by
+   the existing assessment capability — never by the assistant directly. The data-ingestion
+   capability (_extractMetricsFromText / _importTeamTable / office parsing / ai.transcribe) is
+   PRESERVED as functions; its upload/voice UI is deferred and documented (no live Studio chat). */
 
 /* GET /api/assessments — everything the caller needs for the tab, role-scoped. */
 app.get('/api/assessments', requireAuth, (req, res) => {
@@ -4955,14 +4674,18 @@ app.post('/api/assessments/assign', requireAuth, (req, res) => {
 });
 
 /* POST /api/assessments/:id/submit — the assignee fills it in and returns it. */
-app.post('/api/assessments/:id/submit', requireAuth, (req, res) => {
-  const { orgCode: code, userId } = req.iqSession;
-  const a = (assessmentAssignments[code] || []).find(x => x.id === req.params.id);
-  if (!a) return res.status(404).json({ error: 'not found' });
-  if (a.assigneeId !== userId) return res.status(403).json({ error: 'not your assessment' });
-  const { response, note } = req.body || {};
-  const resp = (response && typeof response === 'object') ? response : {};
-  const noteText = String(note || '').slice(0, 4000);
+/* CAPABILITY — submit (or resubmit) a member's OWN assigned work. The single validated,
+   authorised write for a submission: used by the HTTP route AND by the unified assistant's
+   confirmable `submit_work` proposal executor, so authorisation/append-only/canonicalisation
+   exist exactly once. The assistant never calls this without an explicit confirmed proposal. */
+function _submitAssignment(code, userId, id, { response, note } = {}) {
+  const a = (assessmentAssignments[code] || []).find(x => x.id === id);
+  if (!a) return { ok: false, status: 404, error: 'not found' };
+  if (a.assigneeId !== userId) return { ok: false, status: 403, error: 'not your assessment' };
+  // No response supplied (e.g. a confirmed submit_work proposal) → submit the member's EXISTING
+  // saved response; never blank their work. The HTTP form always supplies the current response.
+  const resp = (response && typeof response === 'object') ? response : (a.response || {});
+  const noteText = note != null ? String(note).slice(0, 4000) : (a.note || '');
   // APPEND-ONLY submissions. A resubmission never overwrites — it is a REVISION linked to
   // the prior submission (and to the assessment it answers, if the work had been returned).
   a.submissions = a.submissions || [];
@@ -4986,7 +4709,13 @@ app.post('/api/assessments/:id/submit', requireAuth, (req, res) => {
   // AUTHORITATIVE: the submission (and, on resubmit, a revision) becomes canonical evidence.
   try { _canonicaliseSubmission(code, a, sub); } catch (_) {}
   scheduleSave();
-  res.json({ ok: true, assignment: _publicAssignment(a), iteration: sub.iteration });
+  return { ok: true, assignment: _publicAssignment(a), iteration: sub.iteration };
+}
+app.post('/api/assessments/:id/submit', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const r = _submitAssignment(code, userId, req.params.id, { response: req.body?.response, note: req.body?.note });
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  res.json({ ok: true, assignment: r.assignment, iteration: r.iteration });
 });
 
 /* POST /api/assessments/:id/return — the assigner reviews: feedback + optional score. */
@@ -5067,44 +4796,12 @@ app.post('/api/assessments/:id/summarize', requireAuth, async (req, res) => {
   });
 });
 
-/* POST /api/assessments/:id/discuss — the assignment is a conversation, not a form.
-   The assignee (or the assigner) can talk it through with IntelliQ, which knows what
-   the leader set (title, instructions, kind, fields) and helps them think it through
-   — the "interactive, not a chore" experience. LLM-driven with a plain fallback. */
-app.post('/api/assessments/:id/discuss', requireAuth, async (req, res) => {
-  const { orgCode: code, userId } = req.iqSession;
-  const a = (assessmentAssignments[code] || []).find(x => x.id === req.params.id);
-  if (!a) return res.status(404).json({ error: 'not found' });
-  const isAssignee = a.assigneeId === userId;
-  const canReview  = a.assignerId === userId || (_isLeader(code, userId) && new Set(getVisibleUserIds(code, userId)).has(a.assigneeId));
-  if (!isAssignee && !canReview) return res.status(403).json({ error: 'not allowed' });
-  const message = String(req.body?.message || '').slice(0, 2000).trim();
-  if (!message) return res.status(400).json({ error: 'message required' });
-  const history = Array.isArray(req.body?.history) ? req.body.history.slice(-8) : [];
-
-  const fieldList = (a.fields || []).map(f => f.label).join(', ') || 'your response';
-  let reply = isAssignee
-    ? `Start with what you actually did or saw, then be specific. For "${a.title}", the parts to cover are: ${fieldList}. Want to talk through any one of them?`
-    : `This is ${a.assigneeName}'s work on "${a.title}". Ask me to summarise their answers or compare them to what you set.`;
-
-  if (ai.enabled()) {
-    try {
-      const role = isAssignee
-        ? `You are IntelliQ, having a warm, natural CONVERSATION with a person to help them reflect on an assignment their leader set. This is a chat, not a form — guide them gently through the areas below ONE AT A TIME: ask about the first, listen, acknowledge what they say, then move to the next when it feels natural. Ask a follow-up if an answer is thin. When you've covered everything, tell them warmly that they can hit "Send to [leader]" whenever they're ready. Keep each message to 1-3 sentences. Never do it for them, never invent facts about them, never reveal private data. No emojis.`
-        : `You are IntelliQ helping a LEADER reflect on someone's assignment. Be concise and neutral. No emojis.`;
-      const context = `Assignment: "${a.title}" (${a.kind}).\nInstructions the leader set: ${a.description || '(none)'}\nSections to fill: ${fieldList}.` +
-        (a.guidance ? `\n\nHOW THE LEADER WANTS THIS DONE (tutor the person from this — teach them this specific method/expectation, don't invent your own):\n${a.guidance}` : '') +
-        (isAssignee && a.response && Object.keys(a.response).length ? `\nTheir current draft: ${Object.entries(a.response).map(([k, v]) => `${k}: ${v}`).join(' | ').slice(0, 800)}` : '');
-      const messages = [
-        ...history.filter(h => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string').map(h => ({ role: h.role, content: h.content.slice(0, 1000) })),
-        { role: 'user', content: message },
-      ];
-      const out = await ai.complete({ tier: 'reason', system: [`${role}\n\n${context}`, _domainDirective(code, { userId: a.assigneeId })].filter(Boolean).join('\n\n'), messages, maxTokens: 300 });
-      if (out) reply = out;
-    } catch (_) {}
-  }
-  res.json({ ok: true, reply });
-});
+/* [REMOVED] POST /api/assessments/:id/discuss — Phase-1 Cut C. This was a per-item conversational
+   shell (a second assistant identity on each assignment). Member assigned-work assistance now flows
+   through the ONE IntelliQ runtime: /api/assistant/turn with an authorised workItemId (see
+   _assignedWorkContext + the assigned_work_help intent). Authorisation (a member can only discuss
+   their OWN work) is enforced there by owner-scoping. Leader submission review is unchanged
+   (/api/assessments/:id/summarize, leader-side). */
 
 /* Tutorials — pinned how-to references. Leaders pin; everyone can read. */
 app.post('/api/tutorials', requireAuth, (req, res) => {
@@ -7625,7 +7322,10 @@ function _assistantInterpret(code, userId, text) {
   add(purposeIntent[cls.purpose] || 'private_note', 'suggested');
   if (/\?|\bwhy\b|\bhow (am|do) i\b|\bwhat should i\b|going on with|help me understand|insight/.test(l)) add('question', 'suggested');
   if (/\b(meeting|schedule|calendar|reserve|book|call|sync|invite)\b/.test(l)) add('calendar_action', 'suggested');
-  if (/\b(assignment|feedback|revise|resubmit|rubric|assessed|review)\b/.test(l)) add('assigned_work_help', 'low');
+  // Assigned-work assistance (bounded, inspectable): help/understand/plan/status vs. an EXPLICIT
+  // submit request. Both are gated downstream by there being an authorised assigned item to target.
+  if (/\b(assignment|assigned|my task|rubric|criteria|instructions?|deadline|due date|feedback|revise|revision|resubmit|assessed|assessment|submission|marked?)\b/.test(l)) add('assigned_work_help', 'suggested');
+  if (/\b(submit (it|this|my|the)?|hand (it|this|my) in|hand in|resubmit|mark (it |this )?ready for review|turn (it|this) in|send (it|this|my|the) (work|assignment|assessment|answer) (in|for review))\b/.test(l)) add('assigned_work_submit', 'suggested');
   if (/\b(check ?in|remind me|follow up|follow-up|check on me|after (the|my|this))\b/.test(l)) add('follow_up_request', 'suggested');
 
   // ── Current-state check-in detection — BOUNDED and inspectable (not an unbounded model guess).
@@ -7670,7 +7370,7 @@ function _assistantInterpret(code, userId, text) {
 /* Build action PROPOSALS (never executed) from the interpretation. Each proposal names its
    capability, payload, visibility (private default), why, required approval, policy result and
    evidence basis. Persistent effects route ONLY through existing capabilities on confirmation. */
-function _assistantProposals(code, userId, interp, context, text) {
+function _assistantProposals(code, userId, interp, context, text, workCtx) {
   const out = [];
   const primary = interp.suggestedPrivacy;
   const captureIntents = ['personal_reflection', 'private_note', 'plan', 'commitment', 'observation'];
@@ -7716,6 +7416,24 @@ function _assistantProposals(code, userId, interp, context, text) {
   if (ckp) out.push({ id: 'prop_' + generateId(), actionType: 'checkin_proposal', capability: 'checkin',
     label: `Offer a personalised check-in in a few days`, payload: ckp, visibility: 'only_me',
     why: ckp.why, requiredApproval: true, policyResult: { effect: 'require_approval', reason: 'a check-in is only registered with your approval' }, evidenceBasis: ckp.basisIds || [] });
+
+  // Assigned-work SUBMIT (Cut C) — a confirmable proposal executed by the EXISTING assessment
+  // capability (never by the assistant directly). Only when the target is UNAMBIGUOUS (a focused
+  // work item, or the member has exactly one assigned item); otherwise the turn asks which one.
+  if (interp.intents.some(i => i.type === 'assigned_work_submit') && workCtx && workCtx.items.length) {
+    const target = workCtx.items.length === 1 ? workCtx.items[0] : null;
+    if (target) {
+      out.push({ id: 'prop_' + generateId(), actionType: 'submit_work', capability: 'assessment',
+        label: `Submit “${target.title}” for review`, payload: { workItemId: target.id },
+        workItem: { id: target.id, title: target.title, status: target.status },
+        effect: { resultingStatus: 'submitted', triggersReview: true, reversible: false,
+                  whatIsSubmitted: target.myDraft ? 'your current saved response' : 'an empty response (nothing saved yet)' },
+        visibility: 'manager', requiredApproval: true,
+        validation: target.myDraft ? null : 'You have no saved response yet — submitting now sends an empty response.',
+        why: 'you asked to submit this assigned work for review',
+        policyResult: { effect: 'require_approval', reason: 'submitting sends your work to the reviewer' }, evidenceBasis: [target.id] });
+    }
+  }
   return out;
 }
 
@@ -7742,6 +7460,47 @@ function _personalizedCheckinProposal(code, userId, interp, context) {
     expiresAt: new Date(now + 14 * 86400000).toISOString(),
     basisIds: (context.basisIds || []).slice(0, 10), status: 'proposed',
   };
+}
+
+/* AUTHORISED assigned-work context (Cut C). Supplies ONLY the assigned work the requester may
+   see, for personal assistance: the member's OWN assignments (assigneeId === userId), with
+   feedback/score ONLY once released (status 'returned'). NEVER another member's work, and never
+   unreleased reviewer deliberation (not stored on the record before return). An unknown/foreign
+   work-item id yields no items (no leak). Basis IDs = the authorised assignment ids; inspectable. */
+function _assignedWorkContext(code, userId, workItemId) {
+  const mine = (assessmentAssignments[code] || []).filter(a => a.assigneeId === userId);
+  const pick = workItemId ? mine.filter(a => a.id === workItemId) : mine;
+  const items = pick.map(a => {
+    const released = a.status === 'returned';            // feedback/score exist on the record only after return
+    return {
+      id: a.id, title: a.title, kind: a.kind, status: a.status,
+      instructions: ((a.description || '') + (a.guidance ? `\n${a.guidance}` : '')).slice(0, 1200),
+      criteria: (a.fields || []).map(f => ({ label: f.label, hint: f.hint || '' })),
+      myDraft: (a.response && Object.keys(a.response).length) ? a.response : null,
+      myNote: a.note || null, submittedAt: a.submittedAt || null, iterations: (a.submissions || []).length,
+      releasedFeedback: released ? (a.feedback || null) : null,   // RELEASED only
+      releasedScore:    released ? (a.score ?? null)   : null,    // RELEASED only
+      needsRevision:    released && !!a.feedback,
+    };
+  });
+  return {
+    items, basisIds: pick.map(a => a.id), purpose: 'personal_assistance', visibilityEligibility: 'owner-only',
+    limitations: (workItemId && !items.length)
+      ? ['no assigned item matched that reference in your authorised work']
+      : ['only your own assigned work, and only feedback/scores already released to you'],
+  };
+}
+/* Pure ASSISTANCE — a grounded explanation of one assigned item from RELEASED fields only.
+   Never invents criteria, feedback or scores; never asserts a hidden/unreleased decision. */
+function _assignedWorkExplain(item) {
+  const parts = [`"${item.title}" — status: ${item.status}.`];
+  if (item.instructions) parts.push(`Instructions: ${item.instructions.slice(0, 400)}`);
+  if (item.criteria.length) parts.push(`What it asks for: ${item.criteria.map(c => c.label).join(', ')}.`);
+  if (item.needsRevision) parts.push(`Your reviewer returned this for revision. Released feedback: “${String(item.releasedFeedback).slice(0, 300)}”.`);
+  else if (item.releasedFeedback) parts.push(`Released feedback: “${String(item.releasedFeedback).slice(0, 300)}”.`);
+  if (item.releasedScore != null) parts.push(`Released score: ${item.releasedScore}.`);
+  if (item.status !== 'returned') parts.push(`No feedback or score has been released yet.`);
+  return parts.join(' ');
 }
 
 /* ONE authorised context assembler. Retrieves ONLY through existing authorised readers /
@@ -7790,17 +7549,23 @@ function _lensPrioritize(lens, groundedClaims, proposals) {
   });
   return proposals;
 }
-function _assistantTurn(code, userId, text, lens) {
+function _assistantTurn(code, userId, text, lens, opts = {}) {
   lens = ASSISTANT_LENSES.includes(lens) ? lens : null;
+  const workItemId = opts.workItemId ? String(opts.workItemId).slice(0, 80) : null;
   const interp = _assistantInterpret(code, userId, text);
   const context = _assistantContext(code, userId);
-  const proposals = _lensPrioritize(lens, [], _assistantProposals(code, userId, interp, context, text));
+  // Assigned-work is AUTHORISED CONTEXT (Cut C) — assembled only when an assigned-work intent or a
+  // focused work item is present; owner-scoped, released-fields-only (see _assignedWorkContext).
+  const wantsWork = workItemId || interp.intents.some(i => i.type === 'assigned_work_help' || i.type === 'assigned_work_submit');
+  const workCtx = wantsWork ? _assignedWorkContext(code, userId, workItemId) : null;
+  const proposals = _lensPrioritize(lens, [], _assistantProposals(code, userId, interp, context, text, workCtx));
   interp.proposedActions = proposals.map(p => ({ id: p.id, actionType: p.actionType, capability: p.capability, visibility: p.visibility, requiredApproval: p.requiredApproval }));
 
-  // Kernel derivation (grounded) — basis IDs retained; never chain-of-thought.
+  // Kernel derivation (grounded) — basis IDs retained (incl. authorised assigned-work ids); never chain-of-thought.
+  const workBasis = workCtx ? workCtx.basisIds : [];
   const kernelArt = _recordKernelDerivation(code, { type: 'recommendation',
     result: { turn: interp.turnId, intents: interp.intents.map(i => i.type), proposals: proposals.map(p => p.actionType) },
-    basis: context.basisIds.length ? context.basisIds : ['none'], confidence: context.confidence, limitations: context.limitations, detector: 'assistant-runtime' });
+    basis: (context.basisIds.length || workBasis.length) ? [...context.basisIds, ...workBasis] : ['none'], confidence: context.confidence, limitations: context.limitations, detector: 'assistant-runtime' });
 
   // Grounded insight — distinguish what evidence supports from what is only inferred.
   const groundedClaims = [], inferred = [];
@@ -7808,6 +7573,21 @@ function _assistantTurn(code, userId, text, lens) {
   if (context.assessmentDirection && !['unknown'].includes(context.assessmentDirection)) groundedClaims.push({ text: `Your assessment trajectory currently reads ${context.assessmentDirection}.`, basisIds: [] });
   if (context.checkinTrajectory && context.checkinTrajectory !== 'unknown') groundedClaims.push({ text: `Your recent check-ins read ${context.checkinTrajectory}.`, basisIds: [] });
   if (interp.candidateClaims.length) inferred.push({ text: `You seem to be describing ${interp.suggestedPrivacy.purpose === 'reflection' ? 'something personal' : 'a ' + interp.suggestedPrivacy.purpose}.` });
+
+  // Assigned-work ASSISTANCE (Cut C) — pure help, NO write. A grounded explanation from RELEASED
+  // fields only (never invents criteria/feedback/scores). If the target is ambiguous, ask which
+  // item via the follow-up rather than acting; if nothing authorised matched, say so plainly.
+  let workAmbiguous = false, workLead = null;
+  if (workCtx && interp.intents.some(i => i.type === 'assigned_work_help' || i.type === 'assigned_work_submit')) {
+    if (workCtx.items.length === 1) {
+      workLead = _assignedWorkExplain(workCtx.items[0]);
+      groundedClaims.unshift({ text: workLead, basisIds: workCtx.basisIds.slice(0, 6) });
+    } else if (workCtx.items.length > 1) {
+      workAmbiguous = true;
+      workLead = `You have ${workCtx.items.length} assigned items: ${workCtx.items.map(i => `“${i.title}” (${i.status})`).join(', ')}. Which one do you mean?`;
+      groundedClaims.unshift({ text: workLead, basisIds: workCtx.basisIds.slice(0, 6) });
+    }
+  }
 
   // A question in the SAME input is answered through the ONE question-answering path
   // (_assistantAnswer) — not a separate endpoint or reasoning implementation.
@@ -7826,7 +7606,10 @@ function _assistantTurn(code, userId, text, lens) {
   const checkinProp = proposals.find(p => p.actionType === 'checkin_log');
   const otherProps  = proposals.filter(p => p.actionType !== 'checkin_log');
   const parts = [];
-  if (hasAnswer) parts.push(qa.answer);
+  // Assigned-work assistance leads when the member is asking about their assigned work (even over a
+  // generic Q&A answer) — they asked about the work, so answer about the work.
+  if (workLead) parts.push(workLead);
+  else if (hasAnswer) parts.push(qa.answer);
   else if (sensitive) parts.push("Thank you for telling me — that sounds like a lot to be carrying. It stays private with me, and I'm here.");
   else if (hasInsight) parts.push(groundedClaims[0].text);
   if (checkinProp) parts.push("If it'd help, I can log this as today's check-in — nothing is saved until you confirm.");
@@ -7840,15 +7623,19 @@ function _assistantTurn(code, userId, text, lens) {
   const publicProposals = proposals.map(p => ({ id: p.id, actionType: p.actionType, capability: p.capability, label: p.label,
     visibility: p.visibility, why: p.why, requiredApproval: p.requiredApproval, changesPersistentState: p.actionType !== 'checkin_proposal' || true, draftOnly: p.actionType === 'calendar_draft', policyResult: p.policyResult,
     // check-in current-state fields (null for other proposal types) — show what would be recorded before confirming.
-    proposedRecord: p.proposedRecord || null, confidence: p.confidence || null, ambiguity: p.ambiguity || null, immediate: p.immediate || false }));
+    proposedRecord: p.proposedRecord || null, confidence: p.confidence || null, ambiguity: p.ambiguity || null, immediate: p.immediate || false,
+    // assigned-work submit fields (null for other types) — show the exact effect before confirming.
+    workItem: p.workItem || null, effect: p.effect || null, validation: p.validation || null }));
   const response = {
     responseText, mode, lens: lens || null, groundedClaims, inferred, limitations: context.limitations,
     proposedActions: publicProposals,
     // A SMALL prioritised default set (≤2, lens-ordered); the rest stay behind "more".
     primaryActions: publicProposals.slice(0, 2), moreActions: publicProposals.slice(2),
-    privacyNotice, followUpState: proposals.some(p => p.actionType === 'checkin_proposal') ? 'a personalised check-in is proposed (not yet registered)' : 'none',
+    privacyNotice, followUpState: workAmbiguous ? 'which assigned item did you mean?' : (proposals.some(p => p.actionType === 'checkin_proposal') ? 'a personalised check-in is proposed (not yet registered)' : 'none'),
     // A grounded answer when the input carried a question — from the ONE question-answering path.
     qa: qa ? { answer: qa.answer, purpose: qa.purpose, confidence: qa.confidence, limitations: qa.limitations, cites: qa.cites, bounded: qa.bounded } : null,
+    // Bounded assigned-work context extension (authorised, released-fields-only) — NOT a second runtime contract.
+    assignedWork: workCtx ? { items: workCtx.items.map(it => ({ id: it.id, title: it.title, status: it.status, needsRevision: it.needsRevision, releasedScore: it.releasedScore, hasReleasedFeedback: !!it.releasedFeedback })), basisIds: workCtx.basisIds, limitations: workCtx.limitations, ambiguous: workAmbiguous } : null,
     bounded: composed.ok, cites: composed.output.cites,
   };
 
@@ -7876,7 +7663,8 @@ app.post('/api/assistant/turn', requireAuth, (req, res) => {
   if (!text) return res.status(400).json({ error: 'text required' });
   if (text.length > 4000) return res.status(400).json({ error: 'too long' });
   // The active MyWorkspace lens is a BOUNDED context hint (emphasis only, same truth path).
-  const r = _assistantTurn(code, userId, text, req.body?.lens);
+  // An optional workItemId focuses authorised assigned-work context (from clicking a work card).
+  const r = _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId });
   res.json({ ok: true, turnId: r.turn.turnId, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response });
 });
 
@@ -7943,6 +7731,17 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
     prop.confirmed = { at: new Date().toISOString(), checkinId: ckp.id };
     scheduleSave();
     return res.json({ ok: true, confirmed: 'checkin_proposal', checkin: { id: ckp.id, triggerAt: ckp.triggerAt, expiresAt: ckp.expiresAt, referenceable: ckp.referenceable } });
+  }
+
+  if (prop.actionType === 'submit_work') {
+    // Assigned-work SUBMIT: execute through the EXISTING assessment capability (_submitAssignment) —
+    // the assistant never writes assessment truth directly. Submits the member's CURRENT saved
+    // response (never blanks it). The confirmed-guard above makes this at-most-once (no double submit).
+    const r = _submitAssignment(code, userId, prop.payload.workItemId, {});
+    if (!r.ok) return res.status(r.status || 400).json({ error: r.error });
+    prop.confirmed = { at: new Date().toISOString(), workItemId: prop.payload.workItemId, iteration: r.iteration };
+    scheduleSave();
+    return res.json({ ok: true, confirmed: 'submit_work', assignment: r.assignment, iteration: r.iteration });
   }
 
   if (prop.actionType === 'checkin_log') {
@@ -12433,7 +12232,8 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: server-supplied assessment PRESENTATION state
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
-  _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, assistantTurns, checkinProposals };
+  _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
+  _extractMetricsFromText, _importTeamTable, assistantTurns, checkinProposals };
 
 if (require.main === module) (async () => {
   try {

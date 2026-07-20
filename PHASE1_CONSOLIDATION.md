@@ -15,7 +15,7 @@ below is the map; the checklist is the order.
 |---|----------------|-------|-----------------------|-------------|
 | A | **Old `MyWorkspace` composer** (app.js) | `js/app.js` object + `navigate('assessments')` | A 2nd composer (`mw-input`, own lenses, `ask`, `capture`) twinning the unified `#iq-myworkspace` on Home | **done** ✅ |
 | B | **`/api/workspace/ask`** rule-based Q&A | `server.js:7524` | A 2nd question-answering *truth path* parallel to `_assistantTurn` (own work-scope detection + private-inventory answers) | **done** ✅ |
-| C | **Studio** chat surface | `/api/studio*` (server) + `_studioHtml`/`_renderAssessments` (member-view) | A 2nd conversational assistant identity + thread for assigned work | high — 78 refs; assigned-work help must move into the one assistant under the assigned-work boundary (recognise intent, no direct writes) |
+| C | **Studio** chat surface | `/api/studio*` (server) + `_studioHtml`/`_renderAssessments` (member-view) | A 2nd conversational assistant identity + thread for assigned work | **done** ✅ |
 | D | **me-composer** (mood) | `/api/compose` (server) + `#me-composer` (index.html) + `member-view.js:526` | A 2nd capture path (mood/"what happened") outside the unified turn | **done** ✅ |
 | E | **Individual Advisor AI** | `/api/advisor/:memberId/ask` + threads; app.js profile modal | A 2nd chat surface (leader→member). Already canonical (kernel + post-kernel, 45 tests) but still a separate thread/identity | medium — fold the leader "ask about member" into the one runtime with a leader audience, preserving privacy guarantees |
 | F | **`memberResults` raw display projections** | `server.js` (several reads) | Display reads that bypass the canonical assessment projection | low/medium — display-only; retire once the canonical projection covers the fields (see ASSISTANT_RUNTIME.md report 4) |
@@ -45,10 +45,13 @@ or add bespoke capability logic. Consolidate onto the canonical implementation o
   canonical evidence, person-model update and acknowledgement. `/api/compose` is **deleted** and
   `#me-composer` + its handlers (`composeSubmit/composeMood/composeVoice`) removed; member text entry
   is the one `#iq-myworkspace` composer. See the Cut D section below. **Shipped.**
-- [ ] **C — fold Studio into the one assistant.** Assigned-work help routes through `_assistantTurn`
-  under the assigned-work boundary (recognise intent, propose member-owned plans, **never** write the
-  org-owned assessment record). Retire `/api/studio/chat` as a separate conversation; keep assigned-work
-  *cards* as attention/context.
+- [x] **C — fold Studio into the one assistant.** Removed the Studio conversational assistant (routes
+  `/api/studio`, `/studio/chat`, `/studio/plan/:id`, and the per-item `/api/assessments/:id/discuss`
+  chat) and its frontend chat UI. Assigned work is now **authorised context + records**: the unified
+  `_assistantTurn` reads `_assignedWorkContext` (own work, released-fields-only), gives grounded
+  **assistance** (explain/status — no writes), and offers a confirmable **`submit_work`** proposal
+  executed by the existing `_submitAssignment` capability — the assistant never writes assessment truth.
+  See the Cut C section below. **Shipped.**
 - [ ] **E — fold the Individual Advisor into the one runtime** with a leader audience, preserving the
   canonical evidence + kernel + post-kernel privacy guarantees the 45 advisor tests lock in.
 - [ ] **G — converge the two nav routers** once A–E land; one page router, permission-based.
@@ -102,10 +105,77 @@ No numeric mood is manufactured from free text (`mood: null` unless explicitly p
 sensitive-not-logged + explicit-immediate). `endpoint-smoke` 222 → **223** (route 404 + capability
 seed). `checkin-migration` (59) and `checkin-hardening` (26) unchanged and green. Full truth layer green.
 
+## Cut C — Studio / assigned work (detail)
+
+**Removed (assistant identity / conversational shells):**
+- Studio routes `GET /api/studio` (greeting/thread/proactive), `POST /api/studio/chat` (the coach
+  runtime), `POST /api/studio/plan/:id` — a second assistant identity + composer + conversation.
+- The per-item `POST /api/assessments/:id/discuss` — a second conversational shell on each assignment.
+- Frontend: `_studioHtml` + all `_studio*` chat handlers; the per-item `assess-conv` chat +
+  `_assessDiscussSend`. `_renderAssessments` now renders records only (`_assessHtml`).
+- Studio-conversation helpers `_studioThread` / `_studioMemoryContext`. The `studioThreads` store is
+  **retained as a read-only archive** (load/save intact; not surfaced as a live conversation — no
+  migration that changes authorship, timestamps, privacy, or work-item association).
+
+**Preserved (genuine capability):**
+- Assessment records + lifecycle: `/api/assessments` (list, role-scoped track record), `draft`,
+  `plan`, `templates`, `assign`, `:id/submit`, `:id/return`, `:id/presentation`, `:id/summarize`
+  (leader review) — untouched.
+- **`_submitAssignment(code, userId, id, {response, note})`** — extracted from the submit route so the
+  route AND the assistant's `submit_work` proposal share ONE validated, authorised, append-only write
+  (never blanks an existing response). Canonicalisation happens exactly once.
+- Data-ingestion functions `_extractMetricsFromText` / `_importTeamTable` and the office/`ai.transcribe`
+  utilities are preserved (now exported, capability-tested directly).
+- `_studioMemberRead` — an authorised self-read, reused by the check-in acknowledgement (kept).
+
+**Authorised assigned-work context** — `_assignedWorkContext(code, userId, workItemId?)`: the member's
+OWN assignments only; feedback/score included ONLY once released (status `returned`); a foreign/unknown
+work-item id yields no items (no leak). Basis IDs = the authorised assignment ids. Owner-scoped,
+inspectable, released-fields-only. Carried on the response as a bounded `assignedWork` extension, not a
+second top-level contract.
+
+**Assistance vs. action:**
+- *Assistance (no confirmation)* — `assigned_work_help` intent + authorised context → a grounded
+  explanation (`_assignedWorkExplain`) of instructions/criteria/status/**released** feedback+score.
+  Ambiguous target (>1 item, none focused) → the turn asks which one (follow-up), never guesses.
+- *Action (proposal + confirm)* — `assigned_work_submit` intent + an unambiguous item → a `submit_work`
+  proposal stating the exact effect (work item, what is submitted, resulting status, review triggered,
+  not reversible, validation if nothing saved). Confirm → `_submitAssignment`. The confirmed-guard makes
+  it at-most-once (no duplicate submission).
+
+**No-direct-writes boundary:** the assistant response generator never writes assessment truth
+(definitions, criteria, scores, feedback, approval, completion). Only the existing capability, via an
+explicit confirmed proposal, persists a change. No `edit_assignment` / `set_score` / `approve` proposal
+type exists.
+
+**Draft / save / submit distinction:** the assessment model has no separate *draft* store — a member
+fills the response fields (record UI) and submits. The assistant may *generate* draft text in the thread
+(assistance, clearly not saved/submitted); saving-as-you-go is out of model, so **no `save_draft`
+proposal is fabricated** (documented, not invented). Submitting is the only write, and only via the
+`submit_work` proposal. `submit_work` submits the member's **existing saved response** (never blanks it).
+
+**Deferred (documented interface exceptions — capability preserved, presentation removed):**
+- **Attachment ingestion UI + voice** (member evidence upload, `/studio/transcribe`): the Studio upload
+  surface is gone; `_extractMetricsFromText` / office parsing / `ai.transcribe` remain as functions to be
+  re-wired as an authorised attachment capability on the unified composer. Not pretended-consolidated.
+- **Leader team-import UI** (`_importTeamTable`): the function is preserved and tested; its upload entry
+  point is **leader-side, deferred to Cut E** (leader consolidation), not this member-facing slice.
+- **Legacy Studio conversations**: retained as a read-only data-layer archive (`studioThreads`), not
+  surfaced; no live second conversation kept.
+
+**Test evidence:** `assistant-interface-smoke` 46 → **62** (authorised context, explain-no-write,
+released-only feedback/score, foreign-id-no-leak, submit-proposal-effect, no-write-before-confirm,
+capability-exec, duplicate-submit rejection, existing-response-not-blanked, org-truth-immutable,
+stale-context regression, static guards). `endpoint-smoke` 223 → **217** (Studio transport removed;
+discuss authorisation migrated to the unified turn; metric-extraction + team-import migrated to
+capability-level; office round-trip kept). All assessment/privacy suites green.
+
 ## Coexistence still in place (documented debt)
 - `/api/workspace/ask` (server) — a **thin shim** over the one `_assistantAnswer` helper (cut B);
   no parallel reasoning remains. Retire once no client depends on the legacy `{answer,…}` shape.
-- Studio (`/api/studio*`) — assigned-work chat; folds in cut C (**not in this slice**).
+- Attachment-ingestion UI + voice, and leader team-import UI — capabilities preserved as functions,
+  their entry points deferred (see Cut C deferred exceptions above).
+- `studioThreads` — read-only archive of legacy Studio conversations (not surfaced).
 
 Every proactive/learning capability (Phases 2–3) is built **only after** the truth path is single —
 a proactive insight that could be generated by two different runtimes is not trustworthy.

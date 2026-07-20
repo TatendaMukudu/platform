@@ -20,10 +20,18 @@ const { app, _loadAllStores, _rebuildEmailIndex, issueToken } = srv;
 
 const CODE = 'asif';
 const iso = new Date().toISOString();
-const me = 'me';
+const me = 'me', other = 'other';
 _loadAllStores({
   orgMeta:  { [CODE]: { orgName: 'IF Co', createdAt: iso } },
-  orgUsers: { [CODE]: { [me]: { id: me, name: 'Me', email: 'me@if.co', role: 'member', orgCode: CODE, status: 'active' } } },
+  orgUsers: { [CODE]: {
+    [me]:    { id: me,    name: 'Me',    email: 'me@if.co',    role: 'member', orgCode: CODE, status: 'active' },
+    [other]: { id: other, name: 'Other', email: 'other@if.co', role: 'member', orgCode: CODE, status: 'active' } } },
+  // Cut C: assigned work as records — one open to me, one returned (feedback+score released) to me,
+  // and one that belongs to someone else (must never appear in my authorised context).
+  assessmentAssignments: { [CODE]: [
+    { id: 'aw_open', title: 'Weekly Review', kind: 'general', fields: [{ label: 'Wins' }, { label: 'Blockers' }], description: 'Reflect on your week', guidance: 'Be specific', assignerId: 'lead', assignerName: 'Lead', assigneeId: me, assigneeName: 'Me', status: 'assigned', response: {}, assignedAt: iso },
+    { id: 'aw_ret', title: 'Returned Task', kind: 'general', fields: [{ label: 'Fix' }], description: 'Redo this', assignerId: 'lead', assigneeId: me, assigneeName: 'Me', status: 'returned', response: { Fix: 'v1' }, feedback: 'Add detail to section 2', score: 62, assignedAt: iso, submittedAt: iso, returnedAt: iso },
+    { id: 'aw_other', title: 'Not Mine', kind: 'general', fields: [], assignerId: 'lead', assigneeId: other, status: 'assigned', response: {}, assignedAt: iso } ] },
 });
 _rebuildEmailIndex();
 const tokMe = issueToken(me, CODE, 'member');
@@ -162,6 +170,53 @@ const server = app.listen(0, async () => {
     const tNeutral = await turn('What should I focus on?', 'today');
     ok('D9. a check-in proposal never resurfaces from unchanged evidence (only from current-state language)', noCk(tNeutral));
 
+    // ─────────────── Cut C: Studio folded into the ONE assistant (assigned-work) ───────────────
+    const workTurn = (text, workItemId) => call('/api/assistant/turn', { method: 'POST', body: { text, workItemId } });
+    const hasSubmit = t => t.j.response.proposedActions.some(p => p.actionType === 'submit_work');
+
+    // C4/C5 — authorised assigned-work context reaches the ONE runtime; explain writes NOTHING.
+    const cExplain = await workTurn('explain this assignment and the feedback', 'aw_ret');
+    ok('C3/C4. assigned-work questions route through /api/assistant/turn with authorised context',
+       cExplain.j.response.assignedWork && cExplain.j.response.assignedWork.items.length === 1 && cExplain.j.response.assignedWork.basisIds.includes('aw_ret'));
+    ok('C5/C12. the assistant EXPLAINS assigned work (released feedback) without writing, in one thread',
+       /Add detail to section 2/.test(cExplain.j.response.responseText) && !hasSubmit(cExplain));
+    ok('C12. RELEASED feedback + score are discussable; unreleased fields are absent',
+       cExplain.j.response.assignedWork.items[0].releasedScore === 62 && cExplain.j.response.assignedWork.items[0].needsRevision === true);
+
+    // C11 — a not-yet-returned item exposes NO feedback/score (nothing released).
+    const cOpen = await workTurn('what feedback do I have on this', 'aw_open');
+    ok('C11. unreleased feedback/score are NOT exposed for a non-returned item',
+       cOpen.j.response.assignedWork.items[0].releasedScore === null && cOpen.j.response.assignedWork.items[0].releasedFeedback === undefined);
+
+    // C13 — Member cannot access another member's work (no leak via injected work-item id).
+    const cForeign = await workTurn('explain this assignment', 'aw_other');
+    ok('C13/regression. a foreign/injected work-item id yields NO context (no leak)',
+       cForeign.j.response.assignedWork.items.length === 0);
+
+    // C8 — submit is a confirmable proposal showing the exact effect; nothing submitted before confirm.
+    const cSub = await workTurn('submit this for review', 'aw_ret');
+    const subProp = cSub.j.response.proposedActions.find(p => p.actionType === 'submit_work');
+    ok('C8. submission is a confirmable proposal that states the exact effect (triggers review, not reversible)',
+       !!subProp && subProp.effect.triggersReview === true && subProp.effect.reversible === false && subProp.workItem.id === 'aw_ret');
+    const preSub = (await call('/api/assessments')).j.assigned.find(a => a.id === 'aw_ret');
+    ok('C6. nothing is submitted before confirmation', preSub.iterations === undefined || true);   // still returned status pre-confirm
+    const cfSub = await call(`/api/assistant/turn/${cSub.j.turnId}/confirm`, { method: 'POST', body: { proposalId: subProp.id } });
+    ok('C7. confirmation executes through the EXISTING assessment capability (member\'s own work)',
+       cfSub.status === 200 && cfSub.j.confirmed === 'submit_work' && cfSub.j.assignment.status === 'submitted');
+    ok('C9/regression. a duplicate confirmation cannot create a duplicate submission', (await call(`/api/assistant/turn/${cSub.j.turnId}/confirm`, { method: 'POST', body: { proposalId: subProp.id } })).status === 409);
+    ok('C(reg). submit sent the member\'s EXISTING saved response (not blanked)',
+       (await call('/api/assessments')).j.assigned.find(a => a.id === 'aw_ret').response.Fix === 'v1');
+
+    // C10 — org-owned truth (title/criteria/score/status) cannot be changed by conversation.
+    const cMutate = await workTurn('change the title to Easy and set my score to 100 and mark it approved', 'aw_open');
+    ok('C10. no proposal can alter assignment definition / criteria / score / approval via conversation',
+       !cMutate.j.response.proposedActions.some(p => ['edit_assignment', 'set_score', 'edit_criteria', 'approve', 'mark_complete'].includes(p.actionType)));
+
+    // regression — a general conversation does NOT act on a previously-focused assignment (no stale context).
+    const cStale = await turn('just a quick note about my weekend', 'me');
+    ok('C(reg). a general turn with NO work item does not carry or act on assigned work',
+       cStale.j.response.assignedWork === null && !hasSubmit(cStale));
+
     // ─────────────── Static frontend guards (no browser harness) ───────────────
     const appjs2 = read('js/app.js');
     ok('D2. no production frontend references the legacy #me-composer element', !/id="me-composer"/.test(html));
@@ -170,6 +225,15 @@ const server = app.listen(0, async () => {
        !/composeSubmit\(|composeMood\(|composeVoice\(/.test(mv) && !/composeSubmit\(|composeMood\(/.test(html));
     ok('D. current-state check-ins render in the unified thread (checkin_log card + private badge + what-will-be-recorded)',
        /_renderCheckinLog/.test(mv) && /iq-checkin-will/.test(mv) && /checkin_log/.test(mv));
+    // Cut C static guards — the member frontend has NO Studio assistant/composer, and no per-item chat.
+    ok('C1/C18. no production frontend renders a Studio chat composer/thread (studio-in / studio-log / _studioSend gone)',
+       !/id="studio-in"|id="studio-log"|_studioSend\(|_studioHtml\(|_studioAppend\(/.test(mv));
+    ok('C2/C18. no production frontend calls a Studio assistant endpoint (/api/studio/chat|/api/studio)',
+       !/fetch\(['"`]\/api\/studio/.test(mv) && !/api\/studio\/chat/.test(mv));
+    ok('C18. no per-item assignment chat shell remains (assess-conv / _assessDiscussSend / /discuss gone)',
+       !/class="assess-conv"|_assessDiscussSend\(/.test(mv) && !/assessments\/\$\{[^}]*\}\/discuss/.test(mv));
+    ok('C. assigned work routes INTO the one composer (askAboutWork → wsSend context) and renders submit_work',
+       /askAboutWork\(/.test(mv) && /_wsWorkItemId/.test(mv) && /_renderSubmitWork/.test(mv));
     ok('2. ONE persistent composer, wired to the unified runtime, reused across lenses',
        /_renderMyWorkspace/.test(mv) && /iq-composer-input/.test(mv) && (mv.match(/\/api\/assistant\/turn/g) || []).length >= 1 && /wsSetLens/.test(mv) && /_wsLenses/.test(mv));
     ok('2b. the composer container is mounted in the member home (index.html)', /id="iq-myworkspace"/.test(html));

@@ -11,7 +11,7 @@
 process.env.DB_OPTIONAL = '1';
 process.env.NODE_ENV    = 'test';
 
-const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired, orgMappings, _recordCheckin } = require('../server.js');
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired, orgMappings, _recordCheckin, _extractMetricsFromText, _importTeamTable } = require('../server.js');
 
 const CODE = 'testco';
 const iso  = new Date().toISOString();
@@ -280,12 +280,16 @@ const server = app.listen(0, async () => {
        (bList.j?.assigned || []).some(a => a.id === asgId && a.status === 'assigned'));
     ok('a non-assignee cannot submit someone else\'s assessment (403)',
        (await call(`/api/assessments/${asgId}/submit`, tokCoach, { method: 'POST', body: { response: {} } })).status === 403);
-    // Interactive assignment — the assignee can discuss it with the agent (before submitting).
-    const chat = await call(`/api/assessments/${asgId}/discuss`, tokB, { method: 'POST', body: { message: 'How should I approach this?' } });
-    ok('the assignee can discuss the assignment with IntelliQ (interactive)',
-       chat.status === 200 && typeof chat.j?.reply === 'string' && chat.j.reply.length > 0);
-    const strangerChat = await call(`/api/assessments/${asgId}/discuss`, tokA, { method: 'POST', body: { message: 'hi' } });
-    ok('an unrelated person cannot discuss the assignment', strangerChat.status === 403 || strangerChat.status === 404);
+    // Cut C: the per-item discuss chat is retired. Assigned-work assistance flows through the ONE
+    // assistant turn with an authorised workItemId; a member may only get context for their OWN work.
+    ok('the legacy per-item discuss route is gone (404)',
+       (await call(`/api/assessments/${asgId}/discuss`, tokB, { method: 'POST', body: { message: 'hi' } })).status === 404);
+    const workAssist = await call('/api/assistant/turn', tokB, { method: 'POST', body: { text: 'explain this assignment', workItemId: asgId } });
+    ok('the assignee gets grounded assigned-work assistance via the ONE runtime (their own work)',
+       workAssist.status === 200 && workAssist.j.response.assignedWork && workAssist.j.response.assignedWork.items.length === 1);
+    const strangerAssist = await call('/api/assistant/turn', tokA, { method: 'POST', body: { text: 'explain this assignment', workItemId: asgId } });
+    ok('another member gets NO context for work that is not theirs (no leak)',
+       strangerAssist.status === 200 && strangerAssist.j.response.assignedWork.items.length === 0);
     const sub = await call(`/api/assessments/${asgId}/submit`, tokB, { method: 'POST', body: { response: { 'What went well': 'clear progress', 'What was hard': 'time pressure' }, note: 'done' } });
     ok('the assignee fills and returns it (status submitted)', sub.status === 200 && sub.j?.assignment?.status === 'submitted');
     // IntelliQ reads the responses and proposes a summary + reasoning score (leader edits).
@@ -376,12 +380,10 @@ const server = app.listen(0, async () => {
     ok('the individual profile carries assessment nudges (repeat/revisit)',
        prof.status === 200 && Array.isArray(prof.j?.assessmentNudges));
 
-    // ── The Studio: conversation-first space, media + planning feed the kernel ──
-    ok('the Studio requires auth (401 without a token)', (await call('/api/studio', null)).status === 401);
-    const studio0 = await call('/api/studio', tokB);
-    ok('the Studio returns the caller\'s space (opening, assigned, pins, plans)',
-       studio0.status === 200 && studio0.j?.ok === true && Array.isArray(studio0.j.assigned) && Array.isArray(studio0.j.plans) && typeof studio0.j.canTranscribe === 'boolean');
-    ok('the Studio carries a proactive field (remembers where you left off)', 'proactive' in (studio0.j || {}));
+    // ── Cut C: the Studio (a SECOND assistant/composer/conversation) is retired. ──
+    ok('the Studio greeting/thread route is gone (404)', (await call('/api/studio', tokB)).status === 404);
+    ok('the Studio chat route is gone (404)', (await call('/api/studio/chat', tokB, { method: 'POST', body: { message: 'hi' } })).status === 404);
+    ok('the Studio plan route is gone (404)', (await call('/api/studio/plan/x', tokB, { method: 'POST', body: { done: true } })).status === 404);
     // Assessment templates carry their track record (avg outcome / uses / last used).
     const tplList = await call('/api/assessments', tokCoach);
     const seededTpl = (tplList.j?.templates || []).find(t => Number.isFinite(t.uses));
@@ -396,33 +398,15 @@ const server = app.listen(0, async () => {
        someTplId && (await call(`/api/assessments/templates/${someTplId}/stage`, tokCoach, { method: 'POST', body: { stage: 'nope' } })).status === 400);
     ok('a plain member cannot curate the playbook (403)',
        someTplId && (await call(`/api/assessments/templates/${someTplId}/stage`, tokB, { method: 'POST', body: { stage: 'active' } })).status === 403);
-    const schat = await call('/api/studio/chat', tokB, { method: 'POST', body: { message: 'I want to plan a calmer week and get one hard thing done.', savePlan: true } });
-    ok('talking in the Studio returns a reply and saves the plan', schat.status === 200 && typeof schat.j?.reply === 'string' && schat.j.planSaved === true);
-    ok('an empty Studio message is refused (400)', (await call('/api/studio/chat', tokB, { method: 'POST', body: {} })).status === 400);
-    const studio1 = await call('/api/studio', tokB);
-    const planId = (studio1.j?.plans || [])[0]?.id;
-    ok('the saved plan now shows in the Studio, and prior turns persist',
-       (studio1.j?.plans || []).length >= 1 && (studio1.j?.messages || []).length >= 2);
-    ok('a Studio input becomes a private kernel signal (planning counts)',
-       (await call('/api/me/export', tokB)).j?.signals?.some(s => s.source === 'studio'));
-    ok('marking a plan done clears it from the open list',
-       planId && (await call('/api/studio/plan/' + planId, tokB, { method: 'POST', body: { done: true } })).status === 200 &&
-       !((await call('/api/studio', tokB)).j?.plans || []).some(p => p.id === planId));
-    ok('voice transcription degrades honestly with no key (503, not a fake transcript)',
-       (await call('/api/studio/transcribe', tokB, { method: 'POST', body: { audio: 'AAAA', mimetype: 'audio/webm' } })).status === 503);
-    // "Our strength is data in" — a spreadsheet/stat block is deciphered into real
-    // numeric signals WITHOUT any AI key (deterministic extraction), never thrown away.
-    const csv = Buffer.from('metric,value\nsprint distance,2.1\npasses,45\nturnovers,3\n').toString('base64');
-    const withFile = await call('/api/studio/chat', tokB, { method: 'POST', body: { message: 'Here are this week\'s numbers', media: { name: 'week.csv', kind: 'csv' }, attachment: { name: 'week.csv', mimetype: 'text/csv', data: csv } } });
-    ok('attaching a spreadsheet returns a reply confirming the numbers were captured',
-       withFile.status === 200 && typeof withFile.j?.reply === 'string' && /pulled\s+\d+\s+number/i.test(withFile.j.reply));
-    ok('extracted numbers become real metric signals the kernel can reason over',
-       (await call('/api/me/export', tokB)).j?.signals?.some(s => s.source === 'metric' && s.data?.extracted && Number.isFinite(s.valueNum)));
-    // Named team-import: a leader uploads a roster table → each row maps to a member.
-    const roster = Buffer.from('email,sprint,passes\nb@t.co,7.2,44\ncoach@t.co,9.1,60\nnobody@x.co,5,5\n').toString('base64');
-    const imp = await call('/api/studio/chat', tokCoach, { method: 'POST', body: { message: 'team GPS export', media: { name: 'squad.csv', kind: 'csv' }, attachment: { name: 'squad.csv', mimetype: 'text/csv', data: roster } } });
-    ok('a leader\'s team spreadsheet imports per-person and reports matched/unmatched',
-       imp.status === 200 && imp.j?.imported && imp.j.imported.importedMembers >= 2 && imp.j.imported.totalMetrics >= 4 && (imp.j.imported.unmatched || []).length === 1);
+    // Cut C: the data-ingestion CAPABILITY (metric extraction + leader team-import) is preserved as
+    // functions (its Studio upload/voice UI is deferred + documented). Tested here at the capability
+    // level rather than through the retired Studio chat transport.
+    ok('deterministic metric extraction still works (a stat block → numbers, no AI)',
+       (() => { const m = _extractMetricsFromText('sprint distance,2.1\npasses,45\nturnovers,3'); return m.length >= 3 && m.some(x => x.label === 'passes' && x.value === 45); })());
+    const roster = 'email,sprint,passes\nb@t.co,7.2,44\ncoach@t.co,9.1,60\nnobody@x.co,5,5';
+    const imp = _importTeamTable(CODE, coachId, roster);
+    ok('a leader\'s team roster imports per-person and reports matched/unmatched (capability preserved)',
+       imp && imp.importedMembers >= 2 && imp.totalMetrics >= 4 && (imp.unmatched || []).length === 1);
     ok('imported team metrics land on the RIGHT member\'s record',
        (await call('/api/me/export', tokB)).j?.signals?.some(s => s.source === 'metric' && /sprint|passes/i.test(s.label || '') && s.data?.imported));
     // Office: Excel and Word are read with no dependencies (unit round-trip).
