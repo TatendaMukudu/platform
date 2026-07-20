@@ -114,16 +114,38 @@ single relationship, not a set of tools:
   generalise / reject, with no internal evidence IDs and generic fallback when grounded context is
   thin; an active topic is not resurfaced.
 
-The legacy `#me-composer` (mood check-in → `/api/compose`) coexists during transition; its
-consolidation into the unified composer is the next interface step (not this slice).
+## Current-state check-in (mood folded into the one composer — Cut D)
+There is no separate mood composer or Check-In page. When a member writes a message that describes
+their **present personal state**, the bounded interpretation recognises it (`checkin_log` intent) and
+the turn returns a confirmable **"Log this as today's check-in?"** card (`_renderCheckinLog`) that
+shows exactly what would be recorded — the member's own words, private by default, no manufactured
+mood. Nothing is recorded until confirm. On confirm the executor calls the ONE canonical check-in
+capability **`_recordCheckin`** (store → participation signal → canonical evidence → person model →
+acknowledgement), and the single outcome (acknowledgement + what IntelliQ noticed) returns into the
+same thread.
+
+Recognition is **bounded and inspectable** (regex + confidence, not an unbounded model guess): a
+current first-person self-report proposes; historical reflection, hypothetical/general talk,
+third-party observation, quoted/reported speech, and advice-requests that merely mention emotion do
+**not**; an explicit "log this" is immediately confirmable. A **sensitive/urgent disclosure is
+answered supportively first and is never reduced to a logging card** (the proposal is suppressed
+unless the member explicitly asks to log). Edit/Correct updates the proposed record (never the
+original message); the proposal `confirmed` guard makes execution at-most-once (no double write).
+Honest limitation: free-text detection is conservative and may decline when intent is uncertain.
+
+The legacy `#me-composer` and `POST /api/compose` route are **removed**; `_recordCheckin` is the
+single path to a check-in (tests seed fixtures via that helper).
 
 ## Tests
 `scripts/assistant-runtime-smoke.js` (30 checks) proves the runtime's 21 invariants + 2 auth checks.
-`scripts/assistant-interface-smoke.js` (26 checks) proves the interface contract: every lens routes
+`scripts/assistant-interface-smoke.js` (46 checks) proves the interface contract: every lens routes
 through the one endpoint, lens is a bounded hint (identical basis, only emphasis reorders), one
 IntelliQ identity/one composer/one thread, small prioritised set + More options, private-by-default,
 calendar draft-only, confirm/correct/dismiss, explicit visibility-increase confirmation, generic
-non-resurfacing check-in, and attention routing into the same conversation. Because there is no
+non-resurfacing check-in, attention routing into the same conversation, and (Cut D) current-state
+check-in folding: bounded recognition of the semantic distinctions, no record before confirm,
+canonical execution exactly once, duplicate-submit rejection, sensitive-not-logged, and the removal
+of `#me-composer` / `/api/compose`. Because there is no
 browser harness in this repo, frontend contracts are proven by HTTP behaviour **plus static source
 guards** over `js/member-view.js`/`index.html`/`css/member.css` — an honest limitation, not a live
 DOM test. Full truth layer green (assistant-interface 26, assistant-runtime 30,

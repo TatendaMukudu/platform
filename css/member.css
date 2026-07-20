@@ -649,6 +649,13 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .iq-more>summary{font-size:0.8rem;color:var(--accent);cursor:pointer;margin-top:0.2rem}
 .iq-confirmed{font-size:0.85rem;color:#2c7a5b;font-weight:600}
 .iq-corrected{font-size:0.74rem;color:var(--text-muted)}
+/* Current-state check-in proposal (Cut D) — shows what will be recorded before confirming. */
+.iq-checkin-will{font-size:0.74rem;color:var(--text-muted);margin:0.1rem 0 0.4rem}
+.iq-checkin-preview{margin-top:0.2rem;padding:0.4rem 0.55rem;border-left:2px solid var(--accent,#7c5af5);background:rgba(127,127,127,0.06);border-radius:0 6px 6px 0;color:var(--text-primary);font-size:0.82rem}
+.iq-checkin-mood{font-weight:600}
+.iq-proposal-amb{font-size:0.72rem;color:var(--text-muted);font-style:italic;margin-bottom:0.4rem}
+.iq-checkin-ack{margin-top:0.4rem;font-size:0.85rem;color:var(--text-primary);line-height:1.45}
+.iq-checkin-noticed{margin-top:0.3rem;font-size:0.78rem;color:var(--text-muted)}
 .iq-composer{display:flex;gap:0.5rem;align-items:flex-end;position:sticky;bottom:0;background:var(--bg,#fff);padding-top:0.4rem}
 .iq-composer textarea{flex:1;resize:vertical}
 @media (prefers-color-scheme:dark){

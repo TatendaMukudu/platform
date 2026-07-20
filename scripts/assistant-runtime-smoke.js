@@ -55,7 +55,7 @@ const server = app.listen(0, async () => {
 
     // ── 1. One input → grounded insight + action proposal ──────────────────────
     // Seed a little owner context so an insight is available.
-    await call('/api/compose', tokMe, { method: 'POST', body: { text: 'I want to prepare well this week.', mood: 4 } });
+    await srv._recordCheckin(CODE, me, { text: 'I want to prepare well this week.', mood: 4 });  // seed via the canonical capability (route retired)
     const t1 = await turn('I need to prepare for the strategy meeting and I want a plan for it.');
     ok('1. one composer input yields BOTH a response and one or more action proposals',
        t1.status === 200 && typeof t1.j.response.responseText === 'string' && t1.j.response.proposedActions.length >= 1);

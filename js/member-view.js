@@ -503,72 +503,10 @@ const MemberApp = {
     if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
   },
 
-  /* Optional mood on the composer (tap-to-toggle). */
-  composeMood(n) {
-    this._composerMood = (this._composerMood === n) ? null : n;
-    document.querySelectorAll('#composer-mood .composer-mood-faces button').forEach(b => {
-      b.classList.toggle('selected', Number(b.dataset.m) === this._composerMood);
-    });
-  },
-
-  /* The universal composer — one input; the AI decides what it is + what's next. */
-  async composeSubmit() {
-    const input   = document.getElementById('composer-input');
-    const statusEl = document.getElementById('composer-status');
-    const respEl   = document.getElementById('composer-response');
-    const text = (input?.value || '').trim();
-    const mood = this._composerMood || null;
-    if (!text && !mood) { if (statusEl) statusEl.textContent = 'Add a line or tap a mood.'; return; }
-
-    const btn = document.getElementById('composer-add');
-    if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
-    try {
-      const res = await fetch('/api/compose', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
-        body:    JSON.stringify({ text, mood }),
-      });
-      if (!res.ok) throw new Error('compose failed');
-      const d = await res.json();
-      if (input) input.value = '';
-      this._composerMood = null;
-      document.querySelectorAll('#composer-mood .composer-mood-faces button.selected').forEach(b => b.classList.remove('selected'));
-      if (statusEl) statusEl.textContent = '';
-      if (respEl) {
-        respEl.style.display = 'block';
-        respEl.innerHTML = `
-          <div class="card iq-briefing" style="margin-top:0.7rem">
-            <div class="iq-briefing-badge">IntelliQ</div>
-            <div class="iq-briefing-text">${this._escape(d.acknowledgement || 'Added.')}</div>
-            ${(d.noticed && d.noticed.length) ? `<div class="me-compose-noticed">${d.noticed.map(t => `<div>• ${this._escape(t)}</div>`).join('')}</div>` : ''}
-          </div>`;
-      }
-      this._renderMeContext();  // refresh the proactive surface with the new input folded in
-    } catch (_) {
-      if (statusEl) statusEl.textContent = "Couldn't add that — try again.";
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = 'Add'; }
-    }
-  },
-
-  /* Voice → text via the browser's SpeechRecognition (no backend; degrades if absent). */
-  composeVoice() {
-    const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!Rec) return;
-    const input    = document.getElementById('composer-input');
-    const statusEl = document.getElementById('composer-status');
-    const rec = new Rec();
-    rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 1;
-    if (statusEl) statusEl.textContent = 'Listening…';
-    rec.onresult = (e) => {
-      const t = e.results?.[0]?.[0]?.transcript || '';
-      if (input && t) input.value = (input.value ? input.value + ' ' : '') + t;
-      if (statusEl) statusEl.textContent = '';
-    };
-    rec.onerror = () => { if (statusEl) statusEl.textContent = ''; };
-    rec.onend   = () => { if (statusEl && statusEl.textContent === 'Listening…') statusEl.textContent = ''; };
-    try { rec.start(); } catch (_) {}
-  },
+  /* [REMOVED] composeMood / composeSubmit / composeVoice — the legacy #me-composer handlers that
+     posted to /api/compose (Phase-1 Cut D). Member text entry is now the one unified composer
+     (wsSend → /api/assistant/turn); mood/current-state is a confirmable check-in proposal in that
+     one thread, executed through the canonical check-in capability. */
 
   /* Resolve one of the person's own open threads (self-owned memory). */
   async resolveThread(id) {
@@ -2754,6 +2692,7 @@ const MemberApp = {
       : '<span class="iq-badge iq-badge-share">Confirm to share</span>';
     const card = (p) => {
       if (p.actionType === 'checkin_proposal') return this._renderCheckinProposal(j.turnId, p);
+      if (p.actionType === 'checkin_log')      return this._renderCheckinLog(j.turnId, p);
       const state = p.draftOnly ? '<span class="iq-badge iq-badge-draft">Draft only — not scheduled</span>' : '';
       return `<div class="iq-proposal" data-proposal="${esc(p.id)}">
         <div class="iq-proposal-top"><span class="iq-proposal-label">${esc(p.label)}</span> ${priv(p.visibility)} ${state}</div>
@@ -2790,6 +2729,27 @@ const MemberApp = {
       </div></div>`;
   },
 
+  /* Current-state check-in: "Log this as today's check-in?" — shows exactly what will be
+     recorded (the member's own words), private by default. Confirm routes through the canonical
+     check-in capability; nothing is recorded until confirmed. Edit updates the record, not the
+     original message. */
+  _renderCheckinLog(turnId, p) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const rec = p.proposedRecord || {};
+    const preview = rec.text ? `<div class="iq-checkin-preview">“${esc(rec.text)}”${rec.moodLabel ? ` · <span class="iq-checkin-mood">${esc(rec.moodLabel)}</span>` : ''}</div>` : '';
+    const amb = p.ambiguity ? `<div class="iq-proposal-amb">${esc(p.ambiguity)}</div>` : '';
+    return `<div class="iq-proposal iq-checkin-log" data-proposal="${esc(p.id)}">
+      <div class="iq-proposal-top"><span class="iq-proposal-label">Log this as today's check-in?</span> <span class="iq-badge iq-badge-private">Private</span></div>
+      <div class="iq-proposal-why">${esc(p.why || 'record how you are doing right now')}</div>
+      <div class="iq-checkin-will">What I'll record:${preview}</div>
+      ${amb}
+      <div class="iq-proposal-actions">
+        <button class="btn-primary btn-sm" onclick="MemberApp.confirmProposal('${esc(turnId)}','${esc(p.id)}')">Confirm</button>
+        <button class="btn btn-outline btn-sm" onclick="MemberApp.correctProposal('${esc(turnId)}','${esc(p.id)}')">Edit / Correct</button>
+        <button class="btn-ghost btn-sm" onclick="MemberApp.dismissProposal('${esc(p.id)}')">Dismiss</button>
+      </div></div>`;
+  },
+
   async confirmProposal(turnId, proposalId, overrides) {
     const r = await fetch(`/api/assistant/turn/${turnId}/confirm`, { method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, overrides: overrides || {} }) });
@@ -2801,7 +2761,17 @@ const MemberApp = {
       return j;
     }
     const cardEl = document.querySelector(`[data-proposal="${proposalId}"]`);
-    if (cardEl && j.ok) cardEl.innerHTML = `<div class="iq-confirmed">✓ ${this._escape(j.confirmed === 'calendar_draft' ? 'Draft created — not scheduled' : (j.confirmed || 'done'))}</div>`;
+    if (cardEl && j.ok) {
+      if (j.confirmed === 'checkin_log') {
+        // The ONE post-confirm outcome (acknowledgement + what IntelliQ noticed) returns into the thread.
+        const o = j.outcome || {};
+        const noticed = (o.noticed && o.noticed.length) ? `<div class="iq-checkin-noticed">${o.noticed.map(t => `<div>• ${this._escape(t)}</div>`).join('')}</div>` : '';
+        cardEl.innerHTML = `<div class="iq-confirmed">✓ Logged as today's check-in — kept private.</div>` +
+          (o.acknowledgement ? `<div class="iq-checkin-ack">${this._escape(o.acknowledgement)}</div>${noticed}` : '');
+      } else {
+        cardEl.innerHTML = `<div class="iq-confirmed">✓ ${this._escape(j.confirmed === 'calendar_draft' ? 'Draft created — not scheduled' : (j.confirmed || 'done'))}</div>`;
+      }
+    }
     return j;
   },
   async correctProposal(turnId, proposalId, correction) {

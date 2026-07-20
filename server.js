@@ -3756,20 +3756,20 @@ app.get('/api/me/context', requireAuth, async (req, res) => {
   });
 });
 
-/* POST /api/compose — the universal composer (one input; the AI reasons over it).
-   v1: text. Stores as the person's own signal (sensitive by default), updates
-   their Person Model, reasons over the updated picture, and returns what it
-   understood + what it noticed. AI-optional: the "noticed" is real kernel output;
-   the acknowledgement degrades to an honest deterministic line without a key. */
-app.post('/api/compose', requireAuth, async (req, res) => {
-  const { orgCode: code, userId } = req.iqSession;
+/* CANONICAL CHECK-IN CAPABILITY — the ONE place a member's current-state check-in is recorded.
+   Stores the check-in, emits the contentless participation marker, converges it to canonical
+   evidence (a hardship note stays owner-only-private), updates the person model, and returns a
+   grounded acknowledgement + what was noticed. Called by the assistant proposal executor AFTER
+   explicit confirmation (actionType 'checkin_log'). No check-in reasoning or side effect is
+   duplicated anywhere else. AI-optional: acknowledgement degrades to an honest deterministic line. */
+async function _recordCheckin(code, userId, { text, mood } = {}) {
   const me   = orgUsers[code]?.[userId];
-  const text = (req.body?.text || '').trim();
-  const moodRaw = Number(req.body?.mood);
-  const mood = Number.isInteger(moodRaw) && moodRaw >= 1 && moodRaw <= 5 ? moodRaw : null;  // optional
-  if (!me) return res.status(404).json({ error: 'Not found' });
-  if (!text && !mood) return res.status(400).json({ error: 'text or mood required' });
-  if (text.length > 4000) return res.status(400).json({ error: 'too long' });
+  text = (text || '').trim();
+  const moodRaw = Number(mood);
+  mood = Number.isInteger(moodRaw) && moodRaw >= 1 && moodRaw <= 5 ? moodRaw : null;  // optional
+  if (!me) return { ok: false, status: 404, error: 'Not found' };
+  if (!text && !mood) return { ok: false, status: 400, error: 'text or mood required' };
+  if (text.length > 4000) return { ok: false, status: 400, error: 'too long' };
 
   // Is this a RETURN after a quiet spell? Measure the gap BEFORE recording the new
   // check-in. A return is a positive (they came back) — but a low-mood return from
@@ -3834,13 +3834,20 @@ app.post('/api/compose', requireAuth, async (req, res) => {
     } catch (_) { /* keep the deterministic acknowledgement */ }
   }
 
-  res.json({
+  return {
     ok: true,
+    checkinId: _ciRec.id,
+    mood, moodLabel: _ciRec.moodLabel,
     acknowledgement,
     noticed,
     understanding: agents.personModel.understanding(_getMemory(code, userId).model),
-  });
-});
+  };
+}
+/* NOTE: the legacy POST /api/compose route has been RETIRED (Phase-1 Cut D). Its only production
+   caller was the legacy #me-composer, now removed; member current-state check-ins flow through the
+   unified assistant turn → confirmable 'checkin_log' proposal → _recordCheckin. Tests seed check-in
+   fixtures by calling _recordCheckin directly. No thin shim is retained — there is no external
+   caller to preserve, so there is exactly one path to a check-in. */
 
 /* POST /api/me/prepared/act — approve (or dismiss) a prepared suggestion.
    Approve → it becomes one of the person's own active focuses (the visible
@@ -7620,6 +7627,30 @@ function _assistantInterpret(code, userId, text) {
   if (/\b(meeting|schedule|calendar|reserve|book|call|sync|invite)\b/.test(l)) add('calendar_action', 'suggested');
   if (/\b(assignment|feedback|revise|resubmit|rubric|assessed|review)\b/.test(l)) add('assigned_work_help', 'low');
   if (/\b(check ?in|remind me|follow up|follow-up|check on me|after (the|my|this))\b/.test(l)) add('follow_up_request', 'suggested');
+
+  // ── Current-state check-in detection — BOUNDED and inspectable (not an unbounded model guess).
+  //    Distinguishes a first-person PRESENT self-report from history / hypothesis / general talk /
+  //    third-party observation / quoted text / advice-requests, and honours an EXPLICIT log request.
+  let checkinExplicit = false;
+  {
+    const stateWord = /\b(exhaust(?:ed|ing)?|tired|drained|burn(?:t|ed)? ?out|overwhelm(?:ed|ing)?|stress(?:ed)?|anxious|worried|down|low|sad|unhappy|miserable|rough|okay|ok|fine|good|great|fantastic|wonderful|happy|calm|relaxed|energ(?:ised|ized|etic)|motivated|focus(?:ed)?|positive|hopeful|content|frustrated|angry|upset|lonely|isolated|nervous|scared|afraid|unmotivated|flat|numb|struggling|coping|unwell|exhaustion)\b/;
+    const firstPersonState = /\b(i(?:'m| am)|i(?:'ve| have) been|i feel|i(?:'m| am) feeling|feeling|my mood|i(?:'m| am) doing|today i)\b/;
+    const historical  = /\b(last (?:month|week|year|night|time)|yesterday|days? ago|weeks? ago|months? ago|years? ago|used to|back (?:then|when)|previously|earlier (?:this|in)|at the time|when i was|a while ago)\b/;
+    const generalTalk = /\b(people|everyone|athletes?|players?|others|one (?:can|might|tends)|stress (?:affects|impacts|is|can)|it'?s (?:normal|common)|research|studies|in general|tends to)\b/;
+    const quotedState = /["“”'].{0,40}\b(exhaust|tired|overwhelm|stress|anxious|sad|angry|frustrat|struggl)\w*.{0,40}["“”']/;
+    const reported    = /\b(?:he|she|they|you)\s+said\b|\b(?:said|told me)(?: that)? i\b|\bthat was a quote\b|\bquoted?\b/;
+    const adviceReq   = /\b(how (?:do|can|should) i|what (?:do|should|can) i (?:do|say)|help me (?:deal|cope|handle|with|understand)|any (?:advice|tips)|should i)\b/;
+    const explicitLog = /\b(log (?:this|that|it|me|my|a)|record (?:this|that|my|how i|a check)|note (?:that )?i(?:'m| am| feel| have been)|save (?:that )?i(?:'m| am| feel)|mark me (?:as|down)|add (?:a )?check ?in|check me in)\b/;
+    const thirdPartyState = /\b(he|she|they|him|her|his|their)\s+(?:looks?|seems?|feels?|felt|is|are|was|were|has been|have been)\b/i.test(raw)
+      || /\b[A-Z][a-z]+\s+(?:looks?|seems?|feels?|felt|is|are|was|were)\b/.test(raw);
+    checkinExplicit = explicitLog.test(l);
+    const firstPersonPresent = /\bi(?:'m| am| feel|'ve been| have been)\b/.test(l);
+    const currentState = firstPersonState.test(l) && stateWord.test(l)
+      && !historical.test(l) && !generalTalk.test(l) && !quotedState.test(raw) && !reported.test(l)
+      && !(thirdPartyState && !firstPersonPresent);
+    if (checkinExplicit) add('checkin_log', 'suggested');
+    else if (currentState && !adviceReq.test(l)) add('checkin_log', 'suggested');
+  }
   const claims = _extractClaims(raw).slice(0, 8).map(c => ({ text: c.text, claimType: c.type, derivation: c.derivation, confidence: c.confidence, verifiedFact: false }));
   return {
     turnId: 'turn_' + generateId(), userId, organisationId: code, createdAt: new Date().toISOString(),
@@ -7632,13 +7663,14 @@ function _assistantInterpret(code, userId, text) {
     ambiguities: intents.length > 2 ? ['multiple candidate intents — confirm which applies'] : [],
     limitations: ['an interpretation of your message — not verified fact until you confirm'],
     sensitivity, intents,                                          // (intents duplicated for internal use; not returned raw)
+    checkinExplicit,                                               // true only when the user explicitly asked to log
   };
 }
 
 /* Build action PROPOSALS (never executed) from the interpretation. Each proposal names its
    capability, payload, visibility (private default), why, required approval, policy result and
    evidence basis. Persistent effects route ONLY through existing capabilities on confirmation. */
-function _assistantProposals(code, userId, interp, context) {
+function _assistantProposals(code, userId, interp, context, text) {
   const out = [];
   const primary = interp.suggestedPrivacy;
   const captureIntents = ['personal_reflection', 'private_note', 'plan', 'commitment', 'observation'];
@@ -7649,6 +7681,29 @@ function _assistantProposals(code, userId, interp, context) {
       payload: { text: null /* filled from raw at confirm */, scope: primary.scope, purpose: primary.purpose, visibility: primary.visibility, aiUsage: primary.aiUsage },
       visibility: primary.visibility, why: primary.reason, requiredApproval: true,
       policyResult: { effect: 'allow', reason: 'personal capture — owner-scoped' }, evidenceBasis: [] });
+  }
+  // Current-state CHECK-IN (Cut D): a confirmable "Log this as today's check-in?" proposal. NOTHING
+  // is recorded here — the record is created only on confirm, through the canonical _recordCheckin
+  // capability. A sensitive/urgent disclosure is NOT reduced to a logging card unless the user
+  // explicitly asked to log; it gets a supportive response instead. Records only the member's own
+  // words (never model-invented specifics); no numeric mood is manufactured from free text.
+  if (interp.intents.some(i => i.type === 'checkin_log')) {
+    const explicit  = interp.checkinExplicit === true;
+    const sensitive = interp.sensitivity && interp.sensitivity !== 'normal';
+    if (explicit || !sensitive) {
+      const faithful = String(text || '').trim().slice(0, 300);
+      out.push({ id: 'prop_' + generateId(), actionType: 'checkin_log', capability: 'checkin',
+        label: "Log this as today's check-in?",
+        payload: { text: null /* filled from raw at confirm */, mood: null },
+        proposedRecord: { text: faithful, mood: null, moodLabel: null, when: 'today', visibility: 'only_me' },
+        visibility: 'only_me', requiredApproval: true, immediate: explicit,
+        confidence: explicit ? 'suggested' : (interp.confidence || 'suggested'),
+        ambiguity: explicit ? null : 'I read this as how you are doing right now — Edit or Dismiss if not',
+        why: explicit ? "you asked me to record how you're doing"
+                      : "you described how you're doing right now — I can log it as today's check-in",
+        policyResult: { effect: 'require_approval', reason: 'a check-in is only recorded with your confirmation' },
+        evidenceBasis: [] });
+    }
   }
   if (interp.intents.some(i => i.type === 'calendar_action')) {
     let policyResult; try { policyResult = policyLib.evaluate(_policiesFor(code), { capability: 'calendar', verb: 'create', stage: 'execute', actorRole: 'member' }); } catch (_) { policyResult = { effect: 'require_approval' }; }
@@ -7722,12 +7777,12 @@ const ASSISTANT_LENSES = ['today', 'me', 'work', 'notes', 'plans', 'history'];
    separate assistant, thread or context. */
 function _lensPrioritize(lens, groundedClaims, proposals) {
   const propOrder = {
-    today:   ['calendar_draft', 'checkin_proposal', 'capture'],
-    me:      ['checkin_proposal', 'capture', 'calendar_draft'],
-    work:    ['capture', 'calendar_draft', 'checkin_proposal'],
-    notes:   ['capture', 'checkin_proposal', 'calendar_draft'],
-    plans:   ['capture', 'calendar_draft', 'checkin_proposal'],
-    history: ['capture', 'checkin_proposal', 'calendar_draft'],
+    today:   ['calendar_draft', 'checkin_log', 'checkin_proposal', 'capture'],
+    me:      ['checkin_log', 'checkin_proposal', 'capture', 'calendar_draft'],
+    work:    ['capture', 'calendar_draft', 'checkin_log', 'checkin_proposal'],
+    notes:   ['capture', 'checkin_log', 'checkin_proposal', 'calendar_draft'],
+    plans:   ['capture', 'calendar_draft', 'checkin_log', 'checkin_proposal'],
+    history: ['capture', 'checkin_log', 'checkin_proposal', 'calendar_draft'],
   }[lens];
   if (propOrder) proposals.sort((a, b) => {
     const ai = propOrder.indexOf(a.actionType), bi = propOrder.indexOf(b.actionType);
@@ -7739,7 +7794,7 @@ function _assistantTurn(code, userId, text, lens) {
   lens = ASSISTANT_LENSES.includes(lens) ? lens : null;
   const interp = _assistantInterpret(code, userId, text);
   const context = _assistantContext(code, userId);
-  const proposals = _lensPrioritize(lens, [], _assistantProposals(code, userId, interp, context));
+  const proposals = _lensPrioritize(lens, [], _assistantProposals(code, userId, interp, context, text));
   interp.proposedActions = proposals.map(p => ({ id: p.id, actionType: p.actionType, capability: p.capability, visibility: p.visibility, requiredApproval: p.requiredApproval }));
 
   // Kernel derivation (grounded) — basis IDs retained; never chain-of-thought.
@@ -7765,18 +7820,27 @@ function _assistantTurn(code, userId, text, lens) {
   const privacyNotice = interp.suggestedPrivacy.visibility === 'only_me'
     ? 'Kept private — only you can see this. I won\'t share it or increase its audience without you saying so.'
     : 'This classification can be shared; confirm before it becomes visible to anyone else.';
+  // A sensitive/urgent disclosure receives a supportive, non-diagnostic acknowledgement FIRST and is
+  // never reduced to a logging interaction (the check-in card is suppressed for it in _assistantProposals).
+  const sensitive = interp.sensitivity && interp.sensitivity !== 'normal';
+  const checkinProp = proposals.find(p => p.actionType === 'checkin_log');
+  const otherProps  = proposals.filter(p => p.actionType !== 'checkin_log');
   const parts = [];
   if (hasAnswer) parts.push(qa.answer);
+  else if (sensitive) parts.push("Thank you for telling me — that sounds like a lot to be carrying. It stays private with me, and I'm here.");
   else if (hasInsight) parts.push(groundedClaims[0].text);
-  if (hasAction) parts.push(`I can ${proposals.map(p => p.label.toLowerCase()).join(', or ')} — say the word and I'll do it. Nothing happens until you confirm.`);
-  if (!hasInsight && !hasAction && !hasAnswer) parts.push('Noted. Tell me what you\'d like me to do with this, or ask me anything.');
+  if (checkinProp) parts.push("If it'd help, I can log this as today's check-in — nothing is saved until you confirm.");
+  if (otherProps.length) parts.push(`I can ${otherProps.map(p => p.label.toLowerCase()).join(', or ')} — say the word and I'll do it. Nothing happens until you confirm.`);
+  if (!hasInsight && !hasAction && !hasAnswer && !sensitive) parts.push('Noted. Tell me what you\'d like me to do with this, or ask me anything.');
   const responseText = parts.join(' ');
 
   // Post-kernel bound (cite only owner-authorised basis; never raise confidence / drop limits).
   const composed = _composeForAudience(code, kernelArt, { role: 'member', subjectId: userId, viewerId: userId, purpose: 'personal_assistance', text: responseText });
 
   const publicProposals = proposals.map(p => ({ id: p.id, actionType: p.actionType, capability: p.capability, label: p.label,
-    visibility: p.visibility, why: p.why, requiredApproval: p.requiredApproval, changesPersistentState: p.actionType !== 'checkin_proposal' || true, draftOnly: p.actionType === 'calendar_draft', policyResult: p.policyResult }));
+    visibility: p.visibility, why: p.why, requiredApproval: p.requiredApproval, changesPersistentState: p.actionType !== 'checkin_proposal' || true, draftOnly: p.actionType === 'calendar_draft', policyResult: p.policyResult,
+    // check-in current-state fields (null for other proposal types) — show what would be recorded before confirming.
+    proposedRecord: p.proposedRecord || null, confidence: p.confidence || null, ambiguity: p.ambiguity || null, immediate: p.immediate || false }));
   const response = {
     responseText, mode, lens: lens || null, groundedClaims, inferred, limitations: context.limitations,
     proposedActions: publicProposals,
@@ -7828,12 +7892,13 @@ app.get('/api/assistant/turn/:turnId', requireAuth, (req, res) => {
 /* POST /api/assistant/turn/:turnId/confirm — approve ONE proposal. Routes to the EXISTING
    capability (workspace capture / calendar draft / check-in registration). Visibility only
    increases if the user EXPLICITLY provides a wider visibility here — never silently. */
-app.post('/api/assistant/turn/:turnId/confirm', requireAuth, (req, res) => {
+app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const turn = (assistantTurns[_wsKey(code, userId)] || []).find(t => t.turnId === req.params.turnId);
   if (!turn) return res.status(404).json({ error: 'turn not found' });
   const prop = (turn._proposals || []).find(p => p.id === req.body?.proposalId);
   if (!prop) return res.status(404).json({ error: 'proposal not found' });
+  // Idempotency / duplicate-submit guard: a proposal executes AT MOST once — no double write.
   if (prop.confirmed) return res.status(409).json({ error: 'already confirmed' });
   const overrides = req.body?.overrides || {};
 
@@ -7879,6 +7944,21 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, (req, res) => {
     scheduleSave();
     return res.json({ ok: true, confirmed: 'checkin_proposal', checkin: { id: ckp.id, triggerAt: ckp.triggerAt, expiresAt: ckp.expiresAt, referenceable: ckp.referenceable } });
   }
+
+  if (prop.actionType === 'checkin_log') {
+    // Current-state check-in: execute through the ONE canonical capability (_recordCheckin) —
+    // the same code the retired /api/compose used. Records the member's OWN words; no numeric mood
+    // is manufactured. The single outcome (acknowledgement + noticed) returns into the one thread.
+    const mood = Number.isInteger(overrides.mood) && overrides.mood >= 1 && overrides.mood <= 5 ? overrides.mood : (prop.payload.mood || null);
+    // Editing the proposal updated the PROPOSED RECORD (payload.textOverride), never the original message.
+    const r = await _recordCheckin(code, userId, { text: prop.payload.textOverride || turn.rawInput, mood });
+    if (!r.ok) return res.status(r.status || 400).json({ error: r.error });
+    prop.confirmed = { at: new Date().toISOString(), checkinId: r.checkinId };
+    scheduleSave();
+    return res.json({ ok: true, confirmed: 'checkin_log',
+      checkin: { id: r.checkinId, mood: r.mood, moodLabel: r.moodLabel, visibility: 'only_me' },
+      outcome: { acknowledgement: r.acknowledgement, noticed: r.noticed } });
+  }
   return res.status(400).json({ error: 'unknown proposal type' });
 });
 
@@ -7897,7 +7977,17 @@ app.post('/api/assistant/turn/:turnId/correct', requireAuth, (req, res) => {
     if (/keep (all of )?this private|keep it private|only me|private/i.test(correction)) { prop.payload.visibility = 'only_me'; prop.visibility = 'only_me'; applied.push('visibility→only_me'); }
     if (/belongs to work|this is work/i.test(correction)) { prop.payload.scope = 'personal_shared'; applied.push('scope→work (visibility unchanged — still needs explicit confirm to share)'); }
     if (/do not remind|don'?t remind|no reminder/i.test(correction)) { turn._proposals = (turn._proposals || []).filter(p => p.actionType !== 'checkin_proposal'); applied.push('dropped check-in proposal'); }
-    if (/unrelated|not related|remove|cancel/i.test(correction)) { turn._proposals = (turn._proposals || []).filter(p => p.id !== prop.id); applied.push('removed proposal'); }
+    // Correcting a current-state check-in updates the PROPOSED RECORD (never the original message).
+    if (prop.actionType === 'checkin_log' && correction.trim()) {
+      if (/^(not (today|now|me|right)|that'?s not|cancel|dismiss|remove|not my current)/i.test(correction.trim())) {
+        turn._proposals = (turn._proposals || []).filter(p => p.id !== prop.id); applied.push('removed check-in');
+      } else if (!applied.length) {   // otherwise treat the correction as the corrected record text
+        prop.payload.textOverride = correction.trim().slice(0, 4000);
+        if (prop.proposedRecord) prop.proposedRecord.text = prop.payload.textOverride;
+        applied.push('check-in record updated');
+      }
+    }
+    if (/unrelated|not related|remove|cancel/i.test(correction) && prop.actionType !== 'checkin_log') { turn._proposals = (turn._proposals || []).filter(p => p.id !== prop.id); applied.push('removed proposal'); }
   }
   turn.corrections.push({ at: new Date().toISOString(), correction: correction.slice(0, 300), applied, proposalId: prop?.id || null });
   scheduleSave();
@@ -12343,7 +12433,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: server-supplied assessment PRESENTATION state
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
-  _assistantTurn, _assistantInterpret, _assistantContext, assistantTurns, checkinProposals };
+  _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, assistantTurns, checkinProposals };
 
 if (require.main === module) (async () => {
   try {

@@ -1045,31 +1045,11 @@
         <!-- Recognition from others (leader or peer) — the draw-in. -->
         <div id="me-recognition"></div>
 
-        <!-- The universal composer — one input; the AI figures out the rest.
-             Mood is optional and inline (no separate Check-In page). -->
-        <div class="card iq-composer" id="me-composer">
-          <div class="card-label" id="composer-ask">What happened?</div>
-          <div class="composer-mood" id="composer-mood">
-            <span class="composer-mood-q">How are you? <span style="opacity:0.6">(optional)</span></span>
-            <div class="composer-mood-faces">
-              <button data-m="1" onclick="MemberApp.composeMood(1)" title="Rough">😔</button>
-              <button data-m="2" onclick="MemberApp.composeMood(2)" title="Low">😕</button>
-              <button data-m="3" onclick="MemberApp.composeMood(3)" title="Okay">😐</button>
-              <button data-m="4" onclick="MemberApp.composeMood(4)" title="Good">🙂</button>
-              <button data-m="5" onclick="MemberApp.composeMood(5)" title="Great">😄</button>
-            </div>
-          </div>
-          <textarea class="note-input" id="composer-input"
-            placeholder="Add anything — a thought, something that happened, a note. IntelliQ takes it from here."></textarea>
-          <div class="composer-actions">
-            <button class="btn-primary" id="composer-add" onclick="MemberApp.composeSubmit()">Add</button>
-            <button class="btn btn-outline btn-sm" id="composer-mic" onclick="MemberApp.composeVoice()" style="display:none">
-              <span class="ui-icon-slot" data-icon="message" style="display:inline-flex"></span> Voice
-            </button>
-            <span id="composer-status" style="font-size:0.78rem;color:var(--text-muted)"></span>
-          </div>
-          <div id="composer-response" style="display:none"></div>
-        </div>
+        <!-- [REMOVED] The legacy #me-composer (mood faces + /api/compose) — Phase-1 Cut D.
+             ALL member text entry now goes through the one unified composer above (#iq-myworkspace).
+             Current-state / mood is captured as a confirmable "Log this as today's check-in?" proposal
+             in that one thread, executed through the canonical check-in capability. No inline mood
+             slider; a structured editor appears only via Edit/Correct on the check-in proposal. -->
 
         <!-- Reasoning-first sections (chat is not the interface — reasoning is). -->
         <div id="me-noticed"></div>

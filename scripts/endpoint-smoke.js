@@ -11,7 +11,7 @@
 process.env.DB_OPTIONAL = '1';
 process.env.NODE_ENV    = 'test';
 
-const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired, orgMappings } = require('../server.js');
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired, orgMappings, _recordCheckin } = require('../server.js');
 
 const CODE = 'testco';
 const iso  = new Date().toISOString();
@@ -86,8 +86,10 @@ const server = app.listen(0, async () => {
 
     // ── leader check-in text is privacy-filtered (sensitive redacted) ───────
     // (Seed a hardship check-in for A; the leader sees engagement, never the words.)
-    const compHardship = await call('/api/compose', tokA, { method: 'POST', body: { text: 'I have been really struggling to cope this week.' } });
-    ok('compose accepts input and acknowledges', compHardship.status === 200 && compHardship.j?.ok === true);
+    // Cut D: /api/compose is retired — seed the hardship check-in through the canonical capability.
+    const compHardship = await _recordCheckin(CODE, aId, { text: 'I have been really struggling to cope this week.' });
+    ok('the canonical check-in capability records a hardship check-in', compHardship.ok === true && !!compHardship.checkinId);
+    ok('the retired /api/compose route no longer exists (404)', (await call('/api/compose', tokA, { method: 'POST', body: { text: 'x' } })).status === 404);
     const oc = await call('/api/platform/org-checkins', tokCoach);
     const aEntries = oc.j?.checkins?.['Member A'] || [];
     const hardship = aEntries.find(e => e.private === true);

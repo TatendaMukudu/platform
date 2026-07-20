@@ -69,7 +69,7 @@ const server = app.listen(0, async () => {
        tToday.j.response && typeof tToday.j.response.responseText === 'string' && !('advisorText' in tToday.j.response));
 
     // ── 7 / 16. Insight + action in one response; a SMALL prioritised set ──────
-    await call('/api/compose', { method: 'POST', body: { text: 'preparing this week', mood: 4 } });
+    await srv._recordCheckin(CODE, me, { text: 'preparing this week', mood: 4 });  // seed via the canonical capability (route retired)
     const t7 = await turn('I want to prepare for the review meeting and keep a plan.', 'today');
     ok('7. one response can carry both an insight and action proposals', typeof t7.j.response.responseText === 'string' && t7.j.response.proposedActions.length >= 1);
     ok('16. a SMALL prioritised proposal set is returned by default (primary ≤ 2, rest behind more)',
@@ -116,7 +116,60 @@ const server = app.listen(0, async () => {
     ok('P1. a work-scoped question uses a non-personal purpose (private excluded before context)',
        askWorkTurn.j.response.qa?.purpose === 'workspace_shared_reasoning' && askWorkTurn.j.response.qa?.bounded === true);
 
+    // ─────────────── Cut D: mood/check-in folded into the ONE composer ───────────────
+    const ckEv = (uid) => { try { return (srv._checkinKernelState(CODE, uid, { purpose: 'personal_assistance', viewerId: uid }).evidence || []).length; } catch (_) { return -1; } };
+
+    // D4 — current first-person state yields a CONFIRMABLE proposal; nothing recorded yet.
+    const cdBefore = ckEv(me);
+    const tState = await turn('I am feeling calm and focused today.', 'me');
+    const ckProp = tState.j.response.proposedActions.find(p => p.actionType === 'checkin_log');
+    ok('D4. a current first-person state yields a confirmable "Log today\'s check-in?" proposal',
+       !!ckProp && ckProp.visibility === 'only_me' && ckProp.requiredApproval === true && ckProp.proposedRecord && /calm and focused/.test(ckProp.proposedRecord.text));
+    ok('D6. NO canonical check-in evidence is written before confirmation', ckEv(me) === cdBefore);
+
+    // D5 — historical / general / third-party statements must NOT become the member's current state.
+    const tHist = await turn('Last month I felt exhausted and stressed.', 'me');
+    const tGen  = await turn('Stress affects athletes a lot.', 'me');
+    const t3p   = await turn('James looks frustrated today.', 'me');
+    const noCk  = t => !t.j.response.proposedActions.some(p => p.actionType === 'checkin_log');
+    ok('D5. historical / general / third-party statements do NOT produce a current check-in', noCk(tHist) && noCk(tGen) && noCk(t3p));
+
+    // D7 / D11 / D12 — confirm executes the canonical capability, once, returning ONE outcome.
+    const cf = await call(`/api/assistant/turn/${tState.j.turnId}/confirm`, { method: 'POST', body: { proposalId: ckProp.id } });
+    ok('D7/D12. confirmation executes the canonical check-in capability and returns ONE outcome into the thread',
+       cf.status === 200 && cf.j.confirmed === 'checkin_log' && cf.j.outcome && typeof cf.j.outcome.acknowledgement === 'string' && cf.j.checkin.visibility === 'only_me');
+    ok('D11. the check-in / canonical evidence updates EXACTLY once on confirm', ckEv(me) === cdBefore + 1);
+
+    // Regression — duplicate submission must not double-write.
+    const dup = await call(`/api/assistant/turn/${tState.j.turnId}/confirm`, { method: 'POST', body: { proposalId: ckProp.id } });
+    ok('D(reg). a duplicate confirmation is rejected (no double check-in / double evidence)', dup.status === 409 && ckEv(me) === cdBefore + 1);
+
+    // Sensitive disclosure is answered supportively, NOT reduced to a logging card.
+    const tSens = await turn('Honestly I feel completely overwhelmed and unable to cope.', 'me');
+    ok('D. a sensitive disclosure is NOT reduced to a logging card (supportive response first)',
+       noCk(tSens) && /private|here/i.test(tSens.j.response.responseText));
+
+    // Explicit "log this" → immediately confirmable; Edit/Correct updates the RECORD, not the message.
+    const tLog = await turn('Log that I am feeling good today.', 'me');
+    const logProp = tLog.j.response.proposedActions.find(p => p.actionType === 'checkin_log');
+    ok('D. an explicit "log this" yields an immediately-confirmable structured proposal', !!logProp && logProp.immediate === true);
+    const cdCorr = await call(`/api/assistant/turn/${tLog.j.turnId}/correct`, { method: 'POST', body: { proposalId: logProp.id, correction: 'Actually, I am feeling great and rested today.' } });
+    const cdInsp = await call(`/api/assistant/turn/${tLog.j.turnId}`);
+    ok('D8. Edit/Correct updates the proposed RECORD, not the original message',
+       cdCorr.j.applied.includes('check-in record updated') && cdInsp.j.turn.rawInput === 'Log that I am feeling good today.');
+
+    // D9 — a check-in proposal only comes from current-state language, never resurfaced from evidence.
+    const tNeutral = await turn('What should I focus on?', 'today');
+    ok('D9. a check-in proposal never resurfaces from unchanged evidence (only from current-state language)', noCk(tNeutral));
+
     // ─────────────── Static frontend guards (no browser harness) ───────────────
+    const appjs2 = read('js/app.js');
+    ok('D2. no production frontend references the legacy #me-composer element', !/id="me-composer"/.test(html));
+    ok('D3. no production frontend code calls /api/compose', !/fetch\(['"]\/api\/compose/.test(mv) && !/fetch\(['"]\/api\/compose/.test(appjs2));
+    ok('D14. the legacy compose handlers are gone (no composeSubmit/composeMood/composeVoice calls)',
+       !/composeSubmit\(|composeMood\(|composeVoice\(/.test(mv) && !/composeSubmit\(|composeMood\(/.test(html));
+    ok('D. current-state check-ins render in the unified thread (checkin_log card + private badge + what-will-be-recorded)',
+       /_renderCheckinLog/.test(mv) && /iq-checkin-will/.test(mv) && /checkin_log/.test(mv));
     ok('2. ONE persistent composer, wired to the unified runtime, reused across lenses',
        /_renderMyWorkspace/.test(mv) && /iq-composer-input/.test(mv) && (mv.match(/\/api\/assistant\/turn/g) || []).length >= 1 && /wsSetLens/.test(mv) && /_wsLenses/.test(mv));
     ok('2b. the composer container is mounted in the member home (index.html)', /id="iq-myworkspace"/.test(html));
