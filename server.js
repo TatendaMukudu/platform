@@ -7578,6 +7578,297 @@ app.get('/api/workspace/history', requireAuth, (req, res) => {
   res.json({ ok: true, timeline });
 });
 
+/* ═══ UNIFIED MYWORKSPACE ASSISTANT RUNTIME (slice 1) ══════════════════════════
+   ONE IntelliQ assistant, ONE composer. A bounded turn:
+     input → claim-bounded interpretation → authorised context → kernel reasoning →
+     audience-safe response → optional action PROPOSALS → explicit approval →
+     execution through the existing capability/action contract → observable outcome.
+   The raw message stays an INTERACTION artifact (never a conversation-evidence primitive);
+   only policy-approved, user-confirmed interpretations become canonical evidence or actions.
+   The model never writes to a capability store directly. Personal input is PRIVATE by default;
+   visibility never increases without explicit user confirmation. */
+const assistantTurns   = {};   // wsKey → [ bounded interpretation artifact + raw input by ref ]
+const checkinProposals = {};   // wsKey → [ bounded personalized check-in proposal ]
+const ASSISTANT_CAP = 60;
+
+/* Claim-bounded interpretation of ONE turn. Produces the inspectable artifact — candidate
+   intents + claims (claims are NOT facts), a PRIVATE-by-default classification, and bounded
+   limitations. No chain-of-thought is stored — only the structured interpretation output. */
+function _assistantInterpret(code, userId, text) {
+  const raw = String(text || '');
+  const cls = workspaceLib.suggestClassification(raw);              // candidate intent + private default
+  const sensitivity = privacy.classifyText(raw, { source: 'workspace' });
+  const l = raw.toLowerCase();
+  const intents = [];
+  const add = (type, confidence) => { if (!intents.some(i => i.type === type)) intents.push({ type, confidence }); };
+  const purposeIntent = { reflection: 'personal_reflection', note: 'private_note', plan: 'plan', commitment: 'commitment', observation: 'observation' };
+  add(purposeIntent[cls.purpose] || 'private_note', 'suggested');
+  if (/\?|\bwhy\b|\bhow (am|do) i\b|\bwhat should i\b|going on with|help me understand|insight/.test(l)) add('question', 'suggested');
+  if (/\b(meeting|schedule|calendar|reserve|book|call|sync|invite)\b/.test(l)) add('calendar_action', 'suggested');
+  if (/\b(assignment|feedback|revise|resubmit|rubric|assessed|review)\b/.test(l)) add('assigned_work_help', 'low');
+  if (/\b(check ?in|remind me|follow up|follow-up|check on me|after (the|my|this))\b/.test(l)) add('follow_up_request', 'suggested');
+  const claims = _extractClaims(raw).slice(0, 8).map(c => ({ text: c.text, claimType: c.type, derivation: c.derivation, confidence: c.confidence, verifiedFact: false }));
+  return {
+    turnId: 'turn_' + generateId(), userId, organisationId: code, createdAt: new Date().toISOString(),
+    originalInputRef: null,                                         // set once the raw input is stored
+    candidateIntents: intents, candidateClaims: claims,
+    suggestedPrivacy: { scope: cls.scope, purpose: cls.purpose, visibility: cls.visibility, aiUsage: cls.aiUsage, sensitivity, reason: cls.reason },
+    proposedEvidence: [],                                          // nothing becomes evidence until confirmed
+    proposedActions: [],
+    confidence: cls.confidence || 'suggested',
+    ambiguities: intents.length > 2 ? ['multiple candidate intents — confirm which applies'] : [],
+    limitations: ['an interpretation of your message — not verified fact until you confirm'],
+    sensitivity, intents,                                          // (intents duplicated for internal use; not returned raw)
+  };
+}
+
+/* Build action PROPOSALS (never executed) from the interpretation. Each proposal names its
+   capability, payload, visibility (private default), why, required approval, policy result and
+   evidence basis. Persistent effects route ONLY through existing capabilities on confirmation. */
+function _assistantProposals(code, userId, interp, context) {
+  const out = [];
+  const primary = interp.suggestedPrivacy;
+  const captureIntents = ['personal_reflection', 'private_note', 'plan', 'commitment', 'observation'];
+  const cap = interp.intents.find(i => captureIntents.includes(i.type));
+  if (cap) {
+    out.push({ id: 'prop_' + generateId(), actionType: 'capture', capability: 'workspace',
+      label: `Save as ${primary.purpose}${primary.visibility === 'only_me' ? ' (private)' : ''}`,
+      payload: { text: null /* filled from raw at confirm */, scope: primary.scope, purpose: primary.purpose, visibility: primary.visibility, aiUsage: primary.aiUsage },
+      visibility: primary.visibility, why: primary.reason, requiredApproval: true,
+      policyResult: { effect: 'allow', reason: 'personal capture — owner-scoped' }, evidenceBasis: [] });
+  }
+  if (interp.intents.some(i => i.type === 'calendar_action')) {
+    let policyResult; try { policyResult = policyLib.evaluate(_policiesFor(code), { capability: 'calendar', verb: 'create', stage: 'execute', actorRole: 'member' }); } catch (_) { policyResult = { effect: 'require_approval' }; }
+    out.push({ id: 'prop_' + generateId(), actionType: 'calendar_draft', capability: 'calendar',
+      label: 'Draft a calendar hold (nothing scheduled yet)', payload: { title: 'Preparation time', verb: 'create' },
+      visibility: 'only_me', why: 'you mentioned a meeting/scheduling — I can draft it for your review', requiredApproval: true,
+      policyResult, evidenceBasis: [] });
+  }
+  const ckp = _personalizedCheckinProposal(code, userId, interp, context);
+  if (ckp) out.push({ id: 'prop_' + generateId(), actionType: 'checkin_proposal', capability: 'checkin',
+    label: `Offer a personalised check-in in a few days`, payload: ckp, visibility: 'only_me',
+    why: ckp.why, requiredApproval: true, policyResult: { effect: 'require_approval', reason: 'a check-in is only registered with your approval' }, evidenceBasis: ckp.basisIds || [] });
+  return out;
+}
+
+/* A bounded, GROUNDED personalized check-in proposal — or null. Never created solely because
+   hardship was detected; only with a real basis (a user request + a commitment/feedback/concern).
+   Never resurfaces an active topic; sensitive material is referenced gently, never quoted. */
+function _personalizedCheckinProposal(code, userId, interp, context) {
+  const now = Date.now();
+  const active = (checkinProposals[_wsKey(code, userId)] || []).filter(p => p.status !== 'dismissed' && new Date(p.expiresAt).getTime() > now);
+  const wantsFollowUp = interp.intents.some(i => i.type === 'follow_up_request');
+  if (!wantsFollowUp) return null;                                 // never auto-create from hardship alone
+  const commitment = (context.plans || []).find(p => p.purpose === 'commitment');
+  const feedbackAwaiting = context.assessmentFeedbackActedUpon === false && context.assessmentDirection && context.assessmentDirection !== 'unknown';
+  let basis, topic;
+  if (commitment) { basis = `commitment: ${String(commitment.text).slice(0, 80)}`; topic = 'your_commitment'; }
+  else if (feedbackAwaiting) { basis = 'feedback awaiting a revision'; topic = 'assignment_feedback'; }
+  else { basis = 'you asked to be checked in with'; topic = 'general_followup'; }   // generic fallback
+  if (active.some(p => p.topic === topic)) return null;            // do not resurface an active topic
+  const sens = interp.sensitivity && interp.sensitivity !== 'normal' ? interp.sensitivity : 'normal';
+  return {
+    id: 'ckp_' + generateId(), why: `Suggested because: ${basis}`, basis, topic,
+    triggerAt: new Date(now + 3 * 86400000).toISOString(),
+    sensitivity: sens, referenceable: sens === 'normal',          // sensitive topics are referenced gently, not quoted
+    expiresAt: new Date(now + 14 * 86400000).toISOString(),
+    basisIds: (context.basisIds || []).slice(0, 10), status: 'proposed',
+  };
+}
+
+/* ONE authorised context assembler. Retrieves ONLY through existing authorised readers /
+   canonical projections (never raw store assembly, never _gatherSignals). Owner-scoped:
+   personal_assistance, so private evidence is the OWNER's own. Retains basis IDs + limitations. */
+function _assistantContext(code, userId) {
+  const basisIds = [];
+  let attention = []; try { attention = _composeToday(code, userId) || []; } catch (_) {}
+  attention.forEach(a => (a.basis || []).forEach(b => basisIds.push(b)));
+  const plans = (workspaceItems[_wsKey(code, userId)] || [])
+    .filter(i => !i.deleted && ['plan', 'commitment', 'task'].includes(i.purpose)).slice(-6)
+    .map(i => ({ id: i.id, text: i.text.slice(0, 120), purpose: i.purpose, visibility: i.visibility }));
+  const personalEv = _kernelEvidence(code, { purpose: 'personal_assistance', viewerId: userId, subjectId: userId });
+  personalEv.forEach(e => basisIds.push(e.evidenceId));
+  let assess = null; try { assess = _assessmentKernelState(code, userId, { purpose: 'personal_assistance', viewerId: userId }); } catch (_) {}
+  let checkin = null; try { checkin = _checkinKernelState(code, userId, { purpose: 'personal_assistance', viewerId: userId }); } catch (_) {}
+  return {
+    purpose: 'personal_assistance', visibilityEligibility: 'owner-only',
+    basisIds: [...new Set(basisIds)].slice(0, 60), confidence: personalEv.length || attention.length ? 'medium' : 'low',
+    limitations: ['only what you have shared with IntelliQ — not the whole picture'],
+    attention, plans,
+    assessmentDirection: assess ? assess.direction : null, assessmentFeedbackActedUpon: assess ? assess.feedbackActedUpon : null,
+    checkinTrajectory: checkin ? checkin.trajectory : null,
+  };
+}
+
+/* The unified assistant turn. Returns the bounded interpretation artifact, the context artifact,
+   and the ONE response contract (insight + proposals) — all post-kernel bounded. Persists only
+   the turn artifact + reasoning artifacts; NOTHING is written to a capability store here. */
+function _assistantTurn(code, userId, text) {
+  const interp = _assistantInterpret(code, userId, text);
+  const context = _assistantContext(code, userId);
+  const proposals = _assistantProposals(code, userId, interp, context);
+  interp.proposedActions = proposals.map(p => ({ id: p.id, actionType: p.actionType, capability: p.capability, visibility: p.visibility, requiredApproval: p.requiredApproval }));
+
+  // Kernel derivation (grounded) — basis IDs retained; never chain-of-thought.
+  const kernelArt = _recordKernelDerivation(code, { type: 'recommendation',
+    result: { turn: interp.turnId, intents: interp.intents.map(i => i.type), proposals: proposals.map(p => p.actionType) },
+    basis: context.basisIds.length ? context.basisIds : ['none'], confidence: context.confidence, limitations: context.limitations, detector: 'assistant-runtime' });
+
+  // Grounded insight — distinguish what evidence supports from what is only inferred.
+  const groundedClaims = [], inferred = [];
+  if (context.attention && context.attention.length) groundedClaims.push({ text: context.attention[0].text, basisIds: (context.attention[0].basis || []).slice(0, 6) });
+  if (context.assessmentDirection && !['unknown'].includes(context.assessmentDirection)) groundedClaims.push({ text: `Your assessment trajectory currently reads ${context.assessmentDirection}.`, basisIds: [] });
+  if (context.checkinTrajectory && context.checkinTrajectory !== 'unknown') groundedClaims.push({ text: `Your recent check-ins read ${context.checkinTrajectory}.`, basisIds: [] });
+  if (interp.candidateClaims.length) inferred.push({ text: `You seem to be describing ${interp.suggestedPrivacy.purpose === 'reflection' ? 'something personal' : 'a ' + interp.suggestedPrivacy.purpose}.` });
+
+  const hasInsight = groundedClaims.length > 0;
+  const hasAction = proposals.length > 0;
+  const mode = hasInsight && hasAction ? 'combined' : hasAction ? 'assist' : 'insight';
+  const privacyNotice = interp.suggestedPrivacy.visibility === 'only_me'
+    ? 'Kept private — only you can see this. I won\'t share it or increase its audience without you saying so.'
+    : 'This classification can be shared; confirm before it becomes visible to anyone else.';
+  const parts = [];
+  if (hasInsight) parts.push(groundedClaims[0].text);
+  if (hasAction) parts.push(`I can ${proposals.map(p => p.label.toLowerCase()).join(', or ')} — say the word and I'll do it. Nothing happens until you confirm.`);
+  if (!hasInsight && !hasAction) parts.push('Noted. Tell me what you\'d like me to do with this, or ask me anything.');
+  const responseText = parts.join(' ');
+
+  // Post-kernel bound (cite only owner-authorised basis; never raise confidence / drop limits).
+  const composed = _composeForAudience(code, kernelArt, { role: 'member', subjectId: userId, viewerId: userId, purpose: 'personal_assistance', text: responseText });
+
+  const response = {
+    responseText, mode, groundedClaims, inferred, limitations: context.limitations,
+    proposedActions: proposals.map(p => ({ id: p.id, actionType: p.actionType, capability: p.capability, label: p.label,
+      visibility: p.visibility, why: p.why, requiredApproval: p.requiredApproval, policyResult: p.policyResult })),
+    privacyNotice, followUpState: proposals.some(p => p.actionType === 'checkin_proposal') ? 'a personalised check-in is proposed (not yet registered)' : 'none',
+    bounded: composed.ok, cites: composed.output.cites,
+  };
+
+  // Store the turn: the RAW input as an interaction artifact (by ref), the bounded artifact,
+  // the proposals (full payloads, server-side), the context + response. Never as canonical evidence.
+  const key = _wsKey(code, userId);
+  const rawRef = 'raw_' + generateId();
+  interp.originalInputRef = rawRef;
+  const turn = { ...interp, rawInput: String(text || '').slice(0, 4000), _proposals: proposals, context, response, corrections: [] };
+  delete turn.intents; delete turn.sensitivity;                    // keep the returned artifact bounded/clean
+  const list = assistantTurns[key] || (assistantTurns[key] = []);
+  list.push(turn);
+  if (list.length > ASSISTANT_CAP) list.splice(0, list.length - ASSISTANT_CAP);
+  scheduleSave();
+  return { turn, response, interpretation: { turnId: interp.turnId, originalInputRef: rawRef, candidateIntents: interp.candidateIntents,
+    candidateClaims: interp.candidateClaims, suggestedPrivacy: interp.suggestedPrivacy, proposedActions: interp.proposedActions,
+    confidence: interp.confidence, ambiguities: interp.ambiguities, limitations: interp.limitations }, context: { basisIds: context.basisIds, purpose: context.purpose, visibilityEligibility: context.visibilityEligibility, confidence: context.confidence, limitations: context.limitations } };
+}
+
+/* POST /api/assistant/turn — the one composer. Interpret + reason + propose. Persists nothing
+   to a capability store; returns the bounded artifact + response contract + proposals. */
+app.post('/api/assistant/turn', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const text = String(req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'text required' });
+  if (text.length > 4000) return res.status(400).json({ error: 'too long' });
+  const r = _assistantTurn(code, userId, text);
+  res.json({ ok: true, turnId: r.turn.turnId, interpretation: r.interpretation, context: r.context, response: r.response });
+});
+
+/* GET /api/assistant/turn/:turnId — inspect the bounded interpretation artifact (self-only). */
+app.get('/api/assistant/turn/:turnId', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const turn = (assistantTurns[_wsKey(code, userId)] || []).find(t => t.turnId === req.params.turnId);
+  if (!turn) return res.status(404).json({ error: 'not found' });
+  const { _proposals, ...safe } = turn;
+  res.json({ ok: true, turn: safe });
+});
+
+/* POST /api/assistant/turn/:turnId/confirm — approve ONE proposal. Routes to the EXISTING
+   capability (workspace capture / calendar draft / check-in registration). Visibility only
+   increases if the user EXPLICITLY provides a wider visibility here — never silently. */
+app.post('/api/assistant/turn/:turnId/confirm', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const turn = (assistantTurns[_wsKey(code, userId)] || []).find(t => t.turnId === req.params.turnId);
+  if (!turn) return res.status(404).json({ error: 'turn not found' });
+  const prop = (turn._proposals || []).find(p => p.id === req.body?.proposalId);
+  if (!prop) return res.status(404).json({ error: 'proposal not found' });
+  if (prop.confirmed) return res.status(409).json({ error: 'already confirmed' });
+  const overrides = req.body?.overrides || {};
+
+  if (prop.actionType === 'capture') {
+    // Private by default. A WIDER audience is applied only when the user explicitly asks for it.
+    const VIS_RANK = { only_me: 0, manager: 1, team: 2, organization: 3 };
+    let visibility = prop.payload.visibility;
+    if (overrides.visibility && overrides.visibility !== visibility) {
+      if ((VIS_RANK[overrides.visibility] ?? 0) > (VIS_RANK[visibility] ?? 0) && overrides.confirmVisibilityIncrease !== true)
+        return res.status(409).json({ error: 'visibility_increase_requires_confirmation', from: visibility, to: overrides.visibility });
+      visibility = overrides.visibility;
+    }
+    const item = workspaceLib.buildItem({ id: 'ws_' + generateId(), org: code, ownerId: userId, text: turn.rawInput,
+      scope: overrides.scope || prop.payload.scope, purpose: overrides.purpose || prop.payload.purpose, visibility,
+      aiUsage: prop.payload.aiUsage, classifiedBy: 'assistant_confirmed' });
+    (workspaceItems[_wsKey(code, userId)] = workspaceItems[_wsKey(code, userId)] || []).push(item);
+    let interp = { evidenceIds: [] };
+    try { interp = _interpretInput(code, { text: item.text, ownerId: userId, subjectId: item.purpose === 'observation' ? null : userId, item }); } catch (_) {}
+    prop.confirmed = { at: new Date().toISOString(), itemId: item.id, visibility };
+    scheduleSave();
+    return res.json({ ok: true, confirmed: 'capture', item, becameEvidence: interp.evidenceIds.length, informsOrg: workspaceLib.informsOrgReasoning(item) });
+  }
+
+  if (prop.actionType === 'calendar_draft') {
+    // Route through the universal action contract — RECOMMEND → DRAFT only. Nothing is executed
+    // (a calendar event changes external/persistent state → stays a draft awaiting execution).
+    const capr = _CAPABILITIES.calendar;
+    const rec = capr.recommend(code, { actorId: userId, context: { title: overrides.title || prop.payload.title } });
+    const action = actionLib.buildAction({ id: 'act_' + generateId(), org: code, capability: 'calendar', verb: 'create', authority: capr.authority,
+      actorId: userId, category: null, rationale: rec.rationale, evidenceRefs: rec.evidenceRefs, draft: rec.draft, status: 'proposed' });
+    Object.assign(action, capr.draft(code, action)); action.stage = 'draft'; action.status = 'drafted';
+    action.policy = policyLib.evaluate(_policiesFor(code), { capability: 'calendar', verb: 'create', stage: 'execute', actorRole: 'member' });
+    (actionsLog[code] = actionsLog[code] || []).push(action);
+    prop.confirmed = { at: new Date().toISOString(), actionId: action.id, stage: 'draft' };
+    scheduleSave();
+    return res.json({ ok: true, confirmed: 'calendar_draft', action: actionLib.summarize(action), note: 'Drafted for your review — not scheduled. Execute it from your actions when ready.' });
+  }
+
+  if (prop.actionType === 'checkin_proposal') {
+    const ckp = { ...prop.payload, status: 'registered', registeredAt: new Date().toISOString() };
+    (checkinProposals[_wsKey(code, userId)] = checkinProposals[_wsKey(code, userId)] || []).push(ckp);
+    prop.confirmed = { at: new Date().toISOString(), checkinId: ckp.id };
+    scheduleSave();
+    return res.json({ ok: true, confirmed: 'checkin_proposal', checkin: { id: ckp.id, triggerAt: ckp.triggerAt, expiresAt: ckp.expiresAt, referenceable: ckp.referenceable } });
+  }
+  return res.status(400).json({ error: 'unknown proposal type' });
+});
+
+/* POST /api/assistant/turn/:turnId/correct — correct the INTERPRETATION/proposal, never the
+   original message. Bounded corrections only; the raw input is immutable. */
+app.post('/api/assistant/turn/:turnId/correct', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const turn = (assistantTurns[_wsKey(code, userId)] || []).find(t => t.turnId === req.params.turnId);
+  if (!turn) return res.status(404).json({ error: 'turn not found' });
+  const correction = String(req.body?.correction || '');
+  const prop = (turn._proposals || []).find(p => p.id === req.body?.proposalId) || (turn._proposals || [])[0];
+  const before = prop ? JSON.parse(JSON.stringify({ purpose: prop.payload?.purpose, visibility: prop.visibility })) : null;
+  const applied = [];
+  if (prop) {
+    if (/just a note|not a plan/i.test(correction)) { prop.payload.purpose = 'note'; prop.label = 'Save as note (private)'; applied.push('purpose→note'); }
+    if (/keep (all of )?this private|keep it private|only me|private/i.test(correction)) { prop.payload.visibility = 'only_me'; prop.visibility = 'only_me'; applied.push('visibility→only_me'); }
+    if (/belongs to work|this is work/i.test(correction)) { prop.payload.scope = 'personal_shared'; applied.push('scope→work (visibility unchanged — still needs explicit confirm to share)'); }
+    if (/do not remind|don'?t remind|no reminder/i.test(correction)) { turn._proposals = (turn._proposals || []).filter(p => p.actionType !== 'checkin_proposal'); applied.push('dropped check-in proposal'); }
+    if (/unrelated|not related|remove|cancel/i.test(correction)) { turn._proposals = (turn._proposals || []).filter(p => p.id !== prop.id); applied.push('removed proposal'); }
+  }
+  turn.corrections.push({ at: new Date().toISOString(), correction: correction.slice(0, 300), applied, proposalId: prop?.id || null });
+  scheduleSave();
+  // The ORIGINAL message is never rewritten.
+  res.json({ ok: true, applied, originalInputUnchanged: turn.rawInput === String(turn.rawInput), proposals: (turn._proposals || []).map(p => ({ id: p.id, actionType: p.actionType, label: p.label, visibility: p.visibility, purpose: p.payload?.purpose })) });
+});
+
+/* GET /api/assistant/checkin-proposals — the caller's registered personalised check-ins (self). */
+app.get('/api/assistant/checkin-proposals', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const now = Date.now();
+  const list = (checkinProposals[_wsKey(code, userId)] || []).filter(p => new Date(p.expiresAt).getTime() > now && p.status !== 'dismissed')
+    .map(p => ({ id: p.id, why: p.why, triggerAt: p.triggerAt, expiresAt: p.expiresAt, sensitivity: p.sensitivity, referenceable: p.referenceable }));
+  res.json({ ok: true, proposals: list });
+});
+
 /* POST /api/connections/:id/inspect — fetch a SAMPLE, propose a mapping contract for
    the admin to verify (the safe workflow: inspect → AI proposes → admin confirms →
    versioned mapping → all future data validated against it). Nothing is stored yet. */
@@ -12005,7 +12296,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: scenario/memberResults assessment convergence
   _canonicaliseScenarioResult, _capabilityObservations, _capabilityDims, _personStrengths, memberResults,
   // exported for the truth layer: server-supplied assessment PRESENTATION state
-  _assessmentPresentationState, ASSESSMENT_VERDICTS };
+  _assessmentPresentationState, ASSESSMENT_VERDICTS,
+  // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
+  _assistantTurn, _assistantInterpret, _assistantContext, assistantTurns, checkinProposals };
 
 if (require.main === module) (async () => {
   try {

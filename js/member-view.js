@@ -2659,6 +2659,52 @@ const MemberApp = {
     } catch (_) { return null; }
   },
 
+  /* ── Unified IntelliQ assistant (MyWorkspace, one composer) ──────────────────
+     Routes ONE composer input through the unified assistant runtime: a grounded response
+     + confirmable action PROPOSALS + a clear privacy notice. Nothing persists until the user
+     confirms a proposal; visibility never increases without an explicit confirm. Renders into
+     `targetEl` (defaults to #iq-assistant-out). Returns the response contract. */
+  async assistantTurn(text, targetEl) {
+    const out = targetEl || document.getElementById('iq-assistant-out');
+    try {
+      const r = await fetch('/api/assistant/turn', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ text }) });
+      const j = await r.json();
+      if (!j || !j.ok) { if (out) out.textContent = 'Sorry — I couldn\'t process that just now.'; return null; }
+      this._lastTurnId = j.turnId;
+      if (out) out.innerHTML = this._renderAssistant(j);
+      return j;
+    } catch (_) { if (out) out.textContent = 'Sorry — I couldn\'t reach IntelliQ just now.'; return null; }
+  },
+
+  _renderAssistant(j) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const r = j.response || {};
+    const props = (r.proposedActions || []).map(p =>
+      `<div class="iq-proposal" data-proposal="${esc(p.id)}">
+         <div class="iq-proposal-label">${esc(p.label)}</div>
+         <div class="iq-proposal-why" style="font-size:0.78rem;color:var(--text-muted)">${esc(p.why)}${p.visibility === 'only_me' ? ' · <strong>private</strong>' : ''}</div>
+         <button onclick="MemberApp.confirmProposal('${esc(j.turnId)}','${esc(p.id)}')">Confirm</button>
+         <button onclick="MemberApp.correctProposal('${esc(j.turnId)}','${esc(p.id)}')">Not quite</button>
+       </div>`).join('');
+    return `<div class="iq-response"><p>${esc(r.responseText)}</p>
+      ${r.privacyNotice ? `<div class="iq-privacy" style="font-size:0.78rem;color:var(--accent)">${esc(r.privacyNotice)}</div>` : ''}
+      ${props ? `<div class="iq-proposals"><div class="card-label">Proposals (nothing happens until you confirm)</div>${props}</div>` : ''}</div>`;
+  },
+
+  async confirmProposal(turnId, proposalId, overrides) {
+    const r = await fetch(`/api/assistant/turn/${turnId}/confirm`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, overrides: overrides || {} }) });
+    return r.json();
+  },
+  async correctProposal(turnId, proposalId, correction) {
+    const c = correction || window.prompt('What should I change? (e.g. "just a note", "keep this private", "do not remind me")');
+    if (!c) return null;
+    const r = await fetch(`/api/assistant/turn/${turnId}/correct`, { method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, correction: c }) });
+    return r.json();
+  },
+
   _svgRing(score, color, size = 100) {
     const r    = size * 0.38;
     const cx   = size / 2;

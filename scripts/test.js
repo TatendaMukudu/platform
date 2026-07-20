@@ -68,6 +68,7 @@ const SUITES = [
   'assessment-consumption-smoke.js', // the unified assistant consumes the complete Assessment (scale-aware, journey-aware, no double-count)
   'scenario-convergence-smoke.js', // scenario/memberResults converge onto the same canonical assessment model; legacy value-signal cutover
   'assessment-presentation-smoke.js', // server-supplied assessment presentation state; frontend no longer judges a raw score
+  'assistant-runtime-smoke.js',    // unified MyWorkspace assistant runtime: one composer, bounded turn, confirmable proposals
   'connector-harness.js',  // the Connector SDK: identity/confidence + mapping contracts
   'endpoint-smoke.js',   // boots the real app in-process (DB_OPTIONAL) — HTTP authz + Me context
 ];
