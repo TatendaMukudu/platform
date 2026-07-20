@@ -2276,13 +2276,9 @@ app.get('/api/intelligence/watch', requireAuth, (req, res) => {
 /* A person's recurring strengths, pulled from their assessment signals — the
    grounded "what's working" behind momentum (categorical tokens, never content). */
 function _personStrengths(code, id) {
-  const out = {};
-  (orgSignals[code] || []).forEach(s => {
-    if (s.subjectId !== id || s.source !== 'assessment') return;
-    const mm = (s.valueText || '').match(/Strengths:\s*([^·]+)/i);
-    if (mm) mm[1].split(',').forEach(x => { const v = x.trim(); if (v) out[v.toLowerCase()] = (out[v.toLowerCase()] || 0) + 1; });
-  });
-  return Object.entries(out).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k);
+  // MIGRATED: recent CONTEXTUAL strength observations from canonical evidence (never a
+  // permanent trait), with a legacy text-signal fallback during the migration window.
+  return _capabilityDims(code, id, 'strength', 'Strengths');
 }
 
 /* GET /api/intelligence/success — the flip side of the watch: the org's SUCCESS
@@ -3143,6 +3139,10 @@ function _buildMemberIntelInput(code, u, now) {
     // who shifts from 4s to 5s leaves a stale "Mood 4/5" stream that trips a false
     // data_gap ("went quiet"). Skip them here: mood is not a raw external metric.
     if (s.source === 'checkin') return;
+    // Assessment capability now comes from CANONICAL evidence (scale/rubric-aware, self-
+    // relative per comparable group — added below), so the legacy value signal is NOT fed
+    // into the numeric streams: no assessment is counted twice.
+    if (s.source === 'assessment') return;
     const t = new Date(s.ts).getTime(); if (isNaN(t)) return;
     const key = `${s.source}${s.label ? ':' + s.label : ''}`;
     const label = s.label || (SIGNAL_SOURCES[s.source]?.label || s.source);
@@ -3155,6 +3155,20 @@ function _buildMemberIntelInput(code, u, now) {
     }).series.push({ t, v: Number(s.valueNum) });
   });
   Object.values(numeric).forEach(st => { if (st.series.length >= 6) streams.push(st); });
+
+  // CANONICAL assessment capability streams — one stream PER comparable group (same scale +
+  // rubric), so trends are scale-aware, rubric-aware and self-relative; incompatible rubrics
+  // are never pooled into one stream. Built from canonical evidence, never the legacy signal.
+  try {
+    const groups = {};
+    _assessmentEvidenceFor(code, u.id, { purpose: 'organisation_reasoning' }).forEach(a => {
+      if (!Number.isFinite(a.score)) return;
+      const k = _assessmentComparableKey(a);
+      (groups[k] = groups[k] || { key: `assessment:${k}`, label: `Assessment (${String(a.rubric || 'n/a').slice(0, 40)})`,
+        primitive: 'capability', valence: 'up-good', series: [] }).series.push({ t: new Date(a.observedAt).getTime(), v: Number(a.score) });
+    });
+    Object.values(groups).forEach(st => { if (st.series.length >= 6) streams.push(st); });
+  } catch (_) {}
 
   let connections = [];
   try { connections = agents.crossSignal(streams, now); } catch (_) {}
@@ -3241,15 +3255,11 @@ function _promptCandidates(code, userId, now) {
       cta: { label: 'Rework it', action: 'plan', theme: `reworking ${r.title}` } });
   }
 
-  // Development areas per member (categorical tokens from assessment signals only).
+  // Development areas per member — MIGRATED to canonical CONTEXTUAL observations (with a
+  // legacy text-signal fallback during migration). Categorical themes, never permanent traits.
   const devCount = {}, devByMember = {};
   members.forEach(u => {
-    const toks = new Set();
-    (orgSignals[code] || []).forEach(s => {
-      if (s.subjectId !== u.id || s.source !== 'assessment') return;
-      const dm = (s.valueText || '').match(/Development:\s*([^·]+)/i);
-      if (dm) dm[1].split(',').forEach(x => { const v = x.trim().toLowerCase(); if (v) toks.add(v); });
-    });
+    const toks = new Set(_capabilityDims(code, u.id, 'development', 'Development'));
     toks.forEach(v => { devCount[v] = (devCount[v] || 0) + 1; });
     devByMember[u.id] = toks;
   });
@@ -4340,15 +4350,11 @@ function _studioMemberRead(code, userId, now) {
     const aim = g.mainGoals || g.goal; if (aim) parts.push(`Their stated aim: ${String(aim).slice(0, 140)}.`);
     if (g.identity) parts.push(`Who they're trying to be: ${String(g.identity).slice(0, 100)}.`);
   }
+  // MIGRATED (unified MyWorkspace assistant context): strengths + development from canonical
+  // capability observations (contextual, not permanent traits), legacy fallback during migration.
   const strengths = _personStrengths(code, userId);
   if (strengths.length) parts.push(`Recurring strengths in their reviews: ${strengths.join(', ')}.`);
-  const devCount = {};
-  (orgSignals[code] || []).forEach(s => {
-    if (s.subjectId !== userId || s.source !== 'assessment') return;
-    const dm = (s.valueText || '').match(/Development:\s*([^·]+)/i);
-    if (dm) dm[1].split(',').forEach(x => { const v = x.trim().toLowerCase(); if (v) devCount[v] = (devCount[v] || 0) + 1; });
-  });
-  const dev = Object.entries(devCount).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k);
+  const dev = _capabilityDims(code, userId, 'development', 'Development');
   if (dev.length) parts.push(`Development areas they've been working on: ${dev.join(', ')}.`);
   let dir = 'steady'; try { dir = _memberTrajDir(code, u, now); } catch (_) {}
   parts.push(`Recent trajectory: ${dir === 'up' ? 'trending up' : dir === 'down' ? 'in a dip' : 'steady'}.`);
@@ -4718,15 +4724,14 @@ function _gatherPlanningContext(code, userId) {
   ids.forEach(id => {
     const u = orgUsers[code]?.[id];
     if (!u || u.role === 'superadmin') return;
-    const sigs = (orgSignals[code] || []).filter(s => s.subjectId === id && s.source === 'assessment');
-    const scores = sigs.filter(s => Number.isFinite(s.valueNum)).map(s => s.valueNum);
+    // MIGRATED: recent score from the complete canonical Assessment (kept with its scale),
+    // strengths/development from canonical CONTEXTUAL observations — not regex-parsed text.
+    const canonAssess = _assessmentEvidenceFor(code, id, { purpose: 'leader_support', viewerId: userId });
+    const scores = canonAssess.map(a => a.score).filter(Number.isFinite);
     const recentScore = scores.length ? Math.round(scores.slice(-3).reduce((a, b) => a + b, 0) / Math.min(3, scores.length)) : null;
-    const strengths = [], development = [];
-    sigs.forEach(s => {
-      const t = s.valueText || '';
-      const sm = t.match(/Strengths:\s*([^·]+)/i); if (sm) sm[1].split(',').forEach(x => { const v = x.trim(); if (v) strengths.push(v); });
-      const dm = t.match(/Development:\s*([^·]+)/i); if (dm) dm[1].split(',').forEach(x => { const v = x.trim(); if (v) { development.push(v); devCount[v.toLowerCase()] = (devCount[v.toLowerCase()] || 0) + 1; } });
-    });
+    const strengths = _capabilityDims(code, id, 'strength', 'Strengths');
+    const development = _capabilityDims(code, id, 'development', 'Development');
+    development.forEach(v => { devCount[v.toLowerCase()] = (devCount[v.toLowerCase()] || 0) + 1; });
     let trajectory = 'steady';
     try {
       const m = _buildMemberIntelInput(code, u, now);
@@ -4989,15 +4994,17 @@ app.post('/api/assessments/:id/return', requireAuth, (req, res) => {
   const s = Number(score);
   a.score = Number.isFinite(s) ? Math.max(0, Math.min(100, s)) : a.score;
   a.status = 'returned'; a.returnedAt = new Date().toISOString();
-  // BACKWARDS COMPAT: the legacy capability signal is preserved unchanged (numeric streams,
-  // concern trigger, _personStrengths all keep working) — non-authoritative during migration.
-  if (Number.isFinite(a.score)) _emitSignalSafe(code, {
-    subjectType: 'member', subjectId: a.assigneeId, source: 'assessment', modality: 'number',
-    label: `Assessment score: ${a.title}`.slice(0, 120), valueNum: a.score, primitive: 'capability', sensitivity: 'normal',
-  }, userId);
   // AUTHORITATIVE: the complete canonical Assessment (assessor · rubric · scale · feedback ·
   // submissionId) + the feedback as an authored observation — emitted LIVE, never a naked number.
   try { _canonicaliseAssessment(code, a); } catch (_) {}
+  // CUTOVER: the value-bearing legacy score signal is RETIRED to a CONTENTLESS completion
+  // marker. Every consumer (numeric streams, concern detection, strengths/development,
+  // leader views) now reads canonical evidence, so no assessment value re-enters a stream.
+  if (Number.isFinite(a.score)) _emitSignalSafe(code, {
+    subjectType: 'member', subjectId: a.assigneeId, source: 'assessment', modality: 'participation',
+    label: `Assessment returned: ${a.title}`.slice(0, 120), valueNum: null, valueText: null, sensitivity: 'normal',
+    data: { assessment: true, returned: true },
+  }, userId);
   scheduleSave();
   res.json({ ok: true, assignment: _publicAssignment(a) });
 });
@@ -6829,6 +6836,53 @@ function _canonicaliseAssessment(code, a) {
   return _ingestAdapterEvidence(code, capAdapters.AssessmentAdapter.assessment(a, { now: new Date().toISOString(), submissionId }));
 }
 
+/* A scenario/memberResults record converges onto the SAME canonical assessment primitives
+   (submission + assessment + capability observations) via the SAME adapter — one truth
+   representation for assigned-work and scenario assessments. Privacy is CLASSIFIED (the AI
+   summary may reference sensitive content); the raw response is not retained (a limitation). */
+function _canonicaliseScenarioResult(code, subjectId, rec) {
+  if (!subjectId || !rec) return { recorded: 0, duplicates: 0 };
+  const summary = (rec.dimensions && rec.dimensions.summary) || '';
+  const visibility = summary && privacy.isPrivate(privacy.classifyText(summary, { source: 'workspace' })) ? 'sensitive' : 'normal';
+  return _ingestAdapterEvidence(code, capAdapters.AssessmentAdapter.scenarioResult(rec, { subjectId, visibility, now: new Date().toISOString() }));
+}
+
+/* CANONICAL capability observations (strengths / development) — CONTEXTUAL, purpose-scoped,
+   never a permanent trait. Replaces regex-parsing of legacy `Strengths:/Development:` text. */
+function _capabilityObservations(code, subjectId, opts = {}) {
+  const purpose = opts.purpose || 'leader_support';
+  const personal = PERSONAL_PURPOSES.includes(purpose);
+  const viewerId = opts.viewerId || null;
+  const polarity = opts.polarity || null;
+  return (evidenceLog[code] || []).filter(env => {
+    if (env.status !== 'active' || env.subjectId !== subjectId) return false;
+    if (!(env.attributes && env.attributes.primitive === 'observation' && env.attributes.observationType === 'capability')) return false;
+    if (polarity && env.attributes.polarity !== polarity) return false;
+    if (env.visibility === 'private') return personal && !!viewerId && env.ownerRef === viewerId;
+    return true;
+  }).map(env => ({ evidenceId: env.id, dimension: env.attributes.dimension, polarity: env.attributes.polarity,
+    basis: env.attributes.basis, confidence: env.attributes.confidence, limitations: env.attributes.limitations,
+    at: env.observedAt, assessmentId: env.attributes.relatesToAssessmentId }))
+    .sort((a, b) => new Date(a.at) - new Date(b.at));
+}
+/* Top recent capability dimensions of a polarity (bounded), canonical-first with a legacy
+   text-signal fallback during the migration window. Contextual, not a person-level trait. */
+function _capabilityDims(code, subjectId, polarity, legacyLabel) {
+  const obs = _capabilityObservations(code, subjectId, { purpose: 'leader_support', polarity });
+  if (obs.length) {
+    const counts = {};
+    obs.forEach(o => { const v = String(o.dimension || '').toLowerCase().trim(); if (v) counts[v] = (counts[v] || 0) + 1; });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k);
+  }
+  const out = {};
+  (orgSignals[code] || []).forEach(s => {
+    if (s.subjectId !== subjectId || s.source !== 'assessment') return;
+    const m = (s.valueText || '').match(new RegExp(legacyLabel + ':\\s*([^·]+)', 'i'));
+    if (m) m[1].split(',').forEach(x => { const v = x.trim().toLowerCase(); if (v) out[v] = (out[v] || 0) + 1; });
+  });
+  return Object.entries(out).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k);
+}
+
 /* THE authorised complete-Assessment reader. Reads canonical assessment evidence DIRECTLY
    (like the mood series) so reasoning consumes the whole object — assessor, rubric, scale,
    feedback — never an isolated number. It is NOT an unrestricted raw reader: it enforces
@@ -7043,7 +7097,7 @@ app.get('/api/admin/checkin-classification-audit', requirePermission('view_insig
 function _backfillCanonical(code, opts = {}) {
   // Reconciliation report: what was scanned, what claims we expected, what already
   // exists canonically, what we created, what deduped, and any privacy ambiguities.
-  const report = { checkins: 0, assessments: 0, claimsExpected: 0, claimsPresent: 0,
+  const report = { checkins: 0, assessments: 0, scenarios: 0, claimsExpected: 0, claimsPresent: 0,
     recorded: 0, duplicates: 0, privacyAmbiguities: 0, errors: 0, dryRun: !!opts.dryRun };
   const users = orgUsers[code] || {};
   const present = new Set((evidenceLog[code] || []).map(e => e.externalId).filter(Boolean));
@@ -7085,6 +7139,27 @@ function _backfillCanonical(code, opts = {}) {
       inputs.forEach(i => present.add(i.externalId));
     } catch (_) { report.errors++; }
   });
+  // Scenario/memberResults → the SAME canonical primitives via the SAME adapter (idempotent
+  // through the stable scenarioId:submittedAt source key). Keyed by userId or legacy name.
+  for (const key of Object.keys(memberResults)) {
+    if (!key.startsWith(code + ':')) continue;
+    const idPart = key.slice(code.length + 1);
+    const subjectId = users[idPart] ? idPart : _resolveUserIdByName(code, idPart);
+    (memberResults[key] || []).forEach(rec => {
+      report.scenarios++;
+      try {
+        const summary = (rec.dimensions && rec.dimensions.summary) || '';
+        const visibility = summary && privacy.isPrivate(privacy.classifyText(summary, { source: 'workspace' })) ? 'sensitive' : 'normal';
+        const inputs = capAdapters.AssessmentAdapter.scenarioResult(rec, { subjectId: subjectId || rec.memberId, visibility, now: rec.submittedAt });
+        report.claimsExpected += inputs.length;
+        inputs.forEach(i => { if (present.has(i.externalId)) report.claimsPresent++; });
+        if (!subjectId && !rec.memberId) { report.privacyAmbiguities++; return; }   // can't safely scope
+        if (opts.dryRun) return;
+        const r = _ingestAdapterEvidence(code, inputs); report.recorded += r.recorded; report.duplicates += r.duplicates;
+        inputs.forEach(i => present.add(i.externalId));
+      } catch (_) { report.errors++; }
+    });
+  }
   return report;
 }
 app.post('/api/admin/backfill-canonical', requirePermission('manage_settings'), (req, res) => {
@@ -8644,22 +8719,19 @@ app.post('/api/member/submit-result', (req, res) => {
     });
   }
 
-  // Assessment completion → signals: the score (citable) + what it revealed.
   const _code = orgCode.toLowerCase().trim();
   const _aid  = resolvedUserId || _resolveUserIdByName(_code, resolvedName);
   if (_aid) {
-    const sc = result.score || result.dimensions || {};
-    if (sc.overall != null) _emitSignalSafe(_code, {
-      subjectType: 'member', subjectId: _aid, source: 'assessment', modality: 'number',
-      label: 'Assessment overall', valueNum: Number(sc.overall), sensitivity: 'normal',
-    }, _aid);
-    const parts = [];
-    if (sc.summary) parts.push(sc.summary);
-    if (Array.isArray(sc.strengths) && sc.strengths.length)   parts.push('Strengths: ' + sc.strengths.join(', '));
-    if (Array.isArray(sc.development) && sc.development.length) parts.push('Development: ' + sc.development.join(', '));
-    if (parts.length) _emitSignalSafe(_code, {
-      subjectType: 'member', subjectId: _aid, source: 'assessment', modality: 'text',
-      label: result.scenarioTitle || 'Assessment', valueText: parts.join(' · '), sensitivity: 'normal',
+    // AUTHORITATIVE: the scenario result converges onto canonical assessment evidence
+    // (submission + assessment + capability observations) via the shared adapter.
+    try { _canonicaliseScenarioResult(_code, _aid, memberResults[key][memberResults[key].length - 1]); } catch (_) {}
+    // COMPATIBILITY MARKER (cutover): a CONTENTLESS scenario-completion participation signal.
+    // The value-bearing score + Strengths:/Development: text signals are RETIRED — every
+    // migrated consumer now reads canonical evidence, so no value re-enters the streams.
+    _emitSignalSafe(_code, {
+      subjectType: 'member', subjectId: _aid, source: 'assessment', modality: 'participation',
+      label: 'Scenario completed', valueNum: null, valueText: null, sensitivity: 'normal',
+      data: { scenario: true, completed: true },
     }, _aid);
   }
 
@@ -11864,7 +11936,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: assigned-work → canonical evidence (MyWorkspace)
   _canonicaliseCommitment, _canonicaliseSubmission, _canonicaliseAssessment, _assessmentEvidenceFor, _assignmentProgress,
   // exported for the truth layer: complete-assessment consumption (scale-aware kernel state)
-  _assessmentKernelState, _assessmentConcerns, _scaleMax, _assessmentComparableKey, _buildMemberIntelInput };
+  _assessmentKernelState, _assessmentConcerns, _scaleMax, _assessmentComparableKey, _buildMemberIntelInput,
+  // exported for the truth layer: scenario/memberResults assessment convergence
+  _canonicaliseScenarioResult, _capabilityObservations, _capabilityDims, _personStrengths, memberResults };
 
 if (require.main === module) (async () => {
   try {

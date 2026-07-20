@@ -295,8 +295,9 @@ const server = app.listen(0, async () => {
     const ret = await call(`/api/assessments/${asgId}/return`, tokCoach, { method: 'POST', body: { feedback: 'Strong work', score: 82 } });
     ok('the leader reviews it back with feedback + score', ret.status === 200 && ret.j?.assignment?.status === 'returned' && ret.j.assignment.score === 82);
     const expScore = await call('/api/me/export', tokB);
-    ok('a returned score becomes a citable signal in the member\'s record',
-       (expScore.j?.signals || []).some(s => /Assessment score/.test(s.label) && s.valueNum === 82));
+    ok('a returned assessment is retired to a contentless completion marker (score lives in canonical evidence, not a value signal)',
+       (expScore.j?.signals || []).some(s => /Assessment returned/.test(s.label) && s.valueNum == null)
+       && !(expScore.j?.signals || []).some(s => /Assessment score/.test(s.label) && s.valueNum === 82));
     // Tutorials
     ok('a member cannot pin a tutorial (403)',
        (await call('/api/tutorials', tokB, { method: 'POST', body: { title: 'x' } })).status === 403);

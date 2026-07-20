@@ -148,14 +148,14 @@ const server = app.listen(0, async () => {
     const lowIso = T(1);
     craftAssessment(mem, { score: 30, scale: '0-100', rubric: 'closing games', assignmentId: 'low1', ts: lowIso });
     const lowTs = new Date(lowIso).getTime();
-    const legacy62 = (orgSignals[CODE] || []).filter(s => s.source === 'assessment' && s.valueNum === 62);
+    const valueSignals = (orgSignals[CODE] || []).filter(s => s.source === 'assessment' && Number.isFinite(s.valueNum) && s.valueNum > 1);
     const intel = _buildMemberIntelInput(CODE, orgUsers[CODE][mem], Date.now());
     const concernAtLow = intel.concernSeries.filter(c => Math.abs(c.t - lowTs) < 1000).length;
-    ok('8. one live assessment is not double-counted as a legacy score signal (exactly one)', legacy62.length === 1);
-    ok('8b. a low canonical assessment is counted ONCE in concern detection (no legacy + canonical double-count)',
+    ok('8. no value-bearing legacy assessment signal exists (retired at cutover — nothing to double-count)', valueSignals.length === 0);
+    ok('8b. a low canonical assessment is counted ONCE in concern detection (single source of truth)',
        _assessmentConcerns(CODE, mem).filter(c => c.t === lowTs).length === 1 && concernAtLow === 1);
-    ok('8c. the canonical assessment did not leak into the numeric capability streams as a duplicate',
-       !(intel.streams || []).some(st => /as_/.test(String(st.key || ''))));
+    ok('8c. the legacy assessment value never enters the numeric capability streams',
+       !(intel.streams || []).some(st => String(st.key || '').startsWith('assessment:Assessment score')));
 
     // ── Existing non-assessment advisor behaviour unchanged ────────────────────
     ok('11. non-assessment advisor behaviour is unchanged (mood trajectory + anchoring still produced)',

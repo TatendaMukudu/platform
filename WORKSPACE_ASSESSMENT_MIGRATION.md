@@ -128,3 +128,87 @@ assessment-consumption 16, endpoints 222, adapters 12, evidence 21, all suites).
   non-authoritative.
 Severing these requires the scenario/`memberResults` convergence (next slice) so a single
 canonical representation feeds every consumer.
+
+---
+
+# Slice 3 — Scenario / memberResults canonical convergence
+
+**Scope:** collapse the legacy scenario/`memberResults` assessment representation into the same
+canonical assessment model as assigned work. The interaction surfaces stay separate; the **truth
+representation is now one**. ("Studio" is not a product concept — the user-facing system is
+**MyWorkspace**; the AI is the **unified IntelliQ assistant**.)
+
+## Legacy scenario lifecycle (inventory)
+`POST /api/platform/assign-scenario` → `assignedScenarios` (pending). Member completes a scenario;
+it is **scored client-side** (the scorer prompt defines a system 0-100 `overall` composite plus
+sub-dimensions, `strengths[]`, `development[]`, `summary`). `POST /api/member/submit-result` stores
+`{...result, memberName, memberId, submittedAt}` in `memberResults[memberKey]` and (previously)
+emitted a value-bearing `source:'assessment'` **number** signal (overall) and a **text** signal
+encoding `Strengths:/Development:`. The raw response text is **not** retained server-side.
+Fields: `scenarioId, scenarioTitle, domain, date, score (overall number), dimensions {overall,
+summary, strengths[], development[]}, memberId, submittedAt`. Incomplete historical records
+(missing `dimensions`, or missing `memberId`) are handled explicitly, never inferred.
+
+## Canonical mapping (one adapter)
+`AssessmentAdapter.scenarioResult()` maps a `memberResult` into the **same primitives** as assigned
+work, all unpromoted:
+- **submission** — a completion event (`sourceType:'scenario'`, `responseRetained:false`; the raw
+  response isn't retained — a limitation, not an invention).
+- **assessment** — `overall` on the scenario's **system-defined 0-100 scale** (documented via
+  `scaleBasis`, not inferred), `assessorType:'automated'`, rubric = the scenario itself (so scenario
+  and assigned-work assessments are correctly **incomparable**), summary = qualitative feedback.
+  A record with no score yields a submission but **no invented assessment**.
+- **observations** — each strength/development becomes a **contextual** capability observation
+  (`observationType:'capability'`, `polarity`, `dimension`, `relatesToAssessmentId`, basis,
+  limitations) — never an unqualified permanent trait.
+
+## Live + backfill (same code path, idempotent)
+`_canonicaliseScenarioResult` runs at the `submit-result` write boundary; `_backfillCanonical` now
+iterates `memberResults` through the **same** adapter method. Idempotent via the stable
+`scenarioId:submittedAt` source key — repeated backfill records nothing new, and a live-canonicalised
+scenario is not re-created.
+
+## Consumer migration (off legacy signals)
+- `_personStrengths` and the development-area consumers (`_studioMemberRead` [legacy name only],
+  the leader team view, the dev-areas aggregate) now read **structured capability observations**
+  via `_capabilityDims`/`_capabilityObservations` (canonical-first, legacy text fallback during the
+  migration window) — no regex parsing of `Strengths:/Development:`.
+- The leader team view's recent score reads the complete canonical Assessment (with scale).
+- `_buildMemberIntelInput` numeric streams **skip** `source:'assessment'` and instead build
+  **canonical assessment streams**, one per comparable group (same scale + rubric), self-relative —
+  incompatible rubrics are never pooled.
+
+## Legacy signal cutover (phased)
+Emit canonical live → backfill historical → migrate consumers → verify no double-count → **retire**
+the value-bearing signals. Both the scenario overall/text signals and the assigned-work return score
+signal are now **contentless completion markers** (`modality:'participation'`, `valueNum:null`). One
+real assessment is counted **once** — the value lives only in canonical evidence.
+
+## Privacy
+Same boundaries as assigned work: a private scenario assessment is excluded from leader-support
+kernel state and admitted only for its owner under personal assistance; the AI summary is classified
+(sensitive → non-quotable); the raw response is never stored, so it cannot leak.
+
+## Tests
+`scripts/scenario-convergence-smoke.js` (25 checks) proves all 18 invariants: live canonicalization,
+same-adapter idempotent backfill, score+scale linkage, missing-scale→limitation, structured
+strength/development observations, source-assessment IDs retained, private exclusion, no raw-response
+leakage, one kernel-state contract for both paths, incomparable rubrics, numeric streams off the
+legacy value, no double-count, and the value-signal cutover — with assigned-work / advisor / check-in
+behaviour unchanged. Full truth layer green (scenario-convergence 25, assessment-consumption 16,
+workspace-assessment 30, advisor 45, check-in 59, endpoints 222, all suites).
+
+## Remaining legacy dependencies (final report)
+- **Display/aggregate reads of the `memberResults` store** (member exports, org dashboards,
+  `_aggregateOrgData`, the legacy `_buildAdvisorContext`/`_buildBehavioralProfile`) still read the
+  raw `memberResults` array for **display**, not as reasoning truth. They are unchanged and out of
+  scope (no reasoning conclusion depends on them).
+- **The journey-timeline view** renders `events` of `type:'assessment'` (`e.data.overall`) for
+  display only — not a signal consumer.
+- **A contentless completion marker** (`source:'assessment'`, `valueNum:null`) is retained for
+  participation cadence + last-activity (the same named consumer as the check-in frozen marker). No
+  external dependency on the value-bearing signal was identified; if one surfaces, it must read
+  canonical evidence.
+- **Frontend `_scoreLabel`/`_scoreColor`** still derive a client-side qualitative label from a score
+  (flagged in the original inventory) — a separate frontend concern, not touched here.
+No unidentified legacy value-signal consumer remains in the reasoning paths.

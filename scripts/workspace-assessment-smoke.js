@@ -94,13 +94,14 @@ const server = app.listen(0, async () => {
     ok('13. feedback is recorded as a SEPARATE authored observation (observer + basis)',
        prim('observation', mem).some(o => o.attributes.observerId === boss && /decisions/.test(o.attributes.basis) && /commit earlier/i.test(o.valueText)));
 
-    // ── Canonical / legacy CONSISTENCY (deliverable 8) ─────────────────────────
-    const legacyScoreSig = (orgSignals[CODE] || []).filter(s => s.source === 'assessment' && s.valueNum === 68 && s.subjectId === mem);
-    ok('14. the legacy score signal is preserved (backwards compatible)', legacyScoreSig.length === 1);
-    ok('15. canonical Assessment value === legacy signal value === record score (consistent)',
-       A.score === 68 && legacyScoreSig[0].valueNum === 68 && ret1.j.assignment.score === 68);
-    ok('16. the canonical score claim did NOT double-emit a promoted signal (exactly one score signal)',
-       (orgSignals[CODE] || []).filter(s => s.source === 'assessment' && s.valueNum === 68).length === 1);
+    // ── Cutover: the legacy VALUE signal is retired; the score lives in canonical ───
+    ok('14. the value-bearing legacy score signal is retired to a contentless completion marker',
+       (orgSignals[CODE] || []).some(s => s.source === 'assessment' && s.subjectId === mem && s.data && s.data.returned && s.valueNum == null)
+       && !(orgSignals[CODE] || []).some(s => s.source === 'assessment' && s.valueNum === 68));
+    ok('15. the score + record stay consistent through canonical evidence (no naked number)',
+       A.score === 68 && ret1.j.assignment.score === 68);
+    ok('16. no assessment VALUE signal is emitted (nothing can double-count in a numeric stream)',
+       (orgSignals[CODE] || []).filter(s => s.source === 'assessment' && Number.isFinite(s.valueNum) && s.valueNum > 1).length === 0);
 
     // ── Resubmit → Revision (append-only) ──────────────────────────────────────
     const sub2 = await call(`/api/assessments/${aId}/submit`, tokMem, { method: 'POST',
