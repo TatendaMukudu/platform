@@ -26,8 +26,6 @@
    ============================================================ */
 
 // Ranking — severity first, then how confident the kernel is. Lower = surfaced first.
-const SEV_RANK  = { high: 0, medium: 1, low: 2 };
-const CONF_RANK = { clear: 0, confirmed: 0, emerging: 1, medium: 1, tentative: 2, low: 2, calibrating: 2 };
 
 /* ── Polarity — the Attention Engine's core idea ─────────────────────────────
    Attention is not positive or negative; it is "this matters." Every insight
@@ -44,16 +42,9 @@ const PATTERN_POLARITY = {
   // positive — worth celebrating (already emitted by the kernel today)
   recovering: 'progress', quiet_improvement: 'progress',
 };
-// Which Home bucket a polarity belongs to. Priority orders WITHIN a bucket.
-const BUCKET = { risk: 'needs_attention', neutral: 'needs_attention',
-                 progress: 'worth_celebrating', milestone: 'worth_celebrating',
-                 opportunity: 'opportunities' };
-const BUCKET_LABEL = { needs_attention: 'Needs attention', worth_celebrating: 'Worth celebrating', opportunities: 'Opportunities' };
-const BUCKET_EMPTY = {
-  needs_attention:   { self: 'Nothing needs you right now.',            leader: 'Nothing needs your attention right now.' },
-  worth_celebrating: { self: 'Nothing to celebrate just yet — keep going.', leader: 'No standout progress to flag this week.' },
-  opportunities:     { self: 'No new opportunities right now.',          leader: '' },
-};
+// NOTE: bucket mapping, ordering, volume, empty-state and opening messages are
+// DELIVERY decisions and live in the behaviour layer (ai/behaviour.js), not here.
+// This module (the projection) owns only the artifact and its audience-safety.
 
 /* Per-polarity EXPLORE prompts — the natural conversation an insight can start.
    Non-alarmist for risks, reinforcing for wins. Never diagnose, predict, or assume
@@ -262,8 +253,8 @@ function toInsight(finding, opts = {}) {
     subjectLabel,
     polarity,
     priority,
-    bucket: BUCKET[polarity] || 'needs_attention',
     // The conversation this insight can start — a projection, not a generated line.
+    // (Its Home BUCKET is decided by the behaviour layer, not baked into the artifact.)
     explore: (EXPLORE[polarity] && EXPLORE[polarity][audience]) || '',
     severity,
     kernelConfidence: finding.confidence || null,
@@ -282,128 +273,6 @@ function toInsight(finding, opts = {}) {
     basis: audience === 'leader' ? [] : (Array.isArray(finding.basis) ? finding.basis : finding.basis ? [finding.basis] : []),
     careFlag: !!finding.careFlag,
     surfacedAt: opts.now ? new Date(opts.now).toISOString() : new Date().toISOString(),
-  };
-}
-
-/* ── Deterministic surfacing policy ──────────────────────────────────────────
-   • Rank by severity, then kernel confidence, then a stable id tiebreak.
-   • Cap at `limit` (default 3). "Nothing needs your attention" is a first-class,
-     valid, non-error result — empty:true with a calm message.
-   • De-duplicate by dedupeKey (same subject+pattern+audience surfaces once).
-   • Drop anything the caller marked suppressed (per-insight mute).
-   Pure — same inputs always yield the same ordered output. */
-function surface(insights, opts = {}) {
-  const limit = Number.isInteger(opts.limit) ? opts.limit : 3;
-  const suppressed = opts.suppressed instanceof Set ? opts.suppressed
-                   : new Set(Array.isArray(opts.suppressed) ? opts.suppressed : []);
-  const seen = new Set();
-  const ranked = (insights || [])
-    .filter(i => i && !suppressed.has(i.dedupeKey) && !suppressed.has(i.id))
-    .filter(i => (seen.has(i.dedupeKey) ? false : (seen.add(i.dedupeKey), true)))
-    .sort((a, b) => {
-      const s = (SEV_RANK[a.severity] ?? 3) - (SEV_RANK[b.severity] ?? 3);
-      if (s) return s;
-      const c = (CONF_RANK[a.kernelConfidence] ?? 3) - (CONF_RANK[b.kernelConfidence] ?? 3);
-      if (c) return c;
-      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-    })
-    .slice(0, Math.max(0, limit));
-
-  if (!ranked.length) {
-    const leader = (insights || [])[0]?.audience === 'leader' || opts.audience === 'leader';
-    return {
-      empty: true,
-      message: leader ? 'Nothing needs your attention right now.' : 'Nothing needs you right now.',
-      insights: [],
-    };
-  }
-  return { empty: false, message: null, insights: ranked };
-}
-
-/* Rank WITHIN a bucket by PRIORITY (independent of polarity), then confidence,
-   then a stable id — so a milestone can outrank a low risk, and vice versa. */
-function _rankCmp(a, b) {
-  const s = (SEV_RANK[a.priority] ?? 3) - (SEV_RANK[b.priority] ?? 3);
-  if (s) return s;
-  const c = (CONF_RANK[a.kernelConfidence] ?? 3) - (CONF_RANK[b.kernelConfidence] ?? 3);
-  if (c) return c;
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-}
-
-/* ── The Attention Engine surface ────────────────────────────────────────────
-   Groups insights into Home's buckets — "Needs attention", "Worth celebrating",
-   "Opportunities" — each capped and each with a first-class empty state. Home
-   becomes "Your Attention": a balance of what needs action, progress worth
-   celebrating, and opportunities worth pursuing. Attention is not positive or
-   negative; it is simply what matters right now.
-
-   Leaders never receive an OPPORTUNITIES bucket about a person — an "opportunity"
-   framed to a supporter ("ready for more", "leadership potential") is a judgement
-   that could drive unfair decisions and may rest on evidence the person considers
-   private. Opportunities are self-audience-first. Pure + deterministic. */
-function attention(insights, opts = {}) {
-  const audience = opts.audience === 'leader' ? 'leader' : 'self';
-  const limit = Number.isInteger(opts.limit) ? opts.limit : 3;
-  const suppressed = opts.suppressed instanceof Set ? opts.suppressed
-                   : new Set(Array.isArray(opts.suppressed) ? opts.suppressed : []);
-  const order = ['needs_attention', 'worth_celebrating', 'opportunities'];
-  const groups = {};
-  let total = 0;
-  for (const b of order) {
-    if (audience === 'leader' && b === 'opportunities') continue;   // no person-opportunities to a leader
-    const seen = new Set();
-    const ranked = (insights || [])
-      .filter(i => i && (i.bucket || 'needs_attention') === b)
-      .filter(i => !suppressed.has(i.dedupeKey) && !suppressed.has(i.id))
-      .filter(i => (seen.has(i.dedupeKey) ? false : (seen.add(i.dedupeKey), true)))
-      .sort(_rankCmp)
-      .slice(0, Math.max(0, limit));
-    total += ranked.length;
-    const emptyMsg = (BUCKET_EMPTY[b] && BUCKET_EMPTY[b][audience]) || '';
-    groups[b] = { label: BUCKET_LABEL[b], empty: ranked.length === 0, message: ranked.length ? null : emptyMsg, insights: ranked };
-  }
-  return {
-    empty: total === 0,
-    message: total === 0 ? (audience === 'leader' ? 'Nothing needs your attention right now.' : 'Nothing needs you right now.') : null,
-    groups,
-  };
-}
-
-/* ── The proactive OPENING ───────────────────────────────────────────────────
-   "Before you ask, the OS has already organised your world into what deserves
-   your attention." The assistant CONSUMES the Attention artifacts to open a
-   conversation — it does not generate observations. This is pure assembly over
-   the grouped output of attention(): a time-of-day greeting, the same insights
-   (celebrate first, to keep the tone balanced, then needs-attention, then
-   opportunity), and an invitation to explore. Deterministic; no AI, ever.
-   Empty is a calm, valid opening — never an alarm, never a void. */
-function composeOpening(grouped, opts = {}) {
-  const audience = opts.audience === 'leader' ? 'leader' : 'self';
-  const name = opts.name ? String(opts.name).split(' ')[0] : '';
-  const hour = new Date(Number.isFinite(opts.now) ? opts.now : Date.now()).getHours();
-  const tod  = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const hello = name ? `${tod}, ${name}.` : `${tod}.`;
-
-  if (!grouped || grouped.empty) {
-    return {
-      empty: true,
-      greeting: `${hello} Nothing needs you right now — a calm moment to capture a thought or plan ahead.`,
-      sections: [], invitation: null,
-    };
-  }
-  // Lead with a win when there is one — emotional balance is the point.
-  const ORDER = [['worth_celebrating', 'Worth celebrating'], ['needs_attention', 'Needs attention'], ['opportunities', 'Opportunity']];
-  const sections = [];
-  for (const [key, label] of ORDER) {
-    const g = grouped.groups && grouped.groups[key];
-    if (!g || !(g.insights || []).length) continue;
-    sections.push({ key, label, insights: g.insights });
-  }
-  return {
-    empty: false,
-    greeting: `${hello} Here’s what deserves your attention${audience === 'leader' ? '' : ' today'}.`,
-    sections,
-    invitation: 'Would you like to explore any of these?',
   };
 }
 
@@ -531,12 +400,13 @@ function opportunityFinding({ key, subjectId, headline, body, suggestion, priori
 }
 
 module.exports = {
+  // Projection only: artifacts + audience-safety. Delivery (grouping, ordering,
+  // volume, opening, empty-state) lives in ai/behaviour.js.
   milestoneFinding, opportunityFinding,
-  toInsight, surface, attention, composeOpening, audienceSafe,
+  toInsight, audienceSafe,
   normalizePreferences, applyPreferences,
-  MESSAGES, PREF_SCHEMA, PREF_DEFAULTS,
-  PATTERN_POLARITY, BUCKET, BUCKET_LABEL,
-  SEV_RANK, CONF_RANK,
+  MESSAGES, EXPLORE, PREF_SCHEMA, PREF_DEFAULTS,
+  PATTERN_POLARITY,
   // exported for tests
-  _hash, _fallback, _rankCmp,
+  _hash, _fallback,
 };

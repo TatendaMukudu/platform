@@ -22,6 +22,7 @@ const packs      = require('./ai/packs');
 const primitives = require('./ai/primitives');
 const confidence = require('./ai/confidence');
 const proactive  = require('./ai/proactive');
+const behaviour  = require('./ai/behaviour');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
 const office     = require('./lib/office');   // dependency-free .xlsx / .docx reading
@@ -3621,7 +3622,7 @@ function _proactiveInsights(code, viewerId, opts = {}) {
   const audience   = opts.audience === 'leader' ? 'leader' : 'self';
   const subjectId  = audience === 'leader' ? opts.subjectId : viewerId;
   const subject    = orgUsers[code]?.[subjectId];
-  if (!subject) return { empty: true, message: proactive.attention([], { audience }).message, groups: {} };
+  if (!subject) return { empty: true, message: behaviour.plan([], { audience }).message, groups: {} };
 
   const now = opts.now || Date.now();
   let m; try { m = _buildMemberIntelInput(code, subject, now); } catch (_) { m = null; }
@@ -3656,7 +3657,7 @@ function _proactiveInsights(code, viewerId, opts = {}) {
   const rendered = prefs ? insights.map(i => proactive.applyPreferences(i, prefs)) : insights;
 
   const suppressed = insightSuppression[_suppKey(code, viewerId)] || [];
-  return proactive.attention(rendered, { limit: 3, suppressed, audience });
+  return behaviour.plan(rendered, { limit: 3, suppressed, audience, now });
 }
 
 /* GET /api/proactive/insights — the viewer's OWN surfaced insights (self audience).
@@ -3676,7 +3677,7 @@ app.get('/api/assistant/opening', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const grouped = _proactiveInsights(code, userId, { audience: 'self' });
   const user = orgUsers[code]?.[userId];
-  const opening = proactive.composeOpening(grouped, { audience: 'self', name: user?.name, now: Date.now() });
+  const opening = behaviour.opening(grouped, { audience: 'self', name: user?.name, now: Date.now() });
   res.json({ ok: true, opening, empty: grouped.empty });
 });
 

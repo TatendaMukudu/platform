@@ -16,6 +16,7 @@ process.env.NODE_ENV    = 'test';
 
 const proactive = require('../ai/proactive');
 const intel     = require('../ai/intelligence');
+const behaviour = require('../ai/behaviour');
 
 let pass = 0, fail = 0;
 const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n); } };
@@ -30,34 +31,34 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
   ok('1 · the insight adds no conclusion — it mirrors the kernel severity', a.severity === 'high' && a.patternType === 'momentum_drop');
 }
 
-/* ── PURE: 2 · surfacing policy caps at ≤3 ───────────────────────────────────── */
+/* ── PURE: 2 · behaviour caps volume at ≤3 per bucket ─────────────────────────── */
 {
   const many = ['high','medium','low','low','high','medium'].map((s, i) =>
     proactive.toInsight({ type: 'withdrawal', severity: s, confidence: 'emerging' }, { audience: 'self', subjectId: 'u' + i }));
-  ok('2 · surfacing caps at 3 priorities', proactive.surface(many, { limit: 3 }).insights.length === 3);
+  ok('2 · behaviour caps a bucket at 3', behaviour.plan(many, { limit: 3, now: 0 }).groups.needs_attention.insights.length === 3);
 }
 
 /* ── PURE: 3 · "nothing needs your attention" is a VALID result, not an error ─── */
 {
-  const self = proactive.surface([], {});
-  const lead = proactive.surface([], { audience: 'leader' });
-  ok('3 · empty is a first-class calm result (self)', self.empty === true && /nothing needs you/i.test(self.message) && self.insights.length === 0);
+  const self = behaviour.plan([], { now: 0 });
+  const lead = behaviour.plan([], { audience: 'leader', now: 0 });
+  ok('3 · empty is a first-class calm result (self)', self.empty === true && /nothing needs you/i.test(self.message));
   ok('3 · empty is a first-class calm result (leader)', lead.empty === true && /nothing needs your attention/i.test(lead.message));
 }
 
-/* ── PURE: 4 · deterministic ranking — severity, then confidence ──────────────── */
+/* ── PURE: 4 · deterministic ranking — priority, then confidence ──────────────── */
 {
   const lowClear = proactive.toInsight({ type: 'plateau',  severity: 'low',  confidence: 'clear'    }, { audience: 'self', subjectId: 'a' });
   const highTent = proactive.toInsight({ type: 'overload', severity: 'high', confidence: 'tentative'}, { audience: 'self', subjectId: 'b' });
   const medEmerg = proactive.toInsight({ type: 'isolation',severity: 'medium',confidence: 'emerging'}, { audience: 'self', subjectId: 'c' });
-  const order = proactive.surface([lowClear, medEmerg, highTent], { limit: 3 }).insights.map(i => i.severity);
-  ok('4 · severity wins ranking (high → medium → low)', order.join(',') === 'high,medium,low');
+  const order = behaviour.plan([lowClear, medEmerg, highTent], { limit: 3, now: 0 }).groups.needs_attention.insights.map(i => i.severity);
+  ok('4 · priority wins ranking within a bucket (high → medium → low)', order.join(',') === 'high,medium,low');
 }
 
 /* ── PURE: 5 · de-duplication by dedupeKey ───────────────────────────────────── */
 {
   const dup = ['high','low'].map(s => proactive.toInsight({ type: 'withdrawal', severity: s, confidence: 'clear' }, { audience: 'self', subjectId: 'u1' }));
-  const out = proactive.surface(dup, { limit: 3 }).insights;
+  const out = behaviour.plan(dup, { limit: 3, now: 0 }).groups.needs_attention.insights;
   ok('5 · the same subject+pattern surfaces once (keeps the most severe)', out.length === 1 && out[0].severity === 'high');
 }
 
@@ -144,7 +145,7 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
   ok('19 · positive patterns the kernel already emits project to polarity=progress', proactive.PATTERN_POLARITY.recovering === 'progress' && proactive.PATTERN_POLARITY.quiet_improvement === 'progress');
   const risk = proactive.toInsight({ type: 'momentum_drop', severity: 'high', confidence: 'clear' }, { audience: 'self', subjectId: 'u' });
   const prog = proactive.toInsight({ type: 'recovering', severity: 'low', confidence: 'clear' }, { audience: 'self', subjectId: 'u' });
-  ok('19 · a risk and a win land in different buckets', risk.bucket === 'needs_attention' && prog.bucket === 'worth_celebrating');
+  ok('19 · a risk and a win land in different buckets', behaviour.bucketOf(risk) === 'needs_attention' && behaviour.bucketOf(prog) === 'worth_celebrating');
 }
 
 /* ── PURE: 20 · Home groups into "Your Attention" — needs / celebrate / opportunity */
@@ -153,21 +154,21 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
   const win  = proactive.toInsight({ type: 'recovering', severity: 'low', confidence: 'clear' }, { audience: 'self', subjectId: 'u' });
   const mile = proactive.toInsight(proactive.milestoneFinding({ key: 'checkin_streak', subjectId: 'u', days: 21, best: true }), { audience: 'self', subjectId: 'u' });
   const opp  = proactive.toInsight(proactive.opportunityFinding({ key: 'ready', subjectId: 'u', headline: 'Ready for more?', body: 'You have finished early several weeks.', suggestion: 'Talk it through.' }), { audience: 'self', subjectId: 'u' });
-  const g = proactive.attention([risk, win, mile, opp], { audience: 'self' }).groups;
+  const g = behaviour.plan([risk, win, mile, opp], { audience: 'self' }).groups;
   ok('20 · three buckets, correctly populated', g.needs_attention.insights.length === 1 && g.worth_celebrating.insights.length === 2 && g.opportunities.insights.length === 1);
-  ok('20 · an empty bucket is a first-class calm state, not an error', proactive.attention([win], { audience: 'self' }).groups.needs_attention.empty === true);
-  ok('20 · all-empty is a valid, calm whole-surface result', proactive.attention([], { audience: 'self' }).empty === true);
+  ok('20 · an empty bucket is a first-class calm state, not an error', behaviour.plan([win], { audience: 'self' }).groups.needs_attention.empty === true);
+  ok('20 · all-empty is a valid, calm whole-surface result', behaviour.plan([], { audience: 'self' }).empty === true);
 }
 
 /* ── PURE: 21 · priority is INDEPENDENT of polarity ──────────────────────────── */
 {
   const bigWin  = proactive.toInsight(proactive.milestoneFinding({ key: 'checkin_streak', subjectId: 'u', days: 40, best: true, priority: 'high' }), { audience: 'self', subjectId: 'u' });
   const lowRisk = proactive.toInsight({ type: 'plateau', severity: 'low', confidence: 'clear' }, { audience: 'self', subjectId: 'v' });
-  ok('21 · a high-priority milestone can outrank a low-priority risk', proactive.SEV_RANK[bigWin.priority] < proactive.SEV_RANK[lowRisk.priority]);
+  ok('21 · a high-priority milestone can outrank a low-priority risk', behaviour.SEV_RANK[bigWin.priority] < behaviour.SEV_RANK[lowRisk.priority]);
   // within a bucket, ranking is by priority, not by polarity/sentiment
   const a = proactive.toInsight(proactive.milestoneFinding({ key: 'k1', subjectId: 'u', days: 40, best: true, priority: 'high' }), { audience: 'self', subjectId: 'u' });
   const b = proactive.toInsight(proactive.milestoneFinding({ key: 'k2', subjectId: 'u2', days: 15, best: false }), { audience: 'self', subjectId: 'u2' });
-  ok('21 · within a bucket, higher priority sorts first', proactive.attention([b, a], { audience: 'self' }).groups.worth_celebrating.insights[0].priority === 'high');
+  ok('21 · within a bucket, higher priority sorts first', behaviour.plan([b, a], { audience: 'self' }).groups.worth_celebrating.insights[0].priority === 'high');
 }
 
 /* ── PURE: 22 · milestone is deterministic + leader-safe; opportunity is self-only */
@@ -176,7 +177,7 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
   const leadM = proactive.toInsight(proactive.milestoneFinding({ key: 'checkin_streak', subjectId: 'u', days: 21, best: true }), { audience: 'leader', subjectId: 'u', subjectName: 'Mia' });
   ok('22 · the owner milestone celebrates the specific streak', /21 days/.test(selfM.body) && selfM.polarity === 'milestone');
   ok('22 · the leader milestone is directional + numberless + safe', proactive.audienceSafe(leadM).ok && !/\d/.test(leadM.body));
-  ok('22 · a leader surface carries no opportunities bucket', !('opportunities' in proactive.attention([leadM], { audience: 'leader' }).groups));
+  ok('22 · a leader surface carries no opportunities bucket', !('opportunities' in behaviour.plan([leadM], { audience: 'leader' }).groups));
   // opportunity is framed as a question, never a verdict/prediction
   const opp = proactive.opportunityFinding({ key: 'ready', subjectId: 'u', headline: 'Ready for more?', body: 'Want to take on something bigger?' });
   ok('22 · an opportunity is a question, never a prediction/verdict', /\?/.test(opp.render.self.body) && !/\b(will|predict|forecast|guarantee)\b/i.test(opp.render.self.body));
@@ -195,9 +196,9 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
 {
   const win  = proactive.toInsight({ type: 'recovering', severity: 'low', confidence: 'clear' }, { audience: 'self', subjectId: 'u' });
   const risk = proactive.toInsight({ type: 'overload', severity: 'high', confidence: 'clear' }, { audience: 'self', subjectId: 'v' });
-  const grouped = proactive.attention([risk, win], { audience: 'self' });
-  const morning = proactive.composeOpening(grouped, { name: 'Mia Chen', now: new Date('2026-07-21T08:00:00').getTime() });
-  const evening = proactive.composeOpening(grouped, { name: 'Mia Chen', now: new Date('2026-07-21T20:00:00').getTime() });
+  const grouped = behaviour.plan([risk, win], { audience: 'self' });
+  const morning = behaviour.opening(grouped, { name: 'Mia Chen', now: new Date('2026-07-21T08:00:00').getTime() });
+  const evening = behaviour.opening(grouped, { name: 'Mia Chen', now: new Date('2026-07-21T20:00:00').getTime() });
   ok('24 · greeting is deterministic + time-aware', /^Good morning, Mia\./.test(morning.greeting) && /^Good evening, Mia\./.test(evening.greeting));
   ok('24 · the opening LEADS with a win when there is one', morning.sections[0].label === 'Worth celebrating');
   ok('24 · it carries an invitation to explore', /explore/i.test(morning.invitation || ''));
@@ -206,17 +207,32 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
   const openKeys  = morning.sections.flatMap(s => s.insights.map(i => i.dedupeKey));
   ok('24 · the opening surfaces ONLY verified artifacts (no fabrication)', openKeys.length > 0 && openKeys.every(k => inputKeys.has(k)));
   // empty is a calm, valid opening — never an alarm, never a void.
-  const empty = proactive.composeOpening(proactive.attention([], { audience: 'self' }), { name: 'Mia', now: new Date('2026-07-21T08:00:00').getTime() });
+  const empty = behaviour.opening(behaviour.plan([], { audience: 'self' }), { name: 'Mia', now: new Date('2026-07-21T08:00:00').getTime() });
   ok('24 · an empty opening is calm + valid (not an alarm)', empty.empty === true && /nothing needs you/i.test(empty.greeting) && empty.sections.length === 0);
 }
 
 /* ── PURE: 25 · a leader opening never leaks a number/quote/basis ─────────────── */
 {
   const risk = proactive.toInsight({ type: 'momentum_drop', severity: 'high', confidence: 'clear', basis: 'mood 2.1/5' }, { audience: 'leader', subjectId: 'u', subjectName: 'Sam' });
-  const op = proactive.composeOpening(proactive.attention([risk], { audience: 'leader' }), { audience: 'leader', name: 'Sam', now: Date.now() });
+  const op = behaviour.opening(behaviour.plan([risk], { audience: 'leader' }), { audience: 'leader', name: 'Sam', now: Date.now() });
   const items = op.sections.flatMap(s => s.insights);
   ok('25 · a leader opening carries no score/percent', !/\d(?:\.\d)?\s*\/\s*5|\d{1,3}\s*%/.test(JSON.stringify(op)));
   ok('25 · leader opening insights carry no evidence basis', items.length > 0 && items.every(i => (i.basis || []).length === 0));
+}
+
+/* ── PURE: 26 · GOVERNANCE — the behaviour layer is structurally pure ────────── */
+{
+  const fs = require('fs'), path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'ai', 'behaviour.js'), 'utf8');
+  // The boundary is a FILE boundary: behaviour imports NOTHING (no kernel, evidence,
+  // server, AI, or projection) — it cannot reason, interpret, or change visibility.
+  ok('26 · behaviour.js imports nothing (cannot reason or read evidence)', !/\brequire\s*\(/.test(src));
+  // Projection no longer owns delivery — those verbs live only in the behaviour layer.
+  ok('26 · projection no longer exports delivery (attention/surface/opening)',
+     !('attention' in proactive) && !('surface' in proactive) && !('composeOpening' in proactive));
+  ok('26 · delivery lives in the behaviour layer', typeof behaviour.plan === 'function' && typeof behaviour.opening === 'function');
+  // Behaviour cannot mint an insight — it only arranges what projection produced.
+  ok('26 · behaviour exposes no insight-creation surface', !('toInsight' in behaviour) && !('milestoneFinding' in behaviour));
 }
 
 /* ── HTTP + INTEGRATION ──────────────────────────────────────────────────────── */
