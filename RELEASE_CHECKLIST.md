@@ -14,7 +14,7 @@ marked _(deferred)_ are documented in `PILOT_READINESS.md` and are acceptable fo
 - [ ] **Must** — `npm test` GREEN: 35 suites, hermetic (no DB / no AI key).
   - Includes: assistant-runtime (30), assistant-interface (90), advisor/privacy (45),
     check-in (59+26), assessment (30/16/25/23), endpoint HTTP authz (217), evidence/privacy/reasoning,
-    **proactive / Attention Engine (65)**.
+    **proactive / Attention Engine (72)**.
 - [ ] `node --check` on all sources (part of the truth layer).
 - [ ] Browser smoke `npm run smoke:frontend` (Playwright) — **not** in the truth layer; run manually
       where a browser is available. _(deferred: no E2E harness in CI)_

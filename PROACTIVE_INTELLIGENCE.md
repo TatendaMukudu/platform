@@ -57,38 +57,50 @@ outcome measurement) and what this layer actually adds.
 
 | It IS | It is NOT |
 |---|---|
-| A projection of existing kernel findings | A second pattern detector or reasoning engine |
-| One artifact (`ProactiveInsight`) + one surfacing policy | A separate proactive assistant with its own runtime |
+| A projection + one behaviour layer, many consumers | A second pattern detector or reasoning engine |
+| One artifact (`ProactiveInsight`) + one delivery policy | A separate proactive assistant with its own runtime |
 | Deterministic; works with no AI key | An LLM scanning raw data or self-modifying prompts |
 | Surface-only; every action is proposal-gated | An autonomous actor that messages, writes, or intervenes |
 | Audience-aware (owner vs leader) | A path by which private evidence can reach a leader |
 
-## The pipeline
+## The one canonical pipeline (governance)
+
+Every proactive experience in IntelliQ originates from **one** pipeline. Nothing else computes
+proactive behaviour independently. Responsibilities never overlap:
+
+> **The kernel owns truth. Projection owns visibility. Behaviour owns delivery. The assistant owns
+> conversation. Privacy owns boundaries.**
 
 ```
 canonical evidence ──▶ _buildMemberIntelInput (DERIVED features only)
                            │
                            ▼
-   intel.detectPatterns(m) + m.structural   ← the ONE kernel detector (unchanged)
+   intel.detectPatterns(m) + m.structural       ← the ONE kernel detector (truth)
                            │
                            ▼   (server: _proactiveInsights)
      Confidence Engine gate: confidence.shouldSurface(reliabilityByType[type])
                            │
                            ▼
-        ai/proactive.toInsight(finding, { audience })   ← POST-KERNEL PROJECTION
+   ai/proactive  — PROJECTION: toInsight + audienceSafe (+ prefs)   ← owns VISIBILITY
+     · decides the artifact, polarity, audience-safety. Cannot deliver.
                            │
                            ▼
-        ai/proactive.audienceSafe(insight)              ← defence in depth
+   ai/behaviour  — BEHAVIOUR: plan() + opening()                    ← owns DELIVERY
+     · grouping, ordering ("lead with a win"), volume ≤3, silence, opening.
+     · imports NOTHING (no kernel/evidence/server/AI) — structurally cannot reason,
+       create insights, or change confidence/audience/visibility.
                            │
                            ▼
-     applyPreferences (self only)  →  ai/proactive.surface (≤3, empty valid)
-                           │
-                           ▼
-      /api/proactive/insights (self)  ·  /api/proactive/insights/leader/:id (authorised)
-                           │
-                           ▼
-        Home / MyWorkspace attention surface  (member-view _loadAttention)
+   CONSUMERS (never generators): every proactive surface reads this one output
+     · Home "Your Attention"        (member-view _loadAttention → /api/proactive/insights)
+     · Assistant opening            (/api/assistant/opening → behaviour.opening)
+     · /api/me/context              (noticed/prepared CONSUME _proactiveInsights)
+     · Leader Support view          (/api/proactive/insights/leader/:id)
+     · Leader timeline              (_sanitizeTimelineForLeader — audience-safe)
 ```
+
+No new detection happens anywhere in this chain, and no surface re-decides *what* deserves attention,
+*how much* to show, emotional ordering, or empty-state behaviour — those are the behaviour layer's, once.
 
 No new detection happens anywhere in this chain. `toInsight` never reaches a conclusion the kernel did
 not already reach — it re-expresses an existing finding for a specific audience.
@@ -116,7 +128,7 @@ One inspectable object. Fields:
 | `careFlag` | Contentless "there may be private context" nudge |
 | `surfacedAt` | ISO timestamp |
 
-## The surfacing policy (`ai/proactive.attention`)
+## The delivery policy (`ai/behaviour.plan`)
 
 Deterministic and uniform across both surfaces. Groups insights into the three Home buckets and
 returns `{ empty, message, groups: { needs_attention, worth_celebrating, opportunities } }` (a leader
@@ -131,8 +143,8 @@ gets no `opportunities`):
   priority).
 - **Suppress** anything the viewer muted (`insightSuppression`).
 
-(`ai/proactive.surface` — the flat, single-list version — is retained for callers that want an
-ungrouped top-N and for the older tests.)
+Silence is a first-class delivery output: when nothing surfaces, `plan()` returns a calm, confident
+message ("you're in a steady place"), never a void — the OS never invents work to look intelligent.
 
 ## Audience safety (`ai/proactive.audienceSafe`) — the privacy invariant
 
@@ -163,7 +175,7 @@ The defining interaction: *before you ask, the OS has already organised your wor
 your attention.* The assistant opens the conversation by **consuming** the Attention artifacts — it
 never generates observations.
 
-- `ai/proactive.composeOpening(grouped, { audience, name, now })` — a **deterministic** greeting
+- `ai/behaviour.opening(plan, { audience, name, now })` — a **deterministic** greeting
   assembled from the *same* `_proactiveInsights` output. Time-aware ("Good morning, Mia."), it **leads
   with a win** when there is one (emotional balance is the point), then needs-attention, then
   opportunity, and ends with an invitation to explore. No AI, ever. Empty is a calm, valid opening —
@@ -211,16 +223,29 @@ earning attention — observe → evaluate → learn, closing on the surfaced in
 
 ## Tests
 
-`scripts/proactive-smoke.js` — 65 assertions, registered in the truth layer (`scripts/test.js`),
+`scripts/proactive-smoke.js` — 72 assertions, registered in the truth layer (`scripts/test.js`),
 hermetic (no DB, no AI key): artifact shape + stable id, surfacing cap + empty-valid + ranking +
 dedupe, per-pattern deterministic messages, adversarial audience safety (incl. real seeded data over
 HTTP), proposal-gating, bounded preferences, feedback + suppression, Confidence-Engine suppression,
 endpoint authorization, **polarity mapping, bucket grouping, priority-independent ranking, milestone
 determinism + leader-safety, opportunity-as-question, and leader-has-no-opportunities**.
 
+## Learn from success (deferred, deliberately)
+
+Retrieval-based "you recovered from a similar situation before" is **not** built. It requires matching
+*now* to a *past situation* — similarity/retrieval that would edge toward a second reasoning path. Per
+the governance rule, truth beats sophistication: any success memory must be strictly deterministic and
+derived only from recurring patterns already in the same subject's canonical history. Until that can be
+done cleanly (e.g. "this is the 3rd time your momentum recovered after a dip"), it stays deferred. No
+similarity search, no analogies, no speculation.
+
 ## Files
 
-- `ai/proactive.js` — the pure layer (projection, policy, safety, preferences).
-- `server.js` — `_proactiveInsights` + endpoints + stores (`proactivePrefs`, `insightSuppression`).
-- `js/member-view.js` / `css/member.css` — the Home attention surface renders the insight set.
+- `ai/proactive.js` — **projection**: the artifact (`toInsight`), audience-safety (`audienceSafe`),
+  finding shapers, message/explore/polarity maps, preferences. Owns visibility. No delivery.
+- `ai/behaviour.js` — **behaviour**: delivery policy (`plan`, `opening`, bucketing, ordering, volume,
+  silence). Imports nothing; structurally cannot reason or change visibility.
+- `server.js` — `_proactiveInsights` (projection → behaviour) + endpoints; `/api/me/context` and the
+  leader timeline (`_sanitizeTimelineForLeader`) are **consumers** of the one pipeline.
+- `js/member-view.js` / `css/member.css` — Home consumes the pipeline (opening + "Your Attention").
 - `PROACTIVE_BASELINE.md` — the Part-1 verified audit.
