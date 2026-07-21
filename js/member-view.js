@@ -1522,42 +1522,46 @@ const MemberApp = {
     if (!assigned.length) {
       html += `<div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">Nothing assigned right now.</div>`;
     } else {
+      // Contextual assistance link — reads as "ask IntelliQ", not a secondary app button.
+      const askLink = (a, label) => `<button class="aw-ask" onclick="MemberApp.askAboutWork('${a.id}', ${JSON.stringify(a.title)})"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15l-1.9-4.1L5.5 9l4.6-1.4z"/></svg>${label}</button>`;
       html += assigned.map(a => {
         const badge = a.status === 'returned'
-          ? `<span class="pill" style="background:rgba(14,207,176,0.15);color:#0ecfb0">Returned${a.score != null ? ' · ' + a.score : ''}</span>`
+          ? `<span class="aw-badge aw-badge--returned">Returned</span>`
           : a.status === 'submitted'
-          ? `<span class="pill" style="background:rgba(124,90,245,0.15);color:var(--accent)">Submitted</span>`
-          : `<span class="pill" style="background:rgba(247,178,79,0.15);color:#f7b24f">To do</span>`;
+          ? `<span class="aw-badge aw-badge--submitted">Submitted</span>`
+          : `<span class="aw-badge aw-badge--todo">To do</span>`;
         let body = '';
         if (a.status === 'assigned') {
           const leaderFirst = esc((a.assignerName || 'Your leader').split(' ')[0]);
           // Assistance is the ONE IntelliQ composer (no per-item chat). The record capability —
           // filling and submitting the response — stays here as a form.
-          body = `<div style="margin-top:0.6rem">
-            ${a.description ? `<div class="me-row-text" style="font-size:0.84rem;color:var(--text-secondary);margin-bottom:0.5rem"><strong>${leaderFirst}:</strong> ${esc(a.description)}</div>` : ''}
-            <button class="btn btn-outline btn-sm" style="margin-bottom:0.6rem" onclick="MemberApp.askAboutWork('${a.id}', ${JSON.stringify(a.title)})">Ask IntelliQ about this</button>
-            <div style="margin-top:0.2rem">
+          body = `<div class="aw-body">
+            ${a.description ? `<p class="aw-brief"><span class="aw-brief-by">${leaderFirst}</span> ${esc(a.description)}</p>` : ''}
+            <div class="aw-fields">
               ${(a.fields && a.fields.length ? a.fields : [{ label: 'Your response', hint: '' }]).map((f) => `
-                <div style="margin-bottom:0.5rem">
-                  <div class="card-label" style="margin-bottom:2px">${esc(f.label)}</div>
-                  ${f.hint ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:3px">${esc(f.hint)}</div>` : ''}
-                  <textarea class="note-input" data-field="${esc(f.label)}" style="min-height:60px"></textarea>
-                </div>`).join('')}
+                <label class="aw-field">
+                  <span class="aw-field-label">${esc(f.label)}</span>
+                  ${f.hint ? `<span class="aw-field-hint">${esc(f.hint)}</span>` : ''}
+                  <textarea class="note-input" data-field="${esc(f.label)}" rows="2"></textarea>
+                </label>`).join('')}
             </div>
-            <button class="btn-primary" onclick="MemberApp._assessSubmit('${a.id}', this)">Send to ${leaderFirst}</button>
+            <div class="aw-actions">
+              <button class="btn-primary btn-sm" onclick="MemberApp._assessSubmit('${a.id}', this)">Send to ${leaderFirst}</button>
+              ${askLink(a, 'Ask IntelliQ about this')}
+            </div>
           </div>`;
         } else if (a.status === 'submitted') {
-          body = `<div style="margin-top:0.5rem;font-size:0.82rem;color:var(--text-muted)">Waiting for review from ${esc(a.assignerName)}.</div>`;
+          body = `<div class="aw-body"><p class="aw-waiting">Waiting for review from ${esc(a.assignerName)}.</p></div>`;
         } else if (a.status === 'returned') {
-          body = `<div style="margin-top:0.5rem">
-            ${a.feedback ? `<div class="me-row-text" style="font-size:0.86rem"><strong>${esc(a.assignerName)}:</strong> ${esc(a.feedback)}</div>` : ''}
-            ${a.score != null ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:3px">Score: ${a.score}/100</div>` : ''}
-            <button class="btn btn-outline btn-sm" style="margin-top:0.5rem" onclick="MemberApp.askAboutWork('${a.id}', ${JSON.stringify(a.title)})">Ask IntelliQ about this feedback</button>
+          body = `<div class="aw-body">
+            ${a.score != null ? `<div class="aw-score"><span class="aw-score-num">${a.score}</span><span class="aw-score-max">/ 100</span></div>` : ''}
+            ${a.feedback ? `<div class="aw-feedback"><div class="aw-feedback-by">${esc(a.assignerName)}</div><p>${esc(a.feedback)}</p></div>` : ''}
+            ${askLink(a, 'Ask IntelliQ about this feedback')}
           </div>`;
         }
-        return `<div class="me-row" style="display:block;padding:0.7rem 0;border-bottom:1px solid var(--border)">
-          <div style="display:flex;align-items:center;gap:0.5rem">
-            <div style="flex:1"><strong>${esc(a.title)}</strong> <span style="font-size:0.72rem;color:var(--text-muted)">· ${kind(a.kind)}</span></div>
+        return `<div class="aw-item">
+          <div class="aw-head">
+            <div class="aw-title">${esc(a.title)} <span class="aw-kind">${kind(a.kind)}</span></div>
             ${badge}
           </div>${body}</div>`;
       }).join('');
@@ -1914,39 +1918,37 @@ const MemberApp = {
     }
     {
       const sources = d.sources || [];
+      const appIcon = `<span class="app-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>`;
       const row = s => {
         const connected = !!s.connected;
         const assist = s.assist;
-        return `<div class="me-row" style="display:block;padding:0.8rem 0;border-bottom:1px solid var(--border)">
-          <div style="display:flex;align-items:flex-start;gap:0.7rem">
-            <div style="flex:1">
-              <div style="font-weight:700">${esc(s.label)} ${connected ? '<span class="pill" style="background:rgba(14,207,176,0.15);color:#0ecfb0;margin-left:4px">Connected</span>' : ''}</div>
-              <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px">${esc(s.describes)}</div>
+        // Information leads; the action is a quiet, content-sized button (never larger than the info).
+        return `<div class="app-item">
+          <div class="app-main">
+            ${appIcon}
+            <div class="app-info">
+              <div class="app-title">${esc(s.label)}${connected ? ' <span class="app-badge">Connected</span>' : ''}</div>
+              <div class="app-desc">${esc(s.describes)}</div>
+              <div class="app-privacy">Private by default — you choose what it reads; nothing is shared without your consent.</div>
             </div>
-            ${connected
-              ? `<button class="btn-ghost" onclick="MemberApp._appDisconnect('${s.id}','${esc(s.scope)}', this)">Disconnect</button>`
-              : `<button class="btn-primary" onclick="MemberApp._appConnect('${s.id}','${esc(s.scope)}', this)">Connect</button>`}
+            <div class="app-action">${connected
+              ? `<button class="btn-ghost btn-sm" onclick="MemberApp._appDisconnect('${s.id}','${esc(s.scope)}', this)">Disconnect</button>`
+              : `<button class="btn-accent btn-sm" onclick="MemberApp._appConnect('${s.id}','${esc(s.scope)}', this)">Connect</button>`}</div>
           </div>
           ${connected && assist ? `
-            <div style="margin-top:0.55rem;padding:0.55rem 0.7rem;border:1px dashed var(--border);border-radius:8px;display:flex;align-items:flex-start;gap:0.6rem">
-              <div style="flex:1;font-size:0.78rem;color:var(--text-secondary)">
-                <strong>Assistant</strong> ${s.assistConsented ? '<span class="pill" style="background:rgba(124,90,245,0.15);color:var(--accent);margin-left:2px">on</span>' : ''}<br>${esc(assist.describes)}
-              </div>
+            <div class="app-perm">
+              <div class="app-perm-info"><span class="app-perm-title">Assistant</span>${s.assistConsented ? ' <span class="app-badge app-badge--on">On</span>' : ''}<div class="app-perm-desc">${esc(assist.describes)}</div></div>
               ${s.assistConsented
-                ? `<button class="btn-ghost" onclick="MemberApp._appAssist('${s.id}','${esc(assist.scope)}', false, this)">Turn off</button>`
-                : `<button class="btn-ghost" onclick="MemberApp._appAssist('${s.id}','${esc(assist.scope)}', true, this)">Allow</button>`}
+                ? `<button class="btn-ghost btn-sm" onclick="MemberApp._appAssist('${s.id}','${esc(assist.scope)}', false, this)">Turn off</button>`
+                : `<button class="btn-ghost btn-sm" onclick="MemberApp._appAssist('${s.id}','${esc(assist.scope)}', true, this)">Allow</button>`}
             </div>` : ''}
           ${connected && s.contribute ? `
-            <div style="margin-top:0.5rem;padding:0.55rem 0.7rem;border:1px dashed var(--border);border-radius:8px">
-              <div style="display:flex;align-items:flex-start;gap:0.6rem">
-                <div style="flex:1;font-size:0.78rem;color:var(--text-secondary)">
-                  <strong>Contribute to my record</strong> ${s.contributeConsented ? '<span class="pill" style="background:rgba(14,207,176,0.15);color:#0ecfb0;margin-left:2px">on</span>' : ''}<br>${esc(s.contribute.describes)}
-                </div>
-                ${s.contributeConsented
-                  ? `<button class="btn-ghost" onclick="MemberApp._appContribute('${s.id}','${esc(s.contribute.scope)}', false, this)">Turn off</button>`
-                  : `<button class="btn-ghost" onclick="MemberApp._appContribute('${s.id}','${esc(s.contribute.scope)}', true, this)">Allow</button>`}
-              </div>
-              ${s.contributeConsented ? `<button class="btn-ghost" style="font-size:0.72rem;margin-top:0.4rem" onclick="MemberApp._appSeeCrossed(this)">See exactly what's crossed</button><div class="me-crossed" style="display:none;margin-top:0.4rem"></div>` : ''}
+            <div class="app-perm">
+              <div class="app-perm-info"><span class="app-perm-title">Contribute to my record</span>${s.contributeConsented ? ' <span class="app-badge app-badge--on">On</span>' : ''}<div class="app-perm-desc">${esc(s.contribute.describes)}</div>
+                ${s.contributeConsented ? `<button class="app-crossed-link" onclick="MemberApp._appSeeCrossed(this)">See exactly what's crossed</button><div class="me-crossed" style="display:none;margin-top:0.4rem"></div>` : ''}</div>
+              ${s.contributeConsented
+                ? `<button class="btn-ghost btn-sm" onclick="MemberApp._appContribute('${s.id}','${esc(s.contribute.scope)}', false, this)">Turn off</button>`
+                : `<button class="btn-ghost btn-sm" onclick="MemberApp._appContribute('${s.id}','${esc(s.contribute.scope)}', true, this)">Allow</button>`}
             </div>` : ''}
         </div>`;
       };
@@ -1959,7 +1961,7 @@ const MemberApp = {
         html += `<div class="card"><div class="card-label">Your apps</div><div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">No apps available to connect yet. <button class="btn-ghost" onclick="MemberApp._renderApps()">Refresh</button></div></div>`;
       }
       Object.keys(cats).forEach(cat => {
-        html += `<div class="card"><div class="card-label">${esc(cat)}</div>${cats[cat].map(row).join('')}</div>`;
+        html += `<div class="app-group"><div class="app-group-label">${esc(cat)}</div>${cats[cat].map(row).join('')}</div>`;
       });
       html += `
         <div class="card" style="margin-top:0.2rem">

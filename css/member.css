@@ -719,3 +719,61 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
   .iq-typing i{animation:none}
   .iq-att-skel{animation:none}
 }
+
+/* ═══ ASSIGNED WORK — records that breathe (Phase-2 polish) ═══
+   Calm cards over row-borders; clear score hierarchy; "Ask IntelliQ" as
+   contextual assistance, not a secondary app button. */
+.aw-item{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius);padding:0.9rem 1rem;margin-bottom:0.7rem;transition:border-color .18s ease}
+.aw-item:hover{border-color:var(--border-light)}
+.aw-head{display:flex;align-items:center;gap:0.7rem}
+.aw-title{flex:1;font-size:0.95rem;font-weight:600;color:var(--text-primary);line-height:1.35}
+.aw-kind{font-size:0.72rem;font-weight:400;color:var(--text-muted)}
+.aw-badge{flex:none;font-size:0.68rem;font-weight:700;letter-spacing:0.02em;padding:3px 9px;border-radius:999px}
+.aw-badge--returned{color:#0ecfb0;background:rgba(14,207,176,0.14)}
+.aw-badge--submitted{color:#8ea2ff;background:rgba(124,90,245,0.16)}
+.aw-badge--todo{color:#f7b24f;background:rgba(247,178,79,0.14)}
+.aw-body{margin-top:0.75rem;display:flex;flex-direction:column;gap:0.7rem}
+.aw-brief{font-size:0.86rem;color:var(--text-secondary);line-height:1.5;margin:0}
+.aw-brief-by{font-weight:600;color:var(--text-primary);margin-right:0.3rem}
+.aw-fields{display:flex;flex-direction:column;gap:0.7rem}
+.aw-field{display:flex;flex-direction:column;gap:0.25rem}
+.aw-field-label{font-size:0.8rem;font-weight:600;color:var(--text-primary)}
+.aw-field-hint{font-size:0.74rem;color:var(--text-muted)}
+.aw-field .note-input{background:var(--bg-base);border:1px solid var(--border);border-radius:var(--radius-sm);padding:0.55rem 0.65rem;color:var(--text-primary);font-size:0.88rem;line-height:1.5;resize:vertical;transition:border-color .18s ease}
+.aw-field .note-input:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px var(--accent-glow)}
+.aw-actions{display:flex;align-items:center;gap:0.9rem;flex-wrap:wrap}
+.aw-actions .btn-primary{width:auto;padding:0.5rem 1.15rem;font-size:0.84rem;border-radius:9px}
+.aw-ask{display:inline-flex;align-items:center;gap:0.35rem;background:none;border:none;padding:0.35rem 0;color:var(--accent);font-size:0.82rem;font-weight:500;cursor:pointer;transition:color .15s ease}
+.aw-ask:hover{color:var(--text-primary)}
+.aw-ask svg{opacity:0.85}
+.aw-ask:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+.aw-waiting{font-size:0.84rem;color:var(--text-muted);margin:0}
+.aw-score{display:flex;align-items:baseline;gap:0.25rem}
+.aw-score-num{font-size:1.7rem;font-weight:700;color:var(--text-primary);letter-spacing:-0.02em;line-height:1}
+.aw-score-max{font-size:0.85rem;color:var(--text-muted)}
+.aw-feedback{background:var(--bg-base);border-left:2px solid var(--accent);border-radius:0 var(--radius-sm) var(--radius-sm) 0;padding:0.6rem 0.8rem}
+.aw-feedback-by{font-size:0.72rem;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.03em;margin-bottom:0.2rem}
+.aw-feedback p{font-size:0.88rem;color:var(--text-primary);line-height:1.55;margin:0}
+
+/* ═══ APPS — information leads, the action is quiet (Phase-2 polish) ═══ */
+.app-group{margin-bottom:1.4rem}
+.app-group-label{font-size:0.72rem;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-muted);margin-bottom:0.6rem}
+.app-item{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin-bottom:0.7rem;transition:border-color .18s ease}
+.app-item:hover{border-color:var(--border-light)}
+.app-main{display:flex;align-items:flex-start;gap:0.85rem}
+.app-icon{flex:none;width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:var(--bg-hover);color:var(--text-secondary)}
+.app-info{flex:1;min-width:0}
+.app-title{font-size:0.95rem;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:0.45rem;flex-wrap:wrap}
+.app-desc{font-size:0.84rem;color:var(--text-secondary);line-height:1.5;margin-top:0.25rem}
+.app-privacy{font-size:0.75rem;color:var(--text-muted);line-height:1.45;margin-top:0.4rem}
+.app-action{flex:none}
+.app-action .btn-sm{padding:0.42rem 1rem;font-size:0.82rem;border-radius:8px}
+.app-badge{font-size:0.64rem;font-weight:700;letter-spacing:0.02em;padding:2px 8px;border-radius:999px;color:#0ecfb0;background:rgba(14,207,176,0.14)}
+.app-badge--on{color:#8ea2ff;background:rgba(124,90,245,0.16)}
+.app-perm{display:flex;align-items:flex-start;gap:0.7rem;margin-top:0.7rem;padding:0.7rem 0.8rem;background:var(--bg-base);border-radius:var(--radius-sm)}
+.app-perm-info{flex:1;min-width:0}
+.app-perm-title{font-size:0.82rem;font-weight:600;color:var(--text-primary)}
+.app-perm-desc{font-size:0.78rem;color:var(--text-secondary);line-height:1.5;margin-top:0.2rem}
+.app-perm .btn-sm{flex:none}
+.app-crossed-link{display:inline-block;margin-top:0.4rem;background:none;border:none;padding:0;color:var(--accent);font-size:0.75rem;cursor:pointer}
+.app-crossed-link:hover{color:var(--text-primary)}
