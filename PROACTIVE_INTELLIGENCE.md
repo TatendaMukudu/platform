@@ -157,6 +157,28 @@ Every kernel pattern has a static `{ headline, body, suggestion }` for **both** 
 consulted to produce a proactive insight. An unknown pattern degrades to a safe fallback, never a
 crash. This is what lets the whole layer work in a no-key pilot (see `DEMO.md`).
 
+## The proactive opening — the assistant greets from the artifacts
+
+The defining interaction: *before you ask, the OS has already organised your world into what deserves
+your attention.* The assistant opens the conversation by **consuming** the Attention artifacts — it
+never generates observations.
+
+- `ai/proactive.composeOpening(grouped, { audience, name, now })` — a **deterministic** greeting
+  assembled from the *same* `_proactiveInsights` output. Time-aware ("Good morning, Mia."), it **leads
+  with a win** when there is one (emotional balance is the point), then needs-attention, then
+  opportunity, and ends with an invitation to explore. No AI, ever. Empty is a calm, valid opening —
+  never an alarm, never a void.
+- `GET /api/assistant/opening` — grounded, numberless, audience-safe. Home renders the greeting above
+  "Your Attention".
+- **Explore prompts** — every insight carries a per-polarity `explore` line so *wins and risks both
+  start conversations*: reinforcing for a win ("what helped create this? worth protecting what's
+  working"), supportive and **non-alarmist** for a risk ("explore what changed — or who could support
+  you?"). Explore prompts never diagnose, predict, or assume a cause.
+
+The invariant: **the assistant consumes Attention artifacts, it does not generate them.** The opening
+is pure assembly over verified insights — the tests assert every surfaced item is one of the input
+artifacts (no fabrication) and that a leader opening leaks no number, quote, or basis.
+
 ## Surface, never act
 
 Every `suggestion` is `requiresConfirmation: true`. Clicking a suggestion in the UI **prefills the one
@@ -189,7 +211,7 @@ earning attention — observe → evaluate → learn, closing on the surfaced in
 
 ## Tests
 
-`scripts/proactive-smoke.js` — 52 assertions, registered in the truth layer (`scripts/test.js`),
+`scripts/proactive-smoke.js` — 65 assertions, registered in the truth layer (`scripts/test.js`),
 hermetic (no DB, no AI key): artifact shape + stable id, surfacing cap + empty-valid + ranking +
 dedupe, per-pattern deterministic messages, adversarial audience safety (incl. real seeded data over
 HTTP), proposal-gating, bounded preferences, feedback + suppression, Confidence-Engine suppression,
