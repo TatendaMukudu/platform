@@ -2445,15 +2445,32 @@ const MemberApp = {
     box.classList.add('is-loading');
     box.innerHTML = `<div class="iq-att-skel"></div><div class="iq-att-skel"></div>`;
     try {
-      const r = await fetch('/api/workspace/today', { headers: this._authHeaders() });
+      // ONE proactive surface: the deterministic ProactiveInsight set (kernel patterns +
+      // attention items) under the ≤3 surfacing policy. "Nothing needs you" is a valid,
+      // calm result — the premium empty state, never an error.
+      const r = await fetch('/api/proactive/insights', { headers: this._authHeaders() });
       const j = await r.json();
-      const items = (j.attention || []).slice(0, 3);   // ≈3 high-value items
+      const items = (j.insights || []);
       const esc = s => this._escape(String(s == null ? '' : s));
+      const attr = s => JSON.stringify(esc(s)).replace(/"/g, '&quot;');
       box.classList.remove('is-loading');
-      if (items.length) {
+      if (!j.empty && items.length) {
         box.classList.remove('iq-attention--empty');
-        box.innerHTML = `<div class="iq-att-label">Needs you</div>` +
-          items.map(a => `<button class="iq-att-item" onclick="MemberApp.wsAttentionInto(${JSON.stringify(esc(a.text)).replace(/"/g, '&quot;')})">${esc(a.text)}</button>`).join('');
+        box.innerHTML = `<div class="iq-att-label">I noticed</div>` + items.map(a => {
+          const rel = a.reliabilityLabel && a.reliabilityLabel !== 'calibrating'
+            ? `<span class="iq-insight-rel">${esc(a.reliabilityLabel)}</span>` : '';
+          const act = a.suggestion && a.suggestion.text
+            ? `<button class="iq-insight-act" onclick="MemberApp.wsAttentionInto(${attr(a.suggestion.text)})">${esc(a.suggestion.text)}</button>` : '';
+          const fb = a.patternType && a.patternType !== 'privacy' && a.patternType !== 'recent'
+            ? `<div class="iq-insight-fb">
+                 <button class="iq-fb" title="Helpful" onclick="MemberApp.insightFeedback(this,'useful',${attr(a.dedupeKey)},${attr(a.patternType)})">Helpful</button>
+                 <button class="iq-fb" title="Not useful" onclick="MemberApp.insightFeedback(this,'not_useful',${attr(a.dedupeKey)},${attr(a.patternType)})">Not useful</button>
+                 <button class="iq-fb" title="Mute this" onclick="MemberApp.insightFeedback(this,'mute',${attr(a.dedupeKey)},${attr(a.patternType)})">Mute</button>
+               </div>` : '';
+          return `<div class="iq-insight" data-key="${esc(a.dedupeKey)}">
+            <div class="iq-insight-head"><span class="iq-insight-headline">${esc(a.headline)}</span>${rel}</div>
+            <div class="iq-insight-body">${esc(a.body)}</div>${act}${fb}</div>`;
+        }).join('');
       } else {
         // Premium empty state — one warm prompt + gentle ways in (each prefills the one composer).
         box.classList.add('iq-attention--empty');
@@ -2470,8 +2487,24 @@ const MemberApp = {
     } catch (_) { box.classList.remove('is-loading'); box.innerHTML = ''; }
   },
 
-  // Selecting an attention item brings it INTO the same assistant conversation.
+  // Selecting a proactive suggestion brings it INTO the same assistant conversation — it is a
+  // PROMPT, never an executed action. Anything consequential still flows turn→proposal→confirm.
   wsAttentionInto(text) { const i = document.getElementById('iq-composer-input'); if (i) i.value = text; this.wsSend(); },
+
+  /* Per-insight feedback. useful/not_useful teach the Confidence Engine (pattern-type grain);
+     mute suppresses THIS insight for THIS person. Optimistic: fade the card, never block. */
+  async insightFeedback(btn, action, dedupeKey, patternType) {
+    const card = btn && btn.closest('.iq-insight');
+    if (card) card.style.opacity = '0.5';
+    try {
+      await fetch(`/api/proactive/insights/${encodeURIComponent(dedupeKey)}/feedback`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ dedupeKey, patternType, action }),
+      });
+    } catch (_) {}
+    if (card && (action === 'mute' || action === 'not_useful')) card.remove();
+    else if (card) { const fb = card.querySelector('.iq-insight-fb'); if (fb) fb.innerHTML = '<span class="iq-fb-thanks">Thanks — noted.</span>'; }
+  },
 
   async wsSend(retryText) {
     const input = document.getElementById('iq-composer-input');

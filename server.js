@@ -21,6 +21,7 @@ const agents     = require('./ai/agents');
 const packs      = require('./ai/packs');
 const primitives = require('./ai/primitives');
 const confidence = require('./ai/confidence');
+const proactive  = require('./ai/proactive');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
 const office     = require('./lib/office');   // dependency-free .xlsx / .docx reading
@@ -96,6 +97,7 @@ function scheduleSave() {
         rawEvidence, evidenceLog, orgMappings,
         syncRuns, failedRecords, webhookDeliveries,
         orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
+        proactivePrefs, insightSuppression,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -3547,6 +3549,131 @@ app.post('/api/intelligence/notice-feedback', requireAuth, (req, res) => {
   if (!type || !['useful', 'dismiss'].includes(feedback)) return res.status(400).json({ error: 'type and useful|dismiss required' });
   const t = _recordNoticeFeedback(code, type, feedback);
   res.json({ ok: true, reliability: confidence.label(confidence.reliability(t)) });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PROACTIVE SURFACING LAYER — post-kernel projection (ai/proactive.js)
+
+   "I noticed something that may deserve your attention."
+
+   This is NOT a new detector or a second reasoning path. It PROJECTS findings
+   the kernel already produced (intel.detectPatterns + structural patterns, and
+   the deterministic attention items) into one inspectable ProactiveInsight
+   artifact, under one surfacing policy, with audience safety and bounded
+   communication preferences. It surfaces; it never acts — every suggestion is
+   proposal-gated and must go through the existing proposal→confirm→execute
+   pipeline. Fully deterministic — no AI key required.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const proactivePrefs    = {};  // code → userId → { length, tone, cadence } (bounded)
+const insightSuppression = {}; // "code:userId" → [dedupeKey|id, ...] (per-insight mute)
+
+function _suppKey(code, userId) { return `${code}:${userId}`; }
+
+/* Build the surfaced ProactiveInsight set for a viewer.
+   audience 'self'   → viewer's own insights (their admissible evidence, specific).
+   audience 'leader' → insights ABOUT `subjectId`, directional + care-first only.
+   Authorisation is the CALLER's responsibility (endpoints below gate leader reads).
+   Deterministic; the Confidence Engine gates + labels; suppression + prefs applied. */
+function _proactiveInsights(code, viewerId, opts = {}) {
+  const audience   = opts.audience === 'leader' ? 'leader' : 'self';
+  const subjectId  = audience === 'leader' ? opts.subjectId : viewerId;
+  const subject    = orgUsers[code]?.[subjectId];
+  if (!subject) return { empty: true, message: proactive.surface([], { audience }).message, insights: [] };
+
+  const now = opts.now || Date.now();
+  let m; try { m = _buildMemberIntelInput(code, subject, now); } catch (_) { m = null; }
+
+  const reliabilityByType = _reliabilityByType(code);
+  const findings = m ? [...intel.detectPatterns(m), ...(m.structural || [])] : [];
+
+  const insights = [];
+  findings.forEach(f => {
+    const rel = reliabilityByType[f.type];
+    if (!confidence.shouldSurface(rel)) return;  // Confidence Engine stood this type down here
+    const ins = proactive.toInsight(f, {
+      audience, subjectId, subjectName: subject.name,
+      reliabilityLabel: confidence.label(rel), now,
+    });
+    if (proactive.audienceSafe(ins).ok) insights.push(ins);   // defence in depth
+  });
+
+  // Self audience also sees the deterministic attention items (own scope only).
+  if (audience === 'self') {
+    let att = []; try { att = _composeToday(code, viewerId) || []; } catch (_) {}
+    att.forEach(a => {
+      const ins = proactive.toInsight(a, { audience: 'self', subjectId: viewerId, now });
+      if (proactive.audienceSafe(ins).ok) insights.push(ins);
+    });
+  }
+
+  // Bounded communication preferences (self only — leader reads are always standard).
+  const prefs = audience === 'self' ? (proactivePrefs[code]?.[viewerId] || null) : null;
+  const rendered = prefs ? insights.map(i => proactive.applyPreferences(i, prefs)) : insights;
+
+  const suppressed = insightSuppression[_suppKey(code, viewerId)] || [];
+  return proactive.surface(rendered, { limit: 3, suppressed, audience });
+}
+
+/* GET /api/proactive/insights — the viewer's OWN surfaced insights (self audience).
+   Deterministic, ≤3, "nothing needs you" is a valid, calm result (not an error). */
+app.get('/api/proactive/insights', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const out = _proactiveInsights(code, userId, { audience: 'self' });
+  res.json({ ok: true, ...out });
+});
+
+/* GET /api/proactive/insights/leader/:subjectId — leader-audience insights about a
+   member the viewer is AUTHORISED to support. Directional + care-first only; the
+   projection strips evidence basis and numbers before it reaches the leader. */
+app.get('/api/proactive/insights/leader/:subjectId', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const subjectId = req.params.subjectId;
+  const canSupport = getVisibleUserIds(code, userId).includes(subjectId)
+    && (_userHasPerm(code, userId, 'view_insights') || _userHasPerm(code, userId, 'review_checkins'));
+  if (!canSupport) return res.status(403).json({ error: 'Not authorised to support this member.' });
+  const out = _proactiveInsights(code, userId, { audience: 'leader', subjectId });
+  res.json({ ok: true, ...out });
+});
+
+/* POST /api/proactive/insights/:id/feedback — { dedupeKey, patternType, action }.
+   action: 'useful' | 'not_useful' | 'mute'.
+   - useful / not_useful teach the Confidence Engine at the pattern-TYPE grain
+     (the existing learning loop), closing observe→evaluate→learn on a surfaced insight.
+   - mute suppresses THIS insight instance (dedupeKey) for THIS viewer only. */
+app.post('/api/proactive/insights/:id/feedback', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const { dedupeKey, patternType, action } = req.body || {};
+  if (!['useful', 'not_useful', 'mute'].includes(action)) {
+    return res.status(400).json({ error: 'action must be useful | not_useful | mute' });
+  }
+  if (patternType && (action === 'useful' || action === 'not_useful')) {
+    _recordNoticeFeedback(code, patternType, action === 'useful' ? 'useful' : 'dismiss');
+  }
+  if (action === 'mute') {
+    const key = dedupeKey || req.params.id;
+    const k = _suppKey(code, userId);
+    const list = insightSuppression[k] || (insightSuppression[k] = []);
+    if (!list.includes(key)) list.push(key);
+  }
+  scheduleSave();
+  res.json({ ok: true });
+});
+
+/* GET/PUT /api/proactive/preferences — the viewer's bounded communication
+   preferences. Only { length, tone, cadence } from a fixed allow-list can be
+   stored; anything else (including any attempt to smuggle a protected trait) is
+   dropped by normalizePreferences. Nothing is ever inferred. */
+app.get('/api/proactive/preferences', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const prefs = proactive.normalizePreferences(proactivePrefs[code]?.[userId] || {});
+  res.json({ ok: true, preferences: prefs, schema: proactive.PREF_SCHEMA });
+});
+app.put('/api/proactive/preferences', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const prefs = proactive.normalizePreferences(req.body?.preferences || req.body || {});
+  (proactivePrefs[code] || (proactivePrefs[code] = {}))[userId] = prefs;
+  scheduleSave();
+  res.json({ ok: true, preferences: prefs });
 });
 
 /* ── POST /api/signals/import-csv — a source adapter in action ─────────────────
@@ -11961,6 +12088,8 @@ function _loadAllStores(data) {
   Object.assign(orgCalendar,      data.orgCalendar      || {});
   Object.assign(workspaceItems,   data.workspaceItems   || {});
   Object.assign(reasoningArtifacts, data.reasoningArtifacts || {});
+  Object.assign(proactivePrefs,    data.proactivePrefs    || {});
+  Object.assign(insightSuppression, data.insightSuppression || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -12030,7 +12159,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
-  _extractMetricsFromText, _importTeamTable, assistantTurns, checkinProposals };
+  _extractMetricsFromText, _importTeamTable, assistantTurns, checkinProposals,
+  // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
+  _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback };
 
 if (require.main === module) (async () => {
   try {
