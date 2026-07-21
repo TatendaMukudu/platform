@@ -182,6 +182,43 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
   ok('22 · an opportunity is a question, never a prediction/verdict', /\?/.test(opp.render.self.body) && !/\b(will|predict|forecast|guarantee)\b/i.test(opp.render.self.body));
 }
 
+/* ── PURE: 23 · explore prompts — every insight can start a conversation ──────── */
+{
+  const win  = proactive.toInsight({ type: 'recovering', severity: 'low', confidence: 'clear' }, { audience: 'self', subjectId: 'u' });
+  const risk = proactive.toInsight({ type: 'momentum_drop', severity: 'high', confidence: 'clear' }, { audience: 'self', subjectId: 'u' });
+  ok('23 · a win carries a reinforcing explore prompt', /helped|working|keep/i.test(win.explore));
+  ok('23 · a risk carries a supportive, non-alarmist explore prompt', /explore|support|changed/i.test(risk.explore));
+  ok('23 · explore never diagnoses, predicts, or assumes a cause', ![win, risk].some(i => /\b(because|will|diagnos|predict|forecast|must be|caused by)\b/i.test(i.explore)));
+}
+
+/* ── PURE: 24 · the proactive OPENING consumes artifacts (never generates) ────── */
+{
+  const win  = proactive.toInsight({ type: 'recovering', severity: 'low', confidence: 'clear' }, { audience: 'self', subjectId: 'u' });
+  const risk = proactive.toInsight({ type: 'overload', severity: 'high', confidence: 'clear' }, { audience: 'self', subjectId: 'v' });
+  const grouped = proactive.attention([risk, win], { audience: 'self' });
+  const morning = proactive.composeOpening(grouped, { name: 'Mia Chen', now: new Date('2026-07-21T08:00:00').getTime() });
+  const evening = proactive.composeOpening(grouped, { name: 'Mia Chen', now: new Date('2026-07-21T20:00:00').getTime() });
+  ok('24 · greeting is deterministic + time-aware', /^Good morning, Mia\./.test(morning.greeting) && /^Good evening, Mia\./.test(evening.greeting));
+  ok('24 · the opening LEADS with a win when there is one', morning.sections[0].label === 'Worth celebrating');
+  ok('24 · it carries an invitation to explore', /explore/i.test(morning.invitation || ''));
+  // grounding: every item in the opening is one of the input insights — nothing invented.
+  const inputKeys = new Set([risk, win].map(i => i.dedupeKey));
+  const openKeys  = morning.sections.flatMap(s => s.insights.map(i => i.dedupeKey));
+  ok('24 · the opening surfaces ONLY verified artifacts (no fabrication)', openKeys.length > 0 && openKeys.every(k => inputKeys.has(k)));
+  // empty is a calm, valid opening — never an alarm, never a void.
+  const empty = proactive.composeOpening(proactive.attention([], { audience: 'self' }), { name: 'Mia', now: new Date('2026-07-21T08:00:00').getTime() });
+  ok('24 · an empty opening is calm + valid (not an alarm)', empty.empty === true && /nothing needs you/i.test(empty.greeting) && empty.sections.length === 0);
+}
+
+/* ── PURE: 25 · a leader opening never leaks a number/quote/basis ─────────────── */
+{
+  const risk = proactive.toInsight({ type: 'momentum_drop', severity: 'high', confidence: 'clear', basis: 'mood 2.1/5' }, { audience: 'leader', subjectId: 'u', subjectName: 'Sam' });
+  const op = proactive.composeOpening(proactive.attention([risk], { audience: 'leader' }), { audience: 'leader', name: 'Sam', now: Date.now() });
+  const items = op.sections.flatMap(s => s.insights);
+  ok('25 · a leader opening carries no score/percent', !/\d(?:\.\d)?\s*\/\s*5|\d{1,3}\s*%/.test(JSON.stringify(op)));
+  ok('25 · leader opening insights carry no evidence basis', items.length > 0 && items.every(i => (i.basis || []).length === 0));
+}
+
 /* ── HTTP + INTEGRATION ──────────────────────────────────────────────────────── */
 const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _proactiveInsights, noticeFeedback, insightSuppression } = require('../server.js');
 
@@ -263,6 +300,12 @@ const server = app.listen(0, async () => {
     // 17 · bounded preferences round-trip over HTTP
     const put = await call('/api/proactive/preferences', tokM, { method: 'PUT', body: { preferences: { length: 'brief', tone: 'plain', secret: 'race' } } });
     ok('17 · preferences PUT stores only allow-listed knobs', put.status === 200 && !('secret' in put.j.preferences) && put.j.preferences.length === 'brief');
+
+    // 17b · the proactive OPENING endpoint — grounded, deterministic, numberless
+    const openA = await call('/api/assistant/opening', tokM);
+    ok('17b · opening requires auth', (await call('/api/assistant/opening', null)).status === 401);
+    ok('17b · opening returns a grounded greeting', openA.status === 200 && !!openA.j.opening && /deserves your attention|nothing needs you/i.test(openA.j.opening.greeting));
+    ok('17b · opening HTTP payload leaks no score', !/\d(?:\.\d)?\s*\/\s*5|\d{1,3}\s*%/.test(JSON.stringify(openA.j.opening)));
 
     // 18 · Confidence Engine suppression — an unproven type is stood down, org-wide
     noticeFeedback[CODE] = noticeFeedback[CODE] || {};

@@ -55,6 +55,18 @@ const BUCKET_EMPTY = {
   opportunities:     { self: 'No new opportunities right now.',          leader: '' },
 };
 
+/* Per-polarity EXPLORE prompts — the natural conversation an insight can start.
+   Non-alarmist for risks, reinforcing for wins. Never diagnose, predict, or assume
+   a cause; always an invitation, phrased as a question. These let the assistant
+   BEGIN a conversation from a verified artifact instead of waiting to be asked. */
+const EXPLORE = {
+  risk:        { self: 'Would you like to explore what changed — or think about who could support you?', leader: 'Want help preparing a supportive check-in?' },
+  progress:    { self: 'What do you think helped create this? Worth protecting what’s working.',          leader: 'Worth recognising — want help finding the right words?' },
+  milestone:   { self: 'Worth pausing on — want to note what made it possible, so you can keep it going?', leader: 'A good moment to acknowledge — want to prepare a note?' },
+  opportunity: { self: 'Want to explore building on this?',                                                leader: '' },
+  neutral:     { self: 'Want to take a look together?',                                                    leader: '' },
+};
+
 /* ── Per-pattern DETERMINISTIC message structures ────────────────────────────
    audience 'self'   — the person, about their OWN week. May be specific; it's
                        their own evidence. First person, warm, non-clinical.
@@ -251,6 +263,8 @@ function toInsight(finding, opts = {}) {
     polarity,
     priority,
     bucket: BUCKET[polarity] || 'needs_attention',
+    // The conversation this insight can start — a projection, not a generated line.
+    explore: (EXPLORE[polarity] && EXPLORE[polarity][audience]) || '',
     severity,
     kernelConfidence: finding.confidence || null,
     reliabilityLabel: opts.reliabilityLabel || null,
@@ -352,6 +366,44 @@ function attention(insights, opts = {}) {
     empty: total === 0,
     message: total === 0 ? (audience === 'leader' ? 'Nothing needs your attention right now.' : 'Nothing needs you right now.') : null,
     groups,
+  };
+}
+
+/* ── The proactive OPENING ───────────────────────────────────────────────────
+   "Before you ask, the OS has already organised your world into what deserves
+   your attention." The assistant CONSUMES the Attention artifacts to open a
+   conversation — it does not generate observations. This is pure assembly over
+   the grouped output of attention(): a time-of-day greeting, the same insights
+   (celebrate first, to keep the tone balanced, then needs-attention, then
+   opportunity), and an invitation to explore. Deterministic; no AI, ever.
+   Empty is a calm, valid opening — never an alarm, never a void. */
+function composeOpening(grouped, opts = {}) {
+  const audience = opts.audience === 'leader' ? 'leader' : 'self';
+  const name = opts.name ? String(opts.name).split(' ')[0] : '';
+  const hour = new Date(Number.isFinite(opts.now) ? opts.now : Date.now()).getHours();
+  const tod  = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const hello = name ? `${tod}, ${name}.` : `${tod}.`;
+
+  if (!grouped || grouped.empty) {
+    return {
+      empty: true,
+      greeting: `${hello} Nothing needs you right now — a calm moment to capture a thought or plan ahead.`,
+      sections: [], invitation: null,
+    };
+  }
+  // Lead with a win when there is one — emotional balance is the point.
+  const ORDER = [['worth_celebrating', 'Worth celebrating'], ['needs_attention', 'Needs attention'], ['opportunities', 'Opportunity']];
+  const sections = [];
+  for (const [key, label] of ORDER) {
+    const g = grouped.groups && grouped.groups[key];
+    if (!g || !(g.insights || []).length) continue;
+    sections.push({ key, label, insights: g.insights });
+  }
+  return {
+    empty: false,
+    greeting: `${hello} Here’s what deserves your attention${audience === 'leader' ? '' : ' today'}.`,
+    sections,
+    invitation: 'Would you like to explore any of these?',
   };
 }
 
@@ -480,7 +532,7 @@ function opportunityFinding({ key, subjectId, headline, body, suggestion, priori
 
 module.exports = {
   milestoneFinding, opportunityFinding,
-  toInsight, surface, attention, audienceSafe,
+  toInsight, surface, attention, composeOpening, audienceSafe,
   normalizePreferences, applyPreferences,
   MESSAGES, PREF_SCHEMA, PREF_DEFAULTS,
   PATTERN_POLARITY, BUCKET, BUCKET_LABEL,

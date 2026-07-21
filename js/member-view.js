@@ -2390,6 +2390,7 @@ const MemberApp = {
       `<button class="iq-lens${L === this._wsActiveLens ? ' is-active' : ''}" role="tab" aria-selected="${L === this._wsActiveLens}" data-lens="${L}" onclick="MemberApp.wsSetLens('${L}')">${L[0].toUpperCase() + L.slice(1)}</button>`).join('');
     el.innerHTML = `
       <div class="iq-lensbar" id="iq-lensbar" role="tablist" aria-label="Workspace views">${tabs}</div>
+      <div class="iq-opening" id="iq-opening" aria-live="polite"></div>
       <div class="iq-attention" id="iq-attention" aria-live="polite"></div>
       <div class="iq-subject" id="iq-subject"></div>
       <div class="iq-workctx" id="iq-workctx"></div>
@@ -2406,8 +2407,26 @@ const MemberApp = {
         <div class="iq-composer-hint">Private by default · Enter to send, Shift + Enter for a new line</div>
       </div>
       <div class="iq-conversation" id="iq-conversation" aria-live="polite"></div>`;
+    this._loadOpening();
     this._loadAttention();
     this._renderSubjectChip();
+  },
+
+  /* The proactive OPENING — the assistant greets by CONSUMING the Attention artifacts
+     (it never invents observations). Grounded, deterministic, no AI key required.
+     "Before you ask, the OS has already organised your world into what matters." */
+  async _loadOpening() {
+    const box = document.getElementById('iq-opening');
+    if (!box) return;
+    try {
+      const r = await fetch('/api/assistant/opening', { headers: this._authHeaders() });
+      const j = await r.json();
+      const o = j && j.opening;
+      if (!o || !o.greeting) { box.innerHTML = ''; return; }
+      const esc = s => this._escape(String(s == null ? '' : s));
+      const invite = o.invitation && !o.empty ? `<div class="iq-opening-invite">${esc(o.invitation)}</div>` : '';
+      box.innerHTML = `<div class="iq-opening-card"><div class="iq-opening-greeting">${esc(o.greeting)}</div>${invite}</div>`;
+    } catch (_) { box.innerHTML = ''; }
   },
 
   /* Auto-grow the composer up to a calm maximum; keeps the hero compact. */
@@ -2462,6 +2481,7 @@ const MemberApp = {
       const renderInsight = a => {
         const rel = a.reliabilityLabel && a.reliabilityLabel !== 'calibrating'
           ? `<span class="iq-insight-rel">${esc(a.reliabilityLabel)}</span>` : '';
+        const explore = a.explore ? `<div class="iq-insight-explore">${esc(a.explore)}</div>` : '';
         const act = a.suggestion && a.suggestion.text
           ? `<button class="iq-insight-act" onclick="MemberApp.wsAttentionInto(${attr(a.suggestion.text)})">${esc(a.suggestion.text)}</button>` : '';
         const fb = a.patternType && a.patternType !== 'privacy' && a.patternType !== 'recent'
@@ -2472,7 +2492,7 @@ const MemberApp = {
              </div>` : '';
         return `<div class="iq-insight ${POL[a.polarity] || 'iq-pol-neutral'}" data-key="${esc(a.dedupeKey)}">
           <div class="iq-insight-head"><span class="iq-insight-headline">${esc(a.headline)}</span>${rel}</div>
-          <div class="iq-insight-body">${esc(a.body)}</div>${act}${fb}</div>`;
+          <div class="iq-insight-body">${esc(a.body)}</div>${explore}${act}${fb}</div>`;
       };
       const sections = ORDER
         .filter(b => groups[b] && groups[b].insights && groups[b].insights.length)

@@ -3667,6 +3667,19 @@ app.get('/api/proactive/insights', requireAuth, (req, res) => {
   res.json({ ok: true, ...out });
 });
 
+/* GET /api/assistant/opening — the proactive assistant opening. The assistant
+   CONSUMES the Attention artifacts (it does not generate observations): a calm
+   greeting composed deterministically from the SAME _proactiveInsights output,
+   leading with a win when there is one. No AI key required. "Before you ask, the
+   OS has already organised your world into what deserves your attention." */
+app.get('/api/assistant/opening', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const grouped = _proactiveInsights(code, userId, { audience: 'self' });
+  const user = orgUsers[code]?.[userId];
+  const opening = proactive.composeOpening(grouped, { audience: 'self', name: user?.name, now: Date.now() });
+  res.json({ ok: true, opening, empty: grouped.empty });
+});
+
 /* GET /api/proactive/insights/leader/:subjectId — leader-audience insights about a
    member the viewer is AUTHORISED to support. Directional + care-first only; the
    projection strips evidence basis and numbers before it reaches the leader. */
