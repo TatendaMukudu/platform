@@ -138,6 +138,50 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
   ok('13 · unknown prefs fall back to defaults (no throw)', !!proactive.applyPreferences(base, { length: 'nonsense' }).body);
 }
 
+/* ── PURE: 19 · ATTENTION ENGINE — polarity is a projection, not a new detector ─ */
+{
+  ok('19 · negative patterns project to polarity=risk', ['momentum_drop','withdrawal','overload','data_gap','baseline_shift'].every(t => proactive.PATTERN_POLARITY[t] === 'risk'));
+  ok('19 · positive patterns the kernel already emits project to polarity=progress', proactive.PATTERN_POLARITY.recovering === 'progress' && proactive.PATTERN_POLARITY.quiet_improvement === 'progress');
+  const risk = proactive.toInsight({ type: 'momentum_drop', severity: 'high', confidence: 'clear' }, { audience: 'self', subjectId: 'u' });
+  const prog = proactive.toInsight({ type: 'recovering', severity: 'low', confidence: 'clear' }, { audience: 'self', subjectId: 'u' });
+  ok('19 · a risk and a win land in different buckets', risk.bucket === 'needs_attention' && prog.bucket === 'worth_celebrating');
+}
+
+/* ── PURE: 20 · Home groups into "Your Attention" — needs / celebrate / opportunity */
+{
+  const risk = proactive.toInsight({ type: 'overload', severity: 'high', confidence: 'clear' }, { audience: 'self', subjectId: 'u' });
+  const win  = proactive.toInsight({ type: 'recovering', severity: 'low', confidence: 'clear' }, { audience: 'self', subjectId: 'u' });
+  const mile = proactive.toInsight(proactive.milestoneFinding({ key: 'checkin_streak', subjectId: 'u', days: 21, best: true }), { audience: 'self', subjectId: 'u' });
+  const opp  = proactive.toInsight(proactive.opportunityFinding({ key: 'ready', subjectId: 'u', headline: 'Ready for more?', body: 'You have finished early several weeks.', suggestion: 'Talk it through.' }), { audience: 'self', subjectId: 'u' });
+  const g = proactive.attention([risk, win, mile, opp], { audience: 'self' }).groups;
+  ok('20 · three buckets, correctly populated', g.needs_attention.insights.length === 1 && g.worth_celebrating.insights.length === 2 && g.opportunities.insights.length === 1);
+  ok('20 · an empty bucket is a first-class calm state, not an error', proactive.attention([win], { audience: 'self' }).groups.needs_attention.empty === true);
+  ok('20 · all-empty is a valid, calm whole-surface result', proactive.attention([], { audience: 'self' }).empty === true);
+}
+
+/* ── PURE: 21 · priority is INDEPENDENT of polarity ──────────────────────────── */
+{
+  const bigWin  = proactive.toInsight(proactive.milestoneFinding({ key: 'checkin_streak', subjectId: 'u', days: 40, best: true, priority: 'high' }), { audience: 'self', subjectId: 'u' });
+  const lowRisk = proactive.toInsight({ type: 'plateau', severity: 'low', confidence: 'clear' }, { audience: 'self', subjectId: 'v' });
+  ok('21 · a high-priority milestone can outrank a low-priority risk', proactive.SEV_RANK[bigWin.priority] < proactive.SEV_RANK[lowRisk.priority]);
+  // within a bucket, ranking is by priority, not by polarity/sentiment
+  const a = proactive.toInsight(proactive.milestoneFinding({ key: 'k1', subjectId: 'u', days: 40, best: true, priority: 'high' }), { audience: 'self', subjectId: 'u' });
+  const b = proactive.toInsight(proactive.milestoneFinding({ key: 'k2', subjectId: 'u2', days: 15, best: false }), { audience: 'self', subjectId: 'u2' });
+  ok('21 · within a bucket, higher priority sorts first', proactive.attention([b, a], { audience: 'self' }).groups.worth_celebrating.insights[0].priority === 'high');
+}
+
+/* ── PURE: 22 · milestone is deterministic + leader-safe; opportunity is self-only */
+{
+  const selfM = proactive.toInsight(proactive.milestoneFinding({ key: 'checkin_streak', subjectId: 'u', days: 21, best: true }), { audience: 'self', subjectId: 'u' });
+  const leadM = proactive.toInsight(proactive.milestoneFinding({ key: 'checkin_streak', subjectId: 'u', days: 21, best: true }), { audience: 'leader', subjectId: 'u', subjectName: 'Mia' });
+  ok('22 · the owner milestone celebrates the specific streak', /21 days/.test(selfM.body) && selfM.polarity === 'milestone');
+  ok('22 · the leader milestone is directional + numberless + safe', proactive.audienceSafe(leadM).ok && !/\d/.test(leadM.body));
+  ok('22 · a leader surface carries no opportunities bucket', !('opportunities' in proactive.attention([leadM], { audience: 'leader' }).groups));
+  // opportunity is framed as a question, never a verdict/prediction
+  const opp = proactive.opportunityFinding({ key: 'ready', subjectId: 'u', headline: 'Ready for more?', body: 'Want to take on something bigger?' });
+  ok('22 · an opportunity is a question, never a prediction/verdict', /\?/.test(opp.render.self.body) && !/\b(will|predict|forecast|guarantee)\b/i.test(opp.render.self.body));
+}
+
 /* ── HTTP + INTEGRATION ──────────────────────────────────────────────────────── */
 const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _proactiveInsights, noticeFeedback, insightSuppression } = require('../server.js');
 
@@ -160,20 +204,26 @@ _loadAllStores({
 });
 _rebuildEmailIndex();
 
-// 14 · a real seeded pattern surfaces to the OWNER with specifics …
+// flatten the grouped Attention Engine output into one array (test helper).
+const flat = out => Object.values(out.groups || {}).flatMap(g => g.insights || []);
+const bucketOf = (out, b) => (out.groups && out.groups[b] && out.groups[b].insights) || [];
+
+// 14 · a real seeded pattern surfaces to the OWNER, in the needs-attention bucket, with specifics …
 {
   const self = _proactiveInsights(CODE, 'm', { audience: 'self', now });
-  const top = self.insights[0];
-  ok('14 · owner sees the real momentum_drop the kernel found', !self.empty && top && top.patternType === 'momentum_drop');
+  const top = bucketOf(self, 'needs_attention')[0];
+  ok('14 · owner sees the real momentum_drop in "needs attention"', !self.empty && top && top.patternType === 'momentum_drop');
+  ok('14 · the risk is projected with polarity=risk in the needs_attention bucket', top && top.polarity === 'risk' && top.bucket === 'needs_attention');
   ok('14 · owner insight keeps its specific, private-to-them basis', top && Array.isArray(top.basis) && top.basis.length > 0);
 }
 // … and the SAME pattern reaches a LEADER with no number/quote/basis
 {
   const lead = _proactiveInsights(CODE, 'lead', { audience: 'leader', subjectId: 'm', now });
-  const li = lead.insights[0];
+  const li = bucketOf(lead, 'needs_attention')[0];
   ok('14 · leader sees the same pattern, directionally', li && li.patternType === 'momentum_drop');
   ok('14 · leader insight leaks no number/quote/basis (audience-safe on real data)', li && proactive.audienceSafe(li).ok && li.basis.length === 0);
-  ok('14 · leader insight is not the owner’s wording', li && li.body !== _proactiveInsights(CODE, 'm', { audience: 'self', now }).insights[0].body);
+  ok('14 · leader gets NO opportunities bucket', !('opportunities' in (lead.groups || {})));
+  ok('14 · leader insight is not the owner’s wording', li && li.body !== bucketOf(_proactiveInsights(CODE, 'm', { audience: 'self', now }), 'needs_attention')[0].body);
 }
 
 const server = app.listen(0, async () => {
@@ -195,8 +245,8 @@ const server = app.listen(0, async () => {
     ok('15 · a member cannot read leader-audience insights about another member',
        (await call('/api/proactive/insights/leader/m', tokOut)).status === 403);
     const leadRead = await call('/api/proactive/insights/leader/m', tokLead);
-    ok('15 · an authorised leader can read directional insights', leadRead.status === 200 && leadRead.j.insights.length > 0);
-    ok('15 · leader HTTP payload leaks no score', !/\d(?:\.\d)?\s*\/\s*5|\d{1,3}\s*%/.test(JSON.stringify(leadRead.j.insights)));
+    ok('15 · an authorised leader can read directional insights', leadRead.status === 200 && flat(leadRead.j).length > 0);
+    ok('15 · leader HTTP payload leaks no score', !/\d(?:\.\d)?\s*\/\s*5|\d{1,3}\s*%/.test(JSON.stringify(leadRead.j.groups)));
 
     // 16 · feedback + suppression close the loop
     const before = JSON.stringify(noticeFeedback[CODE] || {});
@@ -208,7 +258,7 @@ const server = app.listen(0, async () => {
     const afterMute = await call('/api/proactive/insights', tokM);
     ok('16 · mute suppresses THAT insight for THAT person',
        (insightSuppression[`${CODE}:m`] || []).includes('m:momentum_drop:self') &&
-       !afterMute.j.insights.some(i => i.dedupeKey === 'm:momentum_drop:self'));
+       !flat(afterMute.j).some(i => i.dedupeKey === 'm:momentum_drop:self'));
 
     // 17 · bounded preferences round-trip over HTTP
     const put = await call('/api/proactive/preferences', tokM, { method: 'PUT', body: { preferences: { length: 'brief', tone: 'plain', secret: 'race' } } });
@@ -219,7 +269,7 @@ const server = app.listen(0, async () => {
     noticeFeedback[CODE].withdrawal = { useful: 0, dismiss: 7 };   // proven unhelpful here
     const stood = _proactiveInsights(CODE, 'm', { audience: 'self', now });
     ok('18 · a proven-unhelpful pattern type is suppressed by the Confidence Engine',
-       !stood.insights.some(i => i.patternType === 'withdrawal'));
+       !flat(stood).some(i => i.patternType === 'withdrawal'));
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();

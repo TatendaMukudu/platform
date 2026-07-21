@@ -643,8 +643,17 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .iq-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .iq-att-skel{height:44px;border-radius:var(--radius);background:linear-gradient(90deg,var(--bg-surface),var(--bg-hover),var(--bg-surface));background-size:200% 100%;animation:iq-shimmer 1.3s infinite}
 
-/* ── Proactive insight cards ("I noticed") ──────────────────────────────────── */
-.iq-insight{display:flex;flex-direction:column;gap:0.4rem;padding:0.8rem 0.9rem;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-surface);animation:iq-fade .22s ease both;transition:opacity .18s ease}
+/* ── Attention Engine — "Your Attention" (needs attention / worth celebrating / opportunities) ── */
+.iq-att-section{display:flex;flex-direction:column;gap:0.4rem;margin-bottom:0.9rem}
+.iq-att-section:last-child{margin-bottom:0}
+
+/* ── Proactive insight cards ──────────────────────────────────────────────── */
+.iq-insight{display:flex;flex-direction:column;gap:0.4rem;padding:0.8rem 0.9rem;border-radius:var(--radius);border:1px solid var(--border);border-left:3px solid var(--border-light);background:var(--bg-surface);animation:iq-fade .22s ease both;transition:opacity .18s ease}
+/* Polarity is a quiet left accent — never a loud colour block. Attention is calm. */
+.iq-pol-risk{border-left-color:var(--accent)}
+.iq-pol-progress{border-left-color:#3fb984}
+.iq-pol-opp{border-left-color:var(--accent2,#7c5af5)}
+.iq-pol-neutral{border-left-color:var(--border-light)}
 .iq-insight-head{display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap}
 .iq-insight-headline{font-size:0.92rem;font-weight:600;color:var(--text-primary);letter-spacing:-0.01em}
 .iq-insight-rel{font-size:0.66rem;font-weight:600;letter-spacing:0.03em;text-transform:uppercase;color:var(--text-muted);border:1px solid var(--border);border-radius:999px;padding:0.1rem 0.5rem}

@@ -2450,27 +2450,36 @@ const MemberApp = {
       // calm result — the premium empty state, never an error.
       const r = await fetch('/api/proactive/insights', { headers: this._authHeaders() });
       const j = await r.json();
-      const items = (j.insights || []);
+      const groups = j.groups || {};
       const esc = s => this._escape(String(s == null ? '' : s));
       const attr = s => JSON.stringify(esc(s)).replace(/"/g, '&quot;');
       box.classList.remove('is-loading');
-      if (!j.empty && items.length) {
+      // ATTENTION ENGINE: Home is "Your Attention" — a balance of what needs action,
+      // progress worth celebrating, and opportunities worth pursuing. Same kernel,
+      // different projections; attention is simply "this matters".
+      const ORDER = ['needs_attention', 'worth_celebrating', 'opportunities'];
+      const POL = { risk: 'iq-pol-risk', progress: 'iq-pol-progress', milestone: 'iq-pol-progress', opportunity: 'iq-pol-opp', neutral: 'iq-pol-neutral' };
+      const renderInsight = a => {
+        const rel = a.reliabilityLabel && a.reliabilityLabel !== 'calibrating'
+          ? `<span class="iq-insight-rel">${esc(a.reliabilityLabel)}</span>` : '';
+        const act = a.suggestion && a.suggestion.text
+          ? `<button class="iq-insight-act" onclick="MemberApp.wsAttentionInto(${attr(a.suggestion.text)})">${esc(a.suggestion.text)}</button>` : '';
+        const fb = a.patternType && a.patternType !== 'privacy' && a.patternType !== 'recent'
+          ? `<div class="iq-insight-fb">
+               <button class="iq-fb" title="Helpful" onclick="MemberApp.insightFeedback(this,'useful',${attr(a.dedupeKey)},${attr(a.patternType)})">Helpful</button>
+               <button class="iq-fb" title="Not useful" onclick="MemberApp.insightFeedback(this,'not_useful',${attr(a.dedupeKey)},${attr(a.patternType)})">Not useful</button>
+               <button class="iq-fb" title="Mute this" onclick="MemberApp.insightFeedback(this,'mute',${attr(a.dedupeKey)},${attr(a.patternType)})">Mute</button>
+             </div>` : '';
+        return `<div class="iq-insight ${POL[a.polarity] || 'iq-pol-neutral'}" data-key="${esc(a.dedupeKey)}">
+          <div class="iq-insight-head"><span class="iq-insight-headline">${esc(a.headline)}</span>${rel}</div>
+          <div class="iq-insight-body">${esc(a.body)}</div>${act}${fb}</div>`;
+      };
+      const sections = ORDER
+        .filter(b => groups[b] && groups[b].insights && groups[b].insights.length)
+        .map(b => `<div class="iq-att-section"><div class="iq-att-label">${esc(groups[b].label)}</div>${groups[b].insights.map(renderInsight).join('')}</div>`);
+      if (!j.empty && sections.length) {
         box.classList.remove('iq-attention--empty');
-        box.innerHTML = `<div class="iq-att-label">I noticed</div>` + items.map(a => {
-          const rel = a.reliabilityLabel && a.reliabilityLabel !== 'calibrating'
-            ? `<span class="iq-insight-rel">${esc(a.reliabilityLabel)}</span>` : '';
-          const act = a.suggestion && a.suggestion.text
-            ? `<button class="iq-insight-act" onclick="MemberApp.wsAttentionInto(${attr(a.suggestion.text)})">${esc(a.suggestion.text)}</button>` : '';
-          const fb = a.patternType && a.patternType !== 'privacy' && a.patternType !== 'recent'
-            ? `<div class="iq-insight-fb">
-                 <button class="iq-fb" title="Helpful" onclick="MemberApp.insightFeedback(this,'useful',${attr(a.dedupeKey)},${attr(a.patternType)})">Helpful</button>
-                 <button class="iq-fb" title="Not useful" onclick="MemberApp.insightFeedback(this,'not_useful',${attr(a.dedupeKey)},${attr(a.patternType)})">Not useful</button>
-                 <button class="iq-fb" title="Mute this" onclick="MemberApp.insightFeedback(this,'mute',${attr(a.dedupeKey)},${attr(a.patternType)})">Mute</button>
-               </div>` : '';
-          return `<div class="iq-insight" data-key="${esc(a.dedupeKey)}">
-            <div class="iq-insight-head"><span class="iq-insight-headline">${esc(a.headline)}</span>${rel}</div>
-            <div class="iq-insight-body">${esc(a.body)}</div>${act}${fb}</div>`;
-        }).join('');
+        box.innerHTML = sections.join('');
       } else {
         // Premium empty state — one warm prompt + gentle ways in (each prefills the one composer).
         box.classList.add('iq-attention--empty');

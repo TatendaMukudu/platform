@@ -29,6 +29,32 @@
 const SEV_RANK  = { high: 0, medium: 1, low: 2 };
 const CONF_RANK = { clear: 0, confirmed: 0, emerging: 1, medium: 1, tentative: 2, low: 2, calibrating: 2 };
 
+/* ── Polarity — the Attention Engine's core idea ─────────────────────────────
+   Attention is not positive or negative; it is "this matters." Every insight
+   carries a POLARITY (what kind of thing it is) that is INDEPENDENT of its
+   PRIORITY (how much it matters). A milestone can be high-priority; a risk can
+   be low. Polarity is a projection of an EXISTING kernel pattern — no new
+   detector, no new reasoning. Attention items and dynamic findings (milestone,
+   opportunity) carry their own polarity on the finding. */
+const PATTERN_POLARITY = {
+  // negative — needs attention
+  baseline_shift: 'risk', momentum_drop: 'risk', repeated_concern: 'risk',
+  member_team_divergence: 'risk', invisible_load: 'risk', withdrawal: 'risk',
+  data_gap: 'risk', isolation: 'risk', overload: 'risk', plateau: 'risk',
+  // positive — worth celebrating (already emitted by the kernel today)
+  recovering: 'progress', quiet_improvement: 'progress',
+};
+// Which Home bucket a polarity belongs to. Priority orders WITHIN a bucket.
+const BUCKET = { risk: 'needs_attention', neutral: 'needs_attention',
+                 progress: 'worth_celebrating', milestone: 'worth_celebrating',
+                 opportunity: 'opportunities' };
+const BUCKET_LABEL = { needs_attention: 'Needs attention', worth_celebrating: 'Worth celebrating', opportunities: 'Opportunities' };
+const BUCKET_EMPTY = {
+  needs_attention:   { self: 'Nothing needs you right now.',            leader: 'Nothing needs your attention right now.' },
+  worth_celebrating: { self: 'Nothing to celebrate just yet — keep going.', leader: 'No standout progress to flag this week.' },
+  opportunities:     { self: 'No new opportunities right now.',          leader: '' },
+};
+
 /* ── Per-pattern DETERMINISTIC message structures ────────────────────────────
    audience 'self'   — the person, about their OWN week. May be specific; it's
                        their own evidence. First person, warm, non-clinical.
@@ -188,15 +214,30 @@ function toInsight(finding, opts = {}) {
   const subjectName = opts.subjectName || finding.name || null;
   const subjectLabel = audience === 'leader' ? (subjectName || 'this person') : 'you';
 
-  // Message: attention items carry their own text; kernel patterns use the table.
+  // Message resolution, in order:
+  //  1. finding.render — a dynamic, audience-shaped message (milestone/opportunity),
+  //     which carry a computed number the static table can't hold. The CALLER is
+  //     responsible for making finding.render[audience] audience-safe (leader forms
+  //     must stay directional + numberless); audienceSafe() re-checks it here.
+  //  2. attention items carry their own server-composed text.
+  //  3. kernel patterns use the static table.
   let msg;
-  if (finding.kind && ATTENTION_HEADLINE[finding.kind]) {
+  if (finding.render) {
+    msg = finding.render[audience] || finding.render.self || finding.render;
+  } else if (finding.kind && ATTENTION_HEADLINE[finding.kind]) {
     msg = { headline: ATTENTION_HEADLINE[finding.kind], body: finding.text || '', suggestion: null };
   } else {
     msg = (MESSAGES[patternType] && MESSAGES[patternType][audience]) || _fallback(audience, patternType);
   }
 
   const severity = finding.severity || (finding.kind === 'action' ? 'medium' : 'low');
+  // Polarity: explicit on the finding (milestone/opportunity/neutral attention) else
+  // mapped from the pattern type; defaults to neutral. A pure projection.
+  const polarity = finding.polarity || PATTERN_POLARITY[patternType] || 'neutral';
+  // Priority is INDEPENDENT of polarity — how much this matters, not whether it's
+  // good or bad. Derived from the finding's own severity so a milestone or an
+  // opportunity can outrank a low risk.
+  const priority = finding.priority || severity;
   const dedupeKey = `${subjectId || 'self'}:${patternType}:${audience}`;
   const suggestionText = msg.suggestion;
 
@@ -207,6 +248,9 @@ function toInsight(finding, opts = {}) {
     audience,
     subjectId,
     subjectLabel,
+    polarity,
+    priority,
+    bucket: BUCKET[polarity] || 'needs_attention',
     severity,
     kernelConfidence: finding.confidence || null,
     reliabilityLabel: opts.reliabilityLabel || null,
@@ -260,6 +304,55 @@ function surface(insights, opts = {}) {
     };
   }
   return { empty: false, message: null, insights: ranked };
+}
+
+/* Rank WITHIN a bucket by PRIORITY (independent of polarity), then confidence,
+   then a stable id — so a milestone can outrank a low risk, and vice versa. */
+function _rankCmp(a, b) {
+  const s = (SEV_RANK[a.priority] ?? 3) - (SEV_RANK[b.priority] ?? 3);
+  if (s) return s;
+  const c = (CONF_RANK[a.kernelConfidence] ?? 3) - (CONF_RANK[b.kernelConfidence] ?? 3);
+  if (c) return c;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+/* ── The Attention Engine surface ────────────────────────────────────────────
+   Groups insights into Home's buckets — "Needs attention", "Worth celebrating",
+   "Opportunities" — each capped and each with a first-class empty state. Home
+   becomes "Your Attention": a balance of what needs action, progress worth
+   celebrating, and opportunities worth pursuing. Attention is not positive or
+   negative; it is simply what matters right now.
+
+   Leaders never receive an OPPORTUNITIES bucket about a person — an "opportunity"
+   framed to a supporter ("ready for more", "leadership potential") is a judgement
+   that could drive unfair decisions and may rest on evidence the person considers
+   private. Opportunities are self-audience-first. Pure + deterministic. */
+function attention(insights, opts = {}) {
+  const audience = opts.audience === 'leader' ? 'leader' : 'self';
+  const limit = Number.isInteger(opts.limit) ? opts.limit : 3;
+  const suppressed = opts.suppressed instanceof Set ? opts.suppressed
+                   : new Set(Array.isArray(opts.suppressed) ? opts.suppressed : []);
+  const order = ['needs_attention', 'worth_celebrating', 'opportunities'];
+  const groups = {};
+  let total = 0;
+  for (const b of order) {
+    if (audience === 'leader' && b === 'opportunities') continue;   // no person-opportunities to a leader
+    const seen = new Set();
+    const ranked = (insights || [])
+      .filter(i => i && (i.bucket || 'needs_attention') === b)
+      .filter(i => !suppressed.has(i.dedupeKey) && !suppressed.has(i.id))
+      .filter(i => (seen.has(i.dedupeKey) ? false : (seen.add(i.dedupeKey), true)))
+      .sort(_rankCmp)
+      .slice(0, Math.max(0, limit));
+    total += ranked.length;
+    const emptyMsg = (BUCKET_EMPTY[b] && BUCKET_EMPTY[b][audience]) || '';
+    groups[b] = { label: BUCKET_LABEL[b], empty: ranked.length === 0, message: ranked.length ? null : emptyMsg, insights: ranked };
+  }
+  return {
+    empty: total === 0,
+    message: total === 0 ? (audience === 'leader' ? 'Nothing needs your attention right now.' : 'Nothing needs you right now.') : null,
+    groups,
+  };
 }
 
 /* ── Audience safety ─────────────────────────────────────────────────────────
@@ -336,11 +429,62 @@ function applyPreferences(insight, prefs) {
   return { ...insight, body, appliedPreferences: p };
 }
 
+/* ── Dynamic positive findings (milestone / opportunity) ─────────────────────
+   These carry a computed value the static table can't hold (a streak length, a
+   sustained trend), so they ship an audience-shaped `render`. They are STILL
+   projections of existing canonical series — the server computes them by counting
+   over evidence it already has, not by any new reasoning. The leader form is
+   directional and numberless by construction; audienceSafe() re-checks it. */
+
+/* A milestone — a threshold reached (a streak, a personal best). Positive, worth
+   celebrating. `days` is the person's own count; the leader form never carries it. */
+function milestoneFinding({ key, subjectId, days, best, priority } = {}) {
+  const d = Number(days) || 0;
+  return {
+    polarity: 'milestone',
+    patternType: key || 'milestone',
+    subjectId,
+    severity: 'low',
+    priority: priority || (best ? 'medium' : 'low'),   // priority ≠ polarity
+    confidence: 'clear',
+    render: {
+      self: {
+        headline: best ? 'A personal best' : 'Nice streak going',
+        body: `${d} days of checking in, unbroken${best ? ' — your longest run yet' : ''}. Consistency like that compounds.`,
+        suggestion: null,
+      },
+      leader: {
+        headline: 'Consistently engaged',
+        body: 'They’ve been checking in consistently lately — a good moment to acknowledge it.',
+        suggestion: 'Consider recognising their consistency.',
+      },
+    },
+  };
+}
+
+/* An opportunity — something worth pursuing, framed as a QUESTION, never a verdict
+   or a prediction. SELF-AUDIENCE ONLY (the attention() grouper drops any
+   opportunity bucket for a leader). Derived conservatively from a sustained
+   positive pattern the kernel already found. */
+function opportunityFinding({ key, subjectId, headline, body, suggestion, priority, confidence } = {}) {
+  return {
+    polarity: 'opportunity',
+    patternType: key || 'opportunity',
+    subjectId,
+    severity: 'low',
+    priority: priority || 'medium',
+    confidence: confidence || 'emerging',
+    render: { self: { headline, body, suggestion: suggestion || null } },
+  };
+}
+
 module.exports = {
-  toInsight, surface, audienceSafe,
+  milestoneFinding, opportunityFinding,
+  toInsight, surface, attention, audienceSafe,
   normalizePreferences, applyPreferences,
   MESSAGES, PREF_SCHEMA, PREF_DEFAULTS,
+  PATTERN_POLARITY, BUCKET, BUCKET_LABEL,
   SEV_RANK, CONF_RANK,
   // exported for tests
-  _hash, _fallback,
+  _hash, _fallback, _rankCmp,
 };

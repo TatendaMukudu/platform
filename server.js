@@ -3569,41 +3569,86 @@ const insightSuppression = {}; // "code:userId" → [dedupeKey|id, ...] (per-ins
 
 function _suppKey(code, userId) { return `${code}:${userId}`; }
 
-/* Build the surfaced ProactiveInsight set for a viewer.
-   audience 'self'   → viewer's own insights (their admissible evidence, specific).
-   audience 'leader' → insights ABOUT `subjectId`, directional + care-first only.
-   Authorisation is the CALLER's responsibility (endpoints below gate leader reads).
-   Deterministic; the Confidence Engine gates + labels; suppression + prefs applied. */
+/* Deterministic MILESTONE projection — a threshold reached over evidence we already
+   have. Counting, not reasoning: the current unbroken check-in streak from the
+   canonical mood series. No new detector; a projection over existing series. */
+function _streakMilestones(code, subjectId, now) {
+  const times = _canonicalMoodSeries(code, subjectId).map(p => p.t).sort((a, b) => a - b);
+  if (times.length < 3) return [];
+  const GAP = 8 * 86400000;                                    // "unbroken" = ≤ 8 days apart
+  if (now - times[times.length - 1] > GAP) return [];          // streak must be live
+  let runStart = times[times.length - 1];
+  for (let i = times.length - 1; i > 0; i--) {
+    if (times[i] - times[i - 1] <= GAP) runStart = times[i - 1]; else break;
+  }
+  const days = Math.round((times[times.length - 1] - runStart) / 86400000);
+  if (days < 14) return [];                                    // a real streak, not noise
+  // personal best = this run spans at least as many days as any run in history.
+  let best = 0, start = times[0];
+  for (let i = 1; i < times.length; i++) {
+    if (times[i] - times[i - 1] > GAP) start = times[i];
+    best = Math.max(best, times[i] - start);
+  }
+  const isBest = days >= Math.round(best / 86400000);
+  return [proactive.milestoneFinding({ key: 'checkin_streak', subjectId, days, best: isBest })];
+}
+
+/* Deterministic OPPORTUNITY projection — SELF-audience only, framed as a question,
+   never a verdict or a prediction. Derived from an existing kernel finding (quiet,
+   sustained improvement = capacity to stretch). No new reasoning. */
+function _selfOpportunities(m, subjectId) {
+  const findings = m ? intel.detectPatterns(m) : [];
+  const out = [];
+  if (findings.some(f => f.type === 'quiet_improvement')) {
+    out.push(proactive.opportunityFinding({
+      key: 'building_momentum', subjectId,
+      headline: 'You’ve been building quiet momentum',
+      body: 'Things have been trending up for a while without much fuss — this can be a good moment to stretch, with a bigger goal or a new challenge.',
+      suggestion: 'Set a slightly bigger goal with IntelliQ.',
+    }));
+  }
+  return out;
+}
+
+/* Build the ATTENTION ENGINE surface for a viewer — grouped into Home's buckets
+   (needs attention / worth celebrating / opportunities). Every insight is a
+   projection of an existing kernel output; polarity is a projection, priority is
+   independent of it. Surface-only — suggestions are proposal-gated.
+   audience 'self'   → viewer's own attention (specific, their own evidence).
+   audience 'leader' → about `subjectId`, directional + care-first, NO opportunities.
+   Authorisation is the CALLER's responsibility (endpoints below gate leader reads). */
 function _proactiveInsights(code, viewerId, opts = {}) {
   const audience   = opts.audience === 'leader' ? 'leader' : 'self';
   const subjectId  = audience === 'leader' ? opts.subjectId : viewerId;
   const subject    = orgUsers[code]?.[subjectId];
-  if (!subject) return { empty: true, message: proactive.surface([], { audience }).message, insights: [] };
+  if (!subject) return { empty: true, message: proactive.attention([], { audience }).message, groups: {} };
 
   const now = opts.now || Date.now();
   let m; try { m = _buildMemberIntelInput(code, subject, now); } catch (_) { m = null; }
 
   const reliabilityByType = _reliabilityByType(code);
-  const findings = m ? [...intel.detectPatterns(m), ...(m.structural || [])] : [];
-
   const insights = [];
-  findings.forEach(f => {
-    const rel = reliabilityByType[f.type];
-    if (!confidence.shouldSurface(rel)) return;  // Confidence Engine stood this type down here
-    const ins = proactive.toInsight(f, {
-      audience, subjectId, subjectName: subject.name,
-      reliabilityLabel: confidence.label(rel), now,
+  const add = (finding, aud) => {
+    const rel = finding.type ? reliabilityByType[finding.type] : undefined;
+    if (finding.type && !confidence.shouldSurface(rel)) return;   // Confidence Engine gate (patterns only)
+    const ins = proactive.toInsight(finding, {
+      audience: aud, subjectId: aud === 'leader' ? subjectId : viewerId,
+      subjectName: subject.name, reliabilityLabel: finding.type ? confidence.label(rel) : null, now,
     });
-    if (proactive.audienceSafe(ins).ok) insights.push(ins);   // defence in depth
-  });
+    if (proactive.audienceSafe(ins).ok) insights.push(ins);       // defence in depth
+  };
 
-  // Self audience also sees the deterministic attention items (own scope only).
+  // Risks + progress — the existing kernel patterns (polarity is projected in toInsight).
+  (m ? [...intel.detectPatterns(m), ...(m.structural || [])] : []).forEach(f => add(f, audience));
+  // Milestones — both audiences (leader form is directional + numberless).
+  _streakMilestones(code, subjectId, now).forEach(f => add(f, audience));
+
   if (audience === 'self') {
+    // Opportunities — self only (a leader never gets person-opportunities).
+    _selfOpportunities(m, viewerId).forEach(f => add(f, 'self'));
+    // Deterministic attention items (own scope only).
     let att = []; try { att = _composeToday(code, viewerId) || []; } catch (_) {}
-    att.forEach(a => {
-      const ins = proactive.toInsight(a, { audience: 'self', subjectId: viewerId, now });
-      if (proactive.audienceSafe(ins).ok) insights.push(ins);
-    });
+    att.forEach(a => add(a, 'self'));
   }
 
   // Bounded communication preferences (self only — leader reads are always standard).
@@ -3611,7 +3656,7 @@ function _proactiveInsights(code, viewerId, opts = {}) {
   const rendered = prefs ? insights.map(i => proactive.applyPreferences(i, prefs)) : insights;
 
   const suppressed = insightSuppression[_suppKey(code, viewerId)] || [];
-  return proactive.surface(rendered, { limit: 3, suppressed, audience });
+  return proactive.attention(rendered, { limit: 3, suppressed, audience });
 }
 
 /* GET /api/proactive/insights — the viewer's OWN surfaced insights (self audience).
