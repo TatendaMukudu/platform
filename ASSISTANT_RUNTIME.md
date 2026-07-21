@@ -165,6 +165,15 @@ into it (`askAboutWork` → focuses the composer, stages a `workItemId`).
   preserved for re-wiring as an authorised attachment capability (documented interface exception —
   not pretended-consolidated). Leader review (`/api/assessments/:id/summarize`) is unchanged (leader-side).
 
+## Navigation → assistant context (Cut G)
+Entry into the unified assistant and its bounded context is governed by the ONE canonical navigation
+authority (`navigate()`): every navigation **clears** the transient member-support **subject** and the
+assigned-work **target** before rendering, so a general assistant turn can never inherit a stale member
+or work context. The explicit entry points (`askAboutMember`, `askAboutWork`) navigate to Home first and
+then set their context, which survives the clear; changing lens clears the subject. This is the single
+place stale-target actions are prevented — the runtime still revalidates `subjectMemberId` / `workItemId`
+server-side on every turn regardless of client state.
+
 ## Leader support (Individual Advisor folded into the one assistant — Cut E)
 A leader uses the **same** IntelliQ assistant with an explicit member-support context — not a separate
 Advisor identity, composer, prompt, or runtime. **Unified identity does not mean unified access: the
@@ -203,7 +212,7 @@ assistant's available evidence changes strictly by requester, purpose, subject a
 `scripts/assistant-runtime-smoke.js` (30 checks) proves the runtime's 21 invariants + 2 auth checks.
 `scripts/advisor-migration-smoke.js` (45 checks) — the privacy-critical leader-support kernel +
 post-kernel guarantees — remain green and unchanged (route-source checks re-pointed at `_leaderSupportTurn`).
-`scripts/assistant-interface-smoke.js` (79 checks) proves the interface contract: every lens routes
+`scripts/assistant-interface-smoke.js` (86 checks) proves the interface contract: every lens routes
 through the one endpoint, lens is a bounded hint (identical basis, only emphasis reorders), one
 IntelliQ identity/one composer/one thread, small prioritised set + More options, private-by-default,
 calendar draft-only, confirm/correct/dismiss, explicit visibility-increase confirmation, generic

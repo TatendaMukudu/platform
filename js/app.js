@@ -597,50 +597,77 @@ async function _orgObSubmit() {
 }
 
 /* ── NAVIGATION ──────────────────────────────────────────── */
-function navigate(page){
+/* ═══ CANONICAL NAVIGATION AUTHORITY (Phase-1 Cut G) ══════════════════════════
+   ONE router for the whole member/leader/admin experience — desktop and the mobile
+   sidebar drawer dispatch through this single function. It normalises + validates the
+   destination, resolves legacy aliases to the ONE canonical surface, renders that
+   surface (one renderer owner per destination), updates nav/title/active state, and
+   CLEARS transient assistant context (member subject + assigned-work target) so no
+   stale consequential target ever survives a navigation. Unknown/unavailable/retired
+   destinations fail SAFE to Home — never a blank container, never a resurrected Studio
+   or Advisor identity. There is no second router: retired assistant surfaces have no
+   destinations here, and no alias recreates them. */
+const NAV_ALIASES = {
+  // Folded surfaces → the one canonical destination (no separate renderer, no duplicate state).
+  'org-insights': 'leader-home',
+  'group-health': 'leader-home',
+};
+// destination → its ONE renderer (arrow-wrapped so declaration order/TDZ is never an issue).
+const NAV_ROUTES = {
+  // My Space — every user (the unified assistant + record views)
+  home:            () => { if (typeof MemberApp !== 'undefined') MemberApp._renderHome(); },
+  assessments:     () => { if (typeof MemberApp !== 'undefined') MemberApp._renderAssessments(); },
+  apps:            () => { if (typeof MemberApp !== 'undefined') MemberApp._renderApps(); },
+  checkin:         () => { if (typeof MemberApp !== 'undefined') MemberApp._setupCheckinPrompt(); },
+  notes:           () => { if (typeof MemberApp !== 'undefined') MemberApp._renderNotesPage(); },
+  inbox:           () => { if (typeof MemberApp !== 'undefined') MemberApp._renderInbox(); },
+  stats:           () => { if (typeof MemberApp !== 'undefined') MemberApp._renderStats(); },
+  // Leader Workspace — scoped to the node leader's subtree
+  'leader-home':   () => renderIntelligence(),
+  'leader-people': () => renderLeaderPeople(),
+  'leader-groups': () => renderLeaderGroups(),
+  'data-sources':  () => renderDataSources(),
+  assignments:     () => renderAssignments(),
+  // Management — org-wide
+  'org-health':    () => renderOrgHealth(),
+  analytics:       () => renderAnalytics(),
+  intelliq:        () => renderIntelliQ(),
+  scenarios:       () => renderScenarios(),
+  organisation:    () => renderMyTeam(),
+  people:          () => renderPeople(),
+  alerts:          () => renderAlerts(),
+  reports:         () => renderReports(),
+  settings:        () => renderSettings(),
+  // Legacy dashboards (still real destinations for admin/super)
+  dashboard:       () => renderDashboard(),
+  members:         () => renderMembers(),
+};
+function navigate(dest){
+  // 1/2. normalise + resolve alias + validate → fail SAFE to Home (never blank, never a retired identity).
+  let page = String(dest == null ? '' : dest).trim();
+  page = NAV_ALIASES[page] || page;
+  if (!Object.prototype.hasOwnProperty.call(NAV_ROUTES, page)) page = 'home';
+
+  // 3. Context lifecycle — EVERY navigation clears the transient member-support subject and the
+  //    assigned-work target, so a general turn can never act on a stale member/work context.
+  //    (Explicit entry points — askAboutMember / askAboutWork — navigate first, THEN set context.)
+  try { if (typeof MemberApp !== 'undefined') { if (MemberApp.clearSubject) MemberApp.clearSubject(); MemberApp._wsWorkItemId = null; } } catch (_) {}
+
+  // 4. Activate the canonical surface + one-authority nav/title/active state.
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   const pg = document.getElementById('page-'+page);
   if(pg) pg.classList.add('active');
   document.querySelectorAll(`.nav-item[data-page="${page}"]`).forEach(n=>n.classList.add('active'));
-  // Close mobile sidebar drawer on navigation (and clear its outside-click handler)
+  // Close the mobile sidebar drawer on navigation (and clear its outside-click handler).
   document.getElementById('sidebar')?.classList.remove('open');
   if (typeof _detachSidebarClose === 'function') _detachSidebarClose();
   AppState.currentPage = page;
-  document.querySelector('.topbar-title').textContent = PAGE_TITLES[page] || 'Platform';
+  const _tt = document.querySelector('.topbar-title'); if (_tt) _tt.textContent = PAGE_TITLES[page] || 'Platform';
 
-  // My Space — every user
-  if      (page==='home')         { if(typeof MemberApp!=='undefined') MemberApp._renderHome(); }
-  else if (page==='assessments')  { if(typeof MemberApp!=='undefined') MemberApp._renderAssessments(); }
-  else if (page==='apps')         { if(typeof MemberApp!=='undefined') MemberApp._renderApps(); }
-  else if (page==='checkin')      { if(typeof MemberApp!=='undefined') MemberApp._setupCheckinPrompt(); }
-  else if (page==='notes')        { if(typeof MemberApp!=='undefined') MemberApp._renderNotesPage(); }
-  else if (page==='inbox')        { if(typeof MemberApp!=='undefined') MemberApp._renderInbox(); }
-  else if (page==='stats')        { if(typeof MemberApp!=='undefined') MemberApp._renderStats(); }
-  // Leader Workspace — scoped to node leader's subtree
-  else if (page==='leader-home')        renderIntelligence();
-  else if (page==='leader-people')      renderLeaderPeople();
-  // org-insights / group-health folded into the one Intelligence surface
-  else if (page==='org-insights')       return navigate('leader-home');
-  else if (page==='group-health')       return navigate('leader-home');
-  else if (page==='leader-groups')      renderLeaderGroups();
-  else if (page==='data-sources')       renderDataSources();
-  else if (page==='assignments')        renderAssignments();
-  // Management — org-wide
-  else if (page==='org-health')         renderOrgHealth();
-  // Intelligence pages
-  else if (page==='analytics')  renderAnalytics();
-  else if (page==='intelliq')   renderIntelliQ();
-  else if (page==='scenarios')  renderScenarios();
-  // Management pages
-  else if (page==='organisation')  renderMyTeam();
-  else if (page==='people')    renderPeople();
-  else if (page==='alerts')    renderAlerts();
-  else if (page==='reports')   renderReports();
-  else if (page==='settings')  renderSettings();
-  // Legacy aliases
-  else if (page==='dashboard') renderDashboard();
-  else if (page==='members')   renderMembers();
+  // 5. Render (one owner per destination); a renderer failure falls safely back to Home.
+  try { NAV_ROUTES[page](); }
+  catch (e) { console.warn('[nav] render failed for', page, e && e.message); if (page !== 'home') return navigate('home'); }
 
   // Hydrate any line-icon slots the page just rendered.
   if (typeof hydrateIcons === 'function') hydrateIcons(pg || document);
@@ -7594,10 +7621,8 @@ window.addEventListener('unhandledrejection', (event) => {
 /* ── INIT ────────────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', () => {
   initLogin();
-  // Nav items
-  document.querySelectorAll('.nav-item[data-page]').forEach(item => {
-    item.addEventListener('click', () => navigate(item.dataset.page));
-  });
+  // Nav items are bound where the sidebar nav is rendered (the one dynamic, permission-filtered
+  // binder) — Phase-1 Cut G. No second DOMContentLoaded binder (the sidebar is empty until render).
   // Notification panel toggle
   document.getElementById('notif-btn').addEventListener('click', toggleNotifPanel);
   document.getElementById('notif-panel-close').addEventListener('click', ()=>{

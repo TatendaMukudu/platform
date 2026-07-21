@@ -274,6 +274,48 @@ const server = app.listen(0, async () => {
     ok('E10/regression. pronoun-without-subject resolves no member and leaks no private content',
        !ePriv.j.response.subject && !/secretly|quit/i.test(JSON.stringify(ePriv.j.response)));
 
+    // ─────────────── Cut G: ONE canonical navigation authority ───────────────
+    // Evaluate the REAL navigate() + NAV_ROUTES/NAV_ALIASES in a stubbed scope (no browser) to
+    // prove: alias resolution, fail-safe to Home, and transient-context clearing on every navigation.
+    {
+      const appSrc = read('js/app.js');
+      const navIdx = appSrc.indexOf('function navigate(dest)');
+      const endIdx = appSrc.indexOf('\n}\n', navIdx);
+      const block = appSrc.slice(appSrc.indexOf('const NAV_ALIASES'), endIdx + 2);
+      const rendered = [];
+      const renderer = name => () => { rendered.push(name); };
+      const RENDER_NAMES = ['renderIntelligence','renderLeaderPeople','renderLeaderGroups','renderDataSources','renderAssignments','renderOrgHealth','renderAnalytics','renderIntelliQ','renderScenarios','renderMyTeam','renderPeople','renderAlerts','renderReports','renderSettings','renderDashboard','renderMembers'];
+      const el = { classList: { add(){}, remove(){} } };
+      const documentStub = { querySelectorAll: () => [], getElementById: () => null, querySelector: () => null };
+      const AppStateStub = { currentPage: null };
+      const MemberAppStub = { _wsWorkItemId: 'STALE', _subjectCleared: false,
+        clearSubject(){ this._subjectCleared = true; },
+        _renderHome(){ rendered.push('home'); }, _renderAssessments(){ rendered.push('assessments'); }, _renderApps(){ rendered.push('apps'); },
+        _setupCheckinPrompt(){ rendered.push('checkin'); }, _renderNotesPage(){ rendered.push('notes'); }, _renderInbox(){ rendered.push('inbox'); }, _renderStats(){ rendered.push('stats'); } };
+      const args = ['document','AppState','PAGE_TITLES','MemberApp','hydrateIcons','_detachSidebarClose','console', ...RENDER_NAMES];
+      const vals = [documentStub, AppStateStub, {}, MemberAppStub, () => {}, () => {}, console, ...RENDER_NAMES.map(renderer)];
+      const factory = new Function(...args, block + '\nreturn { navigate, NAV_ROUTES, NAV_ALIASES };');
+      const nav = factory(...vals);
+
+      ok('G1. exactly one canonical navigate() authority with a single destination map (NAV_ROUTES)',
+         (appSrc.match(/function navigate\(/g) || []).length === 1 && nav.NAV_ROUTES && typeof nav.navigate === 'function');
+      ok('G3/G12. no retired assistant destinations (no studio/advisor routes or aliases)',
+         !('studio' in nav.NAV_ROUTES) && !('advisor' in nav.NAV_ROUTES) && !('studio' in nav.NAV_ALIASES) && !('advisor' in nav.NAV_ALIASES));
+      rendered.length = 0; nav.navigate('org-insights');
+      ok('G13. a legacy alias resolves to the ONE canonical destination (org-insights → leader-home)',
+         rendered.length === 1 && rendered[0] === 'renderIntelligence' && AppStateStub.currentPage === 'leader-home');
+      rendered.length = 0; nav.navigate('totally-bogus-destination');
+      ok('G9. an unknown destination fails SAFE to Home (never blank, never a retired identity)',
+         rendered[0] === 'home' && AppStateStub.currentPage === 'home');
+      MemberAppStub._subjectCleared = false; MemberAppStub._wsWorkItemId = 'STALE';
+      nav.navigate('stats');
+      ok('G7/G8. EVERY navigation clears the member subject + assigned-work target (no stale target)',
+         MemberAppStub._subjectCleared === true && MemberAppStub._wsWorkItemId === null);
+    }
+    ok('G2. the dead legacy switchTab router is gone; navigation is one authority', !/switchTab\s*\(tab\)/.test(mv));
+    ok('G18. no second DOMContentLoaded nav binder (one dynamic, permission-filtered binder)',
+       (read('js/app.js').match(/\.nav-item\[data-page\]'\)\.forEach\(item =>/g) || []).length === 1);
+
     // ─────────────── Static frontend guards (no browser harness) ───────────────
     const appjs2 = read('js/app.js');
     ok('D2. no production frontend references the legacy #me-composer element', !/id="me-composer"/.test(html));
@@ -323,7 +365,7 @@ const server = app.listen(0, async () => {
     ok('P1. the second composer input (mw-input) no longer exists in app.js',
        !/id="mw-input"|getElementById\('mw-input'\)/.test(appjs));
     ok('P1. the "MyWorkspace" nav slot routes to the assigned-work surface, not a 2nd composer',
-       /page==='assessments'\)\s*\{\s*if\(typeof MemberApp[^}]*_renderAssessments\(\)/.test(appjs) && !/MyWorkspace\.render\(\)/.test(appjs));
+       /assessments:\s*\(\)\s*=>\s*\{[^}]*_renderAssessments\(\)/.test(appjs) && !/MyWorkspace\.render\(\)/.test(appjs));
 
     console.log(`\n=== assistant-interface-smoke: ${pass} passed, ${fail} failed ===\n`);
     server.close(() => process.exit(fail ? 1 : 0));

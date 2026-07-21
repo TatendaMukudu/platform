@@ -19,7 +19,7 @@ below is the map; the checklist is the order.
 | D | **me-composer** (mood) | `/api/compose` (server) + `#me-composer` (index.html) + `member-view.js:526` | A 2nd capture path (mood/"what happened") outside the unified turn | **done** ✅ |
 | E | **Individual Advisor AI** | `/api/advisor/:memberId/ask` + threads; app.js profile modal | A 2nd chat surface (leader→member). Already canonical (kernel + post-kernel, 45 tests) but still a separate thread/identity | **done** ✅ |
 | F | **`memberResults` raw display projections** | `server.js` (several reads) | Display reads that bypass the canonical assessment projection | low/medium — display-only; retire once the canonical projection covers the fields (see ASSISTANT_RUNTIME.md report 4) |
-| G | **Two nav systems** | app.js `navigate()` + `MemberApp.switchTab` pageMap | Parallel routers that disagreed about what `assessments` shows | low — converge routing once surfaces A–D are unified |
+| G | **Two nav systems** | app.js `navigate()` + `MemberApp.switchTab` pageMap | Parallel routers that disagreed about what `assessments` shows | **done** ✅ |
 
 ## Non-goals (unchanged from the frozen architecture)
 Do **not** redesign the kernel/evidence/action contracts, add parallel systems, rename DB tables,
@@ -57,7 +57,11 @@ or add bespoke capability logic. Consolidate onto the canonical implementation o
   **unchanged** `_advisorKernelReasoning` kernel + `_composeForAudience(leader_support)` post-kernel
   bound. The separate `/api/advisor/:memberId/ask` route, the `ADVISOR_SYSTEM` persona prompt, and the
   Advisor composer are removed; the 45 privacy tests are preserved. See the Cut E section below. **Shipped.**
-- [ ] **G — converge the two nav routers** once A–E land; one page router, permission-based.
+- [x] **G — converge the navigation into one canonical authority.** `navigate()` (app.js) is the sole
+  router: a validated `NAV_ROUTES` destination map + `NAV_ALIASES`, one renderer owner per destination,
+  fail-safe to Home for unknown/retired destinations, and transient assistant-context (member subject +
+  assigned-work target) cleared on every navigation. The dead `MemberApp.switchTab` alias and the
+  redundant second nav binder are removed. See the Cut G section below. **Shipped.**
 - [ ] **F — retire remaining `memberResults` raw display reads** once the canonical projection covers them.
 
 ## Cut D — me-composer / mood check-in (detail)
@@ -232,6 +236,69 @@ one endpoint, canonical contract, directional-not-score, private-never-leaks, as
 server-validated subject, cross-org/unknown no-leak-parity, A→B no bleed, general-turn-no-stale-subject,
 pronoun-no-subject-no-leak, static guards). `advisor-migration-smoke` **45/45** preserved. Full truth
 layer green.
+
+## Cut G — navigation convergence (detail)
+
+**Routers identified:** `navigate(page)` (app.js) was already the primary dispatcher; the only other
+"router" was `MemberApp.switchTab` (a dead old-bottom-nav alias layer, **no callers**) plus a redundant
+second nav-item click binder at DOMContentLoaded (the sidebar is empty until it renders, so it bound
+nothing). Navigation uses **no** location hash / history / query-string for page routing (hashes are used
+only by the auth/invite flow); the "mobile" nav is the **same** `#sidebar-nav` as desktop (a drawer with
+a `.open` class) — so there is **one** destination map for both.
+
+**Canonical router selected:** hardened `navigate()` into the single authority:
+- `NAV_ROUTES` — the one destination → renderer map (one owner per destination, arrow-wrapped).
+- `NAV_ALIASES` — legacy folds (`org-insights` → `leader-home`, `group-health` → `leader-home`)
+  resolved to the ONE canonical destination (no second renderer, no duplicate state).
+- **Validate → fail safe:** an unknown / unavailable / retired destination resolves to **Home** (never a
+  blank container, never a resurrected Studio/Advisor identity); a renderer error also falls back to Home.
+- **One-authority state:** `navigate()` alone updates `.page`/`.nav-item` active classes, the topbar
+  title, `AppState.currentPage`, and closes the mobile drawer.
+
+**Duplicate logic removed:** `MemberApp.switchTab` (dead) and the second DOMContentLoaded nav binder.
+The one dynamic, permission-filtered binder (where `#sidebar-nav` renders) delegates to `navigate()`.
+
+**Destination & alias map:** My Space (`home`, `assessments`, `apps`, `checkin`, `notes`, `inbox`,
+`stats`); Leader (`leader-home`, `leader-people`, `leader-groups`, `data-sources`, `assignments`);
+Management (`org-health`, `analytics`, `intelliq`, `scenarios`, `organisation`, `people`, `alerts`,
+`reports`, `settings`); legacy dashboards (`dashboard`, `members`). Aliases: `org-insights`,
+`group-health` → `leader-home`. **No** `studio` / `advisor` destination or alias exists — retired
+assistant identities cannot be reached or resurrected through navigation.
+
+**Context lifecycle (one place):** every `navigate()` clears the member-support **subject**
+(`clearSubject()`) and the assigned-work **target** (`_wsWorkItemId`) BEFORE rendering, so a general turn
+can never act on a stale member/work context. Explicit entry points (`askAboutMember` / `askAboutWork`)
+navigate first, then set their context — surviving the clear. `_renderMyWorkspace` also clears defensively
+on fresh render. Lens change clears the subject (Cut E). Unconfirmed proposals follow the existing
+proposal lifecycle (a proposal only executes on explicit confirm; navigating away never executes it).
+
+**Permissions:** frontend nav **visibility** already uses capability/permission checks
+(`Auth.canDo(mod.permission)` + `Auth.isLeaderNode()` over `WORKSPACE_MODULES`); server-side enforcement
+of data/actions is unchanged and authoritative. `navigate()` was not given new authorisation power
+(visibility ≠ authorisation); access was not broadened. Unknown/unavailable destinations reveal nothing
+(fail to Home).
+
+**Mobile/desktop:** one markup (`#sidebar-nav`), one destination map, one dispatcher — mobile is the same
+drawer; closing it does not clear or duplicate context (context clearing is owned by `navigate()`).
+
+**Remaining `memberResults` dependencies reserved for Cut F (NOT migrated here):**
+- Backend `memberResults` reads still back the leader-facing **member profile** display
+  (`GET /api/member/:memberId/profile`, app.js `loadBehavioralProfile` ~app.js:4817) reached from the
+  `people` / `leader-people` / `members` destinations, and the leader `GET /api/platform/member-results`
+  view. The canonical router **reaches** these display surfaces but their data source is untouched — this
+  is the precise migration map for Cut F. No `memberResults` read was changed in this cut.
+
+**Test evidence:** `assistant-interface-smoke` 79 → **86** — the real `navigate()` + `NAV_ROUTES`/
+`NAV_ALIASES` evaluated in a stubbed scope (alias→canonical, unknown→Home fail-safe, every-navigation
+clears subject+work), plus static guards (one `navigate()`, no `studio`/`advisor` destinations, `switchTab`
+gone, one nav binder). Full truth layer green.
+
+**Limitations (honest):** no browser harness — DOM-level behaviour (active classes, drawer close, focus)
+is proven by evaluating the real routing logic in a stubbed scope + static guards, not a live DOM.
+Deep-link/Back-Forward page routing is intentionally **not** added (the app has never used hash/history
+for pages; auth/invite hash handling is unchanged). Role-string checks outside navigation
+(e.g. shell selection `role === 'member'` in `launchApp`) are unchanged — they are not navigation
+destinations and were out of scope.
 
 ## Coexistence still in place (documented debt)
 - `/api/workspace/ask` (server) — a **thin shim** over the one `_assistantAnswer` helper (cut B);

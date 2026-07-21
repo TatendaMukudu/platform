@@ -1373,20 +1373,8 @@ const MemberApp = {
     }
   },
 
-  /* ── TAB SWITCHING ──────────────────────────────────────── */
-  async switchTab(tab) {
-    // Translate old bottom-nav tab names to unified workspace page IDs,
-    // then delegate to the workspace navigate() function.
-    const pageMap = {
-      home:      'home',
-      scenarios: 'assessments',
-      checkin:   'checkin',
-      inbox:     'inbox',
-      stats:     'stats',
-    };
-    const page = pageMap[tab] || tab;
-    if (typeof navigate === 'function') navigate(page);
-  },
+  /* [REMOVED] switchTab — a dead legacy bottom-nav alias layer (no callers). Phase-1 Cut G:
+     all navigation goes through the ONE canonical navigate() authority in app.js. */
 
   /* ── INBOX ──────────────────────────────────────────────── */
   async _loadMyGroups() {
