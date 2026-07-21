@@ -336,11 +336,11 @@ const MemberApp = {
       return;
     }
 
-    if (briefEl) briefEl.innerHTML = `
-      <div class="card iq-briefing">
-        <div class="iq-briefing-badge">IntelliQ · already reviewed</div>
-        <div class="iq-briefing-text">${this._escape(d.opening || '')}</div>
-      </div>`;
+    // Greeting + "noticed" are now owned by the ONE Attention surface (opening + Your
+    // Attention). This legacy space no longer renders a second greeting or a second
+    // noticed list — it consumes the same pipeline and shows only what's unique here
+    // (recognition from others, your open questions, your active focuses).
+    if (briefEl) briefEl.innerHTML = '';
 
     // Adaptive check-in — the composer asks what fits where the person is right now.
     const askEl = document.getElementById('composer-ask');
@@ -356,16 +356,9 @@ const MemberApp = {
           <div class="me-row-conf">— ${this._escape(r.by)}</div>
         </div>`).join('')}` : '';
 
-    if (notEl) notEl.innerHTML = (d.noticed && d.noticed.length) ? `
-      <div class="me-section-label">Things I've noticed</div>
-      ${d.noticed.map(x => `
-        <div class="card me-row">
-          <span class="me-dot me-dot-${x.kind === 'pattern' ? 'pattern' : 'shift'}"></span>
-          <div style="flex:1">
-            <div class="me-row-text">${this._escape(x.text)}</div>
-            <div class="me-row-conf">${this._escape(x.confidence || '')}</div>
-          </div>
-        </div>`).join('')}` : '';
+    // "Things I've noticed" is now the "Your Attention" surface above — one pipeline,
+    // one place. This block no longer renders a parallel copy.
+    if (notEl) notEl.innerHTML = '';
 
     if (qEl) qEl.innerHTML = (d.questions && d.questions.length) ? `
       <div class="me-section-label">Still open for you</div>
@@ -381,16 +374,9 @@ const MemberApp = {
     this._focuses  = d.focuses || [];
     if (prepEl) {
       let html = '';
-      if (this._prepared.length) {
-        html += `<div class="me-section-label">Prepared for you</div>` + this._prepared.map((p, i) => `
-          <div class="card me-row">
-            <div style="flex:1" class="me-row-text">${this._escape(p.text)}</div>
-            <div class="me-row-actions">
-              <button class="btn-primary btn-sm" onclick="MemberApp.approvePrepared(${i})">Approve</button>
-              <button class="btn btn-outline btn-sm" onclick="MemberApp.dismissPrepared(${i})">Not now</button>
-            </div>
-          </div>`).join('');
-      }
+      // "Prepared" (a suggested next step) is now shown on its Attention card above —
+      // one pipeline. This space keeps only the ACTIVE FOCUS lifecycle (report outcome),
+      // which is unique here and closes the learn loop.
       if (this._focuses.length) {
         html += `<div class="me-section-label">Your focus</div>` + this._focuses.map(f => `
           <div class="card me-row me-focus-row">

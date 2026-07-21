@@ -3852,28 +3852,24 @@ app.get('/api/me/context', requireAuth, async (req, res) => {
     newSince = lastSeen ? mine.filter(s => new Date(s.ts).getTime() > lastSeen).length : 0;
   } catch (_) {}
 
-  // What the kernel NOTICED — self-relative shifts + structural patterns. Gated,
-  // privacy-safe (labels/directions only, never raw text).
-  const noticed = [];
-  (m?.deviations || []).forEach(d => noticed.push({
-    kind: 'shift', text: `${d.label} is ${d.direction} your usual lately`, confidence: d.confidence || 'tentative',
-  }));
-  (m?.structural || []).forEach(s => noticed.push({
-    kind: 'pattern', text: intel.PATTERN_LABEL[s.type] || s.type, confidence: s.confidence || 'tentative',
-  }));
+  // NOTICED + PREPARED — CONSUME the one canonical pipeline. This endpoint no longer
+  // computes proactive behaviour independently; it reads the same Attention artifacts
+  // (projection → behaviour) as Home, so the two surfaces can never diverge.
+  const _att = _proactiveInsights(code, userId, { audience: 'self', now });
+  const _attInsights = Object.values(_att.groups || {}).flatMap(g => g.insights || []);
+  const noticed = _attInsights.map(i => ({ kind: i.polarity, text: i.headline, confidence: i.kernelConfidence || 'tentative' }));
 
   // The person's OWN open questions — self-owned memory threads (never leave them).
   const questions = (mem.openThreads || []).filter(t => !t.resolved).slice(0, 4)
     .map(t => ({ id: t.id, text: t.text }));
 
-  // Prepared — one gentle, approvable suggestion from the top signal. Carries the
-  // pattern type so approving it can close the loop (Learn) later.
+  // Prepared — the top pipeline suggestion (proposal-gated). One canonical source;
+  // carries the pattern type so approving it can close the loop (Learn) later.
   const prepared = [];
-  const top = (m?.structural || [])[0] || (m?.deviations || [])[0];
+  const _withSug = _attInsights.find(i => i.suggestion && i.suggestion.text);
   const activeFocusTexts = new Set((mem.focuses || []).filter(f => f.status === 'active').map(f => f.text));
-  if (top) {
-    const ptext = top.type ? (intel.DEFAULT_ACTION[top.type] || 'A small, supportive focus this week.') : 'A small, supportive focus this week.';
-    if (!activeFocusTexts.has(ptext)) prepared.push({ text: ptext, type: top.type || null });
+  if (_withSug && !activeFocusTexts.has(_withSug.suggestion.text)) {
+    prepared.push({ text: _withSug.suggestion.text, type: _withSug.patternType || null });
   }
 
   // Returning from a quiet spell — perceive it as a positive (they came back), and
