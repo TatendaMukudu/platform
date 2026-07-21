@@ -307,10 +307,7 @@ const MemberApp = {
     const hour = new Date().getHours();
     const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
     const g = document.getElementById('home-greeting'); if (g) g.textContent = greeting;
-    const n = document.getElementById('home-name');     if (n) n.textContent = this._name;
-    // Reveal the voice affordance only where the browser supports it.
-    const mic = document.getElementById('composer-mic');
-    if (mic && (window.SpeechRecognition || window.webkitSpeechRecognition)) mic.style.display = '';
+    const n = document.getElementById('home-name');     if (n) n.textContent = this._name || '';
     // The unified MyWorkspace assistant surface is the primary home experience.
     try { this._renderMyWorkspace(this._wsActiveLens || 'today'); } catch (_) {}
     this._renderMeContext();
@@ -2387,21 +2384,42 @@ const MemberApp = {
     this._wsActiveLens = this._wsLenses.includes(lens) ? lens : (this._wsActiveLens || 'today');
     const esc = s => this._escape(String(s == null ? '' : s));
     const tabs = this._wsLenses.map(L =>
-      `<button class="iq-lens${L === this._wsActiveLens ? ' is-active' : ''}" data-lens="${L}" onclick="MemberApp.wsSetLens('${L}')">${L[0].toUpperCase() + L.slice(1)}</button>`).join('');
+      `<button class="iq-lens${L === this._wsActiveLens ? ' is-active' : ''}" role="tab" aria-selected="${L === this._wsActiveLens}" data-lens="${L}" onclick="MemberApp.wsSetLens('${L}')">${L[0].toUpperCase() + L.slice(1)}</button>`).join('');
     el.innerHTML = `
-      <div class="iq-ws-head"><div class="iq-ws-title">MyWorkspace</div>
-        <div class="iq-ws-sub">One IntelliQ. Say anything — a thought, a plan, a question. Nothing is shared unless you say so.</div></div>
-      <div class="iq-lensbar" id="iq-lensbar">${tabs}</div>
-      <div class="iq-attention" id="iq-attention"><div class="card-label">Needs you</div><div class="iq-att-list">Loading…</div></div>
-      <div class="iq-conversation" id="iq-conversation"></div>
+      <div class="iq-lensbar" id="iq-lensbar" role="tablist" aria-label="Workspace views">${tabs}</div>
+      <div class="iq-attention" id="iq-attention" aria-live="polite"></div>
       <div class="iq-subject" id="iq-subject"></div>
       <div class="iq-workctx" id="iq-workctx"></div>
-      <div class="iq-composer">
-        <textarea id="iq-composer-input" class="note-input" rows="2" placeholder="Talk to IntelliQ — a note, a plan, a question, anything. It stays private by default."></textarea>
-        <button class="btn-primary" onclick="MemberApp.wsSend()">Send</button>
-      </div>`;
+      <div class="iq-composer-wrap">
+        <div class="iq-composer" id="iq-composer">
+          <textarea id="iq-composer-input" class="iq-composer-input" rows="1" aria-label="Ask IntelliQ — capture a thought or make a plan"
+            placeholder="Ask, capture a thought, or make a plan…"
+            oninput="MemberApp._wsGrow(this)"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.wsSend()}"></textarea>
+          <button class="iq-send" id="iq-send" type="button" aria-label="Send" title="Send" onclick="MemberApp.wsSend()">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M5 13l7-7 7 7"/></svg>
+          </button>
+        </div>
+        <div class="iq-composer-hint">Private by default · Enter to send, Shift + Enter for a new line</div>
+      </div>
+      <div class="iq-conversation" id="iq-conversation" aria-live="polite"></div>`;
     this._loadAttention();
     this._renderSubjectChip();
+  },
+
+  /* Auto-grow the composer up to a calm maximum; keeps the hero compact. */
+  _wsGrow(el) { if (!el) return; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 180) + 'px'; },
+
+  /* Empty-state chips prefill the ONE composer with a gentle starter and focus it — no new
+     capability, just a faster way into the same assistant turn. */
+  wsChip(kind) {
+    const starters = { reflect: 'Today I\'ve been thinking about ', capture: 'Note to self: ', plan: 'I want to make a plan for ', ask: '' };
+    const i = document.getElementById('iq-composer-input');
+    if (!i) return;
+    i.value = starters[kind] != null ? starters[kind] : '';
+    this._wsGrow(i);
+    i.focus();
+    try { i.selectionStart = i.selectionEnd = i.value.length; } catch (_) {}
   },
 
   wsSetLens(lens) {
@@ -2410,22 +2428,41 @@ const MemberApp = {
     if (!this._wsLenses.includes(lens)) return;
     this._wsActiveLens = lens;
     this.clearSubject();
-    document.querySelectorAll('#iq-lensbar .iq-lens').forEach(b => b.classList.toggle('is-active', b.getAttribute('data-lens') === lens));
+    document.querySelectorAll('#iq-lensbar .iq-lens').forEach(b => {
+      const on = b.getAttribute('data-lens') === lens;
+      b.classList.toggle('is-active', on); b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
     this._loadAttention();
   },
 
   async _loadAttention() {
-    const box = document.querySelector('#iq-attention .iq-att-list');
+    const box = document.getElementById('iq-attention');
     if (!box) return;
+    box.classList.add('is-loading');
+    box.innerHTML = `<div class="iq-att-skel"></div><div class="iq-att-skel"></div>`;
     try {
       const r = await fetch('/api/workspace/today', { headers: this._authHeaders() });
       const j = await r.json();
       const items = (j.attention || []).slice(0, 3);   // ≈3 high-value items
       const esc = s => this._escape(String(s == null ? '' : s));
-      box.innerHTML = items.length
-        ? items.map(a => `<button class="iq-att-item" onclick="MemberApp.wsAttentionInto(${JSON.stringify(esc(a.text)).replace(/"/g, '&quot;')})">${esc(a.text)}</button>`).join('')
-        : `<div class="iq-att-empty">Nothing needs you right now.</div>`;
-    } catch (_) { box.innerHTML = ''; }
+      box.classList.remove('is-loading');
+      if (items.length) {
+        box.classList.remove('iq-attention--empty');
+        box.innerHTML = `<div class="iq-att-label">Needs you</div>` +
+          items.map(a => `<button class="iq-att-item" onclick="MemberApp.wsAttentionInto(${JSON.stringify(esc(a.text)).replace(/"/g, '&quot;')})">${esc(a.text)}</button>`).join('');
+      } else {
+        // Premium empty state — one warm prompt + gentle ways in (each prefills the one composer).
+        box.classList.add('iq-attention--empty');
+        box.innerHTML = `
+          <div class="iq-empty-title">What would you like to do today?</div>
+          <div class="iq-empty-chips">
+            <button class="iq-chip" onclick="MemberApp.wsChip('reflect')">Reflect</button>
+            <button class="iq-chip" onclick="MemberApp.wsChip('capture')">Capture</button>
+            <button class="iq-chip" onclick="MemberApp.wsChip('plan')">Plan</button>
+            <button class="iq-chip" onclick="MemberApp.wsChip('ask')">Ask IntelliQ</button>
+          </div>`;
+      }
+    } catch (_) { box.classList.remove('is-loading'); box.innerHTML = ''; }
   },
 
   // Selecting an attention item brings it INTO the same assistant conversation.
@@ -2437,8 +2474,8 @@ const MemberApp = {
     if (!text) return;
     const thread = document.getElementById('iq-conversation');
     const esc = s => this._escape(String(s == null ? '' : s));
-    if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">${esc(text)}</div><div class="iq-msg iq-msg-iq" id="iq-pending">IntelliQ is thinking…</div>`);
-    if (input) input.value = '';
+    if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">${esc(text)}</div><div class="iq-msg iq-msg-iq iq-pending" id="iq-pending" role="status" aria-label="IntelliQ is thinking"><span class="iq-typing" aria-hidden="true"><i></i><i></i><i></i></span></div>`);
+    if (input) { input.value = ''; this._wsGrow(input); }
     const j = await this.assistantTurn(text);
     const pend = document.getElementById('iq-pending');
     if (pend) { pend.removeAttribute('id'); pend.innerHTML = j ? this._renderAssistant(j) : 'Sorry — I couldn\'t process that just now.'; }

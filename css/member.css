@@ -616,38 +616,80 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .studio-rec-status { font-size: 0.74rem; color: var(--text-muted); margin-top: 0.4rem; min-height: 1em; }
 #studio-rec-btn.recording { color: var(--danger); border-color: var(--danger); }
 
-/* ═══ UNIFIED MYWORKSPACE — one assistant, one composer, contextual lenses ═══ */
-#iq-myworkspace{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:0.9rem}
-.iq-ws-head .iq-ws-title{font-size:1.25rem;font-weight:800}
-.iq-ws-head .iq-ws-sub{font-size:0.82rem;color:var(--text-muted);margin-top:2px}
-.iq-lensbar{display:flex;gap:0.35rem;flex-wrap:wrap;border-bottom:1px solid var(--border,#e5e7eb);padding-bottom:0.5rem}
-.iq-lens{font-size:0.8rem;font-weight:600;padding:0.3rem 0.7rem;border-radius:999px;border:1px solid var(--border,#e5e7eb);background:transparent;color:var(--text-muted);cursor:pointer}
-.iq-lens.is-active{background:var(--accent);color:#fff;border-color:var(--accent)}
-.iq-attention{background:var(--bg-surface,#fff);border:1px solid var(--border,#e5e7eb);border-radius:12px;padding:0.7rem 0.9rem}
-.iq-att-list{display:flex;flex-direction:column;gap:0.35rem;margin-top:0.4rem}
-.iq-att-item{text-align:left;font-size:0.85rem;padding:0.45rem 0.6rem;border-radius:8px;border:1px solid var(--border,#e5e7eb);background:transparent;color:var(--text);cursor:pointer}
-.iq-att-item:hover{background:var(--bg-hover,#f5f6f8)}
-.iq-att-empty{font-size:0.82rem;color:var(--text-muted)}
-.iq-conversation{display:flex;flex-direction:column;gap:0.7rem;max-height:52vh;overflow-y:auto}
-.iq-msg{padding:0.6rem 0.8rem;border-radius:12px;font-size:0.9rem;line-height:1.5}
-.iq-msg-user{align-self:flex-end;background:var(--accent);color:#fff;max-width:82%}
-.iq-msg-iq{align-self:flex-start;background:var(--bg-surface,#fff);border:1px solid var(--border,#e5e7eb);max-width:92%}
-.iq-response-text{margin:0 0 0.4rem}
-.iq-grounded{font-size:0.8rem;color:var(--text-muted);margin-bottom:0.35rem}
-.iq-tag{font-size:0.66rem;font-weight:700;text-transform:uppercase;letter-spacing:0.03em;color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);padding:1px 5px;border-radius:4px;margin-right:4px}
-.iq-privacy{font-size:0.78rem;color:var(--accent);margin:0.3rem 0}
-.iq-proposals{margin-top:0.5rem;display:flex;flex-direction:column;gap:0.5rem}
-.iq-proposal{border:1px solid var(--border,#e5e7eb);border-radius:10px;padding:0.6rem 0.75rem;background:var(--bg,#fafbfc)}
-.iq-proposal-top{display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap}
-.iq-proposal-label{font-weight:700;font-size:0.86rem}
-.iq-proposal-why{font-size:0.78rem;color:var(--text-muted);margin:0.25rem 0 0.45rem}
-.iq-proposal-actions{display:flex;gap:0.35rem;flex-wrap:wrap}
-.iq-badge{font-size:0.66rem;font-weight:700;padding:1px 6px;border-radius:5px}
-.iq-badge-private{color:#2c7a5b;background:#dcefe6}
-.iq-badge-share{color:#9c7a12;background:#f3edd6}
-.iq-badge-draft{color:#35507f;background:#e2e8f3}
-.iq-more>summary{font-size:0.8rem;color:var(--accent);cursor:pointer;margin-top:0.2rem}
-.iq-confirmed{font-size:0.85rem;color:#2c7a5b;font-weight:600}
+/* ═══ UNIFIED MYWORKSPACE — one assistant, one composer, contextual lenses ═══
+   Phase-2 polish: dark-native tokens (no stray white blocks), a hero composer,
+   a premium empty state, and calm cards that breathe. Whitespace over borders. */
+#iq-myworkspace{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:1.15rem}
+
+/* Lenses — quiet pills, generous tap targets, a soft active state (no heavy fill). */
+.iq-lensbar{display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center}
+.iq-lens{font-size:0.82rem;font-weight:500;padding:0.4rem 0.85rem;min-height:34px;border-radius:999px;border:none;background:transparent;color:var(--text-secondary);cursor:pointer;transition:background .18s ease,color .18s ease}
+.iq-lens:hover{background:var(--bg-hover);color:var(--text-primary)}
+.iq-lens.is-active{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--text-primary);font-weight:600}
+.iq-lens:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Attention — no box when it has items (labelled list); a centred hero when empty. */
+.iq-attention{display:flex;flex-direction:column;gap:0.4rem}
+.iq-att-label{font-size:0.72rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--text-muted)}
+.iq-att-item{text-align:left;font-size:0.9rem;line-height:1.45;padding:0.7rem 0.85rem;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-surface);color:var(--text-primary);cursor:pointer;transition:border-color .18s ease,background .18s ease;animation:iq-fade .22s ease both}
+.iq-att-item:hover{background:var(--bg-hover);border-color:var(--border-light)}
+.iq-att-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.iq-attention--empty{align-items:center;text-align:center;gap:0.9rem;padding:1.6rem 0 0.4rem}
+.iq-empty-title{font-size:1.15rem;font-weight:600;color:var(--text-primary);letter-spacing:-0.01em}
+.iq-empty-chips{display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:center}
+.iq-chip{font-size:0.85rem;font-weight:500;padding:0.5rem 1rem;min-height:38px;border-radius:999px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text-secondary);cursor:pointer;transition:all .18s ease}
+.iq-chip:hover{color:var(--text-primary);border-color:var(--accent);background:var(--bg-hover)}
+.iq-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.iq-att-skel{height:44px;border-radius:var(--radius);background:linear-gradient(90deg,var(--bg-surface),var(--bg-hover),var(--bg-surface));background-size:200% 100%;animation:iq-shimmer 1.3s infinite}
+
+/* Composer — the hero. One rounded container; the input is borderless inside it. */
+.iq-composer-wrap{display:flex;flex-direction:column;gap:0.4rem}
+.iq-composer{display:flex;align-items:flex-end;gap:0.5rem;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:0.55rem 0.6rem 0.55rem 0.9rem;transition:border-color .18s ease,box-shadow .18s ease}
+.iq-composer:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+.iq-composer-input{flex:1;background:transparent;border:none;outline:none;resize:none;color:var(--text-primary);font-size:0.95rem;line-height:1.5;padding:0.35rem 0;max-height:180px;min-height:24px}
+.iq-composer-input::placeholder{color:var(--text-muted)}
+.iq-send{flex:none;width:36px;height:36px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;background:var(--accent);color:#fff;cursor:pointer;transition:transform .15s ease,opacity .15s ease,filter .15s ease}
+.iq-send:hover{filter:brightness(1.08)}
+.iq-send:active{transform:scale(0.92)}
+.iq-send:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.iq-composer-hint{font-size:0.72rem;color:var(--text-muted);padding-left:0.3rem}
+
+/* Conversation — quiet bubbles; assistant text carries the weight, not borders. */
+.iq-conversation{display:flex;flex-direction:column;gap:0.85rem;max-height:56vh;overflow-y:auto;padding-top:0.2rem}
+.iq-conversation:empty{display:none}
+.iq-msg{padding:0.65rem 0.9rem;border-radius:14px;font-size:0.92rem;line-height:1.55;animation:iq-fade .22s ease both}
+.iq-msg-user{align-self:flex-end;background:var(--accent);color:#fff;max-width:80%;border-bottom-right-radius:5px}
+.iq-msg-iq{align-self:flex-start;background:var(--bg-card);border:1px solid var(--border);color:var(--text-primary);max-width:92%;border-bottom-left-radius:5px}
+.iq-pending{padding:0.75rem 0.95rem}
+.iq-typing{display:inline-flex;gap:4px;align-items:center}
+.iq-typing i{width:6px;height:6px;border-radius:50%;background:var(--text-muted);animation:iq-bounce 1.2s infinite ease-in-out}
+.iq-typing i:nth-child(2){animation-delay:.16s}.iq-typing i:nth-child(3){animation-delay:.32s}
+.iq-response-text{margin:0 0 0.45rem}
+.iq-grounded{font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.4rem;line-height:1.45}
+.iq-tag{font-size:0.64rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);padding:1px 6px;border-radius:5px;margin-right:5px}
+.iq-privacy{font-size:0.78rem;color:var(--text-secondary);margin:0.35rem 0}
+
+/* Proposal cards — calmer: soft surface, one clear label, generous padding. */
+.iq-proposals{margin-top:0.65rem;display:flex;flex-direction:column;gap:0.55rem}
+.iq-proposals .card-label{font-size:0.72rem;font-weight:600;letter-spacing:0.03em;text-transform:uppercase;color:var(--text-muted);margin-bottom:0.1rem}
+.iq-proposal{border:1px solid var(--border);border-radius:var(--radius);padding:0.8rem 0.9rem;background:var(--bg-surface);animation:iq-fade .2s ease both}
+.iq-proposal-top{display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.15rem}
+.iq-proposal-label{font-weight:600;font-size:0.9rem;color:var(--text-primary)}
+.iq-proposal-why{font-size:0.82rem;color:var(--text-secondary);margin:0.2rem 0 0.6rem;line-height:1.45}
+.iq-proposal-actions{display:flex;gap:0.45rem;flex-wrap:wrap;align-items:center}
+/* Normalize inline proposal buttons — the global .btn-primary is full-width for forms; here the
+   Confirm is the ONE obvious action, sized to content, with secondaries quiet beside it. */
+.iq-proposal-actions .btn-primary{width:auto;padding:0.5rem 1.15rem;font-size:0.84rem;font-weight:600;border-radius:9px}
+.iq-proposal-actions .btn,.iq-proposal-actions .btn-outline,.iq-proposal-actions .btn-ghost{padding:0.45rem 0.95rem;font-size:0.84rem;border-radius:9px}
+.iq-proposal-actions .btn-ghost{border-color:transparent;color:var(--text-muted)}
+.iq-proposal-actions .btn-ghost:hover{border-color:transparent;background:var(--bg-hover);color:var(--text-secondary)}
+.iq-badge{font-size:0.64rem;font-weight:700;padding:2px 7px;border-radius:6px;letter-spacing:0.02em}
+.iq-badge-private{color:#63b591;background:rgba(99,181,145,0.14)}
+.iq-badge-share{color:#cbb154;background:rgba(203,177,84,0.14)}
+.iq-badge-draft{color:#89a0cf;background:rgba(137,160,207,0.16)}
+.iq-more>summary{font-size:0.82rem;color:var(--accent);cursor:pointer;margin-top:0.25rem;list-style:none}
+.iq-more>summary::-webkit-details-marker{display:none}
+.iq-confirmed{font-size:0.88rem;color:#63b591;font-weight:600;animation:iq-fade .2s ease both}
 .iq-corrected{font-size:0.74rem;color:var(--text-muted)}
 /* Current-state check-in proposal (Cut D) — shows what will be recorded before confirming. */
 .iq-checkin-will{font-size:0.74rem;color:var(--text-muted);margin:0.1rem 0 0.4rem}
@@ -665,12 +707,15 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .iq-subject{margin:0.2rem 0}
 .iq-subject-chip{display:inline-flex;align-items:center;gap:0.45rem;font-size:0.76rem;padding:4px 11px;border-radius:10px;background:rgba(124,90,245,0.12);color:var(--text-primary);border:1px solid rgba(124,90,245,0.3)}
 .iq-subject-dot{width:7px;height:7px;border-radius:50%;background:var(--accent,#7c5af5);flex:none}
-.iq-subject-chip button{margin-left:0.3rem;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);cursor:pointer;font-size:0.7rem;padding:1px 7px}
-.iq-composer{display:flex;gap:0.5rem;align-items:flex-end;position:sticky;bottom:0;background:var(--bg,#fff);padding-top:0.4rem}
-.iq-composer textarea{flex:1;resize:vertical}
-@media (prefers-color-scheme:dark){
-  .iq-att-item:hover{background:rgba(255,255,255,0.05)}
-  .iq-badge-private{color:#63b591;background:#182c24}
-  .iq-badge-share{color:#cbb154;background:#302c1a}
-  .iq-badge-draft{color:#89a0cf;background:#1d2637}
+.iq-subject-chip button{margin-left:0.3rem;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-secondary);cursor:pointer;font-size:0.7rem;padding:2px 8px;transition:color .15s ease,border-color .15s ease}
+.iq-subject-chip button:hover{color:var(--text-primary);border-color:var(--border-light)}
+
+/* Subtle, calm motion — 180–220ms, nothing flashy. */
+@keyframes iq-fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@keyframes iq-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@keyframes iq-bounce{0%,80%,100%{transform:scale(0.6);opacity:0.5}40%{transform:scale(1);opacity:1}}
+@media (prefers-reduced-motion:reduce){
+  .iq-att-item,.iq-msg,.iq-proposal,.iq-confirmed{animation:none}
+  .iq-typing i{animation:none}
+  .iq-att-skel{animation:none}
 }
