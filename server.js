@@ -2860,6 +2860,9 @@ app.get('/api/workspace/my-tree', requireAuth, (req, res) => {
    Cached per leader for 2h. This is the push, not the pull. */
 const leaderBriefingCache = {}; // `${code}:${userId}` → { data, ts }
 const BRIEFING_TTL = 2 * 60 * 60 * 1000;
+// Hard cap on OPTIONAL AI enrichment inside the leader briefing, well under the
+// client's 14s abort. The deterministic projection never waits longer than this.
+const AI_BRIEF_MS = 8000;
 
 function _memberLastActivity(code, id, name) {
   let last = 0;
@@ -3395,23 +3398,31 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
   const drops = patternCounts.momentum_drop || 0, ups = patternCounts.quiet_improvement || 0;
   const momentum = drops > ups ? 'softening' : ups > drops ? 'building' : 'steady';
 
-  let narrative = null;
-  try {
-    const brief = [
-      `${members.length} members, ${activeWeek} active this week (participation ${participation}%).`,
-      `Patterns noticed: ${Object.entries(patternCounts).map(([k, v]) => `${v}× ${intel.PATTERN_LABEL[k] || k}`).join(', ') || 'none'}.`,
-      `Overall momentum: ${momentum}.`,
-    ].join('\n');
-    narrative = await ai.complete({
-      tier: 'reason', maxTokens: 200,
-      system: [
-        `You are Platform Intelligence, briefing a leader in 2-3 sentences: the shape of the week and the ONE thing to prioritise. Aggregate only — NEVER name an individual (the leader sees the named list separately). Honest and directional — say "pattern" or "early signal", never "prediction" and never scores.`,
-        _worldviewDirective(code),
-        _domainDirective(code),
-      ].filter(Boolean).join('\n\n'),
-      user: brief,
-    });
-  } catch (_) { /* narrative is optional */ }
+  // AI ENRICHMENT is OPTIONAL and must NEVER block the deterministic briefing past a
+  // tight bound (well under the client's abort). The kernel projection IS the contract;
+  // the narrative + reasoned prompts are enrichment. Skipped entirely with no key,
+  // run in PARALLEL, and each capped by AI_BRIEF_MS — on timeout/failure the
+  // deterministic projection stands on its own. This is why the Team page can no longer
+  // hang on "Reading the signals…": the response no longer waits on slow/retrying AI.
+  const brief = [
+    `${members.length} members, ${activeWeek} active this week (participation ${participation}%).`,
+    `Patterns noticed: ${Object.entries(patternCounts).map(([k, v]) => `${v}× ${intel.PATTERN_LABEL[k] || k}`).join(', ') || 'none'}.`,
+    `Overall momentum: ${momentum}.`,
+  ].join('\n');
+  const _capAI = p => Promise.race([
+    Promise.resolve(p).then(v => v, () => undefined),
+    new Promise(r => setTimeout(() => r(undefined), AI_BRIEF_MS)),
+  ]);
+  const narrativeP = ai.enabled() ? ai.complete({
+    tier: 'reason', maxTokens: 200,
+    system: [
+      `You are Platform Intelligence, briefing a leader in 2-3 sentences: the shape of the week and the ONE thing to prioritise. Aggregate only — NEVER name an individual (the leader sees the named list separately). Honest and directional — say "pattern" or "early signal", never "prediction" and never scores.`,
+      _worldviewDirective(code),
+      _domainDirective(code),
+    ].filter(Boolean).join('\n\n'),
+    user: brief,
+  }) : Promise.resolve(null);
+  const [narrative, promptsRaw] = await Promise.all([ _capAI(narrativeP), _capAI(_reasonedPrompts(code, userId, now)) ]);
 
   const data = {
     ok: true,
@@ -3422,7 +3433,7 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
       : `Your ${_vc(code, 'group')} looks steady — ${activeWeek}/${members.length} active, nothing flagged.`),
     rollup: { memberCount: members.length, activeThisWeek: activeWeek, participation, momentum, patternCounts },
     items: top,
-    prompts: await (async () => { try { return await _reasonedPrompts(code, userId, now); } catch (_) { return []; } })(),
+    prompts: Array.isArray(promptsRaw) ? promptsRaw : [],
   };
   intelBriefingCache[cacheKey] = { data, ts: Date.now() };
   res.json(data);
@@ -3791,10 +3802,12 @@ app.get('/api/me/record', requireAuth, async (req, res) => {
   const shifts   = (m?.deviations || []).map(d => ({ label: d.label, direction: d.direction, deviationPct: d.deviationPct, confidence: d.confidence }));
   const trajectory = m?.memberTrajectory || null;
 
-  // The Coach agent reflects — warm, self-relative, values-anchored. Via the gateway.
+  // The Coach agent reflects — warm, self-relative, values-anchored. OPTIONAL AI
+  // enrichment: skipped with no key, and bounded (AI_BRIEF_MS) so this record — which
+  // the Team page awaits in parallel with the briefing — can never stall the surface.
   let reflection = null;
   const enoughToReflect = (m?.moodSeries?.length || 0) >= 1 || Object.keys(portrait).length > 0 || goals.length > 0;
-  if (enoughToReflect) {
+  if (enoughToReflect && ai.enabled()) {
     try {
       // The person's own confidence-gated understanding shapes STYLE only.
       const understanding = agents.personModel.understanding(userAiProfiles[`${code}:${userId}`]?.model);
@@ -3804,7 +3817,10 @@ app.get('/api/me/record', requireAuth, async (req, res) => {
         trajectory, hasSensitiveContext: !!m?.hasSensitiveContext,
         understanding,
       });
-      reflection = await ai.complete({ tier: 'reason', system: [system, _domainDirective(code, { userId })].filter(Boolean).join('\n\n'), user, maxTokens: 220 });
+      reflection = await Promise.race([
+        ai.complete({ tier: 'reason', system: [system, _domainDirective(code, { userId })].filter(Boolean).join('\n\n'), user, maxTokens: 220 }),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('ai-timeout')), AI_BRIEF_MS)),
+      ]);
       // Belt-and-suspenders: strip any private span that could have slipped in.
       reflection = privacy.redact(reflection, m?.privateStrings || []);
     } catch (_) { reflection = null; }

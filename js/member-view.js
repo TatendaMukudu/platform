@@ -304,8 +304,7 @@ const MemberApp = {
   /* ── HOME ───────────────────────────────────────────────── */
   // ── The "Me" context — proactive, reasoning-first home (Individual Experience) ──
   _renderHome() {
-    const hour = new Date().getHours();
-    const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+    const greeting = (typeof iqGreeting === 'function') ? iqGreeting() : 'Good day';
     const g = document.getElementById('home-greeting'); if (g) g.textContent = greeting;
     const n = document.getElementById('home-name');     if (n) n.textContent = this._name || '';
     // The unified MyWorkspace assistant surface is the primary home experience.
@@ -1097,7 +1096,7 @@ const MemberApp = {
     if (!this.mood) { this.showToast('Pick a mood first', 'warning'); return; }
     const noteEl = document.getElementById('checkin-note');
     const note   = (noteEl?.value || '').trim();
-    if (!note) { this.showToast('Add a line or two — IntelliQ reads it', 'warning'); return; }
+    if (!note) { this.showToast('Add a line or two — private unless you choose to share', 'warning'); return; }
 
     const btn = document.getElementById('checkin-submit-btn');
     btn.textContent = 'Sending…'; btn.disabled = true;

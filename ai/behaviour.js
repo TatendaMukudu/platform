@@ -34,26 +34,18 @@ const BUCKET = { risk: 'needs_attention', neutral: 'needs_attention',
                  opportunity: 'opportunities' };
 const BUCKET_LABEL = { needs_attention: 'Needs attention', worth_celebrating: 'Worth celebrating', opportunities: 'Opportunities' };
 const BUCKET_EMPTY = {
-  needs_attention:   { self: 'Nothing needs you right now.',                self_leader: '', leader: 'Nothing needs your attention right now.' },
-  worth_celebrating: { self: 'Nothing to celebrate just yet — keep going.', leader: 'No standout progress to flag this week.' },
-  opportunities:     { self: 'No new opportunities right now.',             leader: '' },
+  needs_attention:   { self: 'Nothing needs your attention right now.',      leader: 'Nothing needs your attention right now.' },
+  worth_celebrating: { self: 'Nothing to celebrate just yet — keep going.',  leader: 'No standout progress to flag this week.' },
+  opportunities:     { self: 'No new opportunities right now.',              leader: '' },
 };
 
 // SILENCE copy — the absence of attention is a confident, intentional state, not a
-// void. Deterministically chosen (by day) so it varies gently without randomness.
+// void. ONE canonical line per audience, so every surface says the same calm thing.
 const CALM = {
-  self:   ['Nothing needs you right now — you’re in a steady place.',
-           'All quiet — a good moment to plan ahead or capture a thought.',
-           'Nothing is pressing right now. A calm moment is worth having.'],
-  leader: ['Nothing needs your attention right now.',
-           'All steady across your people right now.',
-           'A quiet week so far — nothing stands out to act on.'],
+  self:   'Nothing needs your attention right now — you’re in a steady place.',
+  leader: 'Nothing needs your attention right now — all steady across your people.',
 };
-function _calm(audience, now) {
-  const set = CALM[audience] || CALM.self;
-  const day = Math.floor((Number.isFinite(now) ? now : Date.now()) / 86400000);
-  return set[day % set.length];
-}
+function _calm(audience) { return CALM[audience] || CALM.self; }
 
 /* The bucket an insight is delivered into — derived from its polarity. */
 function bucketOf(insight) { return (insight && BUCKET[insight.polarity]) || 'needs_attention'; }

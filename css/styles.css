@@ -2476,3 +2476,6 @@ details.intel-collapse[open] > summary::after { transform: rotate(90deg); }
 .ls-body{font-size:0.8rem;color:var(--text-secondary);line-height:1.5;margin-top:0.2rem}
 .ls-approach{font-size:0.76rem;color:var(--text-secondary);margin-top:0.4rem}
 .ls-approach span{color:var(--text-muted);font-weight:600}
+
+/* Team attention — "Worth recognising" reads as a positive, not a warning. */
+.intel-section--positive b { color: var(--success); }

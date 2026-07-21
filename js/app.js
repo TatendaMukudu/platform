@@ -2,6 +2,16 @@
    PLATFORM — MAIN APPLICATION
    ============================================================ */
 
+/* ONE greeting authority for the client. Thresholds MATCH the behaviour layer
+   (ai/behaviour.js: <12 morning · <18 afternoon · else evening) so the page
+   greeting and the proactive greeting can never disagree. Every client site that
+   needs a time-of-day word calls this — no duplicated greeting logic. */
+function iqTimeOfDay(now) {
+  const h = new Date(Number.isFinite(now) ? now : Date.now()).getHours();
+  return h < 12 ? 'morning' : h < 18 ? 'afternoon' : 'evening';
+}
+function iqGreeting(now) { return 'Good ' + iqTimeOfDay(now); }
+
 /* ════════════════════════════════════════════════════════════
    MEMBER ONBOARDING FLOW
    Shown to any invited user whose profileComplete !== true.
@@ -1119,8 +1129,7 @@ function _checkCoachDailyCheckin() {
   // Set role-specific prompt
   const role   = Auth.currentUser?.role || 'coach';
   const name   = AppState.adminName.split(' ')[0];
-  const hour   = new Date().getHours();
-  const tod    = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+  const tod    = iqTimeOfDay();
 
   const prompts = {
     superadmin: `Good ${tod}, ${name}. How's the organisation running? Anything at the top of your mind — people, decisions, things you're tracking?`,
@@ -6461,6 +6470,17 @@ async function renderIntelligence(refresh) {
         ${me.trajectory ? `<div class="intel-you-dir">Your direction: <b>${_escAdvisor(_trajWord(me.trajectory))}</b></div>` : ''}
       </div>` : '';
 
+    // Attention is not only problems: balance WORTH RECOGNISING (positive patterns the
+    // kernel already found) with NEEDS YOUR ATTENTION. Split by the item's own
+    // patternType — no new reasoning, just a projection of existing findings.
+    const POSITIVE = new Set(['recovering', 'quiet_improvement']);
+    const recognise = (d.items || []).filter(it => POSITIVE.has(it.patternType));
+    const needs     = (d.items || []).filter(it => !POSITIVE.has(it.patternType));
+    const teamSections = (recognise.length || needs.length)
+      ? `${recognise.length ? `<div class="intel-section intel-section--positive"><b>Worth recognising</b> — ${recognise.length} ${_v(recognise.length === 1 ? 'member' : 'members')} doing well</div><div class="intel-list">${recognise.map(_intelCard).join('')}</div>` : ''}
+         ${needs.length ? `<details class="intel-collapse" open><summary class="intel-section"><b>Needs your attention</b> — ${needs.length} ${_v(needs.length === 1 ? 'member' : 'members')} could use you</summary><div class="intel-list">${needs.map(_intelCard).join('')}</div></details>` : ''}`
+      : `<div class="intel-section"><b>Your ${_v('members')}</b> — all steady this week</div><div class="intel-empty">Nothing needs your attention right now — all steady across your people. When a pattern emerges, it appears here with the evidence and a suggested next step.</div>`;
+
     el.innerHTML = `
       ${youStrip}
       <div id="team-prompts"></div>
@@ -6470,9 +6490,7 @@ async function renderIntelligence(refresh) {
         <div class="intel-summary-text">${_escAdvisor(d.summary || '')}</div>
         <button class="intel-refresh" title="Rebuild" onclick="renderIntelligence(true)">↻</button>
       </div>
-      ${n
-        ? `<details class="intel-collapse" open><summary class="intel-section"><b>Your ${_v('members')}</b> — ${n} could use you today</summary><div class="intel-list">${d.items.map(_intelCard).join('')}</div></details>`
-        : `<div class="intel-section"><b>Your ${_v('members')}</b> — all steady this week</div><div class="intel-empty">Nobody needs your attention right now. When a pattern emerges, it appears here with the evidence and a suggested next step.</div>`}
+      ${teamSections}
       <div class="intel-rollup">
         <div class="intel-stat"><span class="intel-stat-v">${r.memberCount || 0}</span><span class="intel-stat-l">${_v('members')}</span></div>
         <div class="intel-stat"><span class="intel-stat-v">${r.activeThisWeek || 0}/${r.memberCount || 0}</span><span class="intel-stat-l">active this week</span></div>

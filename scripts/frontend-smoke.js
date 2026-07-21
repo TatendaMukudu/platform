@@ -122,16 +122,68 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
       await page.evaluate(pg => { if (typeof navigate === 'function') navigate(pg); }, p);
       await page.waitForTimeout(300);
       ok(`[${label}] navigate('${p}') — no error boundary`, !(await boundary()));
+      // REFRESH on this route: a real reload must also boot cleanly (catches boot-time
+      // parse/init errors that only a fresh load surfaces).
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.waitForTimeout(700);
+      ok(`[${label}] refresh on '${p}' — no error boundary`, !(await boundary()));
     }
+
+    // LOADING RESOLVES: no proactive/leader surface may sit forever on a spinner.
+    // (Team = "Reading the signals…"; member Home = attention/opening.)
+    const stuck = await page.evaluate(() => {
+      const t = document.body.innerText || '';
+      return /Reading the signals|Building timeline…|Reading the directional picture/.test(t);
+    });
+    ok(`[${label}] no surface is stuck on a loading state`, !stuck);
+
     ok(`[${label}] zero uncaught JS errors across all pages`, errors.length === 0);
     errors.slice(0, 6).forEach(e => console.log('        ', e));
+    return errors;
+  };
+
+  // Exercise the leader Support view (member timeline modal) + morning check-in —
+  // routes the base smoke never opened, and the ones the pass flagged.
+  const runLeaderExtras = async (user) => {
+    const token = issueToken(user.id, CODE, user.role);
+    const auth  = JSON.stringify({ user, org: { orgCode: CODE, orgName, orgMode: '' }, token, permissions: null });
+    const ctx   = await browser.newContext();
+    const page  = await ctx.newPage();
+    const errors = [];
+    const IGNORE = /\b(Chart|XLSX|JSZip)\b is not defined/;
+    page.on('pageerror', e => { if (!IGNORE.test(e.message)) errors.push(`pageerror: ${e.message}`); });
+    await page.route('**/*', r => { const u = r.request().url(); return (u.startsWith(base) || u.startsWith('data:')) ? r.continue() : r.abort(); });
+    await page.addInitScript(a => { try { localStorage.setItem('iq_auth', a); } catch (_) {} }, auth);
+    await page.goto(base + '/', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1400);
+    const boundary = () => page.evaluate(() => document.body.innerText.includes('Something went wrong loading IntelliQ'));
+    // Load the People page so the roster is populated, then open the first member's
+    // Support timeline (viewMemberTimeline).
+    await page.evaluate(() => { if (typeof navigate === 'function') navigate('people'); });
+    await page.waitForTimeout(900);
+    const opened = await page.evaluate(() => {
+      const list = (window.AppState && Array.isArray(AppState.members)) ? AppState.members : [];
+      const m = list.find(x => x && (x.userId || x.id));
+      if (!m || typeof viewMemberTimeline !== 'function') return 'no-member';
+      viewMemberTimeline(m.name, m.userId || m.id); return 'ok';
+    });
+    await page.waitForTimeout(1200);
+    ok(`[leader] Support timeline opens without the error boundary`, !(await boundary()));
+    ok(`[leader] Support timeline resolves (not stuck on "Building timeline…")`,
+       !(await page.evaluate(() => /Building timeline…/.test((document.getElementById('member-timeline-content')||{}).innerText || ''))));
+    ok(`[leader] Support view zero uncaught JS errors`, errors.length === 0);
+    errors.slice(0, 6).forEach(e => console.log('        ', e));
     await ctx.close();
+    return errors;
   };
 
   try {
-    await runSession('member', member, ['home', 'checkin', 'notes', 'assessments', 'apps', 'inbox']);
+    const e1 = await runSession('member', member, ['home', 'checkin', 'notes', 'assessments', 'apps', 'inbox']);
     // Coach now also has their own "Me" space (id 'home') alongside the team view.
-    await runSession('coach',  coach,  ['home', 'assessments', 'apps', 'leader-home', 'leader-people', 'people', 'organisation', 'settings']);
+    const e2 = await runSession('coach',  coach,  ['home', 'assessments', 'apps', 'leader-home', 'leader-people', 'people', 'organisation', 'settings']);
+    const e3 = await runLeaderExtras(coach);
+    // Surface the exact parse/runtime error text (e.g. "Unexpected token") if any slipped through.
+    [...e1, ...e2, ...e3].filter(x => /Unexpected token|SyntaxError/i.test(x)).forEach(x => console.log('  ‼ PARSE ERROR:', x));
   } catch (e) {
     fail++; console.log('  ✗ smoke threw:', e.message);
   } finally {
