@@ -15,6 +15,7 @@ const privacy    = require('./ai/privacy');
 const lenses     = require('./ai/lenses');
 const valuesLens = require('./ai/values');
 const embeddings = require('./ai/embeddings');
+const retrieval  = require('./ai/retrieval');
 const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
@@ -98,7 +99,7 @@ function scheduleSave() {
         rawEvidence, evidenceLog, orgMappings,
         syncRuns, failedRecords, webhookDeliveries,
         orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
-        proactivePrefs, insightSuppression,
+        proactivePrefs, insightSuppression, answerFeedback,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -5202,6 +5203,7 @@ function _recordEvidence(code, envInput, rawRecord) {
     if (samePayload) return { stored: false, duplicate: true, id: prior.id, promotable: false, envelope: prior };
     prior.status = 'superseded'; prior.supersededBy = env.id; prior.supersededAt = new Date().toISOString();
     _withdrawSignal(code, prior);   // the old signal is withdrawn; the corrected one promotes below
+    try { _evictEvidenceVector(code, prior.id); } catch (_) {}  // stale vector must not linger
     env.correctionOf = prior.id;
   }
   seen.set(key, env);
@@ -7411,6 +7413,102 @@ app.get('/api/workspace/today', requireAuth, (req, res) => {
    endpoint, so there is a SINGLE reasoning implementation — no parallel truth path. Work/org-scoped
    questions exclude private evidence BEFORE context is built; personal questions are owner-scoped.
    Post-kernel bounded: cites only authorised evidence, never raises confidence or drops limits. */
+/* ═══════════════════════════════════════════════════════════════════════════
+   GROUNDED RETRIEVAL — one governed entry point over canonical evidence.
+
+   question → authorised evidence scope (via the ONE gateway) → source-evidence
+   candidates → hybrid ranking → inspectable grounding artifact. Authorisation
+   happens BEFORE any content is available to answer composition: unauthorised
+   evidence is never even a candidate (not retrieved-then-redacted). Pure ranking +
+   answering live in ai/retrieval.js. This is the single retrieval authority every
+   surface reuses — no endpoint builds its own private retrieval.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const evidenceVectors = {};  // code → Map(evidenceId → { hash, vec, visibility, type, indexedAt }) — idempotent index
+const answerFeedback  = {};  // code → [ answer-feedback record ] — NEVER source evidence
+
+function _contentHash(s) { let h = 5381; const str = String(s == null ? '' : s); for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0; return h.toString(36); }
+function _isTextEvidence(env) { const t = env && env.valueText; return !!t && String(t).trim().length >= 3; }
+
+/* Idempotent embedding of ONE source-evidence envelope. Re-indexing unchanged text
+   (same content hash) is a no-op — never a duplicate vector. Generated/derived
+   evidence is refused. The embedding vector itself is only fetched when an
+   embedding key is configured; the hash bookkeeping (and thus idempotency +
+   eviction) works with no key. */
+async function _indexEvidence(code, env) {
+  if (!env || !_isSourceEvidence(env) || !_isTextEvidence(env)) return { indexed: false, reason: 'ineligible' };
+  const store = evidenceVectors[code] || (evidenceVectors[code] = new Map());
+  const hash = _contentHash(env.valueText);
+  const prior = store.get(env.id);
+  if (prior && prior.hash === hash) return { indexed: false, reason: 'idempotent_skip' };
+  let vec = null;
+  if (embeddings.enabled()) { try { vec = await embeddings.embed(env.valueText); } catch (_) {} }
+  store.set(env.id, { hash, vec, visibility: env.visibility, type: env.type, indexedAt: Date.now() });
+  return { indexed: true, semantic: !!vec };
+}
+function _evictEvidenceVector(code, evidenceId) { const s = evidenceVectors[code]; if (s) s.delete(evidenceId); }
+
+/* THE governed retrieval boundary. Returns an inspectable grounding artifact; never
+   mutates evidence or executes anything. `purpose` carries the SAME audience
+   semantics as the kernel (personal_assistance / leader_support / org / etc.). */
+function _retrieveGrounding({ code, requesterId, subjectId, purpose, query, evidenceTypes, limit }) {
+  purpose = purpose || 'personal_assistance';
+  // 1. AUTHORISE FIRST — the one gateway decides the visible set. Unauthorised
+  //    evidence is never a candidate (absent before composition, not redacted after).
+  const authorised = _kernelEvidence(code, { purpose, viewerId: requesterId, subjectId });
+  const authIds = new Set(authorised.map(e => e.evidenceId));
+  const log = evidenceLog[code] || [];
+  let nonSource = 0;
+  const candidates = [];
+  for (const env of log) {
+    if (!authIds.has(env.id)) continue;                    // gate: only ever the authorised set
+    if (!_isSourceEvidence(env)) { nonSource++; continue; } // exclude generated/derived/summaries
+    if (!_isTextEvidence(env)) continue;
+    if (Array.isArray(evidenceTypes) && evidenceTypes.length && !evidenceTypes.includes(env.type)) continue;
+    candidates.push({
+      evidenceId: env.id, passageId: env.id, text: env.valueText,
+      sourceLabel: env.label || null,
+      provenance: { provider: env.provider, source: env.source },
+      visibility: env.visibility,
+      trustTier: retrieval.trustTier({ provider: env.provider, source: env.source }),
+      sourceTimestamp: env.observedAt || env.retrievedAt || null,
+    });
+  }
+  // 2. RANK. Semantic query-time scoring is deferred (needs the async path); lexical +
+  //    authority + freshness rank deterministically now, and are the no-key spine.
+  const ranked = retrieval.rankPassages(candidates, String(query || ''), { now: Date.now() });
+  const FLOOR = 0.12;
+  const above = ranked.filter(p => p.scores.final >= FLOOR);
+  const lim = Number.isInteger(limit) ? limit : 6;
+  const passages = above.slice(0, lim);
+  return retrieval.buildGrounding({
+    queryId: 'rg_' + generateId(), requesterId, purpose, query: String(query || ''),
+    scope: { subjectId: subjectId || null, groupId: null, orgId: code },
+    passages,
+    // Only counts that cannot reveal protected material. `unauthorised` is NEVER
+    // computed/exposed — its very presence could betray that private evidence exists.
+    excludedCounts: { nonSourceEvidence: nonSource, stale: 0, lowRelevance: ranked.length - above.length },
+    limitations: retrieval.userFacingLimitations({ passages }),
+  });
+}
+
+/* Capture a fact the user explicitly asks IntelliQ to remember. PRIVATE by default
+   (owner-only); a broader audience requires the explicit confirmation flow. Recorded
+   as canonical, USER-REPORTED source evidence (never treated as independently
+   verified merely because it was stored). */
+function _captureKnowledge(code, userId, text, opts = {}) {
+  const visibility = (opts.visibility === 'normal' || opts.visibility === 'shared') ? 'normal' : 'private';
+  const label = (String(text).split(/[.\n]/)[0] || 'Remembered').trim().slice(0, 80) || 'Remembered';
+  const r = _recordEvidence(code, {
+    provider: 'user', source: 'reported', subjectId: userId,
+    ownerRef: visibility === 'private' ? userId : null,
+    type: 'knowledge', label, valueText: String(text).slice(0, 4000),
+    observedAt: new Date().toISOString(), retrievedAt: new Date().toISOString(),
+    confidence: 'reported', visibility,
+  });
+  if (r.stored && r.envelope) { _indexEvidence(code, r.envelope).catch(() => {}); }
+  return r;
+}
+
 function _assistantAnswer(code, userId, question) {
   const q = String(question || '').toLowerCase().trim();
   if (!q) return null;
@@ -7419,7 +7517,7 @@ function _assistantAnswer(code, userId, question) {
   const ev = _kernelEvidence(code, { purpose, viewerId: userId, subjectId: workScoped ? undefined : userId });
   const authorised = ev.map(e => e.evidenceId);
 
-  let answer = '', cites = [], confidence = 'medium', limitations = [];
+  let answer = '', cites = [], confidence = 'medium', limitations = [], groundedClaims = [], citations = [], groundingId = null;
   const priv = ev.filter(e => e.visibility === 'private');
   if (/what.*(private|only me)|is.*private/.test(q)) {
     answer = priv.length
@@ -7440,19 +7538,43 @@ function _assistantAnswer(code, userId, question) {
     answer = items.length ? `You have ${items.length} open item${items.length === 1 ? '' : 's'} that may need attention. Want to go through them?` : `Nothing looks stuck right now.`;
     confidence = 'low'; limitations = ['I can only see what you have captured — not everything'];
   } else {
-    // Insufficient support → prefer a grounded clarification over a confident answer.
-    answer = ev.length
-      ? `I can reason over ${ev.length} thing${ev.length === 1 ? '' : 's'} you've shared. Could you say a bit more about what you'd like — to plan, review, or capture something?`
-      : `I don't have enough captured yet to answer that well. Tell me what's on your mind and I'll remember it.`;
-    confidence = ev.length ? 'low' : 'none';
-    limitations = ['limited context'];
+    // GROUNDED RETRIEVAL over authorised free-text evidence (the "answer from what
+    // it holds" path). Authorisation happened in the gateway; compose ONLY from the
+    // returned bundle, validate every claim, and never invent a bridging fact. With
+    // no AI key this is the deterministic extractive answer.
+    const grounding = _retrieveGrounding({ code, requesterId: userId, subjectId: workScoped ? undefined : userId, purpose, query: question, limit: 6 });
+    groundingId = grounding.queryId;
+    const extractive = retrieval.extractiveAnswer(grounding);
+    if (extractive) {
+      // (When an AI key is present, the LLM may re-compose language from THIS bundle
+      //  only; the citation validator below runs regardless and drops any claim that
+      //  does not map to a retrieved passage. No world knowledge is added.)
+      const valid = retrieval.validateCitations(extractive.groundedClaims, grounding);
+      answer = extractive.answer;
+      confidence = extractive.confidence;
+      groundedClaims = valid.kept;
+      citations = extractive.citations;
+      cites = valid.kept.flatMap(c => c.evidenceRefs);
+      limitations = grounding.limitations;
+    } else {
+      // No sufficiently relevant AUTHORISED evidence → say so plainly. Never fabricate,
+      // and never reveal that inaccessible matching evidence might exist.
+      answer = `I don't have enough authorised evidence to answer that yet.`;
+      confidence = 'none';
+      limitations = ['no matching authorised evidence'];
+    }
   }
 
   // Post-kernel bounding — cite only authorised evidence; record the decision artifact.
   const kernelArt = _recordKernelDerivation(code, { type: 'recommendation', result: { question: q }, basis: authorised.length ? authorised.slice(0, 20) : ['none'], confidence, limitations });
   const composed = _composeForAudience(code, kernelArt, { role: 'member', subjectId: userId, viewerId: userId, purpose, text: answer });
   const boundedCites = cites.filter(id => authorised.includes(id));
-  return { answer, purpose, confidence, limitations, cites: boundedCites, bounded: composed.ok };
+  // Grounded claims may only cite authorised evidence (defence in depth over the validator).
+  const boundedClaims = groundedClaims
+    .map(c => ({ ...c, evidenceRefs: (c.evidenceRefs || []).filter(id => authorised.includes(id)) }))
+    .filter(c => c.evidenceRefs.length);
+  return { answer, purpose, confidence, limitations, cites: boundedCites, bounded: composed.ok,
+    groundedClaims: boundedClaims, citations, groundingId };
 }
 
 /* /api/workspace/ask — a thin compatibility shim over the ONE question-answering path
@@ -7463,6 +7585,46 @@ app.post('/api/workspace/ask', requireAuth, (req, res) => {
   const a = _assistantAnswer(code, userId, req.body?.question);
   if (!a) return res.status(400).json({ error: 'question required' });
   res.json({ ok: true, ...a });
+});
+
+/* POST /api/assistant/remember — capture a fact for IntelliQ to retain. PRIVATE by
+   default; a broader audience requires an explicit confirmation (visibility never
+   increases silently). Stored as canonical USER-REPORTED source evidence. */
+app.post('/api/assistant/remember', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const text = String(req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'text required' });
+  const wantsShared = req.body?.visibility === 'normal' || req.body?.visibility === 'shared';
+  if (wantsShared && req.body?.confirmVisibilityIncrease !== true) {
+    return res.status(409).json({ error: 'visibility_increase_requires_confirmation', from: 'private', to: 'normal' });
+  }
+  const r = _captureKnowledge(code, userId, text, { visibility: wantsShared ? 'normal' : 'private' });
+  scheduleSave();
+  res.json({ ok: true, stored: !!r.stored, evidenceId: r.id || null, visibility: wantsShared ? 'normal' : 'private' });
+});
+
+/* POST /api/assistant/answer-feedback — the smallest clean answer-quality hook.
+   Records helpful / used-evidence / corrected + the ranking version. NEVER becomes
+   source evidence. A user-confirmed correction may create user-reported knowledge
+   through the normal capture path. */
+app.post('/api/assistant/answer-feedback', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  const rec = {
+    queryId: String(b.queryId || ''), requesterId: userId,
+    helpful: b.helpful === true, usedEvidenceIds: Array.isArray(b.usedEvidenceIds) ? b.usedEvidenceIds.slice(0, 20) : [],
+    corrected: !!b.corrected, rankingVersion: retrieval.RANKING_VERSION, at: new Date().toISOString(),
+  };
+  (answerFeedback[code] = answerFeedback[code] || []).push(rec);
+  // A confirmed correction is captured as NEW user-reported evidence (never the
+  // answer itself, never automatically) — the normal capture path, private by default.
+  let correction = null;
+  if (b.corrected && typeof b.correctionText === 'string' && b.correctionText.trim()) {
+    const r = _captureKnowledge(code, userId, b.correctionText.trim(), { visibility: 'private' });
+    correction = r.id || null;
+  }
+  scheduleSave();
+  res.json({ ok: true, correctionEvidenceId: correction });
 });
 
 /* A readable timeline of meaningful activity (owner-only; projections + actions). */
@@ -12169,6 +12331,7 @@ function _loadAllStores(data) {
   Object.assign(reasoningArtifacts, data.reasoningArtifacts || {});
   Object.assign(proactivePrefs,    data.proactivePrefs    || {});
   Object.assign(insightSuppression, data.insightSuppression || {});
+  Object.assign(answerFeedback,    data.answerFeedback    || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -12240,7 +12403,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
   _extractMetricsFromText, _importTeamTable, assistantTurns, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
-  _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback };
+  _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
+  // exported for the truth layer: grounded retrieval over canonical evidence
+  _retrieveGrounding, _indexEvidence, _evictEvidenceVector, _captureKnowledge, _isTextEvidence, _assistantAnswer, evidenceVectors, answerFeedback };
 
 if (require.main === module) (async () => {
   try {
