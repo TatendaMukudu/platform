@@ -1810,21 +1810,22 @@ const MemberApp = {
   },
 
   async _assessSubmit(id, btn) {
-    const row = btn.closest('.me-row');
+    // The card is .aw-item (Phase-2). The per-item chat was removed (Cut C) — the response is the
+    // filled fields. (Previously read .me-row / this._assessChat, both gone — a crash on submit.)
+    const row = btn && btn.closest('.aw-item');
+    if (!row) return;
     const response = {};
     row.querySelectorAll('textarea[data-field]').forEach(t => { if (t.value.trim()) response[t.dataset.field] = t.value.trim(); });
-    // The conversation IS the reflection — capture it so the leader sees the reasoning.
-    const chat = (this._assessChat[id] || []).filter(m => m.role === 'user');
-    if (chat.length) response['In their words (from the conversation)'] = chat.map(m => m.content).join('\n\n');
-    if (!Object.keys(response).length) { this.showToast('Say something to IntelliQ or fill it in first', 'warning'); return; }
-    const orig = btn ? btn.textContent : '';
-    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+    if (!Object.keys(response).length) { this.showToast('Add your response first', 'warning'); return; }
+    if (btn.disabled) return;                                   // double-submit guard
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Sending…';
     try {
       const res = await fetch(`/api/assessments/${id}/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ response }) });
-      if (!res.ok) throw new Error();
-      this.showToast('Sent', 'success');
+      if (!res.ok) throw new Error(res.status === 403 ? 'not allowed' : 'failed');
+      this.showToast('Sent for review', 'success');
       this._renderAssessments();
-    } catch (e) { this.showToast('Could not send', 'error'); if (btn) { btn.disabled = false; btn.textContent = orig; } }
+    } catch (e) { this.showToast('Couldn’t send — please try again', 'error'); btn.disabled = false; btn.textContent = orig; }
   },
 
   /* [REMOVED] _assessDiscussSend / _assessChat — the per-item assignment chat (a second
@@ -2434,7 +2435,8 @@ const MemberApp = {
       const on = b.getAttribute('data-lens') === lens;
       b.classList.toggle('is-active', on); b.setAttribute('aria-selected', on ? 'true' : 'false');
     });
-    this._loadAttention();
+    // Attention is not lens-specific (one authorised Today projection) — don't refetch on tab
+    // switch. Avoids a redundant request and visual jitter; it's loaded once on render.
   },
 
   async _loadAttention() {
@@ -2457,6 +2459,7 @@ const MemberApp = {
         box.classList.add('iq-attention--empty');
         box.innerHTML = `
           <div class="iq-empty-title">What would you like to do today?</div>
+          <div class="iq-empty-sub">Your private space to think with IntelliQ — capture a thought, ask a question, or make a plan. Nothing is shared unless you choose.</div>
           <div class="iq-empty-chips">
             <button class="iq-chip" onclick="MemberApp.wsChip('reflect')">Reflect</button>
             <button class="iq-chip" onclick="MemberApp.wsChip('capture')">Capture</button>
@@ -2470,35 +2473,62 @@ const MemberApp = {
   // Selecting an attention item brings it INTO the same assistant conversation.
   wsAttentionInto(text) { const i = document.getElementById('iq-composer-input'); if (i) i.value = text; this.wsSend(); },
 
-  async wsSend() {
+  async wsSend(retryText) {
     const input = document.getElementById('iq-composer-input');
-    const text = (input?.value || '').trim();
-    if (!text) return;
+    const isRetry = retryText != null;
+    const text = isRetry ? String(retryText) : (input?.value || '').trim();
+    if (!text || this._wsSending) return;                 // guard: no empty send, no double-submit
+    this._wsSending = true;
+    const sendBtn = document.getElementById('iq-send');
+    if (sendBtn) { sendBtn.disabled = true; sendBtn.classList.add('is-loading'); }
     const thread = document.getElementById('iq-conversation');
     const esc = s => this._escape(String(s == null ? '' : s));
-    if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">${esc(text)}</div><div class="iq-msg iq-msg-iq iq-pending" id="iq-pending" role="status" aria-label="IntelliQ is thinking"><span class="iq-typing" aria-hidden="true"><i></i><i></i><i></i></span></div>`);
-    if (input) { input.value = ''; this._wsGrow(input); }
-    const j = await this.assistantTurn(text);
-    const pend = document.getElementById('iq-pending');
-    if (pend) { pend.removeAttribute('id'); pend.innerHTML = j ? this._renderAssistant(j) : 'Sorry — I couldn\'t process that just now.'; }
+    if (thread && !isRetry) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">${esc(text)}</div>`);
+    if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-iq iq-pending" id="iq-pending" role="status" aria-label="IntelliQ is thinking"><span class="iq-typing" aria-hidden="true"><i></i><i></i><i></i></span></div>`);
+    if (input && !isRetry) { input.value = ''; this._wsGrow(input); }
     if (thread) thread.scrollTop = thread.scrollHeight;
+    const r = await this.assistantTurn(text);
+    const pend = document.getElementById('iq-pending');
+    if (pend) {
+      pend.removeAttribute('id');
+      if (r && r.ok) { pend.innerHTML = this._renderAssistant(r.j); }
+      else {
+        // Never a blank bubble or a raw error — say what happened + offer a retry (text preserved).
+        pend.classList.add('iq-msg-error');
+        const msg = r && r.reason === 'auth' ? 'Your session may have expired — please sign in again.'
+          : r && r.reason === 'timeout' ? 'That took too long to come back.'
+          : 'I couldn’t reach IntelliQ just now.';
+        pend.innerHTML = `<div class="iq-error-text">${esc(msg)}</div><button class="iq-retry" type="button" onclick="MemberApp.wsRetry(this, ${JSON.stringify(esc(text)).replace(/"/g, '&quot;')})">Try again</button>`;
+      }
+    }
+    if (thread) thread.scrollTop = thread.scrollHeight;
+    this._wsSending = false;
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.classList.remove('is-loading'); }
   },
 
+  /* Retry a failed turn WITHOUT losing the message — removes the error bubble and re-sends. */
+  wsRetry(btn, text) { const b = btn && btn.closest('.iq-msg'); if (b) b.remove(); this.wsSend(text); },
+
   /* Routes ONE composer input through the unified runtime WITH the active lens as a bounded
-     hint. Returns the response contract; never persists anything (proposals await confirmation). */
+     hint. Returns { ok, j } or { ok:false, reason } so the caller can recover gracefully. A
+     30s timeout prevents a hung request leaving "thinking…" forever. */
   async assistantTurn(text, targetEl) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort('timeout'), 30000);
     try {
-      const r = await fetch('/api/assistant/turn', { method: 'POST',
+      const r = await fetch('/api/assistant/turn', { method: 'POST', signal: ctrl.signal,
         headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
         // subjectMemberId requests LEADER-SUPPORT context — server-validated every turn; the chip
         // makes it explicit, and it is only ever set from an authorised profile entry point.
         body: JSON.stringify({ text, lens: this._wsActiveLens || undefined, workItemId: this._wsWorkItemId || undefined, subjectMemberId: this._wsSubjectMemberId || undefined }) });
+      clearTimeout(timer);
+      if (r.status === 401) return { ok: false, reason: 'auth' };
       const j = await r.json();
-      if (!j || !j.ok) return null;
+      if (!j || !j.ok) return { ok: false, reason: 'server' };
       this._lastTurnId = j.turnId;
       if (targetEl) targetEl.innerHTML = this._renderAssistant(j);
-      return j;
-    } catch (_) { return null; }
+      return { ok: true, j };
+    } catch (e) { clearTimeout(timer); return { ok: false, reason: (e && e.name === 'AbortError') ? 'timeout' : 'network' }; }
   },
 
   // One IntelliQ voice. Distinguishes grounded vs suggested; shows privacy clearly; renders a
@@ -2593,16 +2623,31 @@ const MemberApp = {
   },
 
   async confirmProposal(turnId, proposalId, overrides) {
-    const r = await fetch(`/api/assistant/turn/${turnId}/confirm`, { method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, overrides: overrides || {} }) });
-    const j = await r.json();
+    const cardEl = document.querySelector(`[data-proposal="${proposalId}"]`);
+    // Double-submit guard + button loading state (a demo double-click can never double-confirm).
+    this._confirming = this._confirming || new Set();
+    if (this._confirming.has(proposalId)) return;
+    this._confirming.add(proposalId);
+    const btns = cardEl ? Array.from(cardEl.querySelectorAll('button')) : [];
+    const primary = cardEl ? cardEl.querySelector('.btn-primary') : null;
+    const primaryText = primary ? primary.textContent : '';
+    btns.forEach(b => { b.disabled = true; }); if (primary) primary.textContent = 'Working…';
+    const reset = () => { this._confirming.delete(proposalId); btns.forEach(b => { b.disabled = false; }); if (primary) primary.textContent = primaryText; };
+    const inlineError = (m) => { if (!cardEl) return; cardEl.querySelector('.iq-inline-error')?.remove(); const e = document.createElement('div'); e.className = 'iq-inline-error'; e.textContent = m; cardEl.appendChild(e); };
+    let r, j;
+    try {
+      r = await fetch(`/api/assistant/turn/${turnId}/confirm`, { method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, overrides: overrides || {} }) });
+      j = await r.json();
+    } catch (_) { reset(); inlineError('Couldn’t reach the server — please try again.'); return null; }
     if (r.status === 409 && /visibility_increase/.test(j.error || '')) {
       // Explicit confirmation required to increase audience — never silent.
+      reset();
       if (window.confirm(`Make this visible to ${j.to}? It's private right now.`))
         return this.confirmProposal(turnId, proposalId, { ...(overrides || {}), confirmVisibilityIncrease: true });
       return j;
     }
-    const cardEl = document.querySelector(`[data-proposal="${proposalId}"]`);
+    if (!j || !j.ok) { reset(); inlineError(j && /already/.test(j.error || '') ? 'This was already done.' : 'Couldn’t complete that — please try again.'); return j; }
     if (cardEl && j.ok) {
       if (j.confirmed === 'checkin_log') {
         // The ONE post-confirm outcome (acknowledgement + what IntelliQ noticed) returns into the thread.

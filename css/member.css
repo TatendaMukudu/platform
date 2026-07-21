@@ -636,6 +636,7 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .iq-att-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .iq-attention--empty{align-items:stretch;text-align:center;gap:0.9rem;padding:1.6rem 0 0.4rem}
 .iq-empty-title{font-size:1.15rem;font-weight:600;color:var(--text-primary);letter-spacing:-0.01em;max-width:100%}
+.iq-empty-sub{font-size:0.86rem;color:var(--text-secondary);line-height:1.55;max-width:440px;margin:-0.3rem auto 0}
 .iq-empty-chips{display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:center;width:100%;max-width:440px}
 .iq-chip{font-size:0.85rem;font-weight:500;padding:0.5rem 1rem;min-height:38px;border-radius:999px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text-secondary);cursor:pointer;transition:all .18s ease}
 .iq-chip:hover{color:var(--text-primary);border-color:var(--accent);background:var(--bg-hover)}
@@ -651,6 +652,19 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .iq-send{flex:none;width:36px;height:36px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;background:var(--accent);color:#fff;cursor:pointer;transition:transform .15s ease,opacity .15s ease,filter .15s ease}
 .iq-send:hover{filter:brightness(1.08)}
 .iq-send:active{transform:scale(0.92)}
+.iq-send:disabled{cursor:default}
+.iq-send.is-loading{opacity:0.65}
+.iq-send.is-loading svg{display:none}
+.iq-send.is-loading::after{content:"";width:15px;height:15px;border-radius:50%;border:2px solid rgba(255,255,255,0.45);border-top-color:#fff;animation:iq-spin .7s linear infinite}
+@keyframes iq-spin{to{transform:rotate(360deg)}}
+/* Turn failure — never a blank bubble; explain + let them retry (message preserved). */
+.iq-msg-error{background:color-mix(in srgb,var(--danger) 8%,var(--bg-card));border-color:color-mix(in srgb,var(--danger) 35%,var(--border))}
+.iq-error-text{font-size:0.9rem;color:var(--text-primary);line-height:1.5}
+.iq-retry{margin-top:0.5rem;background:none;border:1px solid var(--border);border-radius:8px;color:var(--text-secondary);font-size:0.8rem;font-weight:500;padding:0.35rem 0.85rem;cursor:pointer;transition:border-color .15s ease,color .15s ease}
+.iq-retry:hover{border-color:var(--accent);color:var(--text-primary)}
+.iq-retry:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.iq-inline-error{margin-top:0.5rem;font-size:0.8rem;color:color-mix(in srgb,var(--danger) 78%,var(--text-primary))}
+@media (prefers-reduced-motion:reduce){.iq-send.is-loading::after{animation:none}}
 .iq-send:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .iq-composer-hint{font-size:0.72rem;color:var(--text-muted);padding-left:0.3rem}
 
