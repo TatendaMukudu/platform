@@ -3921,7 +3921,7 @@ app.get('/api/me/export', requireAuth, (req, res) => {
     profile,
     goals:       memberGoals[uKey] || memberGoals[mKey] || null,
     checkins:    memberCheckins[uKey] || memberCheckins[mKey] || [],
-    results:     memberResults[uKey] || memberResults[mKey] || [],
+    results:     memberResults[uKey] || memberResults[mKey] || [],   // ARCHIVE (Cut F): self data export (GDPR) — raw records, no derivation
     // A person's own signals — BUT exclude third-party welfare/safeguarding
     // observations others recorded about them (sensitive, reporter-protected).
     // GDPR Art 15(4): access must not adversely affect the rights of others.
@@ -9087,6 +9087,9 @@ app.post('/api/member/submit-result', (req, res) => {
     if (sc) sc.status = 'completed';
   }
 
+  // LEGACY MIRROR (Cut F): the scenario-result capture writes to memberResults for archive/display
+  // AND converges to canonical evidence below (_canonicaliseScenarioResult). The canonical copy is
+  // the ONE truth the OS reasons over; this mirror is display/export only.
   if (!memberResults[key]) memberResults[key] = [];
   // Store memberName and memberId inside result for display + future migration
   memberResults[key].push({ ...result, memberName: resolvedName, memberId: memberId || null, submittedAt: new Date().toISOString() });
@@ -9181,6 +9184,10 @@ function _safeCheckinEntry(c) {
    read any member's raw check-ins by name. Now session-scoped and gated: the
    member themselves, or a leader with review_checkins/view_insights within scope;
    check-ins are privacy-filtered for the leader path. */
+/* ARCHIVE / READ-ONLY (Cut F): raw historical scenario results for leader DISPLAY only. It returns
+   stored records verbatim and derives NO conclusion / trajectory / status / priority. The assistant,
+   kernel and leader-support reasoning read canonical evidence, never this. memberResults itself is
+   fully canonicalised (via _canonicaliseScenarioResult) — this route is a legacy display mirror. */
 app.get('/api/platform/member-results', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const { memberName } = req.query;
@@ -9206,6 +9213,8 @@ app.get('/api/platform/member-results', requireAuth, (req, res) => {
 /* ── Platform pulls all results for org ─────────────────────────────────────
    SECURITY (fixed 2026-07-09): was requireAuth-only. Now session-scoped, gated,
    and limited to the caller's visible members. */
+/* ARCHIVE / READ-ONLY (Cut F): org-wide raw historical results for leader DISPLAY only — verbatim
+   records, no derived conclusion/trajectory/status. Not a reasoning input (the OS reads canonical). */
 app.get('/api/platform/org-results', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   if (!code || !userId) return res.status(403).json({ error: 'Forbidden' });
@@ -10104,6 +10113,10 @@ function _aggregateOrgData(code) {
   const thisWeekEntries  = weeklyAssessments[last4WeekKeys[0]] || [];
 
   // ── Assessment/scenario results per member ────────────────────────────────
+  // TECH DEBT (Cut F, documented): legacy ORG-analytics still reads the canonicalised memberResults
+  // MIRROR here (leader org-insights / patterns) rather than canonical assessment evidence directly.
+  // It is NOT the assistant OS (which is memberResults-free). Removal plan: repoint to a canonical
+  // assessment reader in pilot hardening, gated by the intelligence/eval suites. See PHASE1_COMPLETION.md.
   const resultsByMember = {};
   allMembers.forEach(u => {
     const all = [
@@ -10639,6 +10652,9 @@ async function _buildMemberTimeline(code, userId, memberName) {
   });
 
   // Assessment results
+  // TECH DEBT (Cut F, documented): legacy INTERVENTION-outcome measurement reads the canonicalised
+  // memberResults MIRROR here (a leader/management analytics loop), not the assistant OS. Removal
+  // plan: repoint to canonical assessment evidence in pilot hardening. See PHASE1_COMPLETION.md.
   const seenResults = new Set();
   checkinKeys.forEach(k => (memberResults[k] || []).forEach(r => {
     const ts = r.submittedAt;
@@ -11023,183 +11039,10 @@ app.get('/api/intelliq/intervention-analysis', requireAuth, (req, res) => {
    arrives in Phase 2 once the signals table exists.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* Build the two-tier advisor context for a member from current stores.
-   Returns { citable[], privateInforming[], privateStrings[] } where
-   privateStrings are raw spans the redaction pass must never let through. */
-function _buildAdvisorContext(code, member, requesterUser) {
-  const memberId   = member.id;
-  const memberName = member.name || '';
-  const keys       = [userKey(code, memberId), memberKey(code, memberName)];
-
-  const citable          = [];
-  const privateInforming = [];
-  const privateStrings   = [];
-
-  // ── Identity ──────────────────────────────────────────────────────────────
-  citable.push(`Name: ${memberName}${member.role ? ` · role: ${member.role}` : ''}`);
-
-  // ── Alignment anchors — the three frames the advisor reasons across ────────
-  // These are STATED AIMS (not private). They are the references behaviour is
-  // measured against; they are never a hierarchy.
-  //  • Member aims  = the engine (intrinsic goals)
-  //  • Team context = the shared middle (group emphasis / culture)
-  //  • Org values   = the guardrails (ethical boundaries + identity)
-  const goals = normalizeMemberGoals(_memberGoalsFor(code, member));
-  if (goals.length) {
-    citable.push(`MEMBER aim(s): ${goals.map(g => g.title || g.text).filter(Boolean).join('; ')}`);
-  } else {
-    citable.push('MEMBER aim(s): none stated yet — treat as UNANCHORED; the absence is itself the finding.');
-  }
-  (orgGroups[code] || [])
-    .filter(g => (g.memberIds || []).includes(memberId) || (g.leadIds || []).includes(memberId))
-    .forEach(g => citable.push(`TEAM context — ${g.name}${g.description ? `: ${g.description}` : ''}`));
-  const _orgValues = orgValues[code] || [];
-  if (_orgValues.length) citable.push(`ORG values (guardrails): ${_orgValues.join(', ')}`);
-  const _orgGoals = orgGoals[code] || [];
-  if (_orgGoals.length) citable.push(`ORG priorities: ${_orgGoals.map(g => g.text).filter(Boolean).slice(0, 4).join('; ')}`);
-
-  // ── Check-ins: mood numbers citable, free text informs only ───────────────
-  const checkins = [];
-  const seen = new Set();
-  keys.forEach(k => (memberCheckins[k] || []).forEach(c => {
-    const ts = c.ts || c.date; if (!ts || seen.has(ts)) return; seen.add(ts);
-    checkins.push({ mood: c.mood != null ? Number(c.mood) : null, text: (c.text || c.note || '').trim(), ts });
-  }));
-  checkins.sort((a, b) => new Date(b.ts) - new Date(a.ts));
-  const moods = checkins.filter(c => c.mood !== null).map(c => c.mood);
-  if (moods.length) {
-    const recent = moods.slice(0, 10);
-    const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
-    citable.push(`Recent mood: ${Math.round(avg * 10) / 10}/5 across ${recent.length} check-in(s); ${checkins.length} total.`);
-  } else {
-    citable.push('No check-in mood data yet.');
-  }
-  checkins.slice(0, 6).forEach(c => {
-    if (!c.text) return;
-    privateInforming.push(`Check-in note: ${c.text}`);
-    privateStrings.push(c.text);
-  });
-
-  // ── Weekly reflections: completion citable, text informs only ─────────────
-  let weeklyCount = 0;
-  Object.entries(weeklyAssessments).forEach(([key, entries]) => {
-    if (!key.startsWith(code + ':')) return;
-    (entries || []).forEach(e => {
-      if (e.memberName !== memberName && e.memberId !== memberId) return;
-      weeklyCount++;
-      const text = Object.values(e.data || {}).filter(Boolean).join(' | ').trim();
-      if (text) { privateInforming.push(`Weekly reflection: ${text.slice(0, 300)}`); privateStrings.push(text.slice(0, 300)); }
-    });
-  });
-  if (weeklyCount) citable.push(`Completed ${weeklyCount} weekly reflection(s).`);
-
-  // ── Assessment results: scores/strengths/development are citable ──────────
-  const results = [];
-  keys.forEach(k => (memberResults[k] || []).forEach(r => results.push(r)));
-  if (results.length) {
-    const last = results[results.length - 1]?.score || {};
-    const bits = [];
-    if (last.overall != null) bits.push(`latest overall ${last.overall}/100`);
-    if (Array.isArray(last.strengths) && last.strengths.length) bits.push(`strengths: ${last.strengths.slice(0, 3).join(', ')}`);
-    if (Array.isArray(last.development) && last.development.length) bits.push(`development areas: ${last.development.slice(0, 3).join(', ')}`);
-    citable.push(`Assessments completed: ${results.length}${bits.length ? ` (${bits.join('; ')})` : ''}.`);
-  }
-
-  // ── Memory profile: behavioral observations inform reasoning ──────────────
-  const mem = userAiProfiles[`${code}:${memberId}`];
-  if (mem) {
-    // Durable long-term memory (persists even after signals age out) — significant
-    // facts/events. Sensitive ones inform reasoning only; non-sensitive are citable.
-    (mem.keyMemory || []).forEach(k => {
-      const line = `[strong] Remembered${k.firstSeen ? ` (since ${k.firstSeen})` : ''}: ${k.text}`;
-      if (k.sensitive) { privateInforming.push(line); privateStrings.push(k.text); }
-      else citable.push(line);
-    });
-    (mem.openThreads || []).filter(t => !t.resolved).slice(0, 5).forEach(t => {
-      privateInforming.push(`Recurring observation${t.occurrences > 1 ? ` (×${t.occurrences})` : ''}: ${t.text}`);
-      privateStrings.push(t.text);
-    });
-    (mem.priorFollowUps || []).filter(f => !f.resolved).slice(0, 3).forEach(f => {
-      privateInforming.push(`Open follow-up: ${f.commitment}`);
-    });
-  }
-
-  // ── Authored notes: private/restricted inform only; shared are citable ────
-  Object.values(orgNotes)
-    .filter(n => n.orgCode === code && n.authorId === memberId)
-    .forEach(n => {
-      const sens = n.sensitivity || privacy.classifyText(n.content, { type: n.type, tag: n.tag });
-      if (privacy.isPrivate(sens)) {
-        privateInforming.push(`Private note (${sens}): ${n.content.slice(0, 200)}`);
-        privateStrings.push(n.content.slice(0, 200));
-      } else {
-        citable.push(`Shared note: ${n.content.slice(0, 160)}`);
-      }
-    });
-
-  // ── Interventions targeting this member: coach actions are citable ────────
-  (orgInterventions[code] || [])
-    .filter(i => i.targetMember === memberName || i.targetMemberId === memberId)
-    .slice(-5)
-    .forEach(i => {
-      const out = i.outcome?.outcome ? ` → ${i.outcome.outcome}` : '';
-      citable.push(`Past action: ${i.action} [${i.status}]${out}`);
-    });
-
-  // ── Patterns + predictions from the aggregator (derived, citable) ─────────
-  try {
-    const agg = _aggregateOrgData(code);
-    (agg.memberPatterns?.[memberName] || []).forEach(p => citable.push(`Pattern: ${p.label || p.type} (${p.confidence || 'n/a'} confidence)`));
-    (agg.memberPredictions?.[memberName] || []).forEach(p => citable.push(`Trajectory: ${p.prediction}`));
-  } catch (_) { /* aggregation is best-effort here */ }
-
-  // ── Ingested signals — WEIGHTED so the AI doesn't treat noise like results ──
-  // The universal input layer: public/normal = citable, sensitive = inform-only.
-  // Effective weight = base(source) + repetition + recency, so repeated behaviour
-  // and recent hard outcomes outrank one-off notes. Strong/medium are included;
-  // weak one-offs are capped to keep reasoning signal-rich, not noisy.
-  const sigs = _gatherSignals(code, 'member', memberId, 60);
-  // "Repeated behaviour" means the MEMBER repeatedly did the same thing — so only
-  // count signals the member generated themselves. How many times a coach logged
-  // about them is coach activity, not member behaviour, and must not inflate weight.
-  const ownSrcCount = {};
-  sigs.forEach(s => { if (s.createdBy === memberId) ownSrcCount[s.source] = (ownSrcCount[s.source] || 0) + 1; });
-  const nowTs = Date.now();
-  const baseW = s => s.weightNum != null ? s.weightNum : _signalBaseWeight(s.source);
-  // Effective weight drives ORDERING only (recurring + recent surface first)…
-  const effective = s => {
-    let w = baseW(s);
-    if ((ownSrcCount[s.source] || 0) >= 3) w += 1;                   // member's own repeated behaviour
-    if (nowTs - new Date(s.ts).getTime() < 14 * 86400000) w += 0.5;  // recent
-    return w;
-  };
-  const ranked = sigs
-    .map(s => ({ s, w: effective(s) }))
-    .sort((a, b) => b.w - a.w || new Date(b.s.ts) - new Date(a.s.ts));
-
-  let weakUsed = 0;
-  ranked.forEach(({ s }) => {
-    // …but the strength LABEL reflects the source's TRUE weight, so a soft note is
-    // never dressed up as a hard outcome ([strong]) by recency/repetition alone.
-    const tier = _weightTier(baseW(s));
-    if (tier === 'weak' && weakUsed >= 3) return;                     // cap noise
-    if (tier === 'weak') weakUsed++;
-    const src   = SIGNAL_SOURCES[s.source]?.label || s.source;
-    const valid = s.valueText || (s.valueNum != null ? `${s.label ? s.label + ': ' : ''}${s.valueNum}` : null)
-                  || (s.data ? JSON.stringify(s.data).slice(0, 200) : null);
-    if (!valid) return;
-    const tag  = tier === 'strong' ? '[strong] ' : tier === 'weak' ? '[minor] ' : '';
-    const line = `${tag}${src}${s.label && s.valueText ? ` (${s.label})` : ''}: ${valid}`;
-    if (privacy.isPrivate(s.sensitivity)) {
-      privateInforming.push(line);
-      if (s.valueText) privateStrings.push(s.valueText.slice(0, 200));
-    } else {
-      citable.push(line);
-    }
-  });
-
-  return { citable, privateInforming, privateStrings };
-}
+/* [REMOVED] _buildAdvisorContext — Phase-1 Cut F. A legacy RAW-STORE reasoning reader
+   (memberResults + raw check-ins + weeklyAssessments + legacy keyMemory). Its only consumer,
+   the member-profile digest _buildBehavioralProfile, now derives from the CANONICAL
+   _advisorKernelReasoning kernel. No production reasoning path reads memberResults. */
 
 /* ═══════════════════════════════════════════════════════════════════════════
    BEHAVIORAL PROFILE — the AI's evolving understanding of a person
@@ -11266,7 +11109,12 @@ async function _buildBehavioralProfile(code, userId) {
   const member = orgUsers[code]?.[userId];
   if (!member) return null;
   const mem = _getMemory(code, userId);
-  const ctx = _buildAdvisorContext(code, member, member);
+  // Cut F: the member-profile digest now derives from the CANONICAL leader-support kernel
+  // (_advisorKernelReasoning: authorised canonical evidence only, private excluded, sensitive
+  // informs-not-quoted, directional trajectory) — NOT from the retired raw-store reader
+  // (_buildAdvisorContext, which read legacy result mirrors + raw check-ins + legacy memory).
+  const _kr = _advisorKernelReasoning(code, member, member.id);
+  const ctx = { citable: _kr.citable, privateInforming: _kr.informing, privateStrings: _kr.informingStrings };
   const signalCount = _memberSignalCount(code, userId, member.name);
 
   // Feed the durable record back in so the AI keeps continuity across rebuilds.

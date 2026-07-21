@@ -316,6 +316,33 @@ const server = app.listen(0, async () => {
     ok('G18. no second DOMContentLoaded nav binder (one dynamic, permission-filtered binder)',
        (read('js/app.js').match(/\.nav-item\[data-page\]'\)\.forEach\(item =>/g) || []).length === 1);
 
+    // ─────────────── Cut F: the OS decision paths are memberResults-FREE ───────────────
+    // Prove that NO assistant/OS reasoning function derives anything from memberResults — the OS
+    // reads only authorised canonical evidence. (memberResults survives ONLY as an archive/display
+    // mirror + legacy leader-analytics, documented in PHASE1_COMPLETION.md.)
+    {
+      const srvSrc = read('server.js');
+      const bodyOf = (name) => {
+        const start = srvSrc.indexOf('function ' + name + '(');
+        if (start < 0) return '';
+        const after = srvSrc.slice(start + 10);
+        const nextFn = after.search(/\n(?:function |app\.(?:get|post|put|delete)\()/);
+        return nextFn < 0 ? after : after.slice(0, nextFn);
+      };
+      const OS_FNS = ['_assistantTurn','_assistantInterpret','_assistantContext','_assistantAnswer',
+        '_assistantProposals','_leaderSupportTurn','_resolveLeaderSubject','_advisorKernelReasoning',
+        '_assignedWorkContext','_recordCheckin','_buildBehavioralProfile'];
+      const dirty = OS_FNS.filter(fn => /memberResults/.test(bodyOf(fn)));
+      ok('F. NO OS decision path reads memberResults (assistant · answer · leader-support · advisor kernel · assigned-work · check-in · profile digest)',
+         dirty.length === 0);
+      ok('F. the retired raw-store reasoning reader _buildAdvisorContext is deleted',
+         !/function _buildAdvisorContext\(/.test(srvSrc) && /\[REMOVED\] _buildAdvisorContext/.test(srvSrc));
+      ok('F. remaining memberResults reads are labelled archive/display or documented legacy analytics',
+         /ARCHIVE \/ READ-ONLY \(Cut F\)/.test(srvSrc) && /TECH DEBT \(Cut F/.test(srvSrc));
+      ok('F. the member-profile digest derives from the canonical kernel (_advisorKernelReasoning), not memberResults',
+         /_advisorKernelReasoning\(code, member, member\.id\)/.test(srvSrc));
+    }
+
     // ─────────────── Static frontend guards (no browser harness) ───────────────
     const appjs2 = read('js/app.js');
     ok('D2. no production frontend references the legacy #me-composer element', !/id="me-composer"/.test(html));

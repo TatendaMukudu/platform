@@ -1172,43 +1172,9 @@ async function submitCoachCheckin() {
 }
 
 /* ── MEMBER VIEW — unified shell inside main app ────────────────────────── */
-function launchMemberView() {
-  // DEPRECATED — the separate member shell has been removed.
-  // All users now enter the unified IntelliQ workspace via launchApp().
-  console.warn('[ROUTE] launchMemberView() is deprecated — routing through launchApp()');
-  launchApp();
-}
+/* [REMOVED] launchMemberView — deprecated dead shim (no callers); all entry is launchApp(). Cut F sweep. */
 
-function _memberErrorHTML(err) {
-  const detail = err?.message || String(err);
-  return `
-    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;
-                min-height:100vh;padding:2rem;text-align:center;gap:1.2rem;background:#fff">
-      <div style="font-size:2.5rem"></div>
-      <div style="font-weight:700;font-size:1.15rem;color:#111">Something went wrong loading your dashboard.</div>
-      <div style="color:#666;font-size:0.85rem;max-width:320px;line-height:1.5">
-        This is usually a temporary issue. Try refreshing — if it keeps happening, log out and back in.
-      </div>
-      <div style="display:flex;gap:0.8rem;flex-wrap:wrap;justify-content:center;margin-top:0.4rem">
-        <button onclick="location.reload()"
-          style="padding:0.6rem 1.6rem;border-radius:8px;background:#0066ff;color:#fff;border:none;cursor:pointer;font-size:0.9rem;font-weight:600">
-          Retry
-        </button>
-        <button onclick="Auth.logout();location.reload()"
-          style="padding:0.6rem 1.4rem;border-radius:8px;background:#f3f4f6;color:#333;border:none;cursor:pointer;font-size:0.9rem">
-          Log out
-        </button>
-        <button onclick="navigator.clipboard?.writeText(${JSON.stringify(detail)}).then(()=>showToast('Copied','success')).catch(()=>{})"
-          style="padding:0.6rem 1.2rem;border-radius:8px;background:#f3f4f6;color:#555;border:none;cursor:pointer;font-size:0.82rem">
-          Copy error
-        </button>
-      </div>
-      <details style="margin-top:0.5rem;max-width:380px">
-        <summary style="font-size:0.75rem;color:#aaa;cursor:pointer">Error details</summary>
-        <pre style="font-size:0.72rem;color:#999;text-align:left;white-space:pre-wrap;margin-top:0.4rem">${detail}</pre>
-      </details>
-    </div>`;
-}
+/* [REMOVED] _memberErrorHTML — dead (no callers), Phase-1 Cut F sweep. */
 
 /* ── Load real org data from server and populate AppState ─────────────── */
 async function loadRealOrgData() {
