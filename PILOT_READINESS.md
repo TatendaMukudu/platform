@@ -111,5 +111,16 @@ is architectural; everything below is hardening.
 - [ ] Pagination/caching for org-wide reads as data grows.
 - [ ] Frontend role-branch sweep (defence-in-depth; server already enforces).
 
-**Not in scope (deliberate):** proactive intelligence, preference learning, connectors, new AI
-capabilities, attachment/voice UI, interface redesign — these are post-pilot-hardening.
+**Not in scope (deliberate):** connectors, new AI capabilities, attachment/voice UI, interface
+redesign — these remain post-pilot-hardening.
+
+## Update — proactive intelligence layer (shipped)
+
+The **proactive surfacing layer** and its **preference/outcome learning** are now built (previously
+listed here as out of scope). They are a bounded, post-kernel projection — no new detector, no second
+truth path, deterministic, surface-only (every suggestion proposal-gated). See
+`PROACTIVE_INTELLIGENCE.md`, `OUTCOME_LEARNING.md`, `COMMUNICATION_PREFERENCES.md`, and the Part-1
+audit `PROACTIVE_BASELINE.md`. Covered by `scripts/proactive-smoke.js` (38 assertions, in the truth
+layer). This does **not** change the P0/P1/P2 hardening priorities above (accessibility, E2E harness,
+observability) — those still gate a real pilot. The proactive layer inherits the same frontend
+hardening caveats (verified by HTTP + static guards, not DOM/E2E).

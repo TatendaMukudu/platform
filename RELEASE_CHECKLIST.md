@@ -11,9 +11,10 @@ marked _(deferred)_ are documented in `PILOT_READINESS.md` and are acceptable fo
 - [ ] `DB_OPTIONAL=1` is a **test-only** switch — never set in production.
 
 ## Tests
-- [ ] **Must** — `npm test` GREEN: 34 suites, **967 assertions**, hermetic (no DB / no AI key).
+- [ ] **Must** — `npm test` GREEN: 35 suites, hermetic (no DB / no AI key).
   - Includes: assistant-runtime (30), assistant-interface (90), advisor/privacy (45),
-    check-in (59+26), assessment (30/16/25/23), endpoint HTTP authz (217), evidence/privacy/reasoning.
+    check-in (59+26), assessment (30/16/25/23), endpoint HTTP authz (217), evidence/privacy/reasoning,
+    **proactive surfacing (38)**.
 - [ ] `node --check` on all sources (part of the truth layer).
 - [ ] Browser smoke `npm run smoke:frontend` (Playwright) — **not** in the truth layer; run manually
       where a browser is available. _(deferred: no E2E harness in CI)_
@@ -63,6 +64,9 @@ marked _(deferred)_ are documented in `PILOT_READINESS.md` and are acceptable fo
       is supported in all current evergreens — verify Safari ≥ 16.2 for the customer's fleet. _(P2)_
 
 ## Known limitations (acceptable for pilot)
+- Proactive insights are surface-only and deterministic; every suggestion is proposal-gated (no
+  autonomous action). Reliability learning is org-scoped and pattern-type-grained, not per-person.
+  See `PROACTIVE_INTELLIGENCE.md`.
 - Deterministic leader-support narrative (no separate AI persona) — by design.
 - Attachment upload / voice / leader team-import UI deferred (capabilities preserved as functions).
 - Legacy leader/org analytics still read the canonicalised `memberResults` mirror (documented in
