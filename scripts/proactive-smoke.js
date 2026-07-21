@@ -254,6 +254,11 @@ _loadAllStores({
     ev('e1','m',4.2,40), ev('e2','m',4.0,35), ev('e3','m',4.1,30),   // was fine
     ev('e4','m',2.2,6),  ev('e5','m',2.0,3),  ev('e6','m',2.1,1),    // now declining
   ] },
+  // raw check-ins with private text + mood — a leader timeline must never leak these.
+  memberCheckins: { [`${CODE}:m`]: [
+    { memberName: 'Mia', text: 'I felt completely overwhelmed this week', mood: 2, date: '02/07/2026', ts: new Date(now - 6 * DAY).toISOString() },
+    { memberName: 'Mia', text: 'a bit better now', mood: 3, date: '05/07/2026', ts: new Date(now - 2 * DAY).toISOString() },
+  ] },
 });
 _rebuildEmailIndex();
 
@@ -322,6 +327,12 @@ const server = app.listen(0, async () => {
     ok('17b · opening requires auth', (await call('/api/assistant/opening', null)).status === 401);
     ok('17b · opening returns a grounded greeting', openA.status === 200 && !!openA.j.opening && /deserves your attention|nothing needs you/i.test(openA.j.opening.greeting));
     ok('17b · opening HTTP payload leaks no score', !/\d(?:\.\d)?\s*\/\s*5|\d{1,3}\s*%/.test(JSON.stringify(openA.j.opening)));
+
+    // 17c · GOVERNANCE — the legacy leader timeline is reconciled with the privacy model
+    const tl = await call('/api/intelliq/member-timeline?memberId=m', tokLead);
+    ok('17c · leader timeline never quotes a private check-in', tl.status === 200 && !/overwhelmed|a bit better now/i.test(JSON.stringify(tl.j)));
+    ok('17c · leader timeline exposes no private mood number', !/\d(?:\.\d)?\s*\/\s*5/.test(JSON.stringify(tl.j)) && !/"mood":\s*[0-9]/.test(JSON.stringify(tl.j)));
+    ok('17c · leader timeline is marked sanitised', tl.j && tl.j.sanitized === true);
 
     // 18 · Confidence Engine suppression — an unproven type is stood down, org-wide
     noticeFeedback[CODE] = noticeFeedback[CODE] || {};

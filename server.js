@@ -11025,6 +11025,28 @@ function _buildOrgTimeline(code) {
 }
 
 /* ── GET member timeline ───────────────────────────────────────────────── */
+/* Reconcile the legacy timeline with the audience-safe model. A leader viewing
+   ANOTHER person's timeline must see DIRECTION + authorised work evidence only —
+   never a private wellbeing number, a quoted check-in, a quoted reflection, or an
+   AI narrative built from that private text. (Viewing your OWN timeline is full.)
+   This closes the last leader surface that could contradict the privacy promise. */
+function _sanitizeTimelineForLeader(data) {
+  if (!data || !Array.isArray(data.timeline)) return data;
+  const timeline = data.timeline.map(month => {
+    const { moodAvg, narrative, ...rest } = month;   // drop the mood number + private-derived narrative
+    const events = (month.events || [])
+      .filter(e => e.type !== 'checkin')               // individual check-ins would quote private text
+      .map(e => {
+        if (e.type === 'weekly_reflection') return { ...e, data: { role: e.data.role || 'member', text: 'Reflection submitted' } };
+        if (e.type === 'mood_improving')    return { ...e, data: { direction: 'up' } };
+        if (e.type === 'mood_declining')    return { ...e, data: { direction: 'down' } };
+        return e;                                       // goals (shared), assessment scores + interventions (authorised) pass through
+      });
+    return { ...rest, events };
+  });
+  return { ...data, timeline, sanitized: true };
+}
+
 app.get('/api/intelliq/member-timeline', requireAuth, async (req, res) => {
   const { memberId, memberName, refresh } = req.query;
   const g = _requireInsight(req, res); if (!g) return;
@@ -11037,11 +11059,14 @@ app.get('/api/intelliq/member-timeline', requireAuth, async (req, res) => {
     return res.status(403).json({ error: 'Member not in your scope' });
   }
 
+  // Full timeline only when viewing your OWN; anyone else gets the audience-safe shape.
+  const shape = d => (targetId === g.userId) ? d : _sanitizeTimelineForLeader(d);
+
   const cacheKey = `${code}:${memberId || memberName || ''}`;
   const cached  = memberTimelineCache[cacheKey];
 
   if (cached && refresh !== '1' && (Date.now() - cached.ts < TIMELINE_TTL)) {
-    return res.json({ ...cached.data, cached: true });
+    return res.json({ ...shape(cached.data), cached: true });
   }
 
   // Resolve member name from userId if only id provided
@@ -11053,8 +11078,8 @@ app.get('/api/intelliq/member-timeline', requireAuth, async (req, res) => {
 
   try {
     const data = await _buildMemberTimeline(code, memberId || '', resolvedName);
-    memberTimelineCache[cacheKey] = { data, ts: Date.now() };
-    res.json(data);
+    memberTimelineCache[cacheKey] = { data, ts: Date.now() };   // cache RAW; sanitise per-viewer on output
+    res.json(shape(data));
   } catch(err) {
     res.status(500).json({ error: 'Timeline generation failed', detail: err.message });
   }

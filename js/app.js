@@ -2756,8 +2756,8 @@ function _renderMemberTimeline(data, el) {
               if (e.type === 'goal_set')              label = `Goal: "${e.data.goal?.slice(0, 60) || ''}"`;
               else if (e.type === 'weekly_reflection') label = `Weekly: "${e.data.text?.slice(0, 80) || ''}"`;
               else if (e.type === 'assessment')        label = `Assessment score: ${e.data.overall ?? '?'}/100`;
-              else if (e.type === 'mood_improving')    label = `Mood improving (${e.data.from} → ${e.data.to})`;
-              else if (e.type === 'mood_declining')    label = `Mood declining (${e.data.from} → ${e.data.to})`;
+              else if (e.type === 'mood_improving')    label = `Mood trending up`;
+              else if (e.type === 'mood_declining')    label = `Mood softening`;
               else if (e.type === 'checkin' && e.data.text) label = `"${e.data.text.slice(0, 80)}"`;
               else if (e.type === 'intervention_completed') label = `Intervention completed${e.data.outcome ? ` — ${e.data.outcome}` : ''}`;
               else return '';
