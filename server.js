@@ -3893,28 +3893,11 @@ app.get('/api/me/context', requireAuth, async (req, res) => {
   else if (rising)                       ask = "You've been building nicely lately. What's been working that you want to keep doing?";
   else                                   ask = "What happened this week that's worth noting?";
 
-  // A deterministic, honest opening line (no AI needed).
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-  let opening;
-  if (returning)           opening = `Good to see you back${quietDays >= 14 ? ` — it's been about ${quietDays} days` : ''}. No pressure; whenever you're ready, tell me how things are.`;
-  else if (noticed.length) opening = `Since you were last here, I looked over your week — ${noticed.length === 1 ? "there's one thing" : `there are ${noticed.length} things`} worth a moment.`;
-  else if (newSince > 0)   opening = `I've taken in ${newSince} new ${newSince === 1 ? 'thing' : 'things'} since your last visit and folded ${newSince === 1 ? 'it' : 'them'} into your picture.`;
-  else                     opening = `Nothing new demands your attention right now. Add anything on your mind and I'll take it from there.`;
-
-  // If a model is configured, let the Coach VOICE the opening warmly. The
-  // judgment stays deterministic above; the LLM only turns it into words.
-  // Privacy-safe: it sees labels/directions (never raw text) and is redacted.
-  // Skipped for a return (the warm fixed line is the point) and with no key.
-  if (ai.enabled() && !returning) {
-    try {
-      const obs = noticed.map(x => `- ${x.text}`).join('\n') || '- nothing notably different from their own normal lately';
-      const sys = `You are IntelliQ, ${me.name}'s private mirror. Write ONE warm, brief opening (max 2 sentences) that makes them feel seen. Speak to them as "you". Self-relative, no scores, no advice, no invented specifics.`;
-      const usr = `Observations about THEIR OWN recent patterns — never quote or state private detail:\n${obs}\n\nWrite the opening line only.`;
-      const line = await ai.complete({ tier: 'micro', system: sys, user: usr, maxTokens: 90 });
-      if (line && line.trim()) opening = privacy.redact(line.trim(), m?.privateStrings || []);
-    } catch (_) { /* keep the deterministic opening */ }
-  }
+  // The opening greeting is NOT composed here. It is CONSUMED from the one behaviour
+  // layer (the same greeting Home shows), so no surface invents a second opening.
+  const _open = behaviour.opening(_att, { audience: 'self', name: me.name, now });
+  const greeting = _open.greeting;
+  const opening = _open.greeting;
 
   // Mark this visit.
   mem.lastSeen = new Date().toISOString();

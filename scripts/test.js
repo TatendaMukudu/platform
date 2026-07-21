@@ -71,6 +71,7 @@ const SUITES = [
   'assistant-runtime-smoke.js',    // unified MyWorkspace assistant runtime: one composer, bounded turn, confirmable proposals
   'assistant-interface-smoke.js',  // unified MyWorkspace INTERFACE: one composer/identity, lenses as bounded hints, confirmable proposal cards
   'proactive-smoke.js',            // the proactive surfacing layer: post-kernel ProactiveInsight projection, surfacing policy, audience safety, bounded preferences
+  'governance-smoke.js',           // architectural gravity: proactive DELIVERY lives ONLY in ai/behaviour.js; every surface consumes one pipeline
   'connector-harness.js',  // the Connector SDK: identity/confidence + mapping contracts
   'endpoint-smoke.js',   // boots the real app in-process (DB_OPTIONAL) — HTTP authz + Me context
 ];
