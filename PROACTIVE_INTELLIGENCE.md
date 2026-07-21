@@ -1,11 +1,53 @@
-# PROACTIVE_INTELLIGENCE.md — the proactive surfacing layer
+# PROACTIVE_INTELLIGENCE.md — the Attention Engine
 
 > "I noticed something that may deserve your attention."
 
-IntelliQ's first proactive layer. It is a **post-kernel projection**, not a second assistant, not a
-second reasoning engine, and not an LLM scanning the database. It takes intelligence the canonical
-evidence + kernel architecture **already produces** and surfaces it, deterministically, under one
-policy, with audience safety and bounded personalisation.
+IntelliQ's proactive layer is an **Attention Engine**. Attention is not positive or negative; it is
+simply *this matters*. The same kernel that finds a risk also finds a recovery, a milestone, and an
+opportunity — they are **different projections of the same evidence**, not different systems. Home is
+**"Your Attention"**: a balance of what needs action, progress worth celebrating, and opportunities
+worth pursuing. Opening IntelliQ should mean *"understand what matters most right now"* — not *"what's
+wrong."*
+
+It is a **post-kernel projection**, not a second assistant, not a second reasoning engine, and not an
+LLM scanning the database. It takes intelligence the canonical evidence + kernel architecture
+**already produces** and surfaces it, deterministically, under one policy, with audience safety and
+bounded personalisation.
+
+## Polarity and buckets — the core idea
+
+Every insight carries a **polarity** (what kind of thing it is) that is **independent of its
+priority** (how much it matters). A milestone can be high-priority; a risk can be low. Polarity is a
+projection of an existing kernel pattern — no new detector, no new reasoning.
+
+| Polarity | Home bucket | Source | Audience |
+|---|---|---|---|
+| `risk` | **Needs attention** | negative patterns (`momentum_drop`, `withdrawal`, `overload`, `data_gap`, `isolation`, `baseline_shift`, `repeated_concern`, `member_team_divergence`, `invisible_load`, `plateau`) | self + leader (directional) |
+| `progress` | **Worth celebrating** | positive patterns the kernel already emits (`recovering`, `quiet_improvement`) | self + leader (directional) |
+| `milestone` | **Worth celebrating** | deterministic threshold projection (check-in streak) — counting, not reasoning | self (specific) + leader (numberless) |
+| `opportunity` | **Opportunities** | a question derived from a sustained positive pattern | **self only** |
+| `neutral` | **Needs attention** | deterministic attention items (`_composeToday`) | self only |
+
+Rules that make this safe:
+- **Priority ≠ polarity.** Ranking *within* a bucket is by priority, then confidence — never by
+  sentiment. (`ai/proactive._rankCmp`)
+- **Each bucket caps at 3**, and an empty bucket is a first-class calm state. All-empty is a valid
+  whole-surface result.
+- **A leader never receives an `opportunities` bucket about a person.** "Ready for more" or
+  "leadership potential" framed to a supporter is a judgement that could drive unfair decisions and
+  may rest on evidence the member considers private. Opportunities are self-audience-first.
+- **Positive ≠ automatically safe for a leader.** "Recovery has stayed strong for 21 days" *implies a
+  prior dip.* Every positive insight goes through the same `audienceSafe` gate; leader milestones are
+  directional and numberless by construction.
+- **No prediction polarity.** The product's "say pattern/early signal, never prediction" invariant is
+  preserved — there is no `prediction` polarity in this layer.
+
+### Cross-domain: correlation, never causation
+
+The kernel's cross-signal `connections` are labelled correlational, never causal. The Attention Engine
+inherits that discipline: it may surface *"your sleep and match performance have moved together — want
+to look at that?"* (a question), and must never assert *"soccer improved **because** sleep improved."*
+The moat is owning the whole story across domains; the trust comes from refusing to fake causality.
 
 Read `PROACTIVE_BASELINE.md` first — it is the Part-1 audit that proves how much of this substrate
 already existed (pattern detection, directional states, severity ranking, the Confidence Engine,
@@ -62,6 +104,9 @@ One inspectable object. Fields:
 | `patternType` | The kernel pattern (or attention kind) — unchanged from the detector |
 | `audience` | `self` (the person about themselves) or `leader` (an authorised supporter) |
 | `subjectId` / `subjectLabel` | Who it's about; `you` for self, the name for a leader |
+| `polarity` | `risk` / `progress` / `milestone` / `opportunity` / `neutral` — a projection of the pattern |
+| `priority` | `high` / `medium` / `low` — how much it matters, **independent of polarity** |
+| `bucket` | `needs_attention` / `worth_celebrating` / `opportunities` — derived from polarity |
 | `severity` | `high` / `medium` / `low` — **from the kernel finding**, not re-derived |
 | `kernelConfidence` | The kernel's own confidence word |
 | `reliabilityLabel` | The Confidence Engine's honest label (`reliable here` / `promising here` / `calibrating` …) |
@@ -71,16 +116,23 @@ One inspectable object. Fields:
 | `careFlag` | Contentless "there may be private context" nudge |
 | `surfacedAt` | ISO timestamp |
 
-## The surfacing policy (`ai/proactive.surface`)
+## The surfacing policy (`ai/proactive.attention`)
 
-Deterministic and uniform across both surfaces:
+Deterministic and uniform across both surfaces. Groups insights into the three Home buckets and
+returns `{ empty, message, groups: { needs_attention, worth_celebrating, opportunities } }` (a leader
+gets no `opportunities`):
 
-- **Rank** by severity, then kernel confidence, then a stable id tiebreak.
-- **Cap** at **3** priorities. More than three competing things is noise, not attention.
-- **"Nothing needs your attention" is a first-class, valid result** — `{ empty:true, message, insights:[] }`,
-  never an error, never an empty-looking bug. The UI renders the calm premium empty state.
-- **De-duplicate** by `dedupeKey` (same subject+pattern+audience surfaces once, keeping the most severe).
+- **Rank within a bucket** by priority (independent of polarity), then kernel confidence, then a stable
+  id tiebreak.
+- **Cap each bucket at 3.** More than three competing things is noise, not attention.
+- **Empty is first-class.** Each bucket carries `empty` + a calm message; all-empty returns
+  `{ empty:true }` for the whole surface — never an error, never an empty-looking bug.
+- **De-duplicate** by `dedupeKey` (same subject+pattern+audience surfaces once, keeping the highest
+  priority).
 - **Suppress** anything the viewer muted (`insightSuppression`).
+
+(`ai/proactive.surface` — the flat, single-list version — is retained for callers that want an
+ungrouped top-N and for the older tests.)
 
 ## Audience safety (`ai/proactive.audienceSafe`) — the privacy invariant
 
@@ -137,11 +189,12 @@ earning attention — observe → evaluate → learn, closing on the surfaced in
 
 ## Tests
 
-`scripts/proactive-smoke.js` — 38 assertions, registered in the truth layer (`scripts/test.js`),
+`scripts/proactive-smoke.js` — 52 assertions, registered in the truth layer (`scripts/test.js`),
 hermetic (no DB, no AI key): artifact shape + stable id, surfacing cap + empty-valid + ranking +
 dedupe, per-pattern deterministic messages, adversarial audience safety (incl. real seeded data over
 HTTP), proposal-gating, bounded preferences, feedback + suppression, Confidence-Engine suppression,
-and endpoint authorization.
+endpoint authorization, **polarity mapping, bucket grouping, priority-independent ranking, milestone
+determinism + leader-safety, opportunity-as-question, and leader-has-no-opportunities**.
 
 ## Files
 
