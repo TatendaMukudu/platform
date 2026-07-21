@@ -2460,3 +2460,19 @@ details.intel-collapse[open] > summary::after { transform: rotate(90deg); }
 .intel-discovery-area { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); margin-bottom: 2px; }
 .intel-discovery-text { font-size: 0.85rem; line-height: 1.45; color: var(--text-primary); }
 .intel-discovery-basis { font-size: 0.72rem; color: var(--text-muted); margin-top: 2px; }
+
+/* ── Leader SUPPORT card (privacy-safe "how to support") — member timeline modal ── */
+.ls-card{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius);padding:1rem 1.1rem;margin-bottom:1.4rem}
+.ls-card--loading{color:var(--text-muted);font-size:0.82rem}
+.ls-title{font-size:0.98rem;font-weight:700;color:var(--text-primary);letter-spacing:-0.01em}
+.ls-note{font-size:0.76rem;color:var(--text-muted);line-height:1.55;margin:0.35rem 0 0.9rem}
+.ls-empty{font-size:0.82rem;color:var(--text-secondary);line-height:1.5}
+.ls-section{margin-top:0.7rem}
+.ls-section-label{font-size:0.68rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--text-muted);margin-bottom:0.4rem}
+.ls-insight{padding:0.65rem 0.8rem;border-radius:var(--radius-sm);border:1px solid var(--border);border-left:3px solid var(--border-light);background:var(--bg-card);margin-bottom:0.5rem}
+.ls-pol-risk{border-left-color:var(--accent)}
+.ls-pol-progress,.ls-pol-milestone{border-left-color:var(--success)}
+.ls-headline{font-size:0.86rem;font-weight:600;color:var(--text-primary)}
+.ls-body{font-size:0.8rem;color:var(--text-secondary);line-height:1.5;margin-top:0.2rem}
+.ls-approach{font-size:0.76rem;color:var(--text-secondary);margin-top:0.4rem}
+.ls-approach span{color:var(--text-muted);font-weight:600}

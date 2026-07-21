@@ -2670,7 +2670,11 @@ async function viewMemberTimeline(memberName, memberId) {
   title.textContent = memberName + ' — Timeline';
   sub.textContent   = 'Loading…';
   modal.style.display = 'block';
-  content.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--text-muted)">Building timeline…</div>`;
+  // A privacy-safe SUPPORT read sits above the detailed timeline: the leader-audience
+  // Attention picture (directional, care-first, numberless) — "how to support", the
+  // first thing a leader should see. It loads independently of the timeline.
+  content.innerHTML = `<div id="leader-support-slot"></div><div id="member-timeline-body"><div style="text-align:center;padding:2rem;color:var(--text-muted)">Building timeline…</div></div>`;
+  _renderLeaderSupport(memberId, memberName);
 
   const orgCode = AppState.orgCode || '';
   try {
@@ -2679,10 +2683,47 @@ async function viewMemberTimeline(memberName, memberId) {
     if (!res.ok) throw new Error('Failed');
     const data = await res.json();
     sub.textContent = `${data.timeline?.length || 0} months of activity`;
-    _renderMemberTimeline(data, content);
+    _renderMemberTimeline(data, document.getElementById('member-timeline-body') || content);
   } catch(e) {
-    content.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Could not load timeline — ${e.message}</div>`;
+    const body = document.getElementById('member-timeline-body') || content;
+    body.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Could not load timeline — ${e.message}</div>`;
   }
+}
+
+/* The leader SUPPORT card — the privacy-safe answer to "how will a leader know?".
+   Renders the leader-audience Attention Engine read: directional insights (needs
+   attention / worth recognising), care-first, NEVER a private number, quote, or
+   dimension. Points the leader toward a good conversation; it does not replace it.
+   Fails silent (e.g. 403 / thin data) — the timeline still renders below. */
+async function _renderLeaderSupport(memberId, memberName) {
+  const slot = document.getElementById('leader-support-slot');
+  if (!slot) return;
+  if (!memberId) { slot.innerHTML = ''; return; }
+  slot.innerHTML = `<div class="ls-card ls-card--loading">Reading the directional picture…</div>`;
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+  const first = (memberName || '').split(' ')[0] || 'them';
+  try {
+    const res = await authFetch(`/api/proactive/insights/leader/${encodeURIComponent(memberId)}`);
+    if (!res.ok) { slot.innerHTML = ''; return; }              // not authorised / unavailable → hide, show timeline
+    const j = await res.json();
+    const groups = j.groups || {};
+    const section = (key, label) => {
+      const g = groups[key];
+      if (!g || !(g.insights || []).length) return '';
+      return `<div class="ls-section"><div class="ls-section-label">${esc(label)}</div>` +
+        g.insights.map(a => `<div class="ls-insight ls-pol-${esc(a.polarity)}">
+          <div class="ls-headline">${esc(a.headline)}</div>
+          <div class="ls-body">${esc(a.body)}</div>
+          ${a.suggestion && a.suggestion.text ? `<div class="ls-approach"><span>Suggested approach</span> ${esc(a.suggestion.text)}</div>` : ''}
+        </div>`).join('') + `</div>`;
+    };
+    const body = section('needs_attention', 'May need you') + section('worth_celebrating', 'Worth recognising');
+    slot.innerHTML = `<div class="ls-card">
+      <div class="ls-title">How to support ${esc(first)}</div>
+      <div class="ls-note">A directional, privacy-safe read. ${esc(first)}’s private details stay private — this is only what you’re authorised to see, and it points you toward a good conversation, it doesn’t replace one.</div>
+      ${body || `<div class="ls-empty">Nothing stands out right now — often good news. The timeline below has the fuller picture.</div>`}
+    </div>`;
+  } catch (_) { slot.innerHTML = ''; }
 }
 
 function _renderMemberTimeline(data, el) {
