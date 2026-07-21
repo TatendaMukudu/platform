@@ -634,9 +634,9 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .iq-att-item{text-align:left;font-size:0.9rem;line-height:1.45;padding:0.7rem 0.85rem;border-radius:var(--radius);border:1px solid var(--border);background:var(--bg-surface);color:var(--text-primary);cursor:pointer;transition:border-color .18s ease,background .18s ease;animation:iq-fade .22s ease both}
 .iq-att-item:hover{background:var(--bg-hover);border-color:var(--border-light)}
 .iq-att-item:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.iq-attention--empty{align-items:center;text-align:center;gap:0.9rem;padding:1.6rem 0 0.4rem}
-.iq-empty-title{font-size:1.15rem;font-weight:600;color:var(--text-primary);letter-spacing:-0.01em}
-.iq-empty-chips{display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:center}
+.iq-attention--empty{align-items:stretch;text-align:center;gap:0.9rem;padding:1.6rem 0 0.4rem}
+.iq-empty-title{font-size:1.15rem;font-weight:600;color:var(--text-primary);letter-spacing:-0.01em;max-width:100%}
+.iq-empty-chips{display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:center;width:100%;max-width:440px}
 .iq-chip{font-size:0.85rem;font-weight:500;padding:0.5rem 1rem;min-height:38px;border-radius:999px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text-secondary);cursor:pointer;transition:all .18s ease}
 .iq-chip:hover{color:var(--text-primary);border-color:var(--accent);background:var(--bg-hover)}
 .iq-chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -646,7 +646,7 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .iq-composer-wrap{display:flex;flex-direction:column;gap:0.4rem}
 .iq-composer{display:flex;align-items:flex-end;gap:0.5rem;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:0.55rem 0.6rem 0.55rem 0.9rem;transition:border-color .18s ease,box-shadow .18s ease}
 .iq-composer:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
-.iq-composer-input{flex:1;background:transparent;border:none;outline:none;resize:none;color:var(--text-primary);font-size:0.95rem;line-height:1.5;padding:0.35rem 0;max-height:180px;min-height:24px}
+.iq-composer-input{flex:1 1 0%;min-width:0;background:transparent;border:none;outline:none;resize:none;color:var(--text-primary);font-size:0.95rem;line-height:1.5;padding:0.35rem 0;max-height:180px;min-height:24px}
 .iq-composer-input::placeholder{color:var(--text-muted)}
 .iq-send{flex:none;width:36px;height:36px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;background:var(--accent);color:#fff;cursor:pointer;transition:transform .15s ease,opacity .15s ease,filter .15s ease}
 .iq-send:hover{filter:brightness(1.08)}
@@ -699,13 +699,14 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .iq-checkin-ack{margin-top:0.4rem;font-size:0.85rem;color:var(--text-primary);line-height:1.45}
 .iq-checkin-noticed{margin-top:0.3rem;font-size:0.78rem;color:var(--text-muted)}
 /* Assigned-work in the one composer (Cut C) — work-context chip + submit-effect preview. */
-.iq-workctx{margin:0.2rem 0}
-.iq-workctx-chip{display:inline-flex;align-items:center;gap:0.4rem;font-size:0.74rem;padding:2px 9px;border-radius:9px;background:rgba(124,90,245,0.12);color:var(--accent,#7c5af5)}
-.iq-workctx-chip button{background:none;border:none;color:inherit;cursor:pointer;font-size:0.8rem;line-height:1}
-.iq-submit-effect{font-size:0.76rem;color:var(--text-secondary);margin:0.3rem 0 0.4rem;padding:0.4rem 0.55rem;border-left:2px solid var(--accent,#7c5af5);background:rgba(127,127,127,0.06);border-radius:0 6px 6px 0;line-height:1.5}
+.iq-workctx{margin:0.1rem 0}
+.iq-workctx-chip{display:inline-flex;align-items:center;gap:0.4rem;font-size:0.76rem;padding:5px 11px;border-radius:999px;background:color-mix(in srgb,var(--accent2) 14%,transparent);color:var(--text-primary);border:1px solid color-mix(in srgb,var(--accent2) 32%,transparent)}
+.iq-workctx-chip button{margin-left:0.2rem;background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:0.8rem;line-height:1;transition:color .15s ease}
+.iq-workctx-chip button:hover{color:var(--text-primary)}
+.iq-submit-effect{font-size:0.8rem;color:var(--text-secondary);margin:0.3rem 0 0.5rem;padding:0.55rem 0.7rem;border-left:2px solid var(--accent2);background:var(--bg-base);border-radius:0 var(--radius-sm) var(--radius-sm) 0;line-height:1.55}
 /* Leader member-support subject chip (Cut E) — explicit, visible, clearable context header. */
 .iq-subject{margin:0.2rem 0}
-.iq-subject-chip{display:inline-flex;align-items:center;gap:0.45rem;font-size:0.76rem;padding:4px 11px;border-radius:10px;background:rgba(124,90,245,0.12);color:var(--text-primary);border:1px solid rgba(124,90,245,0.3)}
+.iq-subject-chip{display:inline-flex;align-items:center;gap:0.5rem;font-size:0.78rem;padding:6px 13px;border-radius:999px;background:color-mix(in srgb,var(--accent2) 12%,transparent);color:var(--text-primary);border:1px solid color-mix(in srgb,var(--accent2) 30%,transparent)}
 .iq-subject-dot{width:7px;height:7px;border-radius:50%;background:var(--accent,#7c5af5);flex:none}
 .iq-subject-chip button{margin-left:0.3rem;background:none;border:1px solid var(--border);border-radius:6px;color:var(--text-secondary);cursor:pointer;font-size:0.7rem;padding:2px 8px;transition:color .15s ease,border-color .15s ease}
 .iq-subject-chip button:hover{color:var(--text-primary);border-color:var(--border-light)}
@@ -777,3 +778,25 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .app-perm .btn-sm{flex:none}
 .app-crossed-link{display:inline-block;margin-top:0.4rem;background:none;border:none;padding:0;color:var(--accent);font-size:0.75rem;cursor:pointer}
 .app-crossed-link:hover{color:var(--text-primary)}
+
+/* ═══ RESPONSIVE — mobile first, no overflow, no clipped controls (Phase-2) ═══ */
+@media (max-width:640px){
+  #iq-myworkspace{gap:1rem}
+  .iq-lensbar{gap:0.15rem;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:2px}
+  .iq-lensbar::-webkit-scrollbar{display:none}
+  .iq-lens{flex:none}
+  .iq-msg-user{max-width:88%}
+  .iq-msg-iq{max-width:97%}
+  .iq-empty-title{font-size:1.05rem}
+  .iq-composer{border-radius:var(--radius)}
+  .app-main{flex-wrap:wrap}
+  .app-action{width:100%;margin-top:0.2rem}
+  .app-action .btn-sm{width:100%}
+  .aw-actions{gap:0.6rem}
+  .app-perm{flex-wrap:wrap}
+  .app-perm .btn-sm{width:100%;margin-top:0.3rem}
+}
+/* Larger, comfortable tap targets on touch devices. */
+@media (hover:none){
+  .iq-lens,.iq-chip,.iq-att-item,.aw-ask,.iq-send{min-height:40px}
+}
