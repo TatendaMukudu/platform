@@ -236,7 +236,7 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
 }
 
 /* ── HTTP + INTEGRATION ──────────────────────────────────────────────────────── */
-const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _proactiveInsights, noticeFeedback, insightSuppression } = require('../server.js');
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _proactiveInsights, noticeFeedback, insightSuppression, _sanitizeBriefingForLeader, _stripLeaderNumbers } = require('../server.js');
 
 const CODE = 'pc', DAY = 86400000, now = Date.now();
 const ev = (id, subj, mood, daysAgo) => ({ id, orgCode: CODE, status: 'active', subjectId: subj, type: 'metric', label: 'mood',
@@ -333,6 +333,37 @@ const server = app.listen(0, async () => {
     ok('17c · leader timeline never quotes a private check-in', tl.status === 200 && !/overwhelmed|a bit better now/i.test(JSON.stringify(tl.j)));
     ok('17c · leader timeline exposes no private mood number', !/\d(?:\.\d)?\s*\/\s*5/.test(JSON.stringify(tl.j)) && !/"mood":\s*[0-9]/.test(JSON.stringify(tl.j)));
     ok('17c · leader timeline is marked sanitised', tl.j && tl.j.sanitized === true);
+
+    // 17d · GOVERNANCE — the Team briefing is numberless for a leader (endpoint + unit)
+    // A leader must NEVER see a member's deviation %, mood x/5, "usual" value, or raw
+    // markdown. This is the trust-critical guard for the Team surface (IMG_0991 leak).
+    {
+      const dirty = {
+        ok: true, summary: '**Shape of the week:** participation is below usual (83%).',
+        items: [{
+          memberName: 'Sam', severity: 'high',
+          whyNow: 'check-in cadence below their usual (100%); contribution below their usual (83%)',
+          recommendedAction: 'A gentle 1:1 — mood dipped to 2.1/5 this week.',
+          learnedNote: 'This mattered last time (confidence 0.8).',
+          evidence: ['mood 2.1/5 over two weeks', 'checkins 3/7'],
+          patterns: [{ type: 'momentum_drop', label: 'momentum', confidence: 'clear', basis: 'mood 2.1/5' }],
+          deviations: [{ label: 'check-ins', direction: 'below', confidence: 'clear', deviationPct: 100, normal: '5/wk' }],
+          connections: [{ label: 'x', basis: 'contribution 83% of normal' }],
+          graph: { nodes: [1], edges: [2] },
+        }],
+      };
+      const clean = _sanitizeBriefingForLeader(dirty);
+      const blob = JSON.stringify(clean);
+      ok('17d · sanitized briefing carries no percentage or x/5 score', !/\d(?:\.\d)?\s*\/\s*5|\d{1,3}\s*%/.test(blob));
+      ok('17d · sanitized briefing carries no raw markdown bold', !/\*\*/.test(blob));
+      ok('17d · sanitized briefing drops the raw numeric evidence basis', (clean.items[0].evidence || []).length === 0 && clean.items[0].graph === undefined);
+      ok('17d · sanitized briefing keeps DIRECTION words for the leader', /below their usual/.test(clean.items[0].whyNow) && !/100|83/.test(clean.items[0].whyNow));
+      ok('17d · _stripLeaderNumbers removes numbers but keeps prose', _stripLeaderNumbers('mood 2.1/5 (83%) matters') === 'mood matters');
+
+      const brief = await call('/api/intelligence/briefing', tokLead);
+      ok('17d · the live Team briefing endpoint is numberless for a leader',
+         brief.status === 200 && !/\d(?:\.\d)?\s*\/\s*5|\d{1,3}\s*%/.test(JSON.stringify(brief.j)) && !/\*\*/.test(JSON.stringify(brief.j)));
+    }
 
     // 18 · Confidence Engine suppression — an unproven type is stood down, org-wide
     noticeFeedback[CODE] = noticeFeedback[CODE] || {};

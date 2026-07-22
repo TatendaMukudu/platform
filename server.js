@@ -3351,6 +3351,34 @@ async function _reasonedPrompts(code, userId, now) {
    Consolidates: who-needs-attention + why-now + evidence + recommended action +
    group rollup (folds the old Group Health / Org Health / Intelligence pages).
    Privacy-safe throughout; the only AI call is the aggregate summary (gateway). */
+/* Strip every leaked NUMBER from a leader-facing string — deviation percentages,
+   mood x/5, and raw markdown bold — leaving direction words intact. */
+function _stripLeaderNumbers(s) {
+  return String(s == null ? '' : s)
+    .replace(/\s*\(\s*\d+(?:\.\d+)?\s*%\s*\)/g, '')       // "(100%)"
+    .replace(/\b\d+(?:\.\d+)?\s*\/\s*5\b/g, '')           // "2.1/5"
+    .replace(/\b\d+(?:\.\d+)?\s*%/g, '')                  // "83%"
+    .replace(/\*\*/g, '')                                 // markdown bold markers → plain
+    .replace(/\s{2,}/g, ' ').replace(/\s+([;.,])/g, '$1').replace(/\(\s*\)/g, '').trim();
+}
+/* Make the Team briefing audience-safe: direction + care only, never a member's
+   numbers or raw evidence basis. One source → every leader surface inherits it. */
+function _sanitizeBriefingForLeader(data) {
+  if (!data) return data;
+  const items = (data.items || []).map(it => ({
+    ...it,
+    whyNow: _stripLeaderNumbers(it.whyNow),
+    recommendedAction: _stripLeaderNumbers(it.recommendedAction),
+    learnedNote: it.learnedNote ? _stripLeaderNumbers(it.learnedNote) : it.learnedNote,
+    evidence: [],                                          // raw numeric basis never reaches a leader
+    patterns: (it.patterns || []).map(p => ({ type: p.type, label: p.label, confidence: p.confidence })),  // drop numeric basis
+    deviations: (it.deviations || []).map(d => ({ label: d.label, direction: d.direction, confidence: d.confidence })), // no pct/normal/recent
+    connections: (it.connections || []).map(c => ({ ...c, basis: _stripLeaderNumbers(c.basis) })),
+    graph: undefined,                                      // node/edge internals not for the leader UI
+  }));
+  return { ...data, summary: _stripLeaderNumbers(data.summary), items };
+}
+
 app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
   const { orgCode, userId } = req.iqSession;
   const code = orgCode;
@@ -3426,7 +3454,7 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
   }) : Promise.resolve(null);
   const [narrative, promptsRaw] = await Promise.all([ _capAI(narrativeP), _capAI(_reasonedPrompts(code, userId, now)) ]);
 
-  const data = {
+  let data = {
     ok: true,
     generatedAt: new Date().toISOString(),
     domain: _domainStamp(code),
@@ -3437,6 +3465,10 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
     items: top,
     prompts: Array.isArray(promptsRaw) ? promptsRaw : [],
   };
+  // The Team briefing is ALWAYS leader-facing → strip every per-member NUMBER
+  // (deviation %, mood x/5, "usual" values) and raw evidence basis. A leader gets
+  // DIRECTION + care + a suggested step, never a member's private figures.
+  data = _sanitizeBriefingForLeader(data);
   intelBriefingCache[cacheKey] = { data, ts: Date.now() };
   res.json(data);
 });
@@ -12524,7 +12556,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: grounded retrieval over canonical evidence
   _retrieveGrounding, _indexEvidence, _evictEvidenceVector, _captureKnowledge, _isTextEvidence, _assistantAnswer, evidenceVectors, answerFeedback,
   // exported for the truth layer: universal evidence intake
-  _ingestArtifact, _deleteImport };
+  _ingestArtifact, _deleteImport, _sanitizeBriefingForLeader, _stripLeaderNumbers };
 
 if (require.main === module) (async () => {
   try {

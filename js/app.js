@@ -6757,7 +6757,7 @@ async function deliverTeam(btn) {
 function _intelCard(it) {
   const sevColor = _INTEL_SEV[it.severity] || '#4f8ef7';
   const chips = (it.patterns || []).map(p =>
-    `<span class="intel-chip" title="${_escAdvisor(p.basis)} · ${p.confidence}">${_escAdvisor(p.label)}</span>`).join('');
+    `<span class="intel-chip" title="${_escAdvisor(p.confidence || '')}">${_escAdvisor(p.label)}</span>`).join('');
   const ev = (it.evidence || []).map(e => `<li>${_escAdvisor(e)}</li>`).join('');
   return `
     <div class="intel-card" style="border-left:3px solid ${sevColor}">
@@ -6768,7 +6768,7 @@ function _intelCard(it) {
       <div class="intel-why"><strong>Why now:</strong> ${_escAdvisor(it.whyNow)}</div>
       ${(it.deviations || []).length ? `<div class="intel-dev">${it.deviations.slice(0, 3).map(_intelDevChip).join('')}</div>` : ''}
       ${(it.connections || []).length ? `<div class="intel-conn">${_escAdvisor(it.connections[0].basis)} <span class="intel-conn-hint">(a connection, not a cause)</span></div>` : ''}
-      <details class="intel-ev"><summary>Evidence basis</summary><ul>${ev}</ul></details>
+      ${ev ? `<details class="intel-ev"><summary>Evidence basis</summary><ul>${ev}</ul></details>` : ''}
       ${it.careFlag ? `<div class="intel-care">There may be personal context here — lead with care. Details are kept private.</div>` : ''}
       <div class="intel-action"><strong>Try:</strong> ${_escAdvisor(it.recommendedAction)}</div>
       ${it.learnedNote ? `<div class="intel-learned">${_escAdvisor(it.learnedNote)}</div>` : ''}
@@ -6784,9 +6784,9 @@ function _intelCard(it) {
 function _intelDevChip(d) {
   const arrow = d.direction === 'below' ? '↓' : '↑';
   const col = d.direction === 'below' ? 'var(--danger)' : 'var(--success)';
-  const pct = d.deviationPct != null ? `${Math.abs(d.deviationPct)}% ` : '';
-  return `<span class="intel-devchip" title="vs their own normal (${d.normal}); confidence ${d.confidence}">
-    <span style="color:${col}">${arrow}</span> ${_escAdvisor(d.label)} ${pct}${d.direction} their usual</span>`;
+  // Direction only — never the member's numbers (deviation %, "usual" value).
+  return `<span class="intel-devchip" title="vs their own normal · ${_escAdvisor(d.confidence || '')}">
+    <span style="color:${col}">${arrow}</span> ${_escAdvisor(d.label)} ${d.direction} their usual</span>`;
 }
 
 async function intelAct(memberId, patternType, btn) {
