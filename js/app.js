@@ -12,6 +12,11 @@ function iqTimeOfDay(now) {
 }
 function iqGreeting(now) { return 'Good ' + iqTimeOfDay(now); }
 
+/* The ONE mood→word mapping for every leader/admin surface. A leader never sees a
+   member's (or the org's) mood as a raw number — only an energy DIRECTION. Keep this
+   the single source so no surface can drift back to "2.1/5". */
+function iqMoodWord(v) { return v == null ? '—' : v >= 4 ? 'Positive' : v >= 3 ? 'Steady' : 'Low'; }
+
 /* ════════════════════════════════════════════════════════════
    MEMBER ONBOARDING FLOW
    Shown to any invited user whose profileComplete !== true.
@@ -621,6 +626,10 @@ const NAV_ALIASES = {
   // Folded surfaces → the one canonical destination (no separate renderer, no duplicate state).
   'org-insights': 'leader-home',
   'group-health': 'leader-home',
+  // The legacy "IntelliQ" org-intelligence page composed leader-facing narrative that
+  // named individuals with their mood numbers (a per-member leak) and duplicated the
+  // privacy-safe briefing. Retired → the briefing is the one intelligence surface.
+  'intelliq':     'leader-home',
 };
 // destination → its ONE renderer (arrow-wrapped so declaration order/TDZ is never an issue).
 const NAV_ROUTES = {
@@ -641,7 +650,6 @@ const NAV_ROUTES = {
   // Management — org-wide
   'org-health':    () => renderOrgHealth(),
   analytics:       () => renderAnalytics(),
-  intelliq:        () => renderIntelliQ(),
   scenarios:       () => renderScenarios(),
   organisation:    () => renderMyTeam(),
   people:          () => renderPeople(),
@@ -2314,7 +2322,7 @@ function _renderOrgInsights(data, el) {
 
   // ── 8. Stats (secondary — metrics last) ───────────────────────────────────
   if (!ai.notEnoughData && stats) {
-    const moodVal = stats.avgMoodLast7 != null ? `${stats.avgMoodLast7}/5` : '—';
+    const moodVal = iqMoodWord(stats.avgMoodLast7 != null ? stats.avgMoodLast7 : null);
     const tColor  = trendColor[ai.moodTrend] || 'var(--text-muted)';
     html += `
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:0.5rem;margin-bottom:1rem">
@@ -2561,7 +2569,7 @@ function _renderLearningSummary(data, el) {
       const moodBg = m.avgMood >= 4 ? 'rgba(79,200,142,0.12)' : m.avgMood >= 3 ? 'rgba(247,168,79,0.1)' : m.avgMood !== null ? 'rgba(247,79,79,0.1)' : 'var(--surface-2)';
       html += `<div style="flex:1;min-width:80px;background:${moodBg};border:1px solid var(--border);border-radius:8px;padding:0.5rem;text-align:center">
         <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.15rem">${m.month}</div>
-        <div style="font-size:1rem;font-weight:700;color:var(--text-primary)">${m.avgMood !== null ? m.avgMood + '/5' : '—'}</div>
+        <div style="font-size:1rem;font-weight:700;color:var(--text-primary)">${iqMoodWord(m.avgMood)}</div>
         <div style="font-size:0.65rem;color:var(--text-muted)">${m.checkins} check-in${m.checkins !== 1 ? 's' : ''}</div>
       </div>`;
     });
@@ -2643,7 +2651,7 @@ function _renderOrgTimeline(data, el) {
         <div style="flex:1;padding-bottom:${isLast ? '0' : '0.5rem'}">
           <div style="display:flex;align-items:center;gap:0.6rem;margin-bottom:0.25rem">
             <span style="font-size:0.8rem;font-weight:700;color:var(--text-primary)">${m.label}</span>
-            ${m.avgMood != null ? `<span style="font-size:0.72rem;color:${mColor}">${m.avgMood}/5</span>` : ''}
+            ${m.avgMood != null ? `<span style="font-size:0.72rem;color:${mColor}">${iqMoodWord(m.avgMood)}</span>` : ''}
             ${engRate > 0 ? `<span style="font-size:0.7rem;color:var(--text-muted)">${engRate}% engaged</span>` : ''}
           </div>
           ${m.textSamples?.length ? `<div style="font-size:0.75rem;color:var(--text-secondary);line-height:1.5">"${m.textSamples[0].slice(0, 100)}${m.textSamples[0].length > 100 ? '…' : ''}"</div>` : ''}
@@ -2749,7 +2757,7 @@ function _renderMemberTimeline(data, el) {
         </div>
         <div style="flex:1">
           ${month.narrative ? `<div style="font-size:0.82rem;color:var(--text-primary);font-style:italic;margin-bottom:0.4rem;line-height:1.55">"${month.narrative}"</div>` : ''}
-          ${month.moodAvg   ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.3rem">Mood avg: ${month.moodAvg}/5</div>` : ''}
+          ${month.moodAvg   ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.3rem">Energy: ${iqMoodWord(month.moodAvg)}</div>` : ''}
           <div style="font-size:0.75rem;line-height:1.7">
             ${month.events.filter(e => !['checkin'].includes(e.type) || e.data.text).slice(0, 5).map(e => {
               const icon  = typeIcon[e.type]  || '•';
@@ -5541,7 +5549,17 @@ function _renderMyTeamList() {
   const el = document.getElementById('myteam-content');
   if (!el) return;
 
-  const MOOD_ICONS = { 1:'', 2:'', 3:'', 4:'', 5:'' };
+  // A leader sees check-in RECENCY (are they engaging?), never a member's mood.
+  // Mood is private evidence; the leader's roster answers "who's active", and the
+  // briefing surfaces who needs attention — direction + care, never a number/emoji.
+  const _recency = (ck) => {
+    if (!ck || !ck.ts && !ck.date) return { dot: 'var(--text-muted)', word: 'No check-in' };
+    const t = ck.ts ? new Date(ck.ts).getTime() : Date.parse(ck.date);
+    const days = Number.isFinite(t) ? (Date.now() - t) / 86400000 : Infinity;
+    if (days <= 7)  return { dot: 'var(--success)', word: 'Active this week' };
+    if (days <= 30) return { dot: 'var(--warning)', word: 'Active this month' };
+    return { dot: 'var(--text-muted)', word: 'Quiet lately' };
+  };
   const filtered   = _myTeamSearch
     ? _myTeamMembers.filter(m =>
         m.name.toLowerCase().includes(_myTeamSearch) ||
@@ -5564,7 +5582,7 @@ function _renderMyTeamList() {
       ${filtered.map(m => {
         const initials   = (m.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
         const roleLabel  = Auth.ROLE_LABELS?.[m.role] || m.role || 'Member';
-        const moodEmoji  = MOOD_ICONS[m.latestCheckin?.mood] || '—';
+        const rec        = _recency(m.latestCheckin);
         const ckDate     = m.latestCheckin?.date || null;
         const isPending  = !m.passwordSet;
         const needsSetup = !m.profileComplete && !isPending;
@@ -5583,7 +5601,7 @@ function _renderMyTeamList() {
               ${nodeCount ? `<div class="lm-nodes">${nodeCount} node${nodeCount !== 1 ? 's' : ''}</div>` : ''}
             </div>
             <div class="lm-checkin">
-              <div class="lm-mood" title="${ckDate ? 'Last check-in ' + ckDate : 'No check-in yet'}">${moodEmoji}</div>
+              <div class="lm-mood" title="${rec.word}"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${rec.dot}"></span></div>
               <div class="lm-checkin-date">${ckDate || 'No check-in'}</div>
             </div>
           </div>`;
@@ -5704,6 +5722,9 @@ async function renderOrgHealth() {
     const now       = Date.now();
     const moodVal   = ins.avgMood;
     const moodColor = v => v >= 4 ? 'var(--success)' : v >= 3 ? 'var(--warning)' : 'var(--danger)';
+    // Even aggregated, the org sees an energy DIRECTION word, not a mood number —
+    // one consistent rule (iqMoodWord) across every leader/admin surface.
+    const moodWord  = iqMoodWord;
 
     // Participation breakdown
     const active7d  = members.filter(m => m.latestCheckin?.ts && (now - new Date(m.latestCheckin.ts).getTime()) < 7*86400000).length;
@@ -5728,9 +5749,9 @@ async function renderOrgHealth() {
         </div>
         <div class="stat-card">
           <div class="stat-card-val" style="color:${moodVal ? moodColor(moodVal) : 'var(--text-muted)'}">
-            ${moodVal ? moodVal.toFixed(1) : '—'}
+            ${moodWord(moodVal)}
           </div>
-          <div class="stat-card-label">Avg Mood (1–5)</div>
+          <div class="stat-card-label">Team Energy</div>
         </div>
       </div>
 
@@ -5758,8 +5779,8 @@ async function renderOrgHealth() {
           <div class="card-label" style="margin-bottom:0.6rem">Wellbeing snapshot (anonymous)</div>
           <div style="display:flex;gap:1.2rem;flex-wrap:wrap">
             <div>
-              <div style="font-size:1.4rem;font-weight:800;color:${moodColor(moodVal)}">${moodVal?.toFixed(1) ?? '—'}</div>
-              <div style="font-size:0.72rem;color:var(--text-muted)">Average mood</div>
+              <div style="font-size:1.4rem;font-weight:800;color:${moodColor(moodVal)}">${moodWord(moodVal)}</div>
+              <div style="font-size:0.72rem;color:var(--text-muted)">Team energy</div>
             </div>
             <div>
               <div style="font-size:1.4rem;font-weight:800">${ins.activeThisWeek}</div>

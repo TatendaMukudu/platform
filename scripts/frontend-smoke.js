@@ -199,7 +199,26 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
     ok('[leader-home] shows no per-member mood score to a leader', !/\d(?:\.\d)?\s*\/\s*5/.test(home));
     ok('[leader-home] resolved to a real briefing (attention or a calm empty state)',
        home.length > 0 && !/Reading the signals/.test(home));
-    ok('[leader-home] zero uncaught JS errors', errors.length === 0);
+
+    // Every OTHER reachable leader/admin surface obeys the same rule: direction +
+    // status, never a member's (or the org's) mood as a number or "Avg Mood" score.
+    const scan = async (route, elId) => {
+      await page.evaluate(pg => { if (typeof navigate === 'function') navigate(pg); }, route);
+      await page.waitForTimeout(1100);
+      return page.evaluate(id => (document.getElementById(id) || document.querySelector('.page.active') || {}).innerText || '', elId);
+    };
+    for (const [route, elId] of [['organisation', 'myteam-content'], ['org-health', 'org-health-content']]) {
+      const txt = await scan(route, elId);
+      ok(`[${route}] shows no mood score (x/5) to a leader`, !/\d(?:\.\d)?\s*\/\s*5/.test(txt));
+      ok(`[${route}] shows no "Avg Mood" number card`, !/Avg Mood/i.test(txt));
+    }
+    // The legacy IntelliQ page leaked per-member mood + names via server narrative;
+    // it's retired. navigate('intelliq') must land on the privacy-safe briefing.
+    await page.evaluate(() => { if (typeof navigate === 'function') navigate('intelliq'); });
+    await page.waitForTimeout(400);
+    const landed = await page.evaluate(() => (document.querySelector('.page.active') || {}).id || '');
+    ok('[intelliq] retired → redirects to the privacy-safe briefing', landed === 'page-leader-home');
+    ok('[leader surfaces] zero uncaught JS errors', errors.length === 0);
     errors.slice(0, 6).forEach(e => console.log('        ', e));
     await ctx.close();
     return errors;
