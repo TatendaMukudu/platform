@@ -26,6 +26,7 @@ const ICON = {
   spark:    _svg('<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.3 6.3l2.5 2.5M15.2 15.2l2.5 2.5M17.7 6.3l-2.5 2.5M8.8 15.2l-2.5 2.5"/>'),
   clipboard:_svg('<path d="M9 4h6a1 1 0 0 1 1 1v1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h1V5a1 1 0 0 1 1-1z"/><path d="M9 4a1 1 0 0 0-1 1v1h8V5a1 1 0 0 0-1-1"/><path d="m9 14 2 2 4-4"/>'),
   plug:     _svg('<path d="M9 2v6M15 2v6"/><path d="M7 8h10v3a5 5 0 0 1-10 0z"/><path d="M12 16v6"/>'),
+  upload:   _svg('<path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/>'),
 };
 
 /* ── Org mode display config ──────────────────────────────────────────────
@@ -132,6 +133,9 @@ const WORKSPACE_MODULES = [
   // Notes now live INSIDE the Me space (no separate tab) — the page stays
   // reachable for full options (tags / sharing) via navigate('notes').
   { section: null,        id: 'assessments', icon: ICON.clipboard, label: 'MyWorkspace', permission: null },
+  // Knowledge — the one governed input door. Every user can teach IntelliQ (private
+  // by default); what they add becomes citable evidence for the grounded assistant.
+  { section: null,        id: 'data-sources', icon: ICON.upload, label: 'Knowledge', permission: null },
   { section: null,        id: 'apps',    icon: ICON.plug,    label: 'Apps',     permission: null },
   // Inbox demoted from the main nav — IntelliQ is the intelligence layer, not a
   // messaging app (Teams / Slack / email own comms). Proactive "updates from
@@ -147,7 +151,7 @@ const WORKSPACE_MODULES = [
   { section: null,     id: 'settings',     icon: ICON.settings, label: 'Settings',     permission: 'manage_settings' },
 
   // ── Hidden from nav, fully reachable + backend intact (restore any line) ──
-  //   assessments · stats · assignments · leader-groups · data-sources ·
+  //   assessments · stats · assignments · leader-groups ·
   //   analytics · intelliq · scenarios · org-health · alerts · reports
   //   Their pages and data still work; outputs folded into Home/the briefing,
   //   inputs folded into Check-In/Notes.

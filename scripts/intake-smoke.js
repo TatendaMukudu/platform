@@ -10,14 +10,17 @@ process.env.DB_OPTIONAL = '1';
 process.env.NODE_ENV    = 'test';
 
 const S = require('../server.js');
-const { _loadAllStores, _rebuildEmailIndex, _ingestArtifact, _deleteImport,
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _ingestArtifact, _deleteImport,
         _assistantAnswer, _retrieveGrounding, evidenceLog } = S;
 
 let pass = 0, fail = 0;
 const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n); } };
 const envOf = (code, id) => (evidenceLog[code] || []).find(e => e.id === id);
 
-const A = 'orgA', B = 'orgB', iso = new Date().toISOString();
+// Lowercase codes: issueToken (used by the HTTP suite below) lowercases orgCode, and
+// production keys orgUsers/evidenceLog by the lowercased code everywhere — so the seed
+// must match to exercise the real authority (e.g. admin role lookup).
+const A = 'orga', B = 'orgb', iso = new Date().toISOString();
 _loadAllStores({
   orgMeta:  { [A]: { orgName: 'A', createdAt: iso }, [B]: { orgName: 'B', createdAt: iso } },
   orgUsers: {
@@ -129,5 +132,52 @@ ok('1 · imported evidence carries import provenance', (() => { const e = envOf(
   ok('18 · a derived/generated summary of an import is excluded from retrieval', derived ? !g.passages.some(p => p.evidenceId === derived.id) : true);
 }
 
-console.log(`\nintake-smoke: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+// 19 · HTTP — the governed door + the coverage/list endpoint (what the UI drives)
+//   Proves the ONE canonical door works over HTTP and the imports-list endpoint
+//   respects the same authority as retrieval: you see your own + org-shared, never
+//   another member's PRIVATE import.
+const server = app.listen(0, async () => {
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const tokCoach = issueToken('coach', A, 'superadmin');
+  const tokMia   = issueToken('mia',   A, 'member');
+  const call = async (path, tok, opts = {}) => {
+    const headers = { ...(opts.headers || {}), ...(tok ? { Authorization: `Bearer ${tok}` } : {}) };
+    if (opts.body) headers['Content-Type'] = 'application/json';
+    const r = await fetch(base + path, { method: opts.method || 'GET', headers, body: opts.body ? JSON.stringify(opts.body) : undefined });
+    let j = null; try { j = await r.json(); } catch (_) {}
+    return { status: r.status, j };
+  };
+  try {
+    // the canonical door over HTTP
+    const up = await call('/api/evidence/import', tokMia, { method: 'POST', body: { format: 'text', content: 'Our set-piece routine: near-post run, then a pull-back to the penalty spot.', sourceName: 'Set pieces', visibility: 'normal', confirmVisibilityIncrease: true } });
+    ok('19 · POST /api/evidence/import ingests over HTTP', up.status === 200 && up.j.ok === true && up.j.imported === 1);
+
+    // a shared import needs confirmation (409), never silently promoted
+    const noconf = await call('/api/evidence/import', tokMia, { method: 'POST', body: { format: 'text', content: 'x', sourceName: 'y', visibility: 'normal' } });
+    ok('19 · a shared import without confirmation is refused (409)', noconf.status === 409 && noconf.j.needsConfirmation === true);
+
+    // a private import by Mia
+    const privUp = await call('/api/evidence/import', tokMia, { method: 'POST', body: { format: 'text', content: 'Private: I get anxious before big games.', sourceName: 'Mia private' } });
+    ok('19 · a private import defaults private over HTTP', privUp.status === 200 && privUp.j.visibility === 'private');
+
+    // Mia's coverage lists BOTH her shared + private imports
+    const mineList = await call('/api/evidence/imports', tokMia);
+    ok('19 · GET /api/evidence/imports lists the owner’s own imports', mineList.status === 200 &&
+       mineList.j.imports.some(g => g.sourceName === 'Set pieces') && mineList.j.imports.some(g => g.sourceName === 'Mia private'));
+
+    // the coach (admin) sees Mia's SHARED import but NOT her PRIVATE one
+    const coachList = await call('/api/evidence/imports', tokCoach);
+    ok('19 · an admin sees a member’s SHARED import in coverage', coachList.j.imports.some(g => g.sourceName === 'Set pieces'));
+    ok('19 · an admin NEVER sees a member’s PRIVATE import in coverage', !coachList.j.imports.some(g => g.sourceName === 'Mia private'));
+
+    // delete over HTTP removes it from coverage and from retrieval
+    const setImportId = mineList.j.imports.find(g => g.sourceName === 'Set pieces').importId;
+    const del = await call('/api/evidence/import/' + setImportId, tokMia, { method: 'DELETE' });
+    ok('19 · DELETE /api/evidence/import/:id removes the import', del.status === 200 && del.j.removed >= 1);
+    const after = await call('/api/evidence/imports', tokMia);
+    ok('19 · a deleted import disappears from coverage', !after.j.imports.some(g => g.sourceName === 'Set pieces'));
+  } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
+  server.close();
+  console.log(`\nintake-smoke: ${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+});

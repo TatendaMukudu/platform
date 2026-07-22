@@ -7752,6 +7752,35 @@ app.delete('/api/evidence/import/:importId', requireAuth, (req, res) => {
   res.json(_deleteImport(code, String(req.params.importId || ''), userId));
 });
 
+/* GET /api/evidence/imports — what THIS user has taught IntelliQ (their own imports),
+   plus, for an admin, the org-shared imports anyone added. Grouped by import, with a
+   category breakdown and unit count. NEVER lists another member's PRIVATE import —
+   the same authority that gates retrieval gates this coverage view. */
+app.get('/api/evidence/imports', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  const groups = new Map();
+  (evidenceLog[code] || []).forEach(env => {
+    if (env.status !== 'active' || env.provider !== 'import' || !env.attributes || !env.attributes.importId) return;
+    const mine   = env.ownerRef === userId;
+    const shared = env.visibility === 'normal' && env.promoted === true;
+    // You see your own imports. An admin also sees org-shared ones. A member's
+    // PRIVATE import is visible to nobody else — never listed here.
+    if (!mine && !(isAdmin && shared)) return;
+    const key = env.attributes.importId;
+    let g = groups.get(key);
+    if (!g) { g = { importId: key, sourceName: env.attributes.sourceName || 'Import', sourceType: env.attributes.sourceType || 'text',
+      visibility: env.visibility, units: 0, categories: {}, importTime: env.attributes.importTime || env.retrievedAt || null,
+      owned: mine || isAdmin }; groups.set(key, g); }
+    g.units++;
+    const cat = env.attributes.category || 'knowledge';
+    g.categories[cat] = (g.categories[cat] || 0) + 1;
+    if (env.attributes.importTime && (!g.importTime || env.attributes.importTime > g.importTime)) g.importTime = env.attributes.importTime;
+  });
+  const imports = [...groups.values()].sort((a, b) => String(b.importTime || '').localeCompare(String(a.importTime || '')));
+  res.json({ ok: true, imports, totalUnits: imports.reduce((n, g) => n + g.units, 0) });
+});
+
 /* POST /api/assistant/answer-feedback — the smallest clean answer-quality hook.
    Records helpful / used-evidence / corrected + the ranking version. NEVER becomes
    source evidence. A user-confirmed correction may create user-reported knowledge

@@ -699,7 +699,7 @@ const PAGE_TITLES = {
   'org-insights':  'Intelligence',
   'group-health':  'Intelligence',
   'leader-groups': 'My Groups',
-  'data-sources':  'Data Sources',
+  'data-sources':  'Knowledge',
   // Organisation Health — management level
   'org-health':    'Organisation Health',
   // Intelligence
@@ -6244,157 +6244,185 @@ async function _saveGroupAims(gid) {
   }
 }
 
-/* ── Data Sources hub — the universal input UX ────────────────────────────────
-   Upload (stat sheets / Word / film logs / CSV / PDF) -> parsed to text ->
-   ingested as a signal; Connect cards for Teams/Google/Outlook (OAuth, declared);
-   and a transparency list of what IntelliQ can already use. */
-let _dsTargets = [];
+/* ── Knowledge intake — the ONE governed input door ───────────────────────────
+   Paste text or upload a file (txt · md · csv · json · pdf · docx). Everything
+   flows through the single canonical door (/api/evidence/import → _ingestArtifact),
+   becomes canonical evidence, and is immediately answerable by the grounded
+   assistant — the SAME retrieval the member Home uses. Private by default; sharing
+   with the team is an explicit choice. No second import path, no per-feature logic. */
+
+/* Map a filename to one of the intake formats the canonical door accepts. */
+function _knowledgeFormat(name) {
+  const ext = String(name || '').toLowerCase().split('.').pop();
+  if (ext === 'csv')  return 'csv';
+  if (ext === 'json') return 'json';
+  if (ext === 'md' || ext === 'markdown') return 'markdown';
+  if (ext === 'pdf')  return 'pdf';
+  if (ext === 'doc' || ext === 'docx') return 'docx';
+  return 'text';
+}
 
 async function renderDataSources() {
   const el = document.getElementById('data-sources-content');
   if (!el) return;
-  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Loading…</div>`;
-
-  // Build the "attach to" target list (org + visible members).
-  try {
-    const r = await fetch('/api/workspace/visible-members', { headers: Auth._headers() });
-    const d = r.ok ? await r.json() : { members: [] };
-    _dsTargets = (d.members || []).map(m => ({ id: m.userId, name: m.name }));
-  } catch (_) { _dsTargets = []; }
-
-  const memberOpts = _dsTargets.map(t => `<option value="${t.id}">${_escAdvisor(t.name)}</option>`).join('');
   const connectCard = (icon, name, note) => `
     <div class="ds-connect">
       <div class="ds-connect-top"><span class="ds-connect-icon">${icon}</span><span class="ds-connect-name">${name}</span></div>
       <div class="ds-connect-note">${note}</div>
-      <button class="btn btn-outline btn-sm" onclick="showToast('${name} connector is coming — it will sync activity signals here.','info')">Connect</button>
+      <button class="btn btn-outline btn-sm" onclick="showToast('${name} connector is coming — it will flow into this same knowledge base.','info')">Connect</button>
     </div>`;
 
   el.innerHTML = `
     <div class="card" style="margin-bottom:1rem">
-      <div class="card-label" style="margin-bottom:0.5rem">Upload data</div>
+      <div class="card-label" style="margin-bottom:0.5rem">Teach IntelliQ something</div>
       <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.7rem">
-        Stat sheets, film logs, Word docs, CSV, PDF, images. IntelliQ reads the content and uses it to advise.
+        Paste notes, policies, tactics, meeting minutes — anything true and useful. IntelliQ turns it into
+        evidence it can cite when you ask a question. It never guesses; it only answers from what it's been given.
       </div>
-      <div class="ds-upload-row">
-        <select class="search-input" id="ds-target" style="max-width:240px">
-          <option value="smart">Auto-detect members (smart import)</option>
-          <option value="org">Whole organization</option>
-          ${memberOpts ? `<optgroup label="A specific member">${memberOpts}</optgroup>` : ''}
+      <textarea id="kn-text" class="search-input" rows="5" placeholder="Paste text here — a policy, a play, a process, a set of notes…"
+        style="width:100%;resize:vertical;font-family:inherit;line-height:1.5"></textarea>
+      <div class="ds-upload-row" style="margin-top:0.6rem">
+        <input id="kn-name" class="search-input" style="max-width:240px" placeholder="Name it (e.g. Staff Handbook)">
+        <select class="search-input" id="kn-format" style="max-width:150px" title="How to read the pasted text">
+          <option value="text">Plain text</option>
+          <option value="markdown">Markdown</option>
+          <option value="csv">CSV (rows)</option>
+          <option value="json">JSON</option>
         </select>
-        <label class="btn btn-accent btn-sm" style="cursor:pointer">
-          ＋ Choose file
-          <input type="file" id="ds-file" style="display:none"
-            accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv"
-            onchange="uploadDataSource(this)">
-        </label>
-        <label style="display:flex;align-items:center;gap:0.35rem;font-size:0.74rem;color:var(--text-muted)">
-          <input type="checkbox" id="ds-public"> Public (citable)
-        </label>
+        <select class="search-input" id="kn-visibility" style="max-width:200px">
+          <option value="private">Private to me</option>
+          <option value="normal">Share with the team</option>
+        </select>
+        <button class="btn btn-accent btn-sm" onclick="addKnowledgeText(this)">Add to IntelliQ</button>
       </div>
-      <div id="ds-upload-result" style="font-size:0.8rem;margin-top:0.5rem"></div>
+      <div style="display:flex;align-items:center;gap:0.6rem;margin-top:0.7rem;flex-wrap:wrap">
+        <label class="btn btn-outline btn-sm" style="cursor:pointer">
+          ＋ Upload a file
+          <input type="file" id="kn-file" style="display:none"
+            accept=".txt,.md,.markdown,.csv,.json,.pdf,.doc,.docx"
+            onchange="uploadKnowledgeFile(this)">
+        </label>
+        <span style="font-size:0.72rem;color:var(--text-muted)">txt · md · csv · json · pdf · docx — uploads use the visibility selected above.</span>
+      </div>
+      <div id="kn-result" style="font-size:0.8rem;margin-top:0.6rem"></div>
     </div>
 
     <div class="card" style="margin-bottom:1rem">
-      <div class="card-label" style="margin-bottom:0.6rem">Connect a source</div>
+      <div class="card-label" style="margin-bottom:0.6rem">Connect a source <span style="font-weight:400;color:var(--text-muted);font-size:0.72rem">(coming soon)</span></div>
       <div class="ds-connect-grid">
-        ${connectCard('', 'Microsoft Teams', 'Meeting attendance & activity signals (metadata).')}
-        ${connectCard('', 'Google Workspace', 'Calendar & activity signals.')}
-        ${connectCard('', 'Outlook / Email', 'Engagement cadence signals (metadata).')}
+        ${connectCard('', 'Microsoft Teams', 'Meeting notes & shared docs.')}
+        ${connectCard('', 'Google Workspace', 'Docs, sheets & calendar.')}
+        ${connectCard('', 'Notion / Confluence', 'Your team wiki & handbooks.')}
       </div>
-      <div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.6rem">Connectors sync <strong>signals, not message content</strong> — and require your org admin's consent.</div>
+      <div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.6rem">Connectors will land in <strong>this same knowledge base</strong> — one governed door, with your admin's consent.</div>
     </div>
 
     <div class="card">
       <div class="card-label" style="margin-bottom:0.6rem">What IntelliQ can use</div>
-      <div id="ds-recent"><div style="color:var(--text-muted);font-size:0.82rem">Loading…</div></div>
+      <div id="kn-coverage"><div style="color:var(--text-muted);font-size:0.82rem">Loading…</div></div>
     </div>`;
 
-  _loadDataSourcesRecent();
+  _loadKnowledgeCoverage();
 }
 
-async function _loadDataSourcesRecent() {
-  const el = document.getElementById('ds-recent');
+/* The transparency + management view: every import THIS user can see (their own +
+   org-shared), grouped, with a one-tap remove. Drives home "IntelliQ only knows
+   what you've told it" — the trust surface behind the grounded assistant. */
+async function _loadKnowledgeCoverage() {
+  const el = document.getElementById('kn-coverage');
   if (!el) return;
   try {
-    const r = await fetch('/api/signals/recent', { headers: Auth._headers() });
-    const d = await r.json();
-    const list = d.signals || [];
-    if (!list.length) { el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Nothing yet. Upload a file, log a note, or connect a source.</div>`; return; }
-    el.innerHTML = list.map(s => `
-      <div class="ds-recent-row">
-        <div class="ds-recent-main">
-          <span class="ds-recent-w ds-w-${s.weight || 'weak'}" title="${s.weight || 'weak'} signal"></span>
-          <span class="ds-recent-src">${_escAdvisor(s.sourceLabel)}</span>
-          <span class="ds-recent-snip">${_escAdvisor(s.snippet || '')}</span>
-        </div>
-        <div class="ds-recent-meta">${_escAdvisor(s.subject)}${s.public ? ' · public' : ''} · ${_escAdvisor(new Date(s.ts).toLocaleDateString())}</div>
-      </div>`).join('');
+    const r = await fetch('/api/evidence/imports', { headers: Auth._headers() });
+    const d = r.ok ? await r.json() : { imports: [] };
+    const list = d.imports || [];
+    if (!list.length) { el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Nothing yet. Paste some text or upload a file above — then ask the assistant about it.</div>`; return; }
+    el.innerHTML = `
+      <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.6rem">${d.totalUnits} item${d.totalUnits !== 1 ? 's' : ''} across ${list.length} source${list.length !== 1 ? 's' : ''} — the assistant can cite any of these.</div>
+      ${list.map(g => {
+        const cats = Object.keys(g.categories || {}).sort((a, b) => g.categories[b] - g.categories[a]).slice(0, 3).join(' · ');
+        const when = g.importTime ? new Date(g.importTime).toLocaleDateString() : '';
+        return `
+        <div class="ds-recent-row">
+          <div class="ds-recent-main">
+            <span class="ds-recent-src">${_escAdvisor(g.sourceName)}</span>
+            <span class="ds-recent-snip">${g.units} item${g.units !== 1 ? 's' : ''}${cats ? ' · ' + _escAdvisor(cats) : ''}</span>
+          </div>
+          <div class="ds-recent-meta">
+            <span title="${g.visibility === 'normal' ? 'Shared with the team' : 'Private to you'}">${g.visibility === 'normal' ? 'Shared' : 'Private'}</span>${when ? ' · ' + when : ''}
+            ${g.owned ? ` · <a href="#" onclick="deleteKnowledge('${g.importId}', event)" style="color:var(--danger)">remove</a>` : ''}
+          </div>
+        </div>`; }).join('')}`;
   } catch (_) {
     el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Could not load.</div>`;
   }
 }
 
-async function uploadDataSource(input) {
+/* Send content through the ONE canonical door. Handles the visibility-increase
+   confirmation the server requires when a user shares with the team. */
+async function _postKnowledge({ format, content, sourceName, visibility }, resEl, doneMsg) {
+  const body = { format, content, sourceName, visibility };
+  if (visibility === 'normal') body.confirmVisibilityIncrease = true;   // the UI choice IS the explicit confirmation
+  const r = await fetch('/api/evidence/import', { method: 'POST', headers: Auth._headers(), body: JSON.stringify(body) });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || d.ok === false) throw new Error(d.error === 'unsupported_format' ? 'That file type isn’t supported yet.' : (d.error || 'Import failed'));
+  if (resEl) {
+    const parts = [];
+    if (d.imported)   parts.push(`Added ${d.imported} item${d.imported !== 1 ? 's' : ''}`);
+    if (d.duplicates) parts.push(`${d.duplicates} already known`);
+    if (d.identityMatches) parts.push(`${d.identityMatches} matched to a person`);
+    resEl.style.color = d.imported ? 'var(--success)' : 'var(--text-muted)';
+    resEl.textContent = (parts.join(' · ') || doneMsg) + (d.imported ? ' — ask the assistant about it now.' : '');
+  }
+  _loadKnowledgeCoverage();
+  return d;
+}
+
+async function addKnowledgeText(btn) {
+  const ta   = document.getElementById('kn-text');
+  const res  = document.getElementById('kn-result');
+  const text = (ta?.value || '').trim();
+  if (!text) { if (res) { res.style.color = 'var(--text-muted)'; res.textContent = 'Paste some text first.'; } return; }
+  const sourceName = (document.getElementById('kn-name')?.value || '').trim() || 'Pasted note';
+  const format     = document.getElementById('kn-format')?.value || 'text';
+  const visibility  = document.getElementById('kn-visibility')?.value || 'private';
+  if (btn) btn.disabled = true;
+  if (res) { res.style.color = 'var(--text-muted)'; res.textContent = 'Adding…'; }
+  try {
+    await _postKnowledge({ format, content: text, sourceName, visibility }, res, 'Nothing new to add');
+    if (ta) ta.value = ''; const nm = document.getElementById('kn-name'); if (nm) nm.value = '';
+  } catch (err) {
+    if (res) { res.style.color = 'var(--danger)'; res.textContent = err.message; }
+  } finally { if (btn) btn.disabled = false; }
+}
+
+async function uploadKnowledgeFile(input) {
   const file = input.files && input.files[0];
-  const res  = document.getElementById('ds-upload-result');
+  const res  = document.getElementById('kn-result');
   if (!file) return;
   if (typeof AttachmentHandler === 'undefined') { if (res) { res.style.color = 'var(--danger)'; res.textContent = 'Uploader not available.'; } return; }
+  const format     = _knowledgeFormat(file.name);
+  const visibility = document.getElementById('kn-visibility')?.value || 'private';
   if (res) { res.style.color = 'var(--text-muted)'; res.textContent = `Reading ${file.name}…`; }
-
   try {
-    const parsed = await AttachmentHandler.process(file);
-    const targetSel = document.getElementById('ds-target');
-    const target = targetSel ? targetSel.value : 'smart';
-    const isPublic = !!document.getElementById('ds-public')?.checked;
-    const content = parsed.content || parsed.summary || `Uploaded ${file.name}`;
-
-    // SMART IMPORT — AI auto-attributes rows/mentions to the right members.
-    if (target === 'smart') {
-      const isVisual = parsed.kind === 'image' || parsed.kind === 'pdf';
-      if (res) { res.style.color = 'var(--text-muted)'; res.textContent = `${isVisual ? 'Scanning' : 'Reading'} ${file.name} and matching members…`; }
-      const payload = isVisual
-        ? { fileName: file.name, public: isPublic, media: { kind: parsed.kind, mediaType: parsed.mediaType, data: parsed.data } }
-        : { fileName: file.name, public: isPublic, content: String(content) };
-      const r = await fetch('/api/signals/import', {
-        method: 'POST', headers: Auth._headers(),
-        body: JSON.stringify(payload),
-      });
-      const d = await r.json();
-      if (!r.ok || !d.ok) throw new Error(d.error || 'Import failed');
-      if (res) {
-        const matched = (d.matched || []).map(m => `${_escAdvisor(m.name)} (${m.signals})`).join(', ');
-        const un = (d.unmatched || []).length ? ` · not matched: ${(d.unmatched || []).map(_escAdvisor).join(', ')}` : '';
-        res.style.color = d.imported ? 'var(--success)' : 'var(--text-muted)';
-        res.innerHTML = d.imported
-          ? `Imported ${d.imported} item(s) → ${matched}${un}`
-          : `No per-member data found. Try "Whole organization" to keep the whole file.${un}`;
-      }
-      input.value = '';
-      _loadDataSourcesRecent();
-      return;
-    }
-
-    // Plain ingest — attach the whole file to org or one member.
-    const source  = parsed.kind === 'xlsx' || parsed.kind === 'csv' ? 'sheet'
-                  : parsed.kind === 'image' || parsed.kind === 'pdf' ? 'document' : 'document';
-    const body = {
-      subjectType: target === 'org' ? 'org' : 'member',
-      subjectId:   target === 'org' ? null : target,
-      source, modality: parsed.kind === 'xlsx' || parsed.kind === 'csv' ? 'sheet' : 'file',
-      label:     file.name,
-      valueText: String(content).slice(0, 4000),
-      public:    isPublic,
-    };
-    const r = await fetch('/api/signals/ingest', { method: 'POST', headers: Auth._headers(), body: JSON.stringify(body) });
-    const d = await r.json();
-    if (!r.ok || !d.ok) throw new Error(d.error || 'Upload failed');
-    if (res) { res.style.color = 'var(--success)'; res.textContent = `${file.name} added — IntelliQ can now use it.`; }
+    const parsed  = await AttachmentHandler.process(file);
+    const content = parsed.content || parsed.summary || '';
+    if (!String(content).trim()) throw new Error('Could not read any text from that file.');
+    await _postKnowledge({ format, content: String(content), sourceName: file.name, visibility }, res, 'Nothing new to add');
     input.value = '';
-    _loadDataSourcesRecent();
   } catch (err) {
-    if (res) { res.style.color = 'var(--danger)'; res.textContent = `${err.message}`; }
+    if (res) { res.style.color = 'var(--danger)'; res.textContent = err.message; }
   }
+}
+
+async function deleteKnowledge(importId, ev) {
+  if (ev && ev.preventDefault) ev.preventDefault();
+  if (!confirm('Remove this from what IntelliQ can use? It will stop citing it immediately.')) return;
+  try {
+    const r = await fetch('/api/evidence/import/' + encodeURIComponent(importId), { method: 'DELETE', headers: Auth._headers() });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.ok === false) throw new Error(d.error || 'Could not remove');
+    _loadKnowledgeCoverage();
+  } catch (err) { showToast(err.message, 'error'); }
 }
 
 /* ════════════════════════════════════════════════════════════
