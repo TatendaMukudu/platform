@@ -177,13 +177,42 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
     return errors;
   };
 
+  // Team = ONE interface. After the async org-data load settles on leader-home, the
+  // surface must be the privacy-safe briefing (renderIntelligence) — NOT the legacy
+  // dashboard that a stale second dispatch used to swap in (per-member mood icons +
+  // "Avg Mood" scores). This guards the "two different interfaces for Team" fix.
+  const runLeaderHomeCheck = async (user) => {
+    const token = issueToken(user.id, CODE, user.role);
+    const auth  = JSON.stringify({ user, org: { orgCode: CODE, orgName, orgMode: '' }, token, permissions: null });
+    const ctx   = await browser.newContext();
+    const page  = await ctx.newPage();
+    const errors = [];
+    const IGNORE = /\b(Chart|XLSX|JSZip)\b is not defined/;
+    page.on('pageerror', e => { if (!IGNORE.test(e.message)) errors.push(`pageerror: ${e.message}`); });
+    await page.route('**/*', r => { const u = r.request().url(); return (u.startsWith(base) || u.startsWith('data:')) ? r.continue() : r.abort(); });
+    await page.addInitScript(a => { try { localStorage.setItem('iq_auth', a); } catch (_) {} }, auth);
+    await page.goto(base + '/', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => { if (typeof navigate === 'function') navigate('leader-home'); });
+    await page.waitForTimeout(1800);   // let the org-data load + any re-render settle
+    const home = await page.evaluate(() => (document.getElementById('ldr-home-content') || {}).innerText || '');
+    ok('[leader-home] renders the ONE briefing surface (not the legacy dashboard)', !/Avg Mood/i.test(home));
+    ok('[leader-home] shows no per-member mood score to a leader', !/\d(?:\.\d)?\s*\/\s*5/.test(home));
+    ok('[leader-home] resolved to a real briefing (attention or a calm empty state)',
+       home.length > 0 && !/Reading the signals/.test(home));
+    ok('[leader-home] zero uncaught JS errors', errors.length === 0);
+    errors.slice(0, 6).forEach(e => console.log('        ', e));
+    await ctx.close();
+    return errors;
+  };
+
   try {
     const e1 = await runSession('member', member, ['home', 'checkin', 'notes', 'assessments', 'apps', 'inbox']);
     // Coach now also has their own "Me" space (id 'home') alongside the team view.
-    const e2 = await runSession('coach',  coach,  ['home', 'assessments', 'apps', 'leader-home', 'leader-people', 'people', 'organisation', 'settings']);
+    const e2 = await runSession('coach',  coach,  ['home', 'assessments', 'apps', 'data-sources', 'leader-home', 'leader-people', 'people', 'organisation', 'settings']);
     const e3 = await runLeaderExtras(coach);
+    const e4 = await runLeaderHomeCheck(coach);
     // Surface the exact parse/runtime error text (e.g. "Unexpected token") if any slipped through.
-    [...e1, ...e2, ...e3].filter(x => /Unexpected token|SyntaxError/i.test(x)).forEach(x => console.log('  ‼ PARSE ERROR:', x));
+    [...e1, ...e2, ...e3, ...e4].filter(x => /Unexpected token|SyntaxError/i.test(x)).forEach(x => console.log('  ‼ PARSE ERROR:', x));
   } catch (e) {
     fail++; console.log('  ✗ smoke threw:', e.message);
   } finally {

@@ -1242,24 +1242,17 @@ async function loadRealOrgData() {
       AppState.orgValues  = d.values  || [];
     }
 
-    // Re-render pages that are currently visible
-    const page = AppState.currentPage;
-    if (page === 'dashboard')    renderDashboard();
-    if (page === 'members')      renderMembers();
-    if (page === 'analytics')    renderAnalytics();
-    if (page === 'reports')      renderReports();
-    if (page === 'intelliq')     renderIntelliQ();
-    if (page === 'people')       renderPeople();
-    if (page === 'alerts')       renderAlerts();
-    if (page === 'myteam')            renderMyTeam();
-    if (page === 'assignments')       renderAssignments();
-    if (page === 'org-insights')      renderLeaderIntelligence();
-    if (page === 'group-health')      renderGroupHealth();
-    if (page === 'leader-groups')     renderLeaderGroups();
-    if (page === 'data-sources')      renderDataSources();
-    if (page === 'org-health')        renderOrgHealth();
-    if (page === 'leader-home')       renderLeaderHome();
-    if (page === 'leader-people')     renderLeaderPeople();
+    // Re-render the currently visible page through the ONE canonical renderer
+    // (NAV_ROUTES, alias-resolved). This used to be a SECOND, divergent dispatch —
+    // it mapped leader-home to a legacy dashboard (per-member mood icons + "Avg
+    // Mood" numbers) and so, after this data load completed, it OVERWROTE the
+    // privacy-safe briefing with the old surface. That timing swap was the "two
+    // different interfaces for Team". One renderer per destination, always.
+    let page = AppState.currentPage;
+    page = (typeof NAV_ALIASES !== 'undefined' && NAV_ALIASES[page]) || page;
+    if (page && Object.prototype.hasOwnProperty.call(NAV_ROUTES, page)) {
+      try { NAV_ROUTES[page](); } catch (e) { console.warn('[reload-render] failed for', page, e && e.message); }
+    }
     updateAlertBadge();
   } catch(e) {
     console.warn('loadRealOrgData failed:', e.message);
