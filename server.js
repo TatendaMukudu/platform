@@ -16,6 +16,7 @@ const lenses     = require('./ai/lenses');
 const valuesLens = require('./ai/values');
 const embeddings = require('./ai/embeddings');
 const retrieval  = require('./ai/retrieval');
+const intake     = require('./ai/intake');
 const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
@@ -7454,8 +7455,15 @@ function _retrieveGrounding({ code, requesterId, subjectId, purpose, query, evid
   purpose = purpose || 'personal_assistance';
   // 1. AUTHORISE FIRST — the one gateway decides the visible set. Unauthorised
   //    evidence is never a candidate (absent before composition, not redacted after).
-  const authorised = _kernelEvidence(code, { purpose, viewerId: requesterId, subjectId });
-  const authIds = new Set(authorised.map(e => e.evidenceId));
+  //    The authorised set is the UNION of the requested scope and ORG-SHARED knowledge
+  //    (promoted, non-private) — so a viewer can ground answers in their own evidence
+  //    PLUS shared org documents (a handbook, a policy), while others' PRIVATE material
+  //    is in neither set and can never surface. Org-shared is safe by construction:
+  //    organisation_reasoning excludes private and requires promotion.
+  const authIds = new Set([
+    ..._kernelEvidence(code, { purpose, viewerId: requesterId, subjectId }),
+    ..._kernelEvidence(code, { purpose: 'organisation_reasoning', viewerId: requesterId }),
+  ].map(e => e.evidenceId));
   const log = evidenceLog[code] || [];
   let nonSource = 0;
   const candidates = [];
@@ -7470,7 +7478,9 @@ function _retrieveGrounding({ code, requesterId, subjectId, purpose, query, evid
       provenance: { provider: env.provider, source: env.source },
       visibility: env.visibility,
       trustTier: retrieval.trustTier({ provider: env.provider, source: env.source }),
-      sourceTimestamp: env.observedAt || env.retrievedAt || null,
+      // For imports, observedAt is a stable dedupe placeholder — recency is the import
+      // time (retrievedAt); for real evidence, observedAt is the true event time.
+      sourceTimestamp: env.provider === 'import' ? (env.retrievedAt || env.observedAt) : (env.observedAt || env.retrievedAt || null),
     });
   }
   // 2. RANK. Semantic query-time scoring is deferred (needs the async path); lexical +
@@ -7509,6 +7519,87 @@ function _captureKnowledge(code, userId, text, opts = {}) {
   return r;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   UNIVERSAL EVIDENCE INTAKE — one governed ingestion boundary.
+
+   raw input → parse (ai/intake) → normalised units → classify → identity resolve →
+   visibility → canonical evidence envelope (_recordEvidence) → index (_indexEvidence).
+   Every imported artifact becomes canonical evidence and immediately participates in
+   the SAME grounded retrieval — no feature-specific import or retrieval logic. Reuses
+   the one identity resolver, the one dedupe/supersede path, the one index. Documents,
+   CSV rows, and JSON objects each become one envelope (never flattened).
+   ═══════════════════════════════════════════════════════════════════════════ */
+const IMPORT_EPOCH = '2000-01-01T00:00:00.000Z';   // stable observedAt for imports with no source date
+function _ingestArtifact(code, uploaderId, input = {}) {
+  const wantsShared = input.visibility === 'normal' || input.visibility === 'shared';
+  if (wantsShared && input.confirmVisibilityIncrease !== true) {
+    return { ok: false, needsConfirmation: true, error: 'visibility_increase_requires_confirmation', from: 'private', to: 'normal' };
+  }
+  const visibility = wantsShared ? 'normal' : 'private';        // PRIVATE by default
+  const sourceName = String(input.sourceName || 'import').slice(0, 200);
+  const importId = 'imp_' + generateId();
+  const importTime = new Date().toISOString();
+  const parsed = intake.parse({ format: input.format, content: input.content, sourceName });
+
+  const diag = { ok: true, importId, sourceName, sourceType: parsed.sourceType, visibility,
+    imported: 0, duplicates: 0, skipped: 0, failures: parsed.failures.slice(), warnings: parsed.warnings.slice(),
+    classification: {}, identityMatches: 0, evidenceIds: [] };
+
+  parsed.units.forEach(u => {
+    // Identity resolution — REUSE the one resolver; never invent an identity.
+    let subjectId = null;
+    if (u.subjectRef) { try { subjectId = _resolveUserIdByName(code, u.subjectRef) || null; } catch (_) {} if (subjectId) diag.identityMatches++; }
+    const contentHash = _contentHash(u.text);
+    const r = _recordEvidence(code, {
+      provider: 'import', source: parsed.sourceType,
+      externalId: `${sourceName}#${u.unitKey}`,                 // stable per unit → clean dedupe + supersede
+      // A PRIVATE import is scoped to its uploader (owner-only, personal). A SHARED
+      // import is org-scoped (subjectId null) unless it resolved to a specific person.
+      subjectId: subjectId || (visibility === 'private' ? uploaderId : null),
+      ownerRef: uploaderId,                                     // the uploader can always retrieve their own imports
+      type: 'document', label: (u.title || sourceName).slice(0, 120), valueText: String(u.text).slice(0, 8000),
+      // observedAt is the STABLE dedupe identity per unit (never import-time) so an
+      // identical re-import collapses and a modified one supersedes. Recency for
+      // ranking comes from retrievedAt (the actual import time) instead.
+      observedAt: input.captureTime || IMPORT_EPOCH,
+      retrievedAt: importTime, confidence: 'reported', visibility,
+      attributes: {
+        sourceType: parsed.sourceType, sourceName, importId, importTime, category: u.category,
+        rowNumber: (u.structured && u.structured.rowNumber) || null, contentHash,
+        original: (u.structured && u.structured.values) ? JSON.stringify(u.structured.values).slice(0, 1000) : null,
+      },
+    }, { importUnit: u.unitKey });
+    diag.classification[u.category] = (diag.classification[u.category] || 0) + 1;
+    if (r.duplicate) { diag.duplicates++; }
+    else if (r.stored) {
+      // A SHARED import crosses the org boundary so authorised org/leader reads can
+      // retrieve it; a PRIVATE import stays owner-only (leaders never see it).
+      if (visibility === 'normal' && r.envelope) r.envelope.promoted = true;
+      diag.imported++; diag.evidenceIds.push(r.id);
+      if (r.envelope) _indexEvidence(code, r.envelope).catch(() => {});
+    } else { diag.skipped++; diag.failures.push({ unit: u.unitKey, reason: r.invalid ? 'invalid_envelope' : 'not_stored', errors: r.errors || null }); }
+  });
+  scheduleSave();
+  return diag;
+}
+
+/* Remove an import (all its evidence) — owner or an admin only. Marks the envelopes
+   deleted (the active-status gate then excludes them everywhere) and evicts vectors,
+   so grounded retrieval stops returning them immediately. */
+function _deleteImport(code, importId, requesterId) {
+  const log = evidenceLog[code] || [];
+  const isAdmin = orgUsers[code]?.[requesterId]?.role === 'superadmin';
+  let removed = 0;
+  log.forEach(env => {
+    if (!env.attributes || env.attributes.importId !== importId || env.status !== 'active') return;
+    if (!isAdmin && env.ownerRef && env.ownerRef !== requesterId) return;   // not yours to delete
+    env.status = 'deleted'; removed++;
+    try { _evictEvidenceVector(code, env.id); } catch (_) {}
+  });
+  if (removed) scheduleSave();
+  return { ok: true, importId, removed };
+}
+
 function _assistantAnswer(code, userId, question) {
   const q = String(question || '').toLowerCase().trim();
   if (!q) return null;
@@ -7544,6 +7635,10 @@ function _assistantAnswer(code, userId, question) {
     // no AI key this is the deterministic extractive answer.
     const grounding = _retrieveGrounding({ code, requesterId: userId, subjectId: workScoped ? undefined : userId, purpose, query: question, limit: 6 });
     groundingId = grounding.queryId;
+    // The grounding's passages ARE the authorised set for this answer (they came
+    // through the retrieval boundary's own gate, which unions own + org-shared) — so
+    // its citations bind against them, not only the personal evidence set below.
+    grounding.passages.forEach(p => authorised.push(p.evidenceId));
     const extractive = retrieval.extractiveAnswer(grounding);
     if (extractive) {
       // (When an AI key is present, the LLM may re-compose language from THIS bundle
@@ -7601,6 +7696,28 @@ app.post('/api/assistant/remember', requireAuth, (req, res) => {
   const r = _captureKnowledge(code, userId, text, { visibility: wantsShared ? 'normal' : 'private' });
   scheduleSave();
   res.json({ ok: true, stored: !!r.stored, evidenceId: r.id || null, visibility: wantsShared ? 'normal' : 'private' });
+});
+
+/* POST /api/evidence/import — the one governed intake door. Body:
+   { format, content, sourceName, visibility?, confirmVisibilityIncrease?, captureTime? }.
+   Returns an inspectable diagnostics artifact. Private by default; a shared import
+   needs the explicit visibility confirmation. */
+app.post('/api/evidence/import', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  if (!b.content && b.content !== 0) return res.status(400).json({ error: 'content required' });
+  if (!intake.SUPPORTED.includes(String(b.format || 'text').toLowerCase().replace('md', 'markdown')))
+    return res.status(400).json({ error: 'unsupported_format', supported: intake.SUPPORTED });
+  const out = _ingestArtifact(code, userId, b);
+  if (out.needsConfirmation) return res.status(409).json(out);
+  res.json(out);
+});
+
+/* DELETE /api/evidence/import/:importId — remove an import (owner/admin); retrieval
+   stops returning it immediately. */
+app.delete('/api/evidence/import/:importId', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  res.json(_deleteImport(code, String(req.params.importId || ''), userId));
 });
 
 /* POST /api/assistant/answer-feedback — the smallest clean answer-quality hook.
@@ -12405,7 +12522,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
   // exported for the truth layer: grounded retrieval over canonical evidence
-  _retrieveGrounding, _indexEvidence, _evictEvidenceVector, _captureKnowledge, _isTextEvidence, _assistantAnswer, evidenceVectors, answerFeedback };
+  _retrieveGrounding, _indexEvidence, _evictEvidenceVector, _captureKnowledge, _isTextEvidence, _assistantAnswer, evidenceVectors, answerFeedback,
+  // exported for the truth layer: universal evidence intake
+  _ingestArtifact, _deleteImport };
 
 if (require.main === module) (async () => {
   try {

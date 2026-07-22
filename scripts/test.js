@@ -73,6 +73,7 @@ const SUITES = [
   'proactive-smoke.js',            // the proactive surfacing layer: post-kernel ProactiveInsight projection, surfacing policy, audience safety, bounded preferences
   'governance-smoke.js',           // architectural gravity: proactive DELIVERY lives ONLY in ai/behaviour.js; every surface consumes one pipeline
   'retrieval-smoke.js',            // grounded retrieval over canonical evidence: authorised-before-composition, cited, no-key extractive, full privacy/integrity matrix
+  'intake-smoke.js',               // universal evidence intake: one governed ingestion boundary (text/md/pdf/docx/csv/json) → canonical evidence → grounded retrieval; dedup/supersede/delete, provenance, privacy
   'connector-harness.js',  // the Connector SDK: identity/confidence + mapping contracts
   'frontend-smoke.js',     // REAL headless-Chromium boot: every route + refresh + Support view; fails on any uncaught JS/parse error (self-skips if no Chromium). This is the guard that would have caught the mobile "Unexpected token" boot crash.
   'endpoint-smoke.js',   // boots the real app in-process (DB_OPTIONAL) — HTTP authz + Me context
