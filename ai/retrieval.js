@@ -97,11 +97,20 @@ function buildGrounding({ queryId, requesterId, purpose, scope, query, passages,
 
 /* Pick the sentence in a passage most relevant to the query (deterministic). */
 function _bestSentence(text, query) {
-  const sentences = String(text || '').split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(Boolean);
+  // Strip markdown heading/list/emphasis markers so a bare heading isn't returned as
+  // the whole answer, and split into candidate sentences.
+  const sentences = String(text || '')
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map(s => s.replace(/^#{1,6}\s*/, '').replace(/^[-*]\s+/, '').replace(/[*_`]/g, '').trim())
+    .filter(Boolean);
   if (!sentences.length) return String(text || '').trim();
-  let best = sentences[0], bestScore = -1;
-  for (const s of sentences) { const sc = lexicalScore(query, s); if (sc > bestScore) { bestScore = sc; best = s; } }
-  return best;
+  const scored = sentences.map(s => ({ s, sc: lexicalScore(query, s), words: s.split(/\s+/).length }));
+  const max = Math.max(...scored.map(x => x.sc));
+  // Prefer a CONTENT sentence (≥4 words) that is relevant; a short heading like
+  // "PTO Policy" matches the query but isn't a useful answer on its own.
+  const content = scored.filter(x => x.sc > 0 && x.words >= 4).sort((a, b) => b.sc - a.sc || b.words - a.words);
+  if (content.length && content[0].sc >= max * 0.5) return content[0].s;
+  return scored.sort((a, b) => b.sc - a.sc || b.words - a.words)[0].s;
 }
 
 /* ── Deterministic extractive answer — the no-AI-key fallback ──────────────────
