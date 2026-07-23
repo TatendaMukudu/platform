@@ -4570,6 +4570,7 @@ function _studioMemberRead(code, userId, now) {
 
 /* GET /api/assessments — everything the caller needs for the tab, role-scoped. */
 app.get('/api/assessments', requireAuth, (req, res) => {
+ try {
   const { orgCode: code, userId } = req.iqSession;
   const leader = _isLeader(code, userId);
   const all = assessmentAssignments[code] || [];
@@ -4598,14 +4599,23 @@ app.get('/api/assessments', requireAuth, (req, res) => {
     else                                                         evidence = 'Works sometimes';
     return { uses: uses.length, returned: scored.length, avgOutcome, lastUsed, verdict, evidence, stage: tpl.stage || 'active' };
   };
+  // Per-record guards: one malformed template/assignment must NEVER 500 the whole
+  // page (that surfaced to the member as a dead-end "Couldn't load your assigned
+  // work"). A bad row is skipped, the rest still load.
+  const safeMap = (arr, fn) => (arr || []).reduce((out, x) => { try { out.push(fn(x)); } catch (_) {} return out; }, []);
   res.json({
     ok: true,
     canCreate: leader,
-    templates: (assessmentTemplates[code] || []).map(t => ({ id: t.id, title: t.title, description: t.description, kind: t.kind, fields: t.fields, createdByName: t.createdByName, ...templateStats(t) })),
-    assigned: all.filter(a => a.assigneeId === userId).map(_publicAssignment),           // things I must fill
-    issued:   leader ? all.filter(a => a.assignerId === userId).map(_publicAssignment) : [], // things I gave out
-    tutorials: (orgTutorials[code] || []).map(t => ({ id: t.id, title: t.title, body: t.body, url: t.url, kind: t.kind, createdByName: t.createdByName, createdAt: t.createdAt })),
+    templates: safeMap(assessmentTemplates[code], t => ({ id: t.id, title: t.title, description: t.description, kind: t.kind, fields: t.fields, createdByName: t.createdByName, ...templateStats(t) })),
+    assigned: safeMap(all.filter(a => a.assigneeId === userId), _publicAssignment),           // things I must fill
+    issued:   leader ? safeMap(all.filter(a => a.assignerId === userId), _publicAssignment) : [], // things I gave out
+    tutorials: safeMap(orgTutorials[code], t => ({ id: t.id, title: t.title, body: t.body, url: t.url, kind: t.kind, createdByName: t.createdByName, createdAt: t.createdAt })),
   });
+ } catch (e) {
+  // Never return a non-JSON 500 (an HTML error page is what made the client throw).
+  console.warn('[assessments] failed:', e && e.message);
+  res.status(200).json({ ok: false, canCreate: false, templates: [], assigned: [], issued: [], tutorials: [], error: 'load_failed' });
+ }
 });
 
 /* POST /api/assessments/templates — a leader defines an assessment. */

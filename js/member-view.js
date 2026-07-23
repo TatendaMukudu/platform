@@ -1406,13 +1406,21 @@ const MemberApp = {
     if (!root) return;
     root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Loading…</div>`;
     try {
-      const d = await (await fetch('/api/assessments', { headers: this._authHeaders() })).json();
+      const res = await fetch('/api/assessments', { headers: this._authHeaders() });
+      // Read as text first so a non-JSON gateway/error page can't throw past our guard.
+      const raw = await res.text();
+      let d; try { d = JSON.parse(raw); } catch (_) { d = null; }
+      if (!d || d.ok === false) throw new Error(d && d.error ? d.error : `HTTP ${res.status}`);
       this._assessState = d;
       root.innerHTML = this._assessHtml(d);
       if (typeof hydrateIcons === 'function') hydrateIcons(root);
       if (d.canCreate) this._loadAssessLearning();
     } catch (e) {
-      root.innerHTML = `<div class="empty-hint" style="padding:1rem;color:var(--text-muted)">Couldn't load your assigned work.</div>`;
+      root.innerHTML = `
+        <div class="empty-hint" style="padding:1rem;color:var(--text-muted)">
+          Couldn't load your workspace right now.
+          <button class="btn btn-outline btn-sm" style="margin-top:0.6rem" onclick="MemberApp._renderAssessments()">Try again</button>
+        </div>`;
     }
   },
 
