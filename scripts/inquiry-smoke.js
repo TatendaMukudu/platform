@@ -1,0 +1,166 @@
+/* Truth layer — INQUIRY / EPISTEMIC-PLANNING ENGINE (pure).
+
+   Proves the reasoning layer that decides WHETHER to ask before asking. Questions are
+   ACTIONS: the engine only recommends an ask when the answer would change a real
+   decision, the owner can answer it, it is privacy-safe, non-leading, non-duplicative,
+   and not answerable without asking. It optimises for organisational health, not data
+   collection. Pure — no DB, no AI. Run: node scripts/inquiry-smoke.js */
+
+process.env.DB_OPTIONAL = '1';
+process.env.NODE_ENV    = 'test';
+
+const IQ = require('../ai/inquiry');
+const { UNCERTAINTY } = IQ;
+
+let pass = 0, fail = 0;
+const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n); } };
+
+// A worthwhile, well-routed operational uncertainty (missing required fact, real owner).
+const goodOp = {
+  id: 'u_meeting', type: UNCERTAINTY.MISSING_REQUIRED,
+  claim: "Saturday's team meeting start time", requiredFor: ['player preparation', 'calendar coordination'],
+  impact: 'high', urgency: 'high', resolutionOwner: 'team-coach', ownerAuthoritative: true, privacyClass: 'team-shared',
+};
+
+// 1 · a high-value, well-routed, answerable question clears the gate
+{
+  const v = IQ.questionValue(goodOp);
+  ok('1 · a real, well-routed operational question scores high', v >= 0.5);
+  ok('1 · its critic passes (answerable, actionable, non-leading, owned)', IQ.critique(goodOp).ok);
+  ok('1 · it survives the health guard', !IQ.healthGuard(goodOp).rejected);
+}
+
+// 2 · never ask what we can answer ourselves (derive) or read from a system of record
+{
+  const derivable = { ...goodOp, id: 'u_d', derivable: true };
+  const sor       = { ...goodOp, id: 'u_s', systemOfRecord: 'calendar' };
+  ok('2 · a derivable uncertainty is not worth asking a person', IQ.questionValue(derivable) < 0.2 && !IQ.critique(derivable).ok);
+  ok('2 · a system-of-record answer routes to the record, not a person', IQ.route(sor).method === 'inspect_system_of_record');
+  const plan = IQ.planInquiries([derivable, sor]);
+  ok('2 · the planner asks NEITHER (answerable without asking)', plan.plans.length === 0 && plan.rejected.length === 2);
+}
+
+// 3 · no reliable owner ⇒ do not ask (escalate to a human to route)
+{
+  const orphan = { ...goodOp, id: 'u_o', resolutionOwner: null };
+  ok('3 · an ownerless question fails the critic', !IQ.critique(orphan).ok);
+  ok('3 · routing escalates rather than guessing a target', IQ.route(orphan).method === 'escalate');
+}
+
+// 4 · leading / accusatory questions are blocked; observation-first phrasing is used
+{
+  const hyp = {
+    id: 'u_att', type: UNCERTAINTY.UNSUPPORTED_HYPOTHESIS,
+    claim: 'the recent attendance dip', observedBaseline: 'Attendance has been below its three-week baseline',
+    requiredFor: ['planning'], impact: 'medium', urgency: 'medium', resolutionOwner: 'coordinator', ownerAuthoritative: true,
+    hypotheses: [{ separatedBy: 'schedule_changed', probeCost: 0.15 }, { separatedBy: 'schedule_changed' }, { separatedBy: 'injuries' }],
+  };
+  const phrased = IQ.phraseQuestion(hyp);
+  ok('4 · phrasing states the observation, not a cause', /below its three-week baseline/i.test(phrased) && !/why has|motivation/i.test(phrased));
+  ok('4 · a leading "why has motivation dropped" is blocked', !IQ.critique(hyp, 'Why has the team lost motivation?').ok);
+  ok('4 · the neutral phrasing passes the critic', IQ.critique(hyp, phrased).ok);
+  // hypothesis discrimination: pick the single probe that separates the most, cheapest
+  const d = IQ.discriminate(hyp);
+  ok('4 · discrimination picks the most-separating, lowest-cost probe', d && d.key === 'schedule_changed' && d.separates === 2);
+}
+
+// 5 · HEALTH GUARD — organisational health over data collection
+{
+  const priv = { id: 'u_p', type: UNCERTAINTY.UNSUPPORTED_HYPOTHESIS, claim: 'why a member seems low', privacyClass: 'sensitive', impact: 'high', urgency: 'high', resolutionOwner: 'coach', ownerAuthoritative: true };
+  ok('5 · a private/emotional disclosure never becomes a management ask', IQ.healthGuard(priv).rejected && IQ.healthGuard(priv).reason === 'private_or_sensitive_disclosure');
+
+  const perf = { id: 'u_perf', type: UNCERTAINTY.MISSING_REQUIRED, claim: 'explain their performance — why are they behind', subjectId: 'm1', impact: 'high', urgency: 'high', resolutionOwner: 'coach', ownerAuthoritative: true };
+  ok('5 · never single out an individual for an underperformance explanation', IQ.healthGuard(perf).rejected && IQ.healthGuard(perf).reason === 'targets_individual_performance');
+
+  const loyalty = { id: 'u_l', type: UNCERTAINTY.MISSING_REQUIRED, claim: 'why aren’t you responding after hours — commitment', impact: 'medium', urgency: 'low', resolutionOwner: 'lead', ownerAuthoritative: true };
+  ok('5 · wellbeing/effort is never used as a performance proxy', IQ.healthGuard(loyalty).rejected && IQ.healthGuard(loyalty).reason === 'wellbeing_used_as_performance_proxy');
+
+  ok('5 · the planner drops every harmful uncertainty', IQ.planInquiries([priv, perf, loyalty]).plans.length === 0);
+}
+
+// 6 · CONTRADICTION — resolve, don't bury; ask the owner, non-leading
+{
+  const contra = {
+    id: 'u_kick', type: UNCERTAINTY.CONTRADICTION, claim: 'the cup final kickoff time',
+    currentBeliefs: [{ value: '3pm', authority: 'coach', confidence: 0.82 }, { value: '5pm', authority: 'member', confidence: 0.45 }],
+    requiredFor: ['player preparation'], impact: 'high', urgency: 'high', resolutionOwner: 'team-coach', ownerAuthoritative: true,
+  };
+  ok('6 · a contradiction is worth resolving', IQ.questionValue(contra) >= 0.4);
+  ok('6 · it is phrased as "which is correct", not an accusation', /which is correct/i.test(IQ.phraseQuestion(contra)) && /3pm.*5pm|5pm.*3pm/i.test(IQ.phraseQuestion(contra)));
+  ok('6 · near-equal beliefs would score even higher information gain',
+     IQ.infoGain({ ...contra, currentBeliefs: [{ confidence: 0.6 }, { confidence: 0.58 }] }) > IQ.infoGain(contra));
+}
+
+// 7 · DUPLICATION / cadence — never re-ask what was just asked
+{
+  const asked = { ...goodOp, id: 'u_recent', lastAskedAt: new Date().toISOString() };
+  ok('7 · a recently-asked question is blocked', !IQ.critique(asked).ok);
+  ok('7 · duplication tanks its value', IQ.questionValue(asked) < IQ.questionValue(goodOp));
+}
+
+// 8 · THE PLANNER — restraint, ranking, dedup, recommendation-only
+{
+  const worthy2 = { id: 'u_dep', type: UNCERTAINTY.BLOCKED_DEPENDENCY, claim: 'whether Saturday transport is confirmed', requiredFor: ['availability'], impact: 'high', urgency: 'high', resolutionOwner: 'operations', ownerAuthoritative: true };
+  const weak    = { id: 'u_weak', type: UNCERTAINTY.MISSING_REQUIRED, claim: 'a nice-to-have preference', impact: 'low', urgency: 'none', resolutionOwner: 'lead' };
+  const out = IQ.planInquiries([goodOp, worthy2, weak, { ...goodOp, id: 'u_dupe' }], { maxAsks: 5 });
+  ok('8 · only decision-relevant asks are planned (weak one dropped)', out.plans.every(p => p.uncertaintyId !== 'u_weak'));
+  ok('8 · a near-duplicate is deduped', out.plans.filter(p => /meeting start time/i.test(p.question)).length === 1);
+  ok('8 · plans are ranked by ask-worthiness', out.plans.every((p, i, a) => i === 0 || a[i - 1].askWorthiness >= p.askWorthiness));
+  ok('8 · every plan is recommendation-only (nothing is sent)', out.plans.every(p => p.status === 'recommended'));
+  ok('8 · volume is capped (restraint is a feature)', IQ.planInquiries([goodOp, worthy2, { ...worthy2, id: 'x1', claim: 'confirm the kit order' }, { ...worthy2, id: 'x2', claim: 'confirm the pitch booking' }], { maxAsks: 2 }).plans.length === 2);
+}
+
+// 9 · ANSWER ADJUDICATION — an answer is not automatically truth
+{
+  const obs = IQ.adjudicateAnswer({ answer: 'Training was cancelled on Tuesday.', answererRole: 'coordinator', ownerRole: 'coordinator', claimType: 'schedule' });
+  ok('9 · an owner stating a fact is adjudicated authoritative', obs.kind === 'observation' && obs.authoritative && obs.recommend === 'authoritative');
+  const interp = IQ.adjudicateAnswer({ answer: 'I think the team is a bit burned out lately.', answererRole: 'member', ownerRole: 'coach', claimType: 'wellbeing' });
+  ok('9 · a perception is kept as reported, not org truth', interp.kind === 'interpretation' && !interp.authoritative && interp.recommend === 'reported_perception');
+  const conflict = IQ.adjudicateAnswer({ answer: 'Kickoff is 5pm.', answererRole: 'member', ownerRole: 'coach', claimType: 'schedule', conflictsWithAuthoritative: true });
+  ok('9 · an answer conflicting with the authoritative record needs corroboration', conflict.recommend === 'needs_corroboration');
+}
+
+// 10 · THE GOVERNING PRINCIPLE — endless missing info does NOT mean endless asking
+{
+  const trivia = Array.from({ length: 20 }, (_, i) => ({ id: 'triv_' + i, type: UNCERTAINTY.MISSING_REQUIRED, claim: 'some absent detail ' + i, impact: 'none', urgency: 'none', resolutionOwner: 'lead' }));
+  ok('10 · a sea of low-impact gaps produces zero asks', IQ.planInquiries(trivia).plans.length === 0);
+}
+
+// ── HTTP: recommendation-only endpoint over REAL derivation + the privacy boundary ──
+const S = require('../server.js');
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken } = S;
+const A = 'orga', iso = new Date().toISOString();
+_loadAllStores({
+  orgMeta:  { [A]: { orgName: 'A', createdAt: iso } },
+  orgUsers: { [A]: {
+    coach: { id: 'coach', name: 'Coach', role: 'superadmin', orgCode: A, supervisorId: null,   status: 'active' },
+    mia:   { id: 'mia',   name: 'Mia',   role: 'member',     orgCode: A, supervisorId: 'coach', status: 'active' },
+  } },
+});
+_rebuildEmailIndex();
+
+const server = app.listen(0, async () => {
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const tok = { coach: issueToken('coach', A, 'superadmin'), mia: issueToken('mia', A, 'member') };
+  const turn = (who, text) => fetch(base + '/api/assistant/turn', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok[who]}` }, body: JSON.stringify({ text }) }).then(r => r.json());
+  const recs = (who) => fetch(base + '/api/inquiry/recommendations', { headers: { Authorization: `Bearer ${tok[who]}` } }).then(async r => ({ status: r.status, j: await r.json().catch(() => null) }));
+  try {
+    // an AUTHORITATIVE org record and a REPORTED member claim that disagree on the same topic
+    await turn('coach', 'Add this to our organisation knowledge: Cup final kickoff confirmed for Saturday afternoon.');
+    await turn('mia',   'Add this to our organisation knowledge: Cup final kickoff might be Saturday evening instead.');
+    // a PRIVATE, sensitive disclosure — must NEVER become a leader-facing question
+    await turn('mia',   'Remember this: I have been feeling low and anxious about my place in the team this month.');
+
+    const r = await recs('coach');
+    ok('11 · a genuine contradiction surfaces a recommended question', r.status === 200 && r.j.recommendations.length >= 1 && r.j.recommendations.some(x => /kickoff|which is correct/i.test(x.question)));
+    ok('11 · the endpoint is recommendation-only (nothing is sent)', r.j.mode === 'recommendation_only');
+    ok('11 · a member’s PRIVATE disclosure never appears as an inquiry', !/anxious|feeling low|my place in the team|low and anxious/i.test(JSON.stringify(r.j)));
+    ok('11 · recommendations route to the authoritative owner, not a broadcast', r.j.recommendations.every(x => x.owner && x.method === 'ask_owner'));
+
+    const m = await recs('mia');
+    ok('11 · inquiry recommendations are leaders-only (member 403)', m.status === 403);
+  } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
+  server.close();
+  console.log(`\ninquiry-smoke: ${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+});

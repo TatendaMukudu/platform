@@ -18,6 +18,7 @@ const embeddings = require('./ai/embeddings');
 const retrieval  = require('./ai/retrieval');
 const intake     = require('./ai/intake');
 const capture    = require('./ai/capture');
+const inquiry    = require('./ai/inquiry');
 const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
@@ -7716,6 +7717,68 @@ function _assistantAnswer(code, userId, question) {
     groundedClaims: boundedClaims, citations, groundingId };
 }
 
+/* ─── INQUIRY / EPISTEMIC PLANNING (recommendation-only) ──────────────────────
+   Derive UNCERTAINTIES from evidence we ALREADY hold, then let the pure Inquiry
+   Engine decide whether any is worth asking a person about. Reuses the exact privacy
+   boundary as retrieval: ONLY organisation-shared, admissible evidence is ever
+   considered — a member's private disclosure never enters this reasoning, so it can
+   never become a leader-facing question. This slice RECOMMENDS only; nothing is sent. */
+function _deriveOrgUncertainties(code) {
+  const uncertainties = [];
+  // Consider ONLY org-shared, source, text evidence (never private, never derived).
+  const pool = (evidenceLog[code] || []).filter(e =>
+    e.status === 'active' && e.visibility === 'normal' && e.promoted === true &&
+    _isSourceEvidence(e) && _isTextEvidence(e));
+  const tok = t => new Set((retrieval._tokens(t) || []).filter(w => w.length > 3));
+  const overlap = (a, b) => { if (!a.size || !b.size) return 0; let n = 0; for (const w of a) if (b.has(w)) n++; return n / Math.min(a.size, b.size); };
+  const meta = pool.map(e => ({ e, toks: tok(`${e.label || ''} ${e.valueText || ''}`), authoritative: e.source === 'system_of_record' }));
+
+  // CONTRADICTION: an AUTHORITATIVE org record and a REPORTED claim on the same topic
+  // that disagree — surface it for resolution, never bury it behind ranking.
+  for (let i = 0; i < meta.length; i++) {
+    for (let j = i + 1; j < meta.length; j++) {
+      const A = meta[i], B = meta[j];
+      if (A.authoritative === B.authoritative) continue;                 // need one authoritative + one reported
+      if (overlap(A.toks, B.toks) < 0.5) continue;                       // same topic
+      const contentHashA = A.e.attributes && A.e.attributes.contentHash, contentHashB = B.e.attributes && B.e.attributes.contentHash;
+      if (contentHashA && contentHashA === contentHashB) continue;       // identical text → not a conflict
+      const auth = A.authoritative ? A : B, rep = A.authoritative ? B : A;
+      uncertainties.push(inquiry.buildUncertainty({
+        id: `contra_${auth.e.id}_${rep.e.id}`, type: inquiry.UNCERTAINTY.CONTRADICTION,
+        claim: (auth.e.label || auth.e.attributes?.sourceName || 'a shared record').slice(0, 120),
+        currentBeliefs: [
+          { value: String(auth.e.valueText || '').slice(0, 80), authority: 'organisation', confidence: 0.82 },
+          { value: String(rep.e.valueText || '').slice(0, 80), authority: 'member', confidence: 0.45 },
+        ],
+        // A contradiction in an AUTHORITATIVE shared record is high-impact: people act
+        // on wrong information. Urgency stays medium (we can't see external timing here).
+        requiredFor: ['a shared record staying correct'], impact: 'high', urgency: 'medium',
+        resolutionOwner: auth.e.ownerRef || null, ownerAuthoritative: true, privacyClass: 'team-shared',
+      }));
+    }
+  }
+  return uncertainties;
+}
+
+/* GET /api/inquiry/recommendations — leader-only, RECOMMENDATION-ONLY. Returns the
+   questions the Inquiry Engine judges worth asking (value-gated, critiqued, health-
+   guarded, routed) — usually none. Nothing is ever sent from here. */
+app.get('/api/inquiry/recommendations', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const uncertainties = _deriveOrgUncertainties(code);
+    const out = inquiry.planInquiries(uncertainties, { threshold: 0.4, maxAsks: 3 });
+    // Recommendation-only: expose the question + why + routing, never internal evidence text.
+    res.json({ ok: true, mode: 'recommendation_only', considered: out.considered,
+      recommendations: out.plans.map(p => ({ id: p.id, question: p.question, why: p.why, requiredFor: p.requiredFor,
+        method: p.method, owner: p.owner, visibility: p.visibility, askWorthiness: p.askWorthiness, type: p.uncertaintyType })) });
+  } catch (e) {
+    console.warn('[inquiry] failed:', e && e.message);
+    res.status(200).json({ ok: false, mode: 'recommendation_only', considered: 0, recommendations: [] });
+  }
+});
+
 /* /api/workspace/ask — a thin compatibility shim over the ONE question-answering path
    (_assistantAnswer). Retained for the workspace-experience contract; the unified assistant
    turn answers questions through the same helper. No parallel reasoning lives here. */
@@ -11943,7 +12006,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: grounded retrieval over canonical evidence
   _retrieveGrounding, _indexEvidence, _evictEvidenceVector, _captureKnowledge, _isTextEvidence, _assistantAnswer, evidenceVectors, answerFeedback,
   // exported for the truth layer: universal evidence intake
-  _ingestArtifact, _deleteImport, _sanitizeBriefingForLeader, _stripLeaderNumbers };
+  _ingestArtifact, _deleteImport, _sanitizeBriefingForLeader, _stripLeaderNumbers, _deriveOrgUncertainties };
 
 if (require.main === module) (async () => {
   try {
