@@ -36,6 +36,7 @@ const round = n => Math.round(n * 100) / 100;
    supplies whatever it can derive; missing fields fall back to conservative values
    (low impact, low urgency) so a thin signal never masquerades as an emergency. */
 function buildUncertainty(u = {}) {
+  u = u || {};
   const beliefs = Array.isArray(u.currentBeliefs) ? u.currentBeliefs.slice(0, 8) : [];
   return {
     id: u.id || null,
@@ -74,7 +75,7 @@ function infoGain(u) {
     return clamp(0.3 + 0.1 * Math.max(0, (u.hypotheses || []).length - 1), 0.3, 1);
   }
   if (u.type === UNCERTAINTY.MISSING_REQUIRED || u.type === UNCERTAINTY.BLOCKED_DEPENDENCY) return 0.8;
-  if (u.type === UNCERTAINTY.STALE) return 0.6;
+  if (u.type === UNCERTAINTY.STALE) return 0.7;   // confirming a stale record fully resolves it
   return 0.5;
 }
 

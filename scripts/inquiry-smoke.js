@@ -159,6 +159,15 @@ const server = app.listen(0, async () => {
 
     const m = await recs('mia');
     ok('11 · inquiry recommendations are leaders-only (member 403)', m.status === 403);
+
+    // 12 · KNOWLEDGE HEALTH — the "what to keep / what to let go" view, recommendation-only,
+    //   private evidence excluded.
+    const kh = await fetch(base + '/api/knowledge/health', { headers: { Authorization: `Bearer ${tok.coach}` } }).then(r => r.json());
+    ok('12 · knowledge-health returns a freshness rollup', kh.ok && typeof kh.total === 'number' && kh.counts);
+    ok('12 · it is recommendation-only (never deletes)', kh.mode === 'recommendation_only');
+    ok('12 · it never exposes a member’s private disclosure', !/anxious|feeling low|my place in the team/i.test(JSON.stringify(kh)));
+    const khm = await fetch(base + '/api/knowledge/health', { headers: { Authorization: `Bearer ${tok.mia}` } });
+    ok('12 · knowledge-health is leaders-only (member 403)', khm.status === 403);
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
   server.close();
   console.log(`\ninquiry-smoke: ${pass} passed, ${fail} failed`);

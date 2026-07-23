@@ -19,6 +19,7 @@ const retrieval  = require('./ai/retrieval');
 const intake     = require('./ai/intake');
 const capture    = require('./ai/capture');
 const inquiry    = require('./ai/inquiry');
+const lifecycle  = require('./ai/lifecycle');
 const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
@@ -7757,8 +7758,42 @@ function _deriveOrgUncertainties(code) {
       }));
     }
   }
+
+  // STALE — a shared record past its useful life becomes a proactive "is this still
+  // current?" uncertainty, routed to its owner. Impact/urgency stay conservative until
+  // the org-state model can supply real timing, so routine staleness stays quiet (the
+  // value gate) while the knowledge-health view still surfaces it for review.
+  for (const m of meta) {
+    const a = lifecycle.assess(m.e, Date.now());
+    if (a.verdict !== 'review') continue;
+    const u = lifecycle.toUncertainty(a, { owner: m.e.ownerRef || null, ownerAuthoritative: m.authoritative,
+      label: m.e.label || (m.e.attributes && m.e.attributes.sourceName), privacyClass: 'team-shared' });
+    if (u) uncertainties.push(inquiry.buildUncertainty(u));
+  }
   return uncertainties;
 }
+
+/* GET /api/knowledge/health — the "what to keep / what to let go" view (leader-only).
+   Assesses ONLY organisation-shared evidence (private never enters), classifies each
+   by freshness, and RECOMMENDS review / retire / merge — never deletes. */
+app.get('/api/knowledge/health', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const pool = (evidenceLog[code] || []).filter(e =>
+      e.status === 'active' && e.visibility === 'normal' && e.promoted === true && _isSourceEvidence(e) && _isTextEvidence(e));
+    const now = Date.now();
+    const assessments = pool.map(e => lifecycle.assess(e, now));
+    const roll = lifecycle.summarise(assessments);
+    const recon = lifecycle.reconcile(pool.map(e => ({ evidenceId: e.id, authorityTier: e.source === 'system_of_record' ? 'system_of_record' : 'user_reported', label: e.label, text: e.valueText })), { tokens: retrieval._tokens });
+    res.json({ ok: true, mode: 'recommendation_only', ...roll, mergeCandidates: recon.redundant,
+      // per-record verdicts (label + status + verdict only — no raw content dump)
+      records: assessments.map(a => ({ id: a.evidenceId, category: a.category, status: a.status, verdict: a.verdict, ageDays: a.ageDays, confidenceNow: a.confidenceNow })) });
+  } catch (e) {
+    console.warn('[knowledge/health] failed:', e && e.message);
+    res.status(200).json({ ok: false, mode: 'recommendation_only', total: 0, counts: {}, records: [] });
+  }
+});
 
 /* GET /api/inquiry/recommendations — leader-only, RECOMMENDATION-ONLY. Returns the
    questions the Inquiry Engine judges worth asking (value-gated, critiqued, health-
