@@ -121,6 +121,26 @@ ok('1 · imported evidence carries import provenance', (() => { const e = envOf(
   ok('17 · org-B imports never appear in org-A retrieval', !/30 days/.test(a.answer));
 }
 
+// 20 · AUTHORITY DEPENDS ON WHO INPUTTED IT — a leader's org-shared import is
+//   authoritative (system_of_record); the same content shared by a member is a
+//   user-reported assertion. When they conflict, the leader's outranks in retrieval.
+{
+  const byLeader = _ingestArtifact(A, 'coach', { format: 'text', content: 'Kickoff for the cup final is at 3pm sharp.', sourceName: 'Fixtures (coach)', visibility: 'normal', confirmVisibilityIncrease: true });
+  const byMember = _ingestArtifact(A, 'mia',   { format: 'text', content: 'I heard the cup final kicks off at 5pm.',   sourceName: 'Fixtures (Mia)',  visibility: 'normal', confirmVisibilityIncrease: true });
+  ok('20 · a leader’s org-shared import is tagged authoritative (organisation)', byLeader.authority === 'organisation');
+  ok('20 · a member’s org-shared import is NOT authoritative (shared_unverified)', byMember.authority === 'shared_unverified');
+  const lead = envOf(A, byLeader.evidenceIds[0]), mem = envOf(A, byMember.evidenceIds[0]);
+  ok('20 · the leader import carries system-of-record provenance', lead.source === 'system_of_record');
+  ok('20 · the member import stays user-reported provenance', mem.source === 'reported');
+  const g = _retrieveGrounding({ code: A, requesterId: 'coach', subjectId: 'coach', purpose: 'personal_assistance', query: 'what time is the cup final kickoff' });
+  const li = g.passages.findIndex(p => p.evidenceId === byLeader.evidenceIds[0]);
+  const mi = g.passages.findIndex(p => p.evidenceId === byMember.evidenceIds[0]);
+  ok('20 · both conflicting claims are retrieved (nothing hidden)', li !== -1 && mi !== -1);
+  ok('20 · the AUTHORITATIVE (leader) claim outranks the member’s assertion', li < mi);
+  ok('20 · the leader claim is trusted as system_of_record, the member as user_reported',
+     g.passages[li].trustTier === 'system_of_record' && g.passages[mi].trustTier === 'user_reported');
+}
+
 // 18 · a DERIVED summary of an import is never retrieved as source (no self-feeding)
 {
   const src = envOf(A, imp.evidenceIds[0]);

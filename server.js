@@ -7571,7 +7571,20 @@ function _ingestArtifact(code, uploaderId, input = {}) {
   const importTime = new Date().toISOString();
   const parsed = intake.parse({ format: input.format, content: input.content, sourceName });
 
+  // TRUTH DEPENDS ON WHO INPUTTED IT. A leader sharing to the org is stating
+  // authoritative organisational truth (system-of-record tier — it outranks a
+  // member's assertion when they conflict). Anyone else — a member, or any private
+  // import — is a user-reported assertion until corroborated. This flows straight
+  // into retrieval ranking (authority) and into honest "not independently verified"
+  // labelling, so the grounded answer trusts the right source.
+  let uploaderIsLeader = false;
+  try { uploaderIsLeader = _isLeader(code, uploaderId); } catch (_) {}
+  const authoritative = uploaderIsLeader && visibility === 'normal';
+  const evidenceSource = authoritative ? 'system_of_record' : 'reported';
+  const evidenceConfidence = authoritative ? 'high' : 'reported';
+
   const diag = { ok: true, importId, sourceName, sourceType: parsed.sourceType, visibility,
+    authority: authoritative ? 'organisation' : (visibility === 'normal' ? 'shared_unverified' : 'personal'),
     imported: 0, duplicates: 0, skipped: 0, failures: parsed.failures.slice(), warnings: parsed.warnings.slice(),
     classification: {}, identityMatches: 0, evidenceIds: [] };
 
@@ -7581,7 +7594,7 @@ function _ingestArtifact(code, uploaderId, input = {}) {
     if (u.subjectRef) { try { subjectId = _resolveUserIdByName(code, u.subjectRef) || null; } catch (_) {} if (subjectId) diag.identityMatches++; }
     const contentHash = _contentHash(u.text);
     const r = _recordEvidence(code, {
-      provider: 'import', source: parsed.sourceType,
+      provider: 'import', source: evidenceSource,               // authority reflects WHO inputted it (see above)
       externalId: `${sourceName}#${u.unitKey}`,                 // stable per unit → clean dedupe + supersede
       // A PRIVATE import is scoped to its uploader (owner-only, personal). A SHARED
       // import is org-scoped (subjectId null) unless it resolved to a specific person.
@@ -7592,7 +7605,7 @@ function _ingestArtifact(code, uploaderId, input = {}) {
       // identical re-import collapses and a modified one supersedes. Recency for
       // ranking comes from retrievedAt (the actual import time) instead.
       observedAt: input.captureTime || IMPORT_EPOCH,
-      retrievedAt: importTime, confidence: 'reported', visibility,
+      retrievedAt: importTime, confidence: evidenceConfidence, visibility,
       attributes: {
         sourceType: parsed.sourceType, sourceName, importId, importTime, category: u.category,
         rowNumber: (u.structured && u.structured.rowNumber) || null, contentHash,

@@ -2610,7 +2610,11 @@ const MemberApp = {
       const bits = [];
       if (d.imported) bits.push(`Saved ${d.imported} item${d.imported !== 1 ? 's' : ''} from ${esc(file.name)}`);
       if (d.duplicates) bits.push(`${d.duplicates} already known`);
-      done(`${bits.join(' · ') || 'Nothing new to add'} — it’s private to you, and I can use it now. Ask me anything about it.`);
+      // Honest about how it will be trusted — truth depends on who inputted it.
+      const kept = d.authority === 'organisation' ? 'kept as authoritative organisation evidence'
+                 : d.authority === 'shared_unverified' ? 'shared with the team as your account (not yet verified)'
+                 : 'private to you';
+      done(`${bits.join(' · ') || 'Nothing new to add'} — ${kept}, and I can use it now. Ask me anything about it.`);
     } catch (e) {
       done(`<span class="iq-error-text">${esc(e.message || 'I couldn’t add that file.')}</span>`);
     }
