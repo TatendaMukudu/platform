@@ -128,7 +128,7 @@ const goodOp = {
 
 // ── HTTP: recommendation-only endpoint over REAL derivation + the privacy boundary ──
 const S = require('../server.js');
-const { app, _loadAllStores, _rebuildEmailIndex, issueToken } = S;
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken, evidenceLog } = S;
 const A = 'orga', iso = new Date().toISOString();
 _loadAllStores({
   orgMeta:  { [A]: { orgName: 'A', createdAt: iso } },
@@ -139,26 +139,56 @@ _loadAllStores({
 });
 _rebuildEmailIndex();
 
+const { orgStateConfig } = S;
+
 const server = app.listen(0, async () => {
   const base = `http://127.0.0.1:${server.address().port}`;
   const tok = { coach: issueToken('coach', A, 'superadmin'), mia: issueToken('mia', A, 'member') };
+  const inDays = d => new Date(Date.now() + d * 86400000).toISOString();
   const turn = (who, text) => fetch(base + '/api/assistant/turn', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok[who]}` }, body: JSON.stringify({ text }) }).then(r => r.json());
   const recs = (who) => fetch(base + '/api/inquiry/recommendations', { headers: { Authorization: `Bearer ${tok[who]}` } }).then(async r => ({ status: r.status, j: await r.json().catch(() => null) }));
+  const orgstate = (who) => fetch(base + '/api/org-state', { headers: { Authorization: `Bearer ${tok[who]}` } }).then(async r => ({ status: r.status, j: await r.json().catch(() => null) }));
   try {
-    // an AUTHORITATIVE org record and a REPORTED member claim that disagree on the same topic
-    await turn('coach', 'Add this to our organisation knowledge: Cup final kickoff confirmed for Saturday afternoon.');
-    await turn('mia',   'Add this to our organisation knowledge: Cup final kickoff might be Saturday evening instead.');
+    // SCENARIO 2 — an upcoming match (explicit org config) with a KICKOFF CONFLICT.
+    orgStateConfig[A] = { pack: 'sports', events: [{ id: 'cupfinal', type: 'match', title: 'Cup Final', startAt: inDays(3), participants: 22, owner: 'coach' }] };
+    await turn('coach', 'Add this to our organisation knowledge: Cup final kickoff confirmed at 3pm.');
+    await turn('mia',   'Add this to our organisation knowledge: I heard the cup final kickoff might be at 5pm.');
     // a PRIVATE, sensitive disclosure — must NEVER become a leader-facing question
     await turn('mia',   'Remember this: I have been feeling low and anxious about my place in the team this month.');
 
     const r = await recs('coach');
-    ok('11 · a genuine contradiction surfaces a recommended question', r.status === 200 && r.j.recommendations.length >= 1 && r.j.recommendations.some(x => /kickoff|which is correct/i.test(x.question)));
+    ok('11 · a contradiction on an upcoming event surfaces a recommendation', r.status === 200 && r.j.recommendations.some(x => /kickoff|which is correct/i.test(x.question)));
+    ok('11 · a missing game plan for the match also surfaces', r.j.recommendations.some(x => /game plan/i.test(x.question)));
     ok('11 · the endpoint is recommendation-only (nothing is sent)', r.j.mode === 'recommendation_only');
     ok('11 · a member’s PRIVATE disclosure never appears as an inquiry', !/anxious|feeling low|my place in the team|low and anxious/i.test(JSON.stringify(r.j)));
-    ok('11 · recommendations route to the authoritative owner, not a broadcast', r.j.recommendations.every(x => x.owner && x.method === 'ask_owner'));
+    ok('11 · recommendations route to the owner, not a broadcast', r.j.recommendations.every(x => x.owner && x.method === 'ask_owner'));
 
     const m = await recs('mia');
     ok('11 · inquiry recommendations are leaders-only (member 403)', m.status === 403);
+
+    // 11b · ORG-STATE diagnostic — derived structure, no private, leader-only
+    const os = await orgstate('coach');
+    ok('11b · org-state derives the event + requirements + readiness', os.status === 200 && os.j.events.some(e => e.id === 'cupfinal') && os.j.requirements.some(rq => rq.claimType === 'game_plan') && os.j.readiness.some(rd => rd.status === 'at_risk'));
+    ok('11b · the disputed kickoff is a claim state, not a silent supersede', os.j.claimStates.some(c => c.claimType === 'kickoff_time' && c.state === 'disputed'));
+    ok('11b · org-state never exposes raw evidence text or private content', !/anxious|feeling low|3pm|5pm/i.test(JSON.stringify(os.j)));
+    ok('11b · org-state is leaders-only', (await orgstate('mia')).status === 403);
+
+    // 11c · REQUIREMENT SATISFIED — an authoritative game plan makes the ask disappear
+    await turn('coach', 'Add this to our organisation knowledge: Game plan for the cup final: high press 4-3-3, tactics and formation set, squad availability confirmed.');
+    const r2 = await recs('coach');
+    ok('11c · once satisfied, the game-plan recommendation disappears deterministically', !r2.j.recommendations.some(x => /game plan/i.test(x.question)));
+
+    // 11d · CACHE INVALIDATION after a new import — recommendations reflect the change
+    const before = (await orgstate('coach')).j.claimStates.find(c => c.claimType === 'game_plan');
+    ok('11d · cache invalidated after import (game_plan now known)', before && before.state === 'known');
+
+    // 11e · MALFORMED evidence resilience + valid JSON on any projection hiccup
+    (evidenceLog[A] = evidenceLog[A] || []).push({ id: 'bad_os', orgCode: A, status: 'active', provider: 'import', source: 'reported', type: 'document', visibility: 'normal', promoted: true, ownerRef: 'coach' /* no attributes, no valueText */ });
+    const osBad = await orgstate('coach');
+    ok('11e · a malformed evidence row never breaks the projection', osBad.status === 200 && osBad.j.ok === true);
+    const recBad = await recs('coach');
+    ok('11e · recommendations still return valid JSON with a malformed row', recBad.status === 200 && Array.isArray(recBad.j.recommendations));
+    evidenceLog[A] = evidenceLog[A].filter(e => e.id !== 'bad_os');
 
     // 12 · KNOWLEDGE HEALTH — the "what to keep / what to let go" view, recommendation-only,
     //   private evidence excluded.

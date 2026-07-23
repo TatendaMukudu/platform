@@ -20,6 +20,7 @@ const intake     = require('./ai/intake');
 const capture    = require('./ai/capture');
 const inquiry    = require('./ai/inquiry');
 const lifecycle  = require('./ai/lifecycle');
+const orgState   = require('./ai/org-state');
 const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
@@ -7718,60 +7719,102 @@ function _assistantAnswer(code, userId, question) {
     groundedClaims: boundedClaims, citations, groundingId };
 }
 
-/* ─── INQUIRY / EPISTEMIC PLANNING (recommendation-only) ──────────────────────
-   Derive UNCERTAINTIES from evidence we ALREADY hold, then let the pure Inquiry
-   Engine decide whether any is worth asking a person about. Reuses the exact privacy
-   boundary as retrieval: ONLY organisation-shared, admissible evidence is ever
-   considered — a member's private disclosure never enters this reasoning, so it can
-   never become a leader-facing question. This slice RECOMMENDS only; nothing is sent. */
-function _deriveOrgUncertainties(code) {
-  const uncertainties = [];
-  // Consider ONLY org-shared, source, text evidence (never private, never derived).
-  const pool = (evidenceLog[code] || []).filter(e =>
+/* ─── ORGANISATIONAL-STATE BOUNDARY + INQUIRY (recommendation-only) ────────────
+   The org-state model is a DERIVED projection over ALREADY-ADMISSIBLE evidence +
+   explicit org configuration + pack rules. Impact, urgency, ownership, readiness, and
+   expected-information gaps are derived THERE (ai/org-state.js), not assigned ad hoc
+   here. This is the ONE boundary every consumer uses. Private evidence never enters
+   (the pool below mirrors the retrieval admissibility gate). RECOMMENDS only. */
+
+// Explicit org configuration (objectives/events/decisions/requirements/rhythms). The
+// seam for a future config UI/import; today it is seeded by admins/tests. Per org.
+const orgStateConfig = {};
+// Projection cache — one slot per org, keyed by a fingerprint of evidence + config +
+// policy version, so any change invalidates it. Never crosses a tenant boundary.
+const orgStateCache = {};
+
+function _orgPack(code) {
+  const cfg = orgStateConfig[code];
+  if (cfg && cfg.pack) return cfg.pack;
+  const mode = (orgMeta[code] && orgMeta[code].orgMode) || '';
+  return mode === 'sports' ? 'sports' : 'universal';   // domain-driven, never org-name driven
+}
+
+// The admissible org-level evidence pool — the SAME gate as retrieval: org-shared,
+// promoted, source, text. Private / derived / kernel evidence is excluded BEFORE it
+// can influence any requirement, ownership, impact, urgency, or readiness.
+function _orgAdmissibleEvidence(code) {
+  return (evidenceLog[code] || []).filter(e =>
     e.status === 'active' && e.visibility === 'normal' && e.promoted === true &&
     _isSourceEvidence(e) && _isTextEvidence(e));
-  const tok = t => new Set((retrieval._tokens(t) || []).filter(w => w.length > 3));
-  const overlap = (a, b) => { if (!a.size || !b.size) return 0; let n = 0; for (const w of a) if (b.has(w)) n++; return n / Math.min(a.size, b.size); };
-  const meta = pool.map(e => ({ e, toks: tok(`${e.label || ''} ${e.valueText || ''}`), authoritative: e.source === 'system_of_record' }));
-
-  // CONTRADICTION: an AUTHORITATIVE org record and a REPORTED claim on the same topic
-  // that disagree — surface it for resolution, never bury it behind ranking.
-  for (let i = 0; i < meta.length; i++) {
-    for (let j = i + 1; j < meta.length; j++) {
-      const A = meta[i], B = meta[j];
-      if (A.authoritative === B.authoritative) continue;                 // need one authoritative + one reported
-      if (overlap(A.toks, B.toks) < 0.5) continue;                       // same topic
-      const contentHashA = A.e.attributes && A.e.attributes.contentHash, contentHashB = B.e.attributes && B.e.attributes.contentHash;
-      if (contentHashA && contentHashA === contentHashB) continue;       // identical text → not a conflict
-      const auth = A.authoritative ? A : B, rep = A.authoritative ? B : A;
-      uncertainties.push(inquiry.buildUncertainty({
-        id: `contra_${auth.e.id}_${rep.e.id}`, type: inquiry.UNCERTAINTY.CONTRADICTION,
-        claim: (auth.e.label || auth.e.attributes?.sourceName || 'a shared record').slice(0, 120),
-        currentBeliefs: [
-          { value: String(auth.e.valueText || '').slice(0, 80), authority: 'organisation', confidence: 0.82 },
-          { value: String(rep.e.valueText || '').slice(0, 80), authority: 'member', confidence: 0.45 },
-        ],
-        // A contradiction in an AUTHORITATIVE shared record is high-impact: people act
-        // on wrong information. Urgency stays medium (we can't see external timing here).
-        requiredFor: ['a shared record staying correct'], impact: 'high', urgency: 'medium',
-        resolutionOwner: auth.e.ownerRef || null, ownerAuthoritative: true, privacyClass: 'team-shared',
-      }));
-    }
-  }
-
-  // STALE — a shared record past its useful life becomes a proactive "is this still
-  // current?" uncertainty, routed to its owner. Impact/urgency stay conservative until
-  // the org-state model can supply real timing, so routine staleness stays quiet (the
-  // value gate) while the knowledge-health view still surfaces it for review.
-  for (const m of meta) {
-    const a = lifecycle.assess(m.e, Date.now());
-    if (a.verdict !== 'review') continue;
-    const u = lifecycle.toUncertainty(a, { owner: m.e.ownerRef || null, ownerAuthoritative: m.authoritative,
-      label: m.e.label || (m.e.attributes && m.e.attributes.sourceName), privacyClass: 'team-shared' });
-    if (u) uncertainties.push(inquiry.buildUncertainty(u));
-  }
-  return uncertainties;
 }
+
+// A cheap, deterministic fingerprint that changes on ANY relevant mutation: active
+// admissible count + newest timestamp + supersede/delete count + config size.
+function _orgEvidenceFingerprint(code) {
+  let n = 0, newest = '', changed = 0;
+  for (const e of (evidenceLog[code] || [])) {
+    if (e.provider === 'kernel') continue;
+    if (e.status === 'active') { n++; const t = e.retrievedAt || e.observedAt || ''; if (t > newest) newest = t; }
+    else changed++;
+  }
+  return `${n}:${newest}:${changed}:${JSON.stringify(orgStateConfig[code] || {}).length}`;
+}
+
+function _buildOrgStateInputs(code) {
+  const cfg = orgStateConfig[code] || {};
+  const pack = _orgPack(code);
+  return {
+    organisation: { id: code, pack },
+    structure: { responsibilities: cfg.responsibilities || [] },
+    configuration: { pack, objectives: cfg.objectives || [], events: cfg.events || [], decisions: cfg.decisions || [],
+      requirements: cfg.requirements || [], rhythms: cfg.rhythms || [], dependencies: cfg.dependencies || [], fallbackOwner: cfg.fallbackOwner || null },
+    evidence: _orgAdmissibleEvidence(code),
+  };
+}
+
+/* _getOrgState — the ONE internal state boundary. Cached by org + purpose + policy
+   version + evidence/config fingerprint; rebuilds idempotently on any change. Callers
+   MUST NOT derive goals/ownership/readiness/requirements independently. */
+function _getOrgState({ actor, organisationId, purpose = 'organisation_reasoning', now = Date.now() } = {}) {
+  const code = organisationId;
+  const key = `${code}|${purpose}|v1|${_orgEvidenceFingerprint(code)}`;
+  const hit = orgStateCache[code];
+  if (hit && hit.key === key) return { ...hit.state, _cache: { hit: true, ageMs: now - hit.builtAt } };
+  const state = orgState.deriveOrgState({ now, ..._buildOrgStateInputs(code) });
+  orgStateCache[code] = { key, state, builtAt: now };
+  return { ...state, _cache: { hit: false, ageMs: 0 } };
+}
+
+/* Uncertainties are generated from DERIVED org-state (missing/stale/disputed/
+   unresolved-owner), each carrying derived impact/urgency/ownership. The Inquiry
+   Engine then decides whether asking is worth it. Fail closed → []. */
+function _deriveOrgUncertainties(code) {
+  try {
+    const state = _getOrgState({ organisationId: code, purpose: 'organisation_reasoning', now: Date.now() });
+    return orgState.stateToUncertainties(state).map(u => inquiry.buildUncertainty(u));
+  } catch (e) { console.warn('[org-uncertainties] failed:', e && e.message); return []; }
+}
+
+/* GET /api/org-state — RESTRICTED diagnostic (leader-only). Exposes the derived
+   structure + claim states + readiness + provenance KIND — never raw evidence text,
+   never private evidence, never internal policy objects. */
+app.get('/api/org-state', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const s = _getOrgState({ actor: userId, organisationId: code, purpose: 'organisation_reasoning', now: Date.now() });
+    res.json({ ok: true, mode: 'diagnostic', pack: s.organisation.pack,
+      events: (s.events || []).map(e => ({ id: e.id, type: e.type, title: e.title, startAt: e.startAt, owner: e.owner, provenanceKind: e.provenance.kind })),
+      requirements: (s.requirements || []).map(r => ({ id: r.id, claimType: r.claimType, expectedOwner: r.expectedOwner, ownerBasis: r.ownerBasis, neededBy: r.neededBy, ownerUnresolved: r.ownerUnresolved })),
+      claimStates: (s.claimStates || []).map(c => ({ requirementId: c.requirementId, claimType: c.claimType, state: c.state })),
+      readiness: (s.readiness || []).map(r => ({ subjectId: r.subjectId, status: r.status, blockingRequirements: r.blockingRequirements })),
+      limitations: s.limitations || [], cache: s._cache });
+  } catch (e) {
+    console.warn('[org-state] failed:', e && e.message);
+    res.status(200).json({ ok: false, mode: 'diagnostic', events: [], requirements: [], claimStates: [], readiness: [] });
+  }
+});
 
 /* GET /api/knowledge/health — the "what to keep / what to let go" view (leader-only).
    Assesses ONLY organisation-shared evidence (private never enters), classifies each
@@ -12041,7 +12084,8 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: grounded retrieval over canonical evidence
   _retrieveGrounding, _indexEvidence, _evictEvidenceVector, _captureKnowledge, _isTextEvidence, _assistantAnswer, evidenceVectors, answerFeedback,
   // exported for the truth layer: universal evidence intake
-  _ingestArtifact, _deleteImport, _sanitizeBriefingForLeader, _stripLeaderNumbers, _deriveOrgUncertainties };
+  _ingestArtifact, _deleteImport, _sanitizeBriefingForLeader, _stripLeaderNumbers, _deriveOrgUncertainties,
+  _getOrgState, _buildOrgStateInputs, orgStateConfig };
 
 if (require.main === module) (async () => {
   try {
