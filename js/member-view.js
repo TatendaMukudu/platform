@@ -424,7 +424,10 @@ const MemberApp = {
       </div>
       ${notes.length
         ? list + (notes.length > 6 ? `<button class="btn-ghost" style="font-size:0.74rem" onclick="navigate('notes')">See all ${notes.length}</button>` : '')
-        : `<div style="font-size:0.82rem;color:var(--text-muted)">No notes yet — keep a thought and IntelliQ remembers it.</div>`}`;
+        : `<div style="font-size:0.82rem;color:var(--text-muted)">No notes yet — keep a thought and IntelliQ remembers it.</div>`}
+      <div style="margin-top:0.7rem;border-top:1px solid var(--border);padding-top:0.6rem">
+        <button class="btn-ghost" style="font-size:0.74rem" onclick="navigate('data-sources')">📚 Manage what IntelliQ can use →</button>
+      </div>`;
   },
 
   _meNoteToggle() { const el = document.getElementById('me-note-add'); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; },
@@ -2389,15 +2392,19 @@ const MemberApp = {
       <div class="iq-workctx" id="iq-workctx"></div>
       <div class="iq-composer-wrap">
         <div class="iq-composer" id="iq-composer">
+          <label class="iq-attach" title="Add a document IntelliQ can use (meeting minutes, stats, a policy…)" aria-label="Add knowledge" style="cursor:pointer;display:flex;align-items:center;padding:0 0.3rem;color:var(--text-muted)">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5 12.5 21a4 4 0 0 1-5.66-5.66l8.49-8.48a2.5 2.5 0 0 1 3.54 3.54l-8.49 8.48a1 1 0 0 1-1.41-1.41l7.78-7.78"/></svg>
+            <input type="file" id="iq-attach-input" style="display:none" accept=".txt,.md,.markdown,.csv,.json,.pdf,.doc,.docx" onchange="MemberApp.wsAttach(this)">
+          </label>
           <textarea id="iq-composer-input" class="iq-composer-input" rows="1" aria-label="Ask IntelliQ — capture a thought or make a plan"
-            placeholder="Ask, capture a thought, or make a plan…"
+            placeholder="Ask, capture a thought, or drop in notes, minutes, stats…"
             oninput="MemberApp._wsGrow(this)"
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.wsSend()}"></textarea>
           <button class="iq-send" id="iq-send" type="button" aria-label="Send" title="Send" onclick="MemberApp.wsSend()">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M5 13l7-7 7 7"/></svg>
           </button>
         </div>
-        <div class="iq-composer-hint">Private by default · Enter to send, Shift + Enter for a new line</div>
+        <div class="iq-composer-hint">Private by default · attach a file to teach IntelliQ · Enter to send</div>
       </div>
       <div class="iq-conversation" id="iq-conversation" aria-live="polite"></div>`;
     this._loadOpening();
@@ -2563,6 +2570,51 @@ const MemberApp = {
 
   /* Retry a failed turn WITHOUT losing the message — removes the error bubble and re-sends. */
   wsRetry(btn, text) { const b = btn && btn.closest('.iq-msg'); if (b) b.remove(); this.wsSend(text); },
+
+  /* Filename → the intake format the ONE governed door accepts. */
+  _knowledgeFormat(name) {
+    const ext = String(name || '').toLowerCase().split('.').pop();
+    if (ext === 'csv') return 'csv';
+    if (ext === 'json') return 'json';
+    if (ext === 'md' || ext === 'markdown') return 'markdown';
+    if (ext === 'pdf') return 'pdf';
+    if (ext === 'doc' || ext === 'docx') return 'docx';
+    return 'text';
+  },
+
+  /* Drop a document straight into the conversation → it flows through the SAME governed
+     intake door (/api/evidence/import) → canonical evidence → the assistant can cite it
+     on the very next turn. This is "here are the meeting minutes / the game stats" made
+     literal: talking to IntelliQ IS how you feed it. Private by default. */
+  async wsAttach(fileInput) {
+    const file = fileInput && fileInput.files && fileInput.files[0];
+    if (!file) return;
+    const thread = document.getElementById('iq-conversation');
+    const esc = s => this._escape(String(s == null ? '' : s));
+    if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">📎 ${esc(file.name)}</div>`);
+    if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-iq iq-pending" id="iq-attach-pending" role="status">Reading ${esc(file.name)}…</div>`);
+    if (thread) thread.scrollTop = thread.scrollHeight;
+    fileInput.value = '';
+    const done = (html) => { const p = document.getElementById('iq-attach-pending'); if (p) { p.removeAttribute('id'); p.innerHTML = html; } if (thread) thread.scrollTop = thread.scrollHeight; };
+    try {
+      if (typeof AttachmentHandler === 'undefined') throw new Error('The uploader isn’t available right now.');
+      const parsed = await AttachmentHandler.process(file);
+      const content = parsed.content || parsed.summary || '';
+      if (!String(content).trim()) throw new Error('I couldn’t read any text from that file.');
+      const r = await fetch('/api/evidence/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ format: this._knowledgeFormat(file.name), content: String(content), sourceName: file.name }),
+      });
+      const raw = await r.text(); let d; try { d = JSON.parse(raw); } catch (_) { d = null; }
+      if (!r.ok || !d || d.ok === false) throw new Error((d && d.error) || 'I couldn’t save that.');
+      const bits = [];
+      if (d.imported) bits.push(`Saved ${d.imported} item${d.imported !== 1 ? 's' : ''} from ${esc(file.name)}`);
+      if (d.duplicates) bits.push(`${d.duplicates} already known`);
+      done(`${bits.join(' · ') || 'Nothing new to add'} — it’s private to you, and I can use it now. Ask me anything about it.`);
+    } catch (e) {
+      done(`<span class="iq-error-text">${esc(e.message || 'I couldn’t add that file.')}</span>`);
+    }
+  },
 
   /* Routes ONE composer input through the unified runtime WITH the active lens as a bounded
      hint. Returns { ok, j } or { ok:false, reason } so the caller can recover gracefully. A

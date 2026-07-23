@@ -132,9 +132,9 @@ const WORKSPACE_MODULES = [
   // Notes now live INSIDE the Me space (no separate tab) — the page stays
   // reachable for full options (tags / sharing) via navigate('notes').
   { section: null,        id: 'assessments', icon: ICON.clipboard, label: 'MyWorkspace', permission: null },
-  // Knowledge — the one governed input door. Every user can teach IntelliQ (private
-  // by default); what they add becomes citable evidence for the grounded assistant.
-  { section: null,        id: 'data-sources', icon: ICON.upload, label: 'Knowledge', permission: null },
+  // Knowledge is folded INTO Me: you teach IntelliQ by talking to it (attach a file
+  // in the composer) — no separate nav. The full coverage/manage view is still
+  // reachable at navigate('data-sources') via the "Manage knowledge" link in Me.
   { section: null,        id: 'apps',    icon: ICON.plug,    label: 'Apps',     permission: null },
   // Inbox demoted from the main nav — IntelliQ is the intelligence layer, not a
   // messaging app (Teams / Slack / email own comms). Proactive "updates from
