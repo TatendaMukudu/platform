@@ -1057,69 +1057,6 @@ async function handleInviteRegister() {
   }
 }
 
-/* ── ORG INTELLIGENCE — Show extracted traits after setup ──────────────── */
-async function _analyseOrgDescription(description, orgName, orgCode) {
-  try {
-    const res = await fetch('/api/org/describe', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ description, orgName }),
-    });
-    if (!res.ok) throw new Error();
-    const data = await res.json();
-
-    // Update orgMode if AI detected a different one
-    if (data.orgMode && data.orgMode !== AppState.mode) {
-      AppState.mode = data.orgMode;
-      renderSidebar();
-    }
-
-    // Store traits on AppState
-    AppState.orgTraits      = data.traits    || [];
-    AppState.orgGoals       = data.goals     || [];
-    AppState.orgEnvironment = data.environment || '';
-    AppState.orgSuccess     = data.successLooks || '';
-
-    // Persist org AI profile to server so prompts can use it
-    if (orgCode && Auth.token) {
-      fetch('/api/org/profile', {
-        method:  'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${Auth.token}` },
-        body: JSON.stringify({
-          orgCode,
-          orgMode:             data.orgMode || AppState.mode,
-          orgDescription:      description,
-          orgSummary:          data.summary || '',
-          orgEnvironment:      data.environment || '',
-          orgSuccessDefinition: data.successLooks || '',
-          orgTraits:           data.traits || [],
-        }),
-      }).catch(() => {}); // fire-and-forget; non-critical
-    }
-
-    // Show org intelligence modal
-    document.getElementById('org-intel-sub').textContent     = `${orgName} — detected as ${data.orgMode}`;
-    document.getElementById('org-intel-summary').textContent  = data.summary || '';
-    document.getElementById('org-intel-env').textContent      = data.environment || '—';
-    document.getElementById('org-intel-success').textContent  = data.successLooks || '—';
-
-    const traitsEl = document.getElementById('org-intel-traits');
-    traitsEl.innerHTML = (data.traits || []).map(t =>
-      `<span style="font-size:0.75rem;padding:4px 10px;background:rgba(124,90,245,0.12);border:1px solid rgba(124,90,245,0.25);border-radius:20px;color:var(--accent)">${t}</span>`
-    ).join('');
-
-    const goalsEl = document.getElementById('org-intel-goals');
-    goalsEl.innerHTML = (data.goals || []).map(g =>
-      `<div style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.4rem 0;border-bottom:1px solid var(--border);font-size:0.82rem;color:var(--text-secondary)"><span style="color:var(--accent);flex-shrink:0">→</span>${g}</div>`
-    ).join('');
-
-    openModal('org-intelligence-modal');
-
-  } catch(err) {
-    // Silent fail — org still works, just without extracted traits
-    _checkCoachDailyCheckin();
-  }
-}
 
 function closeOrgIntelModal() {
   closeAllModals();
@@ -1932,12 +1869,6 @@ function renderAnalytics(){
 /* ── INTELLIQ PAGE ───────────────────────────────────────── */
 
 
-// Resolve member from AppState by name, then open timeline
-function viewMemberTimelineByName(memberName) {
-  const member = (AppState.members || []).find(m => m.name === memberName);
-  const userId = member?.userId || member?.id || '';
-  viewMemberTimeline(memberName, userId);
-}
 
 // Open member timeline modal
 async function viewMemberTimeline(memberName, memberId) {
@@ -3123,14 +3054,6 @@ function switchPeopleTab(tab) {
   if (tab === 'onboard') renderOnboardHub();
 }
 
-/* Navigate to People page and open a specific onboard sub-tab */
-function openOnboardingTab(sub) {
-  navigate('people');
-  setTimeout(() => {
-    switchPeopleTab('onboard');
-    if (sub) _openOnboardSection(sub);
-  }, 80);
-}
 
 /* ══════════════════════════════════════════════════════════════
    ONBOARDING HUB (Sprint 2 — invite-only, no default passwords,
@@ -3803,123 +3726,11 @@ async function sendGroupMessage(anonymous) {
   loadGroupFeed(_currentGroupId);
 }
 
-/* ── PLATFORM INBOX (all groups, cross-group view) ───────── */
-async function renderPlatformInbox() {
-  const el = document.getElementById('platform-inbox-content');
-  if (!el) return;
-
-  const orgCode = Auth.currentUser?.orgCode || AppState.orgCode;
-  if (!_platformGroups.length) {
-    try {
-      const res = await fetch(`/api/groups?orgCode=${encodeURIComponent(orgCode)}`);
-      const data = res.ok ? await res.json() : { groups: [] };
-      _platformGroups = data.groups || [];
-    } catch(e) {}
-  }
-
-  if (!_platformGroups.length) {
-    el.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--text-muted);font-size:0.82rem">Create groups first to see their feeds here.</div>`;
-    return;
-  }
-
-  el.innerHTML = _platformGroups.map(g => `
-    <div style="background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);padding:0.8rem 1rem;margin-bottom:0.6rem;cursor:pointer;display:flex;align-items:center;justify-content:space-between"
-         onclick="openGroupDetail('${g.id}')">
-      <div>
-        <div style="font-size:0.88rem;font-weight:600">${g.name}</div>
-        <div style="font-size:0.75rem;color:var(--text-muted)">${g.memberIds?.length || 0} members</div>
-      </div>
-      <span style="color:var(--accent);font-size:0.82rem">View →</span>
-    </div>`).join('');
-}
 
 function openEditGroup(gid) {
   showToast('Edit group — coming soon', 'info');
 }
 
-/* ── WEEKLY PULSE (IntelliQ page) ───────────────────────── */
-async function loadWeeklyPulse() {
-  const panel  = document.getElementById('weekly-pulse-panel');
-  if (!panel) return;
-  panel.innerHTML = `<div style="padding:1rem;text-align:center;color:var(--text-muted);font-size:0.82rem">Loading…</div>`;
-
-  const orgCode = AppState.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g,'-');
-
-  try {
-    // Get this week's raw submissions (both endpoints require auth)
-    const [rawRes, synthRes] = await Promise.all([
-      authFetch(`/api/weekly/org?orgCode=${encodeURIComponent(orgCode)}`),
-      authFetch('/api/weekly/synthesis', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orgCode, orgName: AppState.orgName, orgMode: AppState.mode }),
-      }),
-    ]);
-
-    const rawData  = rawRes.ok  ? await rawRes.json()  : { assessments: [] };
-    const synthData = synthRes.ok ? await synthRes.json() : { synthesis: null };
-
-    const entries = rawData.assessments || [];
-    const synth   = synthData.synthesis;
-
-    if (!entries.length) {
-      panel.innerHTML = `
-        <div style="text-align:center;padding:1.5rem 0;color:var(--text-muted);font-size:0.82rem">
-          <div style="font-size:1.5rem;margin-bottom:0.5rem"></div>
-          No weekly reflections submitted yet for ${rawData.week || 'this week'}.<br>
-          Members complete these in the IntelliQ app when they open it each week.
-        </div>`;
-      return;
-    }
-
-    const color = ORG_MODES[AppState.mode].color;
-    let html = `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.8rem">${rawData.week || 'This Week'} · ${entries.length} submission${entries.length !== 1 ? 's' : ''}</div>`;
-
-    // IntelliQ synthesis
-    if (synth) {
-      html += `
-        <div style="background:rgba(124,90,245,0.07);border:1px solid rgba(124,90,245,0.2);border-radius:10px;padding:0.9rem;margin-bottom:1rem">
-          <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin-bottom:0.6rem">IntelliQ Synthesis</div>
-          <div style="font-size:0.88rem;font-weight:600;color:var(--text-primary);margin-bottom:0.7rem">${synth.headline || ''}</div>
-          ${synth.patterns?.length ? `
-            <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:var(--text-muted);margin-bottom:0.4rem">Patterns</div>
-            ${synth.patterns.map(p => `<div style="font-size:0.8rem;color:var(--text-secondary);padding:3px 0">• ${p}</div>`).join('')}` : ''}
-          ${synth.watchFor?.length ? `
-            <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:var(--warning);margin:0.6rem 0 0.4rem">Watch For</div>
-            ${synth.watchFor.map(w => `<div style="font-size:0.8rem;color:var(--warning);padding:3px 0">${w}</div>`).join('')}` : ''}
-          ${synth.positives?.length ? `
-            <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:var(--success);margin:0.6rem 0 0.4rem">Positives</div>
-            ${synth.positives.map(p => `<div style="font-size:0.8rem;color:var(--success);padding:3px 0">${p}</div>`).join('')}` : ''}
-          ${synth.recommendations?.length ? `
-            <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;color:${color};margin:0.6rem 0 0.4rem">Recommended Actions</div>
-            ${synth.recommendations.map((r,i) => `<div style="font-size:0.8rem;color:var(--text-secondary);padding:3px 0">${i+1}. ${r}</div>`).join('')}` : ''}
-        </div>`;
-    }
-
-    // Individual submissions (coach can see each person's input)
-    html += `<div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Individual Reflections</div>`;
-    html += entries.map(e => {
-      const member = AppState.members.find(m => m.name.toLowerCase() === e.memberName.toLowerCase());
-      const col    = member?.color || color;
-      const init   = e.memberName.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
-      return `
-        <div style="padding:0.7rem 0;border-bottom:1px solid var(--border)">
-          <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem">
-            <div class="user-avatar" style="width:26px;height:26px;font-size:0.65rem;background:${col}">${init}</div>
-            <span style="font-size:0.82rem;font-weight:600">${e.memberName}</span>
-            <span style="font-size:0.7rem;color:var(--text-muted)">${e.role}</span>
-          </div>
-          ${Object.entries(e.data).map(([k,v]) => v && v !== '—' ? `
-            <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:1px">${k}:</div>
-            <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.4rem;line-height:1.5">${v}</div>` : '').join('')}
-        </div>`;
-    }).join('');
-
-    panel.innerHTML = html;
-
-  } catch(err) {
-    panel.innerHTML = `<div style="font-size:0.82rem;color:var(--danger);padding:0.8rem">Could not load — check server connection.</div>`;
-  }
-}
 
 // renderHierarchyBuilder / addHierarchyLevel / removeHierarchyLevel / saveHierarchy
 // removed in Sprint 2.5. Org structure is now managed via the Org Tree (tree.js).

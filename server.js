@@ -5183,18 +5183,6 @@ function _orgByIngestToken(tok) {
    resolves the subject by userId / email / name / common role keys. */
 const _SUBJECT_KEYS = ['userid', 'id', 'email', 'mail', 'emailaddress', 'name', 'fullname', 'player', 'member', 'athlete', 'employee', 'student', 'user', 'person'];
 const _META_KEYS    = ['date', 'ts', 'timestamp', 'time', 'label', 'value', 'unit'];
-function _resolveSubjectId(code, rec) {
-  const users = orgUsers[code] || {};
-  const norm = k => String(k).toLowerCase().replace(/[\s_-]/g, '');
-  const find = (keys) => { for (const k of Object.keys(rec)) if (keys.includes(norm(k))) { const v = rec[k]; if (v != null && v !== '') return String(v); } return null; };
-  const uidRaw = find(['userid', 'id', 'user']);
-  if (uidRaw && users[uidRaw]) return uidRaw;
-  const email = find(['email', 'mail', 'emailaddress']);
-  if (email) { const e = email.toLowerCase(); const id = Object.keys(users).find(k => (users[k].email || '').toLowerCase() === e); if (id) return id; }
-  const name = find(['name', 'fullname', 'player', 'member', 'athlete', 'employee', 'student', 'person']);
-  if (name) { const n = name.toLowerCase().trim(); const id = Object.keys(users).find(k => (users[k].name || '').toLowerCase().trim() === n); if (id) return id; }
-  return null;
-}
 /* Rebuild the dedupe index from the persisted log (called on load). Map keyed by
    dedupeKey → the CURRENT envelope for that factual identity, so a retry can be
    recognised as a duplicate and a corrected value can supersede the prior fact. */
@@ -10736,85 +10724,6 @@ function _aggregateOrgData(code) {
   };
 }
 
-function _buildInsightPrompt(agg, orgCode) {
-  const lines = [];
-
-  // ── Header ────────────────────────────────────────────────────────────────
-  lines.push(`ORG: ${agg.meta.orgName || orgCode} (${agg.meta.orgMode || 'general'})`);
-  lines.push(`WEEK: ${agg.thisWeek} | Members: ${agg.memberCount}`);
-  lines.push(`ENGAGEMENT: ${agg.activeThisWeek}/${agg.memberCount} active this week, ${agg.activeLast30}/${agg.memberCount} active last 30 days`);
-
-  const trendDir = agg.moodLast7 !== null && agg.moodPrevWeek !== null
-    ? (agg.moodLast7 > agg.moodPrevWeek + 0.3 ? 'up ↑' : agg.moodLast7 < agg.moodPrevWeek - 0.3 ? 'down ↓' : 'stable →')
-    : '—';
-  lines.push(`MOOD: This week avg ${agg.moodLast7 ?? '—'}/5 (${agg.moodCount7} responses) | Prev week ${agg.moodPrevWeek ?? '—'}/5 | Last 30d avg ${agg.moodLast30 ?? '—'}/5 | vs last week: ${trendDir}`);
-  if (agg.inactiveMembers.length) lines.push(`NO CHECK-IN THIS WEEK: ${agg.inactiveMembers.join(', ')}`);
-  lines.push('');
-
-  // ── Per-member cross-referenced profiles ──────────────────────────────────
-  lines.push('MEMBER PROFILES (goals + check-ins + weekly reflections + assessments):');
-  agg.allMembers.forEach(u => {
-    const thisWeekC  = (agg.checkinsByMember[u.name] || []).filter(c => c.isThisWeek);
-    const allC       = agg.checkinsByMember[u.name]  || [];
-    const moods7     = thisWeekC.filter(c => c.mood !== null).map(c => c.mood);
-    const avgM       = moods7.length ? (moods7.reduce((a, b) => a + b, 0) / moods7.length).toFixed(1) : null;
-    const text7      = thisWeekC.map(c => c.text).filter(Boolean).slice(0, 3).join(' / ').slice(0, 280);
-    const text30     = allC.filter(c => !c.isThisWeek).map(c => c.text).filter(Boolean).slice(-4).join(' / ').slice(0, 280);
-    const goalObj    = agg.membersWithGoals.find(g => g.name === u.name);
-    const weeklies   = agg.allWeeklyEntries.filter(e => e.memberName === u.name || (e.memberId && e.memberId === u.id)).slice(-2);
-    const weeklyText = weeklies.map(e => Object.values(e.data || {}).filter(Boolean).join(' | ').slice(0, 250)).join(' // ');
-    const results    = agg.resultsByMember[u.name] || [];
-    const scoreLines = results.map(r => r.score
-      ? `overall:${r.score.overall ?? '?'} ethical:${r.score.ethical_reasoning ?? '?'} pressure:${r.score.pressure_response ?? '?'} self-awareness:${r.score.self_awareness ?? '?'}`
-      : null).filter(Boolean).slice(-2).join(' | ');
-
-    lines.push(`\n[${u.name}] role:${u.role}`);
-    lines.push(`  Goal: ${goalObj ? `"${goalObj.goal.slice(0, 130)}"` : 'not set'}${goalObj?.identity ? ` | Identity: "${goalObj.identity.slice(0, 80)}"` : ''}`);
-    lines.push(`  Mood this week: ${avgM !== null ? `${avgM}/5 (${moods7.length} check-ins)` : 'no check-in'}`);
-    if (text7)   lines.push(`  Check-in text (this week): "${text7}"`);
-    if (text30)  lines.push(`  Check-in text (prev weeks): "${text30}"`);
-    if (weeklyText) lines.push(`  Weekly reflections: "${weeklyText}"`);
-    if (scoreLines) lines.push(`  Assessment scores: ${scoreLines}`);
-  });
-  lines.push('');
-
-  // ── Groups ────────────────────────────────────────────────────────────────
-  if (agg.groupData.length > 0) {
-    lines.push('GROUPS:');
-    agg.groupData.forEach(g => {
-      const mStr = g.avgMood !== null ? `avg mood ${g.avgMood}/5` : 'no mood data';
-      lines.push(`${g.name}: members [${g.memberNames.join(', ')}] — ${g.activeCount}/${g.memberCount} active, ${mStr}`);
-    });
-    lines.push('');
-  }
-
-  // ── Text corpus for semantic clustering ───────────────────────────────────
-  const corpus = agg.textCorpus.filter(Boolean).slice(0, 35);
-  if (corpus.length > 0) {
-    lines.push('ALL MEMBER TEXT (check-ins + reflections + notes — use for semantic theme clustering):');
-    corpus.forEach((t, i) => lines.push(`${i + 1}. "${t}"`));
-    lines.push('');
-  }
-
-  // ── Detected risk patterns (rule-based, pre-computed) ────────────────────
-  const allPatternNames = Object.entries(agg.memberPatterns || {})
-    .flatMap(([name, pats]) => pats.map(p => `${name}: ${p.label} (${p.confidence} confidence — ${p.signals.join('; ')})`));
-  const allPredictions = Object.entries(agg.memberPredictions || {})
-    .flatMap(([name, preds]) => preds.map(p => `${name}: ${p.label} — ${p.prediction}`));
-
-  if (allPatternNames.length > 0) {
-    lines.push('DETECTED RISK PATTERNS (algorithm-detected, include in recommendations):');
-    allPatternNames.forEach(s => lines.push(`  • ${s}`));
-    lines.push('');
-  }
-  if (allPredictions.length > 0) {
-    lines.push('TRAJECTORY PREDICTIONS (linear trend extrapolation):');
-    allPredictions.forEach(s => lines.push(`  • ${s}`));
-    lines.push('');
-  }
-
-  return lines.join('\n');
-}
 
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -11090,107 +10999,7 @@ async function _buildMemberTimeline(code, userId, memberName) {
   return { member: memberName, userId, timeline: monthData.filter(m => m.eventCount > 0) };
 }
 
-// ── Build group timeline ────────────────────────────────────────────────────────
-function _buildGroupTimeline(code, group) {
-  const memberIds   = group.memberIds || [];
-  const users       = orgUsers[code]   || {};
-  const gmUsers     = Object.values(users).filter(u => memberIds.includes(u.id));
 
-  // Collect all check-ins for group members, grouped by month
-  const monthlyMood = {}; // month → [mood scores]
-  const monthlyText = {}; // month → [text snippets]
-
-  gmUsers.forEach(u => {
-    const keys = [userKey(code, u.id), memberKey(code, u.name)];
-    keys.forEach(k => (memberCheckins[k] || []).forEach(c => {
-      const ts = c.ts || c.date;
-      if (!ts) return;
-      const month = ts.slice(0, 7);
-      if (c.mood != null) {
-        if (!monthlyMood[month]) monthlyMood[month] = [];
-        monthlyMood[month].push(Number(c.mood));
-      }
-      if (c.text || c.note) {
-        if (!monthlyText[month]) monthlyText[month] = [];
-        monthlyText[month].push((c.text || c.note || '').slice(0, 80));
-      }
-    }));
-
-    // Weekly reflections
-    Object.entries(weeklyAssessments).forEach(([key, entries]) => {
-      if (!key.startsWith(code + ':')) return;
-      entries.filter(e => e.memberName === u.name || e.memberId === u.id).forEach(e => {
-        const month = (e.submittedAt || '').slice(0, 7);
-        if (!month) return;
-        const text = Object.values(e.data || {}).filter(Boolean).join(' | ').slice(0, 100);
-        if (text) { if (!monthlyText[month]) monthlyText[month] = []; monthlyText[month].push(text); }
-      });
-    });
-  });
-
-  const months = [...new Set([...Object.keys(monthlyMood), ...Object.keys(monthlyText)])].sort();
-  const timeline = months.map(month => {
-    const moods = monthlyMood[month] || [];
-    const avgMood = moods.length ? Math.round((moods.reduce((a, b) => a + b, 0) / moods.length) * 10) / 10 : null;
-    const texts   = (monthlyText[month] || []).slice(0, 4);
-    return {
-      month,
-      label:        new Date(month + '-15').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }),
-      avgMood,
-      checkInCount: moods.length,
-      textSamples:  texts,
-    };
-  });
-
-  return { groupId: group.id, groupName: group.name, memberCount: gmUsers.length, timeline };
-}
-
-// ── Build org timeline ────────────────────────────────────────────────────────
-function _buildOrgTimeline(code) {
-  const users  = orgUsers[code]  || {};
-  const allMembers = Object.values(users).filter(u => u.role !== 'superadmin');
-
-  const monthlyMood = {};
-  const monthlyActive = {};
-  const monthlyText = {};
-
-  allMembers.forEach(u => {
-    const keys = [userKey(code, u.id), memberKey(code, u.name)];
-    keys.forEach(k => (memberCheckins[k] || []).forEach(c => {
-      const ts = c.ts || c.date;
-      if (!ts) return;
-      const month = ts.slice(0, 7);
-      if (c.mood != null) {
-        if (!monthlyMood[month])   monthlyMood[month]   = [];
-        if (!monthlyActive[month]) monthlyActive[month] = new Set();
-        monthlyMood[month].push(Number(c.mood));
-        monthlyActive[month].add(u.name);
-      }
-      if (c.text || c.note) {
-        if (!monthlyText[month]) monthlyText[month] = [];
-        monthlyText[month].push((c.text || c.note || '').slice(0, 80));
-      }
-    }));
-  });
-
-  const months = [...new Set([...Object.keys(monthlyMood), ...Object.keys(monthlyText)])].sort();
-  const timeline = months.map(month => {
-    const moods     = monthlyMood[month] || [];
-    const avgMood   = moods.length ? Math.round((moods.reduce((a, b) => a + b, 0) / moods.length) * 10) / 10 : null;
-    const active    = monthlyActive[month]?.size || 0;
-    const texts     = (monthlyText[month] || []).slice(0, 5);
-    return {
-      month,
-      label:         new Date(month + '-15').toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }),
-      avgMood,
-      activeMembers: active,
-      totalMembers:  allMembers.length,
-      textSamples:   texts,
-    };
-  });
-
-  return { orgCode: code, orgName: orgMeta[code]?.orgName || code, memberCount: allMembers.length, timeline };
-}
 
 /* ── GET member timeline ───────────────────────────────────────────────── */
 /* Reconcile the legacy timeline with the audience-safe model. A leader viewing
@@ -11921,79 +11730,7 @@ const learningSummaryCache = {}; // orgCode → { data, generatedAt }
 const LEARNING_CACHE_TTL   = 2 * 60 * 60 * 1000; // 2 hours
 
 
-function _noDataFallback(agg) {
-  return {
-    summary: 'Not enough data yet. Once members complete a check-in or weekly reflection, IntelliQ will synthesise what it learns here.',
-    moodTrend: 'unknown', moodNote: 'No mood data collected yet.', notEnoughData: true,
-    trends: { trendDirection: 'unknown', trendReason: 'No data yet.', confidenceLevel: 'low', engagementTrend: 'unknown', moodComparison: 'No data yet.' },
-    semanticThemes: [], memberProfiles: [], groupInsights: [],
-    recommendations: [
-      { action: 'Ask members to complete their first check-in in the IntelliQ app.', urgency: 'high', owner: 'leader', reason: 'No member activity recorded yet.', evidence: [] },
-      { action: 'Ensure all members have set a personal goal on first login.', urgency: 'medium', owner: 'leader', reason: `${agg.memberCount - agg.membersWithGoals.length} member(s) have no goal set.`, evidence: ['goals'] },
-    ],
-    memberHighlights: [], goalProgress: `${agg.membersWithGoals.length} of ${agg.memberCount} member(s) have set goals.`,
-    atRisk: [], themes: [], groupHighlights: [], recommendedActions: [],
-  };
-}
 
-function _buildFallbackInsight(agg) {
-  const moodTrend = agg.moodLast7 === null ? 'unknown'
-    : agg.moodPrevWeek !== null && agg.moodLast7 > agg.moodPrevWeek + 0.3 ? 'improving'
-    : agg.moodPrevWeek !== null && agg.moodLast7 < agg.moodPrevWeek - 0.3 ? 'declining'
-    : 'stable';
-  const engTrend = agg.activeThisWeek >= Math.ceil(agg.memberCount * 0.7) ? 'stable' : 'declining';
-
-  return {
-    summary: `${agg.activeThisWeek} of ${agg.memberCount} members active this week.`
-      + (agg.moodLast7 !== null ? ` Team mood: ${agg.moodLast7}/5.` : '')
-      + (agg.atRiskComputed.length > 0 ? ` ${agg.atRiskComputed.length} member(s) need attention.` : ''),
-    moodTrend, notEnoughData: false,
-    moodNote: agg.moodLast7 !== null ? `Team mood ${agg.moodLast7}/5 this week.` : 'No mood data.',
-    trends: {
-      trendDirection: moodTrend, engagementTrend: engTrend,
-      confidenceLevel: agg.moodCount7 >= 4 ? 'high' : agg.moodCount7 >= 2 ? 'medium' : 'low',
-      trendReason: agg.moodLast7 !== null && agg.moodPrevWeek !== null
-        ? `Mood moved from ${agg.moodPrevWeek}/5 last week to ${agg.moodLast7}/5 this week.`
-        : 'Insufficient data for trend comparison.',
-      moodComparison: agg.moodLast30 !== null
-        ? `Last 30d avg: ${agg.moodLast30}/5 — this week: ${agg.moodLast7 ?? '—'}/5.`
-        : 'No historical data yet.',
-    },
-    semanticThemes: [],
-    memberProfiles: agg.allMembers.map(u => {
-      const thisWeekC = (agg.checkinsByMember[u.name] || []).filter(c => c.isThisWeek);
-      const moods     = thisWeekC.filter(c => c.mood !== null).map(c => c.mood);
-      const avg       = moods.length ? moods.reduce((a, b) => a + b, 0) / moods.length : null;
-      const hasGoal   = agg.membersWithGoals.some(g => g.name === u.name);
-      return {
-        name: u.name,
-        currentState: avg !== null ? `Mood ${avg.toFixed(1)}/5 this week (${moods.length} check-ins)` : 'No check-in this week — status unknown',
-        strengths: [], concerns: thisWeekC.length === 0 ? ['No check-in this week'] : [],
-        goalAlignment: hasGoal ? 'unknown' : 'no_goal',
-        goalAlignmentExplanation: hasGoal ? 'Insufficient check-in data for alignment analysis.' : 'No goal set.',
-        riskSignals: avg !== null && avg < 2.5 ? [`Low mood avg ${avg.toFixed(1)}/5`] : [],
-        recommendedAction: avg !== null && avg < 2.5 ? `Check in with ${u.name} directly this week.`
-          : thisWeekC.length === 0 ? `Nudge ${u.name} to check in.` : '',
-      };
-    }),
-    groupInsights: agg.groupData.filter(g => g.memberCount > 0).map(g => ({
-      groupName: g.name,
-      mood: g.avgMood === null ? 'unknown' : g.avgMood >= 4 ? 'high' : g.avgMood >= 3 ? 'okay' : 'low',
-      engagement: g.memberCount === 0 ? 'low' : g.activeCount / g.memberCount >= 0.7 ? 'high' : g.activeCount > 0 ? 'medium' : 'low',
-      recurringThemes: [], riskSignals: [], positiveSignals: [],
-      membersNeedingAttention: [], suggestedAction: '',
-    })),
-    recommendations: agg.atRiskComputed.slice(0, 3).map(r => ({
-      action: `Check in with ${r.name} — ${r.reason.toLowerCase()}.`,
-      urgency: r.urgency, owner: 'leader', reason: r.reason, evidence: ['checkins'],
-    })),
-    memberHighlights: [],
-    goalProgress: `${agg.membersWithGoals.length} of ${agg.memberCount} members have set goals.`,
-    atRisk: agg.atRiskComputed.slice(0, 3),
-    themes: [], groupHighlights: [],
-    recommendedActions: agg.atRiskComputed.slice(0, 2).map(r => ({ priority: r.urgency, action: `Check in with ${r.name}.` })),
-  };
-}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    STARTUP — Postgres init → load stores → start HTTP server
