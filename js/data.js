@@ -51,7 +51,6 @@ const PLATFORM_GRADES = {
 
 /* ── Utility functions ────────────────────────────────────── */
 function rnd(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
-function rndFloat(min,max,d=1){ return parseFloat((Math.random()*(max-min)+min).toFixed(d)); }
 function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];

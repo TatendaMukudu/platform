@@ -167,33 +167,6 @@ function createScatterChart(canvasId, members){
   });
 }
 
-/* Mini sparkline (no axes, no legend, inline) */
-function createSparkline(canvasId, data, color='#4f8ef7'){
-  destroyChart(canvasId);
-  const ctx = document.getElementById(canvasId);
-  if(!ctx) return;
-  return new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: data.map((_,i)=>i),
-      datasets: [{
-        data,
-        borderColor: color,
-        borderWidth: 2,
-        pointRadius: 0,
-        fill: true,
-        backgroundColor: color+'22',
-        tension: 0.4,
-      }],
-    },
-    options: {
-      responsive: false,
-      plugins: { legend:{display:false}, tooltip:{enabled:false} },
-      scales: { x:{display:false}, y:{display:false} },
-      animation: false,
-    },
-  });
-}
 
 /* Horizontal bar for group comparison */
 function createHorizBarChart(canvasId, labels, data, color='#4f8ef7'){

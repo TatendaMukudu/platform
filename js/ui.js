@@ -69,11 +69,6 @@ function gradeBadgeHTML(grade){
   return `<span class="grade-badge grade-${grade}">● ${grade}-Grade</span>`;
 }
 
-/* ── STATUS DOT ──────────────────────────────────────────── */
-function statusDotHTML(score){
-  const cls = score>=70?'green':score>=50?'yellow':'red';
-  return `<span class="status-dot ${cls}"></span>`;
-}
 
 /* ── PROGRESS BAR ────────────────────────────────────────── */
 function progressHTML(val, color){
@@ -138,24 +133,6 @@ function alertItemHTML(a, idx){
     </div>`;
 }
 
-/* ── HEATMAP ─────────────────────────────────────────────── */
-function heatmapHTML(data){
-  // data: 7 rows x 12 cols (weeks x months isn't quite right but good visual)
-  const weeks = 16;
-  const days  = 7;
-  const cells = Array.from({length:days}, () => Array.from({length:weeks}, () => Math.random()));
-  let html = '<div style="display:flex;gap:3px;flex-direction:column">';
-  cells.forEach(row => {
-    html += '<div class="heatmap-row">';
-    row.forEach(v => {
-      const alpha = (0.1 + v*0.9).toFixed(2);
-      html += `<div class="hm-cell" style="background:rgba(79,142,247,${alpha})" title="${Math.round(v*100)}%"></div>`;
-    });
-    html += '</div>';
-  });
-  html += '</div>';
-  return html;
-}
 
 /* ── WELLNESS METER ──────────────────────────────────────── */
 function wellnessMeterHTML(score){
@@ -187,21 +164,6 @@ function closeAllModals(){
   document.querySelectorAll('.modal-overlay.open').forEach(m=>m.classList.remove('open'));
 }
 
-/* ── TABS ────────────────────────────────────────────────── */
-function initTabs(containerSel){
-  document.querySelectorAll(containerSel+' .tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const tabs = btn.closest('.tabs');
-      const panels = btn.closest('[data-tabs]') || btn.closest('.card') || btn.closest('.page');
-      tabs.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      const target = btn.dataset.tab;
-      panels.querySelectorAll('.tab-panel').forEach(p => {
-        p.classList.toggle('active', p.dataset.panel===target);
-      });
-    });
-  });
-}
 
 /* ── TOAST ───────────────────────────────────────────────── */
 let toastTimeout;
