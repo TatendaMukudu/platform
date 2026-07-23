@@ -83,4 +83,44 @@ function looksDeclarative(text) {
   return words >= 8 && (hasInfoMarker || hasStructure || (hasNumbers && words >= 12));
 }
 
-module.exports = { detectCommand, looksDeclarative };
+// A message (or clause) is an INFORMATION REQUEST when it ends in a question mark
+// or opens with an interrogative / info-imperative — not brittle topic keywords, so
+// "what are our pressing triggers" and "tell me the game plan" both qualify.
+const QUESTION_LEAD = /^(?:\s*(?:hey|hi|ok|okay|so|and|also|please|pls)\b[ ,]*)*(?:who|what|whats|what's|when|where|why|how|hows|how's|which|whose|whom|is|are|was|were|do|does|did|can|could|should|would|will|may|might|shall|tell me|explain|describe|show me|list|give me|walk me through|remind me (?:what|when|who|where|how|which))\b/i;
+function looksLikeQuestion(text) {
+  const raw = String(text == null ? '' : text).trim();
+  if (!raw) return false;
+  if (/\?/.test(raw)) return true;
+  return QUESTION_LEAD.test(raw);
+}
+
+/* Classify ONE turn into the shape the grounded-turn pipeline needs — deterministic,
+   no topic keywords. Splits into sentences so a MIXED turn ("Remember X. What is Y?")
+   is separated cleanly: the command payload excludes the question, and the question
+   text excludes the command. Returns:
+     { kind, command, isQuestion, questionText, declarative }
+   kind ∈ question | capture_command | declarative | mixed | conversation.
+   The caller uses the FIELDS (command / isQuestion / questionText); `kind` is a label. */
+function classify(text) {
+  const raw = String(text == null ? '' : text).trim();
+  const sentences = raw.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean);
+  const qSentences   = sentences.filter(looksLikeQuestion);
+  const nonQSentences = sentences.filter(s => !looksLikeQuestion(s));
+  const isQuestion = qSentences.length > 0 || (sentences.length <= 1 && looksLikeQuestion(raw));
+  // Detect the command on the NON-question part so a trailing question never leaks
+  // into the saved payload; fall back to the whole text when there is no split.
+  const nonQText = nonQSentences.join(' ').trim();
+  const command = detectCommand(nonQText || raw) || (nonQText ? detectCommand(raw) : null);
+  const questionText = qSentences.join(' ').trim() || (isQuestion ? raw : '');
+  const declarative = looksDeclarative(raw);
+  const hasPayload = !!(command && command.payload);
+  let kind;
+  if (hasPayload && isQuestion)  kind = 'mixed';
+  else if (hasPayload)           kind = 'capture_command';
+  else if (isQuestion)           kind = 'question';
+  else if (declarative)          kind = 'declarative';
+  else                           kind = 'conversation';
+  return { kind, command, isQuestion, questionText, declarative };
+}
+
+module.exports = { detectCommand, looksDeclarative, looksLikeQuestion, classify };

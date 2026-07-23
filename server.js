@@ -8161,6 +8161,25 @@ function _leaderSupportUnavailable(code, requesterId, text, lens, interp) {
   scheduleSave();
   return { turn, response, interpretation: { turnId: interp.turnId, originalInputRef: rawRef, candidateIntents: interp.candidateIntents, candidateClaims: [], suggestedPrivacy: interp.suggestedPrivacy, proposedActions: [], confidence: 'none', ambiguities: [], limitations: response.limitations }, context: turn.context };
 }
+/* Persist an EXPLICIT save command through the governed door — the ONLY place a turn
+   writes evidence without a second confirm, because the user literally asked. An
+   organisation command routes through _ingestArtifact (authority-aware: leader →
+   authoritative org evidence, member → shared-but-unverified); a personal command
+   through _captureKnowledge (private). Returns the `saved` confirmation, or null on
+   failure (fail closed — a failed write must never be reported as saved). */
+function _persistCaptureCommand(code, userId, command) {
+  try {
+    if (!command || !command.payload) return null;
+    if (command.scope === 'organisation') {
+      const out = _ingestArtifact(code, userId, { format: 'text', content: command.payload, sourceName: 'From a conversation', visibility: 'normal', confirmVisibilityIncrease: true });
+      if (!out || out.ok === false) return null;
+      return { scope: 'organisation', visibility: 'shared', authority: out.authority, source: 'From a conversation', evidenceIds: out.evidenceIds || [], imported: out.imported || 0 };
+    }
+    const k = _captureKnowledge(code, userId, command.payload, { visibility: 'private' });
+    return { scope: 'personal', visibility: 'private', authority: 'personal', source: 'From a conversation', evidenceIds: k && k.id ? [k.id] : [], imported: k && k.stored ? 1 : 0 };
+  } catch (_) { return null; }
+}
+
 function _assistantTurn(code, userId, text, lens, opts = {}) {
   lens = ASSISTANT_LENSES.includes(lens) ? lens : null;
   const workItemId = opts.workItemId ? String(opts.workItemId).slice(0, 80) : null;
@@ -8175,11 +8194,42 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
       : _leaderSupportUnavailable(code, userId, text, lens, interp);
   }
   const context = _assistantContext(code, userId);
+
+  // ── GROUNDED CONVERSATIONAL TURN ─────────────────────────────────────────────
+  // Classify the turn WITHOUT brittle topic keywords, then honour a strict order:
+  //   capture decision → (governed persist) → authorised grounding → answer.
+  // Persisting FIRST and SYNCHRONOUSLY means a mixed turn's just-saved statement is
+  // admissible to the SAME turn's answer (deterministic, not an async race — the
+  // evidence is in evidenceLog before _assistantAnswer reads it; embedding is a
+  // fire-and-forget optimisation and retrieval works lexically without it).
+  const cls = capture.classify(text);
+  let saved = null, capturePrompt = null;
+  if (cls.command && cls.command.payload) {
+    saved = _persistCaptureCommand(code, userId, cls.command);         // explicit save — deliberate, governed
+  } else if (cls.command && !cls.command.payload) {
+    capturePrompt = { need: 'content', message: 'Happy to remember it — what exactly should I save?' };
+  }
+  // The question (or the question half of a mixed turn) is answered through the ONE
+  // question-answering path — _assistantAnswer → _retrieveGrounding — which authorises
+  // BEFORE ranking and excludes private/inadmissible evidence pre-composition. No
+  // second retrieval or answer implementation lives here.
+  // Fail CLOSED: a retrieval/synthesis failure yields no answer (honest), never a
+  // crash and never an ungrounded guess.
+  let qa = null;
+  if (cls.isQuestion) { try { qa = _assistantAnswer(code, userId, cls.questionText || text); } catch (_) { qa = null; } }
+  // Make explicit whether the answer drew on the JUST-saved statement or pre-existing
+  // evidence (needed by the later mixed-turn / contradiction features).
+  if (qa && saved && (saved.evidenceIds || []).length)
+    qa.usedNewlySaved = (qa.cites || []).some(id => saved.evidenceIds.includes(id));
+
   // Assigned-work is AUTHORISED CONTEXT (Cut C) — assembled only when an assigned-work intent or a
   // focused work item is present; owner-scoped, released-fields-only (see _assignedWorkContext).
   const wantsWork = workItemId || interp.intents.some(i => i.type === 'assigned_work_help' || i.type === 'assigned_work_submit');
   const workCtx = wantsWork ? _assignedWorkContext(code, userId, workItemId) : null;
-  const proposals = _lensPrioritize(lens, [], _assistantProposals(code, userId, interp, context, text, workCtx));
+  let proposals = _lensPrioritize(lens, [], _assistantProposals(code, userId, interp, context, text, workCtx));
+  // If we ALREADY saved via an explicit command, don't ALSO offer a capture card for
+  // the same text (no duplicate, no double-write).
+  if (saved) proposals = proposals.filter(p => p.actionType !== 'capture');
   interp.proposedActions = proposals.map(p => ({ id: p.id, actionType: p.actionType, capability: p.capability, visibility: p.visibility, requiredApproval: p.requiredApproval }));
 
   // Kernel derivation (grounded) — basis IDs retained (incl. authorised assigned-work ids); never chain-of-thought.
@@ -8209,10 +8259,6 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
       groundedClaims.unshift({ text: workLead, basisIds: workCtx.basisIds.slice(0, 6) });
     }
   }
-
-  // A question in the SAME input is answered through the ONE question-answering path
-  // (_assistantAnswer) — not a separate endpoint or reasoning implementation.
-  const qa = interp.intents.some(i => i.type === 'question') ? _assistantAnswer(code, userId, text) : null;
 
   const hasInsight = groundedClaims.length > 0;
   const hasAction = proposals.length > 0;
@@ -8254,7 +8300,9 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
     primaryActions: publicProposals.slice(0, 2), moreActions: publicProposals.slice(2),
     privacyNotice, followUpState: workAmbiguous ? 'which assigned item did you mean?' : (proposals.some(p => p.actionType === 'checkin_proposal') ? 'a personalised check-in is proposed (not yet registered)' : 'none'),
     // A grounded answer when the input carried a question — from the ONE question-answering path.
-    qa: qa ? { answer: qa.answer, purpose: qa.purpose, confidence: qa.confidence, limitations: qa.limitations, cites: qa.cites, bounded: qa.bounded } : null,
+    // `usedNewlySaved` says whether a mixed turn's answer drew on the just-saved statement.
+    // `citations` are safe (label/date/ref) — no internal scores or excluded evidence.
+    qa: qa ? { answer: qa.answer, purpose: qa.purpose, confidence: qa.confidence, limitations: qa.limitations, cites: qa.cites, citations: qa.citations || [], bounded: qa.bounded, usedNewlySaved: qa.usedNewlySaved === true } : null,
     // Bounded assigned-work context extension (authorised, released-fields-only) — NOT a second runtime contract.
     assignedWork: workCtx ? { items: workCtx.items.map(it => ({ id: it.id, title: it.title, status: it.status, needsRevision: it.needsRevision, releasedScore: it.releasedScore, hasReleasedFeedback: !!it.releasedFeedback })), basisIds: workCtx.basisIds, limitations: workCtx.limitations, ambiguous: workAmbiguous } : null,
     bounded: composed.ok, cites: composed.output.cites,
@@ -8271,7 +8319,7 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
   list.push(turn);
   if (list.length > ASSISTANT_CAP) list.splice(0, list.length - ASSISTANT_CAP);
   scheduleSave();
-  return { turn, response, interpretation: { turnId: interp.turnId, originalInputRef: rawRef, candidateIntents: interp.candidateIntents,
+  return { turn, response, saved, capturePrompt, interpretation: { turnId: interp.turnId, originalInputRef: rawRef, candidateIntents: interp.candidateIntents,
     candidateClaims: interp.candidateClaims, suggestedPrivacy: interp.suggestedPrivacy, proposedActions: interp.proposedActions,
     confidence: interp.confidence, ambiguities: interp.ambiguities, limitations: interp.limitations }, context: { basisIds: context.basisIds, purpose: context.purpose, visibilityEligibility: context.visibilityEligibility, confidence: context.confidence, limitations: context.limitations } };
 }
@@ -8287,33 +8335,17 @@ app.post('/api/assistant/turn', requireAuth, (req, res) => {
   // An optional workItemId focuses authorised assigned-work context (from clicking a work card).
   // An optional subjectMemberId requests LEADER-SUPPORT context — validated server-side, never
   // trusted from the client (see _resolveLeaderSubject); absent → a general personal turn.
-  const r = _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId });
-
-  // EXPLICIT SAVE COMMAND — the ONE case we persist without a second confirm, because
-  // the user literally asked ("remember this" / "save these minutes" / "add this to
-  // our organisation knowledge"). Everything else stays a one-tap OFFER (a capture
-  // proposal). Detection is automatic; only an explicit instruction saves here.
-  let saved = null, capturePrompt = null;
+  // Capture decision (explicit save / bare-command prompt) + grounded answering both
+  // happen INSIDE _assistantTurn, in a defined order (persist → ground). The endpoint
+  // is a thin boundary — no second retrieval, no endpoint-specific privacy logic.
   try {
-    const cmd = capture.detectCommand(text);
-    if (cmd && cmd.payload) {
-      if (cmd.scope === 'organisation') {
-        // Governed door → authority reflects WHO inputted it (leader → authoritative
-        // org evidence; a member → shared-but-unverified). The command IS the explicit
-        // visibility confirmation.
-        const out = _ingestArtifact(code, userId, { format: 'text', content: cmd.payload, sourceName: 'From a conversation', visibility: 'normal', confirmVisibilityIncrease: true });
-        if (out && out.ok !== false) saved = { scope: 'organisation', visibility: 'shared', authority: out.authority, source: 'From a conversation', evidenceIds: out.evidenceIds || [], imported: out.imported || 0 };
-      } else {
-        const k = _captureKnowledge(code, userId, cmd.payload, { visibility: 'private' });
-        saved = { scope: 'personal', visibility: 'private', authority: 'personal', source: 'From a conversation', evidenceIds: k && k.id ? [k.id] : [], imported: k && k.stored ? 1 : 0 };
-      }
-    } else if (cmd && !cmd.payload) {
-      // A bare "remember this" with nothing to store — ask what to save rather than guess.
-      capturePrompt = { need: 'content', message: 'Happy to remember it — what exactly should I save?' };
-    }
-  } catch (_) {}
-
-  res.json({ ok: true, turnId: r.turn.turnId, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response, saved, capturePrompt });
+    const r = _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId });
+    res.json({ ok: true, turnId: r.turn.turnId, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response, saved: r.saved || null, capturePrompt: r.capturePrompt || null });
+  } catch (e) {
+    // Fail closed with valid JSON — never a non-JSON 500, never a leak in an error body.
+    console.warn('[assistant/turn] failed:', e && e.message);
+    res.status(200).json({ ok: false, error: 'turn_failed', response: { responseText: 'I hit a snag processing that — try again in a moment.', mode: 'error', proposedActions: [], primaryActions: [], moreActions: [], qa: null }, saved: null, capturePrompt: null });
+  }
 });
 
 /* GET /api/assistant/turn/:turnId — inspect the bounded interpretation artifact (self-only). */

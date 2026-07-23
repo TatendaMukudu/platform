@@ -6,7 +6,7 @@
    ordinary declarative content is only ever OFFERED for saving; questions and
    chit-chat trigger nothing. No DB, no AI key. Run: node scripts/capture-smoke.js */
 
-const { detectCommand, looksDeclarative } = require('../ai/capture');
+const { detectCommand, looksDeclarative, looksLikeQuestion, classify } = require('../ai/capture');
 
 let pass = 0, fail = 0;
 const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n); } };
@@ -52,6 +52,32 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
   const t = 'Add this to our organisation knowledge: the pressing triggers are on the goalkeeper and the fullbacks.';
   ok('9 · an org command is detected as a command', !!detectCommand(t));
   ok('9 · the same text also reads as declarative content', looksDeclarative(t));
+}
+
+// ── question detection is robust, not keyword-brittle ────────────────────────
+{
+  ok('10 · "what are our pressing triggers" is a question (no ?)', looksLikeQuestion('what are our pressing triggers'));
+  ok('10 · "tell me the game plan" is a question', looksLikeQuestion('tell me the game plan for saturday'));
+  ok('10 · "explain the offside trap" is a question', looksLikeQuestion('explain the offside trap we use'));
+  ok('10 · a statement is not a question', !looksLikeQuestion('the game plan is a high press in a 4-3-3'));
+}
+
+// ── turn classification: the five shapes ─────────────────────────────────────
+{
+  ok('11 · a plain info request → question', classify('what are our pressing triggers').kind === 'question');
+  ok('11 · an explicit org command → capture_command', classify('Add this to our organisation knowledge: away kit is black.').kind === 'capture_command');
+  ok('11 · meeting minutes → declarative (offer)', classify('Minutes from tonight: we agreed the schedule and confirmed away travel for the cup.').kind === 'declarative');
+  ok('11 · small talk → conversation', classify('Good session today, everyone was buzzing.').kind === 'conversation');
+
+  // MIXED — command payload EXCLUDES the question; question text EXCLUDES the command.
+  const m = classify('Remember that training moved to Thursday. What time does it start?');
+  ok('12 · mixed turn is detected', m.kind === 'mixed');
+  ok('12 · mixed: command payload is the statement only', m.command && /training moved to thursday/i.test(m.command.payload) && !/what time/i.test(m.command.payload));
+  ok('12 · mixed: question text is the question only', /what time does it start/i.test(m.questionText) && !/remember|training moved/i.test(m.questionText));
+
+  // A bare command PLUS a question: answer the question, still no silent save.
+  const b = classify('Remember this. What did we decide last week?');
+  ok('12 · bare-command + question still answers the question', b.isQuestion && (!b.command || !b.command.payload));
 }
 
 console.log(`\ncapture-smoke: ${pass} passed, ${fail} failed`);
