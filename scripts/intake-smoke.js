@@ -196,6 +196,25 @@ const server = app.listen(0, async () => {
     ok('19 · DELETE /api/evidence/import/:id removes the import', del.status === 200 && del.j.removed >= 1);
     const after = await call('/api/evidence/imports', tokMia);
     ok('19 · a deleted import disappears from coverage', !after.j.imports.some(g => g.sourceName === 'Set pieces'));
+
+    // 21 · CONVERSATIONAL CAPTURE — an explicit command in a turn saves through the
+    //   governed door; ordinary talk does NOT persist (detection auto, persistence deliberate).
+    const orgCmd = await call('/api/assistant/turn', tokCoach, { method: 'POST', body: { text: 'Add this to our organisation knowledge: the pressing triggers are on the goalkeeper pass and the fullbacks.' } });
+    ok('21 · a leader "add to org knowledge" command saves as authoritative org evidence',
+       orgCmd.status === 200 && orgCmd.j.saved && orgCmd.j.saved.scope === 'organisation' && orgCmd.j.saved.authority === 'organisation');
+    const grounded = _assistantAnswer(A, 'coach', 'what are our pressing triggers');
+    ok('21 · the saved org knowledge is immediately citable by the grounded assistant',
+       /pressing|goalkeeper|fullbacks/i.test(grounded.answer) && (grounded.cites || []).length > 0);
+
+    const memberCmd = await call('/api/assistant/turn', tokMia, { method: 'POST', body: { text: 'Remember this: I want to work on my weaker left foot before every session.' } });
+    ok('21 · a member "remember this" saves PRIVATELY (personal, not org)',
+       memberCmd.j.saved && memberCmd.j.saved.scope === 'personal' && memberCmd.j.saved.visibility === 'private');
+
+    const chit = await call('/api/assistant/turn', tokMia, { method: 'POST', body: { text: 'The session felt really sharp today, everyone was buzzing.' } });
+    ok('21 · ordinary conversation does NOT auto-save to evidence', !chit.j.saved);
+
+    const bare = await call('/api/assistant/turn', tokMia, { method: 'POST', body: { text: 'remember this' } });
+    ok('21 · a bare "remember this" asks WHAT to save rather than guessing', !bare.j.saved && bare.j.capturePrompt);
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
   server.close();
   console.log(`\nintake-smoke: ${pass} passed, ${fail} failed`);

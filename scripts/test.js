@@ -74,6 +74,7 @@ const SUITES = [
   'governance-smoke.js',           // architectural gravity: proactive DELIVERY lives ONLY in ai/behaviour.js; every surface consumes one pipeline
   'retrieval-smoke.js',            // grounded retrieval over canonical evidence: authorised-before-composition, cited, no-key extractive, full privacy/integrity matrix
   'intake-smoke.js',               // universal evidence intake: one governed ingestion boundary (text/md/pdf/docx/csv/json) → canonical evidence → grounded retrieval; dedup/supersede/delete, provenance, privacy
+  'capture-smoke.js',      // capture-intent detection (pure): explicit save-commands vs one-tap offers vs questions — detection automatic, persistence deliberate
   'deadcode-scan.js',      // dead-code guard: fails on any unreferenced function (named or module-level arrow) across server.js + every js/ module — keeps retired-surface debt from re-accumulating
   'connector-harness.js',  // the Connector SDK: identity/confidence + mapping contracts
   'frontend-smoke.js',     // REAL headless-Chromium boot: every route + refresh + Support view; fails on any uncaught JS/parse error (self-skips if no Chromium). This is the guard that would have caught the mobile "Unexpected token" boot crash.

@@ -17,6 +17,7 @@ const valuesLens = require('./ai/values');
 const embeddings = require('./ai/embeddings');
 const retrieval  = require('./ai/retrieval');
 const intake     = require('./ai/intake');
+const capture    = require('./ai/capture');
 const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
@@ -8287,7 +8288,32 @@ app.post('/api/assistant/turn', requireAuth, (req, res) => {
   // An optional subjectMemberId requests LEADER-SUPPORT context — validated server-side, never
   // trusted from the client (see _resolveLeaderSubject); absent → a general personal turn.
   const r = _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId });
-  res.json({ ok: true, turnId: r.turn.turnId, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response });
+
+  // EXPLICIT SAVE COMMAND — the ONE case we persist without a second confirm, because
+  // the user literally asked ("remember this" / "save these minutes" / "add this to
+  // our organisation knowledge"). Everything else stays a one-tap OFFER (a capture
+  // proposal). Detection is automatic; only an explicit instruction saves here.
+  let saved = null, capturePrompt = null;
+  try {
+    const cmd = capture.detectCommand(text);
+    if (cmd && cmd.payload) {
+      if (cmd.scope === 'organisation') {
+        // Governed door → authority reflects WHO inputted it (leader → authoritative
+        // org evidence; a member → shared-but-unverified). The command IS the explicit
+        // visibility confirmation.
+        const out = _ingestArtifact(code, userId, { format: 'text', content: cmd.payload, sourceName: 'From a conversation', visibility: 'normal', confirmVisibilityIncrease: true });
+        if (out && out.ok !== false) saved = { scope: 'organisation', visibility: 'shared', authority: out.authority, source: 'From a conversation', evidenceIds: out.evidenceIds || [], imported: out.imported || 0 };
+      } else {
+        const k = _captureKnowledge(code, userId, cmd.payload, { visibility: 'private' });
+        saved = { scope: 'personal', visibility: 'private', authority: 'personal', source: 'From a conversation', evidenceIds: k && k.id ? [k.id] : [], imported: k && k.stored ? 1 : 0 };
+      }
+    } else if (cmd && !cmd.payload) {
+      // A bare "remember this" with nothing to store — ask what to save rather than guess.
+      capturePrompt = { need: 'content', message: 'Happy to remember it — what exactly should I save?' };
+    }
+  } catch (_) {}
+
+  res.json({ ok: true, turnId: r.turn.turnId, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response, saved, capturePrompt });
 });
 
 /* GET /api/assistant/turn/:turnId — inspect the bounded interpretation artifact (self-only). */

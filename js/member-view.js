@@ -2666,10 +2666,24 @@ const MemberApp = {
     };
     const primary = (r.primaryActions || r.proposedActions || []).map(card).join('');
     const more = (r.moreActions || []).map(card).join('');
+    // An explicit "remember this" already saved — confirm WHAT happened + how it will
+    // be trusted (visibility + authority tier + source), honestly.
+    let savedHtml = '';
+    if (j.saved) {
+      const s = j.saved;
+      const how = s.authority === 'organisation' ? 'as authoritative organisation evidence'
+                : s.authority === 'shared_unverified' ? 'shared with the team (your account — not yet verified)'
+                : 'privately, just for you';
+      savedHtml = `<div class="iq-saved" style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-secondary);border-left:2px solid var(--success);padding-left:0.6rem">
+        ✓ Saved ${esc(how)} · source “${esc(s.source)}”. I can cite it now.</div>`;
+    } else if (j.capturePrompt) {
+      savedHtml = `<div class="iq-saved" style="margin-top:0.5rem;font-size:0.82rem;color:var(--text-secondary)">${esc(j.capturePrompt.message)}</div>`;
+    }
     return `<div class="iq-response">
       <p class="iq-response-text">${esc(r.responseText)}</p>
       ${(r.groundedClaims || []).length ? `<div class="iq-grounded">${(r.groundedClaims || []).slice(0, 1).map(c => `<span class="iq-tag">grounded</span> ${esc(c.text)}`).join('')}</div>` : ''}
       ${r.privacyNotice ? `<div class="iq-privacy">${esc(r.privacyNotice)}</div>` : ''}
+      ${savedHtml}
       ${primary ? `<div class="iq-proposals"><div class="card-label">Suggestions — nothing happens until you confirm</div>${primary}
         ${more ? `<details class="iq-more"><summary>More options</summary>${more}</details>` : ''}</div>` : ''}
     </div>`;
