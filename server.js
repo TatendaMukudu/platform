@@ -7647,7 +7647,14 @@ function _deleteImport(code, importId, requesterId) {
     env.status = 'deleted'; removed++;
     try { _evictEvidenceVector(code, env.id); } catch (_) {}
   });
-  if (removed) scheduleSave();
+  if (removed) {
+    // Removing source evidence can change the derived org-state — remember the moment
+    // with an evidence_removed trigger so memory attributes any lapse to the removal,
+    // not to time passing. Cache is keyed by the evidence fingerprint, so it re-derives.
+    delete orgStateCache[code];
+    _recordOrgSnapshot(code, { trigger: { type: 'evidence_removed', boundary: 'import_delete', actorRef: requesterId, recordRef: importId } });
+    scheduleSave();
+  }
   return { ok: true, importId, removed };
 }
 
@@ -7833,7 +7840,11 @@ function _confirmOrgContext(code, userId, proposals, opts = {}) {
     (orgContextRecords[code] = orgContextRecords[code] || []).push(rec);
     created.push(rec);
   }
-  if (created.length) { delete orgStateCache[code]; _recordOrgSnapshot(code); scheduleSave(); }   // invalidate the projection + remember the moment
+  if (created.length) {   // invalidate the projection + remember the moment (governed context change)
+    delete orgStateCache[code];
+    _recordOrgSnapshot(code, { trigger: { type: 'context_confirmed', boundary: 'org_context', actorRef: userId, recordRef: created[0].id } });
+    scheduleSave();
+  }
   return { created, rejected };
 }
 // A redacted public view of a durable record (no internal actor/provenance internals).
@@ -7956,7 +7967,9 @@ app.post('/api/org-context/:id/retire', requireAuth, (req, res) => {
     const rec = (orgContextRecords[code] || []).find(r => r.id === req.params.id && r.status === 'active');
     if (!rec) return res.status(404).json({ error: 'record not found' });
     rec.status = 'retired'; rec.effectiveTo = new Date().toISOString();
-    delete orgStateCache[code]; scheduleSave();
+    delete orgStateCache[code];
+    _recordOrgSnapshot(code, { trigger: { type: 'context_confirmed', boundary: 'org_context_retire', actorRef: userId, recordRef: rec.id } });
+    scheduleSave();
     res.json({ ok: true, retired: rec.id });
   } catch (e) { res.status(200).json({ ok: false }); }
 });
@@ -8000,7 +8013,9 @@ function _bindRole(code, confirmedBy, roleRef, userId) {
     provenance: { source: 'form', confirmedAt: now, kind: 'explicit' }, supersedes: prior ? prior.id : null, supersededBy: null, status: 'active' };
   if (prior) { prior.status = 'superseded'; prior.effectiveTo = now; prior.supersededBy = rec.id; }
   list.push(rec);
-  delete orgStateCache[code]; _recordOrgSnapshot(code); scheduleSave();
+  delete orgStateCache[code];
+  _recordOrgSnapshot(code, { trigger: { type: 'role_binding_changed', boundary: 'role_binding', actorRef: confirmedBy, recordRef: rec.id } });
+  scheduleSave();
   return { ok: true, binding: rec };
 }
 const _publicBinding = b => ({ id: b.id, roleRef: b.roleRef, userId: b.userId, effectiveFrom: b.effectiveFrom, effectiveTo: b.effectiveTo, status: b.status, supersededBy: b.supersededBy || null });
@@ -8042,19 +8057,39 @@ function _teamReadiness(code, viewerId, now = Date.now()) {
   return vm;
 }
 
+/* The interpretation-basis versions stamped on every snapshot, sourced from the pure
+   modules that own them. Organisational Memory compares two moments as organisational
+   change ONLY when these match; otherwise a moment is a neutral rebaseline. */
+function _orgMemorySemantics() {
+  return {
+    orgStateSchemaVersion: orgState.SCHEMA_VERSION,
+    projectionRulesVersion: orgState.RULES_VERSION,
+    readinessRulesVersion: readiness.RULES_VERSION,
+    memorySchemaVersion: orgMemory.MEMORY_SCHEMA_VERSION,
+  };
+}
+
 /* ─── ORGANISATIONAL MEMORY — record a snapshot of the CURRENT derived state onto the
    timeline, but ONLY when the observable state has actually changed (ai/org-memory
    dedupes on a content hash). This is a HISTORY of a projection, never a mutation of it,
    and never a second source of truth — it reads _getOrgState + _teamReadiness (both
-   org-admissible only; private evidence cannot enter) and appends. Fail-closed: a memory
+   org-admissible only; private evidence cannot enter) and appends. Every moment carries
+   a SERVER-DERIVED trigger (which governed boundary produced it — never client-trusted)
+   and the semantic versions of the reasoning that produced it. Fail-closed: a memory
    error must never break a governed write. Returns whether a snapshot was recorded. */
-function _recordOrgSnapshot(code, now = Date.now()) {
+function _recordOrgSnapshot(code, opts = {}) {
   try {
+    const now = opts.now || Date.now();
+    // The trigger is derived HERE from the calling boundary — a caller passes a type +
+    // safe refs; anything unrecognised is normalised to a temporal recalculation.
+    const trigger = opts.trigger
+      ? { occurredAt: new Date(now).toISOString(), ...opts.trigger }
+      : { type: 'temporal_recalculation', boundary: 'read', occurredAt: new Date(now).toISOString() };
     const state = _getOrgState({ organisationId: code, purpose: 'organisation_reasoning', now });
     const vm = _teamReadiness(code, null, now);
     const snap = orgMemory.snapshot({ state, readiness: vm,
       contextRecords: (orgContextRecords[code] || []),
-      fingerprint: _orgEvidenceFingerprint(code), now });
+      fingerprint: _orgEvidenceFingerprint(code), now, trigger, semantics: _orgMemorySemantics() });
     const hist = orgStateHistory[code] || [];
     // Don't begin a timeline until there is something to remember — an org with no
     // focus, no tracked claims, and no operating context has no memory yet. Once a
@@ -8141,7 +8176,9 @@ function _writeResolutionEvidence(code, actorId, aq, adj, turnId) {
       confirmedBy: actorId, confirmedAt: now },
   }, { resolutionOf: aq.uncertaintyId });
   if (rec.envelope) { rec.envelope.promoted = true; _indexEvidence(code, rec.envelope).catch(() => {}); }   // org-shared
-  delete orgStateCache[code]; _recordOrgSnapshot(code); scheduleSave();                                     // invalidate → re-derive → remember
+  delete orgStateCache[code];                                                                               // invalidate → re-derive → remember
+  _recordOrgSnapshot(code, { trigger: { type: 'uncertainty_resolved', boundary: 'resolution_write', actorRef: actorId, recordRef: aq.uncertaintyId } });
+  scheduleSave();
   return rec;
 }
 
@@ -8204,6 +8241,26 @@ app.get('/api/org-memory/changed', requireAuth, (req, res) => {
   } catch (e) {
     console.warn('[org-memory/changed] failed:', e && e.message);
     res.status(200).json({ ok: false, anchor: null, head: null, changed: null });
+  }
+});
+
+/* GET /api/org-memory/moments/:fingerprint/explain — a redacted, leader-safe explanation
+   of ONE moment: the safe trigger category, whether the comparison is semantically
+   compatible, the transitions with their (safe) cause categories, the readiness labels,
+   and any limitations (unknown causes / a rules change). Fingerprint is looked up ONLY
+   within the caller's own tenant history. Returns NO raw evidence, actor/record ids,
+   hashes, internal boundary names, semantic version numbers, or requirement ids.
+   Leader-only, fail-closed. A pure inspection — does not record a new moment. */
+app.get('/api/org-memory/moments/:fingerprint/explain', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const { snapshot, prev } = orgMemory.momentByFingerprint(orgStateHistory[code] || [], String(req.params.fingerprint || ''));
+    if (!snapshot) return res.status(404).json({ ok: false, error: 'moment_not_found' });
+    res.json({ ok: true, fingerprint: snapshot.fingerprint, explanation: orgMemory.explainMoment(prev, snapshot) });
+  } catch (e) {
+    console.warn('[org-memory/explain] failed:', e && e.message);
+    res.status(200).json({ ok: false, explanation: null });
   }
 });
 

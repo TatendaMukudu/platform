@@ -16,6 +16,11 @@
    ============================================================ */
 
 const DAY = 86400000;
+// The interpretation basis of the readiness view model, owned here as an explicit
+// constant (see ai/org-state for the rationale). Bump when the MEANING of a readiness
+// state, area grouping, or overall rollup changes — Organisational Memory uses it to
+// decide whether two historical moments are comparable.
+const RULES_VERSION = 1;
 const STATES = Object.freeze(['ready', 'partially_ready', 'not_ready', 'insufficient_information', 'not_yet_due', 'not_applicable']);
 const parse = t => { if (!t) return null; const ms = new Date(t).getTime(); return Number.isFinite(ms) ? ms : null; };
 const fmtDate = t => { const ms = parse(t); return ms ? new Date(ms).toLocaleString('en-GB', { weekday: 'long', hour: '2-digit', minute: '2-digit' }) : 'an unspecified time'; };
@@ -207,4 +212,4 @@ function project({ state = {}, uncertainties = [], inquiryPlans = [], contextRec
   };
 }
 
-module.exports = { STATES, project, selectFocus, buildAreas, overallState, mapQuestions, formatChanges, resolveOwner, claimStatement };
+module.exports = { RULES_VERSION, STATES, project, selectFocus, buildAreas, overallState, mapQuestions, formatChanges, resolveOwner, claimStatement };

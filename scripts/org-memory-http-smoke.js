@@ -16,19 +16,31 @@ const { app, _loadAllStores, _rebuildEmailIndex, issueToken } = S;
 let pass = 0, fail = 0;
 const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n); } };
 
-const A = 'memorga', B = 'memorgb', iso = new Date().toISOString();
+const A = 'memorga', B = 'memorgb', Cc = 'memorgc', iso = new Date().toISOString();
 _loadAllStores({
-  orgMeta:  { [A]: { orgName: 'A', orgMode: 'sports', createdAt: iso }, [B]: { orgName: 'B', orgMode: 'sports', createdAt: iso } },
+  orgMeta:  { [A]: { orgName: 'A', orgMode: 'sports', createdAt: iso }, [B]: { orgName: 'B', orgMode: 'sports', createdAt: iso }, [Cc]: { orgName: 'C', orgMode: 'sports', createdAt: iso } },
   orgUsers: {
     [A]: { coach: { id: 'coach', name: 'Coach', role: 'superadmin', orgCode: A, status: 'active' }, jordan: { id: 'jordan', name: 'Jordan', role: 'member', orgCode: A, supervisorId: 'coach', status: 'active' }, mia: { id: 'mia', name: 'Mia', role: 'member', orgCode: A, supervisorId: 'coach', status: 'active' } },
     [B]: { bc: { id: 'bc', name: 'BCoach', role: 'superadmin', orgCode: B, status: 'active' }, bp: { id: 'bp', name: 'BPlayer', role: 'member', orgCode: B, supervisorId: 'bc', status: 'active' } },
+    [Cc]: { cc: { id: 'cc', name: 'CCoach', role: 'superadmin', orgCode: Cc, status: 'active' }, cp: { id: 'cp', name: 'CPlayer', role: 'member', orgCode: Cc, supervisorId: 'cc', status: 'active' } },
   },
 });
 _rebuildEmailIndex();
 
+// Seed org C with a LEGACY (Phase-A) snapshot — no trigger, no semantics — to prove
+// legacy history restores without fabricated provenance and forces a neutral rebaseline
+// when the next versioned moment is recorded.
+S.orgStateHistory[Cc] = [{
+  schema: 'org-memory/v1', version: 1, at: new Date(Date.now() - 30 * 86400000).toISOString(), fingerprint: 'legacy-c',
+  pack: 'sports', focus: { kind: 'event', id: 'e0', title: 'Old Friendly', type: 'match', at: iso },
+  readinessStatus: 'not_ready', constrained: ['Required information'], supported: [],
+  claims: [{ requirementId: 'e0:game_plan', claimType: 'game_plan', state: 'missing' }],
+  openQuestions: 1, blockingQuestions: 1, contextActive: 1, contentHash: 'legacyhash',
+}];
+
 const server = app.listen(0, async () => {
   const base = `http://127.0.0.1:${server.address().port}`;
-  const tok = { coach: issueToken('coach', A, 'superadmin'), mia: issueToken('mia', A, 'member'), bc: issueToken('bc', B, 'superadmin') };
+  const tok = { coach: issueToken('coach', A, 'superadmin'), mia: issueToken('mia', A, 'member'), bc: issueToken('bc', B, 'superadmin'), cc: issueToken('cc', Cc, 'superadmin') };
   const inDays = d => new Date(Date.now() + d * 86400000).toISOString();
   const call = async (path, who, opts = {}) => {
     const headers = { ...(opts.body ? { 'Content-Type': 'application/json' } : {}), ...(who ? { Authorization: `Bearer ${tok[who]}` } : {}) };
@@ -36,9 +48,10 @@ const server = app.listen(0, async () => {
     let j = null; try { j = await r.json(); } catch (_) {}
     return { status: r.status, j };
   };
-  const confirm = (who, records) => call('/api/org-context/confirm', who, { method: 'POST', body: { records } });
+  const confirm = (who, records, extra = {}) => call('/api/org-context/confirm', who, { method: 'POST', body: { records, ...extra } });
   const timeline = who => call('/api/org-memory/timeline', who);
   const changed = (who, q = '') => call('/api/org-memory/changed' + q, who);
+  const explain = (who, fp) => call('/api/org-memory/moments/' + encodeURIComponent(fp) + '/explain', who);
 
   try {
     // 1 · empty memory before anything happens — a calm baseline, not a crash
@@ -61,17 +74,26 @@ const server = app.listen(0, async () => {
     const t1b = await timeline('coach');
     ok('3 · re-reading with no change does not accrue a moment (dedup on observable state)', t1b.j.summary.count === countAfterCtx);
 
-    // 4 · a governed resolution answer (authoritative) resolves the claim → a new moment
-    await call('/api/assistant/turn', 'coach', { method: 'POST', body: { text: 'Add this to our organisation knowledge: Game plan for the cup final — high press 4-3-3, tactics and formation confirmed.' } });
+    // 4 · a governed uncertainty resolution (answer-and-confirm loop) resolves the claim.
+    // Bind the coach role so an owner can answer authoritatively, then drive the loop.
+    await call('/api/org-context/role-binding', 'coach', { method: 'POST', body: { roleRef: 'coach', userId: 'coach' } });
+    const gq = (await call('/api/team/readiness', 'coach')).j.nextQuestions.find(x => /game plan/i.test(x.question));
+    await call('/api/assistant/active-question', 'coach', { method: 'POST', body: { uncertaintyId: gq.uncertaintyId } });
+    const ans = await call('/api/assistant/turn', 'coach', { method: 'POST', body: { text: 'Yes, the game plan is done — high press 4-3-3, tactics and formation set.' } });
+    const ap = (ans.j.response.proposedActions || []).find(p => p.actionType === 'resolve_uncertainty');
+    const cres = await call('/api/assistant/turn/' + ans.j.turnId + '/confirm', 'coach', { method: 'POST', body: { proposalId: ap.id } });
+    ok('4 · confirming a governed answer resolves the requirement', cres.j.ok && cres.j.outcome === 'resolved');
     const t2 = await timeline('coach');
-    ok('4 · resolving a requirement appends a new moment', t2.j.summary.count === countAfterCtx + 1);
+    ok('4 · the resolution appends a new moment', t2.j.summary.count > countAfterCtx);
     ok('4 · the diff classifies game plan missing → known as resolved', t2.j.entries[0].changed.claimTransitions.some(tr => tr.claimType === 'game_plan' && tr.direction === 'resolved'));
+    ok('4 · the newest moment is stamped with the uncertainty_resolved trigger (safe category)', t2.j.entries[0].snapshot.triggerCategory === 'a question was answered');
     ok('4 · the rollup counts at least one resolved claim', t2.j.summary.claimsResolved >= 1);
 
     // 5 · "what changed" between the previous moment and now
     const ch = await changed('coach');
     ok('5 · /changed reports the most recent transition (head vs previous)', ch.j.ok && ch.j.changed && ch.j.changed.claimTransitions.some(tr => tr.claimType === 'game_plan'));
     ok('5 · the change summary is plain, non-blaming language', /game plan is now recorded/i.test((ch.j.changed.summary || []).join(' ')) && !/\bblame|fault|failed to\b/i.test((ch.j.changed.summary || []).join(' ')));
+    ok('5 · the resolved transition carries the deterministic cause evidence_added', ch.j.changed.claimTransitions.some(tr => tr.claimType === 'game_plan' && tr.cause === 'evidence_added'));
 
     // 6 · a role binding changes ownership resolution → another moment; fingerprint moves
     const fpBefore = t2.j.entries[0].snapshot.fingerprint;
@@ -106,6 +128,35 @@ const server = app.listen(0, async () => {
 
     // 12 · the store is the exported durable one (survives via scheduleSave)
     ok('12 · the timeline is persisted in the durable orgStateHistory store', Array.isArray(S.orgStateHistory[A]) && S.orgStateHistory[A].length === t4.j.summary.count);
+
+    // 13 · trigger provenance surfaces as a SAFE category per governed boundary (server-derived)
+    const cats = (S.orgStateHistory[A] || []).map(s => s.trigger && s.trigger.type);
+    ok('13 · governed boundaries stamped context_confirmed / uncertainty_resolved / role_binding_changed triggers', cats.includes('context_confirmed') && cats.includes('uncertainty_resolved') && cats.includes('role_binding_changed'));
+    ok('13 · the public timeline exposes only a safe trigger CATEGORY (no internal type/actor/record)', t4.j.entries.some(e => e.snapshot.triggerCategory === 'a question was answered') && !/"type":"uncertainty_resolved"|actorRef|recordRef/.test(JSON.stringify(t4.j)));
+
+    // 14 · the client cannot supply or override the trigger — the server derives it
+    await confirm('coach', [{ type: 'event', scope: { kind: 'team' }, fields: { type: 'training', title: 'Injected Session', startAt: inDays(6) } }],
+      { trigger: { type: 'system_rebaseline', actorRef: 'attacker', recordRef: 'evil' } });
+    const headTrig = (S.orgStateHistory[A] || [])[S.orgStateHistory[A].length - 1].trigger;
+    ok('14 · a client-supplied trigger is ignored (server-derived context_confirmed, not the injected type)', headTrig.type === 'context_confirmed' && headTrig.actorRef === 'coach' && headTrig.actorRef !== 'attacker');
+
+    // 15 · the explain endpoint — leader-safe, cause-bearing, no leaks
+    const resFp = (t2.j.entries[0].snapshot || {}).fingerprint;   // the resolution moment
+    const ex = await explain('coach', resFp);
+    ok('15 · explain returns a safe trigger + readiness labels + a resolved transition with a cause', ex.j.ok && ex.j.explanation && ex.j.explanation.trigger === 'a question was answered' && ex.j.explanation.transitions.some(t => t.direction === 'resolved' && t.cause === 'evidence_added'));
+    ok('15 · explain never leaks actor/record ids, hashes, boundary, versions, or requirement ids', !/actorRef|recordRef|contentHash|boundary|SchemaVersion|RulesVersion|requirementId/.test(JSON.stringify(ex.j)));
+    ok('15 · explain is leader-only (member 403)', (await explain('mia', resFp)).status === 403);
+    ok('15 · explain 404s for an unknown fingerprint', (await explain('coach', 'no-such-fp')).status === 404);
+    ok('15 · explain is tenant-isolated (org B leader cannot resolve org A fingerprint)', (await explain('bc', resFp)).status === 404);
+
+    // 16 · legacy history restores WITHOUT fabricated provenance; the next moment rebaselines
+    const cLegacy = await timeline('cc');   // records the current (versioned) moment against the legacy head
+    ok('16 · a restored legacy snapshot keeps a null trigger category (no fabricated provenance)', cLegacy.j.entries.some(e => e.snapshot.fingerprint === 'legacy-c' && (e.snapshot.triggerCategory === null || e.snapshot.triggerCategory === undefined)));
+    ok('16 · the first versioned moment after legacy is a neutral rebaseline (no false transitions)', cLegacy.j.entries.some(e => e.changed && e.changed.semanticsChanged === true && (e.changed.claimTransitions || []).length === 0));
+    ok('16 · a rebaseline is counted separately, never as a readiness gain/slip', cLegacy.j.summary.rebaselines >= 1);
+    const cHeadFp = cLegacy.j.entries[0].snapshot.fingerprint;
+    const cEx = await explain('cc', cHeadFp);
+    ok('16 · explain of the rebaseline says rules changed + is not directly comparable', cEx.j.ok && cEx.j.explanation.rulesChanged === true && cEx.j.explanation.semanticallyCompatible === false && cEx.j.explanation.limitations.some(l => /interpretation rules/i.test(l)));
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();

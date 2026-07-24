@@ -5173,6 +5173,46 @@ const _MEM_DIR = {
   removed:   { color: 'var(--text-muted)', glyph: '−' },
   changed:   { color: 'var(--warning)', glyph: '~' },
 };
+// Safe, plain-language cause labels — the deterministic cause metadata rendered for a
+// leader. Never technical; unknown stays honestly unknown.
+const _MEM_CAUSE = {
+  evidence_added: 'new information', evidence_superseded: 'information replaced', evidence_removed: 'information removed',
+  structure_added: 'a requirement was added', structure_changed: 'a requirement changed', structure_removed: 'a requirement was removed',
+  ownership_changed: 'ownership changed', became_due: 'it became due', became_stale: 'it aged past its freshness window',
+  became_not_applicable: 'no longer applicable', semantics_changed: "IntelliQ's rules changed", unknown: 'cause not determined',
+};
+const _MEM_REMOVAL = {
+  superseded: 'replaced by a newer record', intentionally_removed: 'removed deliberately',
+  no_longer_applicable: 'marked no longer applicable', parent_removed: 'its event/objective was removed',
+  admissibility_changed: 'no longer shared with the organisation', unknown: 'reason not determined',
+};
+
+/* Toggle the "Why did this change?" panel for a moment — fetches the leader-safe
+   explanation for that fingerprint on demand. */
+async function omExplain(fingerprint, btn) {
+  const panel = document.getElementById('om-exp-' + fingerprint);
+  if (!panel) return;
+  if (panel.dataset.open === '1') { panel.style.display = 'none'; panel.dataset.open = '0'; if (btn) btn.textContent = 'Why did this change?'; return; }
+  panel.style.display = 'block'; panel.dataset.open = '1'; if (btn) btn.textContent = 'Hide explanation';
+  panel.innerHTML = `<div style="font-size:0.76rem;color:var(--text-muted)">Explaining…</div>`;
+  let x;
+  try { const r = await fetch('/api/org-memory/moments/' + encodeURIComponent(fingerprint) + '/explain', { headers: Auth._headers() }); const j = await r.json(); x = j && j.explanation; }
+  catch (_) { panel.innerHTML = `<div style="font-size:0.76rem;color:var(--text-muted)">Couldn't load the explanation.</div>`; return; }
+  if (!x) { panel.innerHTML = `<div style="font-size:0.76rem;color:var(--text-muted)">No explanation is available for this moment.</div>`; return; }
+  const trig = x.trigger ? `<div style="font-size:0.78rem"><strong>What happened:</strong> ${_escAdvisor(x.trigger)}.</div>` : '';
+  const rules = x.rulesChanged ? `<div style="font-size:0.76rem;color:var(--text-muted);margin-top:0.2rem">IntelliQ's interpretation rules changed at this point, so it isn't directly comparable to earlier moments.</div>` : '';
+  const trans = (x.transitions || []).map(t => {
+    const dir = _MEM_DIR[t.direction] || _MEM_DIR.changed;
+    const cause = _MEM_CAUSE[t.cause] || t.cause;
+    const rem = t.removalReason ? ` — ${_escAdvisor(_MEM_REMOVAL[t.removalReason] || t.removalReason)}` : '';
+    return `<li style="font-size:0.78rem;color:var(--text-secondary)"><span style="color:${dir.color}">${dir.glyph}</span> ${_escAdvisor(t.claim)} <span style="color:var(--text-muted)">(${_escAdvisor(cause)}${rem})</span></li>`;
+  }).join('');
+  const lims = (x.limitations || []).map(l => `<li style="font-size:0.72rem;color:var(--text-muted)">${_escAdvisor(l)}</li>`).join('');
+  panel.innerHTML = `
+    ${trig}${rules}
+    ${trans ? `<div style="font-size:0.72rem;color:var(--text-muted);margin:0.35rem 0 0.1rem">Changes</div><ul style="margin:0 0 0 1rem;padding:0">${trans}</ul>` : ''}
+    ${lims ? `<div style="font-size:0.72rem;color:var(--text-muted);margin:0.35rem 0 0.1rem">Limitations</div><ul style="margin:0 0 0 1rem;padding:0">${lims}</ul>` : ''}`;
+}
 async function renderOrgMemory() {
   const el = document.getElementById('org-memory-content');
   if (!el) return;
@@ -5199,13 +5239,27 @@ async function renderOrgMemory() {
     const dir = _MEM_DIR[t.direction] || _MEM_DIR.changed;
     return `<span style="display:inline-flex;align-items:center;gap:3px;font-size:0.7rem;color:${dir.color};border:1px solid ${dir.color};border-radius:10px;padding:1px 7px;margin:2px 3px 0 0"><span>${dir.glyph}</span>${_escAdvisor(String(t.claimType || '').replace(/_/g, ' '))}</span>`;
   };
-  const moment = (e) => {
+  // A semantics-change moment is visually + verbally DISTINCT from a gain/slip: it is a
+  // neutral note that IntelliQ's interpretation rules changed, never an org outcome.
+  const rebaselineMoment = (e) => {
     const snap = e.snapshot || {};
+    return `<div class="card" style="margin-bottom:0.75rem;border-left:3px solid var(--text-muted);opacity:0.92">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem">
+        <strong style="font-size:0.82rem;color:var(--text-muted)">IntelliQ's interpretation rules changed</strong>
+        <span style="font-size:0.72rem;color:var(--text-muted)">${fmt(snap.at)}</span>
+      </div>
+      <div style="font-size:0.78rem;color:var(--text-secondary);margin-top:0.25rem">Moments before this point are not directly comparable to those after it. This is a change in how IntelliQ interprets information — not a change in the organisation.</div>
+    </div>`;
+  };
+  const moment = (e) => {
     const ch = e.changed || {};
+    if (ch.semanticsChanged) return rebaselineMoment(e);
+    const snap = e.snapshot || {};
     const rst = _RD_STATE[snap.readinessStatus] || _RD_STATE.insufficient_information;
     const focusTitle = snap.focus ? (snap.focus.title || snap.focus.type || 'Current focus') : 'No confirmed focus';
     const lines = (ch.summary || []).map(changeLine).join('');
     const chips = (ch.claimTransitions || []).map(transitionChip).join('');
+    const canExplain = snap.fingerprint && !ch.baseline;
     return `<div class="card" style="margin-bottom:0.75rem">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem">
         <strong style="font-size:0.82rem">${_escAdvisor(focusTitle)}</strong>
@@ -5218,6 +5272,8 @@ async function renderOrgMemory() {
       </div>
       ${lines ? `<ul style="margin:0.25rem 0 0.25rem 1rem;padding:0">${lines}</ul>` : ''}
       ${chips ? `<div style="margin-top:0.25rem">${chips}</div>` : ''}
+      ${canExplain ? `<button class="btn-ghost btn-sm" style="font-size:0.72rem;margin-top:0.4rem" onclick="omExplain('${_escAdvisor(snap.fingerprint)}', this)">Why did this change?</button>
+      <div id="om-exp-${_escAdvisor(snap.fingerprint)}" data-open="0" style="display:none;margin-top:0.4rem;padding:0.5rem;border-left:2px solid var(--border);background:var(--surface-alt,rgba(127,127,127,0.06))"></div>` : ''}
     </div>`;
   };
 
@@ -5229,6 +5285,7 @@ async function renderOrgMemory() {
         ${stat(s.readinessRegressions || 0, 'readiness slips')}
         ${stat(s.claimsResolved || 0, 'things resolved')}
         ${stat(s.claimsLapsed || 0, 'things lapsed')}
+        ${s.rebaselines ? stat(s.rebaselines, 'rule changes') : ''}
       </div>
     </div>
     ${d.entries.map(moment).join('')}`;

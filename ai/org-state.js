@@ -23,6 +23,15 @@ const DAY = 86400000;
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const round = n => Math.round(n * 100) / 100;
 
+/* ── SEMANTIC VERSIONS — the interpretation basis of this module, owned here as explicit
+   constants (never timestamps/generated). Organisational Memory stamps them on every
+   snapshot so historical moments are only compared when the reasoning that produced them
+   is the same. BUMP SCHEMA_VERSION when the STRUCTURE of the projection changes; bump
+   RULES_VERSION when the MEANING of a claim/impact/urgency/ownership derivation changes
+   (i.e. the same evidence would now yield a different derived state). ── */
+const SCHEMA_VERSION = 1;
+const RULES_VERSION  = 1;
+
 /* ── Named, bounded weights (documented + tested — never unexplained constants) ── */
 // Impact = weighted blend of factors, each normalised to [0,1]. Weights sum-normalise.
 // Base impact = weighted blend of OPERATIONAL factors (weights sum to 1). Safety is
@@ -338,6 +347,7 @@ function stateToUncertainties(state, opts = {}) {
 }
 
 module.exports = {
+  SCHEMA_VERSION, RULES_VERSION,
   IMPACT_WEIGHTS, IMPACT_BUCKETS, URGENCY_BUCKETS, PACKS, CLAIM,
   objective, event, decision, responsibility, dependency, requirement, operatingRhythm, prov,
   resolvePack, resolveOwner, deriveImpact, deriveUrgency, classifyClaim, deriveOrgState, stateToUncertainties,
