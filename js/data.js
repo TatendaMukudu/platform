@@ -151,6 +151,9 @@ const WORKSPACE_MODULES = [
   { section: null,    id: 'operating-context', icon: ICON.building, label: 'Operating context', leaderOnly: true },
   // The organisation's episodic memory: how readiness has changed over time (Phase A).
   { section: null,    id: 'org-memory', icon: ICON.clock, label: 'Organisational memory', leaderOnly: true },
+  // Longitudinal observations derived from that memory (Phase B1): descriptions of
+  // repeated history — never recommendations, predictions, or causal claims.
+  { section: null,    id: 'org-learning', icon: ICON.spark, label: 'Observed over time', leaderOnly: true },
 
   // ── Setup — admin / superadmin (people · org aims & values · settings) ──
   { section: 'Setup', id: 'people',       icon: ICON.person,   label: 'People',       permission: 'view_members'    },

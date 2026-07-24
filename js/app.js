@@ -647,6 +647,7 @@ const NAV_ROUTES = {
   'team-readiness': () => renderTeamReadiness(),
   'operating-context': () => renderOperatingContext(),
   'org-memory': () => renderOrgMemory(),
+  'org-learning': () => renderObservations(),
   'leader-groups': () => renderLeaderGroups(),
   'data-sources':  () => renderDataSources(),
   assignments:     () => renderAssignments(),
@@ -709,6 +710,7 @@ const PAGE_TITLES = {
   'team-readiness': 'Team readiness',
   'operating-context': 'Operating context',
   'org-memory': 'Organisational memory',
+  'org-learning': 'Observed over time',
   assignments:     'Assignments',
   'org-insights':  'Intelligence',
   'group-health':  'Intelligence',
@@ -5289,6 +5291,69 @@ async function renderOrgMemory() {
       </div>
     </div>
     ${d.entries.map(moment).join('')}`;
+}
+
+/* ── Observed over time — longitudinal OBSERVATIONS (Phase B1: history, not advice).
+   Reads /api/org-learning/observations. Each card is a neutral description of something
+   that recurred, with occurrence count, time range, and whether contradictory history
+   exists. NEVER ranked positive/negative, never causal, never about an individual. */
+const _OBS_TYPE_LABEL = {
+  repeated_transition: 'Repeated change', repeated_cause: 'Repeated cause',
+  transition_sequence: 'Recurring sequence', recurring_requirement_type: 'Recurring requirement',
+  readiness_co_occurrence: 'Co-occurrence', stable_non_change: 'Unchanged over time',
+};
+async function renderObservations() {
+  const el = document.getElementById('org-learning-content');
+  if (!el) return;
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Reviewing your recorded history…</div>`;
+  let d;
+  try { const r = await fetch('/api/org-learning/observations', { headers: Auth._headers() }); d = await r.json(); }
+  catch (_) { el.innerHTML = `<div class="empty-state"><p>Couldn't load observations right now. <button class="btn btn-outline btn-sm" onclick="renderObservations()">Try again</button></p></div>`; return; }
+
+  const note = `<div class="card" style="margin-bottom:1rem;background:var(--surface-alt,rgba(127,127,127,0.06))">
+    <div style="font-size:0.8rem;color:var(--text-secondary)">These are descriptions of repeated history — <strong>not recommendations, predictions, or proof of cause</strong>. They describe what recurred, never why, and never rank anything as good or bad.</div></div>`;
+
+  if (!d || !d.observations || !d.observations.length) {
+    el.innerHTML = note + `<div class="card" style="text-align:center;padding:2rem">
+      <div style="font-size:0.9rem;color:var(--text-secondary)">Nothing has recurred often enough yet to describe. As your organisation's history grows, repeated patterns will appear here.</div></div>`;
+    return;
+  }
+
+  const fmt = t => t ? new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+  const card = (o) => {
+    const type = _OBS_TYPE_LABEL[o.type] || 'Observation';
+    const range = o.firstObservedAt && o.lastObservedAt ? `${fmt(o.firstObservedAt)} – ${fmt(o.lastObservedAt)}` : '';
+    const contra = (o.contradictions || []).map(c => `<li style="font-size:0.74rem;color:var(--text-secondary)">${_escAdvisor(c)}</li>`).join('');
+    const lims = (o.limitations || []).map(l => `<li style="font-size:0.72rem;color:var(--text-muted)">${_escAdvisor(l)}</li>`).join('');
+    return `<div class="card" style="margin-bottom:0.75rem">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem">
+        <span style="font-size:0.66rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted)">${_escAdvisor(type)}</span>
+        <span style="font-size:0.72rem;color:var(--text-muted)">${range}</span>
+      </div>
+      <div style="font-size:0.88rem;color:var(--text-primary);margin:0.3rem 0">${_escAdvisor(o.summary)}</div>
+      <div style="font-size:0.72rem;color:var(--text-muted)">${o.occurrenceCount} occurrence${o.occurrenceCount === 1 ? '' : 's'}${o.distinctEvents ? ` · ${o.distinctEvents} event${o.distinctEvents === 1 ? '' : 's'}` : ''}</div>
+      ${contra ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.4rem">Also in the history</div><ul style="margin:0.1rem 0 0 1rem;padding:0">${contra}</ul>` : ''}
+      ${lims ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.3rem">Limitations</div><ul style="margin:0.1rem 0 0 1rem;padding:0">${lims}</ul>` : ''}
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+        <button class="btn-ghost btn-sm" style="font-size:0.72rem" onclick="navigate('org-memory')">View history</button>
+        <button class="btn-ghost btn-sm" style="font-size:0.72rem" onclick="obsDismiss('${_escAdvisor(o.fingerprint)}', this)">Dismiss</button>
+      </div>
+    </div>`;
+  };
+  el.innerHTML = note + d.observations.map(card).join('');
+}
+
+/* Dismiss an observation — feedback on the analytical artifact only (never deletes
+   history, never changes the projection, never means it is objectively false). */
+async function obsDismiss(fingerprint, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Dismissing…'; }
+  try {
+    const r = await fetch('/api/org-learning/observations/' + encodeURIComponent(fingerprint) + '/dismiss', { method: 'POST', headers: Auth._headers() });
+    const j = await r.json();
+    if (!j.ok) throw new Error('dismiss failed');
+    if (typeof showToast === 'function') showToast('Dismissed. This won’t resurface; new history can still create a fresh observation.', 'info');
+    renderObservations();
+  } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Dismiss'; } if (typeof showToast === 'function') showToast('Could not dismiss right now.', 'error'); }
 }
 
 /* ── Operating context — how the team operates (governed intake) ──────────────

@@ -47,13 +47,16 @@ const parse = t => { if (!t) return null; const ms = new Date(t).getTime(); retu
 /* ── TRIGGER taxonomy — the governed boundary that produced a moment. The server derives
    this; it is NEVER trusted from a client. Public surfaces get only the safe category. ── */
 const TRIGGER_TYPES = Object.freeze(['context_confirmed', 'uncertainty_resolved', 'role_binding_changed',
-  'evidence_superseded', 'evidence_removed', 'temporal_recalculation', 'system_rebaseline']);
+  'evidence_recorded', 'evidence_superseded', 'evidence_removed', 'admissibility_changed',
+  'temporal_recalculation', 'system_rebaseline']);
 const TRIGGER_CATEGORY = Object.freeze({
   context_confirmed:     'operating context was updated',
   uncertainty_resolved:  'a question was answered',
   role_binding_changed:  'a role assignment changed',
+  evidence_recorded:     'information was recorded',
   evidence_superseded:   'information was replaced',
   evidence_removed:      'information was removed',
+  admissibility_changed: 'information sharing changed',
   temporal_recalculation:'time passed',
   system_rebaseline:     "IntelliQ's interpretation rules changed",
 });

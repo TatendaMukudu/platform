@@ -24,6 +24,7 @@ const orgState   = require('./ai/org-state');
 const orgContext = require('./ai/org-context');
 const readiness  = require('./ai/readiness');
 const orgMemory  = require('./ai/org-memory');
+const orgLearning= require('./ai/org-learning');
 const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
@@ -108,7 +109,7 @@ function scheduleSave() {
         syncRuns, failedRecords, webhookDeliveries,
         orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
         proactivePrefs, insightSuppression, answerFeedback,
-        orgStateHistory,
+        orgStateHistory, orgObservations,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -7595,6 +7596,7 @@ function _ingestArtifact(code, uploaderId, input = {}) {
     authority: authoritative ? 'organisation' : (visibility === 'normal' ? 'shared_unverified' : 'personal'),
     imported: 0, duplicates: 0, skipped: 0, failures: parsed.failures.slice(), warnings: parsed.warnings.slice(),
     classification: {}, identityMatches: 0, evidenceIds: [] };
+  let _sharedRecorded = 0, _sharedSuperseded = 0, _lastSharedId = null;   // org-memory trigger accounting
 
   parsed.units.forEach(u => {
     // Identity resolution — REUSE the one resolver; never invent an identity.
@@ -7625,12 +7627,24 @@ function _ingestArtifact(code, uploaderId, input = {}) {
     else if (r.stored) {
       // A SHARED import crosses the org boundary so authorised org/leader reads can
       // retrieve it; a PRIVATE import stays owner-only (leaders never see it).
-      if (visibility === 'normal' && r.envelope) r.envelope.promoted = true;
+      if (visibility === 'normal' && r.envelope) {
+        r.envelope.promoted = true;
+        _sharedRecorded++; _lastSharedId = r.id;
+        if (r.envelope.correctionOf) _sharedSuperseded++;   // a correction supersedes a prior org fact
+      }
       diag.imported++; diag.evidenceIds.push(r.id);
       if (r.envelope) _indexEvidence(code, r.envelope).catch(() => {});
     } else { diag.skipped++; diag.failures.push({ unit: u.unitKey, reason: r.invalid ? 'invalid_envelope' : 'not_stored', errors: r.errors || null }); }
   });
   scheduleSave();
+  // A SHARED evidence write can change the derived org-state — remember the moment with
+  // a server-derived trigger (recorded vs superseded), so memory attributes any change to
+  // the evidence write, not to time passing. Private imports never touch org-state.
+  if (visibility === 'normal' && _sharedRecorded) {
+    delete orgStateCache[code];
+    _recordOrgSnapshot(code, { trigger: { type: _sharedSuperseded ? 'evidence_superseded' : 'evidence_recorded',
+      boundary: 'evidence_import', actorRef: uploaderId, recordRef: _lastSharedId } });
+  }
   return diag;
 }
 
@@ -7755,6 +7769,13 @@ const orgStateCache = {};
 // changes, so the history answers "what changed, and when?" without accruing noise.
 const orgStateHistory = {};   // orgCode → [ snapshot ]
 const ORG_MEMORY_CAP = 300;
+// LEARNING ENGINE Phase B1 — durable, reproducible ANALYTICAL ARTIFACTS derived from the
+// memory timeline: deterministic longitudinal observations (NOT recommendations, causal
+// claims, or a playbook). Persisted separately from memory (memory stays the source);
+// each observation is idempotently re-derivable and superseded (never rewritten) on new
+// support or a rules-version change.
+const orgObservations = {};   // orgCode → [ observation ]
+const ORG_OBS_CAP = 500;
 
 function _orgPack(code) {
   const cfg = orgStateConfig[code];
@@ -8098,9 +8119,53 @@ function _recordOrgSnapshot(code, opts = {}) {
     if (isEmpty && hist.length === 0) return false;
     const r = orgMemory.record(hist, snap, { cap: ORG_MEMORY_CAP });
     orgStateHistory[code] = r.timeline;
-    if (r.recorded) scheduleSave();
+    if (r.recorded) { scheduleSave(); _refreshOrgObservations(code, 'memory_write'); }   // re-derive observations from the extended history
     return r.recorded;
   } catch (e) { console.warn('[org-memory] snapshot failed:', e && e.message); return false; }
+}
+
+/* ─── LEARNING ENGINE Phase B1 — the ONE governed generation boundary. Reads the tenant's
+   OWN memory timeline, builds valid comparison intervals (only semantically-compatible,
+   chronological, single-tenant), derives deterministic OBSERVATIONS, and persists them
+   idempotently. It NEVER modifies evidence, memory, org-state, or readiness — observations
+   are reproducible analytical artifacts, not a second source of truth. New support (or a
+   rules-version change) produces a NEW fingerprinted observation that SUPERSEDES the prior
+   version of the same identity; historical observations are never rewritten. A dismissed
+   fingerprint never resurfaces as active. Fail-closed. */
+function _refreshOrgObservations(code, reason = 'refresh') {
+  try {
+    const history = orgStateHistory[code] || [];
+    if (history.length < 2) return { changed: 0 };
+    const intervals = orgLearning.buildIntervals(history, { diff: orgMemory.diff, orgRef: code });
+    const derived = orgLearning.deriveObservations(intervals, {});
+    const store = orgObservations[code] = orgObservations[code] || [];
+    const byFp = new Map(store.map(o => [o.fingerprint, o]));
+    const activeByIdentity = new Map();
+    for (const o of store) if (o.status === 'active') activeByIdentity.set(o.identityKey, o);
+    const now = new Date().toISOString();
+    let changed = 0;
+    for (const d of derived) {
+      if (byFp.has(d.fingerprint)) continue;                       // exact support already known → idempotent (dismissed stays dismissed)
+      const prior = activeByIdentity.get(d.identityKey);           // supersede the prior ACTIVE version of this identity
+      if (prior) { prior.status = 'superseded'; prior.supersededBy = d.fingerprint; prior.supersededAt = now; }
+      const rec = { ...d, orgRef: code, createdAt: now, status: 'active', supersededBy: null, dismissedBy: null, dismissedAt: null };
+      store.push(rec); byFp.set(d.fingerprint, rec); activeByIdentity.set(d.identityKey, rec); changed++;
+    }
+    if (store.length > ORG_OBS_CAP) orgObservations[code] = store.slice(store.length - ORG_OBS_CAP);
+    if (changed) scheduleSave();
+    return { changed };
+  } catch (e) { console.warn('[org-learning] refresh failed:', e && e.message); return { changed: 0, error: true }; }
+}
+
+// Deterministic public ordering: most-recently-supported, then occurrence count, then
+// fingerprint. Optional safe filters: ?type=, ?contradictions=true.
+function _publicObservations(code, filters = {}) {
+  const active = (orgObservations[code] || []).filter(o => o.status === 'active');
+  let list = active.map(orgLearning.publicObservation);
+  if (filters.type) list = list.filter(o => o.type === filters.type);
+  if (filters.contradictions === 'true') list = list.filter(o => o.hasContradictions);
+  return list.sort((a, b) => String(b.lastObservedAt || '').localeCompare(String(a.lastObservedAt || '')) ||
+    (b.occurrenceCount - a.occurrenceCount) || String(a.fingerprint).localeCompare(String(b.fingerprint)));
 }
 
 /* ─── GROUNDED ANSWER-AND-CONFIRM LOOP ────────────────────────────────────────
@@ -8261,6 +8326,59 @@ app.get('/api/org-memory/moments/:fingerprint/explain', requireAuth, (req, res) 
   } catch (e) {
     console.warn('[org-memory/explain] failed:', e && e.message);
     res.status(200).json({ ok: false, explanation: null });
+  }
+});
+
+/* ─── LEARNING ENGINE Phase B1 API — leader-only, tenant-isolated, redacted. Observations
+   are HISTORICAL DESCRIPTIONS, never recommendations. The client can never supply their
+   contents, support, fingerprints, counts, status, or tenant — everything is derived
+   server-side from the tenant's own memory. */
+
+// GET /api/org-learning/observations — active, public-safe observations (deterministic order).
+app.get('/api/org-learning/observations', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    _refreshOrgObservations(code, 'read');   // idempotent — re-derive current observations
+    res.json({ ok: true, kind: 'historical_descriptions',
+      note: 'These are descriptions of repeated history, not recommendations or proof of cause.',
+      observations: _publicObservations(code, { type: req.query.type, contradictions: req.query.contradictions }) });
+  } catch (e) {
+    console.warn('[org-learning/observations] failed:', e && e.message);
+    res.status(200).json({ ok: false, observations: [] });
+  }
+});
+
+// GET /api/org-learning/observations/:fingerprint — a single observation, explained (safe).
+app.get('/api/org-learning/observations/:fingerprint', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const o = (orgObservations[code] || []).find(x => x.fingerprint === String(req.params.fingerprint) && x.status !== 'superseded');
+    if (!o) return res.status(404).json({ ok: false, error: 'observation_not_found' });
+    res.json({ ok: true, observation: orgLearning.explainObservation(o), status: o.status });
+  } catch (e) {
+    console.warn('[org-learning/detail] failed:', e && e.message);
+    res.status(200).json({ ok: false, observation: null });
+  }
+});
+
+// POST /api/org-learning/observations/:fingerprint/dismiss — leader feedback on the
+// ANALYTICAL ARTIFACT only. Never deletes memory, never changes the projection, never
+// asserts the observation is objectively false. The exact fingerprint won't resurface as
+// active; a materially-new observation (new support) can still appear later.
+app.post('/api/org-learning/observations/:fingerprint/dismiss', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const o = (orgObservations[code] || []).find(x => x.fingerprint === String(req.params.fingerprint) && x.status === 'active');
+    if (!o) return res.status(404).json({ ok: false, error: 'observation_not_found' });
+    o.status = 'dismissed'; o.dismissedBy = userId; o.dismissedAt = new Date().toISOString();   // internal only
+    scheduleSave();
+    res.json({ ok: true, dismissed: o.fingerprint });
+  } catch (e) {
+    console.warn('[org-learning/dismiss] failed:', e && e.message);
+    res.status(200).json({ ok: false });
   }
 });
 
@@ -12533,6 +12651,7 @@ function _loadAllStores(data) {
   Object.assign(insightSuppression, data.insightSuppression || {});
   Object.assign(answerFeedback,    data.answerFeedback    || {});
   Object.assign(orgStateHistory,   data.orgStateHistory   || {});
+  Object.assign(orgObservations,   data.orgObservations   || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -12612,7 +12731,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _getOrgState, _buildOrgStateInputs, orgStateConfig, orgContextRecords, _confirmOrgContext,
   _teamReadiness, roleBindings, _bindRole, activeQuestions, _activeQuestionFrom, _writeResolutionEvidence,
   // exported for the truth layer: organisational memory (Phase A) — the derived-state timeline
-  orgStateHistory, _recordOrgSnapshot };
+  orgStateHistory, _recordOrgSnapshot,
+  // exported for the truth layer: learning engine (Phase B1) — longitudinal observations
+  orgObservations, _refreshOrgObservations, _publicObservations };
 
 if (require.main === module) (async () => {
   try {
