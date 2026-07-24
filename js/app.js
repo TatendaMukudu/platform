@@ -5380,15 +5380,25 @@ async function renderPlaybook() {
   const confChip = (label) => `<span style="font-size:0.66rem;font-family:inherit;padding:.15rem .5rem;border-radius:20px;border:1px solid ${_CONF_TONE[label] || 'var(--text-muted)'};color:${_CONF_TONE[label] || 'var(--text-muted)'}">${_escAdvisor(label)}</span>`;
   const counter = (ce) => `<span style="color:var(--success)">${ce.supporting} for</span> · <span style="color:${ce.contradicting ? 'var(--danger)' : 'var(--text-muted)'}">${ce.contradicting} against</span>`;
 
-  // Confirmed practices (what the team has agreed).
-  const entryCard = (e) => `<div class="card" style="margin-bottom:0.6rem;border-left:3px solid var(--success)">
-    <div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:baseline">
-      <span style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted)">Confirmed ${fmt(e.confirmedAt)}</span>
-      ${confChip(e.confidenceLabel)}
-    </div>
-    <div style="font-size:0.9rem;margin:0.3rem 0">${_escAdvisor(e.statement)}</div>
-    <div style="font-size:0.72rem;color:var(--text-muted)">Evidence at confirmation: ${counter(e.counterEvidence)}</div>
-  </div>`;
+  // Confirmed practices (what the team has agreed), each re-checked against current history.
+  const _REV_TONE = { holding: 'var(--success)', contested: 'var(--warning)', unsupported: 'var(--text-muted)' };
+  const entryCard = (e) => {
+    const rev = e.review || { status: 'holding', label: 'Still holding' };
+    const tone = _REV_TONE[rev.status] || 'var(--text-muted)';
+    const contested = rev.status !== 'holding';
+    return `<div class="card" style="margin-bottom:0.6rem;border-left:3px solid ${tone}">
+      <div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:baseline">
+        <span style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted)">Confirmed ${fmt(e.confirmedAt)}</span>
+        <span style="font-size:0.66rem;padding:.15rem .5rem;border-radius:20px;border:1px solid ${tone};color:${tone}">${_escAdvisor(rev.label)}</span>
+      </div>
+      <div style="font-size:0.9rem;margin:0.3rem 0">${_escAdvisor(e.statement)}</div>
+      <div style="font-size:0.72rem;color:var(--text-muted)">Evidence at confirmation: ${counter(e.counterEvidence)}</div>
+      ${contested ? `<div style="font-size:0.74rem;color:var(--text-secondary);margin-top:0.4rem">${_escAdvisor(rev.reason || '')}</div>` : ''}
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+        <button class="btn-ghost btn-sm" style="font-size:0.72rem;color:${contested ? 'var(--danger)' : 'var(--text-muted)'}" onclick="pbRetire('${_escAdvisor(e.fingerprint)}', this)">Retire this practice</button>
+      </div>
+    </div>`;
+  };
 
   // Proposed practices (for review) — counter-evidence + limitations shown before any action.
   const candCard = (c) => {
@@ -5441,6 +5451,17 @@ async function pbDismiss(fingerprint, btn) {
     if (typeof showToast === 'function') showToast('Set aside.', 'info');
     renderPlaybook();
   } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Set aside'; } if (typeof showToast === 'function') showToast('Could not set aside right now.', 'error'); }
+}
+/* Retire a confirmed practice — governed lifecycle (active → retired); never automatic. */
+async function pbRetire(fingerprint, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Retiring…'; }
+  try {
+    const r = await fetch('/api/org-playbook/' + encodeURIComponent(fingerprint) + '/retire', { method: 'POST', headers: Auth._headers() });
+    const j = await r.json();
+    if (!j.ok) throw new Error('retire failed');
+    if (typeof showToast === 'function') showToast('Retired. It stays in history and can be re-proposed if it recurs.', 'info');
+    renderPlaybook();
+  } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Retire this practice'; } if (typeof showToast === 'function') showToast('Could not retire right now.', 'error'); }
 }
 
 /* ── Operating context — how the team operates (governed intake) ──────────────

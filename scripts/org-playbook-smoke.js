@@ -77,5 +77,13 @@ ok('8 · counter-evidence signals are safe, plain sentences', P.publicCandidate(
 const allText = cands.concat([pc]).map(c => JSON.stringify(c)).join(' ');
 ok('9 · no candidate text uses causal, evaluative, or advice language', !/\b(caused|led to|resulted in|because|should|recommend|healthy|unhealthy|effective|ineffective|success|failure|improved)\b/i.test(allText));
 
+/* ── 10 · LIFECYCLE REVIEW — a confirmed practice is re-checked against CURRENT history ── */
+const reverseObs = obs({ transitionCategory: { from: 'known', to: 'missing' }, occurrenceCount: 2, fingerprint: 'obsRev', identityKey: 'idRev' });
+ok('10 · a practice still supported by current history reads "holding"', P.reviewEntry(entry, [obs()]).status === 'holding');
+ok('10 · a practice with MORE counter-evidence than at confirmation reads "contested"', P.reviewEntry(entry, [obs(), reverseObs]).status === 'contested');
+ok('10 · a practice whose pattern no longer appears reads "unsupported"', P.reviewEntry(entry, []).status === 'unsupported');
+ok('10 · review never retires or recommends — it only reports a status + neutral reason', (() => { const r = P.reviewEntry(entry, [obs(), reverseObs]); return P.REVIEW_STATUSES.includes(r.status) && typeof r.reason === 'string' && !/should|retire it|recommend/i.test(r.reason); })());
+ok('10 · review reports current counter-evidence without mutating the entry', (() => { const snap = JSON.stringify(entry); P.reviewEntry(entry, [obs(), reverseObs]); return JSON.stringify(entry) === snap; })());
+
 console.log(`\norg-playbook-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

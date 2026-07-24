@@ -8452,17 +8452,43 @@ app.post('/api/org-playbook/candidates/:fingerprint/dismiss', requireAuth, (req,
 });
 
 // GET /api/org-playbook — the confirmed playbook: how this team has agreed it operates.
+// Each entry is re-checked against CURRENT history and annotated with a review status
+// (holding / contested / unsupported) — a signal to revisit, never an automatic change.
 app.get('/api/org-playbook', requireAuth, (req, res) => {
   try {
     const { orgCode: code, userId } = req.iqSession;
     if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    _refreshOrgObservations(code, 'playbook_review');
+    const active = (orgObservations[code] || []).filter(o => o.status === 'active');
     const entries = (orgPlaybook[code] || []).filter(e => e.status === 'active')
       .sort((a, b) => String(b.confirmedAt || '').localeCompare(String(a.confirmedAt || '')))
-      .map(playbook.publicPlaybookEntry);
+      .map(e => {
+        const r = playbook.reviewEntry(e, active);
+        return { ...playbook.publicPlaybookEntry(e),
+          review: { status: r.status, label: playbook.REVIEW_LABELS[r.status] || r.status, reason: r.reason,
+            currentConfidence: r.currentConfidence, counterEvidenceNow: r.counterEvidenceNow } };
+      });
     res.json({ ok: true, kind: 'confirmed_practices', entries });
   } catch (e) {
     console.warn('[org-playbook] failed:', e && e.message);
     res.status(200).json({ ok: false, entries: [] });
+  }
+});
+
+// POST /api/org-playbook/:fingerprint/retire — a leader retires a confirmed practice.
+// Governed: active → retired, history kept; never deletes memory, never auto-triggered.
+app.post('/api/org-playbook/:fingerprint/retire', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const e = (orgPlaybook[code] || []).find(x => x.fingerprint === String(req.params.fingerprint) && x.status === 'active');
+    if (!e) return res.status(404).json({ ok: false, error: 'practice_not_found' });
+    e.status = 'retired'; e.retiredBy = userId; e.retiredAt = new Date().toISOString();   // actor internal only
+    scheduleSave();
+    res.json({ ok: true, retired: e.fingerprint });
+  } catch (e) {
+    console.warn('[org-playbook/retire] failed:', e && e.message);
+    res.status(200).json({ ok: false });
   }
 });
 

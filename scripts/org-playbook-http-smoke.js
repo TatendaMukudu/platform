@@ -77,7 +77,8 @@ const server = app.listen(0, async () => {
     const pb = await playbook('coach');
     ok('5 · the confirmed practice now appears in the playbook', (pb.j.entries || []).some(e => e.statement === cand.statement && e.confidenceLabel === 'Well supported'));
     ok('5 · a confirmed candidate no longer appears in the proposals list', !((await candidates('coach')).j.candidates || []).some(c => c.fingerprint === cand.fingerprint));
-    ok('6 · the playbook entry never exposes the confirming actor id', !/confirmedBy|"coach"/.test(JSON.stringify(pb.j.entries)));
+    ok('6 · the playbook entry never exposes the confirming actor id', !/confirmedBy|"coach"|retiredBy/.test(JSON.stringify(pb.j.entries)));
+    ok('6 · a freshly-confirmed practice is re-checked against history and reads "holding"', pb.j.entries[0].review && pb.j.entries[0].review.status === 'holding');
 
     /* ── IDEMPOTENCY + injection resistance ── */
     await call('/api/org-playbook/candidates/' + cand.fingerprint + '/confirm', 'coach', { method: 'POST' });
@@ -100,6 +101,24 @@ const server = app.listen(0, async () => {
     /* ── DURABILITY ── */
     ok('9 · confirmed practices persist in the durable orgPlaybook store', Array.isArray(S.orgPlaybook[A]) && S.orgPlaybook[A].length === 1);
     ok('9 · confirming never mutated memory (the timeline is untouched)', (S.orgStateHistory[A] || []).length === 6);
+
+    /* ── LIFECYCLE — a confirmed practice can be CONTESTED by later history, then retired ── */
+    // Later history reverses: availability now lapses (known → missing) across two events.
+    S.orgStateHistory[A] = S.orgStateHistory[A].concat([
+      m(6, [cl('e1:availability', 'missing'), cl('e2:availability', 'known'), cl('e3:availability', 'known'), cl('e4:availability', 'known')], 'not_ready'),
+      m(7, [cl('e1:availability', 'missing'), cl('e2:availability', 'missing'), cl('e3:availability', 'known'), cl('e4:availability', 'known')], 'not_ready'),
+    ]);
+    const pb2 = await playbook('coach');
+    const contested = (pb2.j.entries || [])[0];
+    ok('10 · later reversing history flips a confirmed practice to "contested" (never auto-retired)', contested.review.status === 'contested' && contested.status === 'active' && /argues against/i.test(contested.review.reason));
+    ok('10 · the review reports current counter-evidence for the leader to weigh', contested.review.counterEvidenceNow && contested.review.counterEvidenceNow.contradicting >= 2);
+
+    // Governed retirement.
+    ok('11 · retire is leader-only (member 403)', (await call('/api/org-playbook/' + contested.fingerprint + '/retire', 'jo', { method: 'POST' })).status === 403);
+    const ret = await call('/api/org-playbook/' + contested.fingerprint + '/retire', 'coach', { method: 'POST' });
+    ok('11 · a leader can retire a contested practice (governed)', ret.j.ok && ret.j.retired === contested.fingerprint);
+    ok('11 · a retired practice leaves the active playbook but stays in history', !((await playbook('coach')).j.entries || []).some(e => e.fingerprint === contested.fingerprint) && (S.orgPlaybook[A] || []).some(e => e.fingerprint === contested.fingerprint && e.status === 'retired'));
+    ok('11 · retiring never deleted memory (the timeline is untouched)', (S.orgStateHistory[A] || []).length === 8);
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();

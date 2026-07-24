@@ -39,6 +39,14 @@ const CANDIDATE_TYPES = Object.freeze(['repeated_transition', 'transition_sequen
 /* Qualitative confidence — a BAND, never a number. Ordered weakest → strongest. */
 const CONFIDENCE_BANDS = Object.freeze(['emerging', 'supported', 'well_supported']);
 const CONFIDENCE_LABELS = Object.freeze({ emerging: 'Emerging', supported: 'Supported', well_supported: 'Well supported' });
+const _BAND_RANK = Object.freeze({ well_supported: 0, supported: 1, emerging: 2 });
+
+/* Lifecycle review of a CONFIRMED practice against CURRENT history. A confirmed entry is
+   frozen at the moment a leader agreed to it — but history keeps moving, so a practice can
+   later be challenged. This is deterministic and RECOMMENDATION-FREE: it reports a status,
+   never retires anything. Only a leader retires (governed). */
+const REVIEW_STATUSES = Object.freeze(['holding', 'contested', 'unsupported']);
+const REVIEW_LABELS = Object.freeze({ holding: 'Still holding', contested: 'Contested — worth a look', unsupported: 'No longer seen' });
 
 /* ── COUNTER-EVIDENCE — deterministic tally of what argues FOR and AGAINST. Supporting is
    the observation's own occurrence count. Contradicting is, for a repeated transition, how
@@ -82,7 +90,7 @@ function buildCandidate(assessed) {
   const sample = uniq((assessed.support && assessed.support.intervalFingerprints || []).flatMap(fp => String(fp).split('→')));
   const fingerprint = _hash(JSON.stringify(['candidate', assessed.fingerprint, PLAYBOOK_RULES_VERSION]));
   return {
-    fingerprint, observationFingerprint: assessed.fingerprint,
+    fingerprint, observationFingerprint: assessed.fingerprint, identityKey: assessed.identityKey || null,
     type: assessed.type, subjectLabel: assessed.subjectLabel,
     statement: assessed.summary || 'A repeated pattern was observed.',
     confidence: assessed.confidence,
@@ -122,7 +130,7 @@ function playbookEntryFrom(candidate, { confirmedBy = null, confirmedAt = null }
   return {
     fingerprint: _hash(JSON.stringify(['entry', candidate.fingerprint])),
     candidateFingerprint: candidate.fingerprint,
-    observationFingerprint: candidate.observationFingerprint,
+    observationFingerprint: candidate.observationFingerprint, identityKey: candidate.identityKey || null,
     type: candidate.type, subjectLabel: candidate.subjectLabel, statement: candidate.statement,
     confidenceAtConfirmation: candidate.confidence,
     counterEvidenceAtConfirmation: candidate.counterEvidence,
@@ -130,6 +138,30 @@ function playbookEntryFrom(candidate, { confirmedBy = null, confirmedAt = null }
     confirmedBy, confirmedAt, status: 'active',
     playbookSchemaVersion: PLAYBOOK_SCHEMA_VERSION, playbookRulesVersion: PLAYBOOK_RULES_VERSION,
   };
+}
+
+/* ── LIFECYCLE REVIEW — is a confirmed practice still supported by CURRENT history?
+   Matches the entry to the current observation of the SAME identity (identity is stable as
+   support grows), re-weighs it, and compares to what was true at confirmation. Deterministic,
+   non-blaming, and RETIRES NOTHING — it only reports. `holding`: current history still
+   supports it. `contested`: later history now argues more against it (more counter-evidence,
+   or a weaker confidence band) than when it was confirmed — worth a human's second look.
+   `unsupported`: the pattern no longer appears among current observations at all. ── */
+function reviewEntry(entry, observations) {
+  const byId = new Map(), byFwd = new Map();
+  for (const o of (observations || [])) {
+    if (o.identityKey) byId.set(o.identityKey, o);
+    if (o.type === 'repeated_transition' && o.transitionCategory) byFwd.set(`${o.subject}|${o.transitionCategory.from}|${o.transitionCategory.to}`, o);
+  }
+  const cur = entry && entry.identityKey ? byId.get(entry.identityKey) : null;
+  if (!cur) return { status: 'unsupported', reason: 'This pattern no longer appears in current history.', currentConfidence: null, counterEvidenceNow: null };
+  const assessed = assessObservation(cur, byFwd);
+  const now = assessed.counterEvidence;
+  const wasContra = (entry.counterEvidenceAtConfirmation || {}).contradicting || 0;
+  const weaker = (_BAND_RANK[assessed.confidence] ?? 2) > (_BAND_RANK[entry.confidenceAtConfirmation] ?? 2);
+  if (now.contradicting > wasContra || weaker)
+    return { status: 'contested', reason: 'Later history now argues against this practice more than when it was confirmed.', currentConfidence: assessed.confidence, counterEvidenceNow: { supporting: now.supporting, contradicting: now.contradicting } };
+  return { status: 'holding', reason: 'Current history still supports this practice.', currentConfidence: assessed.confidence, counterEvidenceNow: { supporting: now.supporting, contradicting: now.contradicting } };
 }
 
 /* ── PUBLIC redaction — the only shapes a leader ever sees. No actor ids, record ids,
@@ -166,6 +198,7 @@ const safeSignal = s => SIGNAL_LABELS[s] || 'Other history may qualify this.';
 
 module.exports = {
   PLAYBOOK_SCHEMA_VERSION, PLAYBOOK_RULES_VERSION, CANDIDATE_TYPES, CONFIDENCE_BANDS, CONFIDENCE_LABELS,
+  REVIEW_STATUSES, REVIEW_LABELS,
   counterEvidence, confidenceBand, assessObservation, buildCandidate, deriveCandidates,
-  playbookEntryFrom, publicCandidate, publicPlaybookEntry,
+  playbookEntryFrom, reviewEntry, publicCandidate, publicPlaybookEntry,
 };
