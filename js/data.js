@@ -142,6 +142,7 @@ const WORKSPACE_MODULES = [
 
   // ── Team — shown when the user leads ≥1 node (scoped server-side) ───────
   { section: 'Team', id: 'leader-home',   icon: ICON.people, label: 'Team',      leaderOnly: true }, // the people they lead
+  { section: null,    id: 'team-readiness', icon: ICON.clipboard, label: 'Team readiness', leaderOnly: true }, // grounded briefing: what we're preparing for
   { section: null,    id: 'leader-people', icon: ICON.person, label: 'My People', leaderOnly: true },
   // How the team operates — the governed inputs (events, ownership, prep, rhythms)
   // that let IntelliQ reason about readiness. Leaders describe it; nothing is a rule

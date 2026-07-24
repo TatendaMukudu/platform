@@ -227,7 +227,7 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
   try {
     const e1 = await runSession('member', member, ['home', 'checkin', 'notes', 'assessments', 'apps', 'inbox']);
     // Coach now also has their own "Me" space (id 'home') alongside the team view.
-    const e2 = await runSession('coach',  coach,  ['home', 'assessments', 'apps', 'data-sources', 'leader-home', 'leader-people', 'operating-context', 'people', 'organisation', 'settings']);
+    const e2 = await runSession('coach',  coach,  ['home', 'assessments', 'apps', 'data-sources', 'leader-home', 'team-readiness', 'leader-people', 'operating-context', 'people', 'organisation', 'settings']);
     const e3 = await runLeaderExtras(coach);
     const e4 = await runLeaderHomeCheck(coach);
     // Surface the exact parse/runtime error text (e.g. "Unexpected token") if any slipped through.

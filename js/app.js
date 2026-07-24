@@ -644,6 +644,7 @@ const NAV_ROUTES = {
   // Leader Workspace — scoped to the node leader's subtree
   'leader-home':   () => renderIntelligence(),
   'leader-people': () => renderLeaderPeople(),
+  'team-readiness': () => renderTeamReadiness(),
   'operating-context': () => renderOperatingContext(),
   'leader-groups': () => renderLeaderGroups(),
   'data-sources':  () => renderDataSources(),
@@ -704,6 +705,7 @@ const PAGE_TITLES = {
   // Leader Workspace — node leader scoped tools
   'leader-home':   'Home',
   'leader-people': 'My People',
+  'team-readiness': 'Team readiness',
   'operating-context': 'Operating context',
   assignments:     'Assignments',
   'org-insights':  'Intelligence',
@@ -5039,6 +5041,104 @@ async function _saveGroupAims(gid) {
   } catch (err) {
     if (savedEl) { savedEl.style.color = 'var(--danger)'; savedEl.textContent = `${err.message}`; }
   }
+}
+
+/* ── Team readiness — the grounded operational briefing ───────────────────────
+   Consumes GET /api/team/readiness (server-owned projection over _getOrgState). It
+   RENDERS only — no readiness logic here, no percentages, no traffic lights. Answers
+   four questions in order: preparing for → ready → what could prevent it → next. */
+const _RD_STATE = {
+  ready:                    { label: 'Ready',                   color: 'var(--success)' },
+  partially_ready:          { label: 'Partially ready',         color: 'var(--warning)' },
+  not_ready:                { label: 'Not ready',               color: 'var(--danger)' },
+  insufficient_information: { label: 'Not enough information',  color: 'var(--text-muted)' },
+  not_yet_due:              { label: 'On track — nothing due yet', color: 'var(--accent)' },
+  not_applicable:           { label: 'Not applicable',          color: 'var(--text-muted)' },
+};
+async function renderTeamReadiness() {
+  const el = document.getElementById('team-readiness-content');
+  if (!el) return;
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Reading your operating context…</div>`;
+  let d;
+  try { const r = await fetch('/api/team/readiness', { headers: Auth._headers() }); d = await r.json(); }
+  catch (_) { el.innerHTML = `<div class="empty-state"><p>Couldn't load readiness. <button class="btn btn-outline btn-sm" onclick="renderTeamReadiness()">Try again</button></p></div>`; return; }
+
+  // Empty states — calm, never a manufactured assessment.
+  if (!d.focus) {
+    const msg = d.emptyState === 'no_active_objective_or_event'
+      ? 'There’s operating context, but no upcoming event or active objective to assess readiness against right now.'
+      : 'IntelliQ doesn’t yet have a confirmed objective or upcoming event to assess readiness against.';
+    el.innerHTML = `
+      <div class="card" style="text-align:center;padding:2rem">
+        <div style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:0.9rem">${_escAdvisor(msg)}</div>
+        <button class="btn btn-accent btn-sm" onclick="navigate('operating-context')">Add operating context →</button>
+      </div>`;
+    return;
+  }
+
+  const st = _RD_STATE[d.readiness.status] || _RD_STATE.insufficient_information;
+  const areaCard = (a) => {
+    const s = _RD_STATE[a.state] || _RD_STATE.insufficient_information;
+    const lim = (a.limitations || []).map(l => `<div style="font-size:0.72rem;color:var(--text-muted)">Limitation: ${_escAdvisor(l)}</div>`).join('');
+    return `<div class="ds-recent-row" style="align-items:flex-start">
+      <div class="ds-recent-main" style="flex-direction:column;align-items:flex-start;gap:2px">
+        <div style="display:flex;align-items:center;gap:0.5rem"><span style="width:8px;height:8px;border-radius:50%;background:${s.color};display:inline-block"></span><strong style="font-size:0.82rem">${_escAdvisor(a.label)}</strong> <span style="font-size:0.7rem;color:${s.color}">${s.label}</span></div>
+        <div style="font-size:0.8rem;color:var(--text-secondary)">${_escAdvisor(a.statement)}</div>${lim}
+      </div></div>`;
+  };
+  const q = (x) => {
+    const who = x.targetType === 'person' ? 'a specific person'
+      : x.targetType === 'role' ? `the ${_escAdvisor((x.roleRef || '').replace(/_/g, ' '))} role` : x.targetType;
+    const bindBtn = (x.targetType === 'role' && x.roleRef)
+      ? `<button class="btn-ghost btn-sm" style="font-size:0.72rem" onclick="trBindPrompt('${_escAdvisor(x.roleRef)}')">Bind ${_escAdvisor(x.roleRef.replace(/_/g, ' '))} to a person</button>` : '';
+    return `<div class="card" style="margin-bottom:0.5rem;${x.blocking ? 'border-left:3px solid var(--danger)' : ''}">
+      <div style="font-size:0.86rem;font-weight:600">${_escAdvisor(x.question)}${x.blocking ? ' <span style="font-size:0.68rem;color:var(--danger)">blocking</span>' : ''}</div>
+      <div style="font-size:0.76rem;color:var(--text-secondary);margin-top:2px">${_escAdvisor(x.reason)} · ask ${who}</div>
+      ${bindBtn}</div>`;
+  };
+  const changes = (d.recentContextChanges || []).map(c => `<li style="font-size:0.78rem;color:var(--text-secondary)">${_escAdvisor(c.statement)}</li>`).join('');
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-label" style="margin-bottom:0.3rem">What are we preparing for?</div>
+      <div style="font-size:1rem;font-weight:700">${_escAdvisor(d.focus.title || d.focus.type || 'Current focus')}</div>
+      <div style="font-size:0.78rem;color:var(--text-muted)">${d.focus.at ? new Date(d.focus.at).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''} · chosen as the ${_escAdvisor(d.focus.orderingRule || 'current focus')}${d.focus.otherActive ? ` (+${d.focus.otherActive} more active)` : ''}</div>
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-label" style="margin-bottom:0.3rem">What appears ready?</div>
+      <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.4rem"><span style="width:10px;height:10px;border-radius:50%;background:${st.color};display:inline-block"></span><strong style="color:${st.color}">${st.label}</strong></div>
+      <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.6rem">${_escAdvisor(d.readiness.summary)}</div>
+      ${(d.readiness.supportedAreas || []).map(areaCard).join('') || '<div style="font-size:0.8rem;color:var(--text-muted)">Nothing is confirmed ready yet.</div>'}
+    </div>
+
+    ${(d.readiness.constrainedAreas || []).length ? `<div class="card" style="margin-bottom:1rem">
+      <div class="card-label" style="margin-bottom:0.3rem">What could prevent readiness?</div>
+      ${d.readiness.constrainedAreas.map(areaCard).join('')}
+      ${(d.readiness.limitations || []).length ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.5rem">Why readiness is limited: ${d.readiness.limitations.map(_escAdvisor).join('; ')}</div>` : ''}
+    </div>` : ''}
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-label" style="margin-bottom:0.5rem">What should happen next?</div>
+      ${(d.nextQuestions || []).length ? d.nextQuestions.map(q).join('') : '<div style="font-size:0.8rem;color:var(--text-muted)">No questions need routing right now.</div>'}
+    </div>
+
+    ${changes ? `<div class="card">
+      <div class="card-label" style="margin-bottom:0.4rem">What changed because you confirmed it</div>
+      <ul style="margin:0 0 0 1rem">${changes}</ul>
+    </div>` : ''}`;
+}
+
+async function trBindPrompt(roleRef) {
+  const userId = prompt(`Which member currently holds the "${roleRef.replace(/_/g, ' ')}" role? Enter their user id (routing only — no permissions change).`);
+  if (!userId) return;
+  try {
+    const r = await fetch('/api/org-context/role-binding', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ roleRef, userId: userId.trim() }) });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Could not bind');
+    showToast('Role bound — questions will now route to that person.', 'success');
+    renderTeamReadiness();
+  } catch (e) { showToast(e.message || 'Could not bind role', 'error'); }
 }
 
 /* ── Operating context — how the team operates (governed intake) ──────────────

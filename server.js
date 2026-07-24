@@ -22,6 +22,7 @@ const inquiry    = require('./ai/inquiry');
 const lifecycle  = require('./ai/lifecycle');
 const orgState   = require('./ai/org-state');
 const orgContext = require('./ai/org-context');
+const readiness  = require('./ai/readiness');
 const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
@@ -7973,6 +7974,77 @@ app.post('/api/org-context/import/preview', requireAuth, (req, res) => {
   } catch (e) { console.warn('[org-context/import] failed:', e && e.message); res.status(200).json({ ok: false, valid: [], invalid: [] }); }
 });
 
+/* ─── ROLE BINDING (narrow, governed) — bind a responsibility ROLE to a current
+   user so routed questions can reach a person. Tenant-scoped, durable, provenance-
+   bearing, auditable; rebinding SUPERSEDES (history retained). We NEVER infer that a
+   person holds a role from wording or activity — only an explicit leader confirmation. */
+const roleBindings = {};
+function _bindRole(code, confirmedBy, roleRef, userId) {
+  const role = String(roleRef || '').trim().toLowerCase();
+  if (!role || !userId) return { ok: false, error: 'role_and_user_required' };
+  if (!(orgUsers[code] && orgUsers[code][userId])) return { ok: false, error: 'unknown_user_in_org' };   // tenant-scoped
+  const now = new Date().toISOString();
+  const list = roleBindings[code] = roleBindings[code] || [];
+  const prior = list.find(b => b.status === 'active' && b.roleRef === role);
+  const rec = { id: 'rb_' + generateId(), orgId: code, roleRef: role, userId, effectiveFrom: now, effectiveTo: null,
+    confirmedBy, authority: orgContext.authorityFor(_actorRole(code, confirmedBy)),
+    provenance: { source: 'form', confirmedAt: now, kind: 'explicit' }, supersedes: prior ? prior.id : null, supersededBy: null, status: 'active' };
+  if (prior) { prior.status = 'superseded'; prior.effectiveTo = now; prior.supersededBy = rec.id; }
+  list.push(rec);
+  delete orgStateCache[code]; scheduleSave();
+  return { ok: true, binding: rec };
+}
+const _publicBinding = b => ({ id: b.id, roleRef: b.roleRef, userId: b.userId, effectiveFrom: b.effectiveFrom, effectiveTo: b.effectiveTo, status: b.status, supersededBy: b.supersededBy || null });
+
+// POST /api/org-context/role-binding — bind a role to a user (leader-only, confirmed).
+app.post('/api/org-context/role-binding', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const out = _bindRole(code, userId, req.body?.roleRef, req.body?.userId);
+    if (!out.ok) return res.status(400).json({ ok: false, error: out.error });
+    res.json({ ok: true, binding: _publicBinding(out.binding) });
+  } catch (e) { res.status(200).json({ ok: false, error: 'server_error' }); }
+});
+
+// GET /api/org-context/role-bindings — current + historical bindings (leader-only).
+app.get('/api/org-context/role-bindings', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const all = (roleBindings[code] || []);
+    res.json({ ok: true, bindings: all.filter(b => b.status === 'active').map(_publicBinding), history: all.filter(b => b.status !== 'active').map(_publicBinding) });
+  } catch (e) { res.status(200).json({ ok: false, bindings: [], history: [] }); }
+});
+
+/* ─── TEAM READINESS — the one grounded leader briefing. CONSUMES _getOrgState +
+   stateToUncertainties + the Inquiry Engine + confirmed context history + role
+   bindings, and projects a deliberately shaped, audience-safe view model. No second
+   reasoning engine: it selects/orders/redacts/phrases. Private evidence never enters
+   (it isn't in the org-state projection). Works with no AI key. */
+function _teamReadiness(code, viewerId, now = Date.now()) {
+  const state = _getOrgState({ actor: viewerId, organisationId: code, purpose: 'organisation_reasoning', now });
+  const uncertainties = orgState.stateToUncertainties(state);
+  const plans = inquiry.planInquiries(uncertainties.map(inquiry.buildUncertainty), { threshold: 0.4, maxAsks: 3 }).plans;
+  const vm = readiness.project({ state, uncertainties, inquiryPlans: plans,
+    contextRecords: (orgContextRecords[code] || []).filter(r => r.status === 'active'),
+    roleBindings: (roleBindings[code] || []).filter(b => b.status === 'active'), now, orgId: code });
+  vm.evidenceFingerprint = `${_orgEvidenceFingerprint(code)}|rb:${(roleBindings[code] || []).length}`;
+  return vm;
+}
+
+// GET /api/team/readiness — the audience-safe leader view model. Leader-only, fail-closed.
+app.get('/api/team/readiness', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    res.json({ ok: true, ..._teamReadiness(code, userId, Date.now()) });
+  } catch (e) {
+    console.warn('[team/readiness] failed:', e && e.message);
+    res.status(200).json({ ok: false, focus: null, readiness: { status: 'insufficient_information', summary: 'Readiness is unavailable right now.', supportedAreas: [], constrainedAreas: [], limitations: [] }, nextQuestions: [], recentContextChanges: [], emptyState: 'no_operating_context' });
+  }
+});
+
 /* GET /api/knowledge/health — the "what to keep / what to let go" view (leader-only).
    Assesses ONLY organisation-shared evidence (private never enters), classifies each
    by freshness, and RECOMMENDS review / retire / merge — never deletes. */
@@ -12259,7 +12331,8 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _retrieveGrounding, _indexEvidence, _evictEvidenceVector, _captureKnowledge, _isTextEvidence, _assistantAnswer, evidenceVectors, answerFeedback,
   // exported for the truth layer: universal evidence intake
   _ingestArtifact, _deleteImport, _sanitizeBriefingForLeader, _stripLeaderNumbers, _deriveOrgUncertainties,
-  _getOrgState, _buildOrgStateInputs, orgStateConfig, orgContextRecords, _confirmOrgContext };
+  _getOrgState, _buildOrgStateInputs, orgStateConfig, orgContextRecords, _confirmOrgContext,
+  _teamReadiness, roleBindings, _bindRole };
 
 if (require.main === module) (async () => {
   try {
