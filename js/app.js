@@ -5091,10 +5091,11 @@ async function renderTeamReadiness() {
       : x.targetType === 'role' ? `the ${_escAdvisor((x.roleRef || '').replace(/_/g, ' '))} role` : x.targetType;
     const bindBtn = (x.targetType === 'role' && x.roleRef)
       ? `<button class="btn-ghost btn-sm" style="font-size:0.72rem" onclick="trBindPrompt('${_escAdvisor(x.roleRef)}')">Bind ${_escAdvisor(x.roleRef.replace(/_/g, ' '))} to a person</button>` : '';
+    const answerBtn = x.uncertaintyId ? `<button class="btn btn-outline btn-sm" style="font-size:0.72rem;margin-top:0.4rem" onclick="trAnswer('${_escAdvisor(x.uncertaintyId)}')">Answer this →</button>` : '';
     return `<div class="card" style="margin-bottom:0.5rem;${x.blocking ? 'border-left:3px solid var(--danger)' : ''}">
       <div style="font-size:0.86rem;font-weight:600">${_escAdvisor(x.question)}${x.blocking ? ' <span style="font-size:0.68rem;color:var(--danger)">blocking</span>' : ''}</div>
       <div style="font-size:0.76rem;color:var(--text-secondary);margin-top:2px">${_escAdvisor(x.reason)} · ask ${who}</div>
-      ${bindBtn}</div>`;
+      <div style="display:flex;gap:0.5rem">${answerBtn}${bindBtn}</div></div>`;
   };
   const changes = (d.recentContextChanges || []).map(c => `<li style="font-size:0.78rem;color:var(--text-secondary)">${_escAdvisor(c.statement)}</li>`).join('');
 
@@ -5127,6 +5128,22 @@ async function renderTeamReadiness() {
       <div class="card-label" style="margin-bottom:0.4rem">What changed because you confirmed it</div>
       <ul style="margin:0 0 0 1rem">${changes}</ul>
     </div>` : ''}`;
+}
+
+/* Set a readiness question as the active conversational question, then drop the leader
+   into the assistant to answer it in words. The turn adjudicates → preview → confirm. */
+async function trAnswer(uncertaintyId) {
+  try {
+    const r = await fetch('/api/assistant/active-question', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ uncertaintyId }) });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Could not open that question');
+    navigate('home');
+    setTimeout(() => {
+      const i = document.getElementById('iq-composer-input');
+      if (i) { i.placeholder = `Answer: ${d.activeQuestion.questionText}`; i.focus(); }
+      if (typeof showToast === 'function') showToast('Answer in your own words — I’ll show you exactly what gets recorded before saving.', 'info');
+    }, 250);
+  } catch (e) { showToast(e.message || 'Could not open that question', 'error'); }
 }
 
 async function trBindPrompt(roleRef) {

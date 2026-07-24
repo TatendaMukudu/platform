@@ -194,13 +194,21 @@ function classifyClaim({ req, event, evidence, now, packReq }) {
     if (neededByMs && (neededByMs - now) > (packReq && packReq.leadDays || 1) * DAY * 2) return { state: CLAIM.NOT_YET_DUE, evidenceIds: [], neededByMs };
     return { state: CLAIM.MISSING, evidenceIds: [], neededByMs };
   }
-  // Disputed: >=2 admissible with different authority AND different content.
-  const auths = new Set(candidates.map(evAuthority));
-  const hashes = new Set(candidates.map(e => (e.attributes && e.attributes.contentHash) || (e.valueText || '')));
-  if (candidates.length >= 2 && auths.size >= 2 && hashes.size >= 2)
-    return { state: CLAIM.DISPUTED, evidenceIds: candidates.map(e => e.id).slice(0, 6), neededByMs, beliefs: candidates.map(e => ({ value: String(e.valueText || '').slice(0, 80), authority: evAuthority(e) === 'system_of_record' ? 'organisation' : 'member', confidence: evAuthority(e) === 'system_of_record' ? 0.82 : 0.45, evidenceId: e.id })) };
-  // Stale: the freshest candidate is past its freshness window.
-  const freshest = candidates.reduce((a, b) => (parseTime(b.retrievedAt || b.observedAt) || 0) > (parseTime(a.retrievedAt || a.observedAt) || 0) ? b : a);
+  // Disputed: >=2 DEFINITE admissible claims (not hedges/placeholders) with different
+  // authority AND different content. A "needs corroboration" hedge is a placeholder,
+  // not a competing truth, so it never manufactures a dispute (e.g. a person's own
+  // "should be fine" followed by their authoritative confirmation is NOT a conflict).
+  const disputing = candidates.filter(e => !(e.attributes && e.attributes.definite === false));
+  const auths = new Set(disputing.map(evAuthority));
+  const hashes = new Set(disputing.map(e => (e.attributes && e.attributes.contentHash) || (e.valueText || '')));
+  if (disputing.length >= 2 && auths.size >= 2 && hashes.size >= 2)
+    return { state: CLAIM.DISPUTED, evidenceIds: disputing.map(e => e.id).slice(0, 6), neededByMs, beliefs: disputing.map(e => ({ value: String(e.valueText || '').slice(0, 80), authority: evAuthority(e) === 'system_of_record' ? 'organisation' : 'member', confidence: evAuthority(e) === 'system_of_record' ? 0.82 : 0.45, evidenceId: e.id })) };
+  // A claim explicitly flagged as needing corroboration does NOT satisfy the
+  // requirement — a vague/reported answer is stored but the requirement stays open.
+  const satisfying = candidates.filter(e => !(e.attributes && e.attributes.corroborationNeeded === true));
+  if (!satisfying.length) return { state: CLAIM.MISSING, evidenceIds: candidates.map(e => e.id).slice(0, 4), neededByMs, awaitingCorroboration: true };
+  // Stale: the freshest satisfying candidate is past its freshness window.
+  const freshest = satisfying.reduce((a, b) => (parseTime(b.retrievedAt || b.observedAt) || 0) > (parseTime(a.retrievedAt || a.observedAt) || 0) ? b : a);
   const ageDays = (now - (parseTime(freshest.retrievedAt || freshest.observedAt) || now)) / DAY;
   if (packReq && packReq.freshDays && ageDays > packReq.freshDays) return { state: CLAIM.STALE, evidenceIds: [freshest.id], neededByMs, ageDays: round(ageDays) };
   return { state: CLAIM.KNOWN, evidenceIds: [freshest.id], neededByMs };
@@ -224,10 +232,14 @@ function deriveOrgState({ now = Date.now(), organisation = {}, structure = {}, c
 
   // Evidence-derived events: an admissible record categorised as an event type with a
   // parseable date. Marked provisional (kind:'derived') — never as trusted as config.
+  const EVENT_CATS = { match: 'match', fixture: 'match', game: 'match', meeting: 'meeting', training: 'training', session: 'training', event: 'default' };
   for (const e of evidence) {
     if (e.status !== 'active') continue;
+    if (e.attributes && e.attributes.sourceType === 'resolution') continue;   // an answer to a question is never an event
     const cat = (e.attributes && e.attributes.category) || '';
-    const type = pack.events[cat] ? cat : (/(match|fixture|game)/i.test(cat + ' ' + (e.label || '')) && pack.events.match ? 'match' : (/(meeting)/i.test(cat + ' ' + (e.label || '')) ? 'meeting' : null));
+    // Derive an event ONLY from an explicit event CATEGORY — never by keyword-matching
+    // arbitrary text ("game plan" contains "game" but is not a match).
+    const type = pack.events[cat] ? cat : (pack.events[EVENT_CATS[cat]] ? EVENT_CATS[cat] : null);
     if (!type || !pack.events[type]) continue;
     const when = parseTime(e.attributes && e.attributes.eventAt) || parseTime(e.observedAt) || null;
     if (!when || events.some(ev => ev.evidenceRefs.includes(e.id))) continue;
@@ -310,6 +322,7 @@ function stateToUncertainties(state, opts = {}) {
     const urgency = deriveUrgency({ neededByMs: cs.neededBy ? parseTime(cs.neededBy) : startMs, leadDays, now });
 
     const base = { affects: ev ? { type: 'event', id: ev.id, title: ev.title } : null,
+      claimType: req.claimType, requirementId: req.id,
       impact: impact.label, urgency: urgency.label, impactBasis: impact, urgencyBasis: urgency,
       requiredBy: cs.neededBy, resolutionOwner: req.expectedOwner, ownerBasis: req.ownerBasis, ownerAuthoritative: req.ownerBasis === 'direct_owner' || req.ownerBasis === 'role_responsibility',
       privacyClass: req.sensitivity, requiredFor: [req.consequenceIfAbsent], limitations: [] };

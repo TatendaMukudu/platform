@@ -156,7 +156,7 @@ function mapQuestions(inquiryPlans, uncertainties, roleBindings, now, cap = 3) {
     const u = uById[p.uncertaintyId] || {};
     const tgt = resolveOwner(p.owner, roleBindings, now);
     const blocking = ['missing_required', 'blocked_dependency', 'contradiction'].includes(p.uncertaintyType);
-    return { question: p.question, reason: p.why, targetType: tgt.targetType, targetRef: tgt.targetRef,
+    return { uncertaintyId: p.uncertaintyId, question: p.question, reason: p.why, targetType: tgt.targetType, targetRef: tgt.targetRef,
       roleRef: tgt.bound ? null : tgt.roleRef, blocking,
       relatedEventId: u.affects && u.affects.type === 'event' ? u.affects.id : null,
       relatedRequirementId: (p.uncertaintyId || '').replace(/^(miss_|stale_|contra_|owner_)/, '') || null,

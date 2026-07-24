@@ -112,12 +112,18 @@ const goodOp = {
 
 // 9 · ANSWER ADJUDICATION — an answer is not automatically truth
 {
-  const obs = IQ.adjudicateAnswer({ answer: 'Training was cancelled on Tuesday.', answererRole: 'coordinator', ownerRole: 'coordinator', claimType: 'schedule' });
-  ok('9 · an owner stating a fact is adjudicated authoritative', obs.kind === 'observation' && obs.authoritative && obs.recommend === 'authoritative');
-  const interp = IQ.adjudicateAnswer({ answer: 'I think the team is a bit burned out lately.', answererRole: 'member', ownerRole: 'coach', claimType: 'wellbeing' });
-  ok('9 · a perception is kept as reported, not org truth', interp.kind === 'interpretation' && !interp.authoritative && interp.recommend === 'reported_perception');
-  const conflict = IQ.adjudicateAnswer({ answer: 'Kickoff is 5pm.', answererRole: 'member', ownerRole: 'coach', claimType: 'schedule', conflictsWithAuthoritative: true });
-  ok('9 · an answer conflicting with the authoritative record needs corroboration', conflict.recommend === 'needs_corroboration');
+  const owner = IQ.adjudicateAnswer({ answer: 'Yes, transport has been confirmed.', isOwner: true, claimType: 'transport_confirmation', claimLabel: 'transport' });
+  ok('9 · an OWNER’s clear confirmation resolves + is authoritative', owner.resolution === 'resolves' && owner.authority === 'authoritative' && owner.proposal && owner.proposal.corroborationNeeded === false);
+  const member = IQ.adjudicateAnswer({ answer: 'Yes, it’s confirmed.', isMember: true, claimType: 'transport_confirmation', claimLabel: 'transport' });
+  ok('9 · a member’s confirmation is shared-but-unverified (needs corroboration)', member.authority === 'shared_but_unverified' && member.proposal.corroborationNeeded === true);
+  const vague = IQ.adjudicateAnswer({ answer: 'Should be fine, I think.', isOwner: true, claimType: 'transport_confirmation', claimLabel: 'transport' });
+  ok('9 · a vague answer never satisfies — needs corroboration, does not resolve', vague.authority === 'needs_corroboration' && vague.resolution !== 'resolves' && vague.proposal.corroborationNeeded === true);
+  const nonAns = IQ.adjudicateAnswer({ answer: 'Thanks!', isOwner: true, claimType: 'transport_confirmation' });
+  ok('9 · a non-answer produces NO proposal', nonAns.responseKind === 'non_answer' && nonAns.proposal === null);
+  const clar = IQ.adjudicateAnswer({ answer: 'What do you mean by transport?', isOwner: true, claimType: 'transport_confirmation' });
+  ok('9 · a question back is a clarification, no proposal', clar.responseKind === 'clarification' && clar.proposal === null);
+  const conflict = IQ.adjudicateAnswer({ answer: 'No, transport is not confirmed.', isOwner: true, claimType: 'transport_confirmation', claimLabel: 'transport', hasExistingAuthoritative: true });
+  ok('9 · a negation against an authoritative record is a contradiction (both preserved)', conflict.resolution === 'contradicts' && conflict.proposal);
 }
 
 // 10 · THE GOVERNING PRINCIPLE — endless missing info does NOT mean endless asking

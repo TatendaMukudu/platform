@@ -217,16 +217,64 @@ function discriminate(u) {
    authoritative for THIS claim (reuses the evidence authority tiers). Recommends how
    the answer should enter canonical evidence: authoritative | reported | needs
    corroboration. Pure — the caller applies it through the governed door. */
-function adjudicateAnswer({ answer, answererRole, claimType, ownerRole, conflictsWithAuthoritative } = {}) {
-  const text = String(answer || '');
-  const interpretation = /\b(i (?:think|feel|reckon|guess|believe)|seems?|maybe|probably|might be|burn(?:t|ed)? ?out|morale|vibe)\b/i.test(text);
-  const authoritative = !!(answererRole && ownerRole && answererRole === ownerRole) && !interpretation;
-  let recommend;
-  if (authoritative && !conflictsWithAuthoritative) recommend = 'authoritative';
-  else if (interpretation) recommend = 'reported_perception';
-  else if (conflictsWithAuthoritative) recommend = 'needs_corroboration';
-  else recommend = 'reported';
-  return { kind: interpretation ? 'interpretation' : 'observation', authoritative, recommend };
+function adjudicateAnswer({ answer, isOwner = false, isLeader = false, isMember = false, claimLabel = 'this', claimType = null, hasExistingAuthoritative = false } = {}) {
+  const text = String(answer || '').trim();
+  const l = text.toLowerCase();
+  const out = (o) => ({ responseKind: 'observation', resolution: 'does_not_address', authority: 'shared_but_unverified',
+    confidence: 'low', proposal: null, limitations: [], classification: 'unclassified', ...o });
+
+  // Non-answers: acknowledgements, reactions, unrelated remarks → NO proposal.
+  if (!text) return out({ responseKind: 'non_answer', classification: 'empty' });
+  if (/^(ok(ay)?|thanks?|thank you|cool|nice|great|got it|sure|cheers|no worries|👍|yep|yeah|hmm+)\.?!?$/i.test(text))
+    return out({ responseKind: 'non_answer', classification: 'acknowledgement', limitations: ['not an answer to the question'] });
+  // A question back is a clarification, not an answer.
+  if (/\?\s*$/.test(text) && !/\b(yes|no|confirmed|done)\b/i.test(l))
+    return out({ responseKind: 'clarification', classification: 'question_back', limitations: ['the user asked a question rather than answering'] });
+
+  const vague = /\b(should be|probably|i think so|i guess|maybe|might be|not (?:sure|certain)|possibly|i believe|hopefully|pretty sure|i assume)\b/i.test(l);
+  const interpretation = /\b(i (?:think|feel|reckon|believe|guess)|seems?|in my view|my sense)\b/i.test(l);
+  const affirm = /\b(yes|yep|yeah|it (?:has|is|was)|(?:it'?s|its) (?:confirmed|done|sorted|booked|ready|approved|in place|complete)|confirmed|done|sorted|booked|approved|complete[d]?|finalis[a-z]*|in place|all set)\b/i.test(l);
+  const negate = /\b(no|not (?:yet|done|confirmed|ready|sorted|approved)|still (?:waiting|pending|outstanding)|hasn'?t|haven'?t|won'?t|isn'?t)\b/i.test(l);
+
+  // A hedged/uncertain answer NEVER satisfies AND is not DEFINITE (it's a placeholder,
+  // not a competing truth — it can't create a dispute). Stored as needs-corroboration.
+  if (vague || interpretation) return out({
+    responseKind: interpretation ? 'interpretation' : 'observation', resolution: 'partially_resolves',
+    authority: 'needs_corroboration', confidence: 'low', classification: 'vague_or_interpretation',
+    proposal: { claimType, valueText: `${claimLabel}: ${text}`, corroborationNeeded: true, definite: false },
+    limitations: ['answer is not definite — recorded as needing corroboration, does not satisfy the requirement'] });
+
+  // A clear NEGATION takes precedence over an affirmative token ("not confirmed"
+  // contains "confirmed"): the thing is NOT done. If it contradicts an authoritative
+  // "done" record, mark contradiction (a new claim; never overwrite). Else it just
+  // keeps the requirement open (no false satisfaction).
+  if (negate) return out({
+    responseKind: 'assertion', resolution: hasExistingAuthoritative ? 'contradicts' : 'does_not_address',
+    authority: isOwner ? 'authoritative' : (isMember ? 'shared_but_unverified' : 'reported'),
+    confidence: isOwner ? 'high' : 'medium', classification: hasExistingAuthoritative ? 'negation_contradicts' : 'negation_open',
+    proposal: hasExistingAuthoritative ? { claimType, valueText: `${claimLabel}: ${text}`, corroborationNeeded: !isOwner, definite: true } : null,
+    limitations: hasExistingAuthoritative ? ['conflicts with an existing record — both are preserved'] : ['the requirement remains unmet'] });
+
+  // A clear affirmative assertion RESOLVES — but authority depends on WHO answered, not
+  // that it was typed into the assistant. Only the responsible owner makes it
+  // authoritative; anyone else is reported/unverified (needs corroboration to satisfy).
+  if (affirm) {
+    const authority = isOwner ? 'authoritative' : (isMember ? 'shared_but_unverified' : 'reported');
+    const authoritative = authority === 'authoritative';
+    return out({
+      responseKind: 'assertion',
+      resolution: hasExistingAuthoritative && !authoritative ? 'contradicts' : 'resolves',
+      authority, confidence: authoritative ? 'high' : 'medium', classification: authoritative ? 'owner_confirms' : 'reported_confirms',
+      proposal: { claimType, valueText: `${claimLabel}: ${text}`, corroborationNeeded: !authoritative, definite: true },
+      limitations: authoritative ? [] : ['recorded as reported — an authoritative owner confirmation is still needed to satisfy the requirement'] });
+  }
+
+  // A plain factual statement (not obviously yes/no) → treat as an observation of the claim.
+  return out({ responseKind: 'observation', resolution: 'partially_resolves',
+    authority: isOwner ? 'authoritative' : (isMember ? 'shared_but_unverified' : 'reported'),
+    confidence: isOwner ? 'medium' : 'low', classification: 'statement',
+    proposal: { claimType, valueText: `${claimLabel}: ${text}`, corroborationNeeded: !isOwner, definite: true },
+    limitations: isOwner ? [] : ['recorded as reported'] });
 }
 
 /* THE PLANNER — turn raw uncertainties into a ranked, deduped, capped set of

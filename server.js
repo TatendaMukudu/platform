@@ -8033,6 +8033,94 @@ function _teamReadiness(code, viewerId, now = Date.now()) {
   return vm;
 }
 
+/* ─── GROUNDED ANSWER-AND-CONFIRM LOOP ────────────────────────────────────────
+   Carry an existing uncertainty through conversation to a GOVERNED write — never
+   mutate the projection. Flow: set active question → user answers → adjudicate →
+   preview proposal → explicit confirm → write admissible evidence → org-state
+   rebuilds → re-read the resulting state. Minimal conversational state: the active
+   question, snapshotted with the org fingerprint so a stale/superseded question
+   cannot produce a write. */
+const activeQuestions = {};   // wsKey → active question context
+
+// Is `actor` the responsible owner for this uncertainty (via role binding or directly)?
+function _actorIsOwner(code, actorId, ownerRef) {
+  if (!ownerRef) return false;
+  if (ownerRef === actorId) return true;
+  const b = (roleBindings[code] || []).find(x => x.status === 'active' && x.roleRef === String(ownerRef).toLowerCase());
+  return !!(b && b.userId === actorId);
+}
+
+// Build the active-question context from a live uncertainty id (re-derived, not trusted).
+function _activeQuestionFrom(code, userId, uncertaintyId) {
+  const state = _getOrgState({ actor: userId, organisationId: code, purpose: 'organisation_reasoning', now: Date.now() });
+  const uncertainties = orgState.stateToUncertainties(state);
+  const u = uncertainties.find(x => x.id === uncertaintyId);
+  if (!u) return null;
+  const plans = inquiry.planInquiries(uncertainties.map(inquiry.buildUncertainty), { threshold: 0, maxAsks: 50 }).plans;
+  const plan = plans.find(p => p.uncertaintyId === uncertaintyId);
+  return { uncertaintyId, type: u.type, claimType: u.claimType || null, requirementId: u.requirementId || null,
+    claimLabel: String((u.claimType || 'this')).replace(/_/g, ' '), eventId: u.affects ? u.affects.id : null,
+    questionText: plan ? plan.question : (u.claim || 'this'), ownerRef: u.resolutionOwner || null,
+    privacyClass: u.privacyClass || 'team-shared', fingerprint: _orgEvidenceFingerprint(code), setAt: new Date().toISOString() };
+}
+
+// POST /api/assistant/active-question — surface a specific uncertainty as the active
+// conversational question (from the readiness UI). The NEXT turn's text is adjudicated
+// against it. Leader/owner only for org-level questions.
+app.post('/api/assistant/active-question', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    // Any member may answer a routed org question — the question text is org-level (no
+    // private evidence); AUTHORITY is enforced at write time (a non-owner stays
+    // shared-but-unverified), never here.
+    const aq = _activeQuestionFrom(code, userId, String(req.body?.uncertaintyId || ''));
+    if (!aq) return res.status(404).json({ ok: false, error: 'question_not_found_or_resolved' });
+    activeQuestions[_wsKey(code, userId)] = aq;
+    res.json({ ok: true, activeQuestion: { uncertaintyId: aq.uncertaintyId, questionText: aq.questionText, claimLabel: aq.claimLabel } });
+  } catch (e) { res.status(200).json({ ok: false }); }
+});
+
+// DELETE — clear the active question (dismiss / scope change).
+app.delete('/api/assistant/active-question', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  delete activeQuestions[_wsKey(code, userId)];
+  res.json({ ok: true });
+});
+
+/* GOVERNED write of a resolution answer → admissible canonical evidence with full
+   provenance. Authority + corroboration come from the adjudication (never role alone).
+   This is the ONLY state change; org-state then re-derives the claim state. */
+function _writeResolutionEvidence(code, actorId, aq, adj, turnId) {
+  const now = new Date().toISOString();
+  const source = adj.authority === 'authoritative' ? 'system_of_record' : 'reported';
+  const confidence = adj.authority === 'authoritative' ? 'high' : adj.authority === 'needs_corroboration' ? 'low' : 'reported';
+  const valueText = String(adj.proposal.valueText || `${aq.claimLabel}: ${aq.answerText || ''}`).slice(0, 4000);
+  const rec = _recordEvidence(code, {
+    provider: 'import', source, externalId: `resolution:${aq.uncertaintyId}:${now}`,
+    subjectId: null, ownerRef: actorId, type: 'document', label: `${aq.claimLabel} — reported (${adj.resolution})`,
+    valueText, observedAt: now, retrievedAt: now, confidence, visibility: 'normal',
+    attributes: { sourceType: 'resolution', category: aq.claimType, contentHash: _contentHash(valueText),
+      corroborationNeeded: adj.proposal.corroborationNeeded === true, definite: adj.proposal.definite !== false,
+      resolutionOf: aq.uncertaintyId, requirementRef: aq.requirementId, eventRef: aq.eventId,
+      answeringActor: actorId, sourceTurn: turnId || null, adjudication: adj.classification, authorityClass: adj.authority,
+      confirmedBy: actorId, confirmedAt: now },
+  }, { resolutionOf: aq.uncertaintyId });
+  if (rec.envelope) { rec.envelope.promoted = true; _indexEvidence(code, rec.envelope).catch(() => {}); }   // org-shared
+  delete orgStateCache[code]; scheduleSave();                                                              // invalidate → re-derive
+  return rec;
+}
+
+// The resulting state for a claim after a resolution write (re-read, never manufactured).
+function _resolutionResult(code, viewerId, aq) {
+  const state = _getOrgState({ actor: viewerId, organisationId: code, purpose: 'organisation_reasoning', now: Date.now() });
+  const cs = (state.claimStates || []).find(c => c.requirementId === aq.requirementId) ||
+             (state.claimStates || []).find(c => c.claimType === aq.claimType);
+  const map = { known: 'resolved', disputed: 'disputed', stale: 'still_open', missing: 'still_open', not_yet_due: 'not_yet_due', insufficient_information: 'still_open' };
+  let outcome = cs ? (map[cs.state] || 'still_open') : 'still_open';
+  if (outcome === 'still_open' && cs && cs.awaitingCorroboration) outcome = 'recorded_awaiting_corroboration';
+  return { outcome, claimState: cs ? cs.state : null };
+}
+
 // GET /api/team/readiness — the audience-safe leader view model. Leader-only, fail-closed.
 app.get('/api/team/readiness', requireAuth, (req, res) => {
   try {
@@ -8615,6 +8703,39 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
   // If we ALREADY saved via an explicit command, don't ALSO offer a capture card for
   // the same text (no duplicate, no double-write).
   if (saved) proposals = proposals.filter(p => p.actionType !== 'capture');
+
+  // ── GROUNDED ANSWER-AND-CONFIRM ──────────────────────────────────────────────
+  // If there is an ACTIVE org question and this turn reads as an ANSWER (not a new
+  // command/save), adjudicate it and offer a resolve proposal (PREVIEW — no write
+  // until confirmed). Authority comes from whether the actor is the responsible
+  // owner, never from the fact it was typed. A non-answer/clarification proposes
+  // nothing and leaves the question open.
+  let clarify = null;
+  const _aqKey = _wsKey(code, userId);
+  const aq = activeQuestions[_aqKey];
+  if (aq && !saved && !(cls.command && cls.command.payload)) {
+    const isLeaderActor = _isLeader(code, userId);
+    const isOwner = _actorIsOwner(code, userId, aq.ownerRef);
+    const hasAuth = (evidenceLog[code] || []).some(e => e.status === 'active' && e.source === 'system_of_record' && e.attributes && e.attributes.category === aq.claimType && e.attributes.corroborationNeeded !== true);
+    const adj = inquiry.adjudicateAnswer({ answer: text, isOwner, isLeader: isLeaderActor, isMember: !isLeaderActor, claimLabel: aq.claimLabel, claimType: aq.claimType, hasExistingAuthoritative: hasAuth });
+    if (adj.proposal) {
+      const p = { id: 'prop_' + generateId(), actionType: 'resolve_uncertainty', capability: 'org_context',
+        label: `Record answer: ${aq.questionText}`, why: (adj.limitations[0] || `Recorded as ${adj.authority.replace(/_/g, ' ')}`),
+        visibility: 'organization', requiredApproval: true, policyResult: { effect: 'allow', reason: 'governed resolution' },
+        payload: { activeQuestion: { ...aq, answerText: text }, adjudication: adj },
+        resolvePreview: { understood: text, question: aq.questionText, willRecord: adj.proposal.valueText,
+          authority: adj.authority, visibility: 'organisation shared', effect: adj.resolution, corroborationNeeded: adj.proposal.corroborationNeeded === true } };
+      proposals = [p, ...proposals];
+    }
+  } else if (!aq && !saved && /^\s*(yes|yep|it'?s (?:done|confirmed|sorted)|confirmed|done|sorted|all set)\b/i.test(text)) {
+    // Ambiguity: a bare confirmation with no active question and multiple open questions
+    // → ASK which one, never guess.
+    try {
+      const open = _teamReadiness(code, userId).nextQuestions || [];
+      if (open.length >= 2) clarify = { message: 'Which of these are you answering?', candidates: open.slice(0, 3).map(q => ({ uncertaintyId: q.uncertaintyId, question: q.question })) };
+    } catch (_) {}
+  }
+
   interp.proposedActions = proposals.map(p => ({ id: p.id, actionType: p.actionType, capability: p.capability, visibility: p.visibility, requiredApproval: p.requiredApproval }));
 
   // Kernel derivation (grounded) — basis IDs retained (incl. authorised assigned-work ids); never chain-of-thought.
@@ -8677,7 +8798,9 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
     // check-in current-state fields (null for other proposal types) — show what would be recorded before confirming.
     proposedRecord: p.proposedRecord || null, confidence: p.confidence || null, ambiguity: p.ambiguity || null, immediate: p.immediate || false,
     // assigned-work submit fields (null for other types) — show the exact effect before confirming.
-    workItem: p.workItem || null, effect: p.effect || null, validation: p.validation || null }));
+    workItem: p.workItem || null, effect: p.effect || null, validation: p.validation || null,
+    // resolve-uncertainty preview (null for other types) — what will be recorded + how it will be trusted.
+    resolvePreview: p.resolvePreview || null }));
   const response = {
     responseText, mode, lens: lens || null, groundedClaims, inferred, limitations: context.limitations,
     proposedActions: publicProposals,
@@ -8693,6 +8816,8 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
     bounded: composed.ok, cites: composed.output.cites,
     // A preview of operating-context records to CONFIRM (never persisted here).
     orgContextProposal,
+    // Ambiguity: which open question is the user answering (never guessed).
+    clarify,
   };
 
   // Store the turn: the RAW input as an interaction artifact (by ref), the bounded artifact,
@@ -8756,6 +8881,27 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
   // Idempotency / duplicate-submit guard: a proposal executes AT MOST once — no double write.
   if (prop.confirmed) return res.status(409).json({ error: 'already confirmed' });
   const overrides = req.body?.overrides || {};
+
+  if (prop.actionType === 'resolve_uncertainty') {
+    // Carry the answer through to a GOVERNED evidence write, then let org-state
+    // re-derive. Never mutate the projection. Re-validate the question is still live
+    // (a resolved/superseded question cannot produce a write).
+    const aq = prop.payload.activeQuestion, adj = prop.payload.adjudication;
+    if (!adj || !adj.proposal) return res.status(400).json({ ok: false, error: 'nothing_to_record' });
+    const live = _activeQuestionFrom(code, userId, aq.uncertaintyId);
+    if (!live) return res.status(200).json({ ok: true, confirmed: 'resolve_uncertainty', outcome: 'already_resolved', note: 'That question is no longer open — nothing was recorded.' });
+    const rec = _writeResolutionEvidence(code, userId, aq, adj, turn.turnId);
+    const result = _resolutionResult(code, userId, aq);
+    prop.confirmed = { at: new Date().toISOString(), evidenceId: rec.id || null, outcome: result.outcome };
+    delete activeQuestions[_wsKey(code, userId)];   // question handled
+    scheduleSave();
+    return res.json({ ok: true, confirmed: 'resolve_uncertainty', evidenceId: rec.id || null,
+      authority: adj.authority, outcome: result.outcome, claimState: result.claimState,
+      note: result.outcome === 'resolved' ? 'Recorded and the requirement is now satisfied.'
+        : result.outcome === 'disputed' ? 'Recorded — it conflicts with an existing record, so both are preserved as disputed.'
+        : result.outcome === 'recorded_awaiting_corroboration' ? 'Recorded as reported — an authoritative owner confirmation is still needed.'
+        : 'Recorded; the requirement is still open.' });
+  }
 
   if (prop.actionType === 'capture') {
     // Private by default. A WIDER audience is applied only when the user explicitly asks for it.
@@ -12332,7 +12478,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: universal evidence intake
   _ingestArtifact, _deleteImport, _sanitizeBriefingForLeader, _stripLeaderNumbers, _deriveOrgUncertainties,
   _getOrgState, _buildOrgStateInputs, orgStateConfig, orgContextRecords, _confirmOrgContext,
-  _teamReadiness, roleBindings, _bindRole };
+  _teamReadiness, roleBindings, _bindRole, activeQuestions, _activeQuestionFrom, _writeResolutionEvidence };
 
 if (require.main === module) (async () => {
   try {

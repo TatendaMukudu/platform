@@ -2654,6 +2654,7 @@ const MemberApp = {
       if (p.actionType === 'checkin_proposal') return this._renderCheckinProposal(j.turnId, p);
       if (p.actionType === 'checkin_log')      return this._renderCheckinLog(j.turnId, p);
       if (p.actionType === 'submit_work')      return this._renderSubmitWork(j.turnId, p);
+      if (p.actionType === 'resolve_uncertainty' && p.resolvePreview) return this._renderResolvePreview(j.turnId, p);
       const state = p.draftOnly ? '<span class="iq-badge iq-badge-draft">Draft only — not scheduled</span>' : '';
       return `<div class="iq-proposal" data-proposal="${esc(p.id)}">
         <div class="iq-proposal-top"><span class="iq-proposal-label">${esc(p.label)}</span> ${priv(p.visibility)} ${state}</div>
@@ -2679,14 +2680,52 @@ const MemberApp = {
     } else if (j.capturePrompt) {
       savedHtml = `<div class="iq-saved" style="margin-top:0.5rem;font-size:0.82rem;color:var(--text-secondary)">${esc(j.capturePrompt.message)}</div>`;
     }
+    // Ambiguity: the assistant asks WHICH open question the user is answering.
+    let clarifyHtml = '';
+    if (r.clarify && (r.clarify.candidates || []).length) {
+      clarifyHtml = `<div class="iq-privacy" style="border-left:2px solid var(--accent)">${esc(r.clarify.message)}<div style="margin-top:0.3rem;display:flex;flex-direction:column;gap:0.25rem">${r.clarify.candidates.map(c => `<button class="btn btn-outline btn-sm" style="text-align:left" onclick="MemberApp.wsSetActiveQuestion('${esc(c.uncertaintyId)}')">${esc(c.question)}</button>`).join('')}</div></div>`;
+    }
     return `<div class="iq-response">
       <p class="iq-response-text">${esc(r.responseText)}</p>
       ${(r.groundedClaims || []).length ? `<div class="iq-grounded">${(r.groundedClaims || []).slice(0, 1).map(c => `<span class="iq-tag">grounded</span> ${esc(c.text)}`).join('')}</div>` : ''}
       ${r.privacyNotice ? `<div class="iq-privacy">${esc(r.privacyNotice)}</div>` : ''}
+      ${clarifyHtml}
       ${savedHtml}
       ${primary ? `<div class="iq-proposals"><div class="card-label">Suggestions — nothing happens until you confirm</div>${primary}
         ${more ? `<details class="iq-more"><summary>More options</summary>${more}</details>` : ''}</div>` : ''}
     </div>`;
+  },
+
+  /* Resolve-uncertainty preview — exactly what will be recorded, how it will be
+     trusted, and its effect, BEFORE any write. Confirm routes through the governed
+     boundary; editing = answering again; dismiss writes nothing. */
+  _renderResolvePreview(turnId, p) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const pv = p.resolvePreview || {};
+    const trust = pv.authority === 'authoritative' ? 'authoritative organisation evidence'
+      : pv.authority === 'needs_corroboration' ? 'reported — needs an owner’s confirmation to satisfy the requirement'
+      : pv.authority === 'shared_but_unverified' ? 'shared with the team — not yet verified' : 'reported';
+    return `<div class="iq-proposal" data-proposal="${esc(p.id)}" style="border-left:3px solid var(--accent)">
+      <div class="iq-proposal-top"><span class="iq-proposal-label">Record this answer?</span> <span class="iq-badge iq-badge-share">${esc(pv.visibility || 'organisation shared')}</span></div>
+      <div class="iq-proposal-why" style="font-style:italic">“${esc(pv.willRecord)}”</div>
+      <div style="font-size:0.74rem;color:var(--text-secondary);margin-top:2px">In answer to: ${esc(pv.question)} · will be treated as <strong>${esc(trust)}</strong>.</div>
+      <div class="iq-proposal-actions">
+        <button class="btn-primary btn-sm" onclick="MemberApp.confirmProposal('${esc(turnId)}','${esc(p.id)}')">Confirm</button>
+        <button class="btn btn-outline btn-sm" onclick="document.getElementById('iq-composer-input').focus()">Edit (answer again)</button>
+        <button class="btn-ghost btn-sm" onclick="MemberApp.dismissProposal('${esc(p.id)}')">Dismiss</button>
+      </div></div>`;
+  },
+
+  /* Pick which open question to answer (from a clarification), then keep talking. */
+  async wsSetActiveQuestion(uncertaintyId) {
+    try {
+      const r = await fetch('/api/assistant/active-question', { method: 'POST', headers: this._authHeaders() && { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ uncertaintyId }) });
+      const d = await r.json();
+      if (!d.ok) throw new Error();
+      const i = document.getElementById('iq-composer-input');
+      if (i) { i.placeholder = `Answer: ${d.activeQuestion.questionText}`; i.focus(); }
+      this.showToast('Now answer that one in your own words.', 'info');
+    } catch (_) { this.showToast('Could not open that question', 'error'); }
   },
 
   // Personalized check-in: what it relates to, when, whether the topic is referenced, expiry.
