@@ -648,6 +648,7 @@ const NAV_ROUTES = {
   'operating-context': () => renderOperatingContext(),
   'org-memory': () => renderOrgMemory(),
   'org-learning': () => renderObservations(),
+  'org-playbook': () => renderPlaybook(),
   'leader-groups': () => renderLeaderGroups(),
   'data-sources':  () => renderDataSources(),
   assignments:     () => renderAssignments(),
@@ -711,6 +712,7 @@ const PAGE_TITLES = {
   'operating-context': 'Operating context',
   'org-memory': 'Organisational memory',
   'org-learning': 'Observed over time',
+  'org-playbook': 'Playbook',
   assignments:     'Assignments',
   'org-insights':  'Intelligence',
   'group-health':  'Intelligence',
@@ -5354,6 +5356,91 @@ async function obsDismiss(fingerprint, btn) {
     if (typeof showToast === 'function') showToast('Dismissed. This won’t resurface; new history can still create a fresh observation.', 'info');
     renderObservations();
   } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Dismiss'; } if (typeof showToast === 'function') showToast('Could not dismiss right now.', 'error'); }
+}
+
+/* ── Playbook — the GOVERNED practices surface (Phase B2). Shows what the team has
+   CONFIRMED as how it operates, and PROPOSED patterns (weighed for and against, with a
+   confidence band) for the leader to confirm or set aside. The system never endorses:
+   confirmation is always the human's. No causal or "you should" language. */
+const _CONF_TONE = { 'Well supported': 'var(--success)', 'Supported': 'var(--accent)', 'Emerging': 'var(--text-muted)' };
+async function renderPlaybook() {
+  const el = document.getElementById('org-playbook-content');
+  if (!el) return;
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Reviewing your team's practices…</div>`;
+  let confirmed, proposed;
+  try {
+    const [a, b] = await Promise.all([
+      fetch('/api/org-playbook', { headers: Auth._headers() }).then(r => r.json()),
+      fetch('/api/org-playbook/candidates', { headers: Auth._headers() }).then(r => r.json()),
+    ]);
+    confirmed = (a && a.entries) || []; proposed = (b && b.candidates) || [];
+  } catch (_) { el.innerHTML = `<div class="empty-state"><p>Couldn't load the playbook right now. <button class="btn btn-outline btn-sm" onclick="renderPlaybook()">Try again</button></p></div>`; return; }
+
+  const fmt = t => t ? new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  const confChip = (label) => `<span style="font-size:0.66rem;font-family:inherit;padding:.15rem .5rem;border-radius:20px;border:1px solid ${_CONF_TONE[label] || 'var(--text-muted)'};color:${_CONF_TONE[label] || 'var(--text-muted)'}">${_escAdvisor(label)}</span>`;
+  const counter = (ce) => `<span style="color:var(--success)">${ce.supporting} for</span> · <span style="color:${ce.contradicting ? 'var(--danger)' : 'var(--text-muted)'}">${ce.contradicting} against</span>`;
+
+  // Confirmed practices (what the team has agreed).
+  const entryCard = (e) => `<div class="card" style="margin-bottom:0.6rem;border-left:3px solid var(--success)">
+    <div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:baseline">
+      <span style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted)">Confirmed ${fmt(e.confirmedAt)}</span>
+      ${confChip(e.confidenceLabel)}
+    </div>
+    <div style="font-size:0.9rem;margin:0.3rem 0">${_escAdvisor(e.statement)}</div>
+    <div style="font-size:0.72rem;color:var(--text-muted)">Evidence at confirmation: ${counter(e.counterEvidence)}</div>
+  </div>`;
+
+  // Proposed practices (for review) — counter-evidence + limitations shown before any action.
+  const candCard = (c) => {
+    const sigs = (c.counterEvidence.signals || []).map(s => `<li style="font-size:0.74rem;color:var(--text-secondary)">${_escAdvisor(s)}</li>`).join('');
+    const lims = (c.limitations || []).map(l => `<li style="font-size:0.72rem;color:var(--text-muted)">${_escAdvisor(l)}</li>`).join('');
+    return `<div class="card" style="margin-bottom:0.6rem">
+      <div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:baseline">
+        <span style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted)">Proposed pattern</span>
+        ${confChip(c.confidenceLabel)}
+      </div>
+      <div style="font-size:0.9rem;margin:0.3rem 0">${_escAdvisor(c.statement)}</div>
+      <div style="font-size:0.74rem;color:var(--text-muted)">Weighed: ${counter(c.counterEvidence)}${c.distinctEvents ? ` · across ${c.distinctEvents} event${c.distinctEvents === 1 ? '' : 's'}` : ''}</div>
+      ${sigs ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.4rem">What argues against it</div><ul style="margin:0.1rem 0 0 1rem;padding:0">${sigs}</ul>` : ''}
+      ${lims ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.3rem">Limitations</div><ul style="margin:0.1rem 0 0 1rem;padding:0">${lims}</ul>` : ''}
+      <div style="display:flex;gap:0.5rem;margin-top:0.6rem">
+        <button class="btn btn-accent btn-sm" style="font-size:0.74rem" onclick="pbConfirm('${_escAdvisor(c.fingerprint)}', this)">Recognise as how we operate</button>
+        <button class="btn-ghost btn-sm" style="font-size:0.74rem" onclick="pbDismiss('${_escAdvisor(c.fingerprint)}', this)">Set aside</button>
+      </div>
+    </div>`;
+  };
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:1rem;background:var(--surface-alt,rgba(127,127,127,0.06))">
+      <div style="font-size:0.8rem;color:var(--text-secondary)">A pattern only becomes part of your playbook when <strong>you confirm it</strong>. IntelliQ surfaces what recurred and what argues against it — it never decides, recommends, or claims cause.</div>
+    </div>
+    <div class="card-label" style="margin:0 0 0.5rem">Your playbook — agreed practices</div>
+    ${confirmed.length ? confirmed.map(entryCard).join('') : '<div class="card" style="padding:1.2rem;color:var(--text-muted);font-size:0.85rem">Nothing confirmed yet. Confirmed practices will appear here.</div>'}
+    <div class="card-label" style="margin:1.4rem 0 0.5rem">Proposed for review</div>
+    ${proposed.length ? proposed.map(candCard).join('') : '<div class="card" style="padding:1.2rem;color:var(--text-muted);font-size:0.85rem">No patterns are strong enough to propose yet. As history builds, proposals will appear here for you to review.</div>'}`;
+}
+
+/* Confirm a proposed practice into the playbook — the ONLY path to team knowledge. */
+async function pbConfirm(fingerprint, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Confirming…'; }
+  try {
+    const r = await fetch('/api/org-playbook/candidates/' + encodeURIComponent(fingerprint) + '/confirm', { method: 'POST', headers: Auth._headers() });
+    const j = await r.json();
+    if (!j.ok) throw new Error('confirm failed');
+    if (typeof showToast === 'function') showToast('Added to your playbook.', 'success');
+    renderPlaybook();
+  } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Recognise as how we operate'; } if (typeof showToast === 'function') showToast('Could not confirm right now.', 'error'); }
+}
+/* Set a proposal aside — suppresses this exact candidate; new evidence can re-propose later. */
+async function pbDismiss(fingerprint, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Setting aside…'; }
+  try {
+    const r = await fetch('/api/org-playbook/candidates/' + encodeURIComponent(fingerprint) + '/dismiss', { method: 'POST', headers: Auth._headers() });
+    const j = await r.json();
+    if (!j.ok) throw new Error('dismiss failed');
+    if (typeof showToast === 'function') showToast('Set aside.', 'info');
+    renderPlaybook();
+  } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Set aside'; } if (typeof showToast === 'function') showToast('Could not set aside right now.', 'error'); }
 }
 
 /* ── Operating context — how the team operates (governed intake) ──────────────

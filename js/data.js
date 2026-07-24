@@ -154,6 +154,9 @@ const WORKSPACE_MODULES = [
   // Longitudinal observations derived from that memory (Phase B1): descriptions of
   // repeated history — never recommendations, predictions, or causal claims.
   { section: null,    id: 'org-learning', icon: ICON.spark, label: 'Observed over time', leaderOnly: true },
+  // The governed playbook (Phase B2): proposed patterns a leader confirms into agreed
+  // practices. The system proposes with counter-evidence; only a human confirms.
+  { section: null,    id: 'org-playbook', icon: ICON.clipboard, label: 'Playbook', leaderOnly: true },
 
   // ── Setup — admin / superadmin (people · org aims & values · settings) ──
   { section: 'Setup', id: 'people',       icon: ICON.person,   label: 'People',       permission: 'view_members'    },

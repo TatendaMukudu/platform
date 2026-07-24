@@ -25,6 +25,7 @@ const orgContext = require('./ai/org-context');
 const readiness  = require('./ai/readiness');
 const orgMemory  = require('./ai/org-memory');
 const orgLearning= require('./ai/org-learning');
+const playbook   = require('./ai/org-playbook');
 const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
@@ -109,7 +110,7 @@ function scheduleSave() {
         syncRuns, failedRecords, webhookDeliveries,
         orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
         proactivePrefs, insightSuppression, answerFeedback,
-        orgStateHistory, orgObservations,
+        orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -7776,6 +7777,12 @@ const ORG_MEMORY_CAP = 300;
 // support or a rules-version change.
 const orgObservations = {};   // orgCode → [ observation ]
 const ORG_OBS_CAP = 500;
+// LEARNING ENGINE Phase B2 — GOVERNED PLAYBOOK. Candidate practices are derived (not
+// stored) from active observations; a leader CONFIRMS a candidate to create a durable
+// playbook entry (org knowledge). The Learning Engine never writes the playbook — only a
+// leader's explicit confirmation does. Dismissed candidate fingerprints are suppressed.
+const orgPlaybook = {};           // orgCode → [ confirmed entry ]
+const orgPlaybookDismissed = {};  // orgCode → [ dismissed candidate fingerprint ]
 
 function _orgPack(code) {
   const cfg = orgStateConfig[code];
@@ -8379,6 +8386,83 @@ app.post('/api/org-learning/observations/:fingerprint/dismiss', requireAuth, (re
   } catch (e) {
     console.warn('[org-learning/dismiss] failed:', e && e.message);
     res.status(200).json({ ok: false });
+  }
+});
+
+/* ─── LEARNING ENGINE Phase B2 — CANDIDATE PRACTICES + the GOVERNED PLAYBOOK. Candidates
+   are DERIVED (never stored) from active observations, weighed for/against with a
+   confidence band. A candidate becomes org knowledge ONLY when a leader confirms it. The
+   engine never writes the playbook. Dismissed/confirmed candidates are suppressed. */
+function _deriveOrgCandidates(code) {
+  _refreshOrgObservations(code, 'candidates');   // keep observations current first
+  const active = (orgObservations[code] || []).filter(o => o.status === 'active');
+  const withSummary = active.map(o => ({ ...o, summary: orgLearning.summariseObservation(o) }));
+  const dismissed = new Set(orgPlaybookDismissed[code] || []);
+  const confirmedObs = new Set((orgPlaybook[code] || []).filter(e => e.status === 'active').map(e => e.observationFingerprint));
+  return playbook.deriveCandidates(withSummary)
+    .filter(c => !dismissed.has(c.fingerprint) && !confirmedObs.has(c.observationFingerprint));
+}
+
+// GET /api/org-playbook/candidates — proposed practices for a leader to review. Leader-only.
+app.get('/api/org-playbook/candidates', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    res.json({ ok: true, kind: 'proposed_practices',
+      note: 'These are patterns from your recorded history, weighed for and against. Nothing becomes team knowledge until you confirm it. They are not recommendations or proof of cause.',
+      candidates: _deriveOrgCandidates(code).map(playbook.publicCandidate) });
+  } catch (e) {
+    console.warn('[org-playbook/candidates] failed:', e && e.message);
+    res.status(200).json({ ok: false, candidates: [] });
+  }
+});
+
+// POST /api/org-playbook/candidates/:fingerprint/confirm — the ONE governed write into the
+// playbook. A leader confirms a candidate → it becomes durable org knowledge (idempotent).
+app.post('/api/org-playbook/candidates/:fingerprint/confirm', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const cand = _deriveOrgCandidates(code).find(c => c.fingerprint === String(req.params.fingerprint));
+    if (!cand) return res.status(404).json({ ok: false, error: 'candidate_not_found_or_already_resolved' });
+    const entry = playbook.playbookEntryFrom(cand, { confirmedBy: userId, confirmedAt: new Date().toISOString() });
+    const store = orgPlaybook[code] = orgPlaybook[code] || [];
+    if (!store.some(e => e.fingerprint === entry.fingerprint && e.status === 'active')) { store.push(entry); scheduleSave(); }
+    res.json({ ok: true, entry: playbook.publicPlaybookEntry(entry) });
+  } catch (e) {
+    console.warn('[org-playbook/confirm] failed:', e && e.message);
+    res.status(200).json({ ok: false });
+  }
+});
+
+// POST /api/org-playbook/candidates/:fingerprint/dismiss — a leader sets a candidate aside.
+// Suppresses that exact candidate; a materially-new candidate can still appear later.
+app.post('/api/org-playbook/candidates/:fingerprint/dismiss', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const fp = String(req.params.fingerprint);
+    const list = orgPlaybookDismissed[code] = orgPlaybookDismissed[code] || [];
+    if (!list.includes(fp)) { list.push(fp); scheduleSave(); }
+    res.json({ ok: true, dismissed: fp });
+  } catch (e) {
+    console.warn('[org-playbook/dismiss] failed:', e && e.message);
+    res.status(200).json({ ok: false });
+  }
+});
+
+// GET /api/org-playbook — the confirmed playbook: how this team has agreed it operates.
+app.get('/api/org-playbook', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const entries = (orgPlaybook[code] || []).filter(e => e.status === 'active')
+      .sort((a, b) => String(b.confirmedAt || '').localeCompare(String(a.confirmedAt || '')))
+      .map(playbook.publicPlaybookEntry);
+    res.json({ ok: true, kind: 'confirmed_practices', entries });
+  } catch (e) {
+    console.warn('[org-playbook] failed:', e && e.message);
+    res.status(200).json({ ok: false, entries: [] });
   }
 });
 
@@ -12652,6 +12736,8 @@ function _loadAllStores(data) {
   Object.assign(answerFeedback,    data.answerFeedback    || {});
   Object.assign(orgStateHistory,   data.orgStateHistory   || {});
   Object.assign(orgObservations,   data.orgObservations   || {});
+  Object.assign(orgPlaybook,       data.orgPlaybook       || {});
+  Object.assign(orgPlaybookDismissed, data.orgPlaybookDismissed || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -12733,7 +12819,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: organisational memory (Phase A) — the derived-state timeline
   orgStateHistory, _recordOrgSnapshot,
   // exported for the truth layer: learning engine (Phase B1) — longitudinal observations
-  orgObservations, _refreshOrgObservations, _publicObservations };
+  orgObservations, _refreshOrgObservations, _publicObservations,
+  // exported for the truth layer: learning engine (Phase B2) — candidates + governed playbook
+  orgPlaybook, orgPlaybookDismissed, _deriveOrgCandidates };
 
 if (require.main === module) (async () => {
   try {
