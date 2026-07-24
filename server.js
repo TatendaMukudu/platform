@@ -23,6 +23,7 @@ const lifecycle  = require('./ai/lifecycle');
 const orgState   = require('./ai/org-state');
 const orgContext = require('./ai/org-context');
 const readiness  = require('./ai/readiness');
+const orgMemory  = require('./ai/org-memory');
 const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
@@ -107,6 +108,7 @@ function scheduleSave() {
         syncRuns, failedRecords, webhookDeliveries,
         orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
         proactivePrefs, insightSuppression, answerFeedback,
+        orgStateHistory,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -7739,6 +7741,13 @@ const orgContextRecords = {};
 // Projection cache — one slot per org, keyed by a fingerprint of evidence + config +
 // policy version, so any change invalidates it. Never crosses a tenant boundary.
 const orgStateCache = {};
+// ORGANISATIONAL MEMORY (Phase A) — the durable, append-only timeline of the derived
+// org-state. Each entry is a compact, fingerprinted snapshot (focus, readiness, claim
+// states, context count) produced by ai/org-memory from an ALREADY-admissible projection
+// — never raw evidence, never private content. Recorded only when the observable state
+// changes, so the history answers "what changed, and when?" without accruing noise.
+const orgStateHistory = {};   // orgCode → [ snapshot ]
+const ORG_MEMORY_CAP = 300;
 
 function _orgPack(code) {
   const cfg = orgStateConfig[code];
@@ -7824,7 +7833,7 @@ function _confirmOrgContext(code, userId, proposals, opts = {}) {
     (orgContextRecords[code] = orgContextRecords[code] || []).push(rec);
     created.push(rec);
   }
-  if (created.length) { delete orgStateCache[code]; scheduleSave(); }   // invalidate the projection
+  if (created.length) { delete orgStateCache[code]; _recordOrgSnapshot(code); scheduleSave(); }   // invalidate the projection + remember the moment
   return { created, rejected };
 }
 // A redacted public view of a durable record (no internal actor/provenance internals).
@@ -7991,7 +8000,7 @@ function _bindRole(code, confirmedBy, roleRef, userId) {
     provenance: { source: 'form', confirmedAt: now, kind: 'explicit' }, supersedes: prior ? prior.id : null, supersededBy: null, status: 'active' };
   if (prior) { prior.status = 'superseded'; prior.effectiveTo = now; prior.supersededBy = rec.id; }
   list.push(rec);
-  delete orgStateCache[code]; scheduleSave();
+  delete orgStateCache[code]; _recordOrgSnapshot(code); scheduleSave();
   return { ok: true, binding: rec };
 }
 const _publicBinding = b => ({ id: b.id, roleRef: b.roleRef, userId: b.userId, effectiveFrom: b.effectiveFrom, effectiveTo: b.effectiveTo, status: b.status, supersededBy: b.supersededBy || null });
@@ -8031,6 +8040,32 @@ function _teamReadiness(code, viewerId, now = Date.now()) {
     roleBindings: (roleBindings[code] || []).filter(b => b.status === 'active'), now, orgId: code });
   vm.evidenceFingerprint = `${_orgEvidenceFingerprint(code)}|rb:${(roleBindings[code] || []).length}`;
   return vm;
+}
+
+/* ─── ORGANISATIONAL MEMORY — record a snapshot of the CURRENT derived state onto the
+   timeline, but ONLY when the observable state has actually changed (ai/org-memory
+   dedupes on a content hash). This is a HISTORY of a projection, never a mutation of it,
+   and never a second source of truth — it reads _getOrgState + _teamReadiness (both
+   org-admissible only; private evidence cannot enter) and appends. Fail-closed: a memory
+   error must never break a governed write. Returns whether a snapshot was recorded. */
+function _recordOrgSnapshot(code, now = Date.now()) {
+  try {
+    const state = _getOrgState({ organisationId: code, purpose: 'organisation_reasoning', now });
+    const vm = _teamReadiness(code, null, now);
+    const snap = orgMemory.snapshot({ state, readiness: vm,
+      contextRecords: (orgContextRecords[code] || []),
+      fingerprint: _orgEvidenceFingerprint(code), now });
+    const hist = orgStateHistory[code] || [];
+    // Don't begin a timeline until there is something to remember — an org with no
+    // focus, no tracked claims, and no operating context has no memory yet. Once a
+    // timeline exists, an emptying (everything retired) is itself a recordable moment.
+    const isEmpty = !snap.focus && (snap.claims || []).length === 0 && snap.contextActive === 0;
+    if (isEmpty && hist.length === 0) return false;
+    const r = orgMemory.record(hist, snap, { cap: ORG_MEMORY_CAP });
+    orgStateHistory[code] = r.timeline;
+    if (r.recorded) scheduleSave();
+    return r.recorded;
+  } catch (e) { console.warn('[org-memory] snapshot failed:', e && e.message); return false; }
 }
 
 /* ─── GROUNDED ANSWER-AND-CONFIRM LOOP ────────────────────────────────────────
@@ -8106,7 +8141,7 @@ function _writeResolutionEvidence(code, actorId, aq, adj, turnId) {
       confirmedBy: actorId, confirmedAt: now },
   }, { resolutionOf: aq.uncertaintyId });
   if (rec.envelope) { rec.envelope.promoted = true; _indexEvidence(code, rec.envelope).catch(() => {}); }   // org-shared
-  delete orgStateCache[code]; scheduleSave();                                                              // invalidate → re-derive
+  delete orgStateCache[code]; _recordOrgSnapshot(code); scheduleSave();                                     // invalidate → re-derive → remember
   return rec;
 }
 
@@ -8130,6 +8165,45 @@ app.get('/api/team/readiness', requireAuth, (req, res) => {
   } catch (e) {
     console.warn('[team/readiness] failed:', e && e.message);
     res.status(200).json({ ok: false, focus: null, readiness: { status: 'insufficient_information', summary: 'Readiness is unavailable right now.', supportedAreas: [], constrainedAreas: [], limitations: [] }, nextQuestions: [], recentContextChanges: [], emptyState: 'no_operating_context' });
+  }
+});
+
+/* GET /api/org-memory/timeline — ORGANISATIONAL MEMORY (Phase A): the versioned history
+   of the derived org-state, most-recent-first, each moment carrying the deterministic
+   "what changed" diff to the moment before it, plus a read-only rollup (counts, not
+   learning). Leader-only. Records the current moment lazily first, so the very first
+   view establishes a baseline. No raw evidence, no private content — snapshots are a
+   redacted projection. Fail-closed with valid JSON. */
+app.get('/api/org-memory/timeline', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    _recordOrgSnapshot(code);   // capture the current moment if it differs from the head
+    const limit = Math.max(1, Math.min(200, parseInt(req.query.limit, 10) || 50));
+    const view = orgMemory.buildTimeline(orgStateHistory[code] || [], { limit });
+    res.json({ ok: true, ...view });
+  } catch (e) {
+    console.warn('[org-memory/timeline] failed:', e && e.message);
+    res.status(200).json({ ok: false, count: 0, entries: [], summary: { count: 0, spanFrom: null, spanTo: null, readinessImprovements: 0, readinessRegressions: 0, claimsResolved: 0, claimsLapsed: 0, lastChangeAt: null } });
+  }
+});
+
+/* GET /api/org-memory/changed — "what changed" between an anchor and now. Anchor is, in
+   order of precedence: ?fingerprint=<fp>, ?since=<iso>, ?steps=<n back>, else the
+   previous moment. Leader-only, fail-closed. */
+app.get('/api/org-memory/changed', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    _recordOrgSnapshot(code);
+    const steps = req.query.steps != null ? parseInt(req.query.steps, 10) : null;
+    const out = orgMemory.changedSince(orgStateHistory[code] || [], {
+      fingerprint: req.query.fingerprint || null, since: req.query.since || null,
+      steps: Number.isFinite(steps) ? steps : null });
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    console.warn('[org-memory/changed] failed:', e && e.message);
+    res.status(200).json({ ok: false, anchor: null, head: null, changed: null });
   }
 });
 
@@ -12401,6 +12475,7 @@ function _loadAllStores(data) {
   Object.assign(proactivePrefs,    data.proactivePrefs    || {});
   Object.assign(insightSuppression, data.insightSuppression || {});
   Object.assign(answerFeedback,    data.answerFeedback    || {});
+  Object.assign(orgStateHistory,   data.orgStateHistory   || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -12478,7 +12553,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: universal evidence intake
   _ingestArtifact, _deleteImport, _sanitizeBriefingForLeader, _stripLeaderNumbers, _deriveOrgUncertainties,
   _getOrgState, _buildOrgStateInputs, orgStateConfig, orgContextRecords, _confirmOrgContext,
-  _teamReadiness, roleBindings, _bindRole, activeQuestions, _activeQuestionFrom, _writeResolutionEvidence };
+  _teamReadiness, roleBindings, _bindRole, activeQuestions, _activeQuestionFrom, _writeResolutionEvidence,
+  // exported for the truth layer: organisational memory (Phase A) — the derived-state timeline
+  orgStateHistory, _recordOrgSnapshot };
 
 if (require.main === module) (async () => {
   try {

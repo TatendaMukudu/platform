@@ -646,6 +646,7 @@ const NAV_ROUTES = {
   'leader-people': () => renderLeaderPeople(),
   'team-readiness': () => renderTeamReadiness(),
   'operating-context': () => renderOperatingContext(),
+  'org-memory': () => renderOrgMemory(),
   'leader-groups': () => renderLeaderGroups(),
   'data-sources':  () => renderDataSources(),
   assignments:     () => renderAssignments(),
@@ -707,6 +708,7 @@ const PAGE_TITLES = {
   'leader-people': 'My People',
   'team-readiness': 'Team readiness',
   'operating-context': 'Operating context',
+  'org-memory': 'Organisational memory',
   assignments:     'Assignments',
   'org-insights':  'Intelligence',
   'group-health':  'Intelligence',
@@ -5156,6 +5158,80 @@ async function trBindPrompt(roleRef) {
     showToast('Role bound — questions will now route to that person.', 'success');
     renderTeamReadiness();
   } catch (e) { showToast(e.message || 'Could not bind role', 'error'); }
+}
+
+/* ── Organisational memory — the derived-state timeline (Phase A: history, not advice).
+   Reads /api/org-memory/timeline: most-recent-first moments, each with a plain-language
+   "what changed" and a redacted snapshot of the readiness at that moment. It NEVER
+   invents advice; it recounts what changed and when. Leader-only (server-enforced). */
+const _MEM_DIR = {
+  resolved:  { color: 'var(--success)', glyph: '↑' },
+  improved:  { color: 'var(--success)', glyph: '↑' },
+  lapsed:    { color: 'var(--danger)',  glyph: '↓' },
+  regressed: { color: 'var(--danger)',  glyph: '↓' },
+  appeared:  { color: 'var(--accent)',  glyph: '+' },
+  removed:   { color: 'var(--text-muted)', glyph: '−' },
+  changed:   { color: 'var(--warning)', glyph: '~' },
+};
+async function renderOrgMemory() {
+  const el = document.getElementById('org-memory-content');
+  if (!el) return;
+  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Reading your organisation's memory…</div>`;
+  let d;
+  try { const r = await fetch('/api/org-memory/timeline', { headers: Auth._headers() }); d = await r.json(); }
+  catch (_) { el.innerHTML = `<div class="empty-state"><p>Couldn't load memory right now. <button class="btn btn-outline btn-sm" onclick="renderOrgMemory()">Try again</button></p></div>`; return; }
+
+  if (!d || !d.entries || !d.entries.length) {
+    el.innerHTML = `
+      <div class="card" style="text-align:center;padding:2rem">
+        <div style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:0.9rem">Your organisation's memory begins the moment you confirm operating context or resolve a question. There's nothing recorded yet.</div>
+        <button class="btn btn-accent btn-sm" onclick="navigate('operating-context')">Add operating context →</button>
+      </div>`;
+    return;
+  }
+
+  const s = d.summary || {};
+  const stat = (n, label) => `<div style="text-align:center"><div style="font-size:1.15rem;font-weight:700">${n}</div><div style="font-size:0.68rem;color:var(--text-muted)">${label}</div></div>`;
+  const fmt = t => t ? new Date(t).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+
+  const changeLine = (l) => `<li style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:2px">${_escAdvisor(l)}</li>`;
+  const transitionChip = (t) => {
+    const dir = _MEM_DIR[t.direction] || _MEM_DIR.changed;
+    return `<span style="display:inline-flex;align-items:center;gap:3px;font-size:0.7rem;color:${dir.color};border:1px solid ${dir.color};border-radius:10px;padding:1px 7px;margin:2px 3px 0 0"><span>${dir.glyph}</span>${_escAdvisor(String(t.claimType || '').replace(/_/g, ' '))}</span>`;
+  };
+  const moment = (e) => {
+    const snap = e.snapshot || {};
+    const ch = e.changed || {};
+    const rst = _RD_STATE[snap.readinessStatus] || _RD_STATE.insufficient_information;
+    const focusTitle = snap.focus ? (snap.focus.title || snap.focus.type || 'Current focus') : 'No confirmed focus';
+    const lines = (ch.summary || []).map(changeLine).join('');
+    const chips = (ch.claimTransitions || []).map(transitionChip).join('');
+    return `<div class="card" style="margin-bottom:0.75rem">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem">
+        <strong style="font-size:0.82rem">${_escAdvisor(focusTitle)}</strong>
+        <span style="font-size:0.72rem;color:var(--text-muted)">${fmt(snap.at)}</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:0.4rem;margin:0.3rem 0">
+        <span style="width:8px;height:8px;border-radius:50%;background:${rst.color};display:inline-block"></span>
+        <span style="font-size:0.74rem;color:${rst.color}">${rst.label}</span>
+        ${ch.baseline ? '<span style="font-size:0.68rem;color:var(--text-muted)">· timeline begins here</span>' : ''}
+      </div>
+      ${lines ? `<ul style="margin:0.25rem 0 0.25rem 1rem;padding:0">${lines}</ul>` : ''}
+      ${chips ? `<div style="margin-top:0.25rem">${chips}</div>` : ''}
+    </div>`;
+  };
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-label" style="margin-bottom:0.5rem">Over ${s.count || d.entries.length} recorded moment${(s.count || d.entries.length) === 1 ? '' : 's'}${s.spanFrom ? ` since ${fmt(s.spanFrom)}` : ''}</div>
+      <div style="display:flex;justify-content:space-around;gap:0.5rem;flex-wrap:wrap">
+        ${stat(s.readinessImprovements || 0, 'readiness gains')}
+        ${stat(s.readinessRegressions || 0, 'readiness slips')}
+        ${stat(s.claimsResolved || 0, 'things resolved')}
+        ${stat(s.claimsLapsed || 0, 'things lapsed')}
+      </div>
+    </div>
+    ${d.entries.map(moment).join('')}`;
 }
 
 /* ── Operating context — how the team operates (governed intake) ──────────────

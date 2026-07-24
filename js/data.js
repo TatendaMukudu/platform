@@ -27,6 +27,7 @@ const ICON = {
   clipboard:_svg('<path d="M9 4h6a1 1 0 0 1 1 1v1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h1V5a1 1 0 0 1 1-1z"/><path d="M9 4a1 1 0 0 0-1 1v1h8V5a1 1 0 0 0-1-1"/><path d="m9 14 2 2 4-4"/>'),
   plug:     _svg('<path d="M9 2v6M15 2v6"/><path d="M7 8h10v3a5 5 0 0 1-10 0z"/><path d="M12 16v6"/>'),
   upload:   _svg('<path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/>'),
+  clock:    _svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
 };
 
 /* ── Org mode display config ──────────────────────────────────────────────
@@ -148,6 +149,8 @@ const WORKSPACE_MODULES = [
   // that let IntelliQ reason about readiness. Leaders describe it; nothing is a rule
   // until confirmed.
   { section: null,    id: 'operating-context', icon: ICON.building, label: 'Operating context', leaderOnly: true },
+  // The organisation's episodic memory: how readiness has changed over time (Phase A).
+  { section: null,    id: 'org-memory', icon: ICON.clock, label: 'Organisational memory', leaderOnly: true },
 
   // ── Setup — admin / superadmin (people · org aims & values · settings) ──
   { section: 'Setup', id: 'people',       icon: ICON.person,   label: 'People',       permission: 'view_members'    },

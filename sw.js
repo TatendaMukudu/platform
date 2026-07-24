@@ -3,7 +3,7 @@
    first and only falls back to the cache when the device is offline. So a fresh
    deploy is always picked up the moment the phone is online — the cache is a
    safety net, never the source of truth. */
-const CACHE = 'iq-cache-v2';   // bump: evicts any v1 entry poisoned by a truncated/HTML-as-JS response
+const CACHE = 'iq-cache-v3';   // bump: evicts any stale bundle serving the old "Couldn't load your assigned work" MyWorkspace error
 
 self.addEventListener('install', () => self.skipWaiting());
 
