@@ -2,6 +2,39 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
+<!-- BOOT SELF-HEAL — runs before any external script and cannot itself be separately
+     cached. A stale or truncated cached script can crash the app with a SyntaxError
+     ("Unexpected token") before app.js even runs; this catches that, clears the caches +
+     service worker, and reloads ONCE, so a poisoned cache can never trap the user. -->
+<script>
+(function(){
+  function heal(msg){
+    try{
+      if(sessionStorage.getItem('iq_healed')==='1') return false;                 // heal at most once per crash episode
+      if(!/unexpected token|unexpected end of|syntaxerror|failed to fetch dynamically|error loading|importing a module/i.test(String(msg||''))) return false;
+      sessionStorage.setItem('iq_healed','1');
+      var s=document.createElement('div');
+      s.id='iq-healing';
+      s.style.cssText='position:fixed;inset:0;z-index:2147483647;background:#fff;display:flex;align-items:center;justify-content:center;font:600 16px system-ui,-apple-system,sans-serif;color:#111';
+      s.textContent='Updating IntelliQ…';
+      (document.body||document.documentElement).appendChild(s);
+      var done=function(){ try{ var u=new URL(location.href); u.searchParams.set('_fresh',Date.now()); location.replace(u.toString()); }catch(_){ location.reload(); } };
+      var p=Promise.resolve();
+      if(window.caches&&caches.keys) p=p.then(function(){return caches.keys().then(function(ks){return Promise.all(ks.map(function(k){return caches.delete(k);}));});});
+      if(navigator.serviceWorker&&navigator.serviceWorker.getRegistrations) p=p.then(function(){return navigator.serviceWorker.getRegistrations().then(function(rs){return Promise.all(rs.map(function(r){return r.unregister();}));});});
+      p.catch(function(){}).then(done);
+      setTimeout(done,2500);                                                       // safety: reload even if the cache APIs hang
+      return true;
+    }catch(_){ return false; }
+  }
+  window.addEventListener('error',function(e){
+    var msg=(e&&e.message)||(e&&e.error&&e.error.message)||'';
+    if(heal(msg)&&e.preventDefault) e.preventDefault();
+  },true);
+  // After a clean boot, allow future self-heals again (so a later corruption can recover too).
+  window.addEventListener('load',function(){ setTimeout(function(){ try{ if(!document.getElementById('iq-global-error')&&!document.getElementById('iq-healing')) sessionStorage.removeItem('iq_healed'); }catch(_){} },5000); });
+})();
+</script>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
 <title>Platform — IntelliQ Ecosystem</title>
 <!-- Installable web app (Add to Home Screen) — iOS + Android, no store needed -->
@@ -13,8 +46,8 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260716x"/>
-<link rel="stylesheet" href="css/member.css?v=20260716x"/>
+<link rel="stylesheet" href="css/styles.css?v=20260726a"/>
+<link rel="stylesheet" href="css/member.css?v=20260726a"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -1767,8 +1800,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260716x"></script>
-<script src="js/auth.js?v=20260716x"></script>
+<script src="js/data.js?v=20260726a"></script>
+<script src="js/auth.js?v=20260726a"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1836,14 +1869,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260716x"></script>
-<script src="js/ui.js?v=20260716x"></script>
-<script src="js/attachments.js?v=20260716x"></script>
-<script src="js/scenarios.js?v=20260716x"></script>
-<script src="js/chat.js?v=20260716x"></script>
-<script src="js/tree.js?v=20260716x"></script>
-<script src="js/app.js?v=20260716x"></script>
-<script src="js/member-view.js?v=20260716x"></script>
+<script src="js/charts.js?v=20260726a"></script>
+<script src="js/ui.js?v=20260726a"></script>
+<script src="js/attachments.js?v=20260726a"></script>
+<script src="js/scenarios.js?v=20260726a"></script>
+<script src="js/chat.js?v=20260726a"></script>
+<script src="js/tree.js?v=20260726a"></script>
+<script src="js/app.js?v=20260726a"></script>
+<script src="js/member-view.js?v=20260726a"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->
