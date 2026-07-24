@@ -644,6 +644,7 @@ const NAV_ROUTES = {
   // Leader Workspace — scoped to the node leader's subtree
   'leader-home':   () => renderIntelligence(),
   'leader-people': () => renderLeaderPeople(),
+  'operating-context': () => renderOperatingContext(),
   'leader-groups': () => renderLeaderGroups(),
   'data-sources':  () => renderDataSources(),
   assignments:     () => renderAssignments(),
@@ -703,6 +704,7 @@ const PAGE_TITLES = {
   // Leader Workspace — node leader scoped tools
   'leader-home':   'Home',
   'leader-people': 'My People',
+  'operating-context': 'Operating context',
   assignments:     'Assignments',
   'org-insights':  'Intelligence',
   'group-health':  'Intelligence',
@@ -5037,6 +5039,116 @@ async function _saveGroupAims(gid) {
   } catch (err) {
     if (savedEl) { savedEl.style.color = 'var(--danger)'; savedEl.textContent = `${err.message}`; }
   }
+}
+
+/* ── Operating context — how the team operates (governed intake) ──────────────
+   Leaders describe their operation in plain words (or a quick form); IntelliQ
+   extracts PROPOSED records and shows a confirmation preview. Nothing becomes a rule
+   until confirmed. Reuses /api/org-context/{preview,confirm,retire} — one boundary. */
+let _ocProposals = null;
+
+async function renderOperatingContext() {
+  const el = document.getElementById('operating-context-content');
+  if (!el) return;
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-label" style="margin-bottom:0.5rem">Describe how your team operates</div>
+      <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.6rem">
+        For example: “We play Saturday at 3pm. The head coach owns the game plan, and it must be ready 24 hours before kickoff.”
+        IntelliQ turns this into events, ownership, and preparation it can reason about — you confirm before anything is saved.
+      </div>
+      <textarea id="oc-text" class="search-input" rows="3" placeholder="Describe an event, who owns what, or what must be ready beforehand…"
+        style="width:100%;resize:vertical;font-family:inherit;line-height:1.5"></textarea>
+      <div style="margin-top:0.6rem"><button class="btn btn-accent btn-sm" onclick="ocPreview(this)">Preview</button></div>
+      <div id="oc-preview" style="margin-top:0.7rem"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-label" style="margin-bottom:0.6rem">What IntelliQ understands about your operation</div>
+      <div id="oc-records"><div style="color:var(--text-muted);font-size:0.82rem">Loading…</div></div>
+    </div>`;
+  _ocLoadRecords();
+}
+
+async function _ocLoadRecords() {
+  const el = document.getElementById('oc-records');
+  if (!el) return;
+  try {
+    const r = await fetch('/api/org-context', { headers: Auth._headers() });
+    const d = r.ok ? await r.json() : { records: [] };
+    const list = d.records || [];
+    if (!list.length) { el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Nothing yet. Describe an event or a responsibility above — even one is enough for IntelliQ to spot when preparation is missing.</div>`; return; }
+    const label = r => {
+      const f = r.fields || {};
+      if (r.type === 'event') return `📅 ${_escAdvisor(f.title || f.type || 'Event')}${f.startAt ? ' · ' + new Date(f.startAt).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : ''}`;
+      if (r.type === 'responsibility') return `👤 ${_escAdvisor(f.role || f.subject || 'Owner')} owns ${_escAdvisor((f.claimTypes || []).join(', ').replace(/_/g, ' '))}`;
+      if (r.type === 'requirement') return `✅ ${_escAdvisor((f.claimType || '').replace(/_/g, ' '))} required before the event`;
+      if (r.type === 'rhythm') return `🔁 ${_escAdvisor(f.process || 'Recurring')}${f.expectedOutput ? ' → ' + _escAdvisor(f.expectedOutput) : ''}`;
+      if (r.type === 'dependency') return `🔗 ${_escAdvisor((f.upstream || '').replace(/_/g, ' '))} before ${_escAdvisor((f.downstream || '').replace(/_/g, ' '))}`;
+      return _escAdvisor(r.type);
+    };
+    el.innerHTML = list.map(r => `
+      <div class="ds-recent-row">
+        <div class="ds-recent-main"><span class="ds-recent-snip">${label(r)}</span></div>
+        <div class="ds-recent-meta">${r.authority === 'organisation' ? 'Organisation record' : 'Unverified'} · <a href="#" onclick="ocRetire('${r.id}', event)" style="color:var(--danger)">remove</a></div>
+      </div>`).join('');
+  } catch (_) { el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Could not load.</div>`; }
+}
+
+async function ocPreview(btn) {
+  const text = (document.getElementById('oc-text')?.value || '').trim();
+  const box = document.getElementById('oc-preview');
+  if (!text) { if (box) box.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Describe something first.</div>`; return; }
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('/api/org-context/preview', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ text }) });
+    const d = await r.json();
+    if (d.blocked) { if (box) box.innerHTML = `<div style="font-size:0.82rem;color:var(--danger)">${_escAdvisor(d.message || 'That can’t become an operating rule.')}</div>`; return; }
+    if (!d.proposals || !d.proposals.length) { if (box) box.innerHTML = `<div style="font-size:0.82rem;color:var(--text-muted)">I couldn’t spot an event, owner, or requirement in that. Try naming a day/time, who owns something, or what must be ready beforehand.</div>`; return; }
+    _ocProposals = d.proposals;
+    const lines = (d.preview?.lines || []).map(l => `<li>${_escAdvisor(l)}</li>`).join('');
+    const effects = (d.preview?.effects || []).map(e => `<div style="font-size:0.76rem;color:var(--text-secondary)">• ${_escAdvisor(e)}</div>`).join('');
+    const warns = (d.warnings || []).map(w => `<div style="font-size:0.74rem;color:var(--warning)">⚠ ${_escAdvisor(w.message)}</div>`).join('');
+    if (box) box.innerHTML = `
+      <div class="card" style="background:var(--surface-2);border-color:var(--accent)">
+        <div class="card-label" style="margin-bottom:0.4rem">Save these operating rules?</div>
+        <ul style="margin:0 0 0.5rem 1rem;font-size:0.84rem">${lines}</ul>
+        ${effects}${warns}
+        <div style="font-size:0.72rem;color:var(--text-muted);margin:0.4rem 0">Authority: ${d.preview?.authority === 'organisation' ? 'organisation operating record' : 'shared — not yet verified'}</div>
+        <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+          <button class="btn btn-accent btn-sm" onclick="ocConfirm(this)">Confirm</button>
+          <button class="btn-ghost btn-sm" onclick="document.getElementById('oc-preview').innerHTML=''">Cancel</button>
+        </div>
+      </div>`;
+  } catch (e) { if (box) box.innerHTML = `<div style="font-size:0.82rem;color:var(--danger)">Could not preview.</div>`; }
+  finally { if (btn) btn.disabled = false; }
+}
+
+async function ocConfirm(btn) {
+  if (!_ocProposals) return;
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('/api/org-context/confirm', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ records: _ocProposals, source: 'conversation' }) });
+    const d = await r.json();
+    const box = document.getElementById('oc-preview');
+    if (!d.ok || !(d.created || []).length) { if (box) box.innerHTML = `<div style="font-size:0.82rem;color:var(--danger)">Couldn’t save${(d.rejected || []).length ? ' — ' + _escAdvisor((d.rejected[0].errors || [{}])[0].message || 'validation failed') : ''}.</div>`; return; }
+    _ocProposals = null;
+    const eff = (d.effects || []).map(e => `<div style="font-size:0.76rem;color:var(--text-secondary)">• ${_escAdvisor(e)}</div>`).join('');
+    if (box) box.innerHTML = `<div style="font-size:0.84rem;color:var(--success)">✓ Saved ${d.created.length} record${d.created.length !== 1 ? 's' : ''}. What IntelliQ can now do:</div>${eff}`;
+    const ta = document.getElementById('oc-text'); if (ta) ta.value = '';
+    _ocLoadRecords();
+  } catch (e) { showToast('Could not save', 'error'); }
+  finally { if (btn) btn.disabled = false; }
+}
+
+async function ocRetire(id, ev) {
+  if (ev && ev.preventDefault) ev.preventDefault();
+  if (!confirm('Remove this from what IntelliQ understands? It stays in history but stops affecting readiness.')) return;
+  try {
+    const r = await fetch('/api/org-context/' + encodeURIComponent(id) + '/retire', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({}) });
+    if (!r.ok) throw new Error();
+    _ocLoadRecords();
+  } catch (_) { showToast('Could not remove', 'error'); }
 }
 
 /* ── Knowledge intake — the ONE governed input door ───────────────────────────

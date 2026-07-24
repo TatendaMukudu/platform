@@ -21,6 +21,7 @@ const capture    = require('./ai/capture');
 const inquiry    = require('./ai/inquiry');
 const lifecycle  = require('./ai/lifecycle');
 const orgState   = require('./ai/org-state');
+const orgContext = require('./ai/org-context');
 const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
@@ -7726,9 +7727,14 @@ function _assistantAnswer(code, userId, question) {
    here. This is the ONE boundary every consumer uses. Private evidence never enters
    (the pool below mirrors the retrieval admissibility gate). RECOMMENDS only. */
 
-// Explicit org configuration (objectives/events/decisions/requirements/rhythms). The
-// seam for a future config UI/import; today it is seeded by admins/tests. Per org.
+// PROJECTION/cache seam (dev/test override). The DURABLE source is orgContextRecords
+// (governed, provenance-bearing); this store is merged in for tests/dev overrides.
 const orgStateConfig = {};
+// The durable, governed operating-context records (provenance · actor · org ·
+// visibility · authority · effective period · confirmation · supersession). Persisted
+// like everything else — NOT a side database. org-state projects the CURRENT effective
+// set from here. Per org.
+const orgContextRecords = {};
 // Projection cache — one slot per org, keyed by a fingerprint of evidence + config +
 // policy version, so any change invalidates it. Never crosses a tenant boundary.
 const orgStateCache = {};
@@ -7758,19 +7764,72 @@ function _orgEvidenceFingerprint(code) {
     if (e.status === 'active') { n++; const t = e.retrievedAt || e.observedAt || ''; if (t > newest) newest = t; }
     else changed++;
   }
-  return `${n}:${newest}:${changed}:${JSON.stringify(orgStateConfig[code] || {}).length}`;
+  // Include the durable operating-context records + any dev override, so a confirm/
+  // supersede/retire invalidates the projection cache too.
+  const ctx = (orgContextRecords[code] || []);
+  const ctxSig = `${ctx.length}:${ctx.filter(r => r.status !== 'active').length}`;
+  return `${n}:${newest}:${changed}:${ctxSig}:${JSON.stringify(orgStateConfig[code] || {}).length}`;
+}
+
+// The org-state configuration = the CURRENT effective projection of durable records,
+// merged with any dev/test override. This is the cache seam; the durable truth is
+// orgContextRecords.
+function _orgContextConfig(code) {
+  const projected = orgContext.projectConfig(orgContextRecords[code] || [], Date.now());
+  const ov = orgStateConfig[code] || {};
+  const merge = k => [...(projected[k] || []), ...(ov[k] || [])];
+  return { pack: ov.pack || _orgPack(code), objectives: merge('objectives'), events: merge('events'),
+    decisions: merge('decisions'), requirements: merge('requirements'), rhythms: merge('rhythms'),
+    dependencies: merge('dependencies'), responsibilities: merge('responsibilities'), fallbackOwner: ov.fallbackOwner || null };
 }
 
 function _buildOrgStateInputs(code) {
-  const cfg = orgStateConfig[code] || {};
-  const pack = _orgPack(code);
+  const cfg = _orgContextConfig(code);
   return {
-    organisation: { id: code, pack },
+    organisation: { id: code, pack: cfg.pack },
     structure: { responsibilities: cfg.responsibilities || [] },
-    configuration: { pack, objectives: cfg.objectives || [], events: cfg.events || [], decisions: cfg.decisions || [],
-      requirements: cfg.requirements || [], rhythms: cfg.rhythms || [], dependencies: cfg.dependencies || [], fallbackOwner: cfg.fallbackOwner || null },
+    configuration: cfg,
     evidence: _orgAdmissibleEvidence(code),
   };
+}
+
+/* ── OPERATING-CONTEXT governed write boundary — the ONE place context is persisted.
+   Validates each proposal, stamps provenance/authority/visibility/effective-period,
+   detects dependency cycles, and invalidates the org-state projection. Never persists
+   an invalid or forbidden record; authority comes from WHO confirms, not wording. */
+function _actorRole(code, userId) { return (orgUsers[code] && orgUsers[code][userId] && orgUsers[code][userId].role) || 'member'; }
+function _confirmOrgContext(code, userId, proposals, opts = {}) {
+  const role = _actorRole(code, userId);
+  const authority = orgContext.authorityFor(role);
+  const canShareOrg = _isLeader(code, userId);
+  const now = new Date().toISOString();
+  const created = [], rejected = [];
+  // Cycle check across existing + proposed dependencies (hard block).
+  const allDeps = (orgContextRecords[code] || []).filter(r => r.type === 'dependency' && r.status === 'active')
+    .map(r => r.fields).concat(proposals.filter(p => p.type === 'dependency').map(p => p.fields || p));
+  const cycle = orgContext.detectCycles(allDeps);
+  for (const p of (proposals || [])) {
+    const scope = p.scope || { kind: canShareOrg ? 'team' : 'team' };
+    const rec = { id: 'ctx_' + generateId(), org: code, type: p.type, fields: p.fields || {}, scope,
+      visibility: p.visibility || (canShareOrg ? 'organization' : 'group'), authority, actorId: userId, actorRole: role,
+      effectiveFrom: p.effectiveFrom || now, effectiveTo: p.effectiveTo || null, status: 'active',
+      supersedes: p.supersedes || null, supersededBy: null,
+      provenance: { source: opts.source || 'form', confirmedAt: now, confidence: p.confidence || 0.8, kind: 'explicit' },
+      confirmedAt: now, createdAt: now };
+    const v = orgContext.validate(rec, { actorCanShareOrg: canShareOrg });
+    if (p.type === 'dependency' && cycle.hasCycle) v.hardErrors.push({ code: 'dependency_cycle', message: 'This would create a dependency cycle.' });
+    if (!v.ok) { rejected.push({ type: p.type, errors: v.hardErrors }); continue; }
+    if (p.supersedes) { const old = (orgContextRecords[code] || []).find(r => r.id === p.supersedes); if (old) { old.status = 'superseded'; old.supersededBy = rec.id; old.effectiveTo = now; } }
+    (orgContextRecords[code] = orgContextRecords[code] || []).push(rec);
+    created.push(rec);
+  }
+  if (created.length) { delete orgStateCache[code]; scheduleSave(); }   // invalidate the projection
+  return { created, rejected };
+}
+// A redacted public view of a durable record (no internal actor/provenance internals).
+function _publicOrgContext(r) {
+  return { id: r.id, type: r.type, fields: r.fields, scope: r.scope, visibility: r.visibility, authority: r.authority,
+    status: r.status, effectiveFrom: r.effectiveFrom, effectiveTo: r.effectiveTo, supersededBy: r.supersededBy || null, confirmedAt: r.confirmedAt };
 }
 
 /* _getOrgState — the ONE internal state boundary. Cached by org + purpose + policy
@@ -7814,6 +7873,104 @@ app.get('/api/org-state', requireAuth, (req, res) => {
     console.warn('[org-state] failed:', e && e.message);
     res.status(200).json({ ok: false, mode: 'diagnostic', events: [], requirements: [], claimStates: [], readiness: [] });
   }
+});
+
+/* ─── OPERATING CONTEXT — governed intake for how the org operates ────────────
+   preview (no persist) → confirm (governed) → GET (list) → supersede/retire. All
+   writes converge on _confirmOrgContext. Fail closed with valid JSON. */
+
+// POST /api/org-context/preview — extract from a sentence OR validate structured
+// records; return the proposals + plain-language preview. NOTHING persists.
+app.post('/api/org-context/preview', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    const role = _actorRole(code, userId);
+    const b = req.body || {};
+    let proposals = [];
+    if (typeof b.text === 'string' && b.text.trim()) {
+      const ex = orgContext.extract(b.text, { now: Date.now() });
+      if (ex.blocked) return res.json({ ok: false, blocked: ex.blocked, message: 'That describes private or sensitive information — it cannot become an operating rule.', proposals: [], preview: null });
+      proposals = ex.proposals; var warnings = ex.warnings;
+    } else if (Array.isArray(b.records)) {
+      proposals = b.records;
+    }
+    const validated = proposals.map(p => ({ proposal: p, validation: orgContext.validate({ type: p.type, scope: p.scope || { kind: 'team' }, visibility: p.visibility, fields: p.fields || {} }, { actorCanShareOrg: _isLeader(code, userId) }) }));
+    const preview = orgContext.preview(proposals, { actorRole: role, visibility: _isLeader(code, userId) ? 'organization' : 'group' });
+    res.json({ ok: true, proposals, validated, warnings: warnings || [], preview, requiresConfirmation: true });
+  } catch (e) { console.warn('[org-context/preview] failed:', e && e.message); res.status(200).json({ ok: false, proposals: [], preview: null }); }
+});
+
+// POST /api/org-context/confirm — persist confirmed records through the governed
+// boundary. Members may submit (authority: shared-unverified); leaders make it
+// authoritative. Returns what was created + the plain-language effect.
+app.post('/api/org-context/confirm', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    const records = Array.isArray(req.body?.records) ? req.body.records : [];
+    if (!records.length) return res.status(400).json({ error: 'records required' });
+    const out = _confirmOrgContext(code, userId, records, { source: req.body?.source || 'form' });
+    const effects = orgContext.preview(out.created.map(r => ({ type: r.type, fields: r.fields, plainLanguage: null })), { actorRole: _actorRole(code, userId) }).effects;
+    res.json({ ok: true, created: out.created.map(_publicOrgContext), rejected: out.rejected, effects });
+  } catch (e) { console.warn('[org-context/confirm] failed:', e && e.message); res.status(200).json({ ok: false, created: [], rejected: [{ errors: [{ code: 'server_error' }] }] }); }
+});
+
+// GET /api/org-context — the current, active operating-context records (leader-only).
+app.get('/api/org-context', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const all = (orgContextRecords[code] || []);
+    res.json({ ok: true, records: all.filter(r => r.status === 'active').map(_publicOrgContext),
+      history: all.filter(r => r.status !== 'active').map(_publicOrgContext) });
+  } catch (e) { res.status(200).json({ ok: false, records: [], history: [] }); }
+});
+
+// POST /api/org-context/:id/supersede — create a NEW effective version; old is kept
+// as history (never mutated away). Leader-only.
+app.post('/api/org-context/:id/supersede', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const old = (orgContextRecords[code] || []).find(r => r.id === req.params.id && r.status === 'active');
+    if (!old) return res.status(404).json({ error: 'record not found' });
+    const out = _confirmOrgContext(code, userId, [{ type: old.type, fields: { ...old.fields, ...(req.body?.fields || {}) }, scope: old.scope, visibility: old.visibility, supersedes: old.id }], { source: 'edit' });
+    res.json({ ok: true, superseded: old.id, created: out.created.map(_publicOrgContext), rejected: out.rejected });
+  } catch (e) { res.status(200).json({ ok: false, created: [], rejected: [] }); }
+});
+
+// POST /api/org-context/:id/retire — mark no longer applicable (kept as history).
+app.post('/api/org-context/:id/retire', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const rec = (orgContextRecords[code] || []).find(r => r.id === req.params.id && r.status === 'active');
+    if (!rec) return res.status(404).json({ error: 'record not found' });
+    rec.status = 'retired'; rec.effectiveTo = new Date().toISOString();
+    delete orgStateCache[code]; scheduleSave();
+    res.json({ ok: true, retired: rec.id });
+  } catch (e) { res.status(200).json({ ok: false }); }
+});
+
+// POST /api/org-context/import/preview — validate a CSV/JSON import row-by-row.
+// Invalid rows are reported; valid rows are previewed. NOTHING persists.
+app.post('/api/org-context/import/preview', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    if (!_isLeader(code, userId)) return res.status(403).json({ error: 'leaders only' });
+    const b = req.body || {};
+    let rows = [];
+    if ((b.format || '').toLowerCase() === 'json') { try { const j = JSON.parse(b.content); rows = Array.isArray(j) ? j : [j]; } catch (_) { return res.json({ ok: false, error: 'invalid_json', valid: [], invalid: [] }); } }
+    else if ((b.format || '').toLowerCase() === 'csv') {
+      const parsed = intake.parse({ format: 'csv', content: b.content, sourceName: 'context-import' });
+      rows = (parsed.units || []).map(u => ({ type: (u.structured && u.structured.values && (u.structured.values.type || u.structured.values.Type)) || 'event', fields: (u.structured && u.structured.values) || {}, scope: { kind: 'team' } }));
+    }
+    const valid = [], invalid = [];
+    rows.forEach((r, i) => {
+      const v = orgContext.validate({ type: r.type, scope: r.scope || { kind: 'team' }, visibility: r.visibility, fields: r.fields || r }, { actorCanShareOrg: _isLeader(code, userId) });
+      if (v.ok) valid.push({ row: i, proposal: r }); else invalid.push({ row: i, errors: v.hardErrors });
+    });
+    res.json({ ok: true, total: rows.length, valid, invalid, requiresConfirmation: true });
+  } catch (e) { console.warn('[org-context/import] failed:', e && e.message); res.status(200).json({ ok: false, valid: [], invalid: [] }); }
 });
 
 /* GET /api/knowledge/health — the "what to keep / what to let go" view (leader-only).
@@ -8358,6 +8515,21 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
   // crash and never an ungrounded guess.
   let qa = null;
   if (cls.isQuestion) { try { qa = _assistantAnswer(code, userId, cls.questionText || text); } catch (_) { qa = null; } }
+
+  // OPERATING CONTEXT — if the message DESCRIBES how the org operates ("we play
+  // Saturday at 3", "the head coach owns the game plan"), extract PROPOSED structured
+  // records and offer a confirmation preview. It is NEVER persisted here — the user
+  // confirms via /api/org-context/confirm. Private/sensitive content is blocked.
+  let orgContextProposal = null;
+  try {
+    const ex = orgContext.extract(text, { now: Date.now() });
+    if (!ex.blocked && ex.proposals && ex.proposals.length && !saved) {
+      const role = _actorRole(code, userId);
+      orgContextProposal = { proposals: ex.proposals, warnings: ex.warnings || [],
+        preview: orgContext.preview(ex.proposals, { actorRole: role, visibility: _isLeader(code, userId) ? 'organization' : 'group' }),
+        authority: orgContext.authorityFor(role) };
+    }
+  } catch (_) {}
   // Make explicit whether the answer drew on the JUST-saved statement or pre-existing
   // evidence (needed by the later mixed-turn / contradiction features).
   if (qa && saved && (saved.evidenceIds || []).length)
@@ -8447,6 +8619,8 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
     // Bounded assigned-work context extension (authorised, released-fields-only) — NOT a second runtime contract.
     assignedWork: workCtx ? { items: workCtx.items.map(it => ({ id: it.id, title: it.title, status: it.status, needsRevision: it.needsRevision, releasedScore: it.releasedScore, hasReleasedFeedback: !!it.releasedFeedback })), basisIds: workCtx.basisIds, limitations: workCtx.limitations, ambiguous: workAmbiguous } : null,
     bounded: composed.ok, cites: composed.output.cites,
+    // A preview of operating-context records to CONFIRM (never persisted here).
+    orgContextProposal,
   };
 
   // Store the turn: the RAW input as an interaction artifact (by ref), the bounded artifact,
@@ -12085,7 +12259,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _retrieveGrounding, _indexEvidence, _evictEvidenceVector, _captureKnowledge, _isTextEvidence, _assistantAnswer, evidenceVectors, answerFeedback,
   // exported for the truth layer: universal evidence intake
   _ingestArtifact, _deleteImport, _sanitizeBriefingForLeader, _stripLeaderNumbers, _deriveOrgUncertainties,
-  _getOrgState, _buildOrgStateInputs, orgStateConfig };
+  _getOrgState, _buildOrgStateInputs, orgStateConfig, orgContextRecords, _confirmOrgContext };
 
 if (require.main === module) (async () => {
   try {

@@ -143,6 +143,10 @@ const WORKSPACE_MODULES = [
   // ── Team — shown when the user leads ≥1 node (scoped server-side) ───────
   { section: 'Team', id: 'leader-home',   icon: ICON.people, label: 'Team',      leaderOnly: true }, // the people they lead
   { section: null,    id: 'leader-people', icon: ICON.person, label: 'My People', leaderOnly: true },
+  // How the team operates — the governed inputs (events, ownership, prep, rhythms)
+  // that let IntelliQ reason about readiness. Leaders describe it; nothing is a rule
+  // until confirmed.
+  { section: null,    id: 'operating-context', icon: ICON.building, label: 'Operating context', leaderOnly: true },
 
   // ── Setup — admin / superadmin (people · org aims & values · settings) ──
   { section: 'Setup', id: 'people',       icon: ICON.person,   label: 'People',       permission: 'view_members'    },
