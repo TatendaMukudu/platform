@@ -1518,48 +1518,38 @@ const MemberApp = {
     if (!assigned.length) {
       html += `<div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">Nothing assigned right now.</div>`;
     } else {
-      // Contextual assistance link — reads as "ask IntelliQ", not a secondary app button.
-      const askLink = (a, label) => `<button class="aw-ask" onclick="MemberApp.askAboutWork('${a.id}', ${JSON.stringify(a.title)})"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15l-1.9-4.1L5.5 9l4.6-1.4z"/></svg>${label}</button>`;
+      // Member cards are driven by the server-derived PROJECTION (ai/assessment-view):
+      // a plain-language reading, supporting signals, a concrete next step, and — only
+      // when it's a real individual comment — the leader's feedback. Never a bare score,
+      // never placeholder feedback shown as though it were personal.
       html += assigned.map(a => {
-        const badge = a.status === 'returned'
-          ? `<span class="aw-badge aw-badge--returned">Returned</span>`
-          : a.status === 'submitted'
-          ? `<span class="aw-badge aw-badge--submitted">Submitted</span>`
-          : `<span class="aw-badge aw-badge--todo">To do</span>`;
-        let body = '';
-        if (a.status === 'assigned') {
-          const leaderFirst = esc((a.assignerName || 'Your leader').split(' ')[0]);
-          // Assistance is the ONE IntelliQ composer (no per-item chat). The record capability —
-          // filling and submitting the response — stays here as a form.
-          body = `<div class="aw-body">
-            ${a.description ? `<p class="aw-brief"><span class="aw-brief-by">${leaderFirst}</span> ${esc(a.description)}</p>` : ''}
-            <div class="aw-fields">
-              ${(a.fields && a.fields.length ? a.fields : [{ label: 'Your response', hint: '' }]).map((f) => `
-                <label class="aw-field">
-                  <span class="aw-field-label">${esc(f.label)}</span>
-                  ${f.hint ? `<span class="aw-field-hint">${esc(f.hint)}</span>` : ''}
-                  <textarea class="note-input" data-field="${esc(f.label)}" rows="2"></textarea>
-                </label>`).join('')}
-            </div>
-            <div class="aw-actions">
-              <button class="btn-primary btn-sm" onclick="MemberApp._assessSubmit('${a.id}', this)">Send to ${leaderFirst}</button>
-              ${askLink(a, 'Ask IntelliQ about this')}
-            </div>
-          </div>`;
-        } else if (a.status === 'submitted') {
-          body = `<div class="aw-body"><p class="aw-waiting">Waiting for review from ${esc(a.assignerName)}.</p></div>`;
-        } else if (a.status === 'returned') {
-          body = `<div class="aw-body">
-            ${a.score != null ? `<div class="aw-score"><span class="aw-score-num">${a.score}</span><span class="aw-score-max">/ 100</span></div>` : ''}
-            ${a.feedback ? `<div class="aw-feedback"><div class="aw-feedback-by">${esc(a.assignerName)}</div><p>${esc(a.feedback)}</p></div>` : ''}
-            ${askLink(a, 'Ask IntelliQ about this feedback')}
-          </div>`;
-        }
+        const p = a.projection || {};
+        const complete = !!p.complete;
+        const strength = (p.strengths || [])[0];
+        const attention = (p.attentionAreas || [])[0];
+        const nextStep = (p.nextActions || [])[0];
+        const human = p.feedbackKind === 'human' ? p.humanFeedback : '';
+        const lims = (p.limitations || []);
+        const cta = complete
+          ? `<button class="btn-outline btn-sm" onclick="MemberApp.askAboutWork('${a.id}', ${JSON.stringify(a.title)})">Ask IntelliQ about this</button>`
+          : `<button class="btn-primary btn-sm" onclick="MemberApp._convoStart('${a.id}', this)">${p.statusLabel === 'Not started' ? 'Start with IntelliQ' : 'Continue conversation'}</button>`;
         return `<div class="aw-item">
           <div class="aw-head">
             <div class="aw-title">${esc(a.title)} <span class="aw-kind">${kind(a.kind)}</span></div>
-            ${badge}
-          </div>${body}</div>`;
+            <span class="aw-badge aw-badge--${complete ? 'returned' : (p.statusLabel === 'In progress' ? 'submitted' : 'todo')}">${esc(p.statusLabel || a.status)}</span>
+          </div>
+          <div class="aw-body">
+            ${p.summary ? `<p class="aw-summary" style="font-size:0.86rem;color:var(--text-secondary);margin:0 0 0.4rem">${esc(p.summary)}</p>` : ''}
+            ${strength ? `<div style="font-size:0.8rem;margin:0.15rem 0"><span style="color:var(--success);font-weight:600">Strength · </span>${esc(strength)}</div>` : ''}
+            ${attention ? `<div style="font-size:0.8rem;margin:0.15rem 0"><span style="color:var(--warning);font-weight:600">Worth a look · </span>${esc(attention)}</div>` : ''}
+            ${nextStep ? `<div style="font-size:0.82rem;margin:0.3rem 0;color:var(--text-primary)"><strong>Next:</strong> ${esc(nextStep)}</div>` : ''}
+            ${human ? `<div class="aw-feedback"><div class="aw-feedback-by">From ${esc(a.assignerName)}</div><p>${esc(human)}</p></div>` : ''}
+            ${p.optionalScore && p.optionalScore.show ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.3rem">Score underneath: ${p.optionalScore.value} / ${p.optionalScore.max}</div>` : ''}
+            ${lims.length ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.3rem">${lims.map(esc).join(' · ')}</div>` : ''}
+            <div class="aw-actions" style="margin-top:0.5rem">${cta}</div>
+            <div id="convo-${a.id}" class="convo-panel" style="display:none;margin-top:0.6rem"></div>
+          </div>
+        </div>`;
       }).join('');
     }
     html += `</details>`;
@@ -1803,6 +1793,105 @@ const MemberApp = {
       this.showToast(`Assigned to ${ids.length} `, 'success');
       this._renderAssessments();
     } catch (e) { this.showToast('Could not assign', 'error'); if (btn) { btn.disabled = false; btn.textContent = 'Assign'; } }
+  },
+
+  /* ── Grounded assessment conversation (ai/conversation via /api/conversation/*) ──
+     A member fills an assessment by TALKING to IntelliQ: it asks only what it doesn't
+     already know, shows exactly what will be recorded, and writes only on confirm. The
+     panel is a small in-card dialogue; the durable truth is the confirmed evidence. */
+  async _convoStart(id, btn) {
+    const panel = document.getElementById('convo-' + id);
+    if (!panel) return;
+    if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+    panel.style.display = 'block';
+    panel.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Starting…</div>`;
+    try {
+      const r = await fetch('/api/conversation/start', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ purpose: 'assessment', targetId: id }) });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'start_failed');
+      this._convoRender(id, d);
+    } catch (e) { panel.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't start right now. <button class="btn-ghost btn-sm" onclick="MemberApp._convoStart('${id}')">Try again</button></div>`; }
+  },
+  _convoRender(id, d) {
+    const panel = document.getElementById('convo-' + id);
+    if (!panel) return;
+    const esc = t => this._escape(t || '');
+    if (d.complete || !d.question) {
+      panel.innerHTML = `<div style="font-size:0.82rem;color:var(--success)">All done — thanks. Your leader will review it.</div>`;
+      setTimeout(() => this._renderAssessments(), 900);
+      return;
+    }
+    panel.dataset.session = d.sessionId || panel.dataset.session || '';
+    panel.dataset.claim = d.question.claimRef || '';
+    panel.innerHTML = `
+      ${d.orientation ? `<div style="font-size:0.76rem;color:var(--text-muted);margin-bottom:0.4rem">${esc(d.orientation)}</div>` : ''}
+      <div style="font-size:0.86rem;font-weight:600;margin-bottom:0.4rem">${esc(d.question.text)}</div>
+      <textarea id="convo-input-${id}" class="note-input" rows="3" placeholder="Answer in your own words…"></textarea>
+      <div style="display:flex;gap:0.4rem;margin-top:0.4rem;flex-wrap:wrap">
+        <button class="btn-primary btn-sm" onclick="MemberApp._convoAnswer('${id}')">Send</button>
+        <button class="btn-ghost btn-sm" onclick="MemberApp._convoAnswer('${id}', true)">Not applicable</button>
+        <button class="btn-ghost btn-sm" style="margin-left:auto;color:var(--text-muted)" onclick="MemberApp._convoAbandon('${id}')">Close</button>
+      </div>
+      <div id="convo-msg-${id}" style="font-size:0.76rem;color:var(--text-muted);margin-top:0.3rem"></div>`;
+  },
+  async _convoAnswer(id, notApplicable) {
+    const panel = document.getElementById('convo-' + id);
+    const sid = panel && panel.dataset.session;
+    if (!sid) return;
+    const input = document.getElementById('convo-input-' + id);
+    const text = input ? input.value.trim() : '';
+    if (!notApplicable && !text) { this.showToast('Write an answer first', 'warning'); return; }
+    const msg = document.getElementById('convo-msg-' + id);
+    if (msg) msg.textContent = 'Thinking…';
+    try {
+      const r = await fetch(`/api/conversation/${encodeURIComponent(sid)}/answer`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ text, notApplicable: !!notApplicable }) });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'answer_failed');
+      if (d.needsClarification) { if (msg) msg.textContent = d.message || 'Could you say a bit more?'; return; }
+      this._convoPreview(id, sid, d.preview);
+    } catch (e) { if (msg) msg.textContent = 'Something went wrong — try again.'; }
+  },
+  _convoPreview(id, sid, preview) {
+    const panel = document.getElementById('convo-' + id);
+    if (!panel || !preview) return;
+    const esc = t => this._escape(t || '');
+    panel.innerHTML = `
+      <div style="font-size:0.76rem;color:var(--text-muted);margin-bottom:0.3rem">Here's exactly what I'll record — nothing is saved until you confirm:</div>
+      <div style="font-size:0.84rem;padding:0.5rem 0.6rem;border-left:2px solid var(--accent);background:var(--surface-alt,rgba(127,127,127,0.06));border-radius:6px">${esc(preview.willRecord)}</div>
+      <div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.3rem">${esc(preview.expectedEffect || '')}${preview.corroborationNeeded ? ' It\'ll be kept as tentative.' : ''}</div>
+      <div style="display:flex;gap:0.4rem;margin-top:0.5rem">
+        <button class="btn-primary btn-sm" onclick="MemberApp._convoConfirm('${id}', '${esc(preview.proposalFingerprint)}')">Confirm &amp; record</button>
+        <button class="btn-ghost btn-sm" onclick="MemberApp._convoResume('${id}')">Edit answer</button>
+      </div>`;
+  },
+  async _convoConfirm(id, fp) {
+    const panel = document.getElementById('convo-' + id);
+    const sid = panel && panel.dataset.session;
+    if (!sid) return;
+    panel.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Recording…</div>`;
+    try {
+      const r = await fetch(`/api/conversation/${encodeURIComponent(sid)}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalFingerprint: fp }) });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'confirm_failed');
+      this._convoRender(id, { ...d, sessionId: sid });
+    } catch (e) { panel.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't record — <button class="btn-ghost btn-sm" onclick="MemberApp._convoResume('${id}')">try again</button></div>`; }
+  },
+  async _convoResume(id) {
+    const panel = document.getElementById('convo-' + id);
+    const sid = panel && panel.dataset.session;
+    if (!sid) { return this._convoStart(id); }
+    try {
+      const r = await fetch(`/api/conversation/${encodeURIComponent(sid)}`, { headers: this._authHeaders() });
+      const d = await r.json();
+      if (!d.ok) throw new Error();
+      this._convoRender(id, { ...d, sessionId: sid });
+    } catch (e) { this._convoStart(id); }
+  },
+  async _convoAbandon(id) {
+    const panel = document.getElementById('convo-' + id);
+    const sid = panel && panel.dataset.session;
+    if (sid) { try { await fetch(`/api/conversation/${encodeURIComponent(sid)}/abandon`, { method: 'POST', headers: this._authHeaders() }); } catch (_) {} }
+    if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
   },
 
   async _assessSubmit(id, btn) {

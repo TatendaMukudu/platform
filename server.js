@@ -25,6 +25,8 @@ const orgContext = require('./ai/org-context');
 const readiness  = require('./ai/readiness');
 const orgMemory  = require('./ai/org-memory');
 const orgGraph   = require('./ai/org-graph');
+const conversation   = require('./ai/conversation');
+const assessmentView = require('./ai/assessment-view');
 const orgLearning= require('./ai/org-learning');
 const playbook   = require('./ai/org-playbook');
 const intel      = require('./ai/intelligence');
@@ -112,6 +114,7 @@ function scheduleSave() {
         orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
         proactivePrefs, insightSuppression, answerFeedback,
         orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
+        conversationSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -650,6 +653,11 @@ const pendingActions  = {};  // `orgCode:userId` → [{ id, action, summary, pay
 // pinned how-to references anyone can look back at. `orgCode` → [ ... ].
 const assessmentTemplates   = {};  // [{ id, title, description, kind, fields:[{label,hint}], createdBy, createdByName, createdAt }]
 const assessmentAssignments = {};  // [{ id, templateId, title, kind, fields, assignerId/Name, assigneeId/Name, status, response:{}, feedback, score, assignedAt, submittedAt, returnedAt }]
+// GROUNDED CONVERSATION SESSIONS — coordination state for the intake dialogue (ai/conversation).
+// A session tracks progress; it is NEVER evidence and never enters org-state. Confirmed
+// canonical evidence remains the durable truth; the session is only where the dialogue is.
+const conversationSessions  = {};  // orgCode → { sessionId → session }
+const CONVO_CAP = 500;
 const orgTutorials          = {};  // [{ id, title, body, url, kind, createdBy, createdByName, createdAt }]
 // The Studio — each person's conversation-first space: a running chat with IntelliQ
 // plus the plans they capture there. Keyed `orgCode:userId`. Assigned work and pins
@@ -4618,7 +4626,7 @@ app.get('/api/assessments', requireAuth, (req, res) => {
     ok: true,
     canCreate: leader,
     templates: safeMap(assessmentTemplates[code], t => ({ id: t.id, title: t.title, description: t.description, kind: t.kind, fields: t.fields, createdByName: t.createdByName, ...templateStats(t) })),
-    assigned: safeMap(all.filter(a => a.assigneeId === userId), _publicAssignment),           // things I must fill
+    assigned: safeMap(all.filter(a => a.assigneeId === userId), a => ({ ..._publicAssignment(a), projection: _assessmentMemberProjection(code, a) })),   // things I must fill — with the member-facing projection
     issued:   leader ? safeMap(all.filter(a => a.assignerId === userId), _publicAssignment) : [], // things I gave out
     tutorials: safeMap(orgTutorials[code], t => ({ id: t.id, title: t.title, body: t.body, url: t.url, kind: t.kind, createdByName: t.createdByName, createdAt: t.createdAt })),
   });
@@ -4952,6 +4960,227 @@ app.post('/api/assessments/:id/submit', requireAuth, (req, res) => {
   const r = _submitAssignment(code, userId, req.params.id, { response: req.body?.response, note: req.body?.note });
   if (!r.ok) return res.status(r.status).json({ error: r.error });
   res.json({ ok: true, assignment: r.assignment, iteration: r.iteration });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GROUNDED CONVERSATION ENGINE (ai/conversation) — a reusable intake dialogue for
+   assessments + check-ins: determine what is already known → ask only the missing →
+   adjudicate (via the EXISTING adjudicateAnswer) → preview a governed write → confirm →
+   re-derive the outcome from canonical evidence. The session is coordination only; it is
+   NEVER evidence and never enters org-state. The server derives ALL trusted scope/target
+   context on every request; client-supplied actor/subject/purpose are never trusted.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// Prior admissible answers for each claim of an assignment — contentless summaries only.
+function _conversationEvidenceByRef(code, assignmentId) {
+  const out = {};
+  for (const e of (evidenceLog[code] || [])) {
+    if (e.status !== 'active' || !e.attributes || e.attributes.primitive !== 'conversation_answer' || e.attributes.assignmentId !== assignmentId) continue;
+    const ref = e.attributes.claimRef; if (!ref) continue;
+    (out[ref] = out[ref] || []).push({
+      at: e.retrievedAt || e.observedAt,
+      authority: e.attributes.authorityClass || (e.source === 'system_of_record' ? 'authoritative' : 'reported'),
+      corroborationNeeded: e.attributes.corroborationNeeded === true, definite: e.attributes.definite !== false,
+      notApplicable: e.attributes.notApplicable === true, contentHash: e.attributes.contentHash || _contentHash(e.valueText || ''),
+    });
+  }
+  return out;
+}
+// The assignment a session targets, with the actor's ownership re-derived server-side.
+function _conversationTarget(code, session) {
+  const a = (assessmentAssignments[code] || []).find(x => x.id === session.targetId);
+  if (!a) return null;
+  return a;
+}
+function _conversationPlan(code, session, now = Date.now()) {
+  const a = _conversationTarget(code, session);
+  if (!a) return null;
+  const fields = (a.fields && a.fields.length) ? a.fields : [{ label: 'Your response', hint: '' }];
+  const definition = { version: a.templateId || 0, purpose: session.purpose, fields, freshDays: session.purpose === 'checkin' ? 1 : 30 };
+  return conversation.buildPlan({ definition, now, purpose: session.purpose, subjectRef: session.subjectRef,
+    evidenceByRef: _conversationEvidenceByRef(code, session.targetId) });
+}
+// Is a claim already satisfied authoritatively (so a fresh answer would be redundant)?
+function _claimHasAuthoritative(plan, claimRef) {
+  const c = (plan.claims || []).find(x => x.ref === claimRef);
+  return !!(c && (c.evidence || []).some(e => e.authority === 'authoritative' && e.definite !== false));
+}
+// GOVERNED write of one conversation answer → canonical evidence (NOT promoted → stays out
+// of org-state; feeds only the assessment projection). Full provenance; node-scoped.
+function _writeConversationAnswer(code, session, proposal) {
+  const now = new Date().toISOString();
+  const authoritative = proposal.authorityClass === 'authoritative';
+  const rec = _recordEvidence(code, {
+    provider: 'user', source: authoritative ? 'system_of_record' : 'reported',
+    externalId: `convo:${session.sessionId}:${proposal.claimRef}:${now}`,
+    subjectId: session.subjectRef, ownerRef: session.actorRef, type: 'knowledge',
+    label: `${proposal.claimLabel} — ${session.purpose} response`,
+    valueText: String(proposal.valueText || '').slice(0, 4000), observedAt: now, retrievedAt: now,
+    confidence: authoritative ? 'high' : 'reported', visibility: session.visibilityClass || 'normal',
+    attributes: { primitive: 'conversation_answer', assignmentId: session.targetId, claimRef: proposal.claimRef,
+      sessionId: session.sessionId, purpose: session.purpose, corroborationNeeded: proposal.corroborationNeeded === true,
+      definite: true, notApplicable: proposal.notApplicable === true, authorityClass: proposal.authorityClass,
+      answeringActor: session.actorRef, contentHash: _contentHash(proposal.valueText || ''),
+      ...(session.nodeRef ? { nodeScope: session.nodeRef } : {}) },
+  });
+  return rec;
+}
+// Refresh a session's derived claim buckets + status from the CURRENT plan (re-derived).
+function _refreshSession(code, session, now = Date.now()) {
+  const plan = _conversationPlan(code, session, now);
+  if (!plan) return { plan: null };
+  session.requiredClaimRefs = plan.requiredClaims.map(c => c.ref);
+  session.resolvedClaimRefs = plan.resolvedClaims.map(c => c.ref);
+  session.openClaimRefs = plan.openClaims.map(c => c.ref);
+  session.updatedAt = new Date().toISOString();
+  const done = conversation.completion(plan.claims);
+  if (done.complete && session.status !== 'complete') session.status = session.status === 'abandoned' ? 'abandoned' : 'awaiting_submit';
+  return { plan, done };
+}
+// The member-facing projection for one assignment (interpretation, not a bare score).
+function _assessmentMemberProjection(code, a) {
+  const byRef = _conversationEvidenceByRef(code, a.id);
+  const fields = (a.fields && a.fields.length) ? a.fields : [{ label: 'Your response' }];
+  const req = conversation.requiredClaims({ fields });
+  const cls = conversation.classifyClaims(req, { evidenceByRef: byRef, now: Date.now() });
+  const answeredCount = cls.filter(c => c.state === 'already_known' || c.state === 'not_applicable').length;
+  const partialCount = cls.filter(c => c.state === 'partially_known').length;
+  // Duplicate/sample feedback detection: compare against this member's OTHER assignments.
+  const others = (assessmentAssignments[code] || []).filter(x => x.assigneeId === a.assigneeId && x.id !== a.id).map(x => x.feedback || '');
+  return assessmentView.project({ title: a.title, status: a.status, requiredCount: req.length,
+    answeredCount, partialCount, feedback: a.feedback || '', otherFeedbackTexts: others,
+    score: Number.isFinite(a.score) ? a.score : null, scoreMax: Number.isFinite(a.score) ? 100 : null });
+}
+function _publicSession(s, extra = {}) {
+  return { sessionId: s.sessionId, purpose: s.purpose, targetId: s.targetId, status: s.status,
+    required: (s.requiredClaimRefs || []).length, resolved: (s.resolvedClaimRefs || []).length,
+    open: (s.openClaimRefs || []).length, ...extra };
+}
+
+// POST /api/conversation/start { purpose, targetId } — begin (or resume) an intake dialogue.
+app.post('/api/conversation/start', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    const purpose = req.body && (req.body.purpose === 'checkin' ? 'checkin' : 'assessment');
+    const targetId = String(req.body && req.body.targetId || '');
+    const a = (assessmentAssignments[code] || []).find(x => x.id === targetId);
+    if (!a) return res.status(404).json({ ok: false, error: 'target_not_found' });
+    if (a.assigneeId !== userId) return res.status(403).json({ ok: false, error: 'not_your_assessment' });   // actor derived server-side
+    const store = conversationSessions[code] = conversationSessions[code] || {};
+    // Resume an existing active session for this member+target rather than duplicating.
+    let session = Object.values(store).find(s => s.targetId === targetId && s.actorRef === userId && ['active', 'awaiting_confirmation', 'awaiting_submit'].includes(s.status));
+    const now = new Date().toISOString();
+    if (!session) {
+      session = { sessionId: 'cs_' + generateId(), orgId: code, actorRef: userId, subjectRef: userId,
+        nodeRef: _primaryNodeScope(code, userId), purpose, targetType: 'assessment', targetId,
+        visibilityClass: 'normal', status: 'active', requiredClaimRefs: [], resolvedClaimRefs: [], openClaimRefs: [],
+        askedQuestionFingerprints: [], answerEvidenceRefs: [], pendingProposal: null, createdAt: now, updatedAt: now, completedAt: null };
+      store[session.sessionId] = session;
+      const ids = Object.keys(store); if (ids.length > CONVO_CAP) delete store[ids[0]];
+    }
+    const { plan, done } = _refreshSession(code, session);
+    scheduleSave();
+    if (done && done.complete) return res.json({ ok: true, ..._publicSession(session), orientation: plan.orientation, complete: true, question: null, projection: _assessmentMemberProjection(code, a) });
+    const q = conversation.nextQuestion(plan);
+    res.json({ ok: true, ..._publicSession(session), orientation: plan.orientation, complete: false, question: q ? { claimRef: q.claimRef, text: q.question } : null });
+  } catch (e) { console.warn('[conversation/start] failed:', e && e.message); res.status(200).json({ ok: false, error: 'start_failed' }); }
+});
+
+// POST /api/conversation/:sessionId/answer { text, notApplicable? } — adjudicate + preview (no write).
+app.post('/api/conversation/:sessionId/answer', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    const session = (conversationSessions[code] || {})[String(req.params.sessionId)];
+    if (!session || session.actorRef !== userId) return res.status(404).json({ ok: false, error: 'session_not_found' });
+    if (['complete', 'abandoned'].includes(session.status)) return res.status(409).json({ ok: false, error: 'session_' + session.status });
+    const { plan } = _refreshSession(code, session);
+    if (!plan) return res.status(404).json({ ok: false, error: 'target_not_found' });
+    const q = conversation.nextQuestion(plan);
+    if (!q) return res.json({ ok: true, complete: true, question: null });   // nothing left to ask
+    const claim = plan.claims.find(c => c.ref === q.claimRef);
+    // Self-assessment: the member owns their OWN reflection (open claim). Factual claims
+    // follow real ownership (not implemented for assessments in this slice).
+    const actorIsOwner = claim.kind === 'open' && session.subjectRef === userId;
+    const adj = conversation.adjudicate({ answer: String(req.body && req.body.text || ''), claim, actorIsOwner,
+      actorIsMember: true, hasExistingAuthoritative: _claimHasAuthoritative(plan, claim.ref),
+      notApplicable: req.body && req.body.notApplicable === true, adjudicateAnswer: inquiry.adjudicateAnswer });
+    if (!adj.proposal) {   // ambiguous / unrelated → clarify, never create evidence
+      return res.json({ ok: true, needsClarification: true, outcome: adj.outcome, question: { claimRef: q.claimRef, text: q.question },
+        message: adj.outcome === 'ambiguous' ? 'I didn’t quite catch an answer to that — could you say a bit more?' : 'That doesn’t look like an answer to the question — mind having another go?' });
+    }
+    const resolves = conversation.resolvesClaim(claim, adj);
+    const proposal = conversation.proposalFrom(adj, { claim, subjectRef: session.subjectRef, visibilityClass: session.visibilityClass, sessionId: session.sessionId, resolves });
+    session.pendingProposal = proposal; session.status = 'awaiting_confirmation'; session.updatedAt = new Date().toISOString();
+    scheduleSave();
+    res.json({ ok: true, outcome: adj.outcome, preview: {
+      proposalFingerprint: proposal.fingerprint, claimRef: proposal.claimRef, willRecord: proposal.valueText,
+      subject: 'you', visibility: proposal.visibility, trust: proposal.authorityClass, corroborationNeeded: proposal.corroborationNeeded,
+      resolvesClaim: proposal.resolvesClaim, expectedEffect: resolves ? 'This part will count as covered (a projection estimate; the result is re-derived on confirm).' : 'This will be recorded but kept as tentative.' } });
+  } catch (e) { console.warn('[conversation/answer] failed:', e && e.message); res.status(200).json({ ok: false, error: 'answer_failed' }); }
+});
+
+// POST /api/conversation/:sessionId/confirm { proposalFingerprint } — the governed write.
+app.post('/api/conversation/:sessionId/confirm', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    const session = (conversationSessions[code] || {})[String(req.params.sessionId)];
+    if (!session || session.actorRef !== userId) return res.status(404).json({ ok: false, error: 'session_not_found' });
+    const pending = session.pendingProposal;
+    if (!pending || pending.fingerprint !== String(req.body && req.body.proposalFingerprint)) return res.status(409).json({ ok: false, error: 'no_matching_pending_proposal' });
+    const rec = _writeConversationAnswer(code, session, pending);
+    if (rec && rec.envelope) session.answerEvidenceRefs.push(rec.envelope.id);
+    if (!session.askedQuestionFingerprints.includes(pending.claimRef)) session.askedQuestionFingerprints.push(pending.claimRef);
+    session.pendingProposal = null; session.status = 'active';
+    const { plan, done } = _refreshSession(code, session);   // re-derive from the NEW evidence
+    const a = _conversationTarget(code, session);
+    if (done && done.complete) {
+      // All parts gathered → submit through the EXISTING governed path so leaders review as
+      // today. Response is reconstructed from the recorded answers (latest per claim).
+      const byRef = _conversationEvidenceByRef(code, session.targetId);
+      const response = {};
+      for (const f of (a.fields && a.fields.length ? a.fields : [{ label: 'Your response' }])) {
+        const ref = conversation._refOf(f.ref || f.label);
+        const ev = (evidenceLog[code] || []).filter(e => e.status === 'active' && e.attributes && e.attributes.primitive === 'conversation_answer' && e.attributes.assignmentId === session.targetId && e.attributes.claimRef === ref)
+          .sort((x, y) => new Date(y.retrievedAt || y.observedAt) - new Date(x.retrievedAt || x.observedAt))[0];
+        if (ev) response[f.label] = String(ev.valueText || '').replace(new RegExp('^' + (f.label || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':\\s*', 'i'), '');
+      }
+      _submitAssignment(code, userId, session.targetId, { response });
+      session.status = 'complete'; session.completedAt = new Date().toISOString();
+      scheduleSave();
+      return res.json({ ok: true, complete: true, question: null, projection: _assessmentMemberProjection(code, _conversationTarget(code, session)) });
+    }
+    scheduleSave();
+    const q = conversation.nextQuestion(plan);
+    res.json({ ok: true, complete: false, recorded: true, question: q ? { claimRef: q.claimRef, text: q.question } : null,
+      projection: _assessmentMemberProjection(code, a) });
+  } catch (e) { console.warn('[conversation/confirm] failed:', e && e.message); res.status(200).json({ ok: false, error: 'confirm_failed' }); }
+});
+
+// GET /api/conversation/:sessionId — resume: re-derive the active question (never replay).
+app.get('/api/conversation/:sessionId', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    const session = (conversationSessions[code] || {})[String(req.params.sessionId)];
+    if (!session || session.actorRef !== userId) return res.status(404).json({ ok: false, error: 'session_not_found' });
+    const { plan, done } = _refreshSession(code, session);
+    if (!plan) return res.status(404).json({ ok: false, error: 'target_not_found' });
+    const a = _conversationTarget(code, session);
+    if ((done && done.complete) || session.status === 'complete') return res.json({ ok: true, ..._publicSession(session), complete: true, question: null, projection: _assessmentMemberProjection(code, a) });
+    const q = conversation.nextQuestion(plan);
+    res.json({ ok: true, ..._publicSession(session), orientation: plan.orientation, complete: false, question: q ? { claimRef: q.claimRef, text: q.question } : null });
+  } catch (e) { console.warn('[conversation/resume] failed:', e && e.message); res.status(200).json({ ok: false, error: 'resume_failed' }); }
+});
+
+// POST /api/conversation/:sessionId/abandon — no writes; unconfirmed answers never persist.
+app.post('/api/conversation/:sessionId/abandon', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    const session = (conversationSessions[code] || {})[String(req.params.sessionId)];
+    if (!session || session.actorRef !== userId) return res.status(404).json({ ok: false, error: 'session_not_found' });
+    session.pendingProposal = null; session.status = 'abandoned'; session.updatedAt = new Date().toISOString();
+    scheduleSave();
+    res.json({ ok: true, status: 'abandoned' });
+  } catch (e) { res.status(200).json({ ok: false }); }
 });
 
 /* POST /api/assessments/:id/return — the assigner reviews: feedback + optional score. */
@@ -12807,6 +13036,7 @@ function _loadAllStores(data) {
   Object.assign(orgObservations,   data.orgObservations   || {});
   Object.assign(orgPlaybook,       data.orgPlaybook       || {});
   Object.assign(orgPlaybookDismissed, data.orgPlaybookDismissed || {});
+  Object.assign(conversationSessions, data.conversationSessions || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -12890,7 +13120,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: learning engine (Phase B1) — longitudinal observations
   orgObservations, _refreshOrgObservations, _publicObservations,
   // exported for the truth layer: learning engine (Phase B2) — candidates + governed playbook
-  orgPlaybook, orgPlaybookDismissed, _deriveOrgCandidates };
+  orgPlaybook, orgPlaybookDismissed, _deriveOrgCandidates,
+  // exported for the truth layer: grounded conversation engine (assessment/check-in intake)
+  conversationSessions, _assessmentMemberProjection, _conversationEvidenceByRef };
 
 if (require.main === module) (async () => {
   try {
