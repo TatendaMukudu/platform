@@ -24,6 +24,7 @@ const orgState   = require('./ai/org-state');
 const orgContext = require('./ai/org-context');
 const readiness  = require('./ai/readiness');
 const orgMemory  = require('./ai/org-memory');
+const orgGraph   = require('./ai/org-graph');
 const orgLearning= require('./ai/org-learning');
 const playbook   = require('./ai/org-playbook');
 const intel      = require('./ai/intelligence');
@@ -7630,6 +7631,7 @@ function _ingestArtifact(code, uploaderId, input = {}) {
       // retrieve it; a PRIVATE import stays owner-only (leaders never see it).
       if (visibility === 'normal' && r.envelope) {
         r.envelope.promoted = true;
+        _stampNodeScope(code, r.envelope, uploaderId);   // route into the sharer's node scope (org-wide if no hierarchy)
         _sharedRecorded++; _lastSharedId = r.id;
         if (r.envelope.correctionOf) _sharedSuperseded++;   // a correction supersedes a prior org fact
       }
@@ -7794,10 +7796,46 @@ function _orgPack(code) {
 // The admissible org-level evidence pool — the SAME gate as retrieval: org-shared,
 // promoted, source, text. Private / derived / kernel evidence is excluded BEFORE it
 // can influence any requirement, ownership, impact, urgency, or readiness.
-function _orgAdmissibleEvidence(code) {
-  return (evidenceLog[code] || []).filter(e =>
+//
+// INFORMATION-WEB SCOPING (ai/org-graph): when `visibleScope` is provided (an array of
+// node ids the actor may see), node-scoped evidence is filtered to that scope — so a
+// parent sees its whole subtree and a child sees only its parent. When `visibleScope` is
+// null (no actor, no node structure, or an org admin), the pool is org-wide — this is the
+// safe default that preserves behaviour for every org without a configured hierarchy.
+function _orgAdmissibleEvidence(code, visibleScope) {
+  const pool = (evidenceLog[code] || []).filter(e =>
     e.status === 'active' && e.visibility === 'normal' && e.promoted === true &&
     _isSourceEvidence(e) && _isTextEvidence(e));
+  if (visibleScope == null) return pool;
+  return pool.filter(e => orgGraph.canSee(visibleScope, (e.attributes && e.attributes.nodeScope) || null));
+}
+
+// The set of node ids whose shared information `actor` may draw on, over this org's node
+// web. null = org-wide (no filtering): no actor (the org-wide memory/derivation path), no
+// node structure configured, or an org-level admin who sees the whole organisation.
+function _visibleScopeFor(code, actor) {
+  if (!actor) return null;
+  const nodes = orgNodes[code];
+  if (!nodes || !Object.keys(nodes).length) return null;
+  const role = _actorRole(code, actor);
+  if (role === 'superadmin' || role === 'admin') return null;   // org admins see the whole org
+  return orgGraph.visibleNodesFor(nodes, actor);                // [] if the actor is outside the hierarchy → only org-wide evidence
+}
+
+// The node an actor's shared evidence is scoped INTO (their led node, else their member
+// node). null when the org has no node structure or the actor is unplaced → org-wide.
+function _primaryNodeScope(code, userId) {
+  const nodes = orgNodes[code];
+  if (!nodes || !Object.keys(nodes).length) return null;
+  const { leaderNodeIds, memberNodeIds } = orgGraph.scopeOfActor(nodes, userId);
+  return leaderNodeIds[0] || memberNodeIds[0] || null;
+}
+// Stamp an org-shared envelope with its node scope so the web can route it (no-op when
+// the org has no hierarchy → the record stays org-wide, exactly as today).
+function _stampNodeScope(code, env, userId) {
+  if (!env) return;
+  const scope = _primaryNodeScope(code, userId);
+  if (scope) { env.attributes = env.attributes || {}; env.attributes.nodeScope = scope; }
 }
 
 // A cheap, deterministic fingerprint that changes on ANY relevant mutation: active
@@ -7828,13 +7866,13 @@ function _orgContextConfig(code) {
     dependencies: merge('dependencies'), responsibilities: merge('responsibilities'), fallbackOwner: ov.fallbackOwner || null };
 }
 
-function _buildOrgStateInputs(code) {
+function _buildOrgStateInputs(code, visibleScope) {
   const cfg = _orgContextConfig(code);
   return {
     organisation: { id: code, pack: cfg.pack },
     structure: { responsibilities: cfg.responsibilities || [] },
     configuration: cfg,
-    evidence: _orgAdmissibleEvidence(code),
+    evidence: _orgAdmissibleEvidence(code, visibleScope),
   };
 }
 
@@ -7886,11 +7924,16 @@ function _publicOrgContext(r) {
    MUST NOT derive goals/ownership/readiness/requirements independently. */
 function _getOrgState({ actor, organisationId, purpose = 'organisation_reasoning', now = Date.now() } = {}) {
   const code = organisationId;
-  const key = `${code}|${purpose}|v1|${_orgEvidenceFingerprint(code)}`;
-  const hit = orgStateCache[code];
+  // Per-actor information-web scope. null = org-wide (the memory/derivation path + node-less
+  // orgs + admins). Cache is keyed by scope so different viewers never collide.
+  const scope = _visibleScopeFor(code, actor);
+  const scopeSig = scope == null ? 'all' : scope.join(',');
+  const key = `${code}|${purpose}|v1|${_orgEvidenceFingerprint(code)}|${scopeSig}`;
+  const bucket = orgStateCache[code] || (orgStateCache[code] = {});
+  const hit = bucket[scopeSig];
   if (hit && hit.key === key) return { ...hit.state, _cache: { hit: true, ageMs: now - hit.builtAt } };
-  const state = orgState.deriveOrgState({ now, ..._buildOrgStateInputs(code) });
-  orgStateCache[code] = { key, state, builtAt: now };
+  const state = orgState.deriveOrgState({ now, ..._buildOrgStateInputs(code, scope) });
+  bucket[scopeSig] = { key, state, builtAt: now };
   return { ...state, _cache: { hit: false, ageMs: 0 } };
 }
 
@@ -8247,7 +8290,7 @@ function _writeResolutionEvidence(code, actorId, aq, adj, turnId) {
       answeringActor: actorId, sourceTurn: turnId || null, adjudication: adj.classification, authorityClass: adj.authority,
       confirmedBy: actorId, confirmedAt: now },
   }, { resolutionOf: aq.uncertaintyId });
-  if (rec.envelope) { rec.envelope.promoted = true; _indexEvidence(code, rec.envelope).catch(() => {}); }   // org-shared
+  if (rec.envelope) { rec.envelope.promoted = true; _stampNodeScope(code, rec.envelope, actorId); _indexEvidence(code, rec.envelope).catch(() => {}); }   // org-shared, scoped to the sharer's node
   delete orgStateCache[code];                                                                               // invalidate → re-derive → remember
   _recordOrgSnapshot(code, { trigger: { type: 'uncertainty_resolved', boundary: 'resolution_write', actorRef: actorId, recordRef: aq.uncertaintyId } });
   scheduleSave();
