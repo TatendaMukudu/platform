@@ -5107,6 +5107,14 @@ async function renderTeamReadiness() {
 
   el.innerHTML = `
     <div class="card" style="margin-bottom:1rem">
+      <div class="card-label" style="margin-bottom:0.4rem">Ask about your area</div>
+      <div style="display:flex;gap:0.4rem">
+        <input class="form-input" id="tr-ask-input" placeholder="e.g. what's still outstanding? who owns the game plan?" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')trAsk()">
+        <button class="btn btn-accent btn-sm" onclick="trAsk()">Ask</button>
+      </div>
+      <div id="tr-ask-out" style="margin-top:0.5rem"></div>
+    </div>` + `
+    <div class="card" style="margin-bottom:1rem">
       <div class="card-label" style="margin-bottom:0.3rem">What are we preparing for?</div>
       <div style="font-size:1rem;font-weight:700">${_escAdvisor(d.focus.title || d.focus.type || 'Current focus')}</div>
       <div style="font-size:0.78rem;color:var(--text-muted)">${d.focus.at ? new Date(d.focus.at).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''} · chosen as the ${_escAdvisor(d.focus.orderingRule || 'current focus')}${d.focus.otherActive ? ` (+${d.focus.otherActive} more active)` : ''}</div>
@@ -5150,6 +5158,23 @@ async function trAnswer(uncertaintyId) {
       if (typeof showToast === 'function') showToast('Answer in your own words — I’ll show you exactly what gets recorded before saving.', 'info');
     }, 250);
   } catch (e) { showToast(e.message || 'Could not open that question', 'error'); }
+}
+
+/* Ask a plain organisational question — answered from YOUR scoped area (never a sibling
+   branch), grounded, and routed to the right owner when it can't be answered. */
+async function trAsk() {
+  const input = document.getElementById('tr-ask-input');
+  const out = document.getElementById('tr-ask-out');
+  const q = input && input.value.trim();
+  if (!q || !out) return;
+  out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Checking your area…</div>`;
+  try {
+    const r = await fetch('/api/org/ask', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ question: q }) });
+    const d = await r.json();
+    const route = d.routeTo ? `<div style="font-size:0.74rem;color:var(--text-muted);margin-top:0.3rem">Best person to ask: <strong>${_escAdvisor(d.routeTo.to)}</strong></div>` : '';
+    const lims = (d.limitations || []).length ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.2rem">${d.limitations.map(_escAdvisor).join(' · ')}</div>` : '';
+    out.innerHTML = `<div style="font-size:0.86rem;color:var(--text-primary)">${_escAdvisor(d.answer || 'No answer available.')}</div>${route}${lims}`;
+  } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't answer that right now.</div>`; }
 }
 
 async function trBindPrompt(roleRef) {

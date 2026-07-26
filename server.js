@@ -25,6 +25,7 @@ const orgContext = require('./ai/org-context');
 const readiness  = require('./ai/readiness');
 const orgMemory  = require('./ai/org-memory');
 const orgGraph   = require('./ai/org-graph');
+const orgAnswer  = require('./ai/org-answer');
 const conversation   = require('./ai/conversation');
 const assessmentView = require('./ai/assessment-view');
 const orgLearning= require('./ai/org-learning');
@@ -8761,6 +8762,42 @@ app.post('/api/org-playbook/:fingerprint/retire', requireAuth, (req, res) => {
   } catch (e) {
     console.warn('[org-playbook/retire] failed:', e && e.message);
     res.status(200).json({ ok: false });
+  }
+});
+
+/* ─── SCOPED ORGANISATIONAL ANSWERING (ai/org-answer) — a leader or member asks a plain
+   organisational question; IntelliQ answers from their ALREADY-SCOPED org-state (so they
+   never see a sibling branch), grounded in confirmed evidence, honest about limits, and
+   routes to the right owner when it can't answer. Reuses the SAME scope + graph primitives
+   as org-state/readiness — one reasoning path, not a parallel one. Fail-closed. */
+function _orgAskRouteLeader(code, userId) {
+  const nodes = orgNodes[code];
+  if (!nodes || !Object.keys(nodes).length) return { present: false, label: null };
+  const myNode = _primaryNodeScope(code, userId);
+  if (!myNode) return { present: false, label: null };
+  const rt = orgGraph.routeTarget(orgGraph.buildGraph(nodes), myNode);
+  const leaderId = (rt.leaderIds || []).find(id => id !== userId) || (rt.leaderIds || [])[0];
+  if (!leaderId) return { present: false, label: null };
+  const u = orgUsers[code] && orgUsers[code][leaderId];
+  return { present: true, label: (u && (u.name || u.id)) || 'your area lead' };
+}
+function _orgAskAreaLabel(code, userId) {
+  const nodes = orgNodes[code];
+  const myNode = nodes && _primaryNodeScope(code, userId);
+  const n = myNode && nodes[myNode];
+  return n && n.name ? `the ${n.name} area` : 'your area';
+}
+app.post('/api/org/ask', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    const question = String(req.body && req.body.question || '').slice(0, 500);
+    if (!question.trim()) return res.status(400).json({ ok: false, error: 'question_required' });
+    const state = _getOrgState({ actor: userId, organisationId: code, purpose: 'organisation_reasoning', now: Date.now() });
+    const out = orgAnswer.answer({ question, state, areaLabel: _orgAskAreaLabel(code, userId), nodeLeader: _orgAskRouteLeader(code, userId), now: Date.now() });
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    console.warn('[org/ask] failed:', e && e.message);
+    res.status(200).json({ ok: false, answerable: false, answer: 'I couldn’t answer that from your area right now.', basis: [], limitations: [], routeTo: null });
   }
 });
 
