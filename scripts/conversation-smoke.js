@@ -76,6 +76,12 @@ ok('8 · a plan with missing claims is NOT complete', C.completion(openClaims).c
 const doneClaims = req.map((c, i) => ({ ...c, state: i === 0 ? 'already_known' : 'partially_known' }));
 ok('8 · complete when nothing is still missing/stale (partial counts as handled, with a limitation)', C.completion(doneClaims).complete === true && C.completion(doneClaims).limitations.length === 1);
 
+/* ── 8b · EXPLAINABILITY — why a claim was skipped / is still asked (member-safe) ── */
+const ex = C.explainClaims(planKnown, { now: NOW });
+ok('8b · a known claim carries a plain reason for NOT being asked', ex.known.some(k => k.label === 'What you did' && /covered this today|already/i.test(k.reason)));
+ok('8b · an open claim carries a reason for still being asked', ex.open.some(o => o.label === 'What you learned' && /needs an answer|still/i.test(o.reason)));
+ok('8b · explanations leak no authority / hashes / internal refs', !/authority|contentHash|corroboration|"ref"|fingerprint/i.test(JSON.stringify(ex)));
+
 /* ── 9 · MEMBER PROJECTION — interpretation over a bare score ── */
 ok('9 · placeholder feedback is detected (empty, generic, and duplicated)', V.isPlaceholderFeedback('') && V.isPlaceholderFeedback('Good detail — keep it up.') && V.isPlaceholderFeedback('Nice work', ['Nice work', 'Nice work']));
 ok('9 · a real, specific comment is NOT a placeholder', V.isPlaceholderFeedback('Your Q3 rebound numbers jumped after the footwork drills — do more of that.') === false);

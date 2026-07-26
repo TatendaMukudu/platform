@@ -5082,7 +5082,7 @@ app.post('/api/conversation/start', requireAuth, (req, res) => {
     scheduleSave();
     if (done && done.complete) return res.json({ ok: true, ..._publicSession(session), orientation: plan.orientation, complete: true, question: null, projection: _assessmentMemberProjection(code, a) });
     const q = conversation.nextQuestion(plan);
-    res.json({ ok: true, ..._publicSession(session), orientation: plan.orientation, complete: false, question: q ? { claimRef: q.claimRef, text: q.question } : null });
+    res.json({ ok: true, ..._publicSession(session), orientation: plan.orientation, complete: false, question: q ? { claimRef: q.claimRef, text: q.question } : null, alreadyKnown: conversation.explainClaims(plan).known });
   } catch (e) { console.warn('[conversation/start] failed:', e && e.message); res.status(200).json({ ok: false, error: 'start_failed' }); }
 });
 
@@ -5152,7 +5152,7 @@ app.post('/api/conversation/:sessionId/confirm', requireAuth, (req, res) => {
     scheduleSave();
     const q = conversation.nextQuestion(plan);
     res.json({ ok: true, complete: false, recorded: true, question: q ? { claimRef: q.claimRef, text: q.question } : null,
-      projection: _assessmentMemberProjection(code, a) });
+      alreadyKnown: conversation.explainClaims(plan).known, projection: _assessmentMemberProjection(code, a) });
   } catch (e) { console.warn('[conversation/confirm] failed:', e && e.message); res.status(200).json({ ok: false, error: 'confirm_failed' }); }
 });
 
@@ -5167,7 +5167,7 @@ app.get('/api/conversation/:sessionId', requireAuth, (req, res) => {
     const a = _conversationTarget(code, session);
     if ((done && done.complete) || session.status === 'complete') return res.json({ ok: true, ..._publicSession(session), complete: true, question: null, projection: _assessmentMemberProjection(code, a) });
     const q = conversation.nextQuestion(plan);
-    res.json({ ok: true, ..._publicSession(session), orientation: plan.orientation, complete: false, question: q ? { claimRef: q.claimRef, text: q.question } : null });
+    res.json({ ok: true, ..._publicSession(session), orientation: plan.orientation, complete: false, question: q ? { claimRef: q.claimRef, text: q.question } : null, alreadyKnown: conversation.explainClaims(plan).known });
   } catch (e) { console.warn('[conversation/resume] failed:', e && e.message); res.status(200).json({ ok: false, error: 'resume_failed' }); }
 });
 

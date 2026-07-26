@@ -85,6 +85,7 @@ const server = app.listen(0, async () => {
     await call(`/api/conversation/${s3.j.sessionId}/confirm`, 'joe', { method: 'POST', body: { proposalFingerprint: a3.j.preview.proposalFingerprint } });
     const resumed = await call(`/api/conversation/${s3.j.sessionId}`, 'joe');
     ok('7 · resume re-derives + skips the already-answered part (asks part two)', resumed.j.ok && resumed.j.question && /what you learned/i.test(resumed.j.question.text) && resumed.j.resolved === 1);
+    ok('7 · resume explains WHY the covered part is skipped (member-safe reason)', (resumed.j.alreadyKnown || []).some(k => /what you did/i.test(k.label) && /covered this|already/i.test(k.reason)) && !/authorityClass|contentHash|fingerprint/i.test(JSON.stringify(resumed.j.alreadyKnown)));
 
     // 8 · abandoning writes no unconfirmed answer
     const s8 = await call('/api/conversation/start', 'joe', { method: 'POST', body: { purpose: 'assessment', targetId: 'as9' } });

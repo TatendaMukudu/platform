@@ -1823,8 +1823,10 @@ const MemberApp = {
     }
     panel.dataset.session = d.sessionId || panel.dataset.session || '';
     panel.dataset.claim = d.question.claimRef || '';
+    const known = d.alreadyKnown || [];
     panel.innerHTML = `
       ${d.orientation ? `<div style="font-size:0.76rem;color:var(--text-muted);margin-bottom:0.4rem">${esc(d.orientation)}</div>` : ''}
+      ${known.length ? `<details style="margin-bottom:0.4rem"><summary style="font-size:0.74rem;color:var(--text-muted);cursor:pointer">I already know ${known.length} of these — why?</summary><ul style="margin:0.3rem 0 0 1rem;padding:0">${known.map(k => `<li style="font-size:0.74rem;color:var(--text-muted);margin-bottom:2px"><strong>${esc(k.label)}:</strong> ${esc(k.reason)}</li>`).join('')}</ul></details>` : ''}
       <div style="font-size:0.86rem;font-weight:600;margin-bottom:0.4rem">${esc(d.question.text)}</div>
       <textarea id="convo-input-${id}" class="note-input" rows="3" placeholder="Answer in your own words…"></textarea>
       <div style="display:flex;gap:0.4rem;margin-top:0.4rem;flex-wrap:wrap">

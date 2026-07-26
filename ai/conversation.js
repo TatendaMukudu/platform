@@ -172,8 +172,36 @@ function completion(claims) {
   return { complete: true, reason: partial.length ? 'complete_with_partial' : 'all_resolved', partial: partial.map(c => c.ref), limitations };
 }
 
+/* ── EXPLAINABILITY — why a claim was skipped or is still being asked, in plain, member-
+   safe language. Derived from the SAME classification that drives the questions, so "why
+   didn't you ask me that?" is answered honestly (never a fabricated rationale). No authority
+   metadata, ids, or raw text — only the claim label + a reason + a relative time. ── */
+function _relTime(at, now) {
+  const t = Date.parse(at || 0);
+  if (!Number.isFinite(t)) return '';
+  const days = Math.floor((now - t) / DAY);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 14) return `${days} days ago`;
+  if (days < 60) return `about ${Math.round(days / 7)} weeks ago`;
+  return `on ${new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`;
+}
+function explainClaims(plan, { now = Date.now() } = {}) {
+  const known = [], open = [];
+  for (const c of (plan.claims || [])) {
+    const when = (c.evidence && c.evidence[0] && c.evidence[0].at) ? _relTime(c.evidence[0].at, now) : '';
+    if (c.state === 'already_known') known.push({ label: c.label, reason: when ? `You covered this ${when}, and nothing suggests it has changed — so I'm not asking again.` : 'You have already covered this, so I\'m not asking again.' });
+    else if (c.state === 'not_applicable') known.push({ label: c.label, reason: 'You marked this as not applicable.' });
+    else if (c.state === 'stale') open.push({ label: c.label, reason: when ? `Your last answer was ${when}, so I'll check it's still current.` : 'Your last answer may be out of date.' });
+    else if (c.state === 'partially_known') open.push({ label: c.label, reason: 'You gave a tentative answer — worth firming up.' });
+    else if (c.state === 'disputed') open.push({ label: c.label, reason: 'There are conflicting notes on this, so I need the correct one.' });
+    else open.push({ label: c.label, reason: 'This still needs an answer.' });
+  }
+  return { known, open };
+}
+
 module.exports = {
   SCHEMA_VERSION, CLAIM_STATES, OUTCOMES,
   requiredClaims, classifyClaims, buildPlan, nextQuestion, adjudicate, resolvesClaim, proposalFrom, completion,
-  _refOf: refOf,
+  explainClaims, _refOf: refOf,
 };
