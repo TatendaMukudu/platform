@@ -5141,6 +5141,39 @@ async function renderTeamReadiness() {
     ${changes ? `<div class="card">
       <div class="card-label" style="margin-bottom:0.4rem">What changed because you confirmed it</div>
       <ul style="margin:0 0 0 1rem">${changes}</ul>
+    </div>` : ''}
+    <div id="tr-routing"></div>`;
+  trLoadRouting();
+}
+
+/* Node-aware routing view — what's routed TO this leader, a summary across their subtree,
+   and any multi-parent ownership conflicts that reached them. Pull, not push: nothing is
+   sent; it's surfaced here to act on. Silent when there's nothing (and for node-less orgs). */
+async function trLoadRouting() {
+  const box = document.getElementById('tr-routing');
+  if (!box) return;
+  let d;
+  try { const r = await fetch('/api/org/routing', { headers: Auth._headers() }); d = await r.json(); }
+  catch (_) { return; }
+  if (!d || !d.ok) return;
+  const inbox = d.inbox || [], conflicts = d.conflicts || [], roll = d.rollup;
+  if (!inbox.length && !conflicts.length && !(roll && roll.total)) return;
+  const uTone = { immediate: 'var(--danger)', high: 'var(--danger)', medium: 'var(--warning)', normal: 'var(--text-muted)', low: 'var(--text-muted)' };
+  const row = (x) => `<div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:0.8rem;padding:0.15rem 0">
+    <span>${_escAdvisor(x.label)}${x.conflict ? ' <span style="font-size:0.66rem;color:var(--warning)">shared ownership</span>' : ''}</span>
+    <span style="color:${uTone[x.urgency] || 'var(--text-muted)'};font-size:0.72rem">${_escAdvisor(x.urgency)}</span></div>`;
+  box.innerHTML = `
+    ${conflicts.length ? `<div class="card" style="margin-top:1rem;border-left:3px solid var(--warning)">
+      <div class="card-label" style="margin-bottom:0.3rem">Needs an owner decision</div>
+      ${conflicts.map(c => `<div style="font-size:0.8rem;margin-bottom:0.3rem">${_escAdvisor(c.label)} — <span style="color:var(--text-secondary)">${_escAdvisor(c.reason)}</span></div>`).join('')}
+    </div>` : ''}
+    ${inbox.length ? `<div class="card" style="margin-top:1rem">
+      <div class="card-label" style="margin-bottom:0.3rem">Routed to you (${inbox.length})</div>
+      ${inbox.map(row).join('')}
+    </div>` : ''}
+    ${roll && roll.total ? `<div class="card" style="margin-top:1rem">
+      <div class="card-label" style="margin-bottom:0.3rem">Across your area</div>
+      <div style="font-size:0.8rem;color:var(--text-secondary)">${roll.total} unresolved item${roll.total === 1 ? '' : 's'} in your area${roll.unassigned ? `, ${roll.unassigned} with no owner yet` : ''}.</div>
     </div>` : ''}`;
 }
 

@@ -26,6 +26,7 @@ const readiness  = require('./ai/readiness');
 const orgMemory  = require('./ai/org-memory');
 const orgGraph   = require('./ai/org-graph');
 const orgAnswer  = require('./ai/org-answer');
+const orgRouting = require('./ai/org-routing');
 const conversation   = require('./ai/conversation');
 const assessmentView = require('./ai/assessment-view');
 const orgLearning= require('./ai/org-learning');
@@ -8798,6 +8799,52 @@ app.post('/api/org/ask', requireAuth, (req, res) => {
   } catch (e) {
     console.warn('[org/ask] failed:', e && e.message);
     res.status(200).json({ ok: false, answerable: false, answer: 'I couldn’t answer that from your area right now.', basis: [], limitations: [], routeTo: null });
+  }
+});
+
+/* ─── NODE-AWARE ROUTING (ai/org-routing) — computes WHO should see each unresolved item
+   across the web (proactive, but PULL not push — nothing is auto-sent). Ownership is
+   explicit (a resolved owner, else escalate to the nearest leader); multi-parent-with-no-
+   owner is a CONFLICT for a human to assign, never inferred from ancestry. Branch-isolated
+   + deduped. Governed delivery stays elsewhere. */
+function _routingItems(code) {
+  let state; try { state = _getOrgState({ organisationId: code }); } catch (_) { return []; }
+  const uncertainties = orgState.stateToUncertainties(state);
+  const nodes = orgNodes[code] || {};
+  const bindingByRole = {};
+  for (const b of (roleBindings[code] || [])) if (b.status === 'active') bindingByRole[String(b.roleRef).toLowerCase()] = b.userId;
+  const nodeOfUser = uid => { const s = orgGraph.scopeOfActor(nodes, uid); return s.leaderNodeIds[0] || s.memberNodeIds[0] || null; };
+  return uncertainties.map(u => {
+    const ref = u.resolutionOwner;
+    let ownerUserId = null;
+    if (ref) {
+      if (orgUsers[code] && orgUsers[code][ref]) ownerUserId = ref;
+      else if (bindingByRole[String(ref).toLowerCase()]) ownerUserId = bindingByRole[String(ref).toLowerCase()];
+    }
+    return { id: u.id, label: String(u.claim || u.claimType || 'unresolved item').replace(/_/g, ' '),
+      urgency: u.urgency || 'normal', ownerUserId, subjectNodeId: ownerUserId ? nodeOfUser(ownerUserId) : null };
+  });
+}
+
+// GET /api/org/routing — the viewer's routed inbox + their subtree rollup + any ownership
+// conflicts that reached them. Any authed user (a member can own work); rollup/conflicts are
+// leader-scoped. Nothing here is sent anywhere — it is surfaced for the person to act on.
+app.get('/api/org/routing', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    const nodes = orgNodes[code] || {};
+    const graph = orgGraph.buildGraph(nodes);
+    const items = _routingItems(code);
+    const routes = orgRouting.buildRoutes(graph, items);
+    const { leaderNodeIds } = orgGraph.scopeOfActor(nodes, userId);
+    const conflicts = orgRouting.conflicts(routes).filter(c => (c.routedTo || []).includes(userId));   // only conflicts escalated to me
+    res.json({ ok: true,
+      inbox: orgRouting.inboxFor(routes, userId),
+      rollup: leaderNodeIds.length ? orgRouting.rollupFor(graph, items, { leaderNodeIds }) : null,
+      conflicts });
+  } catch (e) {
+    console.warn('[org/routing] failed:', e && e.message);
+    res.status(200).json({ ok: false, inbox: [], rollup: null, conflicts: [] });
   }
 });
 
