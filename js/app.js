@@ -5858,17 +5858,28 @@ async function renderToday() {
   if (!el) return;
   if (title) title.textContent = 'Today';
   if (sub) sub.textContent = 'Ask, decide, and see what needs you — in one place.';
+  const chips = ['What is outstanding?', 'Who owns what?', 'Are we ready?', 'What changed?'];
   el.innerHTML = `
-    <div class="card" style="margin-bottom:1rem">
-      <div style="display:flex;gap:0.5rem">
-        <input id="today-ask" class="form-input" placeholder="Ask about your team… e.g. what's outstanding? who owns the game plan?" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')todayAsk()">
-        <button class="btn btn-accent btn-sm" onclick="todayAsk()">Ask</button>
+    <div class="today-hero" style="margin-bottom:1.1rem;padding:1rem;border-radius:16px;background:linear-gradient(180deg,var(--surface-alt,rgba(124,90,245,0.06)),transparent);border:1px solid var(--line,rgba(127,127,127,0.14))">
+      <div style="display:flex;gap:0.5rem;align-items:stretch">
+        <input id="today-ask" class="form-input" placeholder="Ask about your team…" style="flex:1;margin:0;font-size:0.95rem;padding:0.7rem 0.8rem" onkeydown="if(event.key==='Enter')todayAsk()">
+        <button class="btn btn-accent" style="padding:0 1.1rem" onclick="todayAsk()">Ask</button>
       </div>
       <div id="today-ask-out" style="margin-top:0.5rem"></div>
+      <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.7rem">
+        ${chips.map(c => `<button class="today-chip" style="font-size:0.74rem;padding:0.28rem 0.7rem;border-radius:20px;border:1px solid var(--line,rgba(127,127,127,0.2));background:transparent;color:var(--text-secondary);cursor:pointer" onclick="todayQuick('${c}')">${c}</button>`).join('')}
+      </div>
     </div>
     <div id="today-feed"><div style="padding:1.2rem;text-align:center;color:var(--text-muted)">Gathering what needs you…</div></div>
-    <div style="text-align:center;margin-top:1rem"><button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="renderIntelligence(true)">Open the full team briefing →</button></div>`;
+    <div style="text-align:center;margin-top:1.2rem"><button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="renderIntelligence(true)">Open the full team briefing →</button></div>`;
   todayLoadFeed();
+}
+
+/* A suggested prompt — fills the composer and asks in one tap. */
+function todayQuick(q) {
+  const input = document.getElementById('today-ask');
+  if (input) input.value = q;
+  todayAsk();
 }
 
 /* The composer — a plain question answered from the leader's scoped area (reuses /api/org/ask). */
@@ -5952,10 +5963,21 @@ async function todayLoadFeed() {
       <button class="btn-ghost btn-sm" style="font-size:0.72rem" onclick="navigate('org-memory')">View history →</button></div>`);
   }
 
-  box.innerHTML = sections.length ? sections.join('') : `
-    <div class="card" style="text-align:center;padding:2rem">
-      <div style="font-size:0.9rem;color:var(--text-secondary)">Nothing needs you right now. Ask a question above, or set up how your team operates.</div>
-      <button class="btn btn-accent btn-sm" style="margin-top:0.8rem" onclick="navigate('operating-context')">Set up operating context →</button>
+  if (sections.length) { box.innerHTML = sections.join(''); return; }
+
+  // Empty → a guided start, not a dead end. Each tile is a real next step that brings
+  // Today to life. (Shown when there's no operating context / nothing outstanding yet.)
+  const tile = (title, desc, onclick) => `<button style="display:flex;width:100%;text-align:left;gap:0.8rem;align-items:flex-start;padding:0.9rem;margin-bottom:0.6rem;border:1px solid var(--line,rgba(127,127,127,0.16));border-radius:12px;background:var(--surface,rgba(127,127,127,0.03));cursor:pointer" onclick="${onclick}">
+    <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:6px;flex:0 0 auto"></span>
+    <span style="flex:1"><span style="display:block;font-size:0.9rem;font-weight:600;color:var(--text-primary)">${title}</span><span style="display:block;font-size:0.78rem;color:var(--text-muted);margin-top:2px">${desc}</span></span>
+    <span style="color:var(--text-muted)">→</span></button>`;
+  box.innerHTML = `
+    <div class="card" style="padding:1.3rem">
+      <div style="font-size:1.05rem;font-weight:700;margin-bottom:0.2rem">Let's bring your Today to life</div>
+      <div style="font-size:0.84rem;color:var(--text-secondary);margin-bottom:1rem">A couple of quick steps and this fills with exactly what needs you.</div>
+      ${tile('Tell IntelliQ how your team operates', 'Your events, who owns what, what prep matters — this is what lets it reason about readiness.', "navigate('operating-context')")}
+      ${tile('Set an assessment or check-in', 'Give your people work; results come back as a grounded conversation, not a blank form.', "navigate('assessments')")}
+      ${tile('Just ask a question', 'Type anything in the box above — I answer from what I already know about your area.', "document.getElementById('today-ask') && document.getElementById('today-ask').focus()")}
     </div>`;
 }
 
