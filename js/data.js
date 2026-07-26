@@ -148,12 +148,12 @@ const WORKSPACE_MODULES = [
   // How the team operates — the governed inputs (events, ownership, prep, rhythms)
   // that let IntelliQ reason about readiness. Leaders describe it; nothing is a rule
   // until confirmed.
-  { section: null,    id: 'operating-context', icon: ICON.building, label: 'Operating context', leaderOnly: true },
+  { section: null,    id: 'operating-context', icon: ICON.building, label: 'How we work', leaderOnly: true },
   // The organisation's episodic memory: how readiness has changed over time (Phase A).
-  { section: null,    id: 'org-memory', icon: ICON.clock, label: 'Organisational memory', leaderOnly: true },
+  { section: null,    id: 'org-memory', icon: ICON.clock, label: 'History', leaderOnly: true },
   // Longitudinal observations derived from that memory (Phase B1): descriptions of
   // repeated history — never recommendations, predictions, or causal claims.
-  { section: null,    id: 'org-learning', icon: ICON.spark, label: 'Observed over time', leaderOnly: true },
+  { section: null,    id: 'org-learning', icon: ICON.spark, label: 'Patterns', leaderOnly: true },
   // The governed playbook (Phase B2): proposed patterns a leader confirms into agreed
   // practices. The system proposes with counter-evidence; only a human confirms.
   { section: null,    id: 'org-playbook', icon: ICON.clipboard, label: 'Playbook', leaderOnly: true },

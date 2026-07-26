@@ -642,7 +642,7 @@ const NAV_ROUTES = {
   inbox:           () => { if (typeof MemberApp !== 'undefined') MemberApp._renderInbox(); },
   stats:           () => { if (typeof MemberApp !== 'undefined') MemberApp._renderStats(); },
   // Leader Workspace — scoped to the node leader's subtree
-  'leader-home':   () => renderIntelligence(),
+  'leader-home':   () => renderToday(),
   'leader-people': () => renderLeaderPeople(),
   'team-readiness': () => renderTeamReadiness(),
   'operating-context': () => renderOperatingContext(),
@@ -5846,6 +5846,118 @@ function applyDomainVocab(domain) {
 const _TRAJ_WORD = { converging:'climbing', sustaining:'steady', up:'climbing', flat:'steady',
   down:'dipping', diverging:'drifting', stalled:'stalled', unanchored:'finding footing', unknown:'building' };
 const _trajWord = t => _TRAJ_WORD[t] || 'building';
+
+/* ── TODAY — the interactive leader home. Not a board: a conversational composer plus a
+   LIVE, ACTIONABLE feed assembled from everything the backend already knows (readiness,
+   routing, playbook proposals, what-changed). Every item is something you DO inline —
+   answer, review, open — not just read. Renders into the shared leader-home container. */
+async function renderToday() {
+  const el = document.getElementById('ldr-home-content');
+  const title = document.getElementById('ldr-home-title');
+  const sub = document.getElementById('ldr-home-sub');
+  if (!el) return;
+  if (title) title.textContent = 'Today';
+  if (sub) sub.textContent = 'Ask, decide, and see what needs you — in one place.';
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:1rem">
+      <div style="display:flex;gap:0.5rem">
+        <input id="today-ask" class="form-input" placeholder="Ask about your team… e.g. what's outstanding? who owns the game plan?" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')todayAsk()">
+        <button class="btn btn-accent btn-sm" onclick="todayAsk()">Ask</button>
+      </div>
+      <div id="today-ask-out" style="margin-top:0.5rem"></div>
+    </div>
+    <div id="today-feed"><div style="padding:1.2rem;text-align:center;color:var(--text-muted)">Gathering what needs you…</div></div>
+    <div style="text-align:center;margin-top:1rem"><button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="renderIntelligence(true)">Open the full team briefing →</button></div>`;
+  todayLoadFeed();
+}
+
+/* The composer — a plain question answered from the leader's scoped area (reuses /api/org/ask). */
+async function todayAsk() {
+  const input = document.getElementById('today-ask');
+  const out = document.getElementById('today-ask-out');
+  const q = input && input.value.trim();
+  if (!q || !out) return;
+  out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Checking your area…</div>`;
+  try {
+    const r = await fetch('/api/org/ask', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ question: q }) });
+    const d = await r.json();
+    const route = d.routeTo ? `<div style="font-size:0.74rem;color:var(--text-muted);margin-top:0.3rem">Best person to ask: <strong>${_escAdvisor(d.routeTo.to)}</strong></div>` : '';
+    out.innerHTML = `<div style="font-size:0.88rem;color:var(--text-primary);padding:0.5rem 0.6rem;border-left:2px solid var(--accent);border-radius:6px;background:var(--surface-alt,rgba(127,127,127,0.05))">${_escAdvisor(d.answer || 'No answer available.')}</div>${route}`;
+  } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't answer that right now.</div>`; }
+}
+
+/* The live feed — composes readiness + routing + playbook + memory into one actionable list. */
+async function todayLoadFeed() {
+  const box = document.getElementById('today-feed');
+  if (!box) return;
+  const get = p => fetch(p, { headers: Auth._headers() }).then(r => r.json()).catch(() => ({}));
+  const [rd, route, cand, changed] = await Promise.all([
+    get('/api/team/readiness'), get('/api/org/routing'), get('/api/org-playbook/candidates'), get('/api/org-memory/changed'),
+  ]);
+  const esc = _escAdvisor;
+  const sections = [];
+
+  // Focus + readiness status — one calm header line.
+  if (rd && rd.focus) {
+    const st = _RD_STATE[rd.readiness && rd.readiness.status] || _RD_STATE.insufficient_information;
+    sections.push(`<div class="card" style="margin-bottom:0.8rem">
+      <div style="font-size:0.66rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted)">Preparing for</div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;margin-top:0.2rem">
+        <strong style="font-size:1rem">${esc(rd.focus.title || rd.focus.type || 'Current focus')}</strong>
+        <span style="font-size:0.74rem;color:${st.color}">${st.label}</span>
+      </div></div>`);
+  }
+
+  // Needs an answer — routed questions, answerable inline.
+  const qs = (rd && rd.nextQuestions) || [];
+  if (qs.length) {
+    sections.push(`<div class="card" style="margin-bottom:0.8rem">
+      <div class="card-label" style="margin-bottom:0.4rem">Needs an answer</div>
+      ${qs.map(x => `<div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:center;padding:0.3rem 0;border-bottom:1px solid var(--line-soft,rgba(127,127,127,0.08))">
+        <span style="font-size:0.84rem">${esc(x.question)}${x.blocking ? ' <span style="font-size:0.66rem;color:var(--danger)">blocking</span>' : ''}</span>
+        ${x.uncertaintyId ? `<button class="btn btn-outline btn-sm" style="font-size:0.72rem;white-space:nowrap" onclick="trAnswer('${esc(x.uncertaintyId)}')">Answer</button>` : ''}
+      </div>`).join('')}</div>`);
+  }
+
+  // Flagged to you — routing conflicts + high-priority routed work.
+  const conflicts = (route && route.conflicts) || [];
+  const inbox = (route && route.inbox) || [];
+  if (conflicts.length || inbox.length) {
+    sections.push(`<div class="card" style="margin-bottom:0.8rem">
+      <div class="card-label" style="margin-bottom:0.4rem">Flagged to you</div>
+      ${conflicts.map(c => `<div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:center;padding:0.3rem 0">
+        <span style="font-size:0.84rem">${esc(c.label)} <span style="font-size:0.66rem;color:var(--warning)">needs an owner</span></span>
+        <button class="btn-outline btn-sm" style="font-size:0.72rem;white-space:nowrap" onclick="navigate('team-readiness')">Assign</button></div>`).join('')}
+      ${inbox.slice(0, 5).map(x => `<div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:center;padding:0.3rem 0">
+        <span style="font-size:0.84rem">${esc(x.label)}</span>
+        <button class="btn-ghost btn-sm" style="font-size:0.72rem;white-space:nowrap" onclick="navigate('team-readiness')">Open</button></div>`).join('')}</div>`);
+  }
+
+  // Worth reviewing — proposed playbook practices.
+  const cands = (cand && cand.candidates) || [];
+  if (cands.length) {
+    sections.push(`<div class="card" style="margin-bottom:0.8rem">
+      <div class="card-label" style="margin-bottom:0.4rem">Worth reviewing</div>
+      ${cands.slice(0, 3).map(c => `<div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:center;padding:0.3rem 0">
+        <span style="font-size:0.82rem">${esc(c.statement)}</span>
+        <button class="btn-outline btn-sm" style="font-size:0.72rem;white-space:nowrap" onclick="navigate('org-playbook')">Review</button></div>`).join('')}</div>`);
+  }
+
+  // Since last time — what changed.
+  const ch = changed && changed.changed;
+  if (ch && !ch.nothingChanged && (ch.summary || []).length) {
+    sections.push(`<div class="card" style="margin-bottom:0.8rem">
+      <div class="card-label" style="margin-bottom:0.4rem">Since last time</div>
+      <ul style="margin:0 0 0.3rem 1rem;padding:0">${(ch.summary || []).slice(0, 3).map(s => `<li style="font-size:0.8rem;color:var(--text-secondary)">${esc(s)}</li>`).join('')}</ul>
+      <button class="btn-ghost btn-sm" style="font-size:0.72rem" onclick="navigate('org-memory')">View history →</button></div>`);
+  }
+
+  box.innerHTML = sections.length ? sections.join('') : `
+    <div class="card" style="text-align:center;padding:2rem">
+      <div style="font-size:0.9rem;color:var(--text-secondary)">Nothing needs you right now. Ask a question above, or set up how your team operates.</div>
+      <button class="btn btn-accent btn-sm" style="margin-top:0.8rem" onclick="navigate('operating-context')">Set up operating context →</button>
+    </div>`;
+}
 
 async function renderIntelligence(refresh) {
   const el    = document.getElementById('ldr-home-content');

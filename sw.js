@@ -3,7 +3,7 @@
    first and only falls back to the cache when the device is offline. So a fresh
    deploy is always picked up the moment the phone is online — the cache is a
    safety net, never the source of truth. */
-const CACHE = 'iq-cache-v4';   // bump: evicts any stale/truncated cached script that boot-crashed the app with "Unexpected token"
+const CACHE = 'iq-cache-v5';   // bump: evicts any stale/truncated cached script that boot-crashed the app with "Unexpected token"
 
 self.addEventListener('install', () => self.skipWaiting());
 

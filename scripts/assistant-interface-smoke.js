@@ -284,7 +284,7 @@ const server = app.listen(0, async () => {
       const block = appSrc.slice(appSrc.indexOf('const NAV_ALIASES'), endIdx + 2);
       const rendered = [];
       const renderer = name => () => { rendered.push(name); };
-      const RENDER_NAMES = ['renderIntelligence','renderLeaderPeople','renderLeaderGroups','renderDataSources','renderAssignments','renderOrgHealth','renderAnalytics','renderIntelliQ','renderScenarios','renderMyTeam','renderPeople','renderAlerts','renderReports','renderSettings','renderDashboard','renderMembers'];
+      const RENDER_NAMES = ['renderToday','renderIntelligence','renderLeaderPeople','renderLeaderGroups','renderDataSources','renderAssignments','renderOrgHealth','renderAnalytics','renderIntelliQ','renderScenarios','renderMyTeam','renderPeople','renderAlerts','renderReports','renderSettings','renderDashboard','renderMembers'];
       const el = { classList: { add(){}, remove(){} } };
       const documentStub = { querySelectorAll: () => [], getElementById: () => null, querySelector: () => null };
       const AppStateStub = { currentPage: null };
@@ -302,8 +302,8 @@ const server = app.listen(0, async () => {
       ok('G3/G12. no retired assistant destinations (no studio/advisor routes or aliases)',
          !('studio' in nav.NAV_ROUTES) && !('advisor' in nav.NAV_ROUTES) && !('studio' in nav.NAV_ALIASES) && !('advisor' in nav.NAV_ALIASES));
       rendered.length = 0; nav.navigate('org-insights');
-      ok('G13. a legacy alias resolves to the ONE canonical destination (org-insights → leader-home)',
-         rendered.length === 1 && rendered[0] === 'renderIntelligence' && AppStateStub.currentPage === 'leader-home');
+      ok('G13. a legacy alias resolves to the ONE canonical destination (org-insights → leader-home → Today)',
+         rendered.length === 1 && rendered[0] === 'renderToday' && AppStateStub.currentPage === 'leader-home');
       rendered.length = 0; nav.navigate('totally-bogus-destination');
       ok('G9. an unknown destination fails SAFE to Home (never blank, never a retired identity)',
          rendered[0] === 'home' && AppStateStub.currentPage === 'home');
