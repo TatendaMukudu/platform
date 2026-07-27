@@ -5905,13 +5905,21 @@ async function renderToday() {
 async function todayLoadVoice() {
   const box = document.getElementById('today-voice');
   if (!box) return;
-  let d; try { d = await fetch('/api/reason/agenda', { headers: Auth._headers() }).then(r => r.json()); } catch (_) { box.innerHTML = ''; return; }
+  let d, brief;
+  try {
+    [d, brief] = await Promise.all([
+      fetch('/api/reason/agenda', { headers: Auth._headers() }).then(r => r.json()),
+      fetch('/api/reason/brief', { headers: Auth._headers() }).then(r => r.json()).catch(() => null),
+    ]);
+  } catch (_) { box.innerHTML = ''; return; }
   const ripe = (d && d.agenda || []).filter(a => a.readiness === 'ripe').slice(0, 4);
   if (!ripe.length) { box.innerHTML = ''; return; }   // nothing worth raising → say nothing (honest)
   const propFor = bid => (d.proposals || []).find(p => p.beliefId === bid);
+  const opener = brief && brief.spoken ? `<div style="font-size:0.9rem;color:var(--text-primary);margin-bottom:0.6rem;line-height:1.4">${_escAdvisor(brief.spoken)}</div>` : '';
   box.innerHTML = `
     <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--accent)">
       <div class="card-label" style="margin-bottom:0.5rem">What I'm seeing</div>
+      ${opener}
       ${ripe.map(a => todayVoiceRow(a, propFor(a.beliefId))).join('')}
     </div>`;
 }

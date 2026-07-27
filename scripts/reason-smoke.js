@@ -173,15 +173,14 @@ ok('18 · it carries confidence, what would change it, and the right to contest'
 ok('18 · it withholds the leader-facing fields (urgency / register / severity / challenge)', !('urgency' in sv) && !('register' in sv) && !('severity' in sv) && !('challenge' in sv) && !('why' in sv));
 
 /* ── OPERATING CONTEXT — a real event grounds urgency + timing ("a time and a place") ── */
-const base = R.reason({ now, scopeLabel: { teamA: 'Team A' }, observations: [
+const wesObs = [
   { id: 'wm1', subjectId: 'wes', subjectName: 'Wes', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'dip', t: d(6) },
-  { id: 'wm2', subjectId: 'wes', subjectName: 'Wes', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'dip', t: d(2) },
-] });
+  { id: 'wm2', subjectId: 'wes', subjectName: 'Wes', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'dip', t: d(3) },
+  { id: 'wm3', subjectId: 'wes', subjectName: 'Wes', scope: 'teamA', kind: 'momentum_drop', severity: 'high', basis: 'dip', t: d(1) },
+];
+const base = R.reason({ now, scopeLabel: { teamA: 'Team A' }, observations: wesObs });
 const withEvent = R.reason({ now, scopeLabel: { teamA: 'Team A' },
-  observations: [
-    { id: 'wm1', subjectId: 'wes', subjectName: 'Wes', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'dip', t: d(6) },
-    { id: 'wm2', subjectId: 'wes', subjectName: 'Wes', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'dip', t: d(2) },
-  ],
+  observations: wesObs,
   context: { events: [
     { id: 'e1', label: 'the cup final', at: now + 2 * DAY, scope: 'teamA' },   // imminent, this branch
     { id: 'e2', label: 'a national camp', at: now + 2 * DAY, scope: 'teamB' }, // imminent, OTHER branch
@@ -193,6 +192,13 @@ ok('19 · an imminent, in-scope event raises the belief\'s urgency', wesAfter.ur
 ok('19 · …and creates a concrete timing note that names the event and the moment', /cup final/.test(wesAfter.timing || '') && /tomorrow|today|in \d+ days/.test(wesAfter.timing || ''));
 ok('19 · an event in ANOTHER branch does not bear on this belief (no false urgency)', !/national camp/.test(JSON.stringify(wesAfter)));
 ok('19 · with no events at all, there is no timing note (honest silence)', wesBefore.timing === null);
+
+/* ── THE VOICE (deterministic floor) — a spoken rundown that adds nothing new ── */
+const spoken = R.speak(withEvent.agenda, { now });
+ok('20 · the voice names the ripe beliefs it was given', /wes|Your|momentum|below/i.test(spoken) && spoken.length > 10);
+ok('20 · it folds in the real timing when there is an event', /cup final/.test(spoken));
+ok('20 · it introduces no private metric of its own (score-free)', !SCORE_RE.test(spoken));
+ok('20 · with nothing ripe it says so honestly (no filler)', /nothing.*pressing|steady/i.test(R.speak([], { now })));
 
 console.log(`\nreason-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -432,6 +432,22 @@ function outcomeTally(beliefs) {
   return tally;
 }
 
+/* ── The voice (deterministic floor) ─────────────────────────────────────────
+   Turn the ripe agenda into a short, warm spoken rundown — the proactive line the
+   assistant opens with. This is PURE and always available: it is the guaranteed
+   output, and the fallback the optional LLM phrasing degrades to. It adds NOTHING the
+   reasoner didn't already decide — it only strings the claims (and their timing)
+   together. No score, no cause, no prediction: just what's already been reasoned. */
+const _NUM = ['no', 'one', 'two', 'three', 'four', 'five'];
+function speak(agenda, { now } = {}) {
+  const ripe = (agenda || []).filter(a => a.readiness === 'ripe');
+  if (!ripe.length) return "Nothing's pressing right now — your group looks steady.";
+  const top = ripe.slice(0, 3);
+  const lead = ripe.length === 1 ? 'One thing stands out.' : `${_cap(_NUM[Math.min(ripe.length, 5)])} things stand out.`;
+  const parts = top.map(a => a.timing ? `${a.claim} ${a.timing}` : a.claim);
+  return `${lead} ${parts.join(' ')}`.trim();
+}
+
 /* subjectView — what the PERSON a belief is about may see about themselves: a warm,
    self-phrased read, its confidence, what would change it, and that they can say it's
    wrong. Deliberately minimal — no urgency, register, severity, or the leader-facing
@@ -467,6 +483,8 @@ module.exports = {
   applyFeedback, isSuppressed, outcomeTally, RESPONSES,
   // the subject's right to see + contest
   subjectView, CLAIM_SELF,
+  // the voice (deterministic floor for the optional LLM phrasing)
+  speak,
   // exported for tests + downstream projection
   agendaItem, proposalFrom,
   AXIS, WELLBEING_AXES, KIND_LABEL, STALE, DISMISS_COOLDOWN, WRONG_COOLDOWN, HORIZON,

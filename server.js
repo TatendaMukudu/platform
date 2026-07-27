@@ -8907,11 +8907,39 @@ function _reasonCanSeeBelief(code, userId, belief) {
   return false;
 }
 
+/* Run the tick and SCOPE the agenda to one reader — the shared basis for /agenda and
+   /brief. A belief about a person routes only to leaders who may see that person; a shared
+   pattern shows only if some of its people are visible (no cross-branch leak). */
+function _reasonScopedAgenda(code, userId, now, force) {
+  const result = _reasonTick(code, now, force);
+  const visible = new Set(getVisibleUserIds(code, userId));
+  const byId = new Map(result.beliefs.map(b => [b.id, b]));
+  const inScope = (item) => {
+    if (item.subjectId) return visible.has(item.subjectId);
+    if (item.shared) {
+      const b = byId.get(item.beliefId);
+      return !!(b && (b.memberBeliefIds || []).some(id => { const mb = byId.get(id); return mb && mb.subjectId && visible.has(mb.subjectId); }));
+    }
+    return false;
+  };
+  const agenda = result.agenda.filter(inScope);
+  const beliefIds = new Set(agenda.map(a => a.beliefId));
+  return { agenda, proposals: result.proposals.filter(p => beliefIds.has(p.beliefId)) };
+}
+
+/* A spoken rundown must never introduce what the reasoner didn't reason: no score, no
+   prediction, no diagnosis. If an LLM rephrase trips this, we fall back to the
+   deterministic voice. This is the guardrail that keeps the translator at the EDGE. */
+function _reasonSpokenSafe(t) {
+  if (!t || typeof t !== 'string' || t.length > 800) return false;
+  if (/\d(?:\.\d)?\s*\/\s*5\b|\b\d{1,3}\s*%/.test(t)) return false;         // no private metric
+  if (/\bpredict|\bdiagnos|\bwill\s+(?:likely|probably)\b/i.test(t)) return false; // no prophecy
+  return true;
+}
+
 /* GET /api/reason/agenda — the reasoner read aloud, SCOPED to this leader. Returns what it
    currently believes is worth attention (ripe first), the self-challenge on each, and the
-   proposal-gated next step for the ripe ones. A belief about a person routes only to leaders
-   who may see that person; a shared pattern shows only if some of its people are visible —
-   no cross-branch leak. Read-only: this endpoint never confirms or acts on anything. */
+   proposal-gated next step for the ripe ones. Read-only: never confirms or acts. */
 app.get('/api/reason/agenda', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
@@ -8920,30 +8948,56 @@ app.get('/api/reason/agenda', requireAuth, (req, res) => {
   }
   try {
     const now = Date.now();
-    const result = _reasonTick(code, now, req.query.refresh === '1');
-    const visible = new Set(getVisibleUserIds(code, userId));
-    const byId = new Map(result.beliefs.map(b => [b.id, b]));
-    const inScope = (item) => {
-      if (item.subjectId) return visible.has(item.subjectId);
-      if (item.shared) {
-        const b = byId.get(item.beliefId);
-        return !!(b && (b.memberBeliefIds || []).some(id => { const mb = byId.get(id); return mb && mb.subjectId && visible.has(mb.subjectId); }));
-      }
-      return false;
-    };
-    const agenda = result.agenda.filter(inScope);
-    const beliefIds = new Set(agenda.map(a => a.beliefId));
+    const { agenda, proposals } = _reasonScopedAgenda(code, userId, now, req.query.refresh === '1');
     const ripe = agenda.filter(a => a.readiness === 'ripe');
     res.json({
       ok: true,
       generatedAt: new Date(now).toISOString(),
       agenda: agenda.map(_reasonAgendaSafe),
-      proposals: result.proposals.filter(p => beliefIds.has(p.beliefId)),
+      proposals,
       counts: { total: agenda.length, ripe: ripe.length, held: agenda.length - ripe.length },
     });
   } catch (e) {
     console.warn('[reason/agenda] failed:', e && e.message);
     res.json({ ok: true, agenda: [], proposals: [], counts: { total: 0, ripe: 0, held: 0 } });
+  }
+});
+
+/* GET /api/reason/brief — the reasoner's OPENING LINE. The deterministic voice
+   (reason.speak) is the guaranteed output; when an AI key is present we OPTIONALLY ask the
+   model to rephrase that same rundown more warmly — strictly at the edge: it may only
+   restyle what it's given, never add a name, number, cause, or prediction, and any breach
+   (or timeout, or no key) falls straight back to the deterministic line. The LLM never
+   touches the reasoning — only the wording. */
+app.get('/api/reason/brief', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+  try {
+    const now = Date.now();
+    const { agenda } = _reasonScopedAgenda(code, userId, now, false);
+    const spoken = reason.speak(agenda, { now });   // deterministic floor — always valid
+    let voice = spoken, enriched = false;
+    if (ai.enabled() && agenda.some(a => a.readiness === 'ripe')) {
+      const p = ai.complete({
+        tier: 'reason', maxTokens: 160,
+        system: [
+          'You are IntelliQ, greeting a leader with a brief spoken rundown (2–3 warm, natural sentences).',
+          'REPHRASE ONLY what you are given. Do NOT add any name, number, statistic, cause, or prediction.',
+          'Never say "predict", "diagnose", or that something "will" happen. Directional and supportive, never alarmist.',
+          _worldviewDirective(code), _domainDirective(code),
+        ].filter(Boolean).join('\n\n'),
+        user: spoken,
+      });
+      const out = await Promise.race([Promise.resolve(p).then(v => v, () => null), new Promise(r => setTimeout(() => r(null), AI_BRIEF_MS))]);
+      if (out && _reasonSpokenSafe(out)) { voice = out.trim(); enriched = true; }
+    }
+    res.json({ ok: true, spoken: voice, deterministic: spoken, enriched });
+  } catch (e) {
+    console.warn('[reason/brief] failed:', e && e.message);
+    res.json({ ok: true, spoken: "Here's where things stand.", deterministic: '', enriched: false });
   }
 });
 

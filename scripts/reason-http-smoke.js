@@ -160,6 +160,13 @@ const server = app.listen(0, async () => {
     ok('14 · a subject CAN say a belief about them is wrong', contest.status === 200 && contest.j.by === 'subject');
     const joeMe2 = await me('joe');
     ok('14 · once contested, it stops being asserted about them', !(joeMe2.j.beliefs || []).some(b => b.beliefId === 'joe::momentum_drop'));
+
+    /* ── 15 · the VOICE — brief endpoint speaks the deterministic rundown (no AI key here) ── */
+    const brief = async who => { const r = await fetch(base + '/api/reason/brief', { headers: { Authorization: `Bearer ${tok[who]}` } }); return { status: r.status, j: await r.json() }; };
+    const bb = await brief('coachB');   // coachB still has bob's plateau (ripe)
+    ok('15 · the brief returns a spoken line, falling back to the deterministic voice with no AI', bb.j.ok && bb.j.enriched === false && bb.j.spoken === bb.j.deterministic && bb.j.spoken.length > 0);
+    ok('15 · the spoken line stays scoped — coachB\'s brief never mentions the other branch', !/joe|Joe|momentum/i.test(bb.j.spoken));
+    ok('15 · the brief is leader-gated (a plain member is refused)', (await brief('pat')).status === 403);
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();
