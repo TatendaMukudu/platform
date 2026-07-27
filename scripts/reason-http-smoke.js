@@ -63,6 +63,7 @@ const server = app.listen(0, async () => {
   const tok = {
     ceo: issueToken('ceo', C, 'coach'), coachA: issueToken('coachA', C, 'coach'),
     coachB: issueToken('coachB', C, 'coach'), pat: issueToken('pat', C, 'member'),
+    joe: issueToken('joe', C, 'member'), bob: issueToken('bob', C, 'member'),
   };
   const agenda = who => (async () => {
     const r = await fetch(base + '/api/reason/agenda', { headers: { Authorization: `Bearer ${tok[who]}` } });
@@ -139,6 +140,23 @@ const server = app.listen(0, async () => {
     await feedback('coachA', 'joe::momentum_drop', 'useful');
     const afterUseful = await agenda('coachA');
     ok('12 · marking it useful brings it back to the agenda', (afterUseful.j.agenda || []).some(x => x.beliefId === 'joe::momentum_drop'));
+
+    /* ── 13 · the SUBJECT can see what's believed about them — their own read only ── */
+    const me = async who => { const r = await fetch(base + '/api/reason/me', { headers: { Authorization: `Bearer ${tok[who]}` } }); return { status: r.status, j: await r.json() }; };
+    const joeMe = await me('joe');
+    ok('13 · a person sees the belief about themselves, self-phrased', joeMe.j.ok && (joeMe.j.beliefs || []).some(b => b.beliefId === 'joe::momentum_drop' && /^your |^you/i.test(b.claim)));
+    ok('13 · they see ONLY their own — never another person\'s', (joeMe.j.beliefs || []).every(b => b.beliefId.startsWith('joe::')));
+    ok('13 · the self-view withholds leader-facing fields (urgency/register/challenge)', (joeMe.j.beliefs || []).every(b => !('urgency' in b) && !('register' in b) && !('challenge' in b) && !('severity' in b)));
+
+    /* ── 14 · the subject can CONTEST (rectification), but only contest ── */
+    const notMine = await feedback('joe', 'bob::plateau', 'wrong');
+    ok('14 · a person cannot touch a belief about someone else (403)', notMine.status === 403);
+    const overreach = await feedback('joe', 'joe::momentum_drop', 'useful');
+    ok('14 · a subject may only CONTEST their own belief, not judge it useful (403)', overreach.status === 403 && /contest/.test(JSON.stringify(overreach.j)));
+    const contest = await feedback('joe', 'joe::momentum_drop', 'wrong');
+    ok('14 · a subject CAN say a belief about them is wrong', contest.status === 200 && contest.j.by === 'subject');
+    const joeMe2 = await me('joe');
+    ok('14 · once contested, it stops being asserted about them', !(joeMe2.j.beliefs || []).some(b => b.beliefId === 'joe::momentum_drop'));
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();

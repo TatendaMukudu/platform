@@ -8947,22 +8947,47 @@ app.get('/api/reason/agenda', requireAuth, (req, res) => {
    see. This is the ONLY write on the reasoner — it records judgement, it never acts. */
 app.post('/api/reason/:beliefId/feedback', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
-  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
-  if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
-    return res.status(403).json({ error: 'Permission denied' });
-  }
   const beliefId = String(req.params.beliefId || '');
   const response = String(req.body && req.body.response || '');
   if (!reason.RESPONSES.has(response)) return res.status(400).json({ ok: false, error: 'invalid_response' });
   const ledger = reasonLedger[code] || [];
   const belief = ledger.find(x => x.id === beliefId);
   if (!belief) return res.status(404).json({ ok: false, error: 'belief_not_found' });
-  if (!_reasonCanSeeBelief(code, userId, belief)) return res.status(403).json({ ok: false, error: 'out_of_scope' });
+
+  const isAdmin  = orgUsers[code]?.[userId]?.role === 'superadmin';
+  const isLeader = (isAdmin || _userHasPerm(code, userId, 'view_team') || _userHasPerm(code, userId, 'view_insights'))
+    && _reasonCanSeeBelief(code, userId, belief);
+  const isSubject = belief.subjectId === userId;   // the person the belief is ABOUT
+  if (!isLeader && !isSubject) return res.status(403).json({ ok: false, error: 'out_of_scope' });
+  // A subject may only CONTEST their own belief ("that's wrong") — the rectification right.
+  // Full judgement (acted/useful/dismissed) is a leader's, over people they lead.
+  if (isSubject && !isLeader && response !== 'wrong') {
+    return res.status(403).json({ ok: false, error: 'subject_can_only_contest' });
+  }
   reason.applyFeedback(ledger, beliefId, response, Date.now(), userId);
   reasonLedger[code] = ledger;
   delete reasonTickCache[code];   // next read reflects the response immediately
   scheduleSave();
-  res.json({ ok: true, beliefId, response });
+  res.json({ ok: true, beliefId, response, by: isSubject && !isLeader ? 'subject' : 'leader' });
+});
+
+/* GET /api/reason/me — what the system believes about YOU. Every person may see their own
+   reads (their own evidence — a fairness + transparency right), warmly phrased, with what
+   would change each and the standing ability to say it's wrong. No leader permission
+   needed; a person only ever sees beliefs about themselves. Never another person's, never
+   the leader-facing urgency/register/challenge. */
+app.get('/api/reason/me', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  try {
+    const now = Date.now();
+    _reasonTick(code, now, req.query.refresh === '1');
+    const mine = (reasonLedger[code] || []).filter(b =>
+      b.subjectId === userId && !b.shared && b.status !== 'dormant' && !reason.isSuppressed(b, now));
+    res.json({ ok: true, beliefs: mine.map(b => reason.subjectView(b)) });
+  } catch (e) {
+    console.warn('[reason/me] failed:', e && e.message);
+    res.json({ ok: true, beliefs: [] });
+  }
 });
 
 /* ─── SCOPED ORGANISATIONAL ANSWERING (ai/org-answer) — a leader or member asks a plain

@@ -98,6 +98,24 @@ const CLAIM = {
   quiet_improvement:      who => `${who} has been quietly improving.`,
 };
 
+/* SELF-audience claims — the SAME belief, phrased for the person it's about. Warm,
+   non-alarmist, second person. A person seeing their own read is a fairness + transparency
+   right (their own evidence), and the doorway to contesting it. */
+const CLAIM_SELF = {
+  momentum_drop:          () => 'Your recent check-ins have been running a little below your own normal.',
+  repeated_concern:       () => 'The same concern has come up a few times for you lately.',
+  baseline_shift:         () => 'A few things are running differently from your own usual lately.',
+  member_team_divergence: () => "You've been trending a bit differently from your group lately.",
+  invisible_load:         () => 'You may be carrying a lot for others right now.',
+  overload:               () => 'Things may be piling up — demand has looked high lately.',
+  withdrawal:             () => "You've eased off a little from your own normal.",
+  data_gap:              () => "It's been quiet lately — no pressure at all.",
+  isolation:              () => 'Your connections have felt a little thinner lately.',
+  plateau:                () => 'Your growth has felt a bit flat lately, despite steady effort.',
+  recovering:             () => "You've been climbing back toward your normal — good to see.",
+  quiet_improvement:      () => "You've been quietly improving lately.",
+};
+
 const _cap = s => (s && s.length) ? s[0].toUpperCase() + s.slice(1) : s;
 const _who = name => name || 'this person';
 
@@ -379,6 +397,23 @@ function outcomeTally(beliefs) {
   return tally;
 }
 
+/* subjectView — what the PERSON a belief is about may see about themselves: a warm,
+   self-phrased read, its confidence, what would change it, and that they can say it's
+   wrong. Deliberately minimal — no urgency, register, severity, or the leader-facing
+   challenge; those are about how to approach the person, not for the person. */
+function subjectView(belief) {
+  if (!belief) return null;
+  const self = CLAIM_SELF[belief.kind];
+  return {
+    beliefId: belief.id,
+    kind: belief.kind,
+    claim: self ? self() : belief.claim,
+    confidence: belief.confidence,
+    whatWouldChangeIt: belief.whatWouldRefute || null,
+    canContest: true,   // the person can always tell us it's wrong (rectification)
+  };
+}
+
 /* Challenge — the reasoner arguing against its own belief. Plain reasons it might be
    wrong, so a human can correct it and it never reads as unearned certainty. */
 function challenge(b, now = Date.now()) {
@@ -395,6 +430,8 @@ module.exports = {
   reason, challenge,
   // calibration — closing the loop
   applyFeedback, isSuppressed, outcomeTally, RESPONSES,
+  // the subject's right to see + contest
+  subjectView, CLAIM_SELF,
   // exported for tests + downstream projection
   agendaItem, proposalFrom,
   AXIS, WELLBEING_AXES, KIND_LABEL, STALE, DISMISS_COOLDOWN, WRONG_COOLDOWN,

@@ -166,5 +166,11 @@ const wrong = R.applyFeedback(fb, 'kim::plateau', 'wrong', now);
 ok('17 · "wrong" suppresses for far longer than a plain dismissal', wrong.suppressUntil - now > R.DISMISS_COOLDOWN);
 ok('17 · an unknown response is rejected (no silent mutation)', R.applyFeedback(fb, 'kim::plateau', 'lol', now) === null);
 
+/* ── 18 · the SUBJECT's view — their own read, warmly phrased, contestable, minimal ── */
+const sv = R.subjectView(joe);
+ok('18 · a person\'s own read is phrased for THEM (second person), not about "this person"', /^your |^you/i.test(sv.claim) && !/this person/i.test(sv.claim));
+ok('18 · it carries confidence, what would change it, and the right to contest', sv.confidence === joe.confidence && !!sv.whatWouldChangeIt && sv.canContest === true);
+ok('18 · it withholds the leader-facing fields (urgency / register / severity / challenge)', !('urgency' in sv) && !('register' in sv) && !('severity' in sv) && !('challenge' in sv) && !('why' in sv));
+
 console.log(`\nreason-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
