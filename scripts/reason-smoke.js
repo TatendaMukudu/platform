@@ -1,0 +1,135 @@
+/* Truth layer — THE REASONER / belief ledger (pure). Proves the layer ABOVE the
+   snapshot detector: observations accumulate into hypotheses held provisionally;
+   confidence is evidence-volume net of counter-evidence; a progress signal CONTESTS
+   the matching risk belief; silence lets a belief go dormant; the same risk across
+   people in a scope becomes ONE shared hypothesis; each belief carries what would
+   refute it; the register (support / scout / acknowledge) encodes "a time and a
+   place"; every proposal is proposal-gated (surface, never act); claims never leak a
+   score or a quote; and the fold is deterministic + persists across ticks.
+   No DB / AI / IO. Run: node scripts/reason-smoke.js */
+
+const R = require('../ai/reason.js');
+
+let pass = 0, fail = 0;
+const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n); } };
+
+const DAY = 86400000;
+const now = Date.parse('2026-07-27T00:00:00Z');
+const d = n => now - n * DAY;                          // n days ago
+const SCORE_RE = /\d(?:\.\d)?\s*\/\s*5\b|\b\d{1,3}\s*%/; // "3.4/5", "60%" — a private metric
+const QUOTE_RE = /[“"«][^”"»]{25,}[”"»]/;               // a long verbatim quotation
+const byId = (arr, id) => arr.find(x => (x.id || x.beliefId) === id);
+
+/* ── Tick A — accumulation, register, readiness, shared, progress, dormancy ──
+   joe: momentum dropping (3 recent signals)          → emerging, wellbeing → ripe SUPPORT
+   ann: momentum dropping (1 recent signal)           → tentative           → HELD (thin)
+   kim: plateau (4 recent signals, growth axis)       → emerging, perf      → ripe SCOUT
+   sam: recovering (3 recent signals)                 → progress            → ripe ACKNOWLEDGE
+   old: momentum dropping 30+ days ago                → no fresh signal      → DORMANT      */
+const tickA = R.reason({
+  now, scopeLabel: { teamA: 'Team A' },
+  observations: [
+    { id: 'jm1', subjectId: 'joe', subjectName: 'Joe', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'mood 2.8/5 over two weeks', t: d(10) },
+    { id: 'jm2', subjectId: 'joe', subjectName: 'Joe', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'mood dip continuing', t: d(6) },
+    { id: 'jm3', subjectId: 'joe', subjectName: 'Joe', scope: 'teamA', kind: 'momentum_drop', severity: 'high',   basis: 'mood 2.3/5', t: d(2) },
+    { id: 'am1', subjectId: 'ann', subjectName: 'Ann', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'mood softening', t: d(3) },
+    { id: 'kp1', subjectId: 'kim', subjectName: 'Kim', scope: 'teamA', kind: 'plateau', severity: 'low', basis: 'flat 6 weeks', t: d(12) },
+    { id: 'kp2', subjectId: 'kim', subjectName: 'Kim', scope: 'teamA', kind: 'plateau', severity: 'low', basis: 'still flat', t: d(9) },
+    { id: 'kp3', subjectId: 'kim', subjectName: 'Kim', scope: 'teamA', kind: 'plateau', severity: 'low', basis: 'still flat', t: d(5) },
+    { id: 'kp4', subjectId: 'kim', subjectName: 'Kim', scope: 'teamA', kind: 'plateau', severity: 'low', basis: 'still flat', t: d(1) },
+    { id: 'sr1', subjectId: 'sam', subjectName: 'Sam', scope: 'teamA', kind: 'recovering', severity: 'low', basis: 'climbing back', t: d(8) },
+    { id: 'sr2', subjectId: 'sam', subjectName: 'Sam', scope: 'teamA', kind: 'recovering', severity: 'low', basis: 'climbing back', t: d(5) },
+    { id: 'sr3', subjectId: 'sam', subjectName: 'Sam', scope: 'teamA', kind: 'recovering', severity: 'low', basis: 'climbing back', t: d(2) },
+    { id: 'om1', subjectId: 'old', subjectName: 'Ola', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'old dip', t: d(40) },
+    { id: 'om2', subjectId: 'old', subjectName: 'Ola', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'old dip', t: d(35) },
+    { id: 'om3', subjectId: 'old', subjectName: 'Ola', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'old dip', t: d(30) },
+    { id: 'bad', subjectId: 'joe', kind: 'not_a_real_kind', severity: 'high', basis: 'ignored', t: d(1) },
+  ],
+});
+
+const joe = byId(tickA.beliefs, 'joe::momentum_drop');
+const ann = byId(tickA.beliefs, 'ann::momentum_drop');
+const kim = byId(tickA.beliefs, 'kim::plateau');
+const sam = byId(tickA.beliefs, 'sam::recovering');
+const old = byId(tickA.beliefs, 'old::momentum_drop');
+const joeA = byId(tickA.agenda, 'joe::momentum_drop');
+const kimA = byId(tickA.agenda, 'kim::plateau');
+const samA = byId(tickA.agenda, 'sam::recovering');
+
+/* ── 1 · accumulation → a real belief, held provisionally ── */
+ok('1 · three signals make an emerging, open belief', joe && joe.confidence === 'emerging' && joe.status === 'open' && joe.supportCount === 3);
+ok('1 · every belief carries what would confirm AND refute it', joe && !!joe.whatWouldConfirm && /refuted|read is off|easing back/.test(joe.whatWouldRefute));
+
+/* ── 2 · a single signal is too thin to raise — held, not surfaced ── */
+ok('2 · one signal is tentative and HELD (never cries wolf)', ann && ann.confidence === 'tentative' && byId(tickA.agenda, 'ann::momentum_drop').readiness === 'hold');
+
+/* ── 3 · register encodes "a time and a place" ── */
+ok('3 · a wellbeing risk is raised SUPPORT-first (arm over the shoulder)', joeA && joeA.register === 'support' && joeA.readiness === 'ripe');
+ok('3 · a performance risk (plateau) is raised as a SCOUT, not an emotional check-in', kimA && kimA.register === 'scout' && kimA.readiness === 'ripe');
+ok('3 · a progress belief is an ACKNOWLEDGE moment, not a concern', samA && samA.register === 'acknowledge' && sam.polarity === 'progress');
+
+/* ── 4 · a shared hypothesis — the pattern no single view shows ── */
+const sharedA = byId(tickA.beliefs, 'shared::teamA::momentum_drop');
+ok('4 · two people with the same risk in a scope form ONE shared hypothesis', sharedA && sharedA.shared === true && sharedA.distinctSubjects === 2);
+ok('4 · the shared claim names the group, never a private metric', sharedA && /Team A/.test(sharedA.claim) && !SCORE_RE.test(sharedA.claim));
+
+/* ── 5 · silence → dormancy (a belief fades without fresh signal) ── */
+ok('5 · a belief with no signal for 3+ weeks goes dormant', old && old.status === 'dormant');
+ok('5 · dormant beliefs are retired from the agenda, not raised', !byId(tickA.agenda, 'old::momentum_drop') && tickA.retired.includes('old::momentum_drop'));
+
+/* ── 6 · surface, never act — every proposal is proposal-gated ── */
+ok('6 · proposals come ONLY from ripe items (joe, kim, sam)', tickA.proposals.length === 3);
+ok('6 · every proposal requires human confirmation (never auto-run)', tickA.proposals.every(p => p.requiresConfirmation === true));
+ok('6 · a proposal proposes — it carries no executable verb/effect', tickA.proposals.every(p => !('execute' in p) && !('effect' in p) && !('run' in p)));
+ok('6 · the support proposal leads with listening', tickA.proposals.some(p => p.register === 'support' && /listen first/i.test(p.text)));
+
+/* ── 7 · privacy by construction — claims never leak a score or a quote ── */
+const rendered = [...tickA.beliefs.map(b => b.claim), ...tickA.agenda.map(a => a.why), ...tickA.proposals.map(p => p.text)];
+ok('7 · no belief/agenda/proposal text carries a private metric (x/5, %)', rendered.every(t => !SCORE_RE.test(t)));
+ok('7 · no rendered text carries a verbatim quotation', rendered.every(t => !QUOTE_RE.test(t)));
+
+/* ── 8 · an unknown observation kind is ignored (no belief invented) ── */
+ok('8 · an unrecognised kind forms no belief', !byId(tickA.beliefs, 'joe::not_a_real_kind'));
+
+/* ── 9 · determinism ── */
+const again = R.reason({ now, scopeLabel: { teamA: 'Team A' }, observations: [
+  { id: 'jm1', subjectId: 'joe', subjectName: 'Joe', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'x', t: d(10) },
+] });
+const twice = R.reason({ now, scopeLabel: { teamA: 'Team A' }, observations: [
+  { id: 'jm1', subjectId: 'joe', subjectName: 'Joe', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'x', t: d(10) },
+] });
+ok('9 · identical inputs → identical ledger', JSON.stringify(again) === JSON.stringify(twice));
+
+/* ── Tick B — the reasoner challenges its own truth ──────────────────────────
+   Carry tick A's ledger forward. Joe now shows recovering (3 signals) — the SAME-
+   axis progress signal that argues against the momentum_drop belief. Re-feed joe's
+   original drop signals too, to prove dedupe. */
+const tickB = R.reason({
+  now, scopeLabel: { teamA: 'Team A' }, priorBeliefs: tickA.beliefs,
+  observations: [
+    { id: 'jm1', subjectId: 'joe', subjectName: 'Joe', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'dup', t: d(10) },
+    { id: 'jm2', subjectId: 'joe', subjectName: 'Joe', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'dup', t: d(6) },
+    { id: 'jm3', subjectId: 'joe', subjectName: 'Joe', scope: 'teamA', kind: 'momentum_drop', severity: 'high',   basis: 'dup', t: d(2) },
+    { id: 'jr1', subjectId: 'joe', subjectName: 'Joe', scope: 'teamA', kind: 'recovering', severity: 'low', basis: 'climbing', t: d(1) },
+    { id: 'jr2', subjectId: 'joe', subjectName: 'Joe', scope: 'teamA', kind: 'recovering', severity: 'low', basis: 'climbing', t: now },
+    { id: 'jr3', subjectId: 'joe', subjectName: 'Joe', scope: 'teamA', kind: 'recovering', severity: 'low', basis: 'climbing', t: now },
+  ],
+});
+const joeB = byId(tickB.beliefs, 'joe::momentum_drop');
+
+/* ── 10 · counter-evidence contests the belief (self-correction) ── */
+ok('10 · a same-axis progress signal is recorded AGAINST the risk belief', joeB && joeB.counterCount === 3);
+ok('10 · when counter ≥ support the belief is CONTESTED and held (not raised)', joeB && joeB.status === 'contested' && byId(tickB.agenda, 'joe::momentum_drop').readiness === 'hold');
+
+/* ── 11 · re-feeding the same observations does NOT double-count (persist + dedupe) ── */
+ok('11 · re-fed observations dedupe by id — support stays 3, not 6', joeB && joeB.supportCount === 3);
+
+/* ── 12 · a self-correcting group read: the shared pattern dissolves ── */
+ok('12 · with joe no longer an OPEN risk, the shared momentum pattern dissolves (only ann left)', !byId(tickB.beliefs, 'shared::teamA::momentum_drop'));
+
+/* ── 13 · challenge() states, in plain words, why the belief might be wrong ── */
+const ch = R.challenge(joeB, now);
+ok('13 · challenge names the counter-evidence and the refutation path', ch.some(r => /argue the other way/.test(r)) && ch.some(r => /refuted by/.test(r)));
+
+console.log(`\nreason-smoke: ${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);
