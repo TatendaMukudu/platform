@@ -98,6 +98,7 @@ const SUITES = [
   'org-routing-http-smoke.js', // node-aware routing (HTTP): a resolved owner gets the item in their inbox + subtree rollup; a sibling branch lead never sees it (no leak); the top leader's rollup spans the org; conflicts scoped to recipients; node-less org returns a valid empty view
   'lifecycle-smoke.js',    // evidence lifecycle / knowledge governance (pure): what to keep vs let go — category half-lives, authority-modulated confidence decay, superseded→retire, redundancy merge, stale→proactive "still current?" inquiry
   'inquiry-smoke.js',      // the Inquiry / epistemic-planning layer (recommendation-only): questions are actions — value-gate, critic, health-guard, least-burdensome routing, non-leading phrasing; derives uncertainties only from admissible evidence (private never enters)
+  'member-methods-scan.js', // member-view guard: every called MemberApp._method is defined (catches called-but-undefined, e.g. a leader-only render branch invoking a missing helper that member-based boot tests never hit)
   'deadcode-scan.js',      // dead-code guard: fails on any unreferenced function (named or module-level arrow) across server.js + every js/ module — keeps retired-surface debt from re-accumulating
   'connector-harness.js',  // the Connector SDK: identity/confidence + mapping contracts
   'frontend-smoke.js',     // REAL headless-Chromium boot: every route + refresh + Support view; fails on any uncaught JS/parse error (self-skips if no Chromium). This is the guard that would have caught the mobile "Unexpected token" boot crash.

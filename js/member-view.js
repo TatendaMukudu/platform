@@ -1690,6 +1690,20 @@ const MemberApp = {
     return html;
   },
 
+  /* Relative time for template "last used" etc. (was referenced but never defined — a
+     missing helper that crashed the leader MyWorkspace whenever a template had been used). */
+  _ago(iso) {
+    const t = Date.parse(iso);
+    if (!Number.isFinite(t)) return 'recently';
+    const d = Math.floor((Date.now() - t) / 86400000);
+    if (d <= 0) return 'today';
+    if (d === 1) return 'yesterday';
+    if (d < 7) return `${d} days ago`;
+    if (d < 30) return `${Math.round(d / 7)} weeks ago`;
+    if (d < 365) return `${Math.round(d / 30)} months ago`;
+    return `${Math.round(d / 365)} years ago`;
+  },
+
   _assessToggleCreate() { const el = document.getElementById('assess-create'); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; },
   _tutorialToggle()     { const el = document.getElementById('tutorial-create'); if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none'; },
 
