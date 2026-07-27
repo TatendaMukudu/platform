@@ -131,5 +131,40 @@ ok('12 · with joe no longer an OPEN risk, the shared momentum pattern dissolves
 const ch = R.challenge(joeB, now);
 ok('13 · challenge names the counter-evidence and the refutation path', ch.some(r => /argue the other way/.test(r)) && ch.some(r => /refuted by/.test(r)));
 
+/* ── CALIBRATION — the reasoner grades its own reads and learns from response ── */
+
+/* ── 14 · a risk that gave way to an open progress belief RESOLVED (a real, useful read) ── */
+ok('14 · joe\'s contested drop, now that he\'s recovering, is scored RESOLVED (not a false read)', joeB && joeB.outcome === 'resolved');
+const tallyB = R.outcomeTally(tickB.beliefs);
+ok('14 · a resolved belief counts as USEFUL for its kind (reliability grows)', tallyB.momentum_drop && tallyB.momentum_drop.useful >= 1);
+
+/* ── 15 · a thin belief that simply went quiet FADED (a likely over-read) ── */
+const faded = R.reason({ now, observations: [
+  { id: 'k1', subjectId: 'ken', subjectName: 'Ken', kind: 'momentum_drop', severity: 'low', basis: 'one old dip', t: d(40) },
+] });
+const ken = byId(faded.beliefs, 'ken::momentum_drop');
+ok('15 · a single, stale signal that never matured is scored FADED', ken && ken.status === 'dormant' && ken.outcome === 'faded');
+ok('15 · a faded belief counts as DISMISS for its kind (reliability falls)', R.outcomeTally(faded.beliefs).momentum_drop.dismiss >= 1);
+
+/* ── 16 · human feedback: "dismissed" stands the belief down (anti-nagging) ── */
+const fb = R.reason({ now, scopeLabel: { teamA: 'Team A' }, observations: [
+  { id: 'p1', subjectId: 'kim', subjectName: 'Kim', scope: 'teamA', kind: 'plateau', severity: 'low', t: d(4) },
+  { id: 'p2', subjectId: 'kim', subjectName: 'Kim', scope: 'teamA', kind: 'plateau', severity: 'low', t: d(2) },
+  { id: 'p3', subjectId: 'kim', subjectName: 'Kim', scope: 'teamA', kind: 'plateau', severity: 'low', t: d(1) },
+] }).beliefs;
+ok('16 · precondition: the belief is on the agenda before any feedback', R.reason({ now, priorBeliefs: fb }).agenda.some(a => a.beliefId === 'kim::plateau'));
+const applied = R.applyFeedback(fb, 'kim::plateau', 'dismissed', now, 'leadX');
+ok('16 · applyFeedback records the response and starts a cooldown', applied && applied.feedback.response === 'dismissed' && R.isSuppressed(applied, now));
+const afterDismiss = R.reason({ now, priorBeliefs: fb });
+ok('16 · a dismissed belief is HELD OUT of the agenda (never nags)', !afterDismiss.agenda.some(a => a.beliefId === 'kim::plateau'));
+ok('16 · …but the reasoner still BELIEVES it (held, not deleted)', afterDismiss.beliefs.some(b => b.id === 'kim::plateau'));
+
+/* ── 17 · "acted"/"useful" re-engages; "wrong" stands it down for much longer ── */
+R.applyFeedback(fb, 'kim::plateau', 'useful', now);
+ok('17 · marking it useful clears the cooldown and it returns to the agenda', R.reason({ now, priorBeliefs: fb }).agenda.some(a => a.beliefId === 'kim::plateau'));
+const wrong = R.applyFeedback(fb, 'kim::plateau', 'wrong', now);
+ok('17 · "wrong" suppresses for far longer than a plain dismissal', wrong.suppressUntil - now > R.DISMISS_COOLDOWN);
+ok('17 · an unknown response is rejected (no silent mutation)', R.applyFeedback(fb, 'kim::plateau', 'lol', now) === null);
+
 console.log(`\nreason-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

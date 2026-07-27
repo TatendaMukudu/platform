@@ -69,6 +69,14 @@ const server = app.listen(0, async () => {
     let j = null; try { j = await r.json(); } catch (_) {}
     return { status: r.status, j };
   })();
+  const feedback = (who, beliefId, response) => (async () => {
+    const r = await fetch(base + `/api/reason/${encodeURIComponent(beliefId)}/feedback`, {
+      method: 'POST', headers: { Authorization: `Bearer ${tok[who]}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ response }),
+    });
+    let j = null; try { j = await r.json(); } catch (_) {}
+    return { status: r.status, j };
+  })();
 
   try {
     /* ── 1 · leader-gated ── */
@@ -109,6 +117,28 @@ const server = app.listen(0, async () => {
     /* ── 8 · deterministic read (throttled tick returns a stable ledger) ── */
     const a2 = await agenda('coachA');
     ok('8 · identical scoped reads → identical agenda', JSON.stringify(a2.j.agenda) === JSON.stringify(a.j.agenda));
+
+    /* ── 9 · calibration — every agenda item carries an honest reliability label ── */
+    ok('9 · agenda items carry a Confidence-Engine reliability label (calibrating until earned)', joeItem && joeItem.reliability === 'calibrating');
+
+    /* ── 10 · feedback is leader-gated + SCOPED — you can only judge a belief you may see ── */
+    const cross = await feedback('coachB', 'joe::momentum_drop', 'dismissed');
+    ok('10 · a leader cannot give feedback on another branch\'s belief (403)', cross.status === 403);
+    const bad = await feedback('coachA', 'joe::momentum_drop', 'lol');
+    ok('10 · an invalid response is rejected (400)', bad.status === 400);
+    const missing = await feedback('coachA', 'nobody::nothing', 'useful');
+    ok('10 · feedback on an unknown belief is a 404', missing.status === 404);
+
+    /* ── 11 · "dismissed" stands the belief down — the reasoner stops raising it (no nag) ── */
+    const dis = await feedback('coachA', 'joe::momentum_drop', 'dismissed');
+    ok('11 · dismissal is accepted', dis.status === 200 && dis.j.ok === true);
+    const afterDismiss = await agenda('coachA');
+    ok('11 · the dismissed belief is no longer raised to that leader', !(afterDismiss.j.agenda || []).some(x => x.beliefId === 'joe::momentum_drop'));
+
+    /* ── 12 · "useful" re-engages it (the loop runs both ways) ── */
+    await feedback('coachA', 'joe::momentum_drop', 'useful');
+    const afterUseful = await agenda('coachA');
+    ok('12 · marking it useful brings it back to the agenda', (afterUseful.j.agenda || []).some(x => x.beliefId === 'joe::momentum_drop'));
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();

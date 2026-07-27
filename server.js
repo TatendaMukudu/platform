@@ -8850,6 +8850,23 @@ function _reasonTick(code, now = Date.now(), force = false) {
     now, scopeLabel,
   });
   reasonLedger[code] = result.beliefs;
+
+  // CALIBRATION — compose the Confidence Engine (ai/confidence). Per KIND of noticing,
+  // turn the reasoner's own outcomes + human feedback into a reliability read, then:
+  //   • label every agenda item honestly ("reliable here" / "calibrating"), and
+  //   • STAND DOWN a kind that has earned enough feedback and proven mostly unhelpful
+  //     (shouldSurface=false) — the reasoner stops raising a kind it keeps getting wrong.
+  // This is the loop closing: beliefs that don't pan out quietly lower their own kind's
+  // standing until it stops interrupting people.
+  const tally = reason.outcomeTally(result.beliefs);
+  const relByKind = {};
+  for (const kind of Object.keys(tally)) relByKind[kind] = confidence.reliability(tally[kind]);
+  result.agenda = result.agenda
+    .filter(a => { const rel = relByKind[a.kind]; return !rel || confidence.shouldSurface(rel); })
+    .map(a => ({ ...a, reliability: confidence.label(relByKind[a.kind] || null) }));
+  const liveBeliefIds = new Set(result.agenda.map(a => a.beliefId));
+  result.proposals = result.proposals.filter(p => liveBeliefIds.has(p.beliefId));
+
   reasonTickCache[code] = { ts: now, result };
   scheduleSave();
   return result;
@@ -8865,7 +8882,21 @@ function _reasonAgendaSafe(item) {
     claim: item.claim, register: item.register, readiness: item.readiness,
     confidence: item.confidence, severity: item.severity, polarity: item.polarity,
     urgency: item.urgency, why: item.why, challenge: item.challenge,
+    reliability: item.reliability || null,   // the Confidence Engine's honest label for this kind
   };
+}
+
+/* Can `userId` see (and therefore respond to) a belief? A per-person belief needs the
+   subject visible; a shared belief needs some of its people visible. */
+function _reasonCanSeeBelief(code, userId, belief) {
+  if (!belief) return false;
+  const visible = new Set(getVisibleUserIds(code, userId));
+  if (belief.subjectId) return visible.has(belief.subjectId);
+  if (belief.shared) {
+    const ledger = reasonLedger[code] || [];
+    return (belief.memberBeliefIds || []).some(id => { const mb = ledger.find(x => x.id === id); return mb && mb.subjectId && visible.has(mb.subjectId); });
+  }
+  return false;
 }
 
 /* GET /api/reason/agenda — the reasoner read aloud, SCOPED to this leader. Returns what it
@@ -8906,6 +8937,32 @@ app.get('/api/reason/agenda', requireAuth, (req, res) => {
     console.warn('[reason/agenda] failed:', e && e.message);
     res.json({ ok: true, agenda: [], proposals: [], counts: { total: 0, ripe: 0, held: 0 } });
   }
+});
+
+/* POST /api/reason/:beliefId/feedback — the human closing the loop. A leader tells the
+   reasoner what a belief was worth: acted / useful (it earned its keep) or dismissed /
+   wrong (stop raising it). dismissed/wrong start a cooldown so it stops nagging, and both
+   feed the per-kind reliability that decides whether that KIND of noticing keeps
+   surfacing. Leader-gated + scoped: you can only respond to a belief you're allowed to
+   see. This is the ONLY write on the reasoner — it records judgement, it never acts. */
+app.post('/api/reason/:beliefId/feedback', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+  const beliefId = String(req.params.beliefId || '');
+  const response = String(req.body && req.body.response || '');
+  if (!reason.RESPONSES.has(response)) return res.status(400).json({ ok: false, error: 'invalid_response' });
+  const ledger = reasonLedger[code] || [];
+  const belief = ledger.find(x => x.id === beliefId);
+  if (!belief) return res.status(404).json({ ok: false, error: 'belief_not_found' });
+  if (!_reasonCanSeeBelief(code, userId, belief)) return res.status(403).json({ ok: false, error: 'out_of_scope' });
+  reason.applyFeedback(ledger, beliefId, response, Date.now(), userId);
+  reasonLedger[code] = ledger;
+  delete reasonTickCache[code];   // next read reflects the response immediately
+  scheduleSave();
+  res.json({ ok: true, beliefId, response });
 });
 
 /* ─── SCOPED ORGANISATIONAL ANSWERING (ai/org-answer) — a leader or member asks a plain

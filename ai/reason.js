@@ -36,6 +36,12 @@
 
 const DAY   = 86400000;
 const STALE = 21 * DAY;   // no fresh signal for three weeks → the belief goes dormant
+const DISMISS_COOLDOWN = 14 * DAY;  // "not now" → don't raise this belief again for two weeks
+const WRONG_COOLDOWN   = 60 * DAY;  // "that's wrong" → stand it down for much longer
+
+// The human responses a belief can receive. acted/useful = the noticing earned its keep;
+// dismissed = "not now" (a nudge to stop nagging); wrong = "you misread this" (strong).
+const RESPONSES = new Set(['acted', 'useful', 'dismissed', 'wrong']);
 
 const SEV_RANK  = { high: 3, medium: 2, low: 1 };
 const CONF_RANK = { clear: 2, emerging: 1, tentative: 0 };
@@ -195,6 +201,23 @@ function reason({ priorBeliefs = [], observations = [], now = Date.now(), scopeL
     b.staleDays = Math.floor((now - b.lastSeen) / DAY);
   }
 
+  // 3.5 · OUTCOME — did the belief go anywhere? This is the reasoner grading its own
+  //       reads, so it can calibrate which kinds of noticing are worth surfacing. A risk
+  //       that gave way to an OPEN progress belief on the same axis RESOLVED (a real
+  //       concern that turned around — the noticing earned its keep). A thin risk that
+  //       simply went quiet FADED (a likely over-read). Between them: still active, or
+  //       matured-then-lapsed (ambiguous — not counted either way).
+  const progressOpen = new Set();
+  for (const b of ledger.values()) if (b.polarity === 'progress' && b.status === 'open') progressOpen.add(`${b.subjectId}::${b.axis}`);
+  for (const b of ledger.values()) {
+    if (b.polarity === 'progress') { b.outcome = 'progress'; continue; }
+    const resolved = progressOpen.has(`${b.subjectId}::${b.axis}`);
+    b.outcome =
+      b.status === 'open'      ? 'active'
+      : b.status === 'contested' ? (resolved ? 'resolved' : 'contested')
+      : /* dormant */            (b.supportCount >= 3 ? 'lapsed' : 'faded');
+  }
+
   // 4 · Cross-subject hypotheses — the pattern no single person's view shows. When
   //     ≥2 distinct subjects in the same scope hold an OPEN risk belief of the same
   //     kind, surface it as one thing to look at as a GROUP. Descriptive, not causal.
@@ -229,8 +252,10 @@ function reason({ priorBeliefs = [], observations = [], now = Date.now(), scopeL
   const beliefs = [...ledger.values(), ...shared].sort((a, b) => a.id.localeCompare(b.id));
 
   // 5 · The agenda — rank by urgency, decide register + readiness. Never an action.
+  //     A dismissed belief is held silently through its cooldown (anti-nagging): the
+  //     reasoner still BELIEVES it, but it will not keep putting it in front of a human.
   const agenda = beliefs
-    .filter(b => b.status !== 'dormant')
+    .filter(b => b.status !== 'dormant' && !isSuppressed(b, now))
     .map(b => agendaItem(b, now))
     .sort((a, b) => b.urgency - a.urgency || SEV_RANK[b.severity] - SEV_RANK[a.severity] || a.beliefId.localeCompare(b.beliefId));
 
@@ -307,6 +332,53 @@ function proposalFrom(item) {
   };
 }
 
+/* ── Calibration — closing the loop ──────────────────────────────────────────
+   The reasoner is only trustworthy if it learns whether its beliefs were TRUE. Two
+   signals feed that: the belief's OWN trajectory (did it resolve, or fade?) and the
+   human's RESPONSE to the proposal (acted / useful / dismissed / wrong). This module
+   turns both into the { useful, dismiss } tally the Confidence Engine consumes — but
+   it does not import the Confidence Engine; the server composes the two (pure modules
+   never depend on each other). */
+
+/* Is this belief in a dismissal cooldown — held so we don't nag? */
+function isSuppressed(belief, now = Date.now()) {
+  return !!(belief && belief.suppressUntil && now < belief.suppressUntil);
+}
+
+/* Record a human's response to a belief, in place. dismissed/wrong start a cooldown
+   (stop raising it); acted/useful clear any cooldown (it earned attention). Returns the
+   updated belief, or null if unknown. */
+function applyFeedback(beliefs, beliefId, response, now = Date.now(), by = null) {
+  if (!RESPONSES.has(response)) return null;
+  const b = (beliefs || []).find(x => x && x.id === beliefId);
+  if (!b) return null;
+  b.feedback = { response, at: now, by: by || null };
+  if (response === 'dismissed')   b.suppressUntil = now + DISMISS_COOLDOWN;
+  else if (response === 'wrong')  b.suppressUntil = now + WRONG_COOLDOWN;
+  else                            delete b.suppressUntil;   // acted / useful → re-engage
+  return b;
+}
+
+/* Per-KIND reliability tally, in the Confidence Engine's { useful, dismiss } shape.
+   Combines self-corroboration (resolved = useful, faded/contested = dismiss) with any
+   human feedback recorded on the belief. Kinds with no closed evidence simply don't
+   appear — the Confidence Engine then reports "calibrating", never false reliability. */
+function outcomeTally(beliefs) {
+  const tally = {};
+  const bump = (kind, field) => { (tally[kind] || (tally[kind] = { useful: 0, dismiss: 0 }))[field]++; };
+  for (const b of (beliefs || [])) {
+    if (!b || !b.kind || b.shared) continue;
+    if (b.outcome === 'resolved')  bump(b.kind, 'useful');
+    else if (b.outcome === 'faded' || b.outcome === 'contested') bump(b.kind, 'dismiss');
+    if (b.feedback) {
+      const r = b.feedback.response;
+      if (r === 'acted' || r === 'useful') bump(b.kind, 'useful');
+      else if (r === 'dismissed' || r === 'wrong') bump(b.kind, 'dismiss');
+    }
+  }
+  return tally;
+}
+
 /* Challenge — the reasoner arguing against its own belief. Plain reasons it might be
    wrong, so a human can correct it and it never reads as unearned certainty. */
 function challenge(b, now = Date.now()) {
@@ -321,8 +393,10 @@ function challenge(b, now = Date.now()) {
 
 module.exports = {
   reason, challenge,
+  // calibration — closing the loop
+  applyFeedback, isSuppressed, outcomeTally, RESPONSES,
   // exported for tests + downstream projection
   agendaItem, proposalFrom,
-  AXIS, WELLBEING_AXES, KIND_LABEL, STALE,
+  AXIS, WELLBEING_AXES, KIND_LABEL, STALE, DISMISS_COOLDOWN, WRONG_COOLDOWN,
   _confWord, _register, _readiness, _urgency,
 };
