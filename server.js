@@ -38,6 +38,7 @@ const packs      = require('./ai/packs');
 const primitives = require('./ai/primitives');
 const confidence = require('./ai/confidence');
 const proactive  = require('./ai/proactive');
+const reason     = require('./ai/reason');
 const behaviour  = require('./ai/behaviour');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
@@ -116,6 +117,7 @@ function scheduleSave() {
         orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
         proactivePrefs, insightSuppression, answerFeedback,
         orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
+        reasonLedger,
         conversationSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
@@ -8042,6 +8044,13 @@ const ORG_OBS_CAP = 500;
 // leader's explicit confirmation does. Dismissed candidate fingerprints are suppressed.
 const orgPlaybook = {};           // orgCode → [ confirmed entry ]
 const orgPlaybookDismissed = {};  // orgCode → [ dismissed candidate fingerprint ]
+// THE REASONER (ai/reason) — the org's persistent BELIEF LEDGER. Unlike the snapshot
+// detector, this remembers: findings accumulate into hypotheses held across ticks, each
+// carrying its counter-evidence and what would refute it. Maintained ORG-WIDE by a single
+// pass (_reasonTick) so every leader reads the SAME belief state, scoped to whom they may
+// see — never a per-leader ledger that would overwrite others. Persisted; re-derivable.
+const reasonLedger = {};          // orgCode → [ belief ]
+const reasonTickCache = {};       // orgCode → { ts, result }  (throttles the org-wide pass)
 
 function _orgPack(code) {
   const cfg = orgStateConfig[code];
@@ -8789,6 +8798,113 @@ app.post('/api/org-playbook/:fingerprint/retire', requireAuth, (req, res) => {
   } catch (e) {
     console.warn('[org-playbook/retire] failed:', e && e.message);
     res.status(200).json({ ok: false });
+  }
+});
+
+/* ─── THE REASONER (ai/reason) — the governed boundary ────────────────────────────────
+   Turn the detector's SNAPSHOT findings into OBSERVATIONS and fold them into the org's
+   persistent belief ledger. This is the one place the pure reasoner meets the real world:
+   it reads canonical-sourced member findings (the SAME detector the briefing uses — not a
+   second engine), stamps each with the subject's node scope, and hands them to reason().
+   The returned ledger is persisted so beliefs accumulate, argue with themselves, and fade
+   ACROSS runs. Org-wide by construction; scoped per reader at the endpoint.
+
+   Observation identity is (member : kind : DAY): re-running the tick within a day dedupes,
+   but the same pattern present on another day is a NEW supporting observation — so
+   confidence grows with persistence over time, exactly as the ledger intends. */
+function _reasonObservations(code, now) {
+  const users = orgUsers[code] || {};
+  const day = Math.floor(now / 86400000);
+  const observations = [];
+  for (const u of Object.values(users)) {
+    if (!u || u.role === 'superadmin') continue;
+    let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { continue; }
+    if (!m) continue;
+    const findings = [...intel.detectPatterns(m), ...(m.structural || [])];
+    if (!findings.length) continue;
+    const scope = _primaryNodeScope(code, u.id);
+    for (const f of findings) {
+      observations.push({
+        id: `${u.id}:${f.type}:${day}`,
+        subjectId: u.id, subjectName: (u.name || u.id) || null, scope,
+        kind: f.type, severity: f.severity, confidence: f.confidence, basis: f.basis,
+        careFlag: !!m.hasSensitiveContext, t: now,
+      });
+    }
+  }
+  return observations;
+}
+
+/* Run the org-wide reasoning pass and persist the ledger. Throttled (BRIEFING_TTL) so
+   polling doesn't re-fold constantly; ?refresh forces a fresh pass. Later beats can call
+   this on evidence-write (reason-on-event) and on a background tick (reason-when-quiet) —
+   the boundary is the same. Fail-safe: any error leaves the last good ledger untouched. */
+function _reasonTick(code, now = Date.now(), force = false) {
+  const cached = reasonTickCache[code];
+  if (!force && cached && (now - cached.ts) < BRIEFING_TTL) return cached.result;
+  const scopeLabel = {};
+  for (const [nid, n] of Object.entries(orgNodes[code] || {})) scopeLabel[nid] = (n && (n.name || n.label)) || nid;
+  const result = reason.reason({
+    priorBeliefs: reasonLedger[code] || [],
+    observations: _reasonObservations(code, now),
+    now, scopeLabel,
+  });
+  reasonLedger[code] = result.beliefs;
+  reasonTickCache[code] = { ts: now, result };
+  scheduleSave();
+  return result;
+}
+
+/* A leader-safe projection of an agenda item — the belief, its register + readiness, its
+   confidence, and the reasoner's own self-challenge. No evidence basis, no support records,
+   no private metric (the reasoner already keeps claims score-free). */
+function _reasonAgendaSafe(item) {
+  return {
+    beliefId: item.beliefId, kind: item.kind, shared: !!item.shared,
+    subjectId: item.subjectId || null, subjectName: item.subjectName || null,
+    claim: item.claim, register: item.register, readiness: item.readiness,
+    confidence: item.confidence, severity: item.severity, polarity: item.polarity,
+    urgency: item.urgency, why: item.why, challenge: item.challenge,
+  };
+}
+
+/* GET /api/reason/agenda — the reasoner read aloud, SCOPED to this leader. Returns what it
+   currently believes is worth attention (ripe first), the self-challenge on each, and the
+   proposal-gated next step for the ripe ones. A belief about a person routes only to leaders
+   who may see that person; a shared pattern shows only if some of its people are visible —
+   no cross-branch leak. Read-only: this endpoint never confirms or acts on anything. */
+app.get('/api/reason/agenda', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+  try {
+    const now = Date.now();
+    const result = _reasonTick(code, now, req.query.refresh === '1');
+    const visible = new Set(getVisibleUserIds(code, userId));
+    const byId = new Map(result.beliefs.map(b => [b.id, b]));
+    const inScope = (item) => {
+      if (item.subjectId) return visible.has(item.subjectId);
+      if (item.shared) {
+        const b = byId.get(item.beliefId);
+        return !!(b && (b.memberBeliefIds || []).some(id => { const mb = byId.get(id); return mb && mb.subjectId && visible.has(mb.subjectId); }));
+      }
+      return false;
+    };
+    const agenda = result.agenda.filter(inScope);
+    const beliefIds = new Set(agenda.map(a => a.beliefId));
+    const ripe = agenda.filter(a => a.readiness === 'ripe');
+    res.json({
+      ok: true,
+      generatedAt: new Date(now).toISOString(),
+      agenda: agenda.map(_reasonAgendaSafe),
+      proposals: result.proposals.filter(p => beliefIds.has(p.beliefId)),
+      counts: { total: agenda.length, ripe: ripe.length, held: agenda.length - ripe.length },
+    });
+  } catch (e) {
+    console.warn('[reason/agenda] failed:', e && e.message);
+    res.json({ ok: true, agenda: [], proposals: [], counts: { total: 0, ripe: 0, held: 0 } });
   }
 });
 
@@ -13146,6 +13262,7 @@ function _loadAllStores(data) {
   Object.assign(orgObservations,   data.orgObservations   || {});
   Object.assign(orgPlaybook,       data.orgPlaybook       || {});
   Object.assign(orgPlaybookDismissed, data.orgPlaybookDismissed || {});
+  Object.assign(reasonLedger,      data.reasonLedger      || {});
   Object.assign(conversationSessions, data.conversationSessions || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
