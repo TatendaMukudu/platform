@@ -8844,10 +8844,17 @@ function _reasonTick(code, now = Date.now(), force = false) {
   if (!force && cached && (now - cached.ts) < BRIEFING_TTL) return cached.result;
   const scopeLabel = {};
   for (const [nid, n] of Object.entries(orgNodes[code] || {})) scopeLabel[nid] = (n && (n.name || n.label)) || nid;
+  // The org's real, upcoming events — facts with dates. They pull a belief's urgency
+  // forward and create a natural moment to act (a match, a deadline). Scope is org-wide
+  // unless the event names a node; a scoped event only bears on its own branch.
+  const events = (orgCalendar[code] || []).map(e => {
+    const at = e && e.start ? Date.parse(e.start) : NaN;
+    return { id: e.id, label: e.title || 'an upcoming event', at, scope: (orgNodes[code] && e.groupRef && orgNodes[code][e.groupRef]) ? e.groupRef : null };
+  }).filter(e => Number.isFinite(e.at));
   const result = reason.reason({
     priorBeliefs: reasonLedger[code] || [],
     observations: _reasonObservations(code, now),
-    now, scopeLabel,
+    now, scopeLabel, context: { events },
   });
   reasonLedger[code] = result.beliefs;
 
@@ -8882,6 +8889,7 @@ function _reasonAgendaSafe(item) {
     claim: item.claim, register: item.register, readiness: item.readiness,
     confidence: item.confidence, severity: item.severity, polarity: item.polarity,
     urgency: item.urgency, why: item.why, challenge: item.challenge,
+    timing: item.timing || null,             // the natural moment a real event creates
     reliability: item.reliability || null,   // the Confidence Engine's honest label for this kind
   };
 }

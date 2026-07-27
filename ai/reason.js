@@ -38,6 +38,7 @@ const DAY   = 86400000;
 const STALE = 21 * DAY;   // no fresh signal for three weeks → the belief goes dormant
 const DISMISS_COOLDOWN = 14 * DAY;  // "not now" → don't raise this belief again for two weeks
 const WRONG_COOLDOWN   = 60 * DAY;  // "that's wrong" → stand it down for much longer
+const HORIZON = 21 * DAY;           // how far ahead a real event pulls a belief's urgency forward
 
 // The human responses a belief can receive. acted/useful = the noticing earned its keep;
 // dismissed = "not now" (a nudge to stop nagging); wrong = "you misread this" (strong).
@@ -149,7 +150,26 @@ function _confWord(net) { return net >= 6 ? 'clear' : net >= 3 ? 'emerging' : 't
    proposals, retired }. A pure fold: it merges this tick's observations into the
    prior ledger, re-weighs every belief against its counter-evidence and its age,
    forms cross-subject "shared" hypotheses, and ranks what is ripe to raise. */
-function reason({ priorBeliefs = [], observations = [], now = Date.now(), scopeLabel = {} } = {}) {
+/* The nearest real, upcoming event that bears on a belief — its scope (a match for that
+   team) or org-wide (a season deadline), within the horizon. Events are FACTS with dates;
+   no prediction. This is what turns "a time and a place" from an axis guess into the org's
+   actual calendar: a wellbeing risk two days before a match is more pressing, and there's a
+   natural moment to act before then. */
+function _eventHorizon(scope, events, now) {
+  let best = null;
+  for (const e of (events || [])) {
+    if (!e || !Number.isFinite(e.at)) continue;
+    const dt = e.at - now;
+    if (dt <= 0 || dt > HORIZON) continue;                       // past, or too far to matter yet
+    if (e.scope != null && scope != null && e.scope !== scope) continue; // a different branch's event
+    if (!best || e.at < best.at) best = e;
+  }
+  if (!best) return null;
+  return { label: best.label || 'an upcoming event', at: best.at, days: Math.max(0, Math.round((best.at - now) / DAY)) };
+}
+
+function reason({ priorBeliefs = [], observations = [], now = Date.now(), scopeLabel = {}, context = {} } = {}) {
+  const events = context.events || [];
   // 1 · Seed the ledger from prior per-subject beliefs. Shared (cross-subject)
   //     beliefs are DERIVED fresh every tick, so we drop any carried in.
   const ledger = new Map();
@@ -269,6 +289,9 @@ function reason({ priorBeliefs = [], observations = [], now = Date.now(), scopeL
 
   const beliefs = [...ledger.values(), ...shared].sort((a, b) => a.id.localeCompare(b.id));
 
+  // 4.5 · Ground each belief in the real calendar — the nearest event that bears on it.
+  for (const b of beliefs) b.horizon = _eventHorizon(b.scope || null, events, now);
+
   // 5 · The agenda — rank by urgency, decide register + readiness. Never an action.
   //     A dismissed belief is held silently through its cooldown (anti-nagging): the
   //     reasoner still BELIEVES it, but it will not keep putting it in front of a human.
@@ -312,7 +335,18 @@ function _urgency(b, now) {
   if (b.shared) u += Math.min(b.distinctSubjects, 5);
   if ((now - b.lastSeen) < 7 * DAY) u += 1;      // a fresh signal is more pressing
   if (b.polarity === 'progress') u -= 1;          // wins matter, but rarely most-urgent
+  // A real event pulls urgency forward — the closer it is, the more pressing acting first.
+  if (b.horizon) u += b.horizon.days <= 2 ? 4 : b.horizon.days <= 7 ? 2 : 1;
   return u;
+}
+
+/* The timing note — the natural moment a real event creates. Deterministic; only present
+   when there's an event on the horizon. */
+function _timing(b, register) {
+  if (!b.horizon) return null;
+  const when = b.horizon.days === 0 ? 'today' : b.horizon.days === 1 ? 'tomorrow' : `in ${b.horizon.days} days`;
+  const verb = register === 'support' ? 'have that word' : register === 'scout' ? 'do this' : 'mark it';
+  return `${b.horizon.label} is ${when} — a natural moment to ${verb} before then.`;
 }
 
 function agendaItem(b, now) {
@@ -324,6 +358,7 @@ function agendaItem(b, now) {
     subjectName: b.subjectName || null, scope: b.scope || null,
     claim: b.claim, severity: b.severity, confidence: b.confidence, polarity: b.polarity,
     urgency: _urgency(b, now), register, readiness,
+    timing: _timing(b, register),
     why: `${b.claim} (${b.confidence}; ${b.supportCount} signal${s}${b.counterCount ? `, ${b.counterCount} against` : ''}).`,
     challenge: challenge(b, now),
   };
@@ -434,6 +469,6 @@ module.exports = {
   subjectView, CLAIM_SELF,
   // exported for tests + downstream projection
   agendaItem, proposalFrom,
-  AXIS, WELLBEING_AXES, KIND_LABEL, STALE, DISMISS_COOLDOWN, WRONG_COOLDOWN,
-  _confWord, _register, _readiness, _urgency,
+  AXIS, WELLBEING_AXES, KIND_LABEL, STALE, DISMISS_COOLDOWN, WRONG_COOLDOWN, HORIZON,
+  _confWord, _register, _readiness, _urgency, _eventHorizon, _timing,
 };

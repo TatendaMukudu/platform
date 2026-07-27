@@ -55,6 +55,8 @@ _loadAllStores({
       whatWouldConfirm: 'the same signal recurring over the coming weeks',
       whatWouldRefute:  "the signal easing back toward Bob's normal, or them telling us the read is off" },
   ] },
+  // A real, imminent event on Joe's branch (teamA) → his belief should carry a timing note.
+  orgCalendar: { [C]: [ { id: 'cal1', title: 'the semi-final', start: new Date(now + 2 * DAY).toISOString(), groupRef: 'teamA' } ] },
 });
 _rebuildEmailIndex();
 
@@ -92,6 +94,7 @@ const server = app.listen(0, async () => {
     ok('2 · it carries the reasoner\'s own self-challenge', joeItem && Array.isArray(joeItem.challenge) && joeItem.challenge.some(r => /refuted by/.test(r)));
     const joeProp = (a.j.proposals || []).find(x => x.beliefId === 'joe::momentum_drop');
     ok('2 · the ripe belief carries a proposal-gated next step (surface, never act)', joeProp && joeProp.requiresConfirmation === true && /listen first/i.test(joeProp.text));
+    ok('2 · the real calendar grounds it — a timing note names the event and the moment', joeItem && /semi-final/.test(joeItem.timing || '') && /tomorrow|today|in \d+ days/.test(joeItem.timing || ''));
 
     /* ── 3 · NO cross-branch leak ── */
     ok('3 · the teamA lead does NOT see the teamB person\'s belief', !(a.j.agenda || []).some(x => x.beliefId === 'bob::plateau'));

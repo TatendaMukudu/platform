@@ -172,5 +172,27 @@ ok('18 · a person\'s own read is phrased for THEM (second person), not about "t
 ok('18 · it carries confidence, what would change it, and the right to contest', sv.confidence === joe.confidence && !!sv.whatWouldChangeIt && sv.canContest === true);
 ok('18 · it withholds the leader-facing fields (urgency / register / severity / challenge)', !('urgency' in sv) && !('register' in sv) && !('severity' in sv) && !('challenge' in sv) && !('why' in sv));
 
+/* ── OPERATING CONTEXT — a real event grounds urgency + timing ("a time and a place") ── */
+const base = R.reason({ now, scopeLabel: { teamA: 'Team A' }, observations: [
+  { id: 'wm1', subjectId: 'wes', subjectName: 'Wes', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'dip', t: d(6) },
+  { id: 'wm2', subjectId: 'wes', subjectName: 'Wes', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'dip', t: d(2) },
+] });
+const withEvent = R.reason({ now, scopeLabel: { teamA: 'Team A' },
+  observations: [
+    { id: 'wm1', subjectId: 'wes', subjectName: 'Wes', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'dip', t: d(6) },
+    { id: 'wm2', subjectId: 'wes', subjectName: 'Wes', scope: 'teamA', kind: 'momentum_drop', severity: 'medium', basis: 'dip', t: d(2) },
+  ],
+  context: { events: [
+    { id: 'e1', label: 'the cup final', at: now + 2 * DAY, scope: 'teamA' },   // imminent, this branch
+    { id: 'e2', label: 'a national camp', at: now + 2 * DAY, scope: 'teamB' }, // imminent, OTHER branch
+  ] },
+});
+const wesBefore = base.agenda.find(a => a.beliefId === 'wes::momentum_drop');
+const wesAfter  = withEvent.agenda.find(a => a.beliefId === 'wes::momentum_drop');
+ok('19 · an imminent, in-scope event raises the belief\'s urgency', wesAfter.urgency > wesBefore.urgency);
+ok('19 · …and creates a concrete timing note that names the event and the moment', /cup final/.test(wesAfter.timing || '') && /tomorrow|today|in \d+ days/.test(wesAfter.timing || ''));
+ok('19 · an event in ANOTHER branch does not bear on this belief (no false urgency)', !/national camp/.test(JSON.stringify(wesAfter)));
+ok('19 · with no events at all, there is no timing note (honest silence)', wesBefore.timing === null);
+
 console.log(`\nreason-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
