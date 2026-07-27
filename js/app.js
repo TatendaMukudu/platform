@@ -5880,7 +5880,7 @@ async function renderToday() {
   el.innerHTML = `
     <div class="today-hero" style="margin-bottom:1.1rem;padding:1rem;border-radius:16px;background:linear-gradient(180deg,var(--surface-alt,rgba(124,90,245,0.06)),transparent);border:1px solid var(--line,rgba(127,127,127,0.14))">
       <div style="display:flex;gap:0.5rem;align-items:stretch">
-        <input id="today-ask" class="form-input" placeholder="Ask about your team…" style="flex:1;margin:0;font-size:0.95rem;padding:0.7rem 0.8rem" onkeydown="if(event.key==='Enter')todayAsk()">
+        <input id="today-ask" class="form-input" placeholder="Ask me anything — or just tell me how it's going…" style="flex:1;margin:0;font-size:0.95rem;padding:0.7rem 0.8rem" onkeydown="if(event.key==='Enter')todayAsk()">
         <button class="btn btn-accent" style="padding:0 1.1rem" onclick="todayAsk()">Ask</button>
       </div>
       <div id="today-ask-out" style="margin-top:0.5rem"></div>
@@ -5981,15 +5981,35 @@ async function todayReasonRespond(beliefId, response, btn) {
   }
 }
 
-/* A suggested prompt — fills the composer and asks in one tap. */
+/* A suggested TEAM prompt (the chips) — fills the composer and asks the team path. */
 function todayQuick(q) {
   const input = document.getElementById('today-ask');
   if (input) input.value = q;
-  todayAsk();
+  todayTeamAsk();
 }
 
-/* The composer — a plain question answered from the leader's scoped area (reuses /api/org/ask). */
+/* The composer — ONE assistant. A leader is a person too, so free text goes through the
+   SAME unified runtime the member uses (/api/assistant/turn): a reflection ("I'm feeling a
+   little tired") becomes a governed, private check-in/note offer, and a question is grounded
+   — never a cold "ask someone else". The explicit team chips still use the purpose-built
+   team path (todayTeamAsk). No parallel assistant; the same brain everywhere. */
 async function todayAsk() {
+  const input = document.getElementById('today-ask');
+  const out = document.getElementById('today-ask-out');
+  const q = input && input.value.trim();
+  if (!q || !out) return;
+  out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Thinking…</div>`;
+  try {
+    const r = await fetch('/api/assistant/turn', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ text: q }) });
+    const j = await r.json();
+    if (!j || !j.ok) throw new Error('turn failed');
+    out.innerHTML = todayRenderTurn(j);
+    if (input) input.value = '';
+  } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't answer that right now.</div>`; }
+}
+
+/* Explicit team questions (the chips) — the scoped, grounded org answer + who to ask. */
+async function todayTeamAsk() {
   const input = document.getElementById('today-ask');
   const out = document.getElementById('today-ask-out');
   const q = input && input.value.trim();
@@ -6001,6 +6021,44 @@ async function todayAsk() {
     const route = d.routeTo ? `<div style="font-size:0.74rem;color:var(--text-muted);margin-top:0.3rem">Best person to ask: <strong>${_escAdvisor(d.routeTo.to)}</strong></div>` : '';
     out.innerHTML = `<div style="font-size:0.88rem;color:var(--text-primary);padding:0.5rem 0.6rem;border-left:2px solid var(--accent);border-radius:6px;background:var(--surface-alt,rgba(127,127,127,0.05))">${_escAdvisor(d.answer || 'No answer available.')}</div>${route}`;
   } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't answer that right now.</div>`; }
+}
+
+/* Render one unified-runtime turn: the assistant's reply, plus any GOVERNED proposals
+   (check-in / private note …) with confirm/dismiss — nothing saved until confirmed. Slim
+   sibling of the member renderer; the response shape is the same. */
+function todayRenderTurn(j) {
+  const esc = _escAdvisor, r = j.response || {};
+  const proposals = r.primaryActions || r.proposedActions || [];
+  const propHtml = proposals.map(p => {
+    const priv = p.visibility === 'only_me' ? 'Private' : 'Confirm to share';
+    return `<div id="today-prop-${esc(p.id)}" style="margin-top:0.5rem;padding:0.55rem 0.7rem;border:1px solid var(--line,rgba(127,127,127,0.16));border-radius:8px">
+      <div style="font-size:0.84rem;font-weight:600;color:var(--text-primary)">${esc(p.label)} <span style="font-size:0.66rem;color:var(--text-muted);font-weight:400">· ${priv}</span></div>
+      ${p.why ? `<div style="font-size:0.76rem;color:var(--text-muted);margin-top:2px">${esc(p.why)}</div>` : ''}
+      <div style="display:flex;gap:0.5rem;margin-top:0.45rem">
+        <button class="btn btn-accent btn-sm" style="font-size:0.72rem" onclick="todayTurnConfirm('${esc(j.turnId)}','${esc(p.id)}',this)">Confirm</button>
+        <button class="btn-ghost btn-sm" style="font-size:0.72rem;color:var(--text-muted)" onclick="todayTurnDismiss('${esc(p.id)}')">Dismiss</button>
+      </div></div>`;
+  }).join('');
+  const note = j.saved ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:0.35rem">✓ Saved — privately, just for you.</div>`
+    : (j.capturePrompt ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:0.35rem">${esc(j.capturePrompt.message)}</div>` : '');
+  return `<div style="font-size:0.88rem;color:var(--text-primary);padding:0.5rem 0.6rem;border-left:2px solid var(--accent);border-radius:6px;background:var(--surface-alt,rgba(127,127,127,0.05))">${esc(r.responseText || '')}</div>${note}${propHtml}`;
+}
+
+/* Confirm a governed proposal from the composer — the only path to a write. Settles in place. */
+async function todayTurnConfirm(turnId, proposalId, btn) {
+  const card = document.getElementById('today-prop-' + proposalId);
+  if (btn) { btn.disabled = true; btn.textContent = 'Confirming…'; }
+  try {
+    const r = await fetch('/api/assistant/turn/' + encodeURIComponent(turnId) + '/confirm', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ proposalId }) });
+    const d = await r.json();
+    if (!d.ok) throw new Error('confirm failed');
+    if (card) card.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">✓ ${_escAdvisor(d.note || 'Done.')}</div>`;
+  } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; } if (typeof showToast === 'function') showToast('Could not confirm right now.', 'error'); }
+}
+/* Dismiss a proposal — nothing was written, so this just clears it from the flow. */
+function todayTurnDismiss(proposalId) {
+  const card = document.getElementById('today-prop-' + proposalId);
+  if (card) card.remove();
 }
 
 /* The live feed — composes readiness + routing + playbook + memory into one actionable list. */
