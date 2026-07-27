@@ -39,6 +39,7 @@ const primitives = require('./ai/primitives');
 const confidence = require('./ai/confidence');
 const proactive  = require('./ai/proactive');
 const reason     = require('./ai/reason');
+const understanding = require('./ai/understanding');
 const behaviour  = require('./ai/behaviour');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
@@ -9031,6 +9032,44 @@ app.post('/api/reason/:beliefId/feedback', requireAuth, (req, res) => {
   delete reasonTickCache[code];   // next read reflects the response immediately
   scheduleSave();
   res.json({ ok: true, beliefId, response, by: isSubject && !isLeader ? 'subject' : 'leader' });
+});
+
+/* The INPUT translator (ai/understanding) at the edge. Read a piece of language ONCE and
+   return only privacy-safe, bounded features — never text. The LLM is optional; with no
+   key this returns null and behaviour is unchanged. Whatever the model returns is FORCED
+   through understanding.sanitizeFeatures, so raw content, quotations, and protected traits
+   cannot pass. Storing these features on shared evidence at capture time (so the reasoner
+   gains language-derived signal) is the reviewed rollout step; this is the mechanism. */
+async function _understandText(code, text) {
+  const t = String(text || '').slice(0, 2000);
+  if (!t.trim() || !ai.enabled()) return null;
+  try {
+    const p = ai.completeJSON({
+      tier: 'reason', maxTokens: 200,
+      system: [
+        'Classify the following note for a wellbeing/performance signal. Return ONLY these fields:',
+        'sentiment (-1, 0, or 1); themes (array, ONLY from: workload, motivation, confidence, fatigue, focus, belonging, conflict, recognition, progress, setback, support_need, logistics); intensity (low|medium|high); sensitive (boolean — does it hint at private/sensitive personal context?).',
+        'Never include names, quotations, health or identity details, or any free text. Themes only from that list.',
+        _domainDirective(code),
+      ].filter(Boolean).join('\n'),
+      user: t, schema: ['sentiment', 'themes', 'intensity', 'sensitive'],
+    });
+    const raw = await Promise.race([Promise.resolve(p).then(v => v, () => null), new Promise(r => setTimeout(() => r(null), AI_BRIEF_MS))]);
+    return raw ? understanding.sanitizeFeatures(raw) : null;
+  } catch (_) { return null; }
+}
+
+/* POST /api/reason/understand — INSPECT the input translator. Leader-gated; stores nothing.
+   Lets a leader see exactly what the understanding layer would extract from a note — proof
+   the edge is bounded and safe. With no AI key it honestly reports disabled. */
+app.post('/api/reason/understand', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+  const features = await _understandText(code, req.body && req.body.text);
+  res.json({ ok: true, enabled: ai.enabled(), features: features || null });
 });
 
 /* GET /api/reason/me — what the system believes about YOU. Every person may see their own
