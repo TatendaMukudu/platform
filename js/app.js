@@ -5913,7 +5913,16 @@ async function todayLoadVoice() {
     ]);
   } catch (_) { box.innerHTML = ''; return; }
   const ripe = (d && d.agenda || []).filter(a => a.readiness === 'ripe').slice(0, 4);
-  if (!ripe.length) { box.innerHTML = ''; return; }   // nothing worth raising → say nothing (honest)
+  if (!ripe.length) {
+    // Nothing to raise — but the assistant is still HERE. Say so, in first person, honestly:
+    // it's watching and will speak up the moment something's worth attention. The brain is
+    // never invisible, even when it's quiet.
+    box.innerHTML = `<div class="card" style="margin-bottom:1rem;display:flex;gap:0.6rem;align-items:flex-start;border-left:3px solid var(--accent)">
+      <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:7px;flex:0 0 auto;box-shadow:0 0 0 3px rgba(124,90,245,0.15)"></span>
+      <div style="font-size:0.9rem;color:var(--text-secondary);line-height:1.45">I'm watching your team — nothing needs you this second. Ask me anything above, and I'll speak up right here the moment something's worth your attention.</div>
+    </div>`;
+    return;
+  }
   const propFor = bid => (d.proposals || []).find(p => p.beliefId === bid);
   const opener = brief && brief.spoken ? `<div style="font-size:0.9rem;color:var(--text-primary);margin-bottom:0.6rem;line-height:1.4">${_escAdvisor(brief.spoken)}</div>` : '';
   box.innerHTML = `
@@ -6075,19 +6084,18 @@ async function todayLoadFeed() {
 
   if (sections.length) { box.innerHTML = sections.join(''); return; }
 
-  // Empty → a guided start, not a dead end. Each tile is a real next step that brings
-  // Today to life. (Shown when there's no operating context / nothing outstanding yet.)
-  const tile = (title, desc, onclick) => `<button style="display:flex;width:100%;text-align:left;gap:0.8rem;align-items:flex-start;padding:0.9rem;margin-bottom:0.6rem;border:1px solid var(--line,rgba(127,127,127,0.16));border-radius:12px;background:var(--surface,rgba(127,127,127,0.03));cursor:pointer" onclick="${onclick}">
-    <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:6px;flex:0 0 auto"></span>
-    <span style="flex:1"><span style="display:block;font-size:0.9rem;font-weight:600;color:var(--text-primary)">${title}</span><span style="display:block;font-size:0.78rem;color:var(--text-muted);margin-top:2px">${desc}</span></span>
-    <span style="color:var(--text-muted)">→</span></button>`;
+  // Empty → the assistant keeps talking. Not a titled board of destinations, but a few
+  // things IT offers to do next, phrased in first person. (No operating context / nothing
+  // outstanding yet.) The voice line above already says "I'm watching"; this is "…and
+  // here's how to give me something to reason about."
+  const step = (label, desc, onclick) => `<button style="display:flex;width:100%;text-align:left;gap:0.7rem;align-items:flex-start;padding:0.7rem 0.4rem;border:0;border-top:1px solid var(--line-soft,rgba(127,127,127,0.1));background:transparent;cursor:pointer" onclick="${onclick}">
+    <span style="flex:1"><span style="display:block;font-size:0.9rem;font-weight:600;color:var(--text-primary)">${label}</span><span style="display:block;font-size:0.78rem;color:var(--text-muted);margin-top:2px">${desc}</span></span></button>`;
   box.innerHTML = `
-    <div class="card" style="padding:1.3rem">
-      <div style="font-size:1.05rem;font-weight:700;margin-bottom:0.2rem">Let's bring your Today to life</div>
-      <div style="font-size:0.84rem;color:var(--text-secondary);margin-bottom:1rem">A couple of quick steps and this fills with exactly what needs you.</div>
-      ${tile('Tell IntelliQ how your team operates', 'Your events, who owns what, what prep matters — this is what lets it reason about readiness.', "navigate('operating-context')")}
-      ${tile('Set an assessment or check-in', 'Give your people work; results come back as a grounded conversation, not a blank form.', "navigate('assessments')")}
-      ${tile('Just ask a question', 'Type anything in the box above — I answer from what I already know about your area.', "document.getElementById('today-ask') && document.getElementById('today-ask').focus()")}
+    <div class="card" style="padding:1.2rem 1.3rem">
+      <div style="font-size:0.92rem;color:var(--text-secondary);line-height:1.5;margin-bottom:0.6rem">To reason well about your team I need a little to go on. Point me at any of these and I'll take it from there:</div>
+      ${step('Tell me how your team works', 'Your events, who owns what, what prep matters — the ground I reason from.', "navigate('operating-context')")}
+      ${step('Set an assessment or check-in', 'Give your people work; it comes back as a grounded conversation, not a blank form.', "navigate('assessments')")}
+      ${step('Just ask me something', 'Type anything in the box above — I answer from what I already know about your area.', "document.getElementById('today-ask') && document.getElementById('today-ask').focus()")}
     </div>`;
 }
 
