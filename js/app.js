@@ -649,6 +649,7 @@ const NAV_ROUTES = {
   'org-memory': () => renderOrgMemory(),
   'org-learning': () => renderObservations(),
   'org-playbook': () => renderPlaybook(),
+  'operate': () => renderOperate(),
   'leader-groups': () => renderLeaderGroups(),
   'data-sources':  () => renderDataSources(),
   assignments:     () => renderAssignments(),
@@ -713,6 +714,7 @@ const PAGE_TITLES = {
   'org-memory': 'Organisational memory',
   'org-learning': 'Observed over time',
   'org-playbook': 'Playbook',
+  'operate': 'How we operate',
   assignments:     'Assignments',
   'org-insights':  'Intelligence',
   'group-health':  'Intelligence',
@@ -5846,6 +5848,22 @@ function applyDomainVocab(domain) {
 const _TRAJ_WORD = { converging:'climbing', sustaining:'steady', up:'climbing', flat:'steady',
   down:'dipping', diverging:'drifting', stalled:'stalled', unanchored:'finding footing', unknown:'building' };
 const _trajWord = t => _TRAJ_WORD[t] || 'building';
+
+/* ── HOW WE OPERATE — one hub that unifies the four org-knowledge surfaces (context,
+   playbook, patterns, history) that used to be four separate nav items. Reuses each
+   existing page via navigate(); one clear place instead of a scattered list. */
+function renderOperate() {
+  const el = document.getElementById('operate-content');
+  if (!el) return;
+  const card = (title, desc, dest) => `<button class="operate-card" style="display:flex;width:100%;text-align:left;gap:0.8rem;align-items:center;padding:1rem;margin-bottom:0.7rem;border:1px solid var(--line,rgba(127,127,127,0.16));border-radius:12px;background:var(--surface,rgba(127,127,127,0.03));cursor:pointer" onclick="navigate('${dest}')">
+    <span style="flex:1"><span style="display:block;font-weight:600;font-size:0.95rem;color:var(--text-primary)">${title}</span><span style="display:block;font-size:0.8rem;color:var(--text-muted);margin-top:2px">${desc}</span></span>
+    <span style="color:var(--text-muted)">→</span></button>`;
+  el.innerHTML =
+    card('How we work', 'The events, ownership, and preparation IntelliQ reasons from. Set it up or update it.', 'operating-context') +
+    card('Playbook', 'Ways your team has agreed it operates — and patterns proposed for you to confirm.', 'org-playbook') +
+    card('Patterns', 'What has recurred in your history — descriptions, never advice or predictions.', 'org-learning') +
+    card('History', 'How your readiness has changed over time, and exactly why.', 'org-memory');
+}
 
 /* ── TODAY — the interactive leader home. Not a board: a conversational composer plus a
    LIVE, ACTIONABLE feed assembled from everything the backend already knows (readiness,

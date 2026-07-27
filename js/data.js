@@ -142,21 +142,13 @@ const WORKSPACE_MODULES = [
   // IntelliQ" live in the Me space (noticed / prepared). The page stays reachable.
 
   // ── Team — shown when the user leads ≥1 node (scoped server-side) ───────
-  { section: 'Team', id: 'leader-home',   icon: ICON.people, label: 'Team',      leaderOnly: true }, // the people they lead
+  //    Four clear surfaces, not a module list: the assistant briefing (Today), what the
+  //    team is preparing for, the people, and ONE hub for how the org operates + what
+  //    IntelliQ has learned (context · playbook · patterns · history live inside it).
+  { section: 'Team', id: 'leader-home',   icon: ICON.home,   label: 'Today',     leaderOnly: true }, // assistant home — ask + what needs you
   { section: null,    id: 'team-readiness', icon: ICON.clipboard, label: 'Team readiness', leaderOnly: true }, // grounded briefing: what we're preparing for
   { section: null,    id: 'leader-people', icon: ICON.person, label: 'My People', leaderOnly: true },
-  // How the team operates — the governed inputs (events, ownership, prep, rhythms)
-  // that let IntelliQ reason about readiness. Leaders describe it; nothing is a rule
-  // until confirmed.
-  { section: null,    id: 'operating-context', icon: ICON.building, label: 'How we work', leaderOnly: true },
-  // The organisation's episodic memory: how readiness has changed over time (Phase A).
-  { section: null,    id: 'org-memory', icon: ICON.clock, label: 'History', leaderOnly: true },
-  // Longitudinal observations derived from that memory (Phase B1): descriptions of
-  // repeated history — never recommendations, predictions, or causal claims.
-  { section: null,    id: 'org-learning', icon: ICON.spark, label: 'Patterns', leaderOnly: true },
-  // The governed playbook (Phase B2): proposed patterns a leader confirms into agreed
-  // practices. The system proposes with counter-evidence; only a human confirms.
-  { section: null,    id: 'org-playbook', icon: ICON.clipboard, label: 'Playbook', leaderOnly: true },
+  { section: null,    id: 'operate',      icon: ICON.building, label: 'How we operate', leaderOnly: true }, // hub → context / playbook / patterns / history
 
   // ── Setup — admin / superadmin (people · org aims & values · settings) ──
   { section: 'Setup', id: 'people',       icon: ICON.person,   label: 'People',       permission: 'view_members'    },
