@@ -5962,14 +5962,27 @@ async function todayLoadFeed() {
         <button class="btn-ghost btn-sm" style="font-size:0.72rem;white-space:nowrap" onclick="navigate('team-readiness')">Open</button></div>`).join('')}</div>`);
   }
 
-  // Worth reviewing — proposed playbook practices.
+  // Worth reviewing — proposed playbook practices, decided RIGHT HERE. No page to open:
+  // the pattern, what argues against it, and the two choices all live in the flow, and
+  // your decision settles in place. Confirming is the only path into your playbook.
   const cands = (cand && cand.candidates) || [];
   if (cands.length) {
+    const patternRow = (c) => {
+      const fp = esc(c.fingerprint);
+      const against = (c.counterEvidence && (c.counterEvidence.signals || [])[0]) || '';
+      return `<div id="today-pat-${fp}" style="padding:0.55rem 0;border-bottom:1px solid var(--line-soft,rgba(127,127,127,0.08))">
+        <div style="font-size:0.84rem;color:var(--text-primary)">${esc(c.statement)}</div>
+        ${against ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.15rem">Worth weighing: ${esc(against)}</div>` : ''}
+        <div style="display:flex;gap:0.5rem;margin-top:0.45rem">
+          <button class="btn btn-accent btn-sm" style="font-size:0.72rem" onclick="todayPattern('${fp}', true, this)">This is how we operate</button>
+          <button class="btn-ghost btn-sm" style="font-size:0.72rem;color:var(--text-muted)" onclick="todayPattern('${fp}', false, this)">Not really</button>
+        </div>
+      </div>`;
+    };
     sections.push(`<div class="card" style="margin-bottom:0.8rem">
-      <div class="card-label" style="margin-bottom:0.4rem">Worth reviewing</div>
-      ${cands.slice(0, 3).map(c => `<div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:center;padding:0.3rem 0">
-        <span style="font-size:0.82rem">${esc(c.statement)}</span>
-        <button class="btn-outline btn-sm" style="font-size:0.72rem;white-space:nowrap" onclick="navigate('org-playbook')">Review</button></div>`).join('')}</div>`);
+      <div class="card-label" style="margin-bottom:0.4rem">Worth confirming</div>
+      <div style="font-size:0.74rem;color:var(--text-muted);margin-bottom:0.3rem">A pattern that keeps recurring. It only joins your playbook if you say so.</div>
+      ${cands.slice(0, 3).map(patternRow).join('')}</div>`);
   }
 
   // Since last time — what changed.
@@ -5997,6 +6010,29 @@ async function todayLoadFeed() {
       ${tile('Set an assessment or check-in', 'Give your people work; results come back as a grounded conversation, not a blank form.', "navigate('assessments')")}
       ${tile('Just ask a question', 'Type anything in the box above — I answer from what I already know about your area.', "document.getElementById('today-ask') && document.getElementById('today-ask').focus()")}
     </div>`;
+}
+
+/* Decide a proposed pattern IN THE FLOW — confirm folds it into the playbook, "not really"
+   sets it aside. Either way the row settles in place with a one-line acknowledgement; no
+   navigation, no page. Reuses the governed confirm/dismiss endpoints. */
+async function todayPattern(fingerprint, confirm, btn) {
+  const row = document.getElementById('today-pat-' + fingerprint);
+  const btns = row && row.querySelectorAll('button');
+  if (btns) btns.forEach(b => { b.disabled = true; });
+  if (btn) btn.textContent = confirm ? 'Adding…' : 'Setting aside…';
+  const path = '/api/org-playbook/candidates/' + encodeURIComponent(fingerprint) + (confirm ? '/confirm' : '/dismiss');
+  try {
+    const r = await fetch(path, { method: 'POST', headers: Auth._headers() });
+    const j = await r.json();
+    if (!j.ok) throw new Error('failed');
+    if (row) {
+      row.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.2rem 0">${confirm ? '✓ Added to your playbook.' : 'Set aside — it can come back if it keeps recurring.'}</div>`;
+    }
+  } catch (e) {
+    if (btns) btns.forEach(b => { b.disabled = false; });
+    if (btn) btn.textContent = confirm ? 'This is how we operate' : 'Not really';
+    if (typeof showToast === 'function') showToast('Could not save that right now.', 'error');
+  }
 }
 
 async function renderIntelligence(refresh) {
