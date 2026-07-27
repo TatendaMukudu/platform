@@ -6093,10 +6093,79 @@ async function todayLoadFeed() {
   box.innerHTML = `
     <div class="card" style="padding:1.2rem 1.3rem">
       <div style="font-size:0.92rem;color:var(--text-secondary);line-height:1.5;margin-bottom:0.6rem">To reason well about your team I need a little to go on. Point me at any of these and I'll take it from there:</div>
-      ${step('Tell me how your team works', 'Your events, who owns what, what prep matters — the ground I reason from.', "navigate('operating-context')")}
+      ${step('Tell me how your team works', 'Your events, who owns what, what prep matters — the ground I reason from.', 'todayContextStart()')}
       ${step('Set an assessment or check-in', 'Give your people work; it comes back as a grounded conversation, not a blank form.', "navigate('assessments')")}
       ${step('Just ask me something', 'Type anything in the box above — I answer from what I already know about your area.', "document.getElementById('today-ask') && document.getElementById('today-ask').focus()")}
     </div>`;
+}
+
+/* ── CONVERSATIONAL OPERATING-CONTEXT INTAKE — learning how the team works, in the flow ──
+   Instead of sending the leader off to a form, the assistant interviews them right here: they
+   describe one thing in plain words, it shows what it understood + what that will DO, they
+   confirm, and it invites the next thing. Grows the operating context conversationally, all
+   in Today. Reuses the governed /api/org-context preview + confirm — no parallel path, and
+   the same hard blocks (private/wellbeing/surveillance can never become an operating rule). */
+let _todayCtxProposals = null;
+function todayContextStart() {
+  const box = document.getElementById('today-feed');
+  if (!box) return;
+  box.innerHTML = `
+    <div class="card" style="border-left:3px solid var(--accent)">
+      <div style="font-size:0.9rem;color:var(--text-primary);line-height:1.5;margin-bottom:0.6rem">Tell me one thing about how your team works — an event, who owns what, or what prep matters. Plain words are fine, like <em>"We play matches every Saturday at 3pm and Sam runs training on Tuesdays."</em></div>
+      <textarea id="today-ctx-in" class="form-input" rows="2" placeholder="Describe one thing…" style="width:100%;font-size:0.9rem;margin:0"></textarea>
+      <div id="today-ctx-out" style="margin-top:0.5rem"></div>
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+        <button class="btn btn-accent btn-sm" onclick="todayContextPreview()">Tell me</button>
+        <button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="todayLoadFeed()">Back</button>
+      </div>
+    </div>`;
+  const t = document.getElementById('today-ctx-in'); if (t) t.focus();
+}
+
+/* Read the sentence → show what the assistant understood + what it will do (no write yet). */
+async function todayContextPreview() {
+  const inp = document.getElementById('today-ctx-in');
+  const out = document.getElementById('today-ctx-out');
+  const text = inp && inp.value.trim();
+  if (!text || !out) return;
+  out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Reading that…</div>`;
+  try {
+    const r = await fetch('/api/org-context/preview', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ text }) });
+    const d = await r.json();
+    if (d.blocked) { out.innerHTML = `<div style="font-size:0.82rem;color:var(--warning,#c90)">${_escAdvisor(d.message || "That looks like private information — it can't become an operating rule.")}</div>`; return; }
+    const proposals = d.proposals || [];
+    if (!proposals.length) { out.innerHTML = `<div style="font-size:0.82rem;color:var(--text-muted)">I couldn't pull anything structured from that. Try naming an event, an owner, or a prep step.</div>`; return; }
+    _todayCtxProposals = proposals;
+    const lines = (d.preview && d.preview.lines) || proposals.map(p => p.type);
+    const effects = (d.preview && d.preview.effects) || [];
+    out.innerHTML = `
+      <div style="padding:0.5rem 0.7rem;border-left:2px solid var(--accent);background:var(--surface-alt,rgba(127,127,127,0.05));border-radius:6px">
+        <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.2rem">Here's what I understood</div>
+        <ul style="margin:0 0 0 1rem;padding:0">${lines.map(l => `<li style="font-size:0.84rem;color:var(--text-primary)">${_escAdvisor(l)}</li>`).join('')}</ul>
+        ${effects.length ? `<div style="font-size:0.74rem;color:var(--text-muted);margin-top:0.35rem">${effects.map(_escAdvisor).join(' ')}</div>` : ''}
+      </div>
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+        <button class="btn btn-accent btn-sm" onclick="todayContextConfirm()">Yes, save that</button>
+        <button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="todayContextStart()">Not quite</button>
+      </div>`;
+  } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't read that right now.</div>`; }
+}
+
+/* Confirm → the governed write. Then invite the next thing (loop) or finish. */
+async function todayContextConfirm() {
+  const out = document.getElementById('today-ctx-out');
+  if (!_todayCtxProposals || !_todayCtxProposals.length || !out) return;
+  try {
+    const r = await fetch('/api/org-context/confirm', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ records: _todayCtxProposals, source: 'conversation' }) });
+    const d = await r.json();
+    if (!d.ok || !(d.created || []).length) throw new Error('none saved');
+    _todayCtxProposals = null;
+    out.innerHTML = `<div style="font-size:0.85rem;color:var(--text-primary)">✓ Got it — saved, and I'll reason from it now.</div>
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+        <button class="btn btn-accent btn-sm" onclick="todayContextStart()">Tell me something else</button>
+        <button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="todayLoadFeed()">Done for now</button>
+      </div>`;
+  } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't save that right now.</div>`; }
 }
 
 /* Decide a proposed pattern IN THE FLOW — confirm folds it into the playbook, "not really"
