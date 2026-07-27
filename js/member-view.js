@@ -1512,6 +1512,16 @@ const MemberApp = {
     const kind = k => this._assessKindLabel[k] || 'General';
     let html = '';
 
+    // The assistant is present at the top of the workspace — ask about your work, scoped
+    // to your area. One continuous presence, reusing the grounded answering boundary.
+    html += `<div class="card" style="margin-bottom:0.9rem;background:linear-gradient(180deg,var(--surface-alt,rgba(124,90,245,0.06)),transparent)">
+      <div style="display:flex;gap:0.5rem">
+        <input id="ws-ask" class="note-input" style="flex:1;margin:0" placeholder="Ask IntelliQ about your work…" onkeydown="if(event.key==='Enter')MemberApp._wsAsk()">
+        <button class="btn-primary btn-sm" onclick="MemberApp._wsAsk()">Ask</button>
+      </div>
+      <div id="ws-ask-out" style="margin-top:0.5rem"></div>
+    </div>`;
+
     // ── Assigned to you ──────────────────────────────────────────────────
     const assigned = d.assigned || [];
     html += `<details class="card collapse-card" open><summary class="card-label">Assigned to you${assigned.length ? ` <span class="collapse-count">${assigned.length}</span>` : ''}</summary>`;
@@ -1532,7 +1542,8 @@ const MemberApp = {
         const lims = (p.limitations || []);
         const cta = complete
           ? `<button class="btn-outline btn-sm" onclick="MemberApp.askAboutWork('${a.id}', ${JSON.stringify(a.title)})">Ask IntelliQ about this</button>`
-          : `<button class="btn-primary btn-sm" onclick="MemberApp._convoStart('${a.id}', this)">${p.statusLabel === 'Not started' ? 'Start with IntelliQ' : 'Continue conversation'}</button>`;
+          : `<button class="btn-primary btn-sm" onclick="MemberApp._convoStart('${a.id}', this)">${p.statusLabel === 'Not started' ? 'Start with IntelliQ' : 'Continue conversation'}</button>
+             <button class="btn-ghost btn-sm" style="font-size:0.74rem" onclick="MemberApp._assessAsk('${a.id}')">What are they looking for?</button>`;
         return `<div class="aw-item">
           <div class="aw-head">
             <div class="aw-title">${esc(a.title)} <span class="aw-kind">${kind(a.kind)}</span></div>
@@ -1546,7 +1557,8 @@ const MemberApp = {
             ${human ? `<div class="aw-feedback"><div class="aw-feedback-by">From ${esc(a.assignerName)}</div><p>${esc(human)}</p></div>` : ''}
             ${p.optionalScore && p.optionalScore.show ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.3rem">Score underneath: ${p.optionalScore.value} / ${p.optionalScore.max}</div>` : ''}
             ${lims.length ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.3rem">${lims.map(esc).join(' · ')}</div>` : ''}
-            <div class="aw-actions" style="margin-top:0.5rem">${cta}</div>
+            <div class="aw-actions" style="margin-top:0.5rem;display:flex;gap:0.5rem;flex-wrap:wrap">${cta}</div>
+            <div id="askbox-${a.id}" style="display:none;margin-top:0.5rem"></div>
             <div id="convo-${a.id}" class="convo-panel" style="display:none;margin-top:0.6rem"></div>
           </div>
         </div>`;
@@ -1894,6 +1906,46 @@ const MemberApp = {
     const sid = panel && panel.dataset.session;
     if (sid) { try { await fetch(`/api/conversation/${encodeURIComponent(sid)}/abandon`, { method: 'POST', headers: this._authHeaders() }); } catch (_) {} }
     if (panel) { panel.style.display = 'none'; panel.innerHTML = ''; }
+  },
+
+  /* The workspace-level assistant — ask about your work; answered from your scoped area. */
+  async _wsAsk() {
+    const input = document.getElementById('ws-ask'), out = document.getElementById('ws-ask-out');
+    const q = input && input.value.trim();
+    if (!q || !out) return;
+    out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Thinking…</div>`;
+    try {
+      const r = await fetch('/api/org/ask', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ question: q }) });
+      const d = await r.json();
+      const route = d.routeTo ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.2rem">Best person to ask: <strong>${this._escape(d.routeTo.to)}</strong></div>` : '';
+      out.innerHTML = `<div style="font-size:0.84rem;padding:0.5rem 0.6rem;border-left:2px solid var(--accent);border-radius:6px;background:var(--surface-alt,rgba(127,127,127,0.05))">${this._escape(d.answer || 'No answer available.')}</div>${route}`;
+    } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't answer right now.</div>`; }
+  },
+  /* "What are they looking for?" — the assistant answers from the LEADER'S brief that was
+     discussed when the assessment was created and carried down the web to this member. */
+  _assessAsk(id) {
+    const box = document.getElementById('askbox-' + id);
+    if (!box) return;
+    if (box.style.display === 'block') { box.style.display = 'none'; return; }
+    box.style.display = 'block';
+    box.innerHTML = `
+      <div style="display:flex;gap:0.4rem">
+        <input id="ask-${id}" class="note-input" style="flex:1;margin:0" placeholder="e.g. what are they looking for? how should I approach it?" onkeydown="if(event.key==='Enter')MemberApp._assessAskSend('${id}')">
+        <button class="btn-primary btn-sm" onclick="MemberApp._assessAskSend('${id}')">Ask</button>
+      </div>
+      <div id="ask-out-${id}" style="margin-top:0.4rem"></div>`;
+    const inp = document.getElementById('ask-' + id); if (inp) inp.focus();
+  },
+  async _assessAskSend(id) {
+    const input = document.getElementById('ask-' + id), out = document.getElementById('ask-out-' + id);
+    const q = input && input.value.trim();
+    if (!q || !out) return;
+    out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Checking with what your leader told me…</div>`;
+    try {
+      const r = await fetch('/api/assessments/' + encodeURIComponent(id) + '/ask', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ question: q }) });
+      const d = await r.json();
+      out.innerHTML = `<div style="font-size:0.84rem;padding:0.5rem 0.6rem;border-left:2px solid var(--accent);border-radius:6px;background:var(--surface-alt,rgba(127,127,127,0.05))">${this._escape(d.answer || '')}</div>`;
+    } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't answer right now.</div>`; }
   },
 
   async _assessSubmit(id, btn) {

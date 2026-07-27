@@ -103,5 +103,13 @@ const human = V.project({ title: 'IDP', status: 'returned', requiredCount: 2, an
 ok('9 · a genuine individual comment is surfaced as human feedback', human.feedbackKind === 'human' && /passing range/.test(human.humanFeedback));
 ok('9 · the projection never leaks internal fields (authority, fingerprints, confidence)', !/authority|fingerprint|confidence|corroborationNeeded/i.test(JSON.stringify(developing)));
 
+/* ── 11 · the assistant answers about an assessment from the LEADER'S carried-down context ── */
+const withCtx = V.answerAboutAssessment({ question: 'what are they looking for?', brief: 'Focus on decision-making under fatigue in the last 20 minutes.', leaderName: 'Coach Alex' });
+ok('11 · with a leader brief, the assistant conveys the leader\'s own intent', withCtx.hasContext === true && /Coach Alex is looking for/i.test(withCtx.answer) && /decision-making under fatigue/i.test(withCtx.answer));
+const howQ = V.answerAboutAssessment({ question: 'how should I approach it?', brief: 'Cover your training week.', guidance: 'Use bullet points with specific dates.', leaderName: 'Coach' });
+ok('11 · a "how" question also surfaces the leader\'s guidance', /bullet points/i.test(howQ.answer));
+const noCtx = V.answerAboutAssessment({ question: 'what do they want?', brief: '', fields: [{ label: 'Your response' }], leaderName: 'Coach' });
+ok('11 · with no leader context, it is honest + offers to ask the leader (never invents)', noCtx.hasContext === false && noCtx.routeToLeader === true && /check with them/i.test(noCtx.answer));
+
 console.log(`\nconversation-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -107,4 +107,26 @@ function project({ title = 'Assessment', status = 'assigned', requiredCount = 0,
   };
 }
 
-module.exports = { project, isPlaceholderFeedback };
+/* ── answerAboutAssessment — the assistant, carrying the LEADER'S context down the web,
+   answers a member's question about the work they've been set. The context is the brief
+   the leader discussed when creating it (assignment/template description + guidance) — so
+   the assistant is genuinely informed at the child end, not guessing. Deterministic: it
+   conveys the leader's own words, framed; when there's no context, it says so honestly and
+   offers to ask the leader rather than inventing an expectation. ── */
+function answerAboutAssessment({ question = '', brief = '', guidance = '', fields = [], leaderName = 'your leader' } = {}) {
+  const q = norm(question);
+  const brf = norm(brief), gd = norm(guidance);
+  const who = norm(leaderName) || 'your leader';
+  const hasContext = !!(brf || gd);
+  const fieldList = (fields || []).map(f => f && f.label).filter(Boolean);
+  if (!hasContext) {
+    return { hasContext: false, routeToLeader: true,
+      answer: `${who} didn't leave extra notes on this one. What it's asking for: ${fieldList.length ? fieldList.join(', ') : 'your response'}. Want me to check with them for more detail?` };
+  }
+  const wantsHow = /\bhow\b|approach|format|structure|example|look like/.test(q);
+  const parts = [`Here's what ${who} is looking for: ${brf || gd}`];
+  if (wantsHow && gd && gd !== brf) parts.push(gd);
+  return { hasContext: true, routeToLeader: false, answer: parts.join(' ') };
+}
+
+module.exports = { project, isPlaceholderFeedback, answerAboutAssessment };

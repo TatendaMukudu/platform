@@ -28,6 +28,7 @@ _loadAllStores({
   } },
   assessmentAssignments: { [A]: [
     asg('as1'), asg('as3'), asg('as9'),
+    asg('asB', { description: 'Focus on your decision-making under fatigue in the last 20 minutes.', guidance: 'Give one concrete example with the date.' }),
     asg('as4', { status: 'returned', feedback: 'Good detail — keep it up.', score: 74, submittedAt: iso, returnedAt: iso }),
     asg('as5', { status: 'returned', feedback: 'Good detail — keep it up.', score: 69, submittedAt: iso, returnedAt: iso }),
     asg('as6', { status: 'returned', feedback: 'Your left-foot delivery is much sharper — build on that in match play.', score: 82, submittedAt: iso, returnedAt: iso }),
@@ -101,6 +102,13 @@ const server = app.listen(0, async () => {
     ok('9 · a genuine individual comment is surfaced as human feedback', byId.as6.projection.feedbackKind === 'human' && /left-foot/.test(byId.as6.projection.humanFeedback));
     ok('9 · the completed as1 projection reads as submitted (interpretation, not a bare score)', byId.as1 && /awaiting review|submitted/i.test(byId.as1.projection.statusLabel));
     ok('9 · the projection exposes no internal fields (authority/fingerprints/confidence)', !/authorityClass|fingerprint|confidence|corroborationNeeded/i.test(JSON.stringify(ws.j.assigned)));
+
+    // 10 · the assistant carries the LEADER'S brief down to the member ("what are they looking for?")
+    const brief = await call('/api/assessments/asB/ask', 'joe', { method: 'POST', body: { question: 'what are they looking for?' } });
+    ok('10 · the assistant conveys the leader\'s brief to the member (context down the web)', brief.j.ok && brief.j.hasContext === true && /decision-making under fatigue/i.test(brief.j.answer));
+    const noBrief = await call('/api/assessments/as9/ask', 'joe', { method: 'POST', body: { question: 'what do they want?' } });
+    ok('10 · with no leader brief it stays honest + offers to ask the leader (never invents)', noBrief.j.ok && noBrief.j.routeToLeader === true);
+    ok('10 · another member cannot ask about an assessment that is not theirs (403)', (await call('/api/assessments/asB/ask', 'mia', { method: 'POST', body: { question: 'x' } })).status === 403);
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();

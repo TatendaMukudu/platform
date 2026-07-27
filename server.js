@@ -4964,6 +4964,32 @@ app.post('/api/assessments/:id/submit', requireAuth, (req, res) => {
   res.json({ ok: true, assignment: r.assignment, iteration: r.iteration });
 });
 
+/* POST /api/assessments/:id/ask — the assistant, carrying the LEADER'S brief down the web,
+   answers the assignee's question about the work they've been set. Grounded in the context
+   the leader gave when they created it (assignment/template description + guidance) — the
+   assistant is genuinely informed at the child end, never inventing an expectation. */
+app.post('/api/assessments/:id/ask', requireAuth, (req, res) => {
+  try {
+    const { orgCode: code, userId } = req.iqSession;
+    const a = (assessmentAssignments[code] || []).find(x => x.id === req.params.id);
+    if (!a) return res.status(404).json({ ok: false, error: 'not_found' });
+    const canView = a.assigneeId === userId || (_isLeader(code, userId) && new Set(getVisibleUserIds(code, userId)).has(a.assigneeId));
+    if (!canView) return res.status(403).json({ ok: false, error: 'not_yours' });
+    const tpl = (assessmentTemplates[code] || []).find(t => t.id === a.templateId) || {};
+    const out = assessmentView.answerAboutAssessment({
+      question: String(req.body && req.body.question || ''),
+      brief: a.description || tpl.description || '',
+      guidance: a.guidance || tpl.guidance || '',
+      fields: a.fields && a.fields.length ? a.fields : (tpl.fields || []),
+      leaderName: (a.assignerName || 'your leader').split(' ')[0],
+    });
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    console.warn('[assessments/ask] failed:', e && e.message);
+    res.status(200).json({ ok: false, answer: 'I couldn’t pull that up right now.', hasContext: false, routeToLeader: false });
+  }
+});
+
 /* ═══════════════════════════════════════════════════════════════════════════
    GROUNDED CONVERSATION ENGINE (ai/conversation) — a reusable intake dialogue for
    assessments + check-ins: determine what is already known → ask only the missing →
