@@ -2536,3 +2536,13 @@ details.intel-collapse[open] > summary::after { transform: rotate(90deg); }
 .tdy-cbtn:hover{color:var(--text-primary)}
 .tdy-privacy{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.6rem;
   letter-spacing:.06em;color:var(--text-muted);text-align:center;margin-top:.5rem}
+
+/* Today composer reply + governed proposal cards (ported). */
+.tdy-reply{font-size:.9rem;color:var(--text-primary);line-height:1.5;padding:.55rem .7rem;
+  border-left:2px solid var(--accent2);border-radius:8px;background:var(--bg-hover)}
+.tdy-prop{margin-top:.5rem;padding:.6rem .75rem;border:1px solid var(--border);border-radius:10px;background:var(--bg-card)}
+.tdy-prop-head{font-size:.86rem;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:.45rem}
+.tdy-prop-why{font-size:.78rem;color:var(--text-secondary);margin-top:.2rem;line-height:1.45}
+.tdy-nbadge{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.55rem;letter-spacing:.08em;
+  text-transform:uppercase;font-weight:400;padding:.16rem .42rem;border-radius:5px;background:var(--bg-hover);color:var(--text-secondary)}
+.tdy-note{font-size:.8rem;color:var(--text-secondary);margin-top:.35rem}

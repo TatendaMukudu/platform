@@ -6021,8 +6021,8 @@ async function todayTeamAsk() {
   try {
     const r = await fetch('/api/org/ask', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ question: q }) });
     const d = await r.json();
-    const route = d.routeTo ? `<div style="font-size:0.74rem;color:var(--text-muted);margin-top:0.3rem">Best person to ask: <strong>${_escAdvisor(d.routeTo.to)}</strong></div>` : '';
-    out.innerHTML = `<div style="font-size:0.88rem;color:var(--text-primary);padding:0.5rem 0.6rem;border-left:2px solid var(--accent);border-radius:6px;background:var(--surface-alt,rgba(127,127,127,0.05))">${_escAdvisor(d.answer || 'No answer available.')}</div>${route}`;
+    const route = d.routeTo ? `<div class="tdy-note" style="margin-top:0.3rem">Best person to ask: <strong>${_escAdvisor(d.routeTo.to)}</strong></div>` : '';
+    out.innerHTML = `<div class="tdy-reply">${_escAdvisor(d.answer || 'No answer available.')}</div>${route}`;
   } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't answer that right now.</div>`; }
 }
 
@@ -6034,17 +6034,17 @@ function todayRenderTurn(j) {
   const proposals = r.primaryActions || r.proposedActions || [];
   const propHtml = proposals.map(p => {
     const priv = p.visibility === 'only_me' ? 'Private' : 'Confirm to share';
-    return `<div id="today-prop-${esc(p.id)}" style="margin-top:0.5rem;padding:0.55rem 0.7rem;border:1px solid var(--line,rgba(127,127,127,0.16));border-radius:8px">
-      <div style="font-size:0.84rem;font-weight:600;color:var(--text-primary)">${esc(p.label)} <span style="font-size:0.66rem;color:var(--text-muted);font-weight:400">· ${priv}</span></div>
-      ${p.why ? `<div style="font-size:0.76rem;color:var(--text-muted);margin-top:2px">${esc(p.why)}</div>` : ''}
-      <div style="display:flex;gap:0.5rem;margin-top:0.45rem">
-        <button class="btn btn-accent btn-sm" style="font-size:0.72rem" onclick="todayTurnConfirm('${esc(j.turnId)}','${esc(p.id)}',this)">Confirm</button>
-        <button class="btn-ghost btn-sm" style="font-size:0.72rem;color:var(--text-muted)" onclick="todayTurnDismiss('${esc(p.id)}')">Dismiss</button>
+    return `<div id="today-prop-${esc(p.id)}" class="tdy-prop">
+      <div class="tdy-prop-head">${esc(p.label)} <span class="tdy-nbadge">${priv}</span></div>
+      ${p.why ? `<div class="tdy-prop-why">${esc(p.why)}</div>` : ''}
+      <div class="tdy-actions" style="margin-top:0.5rem">
+        <button class="btn btn-accent btn-sm" onclick="todayTurnConfirm('${esc(j.turnId)}','${esc(p.id)}',this)">Confirm</button>
+        <button class="btn-ghost btn-sm" onclick="todayTurnDismiss('${esc(p.id)}')">Dismiss</button>
       </div></div>`;
   }).join('');
-  const note = j.saved ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:0.35rem">✓ Saved — privately, just for you.</div>`
-    : (j.capturePrompt ? `<div style="font-size:0.8rem;color:var(--text-muted);margin-top:0.35rem">${esc(j.capturePrompt.message)}</div>` : '');
-  return `<div style="font-size:0.88rem;color:var(--text-primary);padding:0.5rem 0.6rem;border-left:2px solid var(--accent);border-radius:6px;background:var(--surface-alt,rgba(127,127,127,0.05))">${esc(r.responseText || '')}</div>${note}${propHtml}`;
+  const note = j.saved ? `<div class="tdy-note">✓ Saved — privately, just for you.</div>`
+    : (j.capturePrompt ? `<div class="tdy-note">${esc(j.capturePrompt.message)}</div>` : '');
+  return `<div class="tdy-reply">${esc(r.responseText || '')}</div>${note}${propHtml}`;
 }
 
 /* Confirm a governed proposal from the composer — the only path to a write. Settles in place. */
@@ -6055,7 +6055,7 @@ async function todayTurnConfirm(turnId, proposalId, btn) {
     const r = await fetch('/api/assistant/turn/' + encodeURIComponent(turnId) + '/confirm', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ proposalId }) });
     const d = await r.json();
     if (!d.ok) throw new Error('confirm failed');
-    if (card) card.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">✓ ${_escAdvisor(d.note || 'Done.')}</div>`;
+    if (card) card.innerHTML = `<div class="tdy-settled"><span class="tk">✓</span>${_escAdvisor(d.note || 'Done.')}</div>`;
   } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; } if (typeof showToast === 'function') showToast('Could not confirm right now.', 'error'); }
 }
 /* Dismiss a proposal — nothing was written, so this just clears it from the flow. */
