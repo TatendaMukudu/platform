@@ -67,6 +67,27 @@ function ownView(note) {
   };
 }
 
+/* Grounded answer over a single note — the deterministic floor for "ask IntelliQ about this
+   note". It grounds STRICTLY in the note's own words and never invents: relevance is a plain
+   keyword overlap (honest, no model), and the answer only ever surfaces the note's content.
+   The server may pass this note (and nothing else) to the LLM to phrase a real answer — but
+   the grounding is the note alone, so a shared note can never pull in anything private. */
+const _STOP = new Set(['this', 'that', 'with', 'from', 'have', 'they', 'their', 'about', 'what', 'does', 'will', 'when', 'your', 'you', 'the', 'and', 'for', 'are', 'was', 'would', 'could', 'should']);
+function groundedAnswer(note, question) {
+  const content = String((note && note.content) || '').trim();
+  if (!content) return { relevant: false, grounded: '', answer: 'There’s nothing in this note to go on.' };
+  const toks = s => (String(s || '').toLowerCase().match(/[a-z]{4,}/g) || []).filter(w => !_STOP.has(w));
+  const noteSet = new Set(toks(content));
+  const relevant = toks(question).some(w => noteSet.has(w));
+  return {
+    grounded: content,
+    relevant,
+    answer: relevant
+      ? `Here’s what the note says: ${content}`
+      : `This note doesn’t seem to cover that. For reference, it says: ${content}`,
+  };
+}
+
 /* Order a set of notes for a shelf: pinned first, newest pin first, then by recency. */
 function shelfSort(notes) {
   return [...(notes || [])].sort((a, b) => {
@@ -76,5 +97,5 @@ function shelfSort(notes) {
 }
 
 module.exports = {
-  canShareToTeam, share, unshare, pin, unpin, teamView, ownView, shelfSort,
+  canShareToTeam, share, unshare, pin, unpin, teamView, ownView, shelfSort, groundedAnswer,
 };

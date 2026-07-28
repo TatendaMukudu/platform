@@ -50,5 +50,13 @@ ok('7 · pinned notes come first, most-recently-pinned at the top', shelf.map(x 
 /* ── 8 · purity / determinism — share does not mutate the input ── */
 ok('8 · transitions are pure patches (input unchanged)', base.teamShared === undefined && base.pinned === undefined);
 
+/* ── 9 · grounded answer — grounds ONLY in the note, honest on relevance, never invents ── */
+const rel = N.groundedAnswer(base, 'what about the keeper?');
+ok('9 · a relevant question surfaces the note\'s own words', rel.relevant === true && /keeper/.test(rel.answer) && rel.grounded === base.content);
+const irrel = N.groundedAnswer(base, 'how is the pitch drainage?');
+ok('9 · an unrelated question says so honestly, still grounded in the note', irrel.relevant === false && /doesn’t seem to cover/.test(irrel.answer));
+ok('9 · the answer never contains anything beyond the note content', !/drainage|pitch/.test(irrel.answer.replace(irrel.grounded, '')));
+ok('9 · an empty note has nothing to answer from', N.groundedAnswer({ content: '' }, 'anything?').relevant === false);
+
 console.log(`\nnotes-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

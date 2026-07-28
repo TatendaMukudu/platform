@@ -10814,6 +10814,36 @@ app.post('/api/notes/:noteId/unshare', requireAuth, (req, res) => {
   res.json({ ok: true, shared: false });
 });
 
+/* POST /api/notes/:id/ask — ask IntelliQ about a note you can see. The answer is grounded
+   STRICTLY in that note's own words: the deterministic floor surfaces the note; when a key
+   is present the model phrases a real answer, but the ONLY grounding it's given is this note
+   — so a shared note can never pull in anything private. Visibility-gated like everything
+   else. This is what turns a pinned team note into a living, askable artifact. */
+app.post('/api/notes/:noteId/ask', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const note = _noteById(code, req.params.noteId);
+  if (!note) return res.status(404).json({ ok: false, error: 'note_not_found' });
+  if (!_noteVisibleTo(code, userId, note)) return res.status(403).json({ ok: false, error: 'forbidden' });
+  const question = String(req.body && req.body.question || '').slice(0, 500);
+  if (!question.trim()) return res.status(400).json({ ok: false, error: 'question_required' });
+  const g = noteGov.groundedAnswer(note, question);
+  let answer = g.answer, enriched = false;
+  if (ai.enabled()) {
+    const p = ai.complete({
+      tier: 'reason', maxTokens: 180,
+      system: [
+        'Answer the question USING ONLY the note below. If the note does not address it, say so plainly.',
+        'Never invent facts beyond the note. Two or three sentences, plain and honest.',
+        _domainDirective(code),
+      ].filter(Boolean).join('\n'),
+      user: `Note: ${note.content}\n\nQuestion: ${question}`,
+    });
+    const out = await Promise.race([Promise.resolve(p).then(v => v, () => null), new Promise(r => setTimeout(() => r(null), AI_BRIEF_MS))]);
+    if (out && String(out).trim()) { answer = String(out).trim(); enriched = true; }
+  }
+  res.json({ ok: true, answer, grounded: true, relevant: g.relevant, enriched });
+});
+
 /* GET /api/notes/pinned — the shelf: your own pinned notes + team-shared pinned notes you
    can see, ordered pins-first. Each projected safely (a teammate's note never exposes its
    sensitivity, the author's private AI reply, or internal ids). */

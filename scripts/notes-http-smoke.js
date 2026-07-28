@@ -89,6 +89,20 @@ const server = app.listen(0, async () => {
     ok('7 · the author can un-share', un.j.ok === true && un.j.shared === false);
     const jUn = await pinned('joe');
     ok('7 · once un-shared, the teammate no longer sees it', !(jUn.pinned || []).some(p => p.id === 'n1'));
+
+    /* ── 8 · ask IntelliQ about a note — grounded, visibility-gated ── */
+    const askBody = (who, id, q) => (async () => {
+      const r = await fetch(base + `/api/notes/${id}/ask`, { method: 'POST', headers: H(who), body: JSON.stringify({ question: q }) });
+      return { status: r.status, j: await r.json() };
+    })();
+    // n3 is shared to the team; joe (in scope) may ask, and the answer is grounded in the note.
+    const ask = await askBody('joe', 'n3', 'what shape should we try?');
+    ok('8 · a teammate can ask about a shared note, grounded in its own words', ask.j.ok && ask.j.grounded === true && /diamond/i.test(ask.j.answer));
+    // coachB is out of scope for n3 → cannot ask.
+    const askDenied = await askBody('coachB', 'n3', 'what shape?');
+    ok('8 · someone who can\'t see the note cannot ask about it (403)', askDenied.status === 403);
+    const askEmpty = await askBody('joe', 'n3', '   ');
+    ok('8 · an empty question is refused (400)', askEmpty.status === 400);
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();
