@@ -44,6 +44,7 @@ const noteGov    = require('./ai/notes');
 const selfModel  = require('./ai/self-model');
 const report     = require('./ai/report');
 const brief      = require('./ai/brief');
+const languageGuard = require('./ai/language-guard');
 const behaviour  = require('./ai/behaviour');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
@@ -8941,8 +8942,8 @@ function _reasonScopedAgenda(code, userId, now, force) {
    deterministic voice. This is the guardrail that keeps the translator at the EDGE. */
 function _reasonSpokenSafe(t) {
   if (!t || typeof t !== 'string' || t.length > 800) return false;
-  if (/\d(?:\.\d)?\s*\/\s*5\b|\b\d{1,3}\s*%/.test(t)) return false;         // no private metric
-  if (/\bpredict|\bdiagnos|\bwill\s+(?:likely|probably)\b/i.test(t)) return false; // no prophecy
+  if (/\d(?:\.\d)?\s*\/\s*5\b|\b\d{1,3}\s*%/.test(t)) return false;   // no private metric
+  if (languageGuard.predictsOrDiagnoses(t)) return false;             // never predict or diagnose (ai/language-guard)
   return true;
 }
 
@@ -10840,13 +10841,14 @@ app.post('/api/notes/:noteId/ask', requireAuth, async (req, res) => {
       tier: 'reason', maxTokens: 180,
       system: [
         'Answer the question USING ONLY the note below. If the note does not address it, say so plainly.',
-        'Never invent facts beyond the note. Two or three sentences, plain and honest.',
+        'Never invent facts beyond the note. Never predict what will happen, and never diagnose or name a condition — describe only what the note records. Two or three sentences, plain and honest.',
         _domainDirective(code),
       ].filter(Boolean).join('\n'),
       user: `Note: ${note.content}\n\nQuestion: ${question}`,
     });
     const out = await Promise.race([Promise.resolve(p).then(v => v, () => null), new Promise(r => setTimeout(() => r(null), AI_BRIEF_MS))]);
-    if (out && String(out).trim()) { answer = String(out).trim(); enriched = true; }
+    // Grounded AND descriptive: reject any answer that predicts or diagnoses → keep the floor.
+    if (out && String(out).trim() && languageGuard.describesOnly(out)) { answer = String(out).trim(); enriched = true; }
   }
   res.json({ ok: true, answer, grounded: true, relevant: g.relevant, enriched });
 });
@@ -10915,7 +10917,7 @@ app.get('/api/brief', requireAuth, async (req, res) => {
     let opening = composed.opening;
     if (ai.enabled()) {
       const p = ai.complete({ tier: 'reason', maxTokens: 90,
-        system: ['Rephrase this assistant opening in ONE warm, natural sentence. Add nothing — no number, no name not present, no prediction.', _domainDirective(code)].filter(Boolean).join('\n'),
+        system: ['Rephrase this assistant opening in ONE warm, natural sentence. Add nothing — no number, no name not present. Never predict what will happen, and never diagnose; describe only what is given.', _domainDirective(code)].filter(Boolean).join('\n'),
         user: composed.opening });
       const out = await Promise.race([Promise.resolve(p).then(v => v, () => null), new Promise(r => setTimeout(() => r(null), AI_BRIEF_MS))]);
       if (out && _reasonSpokenSafe(out)) opening = String(out).trim();
