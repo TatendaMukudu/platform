@@ -5878,15 +5878,16 @@ async function renderToday() {
   if (sub) sub.textContent = 'Ask, decide, and see what needs you — in one place.';
   const chips = ['What is outstanding?', 'Who owns what?', 'Are we ready?', 'What changed?'];
   el.innerHTML = `
-    <div class="today-hero" style="margin-bottom:1.1rem;padding:1rem;border-radius:16px;background:linear-gradient(180deg,var(--surface-alt,rgba(124,90,245,0.06)),transparent);border:1px solid var(--line,rgba(127,127,127,0.14))">
-      <div style="display:flex;gap:0.5rem;align-items:stretch">
-        <input id="today-ask" class="form-input" placeholder="Ask me anything — or just tell me how it's going…" style="flex:1;margin:0;font-size:0.95rem;padding:0.7rem 0.8rem" onkeydown="if(event.key==='Enter')todayAsk()">
-        <button class="btn btn-accent" style="padding:0 1.1rem" onclick="todayAsk()">Ask</button>
+    <div class="tdy-composer">
+      <div class="tdy-inputrow">
+        <input id="today-ask" placeholder="Ask me anything — or just tell me how it's going…" onkeydown="if(event.key==='Enter')todayAsk()">
+        <button class="tdy-send" onclick="todayAsk()" aria-label="Send">↑</button>
       </div>
       <div id="today-ask-out" style="margin-top:0.5rem"></div>
-      <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.7rem">
-        ${chips.map(c => `<button class="today-chip" style="font-size:0.74rem;padding:0.28rem 0.7rem;border-radius:20px;border:1px solid var(--line,rgba(127,127,127,0.2));background:transparent;color:var(--text-secondary);cursor:pointer" onclick="todayQuick('${c}')">${c}</button>`).join('')}
+      <div class="tdy-chips">
+        ${chips.map(c => `<button class="tdy-cbtn" onclick="todayQuick('${c}')">${c}</button>`).join('')}
       </div>
+      <div class="tdy-privacy">Private by default · nothing is saved or shared until you confirm</div>
     </div>
     <div id="today-voice"></div>
     <div id="today-feed"><div style="padding:1.2rem;text-align:center;color:var(--text-muted)">Gathering what needs you…</div></div>

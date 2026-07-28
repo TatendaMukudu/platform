@@ -2518,3 +2518,21 @@ details.intel-collapse[open] > summary::after { transform: rotate(90deg); }
 .tdy-settled{font-size:.84rem;color:var(--text-secondary);padding:.25rem 0;display:flex;gap:.4rem;align-items:center}
 .tdy-settled .tk{color:var(--success);font-weight:700}
 @media (prefers-reduced-motion:reduce){.tdy-presence .r{animation:none;opacity:.35}}
+
+/* Today composer — the calm column's input (ported). */
+.tdy-composer{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);
+  padding:.75rem .8rem .6rem;margin-bottom:1.1rem;box-shadow:var(--shadow)}
+.tdy-inputrow{display:flex;gap:.5rem;align-items:center}
+.tdy-inputrow input{flex:1;border:0;background:transparent;color:var(--text-primary);font-size:.95rem;
+  padding:.55rem .5rem;outline:none;margin:0}
+.tdy-inputrow input::placeholder{color:var(--text-muted)}
+.tdy-send{flex:0 0 auto;width:38px;height:38px;border-radius:50%;border:0;cursor:pointer;
+  background:var(--accent);color:#fff;font-size:1.05rem;display:grid;place-items:center}
+.tdy-send:hover{background:var(--accent2)}
+.tdy-chips{display:flex;gap:.4rem;overflow-x:auto;margin-top:.55rem;scrollbar-width:none}
+.tdy-chips::-webkit-scrollbar{display:none}
+.tdy-cbtn{flex:0 0 auto;font-size:.76rem;color:var(--text-secondary);background:var(--bg-hover);
+  border:1px solid var(--border);border-radius:20px;padding:.32rem .7rem;cursor:pointer;white-space:nowrap}
+.tdy-cbtn:hover{color:var(--text-primary)}
+.tdy-privacy{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.6rem;
+  letter-spacing:.06em;color:var(--text-muted);text-align:center;margin-top:.5rem}
