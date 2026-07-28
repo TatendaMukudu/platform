@@ -5917,40 +5917,42 @@ async function todayLoadVoice() {
     // Nothing to raise — but the assistant is still HERE. Say so, in first person, honestly:
     // it's watching and will speak up the moment something's worth attention. The brain is
     // never invisible, even when it's quiet.
-    box.innerHTML = `<div class="card" style="margin-bottom:1rem;display:flex;gap:0.6rem;align-items:flex-start;border-left:3px solid var(--accent)">
-      <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:7px;flex:0 0 auto;box-shadow:0 0 0 3px rgba(124,90,245,0.15)"></span>
-      <div style="font-size:0.9rem;color:var(--text-secondary);line-height:1.45">I'm watching your team — nothing needs you this second. Ask me anything above, and I'll speak up right here the moment something's worth your attention.</div>
+    box.innerHTML = `<div class="tdy-voice tdy-standby">
+      <span class="tdy-presence"><span class="r"></span><span class="d"></span></span>
+      <p>I'm watching your team — nothing needs you this second. Ask me anything above, and I'll speak up right here the moment something's worth your attention.</p>
     </div>`;
     return;
   }
   const propFor = bid => (d.proposals || []).find(p => p.beliefId === bid);
-  const opener = brief && brief.spoken ? `<div style="font-size:0.9rem;color:var(--text-primary);margin-bottom:0.6rem;line-height:1.4">${_escAdvisor(brief.spoken)}</div>` : '';
+  const opener = brief && brief.spoken ? `<div class="tdy-opener">${_escAdvisor(brief.spoken)}</div>` : '';
   box.innerHTML = `
-    <div class="card" style="margin-bottom:1rem;border-left:3px solid var(--accent)">
-      <div class="card-label" style="margin-bottom:0.5rem">What I'm seeing</div>
+    <div class="tdy-voice">
+      <div class="tdy-vhead"><span class="tdy-presence"><span class="r"></span><span class="d"></span></span><span class="tdy-kicker">What I'm seeing</span></div>
       ${opener}
       ${ripe.map(a => todayVoiceRow(a, propFor(a.beliefId))).join('')}
     </div>`;
 }
 
-/* One belief, spoken — with its timing, its honesty, and its three in-place choices. */
+/* One belief, spoken — telemetry chips, timing, honesty, and three in-place choices. */
 function todayVoiceRow(a, prop) {
   const esc = _escAdvisor, sid = a.beliefId.replace(/[^a-z0-9]/gi, '_');
   const act = a.register === 'support' ? "I'll have that word" : a.register === 'scout' ? "I'll look into it" : 'Nice — noted';
-  const rel = a.reliability && a.reliability !== 'calibrating' ? `<span style="font-size:0.66rem;color:var(--text-muted)">· ${esc(a.reliability)}</span>` : '';
-  return `<div id="voice-${sid}" style="padding:0.55rem 0;border-bottom:1px solid var(--line-soft,rgba(127,127,127,0.08))">
-    <div style="font-size:0.88rem;color:var(--text-primary)">${esc(a.claim)}</div>
-    ${a.timing ? `<div style="font-size:0.74rem;color:var(--accent);margin-top:0.15rem">${esc(a.timing)}</div>` : ''}
-    ${prop ? `<div style="font-size:0.76rem;color:var(--text-muted);margin-top:0.15rem">${esc(prop.text)}</div>` : ''}
-    <div style="display:flex;gap:0.5rem;margin-top:0.45rem;align-items:center;flex-wrap:wrap">
-      <button class="btn btn-accent btn-sm" style="font-size:0.72rem" onclick="todayReasonRespond('${esc(a.beliefId)}','acted',this)">${act}</button>
-      <button class="btn-ghost btn-sm" style="font-size:0.72rem;color:var(--text-muted)" onclick="todayReasonRespond('${esc(a.beliefId)}','dismissed',this)">Not now</button>
-      <button class="btn-ghost btn-sm" style="font-size:0.72rem;color:var(--text-muted)" onclick="todayReasonWhy('${sid}')">Why?</button>
-      ${rel}
+  const attn = a.severity === 'high' || a.polarity === 'risk';
+  const confChip = a.confidence ? `<span class="tdy-chip${attn ? ' attn' : ''}">${esc(a.confidence)}</span>` : '';
+  const relChip = `<span class="tdy-chip ghost">${esc(a.reliability && a.reliability !== 'calibrating' ? a.reliability : 'calibrating')}</span>`;
+  return `<div id="voice-${sid}" class="tdy-belief">
+    <div class="tdy-metarow">${confChip}${relChip}</div>
+    <div class="tdy-claim">${esc(a.claim)}</div>
+    ${a.timing ? `<div class="tdy-timing"><span style="font-size:0.6rem">◆</span>${esc(a.timing)}</div>` : ''}
+    ${prop ? `<div class="tdy-proposal">${esc(prop.text)}</div>` : ''}
+    <div class="tdy-actions">
+      <button class="btn btn-accent btn-sm" onclick="todayReasonRespond('${esc(a.beliefId)}','acted',this)">${act}</button>
+      <button class="btn-ghost btn-sm" onclick="todayReasonRespond('${esc(a.beliefId)}','dismissed',this)">Not now</button>
+      <button class="btn-ghost btn-sm" onclick="todayReasonWhy('${sid}')">Why?</button>
     </div>
-    <div id="voice-why-${sid}" style="display:none;margin-top:0.4rem;padding:0.4rem 0.6rem;border-left:2px solid var(--line);background:var(--surface-alt,rgba(127,127,127,0.05));border-radius:6px">
-      <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:0.2rem">Why I might be wrong</div>
-      <ul style="margin:0 0 0 1rem;padding:0">${(a.challenge || []).map(c => `<li style="font-size:0.74rem;color:var(--text-secondary)">${esc(c)}</li>`).join('')}</ul>
+    <div id="voice-why-${sid}" class="tdy-why" style="display:none">
+      <span class="lbl">why I might be wrong</span>
+      <ul>${(a.challenge || []).map(c => `<li>${esc(c)}</li>`).join('')}</ul>
     </div>
   </div>`;
 }
@@ -5974,7 +5976,7 @@ async function todayReasonRespond(beliefId, response, btn) {
     });
     const j = await r.json();
     if (!j.ok) throw new Error('failed');
-    if (row) row.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.3rem 0">${response === 'acted' ? '✓ On it — I\'ll keep watching.' : 'Set aside — I won\'t raise this again for a while.'}</div>`;
+    if (row) row.innerHTML = `<div class="tdy-settled"><span class="tk">${response === 'acted' ? '✓' : '·'}</span>${response === 'acted' ? "On it — I'll keep watching." : "Set aside — I won't raise this again for a while."}</div>`;
   } catch (e) {
     if (btns) btns.forEach(b => { b.disabled = false; });
     if (typeof showToast === 'function') showToast('Could not save that right now.', 'error');
