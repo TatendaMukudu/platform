@@ -42,6 +42,8 @@ const reason     = require('./ai/reason');
 const understanding = require('./ai/understanding');
 const noteGov    = require('./ai/notes');
 const selfModel  = require('./ai/self-model');
+const report     = require('./ai/report');
+const brief      = require('./ai/brief');
 const behaviour  = require('./ai/behaviour');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
@@ -10860,6 +10862,109 @@ app.get('/api/notes/pinned', requireAuth, (req, res) => {
   const mineIds = new Set(rawMine.map(n => n.id));
   const ordered = noteGov.shelfSort([...rawMine, ...rawTeam]);
   res.json({ ok: true, pinned: ordered.map(n => mineIds.has(n.id) ? noteGov.ownView(n) : noteGov.teamView(n)) });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE NODE-AWARE PROACTIVE BRIEF (ai/brief) — the assistant opening with a read AND
+   governed offers, shaped by WHERE the person sits in the web. The web does four jobs
+   here, then hands the results to the pure composer:
+     • LEVEL   — org-graph.scopeOfActor → leader (aggregate) vs member (local)
+     • SCOPE   — the same gate as evidence/reasoning picks the reads (no cross-branch leak)
+     • AGGREGATE (leader) — a headline from the scoped agenda's own beliefs (composition,
+                  never new reasoning)
+     • ROUTE   (member) — org-graph.routeTarget (via _orgAskRouteLeader) → who can help
+   brief.compose only ARRANGES; it never reasons or scopes. Every offer is proposal-gated. */
+function _actorLevel(code, userId) {
+  if (orgUsers[code]?.[userId]?.role === 'superadmin') return 'leader';
+  const nodes = orgNodes[code];
+  if (!nodes || !Object.keys(nodes).length) return _userHasPerm(code, userId, 'view_team') ? 'leader' : 'member';
+  const { leaderNodeIds } = orgGraph.scopeOfActor(nodes, userId);
+  return (leaderNodeIds && leaderNodeIds.length) ? 'leader' : 'member';
+}
+function _firstName(code, userId) { return String((orgUsers[code]?.[userId]?.name || '').split(/\s+/)[0] || ''); }
+function _timeOfDay(now) { const h = new Date(now).getHours(); return h < 12 ? 'morning' : h < 18 ? 'afternoon' : 'evening'; }
+
+app.get('/api/brief', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  try {
+    const now = Date.now();
+    const level = _actorLevel(code, userId);
+    const practices = (orgPlaybook[code] || []).filter(e => e.status === 'active' && e.statement).slice(0, 3).map(e => e.statement);
+    let reads = [], routeTo = null, rollupHeadline = null, areaLabel = _orgAskAreaLabel(code, userId);
+
+    if (level === 'leader') {
+      // SCOPE: the leader's own scoped agenda (a sibling branch never appears).
+      const { agenda } = _reasonScopedAgenda(code, userId, now, false);
+      reads = agenda.filter(a => a.readiness === 'ripe').map(a => ({ text: a.claim, meta: a.confidence, polarity: a.polarity }));
+      // AGGREGATE: an honest headline composed from the beliefs already present (no new read).
+      const prog = reads.filter(r => r.polarity === 'progress').length, risk = reads.filter(r => r.polarity === 'risk').length;
+      if (prog > 0 && prog >= risk) rollupHeadline = `${areaLabel} has had a good week`;
+    } else {
+      // SCOPE: the member's OWN reads about themselves (their own evidence), never others'.
+      reads = (reasonLedger[code] || [])
+        .filter(b => b.subjectId === userId && !b.shared && b.status !== 'dormant' && !reason.isSuppressed(b, now))
+        .map(b => { const v = reason.subjectView(b); return { text: v.claim, meta: v.confidence, polarity: b.polarity }; });
+      // ROUTE: who this member can turn to.
+      const rt = _orgAskRouteLeader(code, userId);
+      if (rt && rt.present && rt.label) routeTo = { label: rt.label };
+    }
+
+    const composed = brief.compose({ level, name: _firstName(code, userId), timeOfDay: _timeOfDay(now), reads, practices, routeTo, rollupHeadline, areaLabel });
+
+    // EDGE: optionally warm the opening line (no key / timeout / breach → the deterministic one).
+    let opening = composed.opening;
+    if (ai.enabled()) {
+      const p = ai.complete({ tier: 'reason', maxTokens: 90,
+        system: ['Rephrase this assistant opening in ONE warm, natural sentence. Add nothing — no number, no name not present, no prediction.', _domainDirective(code)].filter(Boolean).join('\n'),
+        user: composed.opening });
+      const out = await Promise.race([Promise.resolve(p).then(v => v, () => null), new Promise(r => setTimeout(() => r(null), AI_BRIEF_MS))]);
+      if (out && _reasonSpokenSafe(out)) opening = String(out).trim();
+    }
+    res.json({ ok: true, level, opening, items: composed.items, offers: composed.offers });
+  } catch (e) {
+    console.warn('[brief] failed:', e && e.message);
+    res.json({ ok: true, level: 'member', opening: 'Here’s where things stand.', items: [], offers: [] });
+  }
+});
+
+/* GET /api/report/team — the first ARTIFACT: a grounded team report, print-ready HTML the
+   browser saves as a PDF. It renders only what the reasoner and the confirmed playbook
+   already know — every line shows its source, and anything without one never appears (the
+   ai/report grounding guarantee). Infrastructure, not UI: the assistant offers "want a
+   PDF?"; this is what it links to. Leader-gated + scoped like everything else. */
+app.get('/api/report/team', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
+    return res.status(403).type('text/plain').send('Permission denied');
+  }
+  const now = Date.now();
+  let attention = [], practices = [];
+  try {
+    const { agenda } = _reasonScopedAgenda(code, userId, now, false);
+    attention = agenda.filter(a => a.readiness === 'ripe').map(a => ({
+      text: a.claim,
+      basis: `reasoner · ${a.confidence}${a.reliability && a.reliability !== 'calibrating' ? ' · ' + a.reliability : ''}`,
+    }));
+  } catch (_) {}
+  try {
+    practices = (orgPlaybook[code] || []).filter(e => e.status === 'active' && e.statement)
+      .map(e => ({ text: e.statement, basis: 'playbook · confirmed practice' }));
+  } catch (_) {}
+  const model = report.buildReport({
+    title: 'Team report',
+    subject: _orgAskAreaLabel(code, userId),
+    generatedAt: new Date(now).toISOString(),
+    intro: attention.length
+      ? `${attention.length} thing${attention.length === 1 ? '' : 's'} the reasoner judges worth your attention — drawn only from recorded check-ins and evidence.`
+      : 'A steady week — this reflects only what’s recorded.',
+    sections: [
+      { heading: 'Worth your attention', facts: attention, emptyNote: 'Nothing is pressing — no recorded pattern is strong enough to raise.' },
+      { heading: 'Confirmed practices', facts: practices, emptyNote: 'No practices are confirmed into your playbook yet.' },
+    ],
+  });
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(report.renderHtml(model));
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
