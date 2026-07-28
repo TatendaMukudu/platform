@@ -2479,3 +2479,70 @@ details.intel-collapse[open] > summary::after { transform: rotate(90deg); }
 
 /* Team attention — "Worth recognising" reads as a positive, not a warning. */
 .intel-section--positive b { color: var(--success); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TODAY FLOW — the reasoner's voice, ported from the agreed prototype.
+   Uses the app's own tokens; violet --accent2 carries the assistant's presence
+   ("the mind"), semantic amber/green carry belief state. Namespaced .tdy-*.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.tdy-voice{background:var(--bg-card);border:1px solid var(--border);border-left:3px solid var(--accent2);
+  border-radius:var(--radius-lg);padding:1rem 1.1rem;margin-bottom:1rem;box-shadow:var(--shadow)}
+.tdy-vhead{display:flex;gap:.55rem;align-items:center;margin-bottom:.55rem}
+.tdy-kicker{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.6rem;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--text-muted)}
+.tdy-presence{width:24px;height:24px;position:relative;flex:0 0 auto}
+.tdy-presence .d{position:absolute;inset:8px;border-radius:50%;background:var(--accent2)}
+.tdy-presence .r{position:absolute;inset:0;border-radius:50%;border:1.5px solid var(--accent2);opacity:.5;
+  animation:tdyBreathe 3.4s ease-in-out infinite}
+@keyframes tdyBreathe{0%,100%{transform:scale(.5);opacity:.55}50%{transform:scale(1);opacity:.07}}
+.tdy-standby{display:flex;gap:.7rem;align-items:flex-start}
+.tdy-standby p{margin:0;font-size:.92rem;line-height:1.5;color:var(--text-secondary)}
+.tdy-opener{font-size:.94rem;line-height:1.5;color:var(--text-primary);margin-bottom:.7rem;max-width:44ch}
+.tdy-belief{padding:.65rem 0;border-top:1px solid var(--border)}
+.tdy-belief:first-of-type{border-top:0;padding-top:.1rem}
+.tdy-metarow{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-bottom:.4rem}
+.tdy-chip{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.6rem;letter-spacing:.08em;
+  text-transform:uppercase;padding:.2rem .5rem;border-radius:6px;background:var(--bg-hover);color:var(--text-secondary);white-space:nowrap}
+.tdy-chip.attn{background:rgba(247,178,79,.14);color:var(--accent4)}
+.tdy-chip.good{background:rgba(79,247,122,.13);color:var(--success)}
+.tdy-chip.ghost{background:transparent;border:1px solid var(--border);color:var(--text-muted)}
+.tdy-claim{font-size:.94rem;line-height:1.45;color:var(--text-primary)}
+.tdy-timing{font-size:.78rem;color:var(--accent2);margin-top:.3rem;display:flex;gap:.35rem;align-items:baseline}
+.tdy-proposal{font-size:.8rem;color:var(--text-secondary);margin-top:.3rem;line-height:1.45}
+.tdy-actions{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.65rem;align-items:center}
+.tdy-why{margin-top:.55rem;padding:.5rem .7rem;border-left:2px solid var(--border);background:var(--bg-surface);border-radius:8px}
+.tdy-why .lbl{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.58rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:.3rem}
+.tdy-why ul{margin:0;padding-left:1.05rem}
+.tdy-why li{font-size:.78rem;color:var(--text-secondary);line-height:1.5;margin:.15rem 0}
+.tdy-settled{font-size:.84rem;color:var(--text-secondary);padding:.25rem 0;display:flex;gap:.4rem;align-items:center}
+.tdy-settled .tk{color:var(--success);font-weight:700}
+@media (prefers-reduced-motion:reduce){.tdy-presence .r{animation:none;opacity:.35}}
+
+/* Today composer — the calm column's input (ported). */
+.tdy-composer{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);
+  padding:.75rem .8rem .6rem;margin-bottom:1.1rem;box-shadow:var(--shadow)}
+.tdy-inputrow{display:flex;gap:.5rem;align-items:center}
+.tdy-inputrow input{flex:1;border:0;background:transparent;color:var(--text-primary);font-size:.95rem;
+  padding:.55rem .5rem;outline:none;margin:0}
+.tdy-inputrow input::placeholder{color:var(--text-muted)}
+.tdy-send{flex:0 0 auto;width:38px;height:38px;border-radius:50%;border:0;cursor:pointer;
+  background:var(--accent);color:#fff;font-size:1.05rem;display:grid;place-items:center}
+.tdy-send:hover{background:var(--accent2)}
+.tdy-chips{display:flex;gap:.4rem;overflow-x:auto;margin-top:.55rem;scrollbar-width:none}
+.tdy-chips::-webkit-scrollbar{display:none}
+.tdy-cbtn{flex:0 0 auto;font-size:.76rem;color:var(--text-secondary);background:var(--bg-hover);
+  border:1px solid var(--border);border-radius:20px;padding:.32rem .7rem;cursor:pointer;white-space:nowrap}
+.tdy-cbtn:hover{color:var(--text-primary)}
+.tdy-privacy{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.6rem;
+  letter-spacing:.06em;color:var(--text-muted);text-align:center;margin-top:.5rem}
+
+/* Today composer reply + governed proposal cards (ported). */
+.tdy-reply{font-size:.9rem;color:var(--text-primary);line-height:1.5;padding:.55rem .7rem;
+  border-left:2px solid var(--accent2);border-radius:8px;background:var(--bg-hover)}
+.tdy-prop{margin-top:.5rem;padding:.6rem .75rem;border:1px solid var(--border);border-radius:10px;background:var(--bg-card)}
+.tdy-prop-head{font-size:.86rem;font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:.45rem}
+.tdy-prop-why{font-size:.78rem;color:var(--text-secondary);margin-top:.2rem;line-height:1.45}
+.tdy-nbadge{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.55rem;letter-spacing:.08em;
+  text-transform:uppercase;font-weight:400;padding:.16rem .42rem;border-radius:5px;background:var(--bg-hover);color:var(--text-secondary)}
+.tdy-note{font-size:.8rem;color:var(--text-secondary);margin-top:.35rem}

@@ -38,6 +38,10 @@ const packs      = require('./ai/packs');
 const primitives = require('./ai/primitives');
 const confidence = require('./ai/confidence');
 const proactive  = require('./ai/proactive');
+const reason     = require('./ai/reason');
+const understanding = require('./ai/understanding');
+const noteGov    = require('./ai/notes');
+const selfModel  = require('./ai/self-model');
 const behaviour  = require('./ai/behaviour');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
@@ -116,6 +120,7 @@ function scheduleSave() {
         orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
         proactivePrefs, insightSuppression, answerFeedback,
         orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
+        reasonLedger, selfModelLedger,
         conversationSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
@@ -8042,6 +8047,17 @@ const ORG_OBS_CAP = 500;
 // leader's explicit confirmation does. Dismissed candidate fingerprints are suppressed.
 const orgPlaybook = {};           // orgCode → [ confirmed entry ]
 const orgPlaybookDismissed = {};  // orgCode → [ dismissed candidate fingerprint ]
+// THE REASONER (ai/reason) — the org's persistent BELIEF LEDGER. Unlike the snapshot
+// detector, this remembers: findings accumulate into hypotheses held across ticks, each
+// carrying its counter-evidence and what would refute it. Maintained ORG-WIDE by a single
+// pass (_reasonTick) so every leader reads the SAME belief state, scoped to whom they may
+// see — never a per-leader ledger that would overwrite others. Persisted; re-derivable.
+const reasonLedger = {};          // orgCode → [ belief ]
+const reasonTickCache = {};       // orgCode → { ts, result }  (throttles the org-wide pass)
+// THE SELF-MODEL (ai/self-model) — the reasoner pointed at each OPERATOR. Keyed per
+// user (userKey) and PRIVATE to them: a person's own working habits are theirs alone,
+// never shared with a leader above and never used to evaluate them. Persisted.
+const selfModelLedger = {};       // `${code}:${userId}` → [ habit ]
 
 function _orgPack(code) {
   const cfg = orgStateConfig[code];
@@ -8789,6 +8805,295 @@ app.post('/api/org-playbook/:fingerprint/retire', requireAuth, (req, res) => {
   } catch (e) {
     console.warn('[org-playbook/retire] failed:', e && e.message);
     res.status(200).json({ ok: false });
+  }
+});
+
+/* ─── THE REASONER (ai/reason) — the governed boundary ────────────────────────────────
+   Turn the detector's SNAPSHOT findings into OBSERVATIONS and fold them into the org's
+   persistent belief ledger. This is the one place the pure reasoner meets the real world:
+   it reads canonical-sourced member findings (the SAME detector the briefing uses — not a
+   second engine), stamps each with the subject's node scope, and hands them to reason().
+   The returned ledger is persisted so beliefs accumulate, argue with themselves, and fade
+   ACROSS runs. Org-wide by construction; scoped per reader at the endpoint.
+
+   Observation identity is (member : kind : DAY): re-running the tick within a day dedupes,
+   but the same pattern present on another day is a NEW supporting observation — so
+   confidence grows with persistence over time, exactly as the ledger intends. */
+function _reasonObservations(code, now) {
+  const users = orgUsers[code] || {};
+  const day = Math.floor(now / 86400000);
+  const observations = [];
+  for (const u of Object.values(users)) {
+    if (!u || u.role === 'superadmin') continue;
+    let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { continue; }
+    if (!m) continue;
+    const findings = [...intel.detectPatterns(m), ...(m.structural || [])];
+    if (!findings.length) continue;
+    const scope = _primaryNodeScope(code, u.id);
+    for (const f of findings) {
+      observations.push({
+        id: `${u.id}:${f.type}:${day}`,
+        subjectId: u.id, subjectName: (u.name || u.id) || null, scope,
+        kind: f.type, severity: f.severity, confidence: f.confidence, basis: f.basis,
+        careFlag: !!m.hasSensitiveContext, t: now,
+      });
+    }
+  }
+  return observations;
+}
+
+/* Run the org-wide reasoning pass and persist the ledger. Throttled (BRIEFING_TTL) so
+   polling doesn't re-fold constantly; ?refresh forces a fresh pass. Later beats can call
+   this on evidence-write (reason-on-event) and on a background tick (reason-when-quiet) —
+   the boundary is the same. Fail-safe: any error leaves the last good ledger untouched. */
+function _reasonTick(code, now = Date.now(), force = false) {
+  const cached = reasonTickCache[code];
+  if (!force && cached && (now - cached.ts) < BRIEFING_TTL) return cached.result;
+  const scopeLabel = {};
+  for (const [nid, n] of Object.entries(orgNodes[code] || {})) scopeLabel[nid] = (n && (n.name || n.label)) || nid;
+  // The org's real, upcoming events — facts with dates. They pull a belief's urgency
+  // forward and create a natural moment to act (a match, a deadline). Scope is org-wide
+  // unless the event names a node; a scoped event only bears on its own branch.
+  const events = (orgCalendar[code] || []).map(e => {
+    const at = e && e.start ? Date.parse(e.start) : NaN;
+    return { id: e.id, label: e.title || 'an upcoming event', at, scope: (orgNodes[code] && e.groupRef && orgNodes[code][e.groupRef]) ? e.groupRef : null };
+  }).filter(e => Number.isFinite(e.at));
+  const result = reason.reason({
+    priorBeliefs: reasonLedger[code] || [],
+    observations: _reasonObservations(code, now),
+    now, scopeLabel, context: { events },
+  });
+  reasonLedger[code] = result.beliefs;
+
+  // CALIBRATION — compose the Confidence Engine (ai/confidence). Per KIND of noticing,
+  // turn the reasoner's own outcomes + human feedback into a reliability read, then:
+  //   • label every agenda item honestly ("reliable here" / "calibrating"), and
+  //   • STAND DOWN a kind that has earned enough feedback and proven mostly unhelpful
+  //     (shouldSurface=false) — the reasoner stops raising a kind it keeps getting wrong.
+  // This is the loop closing: beliefs that don't pan out quietly lower their own kind's
+  // standing until it stops interrupting people.
+  const tally = reason.outcomeTally(result.beliefs);
+  const relByKind = {};
+  for (const kind of Object.keys(tally)) relByKind[kind] = confidence.reliability(tally[kind]);
+  result.agenda = result.agenda
+    .filter(a => { const rel = relByKind[a.kind]; return !rel || confidence.shouldSurface(rel); })
+    .map(a => ({ ...a, reliability: confidence.label(relByKind[a.kind] || null) }));
+  const liveBeliefIds = new Set(result.agenda.map(a => a.beliefId));
+  result.proposals = result.proposals.filter(p => liveBeliefIds.has(p.beliefId));
+
+  reasonTickCache[code] = { ts: now, result };
+  scheduleSave();
+  return result;
+}
+
+/* A leader-safe projection of an agenda item — the belief, its register + readiness, its
+   confidence, and the reasoner's own self-challenge. No evidence basis, no support records,
+   no private metric (the reasoner already keeps claims score-free). */
+function _reasonAgendaSafe(item) {
+  return {
+    beliefId: item.beliefId, kind: item.kind, shared: !!item.shared,
+    subjectId: item.subjectId || null, subjectName: item.subjectName || null,
+    claim: item.claim, register: item.register, readiness: item.readiness,
+    confidence: item.confidence, severity: item.severity, polarity: item.polarity,
+    urgency: item.urgency, why: item.why, challenge: item.challenge,
+    timing: item.timing || null,             // the natural moment a real event creates
+    reliability: item.reliability || null,   // the Confidence Engine's honest label for this kind
+  };
+}
+
+/* Can `userId` see (and therefore respond to) a belief? A per-person belief needs the
+   subject visible; a shared belief needs some of its people visible. */
+function _reasonCanSeeBelief(code, userId, belief) {
+  if (!belief) return false;
+  const visible = new Set(getVisibleUserIds(code, userId));
+  if (belief.subjectId) return visible.has(belief.subjectId);
+  if (belief.shared) {
+    const ledger = reasonLedger[code] || [];
+    return (belief.memberBeliefIds || []).some(id => { const mb = ledger.find(x => x.id === id); return mb && mb.subjectId && visible.has(mb.subjectId); });
+  }
+  return false;
+}
+
+/* Run the tick and SCOPE the agenda to one reader — the shared basis for /agenda and
+   /brief. A belief about a person routes only to leaders who may see that person; a shared
+   pattern shows only if some of its people are visible (no cross-branch leak). */
+function _reasonScopedAgenda(code, userId, now, force) {
+  const result = _reasonTick(code, now, force);
+  const visible = new Set(getVisibleUserIds(code, userId));
+  const byId = new Map(result.beliefs.map(b => [b.id, b]));
+  const inScope = (item) => {
+    if (item.subjectId) return visible.has(item.subjectId);
+    if (item.shared) {
+      const b = byId.get(item.beliefId);
+      return !!(b && (b.memberBeliefIds || []).some(id => { const mb = byId.get(id); return mb && mb.subjectId && visible.has(mb.subjectId); }));
+    }
+    return false;
+  };
+  const agenda = result.agenda.filter(inScope);
+  const beliefIds = new Set(agenda.map(a => a.beliefId));
+  return { agenda, proposals: result.proposals.filter(p => beliefIds.has(p.beliefId)) };
+}
+
+/* A spoken rundown must never introduce what the reasoner didn't reason: no score, no
+   prediction, no diagnosis. If an LLM rephrase trips this, we fall back to the
+   deterministic voice. This is the guardrail that keeps the translator at the EDGE. */
+function _reasonSpokenSafe(t) {
+  if (!t || typeof t !== 'string' || t.length > 800) return false;
+  if (/\d(?:\.\d)?\s*\/\s*5\b|\b\d{1,3}\s*%/.test(t)) return false;         // no private metric
+  if (/\bpredict|\bdiagnos|\bwill\s+(?:likely|probably)\b/i.test(t)) return false; // no prophecy
+  return true;
+}
+
+/* GET /api/reason/agenda — the reasoner read aloud, SCOPED to this leader. Returns what it
+   currently believes is worth attention (ripe first), the self-challenge on each, and the
+   proposal-gated next step for the ripe ones. Read-only: never confirms or acts. */
+app.get('/api/reason/agenda', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+  try {
+    const now = Date.now();
+    const { agenda, proposals } = _reasonScopedAgenda(code, userId, now, req.query.refresh === '1');
+    const ripe = agenda.filter(a => a.readiness === 'ripe');
+    res.json({
+      ok: true,
+      generatedAt: new Date(now).toISOString(),
+      agenda: agenda.map(_reasonAgendaSafe),
+      proposals,
+      counts: { total: agenda.length, ripe: ripe.length, held: agenda.length - ripe.length },
+    });
+  } catch (e) {
+    console.warn('[reason/agenda] failed:', e && e.message);
+    res.json({ ok: true, agenda: [], proposals: [], counts: { total: 0, ripe: 0, held: 0 } });
+  }
+});
+
+/* GET /api/reason/brief — the reasoner's OPENING LINE. The deterministic voice
+   (reason.speak) is the guaranteed output; when an AI key is present we OPTIONALLY ask the
+   model to rephrase that same rundown more warmly — strictly at the edge: it may only
+   restyle what it's given, never add a name, number, cause, or prediction, and any breach
+   (or timeout, or no key) falls straight back to the deterministic line. The LLM never
+   touches the reasoning — only the wording. */
+app.get('/api/reason/brief', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+  try {
+    const now = Date.now();
+    const { agenda } = _reasonScopedAgenda(code, userId, now, false);
+    const spoken = reason.speak(agenda, { now });   // deterministic floor — always valid
+    let voice = spoken, enriched = false;
+    if (ai.enabled() && agenda.some(a => a.readiness === 'ripe')) {
+      const p = ai.complete({
+        tier: 'reason', maxTokens: 160,
+        system: [
+          'You are IntelliQ, greeting a leader with a brief spoken rundown (2–3 warm, natural sentences).',
+          'REPHRASE ONLY what you are given. Do NOT add any name, number, statistic, cause, or prediction.',
+          'Never say "predict", "diagnose", or that something "will" happen. Directional and supportive, never alarmist.',
+          _worldviewDirective(code), _domainDirective(code),
+        ].filter(Boolean).join('\n\n'),
+        user: spoken,
+      });
+      const out = await Promise.race([Promise.resolve(p).then(v => v, () => null), new Promise(r => setTimeout(() => r(null), AI_BRIEF_MS))]);
+      if (out && _reasonSpokenSafe(out)) { voice = out.trim(); enriched = true; }
+    }
+    res.json({ ok: true, spoken: voice, deterministic: spoken, enriched });
+  } catch (e) {
+    console.warn('[reason/brief] failed:', e && e.message);
+    res.json({ ok: true, spoken: "Here's where things stand.", deterministic: '', enriched: false });
+  }
+});
+
+/* POST /api/reason/:beliefId/feedback — the human closing the loop. A leader tells the
+   reasoner what a belief was worth: acted / useful (it earned its keep) or dismissed /
+   wrong (stop raising it). dismissed/wrong start a cooldown so it stops nagging, and both
+   feed the per-kind reliability that decides whether that KIND of noticing keeps
+   surfacing. Leader-gated + scoped: you can only respond to a belief you're allowed to
+   see. This is the ONLY write on the reasoner — it records judgement, it never acts. */
+app.post('/api/reason/:beliefId/feedback', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const beliefId = String(req.params.beliefId || '');
+  const response = String(req.body && req.body.response || '');
+  if (!reason.RESPONSES.has(response)) return res.status(400).json({ ok: false, error: 'invalid_response' });
+  const ledger = reasonLedger[code] || [];
+  const belief = ledger.find(x => x.id === beliefId);
+  if (!belief) return res.status(404).json({ ok: false, error: 'belief_not_found' });
+
+  const isAdmin  = orgUsers[code]?.[userId]?.role === 'superadmin';
+  const isLeader = (isAdmin || _userHasPerm(code, userId, 'view_team') || _userHasPerm(code, userId, 'view_insights'))
+    && _reasonCanSeeBelief(code, userId, belief);
+  const isSubject = belief.subjectId === userId;   // the person the belief is ABOUT
+  if (!isLeader && !isSubject) return res.status(403).json({ ok: false, error: 'out_of_scope' });
+  // A subject may only CONTEST their own belief ("that's wrong") — the rectification right.
+  // Full judgement (acted/useful/dismissed) is a leader's, over people they lead.
+  if (isSubject && !isLeader && response !== 'wrong') {
+    return res.status(403).json({ ok: false, error: 'subject_can_only_contest' });
+  }
+  reason.applyFeedback(ledger, beliefId, response, Date.now(), userId);
+  reasonLedger[code] = ledger;
+  delete reasonTickCache[code];   // next read reflects the response immediately
+  scheduleSave();
+  res.json({ ok: true, beliefId, response, by: isSubject && !isLeader ? 'subject' : 'leader' });
+});
+
+/* The INPUT translator (ai/understanding) at the edge. Read a piece of language ONCE and
+   return only privacy-safe, bounded features — never text. The LLM is optional; with no
+   key this returns null and behaviour is unchanged. Whatever the model returns is FORCED
+   through understanding.sanitizeFeatures, so raw content, quotations, and protected traits
+   cannot pass. Storing these features on shared evidence at capture time (so the reasoner
+   gains language-derived signal) is the reviewed rollout step; this is the mechanism. */
+async function _understandText(code, text) {
+  const t = String(text || '').slice(0, 2000);
+  if (!t.trim() || !ai.enabled()) return null;
+  try {
+    const p = ai.completeJSON({
+      tier: 'reason', maxTokens: 200,
+      system: [
+        'Classify the following note for a wellbeing/performance signal. Return ONLY these fields:',
+        'sentiment (-1, 0, or 1); themes (array, ONLY from: workload, motivation, confidence, fatigue, focus, belonging, conflict, recognition, progress, setback, support_need, logistics); intensity (low|medium|high); sensitive (boolean — does it hint at private/sensitive personal context?).',
+        'Never include names, quotations, health or identity details, or any free text. Themes only from that list.',
+        _domainDirective(code),
+      ].filter(Boolean).join('\n'),
+      user: t, schema: ['sentiment', 'themes', 'intensity', 'sensitive'],
+    });
+    const raw = await Promise.race([Promise.resolve(p).then(v => v, () => null), new Promise(r => setTimeout(() => r(null), AI_BRIEF_MS))]);
+    return raw ? understanding.sanitizeFeatures(raw) : null;
+  } catch (_) { return null; }
+}
+
+/* POST /api/reason/understand — INSPECT the input translator. Leader-gated; stores nothing.
+   Lets a leader see exactly what the understanding layer would extract from a note — proof
+   the edge is bounded and safe. With no AI key it honestly reports disabled. */
+app.post('/api/reason/understand', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+  const features = await _understandText(code, req.body && req.body.text);
+  res.json({ ok: true, enabled: ai.enabled(), features: features || null });
+});
+
+/* GET /api/reason/me — what the system believes about YOU. Every person may see their own
+   reads (their own evidence — a fairness + transparency right), warmly phrased, with what
+   would change each and the standing ability to say it's wrong. No leader permission
+   needed; a person only ever sees beliefs about themselves. Never another person's, never
+   the leader-facing urgency/register/challenge. */
+app.get('/api/reason/me', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  try {
+    const now = Date.now();
+    _reasonTick(code, now, req.query.refresh === '1');
+    const mine = (reasonLedger[code] || []).filter(b =>
+      b.subjectId === userId && !b.shared && b.status !== 'dormant' && !reason.isSuppressed(b, now));
+    res.json({ ok: true, beliefs: mine.map(b => reason.subjectView(b)) });
+  } catch (e) {
+    console.warn('[reason/me] failed:', e && e.message);
+    res.json({ ok: true, beliefs: [] });
   }
 });
 
@@ -10447,6 +10752,162 @@ app.delete('/api/notes/:noteId', (req, res) => {
   delete orgNotes[req.params.noteId];
   scheduleSave();
   res.json({ ok: true });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PINNED + TEAM-SHARED NOTES (ai/notes) — a note is private by default; two
+   deliberate, reversible acts change that: PIN it to a shelf you can return to, and
+   SHARE it with the team. The privacy gate is the hard guard on sharing: a note it
+   marked sensitive stays private even if the author asks. Scope follows the same node
+   web as evidence/reasoning — a shared note reaches only teammates who can see the
+   author's part of the org.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function _noteById(code, id) { const n = orgNotes[id]; return (n && n.orgCode === code) ? n : null; }
+// Can `userId` see this note? Its author always; a team-shared note only if the actor is
+// within the author's visible scope (no cross-branch leak). Private notes: author only.
+function _noteVisibleTo(code, userId, note) {
+  if (!note) return false;
+  if (note.authorId === userId) return true;
+  if (!note.teamShared) return false;
+  return orgGraph.canSee(_visibleScopeFor(code, userId), note.nodeScope || null);
+}
+
+app.post('/api/notes/:noteId/pin', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const note = _noteById(code, req.params.noteId);
+  if (!note) return res.status(404).json({ ok: false, error: 'note_not_found' });
+  if (!_noteVisibleTo(code, userId, note)) return res.status(403).json({ ok: false, error: 'forbidden' });
+  Object.assign(note, noteGov.pin(note, { now: new Date().toISOString() }));
+  scheduleSave();
+  res.json({ ok: true, pinned: true });
+});
+app.post('/api/notes/:noteId/unpin', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const note = _noteById(code, req.params.noteId);
+  if (!note) return res.status(404).json({ ok: false, error: 'note_not_found' });
+  if (!_noteVisibleTo(code, userId, note)) return res.status(403).json({ ok: false, error: 'forbidden' });
+  Object.assign(note, noteGov.unpin(note));
+  scheduleSave();
+  res.json({ ok: true, pinned: false });
+});
+
+/* Share with the team — author only, and only past the privacy gate. */
+app.post('/api/notes/:noteId/share', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const note = _noteById(code, req.params.noteId);
+  if (!note) return res.status(404).json({ ok: false, error: 'note_not_found' });
+  if (note.authorId !== userId) return res.status(403).json({ ok: false, error: 'only_author_can_share' });
+  const gate = noteGov.canShareToTeam(note, { isSensitive: privacy.isPrivate(note.sensitivity) });
+  if (!gate.allowed) {
+    return res.status(200).json({ ok: false, blocked: gate.reason,
+      message: gate.reason === 'sensitive_stays_private'
+        ? 'This note holds private context — it stays yours. It can’t be shared with the team.'
+        : gate.reason === 'already_shared' ? 'This note is already shared with your team.'
+        : 'This note can’t be shared.' });
+  }
+  Object.assign(note, noteGov.share(note, { actorId: userId, now: new Date().toISOString(), nodeScope: _primaryNodeScope(code, userId) }));
+  scheduleSave();
+  res.json({ ok: true, shared: true });
+});
+app.post('/api/notes/:noteId/unshare', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const note = _noteById(code, req.params.noteId);
+  if (!note) return res.status(404).json({ ok: false, error: 'note_not_found' });
+  if (note.authorId !== userId) return res.status(403).json({ ok: false, error: 'only_author_can_unshare' });
+  Object.assign(note, noteGov.unshare(note));
+  scheduleSave();
+  res.json({ ok: true, shared: false });
+});
+
+/* POST /api/notes/:id/ask — ask IntelliQ about a note you can see. The answer is grounded
+   STRICTLY in that note's own words: the deterministic floor surfaces the note; when a key
+   is present the model phrases a real answer, but the ONLY grounding it's given is this note
+   — so a shared note can never pull in anything private. Visibility-gated like everything
+   else. This is what turns a pinned team note into a living, askable artifact. */
+app.post('/api/notes/:noteId/ask', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const note = _noteById(code, req.params.noteId);
+  if (!note) return res.status(404).json({ ok: false, error: 'note_not_found' });
+  if (!_noteVisibleTo(code, userId, note)) return res.status(403).json({ ok: false, error: 'forbidden' });
+  const question = String(req.body && req.body.question || '').slice(0, 500);
+  if (!question.trim()) return res.status(400).json({ ok: false, error: 'question_required' });
+  const g = noteGov.groundedAnswer(note, question);
+  let answer = g.answer, enriched = false;
+  if (ai.enabled()) {
+    const p = ai.complete({
+      tier: 'reason', maxTokens: 180,
+      system: [
+        'Answer the question USING ONLY the note below. If the note does not address it, say so plainly.',
+        'Never invent facts beyond the note. Two or three sentences, plain and honest.',
+        _domainDirective(code),
+      ].filter(Boolean).join('\n'),
+      user: `Note: ${note.content}\n\nQuestion: ${question}`,
+    });
+    const out = await Promise.race([Promise.resolve(p).then(v => v, () => null), new Promise(r => setTimeout(() => r(null), AI_BRIEF_MS))]);
+    if (out && String(out).trim()) { answer = String(out).trim(); enriched = true; }
+  }
+  res.json({ ok: true, answer, grounded: true, relevant: g.relevant, enriched });
+});
+
+/* GET /api/notes/pinned — the shelf: your own pinned notes + team-shared pinned notes you
+   can see, ordered pins-first. Each projected safely (a teammate's note never exposes its
+   sensitivity, the author's private AI reply, or internal ids). */
+app.get('/api/notes/pinned', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const all = Object.values(orgNotes).filter(n => n.orgCode === code && n.pinned);
+  const rawMine = all.filter(n => n.authorId === userId);
+  const rawTeam = all.filter(n => n.authorId !== userId && n.teamShared && _noteVisibleTo(code, userId, n));
+  const mineIds = new Set(rawMine.map(n => n.id));
+  const ordered = noteGov.shelfSort([...rawMine, ...rawTeam]);
+  res.json({ ok: true, pinned: ordered.map(n => mineIds.has(n.id) ? noteGov.ownView(n) : noteGov.teamView(n)) });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE SELF-MODEL (ai/self-model) — IntelliQ learning how YOU like to work and
+   offering to fit itself around you. Strictly PRIVATE to the person: every route
+   here reads and writes only the caller's OWN ledger (userKey). It never reports a
+   person's habits to anyone, never evaluates them — it only proposes a convenience
+   back, which the person confirms, dismisses, or rejects.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const _selfKey = (code, userId) => userKey(code, userId);
+
+/* POST /api/self/observe — record ONE interaction event about yourself. Only allow-listed
+   patterns are learned (the module ignores anything else); a habit forms only across
+   distinct days. This is the single write, and it's always about the caller. */
+app.post('/api/self/observe', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const pattern = String(req.body && req.body.pattern || '');
+  if (!selfModel.PATTERNS[pattern]) return res.status(200).json({ ok: true, ignored: true });   // not learnable → quietly ignored
+  const label = req.body && req.body.label != null ? String(req.body.label) : '';
+  const key = _selfKey(code, userId);
+  selfModelLedger[key] = selfModel.learn({ priorHabits: selfModelLedger[key] || [], events: [{ pattern, label, t: Date.now() }], now: Date.now() });
+  scheduleSave();
+  res.json({ ok: true });
+});
+
+/* GET /api/self/patterns — what IntelliQ would offer to do for you (proposal-gated), plus
+   full transparency into everything it has learned about your working habits. Self only. */
+app.get('/api/self/patterns', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const now = Date.now();
+  const habits = selfModel.learn({ priorHabits: selfModelLedger[_selfKey(code, userId)] || [], now });
+  selfModelLedger[_selfKey(code, userId)] = habits;   // refresh statuses (staleness) in place
+  res.json({ ok: true, proposals: selfModel.proposals(habits, now), learned: selfModel.selfView(habits) });
+});
+
+/* POST /api/self/:habitId/feedback — accept (apply it), dismiss (not now), or reject (not a
+   thing I do). Your model, your call. Self only. */
+app.post('/api/self/:habitId/feedback', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const response = String(req.body && req.body.response || '');
+  if (!selfModel.RESPONSES.has(response)) return res.status(400).json({ ok: false, error: 'invalid_response' });
+  const key = _selfKey(code, userId);
+  const habits = selfModelLedger[key] || [];
+  const h = selfModel.applyFeedback(habits, String(req.params.habitId || ''), response, Date.now());
+  if (!h) return res.status(404).json({ ok: false, error: 'habit_not_found' });
+  selfModelLedger[key] = habits;
+  scheduleSave();
+  res.json({ ok: true, habitId: h.id, response, setting: response === 'accept' ? (selfModel.PATTERNS[h.pattern] || {}).setting || null : null });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -13146,6 +13607,8 @@ function _loadAllStores(data) {
   Object.assign(orgObservations,   data.orgObservations   || {});
   Object.assign(orgPlaybook,       data.orgPlaybook       || {});
   Object.assign(orgPlaybookDismissed, data.orgPlaybookDismissed || {});
+  Object.assign(reasonLedger,      data.reasonLedger      || {});
+  Object.assign(selfModelLedger,   data.selfModelLedger   || {});
   Object.assign(conversationSessions, data.conversationSessions || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down

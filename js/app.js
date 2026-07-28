@@ -5878,30 +5878,141 @@ async function renderToday() {
   if (sub) sub.textContent = 'Ask, decide, and see what needs you — in one place.';
   const chips = ['What is outstanding?', 'Who owns what?', 'Are we ready?', 'What changed?'];
   el.innerHTML = `
-    <div class="today-hero" style="margin-bottom:1.1rem;padding:1rem;border-radius:16px;background:linear-gradient(180deg,var(--surface-alt,rgba(124,90,245,0.06)),transparent);border:1px solid var(--line,rgba(127,127,127,0.14))">
-      <div style="display:flex;gap:0.5rem;align-items:stretch">
-        <input id="today-ask" class="form-input" placeholder="Ask about your team…" style="flex:1;margin:0;font-size:0.95rem;padding:0.7rem 0.8rem" onkeydown="if(event.key==='Enter')todayAsk()">
-        <button class="btn btn-accent" style="padding:0 1.1rem" onclick="todayAsk()">Ask</button>
+    <div class="tdy-composer">
+      <div class="tdy-inputrow">
+        <input id="today-ask" placeholder="Ask me anything — or just tell me how it's going…" onkeydown="if(event.key==='Enter')todayAsk()">
+        <button class="tdy-send" onclick="todayAsk()" aria-label="Send">↑</button>
       </div>
       <div id="today-ask-out" style="margin-top:0.5rem"></div>
-      <div style="display:flex;gap:0.4rem;flex-wrap:wrap;margin-top:0.7rem">
-        ${chips.map(c => `<button class="today-chip" style="font-size:0.74rem;padding:0.28rem 0.7rem;border-radius:20px;border:1px solid var(--line,rgba(127,127,127,0.2));background:transparent;color:var(--text-secondary);cursor:pointer" onclick="todayQuick('${c}')">${c}</button>`).join('')}
+      <div class="tdy-chips">
+        ${chips.map(c => `<button class="tdy-cbtn" onclick="todayQuick('${c}')">${c}</button>`).join('')}
       </div>
+      <div class="tdy-privacy">Private by default · nothing is saved or shared until you confirm</div>
     </div>
+    <div id="today-voice"></div>
     <div id="today-feed"><div style="padding:1.2rem;text-align:center;color:var(--text-muted)">Gathering what needs you…</div></div>
     <div style="text-align:center;margin-top:1.2rem"><button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="renderIntelligence(true)">Open the full team briefing →</button></div>`;
+  todayLoadVoice();
   todayLoadFeed();
 }
 
-/* A suggested prompt — fills the composer and asks in one tap. */
+/* ── THE VOICE — the reasoner, read aloud ─────────────────────────────────────
+   This is the brain speaking first: what it currently believes is worth your
+   attention (ripe only), grounded in the real calendar, honest about how sure it
+   is — and every item is decided RIGHT HERE. "I'll have that word" tells the
+   reasoner it earned its keep; "Not now" stands it down so it never nags; "Why?"
+   shows the reasoner arguing against its own read. Nothing navigates; it all
+   settles in place. Reuses /api/reason/agenda + the feedback endpoint. */
+async function todayLoadVoice() {
+  const box = document.getElementById('today-voice');
+  if (!box) return;
+  let d, brief;
+  try {
+    [d, brief] = await Promise.all([
+      fetch('/api/reason/agenda', { headers: Auth._headers() }).then(r => r.json()),
+      fetch('/api/reason/brief', { headers: Auth._headers() }).then(r => r.json()).catch(() => null),
+    ]);
+  } catch (_) { box.innerHTML = ''; return; }
+  const ripe = (d && d.agenda || []).filter(a => a.readiness === 'ripe').slice(0, 4);
+  if (!ripe.length) {
+    // Nothing to raise — but the assistant is still HERE. Say so, in first person, honestly:
+    // it's watching and will speak up the moment something's worth attention. The brain is
+    // never invisible, even when it's quiet.
+    box.innerHTML = `<div class="tdy-voice tdy-standby">
+      <span class="tdy-presence"><span class="r"></span><span class="d"></span></span>
+      <p>I'm watching your team — nothing needs you this second. Ask me anything above, and I'll speak up right here the moment something's worth your attention.</p>
+    </div>`;
+    return;
+  }
+  const propFor = bid => (d.proposals || []).find(p => p.beliefId === bid);
+  const opener = brief && brief.spoken ? `<div class="tdy-opener">${_escAdvisor(brief.spoken)}</div>` : '';
+  box.innerHTML = `
+    <div class="tdy-voice">
+      <div class="tdy-vhead"><span class="tdy-presence"><span class="r"></span><span class="d"></span></span><span class="tdy-kicker">What I'm seeing</span></div>
+      ${opener}
+      ${ripe.map(a => todayVoiceRow(a, propFor(a.beliefId))).join('')}
+    </div>`;
+}
+
+/* One belief, spoken — telemetry chips, timing, honesty, and three in-place choices. */
+function todayVoiceRow(a, prop) {
+  const esc = _escAdvisor, sid = a.beliefId.replace(/[^a-z0-9]/gi, '_');
+  const act = a.register === 'support' ? "I'll have that word" : a.register === 'scout' ? "I'll look into it" : 'Nice — noted';
+  const attn = a.severity === 'high' || a.polarity === 'risk';
+  const confChip = a.confidence ? `<span class="tdy-chip${attn ? ' attn' : ''}">${esc(a.confidence)}</span>` : '';
+  const relChip = `<span class="tdy-chip ghost">${esc(a.reliability && a.reliability !== 'calibrating' ? a.reliability : 'calibrating')}</span>`;
+  return `<div id="voice-${sid}" class="tdy-belief">
+    <div class="tdy-metarow">${confChip}${relChip}</div>
+    <div class="tdy-claim">${esc(a.claim)}</div>
+    ${a.timing ? `<div class="tdy-timing"><span style="font-size:0.6rem">◆</span>${esc(a.timing)}</div>` : ''}
+    ${prop ? `<div class="tdy-proposal">${esc(prop.text)}</div>` : ''}
+    <div class="tdy-actions">
+      <button class="btn btn-accent btn-sm" onclick="todayReasonRespond('${esc(a.beliefId)}','acted',this)">${act}</button>
+      <button class="btn-ghost btn-sm" onclick="todayReasonRespond('${esc(a.beliefId)}','dismissed',this)">Not now</button>
+      <button class="btn-ghost btn-sm" onclick="todayReasonWhy('${sid}')">Why?</button>
+    </div>
+    <div id="voice-why-${sid}" class="tdy-why" style="display:none">
+      <span class="lbl">why I might be wrong</span>
+      <ul>${(a.challenge || []).map(c => `<li>${esc(c)}</li>`).join('')}</ul>
+    </div>
+  </div>`;
+}
+
+/* Reveal the reasoner's self-doubt — it challenges its own belief, in the open. */
+function todayReasonWhy(sid) {
+  const el = document.getElementById('voice-why-' + sid);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+/* Close the loop from the flow: tell the reasoner what the belief was worth. It settles
+   in place — acted keeps it watching, dismissed stands it down. Never navigates. */
+async function todayReasonRespond(beliefId, response, btn) {
+  const sid = beliefId.replace(/[^a-z0-9]/gi, '_');
+  const row = document.getElementById('voice-' + sid);
+  const btns = row && row.querySelectorAll('button');
+  if (btns) btns.forEach(b => { b.disabled = true; });
+  try {
+    const r = await fetch('/api/reason/' + encodeURIComponent(beliefId) + '/feedback', {
+      method: 'POST', headers: Auth._headers(), body: JSON.stringify({ response }),
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error('failed');
+    if (row) row.innerHTML = `<div class="tdy-settled"><span class="tk">${response === 'acted' ? '✓' : '·'}</span>${response === 'acted' ? "On it — I'll keep watching." : "Set aside — I won't raise this again for a while."}</div>`;
+  } catch (e) {
+    if (btns) btns.forEach(b => { b.disabled = false; });
+    if (typeof showToast === 'function') showToast('Could not save that right now.', 'error');
+  }
+}
+
+/* A suggested TEAM prompt (the chips) — fills the composer and asks the team path. */
 function todayQuick(q) {
   const input = document.getElementById('today-ask');
   if (input) input.value = q;
-  todayAsk();
+  todayTeamAsk();
 }
 
-/* The composer — a plain question answered from the leader's scoped area (reuses /api/org/ask). */
+/* The composer — ONE assistant. A leader is a person too, so free text goes through the
+   SAME unified runtime the member uses (/api/assistant/turn): a reflection ("I'm feeling a
+   little tired") becomes a governed, private check-in/note offer, and a question is grounded
+   — never a cold "ask someone else". The explicit team chips still use the purpose-built
+   team path (todayTeamAsk). No parallel assistant; the same brain everywhere. */
 async function todayAsk() {
+  const input = document.getElementById('today-ask');
+  const out = document.getElementById('today-ask-out');
+  const q = input && input.value.trim();
+  if (!q || !out) return;
+  out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Thinking…</div>`;
+  try {
+    const r = await fetch('/api/assistant/turn', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ text: q }) });
+    const j = await r.json();
+    if (!j || !j.ok) throw new Error('turn failed');
+    out.innerHTML = todayRenderTurn(j);
+    if (input) input.value = '';
+  } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't answer that right now.</div>`; }
+}
+
+/* Explicit team questions (the chips) — the scoped, grounded org answer + who to ask. */
+async function todayTeamAsk() {
   const input = document.getElementById('today-ask');
   const out = document.getElementById('today-ask-out');
   const q = input && input.value.trim();
@@ -5910,9 +6021,47 @@ async function todayAsk() {
   try {
     const r = await fetch('/api/org/ask', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ question: q }) });
     const d = await r.json();
-    const route = d.routeTo ? `<div style="font-size:0.74rem;color:var(--text-muted);margin-top:0.3rem">Best person to ask: <strong>${_escAdvisor(d.routeTo.to)}</strong></div>` : '';
-    out.innerHTML = `<div style="font-size:0.88rem;color:var(--text-primary);padding:0.5rem 0.6rem;border-left:2px solid var(--accent);border-radius:6px;background:var(--surface-alt,rgba(127,127,127,0.05))">${_escAdvisor(d.answer || 'No answer available.')}</div>${route}`;
+    const route = d.routeTo ? `<div class="tdy-note" style="margin-top:0.3rem">Best person to ask: <strong>${_escAdvisor(d.routeTo.to)}</strong></div>` : '';
+    out.innerHTML = `<div class="tdy-reply">${_escAdvisor(d.answer || 'No answer available.')}</div>${route}`;
   } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't answer that right now.</div>`; }
+}
+
+/* Render one unified-runtime turn: the assistant's reply, plus any GOVERNED proposals
+   (check-in / private note …) with confirm/dismiss — nothing saved until confirmed. Slim
+   sibling of the member renderer; the response shape is the same. */
+function todayRenderTurn(j) {
+  const esc = _escAdvisor, r = j.response || {};
+  const proposals = r.primaryActions || r.proposedActions || [];
+  const propHtml = proposals.map(p => {
+    const priv = p.visibility === 'only_me' ? 'Private' : 'Confirm to share';
+    return `<div id="today-prop-${esc(p.id)}" class="tdy-prop">
+      <div class="tdy-prop-head">${esc(p.label)} <span class="tdy-nbadge">${priv}</span></div>
+      ${p.why ? `<div class="tdy-prop-why">${esc(p.why)}</div>` : ''}
+      <div class="tdy-actions" style="margin-top:0.5rem">
+        <button class="btn btn-accent btn-sm" onclick="todayTurnConfirm('${esc(j.turnId)}','${esc(p.id)}',this)">Confirm</button>
+        <button class="btn-ghost btn-sm" onclick="todayTurnDismiss('${esc(p.id)}')">Dismiss</button>
+      </div></div>`;
+  }).join('');
+  const note = j.saved ? `<div class="tdy-note">✓ Saved — privately, just for you.</div>`
+    : (j.capturePrompt ? `<div class="tdy-note">${esc(j.capturePrompt.message)}</div>` : '');
+  return `<div class="tdy-reply">${esc(r.responseText || '')}</div>${note}${propHtml}`;
+}
+
+/* Confirm a governed proposal from the composer — the only path to a write. Settles in place. */
+async function todayTurnConfirm(turnId, proposalId, btn) {
+  const card = document.getElementById('today-prop-' + proposalId);
+  if (btn) { btn.disabled = true; btn.textContent = 'Confirming…'; }
+  try {
+    const r = await fetch('/api/assistant/turn/' + encodeURIComponent(turnId) + '/confirm', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ proposalId }) });
+    const d = await r.json();
+    if (!d.ok) throw new Error('confirm failed');
+    if (card) card.innerHTML = `<div class="tdy-settled"><span class="tk">✓</span>${_escAdvisor(d.note || 'Done.')}</div>`;
+  } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; } if (typeof showToast === 'function') showToast('Could not confirm right now.', 'error'); }
+}
+/* Dismiss a proposal — nothing was written, so this just clears it from the flow. */
+function todayTurnDismiss(proposalId) {
+  const card = document.getElementById('today-prop-' + proposalId);
+  if (card) card.remove();
 }
 
 /* The live feed — composes readiness + routing + playbook + memory into one actionable list. */
@@ -5962,14 +6111,27 @@ async function todayLoadFeed() {
         <button class="btn-ghost btn-sm" style="font-size:0.72rem;white-space:nowrap" onclick="navigate('team-readiness')">Open</button></div>`).join('')}</div>`);
   }
 
-  // Worth reviewing — proposed playbook practices.
+  // Worth reviewing — proposed playbook practices, decided RIGHT HERE. No page to open:
+  // the pattern, what argues against it, and the two choices all live in the flow, and
+  // your decision settles in place. Confirming is the only path into your playbook.
   const cands = (cand && cand.candidates) || [];
   if (cands.length) {
+    const patternRow = (c) => {
+      const fp = esc(c.fingerprint);
+      const against = (c.counterEvidence && (c.counterEvidence.signals || [])[0]) || '';
+      return `<div id="today-pat-${fp}" style="padding:0.55rem 0;border-bottom:1px solid var(--line-soft,rgba(127,127,127,0.08))">
+        <div style="font-size:0.84rem;color:var(--text-primary)">${esc(c.statement)}</div>
+        ${against ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.15rem">Worth weighing: ${esc(against)}</div>` : ''}
+        <div style="display:flex;gap:0.5rem;margin-top:0.45rem">
+          <button class="btn btn-accent btn-sm" style="font-size:0.72rem" onclick="todayPattern('${fp}', true, this)">This is how we operate</button>
+          <button class="btn-ghost btn-sm" style="font-size:0.72rem;color:var(--text-muted)" onclick="todayPattern('${fp}', false, this)">Not really</button>
+        </div>
+      </div>`;
+    };
     sections.push(`<div class="card" style="margin-bottom:0.8rem">
-      <div class="card-label" style="margin-bottom:0.4rem">Worth reviewing</div>
-      ${cands.slice(0, 3).map(c => `<div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:center;padding:0.3rem 0">
-        <span style="font-size:0.82rem">${esc(c.statement)}</span>
-        <button class="btn-outline btn-sm" style="font-size:0.72rem;white-space:nowrap" onclick="navigate('org-playbook')">Review</button></div>`).join('')}</div>`);
+      <div class="card-label" style="margin-bottom:0.4rem">Worth confirming</div>
+      <div style="font-size:0.74rem;color:var(--text-muted);margin-bottom:0.3rem">A pattern that keeps recurring. It only joins your playbook if you say so.</div>
+      ${cands.slice(0, 3).map(patternRow).join('')}</div>`);
   }
 
   // Since last time — what changed.
@@ -5983,20 +6145,111 @@ async function todayLoadFeed() {
 
   if (sections.length) { box.innerHTML = sections.join(''); return; }
 
-  // Empty → a guided start, not a dead end. Each tile is a real next step that brings
-  // Today to life. (Shown when there's no operating context / nothing outstanding yet.)
-  const tile = (title, desc, onclick) => `<button style="display:flex;width:100%;text-align:left;gap:0.8rem;align-items:flex-start;padding:0.9rem;margin-bottom:0.6rem;border:1px solid var(--line,rgba(127,127,127,0.16));border-radius:12px;background:var(--surface,rgba(127,127,127,0.03));cursor:pointer" onclick="${onclick}">
-    <span style="width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:6px;flex:0 0 auto"></span>
-    <span style="flex:1"><span style="display:block;font-size:0.9rem;font-weight:600;color:var(--text-primary)">${title}</span><span style="display:block;font-size:0.78rem;color:var(--text-muted);margin-top:2px">${desc}</span></span>
-    <span style="color:var(--text-muted)">→</span></button>`;
+  // Empty → the assistant keeps talking. Not a titled board of destinations, but a few
+  // things IT offers to do next, phrased in first person. (No operating context / nothing
+  // outstanding yet.) The voice line above already says "I'm watching"; this is "…and
+  // here's how to give me something to reason about."
+  const step = (label, desc, onclick) => `<button style="display:flex;width:100%;text-align:left;gap:0.7rem;align-items:flex-start;padding:0.7rem 0.4rem;border:0;border-top:1px solid var(--line-soft,rgba(127,127,127,0.1));background:transparent;cursor:pointer" onclick="${onclick}">
+    <span style="flex:1"><span style="display:block;font-size:0.9rem;font-weight:600;color:var(--text-primary)">${label}</span><span style="display:block;font-size:0.78rem;color:var(--text-muted);margin-top:2px">${desc}</span></span></button>`;
   box.innerHTML = `
-    <div class="card" style="padding:1.3rem">
-      <div style="font-size:1.05rem;font-weight:700;margin-bottom:0.2rem">Let's bring your Today to life</div>
-      <div style="font-size:0.84rem;color:var(--text-secondary);margin-bottom:1rem">A couple of quick steps and this fills with exactly what needs you.</div>
-      ${tile('Tell IntelliQ how your team operates', 'Your events, who owns what, what prep matters — this is what lets it reason about readiness.', "navigate('operating-context')")}
-      ${tile('Set an assessment or check-in', 'Give your people work; results come back as a grounded conversation, not a blank form.', "navigate('assessments')")}
-      ${tile('Just ask a question', 'Type anything in the box above — I answer from what I already know about your area.', "document.getElementById('today-ask') && document.getElementById('today-ask').focus()")}
+    <div class="card" style="padding:1.2rem 1.3rem">
+      <div style="font-size:0.92rem;color:var(--text-secondary);line-height:1.5;margin-bottom:0.6rem">To reason well about your team I need a little to go on. Point me at any of these and I'll take it from there:</div>
+      ${step('Tell me how your team works', 'Your events, who owns what, what prep matters — the ground I reason from.', 'todayContextStart()')}
+      ${step('Set an assessment or check-in', 'Give your people work; it comes back as a grounded conversation, not a blank form.', "navigate('assessments')")}
+      ${step('Just ask me something', 'Type anything in the box above — I answer from what I already know about your area.', "document.getElementById('today-ask') && document.getElementById('today-ask').focus()")}
     </div>`;
+}
+
+/* ── CONVERSATIONAL OPERATING-CONTEXT INTAKE — learning how the team works, in the flow ──
+   Instead of sending the leader off to a form, the assistant interviews them right here: they
+   describe one thing in plain words, it shows what it understood + what that will DO, they
+   confirm, and it invites the next thing. Grows the operating context conversationally, all
+   in Today. Reuses the governed /api/org-context preview + confirm — no parallel path, and
+   the same hard blocks (private/wellbeing/surveillance can never become an operating rule). */
+let _todayCtxProposals = null;
+function todayContextStart() {
+  const box = document.getElementById('today-feed');
+  if (!box) return;
+  box.innerHTML = `
+    <div class="card" style="border-left:3px solid var(--accent)">
+      <div style="font-size:0.9rem;color:var(--text-primary);line-height:1.5;margin-bottom:0.6rem">Tell me one thing about how your team works — an event, who owns what, or what prep matters. Plain words are fine, like <em>"We play matches every Saturday at 3pm and Sam runs training on Tuesdays."</em></div>
+      <textarea id="today-ctx-in" class="form-input" rows="2" placeholder="Describe one thing…" style="width:100%;font-size:0.9rem;margin:0"></textarea>
+      <div id="today-ctx-out" style="margin-top:0.5rem"></div>
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+        <button class="btn btn-accent btn-sm" onclick="todayContextPreview()">Tell me</button>
+        <button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="todayLoadFeed()">Back</button>
+      </div>
+    </div>`;
+  const t = document.getElementById('today-ctx-in'); if (t) t.focus();
+}
+
+/* Read the sentence → show what the assistant understood + what it will do (no write yet). */
+async function todayContextPreview() {
+  const inp = document.getElementById('today-ctx-in');
+  const out = document.getElementById('today-ctx-out');
+  const text = inp && inp.value.trim();
+  if (!text || !out) return;
+  out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Reading that…</div>`;
+  try {
+    const r = await fetch('/api/org-context/preview', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ text }) });
+    const d = await r.json();
+    if (d.blocked) { out.innerHTML = `<div style="font-size:0.82rem;color:var(--warning,#c90)">${_escAdvisor(d.message || "That looks like private information — it can't become an operating rule.")}</div>`; return; }
+    const proposals = d.proposals || [];
+    if (!proposals.length) { out.innerHTML = `<div style="font-size:0.82rem;color:var(--text-muted)">I couldn't pull anything structured from that. Try naming an event, an owner, or a prep step.</div>`; return; }
+    _todayCtxProposals = proposals;
+    const lines = (d.preview && d.preview.lines) || proposals.map(p => p.type);
+    const effects = (d.preview && d.preview.effects) || [];
+    out.innerHTML = `
+      <div style="padding:0.5rem 0.7rem;border-left:2px solid var(--accent);background:var(--surface-alt,rgba(127,127,127,0.05));border-radius:6px">
+        <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.2rem">Here's what I understood</div>
+        <ul style="margin:0 0 0 1rem;padding:0">${lines.map(l => `<li style="font-size:0.84rem;color:var(--text-primary)">${_escAdvisor(l)}</li>`).join('')}</ul>
+        ${effects.length ? `<div style="font-size:0.74rem;color:var(--text-muted);margin-top:0.35rem">${effects.map(_escAdvisor).join(' ')}</div>` : ''}
+      </div>
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+        <button class="btn btn-accent btn-sm" onclick="todayContextConfirm()">Yes, save that</button>
+        <button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="todayContextStart()">Not quite</button>
+      </div>`;
+  } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't read that right now.</div>`; }
+}
+
+/* Confirm → the governed write. Then invite the next thing (loop) or finish. */
+async function todayContextConfirm() {
+  const out = document.getElementById('today-ctx-out');
+  if (!_todayCtxProposals || !_todayCtxProposals.length || !out) return;
+  try {
+    const r = await fetch('/api/org-context/confirm', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ records: _todayCtxProposals, source: 'conversation' }) });
+    const d = await r.json();
+    if (!d.ok || !(d.created || []).length) throw new Error('none saved');
+    _todayCtxProposals = null;
+    out.innerHTML = `<div style="font-size:0.85rem;color:var(--text-primary)">✓ Got it — saved, and I'll reason from it now.</div>
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+        <button class="btn btn-accent btn-sm" onclick="todayContextStart()">Tell me something else</button>
+        <button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="todayLoadFeed()">Done for now</button>
+      </div>`;
+  } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't save that right now.</div>`; }
+}
+
+/* Decide a proposed pattern IN THE FLOW — confirm folds it into the playbook, "not really"
+   sets it aside. Either way the row settles in place with a one-line acknowledgement; no
+   navigation, no page. Reuses the governed confirm/dismiss endpoints. */
+async function todayPattern(fingerprint, confirm, btn) {
+  const row = document.getElementById('today-pat-' + fingerprint);
+  const btns = row && row.querySelectorAll('button');
+  if (btns) btns.forEach(b => { b.disabled = true; });
+  if (btn) btn.textContent = confirm ? 'Adding…' : 'Setting aside…';
+  const path = '/api/org-playbook/candidates/' + encodeURIComponent(fingerprint) + (confirm ? '/confirm' : '/dismiss');
+  try {
+    const r = await fetch(path, { method: 'POST', headers: Auth._headers() });
+    const j = await r.json();
+    if (!j.ok) throw new Error('failed');
+    if (row) {
+      row.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.2rem 0">${confirm ? '✓ Added to your playbook.' : 'Set aside — it can come back if it keeps recurring.'}</div>`;
+    }
+  } catch (e) {
+    if (btns) btns.forEach(b => { b.disabled = false; });
+    if (btn) btn.textContent = confirm ? 'This is how we operate' : 'Not really';
+    if (typeof showToast === 'function') showToast('Could not save that right now.', 'error');
+  }
 }
 
 async function renderIntelligence(refresh) {
