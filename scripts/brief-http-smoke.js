@@ -70,8 +70,8 @@ const server = app.listen(0, async () => {
     /* ── 5 · every offer everywhere is proposal-gated ── */
     ok('5 · all offers require confirmation (the brief proposes, never acts)', [a, b, j].every(x => (x.offers || []).every(o => o.requiresConfirmation === true)));
 
-    /* ── 6 · the opening greets the person ── */
-    ok('6 · the opening greets by name + time of day', /(Morning|Afternoon|Evening) Alex/.test(a.opening));
+    /* ── 6 · the opening greets the person, in our own (deterministic) voice ── */
+    ok('6 · the opening greets by name + time of day', /(Morning|Afternoon|Evening), Alex/.test(a.opening));
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();
