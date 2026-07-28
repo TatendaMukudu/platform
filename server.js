@@ -41,6 +41,7 @@ const proactive  = require('./ai/proactive');
 const reason     = require('./ai/reason');
 const understanding = require('./ai/understanding');
 const noteGov    = require('./ai/notes');
+const selfModel  = require('./ai/self-model');
 const behaviour  = require('./ai/behaviour');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
@@ -119,7 +120,7 @@ function scheduleSave() {
         orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
         proactivePrefs, insightSuppression, answerFeedback,
         orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
-        reasonLedger,
+        reasonLedger, selfModelLedger,
         conversationSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
@@ -8053,6 +8054,10 @@ const orgPlaybookDismissed = {};  // orgCode → [ dismissed candidate fingerpri
 // see — never a per-leader ledger that would overwrite others. Persisted; re-derivable.
 const reasonLedger = {};          // orgCode → [ belief ]
 const reasonTickCache = {};       // orgCode → { ts, result }  (throttles the org-wide pass)
+// THE SELF-MODEL (ai/self-model) — the reasoner pointed at each OPERATOR. Keyed per
+// user (userKey) and PRIVATE to them: a person's own working habits are theirs alone,
+// never shared with a leader above and never used to evaluate them. Persisted.
+const selfModelLedger = {};       // `${code}:${userId}` → [ habit ]
 
 function _orgPack(code) {
   const cfg = orgStateConfig[code];
@@ -10858,6 +10863,54 @@ app.get('/api/notes/pinned', requireAuth, (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   THE SELF-MODEL (ai/self-model) — IntelliQ learning how YOU like to work and
+   offering to fit itself around you. Strictly PRIVATE to the person: every route
+   here reads and writes only the caller's OWN ledger (userKey). It never reports a
+   person's habits to anyone, never evaluates them — it only proposes a convenience
+   back, which the person confirms, dismisses, or rejects.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const _selfKey = (code, userId) => userKey(code, userId);
+
+/* POST /api/self/observe — record ONE interaction event about yourself. Only allow-listed
+   patterns are learned (the module ignores anything else); a habit forms only across
+   distinct days. This is the single write, and it's always about the caller. */
+app.post('/api/self/observe', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const pattern = String(req.body && req.body.pattern || '');
+  if (!selfModel.PATTERNS[pattern]) return res.status(200).json({ ok: true, ignored: true });   // not learnable → quietly ignored
+  const label = req.body && req.body.label != null ? String(req.body.label) : '';
+  const key = _selfKey(code, userId);
+  selfModelLedger[key] = selfModel.learn({ priorHabits: selfModelLedger[key] || [], events: [{ pattern, label, t: Date.now() }], now: Date.now() });
+  scheduleSave();
+  res.json({ ok: true });
+});
+
+/* GET /api/self/patterns — what IntelliQ would offer to do for you (proposal-gated), plus
+   full transparency into everything it has learned about your working habits. Self only. */
+app.get('/api/self/patterns', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const now = Date.now();
+  const habits = selfModel.learn({ priorHabits: selfModelLedger[_selfKey(code, userId)] || [], now });
+  selfModelLedger[_selfKey(code, userId)] = habits;   // refresh statuses (staleness) in place
+  res.json({ ok: true, proposals: selfModel.proposals(habits, now), learned: selfModel.selfView(habits) });
+});
+
+/* POST /api/self/:habitId/feedback — accept (apply it), dismiss (not now), or reject (not a
+   thing I do). Your model, your call. Self only. */
+app.post('/api/self/:habitId/feedback', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const response = String(req.body && req.body.response || '');
+  if (!selfModel.RESPONSES.has(response)) return res.status(400).json({ ok: false, error: 'invalid_response' });
+  const key = _selfKey(code, userId);
+  const habits = selfModelLedger[key] || [];
+  const h = selfModel.applyFeedback(habits, String(req.params.habitId || ''), response, Date.now());
+  if (!h) return res.status(404).json({ ok: false, error: 'habit_not_found' });
+  selfModelLedger[key] = habits;
+  scheduleSave();
+  res.json({ ok: true, habitId: h.id, response, setting: response === 'accept' ? (selfModel.PATTERNS[h.pattern] || {}).setting || null : null });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
    MESSAGES — Known or Anonymous, to a person / group / org
    ═══════════════════════════════════════════════════════════════════════════ */
 
@@ -13555,6 +13608,7 @@ function _loadAllStores(data) {
   Object.assign(orgPlaybook,       data.orgPlaybook       || {});
   Object.assign(orgPlaybookDismissed, data.orgPlaybookDismissed || {});
   Object.assign(reasonLedger,      data.reasonLedger      || {});
+  Object.assign(selfModelLedger,   data.selfModelLedger   || {});
   Object.assign(conversationSessions, data.conversationSessions || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
