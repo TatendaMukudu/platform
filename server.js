@@ -44,6 +44,7 @@ const noteGov    = require('./ai/notes');
 const selfModel  = require('./ai/self-model');
 const report     = require('./ai/report');
 const brief      = require('./ai/brief');
+const voice      = require('./ai/voice');
 const languageGuard = require('./ai/language-guard');
 const behaviour  = require('./ai/behaviour');
 const adapters   = require('./ai/adapters');
@@ -8940,12 +8941,6 @@ function _reasonScopedAgenda(code, userId, now, force) {
 /* A spoken rundown must never introduce what the reasoner didn't reason: no score, no
    prediction, no diagnosis. If an LLM rephrase trips this, we fall back to the
    deterministic voice. This is the guardrail that keeps the translator at the EDGE. */
-function _reasonSpokenSafe(t) {
-  if (!t || typeof t !== 'string' || t.length > 800) return false;
-  if (/\d(?:\.\d)?\s*\/\s*5\b|\b\d{1,3}\s*%/.test(t)) return false;   // no private metric
-  if (languageGuard.predictsOrDiagnoses(t)) return false;             // never predict or diagnose (ai/language-guard)
-  return true;
-}
 
 /* GET /api/reason/agenda — the reasoner read aloud, SCOPED to this leader. Returns what it
    currently believes is worth attention (ripe first), the self-challenge on each, and the
@@ -8988,23 +8983,9 @@ app.get('/api/reason/brief', requireAuth, async (req, res) => {
   try {
     const now = Date.now();
     const { agenda } = _reasonScopedAgenda(code, userId, now, false);
-    const spoken = reason.speak(agenda, { now });   // deterministic floor — always valid
-    let voice = spoken, enriched = false;
-    if (ai.enabled() && agenda.some(a => a.readiness === 'ripe')) {
-      const p = ai.complete({
-        tier: 'reason', maxTokens: 160,
-        system: [
-          'You are IntelliQ, greeting a leader with a brief spoken rundown (2–3 warm, natural sentences).',
-          'REPHRASE ONLY what you are given. Do NOT add any name, number, statistic, cause, or prediction.',
-          'Never say "predict", "diagnose", or that something "will" happen. Directional and supportive, never alarmist.',
-          _worldviewDirective(code), _domainDirective(code),
-        ].filter(Boolean).join('\n\n'),
-        user: spoken,
-      });
-      const out = await Promise.race([Promise.resolve(p).then(v => v, () => null), new Promise(r => setTimeout(() => r(null), AI_BRIEF_MS))]);
-      if (out && _reasonSpokenSafe(out)) { voice = out.trim(); enriched = true; }
-    }
-    res.json({ ok: true, spoken: voice, deterministic: spoken, enriched });
+    // Spoken in IntelliQ's OWN voice — deterministic, prediction-proof, no model.
+    const spoken = reason.speak(agenda, { now });
+    res.json({ ok: true, spoken, deterministic: spoken, enriched: false });
   } catch (e) {
     console.warn('[reason/brief] failed:', e && e.message);
     res.json({ ok: true, spoken: "Here's where things stand.", deterministic: '', enriched: false });
@@ -10911,17 +10892,13 @@ app.get('/api/brief', requireAuth, async (req, res) => {
       if (rt && rt.present && rt.label) routeTo = { label: rt.label };
     }
 
-    const composed = brief.compose({ level, name: _firstName(code, userId), timeOfDay: _timeOfDay(now), reads, practices, routeTo, rollupHeadline, areaLabel });
-
-    // EDGE: optionally warm the opening line (no key / timeout / breach → the deterministic one).
-    let opening = composed.opening;
-    if (ai.enabled()) {
-      const p = ai.complete({ tier: 'reason', maxTokens: 90,
-        system: ['Rephrase this assistant opening in ONE warm, natural sentence. Add nothing — no number, no name not present. Never predict what will happen, and never diagnose; describe only what is given.', _domainDirective(code)].filter(Boolean).join('\n'),
-        user: composed.opening });
-      const out = await Promise.race([Promise.resolve(p).then(v => v, () => null), new Promise(r => setTimeout(() => r(null), AI_BRIEF_MS))]);
-      if (out && _reasonSpokenSafe(out)) opening = String(out).trim();
-    }
+    const name = _firstName(code, userId), timeOfDay = _timeOfDay(now);
+    const composed = brief.compose({ level, name, timeOfDay, reads, practices, routeTo, rollupHeadline, areaLabel });
+    // The assistant speaks in OUR OWN voice (ai/voice) — deterministic, prediction-proof, no
+    // model. It composes the opening from the same facts; nothing is invented or foretold.
+    const opening = level === 'leader'
+      ? voice.leaderOpening({ name, timeOfDay, count: reads.length, rollupHeadline, areaLabel, seed: userId + level })
+      : voice.memberOpening({ name, timeOfDay, count: reads.length, seed: userId + level });
     res.json({ ok: true, level, opening, items: composed.items, offers: composed.offers });
   } catch (e) {
     console.warn('[brief] failed:', e && e.message);
