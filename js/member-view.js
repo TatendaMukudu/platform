@@ -2544,6 +2544,7 @@ const MemberApp = {
     el.innerHTML = `
       <div class="iq-lensbar" id="iq-lensbar" role="tablist" aria-label="Workspace views">${tabs}</div>
       <div class="iq-opening" id="iq-opening" aria-live="polite"></div>
+      <div id="iq-brief" aria-live="polite"></div>
       <div class="iq-attention" id="iq-attention" aria-live="polite"></div>
       <div class="iq-subject" id="iq-subject"></div>
       <div class="iq-workctx" id="iq-workctx"></div>
@@ -2565,8 +2566,48 @@ const MemberApp = {
       </div>
       <div class="iq-conversation" id="iq-conversation" aria-live="polite"></div>`;
     this._loadOpening();
+    this._loadBrief();
     this._loadAttention();
     this._renderSubjectChip();
+  },
+
+  /* The node-aware BRIEF — the same "What I'm seeing" block the leader gets, at MEMBER level:
+     the reasoner's reads about YOU (your own evidence) plus governed offers scoped to your
+     growth (a personal assessment, what's helped teammates, a route to someone who can help).
+     Reuses the shared .tdy-* voice styling and /api/brief (which the web already scopes to the
+     member). Offers prefill the ONE composer — nothing acts until you send. */
+  async _loadBrief() {
+    const box = document.getElementById('iq-brief');
+    if (!box) return;
+    let d; try { d = await fetch('/api/brief', { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { box.innerHTML = ''; return; }
+    if (!d || !d.ok) { box.innerHTML = ''; return; }
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const items = (d.items || []).map(i =>
+      `<div class="tdy-belief">${i.meta ? `<div class="tdy-metarow"><span class="tdy-chip">${esc(i.meta)}</span></div>` : ''}<div class="tdy-claim">${esc(i.text)}</div></div>`).join('');
+    const offers = (d.offers || []).map(o =>
+      `<button class="btn-ghost btn-sm" style="margin:0.3rem 0.4rem 0 0" onclick="MemberApp._briefOffer('${esc(o.action)}','${esc(o.text).replace(/'/g, "\\'")}')">${esc(o.text)}</button>`).join('');
+    if (!items && !offers) { box.innerHTML = ''; return; }
+    box.innerHTML = `<div class="tdy-voice">
+      <div class="tdy-vhead"><span class="tdy-presence"><span class="r"></span><span class="d"></span></span><span class="tdy-kicker">${items ? "What I'm seeing" : 'Here to help you grow'}</span></div>
+      ${items}
+      ${offers ? `<div style="margin-top:0.6rem">${offers}</div>` : ''}
+    </div>`;
+  },
+
+  /* An offer routes into the ONE composer with a gentle starter — the same governed turn
+     everything else uses; nothing happens until the member sends. */
+  _briefOffer(action, text) {
+    const starters = {
+      self_assessment: 'I’d like a short assessment to help me improve at ',
+      peer_methods: 'What’s helped my teammates improve at this?',
+      ask_help: text || 'Who can help me with this?',
+    };
+    const i = document.getElementById('iq-composer-input');
+    if (!i) return;
+    i.value = starters[action] != null ? starters[action] : String(text || '');
+    this._wsGrow(i);
+    i.focus();
+    try { i.selectionStart = i.selectionEnd = i.value.length; } catch (_) {}
   },
 
   /* The proactive OPENING — the assistant greets by CONSUMING the Attention artifacts
