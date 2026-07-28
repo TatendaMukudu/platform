@@ -40,6 +40,7 @@ const confidence = require('./ai/confidence');
 const proactive  = require('./ai/proactive');
 const reason     = require('./ai/reason');
 const understanding = require('./ai/understanding');
+const noteGov    = require('./ai/notes');
 const behaviour  = require('./ai/behaviour');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
@@ -10746,6 +10747,84 @@ app.delete('/api/notes/:noteId', (req, res) => {
   delete orgNotes[req.params.noteId];
   scheduleSave();
   res.json({ ok: true });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PINNED + TEAM-SHARED NOTES (ai/notes) — a note is private by default; two
+   deliberate, reversible acts change that: PIN it to a shelf you can return to, and
+   SHARE it with the team. The privacy gate is the hard guard on sharing: a note it
+   marked sensitive stays private even if the author asks. Scope follows the same node
+   web as evidence/reasoning — a shared note reaches only teammates who can see the
+   author's part of the org.
+   ═══════════════════════════════════════════════════════════════════════════ */
+function _noteById(code, id) { const n = orgNotes[id]; return (n && n.orgCode === code) ? n : null; }
+// Can `userId` see this note? Its author always; a team-shared note only if the actor is
+// within the author's visible scope (no cross-branch leak). Private notes: author only.
+function _noteVisibleTo(code, userId, note) {
+  if (!note) return false;
+  if (note.authorId === userId) return true;
+  if (!note.teamShared) return false;
+  return orgGraph.canSee(_visibleScopeFor(code, userId), note.nodeScope || null);
+}
+
+app.post('/api/notes/:noteId/pin', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const note = _noteById(code, req.params.noteId);
+  if (!note) return res.status(404).json({ ok: false, error: 'note_not_found' });
+  if (!_noteVisibleTo(code, userId, note)) return res.status(403).json({ ok: false, error: 'forbidden' });
+  Object.assign(note, noteGov.pin(note, { now: new Date().toISOString() }));
+  scheduleSave();
+  res.json({ ok: true, pinned: true });
+});
+app.post('/api/notes/:noteId/unpin', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const note = _noteById(code, req.params.noteId);
+  if (!note) return res.status(404).json({ ok: false, error: 'note_not_found' });
+  if (!_noteVisibleTo(code, userId, note)) return res.status(403).json({ ok: false, error: 'forbidden' });
+  Object.assign(note, noteGov.unpin(note));
+  scheduleSave();
+  res.json({ ok: true, pinned: false });
+});
+
+/* Share with the team — author only, and only past the privacy gate. */
+app.post('/api/notes/:noteId/share', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const note = _noteById(code, req.params.noteId);
+  if (!note) return res.status(404).json({ ok: false, error: 'note_not_found' });
+  if (note.authorId !== userId) return res.status(403).json({ ok: false, error: 'only_author_can_share' });
+  const gate = noteGov.canShareToTeam(note, { isSensitive: privacy.isPrivate(note.sensitivity) });
+  if (!gate.allowed) {
+    return res.status(200).json({ ok: false, blocked: gate.reason,
+      message: gate.reason === 'sensitive_stays_private'
+        ? 'This note holds private context — it stays yours. It can’t be shared with the team.'
+        : gate.reason === 'already_shared' ? 'This note is already shared with your team.'
+        : 'This note can’t be shared.' });
+  }
+  Object.assign(note, noteGov.share(note, { actorId: userId, now: new Date().toISOString(), nodeScope: _primaryNodeScope(code, userId) }));
+  scheduleSave();
+  res.json({ ok: true, shared: true });
+});
+app.post('/api/notes/:noteId/unshare', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const note = _noteById(code, req.params.noteId);
+  if (!note) return res.status(404).json({ ok: false, error: 'note_not_found' });
+  if (note.authorId !== userId) return res.status(403).json({ ok: false, error: 'only_author_can_unshare' });
+  Object.assign(note, noteGov.unshare(note));
+  scheduleSave();
+  res.json({ ok: true, shared: false });
+});
+
+/* GET /api/notes/pinned — the shelf: your own pinned notes + team-shared pinned notes you
+   can see, ordered pins-first. Each projected safely (a teammate's note never exposes its
+   sensitivity, the author's private AI reply, or internal ids). */
+app.get('/api/notes/pinned', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const all = Object.values(orgNotes).filter(n => n.orgCode === code && n.pinned);
+  const rawMine = all.filter(n => n.authorId === userId);
+  const rawTeam = all.filter(n => n.authorId !== userId && n.teamShared && _noteVisibleTo(code, userId, n));
+  const mineIds = new Set(rawMine.map(n => n.id));
+  const ordered = noteGov.shelfSort([...rawMine, ...rawTeam]);
+  res.json({ ok: true, pinned: ordered.map(n => mineIds.has(n.id) ? noteGov.ownView(n) : noteGov.teamView(n)) });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
