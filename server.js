@@ -8928,6 +8928,33 @@ function _reasonTick(code, now = Date.now(), force = false) {
   return result;
 }
 
+// THE HEARTBEAT — the brain does not sleep. Reasoning must not depend on a leader
+// happening to open the app: beliefs form, accumulate, and calibrate on their own so
+// that when someone does look, the read is already current. Two beats:
+//
+//   • _reasonSweep — a periodic, org-wide pass (from the live server's interval below).
+//     It forces a fresh tick for every org that has people, so the ledger stays warm
+//     even when nobody is watching. Bounded and per-org isolated: one org's failure
+//     never stops the others. Returns how many orgs it reasoned over.
+//
+//   • _reasonNudge — event-driven freshness. When new admissible input actually arrives
+//     (a note is shared to the team, and so enters the reasoner's observation set), we
+//     drop that org's tick cache so the very next read re-reasons instead of serving a
+//     stale, pre-note belief state. Cheap: it schedules no work itself, it just lets the
+//     next reader (or the next sweep) pick the change up immediately.
+function _reasonSweep(now = Date.now()) {
+  let reasoned = 0;
+  for (const code of Object.keys(orgUsers)) {
+    if (!orgUsers[code] || !Object.keys(orgUsers[code]).length) continue;
+    try { _reasonTick(code, now, true); reasoned++; }
+    catch (e) { console.warn(`[reason] sweep failed for ${code}:`, e && e.message); }
+  }
+  return reasoned;
+}
+function _reasonNudge(code) {
+  if (code) delete reasonTickCache[code];
+}
+
 /* A leader-safe projection of an agenda item — the belief, its register + readiness, its
    confidence, and the reasoner's own self-challenge. No evidence basis, no support records,
    no private metric (the reasoner already keeps claims score-free). */
@@ -10833,6 +10860,7 @@ app.post('/api/notes/:noteId/share', requireAuth, (req, res) => {
         : 'This note can’t be shared.' });
   }
   Object.assign(note, noteGov.share(note, { actorId: userId, now: new Date().toISOString(), nodeScope: _primaryNodeScope(code, userId) }));
+  _reasonNudge(code);   // new admissible input — let the next read re-reason
   scheduleSave();
   res.json({ ok: true, shared: true });
 });
@@ -10842,6 +10870,7 @@ app.post('/api/notes/:noteId/unshare', requireAuth, (req, res) => {
   if (!note) return res.status(404).json({ ok: false, error: 'note_not_found' });
   if (note.authorId !== userId) return res.status(403).json({ ok: false, error: 'only_author_can_unshare' });
   Object.assign(note, noteGov.unshare(note));
+  _reasonNudge(code);   // input withdrawn — let the next read re-reason without it
   scheduleSave();
   res.json({ ok: true, shared: false });
 });
@@ -13822,7 +13851,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: learning engine (Phase B2) — candidates + governed playbook
   orgPlaybook, orgPlaybookDismissed, _deriveOrgCandidates,
   // exported for the truth layer: grounded conversation engine (assessment/check-in intake)
-  conversationSessions, _assessmentMemberProjection, _conversationEvidenceByRef };
+  conversationSessions, _assessmentMemberProjection, _conversationEvidenceByRef,
+  // exported for the truth layer: the reasoner heartbeat (background sweep + event nudge)
+  _reasonSweep, _reasonNudge, _reasonScopedAgenda, reasonLedger, reasonTickCache };
 
 if (require.main === module) (async () => {
   try {
@@ -13912,6 +13943,14 @@ if (require.main === module) (async () => {
     //     on boot, then daily. Runs only in the live server (never in test mode).
     _purgeExpired();
     setInterval(() => { try { _purgeExpired(); } catch (e) { console.warn('[retention] purge failed:', e.message); } }, 24 * 60 * 60 * 1000).unref();
+
+    // The reasoner heartbeat — the brain reasons on its own, not only when a leader
+    // opens the app. One warm pass on boot, then every 30 min: beliefs form, accumulate,
+    // and calibrate against their own outcomes in the background, so the agenda a leader
+    // sees is already current the moment they look. Never runs in test mode (this whole
+    // block is live-server only). See _reasonSweep.
+    try { const n = _reasonSweep(); if (n) console.log(`[reason] heartbeat — reasoned over ${n} org(s) on boot`); } catch (e) { console.warn('[reason] boot sweep failed:', e.message); }
+    setInterval(() => { try { _reasonSweep(); } catch (e) { console.warn('[reason] heartbeat failed:', e.message); } }, 30 * 60 * 1000).unref();
 
     // Connection poller — every 20 min. Respects pause, backoff (nextAttemptAt),
     // and rate-limit; processes a BOUNDED number per tick and round-robins across
