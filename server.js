@@ -8843,21 +8843,42 @@ app.post('/api/org-playbook/:fingerprint/retire', requireAuth, (req, res) => {
 function _reasonObservations(code, now) {
   const users = orgUsers[code] || {};
   const day = Math.floor(now / 86400000);
+  const WINDOW = 42 * 86400000;   // ~6 weeks — the reasoning window
+  // Group this org's SHARED, non-sensitive notes by author once — the LANGUAGE-signal source.
+  // Private / anonymous / sensitive notes are excluded here: they never feed the org reasoner.
+  const sharedByAuthor = {};
+  for (const n of Object.values(orgNotes)) {
+    if (!n || n.orgCode !== code || n.type !== 'shared' || !n.authorId) continue;
+    if (privacy.isPrivate(n.sensitivity)) continue;
+    const t = Date.parse(n.createdAt); if (!Number.isFinite(t) || now - t > WINDOW) continue;
+    (sharedByAuthor[n.authorId] = sharedByAuthor[n.authorId] || []).push({ id: n.id, content: n.content, t });
+  }
   const observations = [];
   for (const u of Object.values(users)) {
     if (!u || u.role === 'superadmin') continue;
-    let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { continue; }
-    if (!m) continue;
-    const findings = [...intel.detectPatterns(m), ...(m.structural || [])];
-    if (!findings.length) continue;
     const scope = _primaryNodeScope(code, u.id);
-    for (const f of findings) {
-      observations.push({
-        id: `${u.id}:${f.type}:${day}`,
-        subjectId: u.id, subjectName: (u.name || u.id) || null, scope,
-        kind: f.type, severity: f.severity, confidence: f.confidence, basis: f.basis,
-        careFlag: !!m.hasSensitiveContext, t: now,
-      });
+    const name = (u.name || u.id) || null;
+    // (a) DETECTOR findings — self-relative / structural patterns over the numeric signals.
+    let m = null; try { m = _buildMemberIntelInput(code, u, now); } catch (_) {}
+    if (m) {
+      for (const f of [...intel.detectPatterns(m), ...(m.structural || [])]) {
+        observations.push({
+          id: `${u.id}:${f.type}:${day}`,
+          subjectId: u.id, subjectName: name, scope,
+          kind: f.type, severity: f.severity, confidence: f.confidence, basis: f.basis,
+          careFlag: !!m.hasSensitiveContext, t: now,
+        });
+      }
+    }
+    // (b) LANGUAGE-derived signal — what they SHARED, in their own words. Deterministic
+    // (ai/comprehend — no model, nothing leaves), forced through the understanding guard.
+    // One shared note becomes at most one tentative observation; the ledger accumulates.
+    const care = !!(m && m.hasSensitiveContext);
+    for (const n of (sharedByAuthor[u.id] || [])) {
+      const o = understanding.featuresToObservation(
+        understanding.sanitizeFeatures(comprehend.comprehend(n.content || '')),
+        { id: `note:${n.id}`, subjectId: u.id, subjectName: name, scope, t: n.t });
+      if (o) { o.careFlag = o.careFlag || care; observations.push(o); }
     }
   }
   return observations;
