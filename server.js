@@ -11095,17 +11095,21 @@ app.get('/api/brief', requireAuth, async (req, res) => {
   }
 });
 
-/* GET /api/report/team — the first ARTIFACT: a grounded team report, print-ready HTML the
-   browser saves as a PDF. It renders only what the reasoner and the confirmed playbook
-   already know — every line shows its source, and anything without one never appears (the
-   ai/report grounding guarantee). Infrastructure, not UI: the assistant offers "want a
-   PDF?"; this is what it links to. Leader-gated + scoped like everything else. */
-app.get('/api/report/team', requireAuth, (req, res) => {
+/* GET /api/report/team — the first ARTIFACT: a grounded team report. Print-ready HTML the
+   browser saves as a PDF, OR — with ?format=csv (or the /api/report/team.csv path) — the
+   SAME grounded facts as a board-ready, spreadsheet-openable CSV. Both render only what the
+   reasoner and the confirmed playbook already know — every line shows its source, and
+   anything without one never appears (the ai/report grounding guarantee). Infrastructure,
+   not UI: the assistant offers "want a report?"; this is what it links to. The CSV is the
+   first paid-tier EXPORT — the same intelligence, in a format an org can hand to a board or
+   drop in a spreadsheet. Leader-gated + scoped + audit-logged like everything else. */
+app.get(['/api/report/team', '/api/report/team.csv'], requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
   if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
     return res.status(403).type('text/plain').send('Permission denied');
   }
+  const asCsv = req.path.endsWith('.csv') || String(req.query.format || '').toLowerCase() === 'csv';
   const now = Date.now();
   let attention = [], practices = [];
   try {
@@ -11135,8 +11139,13 @@ app.get('/api/report/team', requireAuth, (req, res) => {
   try {
     const { agenda } = _reasonScopedAgenda(code, userId, now, false);
     const touched = [...new Set(agenda.map(a => a.subjectId).filter(Boolean))];
-    _audit(code, { actor: userId, action: 'report_view', subjectIds: touched, basis: 'grounded team report' });
+    _audit(code, { actor: userId, action: 'report_view', subjectIds: touched, basis: asCsv ? 'grounded report export (CSV)' : 'grounded team report' });
   } catch (_) {}
+  if (asCsv) {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="intelliq-team-report.csv"');
+    return res.send(report.renderCsv(model));
+  }
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(report.renderHtml(model));
 });

@@ -38,7 +38,7 @@ _rebuildEmailIndex();
 const server = app.listen(0, async () => {
   const base = `http://127.0.0.1:${server.address().port}`;
   const tok = { coachA: issueToken('coachA', C, 'coach'), joe: issueToken('joe', C, 'member') };
-  const get = async who => { const r = await fetch(base + '/api/report/team', { headers: { Authorization: `Bearer ${tok[who]}` } }); return { status: r.status, ct: r.headers.get('content-type') || '', body: await r.text() }; };
+  const get = async (who, path = '/api/report/team') => { const r = await fetch(base + path, { headers: { Authorization: `Bearer ${tok[who]}` } }); return { status: r.status, ct: r.headers.get('content-type') || '', cd: r.headers.get('content-disposition') || '', body: await r.text() }; };
 
   try {
     const rpt = await get('coachA');
@@ -58,6 +58,13 @@ const server = app.listen(0, async () => {
     const member = await get('joe');
     ok('5 · a plain member cannot pull the team report (403)', member.status === 403);
     ok('5 · …and gets no team content in the refusal', !/Joe's momentum|Thursday video/.test(member.body));
+
+    /* ── 6 · the CSV EXPORT — the same grounded intelligence as a downloadable spreadsheet ── */
+    const csv = await get('coachA', '/api/report/team.csv');
+    ok('6 · the .csv path serves a CSV download (attachment, text/csv)', csv.status === 200 && /text\/csv/.test(csv.ct) && /attachment; filename=.*\.csv/.test(csv.cd));
+    ok('6 · it carries the SAME grounded facts, each with its source', /Joe's momentum has been running below/.test(csv.body) && /reasoner · emerging/.test(csv.body) && /Section,Fact,Source/.test(csv.body));
+    ok('6 · ?format=csv on the base path works too (assistant offer link)', /text\/csv/.test((await get('coachA', '/api/report/team?format=csv')).ct));
+    ok('6 · the CSV export is leader-gated exactly like the report', (await get('joe', '/api/report/team.csv')).status === 403);
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();
