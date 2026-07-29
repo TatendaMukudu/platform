@@ -2585,12 +2585,12 @@ const MemberApp = {
     const items = (d.items || []).map(i =>
       `<div class="tdy-belief">${i.meta ? `<div class="tdy-metarow"><span class="tdy-chip">${esc(i.meta)}</span></div>` : ''}<div class="tdy-claim">${esc(i.text)}</div></div>`).join('');
     const offers = (d.offers || []).map(o =>
-      `<button class="btn-ghost btn-sm" style="margin:0.3rem 0.4rem 0 0" onclick="MemberApp._briefOffer('${esc(o.action)}','${esc(o.text).replace(/'/g, "\\'")}')">${esc(o.text)}</button>`).join('');
+      `<button class="tdy-cbtn" style="margin:0" onclick="MemberApp._briefOffer('${esc(o.action)}','${esc(o.text).replace(/'/g, "\\'")}')">${esc(o.text)}</button>`).join('');
     if (!items && !offers) { box.innerHTML = ''; return; }
     box.innerHTML = `<div class="tdy-voice">
       <div class="tdy-vhead"><span class="tdy-presence"><span class="r"></span><span class="d"></span></span><span class="tdy-kicker">${items ? "What I'm seeing" : 'Here to help you grow'}</span></div>
       ${items}
-      ${offers ? `<div style="margin-top:0.6rem">${offers}</div>` : ''}
+      ${offers ? `<div class="tdy-chips" style="margin-top:0.6rem">${offers}</div>` : ''}
     </div>`;
   },
 

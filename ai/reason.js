@@ -356,12 +356,42 @@ function agendaItem(b, now) {
   return {
     beliefId: b.id, shared: !!b.shared, kind: b.kind, subjectId: b.subjectId || null,
     subjectName: b.subjectName || null, scope: b.scope || null,
+    distinctSubjects: b.shared ? (b.distinctSubjects || 0) : undefined,
     claim: b.claim, severity: b.severity, confidence: b.confidence, polarity: b.polarity,
     urgency: _urgency(b, now), register, readiness,
     timing: _timing(b, register),
     why: `${b.claim} (${b.confidence}; ${b.supportCount} signal${s}${b.counterCount ? `, ${b.counterCount} against` : ''}).`,
     challenge: challenge(b, now),
   };
+}
+
+/* Roll up several SHARED beliefs of the SAME kind — the same pattern showing across
+   multiple groups one leader oversees — into ONE org-wide read, so the feed says it once
+   instead of four near-identical cards. Purely presentational + reader-dependent, so it
+   runs AFTER scoping (the caller passes the scoped agenda). Per-person items and a lone
+   shared item are untouched. The rolled item keeps its constituents' ids so a decision can
+   fan out to all of them. */
+function rollUpShared(agenda) {
+  const shared = (agenda || []).filter(a => a && a.shared);
+  const rest   = (agenda || []).filter(a => a && !a.shared);
+  const byKind = {};
+  for (const a of shared) (byKind[a.kind] = byKind[a.kind] || []).push(a);
+  const out = [...rest];
+  for (const [kind, items] of Object.entries(byKind)) {
+    if (items.length < 2) { out.push(items[0]); continue; }          // one group → leave as-is
+    const top = items.slice().sort((a, b) => (b.urgency || 0) - (a.urgency || 0))[0];
+    const groups = items.length;
+    const people = items.reduce((s, i) => s + (i.distinctSubjects || 0), 0);
+    const label = KIND_LABEL[kind] || kind;
+    out.push({
+      ...top,
+      beliefId: `rollup:${kind}`, rolled: true, groups, people,
+      memberBeliefIds: items.map(i => i.beliefId),
+      claim: `${_cap(label)} is showing up across ${groups} of your groups${people ? ` (${people} people)` : ''} — worth an org-wide look, not group by group.`,
+      why: `${_cap(label)} recurring across ${groups} groups.`,
+    });
+  }
+  return out.sort((a, b) => (b.urgency || 0) - (a.urgency || 0) || String(a.beliefId).localeCompare(String(b.beliefId)));
 }
 
 /* Proposal — proposal-gated ALWAYS. This module never executes it; the caller must
@@ -478,7 +508,7 @@ function challenge(b, now = Date.now()) {
 }
 
 module.exports = {
-  reason, challenge,
+  reason, challenge, rollUpShared,
   // calibration — closing the loop
   applyFeedback, isSuppressed, outcomeTally, RESPONSES,
   // the subject's right to see + contest

@@ -200,5 +200,22 @@ ok('20 · it folds in the real timing when there is an event', /cup final/.test(
 ok('20 · it introduces no private metric of its own (score-free)', !SCORE_RE.test(spoken));
 ok('20 · with nothing ripe it says so honestly (no filler)', /nothing.*pressing|steady/i.test(R.speak([], { now })));
 
+/* ── ROLL-UP — the same shared pattern across many groups reads as ONE org-wide line ── */
+const many = [
+  { beliefId: 'shared::u15::momentum_drop', shared: true, kind: 'momentum_drop', distinctSubjects: 17, urgency: 11, register: 'support', readiness: 'ripe', claim: 'x' },
+  { beliefId: 'shared::u13::momentum_drop', shared: true, kind: 'momentum_drop', distinctSubjects: 15, urgency: 10, register: 'support', readiness: 'ripe', claim: 'x' },
+  { beliefId: 'shared::u12::momentum_drop', shared: true, kind: 'momentum_drop', distinctSubjects: 15, urgency: 9, register: 'support', readiness: 'ripe', claim: 'x' },
+  { beliefId: 'joe::plateau', shared: false, kind: 'plateau', urgency: 5, claim: 'joe plateau', readiness: 'ripe' },
+];
+const rolled = R.rollUpShared(many);
+const roll = rolled.find(a => a.rolled);
+ok('21 · three same-kind shared cards collapse into ONE org-wide read', rolled.filter(a => a.kind === 'momentum_drop').length === 1 && roll);
+ok('21 · the org-wide read names the group count + total people', /across 3 of your groups \(47 people\)/.test(roll.claim));
+ok('21 · it keeps its constituents so a decision can fan out', roll.memberBeliefIds.length === 3 && roll.groups === 3);
+ok('21 · a per-person item is left untouched', rolled.some(a => a.beliefId === 'joe::plateau' && !a.rolled));
+/* a single shared card is NOT rolled up (nothing to collapse) */
+const one = R.rollUpShared([{ beliefId: 'shared::u15::isolation', shared: true, kind: 'isolation', distinctSubjects: 4, urgency: 6 }]);
+ok('21 · one shared card is left as-is (no needless roll-up)', one.length === 1 && !one[0].rolled);
+
 console.log(`\nreason-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

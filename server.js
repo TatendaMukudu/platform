@@ -8919,6 +8919,8 @@ function _reasonAgendaSafe(item) {
     urgency: item.urgency, why: item.why, challenge: item.challenge,
     timing: item.timing || null,             // the natural moment a real event creates
     reliability: item.reliability || null,   // the Confidence Engine's honest label for this kind
+    rolled: !!item.rolled,                    // an org-wide roll-up of several groups…
+    memberBeliefIds: item.rolled ? (item.memberBeliefIds || []) : undefined, // …so a decision fans out
   };
 }
 
@@ -8950,9 +8952,23 @@ function _reasonScopedAgenda(code, userId, now, force) {
     }
     return false;
   };
-  const agenda = result.agenda.filter(inScope);
-  const beliefIds = new Set(agenda.map(a => a.beliefId));
-  return { agenda, proposals: result.proposals.filter(p => beliefIds.has(p.beliefId)) };
+  const scoped = result.agenda.filter(inScope);
+  // Collapse the same shared pattern across several of this leader's groups into one
+  // org-wide read (so the feed says it once). Reader-dependent, so it runs after scoping.
+  const agenda = reason.rollUpShared(scoped);
+  // Keep one proposal per live item; for a rolled item, carry a single proposal forward
+  // from one of its constituents so the org-wide read still has its next step.
+  const byBelief = new Map(result.proposals.map(p => [p.beliefId, p]));
+  const proposals = [];
+  for (const a of agenda) {
+    if (a.rolled) {
+      const src = (a.memberBeliefIds || []).map(id => byBelief.get(id)).find(Boolean);
+      if (src) proposals.push({ ...src, beliefId: a.beliefId });
+    } else if (byBelief.has(a.beliefId)) {
+      proposals.push(byBelief.get(a.beliefId));
+    }
+  }
+  return { agenda, proposals };
 }
 
 /* A spoken rundown must never introduce what the reasoner didn't reason: no score, no
