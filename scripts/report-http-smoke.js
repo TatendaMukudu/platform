@@ -65,6 +65,17 @@ const server = app.listen(0, async () => {
     ok('6 · it carries the SAME grounded facts, each with its source', /Joe's momentum has been running below/.test(csv.body) && /reasoner · emerging/.test(csv.body) && /Section,Fact,Source/.test(csv.body));
     ok('6 · ?format=csv on the base path works too (assistant offer link)', /text\/csv/.test((await get('coachA', '/api/report/team?format=csv')).ct));
     ok('6 · the CSV export is leader-gated exactly like the report', (await get('joe', '/api/report/team.csv')).status === 403);
+
+    /* ── 7 · the per-person DEVELOPMENT RECORD — the artifact a coach hands a player ── */
+    const rec = await get('coachA', '/api/report/person/joe');
+    ok('7 · a leader who can see the person gets their grounded record', rec.status === 200 && /text\/html/.test(rec.ct) && /Development record — Joe/.test(rec.body));
+    ok('7 · …grounded from the reasoner, with the source shown', /Joe's momentum/.test(rec.body) && /reasoner ·/.test(rec.body) && /nothing here is invented or predicted/.test(rec.body));
+    const recCsv = await get('coachA', '/api/report/person/joe.csv');
+    ok('7 · …and exports as a CSV download too', recCsv.status === 200 && /text\/csv/.test(recCsv.ct) && /attachment; filename=.*record\.csv/.test(recCsv.cd) && /Section,Fact,Source/.test(recCsv.body));
+    const own = await get('joe', '/api/report/person/joe');
+    ok('7 · a person can pull their OWN development record (self access)', own.status === 200 && /Development record — Joe/.test(own.body));
+    const pry = await get('joe', '/api/report/person/coachA');
+    ok('7 · a member cannot pull a record for someone they can\'t see (403)', pry.status === 403 && !/momentum|Thursday video/.test(pry.body));
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();

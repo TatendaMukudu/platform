@@ -11150,6 +11150,65 @@ app.get(['/api/report/team', '/api/report/team.csv'], requireAuth, (req, res) =>
   res.send(report.renderHtml(model));
 });
 
+/* GET /api/report/person/:userId — a grounded PERSONAL development record. The artifact a
+   coach hands a player, or a teacher a parent: everything the system can point to about ONE
+   person — the reads the reasoner holds (person-safe, never the leader-facing urgency), and
+   the strengths recorded from their own assessments — each line showing its source, nothing
+   invented. HTML (→ PDF) or ?format=csv. Access is either the SUBJECT themselves (their own
+   record) or a leader who may SEE them (visibility-scoped, view permission); anyone else is
+   refused. Audit-logged as a report_view of that person — a per-person export is exactly the
+   access a compliance trail must capture. This is a paid-tier artifact that reuses the whole
+   grounded stack. */
+app.get('/api/report/person/:userId', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  let targetId = String(req.params.userId || '');
+  // Support a clean .csv suffix on the id (…/person/joe.csv) as well as ?format=csv.
+  let csvSuffix = false;
+  if (targetId.endsWith('.csv')) { csvSuffix = true; targetId = targetId.slice(0, -4); }
+  const target = orgUsers[code]?.[targetId];
+  if (!target) return res.status(404).type('text/plain').send('Person not found');
+  const isSelf   = targetId === userId;
+  const isAdmin  = orgUsers[code]?.[userId]?.role === 'superadmin';
+  const canView  = isAdmin || _userHasPerm(code, userId, 'view_team') || _userHasPerm(code, userId, 'view_insights');
+  const inScope  = new Set(getVisibleUserIds(code, userId)).has(targetId);
+  if (!isSelf && !(canView && inScope)) return res.status(403).type('text/plain').send('Permission denied');
+
+  const asCsv = csvSuffix || String(req.query.format || '').toLowerCase() === 'csv';
+  const now = Date.now();
+  let reads = [], strengths = [];
+  try {
+    _reasonTick(code, now, false);
+    reads = (reasonLedger[code] || [])
+      // A shareable record: non-dormant, non-suppressed reads about them — and NOT a
+      // care-flagged (sensitive wellbeing) read, which stays out of a handable artifact.
+      .filter(b => b.subjectId === targetId && !b.shared && !b.careFlag && b.status !== 'dormant' && !reason.isSuppressed(b, now))
+      .map(b => ({ text: b.claim, basis: `reasoner · ${b.confidence || 'tentative'}` }));
+  } catch (_) {}
+  try {
+    strengths = (_personStrengths(code, targetId) || []).map(s => ({ text: `A recorded strength: ${s}.`, basis: 'assessment · recorded strength' }));
+  } catch (_) {}
+
+  const firstName = String(target.name || targetId).split(/\s+/)[0];
+  const model = report.buildReport({
+    title: `Development record — ${target.name || targetId}`,
+    subject: isSelf ? 'Your own record' : (_orgAskAreaLabel(code, userId) || null),
+    generatedAt: new Date(now).toISOString(),
+    intro: `What the system can point to about ${firstName} — drawn only from recorded evidence, each line showing its source. Nothing here is invented or predicted.`,
+    sections: [
+      { heading: 'Where things stand', facts: reads, emptyNote: 'Nothing is currently strong enough to raise — a steady, unremarkable picture.' },
+      { heading: 'Strengths recorded', facts: strengths, emptyNote: 'No strengths are recorded from assessments yet.' },
+    ],
+  });
+  _audit(code, { actor: userId, action: 'report_view', subjectIds: [targetId], basis: isSelf ? 'own development record' : 'grounded person report' });
+  if (asCsv) {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="intelliq-${firstName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'person'}-record.csv"`);
+    return res.send(report.renderCsv(model));
+  }
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(report.renderHtml(model));
+});
+
 /* ═══════════════════════════════════════════════════════════════════════════
    THE SELF-MODEL (ai/self-model) — IntelliQ learning how YOU like to work and
    offering to fit itself around you. Strictly PRIVATE to the person: every route
