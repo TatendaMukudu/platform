@@ -5397,9 +5397,14 @@ app.post('/api/admin/seed-demo-club', requirePermission('manage_settings'), asyn
 app.post('/api/admin/llm-selftest', requirePermission('manage_settings'), async (req, res) => {
   const status = {
     enabled:   ai.enabled(),
+    deterministicOnly: ai.deterministicOnly(),
     models:    ai.MODELS,
     providers: { claude: !!process.env.ANTHROPIC_API_KEY, openai: !!process.env.OPENAI_API_KEY },
   };
+  if (ai.deterministicOnly()) {
+    return res.json({ ok: true, status, results: [],
+      note: 'Deterministic-only mode is ON — no language model is called and nothing about your people ever leaves this box, even though a key may be configured. IntelliQ runs entirely on its own reasoning and voice.' });
+  }
   if (!ai.enabled()) {
     return res.json({ ok: true, status, results: [],
       note: 'No language-model key is configured on this host. Set ANTHROPIC_API_KEY (or OPENAI_API_KEY) and the kernel will use it; until then it runs on its deterministic fallbacks.' });
@@ -5425,6 +5430,17 @@ app.post('/api/admin/llm-selftest', requirePermission('manage_settings'), async 
     }
   }
   res.json({ ok: true, status, results });
+});
+
+/* POST /api/admin/llm-mode — flip the whole instance to deterministic-only (no-egress) or
+   back, at runtime, without a redeploy. The env guarantee (IQ_DETERMINISTIC_ONLY) always
+   wins — if it's set, this cannot re-enable the model. Superadmin/settings only. */
+app.post('/api/admin/llm-mode', requirePermission('manage_settings'), (req, res) => {
+  const want = !!(req.body && req.body.deterministicOnly);
+  const now = ai.setDeterministicOnly(want);
+  res.json({ ok: true, deterministicOnly: now, enabled: ai.enabled(),
+    note: now ? 'Deterministic-only mode is ON — no model will be called; nothing leaves the box.'
+              : 'Deterministic-only mode is OFF — the optional model may warm phrasing again.' });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════

@@ -36,6 +36,24 @@ const OPENAI_URL   = process.env.OPENAI_URL   || 'https://api.openai.com/v1/chat
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const HAVE_OPENAI  = !!OPENAI_KEY;
 
+/* ── DETERMINISTIC-ONLY / NO-EGRESS MODE ─────────────────────────────────────
+   The long-term stance: IntelliQ needs no third party. In this mode NO model is
+   ever called — even if a key is configured — so an organisation can GUARANTEE
+   that nothing about their people ever leaves the box. Every optional-LLM edge
+   gates on enabled()/canUnderstand() and so goes dark automatically; complete()
+   also hard-refuses as a belt-and-braces backstop.
+
+   Two ways to turn it on:
+     • IQ_DETERMINISTIC_ONLY=1 (env) — the HARD guarantee. Set at deploy time; it
+       cannot be turned back on at runtime, so a school can prove it.
+     • setDeterministicOnly(true) — a runtime switch (superadmin) for the whole
+       instance, for orgs that want to flip it without a redeploy.
+   The env force always wins. */
+const ENV_NO_LLM = /^(1|true|yes|on)$/i.test(String(process.env.IQ_DETERMINISTIC_ONLY || ''));
+let _runtimeNoLLM = false;
+function deterministicOnly() { return ENV_NO_LLM || _runtimeNoLLM; }
+function setDeterministicOnly(on) { if (!ENV_NO_LLM) _runtimeNoLLM = !!on; return deterministicOnly(); }
+
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /* Only text messages can cross to the OpenAI fallback (vision blocks stay on Claude). */
@@ -76,6 +94,10 @@ async function complete({
   tier = 'micro', model, system, messages, user,
   maxTokens = 400, temperature, fallbackToMicro = true,
 }) {
+  // No-egress backstop: refuse to call any model in deterministic-only mode, even if a
+  // key is present and a caller forgot to check enabled(). Nothing leaves the box.
+  if (deterministicOnly()) throw new Error('LLM disabled (deterministic-only mode)');
+
   const primary = model || MODELS[tier] || MODELS.micro;
   const msgs    = messages || [{ role: 'user', content: user }];
 
@@ -155,9 +177,9 @@ async function completeJSON(opts) {
   return obj;
 }
 
-// True when at least one model is configured — callers gate optional LLM prose
-// on this so that with no key they skip the call entirely (no network, no wait).
-function enabled() { return HAVE_CLAUDE || HAVE_OPENAI; }
+// True when at least one model is configured AND we're not in deterministic-only mode —
+// callers gate optional LLM prose on this, so no-egress mode makes every edge go dark.
+function enabled() { return !deterministicOnly() && (HAVE_CLAUDE || HAVE_OPENAI); }
 
 /* ── Evidence understanding (vision + documents) ───────────────────────────
    People communicate through artifacts, not just text — a photo of a whiteboard,
@@ -171,6 +193,7 @@ function enabled() { return HAVE_CLAUDE || HAVE_OPENAI; }
 // What can be read, by evidence kind: images/text ride EITHER provider (Claude
 // vision or OpenAI vision); native PDF is Claude-only. No arg → "anything readable".
 function canUnderstand(kind) {
+  if (deterministicOnly()) return false;                 // no-egress: read nothing via a model
   if (kind === 'pdf') return HAVE_CLAUDE;
   if (kind === 'image' || kind === 'text') return HAVE_CLAUDE || HAVE_OPENAI;
   return HAVE_CLAUDE || HAVE_OPENAI;
@@ -245,4 +268,4 @@ async function transcribe(buffer, { filename = 'audio.webm', mimetype = 'audio/w
   return String(j.text || '').trim();
 }
 
-module.exports = { complete, completeJSON, parseJSON, MODELS, client, enabled, canTranscribe, transcribe, canUnderstand, understand };
+module.exports = { complete, completeJSON, parseJSON, MODELS, client, enabled, canTranscribe, transcribe, canUnderstand, understand, deterministicOnly, setDeterministicOnly };
