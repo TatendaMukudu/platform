@@ -56,5 +56,24 @@ ok('6 · a provided rollup headline leads the opening', /strong week/.test(rolle
 /* ── 7 · determinism ── */
 ok('7 · identical inputs → identical brief', JSON.stringify(B.compose({ level: 'member', name: 'Sam', reads: [{ text: 'x' }] })) === JSON.stringify(B.compose({ level: 'member', name: 'Sam', reads: [{ text: 'x' }] })));
 
+/* ── 8 · ACCOMMODATIONS — an accepted self-model setting actually reshapes the brief ── */
+// pin_view: the view the person opens daily is now waiting, pinned, at the very top.
+const noPref = B.compose({ level: 'member', name: 'Sam', reads: [{ text: 'a real read', meta: 'x' }] });
+const pinned = B.compose({ level: 'member', name: 'Sam', reads: [{ text: 'a real read', meta: 'x' }], prefs: { pin_view: "Marcus's graph" } });
+ok('8 · with no accepted accommodation, nothing is pinned', !noPref.items.some(i => i.pinned) && (noPref.applied || []).length === 0);
+ok('8 · an accepted pin_view puts that view at the TOP of the brief', pinned.items[0].pinned === true && /Marcus's graph/.test(pinned.items[0].text));
+ok('8 · …and the brief reports the accommodation as applied (transparency)', pinned.applied.includes('pin_view'));
+
+// own_assessment_first: the personal-assessment offer is promoted ahead of the rest.
+const promoted = B.compose({ level: 'member', name: 'Sam', reads: [{ text: 'x' }], practices: ['peer thing helped'], prefs: { own_assessment_first: true } });
+ok('8 · an accepted own_assessment_first promotes the self-assessment offer to first', promoted.offers[0].action === 'self_assessment' && promoted.applied.includes('own_assessment_first'));
+
+// a leader accommodation (readiness_first) only applies at leader level.
+const memberReadiness = B.compose({ level: 'member', name: 'Sam', reads: [{ text: 'x' }], prefs: { readiness_first: true } });
+ok('8 · a leader-only accommodation does not apply to a member', !memberReadiness.applied.includes('readiness_first'));
+
+// still governed: promoting an offer never adds one off the allow-list or un-gates it.
+ok('8 · applying accommodations never breaks the offer safety contract', pinned.safe === true && promoted.safe === true);
+
 console.log(`\nbrief-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -70,5 +70,30 @@ ok('7 · no activity for over a month → dormant, not proposed', byId(stale, 'r
 const view = M.selfView(habit);
 ok('8 · selfView lists what it has learned (pattern, confidence, how many days)', view.length && view[0].confidence && typeof view[0].seenOnDays === 'number');
 
+/* ── 9 · an accepted accommodation becomes a LIVE setting (the read-back that makes it apply) ── */
+// `habit` had opens_view accepted in step 5 — activeSettings must now expose it as pin_view.
+const live = M.activeSettings(habit, now);
+ok('9 · an accepted habit surfaces as a live setting (pin_view = its label)', live.pin_view === "Marcus's graph");
+ok('9 · …and it reports which habit produced the setting (transparency)', live._applied.some(a => a.setting === 'pin_view' && a.habitId === "opens_view:Marcus's graph"));
+
+/* an UNACCEPTED (merely emerging) habit is NOT a live setting — nothing applies until you say yes */
+const emergingOnly = M.learn({ now, events: [
+  { pattern: 'own_work_first', t: d(5) }, { pattern: 'own_work_first', t: d(3) }, { pattern: 'own_work_first', t: d(1) },
+] });
+ok('9 · an established-but-unaccepted habit applies NOTHING (proposal-gated)', !M.activeSettings(emergingOnly, now).self_first);
+
+/* a REJECTED habit never applies, even though it was once seen */
+M.applyFeedback(emergingOnly, 'own_work_first:', 'accept', now);
+ok('9 · once accepted, it does apply', M.activeSettings(emergingOnly, now).self_first === true);
+M.applyFeedback(emergingOnly, 'own_work_first:', 'reject', now);
+ok('9 · a rejected accommodation stops applying', !M.activeSettings(emergingOnly, now).self_first);
+
+/* an accepted-but-abandoned (dormant) habit stops applying — accommodations track reality */
+const acceptedThenStale = M.learn({ now, events: [
+  { pattern: 'readiness_first', t: d(50) }, { pattern: 'readiness_first', t: d(48) }, { pattern: 'readiness_first', t: d(46) },
+] });
+M.applyFeedback(acceptedThenStale, 'readiness_first:', 'accept', now);
+ok('9 · an accepted habit gone dormant stops applying (tracks reality)', !M.activeSettings(acceptedThenStale, now).readiness_first);
+
 console.log(`\nself-model-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

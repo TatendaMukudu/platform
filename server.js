@@ -10964,14 +10964,29 @@ app.get('/api/brief', requireAuth, async (req, res) => {
       if (rt && rt.present && rt.label) routeTo = { label: rt.label };
     }
 
+    // The caller's OWN accepted accommodations (self-model) — private to them, read back
+    // here so an accepted proposal actually reshapes their brief. self_first is applied at
+    // the server (lead with the person's own reads); the rest the brief composer honours.
+    const habits = selfModel.learn({ priorHabits: selfModelLedger[_selfKey(code, userId)] || [], now });
+    selfModelLedger[_selfKey(code, userId)] = habits;
+    const prefs = selfModel.activeSettings(habits, now);
+    if (prefs.self_first) {
+      // The person likes to clear their own things first — put their own reads ahead of the rest.
+      const ownReads = (reasonLedger[code] || [])
+        .filter(b => b.subjectId === userId && !b.shared && b.status !== 'dormant' && !reason.isSuppressed(b, now))
+        .map(b => { const v = reason.subjectView(b); return { text: v.claim, meta: v.confidence, polarity: b.polarity, own: true }; });
+      const already = new Set(reads.map(r => r.text));
+      reads = [...ownReads.filter(r => !already.has(r.text)), ...reads];
+    }
+
     const name = _firstName(code, userId), timeOfDay = _timeOfDay(now);
-    const composed = brief.compose({ level, name, timeOfDay, reads, practices, routeTo, rollupHeadline, areaLabel });
+    const composed = brief.compose({ level, name, timeOfDay, reads, practices, routeTo, rollupHeadline, areaLabel, prefs });
     // The assistant speaks in OUR OWN voice (ai/voice) — deterministic, prediction-proof, no
     // model. It composes the opening from the same facts; nothing is invented or foretold.
     const opening = level === 'leader'
       ? voice.leaderOpening({ name, timeOfDay, count: reads.length, rollupHeadline, areaLabel, seed: userId + level })
       : voice.memberOpening({ name, timeOfDay, count: reads.length, seed: userId + level });
-    res.json({ ok: true, level, opening, items: composed.items, offers: composed.offers });
+    res.json({ ok: true, level, opening, items: composed.items, offers: composed.offers, applied: composed.applied || [] });
   } catch (e) {
     console.warn('[brief] failed:', e && e.message);
     res.json({ ok: true, level: 'member', opening: 'Here’s where things stand.', items: [], offers: [] });
