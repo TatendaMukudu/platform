@@ -5909,29 +5909,55 @@ async function todayLoadVoice() {
   let d, brief;
   try {
     [d, brief] = await Promise.all([
-      fetch('/api/reason/agenda', { headers: Auth._headers() }).then(r => r.json()),
-      fetch('/api/reason/brief', { headers: Auth._headers() }).then(r => r.json()).catch(() => null),
+      fetch('/api/reason/agenda', { headers: Auth._headers() }).then(r => r.json()).catch(() => null),
+      fetch('/api/brief', { headers: Auth._headers() }).then(r => r.json()).catch(() => null),
     ]);
   } catch (_) { box.innerHTML = ''; return; }
   const ripe = (d && d.agenda || []).filter(a => a.readiness === 'ripe').slice(0, 4);
-  if (!ripe.length) {
-    // Nothing to raise — but the assistant is still HERE. Say so, in first person, honestly:
-    // it's watching and will speak up the moment something's worth attention. The brain is
-    // never invisible, even when it's quiet.
-    box.innerHTML = `<div class="tdy-voice tdy-standby">
-      <span class="tdy-presence"><span class="r"></span><span class="d"></span></span>
-      <p>I'm watching your team — nothing needs you this second. Ask me anything above, and I'll speak up right here the moment something's worth your attention.</p>
-    </div>`;
-    return;
-  }
-  const propFor = bid => (d.proposals || []).find(p => p.beliefId === bid);
-  const opener = brief && brief.spoken ? `<div class="tdy-opener">${_escAdvisor(brief.spoken)}</div>` : '';
+  const esc = _escAdvisor;
+  const propFor = bid => (d && d.proposals || []).find(p => p.beliefId === bid);
+  // Remember which items are org-wide roll-ups, so a decision fans out to every group.
+  _todayRoll = {};
+  ripe.forEach(a => { if (a.rolled) _todayRoll[a.beliefId] = a.memberBeliefIds || []; });
+
+  // Lead with the node-aware brief: the assistant greets and OFFERS (governed next steps),
+  // then shows what it's seeing. The greeting is always there, so the brain is never invisible.
+  const opener = brief && brief.opening
+    ? `<div class="tdy-opener">${esc(brief.opening)}</div>`
+    : `<div class="tdy-opener">I'm watching your team — I'll speak up here the moment something's worth your attention.</div>`;
+  const offers = (brief && brief.offers || []).map(o =>
+    `<button class="tdy-cbtn" style="margin:0" onclick="todayBriefOffer('${esc(o.action)}')">${esc(o.text)}</button>`).join('');
+  const offersRow = offers ? `<div class="tdy-chips" style="margin-top:0.6rem">${offers}</div>` : '';
+  const beliefs = ripe.map(a => todayVoiceRow(a, propFor(a.beliefId))).join('');
+
   box.innerHTML = `
     <div class="tdy-voice">
-      <div class="tdy-vhead"><span class="tdy-presence"><span class="r"></span><span class="d"></span></span><span class="tdy-kicker">What I'm seeing</span></div>
+      <div class="tdy-vhead"><span class="tdy-presence"><span class="r"></span><span class="d"></span></span><span class="tdy-kicker">${ripe.length ? "What I'm seeing" : 'Today'}</span></div>
       ${opener}
-      ${ripe.map(a => todayVoiceRow(a, propFor(a.beliefId))).join('')}
+      ${beliefs}
+      ${offersRow}
     </div>`;
+}
+let _todayRoll = {};
+
+/* A brief OFFER, wired to its real destination — governed, nothing acts on its own. */
+function todayBriefOffer(action) {
+  if (action === 'report') return todayOpenReport();
+  if (action === 'set_assessment') return (typeof navigate === 'function') && navigate('assessments');
+  // recognise / anything else → into the composer, phrased for the leader to send.
+  const i = document.getElementById('today-ask');
+  if (i) { i.value = action === 'recognise' ? "What's going well that I should recognise?" : ''; if (i.value) todayAsk(); else i.focus(); }
+}
+
+/* Open the grounded team report (print-ready HTML → save as PDF). Fetched WITH auth, then
+   written into a new window opened synchronously so pop-up blockers don't eat it. */
+async function todayOpenReport() {
+  const w = window.open('', '_blank');
+  try {
+    const r = await fetch('/api/report/team', { headers: Auth._headers() });
+    const html = await r.text();
+    if (w) { w.document.open(); w.document.write(html); w.document.close(); }
+  } catch (e) { if (w) w.close(); if (typeof showToast === 'function') showToast('Could not open the report right now.', 'error'); }
 }
 
 /* One belief, spoken — telemetry chips, timing, honesty, and three in-place choices. */
@@ -5972,11 +5998,13 @@ async function todayReasonRespond(beliefId, response, btn) {
   const btns = row && row.querySelectorAll('button');
   if (btns) btns.forEach(b => { b.disabled = true; });
   try {
-    const r = await fetch('/api/reason/' + encodeURIComponent(beliefId) + '/feedback', {
-      method: 'POST', headers: Auth._headers(), body: JSON.stringify({ response }),
-    });
-    const j = await r.json();
-    if (!j.ok) throw new Error('failed');
+    // An org-wide roll-up fans a single decision out to every group it stands for.
+    const targets = _todayRoll[beliefId] && _todayRoll[beliefId].length ? _todayRoll[beliefId] : [beliefId];
+    const results = await Promise.all(targets.map(id =>
+      fetch('/api/reason/' + encodeURIComponent(id) + '/feedback', {
+        method: 'POST', headers: Auth._headers(), body: JSON.stringify({ response }),
+      }).then(r => r.json()).catch(() => ({ ok: false }))));
+    if (!results.some(j => j && j.ok)) throw new Error('failed');
     if (row) row.innerHTML = `<div class="tdy-settled"><span class="tk">${response === 'acted' ? '✓' : '·'}</span>${response === 'acted' ? "On it — I'll keep watching." : "Set aside — I won't raise this again for a while."}</div>`;
   } catch (e) {
     if (btns) btns.forEach(b => { b.disabled = false; });
