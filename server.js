@@ -47,6 +47,7 @@ const brief      = require('./ai/brief');
 const voice      = require('./ai/voice');
 const comprehend = require('./ai/comprehend');
 const languageGuard = require('./ai/language-guard');
+const audit      = require('./ai/audit');
 const behaviour  = require('./ai/behaviour');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
@@ -125,7 +126,7 @@ function scheduleSave() {
         orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
         proactivePrefs, insightSuppression, answerFeedback,
         orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
-        reasonLedger, selfModelLedger,
+        reasonLedger, selfModelLedger, auditLog,
         conversationSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
@@ -1448,6 +1449,9 @@ app.delete('/api/auth/users/:userId', requirePermission('delete_members'), (req,
 
   const result = _removePerson(code, userId, deleteData);
   if (!result.ok) return res.status(404).json(result);
+  // ACCOUNTABILITY — erasure (Art 17) is itself an accountable event. The trail records
+  // THAT a person's data was erased (who did it, whose data) without retaining the data.
+  if (deleteData) _audit(code, { actor: req.iqSession.userId, action: 'erasure', subjectIds: [userId], basis: 'right to erasure (Art 17)' });
   scheduleSave();
   res.json({ ok: true, deleteData });
 });
@@ -8080,6 +8084,22 @@ const reasonTickCache = {};       // orgCode → { ts, result }  (throttles the 
 // never shared with a leader above and never used to evaluate them. Persisted.
 const selfModelLedger = {};       // `${code}:${userId}` → [ habit ]
 
+// THE ACCOUNTABILITY TRAIL (ai/audit) — an append-only, content-free, tamper-evident
+// record of who accessed whose data, when, and on what basis. It is what lets an org
+// PROVE its access is scoped (GDPR Art 5(2) accountability; the trail behind Art 15
+// subject-access and Art 30 records of processing). Bounded per org; persisted.
+const auditLog = {};              // orgCode → [ entry ]  (hash-chained; see ai/audit)
+const AUDIT_CAP = 5000;           // keep the most recent N accesses per org
+function _audit(code, fields) {
+  if (!code) return;
+  try {
+    const entry = audit.record({ ...fields, at: Date.now() }, audit.tip(auditLog[code] || []));
+    if (!entry) return;                                   // unknown action → not recorded
+    auditLog[code] = audit.append(auditLog[code] || [], entry, AUDIT_CAP);
+    scheduleSave();
+  } catch (e) { console.warn('[audit] record failed:', e && e.message); }
+}
+
 function _orgPack(code) {
   const cfg = orgStateConfig[code];
   if (cfg && cfg.pack) return cfg.pack;
@@ -9036,6 +9056,10 @@ app.get('/api/reason/agenda', requireAuth, (req, res) => {
     const now = Date.now();
     const { agenda, proposals } = _reasonScopedAgenda(code, userId, now, req.query.refresh === '1');
     const ripe = agenda.filter(a => a.readiness === 'ripe');
+    // ACCOUNTABILITY — a leader reading beliefs about people is an accountable access.
+    // Record it (content-free): who, that it was an agenda read, and whose data it touched.
+    const touched = [...new Set(agenda.map(a => a.subjectId).filter(Boolean))];
+    if (touched.length) _audit(code, { actor: userId, action: 'agenda_view', subjectIds: touched, basis: 'scoped team read' });
     res.json({
       ok: true,
       generatedAt: new Date(now).toISOString(),
@@ -9101,6 +9125,8 @@ app.post('/api/reason/:beliefId/feedback', requireAuth, (req, res) => {
   reason.applyFeedback(ledger, beliefId, response, Date.now(), userId);
   reasonLedger[code] = ledger;
   delete reasonTickCache[code];   // next read reflects the response immediately
+  // ACCOUNTABILITY — a subject contesting a belief about them is a rectification event.
+  if (isSubject && response === 'wrong') _audit(code, { actor: userId, action: 'belief_contest', subjectIds: [userId], basis: 'subject rectification' });
   scheduleSave();
   res.json({ ok: true, beliefId, response, by: isSubject && !isLeader ? 'subject' : 'leader' });
 });
@@ -9149,6 +9175,82 @@ app.get('/api/reason/me', requireAuth, (req, res) => {
     console.warn('[reason/me] failed:', e && e.message);
     res.json({ ok: true, beliefs: [] });
   }
+});
+
+/* GET /api/me/data — SUBJECT ACCESS REQUEST (GDPR Art 15). A person's standing right to a
+   copy of everything the system holds ABOUT THEM, assembled read-only in one place: the
+   reads the reasoner holds about them (their own subject-view, never the leader-facing
+   urgency/challenge), the working habits their PRIVATE self-model has learned, the notes
+   they authored, and — the accountability half — the content-free trail of who has accessed
+   their data and why. Strictly self: a person can only ever request their OWN record. The
+   request is itself logged (a subject_access event), because exercising the right is an
+   access too. This is what makes IntelliQ answerable to the people it's about. */
+app.get('/api/me/data', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  try {
+    const now = Date.now();
+    const me = orgUsers[code]?.[userId] || {};
+    // The reads held about me — my own transparent view, not the leader-facing projection.
+    const beliefs = (reasonLedger[code] || [])
+      .filter(b => b.subjectId === userId && !b.shared)
+      .map(b => reason.subjectView(b));
+    // My private self-model — the working habits IntelliQ has learned about me.
+    const habits = selfModel.selfView(selfModelLedger[_selfKey(code, userId)] || []);
+    // The notes I authored (my own words — the content I put in).
+    const myNotes = Object.values(orgNotes)
+      .filter(n => n && n.orgCode === code && n.authorId === userId)
+      .map(n => ({ id: n.id, type: n.type, sensitivity: n.sensitivity || 'normal', createdAt: n.createdAt, content: n.content }));
+    // The accountability trail — who accessed my data, when, on what basis (content-free).
+    const accessTrail = audit.subjectTrail(auditLog[code] || [], userId)
+      .map(t => ({ ...t, at: new Date(t.at).toISOString() }));
+    // Exercising the right is itself an access — record it.
+    _audit(code, { actor: userId, action: 'subject_access', subjectIds: [userId], basis: 'subject access request (Art 15)' });
+    res.json({
+      ok: true,
+      subject: { id: userId, name: me.name || null, role: me.role || null },
+      generatedAt: new Date(now).toISOString(),
+      held: {
+        reads: beliefs,                 // what the reasoner believes about me (my view)
+        workingHabits: habits,          // my private self-model
+        myNotes,                        // notes I authored
+        accessTrail,                    // who has accessed my data
+      },
+      rights: {
+        rectify: 'You can contest any read here via /api/reason/:beliefId/feedback (response "wrong").',
+        erase: 'You can ask an administrator to erase your data (right to erasure, Art 17).',
+      },
+    });
+  } catch (e) {
+    console.warn('[me/data] failed:', e && e.message);
+    res.status(500).json({ ok: false, error: 'export_failed' });
+  }
+});
+
+/* GET /api/admin/access-log — the ACCOUNTABILITY REVIEW. An administrator (or a manage-
+   settings leader) can review who has accessed personal data across the org, and verify the
+   trail hasn't been tampered with (the hash chain). Content-free by construction — it shows
+   accesses, never the data accessed. Optional ?subjectId= or ?actor= to narrow. This is the
+   evidence an org shows a regulator, a parent, or its own board that access is scoped. */
+app.get('/api/admin/access-log', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'manage_settings')) {
+    return res.status(403).json({ ok: false, error: 'Permission denied' });
+  }
+  const log = auditLog[code] || [];
+  const subjectId = req.query.subjectId ? String(req.query.subjectId) : null;
+  const actor = req.query.actor ? String(req.query.actor) : null;
+  let entries;
+  if (subjectId) entries = audit.subjectTrail(log, subjectId);
+  else if (actor) entries = audit.actorTrail(log, actor);
+  else entries = log.map(e => ({ seq: e.seq, actor: e.actor, action: e.action, subjectIds: e.subjectIds, basis: e.basis, at: e.at }));
+  const integrity = audit.verify(log);   // does the chain still hold end-to-end?
+  res.json({
+    ok: true,
+    total: log.length,
+    entries: entries.map(e => ({ ...e, at: new Date(e.at).toISOString() })),
+    integrity,   // { ok, brokenAt } — tamper-evidence for the whole trail
+  });
 });
 
 /* ─── SCOPED ORGANISATIONAL ANSWERING (ai/org-answer) — a leader or member asks a plain
@@ -11029,6 +11131,12 @@ app.get('/api/report/team', requireAuth, (req, res) => {
       { heading: 'Confirmed practices', facts: practices, emptyNote: 'No practices are confirmed into your playbook yet.' },
     ],
   });
+  // ACCOUNTABILITY — rendering a grounded report about people is an accountable access.
+  try {
+    const { agenda } = _reasonScopedAgenda(code, userId, now, false);
+    const touched = [...new Set(agenda.map(a => a.subjectId).filter(Boolean))];
+    _audit(code, { actor: userId, action: 'report_view', subjectIds: touched, basis: 'grounded team report' });
+  } catch (_) {}
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(report.renderHtml(model));
 });
@@ -13780,6 +13888,7 @@ function _loadAllStores(data) {
   Object.assign(orgPlaybookDismissed, data.orgPlaybookDismissed || {});
   Object.assign(reasonLedger,      data.reasonLedger      || {});
   Object.assign(selfModelLedger,   data.selfModelLedger   || {});
+  Object.assign(auditLog,          data.auditLog          || {});
   Object.assign(conversationSessions, data.conversationSessions || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
@@ -13868,7 +13977,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: grounded conversation engine (assessment/check-in intake)
   conversationSessions, _assessmentMemberProjection, _conversationEvidenceByRef,
   // exported for the truth layer: the reasoner heartbeat (background sweep + event nudge)
-  _reasonSweep, _reasonNudge, _reasonScopedAgenda, reasonLedger, reasonTickCache };
+  _reasonSweep, _reasonNudge, _reasonScopedAgenda, reasonLedger, reasonTickCache,
+  // exported for the truth layer: the accountability trail (access log + SAR + tamper-evidence)
+  _audit, auditLog, _removePerson };
 
 if (require.main === module) (async () => {
   try {
