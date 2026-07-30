@@ -110,7 +110,7 @@ function reflectSignal(signal = {}) {
     processNotPerson: true,
     protectsGood: s.polarity === 'strength',
     challengesFriction: s.polarity === 'friction',
-    suggestedSurface: s.polarity === 'strength' ? 'worth_celebrating' : 'needs_attention',
+    suggestedSurface: s.polarity === 'strength' ? 'process_strength' : 'process_attention',
     basis: s.level === 'personal' ? s.basis : [],
     limitations: [...new Set(['not_causal', ...s.limitations])],
     safe: true,
