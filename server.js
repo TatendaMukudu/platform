@@ -54,6 +54,7 @@ const delivery   = require('./ai/delivery');
 // priority office ranks). Turns every engine's output into ONE scoped, ranked read.
 const outcomeIntel     = require('./ai/outcome-intelligence');
 const processReflection = require('./ai/process-reflection');
+const processObs       = require('./ai/process-observations');
 const intelFeed        = require('./ai/intelligence-feed');
 const scopedPacket     = require('./ai/scoped-intelligence-packet');
 const behaviour  = require('./ai/behaviour');
@@ -8446,8 +8447,20 @@ function _intelligencePacket(code, userId, now = Date.now()) {
     feedInput.outcomeIntelligence = { briefs: patterns.map(pt => outcomeIntel.earlySignalBrief({ patternType: pt, signalCount: 1, outcomeSummary: summary })).filter(Boolean) };
   } catch (_) {}
   try {
-    const signals = (habits || []).map(h => processReflection.fromSelfModelHabit(h));
-    feedInput.processReflection = { reflections: processReflection.reflect(signals).reflections };
+    // Process reflection now draws on THREE grounded sources, combined:
+    //   • personal working habits (self-model),
+    //   • the ORG's action→outcome recurrence — how the team responds to each pattern,
+    //     turned into STRUCTURAL, aggregate process signals (never a person) via the
+    //     outcome-intelligence summary → process-observations deriver.
+    const personal = (habits || []).map(h => processReflection.fromSelfModelHabit(h));
+    let org = [];
+    try {
+      const interventions = (orgInterventions[code] || [])
+        .filter(iv => iv && iv.recordedOutcome)
+        .map(iv => ({ id: iv.id, patternType: iv.patternType, interventionType: iv.action, outcome: iv.recordedOutcome, subjectId: iv.targetMemberId, at: iv.completedAt || iv.createdAt }));
+      org = processObs.fromOutcomeSummary(outcomeIntel.summarize(interventions));
+    } catch (_) {}
+    feedInput.processReflection = { reflections: processReflection.reflect([...org, ...personal]).reflections };
   } catch (_) {}
   let questions = [];
   try { questions = (_pendingInquiries(code, userId, now) || []).map(q => ({ text: q.question, kind: 'process_challenge', reason: q.why })); } catch (_) {}
