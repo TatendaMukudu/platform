@@ -49,6 +49,7 @@ const comprehend = require('./ai/comprehend');
 const languageGuard = require('./ai/language-guard');
 const audit      = require('./ai/audit');
 const googleProvider = require('./ai/providers/google');
+const delivery   = require('./ai/delivery');
 const behaviour  = require('./ai/behaviour');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
@@ -127,7 +128,7 @@ function scheduleSave() {
         orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
         proactivePrefs, insightSuppression, answerFeedback,
         orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
-        reasonLedger, selfModelLedger, auditLog,
+        reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs,
         conversationSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
@@ -8103,6 +8104,31 @@ const selfModelLedger = {};       // `${code}:${userId}` → [ habit ]
 // subject-access and Art 30 records of processing). Bounded per org; persisted.
 const auditLog = {};              // orgCode → [ entry ]  (hash-chained; see ai/audit)
 const AUDIT_CAP = 5000;           // keep the most recent N accesses per org
+
+// OUTBOUND DELIVERY (ai/delivery) — the last mile. Per-person opt-in prefs + their web-push
+// subscriptions, both PRIVATE to the person and persisted. The actual web-push send is an
+// OPTIONAL capability: it lights up only when the `web-push` library is installed AND VAPID
+// keys are configured (like a connector's live fetch). Until then the pipeline still
+// composes, gates, and audits — the network hop is the only thing gated by config.
+const deliveryPrefs = {};         // userKey → prefs (see ai/delivery.DEFAULT_PREFS)
+const pushSubs      = {};         // userKey → [ web-push subscription ]
+let _webpush = null; try { _webpush = require('web-push'); } catch (_) { /* optional dep */ }
+const VAPID_PUBLIC  = process.env.VAPID_PUBLIC_KEY  || '';
+const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY || '';
+const PUSH_READY = !!(_webpush && VAPID_PUBLIC && VAPID_PRIVATE);
+if (PUSH_READY) { try { _webpush.setVapidDetails('mailto:noreply@intelliq.app', VAPID_PUBLIC, VAPID_PRIVATE); } catch (e) { console.warn('[delivery] VAPID setup failed:', e.message); } }
+
+// No-egress orgs never reach out; a manage-settings admin can also disable outbound per org
+// (orgMeta[code].outboundDisabled). Both are checked before anything leaves the box.
+function _outboundAllowed(code) {
+  if (ai.deterministicOnly()) return false;
+  return !(orgMeta[code] && orgMeta[code].outboundDisabled === true);
+}
+async function _sendPush(sub, payload) {
+  if (!PUSH_READY) return { ok: false, reason: 'push_not_configured' };
+  try { await _webpush.sendNotification(sub, JSON.stringify(payload)); return { ok: true }; }
+  catch (e) { return { ok: false, reason: String(e && e.message || 'push_failed').slice(0, 120), statusCode: e && e.statusCode }; }
+}
 function _audit(code, fields) {
   if (!code) return;
   try {
@@ -11108,6 +11134,173 @@ app.get('/api/brief', requireAuth, async (req, res) => {
   }
 });
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   OUTBOUND DELIVERY (ai/delivery) — the last mile. IntelliQ reaches a person off-
+   platform (web-push now; email/Slack later) with a governed, grounded, well-timed
+   rundown — never a prediction, never a sensitive read, never spam. Consent-first
+   (opt-in per person), org- and no-egress-gated, and every send is audit-logged.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* The reads a person's digest/alert may draw on — the SAME scoped, grounded reads the
+   brief uses, each tagged with careFlag so the outbound gate can drop anything sensitive.
+   Care-flag is resolved from the ledger and FAILS SAFE: an unresolvable belief is treated
+   as sensitive and excluded, so a wellbeing read can never leak off-platform. */
+function _deliveryReadsFor(code, userId, now) {
+  const level = _actorLevel(code, userId);
+  const name  = _firstName(code, userId);
+  const ledger = reasonLedger[code] || [];
+  const byId = new Map(ledger.map(b => [b.id, b]));
+  const careOf = (item) => {
+    if (item.rolled) return (item.memberBeliefIds || []).some(id => (byId.get(id) || {}).careFlag);
+    const b = byId.get(item.beliefId);
+    return b ? !!b.careFlag : true;                 // fail safe: unknown → sensitive → excluded
+  };
+  let reads = [];
+  if (level === 'leader') {
+    const { agenda } = _reasonScopedAgenda(code, userId, now, false);
+    reads = agenda.map(a => ({ text: a.claim, readiness: a.readiness, urgency: a.urgency, careFlag: careOf(a) }));
+  } else {
+    reads = ledger
+      .filter(b => b.subjectId === userId && !b.shared && b.status !== 'dormant' && !reason.isSuppressed(b, now))
+      .map(b => { const v = reason.subjectView(b); return { text: v.claim, readiness: b.readiness, urgency: b.urgency, careFlag: !!b.careFlag }; });
+  }
+  const timeOfDay = _timeOfDay(now);
+  const nEligible = delivery.eligibleReads(reads).length;
+  const opening = level === 'leader'
+    ? voice.leaderOpening({ name, timeOfDay, count: nEligible, seed: userId + level })
+    : voice.memberOpening({ name, timeOfDay, count: nEligible, seed: userId + level });
+  return { level, name, opening, reads };
+}
+
+/* Compose one person's digest and (if the decision says so) deliver it. `force` bypasses the
+   cadence/quiet-hours gate for an explicit self-test, but NEVER the privacy gate (sensitive
+   reads are always excluded) or consent (a channel/subscription must exist to actually send).
+   Returns what happened — the payload, whether it was sent, and how many pushes landed. */
+async function _deliverDigest(code, userId, { force = false } = {}) {
+  const now = Date.now();
+  const key = userKey(code, userId);
+  const prefs = { ...delivery.DEFAULT_PREFS, ...(deliveryPrefs[key] || {}) };
+  const { name, opening, reads } = _deliveryReadsFor(code, userId, now);
+  const eligible = delivery.eligibleReads(reads);
+  const decision = force
+    ? { send: eligible.length > 0 || true, reason: 'test' }
+    : delivery.shouldDeliver({ prefs, now, hasContent: eligible.length > 0 });
+  if (!decision.send) return { sent: false, reason: decision.reason };
+  const payload = delivery.composeDigest({ name, opening, reads, url: '/' });
+  const subs = pushSubs[key] || [];
+  let delivered = 0, gone = [];
+  for (const s of subs) {
+    const r = await _sendPush(s, payload);
+    if (r.ok) delivered++;
+    else if (r.statusCode === 404 || r.statusCode === 410) gone.push(s.endpoint);   // subscription expired — prune
+  }
+  if (gone.length) { pushSubs[key] = subs.filter(s => !gone.includes(s.endpoint)); }
+  prefs.lastSentAt = now;
+  deliveryPrefs[key] = prefs;
+  _audit(code, { actor: 'system', action: 'outbound_delivery', subjectIds: [userId], basis: `digest · ${payload.itemCount} item(s) · ${delivered}/${subs.length} push${force ? ' · test' : ''}` });
+  scheduleSave();
+  return { sent: true, payload, delivered, subscriptions: subs.length, channelReady: PUSH_READY };
+}
+
+/* The DELIVERY SWEEP — the heartbeat's outbound beat. For every org that permits outbound,
+   every person opted in gets their digest considered (the gate decides if it actually goes).
+   Bounded + per-person isolated: one failure never stops the rest. Returns how many sent. */
+async function _deliverySweep() {
+  let sent = 0;
+  for (const code of Object.keys(orgUsers)) {
+    if (!_outboundAllowed(code)) continue;
+    for (const uid of Object.keys(orgUsers[code] || {})) {
+      const key = userKey(code, uid);
+      const p = deliveryPrefs[key];
+      if (!p || !p.enabled) continue;                 // opt-in only
+      try { const r = await _deliverDigest(code, uid, { force: false }); if (r.sent) sent++; }
+      catch (e) { console.warn(`[delivery] sweep failed for ${code}:${uid}:`, e && e.message); }
+    }
+  }
+  return sent;
+}
+
+/* GET /api/delivery/config — what the client needs to subscribe: whether push is live on
+   this deployment, and the VAPID public key to register a subscription with. */
+app.get('/api/delivery/config', requireAuth, (req, res) => {
+  const { orgCode: code } = req.iqSession;
+  res.json({ ok: true, pushReady: PUSH_READY, outboundAllowed: _outboundAllowed(code), vapidPublicKey: VAPID_PUBLIC || null });
+});
+
+/* GET/POST /api/delivery/prefs — a person's OWN delivery preferences (opt-in, channels,
+   cadence, quiet hours, timezone). Strictly self. */
+app.get('/api/delivery/prefs', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  res.json({ ok: true, prefs: { ...delivery.DEFAULT_PREFS, ...(deliveryPrefs[userKey(code, userId)] || {}) }, outboundAllowed: _outboundAllowed(code) });
+});
+app.post('/api/delivery/prefs', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const key = userKey(code, userId);
+  const cur = { ...delivery.DEFAULT_PREFS, ...(deliveryPrefs[key] || {}) };
+  const b = req.body || {};
+  const next = { ...cur };
+  if (typeof b.enabled === 'boolean') next.enabled = b.enabled;
+  if (b.channels && typeof b.channels === 'object') next.channels = { push: !!b.channels.push, email: !!b.channels.email };
+  if (b.cadence === 'daily' || b.cadence === 'off') next.cadence = b.cadence;
+  if (Number.isFinite(b.quietStart)) next.quietStart = Math.max(0, Math.min(23, Math.floor(b.quietStart)));
+  if (Number.isFinite(b.quietEnd))   next.quietEnd   = Math.max(0, Math.min(23, Math.floor(b.quietEnd)));
+  if (Number.isFinite(b.tzOffsetMin)) next.tzOffsetMin = Math.max(-840, Math.min(840, Math.floor(b.tzOffsetMin)));
+  deliveryPrefs[key] = next;
+  scheduleSave();
+  res.json({ ok: true, prefs: next });
+});
+
+/* POST /api/delivery/subscribe — store a web-push subscription for the caller (self only).
+   POST /api/delivery/unsubscribe — drop one by endpoint. */
+app.post('/api/delivery/subscribe', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_outboundAllowed(code)) return res.status(403).json({ ok: false, error: 'outbound_disabled' });
+  const sub = req.body && req.body.subscription;
+  if (!sub || !sub.endpoint || !sub.keys) return res.status(400).json({ ok: false, error: 'invalid_subscription' });
+  const key = userKey(code, userId);
+  const list = pushSubs[key] = (pushSubs[key] || []).filter(s => s.endpoint !== sub.endpoint);
+  list.push({ endpoint: String(sub.endpoint).slice(0, 600), keys: { p256dh: String(sub.keys.p256dh || '').slice(0, 200), auth: String(sub.keys.auth || '').slice(0, 100) } });
+  // Subscribing implies the person wants push on — turn the channel on (they can still tune).
+  const prefs = deliveryPrefs[key] = { ...delivery.DEFAULT_PREFS, ...(deliveryPrefs[key] || {}) };
+  prefs.enabled = true; prefs.channels = { ...prefs.channels, push: true };
+  scheduleSave();
+  res.json({ ok: true, subscriptions: list.length, pushReady: PUSH_READY });
+});
+app.post('/api/delivery/unsubscribe', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const key = userKey(code, userId);
+  const endpoint = req.body && req.body.endpoint;
+  if (endpoint) pushSubs[key] = (pushSubs[key] || []).filter(s => s.endpoint !== endpoint);
+  else pushSubs[key] = [];
+  scheduleSave();
+  res.json({ ok: true, subscriptions: (pushSubs[key] || []).length });
+});
+
+/* GET /api/delivery/preview — the digest that WOULD be delivered right now, with the send
+   decision (why it would or wouldn't go). No send, no side effects. Self only — proof to the
+   person of exactly what leaves the box (and that nothing sensitive does). */
+app.get('/api/delivery/preview', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const now = Date.now();
+  const key = userKey(code, userId);
+  const prefs = { ...delivery.DEFAULT_PREFS, ...(deliveryPrefs[key] || {}) };
+  const { name, opening, reads } = _deliveryReadsFor(code, userId, now);
+  const eligible = delivery.eligibleReads(reads);
+  const payload = delivery.composeDigest({ name, opening, reads, url: '/' });
+  const decision = delivery.shouldDeliver({ prefs, now, hasContent: eligible.length > 0 });
+  const alertRead = delivery.alertWorthy(reads);
+  res.json({ ok: true, payload, decision, wouldAlert: alertRead ? delivery.composeAlert({ name, read: alertRead, url: '/' }) : null, excludedSensitive: reads.length - eligible.length });
+});
+
+/* POST /api/delivery/test — send yourself one now (bypasses cadence/quiet hours, never the
+   privacy gate). Requires a real subscription/channel to actually land. Self only. */
+app.post('/api/delivery/test', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_outboundAllowed(code)) return res.status(403).json({ ok: false, error: 'outbound_disabled' });
+  const r = await _deliverDigest(code, userId, { force: true });
+  res.json({ ok: true, ...r });
+});
+
 /* GET /api/report/team — the first ARTIFACT: a grounded team report. Print-ready HTML the
    browser saves as a PDF, OR — with ?format=csv (or the /api/report/team.csv path) — the
    SAME grounded facts as a board-ready, spreadsheet-openable CSV. Both render only what the
@@ -13970,6 +14163,8 @@ function _loadAllStores(data) {
   Object.assign(reasonLedger,      data.reasonLedger      || {});
   Object.assign(selfModelLedger,   data.selfModelLedger   || {});
   Object.assign(auditLog,          data.auditLog          || {});
+  Object.assign(deliveryPrefs,     data.deliveryPrefs     || {});
+  Object.assign(pushSubs,          data.pushSubs          || {});
   Object.assign(conversationSessions, data.conversationSessions || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
@@ -14060,7 +14255,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: the reasoner heartbeat (background sweep + event nudge)
   _reasonSweep, _reasonNudge, _reasonScopedAgenda, reasonLedger, reasonTickCache,
   // exported for the truth layer: the accountability trail (access log + SAR + tamper-evidence)
-  _audit, auditLog, _removePerson };
+  _audit, auditLog, _removePerson,
+  // exported for the truth layer: outbound delivery (compose + gate + sweep)
+  _deliverDigest, _deliverySweep, _deliveryReadsFor, deliveryPrefs, pushSubs };
 
 if (require.main === module) (async () => {
   try {
@@ -14158,6 +14355,12 @@ if (require.main === module) (async () => {
     // block is live-server only). See _reasonSweep.
     try { const n = _reasonSweep(); if (n) console.log(`[reason] heartbeat — reasoned over ${n} org(s) on boot`); } catch (e) { console.warn('[reason] boot sweep failed:', e.message); }
     setInterval(() => { try { _reasonSweep(); } catch (e) { console.warn('[reason] heartbeat failed:', e.message); } }, 30 * 60 * 1000).unref();
+
+    // The outbound beat — after each heartbeat the reads are fresh, so consider a digest for
+    // everyone opted in (the gate decides if it actually goes: content, quiet hours, once a
+    // day). Runs hourly; sends nothing to no-egress orgs. Push lights up when configured.
+    console.log(`[delivery] outbound ${PUSH_READY ? 'READY (web-push + VAPID configured)' : 'staged (compose+gate+audit; set VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY + install web-push to send)'}`);
+    setInterval(() => { _deliverySweep().then(n => { if (n) console.log(`[delivery] heartbeat — delivered ${n} digest(s)`); }).catch(e => console.warn('[delivery] sweep failed:', e.message)); }, 60 * 60 * 1000).unref();
 
     // Connection poller — every 20 min. Respects pause, backoff (nextAttemptAt),
     // and rate-limit; processes a BOUNDED number per tick and round-robins across
