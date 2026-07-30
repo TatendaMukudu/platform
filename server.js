@@ -50,6 +50,12 @@ const languageGuard = require('./ai/language-guard');
 const audit      = require('./ai/audit');
 const googleProvider = require('./ai/providers/google');
 const delivery   = require('./ai/delivery');
+// The unified attention pipeline (engines discover → feed normalises → packet scopes →
+// priority office ranks). Turns every engine's output into ONE scoped, ranked read.
+const outcomeIntel     = require('./ai/outcome-intelligence');
+const processReflection = require('./ai/process-reflection');
+const intelFeed        = require('./ai/intelligence-feed');
+const scopedPacket     = require('./ai/scoped-intelligence-packet');
 const behaviour  = require('./ai/behaviour');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
@@ -8416,6 +8422,55 @@ app.post('/api/inquiry/:id/dismiss', requireAuth, (req, res) => {
   res.json({ ok: true, dismissed: id, until: new Date(inquiryDismissed[code][id]).toISOString() });
 });
 
+/* THE UNIFIED ATTENTION PIPELINE — every engine's output, in ONE scoped, ranked read.
+   Engines discover (reasoner, proactive, self-model, playbook, outcome history, process
+   reflection, inquiry) → intelligence-feed normalises → scoped-intelligence-packet applies
+   the org web + priority-office ranks. Each source is gathered defensively, so a single
+   engine failing never sinks the packet. Scoping is the packet's job; we hand it the
+   reader's nodes + the already-scoped reasoner agenda, and it enforces the web again. */
+function _intelligencePacket(code, userId, now = Date.now()) {
+  const nodes = Object.values(orgNodes[code] || {});   // org-graph expects an array of node records
+  const feedInput = {};
+  let habits = [];
+  try { const { agenda, proposals } = _reasonScopedAgenda(code, userId, now, false); feedInput.reasoner = { agenda, proposals }; } catch (_) {}
+  // (proactive insights are structured per-group, not a flat list, and overlap the reasoner
+  //  agenda — left out of the feed for now; the reasoner is the primary attention source.)
+  try {
+    habits = selfModel.learn({ priorHabits: selfModelLedger[_selfKey(code, userId)] || [], now });
+    feedInput.selfModel = { habits, proposals: selfModel.proposals(habits, now), settings: selfModel.activeSettings(habits, now) };
+  } catch (_) {}
+  try { feedInput.orgPlaybook = { candidates: _deriveOrgCandidates(code) || [], entries: (orgPlaybook[code] || []).filter(e => e && e.status === 'active') }; } catch (_) {}
+  try {
+    const summary = outcomeIntel.summarize(actionsLog[code] || []);
+    const patterns = [...new Set(((feedInput.reasoner && feedInput.reasoner.agenda) || []).map(a => a.kind).filter(Boolean))];
+    feedInput.outcomeIntelligence = { briefs: patterns.map(pt => outcomeIntel.earlySignalBrief({ patternType: pt, signalCount: 1, outcomeSummary: summary })).filter(Boolean) };
+  } catch (_) {}
+  try {
+    const signals = (habits || []).map(h => processReflection.fromSelfModelHabit(h));
+    feedInput.processReflection = { reflections: processReflection.reflect(signals).reflections };
+  } catch (_) {}
+  let questions = [];
+  try { questions = (_pendingInquiries(code, userId, now) || []).map(q => ({ text: q.question, kind: 'process_challenge', reason: q.why })); } catch (_) {}
+
+  const feed = intelFeed.collect(feedInput, {});
+  return scopedPacket.buildPacket({ actor: { userId }, nodes, feed, questions });
+}
+
+/* GET /api/intelligence/packet — the unified read: one scoped, ranked queue drawn from
+   every engine, with a single lead item and section grouping the UI can render. Leader/
+   insights-gated (a member gets their own self-scoped packet). Read-only; every suggestion
+   inside stays proposal-gated. */
+app.get('/api/intelligence/packet', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  try {
+    const packet = _intelligencePacket(code, userId);
+    res.json({ ok: true, lead: packet.lead, queue: packet.queue, sections: packet.sections, upwardQuestions: packet.upwardQuestions, role: packet.role, empty: packet.empty, safe: packet.safe });
+  } catch (e) {
+    console.warn('[intelligence/packet] failed:', e && e.message);
+    res.json({ ok: true, lead: null, queue: [], sections: {}, empty: true });
+  }
+});
+
 /* GET /api/org-state — RESTRICTED diagnostic (leader-only). Exposes the derived
    structure + claim states + readiness + provenance KIND — never raw evidence text,
    never private evidence, never internal policy objects. */
@@ -14382,7 +14437,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: outbound delivery (compose + gate + sweep)
   _deliverDigest, _deliverySweep, _deliveryReadsFor, deliveryPrefs, pushSubs,
   // exported for the truth layer: autonomous inquiry (proactive, governed questions)
-  _pendingInquiries, _lifecycleUncertainties, inquiryDismissed };
+  _pendingInquiries, _lifecycleUncertainties, inquiryDismissed,
+  // exported for the truth layer: the unified attention pipeline (feed → scope → rank)
+  _intelligencePacket };
 
 if (require.main === module) (async () => {
   try {
