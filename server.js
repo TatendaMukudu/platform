@@ -6244,6 +6244,7 @@ function _processBatch(code, conn, data, run, finalize) {
   });
   const r = _ingestGeneric(code, { records: upserts }, conn.createdBy, { source: conn.source || conn.name || 'connector', provider, requireApprovedMapping: true, connector: conn.id, sourceObject: conn.url, defaultSubjectId: conn.oauth?.subject === 'self' ? conn.createdBy : undefined });
   try { _reresolveUnmatched(code, { by: 'system', method: 'rule', reason: 'sync completed' }); } catch (_) {}
+  if (r && (r.imported || r.held)) _reasonNudge(code);   // AMBIENT SENSING — fresh connector data → re-reason
   conn.needsMappingApproval = !!r.needsMapping; conn.driftPaused = !!r.drift;
   Object.assign(run.metrics, { promoted: r.imported || 0, held: r.held || 0, duplicates: r.duplicates || 0, unresolved: r.unmatched || 0, drift: r.drift ? 1 : 0, deletions });
   if (!r.drift) {
@@ -6466,6 +6467,7 @@ const _CALENDAR_ADAPTERS = {
         attendees: Array.isArray(ev.attendees) ? ev.attendees : [], agenda: ev.agenda || '', groupRef: ev.groupRef || null,
         createdBy: ev.createdBy || 'system', createdAt: new Date().toISOString(), status: 'scheduled', attendance: {} };
       (orgCalendar[code] = orgCalendar[code] || []).push(rec);
+      _reasonNudge(code);   // AMBIENT SENSING — a new event changes timing/urgency → re-reason
       return rec;
     },
     get(code, id) { return (orgCalendar[code] || []).find(e => e.id === id) || null; },
@@ -11672,7 +11674,13 @@ function _resolveUserIdByName(code, name) {
 /* Emit a signal from an input touchpoint — never throws (input flow must not
    break if signal capture fails). This is how EVERY input becomes signal. */
 function _emitSignalSafe(code, raw, createdBy) {
-  try { return _ingestSignal(code, raw, createdBy); } catch (e) { console.warn('[signal] emit failed:', e.message); return null; }
+  try {
+    const r = _ingestSignal(code, raw, createdBy);
+    // AMBIENT SENSING — a new signal is new reality. Nudge the reasoner so the next read
+    // re-reasons WITH it, instead of waiting for the 30-min heartbeat. Cheap (cache clear).
+    _reasonNudge(code);
+    return r;
+  } catch (e) { console.warn('[signal] emit failed:', e.message); return null; }
 }
 
 /* Recent signals for a subject (used by the AI layer). */
