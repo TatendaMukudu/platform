@@ -1598,8 +1598,14 @@ async function refreshProactiveBadge() {
     const n = (j && j.count) || 0;
     const dot = document.getElementById('iq-gear-badge');
     if (!dot) return;
-    if (n > 0) { dot.textContent = n > 9 ? '9+' : String(n); dot.style.display = 'flex'; }
-    else { dot.style.display = 'none'; }
+    if (n > 0) {
+      dot.textContent = n > 9 ? '9+' : String(n);
+      dot.style.display = 'flex';
+      dot.style.pointerEvents = 'auto';
+      dot.style.cursor = 'pointer';
+      dot.title = `${n} thing${n === 1 ? '' : 's'} IntelliQ wants to check`;
+      dot.onclick = () => navigate('leader-home');   // take me to where the questions are
+    } else { dot.style.display = 'none'; }
   } catch (_) { /* cosmetic — never block the app */ }
 }
 
@@ -5925,10 +5931,48 @@ async function renderToday() {
       <div class="tdy-privacy">Private by default · nothing is saved or shared until you confirm</div>
     </div>
     <div id="today-voice"></div>
+    <div id="today-inquiry"></div>
     <div id="today-feed"><div style="padding:1.2rem;text-align:center;color:var(--text-muted)">Gathering what needs you…</div></div>
     <div style="text-align:center;margin-top:1.2rem"><button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="renderIntelligence(true)">Open the full team briefing →</button></div>`;
   todayLoadVoice();
+  todayLoadInquiry();
   todayLoadFeed();
+}
+
+/* AUTONOMOUS INQUIRY, in the flow — the questions the system itself wants to ask, surfaced
+   right where you already are. Grounded + governed upstream (nothing private, nothing
+   leading, nothing it could answer itself); here we just show them, each with why it
+   matters and a "Not now" that stands it down so it never nags. Reuses /api/inquiry. */
+async function todayLoadInquiry() {
+  const box = document.getElementById('today-inquiry');
+  if (!box) return;
+  let j;
+  try { j = await fetch('/api/inquiry/pending?limit=3', { headers: Auth._headers() }).then(r => r.ok ? r.json() : null).catch(() => null); }
+  catch (_) { box.innerHTML = ''; return; }
+  const qs = (j && j.questions) || [];
+  if (!qs.length) { box.innerHTML = ''; return; }
+  const esc = _escAdvisor;
+  box.innerHTML = `
+    <div class="tdy-voice tdy-inquiry">
+      <div class="tdy-vhead"><span class="tdy-kicker">IntelliQ wants to check</span></div>
+      ${qs.map(q => `
+        <div class="tdy-belief" data-inq="${esc(q.id)}">
+          <div class="tdy-claim">${esc(q.question)}</div>
+          ${q.why ? `<div class="tdy-why">${esc(q.why)}</div>` : ''}
+          <div class="tdy-belief-actions">
+            <button class="tdy-cbtn" onclick="todayDismissInquiry('${esc(q.id)}')">Not now</button>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+async function todayDismissInquiry(id) {
+  try { await fetch('/api/inquiry/' + encodeURIComponent(id) + '/dismiss', { method: 'POST', headers: Auth._headers(), body: '{}' }); } catch (_) {}
+  const row = document.querySelector(`#today-inquiry [data-inq="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`);
+  if (row) row.remove();
+  const box = document.getElementById('today-inquiry');
+  if (box && !box.querySelector('[data-inq]')) box.innerHTML = '';   // last one gone → clear the block
+  if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
 }
 
 /* ── THE VOICE — the reasoner, read aloud ─────────────────────────────────────

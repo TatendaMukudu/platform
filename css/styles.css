@@ -2528,6 +2528,10 @@ details.intel-collapse[open] > summary::after { transform: rotate(90deg); }
 .tdy-opener{font-size:.94rem;line-height:1.5;color:var(--text-primary);margin-bottom:.7rem;max-width:44ch}
 .tdy-belief{padding:.65rem 0;border-top:1px solid var(--border)}
 .tdy-belief:first-of-type{border-top:0;padding-top:.1rem}
+/* The autonomous-inquiry block reads as the system ASKING, not alerting — a calm accent
+   rail, distinct from the reasoner's "what I'm seeing" voice above it. */
+.tdy-inquiry{margin-top:.9rem;border-left:2px solid var(--accent);padding-left:.85rem}
+.tdy-belief-actions{margin-top:.5rem;display:flex;flex-wrap:wrap;gap:.4rem}
 .tdy-metarow{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-bottom:.4rem}
 .tdy-chip{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.6rem;letter-spacing:.08em;
   text-transform:uppercase;padding:.2rem .5rem;border-radius:6px;background:var(--bg-hover);color:var(--text-secondary);white-space:nowrap}

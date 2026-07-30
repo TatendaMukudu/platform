@@ -231,6 +231,10 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
     ok('[leader-home] shows no per-member mood score to a leader', !/\d(?:\.\d)?\s*\/\s*5/.test(home));
     ok('[leader-home] resolved to a real briefing (attention or a calm empty state)',
        home.length > 0 && !/Reading the signals/.test(home));
+    // The in-flow autonomous-inquiry surface is wired (the container renders; the questions
+    // + dismiss behaviour are proven server-side by inquiry-http-smoke).
+    ok('[leader-home] the proactive inquiry surface is present in the flow',
+       await page.evaluate(() => !!document.getElementById('today-inquiry') && typeof todayLoadInquiry === 'function' && typeof todayDismissInquiry === 'function'));
 
     // Every OTHER reachable leader/admin surface obeys the same rule: direction +
     // status, never a member's (or the org's) mood as a number or "Avg Mood" score.
