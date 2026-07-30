@@ -7982,6 +7982,15 @@ function _assistantAnswer(code, userId, question) {
   const q = String(question || '').toLowerCase().trim();
   if (!q) return null;
   const workScoped = /\b(team|org|organisation|organization|project|shared|everyone|department|colleague)\b/.test(q);
+  // A team-STATUS question ("how's the team doing?", "how are we going?") — distinct from a
+  // knowledge question ("how does our high press work"): it needs a team subject AND a
+  // status cue, and explicitly NOT a mechanism/definition ("how does … work"). Answered from
+  // the reasoner's read, not evidence retrieval.
+  const teamStatusQ = !/\bhow (?:do|does|did|can|should|to|would)\b|\bwork(?:s|ing)?\b/.test(q) && (
+    /\bhow[^?]*\b(team|we|group|club|squad|everyone|people|things|it|us|the org)\b[^?]*\b(doing|going|getting on|holding up|faring|shaping up|coming along|looking|feeling)\b/.test(q)
+    || /\bhow are (?:we|things|you all|the team|everyone)\b/.test(q)
+    || /\b(team|group|club|squad)\s+(status|update|check-?in|health)\b/.test(q)
+  );
   const purpose = workScoped ? 'workspace_shared_reasoning' : 'personal_assistance';
   const ev = _kernelEvidence(code, { purpose, viewerId: userId, subjectId: workScoped ? undefined : userId });
   const authorised = ev.map(e => e.evidenceId);
@@ -8006,6 +8015,24 @@ function _assistantAnswer(code, userId, question) {
     const items = (workspaceItems[_wsKey(code, userId)] || []).filter(i => !i.deleted && ['commitment', 'task'].includes(i.purpose));
     answer = items.length ? `You have ${items.length} open item${items.length === 1 ? '' : 's'} that may need attention. Want to go through them?` : `Nothing looks stuck right now.`;
     confidence = 'low'; limitations = ['I can only see what you have captured — not everything'];
+  } else if (teamStatusQ) {
+    // TEAM STATUS — "how's the team doing?" is answered from the REASONER's already-scoped
+    // read (the same grounded "what I'm seeing" the Today voice shows), NOT from the asker's
+    // own captures. The reasoner has the picture; the assistant just speaks it. Deterministic,
+    // grounded, never a prediction — and if the reasoner has nothing, it says so honestly.
+    try {
+      const now = Date.now();
+      const { agenda } = _reasonScopedAgenda(code, userId, now, false);
+      const ripe = agenda.filter(a => a.readiness === 'ripe');
+      const name = _firstName(code, userId), area = _orgAskAreaLabel(code, userId);
+      const opening = _actorLevel(code, userId) === 'leader'
+        ? voice.leaderOpening({ name, timeOfDay: _timeOfDay(now), count: ripe.length, areaLabel: area, seed: userId + 'ask' })
+        : voice.memberOpening({ name, timeOfDay: _timeOfDay(now), count: ripe.length, seed: userId + 'ask' });
+      const lines = ripe.slice(0, 3).map(a => a.claim);
+      answer = [opening, ...lines].join(' ').trim();
+      confidence = ripe.length ? 'medium' : 'confirmed';
+      limitations = ['a read from recorded signals, not a prediction'];
+    } catch (_) { answer = `I don't have a clear read on that just yet.`; confidence = 'none'; }
   } else {
     // GROUNDED RETRIEVAL over authorised free-text evidence (the "answer from what
     // it holds" path). Authorisation happened in the gateway; compose ONLY from the
