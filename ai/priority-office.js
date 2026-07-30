@@ -69,7 +69,7 @@ function _score(item, prefs = {}) {
 }
 
 function buildQueue({ reads = [], insights = [], outcomeBriefs = [], feedItems = [], extras = [], prefs = {}, suppressed = [] } = {}) {
-  const suppressedSet = new Set((suppressed || []).map(_s));
+  const suppressedSet = new Set((suppressed || []).map(x => _s(x)));
   const all = [
     ...reads.map(x => normalizeItem(x, 'reasoner')),
     ...insights.map(x => normalizeItem(x, 'proactive')),

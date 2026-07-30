@@ -269,7 +269,7 @@ function collect(input = {}, opts = {}) {
 }
 
 function finalize(items = [], opts = {}) {
-  const suppressed = new Set((opts.suppressed || []).map(_s));
+  const suppressed = new Set((opts.suppressed || []).map(x => _s(x)));
   const seen = new Set();
   const out = [];
   for (const raw of (items || [])) {

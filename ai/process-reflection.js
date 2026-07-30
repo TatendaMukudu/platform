@@ -119,7 +119,7 @@ function reflectSignal(signal = {}) {
 
 function reflect(signals = [], opts = {}) {
   const limit = Number.isInteger(opts.limit) ? opts.limit : 5;
-  const suppressed = new Set((opts.suppressed || []).map(_s));
+  const suppressed = new Set((opts.suppressed || []).map(x => _s(x)));
   const seen = new Set();
   const reflections = (signals || []).map(reflectSignal)
     .filter(r => !suppressed.has(r.id) && !suppressed.has(r.sourceSignalId))
