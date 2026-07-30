@@ -101,7 +101,7 @@ function summarize(records = [], opts = {}) {
     const interventions = [...p.interventions.values()].map(i => {
       const useful = i.counts.improved + i.counts.steady;
       const limitations = ['not_causal'];
-      if (i.total < SMALL_SAMPLE) limitations.push('small_sample');
+      if (i.total <= SMALL_SAMPLE) limitations.push('small_sample');
       if (i.counts.unclear) limitations.push('outcome_still_unclear');
       return {
         interventionType: i.interventionType,
@@ -124,7 +124,7 @@ function summarize(records = [], opts = {}) {
       totalCases: p.totalCases,
       openCases: p.openCases,
       interventions,
-      limitations: p.totalCases < SMALL_SAMPLE ? ['small_sample', 'not_causal'] : ['not_causal'],
+      limitations: p.totalCases <= SMALL_SAMPLE ? ['small_sample', 'not_causal'] : ['not_causal'],
     };
   }).sort((a, b) => (b.totalCases - a.totalCases) || a.patternType.localeCompare(b.patternType));
 
@@ -167,7 +167,7 @@ function earlySignalBrief({ patternType, signalCount = 0, outcomeSummary = null,
     };
   }
 
-  if (best.total < SMALL_SAMPLE) limitations.push('small_sample');
+  if (best.total <= SMALL_SAMPLE) limitations.push('small_sample');
   if (best.unclear) limitations.push('outcome_still_unclear');
   return {
     patternType: p,
