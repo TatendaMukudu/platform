@@ -48,6 +48,7 @@ const voice      = require('./ai/voice');
 const comprehend = require('./ai/comprehend');
 const languageGuard = require('./ai/language-guard');
 const audit      = require('./ai/audit');
+const googleProvider = require('./ai/providers/google');
 const behaviour  = require('./ai/behaviour');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
@@ -4341,7 +4342,19 @@ app.post('/api/me/sources/pull', requireAuth, (req, res) => {
   const conn = connectedSources[_consentKey(code, userId)] || {};
   if (!conn[src.id]) return res.status(400).json({ error: 'not_connected' });
 
-  const raw = Array.isArray(req.body?.data) ? req.body.data.slice(0, 2000) : [];   // integration point / manual export
+  // A provider-backed source (Google Calendar/Gmail) hands us its OWN API JSON; the
+  // provider normaliser turns it into the SDK's raw [{date}] shape, which src.map() then
+  // minimises to numbers-only. Pulling from an external provider is EGRESS — an org in
+  // no-egress (deterministic-only) mode refuses it, so nothing ever leaves the box.
+  const provider = String(req.body?.provider || '').toLowerCase();
+  let raw;
+  if (provider === 'google') {
+    if (ai.deterministicOnly()) return res.status(403).json({ error: 'egress_disabled', message: 'This organisation runs in no-egress mode — external connectors are off.' });
+    if (!googleProvider.SOURCES.includes(src.id)) return res.status(400).json({ error: 'provider_source_mismatch', message: `Google does not feed “${src.id}”.` });
+    try { raw = googleProvider.normalize(src.id, req.body?.data || {}).slice(0, 2000); } catch (_) { raw = []; }
+  } else {
+    raw = Array.isArray(req.body?.data) ? req.body.data.slice(0, 2000) : [];   // integration point / manual export
+  }
   let signals = [];
   try { signals = src.map(raw) || []; } catch (_) { signals = []; }
   let emitted = 0;

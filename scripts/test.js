@@ -121,6 +121,8 @@ const SUITES = [
   'member-methods-scan.js', // member-view guard: every called MemberApp._method is defined (catches called-but-undefined, e.g. a leader-only render branch invoking a missing helper that member-based boot tests never hit)
   'deadcode-scan.js',      // dead-code guard: fails on any unreferenced function (named or module-level arrow) across server.js + every js/ module — keeps retired-surface debt from re-accumulating
   'connector-harness.js',  // the Connector SDK: identity/confidence + mapping contracts
+  'google-provider-smoke.js', // the GOOGLE provider normaliser (pure): the first real provider behind the SDK turns raw Google Calendar/Gmail API JSON into the SDK's [{date}] shape while holding data-minimisation by construction — the INSIGHT tier emits ONLY a date (no title/body/location), Gmail is counted from metadata, all-day + timed events resolve, cancelled dropped, the ASSIST tier carries fuller detail as a separate private tier, scopes are least-privilege read-only, deterministic
+  'google-connector-http-smoke.js', // the GOOGLE connector (HTTP): a person connects calendar/inbox (consent-gated), a raw Google API payload is pulled and MINIMISED to numbers-only before it reaches the kernel (a sensitive event title + email subject never cross), consent + connection are enforced, a source Google can't feed is refused, and an org in NO-EGRESS mode refuses the external pull outright
   'frontend-smoke.js',     // REAL headless-Chromium boot: every route + refresh + Support view; fails on any uncaught JS/parse error (self-skips if no Chromium). This is the guard that would have caught the mobile "Unexpected token" boot crash.
   'endpoint-smoke.js',   // boots the real app in-process (DB_OPTIONAL) — HTTP authz + Me context
 ];
