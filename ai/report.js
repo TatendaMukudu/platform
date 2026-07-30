@@ -99,4 +99,25 @@ function renderHtml(model) {
 </div></body></html>`;
 }
 
-module.exports = { buildReport, renderHtml, _esc };
+/* Render the SAME grounded model to CSV — a board-ready, spreadsheet-openable artifact.
+   Same guarantee as the HTML: every row is a grounded fact with its source (the model was
+   already filtered by buildReport, so nothing ungrounded reaches here). Columns: Section,
+   Fact, Source. RFC-4180 quoting so a comma, quote, or newline in a fact can never break the
+   grid. An empty section contributes one honest row noting it has nothing to report — the
+   file never silently omits a heading. Deterministic. */
+function _csvCell(s) {
+  const v = String(s == null ? '' : s);
+  return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+function renderCsv(model) {
+  const m = model || {};
+  const rows = [['Section', 'Fact', 'Source']];
+  for (const s of (m.sections || [])) {
+    if (s.empty) { rows.push([s.heading, s.emptyNote || 'Nothing recorded yet', '—']); continue; }
+    for (const f of (s.facts || [])) rows.push([s.heading, f.text, f.basis]);
+  }
+  // A leading UTF-8 BOM so Excel opens accented characters correctly; CRLF per RFC-4180.
+  return '﻿' + rows.map(r => r.map(_csvCell).join(',')).join('\r\n') + '\r\n';
+}
+
+module.exports = { buildReport, renderHtml, renderCsv, _esc };

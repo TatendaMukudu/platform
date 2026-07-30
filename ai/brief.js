@@ -40,7 +40,7 @@ function _offer(action, text) { return { action, text: text || OFFERS[action], r
 function compose({
   level = 'member', name = '', timeOfDay = 'afternoon',
   reads = [], practices = [], routeTo = null, rollupHeadline = null,
-  areaLabel = 'your area',
+  areaLabel = 'your area', prefs = {},
 } = {}) {
   const greeting = `${GREET(timeOfDay)}${name ? ' ' + name : ''}.`;
   const items = (reads || []).filter(r => r && r.text).map(r => ({ text: String(r.text), meta: r.meta ? String(r.meta) : null }));
@@ -65,11 +65,34 @@ function compose({
     if (routeTo && routeTo.label) offers.push(_offer('ask_help', `Ask ${routeTo.label} for help`));
   }
 
+  // ACCOMMODATIONS — the person's OWN accepted self-model (ai/self-model.activeSettings),
+  // honoured here at the delivery layer so an accepted proposal actually changes the brief.
+  // Nothing here reasons or scopes; it only re-arranges the already-safe inputs, and only
+  // for settings the person themselves confirmed. Each applied change is reported back for
+  // full transparency (the person can always see which of their accommodations are live).
+  const applied = [];
+  if (prefs && prefs.pin_view) {                         // "keep this view waiting for me"
+    items.unshift({ text: String(prefs.pin_view).slice(0, 60), meta: 'pinned for you', pinned: true });
+    applied.push('pin_view');
+  }
+  if (prefs && prefs.own_assessment_first) {             // "surface mine before setting others'"
+    const i = offers.findIndex(o => o.action === 'self_assessment');
+    if (i > 0) offers.unshift(offers.splice(i, 1)[0]);
+    if (i >= 0) applied.push('own_assessment_first');
+  }
+  if (prefs && prefs.readiness_first && level === 'leader') { // "team readiness up top"
+    const i = offers.findIndex(o => o.action === 'report');
+    if (i > 0) offers.unshift(offers.splice(i, 1)[0]);
+    if (i >= 0) applied.push('readiness_first');
+  }
+  if (prefs && prefs.self_first) applied.push('self_first'); // the caller leads with own reads
+
   return {
     level,
     opening: `${greeting} ${read}`.trim(),
     items,
     offers,
+    applied,                                  // which of the person's accommodations took effect
     // audit: every offer is on the allow-list and proposal-gated (the tests assert this).
     safe: offers.every(o => (o.action in OFFERS) && o.requiresConfirmation === true),
   };

@@ -91,6 +91,27 @@ function proposals(habits, now = Date.now()) {
     }));
 }
 
+/* The accommodations the person has ACCEPTED and that are still live — the settings the app
+   should actually honour right now. This is the read-back that makes an accepted proposal do
+   something: a habit only counts once accepted, not rejected, and not gone dormant. Returns a
+   flat settings object keyed by each pattern's `setting` (a label for `needsLabel` patterns,
+   otherwise `true`), plus `_applied` listing which habit produced each — for transparency.
+   Pure. If the same setting is accepted twice (e.g. two pinned views), the earliest wins for
+   a stable, deterministic result. */
+function activeSettings(habits, now = Date.now()) {
+  const out = { _applied: [] };
+  for (const h of [...(habits || [])].sort((a, b) => (a.firstSeen || 0) - (b.firstSeen || 0))) {
+    if (!h || !h.accepted || h.rejected) continue;
+    if (h.lastSeen && (now - h.lastSeen) > STALE) continue;              // an accepted-but-abandoned habit stops applying
+    const def = PATTERNS[h.pattern]; if (!def) continue;
+    const key = def.setting;
+    if (key in out) continue;                                            // first accepted wins (stable)
+    out[key] = def.needsLabel ? (h.label || true) : true;
+    out._applied.push({ setting: key, habitId: h.id, pattern: h.pattern, label: h.label || null });
+  }
+  return out;
+}
+
 /* The person seeing what IntelliQ has learned about them — full transparency, their data. */
 function selfView(habits) {
   return (habits || []).map(h => ({
@@ -113,6 +134,6 @@ function applyFeedback(habits, habitId, response, now = Date.now()) {
 }
 
 module.exports = {
-  learn, proposals, selfView, applyFeedback,
+  learn, proposals, selfView, applyFeedback, activeSettings,
   PATTERNS, RESPONSES, STALE, DISMISS, REJECT,
 };

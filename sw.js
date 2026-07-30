@@ -3,7 +3,7 @@
    first and only falls back to the cache when the device is offline. So a fresh
    deploy is always picked up the moment the phone is online — the cache is a
    safety net, never the source of truth. */
-const CACHE = 'iq-cache-v16';   // bump: evicts any stale/truncated cached script that boot-crashed the app with "Unexpected token"
+const CACHE = 'iq-cache-v17';   // bump: adds web-push (push + notificationclick) handlers for proactive delivery
 
 self.addEventListener('install', () => self.skipWaiting());
 
@@ -48,5 +48,35 @@ self.addEventListener('fetch', (e) => {
       if (isNavigation) return (await caches.match('/')) || Response.error();
       return Response.error();
     }
+  })());
+});
+
+/* ── Proactive delivery: web-push ──────────────────────────────────────────
+   IntelliQ reaches the person off-platform. The payload is composed server-side by
+   ai/delivery (grounded, never a prediction, never a sensitive read) and arrives as JSON
+   { title, body, url, kind }. We render a notification; clicking it opens (or focuses) the
+   app at the deep link. Defensive: a malformed/empty push still shows a safe default. */
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch (_) { try { d = { body: e.data && e.data.text() }; } catch (__) { d = {}; } }
+  const title = (d && d.title) || 'IntelliQ';
+  const opts = {
+    body: (d && d.body) || 'You have a new rundown.',
+    tag: (d && d.kind) || 'iq-digest',           // same-kind pushes collapse instead of stacking
+    renotify: false,
+    data: { url: (d && d.url) || '/' },
+    icon: '/icon-192.png',
+    badge: '/icon-192.png',
+  };
+  e.waitUntil(self.registration.showNotification(title, opts));
+});
+
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const target = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of all) { if ('focus' in c) { try { await c.focus(); if (c.navigate && target !== '/') await c.navigate(target); return; } catch (_) {} } }
+    if (self.clients.openWindow) await self.clients.openWindow(target);
   })());
 });

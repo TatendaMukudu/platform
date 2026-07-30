@@ -216,18 +216,12 @@
 
     <!-- TOPBAR -->
     <header class="topbar">
-      <button class="topbar-hamburger" id="topbar-hamburger" onclick="toggleSidebar()" aria-label="Open navigation menu" title="Menu"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
       <div class="topbar-title" id="topbar-page-title">Overview Dashboard</div>
       <div style="flex:1"></div>
-      <div class="topbar-search">
-        <span class="topbar-search-icon" style="color:var(--text-muted);display:inline-flex"></span>
-        <input id="topbar-search-input" placeholder="Search members..."/>
-      </div>
       <div class="topbar-actions">
         <div class="icon-btn" id="notif-btn" data-tip="Notifications" style="cursor:pointer">
           <span class="tb-ic-bell"></span> <div class="badge"></div>
         </div>
-        <div class="icon-btn tb-ic-add" data-tip="Add Member" onclick="navigate('people');switchPeopleTab('onboard')" style="cursor:pointer"></div>
         <div style="font-size:0.8rem;color:var(--text-secondary);padding:0 0.5rem" id="topbar-org">Org</div>
         <!-- User account widget — sign out, name, email, role -->
         <div class="topbar-user-widget" id="topbar-user-widget">
@@ -236,12 +230,18 @@
                   title="Account">
             <span id="topbar-avatar-initials">?</span>
           </button>
+          <span class="iq-gear-badge" id="iq-gear-badge" style="display:none" aria-hidden="true"></span>
           <div class="topbar-account-menu" id="topbar-account-menu">
+            <!-- Proactive updates opt-in (populated by renderTopbar) — reach me off-platform -->
+            <div class="topbar-account-proactive" id="topbar-account-proactive"></div>
             <div class="topbar-account-info">
               <div class="topbar-account-name"  id="topbar-account-name">—</div>
               <div class="topbar-account-email" id="topbar-account-email">—</div>
               <div class="topbar-account-role"  id="topbar-account-role">—</div>
             </div>
+            <!-- Setup links (People / Organisation / Settings) — populated by renderTopbar(),
+                 permission-gated. The only place the non-conversational config lives now. -->
+            <div class="topbar-account-links" id="topbar-account-links"></div>
             <div class="topbar-account-divider"></div>
             <button class="topbar-signout-btn" onclick="Auth.logout()">Sign Out</button>
           </div>

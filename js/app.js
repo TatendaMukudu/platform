@@ -1409,8 +1409,14 @@ function launchApp(){
     if (isMember && typeof MemberApp !== 'undefined') {
       try { MemberApp.init(); } catch(e) { console.warn('[ROUTE] MemberApp.init failed:', e.message); }
     }
-    const defaultPage = isMember ? 'home' : isLeader ? 'leader-home' : 'dashboard';
+    // ONE assistant page for everyone: a member lands on their own "Me" assistant, and
+    // leaders + admins/supers land on the leader assistant home (Today). No dashboard
+    // landing — the drawer is gone and everything flows from here.
+    const defaultPage = isMember ? 'home' : 'leader-home';
     navigate(defaultPage);
+    // A quiet proactive cue on the gear — how many governed questions the system wants to
+    // put to this reader (leaders/insights only; members get a clean no-op). Fully guarded.
+    if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
   } catch(err) {
     console.error('[ROUTE] launchApp render error:', err);
   }
@@ -1445,12 +1451,12 @@ function renderSidebar(){
     badge.style.border     = '1px solid var(--border)';
   }
 
-  // Topbar line-icons (injected once the app chrome is present).
+  // Topbar line-icons (injected once the app chrome is present). Only the notifications
+  // bell remains — the nav-era member search + add-member controls are retired with the
+  // drawer (you add people via the account gear → People; you ask the assistant to find one).
   if (typeof ICON !== 'undefined') {
     const set = (sel, svg) => { const el = document.querySelector(sel); if (el && !el.dataset.iconSet) { el.innerHTML = svg; el.dataset.iconSet = '1'; } };
-    set('.topbar-search-icon', ICON.search);
-    set('.tb-ic-bell',         ICON.bell);
-    set('.tb-ic-add',          ICON.plus);
+    set('.tb-ic-bell', ICON.bell);
   }
   document.querySelector('.user-name').textContent = AppState.adminName;
   document.querySelector('.user-role').textContent = AppState.adminRole;
@@ -1463,45 +1469,12 @@ function renderSidebar(){
   // ── Dynamic permission-driven nav ─────────────────────────────────────
   // Filter WORKSPACE_MODULES by Auth.canDo(). null permission = always shown.
   // Sections are rendered as group labels when a new section label appears.
+  // The sectioned navigation drawer is retired — the app flows from ONE assistant page.
+  // Nothing is rendered here; the few non-conversational Setup items now live in the
+  // topbar account menu (see renderTopbar → #topbar-account-links). Every old page stays
+  // reachable via navigate(); it's just no longer a menu list.
   const nav = document.getElementById('sidebar-nav');
-  if (nav) {
-    let currentSection = null;
-    let html = '';
-    const activePage = AppState.currentPage || 'dashboard';
-
-    const isLeader = Auth.isLeaderNode();
-
-    WORKSPACE_MODULES.forEach(mod => {
-      // leaderOnly items: only shown when the user leads at least one node
-      if (mod.leaderOnly && !isLeader) return;
-      // A leader's single Home is the unified leader-home, so hide the member Home for them.
-      if (mod.hideForLeaders && isLeader) return;
-      // Permission gate (null = always shown; check after leaderOnly so gates compose)
-      if (mod.permission !== null && mod.permission !== undefined && !Auth.canDo(mod.permission)) return;
-
-      // Section label
-      if (mod.section && mod.section !== currentSection) {
-        currentSection = mod.section;
-        html += `<div class="nav-section-label">${currentSection}</div>`;
-      }
-
-      const activeClass = activePage === mod.id ? ' active' : '';
-      const badgeHTML   = mod.badge
-        ? `<span class="nav-badge" style="display:none">0</span>`
-        : '';
-
-      html += `<div class="nav-item${activeClass}" data-page="${mod.id}">
-        <span class="nav-icon">${mod.icon}</span> ${mod.label}${badgeHTML}
-      </div>`;
-    });
-
-    nav.innerHTML = html;
-
-    // Re-attach click listeners (event delegation on the nav container)
-    nav.querySelectorAll('.nav-item[data-page]').forEach(item => {
-      item.addEventListener('click', () => navigate(item.dataset.page));
-    });
-  }
+  if (nav) nav.innerHTML = '';
 
   hydrateIcons();
   updateAlertBadge();
@@ -1545,6 +1518,95 @@ function renderTopbar(){
   if (nameEl) nameEl.textContent = user.name  || '—';
   if (emlEl)  emlEl.textContent  = user.email || '—';
   if (roleEl) roleEl.textContent = Auth.ROLE_LABELS?.[user.role] || user.role || 'Admin';
+
+  // The ONE quiet gear: the handful of Setup surfaces that can't be conversational live
+  // here now (People / Organisation / Settings), permission-gated. Everything else flows
+  // from the assistant page. Each link navigates and closes the menu.
+  const links = document.getElementById('topbar-account-links');
+  if (links) {
+    const ic = (name) => (typeof ICON !== 'undefined' && ICON[name]) ? ICON[name] : '';
+    const SETUP = [
+      { id: 'people',       label: 'People',       perm: 'view_members',    icon: 'person'   },
+      { id: 'organisation', label: 'Organisation', perm: 'view_team',       icon: 'building'  },
+      { id: 'settings',     label: 'Settings',     perm: 'manage_settings', icon: 'settings' },
+    ].filter(l => Auth.canDo(l.perm));
+    links.innerHTML = SETUP.length
+      ? SETUP.map(l => `<button class="topbar-account-link" data-page="${l.id}"><span class="tal-ic">${ic(l.icon)}</span>${l.label}</button>`).join('')
+      : '';
+    links.querySelectorAll('.topbar-account-link[data-page]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const menu = document.getElementById('topbar-account-menu');
+        if (menu) menu.classList.remove('open');
+        navigate(btn.dataset.page);
+      });
+    });
+  }
+
+  // Proactive-updates opt-in — the assistant reaching you off-platform. Everyone controls
+  // their own (not permission-gated). Reflects the current subscription state when known.
+  const pro = document.getElementById('topbar-account-proactive');
+  if (pro) {
+    const ic = (name) => (typeof ICON !== 'undefined' && ICON[name]) ? ICON[name] : '';
+    const on = !!(IQPush && IQPush._enabled);
+    pro.innerHTML = `<button class="iq-proactive-toggle${on ? ' on' : ''}" id="iq-proactive-toggle">
+      <span class="tal-ic">${ic('bell')}</span>${on ? 'Proactive updates on' : 'Turn on proactive updates'}</button>`;
+    const btn = document.getElementById('iq-proactive-toggle');
+    if (btn) btn.addEventListener('click', () => { try { IQPush.enable(); } catch (_) {} });
+  }
+}
+
+/* ── Proactive delivery: the client opt-in ───────────────────────────────────
+   Registers a web-push subscription so IntelliQ can reach the person off-platform. Every
+   step is guarded: a device without service-worker / push / Notification support, a denied
+   permission, or a server without push configured all fail softly — the person is still
+   opted in and gets their rundown in-app. Never throws into the app. */
+const IQPush = {
+  _enabled: false,
+  _b64(b64) { const pad = '='.repeat((4 - b64.length % 4) % 4); const s = (b64 + pad).replace(/-/g, '+').replace(/_/g, '/'); const raw = atob(s); return Uint8Array.from([...raw].map(c => c.charCodeAt(0))); },
+  async enable() {
+    try {
+      const cfg = await fetch('/api/delivery/config', { headers: Auth._headers() }).then(r => r.json()).catch(() => null);
+      if (!cfg || !cfg.ok) return;
+      if (!cfg.outboundAllowed) { if (typeof showToast==='function') showToast('Proactive updates are turned off for this organisation.','info'); return; }
+      // Opt in on the server regardless — even without push wired, the in-app rundown stands.
+      await fetch('/api/delivery/prefs', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ enabled: true, channels: { push: true } }) }).catch(() => {});
+      const supported = ('serviceWorker' in navigator) && ('PushManager' in window) && (typeof Notification !== 'undefined');
+      if (supported && cfg.pushReady && cfg.vapidPublicKey) {
+        const perm = await Notification.requestPermission();
+        if (perm === 'granted') {
+          const reg = await navigator.serviceWorker.ready;
+          let sub = await reg.pushManager.getSubscription();
+          if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: this._b64(cfg.vapidPublicKey) });
+          if (sub) await fetch('/api/delivery/subscribe', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ subscription: sub.toJSON() }) });
+        }
+      }
+      this._enabled = true;
+      if (typeof renderTopbar === 'function') renderTopbar();
+      if (typeof showToast==='function') showToast('Proactive updates on — I’ll reach you with your rundown.','success');
+    } catch (e) { console.warn('[push] enable failed:', e && e.message); }
+  },
+};
+
+/* Attention badge on the gear — the count of proactive questions the system wants to put to
+   this reader (leaders/insights only; a member gets a clean 403 and no badge). A quiet cue
+   that something's waiting, before they open anything. Fully guarded. */
+async function refreshProactiveBadge() {
+  try {
+    const r = await fetch('/api/inquiry/pending?limit=9', { headers: Auth._headers() });
+    if (!r.ok) return;                                   // members / no perm → no badge
+    const j = await r.json();
+    const n = (j && j.count) || 0;
+    const dot = document.getElementById('iq-gear-badge');
+    if (!dot) return;
+    if (n > 0) {
+      dot.textContent = n > 9 ? '9+' : String(n);
+      dot.style.display = 'flex';
+      dot.style.pointerEvents = 'auto';
+      dot.style.cursor = 'pointer';
+      dot.title = `${n} thing${n === 1 ? '' : 's'} IntelliQ wants to check`;
+      dot.onclick = () => navigate('leader-home');   // take me to where the questions are
+    } else { dot.style.display = 'none'; }
+  } catch (_) { /* cosmetic — never block the app */ }
 }
 
 function toggleAdminAccountMenu() {
@@ -1564,30 +1626,14 @@ function toggleAdminAccountMenu() {
   }
 }
 
-/* ── Mobile sidebar toggle ───────────────────────────────────────────────
-   ONE managed outside-click handler (never leaked/stacked). The hamburger check
-   uses closest() so a tap on the button's SVG child still counts as the hamburger
-   — otherwise the open tap is seen as an "outside" click and closes the drawer it
-   just opened, which forced repeated taps. */
+/* ── Sidebar close-handler (retained) ────────────────────────────────────
+   The navigation drawer + its hamburger toggle are retired (the app flows from ONE
+   assistant page). navigate() still calls _detachSidebarClose() defensively to clear any
+   stray outside-click handler; with no drawer to open, _sidebarCloseHandler stays null and
+   this is a harmless no-op. Kept as the single owner of that teardown. */
 let _sidebarCloseHandler = null;
 function _detachSidebarClose() {
   if (_sidebarCloseHandler) { document.removeEventListener('click', _sidebarCloseHandler); _sidebarCloseHandler = null; }
-}
-function toggleSidebar() {
-  const sidebar = document.getElementById('sidebar');
-  if (!sidebar) return;
-  const opening = !sidebar.classList.contains('open');
-  sidebar.classList.toggle('open', opening);
-  _detachSidebarClose();                      // clear any prior handler first
-  if (opening) {
-    _sidebarCloseHandler = (e) => {
-      if (e.target.closest && e.target.closest('#topbar-hamburger')) return;  // tap on hamburger (or its icon)
-      if (sidebar.contains(e.target)) return;                                  // tap inside the drawer
-      sidebar.classList.remove('open');
-      _detachSidebarClose();
-    };
-    setTimeout(() => { if (_sidebarCloseHandler) document.addEventListener('click', _sidebarCloseHandler); }, 10);
-  }
 }
 
 /* ── Onboarding empty-state HTML (reused across pages) ───────────────── */
@@ -1787,11 +1833,6 @@ function renderMembers(){
 
 function filterMembers(group){
   memberGroup = group;
-  renderMembers();
-}
-
-function searchMembers(val){
-  memberSearch = val;
   renderMembers();
 }
 
@@ -5890,10 +5931,48 @@ async function renderToday() {
       <div class="tdy-privacy">Private by default · nothing is saved or shared until you confirm</div>
     </div>
     <div id="today-voice"></div>
+    <div id="today-inquiry"></div>
     <div id="today-feed"><div style="padding:1.2rem;text-align:center;color:var(--text-muted)">Gathering what needs you…</div></div>
     <div style="text-align:center;margin-top:1.2rem"><button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="renderIntelligence(true)">Open the full team briefing →</button></div>`;
   todayLoadVoice();
+  todayLoadInquiry();
   todayLoadFeed();
+}
+
+/* AUTONOMOUS INQUIRY, in the flow — the questions the system itself wants to ask, surfaced
+   right where you already are. Grounded + governed upstream (nothing private, nothing
+   leading, nothing it could answer itself); here we just show them, each with why it
+   matters and a "Not now" that stands it down so it never nags. Reuses /api/inquiry. */
+async function todayLoadInquiry() {
+  const box = document.getElementById('today-inquiry');
+  if (!box) return;
+  let j;
+  try { j = await fetch('/api/inquiry/pending?limit=3', { headers: Auth._headers() }).then(r => r.ok ? r.json() : null).catch(() => null); }
+  catch (_) { box.innerHTML = ''; return; }
+  const qs = (j && j.questions) || [];
+  if (!qs.length) { box.innerHTML = ''; return; }
+  const esc = _escAdvisor;
+  box.innerHTML = `
+    <div class="tdy-voice tdy-inquiry">
+      <div class="tdy-vhead"><span class="tdy-kicker">IntelliQ wants to check</span></div>
+      ${qs.map(q => `
+        <div class="tdy-belief" data-inq="${esc(q.id)}">
+          <div class="tdy-claim">${esc(q.question)}</div>
+          ${q.why ? `<div class="tdy-why">${esc(q.why)}</div>` : ''}
+          <div class="tdy-belief-actions">
+            <button class="tdy-cbtn" onclick="todayDismissInquiry('${esc(q.id)}')">Not now</button>
+          </div>
+        </div>`).join('')}
+    </div>`;
+}
+
+async function todayDismissInquiry(id) {
+  try { await fetch('/api/inquiry/' + encodeURIComponent(id) + '/dismiss', { method: 'POST', headers: Auth._headers(), body: '{}' }); } catch (_) {}
+  const row = document.querySelector(`#today-inquiry [data-inq="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"]`);
+  if (row) row.remove();
+  const box = document.getElementById('today-inquiry');
+  if (box && !box.querySelector('[data-inq]')) box.innerHTML = '';   // last one gone → clear the block
+  if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
 }
 
 /* ── THE VOICE — the reasoner, read aloud ─────────────────────────────────────
@@ -7298,18 +7377,14 @@ document.addEventListener('DOMContentLoaded', () => {
   initLogin();
   // Nav items are bound where the sidebar nav is rendered (the one dynamic, permission-filtered
   // binder) — Phase-1 Cut G. No second DOMContentLoaded binder (the sidebar is empty until render).
-  // Notification panel toggle
-  document.getElementById('notif-btn').addEventListener('click', toggleNotifPanel);
-  document.getElementById('notif-panel-close').addEventListener('click', ()=>{
-    document.getElementById('notif-panel').classList.remove('open');
+  // Notification panel toggle (null-safe — topbar chrome may be absent on the one-page flow)
+  document.getElementById('notif-btn')?.addEventListener('click', toggleNotifPanel);
+  document.getElementById('notif-panel-close')?.addEventListener('click', ()=>{
+    document.getElementById('notif-panel')?.classList.remove('open');
   });
   // Close modals on overlay click
   document.querySelectorAll('.modal-overlay').forEach(ov => {
     ov.addEventListener('click', e => { if(e.target===ov) closeAllModals(); });
-  });
-  // Search
-  document.getElementById('topbar-search-input').addEventListener('input', e => {
-    if(AppState.currentPage==='members') searchMembers(e.target.value);
   });
   // Keyboard: Escape closes modals
   document.addEventListener('keydown', e => {

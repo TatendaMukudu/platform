@@ -176,18 +176,10 @@ img { max-width: 100%; }
 #app.visible { display: flex; }
 
 /* ── SIDEBAR ────────────────────────────────────────────── */
-.sidebar {
-  width: var(--sidebar-w);
-  min-height: 100vh;
-  background: var(--bg-surface);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  position: fixed;
-  top: 0; left: 0;
-  z-index: 100;
-  transition: transform 0.3s;
-}
+/* The sectioned navigation drawer is retired — the app now flows from ONE assistant
+   page, with the handful of Setup items living in the topbar account menu. The sidebar
+   markup stays in place (harmless) but is never shown. */
+.sidebar { display: none; }
 
 .sidebar-header {
   padding: 1.1rem 1.2rem;
@@ -285,7 +277,7 @@ img { max-width: 100%; }
 
 /* ── MAIN ────────────────────────────────────────────────── */
 .main-wrap {
-  margin-left: var(--sidebar-w);
+  margin-left: 0;   /* no drawer — content is full-width */
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -793,31 +785,33 @@ img { max-width: 100%; }
 @media (max-width: 900px) {
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
 }
-/* Hamburger button — hidden on desktop, shown on mobile */
-.topbar-hamburger {
-  display: none;
-  background: none;
-  border: none;
-  font-size: 1.25rem;
-  color: var(--text-primary);
-  cursor: pointer;
-  padding: 0 0.5rem 0 0;
-  line-height: 1;
-  flex-shrink: 0;
-}
+/* Hamburger retired with the drawer — never shown. */
+.topbar-hamburger { display: none !important; }
 @media (max-width: 700px) {
-  .topbar-hamburger { display: flex; align-items: center; }
-  .sidebar {
-    transform: translateX(-100%);
-    /* Overlay on top of content on mobile */
-    position: fixed; top: 0; left: 0; z-index: 200;
-    box-shadow: 4px 0 16px rgba(0,0,0,0.18);
-    transition: transform 0.22s ease;
-  }
-  .sidebar.open { transform: translateX(0); }
-  .main-wrap { margin-left: 0; }
   .topbar-search { display: none; }
 }
+
+/* Setup + account links inside the ONE quiet gear (the topbar avatar menu). Everything
+   that can't be conversational (People / Organisation / Settings) lives here now. */
+.topbar-account-link {
+  width: 100%;
+  padding: 0.5rem 1rem;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.83rem;
+  color: var(--text-primary);
+  font-weight: 500;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  transition: background 0.12s;
+}
+.topbar-account-link:hover { background: var(--bg-hover, rgba(127,127,127,0.08)); }
+.topbar-account-link .tal-ic { width: 16px; height: 16px; display: inline-flex; color: var(--text-secondary); flex-shrink: 0; }
+.topbar-account-link .tal-ic svg { width: 16px; height: 16px; }
 
 /* ── FADE IN ─────────────────────────────────────────────── */
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
@@ -1798,6 +1792,40 @@ img { max-width: 100%; }
 .topbar-avatar-btn:hover  { opacity: 0.82; }
 .topbar-avatar-btn:active { transform: scale(0.94); }
 
+/* Attention badge on the gear — a quiet count when something proactive is waiting, so the
+   person knows there's something before they even open anything. */
+.iq-gear-badge {
+  position: absolute;
+  top: -4px; right: -4px;
+  min-width: 16px; height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger, #f74f4f);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 2px var(--bg-surface, #12101a);
+  pointer-events: none;
+}
+/* Proactive-updates opt-in row inside the gear menu. */
+.topbar-account-proactive:empty { display: none; }
+.iq-proactive-toggle {
+  width: 100%;
+  padding: 0.5rem 1rem;
+  text-align: left;
+  background: none; border: none; cursor: pointer;
+  font-size: 0.83rem; font-weight: 600; font-family: inherit;
+  color: var(--accent);
+  display: flex; align-items: center; gap: 0.6rem;
+  transition: background 0.12s;
+}
+.iq-proactive-toggle:hover { background: var(--bg-hover, rgba(127,127,127,0.08)); }
+.iq-proactive-toggle .tal-ic { width: 16px; height: 16px; display: inline-flex; }
+.iq-proactive-toggle.on { color: var(--good, #2f9e6b); }
+
 /* ── Member topbar ───────────────────────────────────────── */
 .member-topbar {
   display: flex;
@@ -2500,6 +2528,10 @@ details.intel-collapse[open] > summary::after { transform: rotate(90deg); }
 .tdy-opener{font-size:.94rem;line-height:1.5;color:var(--text-primary);margin-bottom:.7rem;max-width:44ch}
 .tdy-belief{padding:.65rem 0;border-top:1px solid var(--border)}
 .tdy-belief:first-of-type{border-top:0;padding-top:.1rem}
+/* The autonomous-inquiry block reads as the system ASKING, not alerting — a calm accent
+   rail, distinct from the reasoner's "what I'm seeing" voice above it. */
+.tdy-inquiry{margin-top:.9rem;border-left:2px solid var(--accent);padding-left:.85rem}
+.tdy-belief-actions{margin-top:.5rem;display:flex;flex-wrap:wrap;gap:.4rem}
 .tdy-metarow{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-bottom:.4rem}
 .tdy-chip{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.6rem;letter-spacing:.08em;
   text-transform:uppercase;padding:.2rem .5rem;border-radius:6px;background:var(--bg-hover);color:var(--text-secondary);white-space:nowrap}

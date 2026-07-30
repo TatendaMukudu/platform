@@ -53,5 +53,24 @@ ok('4 · it carries the honesty footer (nothing invented or predicted)', /nothin
 const evil = R.renderHtml(R.buildReport({ title: 'X', sections: [{ heading: 'H', facts: [{ text: '<script>alert(1)</script>', basis: 'src' }] }] }));
 ok('5 · injected markup in a fact is escaped, not executed', !/<script>alert/.test(evil) && /&lt;script&gt;/.test(evil));
 
+/* ── 6 · the CSV EXPORT — the same grounded model as a board-ready spreadsheet ── */
+const csv = R.renderCsv(model);
+const lines = csv.replace(/^﻿/, '').trim().split('\r\n');
+ok('6 · the CSV has a header row (Section, Fact, Source)', lines[0] === 'Section,Fact,Source');
+ok('6 · it exports the grounded fact WITH its source (every row shows provenance)', csv.includes('Momentum has dipped for one player.') && csv.includes('reasoner · emerging · 3 check-ins'));
+ok('6 · it NEVER exports a dropped, ungrounded fact', !/no source/.test(csv));
+ok('6 · an empty section still gets one honest row (no heading silently omitted)', lines.some(l => /^What changed,/.test(l)));
+ok('6 · a leading UTF-8 BOM so Excel opens accents correctly', csv.charCodeAt(0) === 0xFEFF);
+
+/* fields with commas / quotes / newlines are RFC-4180 quoted so the grid can never break */
+const tricky = R.renderCsv(R.buildReport({ title: 'X', sections: [{ heading: 'H', facts: [
+  { text: 'A fact, with a comma and a "quote"', basis: 'src\nwith newline' },
+] }] }));
+ok('6 · a comma/quote in a fact is quoted + escaped (grid stays intact)', tricky.includes('"A fact, with a comma and a ""quote"""'));
+ok('6 · a newline in a field is wrapped so it can\'t start a phantom row', tricky.includes('"src\nwith newline"'));
+
+/* determinism — the same model exports byte-identical CSV */
+ok('6 · identical model → byte-identical CSV (deterministic artifact)', R.renderCsv(model) === csv);
+
 console.log(`\nreport-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

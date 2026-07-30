@@ -70,6 +70,16 @@ const server = app.listen(0, async () => {
     const b = await patterns('userB');
     ok('6 · a different person sees none of Ada\'s habits', b.ok && (b.proposals || []).length === 0 && (b.learned || []).length === 0);
     ok('6 · nothing about Ada leaks to Ben', !/Marcus|userA|Ada/i.test(JSON.stringify(b)));
+
+    /* ── 7 · the accepted accommodation ACTUALLY APPLIES — it reshapes Ada's brief ── */
+    // Ada accepted opens_view (→ pin_view = "Marcus's graph") in step 3. Her brief must now
+    // lead with that view, pinned; and it must be applied for HER only, never for Ben.
+    const brief = who => fetch(base + '/api/brief', { headers: H(who) }).then(r => r.json());
+    const ab = await brief('userA');
+    ok('7 · Ada\'s accepted accommodation reshapes her brief (pin_view is applied)', ab.ok && (ab.applied || []).includes('pin_view'));
+    ok('7 · …the pinned view waits at the TOP of her brief', ab.items && ab.items[0] && ab.items[0].pinned === true && /Marcus's graph/.test(ab.items[0].text));
+    const bb = await brief('userB');
+    ok('7 · Ben\'s brief is untouched — an accommodation is private to its owner', !(bb.applied || []).includes('pin_view') && !(bb.items || []).some(i => i.pinned) && !/Marcus/i.test(JSON.stringify(bb)));
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();

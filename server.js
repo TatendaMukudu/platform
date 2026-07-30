@@ -47,6 +47,9 @@ const brief      = require('./ai/brief');
 const voice      = require('./ai/voice');
 const comprehend = require('./ai/comprehend');
 const languageGuard = require('./ai/language-guard');
+const audit      = require('./ai/audit');
+const googleProvider = require('./ai/providers/google');
+const delivery   = require('./ai/delivery');
 const behaviour  = require('./ai/behaviour');
 const adapters   = require('./ai/adapters');
 const connectors = require('./ai/connectors');
@@ -125,7 +128,7 @@ function scheduleSave() {
         orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
         proactivePrefs, insightSuppression, answerFeedback,
         orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
-        reasonLedger, selfModelLedger,
+        reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
         conversationSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
@@ -1448,6 +1451,9 @@ app.delete('/api/auth/users/:userId', requirePermission('delete_members'), (req,
 
   const result = _removePerson(code, userId, deleteData);
   if (!result.ok) return res.status(404).json(result);
+  // ACCOUNTABILITY — erasure (Art 17) is itself an accountable event. The trail records
+  // THAT a person's data was erased (who did it, whose data) without retaining the data.
+  if (deleteData) _audit(code, { actor: req.iqSession.userId, action: 'erasure', subjectIds: [userId], basis: 'right to erasure (Art 17)' });
   scheduleSave();
   res.json({ ok: true, deleteData });
 });
@@ -4337,7 +4343,19 @@ app.post('/api/me/sources/pull', requireAuth, (req, res) => {
   const conn = connectedSources[_consentKey(code, userId)] || {};
   if (!conn[src.id]) return res.status(400).json({ error: 'not_connected' });
 
-  const raw = Array.isArray(req.body?.data) ? req.body.data.slice(0, 2000) : [];   // integration point / manual export
+  // A provider-backed source (Google Calendar/Gmail) hands us its OWN API JSON; the
+  // provider normaliser turns it into the SDK's raw [{date}] shape, which src.map() then
+  // minimises to numbers-only. Pulling from an external provider is EGRESS — an org in
+  // no-egress (deterministic-only) mode refuses it, so nothing ever leaves the box.
+  const provider = String(req.body?.provider || '').toLowerCase();
+  let raw;
+  if (provider === 'google') {
+    if (ai.deterministicOnly()) return res.status(403).json({ error: 'egress_disabled', message: 'This organisation runs in no-egress mode — external connectors are off.' });
+    if (!googleProvider.SOURCES.includes(src.id)) return res.status(400).json({ error: 'provider_source_mismatch', message: `Google does not feed “${src.id}”.` });
+    try { raw = googleProvider.normalize(src.id, req.body?.data || {}).slice(0, 2000); } catch (_) { raw = []; }
+  } else {
+    raw = Array.isArray(req.body?.data) ? req.body.data.slice(0, 2000) : [];   // integration point / manual export
+  }
   let signals = [];
   try { signals = src.map(raw) || []; } catch (_) { signals = []; }
   let emitted = 0;
@@ -6226,6 +6244,7 @@ function _processBatch(code, conn, data, run, finalize) {
   });
   const r = _ingestGeneric(code, { records: upserts }, conn.createdBy, { source: conn.source || conn.name || 'connector', provider, requireApprovedMapping: true, connector: conn.id, sourceObject: conn.url, defaultSubjectId: conn.oauth?.subject === 'self' ? conn.createdBy : undefined });
   try { _reresolveUnmatched(code, { by: 'system', method: 'rule', reason: 'sync completed' }); } catch (_) {}
+  if (r && (r.imported || r.held)) _reasonNudge(code);   // AMBIENT SENSING — fresh connector data → re-reason
   conn.needsMappingApproval = !!r.needsMapping; conn.driftPaused = !!r.drift;
   Object.assign(run.metrics, { promoted: r.imported || 0, held: r.held || 0, duplicates: r.duplicates || 0, unresolved: r.unmatched || 0, drift: r.drift ? 1 : 0, deletions });
   if (!r.drift) {
@@ -6448,6 +6467,7 @@ const _CALENDAR_ADAPTERS = {
         attendees: Array.isArray(ev.attendees) ? ev.attendees : [], agenda: ev.agenda || '', groupRef: ev.groupRef || null,
         createdBy: ev.createdBy || 'system', createdAt: new Date().toISOString(), status: 'scheduled', attendance: {} };
       (orgCalendar[code] = orgCalendar[code] || []).push(rec);
+      _reasonNudge(code);   // AMBIENT SENSING — a new event changes timing/urgency → re-reason
       return rec;
     },
     get(code, id) { return (orgCalendar[code] || []).find(e => e.id === id) || null; },
@@ -8080,6 +8100,51 @@ const reasonTickCache = {};       // orgCode → { ts, result }  (throttles the 
 // never shared with a leader above and never used to evaluate them. Persisted.
 const selfModelLedger = {};       // `${code}:${userId}` → [ habit ]
 
+// THE ACCOUNTABILITY TRAIL (ai/audit) — an append-only, content-free, tamper-evident
+// record of who accessed whose data, when, and on what basis. It is what lets an org
+// PROVE its access is scoped (GDPR Art 5(2) accountability; the trail behind Art 15
+// subject-access and Art 30 records of processing). Bounded per org; persisted.
+const auditLog = {};              // orgCode → [ entry ]  (hash-chained; see ai/audit)
+const AUDIT_CAP = 5000;           // keep the most recent N accesses per org
+
+// OUTBOUND DELIVERY (ai/delivery) — the last mile. Per-person opt-in prefs + their web-push
+// subscriptions, both PRIVATE to the person and persisted. The actual web-push send is an
+// OPTIONAL capability: it lights up only when the `web-push` library is installed AND VAPID
+// keys are configured (like a connector's live fetch). Until then the pipeline still
+// composes, gates, and audits — the network hop is the only thing gated by config.
+const deliveryPrefs = {};         // userKey → prefs (see ai/delivery.DEFAULT_PREFS)
+const pushSubs      = {};         // userKey → [ web-push subscription ]
+// AUTONOMOUS INQUIRY (ai/inquiry) — when a person stands a proactive question down, we
+// don't ask it again for a while. Keyed per org by the uncertainty id → dismissedUntil.
+const inquiryDismissed = {};      // orgCode → { uncertaintyId: dismissedUntilMs }
+const INQUIRY_COOLDOWN = 3 * 86400000;   // "not now" holds a question for 3 days
+let _webpush = null; try { _webpush = require('web-push'); } catch (_) { /* optional dep */ }
+const VAPID_PUBLIC  = process.env.VAPID_PUBLIC_KEY  || '';
+const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY || '';
+const PUSH_READY = !!(_webpush && VAPID_PUBLIC && VAPID_PRIVATE);
+if (PUSH_READY) { try { _webpush.setVapidDetails('mailto:noreply@intelliq.app', VAPID_PUBLIC, VAPID_PRIVATE); } catch (e) { console.warn('[delivery] VAPID setup failed:', e.message); } }
+
+// No-egress orgs never reach out; a manage-settings admin can also disable outbound per org
+// (orgMeta[code].outboundDisabled). Both are checked before anything leaves the box.
+function _outboundAllowed(code) {
+  if (ai.deterministicOnly()) return false;
+  return !(orgMeta[code] && orgMeta[code].outboundDisabled === true);
+}
+async function _sendPush(sub, payload) {
+  if (!PUSH_READY) return { ok: false, reason: 'push_not_configured' };
+  try { await _webpush.sendNotification(sub, JSON.stringify(payload)); return { ok: true }; }
+  catch (e) { return { ok: false, reason: String(e && e.message || 'push_failed').slice(0, 120), statusCode: e && e.statusCode }; }
+}
+function _audit(code, fields) {
+  if (!code) return;
+  try {
+    const entry = audit.record({ ...fields, at: Date.now() }, audit.tip(auditLog[code] || []));
+    if (!entry) return;                                   // unknown action → not recorded
+    auditLog[code] = audit.append(auditLog[code] || [], entry, AUDIT_CAP);
+    scheduleSave();
+  } catch (e) { console.warn('[audit] record failed:', e && e.message); }
+}
+
 function _orgPack(code) {
   const cfg = orgStateConfig[code];
   if (cfg && cfg.pack) return cfg.pack;
@@ -8240,6 +8305,89 @@ function _deriveOrgUncertainties(code) {
     return orgState.stateToUncertainties(state).map(u => inquiry.buildUncertainty(u));
   } catch (e) { console.warn('[org-uncertainties] failed:', e && e.message); return []; }
 }
+
+/* Knowledge hygiene as a source of proactive questions: run the lifecycle assessor over the
+   org's active evidence and turn each stale/review record into a "still current?" uncertainty
+   routed to its owner. This is the brain noticing its OWN knowledge going out of date and
+   choosing to ask, rather than quietly reasoning off a stale fact. Fail closed → []. */
+function _lifecycleUncertainties(code) {
+  try {
+    const now = Date.now();
+    const pool = (evidenceLog[code] || []).filter(e => e && e.status === 'active').slice(0, 500);
+    const out = [];
+    for (const env of pool) {
+      const a = lifecycle.assess(env, now);
+      const owner = env.subjectId || 'organisation';
+      const label = (env.label || (env.attributes && env.attributes.category) || env.type || 'a shared record');
+      // A record merely aging asks quietly (low); one WELL past its life (expired) is worth
+      // a gentle confirm now — enough to clear the Inquiry Engine's value gate.
+      const urgency = a.status === 'expired' ? 'medium' : 'low';
+      // The owner is authoritative about their OWN record — a confirm from them fully
+      // resolves it (this is a reliable answer, which is what makes the ask worth it).
+      const u = lifecycle.toUncertainty(a, { owner, label, urgency, ownerAuthoritative: !!env.subjectId, privacyClass: env.subjectId ? 'team-shared' : 'org' });
+      if (u) out.push(inquiry.buildUncertainty(u));
+    }
+    return out;
+  } catch (e) { console.warn('[lifecycle-uncertainties] failed:', e && e.message); return []; }
+}
+
+/* AUTONOMOUS INQUIRY — the governed questions the system actually wants to ask this reader
+   right now. It derives uncertainties (open org-state gaps + knowledge going stale), lets the
+   Inquiry Engine decide which are worth asking (value-gated, non-leading, health-guarded, and
+   NOT asked when we could answer them ourselves), drops anything the reader recently stood
+   down, and scopes person-targeted questions to whom the reader may see. Proactive, but never
+   nagging — that's the line. */
+function _pendingInquiries(code, userId, now = Date.now()) {
+  const uncertainties = [..._deriveOrgUncertainties(code), ..._lifecycleUncertainties(code)];
+  // A lower value gate than the interrupt threshold: these are LIGHT-TOUCH confirmations
+  // ("is this still current?"), not a heavy new ask — but the engine still rejects anything
+  // answerable without asking, anything private/sensitive (health-guard), and duplicates.
+  const { plans } = inquiry.planInquiries(uncertainties, { threshold: 0.15, maxAsks: 8 });
+  const dismissed = inquiryDismissed[code] || {};
+  const visible = new Set(getVisibleUserIds(code, userId));
+  return plans.filter(p => {
+    if (dismissed[p.uncertaintyId] && now < dismissed[p.uncertaintyId]) return false;   // cooling down
+    // A question aimed at a specific person only surfaces to a reader who may see them.
+    if (p.owner && p.owner !== 'organisation' && orgUsers[code] && orgUsers[code][p.owner] && !visible.has(p.owner)) return false;
+    return true;
+  }).map(p => ({
+    id: p.uncertaintyId, question: p.question, why: p.why, requiredFor: p.requiredFor,
+    askWorthiness: p.askWorthiness, kind: p.uncertaintyType,
+    owner: p.owner === userId ? 'you' : (p.owner === 'organisation' ? 'the organisation' : (orgUsers[code]?.[p.owner]?.name || null)),
+  }));
+}
+
+/* GET /api/inquiry/pending — the proactive ask. Leader-gated + scoped. Returns the governed
+   questions the system judges worth putting to this reader now (top few), each with why it
+   matters. The in-app proactive surface + the digest draw on this. */
+app.get('/api/inquiry/pending', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
+    return res.status(403).json({ ok: false, error: 'Permission denied' });
+  }
+  try {
+    const questions = _pendingInquiries(code, userId).slice(0, Number(req.query.limit) || 5);
+    res.json({ ok: true, questions, count: questions.length });
+  } catch (e) {
+    console.warn('[inquiry/pending] failed:', e && e.message);
+    res.json({ ok: true, questions: [], count: 0 });
+  }
+});
+
+/* POST /api/inquiry/:id/dismiss — "not now". Stands a question down for a cooldown so the
+   system never nags. Leader-gated + scoped like the ask. */
+app.post('/api/inquiry/:id/dismiss', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
+    return res.status(403).json({ ok: false, error: 'Permission denied' });
+  }
+  const id = String(req.params.id || '');
+  (inquiryDismissed[code] = inquiryDismissed[code] || {})[id] = Date.now() + INQUIRY_COOLDOWN;
+  scheduleSave();
+  res.json({ ok: true, dismissed: id, until: new Date(inquiryDismissed[code][id]).toISOString() });
+});
 
 /* GET /api/org-state — RESTRICTED diagnostic (leader-only). Exposes the derived
    structure + claim states + readiness + provenance KIND — never raw evidence text,
@@ -8843,21 +8991,42 @@ app.post('/api/org-playbook/:fingerprint/retire', requireAuth, (req, res) => {
 function _reasonObservations(code, now) {
   const users = orgUsers[code] || {};
   const day = Math.floor(now / 86400000);
+  const WINDOW = 42 * 86400000;   // ~6 weeks — the reasoning window
+  // Group this org's SHARED, non-sensitive notes by author once — the LANGUAGE-signal source.
+  // Private / anonymous / sensitive notes are excluded here: they never feed the org reasoner.
+  const sharedByAuthor = {};
+  for (const n of Object.values(orgNotes)) {
+    if (!n || n.orgCode !== code || n.type !== 'shared' || !n.authorId) continue;
+    if (privacy.isPrivate(n.sensitivity)) continue;
+    const t = Date.parse(n.createdAt); if (!Number.isFinite(t) || now - t > WINDOW) continue;
+    (sharedByAuthor[n.authorId] = sharedByAuthor[n.authorId] || []).push({ id: n.id, content: n.content, t });
+  }
   const observations = [];
   for (const u of Object.values(users)) {
     if (!u || u.role === 'superadmin') continue;
-    let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { continue; }
-    if (!m) continue;
-    const findings = [...intel.detectPatterns(m), ...(m.structural || [])];
-    if (!findings.length) continue;
     const scope = _primaryNodeScope(code, u.id);
-    for (const f of findings) {
-      observations.push({
-        id: `${u.id}:${f.type}:${day}`,
-        subjectId: u.id, subjectName: (u.name || u.id) || null, scope,
-        kind: f.type, severity: f.severity, confidence: f.confidence, basis: f.basis,
-        careFlag: !!m.hasSensitiveContext, t: now,
-      });
+    const name = (u.name || u.id) || null;
+    // (a) DETECTOR findings — self-relative / structural patterns over the numeric signals.
+    let m = null; try { m = _buildMemberIntelInput(code, u, now); } catch (_) {}
+    if (m) {
+      for (const f of [...intel.detectPatterns(m), ...(m.structural || [])]) {
+        observations.push({
+          id: `${u.id}:${f.type}:${day}`,
+          subjectId: u.id, subjectName: name, scope,
+          kind: f.type, severity: f.severity, confidence: f.confidence, basis: f.basis,
+          careFlag: !!m.hasSensitiveContext, t: now,
+        });
+      }
+    }
+    // (b) LANGUAGE-derived signal — what they SHARED, in their own words. Deterministic
+    // (ai/comprehend — no model, nothing leaves), forced through the understanding guard.
+    // One shared note becomes at most one tentative observation; the ledger accumulates.
+    const care = !!(m && m.hasSensitiveContext);
+    for (const n of (sharedByAuthor[u.id] || [])) {
+      const o = understanding.featuresToObservation(
+        understanding.sanitizeFeatures(comprehend.comprehend(n.content || '')),
+        { id: `note:${n.id}`, subjectId: u.id, subjectName: name, scope, t: n.t });
+      if (o) { o.careFlag = o.careFlag || care; observations.push(o); }
     }
   }
   return observations;
@@ -8905,6 +9074,33 @@ function _reasonTick(code, now = Date.now(), force = false) {
   reasonTickCache[code] = { ts: now, result };
   scheduleSave();
   return result;
+}
+
+// THE HEARTBEAT — the brain does not sleep. Reasoning must not depend on a leader
+// happening to open the app: beliefs form, accumulate, and calibrate on their own so
+// that when someone does look, the read is already current. Two beats:
+//
+//   • _reasonSweep — a periodic, org-wide pass (from the live server's interval below).
+//     It forces a fresh tick for every org that has people, so the ledger stays warm
+//     even when nobody is watching. Bounded and per-org isolated: one org's failure
+//     never stops the others. Returns how many orgs it reasoned over.
+//
+//   • _reasonNudge — event-driven freshness. When new admissible input actually arrives
+//     (a note is shared to the team, and so enters the reasoner's observation set), we
+//     drop that org's tick cache so the very next read re-reasons instead of serving a
+//     stale, pre-note belief state. Cheap: it schedules no work itself, it just lets the
+//     next reader (or the next sweep) pick the change up immediately.
+function _reasonSweep(now = Date.now()) {
+  let reasoned = 0;
+  for (const code of Object.keys(orgUsers)) {
+    if (!orgUsers[code] || !Object.keys(orgUsers[code]).length) continue;
+    try { _reasonTick(code, now, true); reasoned++; }
+    catch (e) { console.warn(`[reason] sweep failed for ${code}:`, e && e.message); }
+  }
+  return reasoned;
+}
+function _reasonNudge(code) {
+  if (code) delete reasonTickCache[code];
 }
 
 /* A leader-safe projection of an agenda item — the belief, its register + readiness, its
@@ -8988,6 +9184,10 @@ app.get('/api/reason/agenda', requireAuth, (req, res) => {
     const now = Date.now();
     const { agenda, proposals } = _reasonScopedAgenda(code, userId, now, req.query.refresh === '1');
     const ripe = agenda.filter(a => a.readiness === 'ripe');
+    // ACCOUNTABILITY — a leader reading beliefs about people is an accountable access.
+    // Record it (content-free): who, that it was an agenda read, and whose data it touched.
+    const touched = [...new Set(agenda.map(a => a.subjectId).filter(Boolean))];
+    if (touched.length) _audit(code, { actor: userId, action: 'agenda_view', subjectIds: touched, basis: 'scoped team read' });
     res.json({
       ok: true,
       generatedAt: new Date(now).toISOString(),
@@ -9053,6 +9253,8 @@ app.post('/api/reason/:beliefId/feedback', requireAuth, (req, res) => {
   reason.applyFeedback(ledger, beliefId, response, Date.now(), userId);
   reasonLedger[code] = ledger;
   delete reasonTickCache[code];   // next read reflects the response immediately
+  // ACCOUNTABILITY — a subject contesting a belief about them is a rectification event.
+  if (isSubject && response === 'wrong') _audit(code, { actor: userId, action: 'belief_contest', subjectIds: [userId], basis: 'subject rectification' });
   scheduleSave();
   res.json({ ok: true, beliefId, response, by: isSubject && !isLeader ? 'subject' : 'leader' });
 });
@@ -9101,6 +9303,82 @@ app.get('/api/reason/me', requireAuth, (req, res) => {
     console.warn('[reason/me] failed:', e && e.message);
     res.json({ ok: true, beliefs: [] });
   }
+});
+
+/* GET /api/me/data — SUBJECT ACCESS REQUEST (GDPR Art 15). A person's standing right to a
+   copy of everything the system holds ABOUT THEM, assembled read-only in one place: the
+   reads the reasoner holds about them (their own subject-view, never the leader-facing
+   urgency/challenge), the working habits their PRIVATE self-model has learned, the notes
+   they authored, and — the accountability half — the content-free trail of who has accessed
+   their data and why. Strictly self: a person can only ever request their OWN record. The
+   request is itself logged (a subject_access event), because exercising the right is an
+   access too. This is what makes IntelliQ answerable to the people it's about. */
+app.get('/api/me/data', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  try {
+    const now = Date.now();
+    const me = orgUsers[code]?.[userId] || {};
+    // The reads held about me — my own transparent view, not the leader-facing projection.
+    const beliefs = (reasonLedger[code] || [])
+      .filter(b => b.subjectId === userId && !b.shared)
+      .map(b => reason.subjectView(b));
+    // My private self-model — the working habits IntelliQ has learned about me.
+    const habits = selfModel.selfView(selfModelLedger[_selfKey(code, userId)] || []);
+    // The notes I authored (my own words — the content I put in).
+    const myNotes = Object.values(orgNotes)
+      .filter(n => n && n.orgCode === code && n.authorId === userId)
+      .map(n => ({ id: n.id, type: n.type, sensitivity: n.sensitivity || 'normal', createdAt: n.createdAt, content: n.content }));
+    // The accountability trail — who accessed my data, when, on what basis (content-free).
+    const accessTrail = audit.subjectTrail(auditLog[code] || [], userId)
+      .map(t => ({ ...t, at: new Date(t.at).toISOString() }));
+    // Exercising the right is itself an access — record it.
+    _audit(code, { actor: userId, action: 'subject_access', subjectIds: [userId], basis: 'subject access request (Art 15)' });
+    res.json({
+      ok: true,
+      subject: { id: userId, name: me.name || null, role: me.role || null },
+      generatedAt: new Date(now).toISOString(),
+      held: {
+        reads: beliefs,                 // what the reasoner believes about me (my view)
+        workingHabits: habits,          // my private self-model
+        myNotes,                        // notes I authored
+        accessTrail,                    // who has accessed my data
+      },
+      rights: {
+        rectify: 'You can contest any read here via /api/reason/:beliefId/feedback (response "wrong").',
+        erase: 'You can ask an administrator to erase your data (right to erasure, Art 17).',
+      },
+    });
+  } catch (e) {
+    console.warn('[me/data] failed:', e && e.message);
+    res.status(500).json({ ok: false, error: 'export_failed' });
+  }
+});
+
+/* GET /api/admin/access-log — the ACCOUNTABILITY REVIEW. An administrator (or a manage-
+   settings leader) can review who has accessed personal data across the org, and verify the
+   trail hasn't been tampered with (the hash chain). Content-free by construction — it shows
+   accesses, never the data accessed. Optional ?subjectId= or ?actor= to narrow. This is the
+   evidence an org shows a regulator, a parent, or its own board that access is scoped. */
+app.get('/api/admin/access-log', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'manage_settings')) {
+    return res.status(403).json({ ok: false, error: 'Permission denied' });
+  }
+  const log = auditLog[code] || [];
+  const subjectId = req.query.subjectId ? String(req.query.subjectId) : null;
+  const actor = req.query.actor ? String(req.query.actor) : null;
+  let entries;
+  if (subjectId) entries = audit.subjectTrail(log, subjectId);
+  else if (actor) entries = audit.actorTrail(log, actor);
+  else entries = log.map(e => ({ seq: e.seq, actor: e.actor, action: e.action, subjectIds: e.subjectIds, basis: e.basis, at: e.at }));
+  const integrity = audit.verify(log);   // does the chain still hold end-to-end?
+  res.json({
+    ok: true,
+    total: log.length,
+    entries: entries.map(e => ({ ...e, at: new Date(e.at).toISOString() })),
+    integrity,   // { ok, brokenAt } — tamper-evidence for the whole trail
+  });
 });
 
 /* ─── SCOPED ORGANISATIONAL ANSWERING (ai/org-answer) — a leader or member asks a plain
@@ -10812,6 +11090,7 @@ app.post('/api/notes/:noteId/share', requireAuth, (req, res) => {
         : 'This note can’t be shared.' });
   }
   Object.assign(note, noteGov.share(note, { actorId: userId, now: new Date().toISOString(), nodeScope: _primaryNodeScope(code, userId) }));
+  _reasonNudge(code);   // new admissible input — let the next read re-reason
   scheduleSave();
   res.json({ ok: true, shared: true });
 });
@@ -10821,6 +11100,7 @@ app.post('/api/notes/:noteId/unshare', requireAuth, (req, res) => {
   if (!note) return res.status(404).json({ ok: false, error: 'note_not_found' });
   if (note.authorId !== userId) return res.status(403).json({ ok: false, error: 'only_author_can_unshare' });
   Object.assign(note, noteGov.unshare(note));
+  _reasonNudge(code);   // input withdrawn — let the next read re-reason without it
   scheduleSave();
   res.json({ ok: true, shared: false });
 });
@@ -10914,31 +11194,217 @@ app.get('/api/brief', requireAuth, async (req, res) => {
       if (rt && rt.present && rt.label) routeTo = { label: rt.label };
     }
 
+    // The caller's OWN accepted accommodations (self-model) — private to them, read back
+    // here so an accepted proposal actually reshapes their brief. self_first is applied at
+    // the server (lead with the person's own reads); the rest the brief composer honours.
+    const habits = selfModel.learn({ priorHabits: selfModelLedger[_selfKey(code, userId)] || [], now });
+    selfModelLedger[_selfKey(code, userId)] = habits;
+    const prefs = selfModel.activeSettings(habits, now);
+    if (prefs.self_first) {
+      // The person likes to clear their own things first — put their own reads ahead of the rest.
+      const ownReads = (reasonLedger[code] || [])
+        .filter(b => b.subjectId === userId && !b.shared && b.status !== 'dormant' && !reason.isSuppressed(b, now))
+        .map(b => { const v = reason.subjectView(b); return { text: v.claim, meta: v.confidence, polarity: b.polarity, own: true }; });
+      const already = new Set(reads.map(r => r.text));
+      reads = [...ownReads.filter(r => !already.has(r.text)), ...reads];
+    }
+
     const name = _firstName(code, userId), timeOfDay = _timeOfDay(now);
-    const composed = brief.compose({ level, name, timeOfDay, reads, practices, routeTo, rollupHeadline, areaLabel });
+    const composed = brief.compose({ level, name, timeOfDay, reads, practices, routeTo, rollupHeadline, areaLabel, prefs });
     // The assistant speaks in OUR OWN voice (ai/voice) — deterministic, prediction-proof, no
     // model. It composes the opening from the same facts; nothing is invented or foretold.
     const opening = level === 'leader'
       ? voice.leaderOpening({ name, timeOfDay, count: reads.length, rollupHeadline, areaLabel, seed: userId + level })
       : voice.memberOpening({ name, timeOfDay, count: reads.length, seed: userId + level });
-    res.json({ ok: true, level, opening, items: composed.items, offers: composed.offers });
+    res.json({ ok: true, level, opening, items: composed.items, offers: composed.offers, applied: composed.applied || [] });
   } catch (e) {
     console.warn('[brief] failed:', e && e.message);
     res.json({ ok: true, level: 'member', opening: 'Here’s where things stand.', items: [], offers: [] });
   }
 });
 
-/* GET /api/report/team — the first ARTIFACT: a grounded team report, print-ready HTML the
-   browser saves as a PDF. It renders only what the reasoner and the confirmed playbook
-   already know — every line shows its source, and anything without one never appears (the
-   ai/report grounding guarantee). Infrastructure, not UI: the assistant offers "want a
-   PDF?"; this is what it links to. Leader-gated + scoped like everything else. */
-app.get('/api/report/team', requireAuth, (req, res) => {
+/* ═══════════════════════════════════════════════════════════════════════════
+   OUTBOUND DELIVERY (ai/delivery) — the last mile. IntelliQ reaches a person off-
+   platform (web-push now; email/Slack later) with a governed, grounded, well-timed
+   rundown — never a prediction, never a sensitive read, never spam. Consent-first
+   (opt-in per person), org- and no-egress-gated, and every send is audit-logged.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* The reads a person's digest/alert may draw on — the SAME scoped, grounded reads the
+   brief uses, each tagged with careFlag so the outbound gate can drop anything sensitive.
+   Care-flag is resolved from the ledger and FAILS SAFE: an unresolvable belief is treated
+   as sensitive and excluded, so a wellbeing read can never leak off-platform. */
+function _deliveryReadsFor(code, userId, now) {
+  const level = _actorLevel(code, userId);
+  const name  = _firstName(code, userId);
+  const ledger = reasonLedger[code] || [];
+  const byId = new Map(ledger.map(b => [b.id, b]));
+  const careOf = (item) => {
+    if (item.rolled) return (item.memberBeliefIds || []).some(id => (byId.get(id) || {}).careFlag);
+    const b = byId.get(item.beliefId);
+    return b ? !!b.careFlag : true;                 // fail safe: unknown → sensitive → excluded
+  };
+  let reads = [];
+  if (level === 'leader') {
+    const { agenda } = _reasonScopedAgenda(code, userId, now, false);
+    reads = agenda.map(a => ({ text: a.claim, readiness: a.readiness, urgency: a.urgency, careFlag: careOf(a) }));
+  } else {
+    reads = ledger
+      .filter(b => b.subjectId === userId && !b.shared && b.status !== 'dormant' && !reason.isSuppressed(b, now))
+      .map(b => { const v = reason.subjectView(b); return { text: v.claim, readiness: b.readiness, urgency: b.urgency, careFlag: !!b.careFlag }; });
+  }
+  const timeOfDay = _timeOfDay(now);
+  const nEligible = delivery.eligibleReads(reads).length;
+  const opening = level === 'leader'
+    ? voice.leaderOpening({ name, timeOfDay, count: nEligible, seed: userId + level })
+    : voice.memberOpening({ name, timeOfDay, count: nEligible, seed: userId + level });
+  return { level, name, opening, reads };
+}
+
+/* Compose one person's digest and (if the decision says so) deliver it. `force` bypasses the
+   cadence/quiet-hours gate for an explicit self-test, but NEVER the privacy gate (sensitive
+   reads are always excluded) or consent (a channel/subscription must exist to actually send).
+   Returns what happened — the payload, whether it was sent, and how many pushes landed. */
+async function _deliverDigest(code, userId, { force = false } = {}) {
+  const now = Date.now();
+  const key = userKey(code, userId);
+  const prefs = { ...delivery.DEFAULT_PREFS, ...(deliveryPrefs[key] || {}) };
+  const { name, opening, reads } = _deliveryReadsFor(code, userId, now);
+  const eligible = delivery.eligibleReads(reads);
+  const decision = force
+    ? { send: eligible.length > 0 || true, reason: 'test' }
+    : delivery.shouldDeliver({ prefs, now, hasContent: eligible.length > 0 });
+  if (!decision.send) return { sent: false, reason: decision.reason };
+  const payload = delivery.composeDigest({ name, opening, reads, url: '/' });
+  const subs = pushSubs[key] || [];
+  let delivered = 0, gone = [];
+  for (const s of subs) {
+    const r = await _sendPush(s, payload);
+    if (r.ok) delivered++;
+    else if (r.statusCode === 404 || r.statusCode === 410) gone.push(s.endpoint);   // subscription expired — prune
+  }
+  if (gone.length) { pushSubs[key] = subs.filter(s => !gone.includes(s.endpoint)); }
+  prefs.lastSentAt = now;
+  deliveryPrefs[key] = prefs;
+  _audit(code, { actor: 'system', action: 'outbound_delivery', subjectIds: [userId], basis: `digest · ${payload.itemCount} item(s) · ${delivered}/${subs.length} push${force ? ' · test' : ''}` });
+  scheduleSave();
+  return { sent: true, payload, delivered, subscriptions: subs.length, channelReady: PUSH_READY };
+}
+
+/* The DELIVERY SWEEP — the heartbeat's outbound beat. For every org that permits outbound,
+   every person opted in gets their digest considered (the gate decides if it actually goes).
+   Bounded + per-person isolated: one failure never stops the rest. Returns how many sent. */
+async function _deliverySweep() {
+  let sent = 0;
+  for (const code of Object.keys(orgUsers)) {
+    if (!_outboundAllowed(code)) continue;
+    for (const uid of Object.keys(orgUsers[code] || {})) {
+      const key = userKey(code, uid);
+      const p = deliveryPrefs[key];
+      if (!p || !p.enabled) continue;                 // opt-in only
+      try { const r = await _deliverDigest(code, uid, { force: false }); if (r.sent) sent++; }
+      catch (e) { console.warn(`[delivery] sweep failed for ${code}:${uid}:`, e && e.message); }
+    }
+  }
+  return sent;
+}
+
+/* GET /api/delivery/config — what the client needs to subscribe: whether push is live on
+   this deployment, and the VAPID public key to register a subscription with. */
+app.get('/api/delivery/config', requireAuth, (req, res) => {
+  const { orgCode: code } = req.iqSession;
+  res.json({ ok: true, pushReady: PUSH_READY, outboundAllowed: _outboundAllowed(code), vapidPublicKey: VAPID_PUBLIC || null });
+});
+
+/* GET/POST /api/delivery/prefs — a person's OWN delivery preferences (opt-in, channels,
+   cadence, quiet hours, timezone). Strictly self. */
+app.get('/api/delivery/prefs', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  res.json({ ok: true, prefs: { ...delivery.DEFAULT_PREFS, ...(deliveryPrefs[userKey(code, userId)] || {}) }, outboundAllowed: _outboundAllowed(code) });
+});
+app.post('/api/delivery/prefs', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const key = userKey(code, userId);
+  const cur = { ...delivery.DEFAULT_PREFS, ...(deliveryPrefs[key] || {}) };
+  const b = req.body || {};
+  const next = { ...cur };
+  if (typeof b.enabled === 'boolean') next.enabled = b.enabled;
+  if (b.channels && typeof b.channels === 'object') next.channels = { push: !!b.channels.push, email: !!b.channels.email };
+  if (b.cadence === 'daily' || b.cadence === 'off') next.cadence = b.cadence;
+  if (Number.isFinite(b.quietStart)) next.quietStart = Math.max(0, Math.min(23, Math.floor(b.quietStart)));
+  if (Number.isFinite(b.quietEnd))   next.quietEnd   = Math.max(0, Math.min(23, Math.floor(b.quietEnd)));
+  if (Number.isFinite(b.tzOffsetMin)) next.tzOffsetMin = Math.max(-840, Math.min(840, Math.floor(b.tzOffsetMin)));
+  deliveryPrefs[key] = next;
+  scheduleSave();
+  res.json({ ok: true, prefs: next });
+});
+
+/* POST /api/delivery/subscribe — store a web-push subscription for the caller (self only).
+   POST /api/delivery/unsubscribe — drop one by endpoint. */
+app.post('/api/delivery/subscribe', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_outboundAllowed(code)) return res.status(403).json({ ok: false, error: 'outbound_disabled' });
+  const sub = req.body && req.body.subscription;
+  if (!sub || !sub.endpoint || !sub.keys) return res.status(400).json({ ok: false, error: 'invalid_subscription' });
+  const key = userKey(code, userId);
+  const list = pushSubs[key] = (pushSubs[key] || []).filter(s => s.endpoint !== sub.endpoint);
+  list.push({ endpoint: String(sub.endpoint).slice(0, 600), keys: { p256dh: String(sub.keys.p256dh || '').slice(0, 200), auth: String(sub.keys.auth || '').slice(0, 100) } });
+  // Subscribing implies the person wants push on — turn the channel on (they can still tune).
+  const prefs = deliveryPrefs[key] = { ...delivery.DEFAULT_PREFS, ...(deliveryPrefs[key] || {}) };
+  prefs.enabled = true; prefs.channels = { ...prefs.channels, push: true };
+  scheduleSave();
+  res.json({ ok: true, subscriptions: list.length, pushReady: PUSH_READY });
+});
+app.post('/api/delivery/unsubscribe', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const key = userKey(code, userId);
+  const endpoint = req.body && req.body.endpoint;
+  if (endpoint) pushSubs[key] = (pushSubs[key] || []).filter(s => s.endpoint !== endpoint);
+  else pushSubs[key] = [];
+  scheduleSave();
+  res.json({ ok: true, subscriptions: (pushSubs[key] || []).length });
+});
+
+/* GET /api/delivery/preview — the digest that WOULD be delivered right now, with the send
+   decision (why it would or wouldn't go). No send, no side effects. Self only — proof to the
+   person of exactly what leaves the box (and that nothing sensitive does). */
+app.get('/api/delivery/preview', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const now = Date.now();
+  const key = userKey(code, userId);
+  const prefs = { ...delivery.DEFAULT_PREFS, ...(deliveryPrefs[key] || {}) };
+  const { name, opening, reads } = _deliveryReadsFor(code, userId, now);
+  const eligible = delivery.eligibleReads(reads);
+  const payload = delivery.composeDigest({ name, opening, reads, url: '/' });
+  const decision = delivery.shouldDeliver({ prefs, now, hasContent: eligible.length > 0 });
+  const alertRead = delivery.alertWorthy(reads);
+  res.json({ ok: true, payload, decision, wouldAlert: alertRead ? delivery.composeAlert({ name, read: alertRead, url: '/' }) : null, excludedSensitive: reads.length - eligible.length });
+});
+
+/* POST /api/delivery/test — send yourself one now (bypasses cadence/quiet hours, never the
+   privacy gate). Requires a real subscription/channel to actually land. Self only. */
+app.post('/api/delivery/test', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_outboundAllowed(code)) return res.status(403).json({ ok: false, error: 'outbound_disabled' });
+  const r = await _deliverDigest(code, userId, { force: true });
+  res.json({ ok: true, ...r });
+});
+
+/* GET /api/report/team — the first ARTIFACT: a grounded team report. Print-ready HTML the
+   browser saves as a PDF, OR — with ?format=csv (or the /api/report/team.csv path) — the
+   SAME grounded facts as a board-ready, spreadsheet-openable CSV. Both render only what the
+   reasoner and the confirmed playbook already know — every line shows its source, and
+   anything without one never appears (the ai/report grounding guarantee). Infrastructure,
+   not UI: the assistant offers "want a report?"; this is what it links to. The CSV is the
+   first paid-tier EXPORT — the same intelligence, in a format an org can hand to a board or
+   drop in a spreadsheet. Leader-gated + scoped + audit-logged like everything else. */
+app.get(['/api/report/team', '/api/report/team.csv'], requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
   if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
     return res.status(403).type('text/plain').send('Permission denied');
   }
+  const asCsv = req.path.endsWith('.csv') || String(req.query.format || '').toLowerCase() === 'csv';
   const now = Date.now();
   let attention = [], practices = [];
   try {
@@ -10964,6 +11430,76 @@ app.get('/api/report/team', requireAuth, (req, res) => {
       { heading: 'Confirmed practices', facts: practices, emptyNote: 'No practices are confirmed into your playbook yet.' },
     ],
   });
+  // ACCOUNTABILITY — rendering a grounded report about people is an accountable access.
+  try {
+    const { agenda } = _reasonScopedAgenda(code, userId, now, false);
+    const touched = [...new Set(agenda.map(a => a.subjectId).filter(Boolean))];
+    _audit(code, { actor: userId, action: 'report_view', subjectIds: touched, basis: asCsv ? 'grounded report export (CSV)' : 'grounded team report' });
+  } catch (_) {}
+  if (asCsv) {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="intelliq-team-report.csv"');
+    return res.send(report.renderCsv(model));
+  }
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(report.renderHtml(model));
+});
+
+/* GET /api/report/person/:userId — a grounded PERSONAL development record. The artifact a
+   coach hands a player, or a teacher a parent: everything the system can point to about ONE
+   person — the reads the reasoner holds (person-safe, never the leader-facing urgency), and
+   the strengths recorded from their own assessments — each line showing its source, nothing
+   invented. HTML (→ PDF) or ?format=csv. Access is either the SUBJECT themselves (their own
+   record) or a leader who may SEE them (visibility-scoped, view permission); anyone else is
+   refused. Audit-logged as a report_view of that person — a per-person export is exactly the
+   access a compliance trail must capture. This is a paid-tier artifact that reuses the whole
+   grounded stack. */
+app.get('/api/report/person/:userId', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  let targetId = String(req.params.userId || '');
+  // Support a clean .csv suffix on the id (…/person/joe.csv) as well as ?format=csv.
+  let csvSuffix = false;
+  if (targetId.endsWith('.csv')) { csvSuffix = true; targetId = targetId.slice(0, -4); }
+  const target = orgUsers[code]?.[targetId];
+  if (!target) return res.status(404).type('text/plain').send('Person not found');
+  const isSelf   = targetId === userId;
+  const isAdmin  = orgUsers[code]?.[userId]?.role === 'superadmin';
+  const canView  = isAdmin || _userHasPerm(code, userId, 'view_team') || _userHasPerm(code, userId, 'view_insights');
+  const inScope  = new Set(getVisibleUserIds(code, userId)).has(targetId);
+  if (!isSelf && !(canView && inScope)) return res.status(403).type('text/plain').send('Permission denied');
+
+  const asCsv = csvSuffix || String(req.query.format || '').toLowerCase() === 'csv';
+  const now = Date.now();
+  let reads = [], strengths = [];
+  try {
+    _reasonTick(code, now, false);
+    reads = (reasonLedger[code] || [])
+      // A shareable record: non-dormant, non-suppressed reads about them — and NOT a
+      // care-flagged (sensitive wellbeing) read, which stays out of a handable artifact.
+      .filter(b => b.subjectId === targetId && !b.shared && !b.careFlag && b.status !== 'dormant' && !reason.isSuppressed(b, now))
+      .map(b => ({ text: b.claim, basis: `reasoner · ${b.confidence || 'tentative'}` }));
+  } catch (_) {}
+  try {
+    strengths = (_personStrengths(code, targetId) || []).map(s => ({ text: `A recorded strength: ${s}.`, basis: 'assessment · recorded strength' }));
+  } catch (_) {}
+
+  const firstName = String(target.name || targetId).split(/\s+/)[0];
+  const model = report.buildReport({
+    title: `Development record — ${target.name || targetId}`,
+    subject: isSelf ? 'Your own record' : (_orgAskAreaLabel(code, userId) || null),
+    generatedAt: new Date(now).toISOString(),
+    intro: `What the system can point to about ${firstName} — drawn only from recorded evidence, each line showing its source. Nothing here is invented or predicted.`,
+    sections: [
+      { heading: 'Where things stand', facts: reads, emptyNote: 'Nothing is currently strong enough to raise — a steady, unremarkable picture.' },
+      { heading: 'Strengths recorded', facts: strengths, emptyNote: 'No strengths are recorded from assessments yet.' },
+    ],
+  });
+  _audit(code, { actor: userId, action: 'report_view', subjectIds: [targetId], basis: isSelf ? 'own development record' : 'grounded person report' });
+  if (asCsv) {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="intelliq-${firstName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'person'}-record.csv"`);
+    return res.send(report.renderCsv(model));
+  }
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(report.renderHtml(model));
 });
@@ -11225,7 +11761,13 @@ function _resolveUserIdByName(code, name) {
 /* Emit a signal from an input touchpoint — never throws (input flow must not
    break if signal capture fails). This is how EVERY input becomes signal. */
 function _emitSignalSafe(code, raw, createdBy) {
-  try { return _ingestSignal(code, raw, createdBy); } catch (e) { console.warn('[signal] emit failed:', e.message); return null; }
+  try {
+    const r = _ingestSignal(code, raw, createdBy);
+    // AMBIENT SENSING — a new signal is new reality. Nudge the reasoner so the next read
+    // re-reasons WITH it, instead of waiting for the 30-min heartbeat. Cheap (cache clear).
+    _reasonNudge(code);
+    return r;
+  } catch (e) { console.warn('[signal] emit failed:', e.message); return null; }
 }
 
 /* Recent signals for a subject (used by the AI layer). */
@@ -13715,6 +14257,10 @@ function _loadAllStores(data) {
   Object.assign(orgPlaybookDismissed, data.orgPlaybookDismissed || {});
   Object.assign(reasonLedger,      data.reasonLedger      || {});
   Object.assign(selfModelLedger,   data.selfModelLedger   || {});
+  Object.assign(auditLog,          data.auditLog          || {});
+  Object.assign(deliveryPrefs,     data.deliveryPrefs     || {});
+  Object.assign(pushSubs,          data.pushSubs          || {});
+  Object.assign(inquiryDismissed,  data.inquiryDismissed  || {});
   Object.assign(conversationSessions, data.conversationSessions || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
@@ -13801,7 +14347,15 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: learning engine (Phase B2) — candidates + governed playbook
   orgPlaybook, orgPlaybookDismissed, _deriveOrgCandidates,
   // exported for the truth layer: grounded conversation engine (assessment/check-in intake)
-  conversationSessions, _assessmentMemberProjection, _conversationEvidenceByRef };
+  conversationSessions, _assessmentMemberProjection, _conversationEvidenceByRef,
+  // exported for the truth layer: the reasoner heartbeat (background sweep + event nudge)
+  _reasonSweep, _reasonNudge, _reasonScopedAgenda, reasonLedger, reasonTickCache,
+  // exported for the truth layer: the accountability trail (access log + SAR + tamper-evidence)
+  _audit, auditLog, _removePerson,
+  // exported for the truth layer: outbound delivery (compose + gate + sweep)
+  _deliverDigest, _deliverySweep, _deliveryReadsFor, deliveryPrefs, pushSubs,
+  // exported for the truth layer: autonomous inquiry (proactive, governed questions)
+  _pendingInquiries, _lifecycleUncertainties, inquiryDismissed };
 
 if (require.main === module) (async () => {
   try {
@@ -13891,6 +14445,20 @@ if (require.main === module) (async () => {
     //     on boot, then daily. Runs only in the live server (never in test mode).
     _purgeExpired();
     setInterval(() => { try { _purgeExpired(); } catch (e) { console.warn('[retention] purge failed:', e.message); } }, 24 * 60 * 60 * 1000).unref();
+
+    // The reasoner heartbeat — the brain reasons on its own, not only when a leader
+    // opens the app. One warm pass on boot, then every 30 min: beliefs form, accumulate,
+    // and calibrate against their own outcomes in the background, so the agenda a leader
+    // sees is already current the moment they look. Never runs in test mode (this whole
+    // block is live-server only). See _reasonSweep.
+    try { const n = _reasonSweep(); if (n) console.log(`[reason] heartbeat — reasoned over ${n} org(s) on boot`); } catch (e) { console.warn('[reason] boot sweep failed:', e.message); }
+    setInterval(() => { try { _reasonSweep(); } catch (e) { console.warn('[reason] heartbeat failed:', e.message); } }, 30 * 60 * 1000).unref();
+
+    // The outbound beat — after each heartbeat the reads are fresh, so consider a digest for
+    // everyone opted in (the gate decides if it actually goes: content, quiet hours, once a
+    // day). Runs hourly; sends nothing to no-egress orgs. Push lights up when configured.
+    console.log(`[delivery] outbound ${PUSH_READY ? 'READY (web-push + VAPID configured)' : 'staged (compose+gate+audit; set VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY + install web-push to send)'}`);
+    setInterval(() => { _deliverySweep().then(n => { if (n) console.log(`[delivery] heartbeat — delivered ${n} digest(s)`); }).catch(e => console.warn('[delivery] sweep failed:', e.message)); }, 60 * 60 * 1000).unref();
 
     // Connection poller — every 20 min. Respects pause, backoff (nextAttemptAt),
     // and rate-limit; processes a BOUNDED number per tick and round-robins across
