@@ -7,8 +7,8 @@
    create a new fact.
 
    Inputs are artifacts from other layers: reasoner reads, proactive insights,
-   outcome-intelligence briefs, confidence labels, and explicit/user-behaviour
-   preferences. Output is a ranked queue the UI can consume later.
+   outcome-intelligence briefs, unified feed items, confidence labels, and explicit
+   user-behaviour preferences. Output is a ranked queue the UI can consume later.
 
    PURE: imports nothing, no DB, no AI, no IO.
    ============================================================ */
@@ -16,8 +16,8 @@
 'use strict';
 
 const PRIORITY_RANK = { urgent: 0, high: 1, medium: 2, low: 3, none: 4 };
-const CONF_RANK = { confirmed: 0, clear: 1, reliable: 1, emerging: 2, promising: 2, tentative: 3, calibrating: 3, low: 3, none: 4 };
-const POLARITY_RANK = { risk: 0, neutral: 1, opportunity: 2, progress: 3, milestone: 3 };
+const CONF_RANK = { confirmed: 0, clear: 1, reliable: 1, well_supported: 1, supported: 1, emerging: 2, promising: 2, tentative: 3, calibrating: 3, low: 3, none: 4 };
+const POLARITY_RANK = { risk: 0, friction: 0, neutral: 1, opportunity: 2, progress: 3, strength: 3, milestone: 3 };
 
 function _s(v, n = 160) { return String(v == null ? '' : v).trim().slice(0, n); }
 function _key(v) { return _s(v || 'unknown', 80).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unknown'; }
@@ -29,22 +29,25 @@ function normalizeItem(item = {}, source = 'unknown') {
   const polarity = _key(item.polarity || (item.outcomeLine ? 'neutral' : 'neutral'));
   const priority = _key(item.priority || item.severity || 'low');
   const confidence = _key(item.kernelConfidence || item.confidence || item.reliability || 'none');
-  const id = _s(item.id || item.dedupeKey || `${source}:${patternType}:${item.subjectId || item.scope || ''}` || ('po_' + _hash(JSON.stringify(item))), 120);
-  const title = _s(item.headline || item.title || item.signal || item.opening || patternType.replace(/_/g, ' '), 160);
-  const body = _s(item.body || item.outcomeLine || item.text || item.line || '', 400);
+  const fallbackKey = `${source}:${patternType}:${item.subjectId || item.scope || item.title || item.headline || _hash(JSON.stringify(item))}`;
+  const id = _s(item.id || item.dedupeKey || fallbackKey, 120);
+  const title = _s(item.headline || item.title || item.signal || item.opening || item.question || patternType.replace(/_/g, ' '), 160);
+  const body = _s(item.body || item.outcomeLine || item.text || item.line || item.why || '', 400);
   const suggestion = item.suggestion || item.suggestedNextStep || null;
   return {
     id,
-    source,
+    source: item.source || source,
+    kind: item.kind || null,
     patternType,
     subjectId: item.subjectId != null ? _s(item.subjectId, 80) : null,
     scope: item.scope != null ? _s(item.scope, 120) : null,
-    bucket: _key(item.bucket || item.suggestedSurface || item.group || patternType),
+    bucket: _key(item.bucket || item.suggestedSurface || item.group || item.kind || patternType),
     polarity,
     priority,
     confidence,
     title,
     body,
+    question: item.question ? _s(item.question, 360) : null,
     suggestion: suggestion ? { ...suggestion, requiresConfirmation: suggestion.requiresConfirmation === true } : null,
     limitations: Array.isArray(item.limitations) ? item.limitations.map(x => _s(x, 160)) : [],
     rationale: Array.isArray(item.rationale) ? item.rationale.map(x => _s(x, 160)) : [],
@@ -60,23 +63,24 @@ function _score(item, prefs = {}) {
   if (item.limitations.includes('no_outcome_history')) score -= 10;
   if (item.limitations.includes('small_sample')) score -= 5;
   const preferred = Array.isArray(prefs.preferredBuckets) ? prefs.preferredBuckets.map(_key) : [];
-  if (preferred.includes(item.bucket) || preferred.includes(item.patternType)) score += 12;
-  if (prefs.pinnedFirst && (_key(prefs.pinnedFirst) === item.bucket || _key(prefs.pinnedFirst) === item.patternType)) score += 30;
+  if (preferred.includes(item.bucket) || preferred.includes(item.patternType) || preferred.includes(_key(item.source))) score += 12;
+  if (prefs.pinnedFirst && (_key(prefs.pinnedFirst) === item.bucket || _key(prefs.pinnedFirst) === item.patternType || _key(prefs.pinnedFirst) === _key(item.source))) score += 30;
   return score;
 }
 
-function buildQueue({ reads = [], insights = [], outcomeBriefs = [], extras = [], prefs = {}, suppressed = [] } = {}) {
+function buildQueue({ reads = [], insights = [], outcomeBriefs = [], feedItems = [], extras = [], prefs = {}, suppressed = [] } = {}) {
   const suppressedSet = new Set((suppressed || []).map(_s));
   const all = [
     ...reads.map(x => normalizeItem(x, 'reasoner')),
     ...insights.map(x => normalizeItem(x, 'proactive')),
     ...outcomeBriefs.map(x => normalizeItem(x, 'outcome_intelligence')),
+    ...feedItems.map(x => normalizeItem(x, x.source || 'intelligence_feed')),
     ...extras.map(x => normalizeItem(x, 'extra')),
-  ].filter(i => i.title || i.body).filter(i => !suppressedSet.has(i.id));
+  ].filter(i => i.title || i.body || i.question).filter(i => !suppressedSet.has(i.id));
 
   const seen = new Set();
   const queue = all.filter(i => {
-    const k = `${i.source}:${i.patternType}:${i.subjectId || i.scope || ''}:${i.title}`;
+    const k = `${i.source}:${i.kind || ''}:${i.patternType}:${i.subjectId || i.scope || ''}:${i.title}`;
     if (seen.has(k)) return false;
     seen.add(k);
     return true;
@@ -86,6 +90,9 @@ function buildQueue({ reads = [], insights = [], outcomeBriefs = [], extras = []
     rationale.push(`priority:${i.priority}`);
     if (i.confidence && i.confidence !== 'none') rationale.push(`confidence:${i.confidence}`);
     if (i.source === 'outcome_intelligence') rationale.push('outcome_history');
+    if (i.source === 'process_reflection') rationale.push('process_question');
+    if (i.source === 'self_model') rationale.push('personal_accommodation');
+    if (i.source === 'org_playbook') rationale.push('playbook_learning');
     if (i.limitations.length) rationale.push(...i.limitations.map(l => `limitation:${l}`));
     return { ...i, score, rationale };
   }).sort((a, b) => (b.score - a.score) || a.id.localeCompare(b.id));
