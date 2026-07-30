@@ -128,7 +128,7 @@ function scheduleSave() {
         orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
         proactivePrefs, insightSuppression, answerFeedback,
         orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
-        reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs,
+        reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
         conversationSessions,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
@@ -8114,6 +8114,10 @@ const AUDIT_CAP = 5000;           // keep the most recent N accesses per org
 // composes, gates, and audits — the network hop is the only thing gated by config.
 const deliveryPrefs = {};         // userKey → prefs (see ai/delivery.DEFAULT_PREFS)
 const pushSubs      = {};         // userKey → [ web-push subscription ]
+// AUTONOMOUS INQUIRY (ai/inquiry) — when a person stands a proactive question down, we
+// don't ask it again for a while. Keyed per org by the uncertainty id → dismissedUntil.
+const inquiryDismissed = {};      // orgCode → { uncertaintyId: dismissedUntilMs }
+const INQUIRY_COOLDOWN = 3 * 86400000;   // "not now" holds a question for 3 days
 let _webpush = null; try { _webpush = require('web-push'); } catch (_) { /* optional dep */ }
 const VAPID_PUBLIC  = process.env.VAPID_PUBLIC_KEY  || '';
 const VAPID_PRIVATE = process.env.VAPID_PRIVATE_KEY || '';
@@ -8301,6 +8305,89 @@ function _deriveOrgUncertainties(code) {
     return orgState.stateToUncertainties(state).map(u => inquiry.buildUncertainty(u));
   } catch (e) { console.warn('[org-uncertainties] failed:', e && e.message); return []; }
 }
+
+/* Knowledge hygiene as a source of proactive questions: run the lifecycle assessor over the
+   org's active evidence and turn each stale/review record into a "still current?" uncertainty
+   routed to its owner. This is the brain noticing its OWN knowledge going out of date and
+   choosing to ask, rather than quietly reasoning off a stale fact. Fail closed → []. */
+function _lifecycleUncertainties(code) {
+  try {
+    const now = Date.now();
+    const pool = (evidenceLog[code] || []).filter(e => e && e.status === 'active').slice(0, 500);
+    const out = [];
+    for (const env of pool) {
+      const a = lifecycle.assess(env, now);
+      const owner = env.subjectId || 'organisation';
+      const label = (env.label || (env.attributes && env.attributes.category) || env.type || 'a shared record');
+      // A record merely aging asks quietly (low); one WELL past its life (expired) is worth
+      // a gentle confirm now — enough to clear the Inquiry Engine's value gate.
+      const urgency = a.status === 'expired' ? 'medium' : 'low';
+      // The owner is authoritative about their OWN record — a confirm from them fully
+      // resolves it (this is a reliable answer, which is what makes the ask worth it).
+      const u = lifecycle.toUncertainty(a, { owner, label, urgency, ownerAuthoritative: !!env.subjectId, privacyClass: env.subjectId ? 'team-shared' : 'org' });
+      if (u) out.push(inquiry.buildUncertainty(u));
+    }
+    return out;
+  } catch (e) { console.warn('[lifecycle-uncertainties] failed:', e && e.message); return []; }
+}
+
+/* AUTONOMOUS INQUIRY — the governed questions the system actually wants to ask this reader
+   right now. It derives uncertainties (open org-state gaps + knowledge going stale), lets the
+   Inquiry Engine decide which are worth asking (value-gated, non-leading, health-guarded, and
+   NOT asked when we could answer them ourselves), drops anything the reader recently stood
+   down, and scopes person-targeted questions to whom the reader may see. Proactive, but never
+   nagging — that's the line. */
+function _pendingInquiries(code, userId, now = Date.now()) {
+  const uncertainties = [..._deriveOrgUncertainties(code), ..._lifecycleUncertainties(code)];
+  // A lower value gate than the interrupt threshold: these are LIGHT-TOUCH confirmations
+  // ("is this still current?"), not a heavy new ask — but the engine still rejects anything
+  // answerable without asking, anything private/sensitive (health-guard), and duplicates.
+  const { plans } = inquiry.planInquiries(uncertainties, { threshold: 0.15, maxAsks: 8 });
+  const dismissed = inquiryDismissed[code] || {};
+  const visible = new Set(getVisibleUserIds(code, userId));
+  return plans.filter(p => {
+    if (dismissed[p.uncertaintyId] && now < dismissed[p.uncertaintyId]) return false;   // cooling down
+    // A question aimed at a specific person only surfaces to a reader who may see them.
+    if (p.owner && p.owner !== 'organisation' && orgUsers[code] && orgUsers[code][p.owner] && !visible.has(p.owner)) return false;
+    return true;
+  }).map(p => ({
+    id: p.uncertaintyId, question: p.question, why: p.why, requiredFor: p.requiredFor,
+    askWorthiness: p.askWorthiness, kind: p.uncertaintyType,
+    owner: p.owner === userId ? 'you' : (p.owner === 'organisation' ? 'the organisation' : (orgUsers[code]?.[p.owner]?.name || null)),
+  }));
+}
+
+/* GET /api/inquiry/pending — the proactive ask. Leader-gated + scoped. Returns the governed
+   questions the system judges worth putting to this reader now (top few), each with why it
+   matters. The in-app proactive surface + the digest draw on this. */
+app.get('/api/inquiry/pending', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
+    return res.status(403).json({ ok: false, error: 'Permission denied' });
+  }
+  try {
+    const questions = _pendingInquiries(code, userId).slice(0, Number(req.query.limit) || 5);
+    res.json({ ok: true, questions, count: questions.length });
+  } catch (e) {
+    console.warn('[inquiry/pending] failed:', e && e.message);
+    res.json({ ok: true, questions: [], count: 0 });
+  }
+});
+
+/* POST /api/inquiry/:id/dismiss — "not now". Stands a question down for a cooldown so the
+   system never nags. Leader-gated + scoped like the ask. */
+app.post('/api/inquiry/:id/dismiss', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_team') && !_userHasPerm(code, userId, 'view_insights')) {
+    return res.status(403).json({ ok: false, error: 'Permission denied' });
+  }
+  const id = String(req.params.id || '');
+  (inquiryDismissed[code] = inquiryDismissed[code] || {})[id] = Date.now() + INQUIRY_COOLDOWN;
+  scheduleSave();
+  res.json({ ok: true, dismissed: id, until: new Date(inquiryDismissed[code][id]).toISOString() });
+});
 
 /* GET /api/org-state — RESTRICTED diagnostic (leader-only). Exposes the derived
    structure + claim states + readiness + provenance KIND — never raw evidence text,
@@ -14173,6 +14260,7 @@ function _loadAllStores(data) {
   Object.assign(auditLog,          data.auditLog          || {});
   Object.assign(deliveryPrefs,     data.deliveryPrefs     || {});
   Object.assign(pushSubs,          data.pushSubs          || {});
+  Object.assign(inquiryDismissed,  data.inquiryDismissed  || {});
   Object.assign(conversationSessions, data.conversationSessions || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
@@ -14265,7 +14353,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: the accountability trail (access log + SAR + tamper-evidence)
   _audit, auditLog, _removePerson,
   // exported for the truth layer: outbound delivery (compose + gate + sweep)
-  _deliverDigest, _deliverySweep, _deliveryReadsFor, deliveryPrefs, pushSubs };
+  _deliverDigest, _deliverySweep, _deliveryReadsFor, deliveryPrefs, pushSubs,
+  // exported for the truth layer: autonomous inquiry (proactive, governed questions)
+  _pendingInquiries, _lifecycleUncertainties, inquiryDismissed };
 
 if (require.main === module) (async () => {
   try {
