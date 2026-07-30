@@ -1448,12 +1448,12 @@ function renderSidebar(){
     badge.style.border     = '1px solid var(--border)';
   }
 
-  // Topbar line-icons (injected once the app chrome is present).
+  // Topbar line-icons (injected once the app chrome is present). Only the notifications
+  // bell remains — the nav-era member search + add-member controls are retired with the
+  // drawer (you add people via the account gear → People; you ask the assistant to find one).
   if (typeof ICON !== 'undefined') {
     const set = (sel, svg) => { const el = document.querySelector(sel); if (el && !el.dataset.iconSet) { el.innerHTML = svg; el.dataset.iconSet = '1'; } };
-    set('.topbar-search-icon', ICON.search);
-    set('.tb-ic-bell',         ICON.bell);
-    set('.tb-ic-add',          ICON.plus);
+    set('.tb-ic-bell', ICON.bell);
   }
   document.querySelector('.user-name').textContent = AppState.adminName;
   document.querySelector('.user-role').textContent = AppState.adminRole;
@@ -1764,11 +1764,6 @@ function renderMembers(){
 
 function filterMembers(group){
   memberGroup = group;
-  renderMembers();
-}
-
-function searchMembers(val){
-  memberSearch = val;
   renderMembers();
 }
 
@@ -7275,18 +7270,14 @@ document.addEventListener('DOMContentLoaded', () => {
   initLogin();
   // Nav items are bound where the sidebar nav is rendered (the one dynamic, permission-filtered
   // binder) — Phase-1 Cut G. No second DOMContentLoaded binder (the sidebar is empty until render).
-  // Notification panel toggle
-  document.getElementById('notif-btn').addEventListener('click', toggleNotifPanel);
-  document.getElementById('notif-panel-close').addEventListener('click', ()=>{
-    document.getElementById('notif-panel').classList.remove('open');
+  // Notification panel toggle (null-safe — topbar chrome may be absent on the one-page flow)
+  document.getElementById('notif-btn')?.addEventListener('click', toggleNotifPanel);
+  document.getElementById('notif-panel-close')?.addEventListener('click', ()=>{
+    document.getElementById('notif-panel')?.classList.remove('open');
   });
   // Close modals on overlay click
   document.querySelectorAll('.modal-overlay').forEach(ov => {
     ov.addEventListener('click', e => { if(e.target===ov) closeAllModals(); });
-  });
-  // Search
-  document.getElementById('topbar-search-input').addEventListener('input', e => {
-    if(AppState.currentPage==='members') searchMembers(e.target.value);
   });
   // Keyboard: Escape closes modals
   document.addEventListener('keydown', e => {
