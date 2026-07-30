@@ -5985,37 +5985,66 @@ async function todayDismissInquiry(id) {
 async function todayLoadVoice() {
   const box = document.getElementById('today-voice');
   if (!box) return;
-  let d, brief;
+  let packet, d, brief;
   try {
-    [d, brief] = await Promise.all([
+    [packet, d, brief] = await Promise.all([
+      fetch('/api/intelligence/packet', { headers: Auth._headers() }).then(r => r.json()).catch(() => null),
       fetch('/api/reason/agenda', { headers: Auth._headers() }).then(r => r.json()).catch(() => null),
       fetch('/api/brief', { headers: Auth._headers() }).then(r => r.json()).catch(() => null),
     ]);
   } catch (_) { box.innerHTML = ''; return; }
-  const ripe = (d && d.agenda || []).filter(a => a.readiness === 'ripe').slice(0, 4);
   const esc = _escAdvisor;
+  // The reasoner agenda still carries the RICH detail (challenge, reliability, timing) that a
+  // ranked packet item flattens — so we key by beliefId and render reasoner items with their
+  // full in-place feedback, while the PACKET decides order and unifies every other source.
+  const agendaById = {};
+  (d && d.agenda || []).forEach(a => { agendaById[a.beliefId] = a; });
   const propFor = bid => (d && d.proposals || []).find(p => p.beliefId === bid);
-  // Remember which items are org-wide roll-ups, so a decision fans out to every group.
   _todayRoll = {};
-  ripe.forEach(a => { if (a.rolled) _todayRoll[a.beliefId] = a.memberBeliefIds || []; });
+  (d && d.agenda || []).forEach(a => { if (a.rolled) _todayRoll[a.beliefId] = a.memberBeliefIds || []; });
 
-  // Lead with the node-aware brief: the assistant greets and OFFERS (governed next steps),
-  // then shows what it's seeing. The greeting is always there, so the brain is never invisible.
+  // The unified queue drives what's shown, in ranked order. Skip routed inquiry questions —
+  // the dedicated "IntelliQ wants to check" block (#today-inquiry) owns those with its dismiss.
+  const items = (packet && packet.queue || []).filter(i => i.kind !== 'questions_upward').slice(0, 6);
+  const rows = items.map(i => {
+    if (i.source === 'reasoner' && agendaById[i.id]) return todayVoiceRow(agendaById[i.id], propFor(i.id));
+    return todayPacketRow(i);
+  }).join('');
+
   const opener = brief && brief.opening
     ? `<div class="tdy-opener">${esc(brief.opening)}</div>`
     : `<div class="tdy-opener">I'm watching your team — I'll speak up here the moment something's worth your attention.</div>`;
   const offers = (brief && brief.offers || []).map(o =>
     `<button class="tdy-cbtn" style="margin:0" onclick="todayBriefOffer('${esc(o.action)}')">${esc(o.text)}</button>`).join('');
   const offersRow = offers ? `<div class="tdy-chips" style="margin-top:0.6rem">${offers}</div>` : '';
-  const beliefs = ripe.map(a => todayVoiceRow(a, propFor(a.beliefId))).join('');
 
   box.innerHTML = `
     <div class="tdy-voice">
-      <div class="tdy-vhead"><span class="tdy-presence"><span class="r"></span><span class="d"></span></span><span class="tdy-kicker">${ripe.length ? "What I'm seeing" : 'Today'}</span></div>
+      <div class="tdy-vhead"><span class="tdy-presence"><span class="r"></span><span class="d"></span></span><span class="tdy-kicker">${items.length ? "What I'm seeing" : 'Today'}</span></div>
       ${opener}
-      ${beliefs}
+      ${rows}
       ${offersRow}
     </div>`;
+}
+
+/* A non-reasoner packet item — a playbook practice, outcome history, a process reflection,
+   or a working pattern — shown as a read card with its source tag. Any suggestion is
+   proposal-gated and shown as text (it never acts on its own from here). */
+function todayPacketRow(i) {
+  const esc = _escAdvisor;
+  const SRC = { org_playbook: 'playbook', outcome_intelligence: 'outcome history', process_reflection: 'process', self_model: 'your working pattern', proactive: 'noticed', extra: 'note' };
+  const tag = SRC[i.source] || (i.source || '').replace(/_/g, ' ');
+  const attn = i.polarity === 'risk' || i.polarity === 'friction';
+  const chip = `<span class="tdy-chip${attn ? ' attn' : ''} ghost">${esc(tag)}</span>`;
+  const conf = i.confidence && i.confidence !== 'none' ? `<span class="tdy-chip ghost">${esc(i.confidence)}</span>` : '';
+  const head = esc(i.title || '');
+  const bodyTxt = i.question ? i.question : i.body;
+  return `<div class="tdy-belief">
+    <div class="tdy-metarow">${chip}${conf}</div>
+    <div class="tdy-claim">${head}</div>
+    ${bodyTxt ? `<div class="tdy-why" style="display:block;margin-top:.4rem"><span class="lbl">${esc(tag)}</span><div style="font-size:.85rem;color:var(--text-secondary);line-height:1.5">${esc(bodyTxt)}</div></div>` : ''}
+    ${i.suggestion && i.suggestion.text ? `<div class="tdy-proposal">${esc(i.suggestion.text)}</div>` : ''}
+  </div>`;
 }
 let _todayRoll = {};
 
