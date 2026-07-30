@@ -313,8 +313,13 @@ const server = app.listen(0, async () => {
          MemberAppStub._subjectCleared === true && MemberAppStub._wsWorkItemId === null);
     }
     ok('G2. the dead legacy switchTab router is gone; navigation is one authority', !/switchTab\s*\(tab\)/.test(mv));
-    ok('G18. no second DOMContentLoaded nav binder (one dynamic, permission-filtered binder)',
-       (read('js/app.js').match(/\.nav-item\[data-page\]'\)\.forEach\(item =>/g) || []).length === 1);
+    // The sectioned nav drawer is retired: the app flows from ONE assistant page, so the
+    // old .nav-item binder is gone entirely, and the single dynamic, permission-filtered
+    // binder is now the account gear's Setup links (People / Organisation / Settings).
+    ok('G18. the retired nav-item drawer binder is gone (no sectioned nav list)',
+       (read('js/app.js').match(/\.nav-item\[data-page\]'\)\.forEach\(item =>/g) || []).length === 0);
+    ok('G18b. exactly ONE dynamic, permission-filtered binder remains (the account-gear Setup links)',
+       (read('js/app.js').match(/\.topbar-account-link\[data-page\]'\)\.forEach\(btn =>/g) || []).length === 1);
 
     // ─────────────── Cut F: the OS decision paths are memberResults-FREE ───────────────
     // Prove that NO assistant/OS reasoning function derives anything from memberResults — the OS

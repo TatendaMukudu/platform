@@ -1409,7 +1409,10 @@ function launchApp(){
     if (isMember && typeof MemberApp !== 'undefined') {
       try { MemberApp.init(); } catch(e) { console.warn('[ROUTE] MemberApp.init failed:', e.message); }
     }
-    const defaultPage = isMember ? 'home' : isLeader ? 'leader-home' : 'dashboard';
+    // ONE assistant page for everyone: a member lands on their own "Me" assistant, and
+    // leaders + admins/supers land on the leader assistant home (Today). No dashboard
+    // landing — the drawer is gone and everything flows from here.
+    const defaultPage = isMember ? 'home' : 'leader-home';
     navigate(defaultPage);
   } catch(err) {
     console.error('[ROUTE] launchApp render error:', err);
@@ -1463,45 +1466,12 @@ function renderSidebar(){
   // ── Dynamic permission-driven nav ─────────────────────────────────────
   // Filter WORKSPACE_MODULES by Auth.canDo(). null permission = always shown.
   // Sections are rendered as group labels when a new section label appears.
+  // The sectioned navigation drawer is retired — the app flows from ONE assistant page.
+  // Nothing is rendered here; the few non-conversational Setup items now live in the
+  // topbar account menu (see renderTopbar → #topbar-account-links). Every old page stays
+  // reachable via navigate(); it's just no longer a menu list.
   const nav = document.getElementById('sidebar-nav');
-  if (nav) {
-    let currentSection = null;
-    let html = '';
-    const activePage = AppState.currentPage || 'dashboard';
-
-    const isLeader = Auth.isLeaderNode();
-
-    WORKSPACE_MODULES.forEach(mod => {
-      // leaderOnly items: only shown when the user leads at least one node
-      if (mod.leaderOnly && !isLeader) return;
-      // A leader's single Home is the unified leader-home, so hide the member Home for them.
-      if (mod.hideForLeaders && isLeader) return;
-      // Permission gate (null = always shown; check after leaderOnly so gates compose)
-      if (mod.permission !== null && mod.permission !== undefined && !Auth.canDo(mod.permission)) return;
-
-      // Section label
-      if (mod.section && mod.section !== currentSection) {
-        currentSection = mod.section;
-        html += `<div class="nav-section-label">${currentSection}</div>`;
-      }
-
-      const activeClass = activePage === mod.id ? ' active' : '';
-      const badgeHTML   = mod.badge
-        ? `<span class="nav-badge" style="display:none">0</span>`
-        : '';
-
-      html += `<div class="nav-item${activeClass}" data-page="${mod.id}">
-        <span class="nav-icon">${mod.icon}</span> ${mod.label}${badgeHTML}
-      </div>`;
-    });
-
-    nav.innerHTML = html;
-
-    // Re-attach click listeners (event delegation on the nav container)
-    nav.querySelectorAll('.nav-item[data-page]').forEach(item => {
-      item.addEventListener('click', () => navigate(item.dataset.page));
-    });
-  }
+  if (nav) nav.innerHTML = '';
 
   hydrateIcons();
   updateAlertBadge();
@@ -1545,6 +1515,29 @@ function renderTopbar(){
   if (nameEl) nameEl.textContent = user.name  || '—';
   if (emlEl)  emlEl.textContent  = user.email || '—';
   if (roleEl) roleEl.textContent = Auth.ROLE_LABELS?.[user.role] || user.role || 'Admin';
+
+  // The ONE quiet gear: the handful of Setup surfaces that can't be conversational live
+  // here now (People / Organisation / Settings), permission-gated. Everything else flows
+  // from the assistant page. Each link navigates and closes the menu.
+  const links = document.getElementById('topbar-account-links');
+  if (links) {
+    const ic = (name) => (typeof ICON !== 'undefined' && ICON[name]) ? ICON[name] : '';
+    const SETUP = [
+      { id: 'people',       label: 'People',       perm: 'view_members',    icon: 'person'   },
+      { id: 'organisation', label: 'Organisation', perm: 'view_team',       icon: 'building'  },
+      { id: 'settings',     label: 'Settings',     perm: 'manage_settings', icon: 'settings' },
+    ].filter(l => Auth.canDo(l.perm));
+    links.innerHTML = SETUP.length
+      ? SETUP.map(l => `<button class="topbar-account-link" data-page="${l.id}"><span class="tal-ic">${ic(l.icon)}</span>${l.label}</button>`).join('')
+      : '';
+    links.querySelectorAll('.topbar-account-link[data-page]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const menu = document.getElementById('topbar-account-menu');
+        if (menu) menu.classList.remove('open');
+        navigate(btn.dataset.page);
+      });
+    });
+  }
 }
 
 function toggleAdminAccountMenu() {
@@ -1564,30 +1557,14 @@ function toggleAdminAccountMenu() {
   }
 }
 
-/* ── Mobile sidebar toggle ───────────────────────────────────────────────
-   ONE managed outside-click handler (never leaked/stacked). The hamburger check
-   uses closest() so a tap on the button's SVG child still counts as the hamburger
-   — otherwise the open tap is seen as an "outside" click and closes the drawer it
-   just opened, which forced repeated taps. */
+/* ── Sidebar close-handler (retained) ────────────────────────────────────
+   The navigation drawer + its hamburger toggle are retired (the app flows from ONE
+   assistant page). navigate() still calls _detachSidebarClose() defensively to clear any
+   stray outside-click handler; with no drawer to open, _sidebarCloseHandler stays null and
+   this is a harmless no-op. Kept as the single owner of that teardown. */
 let _sidebarCloseHandler = null;
 function _detachSidebarClose() {
   if (_sidebarCloseHandler) { document.removeEventListener('click', _sidebarCloseHandler); _sidebarCloseHandler = null; }
-}
-function toggleSidebar() {
-  const sidebar = document.getElementById('sidebar');
-  if (!sidebar) return;
-  const opening = !sidebar.classList.contains('open');
-  sidebar.classList.toggle('open', opening);
-  _detachSidebarClose();                      // clear any prior handler first
-  if (opening) {
-    _sidebarCloseHandler = (e) => {
-      if (e.target.closest && e.target.closest('#topbar-hamburger')) return;  // tap on hamburger (or its icon)
-      if (sidebar.contains(e.target)) return;                                  // tap inside the drawer
-      sidebar.classList.remove('open');
-      _detachSidebarClose();
-    };
-    setTimeout(() => { if (_sidebarCloseHandler) document.addEventListener('click', _sidebarCloseHandler); }, 10);
-  }
 }
 
 /* ── Onboarding empty-state HTML (reused across pages) ───────────────── */

@@ -88,35 +88,46 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
     const boundary = () => page.evaluate(() => document.body.innerText.includes('Something went wrong loading IntelliQ'));
     ok(`[${label}] app boots without the error boundary`, !(await boundary()));
 
-    // Nav must be REACHABLE: the mobile hamburger opens the sidebar drawer, so it
-    // must actually contain a visible glyph/icon — an empty button (e.g. a control
-    // glyph stripped by an over-eager emoji sweep) strands the user with no nav.
-    const navReachable = await page.evaluate(() => {
-      const h = document.getElementById('topbar-hamburger');
-      if (!h) return false;
-      return (h.querySelector('svg') || (h.textContent || '').trim().length > 0) ? true : false;
+    // The drawer is retired — the app flows from ONE assistant page and the only tap-
+    // target that survives is the account GEAR (the topbar avatar). It must be present
+    // with a visible control, and it must NOT strand the user: the old sectioned nav
+    // drawer must be gone (hidden), so the gear is the single affordance.
+    const gearReachable = await page.evaluate(() => {
+      const btn = document.getElementById('topbar-avatar-btn');
+      if (!btn) return false;
+      return (btn.querySelector('svg') || (btn.textContent || '').trim().length > 0) ? true : false;
     });
-    ok(`[${label}] the nav is reachable (hamburger has a visible control)`, navReachable);
+    ok(`[${label}] the account gear is reachable (avatar has a visible control)`, gearReachable);
 
-    // The "press it 4 times" bug: open→navigate cycles left stale outside-click
-    // handlers that slammed the drawer shut on the next tap. After several cycles,
-    // one tap on the hamburger (its SVG child is the real target) must still OPEN it.
-    if (typeof (await page.evaluate(() => typeof toggleSidebar)) === 'string') {
-      const opensInOneTap = await page.evaluate(() => {
-        const sb = document.getElementById('sidebar');
-        for (let i = 0; i < 3; i++) { sb.classList.remove('open'); toggleSidebar(); navigate('home'); }
-        return true;
-      });
-      await page.waitForTimeout(40);  // let any close-handler timeouts attach
-      const stayedOpen = await page.evaluate(() => {
-        const sb = document.getElementById('sidebar');
-        sb.classList.remove('open');
-        const h = document.getElementById('topbar-hamburger');
-        (h.querySelector('svg') || h).dispatchEvent(new MouseEvent('click', { bubbles: true }));
-        return sb.classList.contains('open');
-      });
-      ok(`[${label}] the menu opens in a single tap (no stale close-handler leak)`, opensInOneTap && stayedOpen);
+    const drawerGone = await page.evaluate(() => {
+      const sb = document.getElementById('sidebar');
+      const nav = document.getElementById('sidebar-nav');
+      const sbHidden = !sb || getComputedStyle(sb).display === 'none';
+      const noNavItems = !nav || nav.querySelectorAll('.nav-item').length === 0;
+      return sbHidden && noNavItems;
+    });
+    ok(`[${label}] the navigation drawer is gone (no sectioned nav list)`, drawerGone);
+
+    // ONE page: the default landing is the assistant, not a dashboard. Asserted for the
+    // member (who boots straight through launchApp — a member's assistant is 'home').
+    if (label === 'member') {
+      const landed = await page.evaluate(() => (document.querySelector('.page.active') || {}).id || '');
+      ok(`[${label}] lands on the assistant page by default (not a dashboard)`, landed === 'page-home');
     }
+
+    // Opening the gear reveals the account menu (with Sign Out) — a single tap, and it
+    // actually opens (no stale close-handler leak from the old drawer bug).
+    const gearOpens = await page.evaluate(() => {
+      const menu = document.getElementById('topbar-account-menu');
+      if (!menu || typeof toggleAdminAccountMenu !== 'function') return false;
+      menu.classList.remove('open');
+      toggleAdminAccountMenu();
+      const open = menu.classList.contains('open');
+      const hasSignout = !!menu.querySelector('.topbar-signout-btn');
+      menu.classList.remove('open');
+      return open && hasSignout;
+    });
+    ok(`[${label}] the account gear opens to the account menu (Sign Out present)`, gearOpens);
 
     for (const p of pages) {
       await page.evaluate(pg => { if (typeof navigate === 'function') navigate(pg); }, p);
@@ -192,6 +203,16 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
     await page.route('**/*', r => { const u = r.request().url(); return (u.startsWith(base) || u.startsWith('data:')) ? r.continue() : r.abort(); });
     await page.addInitScript(a => { try { localStorage.setItem('iq_auth', a); } catch (_) {} }, auth);
     await page.goto(base + '/', { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(1500);
+    // The gear exposes the Setup surfaces that can't be conversational (an admin has all
+    // three). Populated by renderTopbar; invoke it directly so the check doesn't depend on
+    // which boot branch this seeded admin takes (the demo superadmin lands in org-setup).
+    const gearSetup = await page.evaluate(() => {
+      if (typeof renderTopbar === 'function') renderTopbar();
+      return [...document.querySelectorAll('#topbar-account-links .topbar-account-link')].map(b => b.dataset.page);
+    });
+    ok('[gear] Setup surfaces live in the account gear (People / Organisation / Settings)',
+       ['people', 'organisation', 'settings'].every(p => gearSetup.includes(p)));
     await page.evaluate(() => { if (typeof navigate === 'function') navigate('leader-home'); });
     await page.waitForTimeout(1800);   // let the org-data load + any re-render settle
     const home = await page.evaluate(() => (document.getElementById('ldr-home-content') || {}).innerText || '');
