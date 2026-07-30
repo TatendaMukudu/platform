@@ -1792,6 +1792,40 @@ img { max-width: 100%; }
 .topbar-avatar-btn:hover  { opacity: 0.82; }
 .topbar-avatar-btn:active { transform: scale(0.94); }
 
+/* Attention badge on the gear — a quiet count when something proactive is waiting, so the
+   person knows there's something before they even open anything. */
+.iq-gear-badge {
+  position: absolute;
+  top: -4px; right: -4px;
+  min-width: 16px; height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--danger, #f74f4f);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 16px;
+  text-align: center;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 2px var(--bg-surface, #12101a);
+  pointer-events: none;
+}
+/* Proactive-updates opt-in row inside the gear menu. */
+.topbar-account-proactive:empty { display: none; }
+.iq-proactive-toggle {
+  width: 100%;
+  padding: 0.5rem 1rem;
+  text-align: left;
+  background: none; border: none; cursor: pointer;
+  font-size: 0.83rem; font-weight: 600; font-family: inherit;
+  color: var(--accent);
+  display: flex; align-items: center; gap: 0.6rem;
+  transition: background 0.12s;
+}
+.iq-proactive-toggle:hover { background: var(--bg-hover, rgba(127,127,127,0.08)); }
+.iq-proactive-toggle .tal-ic { width: 16px; height: 16px; display: inline-flex; }
+.iq-proactive-toggle.on { color: var(--good, #2f9e6b); }
+
 /* ── Member topbar ───────────────────────────────────────── */
 .member-topbar {
   display: flex;

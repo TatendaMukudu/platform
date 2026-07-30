@@ -1414,6 +1414,9 @@ function launchApp(){
     // landing — the drawer is gone and everything flows from here.
     const defaultPage = isMember ? 'home' : 'leader-home';
     navigate(defaultPage);
+    // A quiet proactive cue on the gear — how many governed questions the system wants to
+    // put to this reader (leaders/insights only; members get a clean no-op). Fully guarded.
+    if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
   } catch(err) {
     console.error('[ROUTE] launchApp render error:', err);
   }
@@ -1538,6 +1541,66 @@ function renderTopbar(){
       });
     });
   }
+
+  // Proactive-updates opt-in — the assistant reaching you off-platform. Everyone controls
+  // their own (not permission-gated). Reflects the current subscription state when known.
+  const pro = document.getElementById('topbar-account-proactive');
+  if (pro) {
+    const ic = (name) => (typeof ICON !== 'undefined' && ICON[name]) ? ICON[name] : '';
+    const on = !!(IQPush && IQPush._enabled);
+    pro.innerHTML = `<button class="iq-proactive-toggle${on ? ' on' : ''}" id="iq-proactive-toggle">
+      <span class="tal-ic">${ic('bell')}</span>${on ? 'Proactive updates on' : 'Turn on proactive updates'}</button>`;
+    const btn = document.getElementById('iq-proactive-toggle');
+    if (btn) btn.addEventListener('click', () => { try { IQPush.enable(); } catch (_) {} });
+  }
+}
+
+/* ── Proactive delivery: the client opt-in ───────────────────────────────────
+   Registers a web-push subscription so IntelliQ can reach the person off-platform. Every
+   step is guarded: a device without service-worker / push / Notification support, a denied
+   permission, or a server without push configured all fail softly — the person is still
+   opted in and gets their rundown in-app. Never throws into the app. */
+const IQPush = {
+  _enabled: false,
+  _b64(b64) { const pad = '='.repeat((4 - b64.length % 4) % 4); const s = (b64 + pad).replace(/-/g, '+').replace(/_/g, '/'); const raw = atob(s); return Uint8Array.from([...raw].map(c => c.charCodeAt(0))); },
+  async enable() {
+    try {
+      const cfg = await fetch('/api/delivery/config', { headers: Auth._headers() }).then(r => r.json()).catch(() => null);
+      if (!cfg || !cfg.ok) return;
+      if (!cfg.outboundAllowed) { if (typeof showToast==='function') showToast('Proactive updates are turned off for this organisation.','info'); return; }
+      // Opt in on the server regardless — even without push wired, the in-app rundown stands.
+      await fetch('/api/delivery/prefs', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ enabled: true, channels: { push: true } }) }).catch(() => {});
+      const supported = ('serviceWorker' in navigator) && ('PushManager' in window) && (typeof Notification !== 'undefined');
+      if (supported && cfg.pushReady && cfg.vapidPublicKey) {
+        const perm = await Notification.requestPermission();
+        if (perm === 'granted') {
+          const reg = await navigator.serviceWorker.ready;
+          let sub = await reg.pushManager.getSubscription();
+          if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: this._b64(cfg.vapidPublicKey) });
+          if (sub) await fetch('/api/delivery/subscribe', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ subscription: sub.toJSON() }) });
+        }
+      }
+      this._enabled = true;
+      if (typeof renderTopbar === 'function') renderTopbar();
+      if (typeof showToast==='function') showToast('Proactive updates on — I’ll reach you with your rundown.','success');
+    } catch (e) { console.warn('[push] enable failed:', e && e.message); }
+  },
+};
+
+/* Attention badge on the gear — the count of proactive questions the system wants to put to
+   this reader (leaders/insights only; a member gets a clean 403 and no badge). A quiet cue
+   that something's waiting, before they open anything. Fully guarded. */
+async function refreshProactiveBadge() {
+  try {
+    const r = await fetch('/api/inquiry/pending?limit=9', { headers: Auth._headers() });
+    if (!r.ok) return;                                   // members / no perm → no badge
+    const j = await r.json();
+    const n = (j && j.count) || 0;
+    const dot = document.getElementById('iq-gear-badge');
+    if (!dot) return;
+    if (n > 0) { dot.textContent = n > 9 ? '9+' : String(n); dot.style.display = 'flex'; }
+    else { dot.style.display = 'none'; }
+  } catch (_) { /* cosmetic — never block the app */ }
 }
 
 function toggleAdminAccountMenu() {

@@ -129,6 +129,17 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
     });
     ok(`[${label}] the account gear opens to the account menu (Sign Out present)`, gearOpens);
 
+    // Proactive reach: the gear offers a "proactive updates" opt-in, and the attention badge
+    // element exists for the in-app cue. (Everyone controls their own proactive updates.)
+    const proactiveUi = await page.evaluate(() => {
+      if (typeof renderTopbar === 'function') renderTopbar();   // populate regardless of boot branch
+      const toggle = document.getElementById('iq-proactive-toggle');
+      const badge  = document.getElementById('iq-gear-badge');
+      return { hasToggle: !!toggle && /proactive updates/i.test(toggle.textContent || ''), hasBadge: !!badge };
+    });
+    ok(`[${label}] the gear offers a proactive-updates opt-in`, proactiveUi.hasToggle);
+    ok(`[${label}] the in-app attention badge element is present`, proactiveUi.hasBadge);
+
     for (const p of pages) {
       await page.evaluate(pg => { if (typeof navigate === 'function') navigate(pg); }, p);
       await page.waitForTimeout(300);
