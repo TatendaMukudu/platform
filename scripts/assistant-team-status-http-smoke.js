@@ -57,6 +57,14 @@ const server = app.listen(0, async () => {
 
     /* 4 — leak-safe: teamB's leader never hears teamA's person in the answer */
     ok('4 · a sibling-branch leader\'s team answer never names another branch\'s person', !/Joe's momentum/.test(s3));
+
+    /* 5 — ORG-LEVEL phrasings (both spellings, the bare word) all reach the reasoner, not the
+       "not enough authorised evidence" dead end. This is the exact question that failed live. */
+    for (const q of ['how is the organization doing', 'how is the organisation doing', "how's the org", 'how is the company doing']) {
+      const r = await turn('coachA', q);
+      const sr = JSON.stringify(r);
+      ok(`5 · "${q}" answers from the reasoner (no dead end)`, /Joe's momentum has been running below/.test(sr) && !/enough authorised evidence/.test(sr));
+    }
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();
