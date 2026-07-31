@@ -7993,10 +7993,10 @@ function _assistantAnswer(code, userId, question) {
   // knowledge question ("how does our high press work"): it needs a team subject AND a
   // status cue, and explicitly NOT a mechanism/definition ("how does … work"). Answered from
   // the reasoner's read, not evidence retrieval.
-  const teamStatusQ = !/\bhow (?:do|does|did|can|should|to|would)\b|\bwork(?:s|ing)?\b/.test(q) && (
-    /\bhow[^?]*\b(team|we|group|club|squad|everyone|people|things|it|us|the org)\b[^?]*\b(doing|going|getting on|holding up|faring|shaping up|coming along|looking|feeling)\b/.test(q)
-    || /\bhow are (?:we|things|you all|the team|everyone)\b/.test(q)
-    || /\b(team|group|club|squad)\s+(status|update|check-?in|health)\b/.test(q)
+  const teamStatusQ = !/\bhow (?:do|does|did|can|should|to|would|many|much|long|often)\b|\bwork(?:s|ing)?\b/.test(q) && (
+    /\bhow[^?]*\b(team|we|us|our|group|club|squad|everyone|people|staff|things|it|organisation|organization|org|department|company|business|cohort|class|crew|side)\b[^?]*\b(doing|going|getting on|holding up|faring|shaping up|coming along|looking|feeling)\b/.test(q)
+    || /\bhow(?:'s|'re| is| are)\s+(?:the\s+)?(we|things|everyone|team|organisation|organization|org|club|company|group|department|business|squad)\b/.test(q)
+    || /\b(team|group|club|squad|organisation|organization|org|department|company)\s+(status|update|check-?in|health|doing)\b/.test(q)
   );
   const purpose = workScoped ? 'workspace_shared_reasoning' : 'personal_assistance';
   const ev = _kernelEvidence(code, { purpose, viewerId: userId, subjectId: workScoped ? undefined : userId });
