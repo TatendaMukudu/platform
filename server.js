@@ -7985,6 +7985,26 @@ function _deleteImport(code, importId, requesterId) {
   return { ok: true, importId, removed };
 }
 
+/* The reasoner's CURRENT read, spoken as an answer — the same grounded "what I'm seeing"
+   the Today voice shows, scoped to this reader. `filter:'support'` narrows to support-register
+   reads ("who needs support?"). An empty read still returns a calm, honest line (never a dead
+   end). Returns null only on failure. This is what lets any org/team question get a real,
+   grounded answer instead of "not enough authorised evidence". */
+function _reasonReadAnswer(code, userId, { filter, lead, now = Date.now() } = {}) {
+  try {
+    const { agenda } = _reasonScopedAgenda(code, userId, now, false);
+    let items = agenda.filter(a => a.readiness === 'ripe');
+    if (filter === 'support') items = items.filter(a => a.register === 'support');
+    const name = _firstName(code, userId), area = _orgAskAreaLabel(code, userId);
+    const opening = _actorLevel(code, userId) === 'leader'
+      ? voice.leaderOpening({ name, timeOfDay: _timeOfDay(now), count: items.length, areaLabel: area, seed: userId + 'ask' })
+      : voice.memberOpening({ name, timeOfDay: _timeOfDay(now), count: items.length, seed: userId + 'ask' });
+    const claims = items.slice(0, 3).map(a => a.claim);
+    const answer = [(lead && items.length) ? lead : opening, ...claims].join(' ').trim();
+    return { answer, confidence: items.length ? 'medium' : 'confirmed', limitations: ['a read from recorded signals, not a prediction'], count: items.length };
+  } catch (_) { return null; }
+}
+
 function _assistantAnswer(code, userId, question) {
   const q = String(question || '').toLowerCase().trim();
   if (!q) return null;
@@ -8013,33 +8033,37 @@ function _assistantAnswer(code, userId, question) {
     const recent = ev.slice(-5);
     answer = recent.length ? `Recently you captured: ${recent.map(e => '“' + String(e.valueText || e.label).slice(0, 60) + '”').join('; ')}.` : `Nothing new has been captured recently.`;
     cites = recent.map(e => e.evidenceId); confidence = 'confirmed';
-  } else if (/focus|what should i|attention|priorit/.test(q)) {
+  } else if (/\b(focus|what should i|attention|priorit|outstanding|pending|to ?do|open items?|on my (?:plate|desk)|what needs|needs (?:doing|attention|me|you)|worth (?:a look|attention))\b/.test(q)) {
+    // WHAT'S OUTSTANDING / needs me — the leader's own captured tasks first, else the
+    // reasoner's ripe read (so this never dead-ends when there IS something worth surfacing).
     const att = _composeToday(code, userId);
-    answer = att.length ? att.map(a => a.text).join(' ') : `Nothing is pressing right now. A good moment to plan ahead or capture something.`;
-    cites = att.flatMap(a => a.basis); confidence = 'medium';
-    limitations = ['based only on what you have captured so far'];
+    if (att.length) { answer = att.map(a => a.text).join(' '); cites = att.flatMap(a => a.basis); confidence = 'medium'; limitations = ['based only on what you have captured so far']; }
+    else { const r = _reasonReadAnswer(code, userId, { lead: "Here's what's worth your attention right now." }); if (r) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; } else { answer = `Nothing is pressing right now.`; confidence = 'confirmed'; } }
   } else if (/putting off|avoid|overdue|stuck|blocked/.test(q)) {
     const items = (workspaceItems[_wsKey(code, userId)] || []).filter(i => !i.deleted && ['commitment', 'task'].includes(i.purpose));
     answer = items.length ? `You have ${items.length} open item${items.length === 1 ? '' : 's'} that may need attention. Want to go through them?` : `Nothing looks stuck right now.`;
     confidence = 'low'; limitations = ['I can only see what you have captured — not everything'];
+  } else if (/\bwho\b[^?]*\b(support|help|struggling|worried|okay|ok|alright|wellbeing|pulling back)\b|\bneeds? (?:support|help|a hand)\b|\bwho'?s? (?:struggling|worried|not ok|pulling back)\b/.test(q)) {
+    // WHO NEEDS SUPPORT — the reasoner's support-register reads, aggregate + grounded.
+    const r = _reasonReadAnswer(code, userId, { filter: 'support', lead: 'Where support might help right now:' });
+    if (r) { answer = r.count ? r.answer : `Nothing's flagged for support right now — a calm stretch.`; confidence = r.confidence; limitations = r.limitations; }
+    else { answer = `I don't have a clear read on that just yet.`; confidence = 'none'; }
+  } else if (/\b(ready|readiness|prepared|set for|good to go|all set|are we (?:set|good|ready))\b/.test(q)) {
+    // READINESS — the reasoner's scoped read, framed as where things stand.
+    const r = _reasonReadAnswer(code, userId, { lead: "Here's where things stand ahead of what's next." });
+    if (r) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
+    else { answer = `I don't have a clear read on readiness just yet.`; confidence = 'none'; }
+  } else if (/\b(tell me about|overview|summary|summarise|summarize|catch me up|what'?s (?:going on|happening|the story)|status(?: of)?|how are things|the (?:big )?picture|rundown|brief me)\b/.test(q)) {
+    // A GENERAL "where are we" — the reasoner's read is the grounded answer.
+    const r = _reasonReadAnswer(code, userId);
+    if (r) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
+    else { answer = `Nothing's flagged right now.`; confidence = 'confirmed'; }
   } else if (teamStatusQ) {
-    // TEAM STATUS — "how's the team doing?" is answered from the REASONER's already-scoped
-    // read (the same grounded "what I'm seeing" the Today voice shows), NOT from the asker's
-    // own captures. The reasoner has the picture; the assistant just speaks it. Deterministic,
-    // grounded, never a prediction — and if the reasoner has nothing, it says so honestly.
-    try {
-      const now = Date.now();
-      const { agenda } = _reasonScopedAgenda(code, userId, now, false);
-      const ripe = agenda.filter(a => a.readiness === 'ripe');
-      const name = _firstName(code, userId), area = _orgAskAreaLabel(code, userId);
-      const opening = _actorLevel(code, userId) === 'leader'
-        ? voice.leaderOpening({ name, timeOfDay: _timeOfDay(now), count: ripe.length, areaLabel: area, seed: userId + 'ask' })
-        : voice.memberOpening({ name, timeOfDay: _timeOfDay(now), count: ripe.length, seed: userId + 'ask' });
-      const lines = ripe.slice(0, 3).map(a => a.claim);
-      answer = [opening, ...lines].join(' ').trim();
-      confidence = ripe.length ? 'medium' : 'confirmed';
-      limitations = ['a read from recorded signals, not a prediction'];
-    } catch (_) { answer = `I don't have a clear read on that just yet.`; confidence = 'none'; }
+    // TEAM/ORG STATUS — "how's the team/organisation doing?" answered from the reasoner's
+    // already-scoped read (the same grounded "what I'm seeing" the Today voice shows).
+    const r = _reasonReadAnswer(code, userId);
+    if (r) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
+    else { answer = `I don't have a clear read on that just yet.`; confidence = 'none'; }
   } else {
     // GROUNDED RETRIEVAL over authorised free-text evidence (the "answer from what
     // it holds" path). Authorisation happened in the gateway; compose ONLY from the
@@ -8064,11 +8088,16 @@ function _assistantAnswer(code, userId, question) {
       cites = valid.kept.flatMap(c => c.evidenceRefs);
       limitations = grounding.limitations;
     } else {
-      // No sufficiently relevant AUTHORISED evidence → say so plainly. Never fabricate,
-      // and never reveal that inaccessible matching evidence might exist.
-      answer = `I don't have enough authorised evidence to answer that yet.`;
-      confidence = 'none';
-      limitations = ['no matching authorised evidence'];
+      // No matching AUTHORISED evidence. For an org/team question, fall back to the reasoner's
+      // current read (the same grounded picture) rather than a bare dead end. Only when it's
+      // NOT an org question — or the reasoner is silent too — say so plainly. Never fabricate.
+      const r = workScoped ? _reasonReadAnswer(code, userId) : null;
+      if (r && r.answer) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
+      else {
+        answer = `I don't have enough authorised evidence to answer that yet.`;
+        confidence = 'none';
+        limitations = ['no matching authorised evidence'];
+      }
     }
   }
 
@@ -10086,6 +10115,11 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
   // evidence is in evidenceLog before _assistantAnswer reads it; embedding is a
   // fire-and-forget optimisation and retrieval works lexically without it).
   const cls = capture.classify(text);
+  // Small talk / greeting — be warm and human, then offer a way in. Not a question, not a
+  // command; without this a "hi" falls through to a flat "Noted." and reads as broken.
+  const _greeting = (cls.kind === 'conversation' || (!cls.isQuestion && !cls.command))
+    && /^\s*(hi|hey|hello|yo|hiya|howdy|good (?:morning|afternoon|evening)|morning|afternoon|evening|sup|what'?s up|thanks|thank you|cheers|ok(?:ay)?|cool|nice|great)\b/i.test(text)
+    && String(text).trim().length <= 40;
   let saved = null, capturePrompt = null;
   if (cls.command && cls.command.payload) {
     saved = _persistCaptureCommand(code, userId, cls.command);         // explicit save — deliberate, governed
@@ -10100,6 +10134,12 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
   // crash and never an ungrounded guess.
   let qa = null;
   if (cls.isQuestion) { try { qa = _assistantAnswer(code, userId, cls.questionText || text); } catch (_) { qa = null; } }
+  // A warm, human reply to a greeting — with a real way in, so the assistant feels alive.
+  if (!qa && _greeting) {
+    const nm = _firstName(code, userId);
+    qa = { answer: `${voice.greeting(nm, _timeOfDay(Date.now()))} What would you like to look at — how the organisation's doing, what needs you, or something specific?`,
+      purpose: 'personal_assistance', confidence: 'confirmed', limitations: [], cites: [], citations: [] };
+  }
 
   // OPERATING CONTEXT — if the message DESCRIBES how the org operates ("we play
   // Saturday at 3", "the head coach owns the game plan"), extract PROPOSED structured
@@ -10128,6 +10168,11 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
   // If we ALREADY saved via an explicit command, don't ALSO offer a capture card for
   // the same text (no duplicate, no double-write).
   if (saved) proposals = proposals.filter(p => p.actionType !== 'capture');
+  // A PURE question (or a greeting) shouldn't be met with "save this as a note / log this as
+  // today's check-in" cards — the person asked for an answer, not to record a disclosure.
+  // (A REQUESTED follow-up, checkin_proposal — "check in with me after the meeting" — is a
+  // real ask and stays; compound turns like "feeling down, how's the team?" keep both.)
+  if (cls.kind === 'question' || _greeting) proposals = proposals.filter(p => !['capture', 'checkin_log'].includes(p.actionType));
 
   // ── GROUNDED ANSWER-AND-CONFIRM ──────────────────────────────────────────────
   // If there is an ACTIVE org question and this turn reads as an ANSWER (not a new
