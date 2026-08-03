@@ -7990,11 +7990,15 @@ function _deleteImport(code, importId, requesterId) {
    reads ("who needs support?"). An empty read still returns a calm, honest line (never a dead
    end). Returns null only on failure. This is what lets any org/team question get a real,
    grounded answer instead of "not enough authorised evidence". */
-function _reasonReadAnswer(code, userId, { filter, lead, now = Date.now() } = {}) {
+function _reasonReadAnswer(code, userId, { filter, lead, patterns, now = Date.now() } = {}) {
   try {
     const { agenda } = _reasonScopedAgenda(code, userId, now, false);
     let items = agenda.filter(a => a.readiness === 'ripe');
     if (filter === 'support') items = items.filter(a => a.register === 'support');
+    // "what patterns have you learnt" — the CROSS-person reads the reasoner has consolidated
+    // (a shift showing up across several people), which is genuinely different content from the
+    // per-person rundown. Only real repeats; if none have consolidated, we say so honestly.
+    if (patterns) { const pat = agenda.filter(a => a.shared || a.rolled); items = pat; }
     const name = _firstName(code, userId), area = _orgAskAreaLabel(code, userId);
     const opening = _actorLevel(code, userId) === 'leader'
       ? voice.leaderOpening({ name, timeOfDay: _timeOfDay(now), count: items.length, areaLabel: area, seed: userId + 'ask' })
@@ -8002,6 +8006,50 @@ function _reasonReadAnswer(code, userId, { filter, lead, now = Date.now() } = {}
     const claims = items.slice(0, 3).map(a => a.claim);
     const answer = [(lead && items.length) ? lead : opening, ...claims].join(' ').trim();
     return { answer, confidence: items.length ? 'medium' : 'confirmed', limitations: ['a read from recorded signals, not a prediction'], count: items.length };
+  } catch (_) { return null; }
+}
+
+/* Resolve a NAMED colleague mentioned in a question to a real org user — full name first,
+   then a unique first name. Returns null when nothing matches (so we never invent a person).
+   Matching is over the whole directory so we can honestly say "they're not in your area"
+   rather than dead-ending — but no belief is ever surfaced until the scope check passes. */
+function _resolvePersonQuery(code, q) {
+  const entries = Object.entries(orgUsers[code] || {}).filter(([, u]) => u && u.name && u.status !== 'removed');
+  for (const [id, u] of entries) {
+    const full = String(u.name).toLowerCase().trim();
+    if (full.length >= 4 && q.includes(full)) return { id, name: u.name };
+  }
+  const byFirst = {};
+  for (const [id, u] of entries) {
+    const first = String(u.name).toLowerCase().split(/\s+/)[0];
+    if (first && first.length >= 3) (byFirst[first] = byFirst[first] || []).push({ id, name: u.name });
+  }
+  for (const first of Object.keys(byFirst)) {
+    if (byFirst[first].length !== 1) continue; // ambiguous first name → don't guess
+    const rx = new RegExp('\\b' + first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b');
+    if (rx.test(q)) return byFirst[first][0];
+  }
+  return null;
+}
+
+/* A PERSON-SCOPED read: exactly what the reasoner holds about ONE named person, drawn from
+   the SAME scoped agenda the Today voice uses (so it can only ever surface a person the asker
+   may see). This closes the inconsistency where the overview names someone ("Tomas has been
+   pulling back") but a direct "pull up their profile" dead-ended. Never a fabricated dossier,
+   never a prediction — an empty ledger says so plainly. */
+function _reasonPersonAnswer(code, userId, personId, personName, { now = Date.now() } = {}) {
+  try {
+    const { agenda } = _reasonScopedAgenda(code, userId, now, false);
+    const mine = agenda.filter(a => a.subjectId === personId)
+      .sort((a, b) => (a.readiness === 'ripe' ? 0 : 1) - (b.readiness === 'ripe' ? 0 : 1));
+    const first = String(personName).split(/\s+/)[0] || personName;
+    if (!mine.length) {
+      return { answer: `Nothing specific is recorded about ${first} right now — a calm read. I only speak to signals that are actually there, so there's nothing to invent.`,
+        confidence: 'confirmed', limitations: ['a read from recorded signals, not a prediction'], count: 0 };
+    }
+    const claims = mine.slice(0, 4).map(a => a.claim);
+    return { answer: [`Here's what I'm seeing about ${first} — grounded in recorded signals, not a prediction or an assessment:`, ...claims].join(' ').trim(),
+      confidence: 'medium', limitations: ['a read of recorded signals about this person, not a prediction or a rating'], count: mine.length };
   } catch (_) { return null; }
 }
 
@@ -8022,9 +8070,30 @@ function _assistantAnswer(code, userId, question) {
   const ev = _kernelEvidence(code, { purpose, viewerId: userId, subjectId: workScoped ? undefined : userId });
   const authorised = ev.map(e => e.evidenceId);
 
+  // A PERSON-DIRECTED question ("pull up Tomas's profile", "how is Tomas doing", "tell me
+  // about Tomas") — resolve the named colleague and answer ONLY from what the reasoner holds
+  // about them, ONLY if the asker may see them. This must be tested before the generic
+  // "tell me about…" overview branch, which would otherwise swallow "tell me about Tomas".
+  const personCue = /\b(pull up|profile|dossier|tell me about|what'?s? (?:going on|up|happening) with|how(?:'s| is| are)|check (?:on|in on)|look(?:ing)? (?:at|into)|status of|report on|update on)\b/.test(q);
+  const personHit = personCue ? _resolvePersonQuery(code, q) : null;
+
   let answer = '', cites = [], confidence = 'medium', limitations = [], groundedClaims = [], citations = [], groundingId = null;
   const priv = ev.filter(e => e.visibility === 'private');
-  if (/what.*(private|only me)|is.*private/.test(q)) {
+  if (personHit) {
+    const visible = new Set(getVisibleUserIds(code, userId));
+    const first = String(personHit.name).split(/\s+/)[0];
+    if (!visible.has(personHit.id)) {
+      answer = `${first} isn't in your area, so I can't open a read on them — I only surface people you're responsible for.`;
+      confidence = 'confirmed'; limitations = ['scope: you only see people in your area'];
+    } else {
+      const r = _reasonPersonAnswer(code, userId, personHit.id, personHit.name);
+      if (r) {
+        answer = r.answer; confidence = r.confidence; limitations = r.limitations;
+        // A leader reading beliefs about a named person is an accountable access — record it.
+        if (r.count) { try { _audit(code, { actor: userId, action: 'agenda_view', subjectIds: [personHit.id], basis: 'person read via assistant' }); } catch (_) {} }
+      } else { answer = `I don't have a clear read on ${first} just yet.`; confidence = 'none'; }
+    }
+  } else if (/what.*(private|only me)|is.*private/.test(q)) {
     answer = priv.length
       ? `You have ${priv.length} private item${priv.length === 1 ? '' : 's'}. Only you can see ${priv.length === 1 ? 'it' : 'them'}; ${priv.length === 1 ? "it's" : "they're"} used only to assist you and never inform organisational reasoning.`
       : `Nothing here is marked private right now.`;
@@ -8053,8 +8122,15 @@ function _assistantAnswer(code, userId, question) {
     const r = _reasonReadAnswer(code, userId, { lead: "Here's where things stand ahead of what's next." });
     if (r) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
     else { answer = `I don't have a clear read on readiness just yet.`; confidence = 'none'; }
-  } else if (/\b(tell me about|overview|summary|summarise|summarize|catch me up|what'?s (?:going on|happening|the story)|status(?: of)?|how are things|the (?:big )?picture|rundown|brief me)\b/.test(q)) {
-    // A GENERAL "where are we" — the reasoner's read is the grounded answer.
+  } else if (/\bwhat (?:have you (?:learn|pick|notic|spot|found|got|seen)|patterns?|are you (?:seeing|noticing|learning|picking)|stands? out|trends?)\b|\bpatterns?\b[^?]*\b(learn|seen|notic|found|spot|pick)|what (?:pattern|trend)s?\b/.test(q)) {
+    // "WHAT PATTERNS HAVE YOU LEARNT" — the cross-person reads the reasoner has consolidated.
+    // Distinct content from the per-person rundown, so it stops repeating the same answer.
+    const r = _reasonReadAnswer(code, userId, { patterns: true, lead: "Here are the patterns I've picked up across your area — grounded in recorded signals, never guessed:" });
+    if (r && r.count) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
+    else { answer = `I haven't consolidated any repeated patterns yet — I only name a pattern once the signals actually repeat, rather than guessing one into being. Nothing has crossed that bar so far.`; confidence = 'confirmed'; limitations = ['patterns are named only from real repetition, not inferred']; }
+  } else if (/\b(tell me about|overview|summar\w*|catch me up|make sense|makes? sense of|findings?|sum up|document (?:your |the )?|what'?s (?:going on|happening|the story)|status(?: of)?|how are things|the (?:big )?picture|rundown|brief me)\b/.test(q)) {
+    // A GENERAL "where are we" / "summarise this" — the reasoner's grounded read is the
+    // answer. We never fabricate a summary from nothing; we speak only what's recorded.
     const r = _reasonReadAnswer(code, userId);
     if (r) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
     else { answer = `Nothing's flagged right now.`; confidence = 'confirmed'; }
@@ -10132,8 +10208,14 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
   // second retrieval or answer implementation lives here.
   // Fail CLOSED: a retrieval/synthesis failure yields no answer (honest), never a
   // crash and never an ungrounded guess.
+  // An INFORMATION REQUEST is often phrased as a command, not a grammatical question —
+  // "pull up Tomas's profile", "show me the org", "summarise the week", "what patterns have
+  // you learnt". These are asks for a grounded READ, not disclosures to save, so they route
+  // through the same answer path. Excludes explicit save-commands so "note: …" still captures.
+  const infoRequest = !(cls.command && cls.command.payload)
+    && /\b(pull up|profile|dossier|tell me about|show me|what'?s? (?:going on|up|happening) with|how(?:'s| is| are)\b|summar\w*|make sense|makes? sense of|what (?:patterns?|trends?)|patterns? (?:you|have|i)|report on|update on|catch me up|brief me|rundown|the (?:big )?picture)\b/i.test(text);
   let qa = null;
-  if (cls.isQuestion) { try { qa = _assistantAnswer(code, userId, cls.questionText || text); } catch (_) { qa = null; } }
+  if (cls.isQuestion || infoRequest) { try { qa = _assistantAnswer(code, userId, cls.questionText || text); } catch (_) { qa = null; } }
   // A warm, human reply to a greeting — with a real way in, so the assistant feels alive.
   if (!qa && _greeting) {
     const nm = _firstName(code, userId);
@@ -10172,7 +10254,7 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
   // today's check-in" cards — the person asked for an answer, not to record a disclosure.
   // (A REQUESTED follow-up, checkin_proposal — "check in with me after the meeting" — is a
   // real ask and stays; compound turns like "feeling down, how's the team?" keep both.)
-  if (cls.kind === 'question' || _greeting) proposals = proposals.filter(p => !['capture', 'checkin_log'].includes(p.actionType));
+  if (cls.kind === 'question' || _greeting || (infoRequest && qa)) proposals = proposals.filter(p => !['capture', 'checkin_log'].includes(p.actionType));
 
   // ── GROUNDED ANSWER-AND-CONFIRM ──────────────────────────────────────────────
   // If there is an ACTIVE org question and this turn reads as an ANSWER (not a new
