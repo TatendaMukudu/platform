@@ -52,6 +52,7 @@ const reasoningRegister = require('./ai/reasoning-register');
 const kernelCoreasoning = require('./ai/kernel-coreasoning');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
+const errorlog = require('./ai/errorlog');
 const renderArtifact = require('./ai/render-artifact');
 const googleProvider = require('./ai/providers/google');
 const delivery   = require('./ai/delivery');
@@ -10095,6 +10096,19 @@ function _llmBudgetOk(code) {
 }
 setInterval(() => { try { rateLimit.sweep(_loginRateStore, { windowMs: LOGIN_WIN }); rateLimit.sweep(_llmRateStore, { windowMs: 86400000 }); } catch (_) {} }, 3600000).unref?.();
 
+/* ── OBSERVABILITY — see what breaks during a pilot ──────────────────────────
+   A redacted in-memory ring buffer of recent errors (never a raw email/token), viewable by a
+   superadmin, and optionally forwarded to a webhook (Slack/Discord/log sink) with no SDK. */
+const _errorBuffer = {};
+function _captureError(err, meta = {}) {
+  let entry;
+  try { entry = errorlog.record(_errorBuffer, err, meta); } catch (_) { return; }
+  const hook = process.env.IQ_ERROR_WEBHOOK;
+  if (hook) { try { fetch(hook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: `⚠️ ${entry.method} ${entry.route} → ${entry.status}: ${entry.message}` }) }).catch(() => {}); } catch (_) {} }
+}
+// An unhandled promise rejection is logged + captured, never crashes the dyno.
+process.on('unhandledRejection', (reason) => { console.warn('[unhandledRejection]', reason && reason.message || reason); _captureError(reason, { route: 'unhandledRejection', status: 0 }); });
+
 /* ── SAFEGUARDING — the duty of care, deterministic (works with the model OFF) ────────────── */
 const safeguardingFlags = {};  // code → [ { id, subjectId, subjectName, severity, category, excerpt, at, status, leadId, resolvedBy, resolvedAt } ]
 function _sgResources(code) {
@@ -11018,6 +11032,13 @@ app.post('/api/safeguarding/flags/:id/resolve', requireAuth, (req, res) => {
   scheduleSave();
   res.json({ ok: true, flag: f });
 });
+/* GET /api/admin/errors — recent (redacted) errors, superadmin only. Pilot observability. */
+app.get('/api/admin/errors', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (orgUsers[code]?.[userId]?.role !== 'superadmin') return res.status(403).json({ error: 'superadmin only' });
+  res.json({ ok: true, errors: errorlog.list(_errorBuffer, 100), webhookConfigured: !!process.env.IQ_ERROR_WEBHOOK });
+});
+
 /* GET /api/safeguarding/config — the resources shown to a person in distress (readable by all,
    so the app can always surface real help; the lead identity is not exposed to members). */
 app.get('/api/safeguarding/config', requireAuth, (req, res) => {
@@ -15211,7 +15232,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
-  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, _migrateLegacyNotesToLibrary, orgNotes, safeguardingFlags, _llmBudgetOk, checkinProposals,
+  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, _migrateLegacyNotesToLibrary, orgNotes, safeguardingFlags, _llmBudgetOk, _captureError, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
   // exported for the truth layer: grounded retrieval over canonical evidence
@@ -15366,6 +15387,14 @@ if (require.main === module) (async () => {
       due.sort(() => 0); // stable; fairness comes from the cap + per-connection lock
       for (const [code, conn] of due.slice(0, MAX_PER_TICK)) { try { await _runConnection(code, conn, { trigger: 'poll' }); } catch (_) {} }
     }, 20 * 60 * 1000).unref();
+
+    // 5z. Error-handling middleware — registered LAST so it catches any route that threw.
+    // Captures a redacted record (pilot observability) and returns safe JSON, never a stack.
+    app.use((err, req, res, next) => {
+      try { _captureError(err, { route: (req && req.path) || '', method: (req && req.method) || '', status: 500, orgCode: req && req.iqSession && req.iqSession.orgCode }); } catch (_) {}
+      if (res.headersSent) return next(err);
+      res.status(500).json({ ok: false, error: 'Something went wrong. It has been logged.' });
+    });
 
     // 6. Start HTTP server
     app.listen(PORT, () => {
