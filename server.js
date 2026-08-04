@@ -139,7 +139,7 @@ function scheduleSave() {
         proactivePrefs, insightSuppression, answerFeedback,
         orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
         reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
-        conversationSessions, assistantConversations,
+        conversationSessions, assistantConversations, libraryFolders, libraryItems,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -10014,6 +10014,26 @@ const CONV_CAP = 200;               // max conversations kept per user (generous
 const CONV_MSG_CAP = 400;           // max messages kept per conversation
 function _assistantConvs(key) { return assistantConversations[key] || (assistantConversations[key] = []); }
 function _convTitle(t) { const s = String(t || '').trim().replace(/\s+/g, ' '); return s.length > 60 ? s.slice(0, 57) + '…' : (s || 'New conversation'); }
+/* ── THE LIBRARY — one organised home for what a person keeps ─────────────────
+   Folders (personal) holding items of any type — a saved chat, a note, a generated artifact —
+   each PRIVATE by default and SHAREABLE by an explicit choice. Two meanings of "shared" are
+   kept apart on purpose: a shared item is VISIBLE to the org; only a NOTE that is explicitly
+   promoted through the existing evidence/confirm path ever INFORMS the reasoner. A shared chat
+   is a transcript others can read — never a silent belief. Folders are the user's own; items
+   are org-scoped with an owner + visibility so "make it public" actually reaches teammates. */
+const libraryFolders = {};  // code → [ { id, ownerId, name, createdAt } ]
+const libraryItems   = {};  // code → [ { id, ownerId, type, title, body, sourceRef, folderId, visibility, createdAt, updatedAt } ]
+const LIB_TYPES = ['note', 'chat', 'artifact'];
+function _libFolders(code) { return libraryFolders[code] || (libraryFolders[code] = []); }
+function _libItems(code)   { return libraryItems[code]   || (libraryItems[code]   = []); }
+// What a viewer may see: their own items (any visibility) + anyone's SHARED items.
+function _libVisibleToUser(code, userId, item) { return item.ownerId === userId || item.visibility === 'shared'; }
+function _libItemSafe(item, userId) {
+  return { id: item.id, type: item.type, title: item.title, body: item.body, sourceRef: item.sourceRef || null,
+    folderId: item.folderId || null, visibility: item.visibility, createdAt: item.createdAt, updatedAt: item.updatedAt,
+    mine: item.ownerId === userId };
+}
+
 /* Resolve the conversation for this turn: an existing one the user owns, or a fresh thread.
    Only ever returns a conversation in THIS user's own list, so history is self-only by construction. */
 function _resolveConversation(key, requestedId, firstText, now) {
@@ -10703,6 +10723,113 @@ app.delete('/api/assistant/conversations/:id', requireAuth, (req, res) => {
   if (assistantConversations[key].length === before) return res.status(404).json({ error: 'not found' });
   scheduleSave();
   res.json({ ok: true, deleted: req.params.id });
+});
+
+/* ── LIBRARY: FOLDERS (personal) ─────────────────────────────────────────── */
+app.get('/api/library/folders', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const own = _libFolders(code).filter(f => f.ownerId === userId)
+    .map(f => ({ id: f.id, name: f.name, createdAt: f.createdAt,
+      itemCount: _libItems(code).filter(i => i.ownerId === userId && i.folderId === f.id).length }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  res.json({ ok: true, folders: own });
+});
+app.post('/api/library/folders', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const name = String((req.body && req.body.name) || '').trim().slice(0, 80);
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const f = { id: 'fld_' + generateId(), ownerId: userId, name, createdAt: new Date().toISOString() };
+  _libFolders(code).push(f); scheduleSave();
+  res.json({ ok: true, folder: { id: f.id, name: f.name, createdAt: f.createdAt, itemCount: 0 } });
+});
+app.patch('/api/library/folders/:id', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const f = _libFolders(code).find(x => x.id === req.params.id && x.ownerId === userId);
+  if (!f) return res.status(404).json({ error: 'not found' });
+  if (req.body && typeof req.body.name === 'string') f.name = req.body.name.trim().slice(0, 80) || f.name;
+  scheduleSave(); res.json({ ok: true, folder: { id: f.id, name: f.name } });
+});
+app.delete('/api/library/folders/:id', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const list = _libFolders(code);
+  const before = list.length;
+  libraryFolders[code] = list.filter(f => !(f.id === req.params.id && f.ownerId === userId));
+  if (libraryFolders[code].length === before) return res.status(404).json({ error: 'not found' });
+  // Items in the deleted folder become unfiled (never deleted with the folder).
+  for (const it of _libItems(code)) if (it.ownerId === userId && it.folderId === req.params.id) it.folderId = null;
+  scheduleSave(); res.json({ ok: true, deleted: req.params.id });
+});
+
+/* ── LIBRARY: ITEMS ──────────────────────────────────────────────────────── */
+/* GET /api/library — items visible to me: my own (any visibility) + anyone's SHARED. Filter
+   by ?folderId= (mine only) and ?scope=mine|shared|all. */
+app.get('/api/library', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const scope = ['mine', 'shared', 'all'].includes(req.query.scope) ? req.query.scope : 'all';
+  let items = _libItems(code).filter(i => _libVisibleToUser(code, userId, i));
+  if (scope === 'mine') items = items.filter(i => i.ownerId === userId);
+  else if (scope === 'shared') items = items.filter(i => i.ownerId !== userId && i.visibility === 'shared');
+  if (req.query.folderId) items = items.filter(i => i.ownerId === userId && i.folderId === String(req.query.folderId));
+  items = items.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)).map(i => _libItemSafe(i, userId));
+  res.json({ ok: true, items });
+});
+/* POST /api/library — create an item (default a private note). */
+app.post('/api/library', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  const type = LIB_TYPES.includes(b.type) ? b.type : 'note';
+  const title = String(b.title || '').trim().slice(0, 200) || 'Untitled';
+  const body = String(b.body || '').slice(0, 20000);
+  const visibility = b.visibility === 'shared' ? 'shared' : 'private';
+  const folderId = b.folderId ? String(b.folderId) : null;
+  if (folderId && !_libFolders(code).some(f => f.id === folderId && f.ownerId === userId)) return res.status(400).json({ error: 'unknown folder' });
+  const now = new Date().toISOString();
+  const item = { id: 'lib_' + generateId(), ownerId: userId, type, title, body, sourceRef: b.sourceRef ? String(b.sourceRef).slice(0, 120) : null, folderId, visibility, createdAt: now, updatedAt: now };
+  _libItems(code).push(item); scheduleSave();
+  res.json({ ok: true, item: _libItemSafe(item, userId) });
+});
+/* POST /api/library/from-chat — the bridge: snapshot one of MY conversations into the Library
+   (a keepable record of a good session). Verifies I own the conversation first. */
+app.post('/api/library/from-chat', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  const conv = (assistantConversations[_wsKey(code, userId)] || []).find(c => c.id === String(b.conversationId || ''));
+  if (!conv) return res.status(404).json({ error: 'conversation not found' });
+  const folderId = b.folderId ? String(b.folderId) : null;
+  if (folderId && !_libFolders(code).some(f => f.id === folderId && f.ownerId === userId)) return res.status(400).json({ error: 'unknown folder' });
+  const transcript = (conv.messages || []).map(m => `${m.role === 'assistant' ? 'IntelliQ' : 'You'}: ${m.text}`).join('\n\n').slice(0, 20000);
+  const now = new Date().toISOString();
+  const item = { id: 'lib_' + generateId(), ownerId: userId, type: 'chat',
+    title: String(b.title || conv.title || 'Saved conversation').trim().slice(0, 200),
+    body: transcript, sourceRef: conv.id, folderId, visibility: b.visibility === 'shared' ? 'shared' : 'private', createdAt: now, updatedAt: now };
+  _libItems(code).push(item); scheduleSave();
+  res.json({ ok: true, item: _libItemSafe(item, userId) });
+});
+/* PATCH /api/library/:id — move (folder), rename, or change visibility. Owner only. */
+app.patch('/api/library/:id', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const item = _libItems(code).find(i => i.id === req.params.id && i.ownerId === userId);
+  if (!item) return res.status(404).json({ error: 'not found' });
+  const b = req.body || {};
+  if (typeof b.title === 'string') item.title = b.title.trim().slice(0, 200) || item.title;
+  if (typeof b.body === 'string') item.body = b.body.slice(0, 20000);
+  if (b.visibility === 'private' || b.visibility === 'shared') item.visibility = b.visibility;
+  if ('folderId' in b) {
+    const fid = b.folderId ? String(b.folderId) : null;
+    if (fid && !_libFolders(code).some(f => f.id === fid && f.ownerId === userId)) return res.status(400).json({ error: 'unknown folder' });
+    item.folderId = fid;
+  }
+  item.updatedAt = new Date().toISOString(); scheduleSave();
+  res.json({ ok: true, item: _libItemSafe(item, userId) });
+});
+/* DELETE /api/library/:id — owner erases their own item. */
+app.delete('/api/library/:id', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const list = _libItems(code);
+  const before = list.length;
+  libraryItems[code] = list.filter(i => !(i.id === req.params.id && i.ownerId === userId));
+  if (libraryItems[code].length === before) return res.status(404).json({ error: 'not found' });
+  scheduleSave(); res.json({ ok: true, deleted: req.params.id });
 });
 
 /* GET /api/assistant/turn/:turnId — inspect the bounded interpretation artifact (self-only). */
@@ -14778,6 +14905,8 @@ function _loadAllStores(data) {
   Object.assign(inquiryDismissed,  data.inquiryDismissed  || {});
   Object.assign(conversationSessions, data.conversationSessions || {});
   Object.assign(assistantConversations, data.assistantConversations || {});
+  Object.assign(libraryFolders, data.libraryFolders || {});
+  Object.assign(libraryItems,   data.libraryItems   || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -14847,7 +14976,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
-  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, checkinProposals,
+  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
   // exported for the truth layer: grounded retrieval over canonical evidence

@@ -5923,6 +5923,8 @@ async function renderToday() {
       <div class="tdy-chathead">
         <button class="tdy-headbtn" onclick="todayNewChat()" title="Start a new conversation">＋ New</button>
         <button class="tdy-headbtn" onclick="todayHistoryOpen()" title="Your past conversations">🕘 History</button>
+        <button class="tdy-headbtn" onclick="todaySaveChatToLibrary()" title="Save this conversation to your Library">💾 Save</button>
+        <button class="tdy-headbtn" onclick="todayLibraryOpen()" title="Your Library — folders, notes, saved chats">📁 Library</button>
       </div>
       <div id="today-history" class="tdy-history" style="display:none"></div>
       <div id="today-thread" class="tdy-thread"></div>
@@ -6247,6 +6249,116 @@ async function todayDeleteConversation(id, ev) {
     todayHistoryOpen(); todayHistoryOpen(); // refresh the list (toggle off→on)
   } catch (_) {}
 }
+
+/* ── THE LIBRARY (modal) — one home for saved chats, notes, artifacts ─────────
+   Personal folders; each item private by default, shareable by an explicit choice. */
+window.IQLib = window.IQLib || { view: 'mine', folderId: null, folders: [], items: [], openId: null };
+
+/* Save the current conversation into the Library — the "successful session" flow. */
+async function todaySaveChatToLibrary() {
+  const conv = window.IQChat && window.IQChat.conversationId;
+  if (!conv) { alert('Start a conversation first, then save it.'); return; }
+  const title = prompt('Save this conversation as — give it a name:', '');
+  if (title === null) return;
+  try {
+    const r = await (await fetch('/api/library/from-chat', { method: 'POST', headers: Auth._headers(),
+      body: JSON.stringify({ conversationId: conv, title: title.trim() || undefined }) })).json();
+    if (r && r.ok) { window.IQLib.view = 'mine'; window.IQLib.folderId = null; todayLibraryOpen(); }
+    else alert("Couldn't save that.");
+  } catch (_) { alert("Couldn't save that."); }
+}
+
+async function todayLibraryOpen() {
+  document.getElementById('iq-lib-modal')?.remove();
+  const el = document.createElement('div');
+  el.id = 'iq-lib-modal'; el.className = 'modal-overlay'; el.style.display = 'flex';
+  el.onclick = (e) => { if (e.target === el) libClose(); };
+  el.innerHTML = `<div class="modal-card lib-card">
+    <div class="lib-head"><div class="modal-title" style="margin:0">Library</div>
+      <button class="tdy-headbtn" onclick="libClose()">Close</button></div>
+    <div class="lib-body"><div class="lib-side" id="lib-side"></div><div class="lib-main" id="lib-main"></div></div>
+    <div class="tdy-privacy" style="text-align:left;margin:.6rem .2rem 0">Private by default · “Shared” means teammates can see it · sharing a note never makes it a fact until you confirm it as evidence</div>
+  </div>`;
+  document.body.appendChild(el);
+  await libLoad();
+}
+function libClose() { document.getElementById('iq-lib-modal')?.remove(); }
+
+async function libLoad() {
+  try {
+    const [f, i] = await Promise.all([
+      fetch('/api/library/folders', { headers: Auth._headers() }).then(r => r.json()),
+      fetch('/api/library?scope=all', { headers: Auth._headers() }).then(r => r.json()),
+    ]);
+    window.IQLib.folders = (f && f.folders) || [];
+    window.IQLib.items = (i && i.items) || [];
+  } catch (_) { window.IQLib.folders = []; window.IQLib.items = []; }
+  libRender();
+}
+
+function libRender() {
+  const L = window.IQLib, esc = _escAdvisor;
+  const side = document.getElementById('lib-side'), main = document.getElementById('lib-main');
+  if (!side || !main) return;
+  const sel = (on) => on ? 'lib-navsel' : '';
+  side.innerHTML = `
+    <button class="lib-nav ${sel(L.view==='mine'&&!L.folderId)}" onclick="libSelect('mine',null)">All mine</button>
+    <button class="lib-nav ${sel(L.view==='shared')}" onclick="libSelect('shared',null)">Shared with me</button>
+    <div class="lib-navlabel">Folders</div>
+    ${L.folders.map(f => `<button class="lib-nav ${sel(L.folderId===f.id)}" onclick="libSelect('mine','${esc(f.id)}')">${esc(f.name)} <span class="lib-count">${f.itemCount||0}</span></button>`).join('')}
+    <button class="lib-nav lib-addfld" onclick="libNewFolder()">＋ New folder</button>
+    <button class="btn btn-accent btn-sm" style="margin-top:.6rem;width:100%" onclick="libNewNote()">＋ New note</button>`;
+  // filter items for the current view
+  let items = L.items.slice();
+  if (L.view === 'shared') items = items.filter(x => !x.mine);
+  else { items = items.filter(x => x.mine); if (L.folderId) items = items.filter(x => x.folderId === L.folderId); }
+  const icon = t => t === 'chat' ? '💬' : t === 'artifact' ? '📄' : '📝';
+  if (L.openId) { main.innerHTML = libDetail(L.items.find(x => x.id === L.openId)); return; }
+  main.innerHTML = items.length ? items.map(it => `
+    <div class="lib-item" onclick="libOpen('${esc(it.id)}')">
+      <div class="lib-item-main">
+        <div class="lib-item-title">${icon(it.type)} ${esc(it.title)}</div>
+        <div class="lib-item-meta">${esc(todayWhen(it.updatedAt))}${it.mine?'':' · shared with you'}</div>
+      </div>
+      <span class="lib-vis ${it.visibility==='shared'?'vis-shared':'vis-private'}">${it.visibility==='shared'?'Shared':'Private'}</span>
+    </div>`).join('') : `<div class="tdy-histempty">Nothing here yet. Save a chat, or make a note.</div>`;
+}
+
+function libDetail(it) {
+  if (!it) return '';
+  const esc = _escAdvisor;
+  const folderOpts = ['<option value="">— no folder —</option>'].concat(window.IQLib.folders.map(f => `<option value="${esc(f.id)}" ${it.folderId===f.id?'selected':''}>${esc(f.name)}</option>`)).join('');
+  const owner = it.mine;
+  return `<div class="lib-detail">
+    <button class="tdy-headbtn" onclick="libBack()">← Back</button>
+    <div class="lib-dtitle">${esc(it.title)}</div>
+    <div class="lib-dbody">${esc(it.body||'')}</div>
+    ${owner ? `<div class="lib-dactions">
+      <label class="lib-dctl">Folder <select onchange="libMove('${esc(it.id)}',this.value)">${folderOpts}</select></label>
+      <label class="lib-dctl">Visibility <select onchange="libShare('${esc(it.id)}',this.value)">
+        <option value="private" ${it.visibility==='private'?'selected':''}>Private (only me)</option>
+        <option value="shared" ${it.visibility==='shared'?'selected':''}>Shared (my teammates)</option></select></label>
+      <button class="btn-ghost btn-sm" style="color:var(--danger,#d05a5a)" onclick="libDelete('${esc(it.id)}')">Delete</button>
+    </div>` : `<div class="lib-dctl" style="color:var(--text-muted)">Shared with you — read-only</div>`}
+  </div>`;
+}
+function libOpen(id) { window.IQLib.openId = id; libRender(); }
+function libBack() { window.IQLib.openId = null; libRender(); }
+function libSelect(view, folderId) { window.IQLib.view = view; window.IQLib.folderId = folderId; window.IQLib.openId = null; libRender(); }
+
+async function libNewFolder() {
+  const name = prompt('Folder name:', ''); if (!name || !name.trim()) return;
+  try { await fetch('/api/library/folders', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ name: name.trim() }) }); await libLoad(); } catch (_) {}
+}
+async function libNewNote() {
+  const title = prompt('Note title:', ''); if (title === null) return;
+  const body = prompt('What do you want to remember?', ''); if (body === null) return;
+  const folderId = (window.IQLib.view === 'mine' && window.IQLib.folderId) ? window.IQLib.folderId : null;
+  try { await fetch('/api/library', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ type: 'note', title: title.trim() || 'Untitled', body, folderId }) }); await libLoad(); } catch (_) {}
+}
+async function libMove(id, folderId) { try { await fetch('/api/library/' + encodeURIComponent(id), { method: 'PATCH', headers: Auth._headers(), body: JSON.stringify({ folderId: folderId || null }) }); await libLoad(); } catch (_) {} }
+async function libShare(id, visibility) { try { await fetch('/api/library/' + encodeURIComponent(id), { method: 'PATCH', headers: Auth._headers(), body: JSON.stringify({ visibility }) }); await libLoad(); } catch (_) {} }
+async function libDelete(id) { if (!confirm('Delete this item?')) return; try { await fetch('/api/library/' + encodeURIComponent(id), { method: 'DELETE', headers: Auth._headers() }); window.IQLib.openId = null; await libLoad(); } catch (_) {} }
 
 /* Render the GOVERNED proposals for the latest turn (check-in / private note …) with
    confirm/dismiss — nothing saved until confirmed. The reply text itself now lives in the
