@@ -59,9 +59,12 @@ const server = app.listen(0, async () => {
     const disc = await turn('feeling a bit flat today, not sure why');
     ok('4 · a personal disclosure still offers to log a check-in', cards(disc).includes('checkin_log') || /check-in/i.test(reply(disc)));
 
-    /* 5 — a genuine knowledge question with no evidence still says so honestly (no fabrication) */
+    /* 5 — a genuine knowledge question is a REASONING question, not an org-truth lookup. With
+       the reasoning engine OFF (no model in this env) it degrades HONESTLY — it says it needs
+       the engine and speaks only to recorded data — and never fabricates the answer. (With a
+       model configured, the same path answers in general terms, clearly labelled.) */
     const kn = await turn('what is the capital of France');
-    ok('5 · an off-topic knowledge question is answered honestly, never fabricated', /enough authorised evidence|don'?t (?:have|know)|can'?t/i.test(reply(kn)));
+    ok('5 · an off-topic knowledge question is handled honestly, never fabricated', /reasoning (?:question|engine)|switched on|only speak to what'?s? in your data|don'?t guess|enough authorised evidence|don'?t (?:have|know)|can'?t/i.test(reply(kn)) && !/\bParis\b/i.test(reply(kn)));
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();

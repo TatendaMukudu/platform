@@ -48,6 +48,7 @@ const voice      = require('./ai/voice');
 const comprehend = require('./ai/comprehend');
 const languageGuard = require('./ai/language-guard');
 const audit      = require('./ai/audit');
+const reasoningRegister = require('./ai/reasoning-register');
 const googleProvider = require('./ai/providers/google');
 const delivery   = require('./ai/delivery');
 // The unified attention pipeline (engines discover → feed normalises → packet scopes →
@@ -8009,6 +8010,49 @@ function _reasonReadAnswer(code, userId, { filter, lead, patterns, now = Date.no
   } catch (_) { return null; }
 }
 
+/* THE GOVERNED REASONING EDGE — the second register. A world-knowledge / planning / mixed
+   question ("why is a 4-3-3 better than a 5-3-2?", "help me plan a session for my squad") is
+   NOT an org-truth question, so it must not be forced through the retrieval path and
+   dead-ended. It's reasoned here: the LLM may reason freely in GENERAL terms, but any claim
+   about THIS org must cite one of the already-scoped grounded beliefs we hand it — and that
+   is enforced in CODE by assembleGoverned (cite-or-ask), not merely asked for in the prompt.
+   The belief ledger is never written here. With no model configured this degrades to an
+   honest line rather than a fabricated answer. Async: called from the async turn. */
+async function _governedReason(code, userId, question, { register } = {}) {
+  // The citable context = this reader's already-scoped, ripe grounded beliefs (leak-safe by
+  // construction — they came through _reasonScopedAgenda). Each belief id is a citation the
+  // model may use; it can cite NOTHING else, so it cannot reference data it wasn't shown.
+  let context = [];
+  try {
+    const { agenda } = _reasonScopedAgenda(code, userId, Date.now(), false);
+    context = agenda.filter(a => a.readiness === 'ripe').slice(0, 12).map(a => ({ ref: a.beliefId, text: a.claim }));
+  } catch (_) {}
+
+  // NO MODEL → honest degrade. A mixed question with a real grounded read defers to the
+  // deterministic answer (return null → caller keeps it); a pure reasoning question says so.
+  if (!ai.enabled()) {
+    if (register === 'mixed' && context.length) return null;
+    return { answer: `That's a reasoning question more than a read of your recorded data. I can think it through with you — weighing the general trade-offs against what's actually recorded here — once the reasoning engine is switched on. Until then I'll only speak to what's in your data, so I don't guess.`,
+      confidence: 'none', limitations: ['the reasoning edge is off (no model configured)'], captureProposals: [], provenance: [], usable: true };
+  }
+
+  // MODEL ON → reason, then GOVERN the output. completeJSON returns null on any failure, so a
+  // model hiccup degrades cleanly instead of throwing.
+  try {
+    const out = await ai.completeJSON({
+      tier: 'reason', system: reasoningRegister.SYSTEM_PROMPT,
+      user: reasoningRegister.buildUserMessage({ question, context }),
+      maxTokens: 800, temperature: 0.3, schema: ['claims'],
+    });
+    if (!out) return null;
+    const assembled = reasoningRegister.assembleGoverned({
+      claims: out.claims, openQuestions: out.openQuestions, captures: out.captures,
+      allowedRefs: context.map(c => c.ref),
+    });
+    return assembled.usable ? assembled : null;
+  } catch (_) { return null; }
+}
+
 /* Resolve a NAMED colleague mentioned in a question to a real org user — full name first,
    then a unique first name. Returns null when nothing matches (so we never invent a person).
    Matching is over the whole directory so we can honestly say "they're not in your area"
@@ -10168,7 +10212,7 @@ function _persistCaptureCommand(code, userId, command) {
   } catch (_) { return null; }
 }
 
-function _assistantTurn(code, userId, text, lens, opts = {}) {
+async function _assistantTurn(code, userId, text, lens, opts = {}) {
   lens = ASSISTANT_LENSES.includes(lens) ? lens : null;
   const workItemId = opts.workItemId ? String(opts.workItemId).slice(0, 80) : null;
   const interp = _assistantInterpret(code, userId, text);
@@ -10214,8 +10258,41 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
   // through the same answer path. Excludes explicit save-commands so "note: …" still captures.
   const infoRequest = !(cls.command && cls.command.payload)
     && /\b(pull up|profile|dossier|tell me about|show me|what'?s? (?:going on|up|happening) with|how(?:'s| is| are)\b|summar\w*|make sense|makes? sense of|what (?:patterns?|trends?)|patterns? (?:you|have|i)|report on|update on|catch me up|brief me|rundown|the (?:big )?picture)\b/i.test(text);
+  // A world-knowledge / planning / mixed message is a REASONING request, not a disclosure to
+  // save — even when it's phrased as a command ("help me build a session"). But a bare
+  // declarative that merely mentions a plan ("minutes: we set the new schedule") is a
+  // disclosure to capture, so require a REQUEST cue before the reasoning edge claims the turn.
+  const reg0 = reasoningRegister.classifyRegister(cls.questionText || text).register;
+  const _rt = cls.questionText || text;
+  const requestCue = /\?|\b(help me|can you|could you|would you|please|why|how|should|what|which|when|where|explain|walk me through|build|create|draft|design|plan|prepare|come up with|suggest|recommend|give me|show me|tell me|is it (?:better|worth|good)|better than|difference between|pros and cons|best (?:way|approach))\b/i.test(_rt);
+  // A STRONG reasoning cue (why / how-does / should / better-than / build / plan …) is what
+  // lets the reasoning edge take over a dead end when the MODEL IS OFF — a weak "what is X" is
+  // treated as a possible org lookup and left with its honest "not enough evidence" instead.
+  const strongCue = /\b(why|how (?:do|does|to|should|can|would)|should (?:i|we|you|they)|better than|worse than|vs\.?|versus|explain|define|difference between|pros and cons|trade-?offs?|best (?:way|approach|formation|method|strategy|option)|help me (?:build|plan|create|design|draft|work|figure|prepare|think)|build|create|draft|design|outline|plan a|come up with|walk me through|is it (?:better|worth|good)|when should)\b/i.test(_rt);
+  const reasoningWanted = reasoningRegister.wantsReasoning(reg0) && requestCue && !(cls.command && cls.command.payload);
   let qa = null;
   if (cls.isQuestion || infoRequest) { try { qa = _assistantAnswer(code, userId, cls.questionText || text); } catch (_) { qa = null; } }
+  // The reasoning edge is a FALLBACK — it never overrides an answer the org's own data already
+  // produced (that would hijack a grounded lookup like "how does our high press work").
+  const deterministicAnswered = !!(qa && qa.answer && qa.confidence && qa.confidence !== 'none' && !/enough authorised evidence/i.test(qa.answer));
+  // ── GOVERNED REASONING EDGE (the second register) ────────────────────────────
+  // A reasoning question must not be met with "not enough authorised evidence". Route it
+  // through the governed reasoner: general knowledge is allowed and LABELLED; any org claim
+  // must cite a scoped belief (cite-or-ask, enforced in code); the belief ledger is never
+  // written. When the model is ON we always reason; when OFF we only take over the dead end
+  // for a strong reasoning ask, so a plain org lookup keeps its honest insufficient-evidence line.
+  const runReasoning = !deterministicAnswered && (cls.isQuestion || infoRequest || reasoningWanted)
+    && reasoningRegister.wantsReasoning(reg0) && (ai.enabled() || strongCue);
+  if (runReasoning) {
+    try {
+      const gr = await _governedReason(code, userId, cls.questionText || text, { register: reg0 });
+      if (gr && gr.answer) {
+        qa = { answer: gr.answer, purpose: 'workspace_shared_reasoning', confidence: gr.confidence || 'general',
+          limitations: gr.limitations || [], cites: [], citations: [], provenance: gr.provenance || [],
+          reasoning: true, register: reg0, reasoningCaptures: gr.captureProposals || [] };
+      }
+    } catch (_) { /* reasoning is optional enrichment — never breaks the turn */ }
+  }
   // A warm, human reply to a greeting — with a real way in, so the assistant feels alive.
   if (!qa && _greeting) {
     const nm = _firstName(code, userId);
@@ -10255,6 +10332,10 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
   // (A REQUESTED follow-up, checkin_proposal — "check in with me after the meeting" — is a
   // real ask and stays; compound turns like "feeling down, how's the team?" keep both.)
   if (cls.kind === 'question' || _greeting || (infoRequest && qa)) proposals = proposals.filter(p => !['capture', 'checkin_log'].includes(p.actionType));
+  // A pure WORLD-KNOWLEDGE question ("why is a 4-3-3 better?") isn't a disclosure — a "save as
+  // note" card makes no sense, so drop it. Planning/mixed keep their capture card (e.g. "draft
+  // a plan for the launch" is legitimately a saveable plan item), and check-ins are untouched.
+  else if (reasoningWanted && qa && qa.reasoning && reg0 === 'world_knowledge') proposals = proposals.filter(p => p.actionType !== 'capture');
 
   // ── GROUNDED ANSWER-AND-CONFIRM ──────────────────────────────────────────────
   // If there is an ACTIVE org question and this turn reads as an ANSWER (not a new
@@ -10362,7 +10443,11 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
     // A grounded answer when the input carried a question — from the ONE question-answering path.
     // `usedNewlySaved` says whether a mixed turn's answer drew on the just-saved statement.
     // `citations` are safe (label/date/ref) — no internal scores or excluded evidence.
-    qa: qa ? { answer: qa.answer, purpose: qa.purpose, confidence: qa.confidence, limitations: qa.limitations, cites: qa.cites, citations: qa.citations || [], bounded: qa.bounded, usedNewlySaved: qa.usedNewlySaved === true } : null,
+    qa: qa ? { answer: qa.answer, purpose: qa.purpose, confidence: qa.confidence, limitations: qa.limitations, cites: qa.cites, citations: qa.citations || [], bounded: qa.bounded, usedNewlySaved: qa.usedNewlySaved === true,
+      // Two-register reasoning metadata: whether this answer was reasoned (vs a pure org read),
+      // its register, the provenance tags (general / org_data / ask) the UI shows to keep the
+      // two kinds of knowledge visibly separate, and any confirm-gated captures the reasoning surfaced.
+      reasoning: qa.reasoning === true, register: qa.register || null, provenance: qa.provenance || [], reasoningCaptures: qa.reasoningCaptures || [] } : null,
     // Bounded assigned-work context extension (authorised, released-fields-only) — NOT a second runtime contract.
     assignedWork: workCtx ? { items: workCtx.items.map(it => ({ id: it.id, title: it.title, status: it.status, needsRevision: it.needsRevision, releasedScore: it.releasedScore, hasReleasedFeedback: !!it.releasedFeedback })), basisIds: workCtx.basisIds, limitations: workCtx.limitations, ambiguous: workAmbiguous } : null,
     bounded: composed.ok, cites: composed.output.cites,
@@ -10390,7 +10475,7 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
 
 /* POST /api/assistant/turn — the one composer. Interpret + reason + propose. Persists nothing
    to a capability store; returns the bounded artifact + response contract + proposals. */
-app.post('/api/assistant/turn', requireAuth, (req, res) => {
+app.post('/api/assistant/turn', requireAuth, async (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const text = String(req.body?.text || '').trim();
   if (!text) return res.status(400).json({ error: 'text required' });
@@ -10403,7 +10488,7 @@ app.post('/api/assistant/turn', requireAuth, (req, res) => {
   // happen INSIDE _assistantTurn, in a defined order (persist → ground). The endpoint
   // is a thin boundary — no second retrieval, no endpoint-specific privacy logic.
   try {
-    const r = _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId });
+    const r = await _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId });
     res.json({ ok: true, turnId: r.turn.turnId, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response, saved: r.saved || null, capturePrompt: r.capturePrompt || null });
   } catch (e) {
     // Fail closed with valid JSON — never a non-JSON 500, never a leak in an error body.
