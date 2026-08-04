@@ -11577,10 +11577,10 @@ app.post('/api/groups/create', requireAuth, (req, res) => {
 });
 
 /* ── List groups for org (filtered by memberId if provided) ─────────────── */
-app.get('/api/groups', (req, res) => {
-  const { orgCode, memberId } = req.query;
-  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
-  let groups = orgGroups[orgCode.toLowerCase().trim()] || [];
+app.get('/api/groups', requireAuth, (req, res) => {
+  const orgCode = req.iqSession.orgCode;   // own org only — never read another org's groups
+  const { memberId } = req.query;
+  let groups = orgGroups[orgCode] || [];
   if (memberId) {
     groups = groups.filter(g => g.memberIds.includes(memberId) || g.leadIds.includes(memberId));
   }
@@ -12862,8 +12862,8 @@ app.post('/api/member/join', (req, res) => {
  *
  * ──────────────────────────────────────────────────────────────────────── */
 app.get('/api/member/pending', requireAuth, (req, res) => {
-  const { orgCode, memberName, userId } = req.query;
-  const code = (orgCode || req.iqSession.orgCode || '').toLowerCase().trim();
+  const { memberName, userId } = req.query;
+  const code = req.iqSession.orgCode;   // own org only — query orgCode is ignored (no cross-org read)
   if (!code) return res.status(400).json({ error: 'orgCode required' });
 
   // Resolve memberName from userId when provided (unified app path)
@@ -13556,18 +13556,18 @@ app.post('/api/weekly/submit', requireAuth, async (req, res) => {
 
 /* ── Get weekly assessments for org — requires auth ─────────────────────── */
 app.get('/api/weekly/org', requireAuth, (req, res) => {
-  const { orgCode, week } = req.query;
-  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
+  const orgCode = req.iqSession.orgCode;   // own org only
+  const { week } = req.query;
   const w   = week || currentWeekStr();
   const key = weekKey(orgCode, w);
   res.json({ week: w, assessments: weeklyAssessments[key] || [] });
 });
 
 /* ── Get own weekly history ─────────────────────────────────────────────── */
-app.get('/api/weekly/member', (req, res) => {
-  const { orgCode, memberName, memberId } = req.query;
-  if (!orgCode || (!memberName && !memberId)) return res.status(400).json({ error: 'missing fields' });
-  const code = orgCode.toLowerCase().trim();
+app.get('/api/weekly/member', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode;      // own org only — query orgCode ignored
+  const { memberName, memberId } = req.query;
+  if (!memberName && !memberId) return res.status(400).json({ error: 'missing fields' });
   const history = [];
   Object.keys(weeklyAssessments).forEach(key => {
     if (!key.startsWith(code + ':')) return;

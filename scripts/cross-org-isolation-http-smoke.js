@@ -64,6 +64,14 @@ const server = app.listen(0, async () => {
     /* 8 — the legitimate self-path still works: Alex writes his OWN note in org A */
     const okNote = await post(alex, '/api/notes', { content: 'my own note', type: 'private' });
     ok('8 · a user CAN still write their own data (not over-locked)', okNote.j && okNote.j.ok);
+
+    /* 9 — READ isolation: a query-string orgCode can't read another org's data */
+    const get = (tok, path) => fetch(base + path, { headers: { Authorization: `Bearer ${tok}` } }).then(async r => ({ status: r.status, j: await r.json().catch(() => null) }));
+    // Seed a group in org B so there's something to (not) leak.
+    S.orgGroups[B] = [{ id: 'gB', name: 'B-only group', memberIds: ['bella'], leadIds: ['boss'] }];
+    const leak = await get(alex, '/api/groups?orgCode=' + B);
+    ok('9 · reading /api/groups?orgCode=B returns only org A (query orgCode ignored)', leak.j && (leak.j.groups || []).every(g => g.name !== 'B-only group'));
+    ok('9 · an unauthenticated read is refused (401)', (await fetch(base + '/api/groups?orgCode=' + B)).status === 401);
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();
