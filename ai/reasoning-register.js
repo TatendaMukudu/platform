@@ -177,8 +177,17 @@ const SYSTEM_PROMPT = [
 
 /* Build the user message: the question plus the authorised, de-identified-where-appropriate
    context the model may cite. Context rows are { ref, text }. Pure string assembly. */
-function buildUserMessage({ question, context = [] } = {}) {
-  const lines = [`QUESTION: ${String(question || '').trim()}`, ''];
+function buildUserMessage({ question, context = [], priorMessages = [] } = {}) {
+  const lines = [];
+  // Conversation memory — prior turns give a follow-up its context ("yes, for my U16s"). It is
+  // conversational history, NOT a source of org truth: org claims still require a citation below.
+  const prior = (Array.isArray(priorMessages) ? priorMessages : []).filter(m => m && m.text).slice(-8);
+  if (prior.length) {
+    lines.push('CONVERSATION SO FAR (for continuity only — not a source of org facts):');
+    for (const m of prior) lines.push(`  ${m.role === 'assistant' ? 'You' : 'User'}: ${_clip(m.text, 240)}`);
+    lines.push('');
+  }
+  lines.push(`QUESTION: ${String(question || '').trim()}`, '');
   if (context.length) {
     lines.push('AUTHORISED CONTEXT (the ONLY org facts you may cite; use the ref in evidenceRefs):');
     for (const c of context.slice(0, 24)) lines.push(`  [${c.ref}] ${_clip(c.text, 200)}`);

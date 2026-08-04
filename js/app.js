@@ -5920,15 +5920,21 @@ async function renderToday() {
   const chips = ['What is outstanding?', 'Who owns what?', 'Are we ready?', 'What changed?'];
   el.innerHTML = `
     <div class="tdy-composer">
+      <div class="tdy-chathead">
+        <button class="tdy-headbtn" onclick="todayNewChat()" title="Start a new conversation">＋ New</button>
+        <button class="tdy-headbtn" onclick="todayHistoryOpen()" title="Your past conversations">🕘 History</button>
+      </div>
+      <div id="today-history" class="tdy-history" style="display:none"></div>
+      <div id="today-thread" class="tdy-thread"></div>
       <div class="tdy-inputrow">
         <input id="today-ask" placeholder="Ask me anything — or just tell me how it's going…" onkeydown="if(event.key==='Enter')todayAsk()">
         <button class="tdy-send" onclick="todayAsk()" aria-label="Send">↑</button>
       </div>
-      <div id="today-ask-out" style="margin-top:0.5rem"></div>
+      <div id="today-ask-out"></div>
       <div class="tdy-chips">
         ${chips.map(c => `<button class="tdy-cbtn" onclick="todayQuick('${c}')">${c}</button>`).join('')}
       </div>
-      <div class="tdy-privacy">Private by default · nothing is saved or shared until you confirm</div>
+      <div class="tdy-privacy">Private &amp; yours · history is only visible to you · nothing informs the org until you confirm</div>
     </div>
     <div id="today-voice"></div>
     <div id="today-inquiry"></div>
@@ -6124,48 +6130,128 @@ async function todayReasonRespond(beliefId, response, btn) {
 function todayQuick(q) {
   const input = document.getElementById('today-ask');
   if (input) input.value = q;
-  todayTeamAsk();
+  todayAsk();   // chips go through the SAME threaded assistant — one brain, one thread
 }
 
 /* The composer — ONE assistant. A leader is a person too, so free text goes through the
    SAME unified runtime the member uses (/api/assistant/turn): a reflection ("I'm feeling a
    little tired") becomes a governed, private check-in/note offer, and a question is grounded
-   — never a cold "ask someone else". The explicit team chips still use the purpose-built
-   team path (todayTeamAsk). No parallel assistant; the same brain everywhere. */
+   — never a cold "ask someone else". The quick chips go through this SAME threaded path too.
+   No parallel assistant; the same brain everywhere, in one private conversation thread. */
+/* The live conversation state — a private, self-only thread. conversationId is null for a
+   fresh thread; the server returns one on the first turn and we keep sending it so follow-ups
+   land in the same thread (and the reasoner gets the memory). */
+window.IQChat = window.IQChat || { conversationId: null };
+
 async function todayAsk() {
   const input = document.getElementById('today-ask');
+  const thread = document.getElementById('today-thread');
   const out = document.getElementById('today-ask-out');
   const q = input && input.value.trim();
-  if (!q || !out) return;
-  out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Thinking…</div>`;
+  if (!q || !thread) return;
+  todayHistoryClose();
+  thread.insertAdjacentHTML('beforeend', todayBubble('user', q));
+  if (input) input.value = '';
+  if (out) out.innerHTML = `<div class="tdy-thinking">Thinking…</div>`;
+  todayScrollThread();
   try {
-    const r = await fetch('/api/assistant/turn', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ text: q }) });
+    const r = await fetch('/api/assistant/turn', { method: 'POST', headers: Auth._headers(),
+      body: JSON.stringify({ text: q, conversationId: window.IQChat.conversationId }) });
     const j = await r.json();
     if (!j || !j.ok) throw new Error('turn failed');
-    out.innerHTML = todayRenderTurn(j);
-    if (input) input.value = '';
-  } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't answer that right now.</div>`; }
+    window.IQChat.conversationId = j.conversationId || window.IQChat.conversationId;
+    if (out) out.innerHTML = '';
+    const res = j.response || {};
+    thread.insertAdjacentHTML('beforeend', todayBubble('assistant', res.responseText || '', res.qa || {}));
+    // Governed proposals (check-in / note …) ride under the assistant reply, unchanged.
+    if (out) out.innerHTML = todayRenderProposals(j);
+    todayScrollThread();
+  } catch (e) { if (out) out.innerHTML = `<div class="tdy-thinking">Couldn't answer that right now.</div>`; }
 }
 
-/* Explicit team questions (the chips) — the scoped, grounded org answer + who to ask. */
-async function todayTeamAsk() {
-  const input = document.getElementById('today-ask');
-  const out = document.getElementById('today-ask-out');
-  const q = input && input.value.trim();
-  if (!q || !out) return;
-  out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Checking your area…</div>`;
+/* One chat bubble. Assistant bubbles carry provenance chips so the two registers — general
+   reasoning vs a read of your data vs something to confirm — are visible at a glance. */
+function todayBubble(role, text, qa) {
+  const esc = _escAdvisor;
+  const chips = (role === 'assistant') ? todayProvenanceChips(qa || {}) : '';
+  return `<div class="tdy-msg tdy-msg-${role}"><div class="tdy-bubble">${esc(text)}</div>${chips}</div>`;
+}
+function todayProvenanceChips(qa) {
+  const prov = Array.isArray(qa.provenance) ? qa.provenance : [];
+  const tags = new Set(prov.map(p => p && p.tag));
+  const chip = (cls, label) => `<span class="tdy-prov ${cls}">${label}</span>`;
+  const out = [];
+  if (tags.has('general') || qa.reasoning) out.push(chip('prov-general', 'General reasoning'));
+  if (tags.has('org_data')) out.push(chip('prov-org', 'From your data'));
+  if (tags.has('ask')) out.push(chip('prov-ask', 'To confirm'));
+  return out.length ? `<div class="tdy-provrow">${out.join('')}</div>` : '';
+}
+function todayScrollThread() { const t = document.getElementById('today-thread'); if (t) t.scrollTop = t.scrollHeight; }
+
+/* Start a fresh thread — the current one stays saved in history. */
+function todayNewChat() {
+  window.IQChat.conversationId = null;
+  const t = document.getElementById('today-thread'); if (t) t.innerHTML = '';
+  const o = document.getElementById('today-ask-out'); if (o) o.innerHTML = '';
+  todayHistoryClose();
+  const i = document.getElementById('today-ask'); if (i) i.focus();
+}
+
+/* The history drawer — your past conversations, newest first. Self-only; the server never
+   returns anyone else's. */
+async function todayHistoryOpen() {
+  const box = document.getElementById('today-history');
+  if (!box) return;
+  if (box.style.display !== 'none') { todayHistoryClose(); return; }
+  box.style.display = 'block';
+  box.innerHTML = `<div class="tdy-thinking" style="padding:0.6rem">Loading your conversations…</div>`;
   try {
-    const r = await fetch('/api/org/ask', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ question: q }) });
-    const d = await r.json();
-    const route = d.routeTo ? `<div class="tdy-note" style="margin-top:0.3rem">Best person to ask: <strong>${_escAdvisor(d.routeTo.to)}</strong></div>` : '';
-    out.innerHTML = `<div class="tdy-reply">${_escAdvisor(d.answer || 'No answer available.')}</div>${route}`;
-  } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't answer that right now.</div>`; }
+    const j = await (await fetch('/api/assistant/conversations', { headers: Auth._headers() })).json();
+    const list = (j && j.conversations) || [];
+    if (!list.length) { box.innerHTML = `<div class="tdy-histempty">No past conversations yet — they'll appear here, visible only to you.</div>`; return; }
+    box.innerHTML = list.map(c => `
+      <div class="tdy-histrow" data-id="${_escAdvisor(c.id)}">
+        <div class="tdy-histmain" onclick="todayLoadConversation('${_escAdvisor(c.id)}')">
+          <div class="tdy-histtitle">${_escAdvisor(c.title || 'Conversation')}</div>
+          <div class="tdy-histmeta">${_escAdvisor(todayWhen(c.updatedAt))} · ${c.messageCount || 0} messages</div>
+        </div>
+        <button class="tdy-histdel" title="Delete this conversation" onclick="todayDeleteConversation('${_escAdvisor(c.id)}',event)">✕</button>
+      </div>`).join('');
+  } catch (e) { box.innerHTML = `<div class="tdy-histempty">Couldn't load history right now.</div>`; }
+}
+function todayHistoryClose() { const b = document.getElementById('today-history'); if (b) b.style.display = 'none'; }
+function todayWhen(iso) { try { const d = new Date(iso); const day = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); const tm = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); return `${day}, ${tm}`; } catch (_) { return ''; } }
+
+/* Open a past thread back into the live view — you can keep talking and it continues. */
+async function todayLoadConversation(id) {
+  const thread = document.getElementById('today-thread');
+  if (!thread) return;
+  todayHistoryClose();
+  thread.innerHTML = `<div class="tdy-thinking">Loading…</div>`;
+  try {
+    const j = await (await fetch('/api/assistant/conversations/' + encodeURIComponent(id), { headers: Auth._headers() })).json();
+    if (!j || !j.ok) throw new Error('load failed');
+    window.IQChat.conversationId = j.conversation.id;
+    thread.innerHTML = (j.messages || []).map(m => todayBubble(m.role, m.text, m)).join('');
+    const o = document.getElementById('today-ask-out'); if (o) o.innerHTML = '';
+    todayScrollThread();
+  } catch (e) { thread.innerHTML = `<div class="tdy-thinking">Couldn't open that conversation.</div>`; }
 }
 
-/* Render one unified-runtime turn: the assistant's reply, plus any GOVERNED proposals
-   (check-in / private note …) with confirm/dismiss — nothing saved until confirmed. Slim
-   sibling of the member renderer; the response shape is the same. */
-function todayRenderTurn(j) {
+/* Erase a thread — the user's own, permanent until they do this. */
+async function todayDeleteConversation(id, ev) {
+  if (ev) ev.stopPropagation();
+  try {
+    await fetch('/api/assistant/conversations/' + encodeURIComponent(id), { method: 'DELETE', headers: Auth._headers() });
+    if (window.IQChat.conversationId === id) todayNewChat();
+    todayHistoryOpen(); todayHistoryOpen(); // refresh the list (toggle off→on)
+  } catch (_) {}
+}
+
+/* Render the GOVERNED proposals for the latest turn (check-in / private note …) with
+   confirm/dismiss — nothing saved until confirmed. The reply text itself now lives in the
+   assistant bubble in the thread, so this renders only the proposals + any saved note. */
+function todayRenderProposals(j) {
   const esc = _escAdvisor, r = j.response || {};
   const proposals = r.primaryActions || r.proposedActions || [];
   const propHtml = proposals.map(p => {
@@ -6180,7 +6266,7 @@ function todayRenderTurn(j) {
   }).join('');
   const note = j.saved ? `<div class="tdy-note">✓ Saved — privately, just for you.</div>`
     : (j.capturePrompt ? `<div class="tdy-note">${esc(j.capturePrompt.message)}</div>` : '');
-  return `<div class="tdy-reply">${esc(r.responseText || '')}</div>${note}${propHtml}`;
+  return `${note}${propHtml}`;
 }
 
 /* Confirm a governed proposal from the composer — the only path to a write. Settles in place. */

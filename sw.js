@@ -3,7 +3,7 @@
    first and only falls back to the cache when the device is offline. So a fresh
    deploy is always picked up the moment the phone is online — the cache is a
    safety net, never the source of truth. */
-const CACHE = 'iq-cache-v17';   // bump: adds web-push (push + notificationclick) handlers for proactive delivery
+const CACHE = 'iq-cache-v18';   // bump: threaded chat + private history UI (two-register provenance chips)
 
 self.addEventListener('install', () => self.skipWaiting());
 
