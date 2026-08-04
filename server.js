@@ -50,6 +50,8 @@ const languageGuard = require('./ai/language-guard');
 const audit      = require('./ai/audit');
 const reasoningRegister = require('./ai/reasoning-register');
 const kernelCoreasoning = require('./ai/kernel-coreasoning');
+const safeguarding = require('./ai/safeguarding');
+const rateLimit = require('./ai/rate-limit');
 const renderArtifact = require('./ai/render-artifact');
 const googleProvider = require('./ai/providers/google');
 const delivery   = require('./ai/delivery');
@@ -139,7 +141,7 @@ function scheduleSave() {
         proactivePrefs, insightSuppression, answerFeedback,
         orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
         reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
-        conversationSessions, assistantConversations, libraryFolders, libraryItems,
+        conversationSessions, assistantConversations, libraryFolders, libraryItems, safeguardingFlags,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -998,15 +1000,23 @@ app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   const emailNorm = (email || '').toLowerCase().trim();
 
+  // Brute-force guard: bound failed attempts per email+IP. A failure counts; a success clears.
+  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || 'unknown';
+  const rlKey = emailNorm + '|' + ip;
+  const _fail = (status, error) => { rateLimit.hit(_loginRateStore, rlKey, { limit: LOGIN_MAX, windowMs: LOGIN_WIN }); return res.status(status).json({ error }); };
+  if (rateLimit.isLimited(_loginRateStore, rlKey, { limit: LOGIN_MAX, windowMs: LOGIN_WIN })) {
+    return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes, then try again.' });
+  }
+
   if (!emailNorm) return res.status(400).json({ error: 'Email address is required.' });
   if (!password)  return res.status(400).json({ error: 'Password is required.' });
 
   const entry = emailIndex[emailNorm];
-  if (!entry) return res.status(401).json({ error: 'No account found with that email address.' });
+  if (!entry) return _fail(401, 'No account found with that email address.');
 
   const code = entry.orgCode;
   const user = orgUsers[code]?.[entry.userId];
-  if (!user) return res.status(401).json({ error: 'Account not found. Please contact your admin.' });
+  if (!user) return _fail(401, 'Account not found. Please contact your admin.');
 
   // Lazy bcrypt migration: verify old hash then upgrade
   let passwordValid = false;
@@ -1020,8 +1030,9 @@ app.post('/api/auth/login', async (req, res) => {
     passwordValid = await bcrypt.compare(password, user.passwordHash);
   }
 
-  if (!passwordValid) return res.status(401).json({ error: 'Email or password incorrect.' });
+  if (!passwordValid) return _fail(401, 'Email or password incorrect.');
 
+  rateLimit.reset(_loginRateStore, rlKey);   // a good login clears the failure counter
   const org   = orgMeta[code];
   const token = issueToken(user.id, code, user.role);
   res.json({ ok: true, user: { ...user, passwordHash: undefined }, org, token });
@@ -8038,6 +8049,14 @@ async function _governedReason(code, userId, question, { register, priorMessages
       confidence: 'none', limitations: ['the reasoning edge is off (no model configured)'], captureProposals: [], provenance: [], usable: true };
   }
 
+  // Per-org budget: over the hourly/daily cap, degrade to the honest deterministic line rather
+  // than draining the shared key (or starving other orgs). Same UX as the model being off.
+  if (!_llmBudgetOk(code)) {
+    if (register === 'mixed' && context.length) return null;
+    return { answer: `I've done a lot of reasoning for your organisation in the last little while — to keep things fair and costs sane, I'll pick this back up shortly. In the meantime I can still answer from what's actually recorded.`,
+      confidence: 'none', limitations: ['reasoning temporarily rate-limited for this organisation'], captureProposals: [], provenance: [], usable: true };
+  }
+
   // MODEL ON → reason, then GOVERN the output. completeJSON returns null on any failure, so a
   // model hiccup degrades cleanly instead of throwing.
   try {
@@ -8093,6 +8112,9 @@ async function _kernelCoReason(code) {
     return { ...base, enabled: false,
       note: 'Kernel co-reasoning proposes hypotheses to test and signals worth collecting — it needs the reasoning engine switched on. The aggregate picture below is derived deterministically and is always available.' };
   }
+  if (!_llmBudgetOk(code)) {
+    return { ...base, enabled: true, note: 'Kernel co-reasoning is briefly rate-limited for your organisation; the aggregate picture below is always available.' };
+  }
   try {
     const raw = await ai.completeJSON({ tier: 'reason', system: kernelCoreasoning.SYSTEM_PROMPT,
       user: kernelCoreasoning.buildDigest(aggregates), maxTokens: 900, temperature: 0.4, schema: ['hypotheses'] });
@@ -8146,6 +8168,11 @@ async function _renderArtifact(code, userId, { format = 'summary', intent = '' }
     const det = renderArtifact.deterministicSummary(dataset, format);
     return { enabled: false, draft: det, format: det.format, dataset: meta,
       note: 'A plain, factual draft drawn straight from your data. With the writing engine on I can compose this as a polished summary or email — always from these same figures, nothing invented.' };
+  }
+  if (!_llmBudgetOk(code)) {
+    const det = renderArtifact.deterministicSummary(dataset, format);
+    return { enabled: true, draft: det, format: det.format, dataset: meta,
+      note: 'The writing engine is briefly rate-limited for your organisation — here is the plain factual draft from your data.' };
   }
   try {
     const composed = await ai.completeJSON({ tier: 'reason', system: renderArtifact.SYSTEM_PROMPT,
@@ -10023,6 +10050,64 @@ function _convTitle(t) { const s = String(t || '').trim().replace(/\s+/g, ' '); 
    are org-scoped with an owner + visibility so "make it public" actually reaches teammates. */
 const libraryFolders = {};  // code → [ { id, ownerId, name, createdAt } ]
 const libraryItems   = {};  // code → [ { id, ownerId, type, title, body, sourceRef, folderId, visibility, createdAt, updatedAt } ]
+
+/* ── ABUSE & COST CONTROLS ───────────────────────────────────────────────────
+   Login attempts are bounded per email+IP so a stolen email can't be brute-forced. LLM calls
+   are bounded PER ORG (hourly + daily) so one org can't drain the shared key or starve the
+   others — over budget, the reasoning edges simply degrade to deterministic, exactly as if the
+   key were off. Both are in-memory fixed-window counters (fine for a single dyno; swept hourly). */
+const _loginRateStore = {};   // "email|ip" → window
+const _llmRateStore    = {};  // "org|h" / "org|d" → window
+const LOGIN_MAX   = parseInt(process.env.IQ_LOGIN_MAX, 10)   > 0 ? parseInt(process.env.IQ_LOGIN_MAX, 10)   : 8;    // failures / 15 min
+const LOGIN_WIN   = 15 * 60 * 1000;
+const LLM_ORG_HOURLY = parseInt(process.env.IQ_LLM_ORG_HOURLY, 10) > 0 ? parseInt(process.env.IQ_LLM_ORG_HOURLY, 10) : 240;
+const LLM_ORG_DAILY  = parseInt(process.env.IQ_LLM_ORG_DAILY, 10)  > 0 ? parseInt(process.env.IQ_LLM_ORG_DAILY, 10)  : 2000;
+/* Is this org under its LLM budget? Counts one call if allowed. Over budget → false, and the
+   caller degrades to the deterministic path (never errors). */
+function _llmBudgetOk(code) {
+  if (!ai.enabled()) return false;                          // no model anyway
+  const now = Date.now();
+  const h = rateLimit.hit(_llmRateStore, (code || 'org') + '|h', { limit: LLM_ORG_HOURLY, windowMs: 3600000, now });
+  const d = rateLimit.hit(_llmRateStore, (code || 'org') + '|d', { limit: LLM_ORG_DAILY, windowMs: 86400000, now });
+  return h.allowed && d.allowed;
+}
+setInterval(() => { try { rateLimit.sweep(_loginRateStore, { windowMs: LOGIN_WIN }); rateLimit.sweep(_llmRateStore, { windowMs: 86400000 }); } catch (_) {} }, 3600000).unref?.();
+
+/* ── SAFEGUARDING — the duty of care, deterministic (works with the model OFF) ────────────── */
+const safeguardingFlags = {};  // code → [ { id, subjectId, subjectName, severity, category, excerpt, at, status, leadId, resolvedBy, resolvedAt } ]
+function _sgResources(code) {
+  const custom = orgMeta[code] && orgMeta[code].safeguardingResources;
+  return (Array.isArray(custom) && custom.length) ? custom : safeguarding.DEFAULT_RESOURCES;
+}
+// The named safe adult a crisis flag routes to — the configured lead, else the org's superadmin.
+function _sgLeadId(code) {
+  const set = orgMeta[code] && orgMeta[code].safeguardingLeadId;
+  if (set && orgUsers[code] && orgUsers[code][set]) return set;
+  const admin = Object.values(orgUsers[code] || {}).find(u => u && u.role === 'superadmin' && u.status === 'active');
+  return admin ? admin.id : null;
+}
+function _isSgLead(code, userId) {
+  return _sgLeadId(code) === userId || (orgUsers[code]?.[userId]?.role === 'superadmin');
+}
+function _recordSafeguardingFlag(code, { subjectId, severity, category, excerpt }) {
+  const list = safeguardingFlags[code] || (safeguardingFlags[code] = []);
+  const flag = { id: 'sg_' + generateId(), subjectId, subjectName: (orgUsers[code]?.[subjectId]?.name) || null,
+    severity, category, excerpt: String(excerpt || '').slice(0, 300), at: new Date().toISOString(),
+    status: 'open', leadId: _sgLeadId(code) };
+  list.push(flag);
+  try { _audit(code, { actor: subjectId, action: 'safeguarding_flag', subjectIds: [subjectId], basis: severity }); } catch (_) {}
+  scheduleSave();
+  return flag;
+}
+/* Run the duty-of-care check on a person's own words. Returns a response (message + resources)
+   when risk is present, and records + routes a flag to the safeguarding lead on a CRISIS. */
+function _safeguardingCheck(code, userId, text) {
+  const d = safeguarding.detect(text);
+  if (!d.flagged) return null;
+  const resp = safeguarding.composeResponse({ name: orgUsers[code]?.[userId]?.name || '', severity: d.severity, resources: _sgResources(code) });
+  if (resp.escalate) _recordSafeguardingFlag(code, { subjectId: userId, severity: d.severity, category: d.category, excerpt: text });
+  return { detection: d, response: resp };
+}
 const LIB_TYPES = ['note', 'chat', 'artifact'];
 function _libFolders(code) { return libraryFolders[code] || (libraryFolders[code] = []); }
 function _libItems(code)   { return libraryItems[code]   || (libraryItems[code]   = []); }
@@ -10440,6 +10525,30 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   const _convKey = _wsKey(code, userId);
   const _conv = _resolveConversation(_convKey, opts.conversationId, text, Date.now());
   const priorMessages = (_conv.messages || []).slice(-8).map(m => ({ role: m.role, text: m.text }));
+
+  // ── DUTY OF CARE (first, deterministic) ──────────────────────────────────────
+  // Before anything else — and independent of the LLM — check the person's own words for risk.
+  // A crisis short-circuits the whole turn: no reasoning, no proposals, no capture card that
+  // could bury it. The person gets a warm, honest response with real resources; a flag routes
+  // to the safeguarding lead. Only on the person's OWN turn (never a leader-support subject turn).
+  if (opts.subjectMemberId == null) {
+    const sg = _safeguardingCheck(code, userId, text);
+    if (sg) {
+      const nowIso = new Date().toISOString();
+      const response = { responseText: sg.response.message, mode: 'safeguarding', lens: lens || null,
+        proposedActions: [], primaryActions: [], moreActions: [], groundedClaims: [], inferred: [], limitations: [],
+        safeguarding: { severity: sg.response.severity, escalated: sg.response.escalate, resources: sg.response.resources }, qa: null };
+      _conv.messages.push({ role: 'user', text: String(text || '').slice(0, 4000), at: nowIso });
+      _conv.messages.push({ role: 'assistant', text: sg.response.message, at: nowIso });
+      _conv.updatedAt = nowIso;
+      const turn = { turnId: 'turn_' + generateId(), userId, organisationId: code, createdAt: nowIso, rawInput: String(text || '').slice(0, 4000), lens: lens || null, response, _proposals: [], corrections: [], context: {} };
+      (assistantTurns[_convKey] = assistantTurns[_convKey] || []).push(turn);
+      scheduleSave();
+      return { turn, response, saved: null, capturePrompt: null, conversationId: _conv.id,
+        interpretation: { turnId: turn.turnId, originalInputRef: null, candidateIntents: [], candidateClaims: [], suggestedPrivacy: 'private', proposedActions: [], confidence: 'none', ambiguities: [], limitations: [] },
+        context: { basisIds: [], purpose: 'safeguarding', visibilityEligibility: 'safeguarding', confidence: 'none', limitations: [] } };
+    }
+  }
 
   // ── GROUNDED CONVERSATIONAL TURN ─────────────────────────────────────────────
   // Classify the turn WITHOUT brittle topic keywords, then honour a strict order:
@@ -10862,6 +10971,36 @@ app.delete('/api/library/:id', requireAuth, (req, res) => {
   libraryItems[code] = list.filter(i => !(i.id === req.params.id && i.ownerId === userId));
   if (libraryItems[code].length === before) return res.status(404).json({ error: 'not found' });
   scheduleSave(); res.json({ ok: true, deleted: req.params.id });
+});
+
+/* ── SAFEGUARDING: the lead's queue ──────────────────────────────────────────
+   Only the org's safeguarding lead (or a superadmin) may see or resolve flags — this is
+   sensitive, and access is itself audited. Safety justifies a named safe adult seeing it; no
+   one else does. */
+app.get('/api/safeguarding/flags', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isSgLead(code, userId)) return res.status(403).json({ error: 'safeguarding lead only' });
+  const flags = (safeguardingFlags[code] || []).slice().sort((a, b) => new Date(b.at) - new Date(a.at));
+  const open = flags.filter(f => f.status === 'open');
+  try { if (open.length) _audit(code, { actor: userId, action: 'safeguarding_view', subjectIds: [...new Set(open.map(f => f.subjectId))], basis: 'lead reviewed the safeguarding queue' }); } catch (_) {}
+  res.json({ ok: true, isLead: true, flags, openCount: open.length });
+});
+app.post('/api/safeguarding/flags/:id/resolve', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isSgLead(code, userId)) return res.status(403).json({ error: 'safeguarding lead only' });
+  const f = (safeguardingFlags[code] || []).find(x => x.id === req.params.id);
+  if (!f) return res.status(404).json({ error: 'not found' });
+  f.status = 'resolved'; f.resolvedBy = userId; f.resolvedAt = new Date().toISOString();
+  f.resolutionNote = String((req.body && req.body.note) || '').slice(0, 500) || null;
+  try { _audit(code, { actor: userId, action: 'safeguarding_resolve', subjectIds: [f.subjectId], basis: 'flag resolved' }); } catch (_) {}
+  scheduleSave();
+  res.json({ ok: true, flag: f });
+});
+/* GET /api/safeguarding/config — the resources shown to a person in distress (readable by all,
+   so the app can always surface real help; the lead identity is not exposed to members). */
+app.get('/api/safeguarding/config', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  res.json({ ok: true, resources: _sgResources(code), isLead: _isSgLead(code, userId) });
 });
 
 /* GET /api/assistant/turn/:turnId — inspect the bounded interpretation artifact (self-only). */
@@ -14942,6 +15081,7 @@ function _loadAllStores(data) {
   Object.assign(assistantConversations, data.assistantConversations || {});
   Object.assign(libraryFolders, data.libraryFolders || {});
   Object.assign(libraryItems,   data.libraryItems   || {});
+  Object.assign(safeguardingFlags, data.safeguardingFlags || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -15011,7 +15151,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
-  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, _migrateLegacyNotesToLibrary, orgNotes, checkinProposals,
+  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, _migrateLegacyNotesToLibrary, orgNotes, safeguardingFlags, _llmBudgetOk, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
   // exported for the truth layer: grounded retrieval over canonical evidence
