@@ -1113,7 +1113,7 @@ async function submitCoachCheckin() {
   try {
     const res = await fetch('/api/checkin/freeform', {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...Auth._headers() },
       body:    JSON.stringify({
         orgCode:    AppState.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g,'-'),
         memberName: AppState.adminName,
@@ -3596,7 +3596,7 @@ async function submitCreateGroup() {
 
   try {
     const res = await fetch('/api/groups/create', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
       body: JSON.stringify({ orgCode, name, description: desc, memberIds, leadIds }),
     });
     if (!res.ok) throw new Error();
@@ -3611,7 +3611,7 @@ async function submitCreateGroup() {
 async function deleteGroup(gid) {
   const orgCode = Auth.currentUser?.orgCode || AppState.orgCode;
   await fetch(`/api/groups/${gid}`, {
-    method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+    method: 'DELETE', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
     body: JSON.stringify({ orgCode }),
   });
   showToast('Group removed', 'success');
@@ -3766,7 +3766,7 @@ async function sendGroupMessage(anonymous) {
   const me      = Auth.currentUser;
 
   await fetch('/api/messages/send', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
     body: JSON.stringify({
       orgCode, fromId: me?.id, fromName: me?.name,
       toType: 'group', toId: _currentGroupId,

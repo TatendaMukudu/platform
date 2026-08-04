@@ -1039,9 +1039,12 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 /* ── Create user (admin/coach adds someone below them) ─────────────────── */
-app.post('/api/auth/create-user', async (req, res) => {
-  const { orgCode, creatorId, name, firstName, lastName, email, role, supervisorId, password, group } = req.body;
-  const code  = (orgCode || '').toLowerCase();
+app.post('/api/auth/create-user', requireAuth, async (req, res) => {
+  // The creator + org are the SESSION, never the body — no creating users in another org, and
+  // no claiming to be a higher-privileged creator. The new user's details still come from the body.
+  const code = req.iqSession.orgCode;
+  const creatorId = req.iqSession.userId;
+  const { name, firstName, lastName, email, role, supervisorId, password, group } = req.body;
   const users = orgUsers[code];
   if (!users) return res.status(404).json({ error: 'Org not found' });
 
@@ -1110,8 +1113,18 @@ app.post('/api/auth/create-user', async (req, res) => {
 // or imported in bulk via /api/auth/bulk-import (which requires email column).
 
 /* ── Generate invite link ───────────────────────────────────────────────── */
-app.post('/api/auth/invite', (req, res) => {
-  const { orgCode, role, supervisorId, group, label, usageLimit, expiryDays } = req.body;
+app.post('/api/auth/invite', requireAuth, (req, res) => {
+  const orgCode = req.iqSession.orgCode;
+  const { role, supervisorId, group, label, usageLimit, expiryDays } = req.body;
+  // Only a leader/admin may mint invites — for their OWN org, and never for a role above their
+  // own (closes: anyone inviting themselves in as superadmin to any org).
+  const inviter = orgUsers[orgCode]?.[req.iqSession.userId];
+  if (!inviter || !_isLeader(orgCode, req.iqSession.userId)) return res.status(403).json({ error: 'Only a leader can create invites.' });
+  const roleLevel = { superadmin: 1, admin: 2, coach: 3, member: 4 };
+  const wantRole = role || 'member';
+  if ((roleLevel[wantRole] || 4) < (roleLevel[inviter.role] || 4) && inviter.role !== 'superadmin') {
+    return res.status(403).json({ error: 'You cannot invite someone above your own level.' });
+  }
   const token = generateToken();
   const days  = Math.min(Math.max(parseInt(expiryDays) || 7, 1), 90);
   inviteTokens[token] = {
@@ -1324,11 +1337,20 @@ app.get('/api/auth/org-tree', requireAuth, (req, res) => {
 });
 
 /* ── Update user ────────────────────────────────────────────────────────── */
-app.put('/api/auth/update-user', async (req, res) => {
-  const { orgCode, userId, updates } = req.body;
-  const code  = (orgCode||'').toLowerCase();
+app.put('/api/auth/update-user', requireAuth, async (req, res) => {
+  const code = req.iqSession.orgCode;
+  const { userId } = req.body;
+  const updates = req.body.updates || {};
+  const actor = orgUsers[code]?.[req.iqSession.userId];
+  // Only an admin/superadmin (or explicit edit_members) may modify members — and only in their
+  // OWN org (closes: anyone editing any user, incl. self-promotion to superadmin, in any org).
+  if (!actor || !(actor.role === 'superadmin' || _userHasPerm(code, req.iqSession.userId, 'edit_members'))) {
+    return res.status(403).json({ error: 'You are not allowed to modify members.' });
+  }
   const users = orgUsers[code];
   if (!users || !users[userId]) return res.status(404).json({ error: 'User not found' });
+  // A role change is superadmin-only — a lower privilege can never escalate anyone (or themselves).
+  if (updates.role !== undefined && actor.role !== 'superadmin') delete updates.role;
   const safe = ['name','firstName','lastName','role','supervisorId','group','status'];
   safe.forEach(k => { if (updates[k] !== undefined) users[userId][k] = updates[k]; });
   // Recompute name if first/last changed
@@ -11540,10 +11562,13 @@ function msgId()   { return 'm_'   + generateId(); }
 function groupId() { return 'grp_' + generateId(); }
 
 /* ── Create group ─────────────────────────────────────────────────────────── */
-app.post('/api/groups/create', (req, res) => {
-  const { orgCode, name, description, memberIds, leadIds } = req.body;
-  if (!orgCode || !name) return res.status(400).json({ error: 'orgCode and name required' });
-  const code = orgCode.toLowerCase().trim();
+app.post('/api/groups/create', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode;
+  const { name, description, memberIds, leadIds } = req.body;
+  if (!name) return res.status(400).json({ error: 'name required' });
+  if (!_isLeader(code, req.iqSession.userId) && orgUsers[code]?.[req.iqSession.userId]?.role !== 'superadmin') {
+    return res.status(403).json({ error: 'Only a leader can create groups.' });
+  }
   if (!orgGroups[code]) orgGroups[code] = [];
   const group = { id: groupId(), name, description: description || '', memberIds: memberIds || [], leadIds: leadIds || [], goals: [], traits: [], copilotEnabled: false, createdAt: new Date().toISOString() };
   orgGroups[code].push(group);
@@ -11563,10 +11588,13 @@ app.get('/api/groups', (req, res) => {
 });
 
 /* ── Update group ────────────────────────────────────────────────────────── */
-app.put('/api/groups/:groupId', (req, res) => {
-  const { orgCode, name, description, memberIds, leadIds } = req.body;
-  const code   = orgCode?.toLowerCase().trim();
-  const groups = orgGroups[code] || [];
+app.put('/api/groups/:groupId', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode;
+  const { name, description, memberIds, leadIds } = req.body;
+  if (!_isLeader(code, req.iqSession.userId) && orgUsers[code]?.[req.iqSession.userId]?.role !== 'superadmin') {
+    return res.status(403).json({ error: 'Only a leader can edit groups.' });
+  }
+  const groups = orgGroups[code] || [];   // scoped to the caller's own org — never another's
   const g      = groups.find(g => g.id === req.params.groupId);
   if (!g) return res.status(404).json({ error: 'Group not found' });
   if (name        !== undefined) g.name        = name;
@@ -11742,9 +11770,11 @@ app.get('/api/groups/:groupId/copilot', requireAuth, async (req, res) => {
 });
 
 /* ── Delete group ─────────────────────────────────────────────────────────── */
-app.delete('/api/groups/:groupId', (req, res) => {
-  const { orgCode } = req.body;
-  const code = orgCode?.toLowerCase().trim();
+app.delete('/api/groups/:groupId', requireAuth, (req, res) => {
+  const code = req.iqSession.orgCode;
+  if (!_isLeader(code, req.iqSession.userId) && orgUsers[code]?.[req.iqSession.userId]?.role !== 'superadmin') {
+    return res.status(403).json({ error: 'Only a leader can delete groups.' });
+  }
   if (!orgGroups[code]) return res.status(404).json({ error: 'Org not found' });
   orgGroups[code] = orgGroups[code].filter(g => g.id !== req.params.groupId);
   scheduleSave();
@@ -11756,9 +11786,14 @@ app.delete('/api/groups/:groupId', (req, res) => {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Create note ─────────────────────────────────────────────────────────── */
-app.post('/api/notes', async (req, res) => {
-  const { orgCode, authorId, authorName, content, type, tag, groupId: gid, orgMode, orgName, goals } = req.body;
-  if (!orgCode || !authorId || !content || !type) return res.status(400).json({ error: 'missing fields' });
+app.post('/api/notes', requireAuth, async (req, res) => {
+  // Identity comes from the SESSION, never the body — a note is always authored by the caller,
+  // in the caller's own org (no forging an author or writing into another org).
+  const orgCode = req.iqSession.orgCode;
+  const authorId = req.iqSession.userId;
+  const authorName = orgUsers[orgCode]?.[authorId]?.name || '';
+  const { content, type, tag, groupId: gid, orgMode, orgName, goals } = req.body;
+  if (!content || !type) return res.status(400).json({ error: 'missing fields' });
 
   const id   = noteId();
   const note = {
@@ -12373,9 +12408,13 @@ app.post('/api/self/:habitId/feedback', requireAuth, (req, res) => {
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Send message ─────────────────────────────────────────────────────────── */
-app.post('/api/messages/send', (req, res) => {
-  const { orgCode, fromId, fromName, toType, toId, content, anonymous } = req.body;
-  if (!orgCode || !fromId || !content || !toType) return res.status(400).json({ error: 'missing fields' });
+app.post('/api/messages/send', requireAuth, (req, res) => {
+  // Sender identity is the SESSION, never the body — no sending as someone else / another org.
+  const orgCode = req.iqSession.orgCode;
+  const fromId = req.iqSession.userId;
+  const fromName = orgUsers[orgCode]?.[fromId]?.name || '';
+  const { toType, toId, content, anonymous } = req.body;
+  if (!content || !toType) return res.status(400).json({ error: 'missing fields' });
   const id  = msgId();
   const msg = {
     id, orgCode: orgCode.toLowerCase().trim(),
@@ -12857,9 +12896,13 @@ app.get('/api/member/pending', requireAuth, (req, res) => {
 });
 
 /* ── Member submits scenario result ─────────────────────────────────────── */
-app.post('/api/member/submit-result', (req, res) => {
-  const { orgCode, memberName, memberId, userId, scenarioId, result } = req.body;
-  if (!orgCode || !result) return res.status(400).json({ error: 'missing fields' });
+app.post('/api/member/submit-result', requireAuth, (req, res) => {
+  // The result belongs to the caller — identity from the session, never the body.
+  const orgCode = req.iqSession.orgCode;
+  const memberId = req.iqSession.userId, userId = req.iqSession.userId;
+  const memberName = orgUsers[orgCode]?.[userId]?.name;
+  const { scenarioId, result } = req.body;
+  if (!result) return res.status(400).json({ error: 'missing fields' });
 
   // Resolve memberName from memberId (unified app path)
   let resolvedName = memberName;
@@ -12912,9 +12955,12 @@ app.post('/api/member/submit-result', (req, res) => {
 });
 
 /* ── Member submits check-in (legacy simple endpoint) ───────────────────── */
-app.post('/api/member/checkin', (req, res) => {
-  const { orgCode, memberName, mood, note } = req.body;
-  if (!orgCode || !memberName) return res.status(400).json({ error: 'missing fields' });
+app.post('/api/member/checkin', requireAuth, (req, res) => {
+  // A check-in is always the caller's own — the member is the session user, not a body value.
+  const orgCode = req.iqSession.orgCode;
+  const memberName = orgUsers[orgCode]?.[req.iqSession.userId]?.name;
+  const { mood, note } = req.body;
+  if (!memberName) return res.status(400).json({ error: 'missing fields' });
   const code = (orgCode || '').toLowerCase().trim();
   const key = memberKey(orgCode, memberName);
   if (!memberCheckins[key]) memberCheckins[key] = [];
@@ -13103,9 +13149,13 @@ app.put('/api/org/profile', requireAuth, (req, res) => {
    ═══════════════════════════════════════════════════════════════════════════ */
 const memberGoals = {};  // populated at startup via _loadAllStores()
 
-app.post('/api/member/goals', (req, res) => {
-  const { orgCode, memberName, memberId, goal, identity } = req.body;
-  if (!orgCode || (!memberName && !memberId)) return res.status(400).json({ error: 'missing fields' });
+app.post('/api/member/goals', requireAuth, (req, res) => {
+  // A member sets their OWN goals — identity from the session, never the body.
+  const orgCode = req.iqSession.orgCode;
+  const memberId = req.iqSession.userId;
+  const memberName = orgUsers[orgCode]?.[memberId]?.name;
+  const { goal, identity } = req.body;
+  if (!memberName && !memberId) return res.status(400).json({ error: 'missing fields' });
   // Prefer stable userId as key; fall back to name for backward compat
   const key = memberId
     ? userKey(orgCode, memberId)
@@ -13185,9 +13235,14 @@ app.put('/api/user/memory/resolve', requireAuth, (req, res) => {
    Other roles (leader/admin) return a plain text aiResponse as before.
    Accepts memberId (stable) or memberName (legacy). Prefers memberId.
    ═══════════════════════════════════════════════════════════════════════════ */
-app.post('/api/checkin/freeform', async (req, res) => {
-  const { orgCode, memberName, memberId, userId, text, mood, role, orgMode, orgName, goals } = req.body;
-  if (!orgCode || !memberName || !text) return res.status(400).json({ error: 'missing fields' });
+app.post('/api/checkin/freeform', requireAuth, async (req, res) => {
+  // The check-in belongs to the caller — identity from the session, never the body.
+  const orgCode = req.iqSession.orgCode;
+  const memberId = req.iqSession.userId, userId = req.iqSession.userId;
+  const memberName = orgUsers[orgCode]?.[userId]?.name;
+  const role = req.iqSession.role;
+  const { text, mood, orgMode, orgName, goals } = req.body;
+  if (!memberName || !text) return res.status(400).json({ error: 'missing fields' });
 
   const code = (orgCode || '').toLowerCase().trim();
   const key = memberId
@@ -13413,9 +13468,14 @@ function currentWeekStr() {
 }
 
 /* ── Submit weekly assessment ───────────────────────────────────────────── */
-app.post('/api/weekly/submit', async (req, res) => {
-  const { orgCode, memberName, memberId, userId, role, orgMode, orgName, data, goals } = req.body;
-  if (!orgCode || !memberName || !data) return res.status(400).json({ error: 'missing fields' });
+app.post('/api/weekly/submit', requireAuth, async (req, res) => {
+  // A weekly submission is the caller's own — identity from the session, never the body.
+  const orgCode = req.iqSession.orgCode;
+  const memberId = req.iqSession.userId, userId = req.iqSession.userId;
+  const memberName = orgUsers[orgCode]?.[userId]?.name;
+  const role = req.iqSession.role;
+  const { orgMode, orgName, data, goals } = req.body;
+  if (!memberName || !data) return res.status(400).json({ error: 'missing fields' });
 
   const week = currentWeekStr();
   const key  = weekKey(orgCode, week);
