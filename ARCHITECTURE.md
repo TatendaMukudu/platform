@@ -1,127 +1,125 @@
-# Architecture — IntelliQ OS
+# IntelliQ — Architecture
 
-Four layers move reality into IntelliQ and let IntelliQ act back on it, all built as
-universal contracts (one kernel; domain-specific behaviour at the edges):
+> The map a human (you at 2am, or your first engineering hire) reads to understand the system.
+> Kept honest: it says what's strong, what's load-bearing, and where the ceilings are.
 
-```
-Outside world → Connections → Truth Pipeline → Kernel → Execution Layer → Outside world
-```
+## 1. The thesis, in one paragraph
 
-**Truth Pipeline** (bringing reality in — trustworthy by construction):
-`raw record → approved meaning (mapping) → resolved identity → canonical evidence →
-kernel signal`. Modules: `lib/evidence.js` (envelope), `lib/connector-sdk.js` +
-identity re-resolution, `lib/mapping.js` (approval lifecycle), `lib/sync.js` (durable
-sync runs, health, dead-letter).
+IntelliQ is a **privacy-first, deterministic organisational-learning system**. The rule that
+shapes everything: **the deterministic core owns truth and never fabricates; the LLM lives only
+at the edges, governed.** The core reasons from recorded signals into beliefs it can defend; the
+model is allowed to read messy input, reason about the *world*, and phrase things warmly — but it
+may never assert an organisational fact it can't cite, never predict, never name a person it
+wasn't given. "Agentic in initiative, governed in action."
 
-**Execution Layer** (letting IntelliQ participate — `lib/action.js` + `lib/policy.js`):
-every capability is one contract —
-`recommend → draft → confirm → execute → observe → evaluate → learn` — with three
-authority levels (recommend / draft / execute). Before any outward or destructive
-step, the **Policy Engine** (the org's constitution) decides
-`allow / require_approval / deny / escalate`. The loop closes on *evaluate* — did the
-action actually improve the organisation? — and feeds that back to the kernel. Read,
-reason, and act are separate authorities. A capability plugs stage executors into the
-registry; no capability gets bespoke endpoints or its own truth logic.
-
----
-
-# Organisational language
-
-The single rule that keeps IntelliQ universal at its core while speaking every
-organisation's own voice. Three concerns are kept **separate on purpose**:
-
-| Concern | Lives in | Example |
-|---|---|---|
-| **Meaning** | the kernel's universal primitives — never changes | `person`, `group`, `event`, `observation`, `metric`, `intervention`, `outcome` |
-| **Language** | the org's resolved domain vocabulary (display only) | `person → "player"`, `group → "team"`, `event → "match"` |
-| **Context** | the subject's actual role + the org's own named structures | "The Captain", "Under-18s", "a staff member" |
-
-> **Design law.** No provider, industry, role, or workflow is hard-coded into the
-> kernel when it can be expressed as a universal primitive, a capability, or a
-> configurable domain definition. Domain packs are a *display lens*, not hidden
-> industry logic.
-
-## The one pipeline
-
-Organisational language has exactly **one source**. Every post-setup AI prompt
-receives it the same way — no prompt independently decides what a club, school, or
-business "sounds like."
+## 2. The shape of the code
 
 ```
-Organisation configuration (orgMode / chosen pack / custom words)
-        ↓  ai/packs.js
-resolveDomain(orgMode, { pack, vocab })      → { id, label, vocab }
-        ↓  ai/packs.js
-domainDirective(domain, { subjectRole, avoidGenericForSubject, concepts })
-        ↓  server.js  _domainDirective(code, { userId })
-Every AI prompt  (briefings, Studio, planning, insights, summaries, replies…)
+server.js            ~15k lines. The monolith: Express app, ~90 in-memory stores, every HTTP
+                     endpoint, and the wiring that connects the pure modules to the outside world.
+ai/*.js              The reasoning core + governed edges. PURE where it matters: no IO, no DB,
+                     no network — deterministic functions the truth layer can test in isolation.
+js/*.js              The frontend (vanilla, no framework): app.js (leader), member-view.js, etc.
+css/styles.css       Styles.  index.html  the shell.  sw.js  the service worker (PWA).
+scripts/*.js         The truth layer — one smoke suite per capability + test.js the runner.
 ```
 
-`domainDirective` is the **only** place domain language is expressed. It emits a
-compact instruction the model reads as *context*, not a find-and-replace command,
-and returns **empty** in universal mode with no role nuance (zero tokens, unchanged
-behaviour). It always instructs: use the words naturally; respect each subject's
-actual role; preserve the org's own named structures; custom words win; and wording
-never changes a claim's meaning, source, or confidence (a "coach note" is still an
-observation, not a verified fact).
+### The boundary that matters most
+`ai/*.js` is the **crown jewel and the moat**. Pure, deterministic, dependency-free reasoning:
 
-Generated prose is stamped with `{ pack, vocabVersion }` (`_domainStamp`) so
-historical outputs stay attributable to the vocabulary in effect when they were
-produced, even after an org later changes its display language.
+- `reason.js` — the belief ledger + agenda (what's worth attention), roll-ups, calibration.
+- `reasoning-register.js` — classifies a question (org-fact / world-knowledge / mixed / planning)
+  and **enforces cite-or-ask in code**: an org claim without a real citation is demoted to a
+  question, never asserted. This is what makes the LLM safe.
+- `kernel-coreasoning.js` — the LLM helps the *kernel* reason over **de-identified aggregates**
+  (counts, never people); proposes hypotheses to test, never writes a belief.
+- `render-artifact.js` — the output edge: every figure in a rendered summary/email must trace to
+  the source data (an invented number is caught, the plain version is shown instead).
+- `safeguarding.js` — deterministic distress detection + crisis resources. **Works with the model
+  off** — safety never depends on the LLM.
+- Plus: `gateway.js` (the single LLM layer, Claude + OpenAI fallback + no-egress mode),
+  `privacy.js`, `confidence.js`, `voice.js`, `retrieval.js`, `rate-limit.js`, `errorlog.js`,
+  `metrics.js`, and the rest.
 
-## `orgMode` is configuration, not language
+**Keep the monolith's mess out of these modules.** The day the pure boundary erodes is the day the
+"deterministic, never fabricates" guarantee becomes a hope instead of a fact.
 
-`orgMode` was removed from **language generation** (no more "You are advising
-athletes in a sports club" embedded in prompts). It is still legitimately used for
-**configuration**: selecting an initial domain pack, onboarding, suggesting
-workflows/modules, industry-relevant examples, and analytics. It may appear as a
-**fact in a data payload** (e.g. `ORG: Trafford United FC (sports)`), but it must
-never inject vertical *prose* that steers the model's voice.
-
-`buildReflectionPrompt` and `buildScenarioPrompt` are deliberately
-vertical-neutral: what the model knows about the org comes from the org's **own
-description** (`orgSummary`) plus the resolved domain — never an industry template.
-
-## Pre-classification prompts stay generic
-
-Discovery prompts (`/api/org/describe`, org-setup suggestions) run **before** a
-domain exists. They must stay industry-neutral — feeding a premature domain
-assumption in would bias the very classification they exist to perform.
+## 3. Data flow (one turn)
 
 ```
-Generic discovery → org description → suggested pack → admin confirms/customises
-→ resolved vocabulary enters later prompts
+person types  →  POST /api/assistant/turn  →  _assistantTurn (server.js):
+  1. safeguarding check (deterministic, FIRST) — a crisis short-circuits into resources + a flag
+  2. capture decision (governed persist)       — a disclosure may become evidence (confirmed)
+  3. reasoning register (org-fact vs world)     — routes to the grounded read or the governed edge
+  4. governed reasoning (LLM, if a key + budget)— cite-or-ask enforced by assembleGoverned
+  5. response + confirm-gated proposals         — nothing outward/persistent without a human yes
 ```
 
-## Role sensitivity — permissions never invent a title
+The **belief ledger is only ever written by deterministic derivation** (the reasoner), never by an
+LLM path. Chats, notes, artifacts are the user's own; they inform reasoning only through a
+confirmed capture.
 
-Permission tier (`superadmin`/`admin`/`coach`/`member`) and leadership status are
-**not** semantic roles. A team captain has leadership permissions but is still a
-player; a department admin manages settings but may not be a "manager". So role
-context **suppresses** the generic noun — it never **infers** a profession.
+## 4. Persistence & the ceilings (read this before scaling)
 
-The ladder (`_subjectRoleContext` in `server.js`):
+State lives in **~90 in-memory objects**, serialized to Postgres as **one JSON blob** on every
+change (debounced 500ms, `scheduleSave` → `db.saveMain`). This is the correct choice for now —
+simple, fast to build on — and it is a **hard ceiling** in three named ways:
 
-1. **Explicit role/title** on the record (`title`/`position`/`jobTitle`) → use it verbatim.
-2. **Staff-tier role assigned by the org** (`coach`/`admin`/`superadmin`) → "a staff member" (the assigned tier, domain-neutral — not a guessed job).
-3. **Leadership certain, no explicit role** (a member who leads — captain *or* staff) → suppress the generic noun, use their name. **No title invented.**
-4. **Otherwise** (a plain member) → the resolved generic noun is correct.
+1. **Single process only.** Rate limiters, sessions, the error/metric buffers, and all state are
+   per-process. The moment you need a **second dyno**, they diverge. You are single-instance until
+   the data layer changes.
+2. **Whole-world write.** Every change rewrites the entire blob — O(everything) per save, RAM-
+   bound. Chat history and the Library store full transcripts *into this blob*; it grows unbounded.
+3. **No partial writes / weak concurrency.** A failed save risks the whole blob.
 
-## Deterministic fallback copy
+**The trigger for the next big project** (blob → per-entity Postgres tables) is the *first* of:
+second dyno needed · blob too big for RAM · real concurrent writes. Have it planned, not discovered.
+Don't do it before a pilot forces it.
 
-No-key fallback strings use `_vc(code, key)` (the server-side counterpart of the
-frontend `_v()`) so they still speak the org's language. Remaining low-traffic
-fallbacks are migrated **opportunistically** toward structured templates
-(`buildFallback(kind, { personLabel: vc('person'), … })`) whenever the surface is
-touched — a dedicated sweep is only worth doing before a pilot that demonstrates
-no-key behaviour. Passing whole sentences through vocabulary replacement is avoided.
+## 5. The truth layer (the testing philosophy)
 
-## Guardrails (the truth layer)
+`node scripts/test.js` runs: `node --check` on every source, then every smoke suite, then a
+dead-code scan. **Green is the gate — nothing merges red** (CI: `.github/workflows/ci.yml`).
 
-- `scripts/packs-language-smoke.js` — the same facts render in sports/education/
-  business/nonprofit language; custom words win; roles override generic labels;
-  named structures preserved; no blind replacement; universal mode stays silent;
-  `vocabVersion` is attributable.
-- `scripts/domain-cleanup-smoke.js` — no legacy vertical prose survives anywhere in
-  the server; the role ladder never manufactures a title (the captain case is
-  locked in).
+- Suites boot the *real* app with `DB_OPTIONAL=1` and **no LLM key** — they assert the honest
+  deterministic behaviour, so CI never needs (or carries) a live key.
+- Tests are the executable spec. When you change a governed boundary, the suite that pins it should
+  change with intent, not by accident.
+- Known gap: the *actual* LLM output is only lightly tested (no key in CI). The **governance** that
+  contains it is tested (`prompt-injection-smoke`, `reasoning-register-smoke`) — that's the part
+  that must hold; the model's prose is judged live.
+
+## 6. Security posture
+
+- **Identity comes from the session (`req.iqSession`), never the request body.** Write and read
+  endpoints are `requireAuth` + org-scoped; body-supplied `orgCode`/`authorId` are ignored.
+  Pinned by `cross-org-isolation-http-smoke`. *When adding an endpoint: default to authenticated +
+  session-scoped; only the genuine pre-auth flows (login, set-password, member/join, register-org)
+  are public.*
+- **Abuse/cost:** login lockout per email+IP; per-org LLM budget (hourly/daily) that degrades to
+  deterministic over cap. **Observability:** redacted error log + per-org metrics
+  (`/api/admin/errors`, `/api/admin/metrics`; own-org for a superadmin, all orgs with
+  `IQ_PLATFORM_KEY`).
+- **No-egress mode:** `IQ_DETERMINISTIC_ONLY=1` hard-refuses every model call.
+
+## 7. Key environment variables
+
+| Var | Effect |
+|---|---|
+| `ANTHROPIC_API_KEY` | Turns the reasoning edges on (Claude). Off ⇒ honest deterministic fallback. |
+| `OPENAI_API_KEY` | Whisper voice + embeddings + LLM fallback. |
+| `IQ_DETERMINISTIC_ONLY` | No model is ever called, even with a key (the hard privacy guarantee). |
+| `IQ_LLM_ORG_HOURLY` / `IQ_LLM_ORG_DAILY` | Per-org LLM call caps (cost control). |
+| `IQ_LOGIN_MAX` | Failed logins / 15 min before lockout. |
+| `IQ_ERROR_WEBHOOK` | Optional Slack/Discord webhook for real-time error alerts. |
+| `IQ_PLATFORM_KEY` | Lets the platform owner read all-org errors/metrics via `x-platform-key`. |
+| `RETENTION_DAYS` | Personal-data retention window (default 730). |
+
+## 8. What I'd tell the next engineer
+
+- Read `ai/reason.js` and `ai/reasoning-register.js` first — they *are* the product.
+- Never let an LLM write a belief. If you're tempted, you've found the edge; govern it.
+- Carve cohesive slices out of `server.js` into modules **as you touch them** — a habit, not a
+  refactor project.
+- The persistence ceiling (§4) is the one architectural decision that will force real work. Respect
+  the trigger; don't pre-optimise, don't get caught out.

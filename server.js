@@ -53,6 +53,7 @@ const kernelCoreasoning = require('./ai/kernel-coreasoning');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
 const errorlog = require('./ai/errorlog');
+const metrics = require('./ai/metrics');
 const renderArtifact = require('./ai/render-artifact');
 const googleProvider = require('./ai/providers/google');
 const delivery   = require('./ai/delivery');
@@ -1034,6 +1035,7 @@ app.post('/api/auth/login', async (req, res) => {
   if (!passwordValid) return _fail(401, 'Email or password incorrect.');
 
   rateLimit.reset(_loginRateStore, rlKey);   // a good login clears the failure counter
+  _metric(code, 'login');
   const org   = orgMeta[code];
   const token = issueToken(user.id, code, user.role);
   res.json({ ok: true, user: { ...user, passwordHash: undefined }, org, token });
@@ -10092,13 +10094,24 @@ function _llmBudgetOk(code) {
   const now = Date.now();
   const h = rateLimit.hit(_llmRateStore, (code || 'org') + '|h', { limit: LLM_ORG_HOURLY, windowMs: 3600000, now });
   const d = rateLimit.hit(_llmRateStore, (code || 'org') + '|d', { limit: LLM_ORG_DAILY, windowMs: 86400000, now });
-  return h.allowed && d.allowed;
+  const okBudget = h.allowed && d.allowed;
+  if (okBudget) _metric(code, 'llm_call');   // cost attribution: one counted model call for this org
+  return okBudget;
 }
 setInterval(() => { try { rateLimit.sweep(_loginRateStore, { windowMs: LOGIN_WIN }); rateLimit.sweep(_llmRateStore, { windowMs: 86400000 }); } catch (_) {} }, 3600000).unref?.();
 
 /* ── OBSERVABILITY — see what breaks during a pilot ──────────────────────────
    A redacted in-memory ring buffer of recent errors (never a raw email/token), viewable by a
    superadmin, and optionally forwarded to a webhook (Slack/Discord/log sink) with no SDK. */
+// Per-org usage counters (in-memory; reset on redeploy — a directional pilot signal, not billing).
+const _metricsStore = {};
+function _metric(code, event, n = 1) { try { metrics.inc(_metricsStore, code, event, n); } catch (_) {} }
+// A platform owner (you) can see ALL orgs' errors/metrics via a shared secret header; an org's
+// own superadmin only ever sees their OWN org (no cross-org leak between pilots).
+function _isPlatformAdmin(req) {
+  const key = process.env.IQ_PLATFORM_KEY;
+  return !!key && (req.headers['x-platform-key'] === key || req.query.platformKey === key);
+}
 const _errorBuffer = {};
 function _captureError(err, meta = {}) {
   let entry;
@@ -10131,6 +10144,7 @@ function _recordSafeguardingFlag(code, { subjectId, severity, category, excerpt 
     severity, category, excerpt: String(excerpt || '').slice(0, 300), at: new Date().toISOString(),
     status: 'open', leadId: _sgLeadId(code) };
   list.push(flag);
+  _metric(code, 'safeguarding_flag');
   try { _audit(code, { actor: subjectId, action: 'safeguarding_flag', subjectIds: [subjectId], basis: severity }); } catch (_) {}
   scheduleSave();
   return flag;
@@ -10856,6 +10870,7 @@ app.post('/api/assistant/turn', requireAuth, async (req, res) => {
   // is a thin boundary — no second retrieval, no endpoint-specific privacy logic.
   try {
     const r = await _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId, conversationId: req.body?.conversationId });
+    _metric(code, 'turn');
     res.json({ ok: true, turnId: r.turn.turnId, conversationId: r.conversationId || null, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response, saved: r.saved || null, capturePrompt: r.capturePrompt || null });
   } catch (e) {
     // Fail closed with valid JSON — never a non-JSON 500, never a leak in an error body.
@@ -11032,11 +11047,25 @@ app.post('/api/safeguarding/flags/:id/resolve', requireAuth, (req, res) => {
   scheduleSave();
   res.json({ ok: true, flag: f });
 });
-/* GET /api/admin/errors — recent (redacted) errors, superadmin only. Pilot observability. */
+/* GET /api/admin/errors — recent (redacted) errors. An org superadmin sees only their OWN
+   org's errors; the platform owner (x-platform-key) sees all. Pilot observability, no leak. */
 app.get('/api/admin/errors', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
-  if (orgUsers[code]?.[userId]?.role !== 'superadmin') return res.status(403).json({ error: 'superadmin only' });
-  res.json({ ok: true, errors: errorlog.list(_errorBuffer, 100), webhookConfigured: !!process.env.IQ_ERROR_WEBHOOK });
+  const platform = _isPlatformAdmin(req);
+  if (!platform && orgUsers[code]?.[userId]?.role !== 'superadmin') return res.status(403).json({ error: 'superadmin only' });
+  let errors = errorlog.list(_errorBuffer, 200);
+  if (!platform) errors = errors.filter(e => e.orgCode === code).slice(0, 100);   // own-org only
+  res.json({ ok: true, errors, scope: platform ? 'platform' : 'org', webhookConfigured: !!process.env.IQ_ERROR_WEBHOOK });
+});
+
+/* GET /api/admin/metrics — per-org usage (turns, LLM calls, logins, safeguarding flags). An
+   org superadmin sees only their own org; the platform owner (x-platform-key) sees every org
+   ranked by activity — "is anyone using it?" and "which org is driving LLM cost?". */
+app.get('/api/admin/metrics', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const platform = _isPlatformAdmin(req);
+  if (!platform && orgUsers[code]?.[userId]?.role !== 'superadmin') return res.status(403).json({ error: 'superadmin only' });
+  res.json({ ok: true, scope: platform ? 'platform' : 'org', metrics: metrics.snapshot(_metricsStore, platform ? {} : { orgCode: code }) });
 });
 
 /* GET /api/safeguarding/config — the resources shown to a person in distress (readable by all,

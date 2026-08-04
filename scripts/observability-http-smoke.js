@@ -33,6 +33,13 @@ const server = app.listen(0, async () => {
     ok('1 · a superadmin can see recent errors', admin.j && admin.j.ok && (admin.j.errors || []).length >= 1);
     ok('2 · the error is REDACTED (no email / token leaks into the log)', !/joe@club\.com|supersecrettoken/.test(JSON.stringify(admin.j.errors)));
     ok('3 · a plain member cannot read the error log (403)', (await get('joe')).status === 403);
+
+    /* 4 — metrics: a turn is counted, visible to the org superadmin, refused to a member */
+    await fetch(base + '/api/assistant/turn', { method: 'POST', headers: { Authorization: `Bearer ${issueToken('joe', C, 'member')}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'hello' }) });
+    const met = await fetch(base + '/api/admin/metrics', { headers: { Authorization: `Bearer ${issueToken('boss', C, 'superadmin')}` } }).then(r => r.json());
+    ok('4 · a superadmin sees per-org usage metrics (a turn was counted)', met.ok && met.metrics.some(m => m.orgCode === C && (m.events.turn || 0) >= 1));
+    ok('4 · …scoped to their own org (no cross-org leak by default)', met.scope === 'org' && met.metrics.every(m => m.orgCode === C));
+    ok('4 · a plain member cannot read metrics (403)', (await fetch(base + '/api/admin/metrics', { headers: { Authorization: `Bearer ${issueToken('joe', C, 'member')}` } })).status === 403);
   } catch (e) { fail++; console.log('  ✗ threw:', e && e.message); }
 
   server.close();
