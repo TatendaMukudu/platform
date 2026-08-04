@@ -139,7 +139,7 @@ function scheduleSave() {
         proactivePrefs, insightSuppression, answerFeedback,
         orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
         reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
-        conversationSessions,
+        conversationSessions, assistantConversations,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -8020,7 +8020,7 @@ function _reasonReadAnswer(code, userId, { filter, lead, patterns, now = Date.no
    is enforced in CODE by assembleGoverned (cite-or-ask), not merely asked for in the prompt.
    The belief ledger is never written here. With no model configured this degrades to an
    honest line rather than a fabricated answer. Async: called from the async turn. */
-async function _governedReason(code, userId, question, { register } = {}) {
+async function _governedReason(code, userId, question, { register, priorMessages } = {}) {
   // The citable context = this reader's already-scoped, ripe grounded beliefs (leak-safe by
   // construction — they came through _reasonScopedAgenda). Each belief id is a citation the
   // model may use; it can cite NOTHING else, so it cannot reference data it wasn't shown.
@@ -8043,7 +8043,7 @@ async function _governedReason(code, userId, question, { register } = {}) {
   try {
     const out = await ai.completeJSON({
       tier: 'reason', system: reasoningRegister.SYSTEM_PROMPT,
-      user: reasoningRegister.buildUserMessage({ question, context }),
+      user: reasoningRegister.buildUserMessage({ question, context, priorMessages }),
       maxTokens: 800, temperature: 0.3, schema: ['claims'],
     });
     if (!out) return null;
@@ -10000,6 +10000,28 @@ app.get('/api/workspace/history', requireAuth, (req, res) => {
 const assistantTurns   = {};   // wsKey → [ bounded interpretation artifact + raw input by ref ]
 const checkinProposals = {};   // wsKey → [ bounded personalized check-in proposal ]
 const ASSISTANT_CAP = 60;
+// PRIVATE, PERMANENT chat history — self-only (keyed by wsKey = org:user), kept until the user
+// deletes it, and NEVER informs org reasoning or the belief ledger (a disclosure only becomes
+// org data through a confirmed capture, exactly as before). This is memory FOR the user, owned
+// BY the user. Each conversation is self-contained (its own messages) so history survives the
+// bounded-turn cap. Prior messages are fed back as conversational memory so follow-ups have context.
+const assistantConversations = {};  // wsKey → [ { id, title, createdAt, updatedAt, messages:[{role,text,at,reasoning,register,provenance}] } ]
+const CONV_CAP = 200;               // max conversations kept per user (generous; effectively "permanent")
+const CONV_MSG_CAP = 400;           // max messages kept per conversation
+function _assistantConvs(key) { return assistantConversations[key] || (assistantConversations[key] = []); }
+function _convTitle(t) { const s = String(t || '').trim().replace(/\s+/g, ' '); return s.length > 60 ? s.slice(0, 57) + '…' : (s || 'New conversation'); }
+/* Resolve the conversation for this turn: an existing one the user owns, or a fresh thread.
+   Only ever returns a conversation in THIS user's own list, so history is self-only by construction. */
+function _resolveConversation(key, requestedId, firstText, now) {
+  const list = _assistantConvs(key);
+  let c = requestedId ? list.find(x => x.id === String(requestedId)) : null;
+  if (!c) {
+    c = { id: 'conv_' + generateId(), title: _convTitle(firstText), createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString(), messages: [] };
+    list.push(c);
+    if (list.length > CONV_CAP) list.splice(0, list.length - CONV_CAP);
+  }
+  return c;
+}
 
 /* Claim-bounded interpretation of ONE turn. Produces the inspectable artifact — candidate
    intents + claims (claims are NOT facts), a PRIVATE-by-default classification, and bounded
@@ -10355,6 +10377,14 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   }
   const context = _assistantContext(code, userId);
 
+  // ── CONVERSATION THREAD (private, self-only memory) ──────────────────────────
+  // Resolve the conversation this turn belongs to (a continued thread or a fresh one), and
+  // gather the recent messages as MEMORY so a follow-up ("yes, for my U16s") has context. The
+  // history is the user's own; it never becomes org data here.
+  const _convKey = _wsKey(code, userId);
+  const _conv = _resolveConversation(_convKey, opts.conversationId, text, Date.now());
+  const priorMessages = (_conv.messages || []).slice(-8).map(m => ({ role: m.role, text: m.text }));
+
   // ── GROUNDED CONVERSATIONAL TURN ─────────────────────────────────────────────
   // Classify the turn WITHOUT brittle topic keywords, then honour a strict order:
   //   capture decision → (governed persist) → authorised grounding → answer.
@@ -10413,7 +10443,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     && reasoningRegister.wantsReasoning(reg0) && (ai.enabled() || strongCue);
   if (runReasoning) {
     try {
-      const gr = await _governedReason(code, userId, cls.questionText || text, { register: reg0 });
+      const gr = await _governedReason(code, userId, cls.questionText || text, { register: reg0, priorMessages });
       if (gr && gr.answer) {
         qa = { answer: gr.answer, purpose: 'workspace_shared_reasoning', confidence: gr.confidence || 'general',
           limitations: gr.limitations || [], cites: [], citations: [], provenance: gr.provenance || [],
@@ -10595,8 +10625,16 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   const list = assistantTurns[key] || (assistantTurns[key] = []);
   list.push(turn);
   if (list.length > ASSISTANT_CAP) list.splice(0, list.length - ASSISTANT_CAP);
+  // Append this exchange to the private, self-only conversation history (durable — survives the
+  // bounded-turn cap). Provenance rides along so history can show the two registers too.
+  const _nowIso = new Date().toISOString();
+  _conv.messages.push({ role: 'user', text: String(text || '').slice(0, 4000), at: _nowIso });
+  _conv.messages.push({ role: 'assistant', text: response.responseText, at: _nowIso,
+    reasoning: !!(qa && qa.reasoning), register: (qa && qa.register) || null, provenance: (qa && qa.provenance) || [] });
+  if (_conv.messages.length > CONV_MSG_CAP) _conv.messages.splice(0, _conv.messages.length - CONV_MSG_CAP);
+  _conv.updatedAt = _nowIso;
   scheduleSave();
-  return { turn, response, saved, capturePrompt, interpretation: { turnId: interp.turnId, originalInputRef: rawRef, candidateIntents: interp.candidateIntents,
+  return { turn, response, saved, capturePrompt, conversationId: _conv.id, interpretation: { turnId: interp.turnId, originalInputRef: rawRef, candidateIntents: interp.candidateIntents,
     candidateClaims: interp.candidateClaims, suggestedPrivacy: interp.suggestedPrivacy, proposedActions: interp.proposedActions,
     confidence: interp.confidence, ambiguities: interp.ambiguities, limitations: interp.limitations }, context: { basisIds: context.basisIds, purpose: context.purpose, visibilityEligibility: context.visibilityEligibility, confidence: context.confidence, limitations: context.limitations } };
 }
@@ -10616,13 +10654,51 @@ app.post('/api/assistant/turn', requireAuth, async (req, res) => {
   // happen INSIDE _assistantTurn, in a defined order (persist → ground). The endpoint
   // is a thin boundary — no second retrieval, no endpoint-specific privacy logic.
   try {
-    const r = await _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId });
-    res.json({ ok: true, turnId: r.turn.turnId, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response, saved: r.saved || null, capturePrompt: r.capturePrompt || null });
+    const r = await _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId, conversationId: req.body?.conversationId });
+    res.json({ ok: true, turnId: r.turn.turnId, conversationId: r.conversationId || null, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response, saved: r.saved || null, capturePrompt: r.capturePrompt || null });
   } catch (e) {
     // Fail closed with valid JSON — never a non-JSON 500, never a leak in an error body.
     console.warn('[assistant/turn] failed:', e && e.message);
     res.status(200).json({ ok: false, error: 'turn_failed', response: { responseText: 'I hit a snag processing that — try again in a moment.', mode: 'error', proposedActions: [], primaryActions: [], moreActions: [], qa: null }, saved: null, capturePrompt: null });
   }
+});
+
+/* ── PRIVATE CHAT HISTORY (self-only) ────────────────────────────────────────
+   The user's own conversations with the assistant — memory FOR them, owned BY them. Every
+   route is keyed by their own wsKey, so one person can never read or delete another's history,
+   and none of it informs org reasoning (a disclosure only becomes org data via a confirmed
+   capture). Kept until the user deletes it (private & permanent). */
+
+/* GET /api/assistant/conversations — list the user's threads, newest first (no message bodies). */
+app.get('/api/assistant/conversations', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const list = (assistantConversations[_wsKey(code, userId)] || [])
+    .map(c => ({ id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt, messageCount: (c.messages || []).length,
+      preview: ((c.messages || []).slice(-1)[0] || {}).text ? String((c.messages || []).slice(-1)[0].text).slice(0, 120) : '' }))
+    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  res.json({ ok: true, conversations: list });
+});
+
+/* GET /api/assistant/conversations/:id — the full thread (self-only), with provenance so the UI
+   can show the two registers in history exactly as it does live. */
+app.get('/api/assistant/conversations/:id', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const conv = (assistantConversations[_wsKey(code, userId)] || []).find(c => c.id === req.params.id);
+  if (!conv) return res.status(404).json({ error: 'not found' });
+  res.json({ ok: true, conversation: { id: conv.id, title: conv.title, createdAt: conv.createdAt, updatedAt: conv.updatedAt },
+    messages: (conv.messages || []).map(m => ({ role: m.role, text: m.text, at: m.at, reasoning: !!m.reasoning, register: m.register || null, provenance: m.provenance || [] })) });
+});
+
+/* DELETE /api/assistant/conversations/:id — the user erases their own thread (self-only). */
+app.delete('/api/assistant/conversations/:id', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const key = _wsKey(code, userId);
+  const list = assistantConversations[key] || [];
+  const before = list.length;
+  assistantConversations[key] = list.filter(c => c.id !== req.params.id);
+  if (assistantConversations[key].length === before) return res.status(404).json({ error: 'not found' });
+  scheduleSave();
+  res.json({ ok: true, deleted: req.params.id });
 });
 
 /* GET /api/assistant/turn/:turnId — inspect the bounded interpretation artifact (self-only). */
@@ -14697,6 +14773,7 @@ function _loadAllStores(data) {
   Object.assign(pushSubs,          data.pushSubs          || {});
   Object.assign(inquiryDismissed,  data.inquiryDismissed  || {});
   Object.assign(conversationSessions, data.conversationSessions || {});
+  Object.assign(assistantConversations, data.assistantConversations || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -14766,7 +14843,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
-  _extractMetricsFromText, _importTeamTable, assistantTurns, checkinProposals,
+  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
   // exported for the truth layer: grounded retrieval over canonical evidence
