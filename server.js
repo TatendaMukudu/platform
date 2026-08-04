@@ -49,6 +49,7 @@ const comprehend = require('./ai/comprehend');
 const languageGuard = require('./ai/language-guard');
 const audit      = require('./ai/audit');
 const reasoningRegister = require('./ai/reasoning-register');
+const kernelCoreasoning = require('./ai/kernel-coreasoning');
 const googleProvider = require('./ai/providers/google');
 const delivery   = require('./ai/delivery');
 // The unified attention pipeline (engines discover → feed normalises → packet scopes →
@@ -8052,6 +8053,74 @@ async function _governedReason(code, userId, question, { register } = {}) {
     return assembled.usable ? assembled : null;
   } catch (_) { return null; }
 }
+
+/* KERNEL CO-REASONING — the LLM helps the brain reason about WHAT TO LOOK AT, never about who.
+   Builds a DE-IDENTIFIED aggregate picture (counts + structure, no subject ids, no names),
+   which is the guarantee that the model can't reason about an individual. It returns
+   hypotheses to TEST (never beliefs), signals worth COLLECTING, and framing on ALREADY-
+   confirmed patterns — all read-only and confirmation-gated. The aggregate picture itself is
+   derived deterministically and always available, even with no model. */
+function _kernelAggregates(code) {
+  const beliefs = (reasonLedger[code] || []).filter(b => b && !b.dismissed);
+  const kinds = {}, registers = {};
+  for (const b of beliefs) {
+    if (b.kind) kinds[b.kind] = (kinds[b.kind] || 0) + 1;
+    if (b.register) registers[b.register] = (registers[b.register] || 0) + 1;
+  }
+  const nodes = orgNodes[code] || {};
+  const depth = (nid, seen) => { if (!nid || seen.has(nid)) return 0; seen.add(nid); const n = nodes[nid]; return n && n.parentId ? 1 + depth(n.parentId, seen) : 1; };
+  let tiers = 0; for (const nid of Object.keys(nodes)) tiers = Math.max(tiers, depth(nid, new Set()));
+  const roles = {};
+  for (const u of Object.values(orgUsers[code] || {})) { if (u && u.status !== 'removed' && u.role) roles[u.role] = (roles[u.role] || 0) + 1; }
+  const types = new Set();
+  for (const e of (evidenceLog[code] || [])) { if (e && e.type) types.add(String(e.type)); }
+  // A kind that repeats enough to be a real, de-identified pattern (the framing role attaches
+  // ONLY to these). No subject is ever named — the summary is a count, not a person.
+  const confirmedPatterns = Object.entries(kinds).filter(([, n]) => n >= 3)
+    .map(([k, n]) => ({ id: 'pat_' + k, summary: `a "${k}" pattern is showing across ${n} people` }));
+  return { kinds, registers, structure: { teams: Object.keys(nodes).length, tiers, roles }, collecting: [...types].slice(0, 12), confirmedPatterns };
+}
+
+async function _kernelCoReason(code) {
+  const aggregates = _kernelAggregates(code);
+  const confirmedPatternIds = aggregates.confirmedPatterns.map(p => p.id);
+  // Person tokens are a DEFENCE-IN-DEPTH blocklist over the OUTPUT — the model never receives a
+  // name in the digest, but if one somehow leaks into a suggestion, governSuggestions drops it.
+  const personTokens = Object.values(orgUsers[code] || {}).flatMap(u => (u && u.name) ? [String(u.name).split(/\s+/)[0], u.name] : []);
+  const base = { aggregates, hypotheses: [], collectionGaps: [], framings: [] };
+  if (!ai.enabled()) {
+    return { ...base, enabled: false,
+      note: 'Kernel co-reasoning proposes hypotheses to test and signals worth collecting — it needs the reasoning engine switched on. The aggregate picture below is derived deterministically and is always available.' };
+  }
+  try {
+    const raw = await ai.completeJSON({ tier: 'reason', system: kernelCoreasoning.SYSTEM_PROMPT,
+      user: kernelCoreasoning.buildDigest(aggregates), maxTokens: 900, temperature: 0.4, schema: ['hypotheses'] });
+    if (!raw) return { ...base, enabled: true, note: 'No suggestions this pass.' };
+    const gov = kernelCoreasoning.governSuggestions(raw, { confirmedPatternIds, personTokens });
+    return { aggregates, enabled: true, hypotheses: gov.hypotheses, collectionGaps: gov.collectionGaps, framings: gov.framings, droppedForSafety: gov.dropped.length };
+  } catch (_) {
+    return { ...base, enabled: true, note: 'Co-reasoning was unavailable this pass.' };
+  }
+}
+
+/* GET /api/kernel/coreasoning — the co-reasoning surface (insights/admin only). Read-only:
+   proposes hypotheses/collection-gaps/framings and NEVER writes a belief. A leader reads
+   aggregates about their org — an accountable, content-free access, recorded. */
+app.get('/api/kernel/coreasoning', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_insights') && !_userHasPerm(code, userId, 'view_team')) {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+  try {
+    const out = await _kernelCoReason(code);
+    try { _audit(code, { actor: userId, action: 'coreasoning_view', subjectIds: [], basis: 'de-identified aggregate co-reasoning' }); } catch (_) {}
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    console.warn('[kernel/coreasoning] failed:', e && e.message);
+    res.json({ ok: true, enabled: false, aggregates: null, hypotheses: [], collectionGaps: [], framings: [] });
+  }
+});
 
 /* Resolve a NAMED colleague mentioned in a question to a real org user — full name first,
    then a unique first name. Returns null when nothing matches (so we never invent a person).
