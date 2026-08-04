@@ -48,6 +48,9 @@ const voice      = require('./ai/voice');
 const comprehend = require('./ai/comprehend');
 const languageGuard = require('./ai/language-guard');
 const audit      = require('./ai/audit');
+const reasoningRegister = require('./ai/reasoning-register');
+const kernelCoreasoning = require('./ai/kernel-coreasoning');
+const renderArtifact = require('./ai/render-artifact');
 const googleProvider = require('./ai/providers/google');
 const delivery   = require('./ai/delivery');
 // The unified attention pipeline (engines discover → feed normalises → packet scopes →
@@ -7990,11 +7993,15 @@ function _deleteImport(code, importId, requesterId) {
    reads ("who needs support?"). An empty read still returns a calm, honest line (never a dead
    end). Returns null only on failure. This is what lets any org/team question get a real,
    grounded answer instead of "not enough authorised evidence". */
-function _reasonReadAnswer(code, userId, { filter, lead, now = Date.now() } = {}) {
+function _reasonReadAnswer(code, userId, { filter, lead, patterns, now = Date.now() } = {}) {
   try {
     const { agenda } = _reasonScopedAgenda(code, userId, now, false);
     let items = agenda.filter(a => a.readiness === 'ripe');
     if (filter === 'support') items = items.filter(a => a.register === 'support');
+    // "what patterns have you learnt" — the CROSS-person reads the reasoner has consolidated
+    // (a shift showing up across several people), which is genuinely different content from the
+    // per-person rundown. Only real repeats; if none have consolidated, we say so honestly.
+    if (patterns) { const pat = agenda.filter(a => a.shared || a.rolled); items = pat; }
     const name = _firstName(code, userId), area = _orgAskAreaLabel(code, userId);
     const opening = _actorLevel(code, userId) === 'leader'
       ? voice.leaderOpening({ name, timeOfDay: _timeOfDay(now), count: items.length, areaLabel: area, seed: userId + 'ask' })
@@ -8002,6 +8009,216 @@ function _reasonReadAnswer(code, userId, { filter, lead, now = Date.now() } = {}
     const claims = items.slice(0, 3).map(a => a.claim);
     const answer = [(lead && items.length) ? lead : opening, ...claims].join(' ').trim();
     return { answer, confidence: items.length ? 'medium' : 'confirmed', limitations: ['a read from recorded signals, not a prediction'], count: items.length };
+  } catch (_) { return null; }
+}
+
+/* THE GOVERNED REASONING EDGE — the second register. A world-knowledge / planning / mixed
+   question ("why is a 4-3-3 better than a 5-3-2?", "help me plan a session for my squad") is
+   NOT an org-truth question, so it must not be forced through the retrieval path and
+   dead-ended. It's reasoned here: the LLM may reason freely in GENERAL terms, but any claim
+   about THIS org must cite one of the already-scoped grounded beliefs we hand it — and that
+   is enforced in CODE by assembleGoverned (cite-or-ask), not merely asked for in the prompt.
+   The belief ledger is never written here. With no model configured this degrades to an
+   honest line rather than a fabricated answer. Async: called from the async turn. */
+async function _governedReason(code, userId, question, { register } = {}) {
+  // The citable context = this reader's already-scoped, ripe grounded beliefs (leak-safe by
+  // construction — they came through _reasonScopedAgenda). Each belief id is a citation the
+  // model may use; it can cite NOTHING else, so it cannot reference data it wasn't shown.
+  let context = [];
+  try {
+    const { agenda } = _reasonScopedAgenda(code, userId, Date.now(), false);
+    context = agenda.filter(a => a.readiness === 'ripe').slice(0, 12).map(a => ({ ref: a.beliefId, text: a.claim }));
+  } catch (_) {}
+
+  // NO MODEL → honest degrade. A mixed question with a real grounded read defers to the
+  // deterministic answer (return null → caller keeps it); a pure reasoning question says so.
+  if (!ai.enabled()) {
+    if (register === 'mixed' && context.length) return null;
+    return { answer: `That's a reasoning question more than a read of your recorded data. I can think it through with you — weighing the general trade-offs against what's actually recorded here — once the reasoning engine is switched on. Until then I'll only speak to what's in your data, so I don't guess.`,
+      confidence: 'none', limitations: ['the reasoning edge is off (no model configured)'], captureProposals: [], provenance: [], usable: true };
+  }
+
+  // MODEL ON → reason, then GOVERN the output. completeJSON returns null on any failure, so a
+  // model hiccup degrades cleanly instead of throwing.
+  try {
+    const out = await ai.completeJSON({
+      tier: 'reason', system: reasoningRegister.SYSTEM_PROMPT,
+      user: reasoningRegister.buildUserMessage({ question, context }),
+      maxTokens: 800, temperature: 0.3, schema: ['claims'],
+    });
+    if (!out) return null;
+    const assembled = reasoningRegister.assembleGoverned({
+      claims: out.claims, openQuestions: out.openQuestions, captures: out.captures,
+      allowedRefs: context.map(c => c.ref),
+    });
+    return assembled.usable ? assembled : null;
+  } catch (_) { return null; }
+}
+
+/* KERNEL CO-REASONING — the LLM helps the brain reason about WHAT TO LOOK AT, never about who.
+   Builds a DE-IDENTIFIED aggregate picture (counts + structure, no subject ids, no names),
+   which is the guarantee that the model can't reason about an individual. It returns
+   hypotheses to TEST (never beliefs), signals worth COLLECTING, and framing on ALREADY-
+   confirmed patterns — all read-only and confirmation-gated. The aggregate picture itself is
+   derived deterministically and always available, even with no model. */
+function _kernelAggregates(code) {
+  const beliefs = (reasonLedger[code] || []).filter(b => b && !b.dismissed);
+  const kinds = {}, registers = {};
+  for (const b of beliefs) {
+    if (b.kind) kinds[b.kind] = (kinds[b.kind] || 0) + 1;
+    if (b.register) registers[b.register] = (registers[b.register] || 0) + 1;
+  }
+  const nodes = orgNodes[code] || {};
+  const depth = (nid, seen) => { if (!nid || seen.has(nid)) return 0; seen.add(nid); const n = nodes[nid]; return n && n.parentId ? 1 + depth(n.parentId, seen) : 1; };
+  let tiers = 0; for (const nid of Object.keys(nodes)) tiers = Math.max(tiers, depth(nid, new Set()));
+  const roles = {};
+  for (const u of Object.values(orgUsers[code] || {})) { if (u && u.status !== 'removed' && u.role) roles[u.role] = (roles[u.role] || 0) + 1; }
+  const types = new Set();
+  for (const e of (evidenceLog[code] || [])) { if (e && e.type) types.add(String(e.type)); }
+  // A kind that repeats enough to be a real, de-identified pattern (the framing role attaches
+  // ONLY to these). No subject is ever named — the summary is a count, not a person.
+  const confirmedPatterns = Object.entries(kinds).filter(([, n]) => n >= 3)
+    .map(([k, n]) => ({ id: 'pat_' + k, summary: `a "${k}" pattern is showing across ${n} people` }));
+  return { kinds, registers, structure: { teams: Object.keys(nodes).length, tiers, roles }, collecting: [...types].slice(0, 12), confirmedPatterns };
+}
+
+async function _kernelCoReason(code) {
+  const aggregates = _kernelAggregates(code);
+  const confirmedPatternIds = aggregates.confirmedPatterns.map(p => p.id);
+  // Person tokens are a DEFENCE-IN-DEPTH blocklist over the OUTPUT — the model never receives a
+  // name in the digest, but if one somehow leaks into a suggestion, governSuggestions drops it.
+  const personTokens = Object.values(orgUsers[code] || {}).flatMap(u => (u && u.name) ? [String(u.name).split(/\s+/)[0], u.name] : []);
+  const base = { aggregates, hypotheses: [], collectionGaps: [], framings: [] };
+  if (!ai.enabled()) {
+    return { ...base, enabled: false,
+      note: 'Kernel co-reasoning proposes hypotheses to test and signals worth collecting — it needs the reasoning engine switched on. The aggregate picture below is derived deterministically and is always available.' };
+  }
+  try {
+    const raw = await ai.completeJSON({ tier: 'reason', system: kernelCoreasoning.SYSTEM_PROMPT,
+      user: kernelCoreasoning.buildDigest(aggregates), maxTokens: 900, temperature: 0.4, schema: ['hypotheses'] });
+    if (!raw) return { ...base, enabled: true, note: 'No suggestions this pass.' };
+    const gov = kernelCoreasoning.governSuggestions(raw, { confirmedPatternIds, personTokens });
+    return { aggregates, enabled: true, hypotheses: gov.hypotheses, collectionGaps: gov.collectionGaps, framings: gov.framings, droppedForSafety: gov.dropped.length };
+  } catch (_) {
+    return { ...base, enabled: true, note: 'Co-reasoning was unavailable this pass.' };
+  }
+}
+
+/* GET /api/kernel/coreasoning — the co-reasoning surface (insights/admin only). Read-only:
+   proposes hypotheses/collection-gaps/framings and NEVER writes a belief. A leader reads
+   aggregates about their org — an accountable, content-free access, recorded. */
+app.get('/api/kernel/coreasoning', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin';
+  if (!isAdmin && !_userHasPerm(code, userId, 'view_insights') && !_userHasPerm(code, userId, 'view_team')) {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+  try {
+    const out = await _kernelCoReason(code);
+    try { _audit(code, { actor: userId, action: 'coreasoning_view', subjectIds: [], basis: 'de-identified aggregate co-reasoning' }); } catch (_) {}
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    console.warn('[kernel/coreasoning] failed:', e && e.message);
+    res.json({ ok: true, enabled: false, aggregates: null, hypotheses: [], collectionGaps: [], framings: [] });
+  }
+});
+
+/* THE OUTPUT INTERFACE — present governed data in the format a human chose (summary / email),
+   AFTER the human decision. The LLM composes; it may only narrate the DATASET it was given; a
+   figure it invents is caught by governArtifact and we fall back to the plain factual version,
+   so a fabricated number never reaches the reader. Returns a confirm-gated DRAFT — nothing is
+   sent here; outbound delivery reuses the existing policy-gated path on a separate confirm. */
+function _gatherDataset(code, userId) {
+  // The presentable dataset = this reader's already-scoped grounded read (leak-safe by
+  // construction). Each ripe belief becomes one row the artifact may cite. Real data only.
+  try {
+    const { agenda } = _reasonScopedAgenda(code, userId, Date.now(), false);
+    const rows = agenda.filter(a => a.readiness === 'ripe').slice(0, 25)
+      .map(a => ({ id: a.beliefId, label: a.claim, value: a.register || null }));
+    return { title: `${(orgMeta[code] && orgMeta[code].orgName) || 'Your area'} — current read`, rows };
+  } catch (_) { return { title: 'Summary', rows: [] }; }
+}
+
+async function _renderArtifact(code, userId, { format = 'summary', intent = '' } = {}) {
+  const dataset = _gatherDataset(code, userId);
+  const meta = { title: dataset.title, rowCount: dataset.rows.length };
+  if (!ai.enabled()) {
+    const det = renderArtifact.deterministicSummary(dataset, format);
+    return { enabled: false, draft: det, format: det.format, dataset: meta,
+      note: 'A plain, factual draft drawn straight from your data. With the writing engine on I can compose this as a polished summary or email — always from these same figures, nothing invented.' };
+  }
+  try {
+    const composed = await ai.completeJSON({ tier: 'reason', system: renderArtifact.SYSTEM_PROMPT,
+      user: renderArtifact.buildDatasetMessage({ intent, format, dataset }), maxTokens: 900, temperature: 0.4, schema: ['body'] });
+    if (!composed) return { enabled: true, draft: renderArtifact.deterministicSummary(dataset, format), format, dataset: meta, note: 'Fell back to a plain draft this pass.' };
+    const gov = renderArtifact.governArtifact({ composed, dataset, format });
+    if (!gov.ok) {
+      // An invented figure (or empty body) — NEVER present it; fall back to the factual version.
+      return { enabled: true, draft: renderArtifact.deterministicSummary(dataset, format), format, dataset: meta,
+        flagged: gov.violations, note: 'The composed draft referenced a figure that isn\'t in your data, so I fell back to the plain factual version rather than show it.' };
+    }
+    return { enabled: true, draft: gov.artifact, format, dataset: meta };
+  } catch (_) {
+    return { enabled: true, draft: renderArtifact.deterministicSummary(dataset, format), format, dataset: meta };
+  }
+}
+
+/* POST /api/artifact/render — compose a DRAFT summary/email from the reader's governed data.
+   Read-only: returns a draft for the human to confirm; sends nothing. */
+app.post('/api/artifact/render', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const format = renderArtifact.FORMATS.includes(req.body && req.body.format) ? req.body.format : 'summary';
+  const intent = String((req.body && req.body.intent) || '').slice(0, 500);
+  try {
+    const out = await _renderArtifact(code, userId, { format, intent });
+    res.json({ ok: true, ...out, confirmationRequired: true, delivered: false });
+  } catch (e) {
+    console.warn('[artifact/render] failed:', e && e.message);
+    res.json({ ok: true, enabled: false, draft: null, confirmationRequired: true, delivered: false });
+  }
+});
+
+/* Resolve a NAMED colleague mentioned in a question to a real org user — full name first,
+   then a unique first name. Returns null when nothing matches (so we never invent a person).
+   Matching is over the whole directory so we can honestly say "they're not in your area"
+   rather than dead-ending — but no belief is ever surfaced until the scope check passes. */
+function _resolvePersonQuery(code, q) {
+  const entries = Object.entries(orgUsers[code] || {}).filter(([, u]) => u && u.name && u.status !== 'removed');
+  for (const [id, u] of entries) {
+    const full = String(u.name).toLowerCase().trim();
+    if (full.length >= 4 && q.includes(full)) return { id, name: u.name };
+  }
+  const byFirst = {};
+  for (const [id, u] of entries) {
+    const first = String(u.name).toLowerCase().split(/\s+/)[0];
+    if (first && first.length >= 3) (byFirst[first] = byFirst[first] || []).push({ id, name: u.name });
+  }
+  for (const first of Object.keys(byFirst)) {
+    if (byFirst[first].length !== 1) continue; // ambiguous first name → don't guess
+    const rx = new RegExp('\\b' + first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b');
+    if (rx.test(q)) return byFirst[first][0];
+  }
+  return null;
+}
+
+/* A PERSON-SCOPED read: exactly what the reasoner holds about ONE named person, drawn from
+   the SAME scoped agenda the Today voice uses (so it can only ever surface a person the asker
+   may see). This closes the inconsistency where the overview names someone ("Tomas has been
+   pulling back") but a direct "pull up their profile" dead-ended. Never a fabricated dossier,
+   never a prediction — an empty ledger says so plainly. */
+function _reasonPersonAnswer(code, userId, personId, personName, { now = Date.now() } = {}) {
+  try {
+    const { agenda } = _reasonScopedAgenda(code, userId, now, false);
+    const mine = agenda.filter(a => a.subjectId === personId)
+      .sort((a, b) => (a.readiness === 'ripe' ? 0 : 1) - (b.readiness === 'ripe' ? 0 : 1));
+    const first = String(personName).split(/\s+/)[0] || personName;
+    if (!mine.length) {
+      return { answer: `Nothing specific is recorded about ${first} right now — a calm read. I only speak to signals that are actually there, so there's nothing to invent.`,
+        confidence: 'confirmed', limitations: ['a read from recorded signals, not a prediction'], count: 0 };
+    }
+    const claims = mine.slice(0, 4).map(a => a.claim);
+    return { answer: [`Here's what I'm seeing about ${first} — grounded in recorded signals, not a prediction or an assessment:`, ...claims].join(' ').trim(),
+      confidence: 'medium', limitations: ['a read of recorded signals about this person, not a prediction or a rating'], count: mine.length };
   } catch (_) { return null; }
 }
 
@@ -8022,9 +8239,30 @@ function _assistantAnswer(code, userId, question) {
   const ev = _kernelEvidence(code, { purpose, viewerId: userId, subjectId: workScoped ? undefined : userId });
   const authorised = ev.map(e => e.evidenceId);
 
+  // A PERSON-DIRECTED question ("pull up Tomas's profile", "how is Tomas doing", "tell me
+  // about Tomas") — resolve the named colleague and answer ONLY from what the reasoner holds
+  // about them, ONLY if the asker may see them. This must be tested before the generic
+  // "tell me about…" overview branch, which would otherwise swallow "tell me about Tomas".
+  const personCue = /\b(pull up|profile|dossier|tell me about|what'?s? (?:going on|up|happening) with|how(?:'s| is| are)|check (?:on|in on)|look(?:ing)? (?:at|into)|status of|report on|update on)\b/.test(q);
+  const personHit = personCue ? _resolvePersonQuery(code, q) : null;
+
   let answer = '', cites = [], confidence = 'medium', limitations = [], groundedClaims = [], citations = [], groundingId = null;
   const priv = ev.filter(e => e.visibility === 'private');
-  if (/what.*(private|only me)|is.*private/.test(q)) {
+  if (personHit) {
+    const visible = new Set(getVisibleUserIds(code, userId));
+    const first = String(personHit.name).split(/\s+/)[0];
+    if (!visible.has(personHit.id)) {
+      answer = `${first} isn't in your area, so I can't open a read on them — I only surface people you're responsible for.`;
+      confidence = 'confirmed'; limitations = ['scope: you only see people in your area'];
+    } else {
+      const r = _reasonPersonAnswer(code, userId, personHit.id, personHit.name);
+      if (r) {
+        answer = r.answer; confidence = r.confidence; limitations = r.limitations;
+        // A leader reading beliefs about a named person is an accountable access — record it.
+        if (r.count) { try { _audit(code, { actor: userId, action: 'agenda_view', subjectIds: [personHit.id], basis: 'person read via assistant' }); } catch (_) {} }
+      } else { answer = `I don't have a clear read on ${first} just yet.`; confidence = 'none'; }
+    }
+  } else if (/what.*(private|only me)|is.*private/.test(q)) {
     answer = priv.length
       ? `You have ${priv.length} private item${priv.length === 1 ? '' : 's'}. Only you can see ${priv.length === 1 ? 'it' : 'them'}; ${priv.length === 1 ? "it's" : "they're"} used only to assist you and never inform organisational reasoning.`
       : `Nothing here is marked private right now.`;
@@ -8053,8 +8291,15 @@ function _assistantAnswer(code, userId, question) {
     const r = _reasonReadAnswer(code, userId, { lead: "Here's where things stand ahead of what's next." });
     if (r) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
     else { answer = `I don't have a clear read on readiness just yet.`; confidence = 'none'; }
-  } else if (/\b(tell me about|overview|summary|summarise|summarize|catch me up|what'?s (?:going on|happening|the story)|status(?: of)?|how are things|the (?:big )?picture|rundown|brief me)\b/.test(q)) {
-    // A GENERAL "where are we" — the reasoner's read is the grounded answer.
+  } else if (/\bwhat (?:have you (?:learn|pick|notic|spot|found|got|seen)|patterns?|are you (?:seeing|noticing|learning|picking)|stands? out|trends?)\b|\bpatterns?\b[^?]*\b(learn|seen|notic|found|spot|pick)|what (?:pattern|trend)s?\b/.test(q)) {
+    // "WHAT PATTERNS HAVE YOU LEARNT" — the cross-person reads the reasoner has consolidated.
+    // Distinct content from the per-person rundown, so it stops repeating the same answer.
+    const r = _reasonReadAnswer(code, userId, { patterns: true, lead: "Here are the patterns I've picked up across your area — grounded in recorded signals, never guessed:" });
+    if (r && r.count) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
+    else { answer = `I haven't consolidated any repeated patterns yet — I only name a pattern once the signals actually repeat, rather than guessing one into being. Nothing has crossed that bar so far.`; confidence = 'confirmed'; limitations = ['patterns are named only from real repetition, not inferred']; }
+  } else if (/\b(tell me about|overview|summar\w*|catch me up|make sense|makes? sense of|findings?|sum up|document (?:your |the )?|what'?s (?:going on|happening|the story)|status(?: of)?|how are things|the (?:big )?picture|rundown|brief me)\b/.test(q)) {
+    // A GENERAL "where are we" / "summarise this" — the reasoner's grounded read is the
+    // answer. We never fabricate a summary from nothing; we speak only what's recorded.
     const r = _reasonReadAnswer(code, userId);
     if (r) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
     else { answer = `Nothing's flagged right now.`; confidence = 'confirmed'; }
@@ -10092,7 +10337,7 @@ function _persistCaptureCommand(code, userId, command) {
   } catch (_) { return null; }
 }
 
-function _assistantTurn(code, userId, text, lens, opts = {}) {
+async function _assistantTurn(code, userId, text, lens, opts = {}) {
   lens = ASSISTANT_LENSES.includes(lens) ? lens : null;
   const workItemId = opts.workItemId ? String(opts.workItemId).slice(0, 80) : null;
   const interp = _assistantInterpret(code, userId, text);
@@ -10132,8 +10377,47 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
   // second retrieval or answer implementation lives here.
   // Fail CLOSED: a retrieval/synthesis failure yields no answer (honest), never a
   // crash and never an ungrounded guess.
+  // An INFORMATION REQUEST is often phrased as a command, not a grammatical question —
+  // "pull up Tomas's profile", "show me the org", "summarise the week", "what patterns have
+  // you learnt". These are asks for a grounded READ, not disclosures to save, so they route
+  // through the same answer path. Excludes explicit save-commands so "note: …" still captures.
+  const infoRequest = !(cls.command && cls.command.payload)
+    && /\b(pull up|profile|dossier|tell me about|show me|what'?s? (?:going on|up|happening) with|how(?:'s| is| are)\b|summar\w*|make sense|makes? sense of|what (?:patterns?|trends?)|patterns? (?:you|have|i)|report on|update on|catch me up|brief me|rundown|the (?:big )?picture)\b/i.test(text);
+  // A world-knowledge / planning / mixed message is a REASONING request, not a disclosure to
+  // save — even when it's phrased as a command ("help me build a session"). But a bare
+  // declarative that merely mentions a plan ("minutes: we set the new schedule") is a
+  // disclosure to capture, so require a REQUEST cue before the reasoning edge claims the turn.
+  const reg0 = reasoningRegister.classifyRegister(cls.questionText || text).register;
+  const _rt = cls.questionText || text;
+  const requestCue = /\?|\b(help me|can you|could you|would you|please|why|how|should|what|which|when|where|explain|walk me through|build|create|draft|design|plan|prepare|come up with|suggest|recommend|give me|show me|tell me|is it (?:better|worth|good)|better than|difference between|pros and cons|best (?:way|approach))\b/i.test(_rt);
+  // A STRONG reasoning cue (why / how-does / should / better-than / build / plan …) is what
+  // lets the reasoning edge take over a dead end when the MODEL IS OFF — a weak "what is X" is
+  // treated as a possible org lookup and left with its honest "not enough evidence" instead.
+  const strongCue = /\b(why|how (?:do|does|to|should|can|would)|should (?:i|we|you|they)|better than|worse than|vs\.?|versus|explain|define|difference between|pros and cons|trade-?offs?|best (?:way|approach|formation|method|strategy|option)|help me (?:build|plan|create|design|draft|work|figure|prepare|think)|build|create|draft|design|outline|plan a|come up with|walk me through|is it (?:better|worth|good)|when should)\b/i.test(_rt);
+  const reasoningWanted = reasoningRegister.wantsReasoning(reg0) && requestCue && !(cls.command && cls.command.payload);
   let qa = null;
-  if (cls.isQuestion) { try { qa = _assistantAnswer(code, userId, cls.questionText || text); } catch (_) { qa = null; } }
+  if (cls.isQuestion || infoRequest) { try { qa = _assistantAnswer(code, userId, cls.questionText || text); } catch (_) { qa = null; } }
+  // The reasoning edge is a FALLBACK — it never overrides an answer the org's own data already
+  // produced (that would hijack a grounded lookup like "how does our high press work").
+  const deterministicAnswered = !!(qa && qa.answer && qa.confidence && qa.confidence !== 'none' && !/enough authorised evidence/i.test(qa.answer));
+  // ── GOVERNED REASONING EDGE (the second register) ────────────────────────────
+  // A reasoning question must not be met with "not enough authorised evidence". Route it
+  // through the governed reasoner: general knowledge is allowed and LABELLED; any org claim
+  // must cite a scoped belief (cite-or-ask, enforced in code); the belief ledger is never
+  // written. When the model is ON we always reason; when OFF we only take over the dead end
+  // for a strong reasoning ask, so a plain org lookup keeps its honest insufficient-evidence line.
+  const runReasoning = !deterministicAnswered && (cls.isQuestion || infoRequest || reasoningWanted)
+    && reasoningRegister.wantsReasoning(reg0) && (ai.enabled() || strongCue);
+  if (runReasoning) {
+    try {
+      const gr = await _governedReason(code, userId, cls.questionText || text, { register: reg0 });
+      if (gr && gr.answer) {
+        qa = { answer: gr.answer, purpose: 'workspace_shared_reasoning', confidence: gr.confidence || 'general',
+          limitations: gr.limitations || [], cites: [], citations: [], provenance: gr.provenance || [],
+          reasoning: true, register: reg0, reasoningCaptures: gr.captureProposals || [] };
+      }
+    } catch (_) { /* reasoning is optional enrichment — never breaks the turn */ }
+  }
   // A warm, human reply to a greeting — with a real way in, so the assistant feels alive.
   if (!qa && _greeting) {
     const nm = _firstName(code, userId);
@@ -10172,7 +10456,11 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
   // today's check-in" cards — the person asked for an answer, not to record a disclosure.
   // (A REQUESTED follow-up, checkin_proposal — "check in with me after the meeting" — is a
   // real ask and stays; compound turns like "feeling down, how's the team?" keep both.)
-  if (cls.kind === 'question' || _greeting) proposals = proposals.filter(p => !['capture', 'checkin_log'].includes(p.actionType));
+  if (cls.kind === 'question' || _greeting || (infoRequest && qa)) proposals = proposals.filter(p => !['capture', 'checkin_log'].includes(p.actionType));
+  // A pure WORLD-KNOWLEDGE question ("why is a 4-3-3 better?") isn't a disclosure — a "save as
+  // note" card makes no sense, so drop it. Planning/mixed keep their capture card (e.g. "draft
+  // a plan for the launch" is legitimately a saveable plan item), and check-ins are untouched.
+  else if (reasoningWanted && qa && qa.reasoning && reg0 === 'world_knowledge') proposals = proposals.filter(p => p.actionType !== 'capture');
 
   // ── GROUNDED ANSWER-AND-CONFIRM ──────────────────────────────────────────────
   // If there is an ACTIVE org question and this turn reads as an ANSWER (not a new
@@ -10280,7 +10568,11 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
     // A grounded answer when the input carried a question — from the ONE question-answering path.
     // `usedNewlySaved` says whether a mixed turn's answer drew on the just-saved statement.
     // `citations` are safe (label/date/ref) — no internal scores or excluded evidence.
-    qa: qa ? { answer: qa.answer, purpose: qa.purpose, confidence: qa.confidence, limitations: qa.limitations, cites: qa.cites, citations: qa.citations || [], bounded: qa.bounded, usedNewlySaved: qa.usedNewlySaved === true } : null,
+    qa: qa ? { answer: qa.answer, purpose: qa.purpose, confidence: qa.confidence, limitations: qa.limitations, cites: qa.cites, citations: qa.citations || [], bounded: qa.bounded, usedNewlySaved: qa.usedNewlySaved === true,
+      // Two-register reasoning metadata: whether this answer was reasoned (vs a pure org read),
+      // its register, the provenance tags (general / org_data / ask) the UI shows to keep the
+      // two kinds of knowledge visibly separate, and any confirm-gated captures the reasoning surfaced.
+      reasoning: qa.reasoning === true, register: qa.register || null, provenance: qa.provenance || [], reasoningCaptures: qa.reasoningCaptures || [] } : null,
     // Bounded assigned-work context extension (authorised, released-fields-only) — NOT a second runtime contract.
     assignedWork: workCtx ? { items: workCtx.items.map(it => ({ id: it.id, title: it.title, status: it.status, needsRevision: it.needsRevision, releasedScore: it.releasedScore, hasReleasedFeedback: !!it.releasedFeedback })), basisIds: workCtx.basisIds, limitations: workCtx.limitations, ambiguous: workAmbiguous } : null,
     bounded: composed.ok, cites: composed.output.cites,
@@ -10308,7 +10600,7 @@ function _assistantTurn(code, userId, text, lens, opts = {}) {
 
 /* POST /api/assistant/turn — the one composer. Interpret + reason + propose. Persists nothing
    to a capability store; returns the bounded artifact + response contract + proposals. */
-app.post('/api/assistant/turn', requireAuth, (req, res) => {
+app.post('/api/assistant/turn', requireAuth, async (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const text = String(req.body?.text || '').trim();
   if (!text) return res.status(400).json({ error: 'text required' });
@@ -10321,7 +10613,7 @@ app.post('/api/assistant/turn', requireAuth, (req, res) => {
   // happen INSIDE _assistantTurn, in a defined order (persist → ground). The endpoint
   // is a thin boundary — no second retrieval, no endpoint-specific privacy logic.
   try {
-    const r = _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId });
+    const r = await _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId });
     res.json({ ok: true, turnId: r.turn.turnId, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response, saved: r.saved || null, capturePrompt: r.capturePrompt || null });
   } catch (e) {
     // Fail closed with valid JSON — never a non-JSON 500, never a leak in an error body.
