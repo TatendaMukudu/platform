@@ -276,6 +276,7 @@ function reason({ priorBeliefs = [], observations = [], now = Date.now(), scopeL
     shared.push({
       id: 'shared::' + k, shared: true, kind, axis: members[0].axis, polarity: 'risk',
       scope, subjectId: null, distinctSubjects: distinct.length, memberBeliefIds: members.map(m => m.id).sort(),
+      subjects: distinct.slice().sort(), scopeText: label,   // the cohort + where, for same-cohort collapse
       claim: `${_cap(KIND_LABEL[kind] || kind)} is showing up across ${distinct.length} people in ${label} — worth looking at as a group, not only one at a time.`,
       supportCount: distinct.length, counterCount: 0,
       confidence: _confWord(distinct.length >= 3 ? distinct.length + 2 : distinct.length),
@@ -357,6 +358,9 @@ function agendaItem(b, now) {
     beliefId: b.id, shared: !!b.shared, kind: b.kind, subjectId: b.subjectId || null,
     subjectName: b.subjectName || null, scope: b.scope || null,
     distinctSubjects: b.shared ? (b.distinctSubjects || 0) : undefined,
+    subjects: b.shared ? (b.subjects || []) : undefined,       // the cohort, for same-cohort collapse
+    scopeText: b.shared ? (b.scopeText || null) : undefined,
+    memberBeliefIds: b.shared ? (b.memberBeliefIds || []) : undefined,
     claim: b.claim, severity: b.severity, confidence: b.confidence, polarity: b.polarity,
     urgency: _urgency(b, now), register, readiness,
     timing: _timing(b, register),
@@ -376,22 +380,74 @@ function rollUpShared(agenda) {
   const rest   = (agenda || []).filter(a => a && !a.shared);
   const byKind = {};
   for (const a of shared) (byKind[a.kind] = byKind[a.kind] || []).push(a);
-  const out = [...rest];
+  const rolled = [];
   for (const [kind, items] of Object.entries(byKind)) {
-    if (items.length < 2) { out.push(items[0]); continue; }          // one group → leave as-is
+    if (items.length < 2) { rolled.push(items[0]); continue; }        // one group → leave as-is
     const top = items.slice().sort((a, b) => (b.urgency || 0) - (a.urgency || 0))[0];
     const groups = items.length;
     const people = items.reduce((s, i) => s + (i.distinctSubjects || 0), 0);
     const label = KIND_LABEL[kind] || kind;
-    out.push({
+    rolled.push({
       ...top,
       beliefId: `rollup:${kind}`, rolled: true, groups, people,
       memberBeliefIds: items.map(i => i.beliefId),
+      subjects: [...new Set(items.flatMap(i => i.subjects || []))].sort(),   // union cohort, for same-cohort collapse
       claim: `${_cap(label)} is showing up across ${groups} of your groups${people ? ` (${people} people)` : ''} — worth an org-wide look, not group by group.`,
       why: `${_cap(label)} recurring across ${groups} groups.`,
     });
   }
+  // Same-COHORT collapse — if two patterns of DIFFERENT kinds cover the exact same people,
+  // say it ONCE (otherwise the same N people surface twice: "pulling back" AND "shift from the
+  // usual" across the same 6). Distinct signals over DIFFERENT groups stay separate.
+  const out = [...rest, ..._collapseByCohort(rolled)];
   return out.sort((a, b) => (b.urgency || 0) - (a.urgency || 0) || String(a.beliefId).localeCompare(String(b.beliefId)));
+}
+
+/* Merge shared/rolled items whose cohort (the set of underlying people) is identical. Only
+   merges when there are ≥2 real subjects in common and ≥2 items share them — so a genuinely
+   different group is never folded in. Presentational only; the merged card keeps every
+   constituent's ids so a decision still fans out to all of them. */
+function _collapseByCohort(items) {
+  if ((items || []).length < 2) return items || [];
+  const byCohort = new Map();
+  for (const it of items) {
+    const subs = (it.subjects || []).slice().sort();
+    const sig = subs.length >= 2 ? subs.join(',') : ('_solo:' + (it.beliefId || it.id));  // no cohort → never merge
+    if (!byCohort.has(sig)) byCohort.set(sig, []);
+    byCohort.get(sig).push(it);
+  }
+  const out = [];
+  for (const grp of byCohort.values()) out.push(grp.length < 2 ? grp[0] : _mergeCohort(grp));
+  return out;
+}
+
+function _mergeCohort(grp) {
+  grp = grp.slice().sort((a, b) => (b.urgency || 0) - (a.urgency || 0));
+  const top = grp[0];
+  const labels = grp.map(g => (KIND_LABEL[g.kind] || g.kind).toLowerCase());
+  const n = top.distinctSubjects || (top.subjects || []).length;
+  const where = top.rolled
+    ? `the same ${top.people || n} people across ${top.groups} of your groups`
+    : `the same ${n} people${top.scopeText ? ' in ' + top.scopeText : ''}`;
+  return {
+    ...top,
+    beliefId: 'cohort:' + grp.map(g => g.kind).sort().join('+'),
+    cohortMerged: true, kinds: grp.map(g => g.kind),
+    memberBeliefIds: [...new Set(grp.flatMap(g => g.memberBeliefIds || []))],
+    claim: `A few different shifts are showing up across ${where} — ${_joinLabels(labels)}. Worth looking at as a group, not only one at a time.`,
+    why: `Multiple shifts (${labels.join(', ')}) across the same ${n} people.`,
+    severity: grp.reduce((s, g) => (SEV_RANK[g.severity] > SEV_RANK[s] ? g.severity : s), 'low'),
+    careFlag: grp.some(g => g.careFlag),
+    urgency: Math.max(...grp.map(g => g.urgency || 0)),
+  };
+}
+
+/* "a" · "a and b" · "a, b and c" */
+function _joinLabels(xs) {
+  const a = [...new Set(xs)];
+  if (a.length <= 1) return a[0] || '';
+  if (a.length === 2) return `${a[0]} and ${a[1]}`;
+  return `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`;
 }
 
 /* Proposal — proposal-gated ALWAYS. This module never executes it; the caller must

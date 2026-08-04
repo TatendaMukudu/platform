@@ -217,5 +217,23 @@ ok('21 · a per-person item is left untouched', rolled.some(a => a.beliefId === 
 const one = R.rollUpShared([{ beliefId: 'shared::u15::isolation', shared: true, kind: 'isolation', distinctSubjects: 4, urgency: 6 }]);
 ok('21 · one shared card is left as-is (no needless roll-up)', one.length === 1 && !one[0].rolled);
 
+/* ── SAME-COHORT COLLAPSE — two DIFFERENT kinds over the SAME people read as ONE card ── */
+const sameCohort = [
+  { beliefId: 'shared::teamA::momentum_drop', shared: true, kind: 'momentum_drop', distinctSubjects: 6, subjects: ['a', 'b', 'c', 'd', 'e', 'f'], memberBeliefIds: ['a::momentum_drop', 'b::momentum_drop'], scopeText: 'the organisation', urgency: 9, register: 'support', readiness: 'ripe', severity: 'medium', claim: 'Pulling back is showing up across 6 people…' },
+  { beliefId: 'shared::teamA::baseline_shift', shared: true, kind: 'baseline_shift', distinctSubjects: 6, subjects: ['a', 'b', 'c', 'd', 'e', 'f'], memberBeliefIds: ['a::baseline_shift', 'b::baseline_shift'], scopeText: 'the organisation', urgency: 8, register: 'support', readiness: 'ripe', severity: 'low', claim: 'Shift from the usual is showing up across 6 people…' },
+];
+const merged = R.rollUpShared(sameCohort);
+ok('22 · two different kinds over the SAME 6 people collapse into ONE card', merged.length === 1 && merged[0].cohortMerged === true);
+ok('22 · the one card names BOTH shifts (no repetition of the same 6 people)', /the same 6 people/.test(merged[0].claim) && merged[0].kinds.includes('momentum_drop') && merged[0].kinds.includes('baseline_shift'));
+ok('22 · it keeps both constituents so a decision still fans out to all of them', (merged[0].memberBeliefIds || []).length >= 2);
+ok('22 · it takes the higher urgency / severity of the two', merged[0].urgency === 9 && merged[0].severity === 'medium');
+
+/* two kinds over DIFFERENT people are NOT merged (a genuinely different group stays separate) */
+const diffCohort = [
+  { beliefId: 'shared::teamA::momentum_drop', shared: true, kind: 'momentum_drop', distinctSubjects: 3, subjects: ['a', 'b', 'c'], urgency: 9, claim: 'x' },
+  { beliefId: 'shared::teamB::baseline_shift', shared: true, kind: 'baseline_shift', distinctSubjects: 3, subjects: ['x', 'y', 'z'], urgency: 8, claim: 'y' },
+];
+ok('22 · different cohorts stay as two separate cards (no over-merging)', R.rollUpShared(diffCohort).filter(a => a.cohortMerged).length === 0 && R.rollUpShared(diffCohort).length === 2);
+
 console.log(`\nreason-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
