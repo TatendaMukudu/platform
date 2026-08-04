@@ -16,6 +16,8 @@ ok('1 · "help me build a training session" → planning', R.classifyRegister('h
 ok('1 · "help me plan a session for my squad" → mixed (org + planning)', R.classifyRegister('help me plan a session for my squad').register === 'mixed');
 ok('1 · "what is the offside rule?" → world_knowledge', R.classifyRegister('what is the offside rule?').register === 'world_knowledge');
 ok('1 · "what is outstanding?" → org_fact (status, not general)', R.classifyRegister("what's outstanding?").register === 'org_fact');
+ok('1 · "tell me about robotics" → world_knowledge (a topic, not the org overview)', R.classifyRegister('tell me about robotics').register === 'world_knowledge');
+ok('1 · "what do you know about zonal marking?" → world_knowledge', R.classifyRegister('what do you know about zonal marking?').register === 'world_knowledge');
 
 /* 2 — wantsReasoning: only org_fact stays purely deterministic */
 ok('2 · org_fact does not need the reasoning edge', R.wantsReasoning('org_fact') === false);
