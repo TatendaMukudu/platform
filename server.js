@@ -10033,6 +10033,38 @@ function _libItemSafe(item, userId) {
     folderId: item.folderId || null, visibility: item.visibility, createdAt: item.createdAt, updatedAt: item.updatedAt,
     mine: item.ownerId === userId };
 }
+function _noteTitle(content, tag) {
+  if (tag) return String(tag).slice(0, 60);
+  const s = String(content || '').trim().replace(/\s+/g, ' ');
+  return s.length > 60 ? s.slice(0, 57) + '…' : (s || 'Note');
+}
+/* Mirror a legacy note into the Library as a note item — idempotent (keyed by a note:<id>
+   sourceRef, so re-running never duplicates). A legacy 'shared' note maps to a shared library
+   item; 'private' and 'anonymous' map to private (an anonymous note is never re-exposed). */
+function _noteToLibrary(code, note) {
+  if (!code || !note || !note.id || !note.authorId || !note.content) return null;
+  const ref = 'note:' + note.id;
+  const items = _libItems(code);
+  if (items.some(i => i && i.sourceRef === ref)) return null;
+  const now = note.createdAt || new Date().toISOString();
+  const item = { id: 'lib_' + generateId(), ownerId: note.authorId, type: 'note',
+    title: _noteTitle(note.content, note.tag), body: String(note.content).slice(0, 20000),
+    sourceRef: ref, folderId: null, visibility: note.type === 'shared' ? 'shared' : 'private',
+    createdAt: now, updatedAt: now };
+  items.push(item);
+  return item;
+}
+/* One-time (idempotent) sweep of all legacy notes into the Library, so there's truly one home.
+   Leaves orgNotes intact; only ADDS the missing library mirrors. Runs at boot. */
+function _migrateLegacyNotesToLibrary() {
+  let migrated = 0;
+  for (const id of Object.keys(orgNotes || {})) {
+    const n = orgNotes[id];
+    if (n && n.orgCode && _noteToLibrary(n.orgCode, n)) migrated++;
+  }
+  if (migrated) { console.log(`[library] migrated ${migrated} legacy note(s) into the Library`); scheduleSave(); }
+  return migrated;
+}
 
 /* Resolve the conversation for this turn: an existing one the user owns, or a fresh thread.
    Only ever returns a conversation in THIS user's own list, so history is self-only by construction. */
@@ -11603,6 +11635,9 @@ app.post('/api/notes', async (req, res) => {
     aiResponse: null,
   };
   orgNotes[id] = note;
+  // One home — mirror the note into the Library right away (idempotent), so a note made in the
+  // legacy screen shows up in the Library too. Never throws the request.
+  try { _noteToLibrary(note.orgCode, note); } catch (_) {}
 
   const shouldGetAIResponse = type === 'private' || type === 'anonymous' || type === 'shared';
   if (shouldGetAIResponse) {
@@ -14976,7 +15011,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
-  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, checkinProposals,
+  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, _migrateLegacyNotesToLibrary, orgNotes, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
   // exported for the truth layer: grounded retrieval over canonical evidence
@@ -15032,6 +15067,9 @@ if (require.main === module) (async () => {
 
     // 5. Repair emailIndex (handles any missing entries from loaded data)
     _rebuildEmailIndex();
+
+    // 5a. One home — sweep any legacy notes into the Library (idempotent; adds only the missing mirrors).
+    try { _migrateLegacyNotesToLibrary(); } catch (e) { console.warn('[library] note migration skipped:', e && e.message); }
 
     // 5a2. Optional demo seed on boot — for hosts with no shell (e.g. Render free
     //      tier). Set SEED_DEMO=1 to add the demo squad; idempotent (skips if the
