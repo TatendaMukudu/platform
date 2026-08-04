@@ -50,6 +50,7 @@ const languageGuard = require('./ai/language-guard');
 const audit      = require('./ai/audit');
 const reasoningRegister = require('./ai/reasoning-register');
 const kernelCoreasoning = require('./ai/kernel-coreasoning');
+const renderArtifact = require('./ai/render-artifact');
 const googleProvider = require('./ai/providers/google');
 const delivery   = require('./ai/delivery');
 // The unified attention pipeline (engines discover → feed normalises → packet scopes →
@@ -8119,6 +8120,61 @@ app.get('/api/kernel/coreasoning', requireAuth, async (req, res) => {
   } catch (e) {
     console.warn('[kernel/coreasoning] failed:', e && e.message);
     res.json({ ok: true, enabled: false, aggregates: null, hypotheses: [], collectionGaps: [], framings: [] });
+  }
+});
+
+/* THE OUTPUT INTERFACE — present governed data in the format a human chose (summary / email),
+   AFTER the human decision. The LLM composes; it may only narrate the DATASET it was given; a
+   figure it invents is caught by governArtifact and we fall back to the plain factual version,
+   so a fabricated number never reaches the reader. Returns a confirm-gated DRAFT — nothing is
+   sent here; outbound delivery reuses the existing policy-gated path on a separate confirm. */
+function _gatherDataset(code, userId) {
+  // The presentable dataset = this reader's already-scoped grounded read (leak-safe by
+  // construction). Each ripe belief becomes one row the artifact may cite. Real data only.
+  try {
+    const { agenda } = _reasonScopedAgenda(code, userId, Date.now(), false);
+    const rows = agenda.filter(a => a.readiness === 'ripe').slice(0, 25)
+      .map(a => ({ id: a.beliefId, label: a.claim, value: a.register || null }));
+    return { title: `${(orgMeta[code] && orgMeta[code].orgName) || 'Your area'} — current read`, rows };
+  } catch (_) { return { title: 'Summary', rows: [] }; }
+}
+
+async function _renderArtifact(code, userId, { format = 'summary', intent = '' } = {}) {
+  const dataset = _gatherDataset(code, userId);
+  const meta = { title: dataset.title, rowCount: dataset.rows.length };
+  if (!ai.enabled()) {
+    const det = renderArtifact.deterministicSummary(dataset, format);
+    return { enabled: false, draft: det, format: det.format, dataset: meta,
+      note: 'A plain, factual draft drawn straight from your data. With the writing engine on I can compose this as a polished summary or email — always from these same figures, nothing invented.' };
+  }
+  try {
+    const composed = await ai.completeJSON({ tier: 'reason', system: renderArtifact.SYSTEM_PROMPT,
+      user: renderArtifact.buildDatasetMessage({ intent, format, dataset }), maxTokens: 900, temperature: 0.4, schema: ['body'] });
+    if (!composed) return { enabled: true, draft: renderArtifact.deterministicSummary(dataset, format), format, dataset: meta, note: 'Fell back to a plain draft this pass.' };
+    const gov = renderArtifact.governArtifact({ composed, dataset, format });
+    if (!gov.ok) {
+      // An invented figure (or empty body) — NEVER present it; fall back to the factual version.
+      return { enabled: true, draft: renderArtifact.deterministicSummary(dataset, format), format, dataset: meta,
+        flagged: gov.violations, note: 'The composed draft referenced a figure that isn\'t in your data, so I fell back to the plain factual version rather than show it.' };
+    }
+    return { enabled: true, draft: gov.artifact, format, dataset: meta };
+  } catch (_) {
+    return { enabled: true, draft: renderArtifact.deterministicSummary(dataset, format), format, dataset: meta };
+  }
+}
+
+/* POST /api/artifact/render — compose a DRAFT summary/email from the reader's governed data.
+   Read-only: returns a draft for the human to confirm; sends nothing. */
+app.post('/api/artifact/render', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const format = renderArtifact.FORMATS.includes(req.body && req.body.format) ? req.body.format : 'summary';
+  const intent = String((req.body && req.body.intent) || '').slice(0, 500);
+  try {
+    const out = await _renderArtifact(code, userId, { format, intent });
+    res.json({ ok: true, ...out, confirmationRequired: true, delivered: false });
+  } catch (e) {
+    console.warn('[artifact/render] failed:', e && e.message);
+    res.json({ ok: true, enabled: false, draft: null, confirmationRequired: true, delivered: false });
   }
 });
 
