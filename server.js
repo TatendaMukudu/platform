@@ -9488,7 +9488,9 @@ function _reasonAgendaSafe(item) {
     timing: item.timing || null,             // the natural moment a real event creates
     reliability: item.reliability || null,   // the Confidence Engine's honest label for this kind
     rolled: !!item.rolled,                    // an org-wide roll-up of several groups…
-    memberBeliefIds: item.rolled ? (item.memberBeliefIds || []) : undefined, // …so a decision fans out
+    cohortMerged: !!item.cohortMerged,        // …or several kinds over the SAME people, said once
+    kinds: item.kinds || undefined,           // the kinds folded into a same-cohort card
+    memberBeliefIds: (item.rolled || item.cohortMerged) ? (item.memberBeliefIds || []) : undefined, // …so a decision fans out
   };
 }
 
@@ -9529,7 +9531,9 @@ function _reasonScopedAgenda(code, userId, now, force) {
   const byBelief = new Map(result.proposals.map(p => [p.beliefId, p]));
   const proposals = [];
   for (const a of agenda) {
-    if (a.rolled) {
+    if (a.rolled || a.cohortMerged) {
+      // A rolled or same-cohort-merged card carries a single proposal forward from one of its
+      // constituents, so the merged read still has its next step.
       const src = (a.memberBeliefIds || []).map(id => byBelief.get(id)).find(Boolean);
       if (src) proposals.push({ ...src, beliefId: a.beliefId });
     } else if (byBelief.has(a.beliefId)) {
