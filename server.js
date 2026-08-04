@@ -50,6 +50,7 @@ const languageGuard = require('./ai/language-guard');
 const audit      = require('./ai/audit');
 const reasoningRegister = require('./ai/reasoning-register');
 const kernelCoreasoning = require('./ai/kernel-coreasoning');
+const safeguarding = require('./ai/safeguarding');
 const renderArtifact = require('./ai/render-artifact');
 const googleProvider = require('./ai/providers/google');
 const delivery   = require('./ai/delivery');
@@ -139,7 +140,7 @@ function scheduleSave() {
         proactivePrefs, insightSuppression, answerFeedback,
         orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
         reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
-        conversationSessions, assistantConversations, libraryFolders, libraryItems,
+        conversationSessions, assistantConversations, libraryFolders, libraryItems, safeguardingFlags,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -10023,6 +10024,42 @@ function _convTitle(t) { const s = String(t || '').trim().replace(/\s+/g, ' '); 
    are org-scoped with an owner + visibility so "make it public" actually reaches teammates. */
 const libraryFolders = {};  // code → [ { id, ownerId, name, createdAt } ]
 const libraryItems   = {};  // code → [ { id, ownerId, type, title, body, sourceRef, folderId, visibility, createdAt, updatedAt } ]
+
+/* ── SAFEGUARDING — the duty of care, deterministic (works with the model OFF) ────────────── */
+const safeguardingFlags = {};  // code → [ { id, subjectId, subjectName, severity, category, excerpt, at, status, leadId, resolvedBy, resolvedAt } ]
+function _sgResources(code) {
+  const custom = orgMeta[code] && orgMeta[code].safeguardingResources;
+  return (Array.isArray(custom) && custom.length) ? custom : safeguarding.DEFAULT_RESOURCES;
+}
+// The named safe adult a crisis flag routes to — the configured lead, else the org's superadmin.
+function _sgLeadId(code) {
+  const set = orgMeta[code] && orgMeta[code].safeguardingLeadId;
+  if (set && orgUsers[code] && orgUsers[code][set]) return set;
+  const admin = Object.values(orgUsers[code] || {}).find(u => u && u.role === 'superadmin' && u.status === 'active');
+  return admin ? admin.id : null;
+}
+function _isSgLead(code, userId) {
+  return _sgLeadId(code) === userId || (orgUsers[code]?.[userId]?.role === 'superadmin');
+}
+function _recordSafeguardingFlag(code, { subjectId, severity, category, excerpt }) {
+  const list = safeguardingFlags[code] || (safeguardingFlags[code] = []);
+  const flag = { id: 'sg_' + generateId(), subjectId, subjectName: (orgUsers[code]?.[subjectId]?.name) || null,
+    severity, category, excerpt: String(excerpt || '').slice(0, 300), at: new Date().toISOString(),
+    status: 'open', leadId: _sgLeadId(code) };
+  list.push(flag);
+  try { _audit(code, { actor: subjectId, action: 'safeguarding_flag', subjectIds: [subjectId], basis: severity }); } catch (_) {}
+  scheduleSave();
+  return flag;
+}
+/* Run the duty-of-care check on a person's own words. Returns a response (message + resources)
+   when risk is present, and records + routes a flag to the safeguarding lead on a CRISIS. */
+function _safeguardingCheck(code, userId, text) {
+  const d = safeguarding.detect(text);
+  if (!d.flagged) return null;
+  const resp = safeguarding.composeResponse({ name: orgUsers[code]?.[userId]?.name || '', severity: d.severity, resources: _sgResources(code) });
+  if (resp.escalate) _recordSafeguardingFlag(code, { subjectId: userId, severity: d.severity, category: d.category, excerpt: text });
+  return { detection: d, response: resp };
+}
 const LIB_TYPES = ['note', 'chat', 'artifact'];
 function _libFolders(code) { return libraryFolders[code] || (libraryFolders[code] = []); }
 function _libItems(code)   { return libraryItems[code]   || (libraryItems[code]   = []); }
@@ -10440,6 +10477,30 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   const _convKey = _wsKey(code, userId);
   const _conv = _resolveConversation(_convKey, opts.conversationId, text, Date.now());
   const priorMessages = (_conv.messages || []).slice(-8).map(m => ({ role: m.role, text: m.text }));
+
+  // ── DUTY OF CARE (first, deterministic) ──────────────────────────────────────
+  // Before anything else — and independent of the LLM — check the person's own words for risk.
+  // A crisis short-circuits the whole turn: no reasoning, no proposals, no capture card that
+  // could bury it. The person gets a warm, honest response with real resources; a flag routes
+  // to the safeguarding lead. Only on the person's OWN turn (never a leader-support subject turn).
+  if (opts.subjectMemberId == null) {
+    const sg = _safeguardingCheck(code, userId, text);
+    if (sg) {
+      const nowIso = new Date().toISOString();
+      const response = { responseText: sg.response.message, mode: 'safeguarding', lens: lens || null,
+        proposedActions: [], primaryActions: [], moreActions: [], groundedClaims: [], inferred: [], limitations: [],
+        safeguarding: { severity: sg.response.severity, escalated: sg.response.escalate, resources: sg.response.resources }, qa: null };
+      _conv.messages.push({ role: 'user', text: String(text || '').slice(0, 4000), at: nowIso });
+      _conv.messages.push({ role: 'assistant', text: sg.response.message, at: nowIso });
+      _conv.updatedAt = nowIso;
+      const turn = { turnId: 'turn_' + generateId(), userId, organisationId: code, createdAt: nowIso, rawInput: String(text || '').slice(0, 4000), lens: lens || null, response, _proposals: [], corrections: [], context: {} };
+      (assistantTurns[_convKey] = assistantTurns[_convKey] || []).push(turn);
+      scheduleSave();
+      return { turn, response, saved: null, capturePrompt: null, conversationId: _conv.id,
+        interpretation: { turnId: turn.turnId, originalInputRef: null, candidateIntents: [], candidateClaims: [], suggestedPrivacy: 'private', proposedActions: [], confidence: 'none', ambiguities: [], limitations: [] },
+        context: { basisIds: [], purpose: 'safeguarding', visibilityEligibility: 'safeguarding', confidence: 'none', limitations: [] } };
+    }
+  }
 
   // ── GROUNDED CONVERSATIONAL TURN ─────────────────────────────────────────────
   // Classify the turn WITHOUT brittle topic keywords, then honour a strict order:
@@ -10862,6 +10923,36 @@ app.delete('/api/library/:id', requireAuth, (req, res) => {
   libraryItems[code] = list.filter(i => !(i.id === req.params.id && i.ownerId === userId));
   if (libraryItems[code].length === before) return res.status(404).json({ error: 'not found' });
   scheduleSave(); res.json({ ok: true, deleted: req.params.id });
+});
+
+/* ── SAFEGUARDING: the lead's queue ──────────────────────────────────────────
+   Only the org's safeguarding lead (or a superadmin) may see or resolve flags — this is
+   sensitive, and access is itself audited. Safety justifies a named safe adult seeing it; no
+   one else does. */
+app.get('/api/safeguarding/flags', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isSgLead(code, userId)) return res.status(403).json({ error: 'safeguarding lead only' });
+  const flags = (safeguardingFlags[code] || []).slice().sort((a, b) => new Date(b.at) - new Date(a.at));
+  const open = flags.filter(f => f.status === 'open');
+  try { if (open.length) _audit(code, { actor: userId, action: 'safeguarding_view', subjectIds: [...new Set(open.map(f => f.subjectId))], basis: 'lead reviewed the safeguarding queue' }); } catch (_) {}
+  res.json({ ok: true, isLead: true, flags, openCount: open.length });
+});
+app.post('/api/safeguarding/flags/:id/resolve', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  if (!_isSgLead(code, userId)) return res.status(403).json({ error: 'safeguarding lead only' });
+  const f = (safeguardingFlags[code] || []).find(x => x.id === req.params.id);
+  if (!f) return res.status(404).json({ error: 'not found' });
+  f.status = 'resolved'; f.resolvedBy = userId; f.resolvedAt = new Date().toISOString();
+  f.resolutionNote = String((req.body && req.body.note) || '').slice(0, 500) || null;
+  try { _audit(code, { actor: userId, action: 'safeguarding_resolve', subjectIds: [f.subjectId], basis: 'flag resolved' }); } catch (_) {}
+  scheduleSave();
+  res.json({ ok: true, flag: f });
+});
+/* GET /api/safeguarding/config — the resources shown to a person in distress (readable by all,
+   so the app can always surface real help; the lead identity is not exposed to members). */
+app.get('/api/safeguarding/config', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  res.json({ ok: true, resources: _sgResources(code), isLead: _isSgLead(code, userId) });
 });
 
 /* GET /api/assistant/turn/:turnId — inspect the bounded interpretation artifact (self-only). */
@@ -14942,6 +15033,7 @@ function _loadAllStores(data) {
   Object.assign(assistantConversations, data.assistantConversations || {});
   Object.assign(libraryFolders, data.libraryFolders || {});
   Object.assign(libraryItems,   data.libraryItems   || {});
+  Object.assign(safeguardingFlags, data.safeguardingFlags || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -15011,7 +15103,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
-  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, _migrateLegacyNotesToLibrary, orgNotes, checkinProposals,
+  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, _migrateLegacyNotesToLibrary, orgNotes, safeguardingFlags, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
   // exported for the truth layer: grounded retrieval over canonical evidence

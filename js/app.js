@@ -6165,6 +6165,11 @@ async function todayAsk() {
     if (out) out.innerHTML = '';
     const res = j.response || {};
     thread.insertAdjacentHTML('beforeend', todayBubble('assistant', res.responseText || '', res.qa || {}));
+    // Duty of care: if this turn was a safeguarding response, surface the real resources
+    // prominently right under the message — help must be impossible to miss.
+    if (res.safeguarding && (res.safeguarding.resources || []).length) {
+      thread.insertAdjacentHTML('beforeend', todaySafeguardingCard(res.safeguarding));
+    }
     // Governed proposals (check-in / note …) ride under the assistant reply, unchanged.
     if (out) out.innerHTML = todayRenderProposals(j);
     todayScrollThread();
@@ -6189,6 +6194,18 @@ function todayProvenanceChips(qa) {
   return out.length ? `<div class="tdy-provrow">${out.join('')}</div>` : '';
 }
 function todayScrollThread() { const t = document.getElementById('today-thread'); if (t) t.scrollTop = t.scrollHeight; }
+
+/* The duty-of-care card — real crisis resources, impossible to miss. Deterministic; shown
+   whenever a turn returns a safeguarding response, whether or not the model is on. */
+function todaySafeguardingCard(sg) {
+  const esc = _escAdvisor;
+  const rows = (sg.resources || []).map(x => `<div class="sg-res"><span class="sg-res-label">${esc(x.label)}</span><span class="sg-res-contact">${esc(x.contact)}</span></div>`).join('');
+  return `<div class="tdy-msg tdy-msg-assistant"><div class="sg-card">
+    <div class="sg-title">You don't have to face this alone — reach out any time</div>
+    ${rows}
+    ${sg.escalated ? `<div class="sg-note">I've let your safeguarding lead know so a person can support you.</div>` : ''}
+  </div></div>`;
+}
 
 /* Start a fresh thread — the current one stays saved in history. */
 function todayNewChat() {

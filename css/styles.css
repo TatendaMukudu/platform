@@ -2600,6 +2600,14 @@ details.intel-collapse[open] > summary::after { transform: rotate(90deg); }
 .tdy-prov.prov-org{color:#2fa46a;background:rgba(47,164,106,.12);border-color:rgba(47,164,106,.3)}
 .tdy-prov.prov-ask{color:#c98a2b;background:rgba(201,138,43,.12);border-color:rgba(201,138,43,.3)}
 .tdy-thinking{font-size:.8rem;color:var(--text-muted)}
+/* Duty-of-care card — warm, clear, impossible to miss. */
+.sg-card{background:rgba(47,164,106,.08);border:1px solid rgba(47,164,106,.35);border-radius:12px;padding:.7rem .8rem;max-width:100%}
+.sg-title{font-size:.86rem;font-weight:600;color:var(--text-primary);margin-bottom:.5rem}
+.sg-res{display:flex;justify-content:space-between;gap:.6rem;padding:.3rem 0;border-top:1px solid rgba(47,164,106,.15);font-size:.84rem}
+.sg-res:first-of-type{border-top:0}
+.sg-res-label{color:var(--text-secondary)}
+.sg-res-contact{color:#2fa46a;font-weight:600;white-space:nowrap}
+.sg-note{font-size:.74rem;color:var(--text-muted);margin-top:.5rem;font-style:italic}
 .tdy-history{border:1px solid var(--border);border-radius:12px;background:var(--bg-card);
   max-height:40vh;overflow-y:auto;margin-bottom:.6rem}
 .tdy-histrow{display:flex;align-items:center;border-bottom:1px solid var(--line-soft,rgba(127,127,127,.08))}
