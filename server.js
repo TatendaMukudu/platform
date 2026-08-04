@@ -51,6 +51,7 @@ const audit      = require('./ai/audit');
 const reasoningRegister = require('./ai/reasoning-register');
 const kernelCoreasoning = require('./ai/kernel-coreasoning');
 const safeguarding = require('./ai/safeguarding');
+const rateLimit = require('./ai/rate-limit');
 const renderArtifact = require('./ai/render-artifact');
 const googleProvider = require('./ai/providers/google');
 const delivery   = require('./ai/delivery');
@@ -999,15 +1000,23 @@ app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   const emailNorm = (email || '').toLowerCase().trim();
 
+  // Brute-force guard: bound failed attempts per email+IP. A failure counts; a success clears.
+  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || 'unknown';
+  const rlKey = emailNorm + '|' + ip;
+  const _fail = (status, error) => { rateLimit.hit(_loginRateStore, rlKey, { limit: LOGIN_MAX, windowMs: LOGIN_WIN }); return res.status(status).json({ error }); };
+  if (rateLimit.isLimited(_loginRateStore, rlKey, { limit: LOGIN_MAX, windowMs: LOGIN_WIN })) {
+    return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes, then try again.' });
+  }
+
   if (!emailNorm) return res.status(400).json({ error: 'Email address is required.' });
   if (!password)  return res.status(400).json({ error: 'Password is required.' });
 
   const entry = emailIndex[emailNorm];
-  if (!entry) return res.status(401).json({ error: 'No account found with that email address.' });
+  if (!entry) return _fail(401, 'No account found with that email address.');
 
   const code = entry.orgCode;
   const user = orgUsers[code]?.[entry.userId];
-  if (!user) return res.status(401).json({ error: 'Account not found. Please contact your admin.' });
+  if (!user) return _fail(401, 'Account not found. Please contact your admin.');
 
   // Lazy bcrypt migration: verify old hash then upgrade
   let passwordValid = false;
@@ -1021,8 +1030,9 @@ app.post('/api/auth/login', async (req, res) => {
     passwordValid = await bcrypt.compare(password, user.passwordHash);
   }
 
-  if (!passwordValid) return res.status(401).json({ error: 'Email or password incorrect.' });
+  if (!passwordValid) return _fail(401, 'Email or password incorrect.');
 
+  rateLimit.reset(_loginRateStore, rlKey);   // a good login clears the failure counter
   const org   = orgMeta[code];
   const token = issueToken(user.id, code, user.role);
   res.json({ ok: true, user: { ...user, passwordHash: undefined }, org, token });
@@ -8039,6 +8049,14 @@ async function _governedReason(code, userId, question, { register, priorMessages
       confidence: 'none', limitations: ['the reasoning edge is off (no model configured)'], captureProposals: [], provenance: [], usable: true };
   }
 
+  // Per-org budget: over the hourly/daily cap, degrade to the honest deterministic line rather
+  // than draining the shared key (or starving other orgs). Same UX as the model being off.
+  if (!_llmBudgetOk(code)) {
+    if (register === 'mixed' && context.length) return null;
+    return { answer: `I've done a lot of reasoning for your organisation in the last little while — to keep things fair and costs sane, I'll pick this back up shortly. In the meantime I can still answer from what's actually recorded.`,
+      confidence: 'none', limitations: ['reasoning temporarily rate-limited for this organisation'], captureProposals: [], provenance: [], usable: true };
+  }
+
   // MODEL ON → reason, then GOVERN the output. completeJSON returns null on any failure, so a
   // model hiccup degrades cleanly instead of throwing.
   try {
@@ -8094,6 +8112,9 @@ async function _kernelCoReason(code) {
     return { ...base, enabled: false,
       note: 'Kernel co-reasoning proposes hypotheses to test and signals worth collecting — it needs the reasoning engine switched on. The aggregate picture below is derived deterministically and is always available.' };
   }
+  if (!_llmBudgetOk(code)) {
+    return { ...base, enabled: true, note: 'Kernel co-reasoning is briefly rate-limited for your organisation; the aggregate picture below is always available.' };
+  }
   try {
     const raw = await ai.completeJSON({ tier: 'reason', system: kernelCoreasoning.SYSTEM_PROMPT,
       user: kernelCoreasoning.buildDigest(aggregates), maxTokens: 900, temperature: 0.4, schema: ['hypotheses'] });
@@ -8147,6 +8168,11 @@ async function _renderArtifact(code, userId, { format = 'summary', intent = '' }
     const det = renderArtifact.deterministicSummary(dataset, format);
     return { enabled: false, draft: det, format: det.format, dataset: meta,
       note: 'A plain, factual draft drawn straight from your data. With the writing engine on I can compose this as a polished summary or email — always from these same figures, nothing invented.' };
+  }
+  if (!_llmBudgetOk(code)) {
+    const det = renderArtifact.deterministicSummary(dataset, format);
+    return { enabled: true, draft: det, format: det.format, dataset: meta,
+      note: 'The writing engine is briefly rate-limited for your organisation — here is the plain factual draft from your data.' };
   }
   try {
     const composed = await ai.completeJSON({ tier: 'reason', system: renderArtifact.SYSTEM_PROMPT,
@@ -10024,6 +10050,28 @@ function _convTitle(t) { const s = String(t || '').trim().replace(/\s+/g, ' '); 
    are org-scoped with an owner + visibility so "make it public" actually reaches teammates. */
 const libraryFolders = {};  // code → [ { id, ownerId, name, createdAt } ]
 const libraryItems   = {};  // code → [ { id, ownerId, type, title, body, sourceRef, folderId, visibility, createdAt, updatedAt } ]
+
+/* ── ABUSE & COST CONTROLS ───────────────────────────────────────────────────
+   Login attempts are bounded per email+IP so a stolen email can't be brute-forced. LLM calls
+   are bounded PER ORG (hourly + daily) so one org can't drain the shared key or starve the
+   others — over budget, the reasoning edges simply degrade to deterministic, exactly as if the
+   key were off. Both are in-memory fixed-window counters (fine for a single dyno; swept hourly). */
+const _loginRateStore = {};   // "email|ip" → window
+const _llmRateStore    = {};  // "org|h" / "org|d" → window
+const LOGIN_MAX   = parseInt(process.env.IQ_LOGIN_MAX, 10)   > 0 ? parseInt(process.env.IQ_LOGIN_MAX, 10)   : 8;    // failures / 15 min
+const LOGIN_WIN   = 15 * 60 * 1000;
+const LLM_ORG_HOURLY = parseInt(process.env.IQ_LLM_ORG_HOURLY, 10) > 0 ? parseInt(process.env.IQ_LLM_ORG_HOURLY, 10) : 240;
+const LLM_ORG_DAILY  = parseInt(process.env.IQ_LLM_ORG_DAILY, 10)  > 0 ? parseInt(process.env.IQ_LLM_ORG_DAILY, 10)  : 2000;
+/* Is this org under its LLM budget? Counts one call if allowed. Over budget → false, and the
+   caller degrades to the deterministic path (never errors). */
+function _llmBudgetOk(code) {
+  if (!ai.enabled()) return false;                          // no model anyway
+  const now = Date.now();
+  const h = rateLimit.hit(_llmRateStore, (code || 'org') + '|h', { limit: LLM_ORG_HOURLY, windowMs: 3600000, now });
+  const d = rateLimit.hit(_llmRateStore, (code || 'org') + '|d', { limit: LLM_ORG_DAILY, windowMs: 86400000, now });
+  return h.allowed && d.allowed;
+}
+setInterval(() => { try { rateLimit.sweep(_loginRateStore, { windowMs: LOGIN_WIN }); rateLimit.sweep(_llmRateStore, { windowMs: 86400000 }); } catch (_) {} }, 3600000).unref?.();
 
 /* ── SAFEGUARDING — the duty of care, deterministic (works with the model OFF) ────────────── */
 const safeguardingFlags = {};  // code → [ { id, subjectId, subjectName, severity, category, excerpt, at, status, leadId, resolvedBy, resolvedAt } ]
@@ -15103,7 +15151,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
-  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, _migrateLegacyNotesToLibrary, orgNotes, safeguardingFlags, checkinProposals,
+  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, _migrateLegacyNotesToLibrary, orgNotes, safeguardingFlags, _llmBudgetOk, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
   // exported for the truth layer: grounded retrieval over canonical evidence
