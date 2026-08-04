@@ -8297,8 +8297,11 @@ function _assistantAnswer(code, userId, question) {
     const r = _reasonReadAnswer(code, userId, { patterns: true, lead: "Here are the patterns I've picked up across your area — grounded in recorded signals, never guessed:" });
     if (r && r.count) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
     else { answer = `I haven't consolidated any repeated patterns yet — I only name a pattern once the signals actually repeat, rather than guessing one into being. Nothing has crossed that bar so far.`; confidence = 'confirmed'; limitations = ['patterns are named only from real repetition, not inferred']; }
-  } else if (/\b(tell me about|overview|summar\w*|catch me up|make sense|makes? sense of|findings?|sum up|document (?:your |the )?|what'?s (?:going on|happening|the story)|status(?: of)?|how are things|the (?:big )?picture|rundown|brief me)\b/.test(q)) {
-    // A GENERAL "where are we" / "summarise this" — the reasoner's grounded read is the
+  } else if (/\btell me (?:more )?about (?:the |our |my |this )?(org|organisation|organization|team|squad|club|group|company|department|business|us|everyone|things|it|situation|state|people|staff|side|cohort|class)\b/.test(q)
+    || /\b(overview|summar\w*|catch me up|make sense|makes? sense of|findings?|sum up|document (?:your |the )?|what'?s (?:going on|happening|the story)|status(?: of)?|how are things|the (?:big )?picture|rundown|brief me)\b/.test(q)) {
+    // A GENERAL "where are we" / "summarise this" — but ONLY when it's about the ORG/team, not
+    // a topic ("tell me about robotics" is a reasoning question, not an org-overview request).
+    // The reasoner's grounded read is the
     // answer. We never fabricate a summary from nothing; we speak only what's recorded.
     const r = _reasonReadAnswer(code, userId);
     if (r) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
@@ -10393,7 +10396,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // A STRONG reasoning cue (why / how-does / should / better-than / build / plan …) is what
   // lets the reasoning edge take over a dead end when the MODEL IS OFF — a weak "what is X" is
   // treated as a possible org lookup and left with its honest "not enough evidence" instead.
-  const strongCue = /\b(why|how (?:do|does|to|should|can|would)|should (?:i|we|you|they)|better than|worse than|vs\.?|versus|explain|define|difference between|pros and cons|trade-?offs?|best (?:way|approach|formation|method|strategy|option)|help me (?:build|plan|create|design|draft|work|figure|prepare|think)|build|create|draft|design|outline|plan a|come up with|walk me through|is it (?:better|worth|good)|when should)\b/i.test(_rt);
+  const strongCue = /\b(why|how (?:do|does|to|should|can|would)|should (?:i|we|you|they)|better than|worse than|vs\.?|versus|explain|define|difference between|pros and cons|trade-?offs?|best (?:way|approach|formation|method|strategy|option)|help me (?:build|plan|create|design|draft|work|figure|prepare|think)|build|create|draft|design|outline|plan a|come up with|walk me through|is it (?:better|worth|good)|when should|tell me (?:more )?about|what do you know about)\b/i.test(_rt);
   const reasoningWanted = reasoningRegister.wantsReasoning(reg0) && requestCue && !(cls.command && cls.command.payload);
   let qa = null;
   if (cls.isQuestion || infoRequest) { try { qa = _assistantAnswer(code, userId, cls.questionText || text); } catch (_) { qa = null; } }

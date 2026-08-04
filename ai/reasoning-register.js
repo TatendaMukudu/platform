@@ -42,6 +42,8 @@ const WORLD = new RegExp([
   /\bhow (?:do|does|to|would|can|should)\b/.source,
   /\bwhat (?:is|are|makes|would|kind of|type of)\b/.source,
   /\b(explain|define|meaning of|tell me how)\b/.source,
+  /\btell me (?:more )?about\b/.source,
+  /\bwhat do you know about\b/.source,
   /\b(difference between|better than|worse than|vs\.?|versus|compared? to|instead of)\b/.source,
   /\b(pros and cons|trade-?offs?|advantages?|disadvantages?|benefits?)\b/.source,
   /\bshould (?:i|we|you|they)\b/.source,
