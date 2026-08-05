@@ -27,6 +27,7 @@ const MemberApp = {
   _notesFilter: 'All',
   _myGroups:    [],
   _cachedNotes: [],
+  _chatConvId:  null,   // the member's live threaded conversation (same runtime as the leader)
 
   // Scenario runner
   _scenario:  null,
@@ -2549,6 +2550,11 @@ const MemberApp = {
       <div class="iq-subject" id="iq-subject"></div>
       <div class="iq-workctx" id="iq-workctx"></div>
       <div class="iq-composer-wrap">
+        <div class="tdy-chathead iq-chathead">
+          <button class="tdy-headbtn" type="button" onclick="MemberApp.wsNewChat()" title="Start a new conversation">＋ New</button>
+          <button class="tdy-headbtn" type="button" onclick="MemberApp.wsHistoryOpen()" title="Your past conversations">🕘 History</button>
+        </div>
+        <div id="iq-history" class="tdy-history" style="display:none"></div>
         <div class="iq-composer" id="iq-composer">
           <label class="iq-attach" title="Add a document IntelliQ can use (meeting minutes, stats, a policy…)" aria-label="Add knowledge" style="cursor:pointer;display:flex;align-items:center;padding:0 0.3rem;color:var(--text-muted)">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5 12.5 21a4 4 0 0 1-5.66-5.66l8.49-8.48a2.5 2.5 0 0 1 3.54 3.54l-8.49 8.48a1 1 0 0 1-1.41-1.41l7.78-7.78"/></svg>
@@ -2769,6 +2775,64 @@ const MemberApp = {
   /* Retry a failed turn WITHOUT losing the message — removes the error bubble and re-sends. */
   wsRetry(btn, text) { const b = btn && btn.closest('.iq-msg'); if (b) b.remove(); this.wsSend(text); },
 
+  /* ── Threaded-chat controls (the same threaded assistant the leader has) ──────────
+     Members now get real multi-turn memory + a history drawer, reusing the shared
+     /api/assistant/conversations endpoints and the .tdy-* voice styling. */
+  wsNewChat() {
+    this._chatConvId = null;
+    const c = document.getElementById('iq-conversation'); if (c) c.innerHTML = '';
+    this.wsHistoryClose();
+    const i = document.getElementById('iq-composer-input'); if (i) i.focus();
+  },
+  wsHistoryClose() { const b = document.getElementById('iq-history'); if (b) b.style.display = 'none'; },
+  _chatWhen(iso) { try { const d = new Date(iso); return `${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`; } catch (_) { return ''; } },
+  async wsHistoryOpen() {
+    const box = document.getElementById('iq-history');
+    if (!box) return;
+    if (box.style.display !== 'none') { this.wsHistoryClose(); return; }
+    box.style.display = 'block';
+    const esc = s => this._escape(String(s == null ? '' : s));
+    box.innerHTML = `<div class="tdy-thinking" style="padding:0.6rem">Loading your conversations…</div>`;
+    try {
+      const j = await (await fetch('/api/assistant/conversations', { headers: this._authHeaders() })).json();
+      const list = (j && j.conversations) || [];
+      if (!list.length) { box.innerHTML = `<div class="tdy-histempty">No past conversations yet — they'll appear here, visible only to you.</div>`; return; }
+      box.innerHTML = list.map(c => `
+        <div class="tdy-histrow" data-id="${esc(c.id)}">
+          <div class="tdy-histmain" onclick="MemberApp.wsLoadConversation('${esc(c.id)}')">
+            <div class="tdy-histtitle">${esc(c.title || 'Conversation')}</div>
+            <div class="tdy-histmeta">${esc(this._chatWhen(c.updatedAt))} · ${c.messageCount || 0} messages</div>
+          </div>
+          <button class="tdy-histdel" title="Delete this conversation" onclick="MemberApp.wsDeleteConversation('${esc(c.id)}',event)">✕</button>
+        </div>`).join('');
+    } catch (e) { box.innerHTML = `<div class="tdy-histempty">Couldn't load history right now.</div>`; }
+  },
+  /* Open a past thread back into the conversation pane — keep talking and it continues. */
+  async wsLoadConversation(id) {
+    const thread = document.getElementById('iq-conversation');
+    if (!thread) return;
+    this.wsHistoryClose();
+    const esc = s => this._escape(String(s == null ? '' : s));
+    thread.innerHTML = `<div class="iq-msg iq-msg-iq">Loading…</div>`;
+    try {
+      const j = await (await fetch('/api/assistant/conversations/' + encodeURIComponent(id), { headers: this._authHeaders() })).json();
+      if (!j || !j.ok) throw new Error('load failed');
+      this._chatConvId = j.conversation.id;
+      thread.innerHTML = (j.messages || []).map(m => `<div class="iq-msg iq-msg-${m.role === 'user' ? 'user' : 'iq'}">${esc(m.text)}</div>`).join('');
+      thread.scrollTop = thread.scrollHeight;
+    } catch (e) { thread.innerHTML = `<div class="iq-msg iq-msg-iq">Couldn't open that conversation.</div>`; }
+  },
+  /* Erase a thread — the member's own, permanent until they do this. */
+  async wsDeleteConversation(id, ev) {
+    if (ev) ev.stopPropagation();
+    try {
+      await fetch('/api/assistant/conversations/' + encodeURIComponent(id), { method: 'DELETE', headers: this._authHeaders() });
+      if (this._chatConvId === id) this.wsNewChat();
+      this.wsHistoryClose();
+      this.wsHistoryOpen();   // reopen to show the refreshed list
+    } catch (_) {}
+  },
+
   /* Filename → the intake format the ONE governed door accepts. */
   _knowledgeFormat(name) {
     const ext = String(name || '').toLowerCase().split('.').pop();
@@ -2824,16 +2888,21 @@ const MemberApp = {
   async assistantTurn(text, targetEl) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort('timeout'), 30000);
+    // Thread the plain personal chat like the leader's (same runtime, same endpoints). A
+    // work-item or member-support turn stays a scoped one-off — it isn't mixed into the
+    // personal thread — so threading only applies when neither context is set.
+    const threaded = !this._wsSubjectMemberId && !this._wsWorkItemId;
     try {
       const r = await fetch('/api/assistant/turn', { method: 'POST', signal: ctrl.signal,
         headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
         // subjectMemberId requests LEADER-SUPPORT context — server-validated every turn; the chip
         // makes it explicit, and it is only ever set from an authorised profile entry point.
-        body: JSON.stringify({ text, lens: this._wsActiveLens || undefined, workItemId: this._wsWorkItemId || undefined, subjectMemberId: this._wsSubjectMemberId || undefined }) });
+        body: JSON.stringify({ text, conversationId: threaded ? (this._chatConvId || undefined) : undefined, lens: this._wsActiveLens || undefined, workItemId: this._wsWorkItemId || undefined, subjectMemberId: this._wsSubjectMemberId || undefined }) });
       clearTimeout(timer);
       if (r.status === 401) return { ok: false, reason: 'auth' };
       const j = await r.json();
       if (!j || !j.ok) return { ok: false, reason: 'server' };
+      if (threaded && j.conversationId) this._chatConvId = j.conversationId;
       this._lastTurnId = j.turnId;
       if (targetEl) targetEl.innerHTML = this._renderAssistant(j);
       return { ok: true, j };
