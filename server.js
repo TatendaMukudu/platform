@@ -10553,6 +10553,16 @@ function _persistCaptureCommand(code, userId, command) {
   } catch (_) { return null; }
 }
 
+/* Pull a rough topic out of an assessment request: "…improve at time management" → "time
+   management"; "assessment on defending" → "defending". Best-effort, never throws. */
+function _assessTopic(t) {
+  const s = String(t || '');
+  let m = s.match(/\b(?:improve|get better|better|work on|help me|good|strong(?:er)?)\s+(?:at|on|with|in)\s+([a-z][a-z0-9 \-']{2,40})/i);
+  if (!m) m = s.match(/\bassessment\s+(?:on|about|for|around|covering)\s+([a-z][a-z0-9 \-']{2,40})/i);
+  if (!m) m = s.match(/\bassess\s+(?:me\s+)?(?:on|about|for|with)\s+(?:my\s+)?([a-z][a-z0-9 \-']{2,40})/i);
+  return m ? m[1].trim().replace(/[.?!,;].*$/, '').trim() : '';
+}
+
 async function _assistantTurn(code, userId, text, lens, opts = {}) {
   lens = ASSISTANT_LENSES.includes(lens) ? lens : null;
   const workItemId = opts.workItemId ? String(opts.workItemId).slice(0, 80) : null;
@@ -10673,6 +10683,20 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
       purpose: 'personal_assistance', confidence: 'confirmed', limitations: [], cites: [], citations: [] };
   }
 
+  // ── ASSESSMENT REQUEST ───────────────────────────────────────────────────────
+  // "I'd like an assessment to improve at X" / "can we make the assessment together" is a
+  // REQUEST to build one — NOT a disclosure to file as a private note. Acknowledge it
+  // (topic-aware) and offer to start, instead of defaulting to a capture card.
+  const assessmentAsk = !(cls.command && cls.command.payload)
+    && (/\b(assessment|assess me|assess my|evaluate me|self.?assessment)\b/i.test(text) || /\bmake (?:an?|the) assessment\b/i.test(text));
+  const assessTopic = assessmentAsk ? _assessTopic(text) : '';
+  if (assessmentAsk && (!qa || qa.confidence === 'none')) {
+    qa = { answer: assessTopic
+      ? `Happy to build you a short assessment on ${assessTopic} — we'll shape it together. Want to start? I'll ask a few focused questions and turn your answers into something you can act on.`
+      : `Happy to build you a short personal assessment — want to start? I'll ask a few focused questions and we'll shape it together.`,
+      purpose: 'personal_assistance', confidence: 'confirmed', limitations: [], cites: [], citations: [], assessment: { topic: assessTopic } };
+  }
+
   // OPERATING CONTEXT — if the message DESCRIBES how the org operates ("we play
   // Saturday at 3", "the head coach owns the game plan"), extract PROPOSED structured
   // records and offer a confirmation preview. It is NEVER persisted here — the user
@@ -10709,6 +10733,14 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // note" card makes no sense, so drop it. Planning/mixed keep their capture card (e.g. "draft
   // a plan for the launch" is legitimately a saveable plan item), and check-ins are untouched.
   else if (reasoningWanted && qa && qa.reasoning && reg0 === 'world_knowledge') proposals = proposals.filter(p => p.actionType !== 'capture');
+  // An assessment REQUEST offers to start an assessment — not a "save as note" card.
+  if (assessmentAsk) {
+    proposals = proposals.filter(p => !['capture', 'checkin_log'].includes(p.actionType));
+    proposals.unshift({ id: 'prop_' + generateId(), actionType: 'assessment_start', capability: 'assessment',
+      label: assessTopic ? `Start an assessment on ${assessTopic}` : 'Start a personal assessment',
+      payload: { topic: assessTopic }, visibility: 'only_me', why: 'you asked to build an assessment',
+      requiredApproval: true, policyResult: { effect: 'allow', reason: 'personal assessment' }, evidenceBasis: [] });
+  }
 
   // ── GROUNDED ANSWER-AND-CONFIRM ──────────────────────────────────────────────
   // If there is an ACTIVE org question and this turn reads as an ANSWER (not a new
