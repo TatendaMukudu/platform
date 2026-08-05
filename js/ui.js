@@ -94,11 +94,11 @@ function memberCardHTML(m, metrics){
     <div class="member-card-actions" onclick="event.stopPropagation()">
       ${isPending ? `
         <button class="mca-btn" title="Copy invite link"
-          onclick="copyMemberInviteLink('${m.userId}','${m.email}')">🔗 Copy Invite</button>
+          onclick="copyMemberInviteLink('${m.userId}','${m.email}')">Copy Invite</button>
         <button class="mca-btn" title="Generate new invite link"
           onclick="regenerateMemberInvite('${m.userId}','${m.email}')">↺ New Invite</button>` : ''}
       <button class="mca-btn mca-btn-danger" title="Remove person"
-        onclick="openRemovePersonModal('${m.userId}')">✕ Remove</button>
+        onclick="openRemovePersonModal('${m.userId}')">Remove</button>
     </div>` : '';
 
   return `
@@ -152,7 +152,7 @@ function wellnessMeterHTML(score){
 function devPlanHTML(plan){
   return plan.map((item, i) => `
     <div class="dev-plan-item">
-      <div class="dev-checkbox ${item.done?'checked':''}" onclick="toggleDevPlan(${i})">${item.done?'✓':''}</div>
+      <div class="dev-checkbox ${item.done?'checked':''}" onclick="toggleDevPlan(${i})">${item.done?'<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>':''}</div>
       <div style="flex:1;font-size:0.85rem;${item.done?'opacity:0.5;text-decoration:line-through':''}">${item.text}</div>
     </div>`).join('');
 }

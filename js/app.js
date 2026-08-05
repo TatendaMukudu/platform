@@ -2414,7 +2414,7 @@ async function loadPolicies() {
         <span class="pill" style="background:${c}22;color:${c};font-size:0.66rem;padding:1px 7px;border-radius:10px;white-space:nowrap">${esc(_POLICY_LABEL[p.effect]||p.effect)}</span>
         <span style="flex:1;min-width:0"><b>${esc(p.capability)}${p.verb&&p.verb!=='*'?'.'+esc(p.verb):''}</b> <span style="color:var(--text-muted)">${esc(p.stage||'')}${cond?' · '+cond:''}</span>${p.note?`<div style="font-size:0.72rem;color:var(--text-muted)">${esc(p.note)}</div>`:''}</span>
         <button class="btn-ghost btn-sm" style="font-size:0.72rem" onclick="togglePolicy('${p.id}')">${p.enabled===false?'enable':'disable'}</button>
-        ${p.builtin?'':`<button class="btn-ghost btn-sm" style="font-size:0.72rem;color:var(--danger)" onclick="deletePolicy('${p.id}')">✕</button>`}
+        ${p.builtin?'':`<button class="btn-ghost btn-sm" style="font-size:0.72rem;color:var(--danger)" onclick="deletePolicy('${p.id}')">×</button>`}
       </div>`;
     }).join('') + `
       <details style="margin-top:0.6rem"><summary style="cursor:pointer;font-size:0.82rem;color:var(--accent)">＋ Add a rule</summary>
@@ -2498,8 +2498,8 @@ async function mappingReview(id) {
     const samples = d.preview?.samples || [];
     const drift = d.drift || {};
     const driftMsg = drift.drifted
-      ? `<div style="color:var(--danger);font-size:0.76rem;margin:0.3rem 0">⚠ Schema changed: ${[...(drift.missing||[]).map(f=>`field "${esc(f)}" missing`), ...(drift.typeChanged||[]).map(t=>`"${esc(t.field)}" no longer numeric`), ...(drift.identityMissing?['identity field missing']:[])].join('; ')}. Ingestion is paused until re-reviewed.</div>`
-      : `<div style="color:var(--success);font-size:0.76rem;margin:0.3rem 0">✓ Schema matches — no drift.</div>`;
+      ? `<div style="color:var(--danger);font-size:0.76rem;margin:0.3rem 0">Schema changed: ${[...(drift.missing||[]).map(f=>`field "${esc(f)}" missing`), ...(drift.typeChanged||[]).map(t=>`"${esc(t.field)}" no longer numeric`), ...(drift.identityMissing?['identity field missing']:[])].join('; ')}. Ingestion is paused until re-reviewed.</div>`
+      : `<div style="color:var(--success);font-size:0.76rem;margin:0.3rem 0">Schema matches — no drift.</div>`;
     panel.innerHTML = driftMsg + samples.slice(0,3).map(s => `
       <div style="border-top:1px solid var(--border);padding:0.4rem 0;font-size:0.74rem">
         <div style="color:var(--text-muted)">in: <code>${esc(JSON.stringify(s.input)).slice(0,200)}</code></div>
@@ -2661,7 +2661,7 @@ async function loadConnections() {
         <button class="btn-ghost btn-sm" style="font-size:0.76rem" onclick="connRuns('${c.id}')">History</button>
         ${c.failures ? `<button class="btn-ghost btn-sm" style="font-size:0.76rem;color:var(--danger)" onclick="connReplay('${c.id}')">Replay failed</button>` : ''}
         <button class="btn-ghost btn-sm" title="Reset cursor" style="font-size:0.76rem;color:var(--text-muted)" onclick="connControl('${c.id}','cursor/reset')">Reset cursor</button>
-        <button class="btn-ghost" title="Remove" onclick="deleteConnection('${c.id}')" style="color:var(--text-muted);margin-left:auto">✕</button>
+        <button class="btn-ghost" title="Remove" onclick="deleteConnection('${c.id}')" style="color:var(--text-muted);margin-left:auto">×</button>
       </div>
       <div id="conn-runs-${c.id}" style="display:none;margin-top:0.5rem"></div>
     </div>`; }).join('');
@@ -5604,11 +5604,11 @@ async function _ocLoadRecords() {
     if (!list.length) { el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Nothing yet. Describe an event or a responsibility above — even one is enough for IntelliQ to spot when preparation is missing.</div>`; return; }
     const label = r => {
       const f = r.fields || {};
-      if (r.type === 'event') return `📅 ${_escAdvisor(f.title || f.type || 'Event')}${f.startAt ? ' · ' + new Date(f.startAt).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : ''}`;
-      if (r.type === 'responsibility') return `👤 ${_escAdvisor(f.role || f.subject || 'Owner')} owns ${_escAdvisor((f.claimTypes || []).join(', ').replace(/_/g, ' '))}`;
-      if (r.type === 'requirement') return `✅ ${_escAdvisor((f.claimType || '').replace(/_/g, ' '))} required before the event`;
-      if (r.type === 'rhythm') return `🔁 ${_escAdvisor(f.process || 'Recurring')}${f.expectedOutput ? ' → ' + _escAdvisor(f.expectedOutput) : ''}`;
-      if (r.type === 'dependency') return `🔗 ${_escAdvisor((f.upstream || '').replace(/_/g, ' '))} before ${_escAdvisor((f.downstream || '').replace(/_/g, ' '))}`;
+      if (r.type === 'event') return `${_escAdvisor(f.title || f.type || 'Event')}${f.startAt ? ' · ' + new Date(f.startAt).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : ''}`;
+      if (r.type === 'responsibility') return `${_escAdvisor(f.role || f.subject || 'Owner')} owns ${_escAdvisor((f.claimTypes || []).join(', ').replace(/_/g, ' '))}`;
+      if (r.type === 'requirement') return `${_escAdvisor((f.claimType || '').replace(/_/g, ' '))} required before the event`;
+      if (r.type === 'rhythm') return `${_escAdvisor(f.process || 'Recurring')}${f.expectedOutput ? ' → ' + _escAdvisor(f.expectedOutput) : ''}`;
+      if (r.type === 'dependency') return `${_escAdvisor((f.upstream || '').replace(/_/g, ' '))} before ${_escAdvisor((f.downstream || '').replace(/_/g, ' '))}`;
       return _escAdvisor(r.type);
     };
     el.innerHTML = list.map(r => `
@@ -5632,7 +5632,7 @@ async function ocPreview(btn) {
     _ocProposals = d.proposals;
     const lines = (d.preview?.lines || []).map(l => `<li>${_escAdvisor(l)}</li>`).join('');
     const effects = (d.preview?.effects || []).map(e => `<div style="font-size:0.76rem;color:var(--text-secondary)">• ${_escAdvisor(e)}</div>`).join('');
-    const warns = (d.warnings || []).map(w => `<div style="font-size:0.74rem;color:var(--warning)">⚠ ${_escAdvisor(w.message)}</div>`).join('');
+    const warns = (d.warnings || []).map(w => `<div style="font-size:0.74rem;color:var(--warning)">${_escAdvisor(w.message)}</div>`).join('');
     if (box) box.innerHTML = `
       <div class="card" style="background:var(--surface-2);border-color:var(--accent)">
         <div class="card-label" style="margin-bottom:0.4rem">Save these operating rules?</div>
@@ -5658,7 +5658,7 @@ async function ocConfirm(btn) {
     if (!d.ok || !(d.created || []).length) { if (box) box.innerHTML = `<div style="font-size:0.82rem;color:var(--danger)">Couldn’t save${(d.rejected || []).length ? ' — ' + _escAdvisor((d.rejected[0].errors || [{}])[0].message || 'validation failed') : ''}.</div>`; return; }
     _ocProposals = null;
     const eff = (d.effects || []).map(e => `<div style="font-size:0.76rem;color:var(--text-secondary)">• ${_escAdvisor(e)}</div>`).join('');
-    if (box) box.innerHTML = `<div style="font-size:0.84rem;color:var(--success)">✓ Saved ${d.created.length} record${d.created.length !== 1 ? 's' : ''}. What IntelliQ can now do:</div>${eff}`;
+    if (box) box.innerHTML = `<div style="font-size:0.84rem;color:var(--success)">Saved ${d.created.length} record${d.created.length !== 1 ? 's' : ''}. What IntelliQ can now do:</div>${eff}`;
     const ta = document.getElementById('oc-text'); if (ta) ta.value = '';
     _ocLoadRecords();
   } catch (e) { showToast('Could not save', 'error'); }
@@ -6121,7 +6121,7 @@ async function todayReasonRespond(beliefId, response, btn) {
         method: 'POST', headers: Auth._headers(), body: JSON.stringify({ response }),
       }).then(r => r.json()).catch(() => ({ ok: false }))));
     if (!results.some(j => j && j.ok)) throw new Error('failed');
-    if (row) row.innerHTML = `<div class="tdy-settled"><span class="tk">${response === 'acted' ? '✓' : '·'}</span>${response === 'acted' ? "On it — I'll keep watching." : "Set aside — I won't raise this again for a while."}</div>`;
+    if (row) row.innerHTML = `<div class="tdy-settled">${response === 'acted' ? "On it — I'll keep watching." : "Set aside — I won't raise this again for a while."}</div>`;
   } catch (e) {
     if (btns) btns.forEach(b => { b.disabled = false; });
     if (typeof showToast === 'function') showToast('Could not save that right now.', 'error');
@@ -6234,7 +6234,7 @@ async function todayHistoryOpen() {
           <div class="tdy-histtitle">${_escAdvisor(c.title || 'Conversation')}</div>
           <div class="tdy-histmeta">${_escAdvisor(todayWhen(c.updatedAt))} · ${c.messageCount || 0} messages</div>
         </div>
-        <button class="tdy-histdel" title="Delete this conversation" onclick="todayDeleteConversation('${_escAdvisor(c.id)}',event)">✕</button>
+        <button class="tdy-histdel" title="Delete this conversation" onclick="todayDeleteConversation('${_escAdvisor(c.id)}',event)">×</button>
       </div>`).join('');
   } catch (e) { box.innerHTML = `<div class="tdy-histempty">Couldn't load history right now.</div>`; }
 }
@@ -6329,12 +6329,11 @@ function libRender() {
   let items = L.items.slice();
   if (L.view === 'shared') items = items.filter(x => !x.mine);
   else { items = items.filter(x => x.mine); if (L.folderId) items = items.filter(x => x.folderId === L.folderId); }
-  const icon = t => t === 'chat' ? '💬' : t === 'artifact' ? '📄' : '📝';
   if (L.openId) { main.innerHTML = libDetail(L.items.find(x => x.id === L.openId)); return; }
   main.innerHTML = items.length ? items.map(it => `
     <div class="lib-item" onclick="libOpen('${esc(it.id)}')">
       <div class="lib-item-main">
-        <div class="lib-item-title">${icon(it.type)} ${esc(it.title)}</div>
+        <div class="lib-item-title">${esc(it.title)}</div>
         <div class="lib-item-meta">${esc(todayWhen(it.updatedAt))}${it.mine?'':' · shared with you'}</div>
       </div>
       <span class="lib-vis ${it.visibility==='shared'?'vis-shared':'vis-private'}">${it.visibility==='shared'?'Shared':'Private'}</span>
@@ -6393,7 +6392,7 @@ function todayRenderProposals(j) {
         <button class="btn-ghost btn-sm" onclick="todayTurnDismiss('${esc(p.id)}')">Dismiss</button>
       </div></div>`;
   }).join('');
-  const note = j.saved ? `<div class="tdy-note">✓ Saved — privately, just for you.</div>`
+  const note = j.saved ? `<div class="tdy-note">Saved — privately, just for you.</div>`
     : (j.capturePrompt ? `<div class="tdy-note">${esc(j.capturePrompt.message)}</div>` : '');
   return `${note}${propHtml}`;
 }
@@ -6406,7 +6405,7 @@ async function todayTurnConfirm(turnId, proposalId, btn) {
     const r = await fetch('/api/assistant/turn/' + encodeURIComponent(turnId) + '/confirm', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ proposalId }) });
     const d = await r.json();
     if (!d.ok) throw new Error('confirm failed');
-    if (card) card.innerHTML = `<div class="tdy-settled"><span class="tk">✓</span>${_escAdvisor(d.note || 'Done.')}</div>`;
+    if (card) card.innerHTML = `<div class="tdy-settled">${_escAdvisor(d.note || 'Done.')}</div>`;
   } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; } if (typeof showToast === 'function') showToast('Could not confirm right now.', 'error'); }
 }
 /* Dismiss a proposal — nothing was written, so this just clears it from the flow. */
@@ -6572,7 +6571,7 @@ async function todayContextConfirm() {
     const d = await r.json();
     if (!d.ok || !(d.created || []).length) throw new Error('none saved');
     _todayCtxProposals = null;
-    out.innerHTML = `<div style="font-size:0.85rem;color:var(--text-primary)">✓ Got it — saved, and I'll reason from it now.</div>
+    out.innerHTML = `<div style="font-size:0.85rem;color:var(--text-primary)">Got it — saved, and I'll reason from it now.</div>
       <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
         <button class="btn btn-accent btn-sm" onclick="todayContextStart()">Tell me something else</button>
         <button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="todayLoadFeed()">Done for now</button>
@@ -6594,7 +6593,7 @@ async function todayPattern(fingerprint, confirm, btn) {
     const j = await r.json();
     if (!j.ok) throw new Error('failed');
     if (row) {
-      row.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.2rem 0">${confirm ? '✓ Added to your playbook.' : 'Set aside — it can come back if it keeps recurring.'}</div>`;
+      row.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.2rem 0">${confirm ? 'Added to your playbook.' : 'Set aside — it can come back if it keeps recurring.'}</div>`;
     }
   } catch (e) {
     if (btns) btns.forEach(b => { b.disabled = false; });
