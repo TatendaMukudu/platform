@@ -19,12 +19,6 @@ const Auth = {
     coach:      'Coach / Staff',
     member:     'Member',
   },
-  ROLE_ICONS: {
-    superadmin: '🔑',
-    admin:      '📋',
-    coach:      '👟',
-    member:     '🔵',
-  },
   ROLE_ORDER: { superadmin:1, admin:2, coach:3, member:4 },
 
   /* ── Boot ──────────────────────────────────────────────── */

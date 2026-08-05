@@ -81,7 +81,6 @@ const OrgTree = {
     if (!Object.keys(this._nodes).length) {
       el.innerHTML = `
         <div style="text-align:center;padding:3rem 2rem;color:var(--text-muted)">
-          <div style="font-size:2.5rem;margin-bottom:0.6rem">🏗️</div>
           <div style="font-size:0.92rem;font-weight:700;color:var(--text-primary);margin-bottom:0.4rem">No structure yet</div>
           <div style="font-size:0.82rem;max-width:340px;margin:0 auto;line-height:1.6">
             Add your first group, department, team, or unit — then nest more nodes inside it.
@@ -122,7 +121,7 @@ const OrgTree = {
     // Leader pills
     const leaderPills = (node.leaderIds || []).slice(0, 3).map(uid => {
       const u = users.find(m => m.userId === uid || m.id === uid);
-      return u ? `<span style="font-size:0.7rem;background:rgba(124,90,245,0.15);border:1px solid rgba(124,90,245,0.35);color:var(--accent);border-radius:20px;padding:2px 7px">★ ${this._escHtml(u.name)}</span>` : '';
+      return u ? `<span style="font-size:0.7rem;background:rgba(124,90,245,0.15);border:1px solid rgba(124,90,245,0.35);color:var(--accent);border-radius:20px;padding:2px 7px">${this._escHtml(u.name)}</span>` : '';
     }).filter(Boolean).join('');
 
     // Member pills (non-leaders)
@@ -176,7 +175,7 @@ const OrgTree = {
                 <button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="OrgTree.openAddSibling('${node.nodeId}')">+ Sibling</button>
                 <button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="OrgTree.openManageNode('${node.nodeId}')">⋯ Manage</button>
                 <button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="OrgTree.openMoveNode('${node.nodeId}')">↕ Move</button>` : ''}
-              <button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="OrgTree.openAssignPeople('${node.nodeId}')">👥 Assign People</button>
+              <button class="btn btn-outline btn-sm" style="padding:2px 7px;font-size:0.72rem" onclick="OrgTree.openAssignPeople('${node.nodeId}')">Assign People</button>
             </div>` : ''}
         </div>
         ${hasKids && expanded ? `
@@ -307,7 +306,7 @@ const OrgTree = {
       this._nodes[nodeId].description = data.node.description || '';
       _closeInlineModal();
       this.render('org-tree-container');
-      showToast('Saved ✓', 'success');
+      showToast('Saved', 'success');
     } catch(e) { showToast(e.message, 'warning'); }
   },
 
@@ -379,7 +378,7 @@ const OrgTree = {
       await this.load();
       if (newParentId) this._expanded.add(newParentId);
       this.render('org-tree-container');
-      showToast(`"${node.name}" moved ✓`, 'success');
+      showToast(`"${node.name}" moved`, 'success');
     } catch(e) { showToast(e.message, 'warning'); }
   },
 
@@ -461,7 +460,7 @@ const OrgTree = {
       this._nodes[nodeId].leaderIds = data.node.leaderIds;
       _closeInlineModal();
       this.render('org-tree-container');
-      showToast('Assignments saved ✓', 'success');
+      showToast('Assignments saved', 'success');
     } catch(e) { showToast(e.message, 'warning'); }
   },
 };

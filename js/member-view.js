@@ -427,7 +427,7 @@ const MemberApp = {
         ? list + (notes.length > 6 ? `<button class="btn-ghost" style="font-size:0.74rem" onclick="navigate('notes')">See all ${notes.length}</button>` : '')
         : `<div style="font-size:0.82rem;color:var(--text-muted)">No notes yet — keep a thought and IntelliQ remembers it.</div>`}
       <div style="margin-top:0.7rem;border-top:1px solid var(--border);padding-top:0.6rem">
-        <button class="btn-ghost" style="font-size:0.74rem" onclick="navigate('data-sources')">📚 Manage what IntelliQ can use →</button>
+        <button class="btn-ghost" style="font-size:0.74rem" onclick="navigate('data-sources')">Manage what IntelliQ can use →</button>
       </div>`;
   },
 
@@ -1438,7 +1438,7 @@ const MemberApp = {
       const i = document.getElementById('iq-composer-input');
       if (i) { i.value = `Help me with my assigned work: “${title || 'this item'}”.`; i.focus(); }
       const chip = document.getElementById('iq-workctx');
-      if (chip) chip.innerHTML = workItemId ? `<span class="iq-workctx-chip">Assigned work in context: ${this._escape(title || workItemId)} <button onclick="MemberApp.clearWorkCtx()" title="Clear">✕</button></span>` : '';
+      if (chip) chip.innerHTML = workItemId ? `<span class="iq-workctx-chip">Assigned work in context: ${this._escape(title || workItemId)} <button onclick="MemberApp.clearWorkCtx()" title="Clear">×</button></span>` : '';
     }, 60);
   },
   clearWorkCtx() { this._wsWorkItemId = null; const chip = document.getElementById('iq-workctx'); if (chip) chip.innerHTML = ''; },
@@ -2552,7 +2552,7 @@ const MemberApp = {
       <div class="iq-composer-wrap">
         <div class="tdy-chathead iq-chathead">
           <button class="tdy-headbtn" type="button" onclick="MemberApp.wsNewChat()" title="Start a new conversation">＋ New</button>
-          <button class="tdy-headbtn" type="button" onclick="MemberApp.wsHistoryOpen()" title="Your past conversations">🕘 History</button>
+          <button class="tdy-headbtn" type="button" onclick="MemberApp.wsHistoryOpen()" title="Your past conversations">History</button>
         </div>
         <div id="iq-history" class="tdy-history" style="display:none"></div>
         <div class="iq-composer" id="iq-composer">
@@ -2803,7 +2803,7 @@ const MemberApp = {
             <div class="tdy-histtitle">${esc(c.title || 'Conversation')}</div>
             <div class="tdy-histmeta">${esc(this._chatWhen(c.updatedAt))} · ${c.messageCount || 0} messages</div>
           </div>
-          <button class="tdy-histdel" title="Delete this conversation" onclick="MemberApp.wsDeleteConversation('${esc(c.id)}',event)">✕</button>
+          <button class="tdy-histdel" title="Delete this conversation" onclick="MemberApp.wsDeleteConversation('${esc(c.id)}',event)">×</button>
         </div>`).join('');
     } catch (e) { box.innerHTML = `<div class="tdy-histempty">Couldn't load history right now.</div>`; }
   },
@@ -2853,7 +2853,7 @@ const MemberApp = {
     if (!file) return;
     const thread = document.getElementById('iq-conversation');
     const esc = s => this._escape(String(s == null ? '' : s));
-    if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">📎 ${esc(file.name)}</div>`);
+    if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">${esc(file.name)}</div>`);
     if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-iq iq-pending" id="iq-attach-pending" role="status">Reading ${esc(file.name)}…</div>`);
     if (thread) thread.scrollTop = thread.scrollHeight;
     fileInput.value = '';
@@ -2943,7 +2943,7 @@ const MemberApp = {
                 : s.authority === 'shared_unverified' ? 'shared with the team (your account — not yet verified)'
                 : 'privately, just for you';
       savedHtml = `<div class="iq-saved" style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-secondary);border-left:2px solid var(--success);padding-left:0.6rem">
-        ✓ Saved ${esc(how)} · source “${esc(s.source)}”. I can cite it now.</div>`;
+        Saved ${esc(how)} · source “${esc(s.source)}”. I can cite it now.</div>`;
     } else if (j.capturePrompt) {
       savedHtml = `<div class="iq-saved" style="margin-top:0.5rem;font-size:0.82rem;color:var(--text-secondary)">${esc(j.capturePrompt.message)}</div>`;
     }
@@ -3084,14 +3084,14 @@ const MemberApp = {
         // The ONE post-confirm outcome (acknowledgement + what IntelliQ noticed) returns into the thread.
         const o = j.outcome || {};
         const noticed = (o.noticed && o.noticed.length) ? `<div class="iq-checkin-noticed">${o.noticed.map(t => `<div>• ${this._escape(t)}</div>`).join('')}</div>` : '';
-        cardEl.innerHTML = `<div class="iq-confirmed">✓ Logged as today's check-in — kept private.</div>` +
+        cardEl.innerHTML = `<div class="iq-confirmed">Logged as today's check-in — kept private.</div>` +
           (o.acknowledgement ? `<div class="iq-checkin-ack">${this._escape(o.acknowledgement)}</div>${noticed}` : '');
       } else if (j.confirmed === 'submit_work') {
         this._wsWorkItemId = null;  // clear the focused work context after submitting
         const chip = document.getElementById('iq-workctx'); if (chip) chip.innerHTML = '';
-        cardEl.innerHTML = `<div class="iq-confirmed">✓ Submitted “${this._escape(j.assignment?.title || 'your work')}” for review${j.iteration ? ` (submission #${j.iteration})` : ''}.</div>`;
+        cardEl.innerHTML = `<div class="iq-confirmed">Submitted “${this._escape(j.assignment?.title || 'your work')}” for review${j.iteration ? ` (submission #${j.iteration})` : ''}.</div>`;
       } else {
-        cardEl.innerHTML = `<div class="iq-confirmed">✓ ${this._escape(j.confirmed === 'calendar_draft' ? 'Draft created — not scheduled' : (j.confirmed || 'done'))}</div>`;
+        cardEl.innerHTML = `<div class="iq-confirmed">${this._escape(j.confirmed === 'calendar_draft' ? 'Draft created — not scheduled' : (j.confirmed || 'done'))}</div>`;
       }
     }
     return j;

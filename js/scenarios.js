@@ -35,7 +35,7 @@ const ScenarioEngine = {
         </div>
         <div style="display:flex;align-items:center;gap:0.8rem">
           <span id="sr-exchange-count" style="font-size:0.72rem;color:var(--text-muted)">Starting…</span>
-          <button class="btn-icon" onclick="closeModal('scenario-runner-modal')">✕</button>
+          <button class="btn-icon" onclick="closeModal('scenario-runner-modal')">×</button>
         </div>
       </div>
 
@@ -191,7 +191,7 @@ const ScenarioEngine = {
     document.getElementById('scenario-runner-content').innerHTML = `
       <div class="sr-header" style="flex-shrink:0">
         <div style="font-size:1rem;font-weight:700;color:var(--text-primary)">Scenario Complete</div>
-        <button class="btn-icon" onclick="closeModal('scenario-runner-modal')">✕</button>
+        <button class="btn-icon" onclick="closeModal('scenario-runner-modal')">×</button>
       </div>
 
       <div class="sr-body" style="padding:1.2rem">
@@ -220,7 +220,7 @@ const ScenarioEngine = {
         ${score.strengths?.length ? `
           <div style="margin-bottom:0.9rem">
             <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.5rem">Strengths Identified</div>
-            ${score.strengths.map(s => `<div style="font-size:0.82rem;color:var(--success);padding:0.35rem 0;border-bottom:1px solid var(--border)">✓ ${s}</div>`).join('')}
+            ${score.strengths.map(s => `<div style="font-size:0.82rem;color:var(--success);padding:0.35rem 0;border-bottom:1px solid var(--border)">${s}</div>`).join('')}
           </div>` : ''}
 
         ${score.development?.length ? `
@@ -234,7 +234,7 @@ const ScenarioEngine = {
         <button class="btn btn-outline" onclick="closeModal('scenario-runner-modal')">Close</button>
         <div style="display:flex;gap:0.5rem">
           <button class="btn btn-outline" onclick="closeModal('scenario-runner-modal');showProfile(${this.memberId})">View Profile</button>
-          <button class="btn btn-accent" id="sr-reflect-btn">🤖 Start Reflection →</button>
+          <button class="btn btn-accent" id="sr-reflect-btn">Start Reflection →</button>
         </div>
       </div>`;
 
@@ -274,8 +274,8 @@ const ScenarioEngine = {
       panel.style.cssText = 'margin-top:1rem;padding-top:1rem;border-top:2px solid rgba(124,90,245,0.3)';
       panel.innerHTML = `
         <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.9rem">
-          <span style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent)">🔒 Leader Debrief — Private</span>
-          ${debrief.escalate ? `<span style="font-size:0.7rem;background:rgba(247,79,122,0.15);color:var(--danger);border:1px solid rgba(247,79,122,0.3);border-radius:4px;padding:2px 8px">⚠ Review Recommended</span>` : ''}
+          <span style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent)">Leader Debrief — Private</span>
+          ${debrief.escalate ? `<span style="font-size:0.7rem;background:rgba(247,79,122,0.15);color:var(--danger);border:1px solid rgba(247,79,122,0.3);border-radius:4px;padding:2px 8px">Review Recommended</span>` : ''}
         </div>
 
         <div style="background:rgba(124,90,245,0.06);border:1px solid rgba(124,90,245,0.2);border-radius:8px;padding:0.9rem;margin-bottom:0.8rem">
@@ -286,7 +286,7 @@ const ScenarioEngine = {
         ${debrief.watchFor?.length ? `
           <div style="margin-bottom:0.8rem">
             <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.5rem">Watch For</div>
-            ${debrief.watchFor.map(w => `<div style="font-size:0.8rem;color:var(--warning);padding:0.3rem 0;border-bottom:1px solid var(--border)">👁 ${w}</div>`).join('')}
+            ${debrief.watchFor.map(w => `<div style="font-size:0.8rem;color:var(--warning);padding:0.3rem 0;border-bottom:1px solid var(--border)">${w}</div>`).join('')}
           </div>` : ''}
 
         ${debrief.coachingActions?.length ? `
@@ -357,7 +357,7 @@ const ScenarioEngine = {
     member.wellnessScore = Math.max(5, (member.wellnessScore || 50) - 15);
     AppState.alerts.unshift({
       type:     'danger',
-      title:    '⚠ Mandated Reporter Alert',
+      title:    'Mandated Reporter Alert',
       detail:   `${member.name} used concerning language during an AI scenario session.`,
       time:     'Just now',
       unread:   true,

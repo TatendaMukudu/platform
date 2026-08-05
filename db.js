@@ -7,9 +7,9 @@
 
    Startup output (all required, no silent failures):
      [db] Connecting to Neon Postgres...
-     [db] Connected ✓ (database: neondb)
-     [db] Schema ready ✓
-     [db] Store loaded ✓  orgs:2  users:15  metrics:8
+     [db] Connected (database: neondb)
+     [db] Schema ready
+     [db] Store loaded  orgs:2  users:15  metrics:8
 
    FATAL if DATABASE_URL is not set or connection fails at boot.
    There is NO silent fallback — without Postgres the platform
@@ -78,10 +78,10 @@ async function init() {
   try {
     const dbRes = await client.query('SELECT current_database()');
     const dbName = dbRes.rows[0]?.current_database || '(unknown)';
-    console.log(`[db] Connected ✓ (database: ${dbName})`);
+    console.log(`[db] Connected (database: ${dbName})`);
 
     await client.query(SCHEMA_SQL);
-    console.log('[db] Schema ready ✓');
+    console.log('[db] Schema ready');
   } catch (err) {
     console.error('[db] FATAL: Schema initialisation failed:', err.message);
     process.exit(1);
@@ -116,7 +116,7 @@ async function loadMain() {
     const metrics = Object.values(data.orgMetrics || {})
                       .reduce((n, m) => n + (Array.isArray(m) ? m.length : 0), 0);
 
-    console.log(`[db] Store loaded ✓  orgs:${orgs}  users:${users}  metrics:${metrics}`);
+    console.log(`[db] Store loaded  orgs:${orgs}  users:${users}  metrics:${metrics}`);
     return data;
 
   } catch (err) {
@@ -173,7 +173,7 @@ async function initVectors(dim = 1536) {
       );
     } catch (_) { /* index is best-effort */ }
     _vectorsEnabled = true;
-    console.log('[db] pgvector ready ✓ — cross-member similarity enabled');
+    console.log('[db] pgvector ready — cross-member similarity enabled');
   } catch (err) {
     _vectorsEnabled = false;
     console.log('[db] pgvector not available — similarity uses rule-based fallback (' + err.message + ')');

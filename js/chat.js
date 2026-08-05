@@ -154,7 +154,7 @@ const ChatEngine = {
 
     AppState.alerts.unshift({
       type:     'danger',
-      title:    '⚠ Mandated Reporter Alert',
+      title:    'Mandated Reporter Alert',
       detail:   `${member.name} used language during an AI check-in that requires immediate follow-up by a trusted adult or counsellor.`,
       time:     'Just now',
       unread:   true,

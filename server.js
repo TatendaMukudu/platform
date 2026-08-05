@@ -10117,7 +10117,7 @@ function _captureError(err, meta = {}) {
   let entry;
   try { entry = errorlog.record(_errorBuffer, err, meta); } catch (_) { return; }
   const hook = process.env.IQ_ERROR_WEBHOOK;
-  if (hook) { try { fetch(hook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: `⚠️ ${entry.method} ${entry.route} → ${entry.status}: ${entry.message}` }) }).catch(() => {}); } catch (_) {} }
+  if (hook) { try { fetch(hook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: `[error] ${entry.method} ${entry.route} → ${entry.status}: ${entry.message}` }) }).catch(() => {}); } catch (_) {} }
 }
 // An unhandled promise rejection is logged + captured, never crashes the dyno.
 process.on('unhandledRejection', (reason) => { console.warn('[unhandledRejection]', reason && reason.message || reason); _captureError(reason, { route: 'unhandledRejection', status: 0 }); });
@@ -11370,7 +11370,7 @@ app.post('/api/oauth/:provider/start', requirePermission('manage_settings'), (re
    they approve. We exchange the code for tokens and create a polled connection. */
 app.get('/api/oauth/callback', async (req, res) => {
   const { code: authCode, state, error } = req.query;
-  const page = (msg, ok) => `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:system-ui;background:#131019;color:#ece9f4;display:grid;place-items:center;height:100vh;margin:0;text-align:center;padding:1.5rem"><div><div style="font-size:2rem;margin-bottom:0.5rem">${ok ? '✓' : '—'}</div><div style="font-size:1.05rem;max-width:30ch">${msg}</div><div style="color:#837c94;font-size:0.85rem;margin-top:1rem">You can close this window.</div></div></body>`;
+  const page = (msg, ok) => `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="font-family:system-ui;background:#131019;color:#ece9f4;display:grid;place-items:center;height:100vh;margin:0;text-align:center;padding:1.5rem"><div><div style="font-size:2rem;margin-bottom:0.5rem">${ok ? '<svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>' : '—'}</div><div style="font-size:1.05rem;max-width:30ch">${msg}</div><div style="color:#837c94;font-size:0.85rem;margin-top:1rem">You can close this window.</div></div></body>`;
   if (error) return res.status(400).send(page('Connection was declined.', false));
   const pend = state && oauthPending[state];
   if (!pend || !authCode) return res.status(400).send(page('This connection link has expired — start again from Settings.', false));
@@ -15337,7 +15337,7 @@ if (require.main === module) (async () => {
         const jsonData = JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'));
         await db.saveMain(jsonData);
         storeData = jsonData;
-        console.log('[db] Migration complete ✓  store.json data is now in Postgres.');
+        console.log('[db] Migration complete — store.json data is now in Postgres.');
         console.log('[db] You can delete data/store.json — it will no longer be used.');
       } catch (e) {
         console.warn('[db] Migration skipped (store.json unreadable):', e.message);
@@ -15369,7 +15369,7 @@ if (require.main === module) (async () => {
           _rebuildEmailIndex();
           scheduleSave();
           const n = Object.keys(demo.orgUsers[code] || {}).length;
-          console.log(`[seed] ✓ ${flag}=${v} — ready (${n} users in ${code}). ${creds}`);
+          console.log(`[seed] ${flag}=${v} — ready (${n} users in ${code}). ${creds}`);
         } else {
           console.log(`[seed] ${flag}=1 but ${code} already present — skipping (use ${flag}=force to re-seed).`);
         }
@@ -15389,7 +15389,7 @@ if (require.main === module) (async () => {
           _loadAllStores(store);        // additive merge into the in-memory stores
           _rebuildEmailIndex();
           scheduleSave();
-          console.log(`[seed] ✓ SEED_CLUB — ${summary.orgName} ready (${summary.users} users, org "${CLUB_CODE}"). Log in (password demo1234): director@trafford.fc · coach@trafford.fc · player@trafford.fc`);
+          console.log(`[seed] SEED_CLUB — ${summary.orgName} ready (${summary.users} users, org "${CLUB_CODE}"). Log in (password demo1234): director@trafford.fc · coach@trafford.fc · player@trafford.fc`);
         } else {
           console.log(`[seed] SEED_CLUB=1 but ${CLUB_CODE} already present — skipping (SEED_CLUB=force to re-seed).`);
         }
@@ -15460,8 +15460,8 @@ if (require.main === module) (async () => {
     // 6. Start HTTP server
     app.listen(PORT, () => {
       console.log('');
-      console.log(`[server] ✓ IntelliQ ready on port ${PORT}`);
-      console.log(`[server]   API key: ${process.env.ANTHROPIC_API_KEY ? '✓ loaded' : '✗ MISSING — set ANTHROPIC_API_KEY'}`);
+      console.log(`[server] IntelliQ ready on port ${PORT}`);
+      console.log(`[server]   API key: ${process.env.ANTHROPIC_API_KEY ? 'loaded' : 'MISSING — set ANTHROPIC_API_KEY'}`);
       console.log(`[server]   Persistence: Neon Postgres (DATABASE_URL)`);
       console.log(`[server]   Retention: ${RETENTION_DAYS} days (RETENTION_DAYS to override)`);
       console.log('');
