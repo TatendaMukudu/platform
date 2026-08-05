@@ -46,6 +46,15 @@ const server = app.listen(0, async () => {
     /* 4 — a genuine disclosure is NOT hijacked into an assessment (no false positive) */
     const r4 = await turn('feeling a bit flat today, not sure why');
     ok('4 · an ordinary disclosure is not turned into an assessment', !cards(r4).includes('assessment_start'));
+
+    /* 5 — a MEMBER reasons through the SAME runtime as a leader: a world-knowledge question
+       routes through the reasoning register (with no model, the honest degrade — never the old
+       "not enough authorised evidence" dead end, never a "save as note"). Proves Fix 3: members
+       are not on a weaker path; the same _assistantTurn + governed reasoning serves everyone. */
+    const r5 = await turn('why is a 4-3-3 better than a 5-3-2?');
+    ok('5 · a member\'s world-knowledge question routes through the reasoner (same runtime)',
+      (r5.response && r5.response.qa && r5.response.qa.register === 'world_knowledge')
+      && !cards(r5).includes('capture'));
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();
