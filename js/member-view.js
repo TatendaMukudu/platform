@@ -2552,7 +2552,7 @@ const MemberApp = {
       <div class="iq-composer-wrap">
         <div class="tdy-chathead iq-chathead">
           <button class="tdy-headbtn" type="button" onclick="MemberApp.wsNewChat()" title="Start a new conversation">＋ New</button>
-          <button class="tdy-headbtn" type="button" onclick="MemberApp.wsHistoryOpen()" title="Your past conversations">🕘 History</button>
+          <button class="tdy-headbtn" type="button" onclick="MemberApp.wsHistoryOpen()" title="Your past conversations">History</button>
         </div>
         <div id="iq-history" class="tdy-history" style="display:none"></div>
         <div class="iq-composer" id="iq-composer">
@@ -2853,7 +2853,7 @@ const MemberApp = {
     if (!file) return;
     const thread = document.getElementById('iq-conversation');
     const esc = s => this._escape(String(s == null ? '' : s));
-    if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">📎 ${esc(file.name)}</div>`);
+    if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">${esc(file.name)}</div>`);
     if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-iq iq-pending" id="iq-attach-pending" role="status">Reading ${esc(file.name)}…</div>`);
     if (thread) thread.scrollTop = thread.scrollHeight;
     fileInput.value = '';

@@ -5922,9 +5922,9 @@ async function renderToday() {
     <div class="tdy-composer">
       <div class="tdy-chathead">
         <button class="tdy-headbtn" onclick="todayNewChat()" title="Start a new conversation">＋ New</button>
-        <button class="tdy-headbtn" onclick="todayHistoryOpen()" title="Your past conversations">🕘 History</button>
-        <button class="tdy-headbtn" onclick="todaySaveChatToLibrary()" title="Save this conversation to your Library">💾 Save</button>
-        <button class="tdy-headbtn" onclick="todayLibraryOpen()" title="Your Library — folders, notes, saved chats">📁 Library</button>
+        <button class="tdy-headbtn" onclick="todayHistoryOpen()" title="Your past conversations">History</button>
+        <button class="tdy-headbtn" onclick="todaySaveChatToLibrary()" title="Save this conversation to your Library">Save</button>
+        <button class="tdy-headbtn" onclick="todayLibraryOpen()" title="Your Library — folders, notes, saved chats">Library</button>
       </div>
       <div id="today-history" class="tdy-history" style="display:none"></div>
       <div id="today-thread" class="tdy-thread"></div>
