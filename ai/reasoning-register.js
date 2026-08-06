@@ -61,6 +61,26 @@ const PLAN = new RegExp([
   /\b(session|drill|training|curriculum|programme|program|agenda|strategy for|approach for)\b/.source,
 ].join('|'), 'i');
 
+/* Is the person asking about THIS CONVERSATION rather than the organisation's records?
+   "What did I just tell you?" is not an org lookup — answering it from the evidence store
+   dead-ends ("not enough authorised evidence") even though the answer is right there in the
+   thread. Recall is answered DETERMINISTICALLY from the conversation, so it needs no model,
+   sends nothing anywhere, and cannot fabricate.
+   NOTE the deliberate narrowness: "what did I say ABOUT MY SORE KNEE" names a topic, so it is a
+   lookup of recorded evidence, NOT thread recall. Recall fires only when the question is plainly
+   about this exchange — it says "just", or it names no topic at all. */
+const RECALL = new RegExp([
+  // "just" is the giveaway that they mean this exchange rather than something recorded
+  /\bwhat did i just (?:say|tell you|mention|ask)\b/.source,
+  /\bwhat was i just (?:saying|talking about|asking)\b/.source,
+  /\bwhat (?:did|have) we just (?:say|said|discuss(?:ed)?|talk(?:ed)? about|cover(?:ed)?)\b/.source,
+  /\bdo you (?:remember|recall) what i just (?:said|told you)\b/.source,
+  /\b(?:remind me|tell me) what i just (?:said|told you)\b/.source,
+  // …or a BARE "what did I say?" that names no topic at all
+  /\bwhat did i (?:say|tell you)\s*\??$/.source,
+  /\b(?:repeat|recap) (?:that|what i (?:just )?said|our (?:chat|conversation))\b/.source,
+].join('|'), 'i');
+
 /* Return the register plus the raw signals (so callers/tests can see WHY). A question that
    touches the org AND asks for reasoning/planning is MIXED — the most valuable case, where
    world knowledge is fused with the grounded read. Pure org-state questions stay org_fact so
@@ -70,13 +90,45 @@ function classifyRegister(question) {
   const hasOrg  = ORG.test(q);
   const hasWorld = WORLD.test(q);
   const hasPlan = PLAN.test(q);
+  const hasRecall = RECALL.test(q);
   let register;
   if (!q) register = 'org_fact';
+  // Recall is unambiguous and wins outright — it is about the thread, not the records.
+  else if (hasRecall) register = 'recall';
   else if (hasOrg && (hasWorld || hasPlan)) register = 'mixed';
   else if (hasPlan && !hasOrg) register = 'planning';
   else if (hasWorld && !hasOrg) register = 'world_knowledge';
   else register = 'org_fact';                 // default: try the grounded read (safe, no egress)
-  return { register, signals: { hasOrg, hasWorld, hasPlan } };
+  return { register, signals: { hasOrg, hasWorld, hasPlan, hasRecall } };
+}
+
+/* ── OUTPUT POLISH ───────────────────────────────────────────────────────────
+   The output IS the product, so the model's prose gets a deterministic pass before anyone
+   reads it. Deliberately limited to transforms that CANNOT damage meaning or grammar: strip
+   emoji (house style), drop the assistant-ese prefaces ("Great question!", "Certainly,"),
+   and normalise whitespace. Anything riskier than this — rewriting a sentence into second
+   person, say — is left to the prompt, because a bad rewrite is worse than the original. */
+const _EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}\u{1F900}-\u{1F9FF}]/gu;
+function polish(s) {
+  return String(s == null ? '' : s)
+    .replace(_EMOJI, '')
+    .replace(/^\s*(?:great|good|excellent|interesting)\s+question[!.,]*\s*/i, '')
+    .replace(/^\s*(?:certainly|sure thing|sure|of course|absolutely|happy to help)[!.,]+\s*/i, '')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+/* Answer a RECALL question from the conversation itself. Pure and deterministic: it quotes
+   what was actually said and invents nothing, so it needs no model and no egress. Returns
+   null when there is nothing to recall, so the caller can say so honestly. */
+function composeRecall(priorMessages = []) {
+  const said = (Array.isArray(priorMessages) ? priorMessages : [])
+    .filter(m => m && m.role === 'user' && String(m.text || '').trim());
+  if (!said.length) return null;
+  const last = _clip(String(said[said.length - 1].text).trim(), 300);
+  if (said.length === 1) return `You told me: “${last}”`;
+  const before = said.slice(0, -1).slice(-2).map(m => `“${_clip(String(m.text).trim(), 120)}”`);
+  return `The last thing you told me was: “${last}” Before that: ${before.join(', ')}.`;
 }
 
 // Does answering this register benefit from world-knowledge reasoning (i.e. an LLM edge)?
@@ -96,7 +148,7 @@ function assembleGoverned({ claims = [], openQuestions = [], captures = [], allo
   const proposals = [];        // user_input → confirmation-gated captures
 
   for (const raw of Array.isArray(claims) ? claims : []) {
-    const text = String(raw && raw.text || '').trim();
+    const text = polish(raw && raw.text);
     if (!text) continue;
     const prov = String(raw.provenance || raw.tag || '').toLowerCase();
     const conf = raw.confidence || 'medium';
@@ -115,7 +167,7 @@ function assembleGoverned({ claims = [], openQuestions = [], captures = [], allo
     }
   }
   for (const oq of Array.isArray(openQuestions) ? openQuestions : []) {
-    const t = String(oq || '').trim(); if (t) asks.push(t);
+    const t = polish(oq); if (t) asks.push(t);
   }
   for (const c of Array.isArray(captures) ? captures : []) {
     const t = String(c && (c.text || c) || '').trim(); if (t) proposals.push({ text: t, kind: (c && c.kind) || 'note' });
@@ -170,6 +222,12 @@ const SYSTEM_PROMPT = [
   '  "user_input".',
   'When you genuinely do not know something, say so via openQuestions. Being honest about a gap',
   '  is always better than filling it.',
+  'HOW TO WRITE (the output is the product — govern it as carefully as the facts):',
+  '  • Speak TO the person, not about them: "you", never their name in the third person.',
+  '  • Plain, warm, direct British English. Short sentences. No jargon, no filler, no hype.',
+  '  • No emojis, no exclamation marks, no bullet characters inside claim text.',
+  '  • Do not preface with "Great question", "Certainly", or restate the question back.',
+  '  • Be concrete and specific. One clear idea per claim; cut every word that earns nothing.',
   'Respond ONLY with JSON: { "claims": [ { "text": string, "provenance": "general"|"org_data"',
   '  |"user_input", "evidenceRefs": string[]?, "confidence": "high"|"medium"|"low"? } ],',
   '  "openQuestions": string[], "captures": [ { "text": string, "kind": "note" } ] }.',
@@ -197,4 +255,4 @@ function buildUserMessage({ question, context = [], priorMessages = [] } = {}) {
   return lines.join('\n');
 }
 
-module.exports = { classifyRegister, wantsReasoning, assembleGoverned, buildUserMessage, SYSTEM_PROMPT };
+module.exports = { classifyRegister, wantsReasoning, assembleGoverned, buildUserMessage, composeRecall, polish, SYSTEM_PROMPT };

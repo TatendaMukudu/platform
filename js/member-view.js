@@ -3064,7 +3064,10 @@ const MemberApp = {
         const chip = document.getElementById('iq-workctx'); if (chip) chip.innerHTML = '';
         cardEl.innerHTML = `<div class="iq-confirmed">Submitted “${this._escape(j.assignment?.title || 'your work')}” for review${j.iteration ? ` (submission #${j.iteration})` : ''}.</div>`;
       } else {
-        cardEl.innerHTML = `<div class="iq-confirmed">${this._escape(j.confirmed === 'calendar_draft' ? 'Draft created — not scheduled' : (j.confirmed || 'done'))}</div>`;
+        // Prefer the server's own human sentence. A raw actionType ("assessment_start") is an
+        // internal token and must never be shown as if it were a message to the person.
+        const said = j.note || (j.confirmed === 'calendar_draft' ? 'Draft created — not scheduled' : '');
+        cardEl.innerHTML = `<div class="iq-confirmed">${this._escape(said || 'Done.')}</div>`;
       }
     }
     return j;
