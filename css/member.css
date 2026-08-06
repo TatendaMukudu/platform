@@ -621,13 +621,6 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
    a premium empty state, and calm cards that breathe. Whitespace over borders. */
 #iq-myworkspace{max-width:720px;margin:0 auto;display:flex;flex-direction:column;gap:1.15rem}
 
-/* Lenses — quiet pills, generous tap targets, a soft active state (no heavy fill). */
-.iq-lensbar{display:flex;gap:0.3rem;flex-wrap:wrap;align-items:center}
-.iq-lens{font-size:0.82rem;font-weight:500;padding:0.4rem 0.85rem;min-height:34px;border-radius:999px;border:none;background:transparent;color:var(--text-secondary);cursor:pointer;transition:background .18s ease,color .18s ease}
-.iq-lens:hover{background:var(--bg-hover);color:var(--text-primary)}
-.iq-lens.is-active{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--text-primary);font-weight:600}
-.iq-lens:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-
 /* Attention — no box when it has items (labelled list); a centred hero when empty. */
 .iq-attention{display:flex;flex-direction:column;gap:0.4rem}
 .iq-att-label{font-size:0.72rem;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--text-muted)}
@@ -827,9 +820,6 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 /* ═══ RESPONSIVE — mobile first, no overflow, no clipped controls (Phase-2) ═══ */
 @media (max-width:640px){
   #iq-myworkspace{gap:1rem}
-  .iq-lensbar{gap:0.15rem;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding-bottom:2px}
-  .iq-lensbar::-webkit-scrollbar{display:none}
-  .iq-lens{flex:none}
   .iq-msg-user{max-width:88%}
   .iq-msg-iq{max-width:97%}
   .iq-empty-title{font-size:1.05rem}
@@ -843,5 +833,5 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 }
 /* Larger, comfortable tap targets on touch devices. */
 @media (hover:none){
-  .iq-lens,.iq-chip,.iq-att-item,.aw-ask,.iq-send{min-height:40px}
+  .iq-chip,.iq-att-item,.aw-ask,.iq-send{min-height:40px}
 }

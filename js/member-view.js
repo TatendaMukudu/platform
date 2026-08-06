@@ -2523,14 +2523,13 @@ const MemberApp = {
     } catch (_) { return null; }
   },
 
-  /* ═══ UNIFIED MYWORKSPACE — one assistant, one composer, contextual lenses ═════
+  /* ═══ UNIFIED MYWORKSPACE — one assistant, one composer, one clean chat ═════
      ONE persistent composer wired to POST /api/assistant/turn, ONE continuous IntelliQ
-     conversation, and lenses (Today/Me/Work/Notes/Plans/History) that are BOUNDED context
-     HINTS over the same runtime — never separate assistants, threads or truth paths. Nothing
+     conversation — the same threaded assistant the leader has. Context (notes, work, plans)
+     is surfaced by the assistant IN the conversation, never via navigation tabs. Nothing
      persists until the user confirms a proposal; personal input is private by default and its
      audience never increases without an explicit confirmation. There is no Studio or separate
      Advisor identity — every response is IntelliQ. */
-  _wsLenses: ['today', 'me', 'work', 'notes', 'plans', 'history'],
 
   _renderMyWorkspace(lens) {
     const el = document.getElementById('iq-myworkspace');
@@ -2538,15 +2537,11 @@ const MemberApp = {
     // Fresh render (e.g. navigating to Home) CLEARS any stale member/work context — a member
     // subject is never silently carried across navigation (Cut E). askAboutMember sets it after.
     this._wsSubjectMemberId = null; this._wsSubjectName = null; this._wsWorkItemId = null;
-    this._wsActiveLens = this._wsLenses.includes(lens) ? lens : (this._wsActiveLens || 'today');
+    // One clean chat surface — the composer leads, like the leader's Today. Context (notes,
+    // work, plans) is surfaced by the assistant IN the conversation, not via navigation tabs.
+    this._wsActiveLens = 'today';
     const esc = s => this._escape(String(s == null ? '' : s));
-    const tabs = this._wsLenses.map(L =>
-      `<button class="iq-lens${L === this._wsActiveLens ? ' is-active' : ''}" role="tab" aria-selected="${L === this._wsActiveLens}" data-lens="${L}" onclick="MemberApp.wsSetLens('${L}')">${L[0].toUpperCase() + L.slice(1)}</button>`).join('');
     el.innerHTML = `
-      <div class="iq-lensbar" id="iq-lensbar" role="tablist" aria-label="Workspace views">${tabs}</div>
-      <div class="iq-opening" id="iq-opening" aria-live="polite"></div>
-      <div id="iq-brief" aria-live="polite"></div>
-      <div class="iq-attention" id="iq-attention" aria-live="polite"></div>
       <div class="iq-subject" id="iq-subject"></div>
       <div class="iq-workctx" id="iq-workctx"></div>
       <div class="iq-composer-wrap">
@@ -2570,7 +2565,10 @@ const MemberApp = {
         </div>
         <div class="iq-composer-hint">Private by default · attach a file to teach IntelliQ · Enter to send</div>
       </div>
-      <div class="iq-conversation" id="iq-conversation" aria-live="polite"></div>`;
+      <div class="iq-conversation" id="iq-conversation" aria-live="polite"></div>
+      <div class="iq-opening" id="iq-opening" aria-live="polite"></div>
+      <div id="iq-brief" aria-live="polite"></div>
+      <div class="iq-attention" id="iq-attention" aria-live="polite"></div>`;
     this._loadOpening();
     this._loadBrief();
     this._loadAttention();
@@ -2646,20 +2644,6 @@ const MemberApp = {
     this._wsGrow(i);
     i.focus();
     try { i.selectionStart = i.selectionEnd = i.value.length; } catch (_) {}
-  },
-
-  wsSetLens(lens) {
-    // A lens is a bounded context HINT — same composer, same conversation, same runtime. Switching
-    // lens is a GENERAL-context move, so it exits any active member-support subject (never silent).
-    if (!this._wsLenses.includes(lens)) return;
-    this._wsActiveLens = lens;
-    this.clearSubject();
-    document.querySelectorAll('#iq-lensbar .iq-lens').forEach(b => {
-      const on = b.getAttribute('data-lens') === lens;
-      b.classList.toggle('is-active', on); b.setAttribute('aria-selected', on ? 'true' : 'false');
-    });
-    // Attention is not lens-specific (one authorised Today projection) — don't refetch on tab
-    // switch. Avoids a redundant request and visual jitter; it's loaded once on render.
   },
 
   async _loadAttention() {

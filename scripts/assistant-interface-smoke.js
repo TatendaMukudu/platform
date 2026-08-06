@@ -372,16 +372,16 @@ const server = app.listen(0, async () => {
        !/\/api\/advisor\/[^']*\/ask|advisor\/\$\{[^}]*\}\/ask/.test(appjs2));
     ok('E4. leader "Ask IntelliQ" routes into the one composer with an explicit, clearable member subject',
        /askAboutMember\(/.test(mv) && /_wsSubjectMemberId/.test(mv) && /clearSubject\(/.test(mv) && /id="iq-subject"/.test(mv) && /id="pm-ask-iq"/.test(html));
-    ok('E. the member subject is cleared on fresh render and on lens change (no silent stale context)',
-       /_wsSubjectMemberId = null/.test(mv) && /wsSetLens\(lens\)/.test(mv) && /this\.clearSubject\(\)/.test(mv));
-    ok('2. ONE persistent composer, wired to the unified runtime, reused across lenses',
-       /_renderMyWorkspace/.test(mv) && /iq-composer-input/.test(mv) && (mv.match(/\/api\/assistant\/turn/g) || []).length >= 1 && /wsSetLens/.test(mv) && /_wsLenses/.test(mv));
+    ok('E. the member subject is cleared on every fresh render (no silent stale context carried across navigation)',
+       /_wsSubjectMemberId = null;/.test(mv) && /_renderMyWorkspace\(/.test(mv) && /clearSubject\(/.test(mv));
+    ok('2. ONE persistent composer, wired to the unified runtime (one clean chat surface, no lens tabs)',
+       /_renderMyWorkspace/.test(mv) && /iq-composer-input/.test(mv) && (mv.match(/\/api\/assistant\/turn/g) || []).length >= 1 && !/wsSetLens/.test(mv) && !/iq-lensbar/.test(mv));
     ok('2b. the composer container is mounted in the member home (index.html)', /id="iq-myworkspace"/.test(html));
     ok('14. no client-side score judgment is reintroduced (scoreLabel/_scoreLabel stay neutralized)',
        /NEUTRALIZED/.test(ui) && !/Exceptional|Needs Work/.test(mv.slice(mv.indexOf('_scoreLabel(v)'), mv.indexOf('_scoreLabel(v)') + 260)));
     ok('15. no Studio or separate Advisor identity is RENDERED in the unified surface (one IntelliQ voice)',
        (() => { const s = mv.slice(mv.indexOf('UNIFIED MYWORKSPACE'), mv.indexOf('dismissProposal(proposalId)')); return s.length > 200 && !/>\s*(Advisor|Studio|Planning AI|Notes AI|Assessment AI|Check-?in AI)\b/i.test(s) && /IntelliQ/.test(s); })());
-    ok('  · lenses are contextual views, not separate chats (one wsSend/one conversation thread)',
+    ok('  · one clean chat surface — not separate chats (one wsSend / one conversation thread)',
        /iq-conversation/.test(mv) && (mv.match(/async wsSend/g) || []).length === 1);
     ok('  · proposal cards expose Confirm / Edit-Correct / Dismiss', /Confirm<\/button>/.test(mv) && /Edit \/ Correct/.test(mv) && /dismissProposal/.test(mv));
     ok('  · a personalised check-in card exposes confirm / change-timing / generalise / reject', /_renderCheckinProposal/.test(mv) && /Change timing/.test(mv) && /Generalise/.test(mv));
