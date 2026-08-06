@@ -2537,19 +2537,23 @@ const MemberApp = {
     // Fresh render (e.g. navigating to Home) CLEARS any stale member/work context — a member
     // subject is never silently carried across navigation (Cut E). askAboutMember sets it after.
     this._wsSubjectMemberId = null; this._wsSubjectName = null; this._wsWorkItemId = null;
-    // One clean chat surface — the composer leads, like the leader's Today. Context (notes,
-    // work, plans) is surfaced by the assistant IN the conversation, not via navigation tabs.
+    // It reads like a CHAT: the conversation flows down and the composer sits at the bottom of
+    // the chat box, where you type — never above the thread, so a reply never pushes the input
+    // away. Below it are the other boxes you move on to. Context (notes, work, plans) is
+    // surfaced by the assistant IN the conversation, not via navigation tabs.
     this._wsActiveLens = 'today';
     const esc = s => this._escape(String(s == null ? '' : s));
     el.innerHTML = `
-      <div class="iq-subject" id="iq-subject"></div>
-      <div class="iq-workctx" id="iq-workctx"></div>
-      <div class="iq-composer-wrap">
+      <div class="iq-chatbox">
+        <div class="iq-subject" id="iq-subject"></div>
+        <div class="iq-workctx" id="iq-workctx"></div>
         <div class="tdy-chathead iq-chathead">
           <button class="tdy-headbtn" type="button" onclick="MemberApp.wsNewChat()" title="Start a new conversation">＋ New</button>
           <button class="tdy-headbtn" type="button" onclick="MemberApp.wsHistoryOpen()" title="Your past conversations">History</button>
         </div>
         <div id="iq-history" class="tdy-history" style="display:none"></div>
+        <div class="iq-conversation" id="iq-conversation" aria-live="polite"></div>
+        <div class="iq-composer-wrap">
         <div class="iq-composer" id="iq-composer">
           <label class="iq-attach" title="Add a document IntelliQ can use (meeting minutes, stats, a policy…)" aria-label="Add knowledge" style="cursor:pointer;display:flex;align-items:center;padding:0 0.3rem;color:var(--text-muted)">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5 12.5 21a4 4 0 0 1-5.66-5.66l8.49-8.48a2.5 2.5 0 0 1 3.54 3.54l-8.49 8.48a1 1 0 0 1-1.41-1.41l7.78-7.78"/></svg>
@@ -2564,12 +2568,10 @@ const MemberApp = {
           </button>
         </div>
         <div class="iq-composer-hint">Private by default · attach a file to teach IntelliQ · Enter to send</div>
+        </div>
       </div>
-      <div class="iq-conversation" id="iq-conversation" aria-live="polite"></div>
-      <div class="iq-opening" id="iq-opening" aria-live="polite"></div>
       <div id="iq-brief" aria-live="polite"></div>
       <div class="iq-attention" id="iq-attention" aria-live="polite"></div>`;
-    this._loadOpening();
     this._loadBrief();
     this._loadAttention();
     this._renderSubjectChip();
@@ -2614,22 +2616,9 @@ const MemberApp = {
     try { i.selectionStart = i.selectionEnd = i.value.length; } catch (_) {}
   },
 
-  /* The proactive OPENING — the assistant greets by CONSUMING the Attention artifacts
-     (it never invents observations). Grounded, deterministic, no AI key required.
-     "Before you ask, the OS has already organised your world into what matters." */
-  async _loadOpening() {
-    const box = document.getElementById('iq-opening');
-    if (!box) return;
-    try {
-      const r = await fetch('/api/assistant/opening', { headers: this._authHeaders() });
-      const j = await r.json();
-      const o = j && j.opening;
-      if (!o || !o.greeting) { box.innerHTML = ''; return; }
-      const esc = s => this._escape(String(s == null ? '' : s));
-      const invite = o.invitation && !o.empty ? `<div class="iq-opening-invite">${esc(o.invitation)}</div>` : '';
-      box.innerHTML = `<div class="iq-opening-card"><div class="iq-opening-greeting">${esc(o.greeting)}</div>${invite}</div>`;
-    } catch (_) { box.innerHTML = ''; }
-  },
+  /* [REMOVED] _loadOpening — a second "Good morning, <name>" card that duplicated the page
+     header's own greeting, and (once the conversation led the page) rendered a greeting BELOW
+     the chat. The Attention surface below already carries what it was pointing at. */
 
   /* Auto-grow the composer up to a calm maximum; keeps the hero compact. */
   _wsGrow(el) { if (!el) return; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 180) + 'px'; },
