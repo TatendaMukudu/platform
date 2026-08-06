@@ -8298,7 +8298,7 @@ function _assistantAnswer(code, userId, question) {
   const personCue = /\b(pull up|profile|dossier|tell me about|what'?s? (?:going on|up|happening) with|how(?:'s| is| are)|check (?:on|in on)|look(?:ing)? (?:at|into)|status of|report on|update on)\b/.test(q);
   const personHit = personCue ? _resolvePersonQuery(code, q) : null;
 
-  let answer = '', cites = [], confidence = 'medium', limitations = [], groundedClaims = [], citations = [], groundingId = null;
+  let answer = '', cites = [], confidence = 'medium', limitations = [], groundedClaims = [], citations = [], groundingId = null, standingRead = false;
   const priv = ev.filter(e => e.visibility === 'private');
   if (personHit) {
     const visible = new Set(getVisibleUserIds(code, userId));
@@ -8392,7 +8392,13 @@ function _assistantAnswer(code, userId, question) {
       // current read (the same grounded picture) rather than a bare dead end. Only when it's
       // NOT an org question — or the reasoner is silent too — say so plainly. Never fabricate.
       const r = workScoped ? _reasonReadAnswer(code, userId) : null;
-      if (r && r.answer) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
+      if (r && r.answer) {
+        answer = r.answer; confidence = r.confidence; limitations = r.limitations;
+        // This is the reasoner's STANDING read (the attention digest), not an answer to what
+        // was actually asked. Mark it so the caller never mistakes it for a real answer and
+        // lets the governed reasoner take the question instead (see _assistantTurn).
+        standingRead = true;
+      }
       else {
         answer = `I don't have enough authorised evidence to answer that yet.`;
         confidence = 'none';
@@ -8410,7 +8416,7 @@ function _assistantAnswer(code, userId, question) {
     .map(c => ({ ...c, evidenceRefs: (c.evidenceRefs || []).filter(id => authorised.includes(id)) }))
     .filter(c => c.evidenceRefs.length);
   return { answer, purpose, confidence, limitations, cites: boundedCites, bounded: composed.ok,
-    groundedClaims: boundedClaims, citations, groundingId };
+    groundedClaims: boundedClaims, citations, groundingId, standingRead };
 }
 
 /* ─── ORGANISATIONAL-STATE BOUNDARY + INQUIRY (recommendation-only) ────────────
@@ -10657,7 +10663,11 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   if (cls.isQuestion || infoRequest) { try { qa = _assistantAnswer(code, userId, cls.questionText || text); } catch (_) { qa = null; } }
   // The reasoning edge is a FALLBACK — it never overrides an answer the org's own data already
   // produced (that would hijack a grounded lookup like "how does our high press work").
-  const deterministicAnswered = !!(qa && qa.answer && qa.confidence && qa.confidence !== 'none' && !/enough authorised evidence/i.test(qa.answer));
+  // A STANDING READ (the attention digest, returned when nothing matched the actual question)
+  // is not an answer — treating it as one is what made every unmatched question come back with
+  // the same "here's what deserves your attention" text and silently blocked the reasoner.
+  const deterministicAnswered = !!(qa && qa.answer && qa.confidence && qa.confidence !== 'none'
+    && !qa.standingRead && !/enough authorised evidence/i.test(qa.answer));
   // ── GOVERNED REASONING EDGE (the second register) ────────────────────────────
   // A reasoning question must not be met with "not enough authorised evidence". Route it
   // through the governed reasoner: general knowledge is allowed and LABELLED; any org claim
@@ -10687,10 +10697,17 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // "I'd like an assessment to improve at X" / "can we make the assessment together" is a
   // REQUEST to build one — NOT a disclosure to file as a private note. Acknowledge it
   // (topic-aware) and offer to start, instead of defaulting to a capture card.
-  const assessmentAsk = !(cls.command && cls.command.payload)
-    && (/\b(assessment|assess me|assess my|evaluate me|self.?assessment)\b/i.test(text) || /\bmake (?:an?|the) assessment\b/i.test(text));
+  // It must MENTION an assessment and READ AS A REQUEST — so "what's the assessment status?"
+  // stays a normal lookup while "I'd like an assessment on finishing" is heard as an ask.
+  const _assessMentions = /\b(assessment|assess me|assess my|evaluate me|self.?assessment)\b/i.test(text);
+  const _assessRequest = /\b(i'?d like|i would like|i want|can we|could we|can you|help me|let'?s|make|build|create|start|set ?up|run|give me|need)\b/i.test(text)
+    || /^\s*assess\b/i.test(text);
+  const assessmentAsk = !(cls.command && cls.command.payload) && _assessMentions && _assessRequest;
   const assessTopic = assessmentAsk ? _assessTopic(text) : '';
-  if (assessmentAsk && (!qa || qa.confidence === 'none')) {
+  // An explicit assessment request LEADS the reply. Without this the deterministic read wins
+  // and the person gets an unrelated clarifier ("you have 3 assigned items — which one do you
+  // mean?") with the assessment offer bolted on. A genuine reasoning answer is left alone.
+  if (assessmentAsk && !(qa && qa.reasoning)) {
     qa = { answer: assessTopic
       ? `Happy to build you a short assessment on ${assessTopic} — we'll shape it together. Want to start? I'll ask a few focused questions and turn your answers into something you can act on.`
       : `Happy to build you a short personal assessment — want to start? I'll ask a few focused questions and we'll shape it together.`,
@@ -11183,6 +11200,54 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
     prop.confirmed = { at: new Date().toISOString(), actionId: action.id, stage: 'draft' };
     scheduleSave();
     return res.json({ ok: true, confirmed: 'calendar_draft', action: actionLib.summarize(action), note: 'Drafted for your review — not scheduled. Execute it from your actions when ready.' });
+  }
+
+  if (prop.actionType === 'assessment_start') {
+    // A PERSONAL assessment the member asked for: create a private template on the topic and
+    // self-assign it, through the SAME template + assignment machinery a leader uses (self-assign
+    // is already permitted). The assistant never writes assessment truth directly — this creates
+    // the thing to fill in, nothing more. Deterministic scaffold; the model only shapes wording.
+    const topic = String(prop.payload?.topic || '').slice(0, 120).trim();
+    const me = orgUsers[code]?.[userId];
+    const draft = {
+      title: topic ? `Personal assessment — ${topic}` : 'Personal assessment',
+      kind: 'general',
+      description: topic
+        ? `A short self-assessment on ${topic}. Be specific — concrete examples are more useful than summaries.`
+        : 'A short self-assessment. Be specific — concrete examples are more useful than summaries.',
+      fields: [
+        { label: topic ? `Where ${topic} is going well` : 'What is going well', hint: 'Concrete examples' },
+        { label: topic ? `Where ${topic} breaks down` : 'What is hard or gets in the way', hint: 'When does it happen, and what is going on around it' },
+        { label: 'What you will work on next', hint: 'One or two clear steps' },
+      ],
+    };
+    if (ai.enabled()) {
+      try {
+        const system = ['You design short, motivating SELF-assessments. Return JSON only: {"title": string (<=80 chars), "description": string (2-3 warm, specific sentences, no emojis), "fields": array of 3-5 {"label": string, "hint": string}}. It is for the person themselves, so address them directly. No scores, no judgement.', _domainDirective(code)].filter(Boolean).join('\n\n');
+        const out = await ai.completeJSON({ tier: 'reason', system, user: `Self-assessment topic: ${topic || 'general personal development'}`, maxTokens: 500, schema: ['title', 'fields'] });
+        if (out && Array.isArray(out.fields) && out.fields.length) {
+          draft.title = String(out.title || draft.title).slice(0, 160);
+          draft.description = String(out.description || draft.description).slice(0, 2000);
+          draft.fields = out.fields.slice(0, 6).map(f => ({ label: String(f?.label || '').slice(0, 160), hint: String(f?.hint || '').slice(0, 400) })).filter(f => f.label);
+        }
+      } catch (_) { /* the deterministic scaffold stands */ }
+    }
+    const tpl = { id: _shortId(), title: draft.title, description: draft.description, guidance: '',
+      kind: 'general', fields: draft.fields, personal: true,
+      createdBy: userId, createdByName: me?.name || 'Member', createdAt: new Date().toISOString() };
+    (assessmentTemplates[code] = assessmentTemplates[code] || []).push(tpl);
+    const a = { id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind,
+      fields: JSON.parse(JSON.stringify(tpl.fields || [])), description: tpl.description, guidance: '',
+      criteriaVersion: 1, assignerId: userId, assignerName: me?.name || 'Member',
+      assigneeId: userId, assigneeName: me?.name || 'Member', selfAssigned: true,
+      status: 'assigned', response: {}, note: '', feedback: '', score: null, submissions: [],
+      assignedAt: new Date().toISOString() };
+    (assessmentAssignments[code] = assessmentAssignments[code] || []).push(a);
+    try { _canonicaliseCommitment(code, a); } catch (_) {}
+    prop.confirmed = { at: new Date().toISOString(), templateId: tpl.id, assignmentId: a.id };
+    scheduleSave();
+    return res.json({ ok: true, confirmed: 'assessment_start', assessment: _publicAssignment(a),
+      note: `Started "${tpl.title}" — it's private to you and waiting in your work.` });
   }
 
   if (prop.actionType === 'checkin_proposal') {
