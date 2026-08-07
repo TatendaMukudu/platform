@@ -46,6 +46,21 @@ ok('2b · …and is told to open the discussion rather than restate the card',
   /Start there\./.test(fromCard) && /one question that moves it forward/.test(fromCard));
 ok('2b · an ordinary thread carries no card context', !/OPENED FROM SOMETHING/.test(ctx));
 
+/* THE KERNEL DECIDES WHAT TO LEARN; THE MODEL ONLY PHRASES IT. Without this the assistant asks
+   a good question. With it, it asks the most valuable one the kernel currently has. */
+const withNeed = c.buildContext({
+  question: 'how do I fix it?',
+  need: { need: ['scanning_vs_execution'], distinguishes: ['scanning', 'execution'],
+    candidate: { question: 'does it happen when you can see the defender coming?', topic: 'First touch' } },
+});
+ok('2c · the highest-value unknown is handed to the model as a NEED to phrase',
+  /MOST USEFUL THING TO LEARN NEXT/.test(withNeed)
+  && /see the defender coming/.test(withNeed) && /First touch/.test(withNeed));
+ok('2c · …with what it would distinguish between, and a one-question limit',
+  /scanning vs execution/.test(withNeed) && /Never ask two questions/.test(withNeed));
+ok('2c · a turn with nothing worth asking carries no need block (no invented question)',
+  !/MOST USEFUL THING TO LEARN NEXT/.test(ctx));
+
 /* ── the cage ─────────────────────────────────────────────────────────────── */
 const roster = ['Ashton Mbeki', 'Josh Marin', 'Tomas Reyes'];
 const V = (reply) => c.verifyGrounding(reply, { contextText: ctx, roster, readerName: 'Ashton Mbeki' });

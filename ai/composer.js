@@ -83,7 +83,7 @@ const _clip = (s, n = 400) => { const t = String(s == null ? '' : s); return t.l
    Pure string assembly over the already-scoped bundle the caller retrieved. Everything in
    here is authorised for this reader; the model may use anything it is given and nothing else. */
 function buildContext({
-  name = '', role = '', domain = '', question = '', about = null,
+  name = '', role = '', domain = '', question = '', about = null, need = null,
   beliefs = [],        // [{ text }]        the reasoner's reads about them (self-view)
   evidence = [],       // [{ text, source }] their own notes / authorised records
   assignedWork = [],   // [{ title, status }]
@@ -134,6 +134,20 @@ function buildContext({
   if (acts.length) {
     L.push('AVAILABLE ACTIONS (offer at most one, in your own words; it is not done until they confirm):');
     for (const a of acts) L.push(`  - ${_clip(a.label, 120)}`);
+    L.push('');
+  }
+
+  // THE HIGHEST-VALUE THING TO LEARN NEXT, chosen by the kernel from what it does not yet know.
+  // The model phrases it; it does not get to pick a different question because one occurred to
+  // it. This is what separates a question that keeps the conversation going from one that
+  // actually moves the understanding forward.
+  if (need && (need.need || (need.candidate && need.candidate.question))) {
+    const c = need.candidate || {};
+    L.push('THE MOST USEFUL THING TO LEARN NEXT (ask about THIS, in your own words, once):');
+    if (c.topic) L.push(`  On: ${_clip(c.topic, 120)}`);
+    L.push(`  What is missing: ${_clip(c.question || '', 300)}`);
+    if (need.distinguishes && need.distinguishes.length) L.push(`  It would tell us between: ${need.distinguishes.map(d => _clip(String(d), 60)).join(' vs ')}`);
+    L.push('  Ask it naturally and only if it fits what they just said. Never ask two questions.');
     L.push('');
   }
 

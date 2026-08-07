@@ -102,7 +102,7 @@ ok('5 · …and looks for strengths as hard as for difficulties (not a weakness 
 {
   const inq = d.newInquiry({ id: 'i1', subjectRef: 'member:123', concept: 'football.receiving_under_pressure', label: 'Receiving under pressure', domain: 'football' });
   ok('11 · an inquiry starts honestly empty and exploring',
-    inq.status === 'exploring' && inq.confidence.score === 0 && inq.hypothesis === null);
+    inq.status === 'exploring' && inq.confidence.score === 0 && inq.hypotheses.length === 0);
   ok('11 · …and the primitive is NEUTRAL, so a strength is as expressible as a problem',
     'polarity' in inq && d.newInquiry({ polarity: 'strength' }).polarity === 'strength');
 
@@ -114,19 +114,30 @@ ok('5 · …and looks for strengths as hard as for difficulties (not a weakness 
   ], { utterance: UTTERANCE, turnId: 't1' });
   const after = d.applyProposals(inq, accepted);
   ok('12 · applying proposals records the signal and the working hypothesis',
-    after.knownSignals.length === 1 && /seen too late/.test(after.hypothesis.statement));
-  ok('12 · …keeps the rival explanation instead of quietly dropping it',
-    after.alternatives.some(a => /technical execution/.test(a.statement)));
+    after.signals.length === 1 && /seen too late/.test((after.hypotheses.find(h => h.id === after.leadingHypothesisId) || {}).statement || ''));
+  ok('12 · …keeps the rival explanation as a COMPETING hypothesis, not a footnote',
+    after.hypotheses.some(h => /technical execution/.test(h.statement)));
   ok('12 · …and records what would show it is wrong', after.falsifiers.length === 1);
+
+  /* AN INQUIRY IS A PROJECTION, NOT A STORE. It holds references into governed evidence — never
+     copies of the text. The first cut copied signal text inline, which created a second
+     substrate with no provenance, no inherited visibility and no deletion path: erasing a piece
+     of evidence would have left its content sitting in an inquiry forever. */
+  ok('12 · the inquiry holds REFERENCES, never a copy of the evidence text',
+    after.signals.every(s => typeof s.ref === 'string' && !('text' in s))
+    && !JSON.stringify(after.signals).includes('first touch degrades'));
+  ok('12 · …while keeping what the KERNEL needs to weigh the claim',
+    after.signals.every(s => 'directness' in s && 'authority' in s && 'at' in s));
 
   // A later, competing hypothesis must not erase the first — it demotes it.
   const { accepted: a2 } = d.groundProposals([
     { id: 'h2', level: 'hypothesis', text: 'the touch itself is technically loose', basis: ['o1'] },
   ], { utterance: UTTERANCE, turnId: 't2', knownObservationIds: ['o1'] });
   const after2 = d.applyProposals(after, a2);
-  ok('13 · a competing hypothesis demotes the old one to an alternative, never deletes it',
-    /technically loose/.test(after2.hypothesis.statement)
-    && after2.alternatives.some(a => /seen too late/.test(a.statement)));
+  ok('13 · rival hypotheses COEXIST and compete — no last-writer-wins',
+    after2.hypotheses.filter(h => /technically loose|seen too late/.test(h.statement)).length === 2);
+  ok('13 · …each carrying its OWN confidence, so they can rise and fall independently',
+    after2.hypotheses.every(h => h.confidence && typeof h.confidence.band === 'string'));
 }
 
 /* ── 4. DIAGNOSTIC YIELD — and the ways of gaming it are punished ─────────── */
@@ -140,14 +151,27 @@ ok('5 · …and looks for strengths as hard as for difficulties (not a weakness 
   const y = d.diagnosticYield(base, after, { rejected: [] });
   ok('14 · a real new signal yields something', y.score > 0 && y.evidenceQuality > 0.5);
 
-  // Repeating what we already hold is worth ~nothing.
-  const repeat = d.applyProposals(after, d.groundProposals([
-    { id: 'o2', level: 'observation', text: 'touch gets away when pressed from behind',
-      sourceSpan: 'first touch when someone closes me down', source: 'self', directness: 'direct', specificity: 0.9 },
-  ], { utterance: UTTERANCE, turnId: 't2' }).accepted);
+  /* EVIDENCE CHALLENGES a hypothesis, not just supports one — the thing a flat signal list
+     could never express, and what makes a well-attacked explanation actually fall. */
+  const rivals = d.applyProposals(d.newInquiry({ id: 'i3', subjectRef: 'm:1', concept: 'football.first_touch' }),
+    d.groundProposals([
+      { id: 'o1', level: 'observation', text: 'touch is clean when unpressured',
+        sourceSpan: 'first touch when someone closes me down', source: 'video', directness: 'direct',
+        authority: 'authoritative', specificity: 0.9, challenges: 'hTech' },
+      { id: 'hTech', level: 'hypothesis', text: 'the touch is technically loose', basis: ['o1'] },
+    ], { utterance: UTTERANCE, turnId: 't1' }).accepted);
+  const tech = rivals.hypotheses.find(h => h.id === 'hTech');
+  ok('14 · evidence can CHALLENGE a hypothesis, and challenging evidence is recorded as such',
+    tech && tech.challengeRefs.length === 1);
+
+  /* Re-applying the SAME evidence is idempotent and teaches nothing. Novelty is now judged by
+     reference rather than by text: two DIFFERENT pieces of evidence that happen to say similar
+     things are genuinely two signals, and de-duplicating identical content is the evidence
+     layer's job (lib/evidence.dedupeKey), not this one's. */
+  const repeat = d.applyProposals(after, accepted);
   const yRepeat = d.diagnosticYield(after, repeat, { rejected: [] });
-  ok('15 · repeating a known signal is penalised as no learning',
-    yRepeat.novelty === 0 && /repeated what was already held/.test(yRepeat.penalties.join(' ')));
+  ok('15 · re-applying the same evidence is idempotent and yields no learning',
+    repeat.signals.length === after.signals.length && yRepeat.score === 0);
 
   // Unsupported inference is penalised — the model guessing costs it.
   const yUnsupported = d.diagnosticYield(base, after, {
@@ -185,6 +209,75 @@ ok('5 · …and looks for strengths as hard as for difficulties (not a weakness 
     need && need.distinguishes.includes('scanning_vs_execution'));
   ok('20 · …and with nothing worth asking it says so rather than inventing a question',
     d.nextNeed(null, []) === null);
+}
+
+/* ── 6. THE COLLECTION FRONTIER, derived from the inquiry's OWN state ────── */
+{
+  const inq = d.applyProposals(
+    d.newInquiry({ id: 'i9', subjectRef: 'm:1', concept: 'football.first_touch' }),
+    d.groundProposals([
+      { id: 'o1', level: 'observation', text: 'touch gets away under pressure',
+        sourceSpan: 'first touch when someone closes me down', source: 'self', directness: 'direct', specificity: 0.8 },
+      { id: 'h1', level: 'hypothesis', text: 'pressure is seen too late', basis: ['o1'],
+        alternatives: ['the touch itself is loose'] },
+    ], { utterance: UTTERANCE, turnId: 't1' }).accepted);
+  inq.missingSignals = [
+    { question: 'does it happen when you can see the defender coming?', resolves: ['scanning_vs_execution'], burden: 0.2 },
+    { question: 'can you film every reception for a full season?', resolves: ['scanning_vs_execution'], burden: 0.95 },
+  ];
+  const ranked = d.rankQuestions(d.frontierFor(inq));
+  ok('21 · the frontier derives its ranking from the inquiry, not from a model\'s say-so',
+    ranked.length === 2 && ranked.every(c => typeof c.value === 'number'));
+  ok('21 · …and the easy question beats the expensive one that resolves the same thing',
+    /see the defender coming/.test(ranked[0].question));
+  ok('22 · a CONTESTED inquiry raises the value of settling it',
+    d.frontierFor(inq)[0].decisionImpact >= 0.8);
+  ok('23 · an inquiry with nothing unknown offers no question rather than inventing one',
+    d.frontierFor(d.newInquiry({ id: 'i10' })).length === 0);
+}
+
+/* ── 7. THE TIMELINE — how the understanding CHANGED, not just where it landed ── */
+{
+  const t0 = Date.now();
+  const start = d.newInquiry({ id: 'i11', subjectRef: 'm:1', concept: 'football.first_touch', now: t0 });
+  ok('24 · a new inquiry starts with an empty history', Array.isArray(start.timeline) && start.timeline.length === 0);
+
+  // First evidence + a technical explanation.
+  const s1 = d.applyProposals(start, d.groundProposals([
+    { id: 'o1', level: 'observation', text: 'touch gets away under pressure',
+      sourceSpan: 'first touch when someone closes me down', source: 'self', directness: 'direct', specificity: 0.8 },
+    { id: 'hTech', level: 'hypothesis', text: 'the touch is technically loose', basis: ['o1'] },
+  ], { utterance: UTTERANCE, turnId: 't1' }).accepted, { now: t0 });
+  ok('25 · evidence arriving is recorded, and the first explanation with it',
+    s1.timeline.some(e => e.kind === 'evidence') && s1.timeline.some(e => e.kind === 'hypothesis'));
+
+  // Film says the touch is clean unpressured — that CHALLENGES the technical explanation.
+  const t1 = t0 + 86400000;
+  const s2 = d.applyProposals(s1, d.groundProposals([
+    { id: 'o2', level: 'observation', text: 'touch is clean when unpressured',
+      sourceSpan: 'struggling with my first touch', source: 'video', directness: 'direct',
+      authority: 'authoritative', specificity: 0.9, challenges: 'hTech' },
+    { id: 'hLate', level: 'hypothesis', text: 'pressure is seen too late', basis: ['o2'] },
+  ], { utterance: UTTERANCE, turnId: 't2', knownObservationIds: ['o1'] }).accepted, { now: t1 });
+
+  ok('26 · the record shows the lead CHANGING HANDS, with what it moved from and to',
+    s2.timeline.some(e => e.kind === 'lead_change' && /seen too late/.test(e.to || '')));
+  ok('27 · …and it is ordered, so you can read how the understanding developed',
+    s2.timeline.every((e, i, a) => i === 0 || e.at >= a[i - 1].at));
+
+  /* THE DISCIPLINE: a timeline REFERENCES evidence, it never quotes it. Otherwise the history
+     becomes the leak that the inquiry itself was carefully designed not to be. */
+  ok('28 · the history references evidence and never copies its wording',
+    s2.timeline.every(e => Array.isArray(e.refs))
+    && !JSON.stringify(s2.timeline).includes('touch is clean when unpressured'));
+
+  // Re-applying known evidence is not history. Silence is correct here.
+  const s3 = d.applyProposals(s2, d.groundProposals([
+    { id: 'o2', level: 'observation', text: 'touch is clean when unpressured',
+      sourceSpan: 'struggling with my first touch', source: 'video', directness: 'direct', specificity: 0.9 },
+  ], { utterance: UTTERANCE, turnId: 't3' }).accepted, { now: t1 + 1000 });
+  ok('29 · re-applying known evidence writes NO history (only material change is recorded)',
+    s3.timeline.length === s2.timeline.length);
 }
 
 console.log(`\ndiagnose-smoke: ${pass} passed, ${fail} failed`);
