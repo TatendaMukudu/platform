@@ -2573,8 +2573,10 @@ const MemberApp = {
         </div>
       </div>
       <div id="iq-brief" aria-live="polite"></div>
-      <div class="iq-attention" id="iq-attention" aria-live="polite"></div>`;
+      <div class="iq-attention" id="iq-attention" aria-live="polite"></div>
+      <div id="iq-inquiries" aria-live="polite"></div>`;
     this._loadBrief();
+    this._loadInquiries();
     this._loadAttention();
     this._renderSubjectChip();
   },
@@ -2616,6 +2618,38 @@ const MemberApp = {
     this._wsGrow(i);
     i.focus();
     try { i.selectionStart = i.selectionEnd = i.value.length; } catch (_) {}
+  },
+
+  /* WHAT I'M WORKING OUT — the inquiries the ears have built from conversation. This is the
+     working picture, not the record: every hypothesis is unconfirmed, its confidence was
+     computed from the shape of the evidence (never asserted by the model), and each one shows
+     what is still unknown. Showing the gaps is the point — a system that only displays what it
+     believes, and hides what it does not know, is the one you cannot trust. */
+  async _loadInquiries() {
+    const box = document.getElementById('iq-inquiries');
+    if (!box) return;
+    let j;
+    try { j = await fetch('/api/inquiry', { headers: this._authHeaders() }).then(r => r.json()); }
+    catch (_) { box.innerHTML = ''; return; }
+    const list = (j && j.inquiries) || [];
+    if (!list.length) { box.innerHTML = ''; return; }
+    const esc = s => this._escape(String(s == null ? '' : s));
+    box.innerHTML = `
+      <div class="iq-att-section">
+        <div class="iq-att-label">What I'm working out</div>
+        ${list.slice(0, 6).map(i => `
+          <div class="iq-inq">
+            <div class="iq-inq-head">
+              <span class="iq-inq-topic">${esc(i.topic.label || i.topic.canonicalConcept)}</span>
+              <span class="iq-inq-band iq-band-${esc(i.confidence.band)}">${esc(i.confidence.band)}</span>
+            </div>
+            ${i.hypothesis ? `<div class="iq-inq-hyp">${esc(i.hypothesis)}</div>` : ''}
+            <div class="iq-inq-why">${esc((i.confidence.because || []).join(' · '))}</div>
+            ${(i.stillUnknown || []).length ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Still unknown</span> ${esc(i.stillUnknown[0])}</div>` : ''}
+            ${(i.alternatives || []).length ? `<div class="iq-inq-alt">Could also be: ${esc(i.alternatives.slice(0, 2).join('; '))}</div>` : ''}
+          </div>`).join('')}
+        <div class="iq-inq-note">${esc(j.note || '')}</div>
+      </div>`;
   },
 
   /* [REMOVED] _loadOpening — a second "Good morning, <name>" card that duplicated the page

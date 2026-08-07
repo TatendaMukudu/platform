@@ -667,6 +667,21 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .iq-fb:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .iq-fb-thanks{font-size:0.74rem;color:var(--text-muted)}
 
+/* WHAT I'M WORKING OUT — an inquiry reads as a working hypothesis with its confidence and,
+   deliberately, what is still unknown. The gap is shown as prominently as the finding. */
+.iq-inq{border:1px solid var(--border);border-radius:var(--radius);padding:0.75rem 0.9rem;margin-bottom:0.55rem;background:var(--bg-surface)}
+.iq-inq-head{display:flex;align-items:center;gap:0.5rem;justify-content:space-between}
+.iq-inq-topic{font-size:0.88rem;font-weight:600;color:var(--text-primary)}
+.iq-inq-band{flex:none;font-size:0.62rem;text-transform:uppercase;letter-spacing:0.05em;padding:0.12rem 0.5rem;border-radius:999px;border:1px solid var(--border);color:var(--text-muted)}
+.iq-band-supported{color:var(--success);border-color:color-mix(in srgb,var(--success) 45%,transparent)}
+.iq-band-probable{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
+.iq-inq-hyp{font-size:0.85rem;color:var(--text-secondary);line-height:1.5;margin-top:0.35rem}
+.iq-inq-why{font-size:0.7rem;color:var(--text-muted);margin-top:0.3rem}
+.iq-inq-gap{font-size:0.8rem;color:var(--text-secondary);margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid var(--border);line-height:1.5}
+.iq-inq-gaplabel{font-size:0.62rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--accent);margin-right:0.35rem}
+.iq-inq-alt{font-size:0.74rem;color:var(--text-muted);margin-top:0.35rem;font-style:italic}
+.iq-inq-note{font-size:0.7rem;color:var(--text-muted);margin-top:0.2rem}
+
 /* The CHAT BOX — one conversation with its input at the bottom, where you type. Below it sit
    the other boxes (what I'm seeing, what needs attention) you move on to once the chat is done. */
 .iq-chatbox{display:flex;flex-direction:column;gap:0.6rem}
