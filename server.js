@@ -4941,6 +4941,29 @@ app.post('/api/assessments/templates', requireAuth, (req, res) => {
   res.json({ ok: true, template: tpl });
 });
 
+/* DELETE /api/assessments/self/:id — remove a PERSONAL assessment you started for yourself.
+   A self-assigned assessment is yours: if the assistant misread you and built the wrong thing,
+   you must be able to take it back off your own list. Only ever your own, only ever self-assigned
+   (a leader's assignment is not yours to delete), and it takes the personal template with it so
+   the wrong title stops resurfacing as context in future turns. */
+app.delete('/api/assessments/self/:id', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const list = assessmentAssignments[code] || [];
+  const a = list.find(x => x && x.id === req.params.id);
+  if (!a) return res.status(404).json({ error: 'not found' });
+  if (a.assigneeId !== userId) return res.status(403).json({ error: 'not yours' });
+  if (!a.selfAssigned) return res.status(403).json({ error: 'only a personal assessment you started can be removed here' });
+  assessmentAssignments[code] = list.filter(x => x.id !== a.id);
+  // The personal template exists only for this assignment — remove it too, so its title cannot
+  // be read back as evidence of what the person meant.
+  if (a.templateId) {
+    assessmentTemplates[code] = (assessmentTemplates[code] || [])
+      .filter(t => !(t.id === a.templateId && t.personal && t.createdBy === userId));
+  }
+  scheduleSave();
+  res.json({ ok: true, removed: a.id, title: a.title });
+});
+
 app.delete('/api/assessments/templates/:id', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const list = assessmentTemplates[code] || [];
