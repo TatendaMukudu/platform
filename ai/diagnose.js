@@ -368,6 +368,40 @@ function rankQuestions(candidates = [], { now = Date.now() } = {}) {
     .sort((a, b) => b.value - a.value);
 }
 
+/* Turn an inquiry's open unknowns into ranked candidates, deriving the ranking factors from the
+   inquiry's OWN state rather than asking a model to score them:
+
+     gain       — the less we understand, the more any answer is worth
+     importance — how much rests on the leading explanation being right
+     impact     — a contested inquiry needs settling more than a quiet one
+     burden     — carried from the unknown itself (asking for a season of film is expensive)
+
+   This is the kernel deciding WHAT must be learned. The model only phrases it. */
+function frontierFor(inquiry) {
+  const inq = inquiry || {};
+  const conf = (inq.confidence && inq.confidence.score) || 0;
+  const hyps = inq.hypotheses || [];
+  const live = hyps.filter(h => h.status !== 'refuted');
+  const lead = hyps.find(h => h.id === inq.leadingHypothesisId) || null;
+  const contested = live.length > 1;
+  const dissents = (inq.signals || []).filter(s => s.dissents).length > 0;
+
+  return (inq.missingSignals || []).filter(u => u && u.question).map(u => ({
+    question: String(u.question),
+    resolves: u.resolves,
+    inquiryId: inq.inquiryId,
+    topic: (inq.topic && (inq.topic.label || inq.topic.canonicalConcept)) || '',
+    // An answer is worth most when we understand least.
+    expectedInformationGain: typeof u.expectedInformationGain === 'number' ? u.expectedInformationGain : (1 - conf),
+    // A leading explanation that is barely ahead is worth more work than a settled one.
+    hypothesisImportance: lead ? (contested ? 0.9 : 0.6) : 0.5,
+    // A contradiction in the record is the strongest reason to go and find out.
+    decisionImpact: dissents ? 0.95 : (contested ? 0.8 : 0.5),
+    answerability: typeof u.answerability === 'number' ? u.answerability : 0.85,
+    burden: typeof u.burden === 'number' ? u.burden : 0.3,
+  }));
+}
+
 /* The single highest-value thing to learn next, as a NEED for the model to phrase. */
 function nextNeed(inquiry, candidates = []) {
   const ranked = rankQuestions(candidates);
@@ -402,6 +436,12 @@ const INTAKE_PROMPT = [
   'Look for STRENGTHS and CONDITIONS FOR SUCCESS as carefully as for difficulties: what someone',
   'is unusually good at, and what circumstances bring out their best, matter just as much.',
   '',
+  'WORTH AN INQUIRY? Also return "worthInquiry": true|false. TRUE only when there is an ongoing',
+  '  phenomenon worth understanding, diagnosing or improving. FALSE for coordination and one-off',
+  '  facts — "what time is practice", "who has the keys", "is the meeting moved" — and for pure',
+  '  requests for general knowledge. Those are perfectly good conversations; they are just not',
+  '  something to build a model of. Over-creating inquiries makes the picture noise.',
+  '',
   'For "unknowns", list what you cannot tell from what was said — each with "question" (the thing',
   'that needs settling, in plain terms), "resolves" (what it would distinguish between), and',
   '"burden" 0-1 (how much effort answering costs them). Rank nothing; the system ranks.',
@@ -409,6 +449,6 @@ const INTAKE_PROMPT = [
 
 module.exports = {
   LEVELS, LEVEL_RANK, MODEL_MAY_PROPOSE, INTAKE_PROMPT,
-  groundProposals, deriveConfidence, newInquiry, newHypothesis, applyProposals,
+  groundProposals, deriveConfidence, newInquiry, newHypothesis, applyProposals, frontierFor,
   diagnosticYield, rankQuestions, nextNeed,
 };

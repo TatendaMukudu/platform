@@ -211,5 +211,30 @@ ok('5 · …and looks for strengths as hard as for difficulties (not a weakness 
     d.nextNeed(null, []) === null);
 }
 
+/* ── 6. THE COLLECTION FRONTIER, derived from the inquiry's OWN state ────── */
+{
+  const inq = d.applyProposals(
+    d.newInquiry({ id: 'i9', subjectRef: 'm:1', concept: 'football.first_touch' }),
+    d.groundProposals([
+      { id: 'o1', level: 'observation', text: 'touch gets away under pressure',
+        sourceSpan: 'first touch when someone closes me down', source: 'self', directness: 'direct', specificity: 0.8 },
+      { id: 'h1', level: 'hypothesis', text: 'pressure is seen too late', basis: ['o1'],
+        alternatives: ['the touch itself is loose'] },
+    ], { utterance: UTTERANCE, turnId: 't1' }).accepted);
+  inq.missingSignals = [
+    { question: 'does it happen when you can see the defender coming?', resolves: ['scanning_vs_execution'], burden: 0.2 },
+    { question: 'can you film every reception for a full season?', resolves: ['scanning_vs_execution'], burden: 0.95 },
+  ];
+  const ranked = d.rankQuestions(d.frontierFor(inq));
+  ok('21 · the frontier derives its ranking from the inquiry, not from a model\'s say-so',
+    ranked.length === 2 && ranked.every(c => typeof c.value === 'number'));
+  ok('21 · …and the easy question beats the expensive one that resolves the same thing',
+    /see the defender coming/.test(ranked[0].question));
+  ok('22 · a CONTESTED inquiry raises the value of settling it',
+    d.frontierFor(inq)[0].decisionImpact >= 0.8);
+  ok('23 · an inquiry with nothing unknown offers no question rather than inventing one',
+    d.frontierFor(d.newInquiry({ id: 'i10' })).length === 0);
+}
+
 console.log(`\ndiagnose-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
