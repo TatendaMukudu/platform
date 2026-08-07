@@ -86,7 +86,10 @@ function groundProposals(proposals, { utterance = '', turnId = '', knownObservat
   for (const raw of Array.isArray(proposals) ? proposals : []) {
     const p = raw && typeof raw === 'object' ? raw : {};
     const level = String(p.level || '').toLowerCase();
-    const text = String(p.text || '').trim();
+    // The contract asks for "text". Accept the obvious synonyms too: losing a real observation
+    // because a model called the field "claim" is a self-inflicted wound, and the grounding
+    // discipline below is unchanged either way.
+    const text = String(p.text || p.claim || p.statement || p.content || '').trim();
 
     if (!text) { rejected.push({ proposal: p, reason: 'empty text' }); continue; }
     if (!LEVELS.includes(level)) { rejected.push({ proposal: p, reason: `unknown level "${p.level}"` }); continue; }
@@ -484,7 +487,25 @@ const INTAKE_PROMPT = [
   'You are the intake layer of a governed organisational assistant. You do NOT reply to the',
   'person here. You read what they said and propose SEMANTIC STRUCTURE for the system to weigh.',
   '',
-  'Return ONLY JSON: { "proposals": [ ... ], "unknowns": [ ... ] }',
+  'Return ONLY JSON in EXACTLY this shape. Every proposal MUST have "id", "level" and "text" —',
+  'those three field names precisely, not "claim", "statement", "content" or anything else:',
+  '',
+  '{',
+  '  "worthInquiry": true,',
+  '  "proposals": [',
+  '    { "id": "o1", "level": "observation", "text": "first touch degrades under immediate pressure",',
+  '      "sourceSpan": "struggling with my first touch", "domainConcept": "football.first_touch",',
+  '      "source": "self", "directness": "direct", "specificity": 0.8 },',
+  '    { "id": "h1", "level": "hypothesis", "text": "pressure is being seen too late",',
+  '      "basis": ["o1"], "domainConcept": "football.first_touch",',
+  '      "alternatives": ["the touch itself is technically loose"],',
+  '      "falsifiers": ["clean touches when pressure is called early"] }',
+  '  ],',
+  '  "unknowns": [',
+  '    { "question": "does it happen when you see the defender coming?",',
+  '      "resolves": ["scanning_vs_execution"], "burden": 0.2 }',
+  '  ]',
+  '}',
   '',
   'A proposal is one of exactly three levels, and they must never be collapsed:',
   '  • "observation"    — what they actually reported. MUST carry "sourceSpan": a short quote',
@@ -495,6 +516,7 @@ const INTAKE_PROMPT = [
   '    carry "alternatives" (rival explanations) and "falsifiers" (what would show it is wrong).',
   'You may NOT return a conclusion. Deciding what is settled is not your job.',
   'Do NOT return confidence numbers. Confidence is computed from the evidence, not asserted.',
+  'Give every proposal a short "id" ("o1", "h1") so later proposals can reference it in "basis".',
   '',
   'Name the domain concept precisely ("football.first_touch", "manufacturing.tolerance_drift"),',
   'because a vague concept cannot be retrieved or connected to anything later.',
