@@ -8192,8 +8192,16 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
       evidence = (g.passages || []).map(p => ({ text: p.text, source: p.label || 'your record' }));
     } catch (_) {}
 
-    const assignedWork = (workCtx && Array.isArray(workCtx.items))
-      ? workCtx.items.map(i => ({ title: i.title, status: i.status })) : [];
+    // A person's OWN assigned work is always theirs to be told about. It used to arrive only when
+    // an intent classifier decided the turn was "about assigned work", so "what assessments do I
+    // have?" was answered "nothing recorded" while seven sat on their list — the model reporting
+    // an empty context honestly. Their own list is cheap context and it is theirs; always send it.
+    const assignedWork = (workCtx && Array.isArray(workCtx.items) && workCtx.items.length)
+      ? workCtx.items.map(i => ({ title: i.title, status: i.status }))
+      : (assessmentAssignments[code] || [])
+          .filter(a => a && a.assigneeId === userId)
+          .slice(-12)
+          .map(a => ({ title: a.title, status: a.status }));
 
     // WHAT THE EARS HAVE BUILT — the working picture from earlier turns, so the conversation
     // compounds instead of restarting. Stated as a working read with its confidence band, never
