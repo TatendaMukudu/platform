@@ -2620,6 +2620,105 @@ const MemberApp = {
     try { i.selectionStart = i.selectionEnd = i.value.length; } catch (_) {}
   },
 
+  /* ── THE NAV ──────────────────────────────────────────────────────────────
+     One drawer, and the buckets are what the system actually holds — not artifact types.
+     An assessment is not a category of thing; it is an inquiry someone chose to formalise, and
+     a note is a signal attached to one. So the top level is: the conversation you're in, the
+     things being worked out, the work you've been given, and what you've kept. Recents sit
+     underneath because a conversation is how you get back to any of it. */
+  _NAV: [
+    { id: 'home',    label: 'Chat',      icon: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' },
+    { id: 'inquiry', label: 'Inquiries', icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01' },
+    { id: 'work',    label: 'Work',      icon: 'M20 7H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2' },
+    { id: 'notes',   label: 'Library',   icon: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z' },
+  ],
+
+  navToggle() {
+    const open = document.getElementById('iq-nav');
+    if (open) { this.navClose(); return; }
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const active = this._navActive || 'home';
+    const el = document.createElement('div');
+    el.id = 'iq-nav';
+    el.className = 'iq-nav';
+    el.innerHTML = `
+      <div class="iq-nav-scrim" onclick="MemberApp.navClose()"></div>
+      <nav class="iq-nav-panel" role="navigation" aria-label="Sections">
+        <div class="iq-nav-brand">IntelliQ</div>
+        ${this._NAV.map(n => `
+          <button class="iq-nav-item${n.id === active ? ' is-active' : ''}" onclick="MemberApp.navGo('${n.id}')">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${n.icon}"/></svg>
+            <span>${esc(n.label)}</span>
+          </button>`).join('')}
+        <div class="iq-nav-label">Recent</div>
+        <div class="iq-nav-recents" id="iq-nav-recents"></div>
+        <button class="iq-nav-new" onclick="MemberApp.navNewChat()">＋ New chat</button>
+      </nav>`;
+    document.body.appendChild(el);
+    this._navRecents();
+  },
+  navClose() { const el = document.getElementById('iq-nav'); if (el) el.remove(); },
+
+  async _navRecents() {
+    const box = document.getElementById('iq-nav-recents');
+    if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    try {
+      const j = await fetch('/api/assistant/conversations', { headers: this._authHeaders() }).then(r => r.json());
+      const list = (j && j.conversations) || [];
+      box.innerHTML = list.length
+        ? list.slice(0, 8).map(c => `<button class="iq-nav-recent" onclick="MemberApp.navOpenChat('${esc(c.id)}')">${esc(c.title || 'Conversation')}</button>`).join('')
+        : `<div class="iq-nav-empty">No conversations yet</div>`;
+    } catch (_) { box.innerHTML = ''; }
+  },
+
+  navGo(id) {
+    this._navActive = id;
+    this.navClose();
+    if (id === 'inquiry') { this._renderInquiryPage(); return; }
+    if (typeof navigate === 'function') navigate(id === 'work' ? 'assessments' : id);
+  },
+  navNewChat() { this._navActive = 'home'; this.navClose(); if (typeof navigate === 'function') navigate('home'); setTimeout(() => this.wsNewChat(), 60); },
+  navOpenChat(id) { this._navActive = 'home'; this.navClose(); if (typeof navigate === 'function') navigate('home'); setTimeout(() => this.wsLoadConversation(id), 60); },
+
+  /* The Inquiries page — the same working picture the home surface shows, given room to
+     breathe and grouped by how settled each one is. State, not type: what is still moving,
+     what has landed, and what has gone quiet without resolving. */
+  async _renderInquiryPage() {
+    const el = document.getElementById('iq-myworkspace') || document.getElementById('page-content');
+    if (!el) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    el.innerHTML = `<div id="iq-inquiries-page">Loading…</div>`;
+    let j; try { j = await fetch('/api/inquiry', { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
+    const list = (j && j.inquiries) || [];
+    const box = document.getElementById('iq-inquiries-page');
+    if (!box) return;
+    if (!list.length) {
+      box.innerHTML = `<div class="iq-empty-title">Nothing being worked out yet</div>
+        <div class="iq-empty-sub">Talk something through and IntelliQ starts building a picture of it here — including what it still does not know.</div>`;
+      return;
+    }
+    const GROUPS = [
+      { key: 'live',    label: 'Still working it out', has: i => ['exploring', 'probable'].includes(i.status) },
+      { key: 'settled', label: 'Landed',               has: i => i.status === 'supported' || i.status === 'resolved' },
+      { key: 'dispute', label: 'Contested',            has: i => i.status === 'disputed' },
+    ];
+    box.innerHTML = GROUPS.map(g => {
+      const items = list.filter(g.has);
+      if (!items.length) return '';
+      return `<div class="iq-att-section"><div class="iq-att-label">${esc(g.label)}</div>${items.map(i => {
+        const conf = i.confidence || {}; const topic = i.topic || {};
+        return `<div class="iq-inq">
+          <div class="iq-inq-head"><span class="iq-inq-topic">${esc(topic.label || topic.canonicalConcept || 'Working it out')}</span>
+            <span class="iq-inq-band iq-band-${esc(conf.band || 'tentative')}">${esc(conf.band || 'tentative')}</span></div>
+          ${i.hypothesis ? `<div class="iq-inq-hyp">${esc(i.hypothesis)}</div>` : ''}
+          <div class="iq-inq-why">${esc((conf.because || []).join(' · '))}${i.signals ? ` · ${i.signals} signal${i.signals === 1 ? '' : 's'}` : ''}</div>
+          ${(i.stillUnknown || []).length ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Still unknown</span> ${esc(i.stillUnknown[0])}</div>` : ''}
+          ${(i.alternatives || []).length ? `<div class="iq-inq-alt">Could also be: ${esc(i.alternatives.slice(0, 2).join('; '))}</div>` : ''}
+        </div>`; }).join('')}</div>`;
+    }).join('') + `<div class="iq-inq-note">${esc(j.note || '')}</div>`;
+  },
+
   /* WHAT I'M WORKING OUT — the inquiries the ears have built from conversation. This is the
      working picture, not the record: every hypothesis is unconfirmed, its confidence was
      computed from the shape of the evidence (never asserted by the model), and each one shows
@@ -2637,17 +2736,21 @@ const MemberApp = {
     box.innerHTML = `
       <div class="iq-att-section">
         <div class="iq-att-label">What I'm working out</div>
-        ${list.slice(0, 6).map(i => `
+        ${list.slice(0, 6).map(i => {
+          // Defensive: one malformed record must never blank the whole surface.
+          const topic = (i && i.topic) || {}; const conf = (i && i.confidence) || {};
+          const band = conf.band || 'tentative';
+          return `
           <div class="iq-inq">
             <div class="iq-inq-head">
-              <span class="iq-inq-topic">${esc(i.topic.label || i.topic.canonicalConcept)}</span>
-              <span class="iq-inq-band iq-band-${esc(i.confidence.band)}">${esc(i.confidence.band)}</span>
+              <span class="iq-inq-topic">${esc(topic.label || topic.canonicalConcept || 'Working it out')}</span>
+              <span class="iq-inq-band iq-band-${esc(band)}">${esc(band)}</span>
             </div>
             ${i.hypothesis ? `<div class="iq-inq-hyp">${esc(i.hypothesis)}</div>` : ''}
-            <div class="iq-inq-why">${esc((i.confidence.because || []).join(' · '))}</div>
+            <div class="iq-inq-why">${esc((conf.because || []).join(' · '))}</div>
             ${(i.stillUnknown || []).length ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Still unknown</span> ${esc(i.stillUnknown[0])}</div>` : ''}
             ${(i.alternatives || []).length ? `<div class="iq-inq-alt">Could also be: ${esc(i.alternatives.slice(0, 2).join('; '))}</div>` : ''}
-          </div>`).join('')}
+          </div>`; }).join('')}
         <div class="iq-inq-note">${esc(j.note || '')}</div>
       </div>`;
   },
