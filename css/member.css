@@ -701,6 +701,15 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .iq-inq-gaplabel{font-size:0.62rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--accent);margin-right:0.35rem}
 .iq-inq-alt{font-size:0.74rem;color:var(--text-muted);margin-top:0.35rem;font-style:italic}
 .iq-inq-note{font-size:0.7rem;color:var(--text-muted);margin-top:0.2rem}
+/* HOW IT CHANGED — collapsed by default. The current read is what you usually want; the
+   history is what makes it defensible when you doubt it. */
+.iq-inq-hist{margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid var(--border)}
+.iq-inq-hist summary{font-size:0.74rem;color:var(--text-muted);cursor:pointer;list-style:none}
+.iq-inq-hist summary::-webkit-details-marker{display:none}
+.iq-inq-hist summary:hover{color:var(--text-primary)}
+.iq-inq-hist[open] summary{margin-bottom:0.4rem;color:var(--text-secondary)}
+.iq-inq-histrow{font-size:0.78rem;color:var(--text-secondary);line-height:1.5;padding:0.18rem 0}
+.iq-inq-histwhen{color:var(--text-muted);font-size:0.7rem;margin-right:0.35rem}
 
 /* The CHAT BOX — one conversation with its input at the bottom, where you type. Below it sit
    the other boxes (what I'm seeing, what needs attention) you move on to once the chat is done. */

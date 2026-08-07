@@ -236,5 +236,49 @@ ok('5 · …and looks for strengths as hard as for difficulties (not a weakness 
     d.frontierFor(d.newInquiry({ id: 'i10' })).length === 0);
 }
 
+/* ── 7. THE TIMELINE — how the understanding CHANGED, not just where it landed ── */
+{
+  const t0 = Date.now();
+  const start = d.newInquiry({ id: 'i11', subjectRef: 'm:1', concept: 'football.first_touch', now: t0 });
+  ok('24 · a new inquiry starts with an empty history', Array.isArray(start.timeline) && start.timeline.length === 0);
+
+  // First evidence + a technical explanation.
+  const s1 = d.applyProposals(start, d.groundProposals([
+    { id: 'o1', level: 'observation', text: 'touch gets away under pressure',
+      sourceSpan: 'first touch when someone closes me down', source: 'self', directness: 'direct', specificity: 0.8 },
+    { id: 'hTech', level: 'hypothesis', text: 'the touch is technically loose', basis: ['o1'] },
+  ], { utterance: UTTERANCE, turnId: 't1' }).accepted, { now: t0 });
+  ok('25 · evidence arriving is recorded, and the first explanation with it',
+    s1.timeline.some(e => e.kind === 'evidence') && s1.timeline.some(e => e.kind === 'hypothesis'));
+
+  // Film says the touch is clean unpressured — that CHALLENGES the technical explanation.
+  const t1 = t0 + 86400000;
+  const s2 = d.applyProposals(s1, d.groundProposals([
+    { id: 'o2', level: 'observation', text: 'touch is clean when unpressured',
+      sourceSpan: 'struggling with my first touch', source: 'video', directness: 'direct',
+      authority: 'authoritative', specificity: 0.9, challenges: 'hTech' },
+    { id: 'hLate', level: 'hypothesis', text: 'pressure is seen too late', basis: ['o2'] },
+  ], { utterance: UTTERANCE, turnId: 't2', knownObservationIds: ['o1'] }).accepted, { now: t1 });
+
+  ok('26 · the record shows the lead CHANGING HANDS, with what it moved from and to',
+    s2.timeline.some(e => e.kind === 'lead_change' && /seen too late/.test(e.to || '')));
+  ok('27 · …and it is ordered, so you can read how the understanding developed',
+    s2.timeline.every((e, i, a) => i === 0 || e.at >= a[i - 1].at));
+
+  /* THE DISCIPLINE: a timeline REFERENCES evidence, it never quotes it. Otherwise the history
+     becomes the leak that the inquiry itself was carefully designed not to be. */
+  ok('28 · the history references evidence and never copies its wording',
+    s2.timeline.every(e => Array.isArray(e.refs))
+    && !JSON.stringify(s2.timeline).includes('touch is clean when unpressured'));
+
+  // Re-applying known evidence is not history. Silence is correct here.
+  const s3 = d.applyProposals(s2, d.groundProposals([
+    { id: 'o2', level: 'observation', text: 'touch is clean when unpressured',
+      sourceSpan: 'struggling with my first touch', source: 'video', directness: 'direct', specificity: 0.9 },
+  ], { utterance: UTTERANCE, turnId: 't3' }).accepted, { now: t1 + 1000 });
+  ok('29 · re-applying known evidence writes NO history (only material change is recorded)',
+    s3.timeline.length === s2.timeline.length);
+}
+
 console.log(`\ndiagnose-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

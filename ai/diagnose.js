@@ -202,8 +202,65 @@ function newInquiry({ id, subjectRef, concept, label, domain = '', polarity = 'n
     falsifiers: [],                    // what would show the leading hypothesis is wrong
     confidence: { score: 0, band: 'tentative', because: ['nothing recorded yet'] },
     status: 'exploring',               // exploring | probable | supported | disputed | resolved
+    timeline: [],                      // HOW the understanding changed — see _recordTimeline
     createdAt: now, lastUpdatedAt: now,
   };
+}
+
+/* ── THE TIMELINE ────────────────────────────────────────────────────────────
+   An inquiry that only shows its current state throws away the most defensible thing it has:
+   how it got there. "Scanning is the leading explanation" is an assertion. "Technical was
+   leading until film evidence arrived on the 5th, and it has not recovered" is a record — and
+   it is what makes a conclusion auditable, contestable, and worth trusting later.
+
+   The same discipline as signals applies: entries reference evidence, they never quote it.
+   Hypothesis statements are the system's own proposals and may appear; a person's words may not.
+   Only MATERIAL change is recorded — re-applying known evidence writes nothing, or the history
+   becomes noise and the blob grows for no reason. */
+const TIMELINE_CAP = 40;
+
+function _recordTimeline(before, after, now) {
+  const events = [];
+  const bSig = new Set((before.signals || []).map(s => s.ref));
+  const fresh = (after.signals || []).filter(s => !bSig.has(s.ref));
+  if (fresh.length) {
+    const dissent = fresh.filter(s => s.dissents).length;
+    events.push({ at: now, kind: dissent ? 'contradiction' : 'evidence',
+      summary: dissent
+        ? `${dissent} signal${dissent === 1 ? '' : 's'} arrived that disagree with the current read`
+        : `${fresh.length} new signal${fresh.length === 1 ? '' : 's'}`,
+      refs: fresh.map(s => s.ref) });
+  }
+
+  const bHyp = new Set((before.hypotheses || []).map(h => h.id));
+  for (const h of (after.hypotheses || [])) {
+    if (!bHyp.has(h.id)) events.push({ at: now, kind: 'hypothesis', summary: `New explanation on the table: ${h.statement}`, refs: [] });
+  }
+
+  for (const h of (after.hypotheses || [])) {
+    const was = (before.hypotheses || []).find(x => x.id === h.id);
+    if (was && was.status !== 'refuted' && h.status === 'refuted') {
+      events.push({ at: now, kind: 'refuted', summary: `Ruled out by the evidence: ${h.statement}`, refs: h.challengeRefs.slice(0, 4) });
+    }
+  }
+
+  if (before.leadingHypothesisId !== after.leadingHypothesisId) {
+    const lead = (after.hypotheses || []).find(h => h.id === after.leadingHypothesisId);
+    const old = (before.hypotheses || []).find(h => h.id === before.leadingHypothesisId);
+    if (lead) events.push({ at: now, kind: 'lead_change',
+      summary: old ? `The evidence now favours "${lead.statement}" over "${old.statement}"` : `Leading explanation: ${lead.statement}`,
+      refs: [], from: old ? old.statement : null, to: lead.statement });
+  }
+
+  const bBand = (before.confidence || {}).band, aBand = (after.confidence || {}).band;
+  if (bBand !== aBand) events.push({ at: now, kind: 'confidence', summary: `Confidence moved from ${bBand} to ${aBand}`, refs: [], from: bBand, to: aBand });
+  if (before.status !== after.status) events.push({ at: now, kind: 'status', summary: `Now ${after.status}`, refs: [], from: before.status, to: after.status });
+
+  if (!events.length) return after.timeline || [];
+  // Keep the beginning (where it started is never noise) and the most recent movement.
+  const all = [...(after.timeline || []), ...events];
+  return all.length <= TIMELINE_CAP ? all
+    : [...all.slice(0, 3), { at: all[3].at, kind: 'elided', summary: `${all.length - TIMELINE_CAP} earlier changes not kept`, refs: [] }, ...all.slice(-(TIMELINE_CAP - 4))];
 }
 
 /* A hypothesis is a first-class object, not a sentence on the inquiry. Evidence SUPPORTS or
@@ -281,12 +338,20 @@ function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefO
   // evidence is passed through as a contradiction, so a well-attacked hypothesis falls.
   const byRef = new Map(next.signals.map(s => [s.ref, s]));
   for (const h of next.hypotheses) {
-    const sig = [
-      ...h.supportRefs.map(r => byRef.get(r)).filter(Boolean),
-      ...h.challengeRefs.map(r => byRef.get(r)).filter(Boolean).map(s => ({ ...s, contradicts: true })),
-    ];
-    h.confidence = sig.length ? deriveConfidence(sig, { now })
+    // Confidence is built from what SUPPORTS a hypothesis; challenges then cut it. Counting a
+    // challenge into the evidence base was double-counting in the wrong direction — it made a
+    // well-attacked explanation look better supported than a fresh rival, purely because more
+    // had been said about it. Being argued with is not evidence in your favour.
+    const support = h.supportRefs.map(r => byRef.get(r)).filter(Boolean);
+    const nChallenges = h.challengeRefs.length;
+    const base = support.length ? deriveConfidence(support, { now })
       : { score: 0, band: 'tentative', because: ['nothing supports this yet'] };
+    const score = Math.round(base.score * Math.pow(0.45, nChallenges) * 100) / 100;
+    h.confidence = {
+      score,
+      band: (_BANDS.find(b => score >= b.at) || _BANDS[_BANDS.length - 1]).band,
+      because: nChallenges ? [...base.because, `${nChallenges} piece${nChallenges === 1 ? '' : 's'} of evidence against it`] : base.because,
+    };
     h.status = h.challengeRefs.length && !h.supportRefs.length ? 'refuted' : h.status === 'settled' ? 'settled' : 'open';
   }
 
@@ -303,6 +368,7 @@ function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefO
   const real = next.signals.filter(s => s.kind !== 'interpretation');
   next.confidence = lead && lead.confidence.score > 0 ? lead.confidence : deriveConfidence(real, { now });
   next.status = _STATUS_FOR(next.confidence.band, real.filter(s => s.dissents).length);
+  next.timeline = _recordTimeline(inquiry, next, now);
   next.lastUpdatedAt = now;
   return next;
 }

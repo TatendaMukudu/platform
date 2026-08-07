@@ -2712,6 +2712,9 @@ const MemberApp = {
           <div class="iq-inq-why">${esc((conf.because || []).join(' · '))}${i.signals ? ` · ${i.signals} signal${i.signals === 1 ? '' : 's'}` : ''}</div>
           ${(i.stillUnknown || []).length ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Still unknown</span> ${esc(i.stillUnknown[0])}</div>` : ''}
           ${(i.alternatives || []).length ? `<div class="iq-inq-alt">Could also be: ${esc(i.alternatives.slice(0, 2).map(a => typeof a === 'string' ? a : `${a.statement} (${a.band})`).join('; '))}</div>` : ''}
+          ${(i.timeline || []).length ? `<details class="iq-inq-hist"><summary>How this changed</summary>${
+            i.timeline.map(e => `<div class="iq-inq-histrow"><span class="iq-inq-histwhen">${esc(this._chatWhen(e.at))}</span> ${esc(e.summary)}</div>`).join('')
+          }</details>` : ''}
         </div>`; }).join('')}</div>`;
     }).join('') + `<div class="iq-inq-note">${esc(j.note || '')}</div>`;
   },

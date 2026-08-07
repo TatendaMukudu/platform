@@ -11340,6 +11340,9 @@ app.get('/api/inquiry', requireAuth, (req, res) => {
       stillUnknown: (i.missingSignals || []).map(m => m.question),
       falsifiers: i.falsifiers || [],
       contradictions: sig.filter(s => s.dissents).length,
+      // HOW the understanding changed — most recent first, refs stripped (a reader gets the
+      // shape of the history, not a back door to evidence they were never shown).
+      timeline: (i.timeline || []).slice(-8).reverse().map(e => ({ at: e.at, kind: e.kind, summary: e.summary })),
       lastUpdatedAt: i.lastUpdatedAt,
     };
   }).sort((a, b) => (b.confidence.score - a.confidence.score));
