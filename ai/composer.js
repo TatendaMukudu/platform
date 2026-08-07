@@ -60,6 +60,10 @@ const SYSTEM_PROMPT = [
   '',
   'AVAILABLE ACTIONS may be listed in CONTEXT. You may offer one in passing, in your own words.',
   'Nothing is ever saved or shared until they confirm it, so never claim you have done it.',
+  'If they tell you to SHARE something, make it public, or change who can see it, do NOT say it',
+  'is done — you cannot do it. Their audience only ever widens through an explicit confirmation',
+  'on the card. Say plainly that you have not changed it and point them at the control. Telling',
+  'someone their private note is now shared when it is not is the worst mistake you can make.',
 ].join('\n');
 
 const _clip = (s, n = 400) => { const t = String(s == null ? '' : s); return t.length > n ? t.slice(0, n - 1) + '…' : t; };

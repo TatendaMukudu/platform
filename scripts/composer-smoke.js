@@ -88,6 +88,10 @@ ok('9 · …to keep it short enough to read on a phone',
   /under 120 words/.test(c.SYSTEM_PROMPT));
 ok('9 · …and to write plain prose with no markdown',
   /NO markdown/.test(c.SYSTEM_PROMPT) && /Asterisks are shown literally/.test(c.SYSTEM_PROMPT));
+// A privacy-first product cannot tell someone their private note is now shared when it is not.
+// Visibility only ever widens through an explicit confirmation, so the model must never claim it.
+ok('9 · …and NEVER to claim it changed who can see something',
+  /do NOT say it/.test(c.SYSTEM_PROMPT) && /only ever widens through an explicit confirmation/.test(c.SYSTEM_PROMPT));
 
 /* ── the honest degrade never fabricates ──────────────────────────────────── */
 ok('10 · with nothing recorded it says so and asks for what would build the picture',

@@ -10954,7 +10954,13 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // crisis response and exits the turn far above. If the composer is off, unavailable, or its
   // output failed the grounding cage, we fall straight through to the deterministic composition.
   let composedReply = null;
-  if (IQ_COMPOSER && (cls.isQuestion || infoRequest || reasoningWanted || assessmentAsk || sensitive)) {
+  // The gate is deliberately WIDE. Restricting it to questions meant an ordinary conversational
+  // reply fell off the intelligent path: "you can make it public" was answered with "you marked
+  // 2 things private — they've stayed private", which contradicts what was just said and ignores
+  // the instruction in it. A person mid-conversation is owed a reply, not a recitation. The only
+  // turn that skips the composer is an explicit command carrying its own payload (a literal
+  // "save this as X"), where the deterministic confirmation IS the right answer.
+  if (IQ_COMPOSER && String(text || '').trim() && !(cls.command && cls.command.payload)) {
     composedReply = await _composeTurn(code, userId, cls.questionText || text, {
       priorMessages, workCtx, actions: proposals, about: _turnAbout(opts.about),
     });
