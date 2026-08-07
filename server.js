@@ -8130,7 +8130,18 @@ async function _governedReason(code, userId, question, { register, priorMessages
    The cage is composer.verifyGrounding, applied in code AFTER the model writes: an invented
    name, item title, or count about their records fails the turn and we degrade honestly rather
    than ship a fabrication. Returns null when unavailable/unsafe so the caller keeps the old path. */
-async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [] } = {}) {
+/* A thread opened FROM an observation card tells us what it is about. The text is the person's
+   OWN card, echoed back by their own client — the same trust level as anything they type — so it
+   is hard-capped and treated as untrusted content inside the context block, never as instruction.
+   The grounding cage still verifies whatever the model writes on top of it. */
+function _turnAbout(about) {
+  if (!about || typeof about !== 'object') return null;
+  const h = String(about.headline || '').slice(0, 200).trim();
+  const b = String(about.body || '').slice(0, 300).trim();
+  return (h || b) ? { headline: h, body: b } : null;
+}
+
+async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null } = {}) {
   if (!IQ_COMPOSER || !ai.enabled() || !_llmBudgetOk(code)) return null;
   try {
     const u = orgUsers[code]?.[userId] || {};
@@ -8162,11 +8173,13 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     const contextText = composer.buildContext({
       name: _firstName(code, userId), role: u.role || 'member',
       domain: _domainDirective(code) ? String(org.orgName || '') + (org.orgMode ? ` (${org.orgMode})` : '') : (org.orgName || ''),
-      question, beliefs, evidence, assignedWork, priorMessages,
+      question, about, beliefs, evidence, assignedWork, priorMessages,
       actions: (actions || []).map(a => ({ label: a.label })),
     });
 
-    const reply = await ai.complete({ tier: 'reason', system: composer.SYSTEM_PROMPT, user: contextText, maxTokens: 700, temperature: 0.4 });
+    // maxTokens is a hard ceiling behind the prompt's word budget — a reply nobody scrolls to the
+    // end of is not a better reply, and this is read on a phone.
+    const reply = await ai.complete({ tier: 'reason', system: composer.SYSTEM_PROMPT, user: contextText, maxTokens: 320, temperature: 0.4 });
     const written = reasoningRegister.polish(reply);
     if (!written || written.length < 2) return null;
 
@@ -10943,7 +10956,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   let composedReply = null;
   if (IQ_COMPOSER && (cls.isQuestion || infoRequest || reasoningWanted || assessmentAsk || sensitive)) {
     composedReply = await _composeTurn(code, userId, cls.questionText || text, {
-      priorMessages, workCtx, actions: proposals,
+      priorMessages, workCtx, actions: proposals, about: _turnAbout(opts.about),
     });
   }
   if (composedReply) parts.push(composedReply.answer);
@@ -10971,8 +10984,14 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     workItem: p.workItem || null, effect: p.effect || null, validation: p.validation || null,
     // resolve-uncertainty preview (null for other types) — what will be recorded + how it will be trusted.
     resolvePreview: p.resolvePreview || null }));
+  // When the COMPOSER wrote the reply, the deterministic claim list is not what was said — it is
+  // the raw material the model already reasoned over. Surfacing it underneath produced a
+  // non-sequitur ("You marked 1 thing private") sitting under an unrelated answer, and in the
+  // worst case a stale clarifier contradicting the reply above it. The prose stands on its own.
   const response = {
-    responseText, mode, lens: lens || null, groundedClaims, inferred, limitations: context.limitations,
+    responseText, mode, lens: lens || null,
+    groundedClaims: composedReply ? [] : groundedClaims, inferred: composedReply ? [] : inferred,
+    limitations: context.limitations,
     proposedActions: publicProposals,
     // A SMALL prioritised default set (≤2, lens-ordered); the rest stay behind "more".
     primaryActions: publicProposals.slice(0, 2), moreActions: publicProposals.slice(2),
@@ -11033,7 +11052,7 @@ app.post('/api/assistant/turn', requireAuth, async (req, res) => {
   // happen INSIDE _assistantTurn, in a defined order (persist → ground). The endpoint
   // is a thin boundary — no second retrieval, no endpoint-specific privacy logic.
   try {
-    const r = await _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId, conversationId: req.body?.conversationId });
+    const r = await _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId, conversationId: req.body?.conversationId, about: req.body?.about });
     _metric(code, 'turn');
     res.json({ ok: true, turnId: r.turn.turnId, conversationId: r.conversationId || null, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response, saved: r.saved || null, capturePrompt: r.capturePrompt || null });
   } catch (e) {

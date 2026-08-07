@@ -57,6 +57,13 @@ ok('P6 · emoji never survive into displayed prose (house style)',
   !/[\u{1F300}-\u{1FAFF}]/u.test(reg.polish('Nice work 🎉 keep going 🔥')));
 ok('P6 · it never damages ordinary prose (safe transforms only)',
   reg.polish('You have eased off from your own normal.') === 'You have eased off from your own normal.');
+// The reply renders as PLAIN TEXT, so markdown arrives as literal asterisks on the person's
+// screen ("**Body shape on receipt.**" was shown verbatim live). Strip the markers, keep the words.
+ok('P6b · markdown emphasis never reaches the screen as literal asterisks',
+  reg.polish('**Body shape on receipt.** Opening your hips helps.') === 'Body shape on receipt. Opening your hips helps.'
+  && reg.polish('it does not tell me *what* has shifted') === 'it does not tell me what has shifted');
+ok('P6b · …and a multiplication or footnote asterisk is left alone',
+  reg.polish('3 * 4 sets') === '3 * 4 sets');
 ok('P7 · the model is instructed to address the person directly, and to skip filler',
   /Speak TO the person/.test(reg.SYSTEM_PROMPT) && /No emojis/.test(reg.SYSTEM_PROMPT));
 ok('P8 · the polish runs inside the governed assembler (not just as advice in the prompt)',

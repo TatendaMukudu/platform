@@ -114,6 +114,11 @@ function polish(s) {
     .replace(_EMOJI, '')
     .replace(/^\s*(?:great|good|excellent|interesting)\s+question[!.,]*\s*/i, '')
     .replace(/^\s*(?:certainly|sure thing|sure|of course|absolutely|happy to help)[!.,]+\s*/i, '')
+    // The reply is rendered as PLAIN TEXT, so markdown emphasis arrives as literal asterisks
+    // ("**Body shape on receipt.**"). Strip the markers and keep the words.
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s.,;:!?)]|$)/g, '$1$2')
+    .replace(/(^|\n)\s*[-–•]\s+/g, '$1')
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
 }

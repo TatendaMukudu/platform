@@ -33,6 +33,19 @@ ok('1 · …the question, and the actions available this turn',
 ok('2 · an EMPTY bundle states the absence explicitly (so the model is told to admit it)',
   /nothing recorded yet/i.test(c.buildContext({ question: 'how is my finishing?' })));
 
+/* A CARD IS A THREAD — a conversation opened from an observation carries what it is about, so
+   it starts where the person already is instead of from a blank page. */
+const fromCard = c.buildContext({
+  question: "Let's talk about this: You've been pulling back",
+  about: { headline: "You've been pulling back", body: 'Your participation has eased off from your own normal.' },
+});
+ok('2b · a thread opened from a card carries what it is about',
+  /OPENED FROM SOMETHING THE SYSTEM NOTICED/.test(fromCard)
+  && /You've been pulling back/.test(fromCard) && /eased off from your own normal/.test(fromCard));
+ok('2b · …and is told to open the discussion rather than restate the card',
+  /Start there\./.test(fromCard) && /one question that moves it forward/.test(fromCard));
+ok('2b · an ordinary thread carries no card context', !/OPENED FROM SOMETHING/.test(ctx));
+
 /* ── the cage ─────────────────────────────────────────────────────────────── */
 const roster = ['Ashton Mbeki', 'Josh Marin', 'Tomas Reyes'];
 const V = (reply) => c.verifyGrounding(reply, { contextText: ctx, roster, readerName: 'Ashton Mbeki' });
@@ -69,6 +82,12 @@ ok('9 · …to actually start building when asked to build, not just offer',
   /Offering is not helping/.test(c.SYSTEM_PROMPT));
 ok('9 · …and to speak to the person, in house style',
   /speak TO them/i.test(c.SYSTEM_PROMPT) && /No emojis/.test(c.SYSTEM_PROMPT));
+// Read on a phone: a reply nobody scrolls to the end of is not a better reply, and markdown
+// markers are shown literally rather than rendered.
+ok('9 · …to keep it short enough to read on a phone',
+  /under 120 words/.test(c.SYSTEM_PROMPT));
+ok('9 · …and to write plain prose with no markdown',
+  /NO markdown/.test(c.SYSTEM_PROMPT) && /Asterisks are shown literally/.test(c.SYSTEM_PROMPT));
 
 /* ── the honest degrade never fabricates ──────────────────────────────────── */
 ok('10 · with nothing recorded it says so and asks for what would build the picture',
