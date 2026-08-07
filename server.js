@@ -15678,6 +15678,10 @@ if (require.main === module) (async () => {
       console.log('');
       console.log(`[server] IntelliQ ready on port ${PORT}`);
       console.log(`[server]   API key: ${process.env.ANTHROPIC_API_KEY ? 'loaded' : 'MISSING — set ANTHROPIC_API_KEY'}`);
+      // Say which voice is answering. A silent flag cost us a whole test round: the replies
+      // looked unchanged and it took a code read to work out the composer had never been on.
+      console.log(`[server]   Composer: ${IQ_COMPOSER ? 'ON — the model writes, the deterministic core grounds it' : 'off (set IQ_COMPOSER=1) — deterministic templates write the reply'}`);
+      console.log(`[server]   Reasoning model: ${process.env.AI_MODEL_REASON || 'claude-sonnet-4-6 (default; set AI_MODEL_REASON to change)'}`);
       console.log(`[server]   Persistence: Neon Postgres (DATABASE_URL)`);
       console.log(`[server]   Retention: ${RETENTION_DAYS} days (RETENTION_DAYS to override)`);
       console.log('');
