@@ -8208,8 +8208,12 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     // as settled fact: these are proposals the person has not confirmed into the record.
     const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
     for (const inq of Object.values(mine).slice(0, 4)) {
-      if (!inq || !inq.hypothesis) continue;
-      beliefs.push({ text: `Working read on ${inq.topic.label || inq.topic.canonicalConcept} (${inq.confidence.band}, not confirmed): ${inq.hypothesis.statement}` });
+      const lead = inq && (inq.hypotheses || []).find(h => h.id === inq.leadingHypothesisId);
+      if (!lead) continue;
+      beliefs.push({ text: `Working read on ${inq.topic.label || inq.topic.canonicalConcept} (${inq.confidence.band}, not confirmed): ${lead.statement}` });
+      // A rival worth mentioning keeps the model honest about what is NOT settled.
+      const rival = (inq.hypotheses || []).find(h => h !== lead && h.status !== 'refuted' && h.confidence.score > 0);
+      if (rival) beliefs.push({ text: `A rival explanation there, still open: ${rival.statement}` });
       const gap = (inq.missingSignals || [])[0];
       if (gap && gap.question) beliefs.push({ text: `Still unknown there: ${gap.question}` });
     }
@@ -11298,17 +11302,24 @@ app.delete('/api/library/folders/:id', requireAuth, (req, res) => {
 app.get('/api/inquiry', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
-  const inquiries = Object.values(mine).map(i => ({
-    inquiryId: i.inquiryId, topic: i.topic, polarity: i.polarity, status: i.status,
-    hypothesis: i.hypothesis ? i.hypothesis.statement : null,
-    alternatives: (i.alternatives || []).map(a => a.statement),
-    confidence: i.confidence,                       // { score, band, because } — deterministic
-    signals: (i.knownSignals || []).filter(s => !s.interpretation).length,
-    stillUnknown: (i.missingSignals || []).map(m => m.question),
-    falsifiers: i.falsifiers || [],
-    contradictions: (i.contradictions || []).length,
-    lastUpdatedAt: i.lastUpdatedAt,
-  })).sort((a, b) => (b.confidence.score - a.confidence.score));
+  const inquiries = Object.values(mine).map(i => {
+    const hyps = i.hypotheses || [];
+    const lead = hyps.find(h => h.id === i.leadingHypothesisId) || null;
+    const sig = (i.signals || []).filter(s => s.kind !== 'interpretation');
+    return {
+      inquiryId: i.inquiryId, topic: i.topic, polarity: i.polarity, status: i.status,
+      hypothesis: lead ? lead.statement : null,
+      // Rivals are returned WITH their own confidence, because "could also be X" is a different
+      // statement from "X is nearly as well supported as the leading explanation".
+      alternatives: hyps.filter(h => h !== lead).map(h => ({ statement: h.statement, band: h.confidence.band, status: h.status })),
+      confidence: i.confidence,                     // { score, band, because } — deterministic
+      signals: sig.length,
+      stillUnknown: (i.missingSignals || []).map(m => m.question),
+      falsifiers: i.falsifiers || [],
+      contradictions: sig.filter(s => s.dissents).length,
+      lastUpdatedAt: i.lastUpdatedAt,
+    };
+  }).sort((a, b) => (b.confidence.score - a.confidence.score));
   res.json({ ok: true, inquiries, note: 'A working picture built from conversation. Nothing here is recorded as fact until you confirm it.' });
 });
 

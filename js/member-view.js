@@ -2711,7 +2711,7 @@ const MemberApp = {
           ${i.hypothesis ? `<div class="iq-inq-hyp">${esc(i.hypothesis)}</div>` : ''}
           <div class="iq-inq-why">${esc((conf.because || []).join(' · '))}${i.signals ? ` · ${i.signals} signal${i.signals === 1 ? '' : 's'}` : ''}</div>
           ${(i.stillUnknown || []).length ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Still unknown</span> ${esc(i.stillUnknown[0])}</div>` : ''}
-          ${(i.alternatives || []).length ? `<div class="iq-inq-alt">Could also be: ${esc(i.alternatives.slice(0, 2).join('; '))}</div>` : ''}
+          ${(i.alternatives || []).length ? `<div class="iq-inq-alt">Could also be: ${esc(i.alternatives.slice(0, 2).map(a => typeof a === 'string' ? a : `${a.statement} (${a.band})`).join('; '))}</div>` : ''}
         </div>`; }).join('')}</div>`;
     }).join('') + `<div class="iq-inq-note">${esc(j.note || '')}</div>`;
   },
@@ -2746,7 +2746,7 @@ const MemberApp = {
             ${i.hypothesis ? `<div class="iq-inq-hyp">${esc(i.hypothesis)}</div>` : ''}
             <div class="iq-inq-why">${esc((conf.because || []).join(' · '))}</div>
             ${(i.stillUnknown || []).length ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Still unknown</span> ${esc(i.stillUnknown[0])}</div>` : ''}
-            ${(i.alternatives || []).length ? `<div class="iq-inq-alt">Could also be: ${esc(i.alternatives.slice(0, 2).join('; '))}</div>` : ''}
+            ${(i.alternatives || []).length ? `<div class="iq-inq-alt">Could also be: ${esc(i.alternatives.slice(0, 2).map(a => typeof a === 'string' ? a : `${a.statement} (${a.band})`).join('; '))}</div>` : ''}
           </div>`; }).join('')}
         <div class="iq-inq-note">${esc(j.note || '')}</div>
       </div>`;

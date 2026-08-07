@@ -177,22 +177,47 @@ function deriveConfidence(signals = [], { now = Date.now(), halfLifeDays = 45 } 
 
 /* ── 3. THE INQUIRY STATE ────────────────────────────────────────────────────
    One live line of understanding about a subject. Neutral by construction: `polarity` may be a
-   strength or a difficulty or a condition for success, so the engine is not a weakness detector. */
+   strength or a difficulty or a condition for success, so the engine is not a weakness detector.
+
+   AN INQUIRY IS A PROJECTION, NOT A STORE. It holds evidenceRefs — never copies of the text.
+   The first cut of this module copied signal text inline, which quietly created a second
+   substrate: no provenance, no inherited visibility, and no deletion path, so erasing a piece
+   of evidence would have left its content sitting in an inquiry forever. Canonical evidence
+   stays the one provenance-bearing truth; this reads it.
+
+   `signals` therefore carries only what the KERNEL needs to weigh a claim — the reference, and
+   the shape of the evidence (how direct, whose authority, how specific, when, does it dissent).
+   Rendering resolves refs through the normal authorised read, so a reader can only ever see
+   what they were already entitled to see. */
 function newInquiry({ id, subjectRef, concept, label, domain = '', polarity = 'neutral', now = Date.now() } = {}) {
   return {
     inquiryId: String(id || `inq_${now}`),
     subjectRef: String(subjectRef || ''),
     topic: { canonicalConcept: String(concept || ''), label: String(label || concept || ''), domain: String(domain || '') },
     polarity,                          // 'strength' | 'difficulty' | 'condition' | 'neutral'
-    hypothesis: null,                  // { statement, basis, provenance }
-    alternatives: [],                  // rival explanations still open — kept, never silently dropped
-    knownSignals: [],
+    hypotheses: [],                    // [{ id, statement, confidence, supportRefs, challengeRefs, status }]
+    leadingHypothesisId: null,
+    signals: [],                       // [{ ref, kind, directness, authority, specificity, at, dissents }] — REFS ONLY
     missingSignals: [],                // the collection frontier
-    contradictions: [],
-    falsifiers: [],                    // what would show this is wrong
+    falsifiers: [],                    // what would show the leading hypothesis is wrong
     confidence: { score: 0, band: 'tentative', because: ['nothing recorded yet'] },
     status: 'exploring',               // exploring | probable | supported | disputed | resolved
     createdAt: now, lastUpdatedAt: now,
+  };
+}
+
+/* A hypothesis is a first-class object, not a sentence on the inquiry. Evidence SUPPORTS or
+   CHALLENGES it, and each hypothesis carries its own confidence — so three rival explanations
+   can rise and fall independently as evidence arrives, which is what makes the reasoning
+   longitudinal instead of a snapshot recomputed from a flat list. */
+function newHypothesis({ id, statement, now = Date.now() } = {}) {
+  return {
+    id: String(id || `hyp_${now}`),
+    statement: String(statement || '').trim(),
+    supportRefs: [], challengeRefs: [],
+    confidence: { score: 0, band: 'tentative', because: ['nothing supports this yet'] },
+    status: 'open',                    // open | leading | refuted | settled
+    createdAt: now,
   };
 }
 
@@ -201,38 +226,83 @@ const _STATUS_FOR = (band, contradictions) =>
 
 /* Apply GROUNDED proposals to an inquiry. Nothing here becomes evidence — this is the working
    picture, from which a person may later confirm something into the real record. */
-function applyProposals(inquiry, accepted = [], { now = Date.now() } = {}) {
+function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefOf } = {}) {
   const next = JSON.parse(JSON.stringify(inquiry));
+  // A proposal points at governed evidence. Until the caller supplies a real ref (the evidence
+  // this turn produced), we hold the proposal's own id — still a reference, never the content.
+  const refOf = typeof evidenceRefOf === 'function' ? evidenceRefOf : (p => String(p.id));
+
   for (const p of accepted) {
-    if (p.level === 'observation') {
-      next.knownSignals.push({ id: p.id, text: p.text, sourceSpan: p.sourceSpan, turnId: p.turnId,
-        source: p.source || 'self', directness: p.directness || 'direct',
-        authority: p.authority || 'self_report', specificity: p.specificity, at: now, contradicts: !!p.contradicts });
-      if (p.contradicts) next.contradictions.push({ id: p.id, text: p.text });
+    if (p.level === 'observation' || p.level === 'interpretation') {
+      const isInterp = p.level === 'interpretation';
+      const ref = refOf(p);
+      if (next.signals.some(s => s.ref === ref)) continue;           // idempotent on replay
+      next.signals.push({
+        ref, kind: isInterp ? 'interpretation' : 'observation',
+        directness: isInterp ? 'inferred' : (p.directness || 'direct'),
+        authority: isInterp ? 'unverified' : (p.authority || 'self_report'),
+        source: isInterp ? 'interpretation' : (p.source || 'self'),
+        specificity: isInterp ? 0.4 : p.specificity,
+        at: now, dissents: !!p.contradicts,
+        // Which hypothesis this bears on, and which way. The model may say; if it does not,
+        // the signal still counts toward the inquiry but weighs on nothing in particular.
+        supports: p.supports ? String(p.supports) : null,
+        challenges: p.challenges ? String(p.challenges) : null,
+      });
     } else if (p.level === 'hypothesis') {
-      // A rival hypothesis is never silently discarded — it moves to alternatives.
-      if (next.hypothesis && _norm(next.hypothesis.statement) !== _norm(p.text)) {
-        if (!next.alternatives.some(a => _norm(a.statement) === _norm(next.hypothesis.statement))) {
-          next.alternatives.push({ statement: next.hypothesis.statement, basis: next.hypothesis.basis });
-        }
+      // Rival explanations COEXIST. A new one never overwrites the old — they compete, and
+      // evidence decides. This is the difference between reasoning and last-writer-wins.
+      let h = next.hypotheses.find(x => _norm(x.statement) === _norm(p.text));
+      if (!h) { h = newHypothesis({ id: p.id, statement: p.text, now }); next.hypotheses.push(h); }
+      for (const b of (Array.isArray(p.basis) ? p.basis : [])) {
+        if (!h.supportRefs.includes(String(b))) h.supportRefs.push(String(b));
       }
-      next.hypothesis = { statement: p.text, basis: p.basis || [], provenance: 'proposed_from_conversation' };
       for (const alt of (Array.isArray(p.alternatives) ? p.alternatives : [])) {
         const t = String(alt || '').trim();
-        if (t && !next.alternatives.some(a => _norm(a.statement) === _norm(t))) next.alternatives.push({ statement: t, basis: [] });
+        if (t && !next.hypotheses.some(x => _norm(x.statement) === _norm(t))) {
+          next.hypotheses.push(newHypothesis({ id: `${p.id}_alt${next.hypotheses.length}`, statement: t, now }));
+        }
       }
       for (const f of (Array.isArray(p.falsifiers) ? p.falsifiers : [])) {
         const t = String(f || '').trim();
         if (t && !next.falsifiers.includes(t)) next.falsifiers.push(t);
       }
-    } else if (p.level === 'interpretation') {
-      // Held as an interpretation, explicitly beneath hypothesis in weight.
-      next.knownSignals.push({ id: p.id, text: p.text, interpretation: true, basis: p.basis,
-        source: 'interpretation', directness: 'inferred', authority: 'unverified', specificity: 0.4, at: now });
     }
   }
-  next.confidence = deriveConfidence(next.knownSignals.filter(s => !s.interpretation), { now });
-  next.status = _STATUS_FOR(next.confidence.band, next.contradictions.length);
+
+  // Route each signal to the hypotheses it bears on, so a rival can be CHALLENGED by the very
+  // evidence that supports another — the thing a flat signal list could never express.
+  for (const s of next.signals) {
+    if (s.supports) { const h = next.hypotheses.find(x => x.id === s.supports); if (h && !h.supportRefs.includes(s.ref)) h.supportRefs.push(s.ref); }
+    if (s.challenges) { const h = next.hypotheses.find(x => x.id === s.challenges); if (h && !h.challengeRefs.includes(s.ref)) h.challengeRefs.push(s.ref); }
+  }
+
+  // Each hypothesis earns its OWN confidence from the evidence beneath it. Challenging
+  // evidence is passed through as a contradiction, so a well-attacked hypothesis falls.
+  const byRef = new Map(next.signals.map(s => [s.ref, s]));
+  for (const h of next.hypotheses) {
+    const sig = [
+      ...h.supportRefs.map(r => byRef.get(r)).filter(Boolean),
+      ...h.challengeRefs.map(r => byRef.get(r)).filter(Boolean).map(s => ({ ...s, contradicts: true })),
+    ];
+    h.confidence = sig.length ? deriveConfidence(sig, { now })
+      : { score: 0, band: 'tentative', because: ['nothing supports this yet'] };
+    h.status = h.challengeRefs.length && !h.supportRefs.length ? 'refuted' : h.status === 'settled' ? 'settled' : 'open';
+  }
+
+  // The leading hypothesis is whichever the evidence currently favours — not whichever arrived
+  // most recently. It can change hands, and change back, without anything being lost.
+  const live = next.hypotheses.filter(h => h.status !== 'refuted');
+  const lead = live.slice().sort((a, b) => b.confidence.score - a.confidence.score)[0] || null;
+  next.leadingHypothesisId = lead ? lead.id : null;
+  for (const h of next.hypotheses) if (h.status === 'leading') h.status = 'open';
+  if (lead && lead.status === 'open') lead.status = 'leading';
+
+  // The INQUIRY's confidence is how well we understand the phenomenon — which is the leading
+  // explanation's confidence, not the volume of signals collected about it.
+  const real = next.signals.filter(s => s.kind !== 'interpretation');
+  next.confidence = lead && lead.confidence.score > 0 ? lead.confidence : deriveConfidence(real, { now });
+  next.status = _STATUS_FOR(next.confidence.band, real.filter(s => s.dissents).length);
   next.lastUpdatedAt = now;
   return next;
 }
@@ -246,18 +316,20 @@ function diagnosticYield(before, after, { proposals = [], rejected = [], now = D
   const uAfter  = 1 - (after?.confidence?.score || 0);
   const uncertaintyReduction = Math.max(0, uBefore - uAfter);
 
-  const newSignals = (after?.knownSignals || []).filter(s => !s.interpretation)
-    .filter(s => !(before?.knownSignals || []).some(b => b.id === s.id));
+  const newSignals = (after?.signals || []).filter(s => s.kind !== 'interpretation')
+    .filter(s => !(before?.signals || []).some(b => b.ref === s.ref));
   const evidenceQuality = newSignals.length
     ? newSignals.reduce((a, s) => a + (s.directness === 'direct' ? 1 : 0.5) * _clamp01(typeof s.specificity === 'number' ? s.specificity : 0.5), 0) / newSignals.length
     : 0;
 
   const relevance    = after?.topic?.canonicalConcept ? 1 : 0.5;
-  const actionability = (after?.missingSignals || []).length || after?.hypothesis ? 1 : 0.5;
+  const actionability = (after?.missingSignals || []).length || (after?.hypotheses || []).length ? 1 : 0.5;
 
-  // Novelty: repeating what we already hold is worth nothing.
-  const seen = new Set((before?.knownSignals || []).map(s => _norm(s.text)));
-  const fresh = newSignals.filter(s => !seen.has(_norm(s.text)));
+  // Novelty: repeating what we already hold is worth nothing. Signals are references now, so
+  // "already held" is a ref we have seen before — which is a stricter and cheaper test than
+  // comparing text, and it cannot be fooled by a reworded duplicate of the same evidence.
+  const seen = new Set((before?.signals || []).map(s => s.ref));
+  const fresh = newSignals.filter(s => !seen.has(s.ref));
   const novelty = newSignals.length ? fresh.length / newSignals.length : 0;
 
   let score = uncertaintyReduction * (0.2 + 0.8 * evidenceQuality) * relevance * actionability * (0.2 + 0.8 * novelty);
@@ -266,9 +338,11 @@ function diagnosticYield(before, after, { proposals = [], rejected = [], now = D
   const unsupported = (rejected || []).filter(r => /no grounded observation|source span/.test(r.reason || '')).length;
   if (unsupported) { score *= Math.pow(0.6, unsupported); penalties.push(`${unsupported} unsupported inference`); }
   if (novelty === 0 && newSignals.length) { score *= 0.4; penalties.push('repeated what was already held'); }
-  if ((after?.contradictions || []).length > (before?.contradictions || []).length) { score *= 0.7; penalties.push('introduced a contradiction'); }
+  const dissentAfter = (after?.signals || []).filter(s => s.dissents).length;
+  const dissentBefore = (before?.signals || []).filter(s => s.dissents).length;
+  if (dissentAfter > dissentBefore) { score *= 0.7; penalties.push('introduced a contradiction'); }
   // Premature certainty: a big confidence jump off a single signal is a red flag, not a win.
-  const signalCount = (after?.knownSignals || []).filter(s => !s.interpretation).length;
+  const signalCount = (after?.signals || []).filter(s => s.kind !== 'interpretation').length;
   if (signalCount <= 1 && (after?.confidence?.score || 0) > 0.5) { score *= 0.3; penalties.push('premature certainty'); }
 
   return { score: Math.round(_clamp01(score) * 100) / 100, uncertaintyReduction: Math.round(uncertaintyReduction * 100) / 100,
@@ -335,6 +409,6 @@ const INTAKE_PROMPT = [
 
 module.exports = {
   LEVELS, LEVEL_RANK, MODEL_MAY_PROPOSE, INTAKE_PROMPT,
-  groundProposals, deriveConfidence, newInquiry, applyProposals,
+  groundProposals, deriveConfidence, newInquiry, newHypothesis, applyProposals,
   diagnosticYield, rankQuestions, nextNeed,
 };
