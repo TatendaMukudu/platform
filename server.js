@@ -51,6 +51,7 @@ const audit      = require('./ai/audit');
 const reasoningRegister = require('./ai/reasoning-register');
 const kernelCoreasoning = require('./ai/kernel-coreasoning');
 const composer          = require('./ai/composer');
+const diagnose          = require('./ai/diagnose');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
 const errorlog = require('./ai/errorlog');
@@ -145,6 +146,7 @@ function scheduleSave() {
         orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
         reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
         conversationSessions, assistantConversations, libraryFolders, libraryItems, safeguardingFlags,
+        inquiryStates,
       });
     } catch(e) { console.error('[db] Save failed:', e.message); }
   }, 500);
@@ -8170,6 +8172,17 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     const assignedWork = (workCtx && Array.isArray(workCtx.items))
       ? workCtx.items.map(i => ({ title: i.title, status: i.status })) : [];
 
+    // WHAT THE EARS HAVE BUILT — the working picture from earlier turns, so the conversation
+    // compounds instead of restarting. Stated as a working read with its confidence band, never
+    // as settled fact: these are proposals the person has not confirmed into the record.
+    const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+    for (const inq of Object.values(mine).slice(0, 4)) {
+      if (!inq || !inq.hypothesis) continue;
+      beliefs.push({ text: `Working read on ${inq.topic.label || inq.topic.canonicalConcept} (${inq.confidence.band}, not confirmed): ${inq.hypothesis.statement}` });
+      const gap = (inq.missingSignals || [])[0];
+      if (gap && gap.question) beliefs.push({ text: `Still unknown there: ${gap.question}` });
+    }
+
     const contextText = composer.buildContext({
       name: _firstName(code, userId), role: u.role || 'member',
       domain: _domainDirective(code) ? String(org.orgName || '') + (org.orgMode ? ` (${org.orgMode})` : '') : (org.orgName || ''),
@@ -8193,6 +8206,74 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     }
     _metric(code, 'composer_used');
     return { answer: written, grounded: beliefs.length + evidence.length > 0 };
+  } catch (_) { return null; }
+}
+
+/* ── THE EARS (semantic intake) ──────────────────────────────────────────────
+   Runs AFTER the reply has been composed, so it costs the person no latency: this is not how
+   we answer THIS turn, it is how we understand better by the NEXT one. The model proposes
+   grounded semantic structure; ai/diagnose.js refuses anything it cannot trace to the person's
+   own words, refuses a conclusion outright, and computes confidence itself.
+
+   Nothing here becomes evidence or touches the belief ledger. It builds a working picture the
+   person can later confirm from. That boundary is the whole reason this is safe to run
+   automatically on every turn. */
+function _inquiryFor(code, subjectRef, concept, label, domain, now) {
+  const byOrg = inquiryStates[code] || (inquiryStates[code] = {});
+  const bySubject = byOrg[subjectRef] || (byOrg[subjectRef] = {});
+  const key = String(concept || 'general').toLowerCase();
+  if (!bySubject[key]) {
+    bySubject[key] = diagnose.newInquiry({ id: 'inq_' + generateId(), subjectRef, concept: key, label, domain, now });
+  }
+  return bySubject[key];
+}
+
+async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = [] } = {}) {
+  if (!IQ_COMPOSER || !ai.enabled() || !_llmBudgetOk(code)) return null;
+  const utterance = String(text || '').trim();
+  if (utterance.length < 12) return null;              // "ok", "thanks" carry nothing to extract
+  try {
+    const org = orgMeta[code] || {};
+    const prior = (priorMessages || []).slice(-4).map(m => `${m.role === 'assistant' ? 'You' : 'Them'}: ${String(m.text || '').slice(0, 200)}`).join('\n');
+    const out = await ai.completeJSON({
+      tier: 'micro',                                   // extraction, not open reasoning — the cheap tier fits
+      system: diagnose.INTAKE_PROMPT,
+      user: [org.orgName ? `Domain: ${org.orgName}${org.orgMode ? ` (${org.orgMode})` : ''}` : '',
+        prior ? `RECENT CONVERSATION:\n${prior}` : '',
+        `THEY JUST SAID: ${utterance.slice(0, 1500)}`].filter(Boolean).join('\n\n'),
+      maxTokens: 700, temperature: 0.2, schema: ['proposals'],
+    });
+    if (!out || !Array.isArray(out.proposals)) return null;
+
+    const { accepted, rejected } = diagnose.groundProposals(out.proposals, { utterance, turnId });
+    if (rejected.length) _metric(code, 'intake_refused', rejected.length);
+    if (!accepted.length) return null;
+
+    // Group by the concept each proposal names, so one utterance can touch several inquiries.
+    const now = Date.now();
+    const subjectRef = `member:${userId}`;
+    const byConcept = {};
+    for (const p of accepted) {
+      const c = String(p.domainConcept || p.concept || 'general').toLowerCase();
+      (byConcept[c] = byConcept[c] || []).push(p);
+    }
+    const touched = [];
+    for (const [concept, props] of Object.entries(byConcept)) {
+      const inq = _inquiryFor(code, subjectRef, concept, props[0].label || concept, org.orgMode || '', now);
+      const before = JSON.parse(JSON.stringify(inq));
+      const after = diagnose.applyProposals(inq, props, { now });
+      // The collection frontier for this inquiry — what the model could not tell from what was said.
+      after.missingSignals = (Array.isArray(out.unknowns) ? out.unknowns : [])
+        .map(u => ({ question: String(u && u.question || '').slice(0, 300), resolves: u && u.resolves,
+          burden: typeof (u && u.burden) === 'number' ? u.burden : 0.3 }))
+        .filter(u => u.question).slice(0, 5);
+      inquiryStates[code][subjectRef][concept] = after;
+      const y = diagnose.diagnosticYield(before, after, { rejected });
+      _metric(code, 'intake_applied');
+      touched.push({ concept, yield: y.score, band: after.confidence.band });
+    }
+    scheduleSave();
+    return touched;
   } catch (_) { return null; }
 }
 
@@ -10179,6 +10260,11 @@ function _convTitle(t) { const s = String(t || '').trim().replace(/\s+/g, ' '); 
 const libraryFolders = {};  // code → [ { id, ownerId, name, createdAt } ]
 const libraryItems   = {};  // code → [ { id, ownerId, type, title, body, sourceRef, folderId, visibility, createdAt, updatedAt } ]
 
+/* INQUIRY STATE — the working understanding built from conversation. NOT evidence and NOT the
+   belief ledger: it is a picture that accumulates, from which a person may later confirm
+   something into the real record. Keyed code → subjectRef → concept. See ai/diagnose.js. */
+const inquiryStates  = {};
+
 /* ── ABUSE & COST CONTROLS ───────────────────────────────────────────────────
    Login attempts are bounded per email+IP so a stolen email can't be brute-forced. LLM calls
    are bounded PER ORG (hourly + daily) so one org can't drain the shared key or starve the
@@ -11038,6 +11124,11 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   if (_conv.messages.length > CONV_MSG_CAP) _conv.messages.splice(0, _conv.messages.length - CONV_MSG_CAP);
   _conv.updatedAt = _nowIso;
   scheduleSave();
+  // THE EARS, last and unawaited. Understanding the turn must never delay answering it — this
+  // improves the NEXT reply, not this one. A crisis turn exits far above and never reaches here.
+  if (opts.subjectMemberId == null) {
+    Promise.resolve().then(() => _intakeTurn(code, userId, text, { turnId: turn.turnId, priorMessages })).catch(() => {});
+  }
   return { turn, response, saved, capturePrompt, conversationId: _conv.id, interpretation: { turnId: interp.turnId, originalInputRef: rawRef, candidateIntents: interp.candidateIntents,
     candidateClaims: interp.candidateClaims, suggestedPrivacy: interp.suggestedPrivacy, proposedActions: interp.proposedActions,
     confidence: interp.confidence, ambiguities: interp.ambiguities, limitations: interp.limitations }, context: { basisIds: context.basisIds, purpose: context.purpose, visibilityEligibility: context.visibilityEligibility, confidence: context.confidence, limitations: context.limitations } };
@@ -11144,6 +11235,27 @@ app.delete('/api/library/folders/:id', requireAuth, (req, res) => {
 /* ── LIBRARY: ITEMS ──────────────────────────────────────────────────────── */
 /* GET /api/library — items visible to me: my own (any visibility) + anyone's SHARED. Filter
    by ?folderId= (mine only) and ?scope=mine|shared|all. */
+/* GET /api/inquiry — what the ears have built about YOU, and only you. This is the working
+   picture, not the record: every hypothesis is unconfirmed, its confidence was computed from the
+   shape of the evidence (never asserted by a model), and each one carries what is still unknown.
+   Self-scoped with no override — a leader does not read this through this route. */
+app.get('/api/inquiry', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+  const inquiries = Object.values(mine).map(i => ({
+    inquiryId: i.inquiryId, topic: i.topic, polarity: i.polarity, status: i.status,
+    hypothesis: i.hypothesis ? i.hypothesis.statement : null,
+    alternatives: (i.alternatives || []).map(a => a.statement),
+    confidence: i.confidence,                       // { score, band, because } — deterministic
+    signals: (i.knownSignals || []).filter(s => !s.interpretation).length,
+    stillUnknown: (i.missingSignals || []).map(m => m.question),
+    falsifiers: i.falsifiers || [],
+    contradictions: (i.contradictions || []).length,
+    lastUpdatedAt: i.lastUpdatedAt,
+  })).sort((a, b) => (b.confidence.score - a.confidence.score));
+  res.json({ ok: true, inquiries, note: 'A working picture built from conversation. Nothing here is recorded as fact until you confirm it.' });
+});
+
 app.get('/api/library', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const scope = ['mine', 'shared', 'all'].includes(req.query.scope) ? req.query.scope : 'all';
@@ -15439,6 +15551,7 @@ function _loadAllStores(data) {
   Object.assign(assistantConversations, data.assistantConversations || {});
   Object.assign(libraryFolders, data.libraryFolders || {});
   Object.assign(libraryItems,   data.libraryItems   || {});
+  Object.assign(inquiryStates,  data.inquiryStates  || {});
   Object.assign(safeguardingFlags, data.safeguardingFlags || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
@@ -15509,7 +15622,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
-  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, _migrateLegacyNotesToLibrary, orgNotes, safeguardingFlags, _llmBudgetOk, _captureError, checkinProposals,
+  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, inquiryStates, _migrateLegacyNotesToLibrary, orgNotes, safeguardingFlags, _llmBudgetOk, _captureError, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
   // exported for the truth layer: grounded retrieval over canonical evidence
