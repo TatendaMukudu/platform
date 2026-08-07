@@ -61,6 +61,23 @@ const server = app.listen(0, async () => {
     ok('2b · confirming the SAME topic again reuses the open one (no duplicate)',
       conf2.ok === true && conf2.assessment && conf2.assessment.id === conf.assessment.id && /already have/i.test(conf2.note || ''));
 
+    /* 2c — a personal assessment is YOURS to remove. If the assistant misread you and built the
+       wrong thing, it must come off your list — otherwise its wrong title keeps resurfacing as
+       context and drags future reasoning back toward the original misreading. */
+    const del = await fetch(base + `/api/assessments/self/${encodeURIComponent(conf.assessment.id)}`, { method: 'DELETE', headers: H }).then(r => r.json());
+    ok('2c · you can remove a personal assessment you started', del.ok === true && del.removed === conf.assessment.id);
+    const gone = await fetch(base + `/api/assessments/self/${encodeURIComponent(conf.assessment.id)}`, { method: 'DELETE', headers: H });
+    ok('2c · …and it is really gone', gone.status === 404);
+    // Someone else's assessment is never yours to delete.
+    const otherTok = issueToken('ghost', C, 'member');
+    const r2 = await turn("I'd like a short assessment to help me improve at heading");
+    const p2 = ((r2.response && r2.response.proposedActions) || []).find(p => p.actionType === 'assessment_start');
+    const c2 = await fetch(base + `/api/assistant/turn/${encodeURIComponent(r2.turnId)}/confirm`, {
+      method: 'POST', headers: H, body: JSON.stringify({ proposalId: p2 && p2.id }) }).then(r => r.json());
+    const theft = await fetch(base + `/api/assessments/self/${encodeURIComponent(c2.assessment.id)}`, {
+      method: 'DELETE', headers: { Authorization: `Bearer ${otherTok}` } });
+    ok('2c · …but someone else\'s is not yours to remove (403)', theft.status === 403);
+
     /* 3 — a status-style mention is NOT hijacked into an assessment request (no false positive) */
     const r3 = await turn('what is the assessment status for the squad?');
     ok('3 · a status question about assessments is not turned into an assessment request',
