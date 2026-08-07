@@ -29,7 +29,7 @@ const MemberApp = {
   _cachedNotes: [],
   _chatConvId:  null,   // the member's live threaded conversation (same runtime as the leader)
   _insights:    {},     // dedupeKey -> { headline, body, patternType } for the cards on screen
-  _cardThreads: {},     // dedupeKey -> conversationId — each card keeps its OWN thread
+  _cardThreads: null,   // dedupeKey -> conversationId (persisted; loaded lazily on first send)
 
   // Scenario runner
   _scenario:  null,
@@ -2848,6 +2848,12 @@ const MemberApp = {
      helped. Tapping one opens a FULL conversation that already knows what it is about: a fresh
      thread, the observation pinned at the top as context, and the assistant opening the
      discussion. Resolving it closes the card. Nothing is written without a confirmation. */
+  /* A card's thread must survive a page reload, or every visit forks another conversation for
+     the same observation and Recents fills with duplicates of it. */
+  _lsCardThreads() { return `iq_cardthreads_${this._userId}`; },
+  _cardThreadsLoad() { try { return JSON.parse(localStorage.getItem(this._lsCardThreads()) || '{}') || {}; } catch (_) { return {}; } },
+  _cardThreadsSave() { try { localStorage.setItem(this._lsCardThreads(), JSON.stringify(this._cardThreads || {})); } catch (_) {} },
+
   _cardEl(dedupeKey) {
     const k = (window.CSS && CSS.escape) ? CSS.escape(dedupeKey) : dedupeKey;
     return document.querySelector(`.iq-insight[data-key="${k}"]`);
@@ -2906,7 +2912,7 @@ const MemberApp = {
     if (msgs) msgs.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-iq iq-pending" data-pending="1" role="status"><span class="iq-typing" aria-hidden="true"><i></i><i></i><i></i></span></div>`);
     if (ta && !isOpening) { ta.value = ''; this._wsGrow(ta); }
 
-    this._cardThreads = this._cardThreads || {};
+    this._cardThreads = this._cardThreads || this._cardThreadsLoad();
     let j = null;
     try {
       const r = await fetch('/api/assistant/turn', { method: 'POST',
@@ -2914,7 +2920,7 @@ const MemberApp = {
         body: JSON.stringify({ text, conversationId: this._cardThreads[dedupeKey] || undefined,
           about: { headline: info.headline, body: info.body } }) });
       j = await r.json();
-      if (j && j.conversationId) this._cardThreads[dedupeKey] = j.conversationId;
+      if (j && j.conversationId) { this._cardThreads[dedupeKey] = j.conversationId; this._cardThreadsSave(); }
     } catch (_) { j = null; }
 
     const pend = msgs && msgs.querySelector('[data-pending="1"]');

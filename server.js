@@ -10803,7 +10803,11 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // gather the recent messages as MEMORY so a follow-up ("yes, for my U16s") has context. The
   // history is the user's own; it never becomes org data here.
   const _convKey = _wsKey(code, userId);
-  const _conv = _resolveConversation(_convKey, opts.conversationId, text, Date.now());
+  // A thread opened from an observation card is titled from the CARD, not from the synthetic
+  // opening line the client sends. Otherwise Recents fills up with "Let's talk about this: …"
+  // repeated, which is machine chatter presented as though the person had written it.
+  const _convSeed = (opts.about && opts.about.headline) ? String(opts.about.headline) : text;
+  const _conv = _resolveConversation(_convKey, opts.conversationId, _convSeed, Date.now());
   const priorMessages = (_conv.messages || []).slice(-8).map(m => ({ role: m.role, text: m.text }));
 
   // ── DUTY OF CARE (first, deterministic) ──────────────────────────────────────
