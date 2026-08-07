@@ -82,6 +82,12 @@ ok('9 · …to actually start building when asked to build, not just offer',
   /Offering is not helping/.test(c.SYSTEM_PROMPT));
 ok('9 · …and to speak to the person, in house style',
   /speak TO them/i.test(c.SYSTEM_PROMPT) && /No emojis/.test(c.SYSTEM_PROMPT));
+// Read on a phone: a reply nobody scrolls to the end of is not a better reply, and markdown
+// markers are shown literally rather than rendered.
+ok('9 · …to keep it short enough to read on a phone',
+  /under 120 words/.test(c.SYSTEM_PROMPT));
+ok('9 · …and to write plain prose with no markdown',
+  /NO markdown/.test(c.SYSTEM_PROMPT) && /Asterisks are shown literally/.test(c.SYSTEM_PROMPT));
 
 /* ── the honest degrade never fabricates ──────────────────────────────────── */
 ok('10 · with nothing recorded it says so and asks for what would build the picture',

@@ -8177,7 +8177,9 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
       actions: (actions || []).map(a => ({ label: a.label })),
     });
 
-    const reply = await ai.complete({ tier: 'reason', system: composer.SYSTEM_PROMPT, user: contextText, maxTokens: 700, temperature: 0.4 });
+    // maxTokens is a hard ceiling behind the prompt's word budget — a reply nobody scrolls to the
+    // end of is not a better reply, and this is read on a phone.
+    const reply = await ai.complete({ tier: 'reason', system: composer.SYSTEM_PROMPT, user: contextText, maxTokens: 320, temperature: 0.4 });
     const written = reasoningRegister.polish(reply);
     if (!written || written.length < 2) return null;
 
@@ -10982,8 +10984,14 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     workItem: p.workItem || null, effect: p.effect || null, validation: p.validation || null,
     // resolve-uncertainty preview (null for other types) — what will be recorded + how it will be trusted.
     resolvePreview: p.resolvePreview || null }));
+  // When the COMPOSER wrote the reply, the deterministic claim list is not what was said — it is
+  // the raw material the model already reasoned over. Surfacing it underneath produced a
+  // non-sequitur ("You marked 1 thing private") sitting under an unrelated answer, and in the
+  // worst case a stale clarifier contradicting the reply above it. The prose stands on its own.
   const response = {
-    responseText, mode, lens: lens || null, groundedClaims, inferred, limitations: context.limitations,
+    responseText, mode, lens: lens || null,
+    groundedClaims: composedReply ? [] : groundedClaims, inferred: composedReply ? [] : inferred,
+    limitations: context.limitations,
     proposedActions: publicProposals,
     // A SMALL prioritised default set (≤2, lens-ordered); the rest stay behind "more".
     primaryActions: publicProposals.slice(0, 2), moreActions: publicProposals.slice(2),
