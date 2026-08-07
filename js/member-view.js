@@ -28,7 +28,8 @@ const MemberApp = {
   _myGroups:    [],
   _cachedNotes: [],
   _chatConvId:  null,   // the member's live threaded conversation (same runtime as the leader)
-  _insightCtx:  null,   // the observation card THIS thread was opened from (a card is a thread)
+  _insights:    {},     // dedupeKey -> { headline, body, patternType } for the cards on screen
+  _cardThreads: {},     // dedupeKey -> conversationId — each card keeps its OWN thread
 
   // Scenario runner
   _scenario:  null,
@@ -2538,7 +2539,6 @@ const MemberApp = {
     // Fresh render (e.g. navigating to Home) CLEARS any stale member/work context — a member
     // subject is never silently carried across navigation (Cut E). askAboutMember sets it after.
     this._wsSubjectMemberId = null; this._wsSubjectName = null; this._wsWorkItemId = null;
-    this._insightCtx = null;
     // It reads like a CHAT: the conversation flows down and the composer sits at the bottom of
     // the chat box, where you type — never above the thread, so a reply never pushes the input
     // away. Below it are the other boxes you move on to. Context (notes, work, plans) is
@@ -2669,12 +2669,15 @@ const MemberApp = {
                <button class="iq-fb" title="Not useful" onclick="MemberApp.insightFeedback(this,'not_useful',${attr(a.dedupeKey)},${attr(a.patternType)})">Not useful</button>
                <button class="iq-fb" title="Mute this" onclick="MemberApp.insightFeedback(this,'mute',${attr(a.dedupeKey)},${attr(a.patternType)})">Mute</button>
              </div>` : '';
-        // The card OPENS as a full thread — it is a conversation waiting to happen, not a
-        // notification. Tapping it starts a thread that already knows what it is about.
-        const open = `<button class="iq-insight-open" onclick="MemberApp.openInsightThread(${attr(a.dedupeKey)},${attr(a.headline)},${attr(a.body)},${attr(a.patternType || '')})">Talk this through</button>`;
+        // The card EXPANDS IN PLACE into a full thread — it is a conversation waiting to happen,
+        // not a notification. Keeping the card's own text in a map (rather than passing it
+        // through an onclick attribute) avoids double-escaping "You've" into "You&#39;ve".
+        this._insights[a.dedupeKey] = { headline: a.headline, body: a.body, patternType: a.patternType || '' };
+        const open = `<button class="iq-insight-open" onclick="MemberApp.openInsightThread(${attr(a.dedupeKey)})">Talk this through</button>`;
         return `<div class="iq-insight ${POL[a.polarity] || 'iq-pol-neutral'}" data-key="${esc(a.dedupeKey)}">
           <div class="iq-insight-head"><span class="iq-insight-headline">${esc(a.headline)}</span>${rel}</div>
-          <div class="iq-insight-body">${esc(a.body)}</div>${explore}${open}${act}${fb}</div>`;
+          <div class="iq-insight-body">${esc(a.body)}</div>${explore}${open}${act}${fb}
+          <div class="iq-cardthread" data-thread="${esc(a.dedupeKey)}" style="display:none"></div></div>`;
       };
       const sections = ORDER
         .filter(b => groups[b] && groups[b].insights && groups[b].insights.length)
@@ -2707,40 +2710,95 @@ const MemberApp = {
      helped. Tapping one opens a FULL conversation that already knows what it is about: a fresh
      thread, the observation pinned at the top as context, and the assistant opening the
      discussion. Resolving it closes the card. Nothing is written without a confirmation. */
-  openInsightThread(dedupeKey, headline, body, patternType) {
-    this._insightCtx = { dedupeKey, headline, body, patternType };
-    this._chatConvId = null;                       // a card gets its OWN thread, never the last one
-    this.wsHistoryClose();
+  _cardEl(dedupeKey) {
+    const k = (window.CSS && CSS.escape) ? CSS.escape(dedupeKey) : dedupeKey;
+    return document.querySelector(`.iq-insight[data-key="${k}"]`);
+  },
+
+  /* Expand the card, in place. It does NOT jump you to the composer at the top of the page —
+     the conversation opens where you already are, under the observation it is about, with its
+     own thread and its own input. That is what "tap the card and it expands" means. */
+  openInsightThread(dedupeKey) {
+    const info = (this._insights || {})[dedupeKey];
+    if (!info) return;
+    const card = this._cardEl(dedupeKey);
+    const pane = card && card.querySelector('.iq-cardthread');
+    if (!pane) return;
+    if (pane.style.display !== 'none') { this.wsCardFocus(dedupeKey); return; }   // already open
+
     const esc = s => this._escape(String(s == null ? '' : s));
-    const thread = document.getElementById('iq-conversation');
-    if (thread) {
-      thread.innerHTML = `
-        <div class="iq-threadctx" id="iq-threadctx">
-          <div class="iq-threadctx-label">Talking through</div>
-          <div class="iq-threadctx-head">${esc(headline)}</div>
-          ${body ? `<div class="iq-threadctx-body">${esc(body)}</div>` : ''}
-          <button class="iq-threadctx-close" onclick="MemberApp.resolveInsightThread('useful')">Done with this</button>
-        </div>`;
-      thread.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const openBtn = card.querySelector('.iq-insight-open');
+    if (openBtn) openBtn.style.display = 'none';
+    pane.style.display = 'block';
+    pane.innerHTML = `
+      <div class="iq-cardthread-msgs" data-msgs="${esc(dedupeKey)}" aria-live="polite"></div>
+      <div class="iq-cardthread-input">
+        <textarea class="iq-cardthread-ta" data-ta="${esc(dedupeKey)}" rows="1" placeholder="Say what's actually going on…"
+          oninput="MemberApp._wsGrow(this)"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.cardSend(${JSON.stringify(esc(dedupeKey)).replace(/"/g, '&quot;')})}"></textarea>
+        <button class="iq-cardthread-send" type="button" aria-label="Send" onclick="MemberApp.cardSend(${JSON.stringify(esc(dedupeKey)).replace(/"/g, '&quot;')})">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M5 13l7-7 7 7"/></svg>
+        </button>
+      </div>
+      <button class="iq-threadctx-close" onclick="MemberApp.resolveInsightThread(${JSON.stringify(esc(dedupeKey)).replace(/"/g, '&quot;')},'useful')">Done with this</button>`;
+    // The assistant opens the discussion from the observation — no blank page to face.
+    this.cardSend(dedupeKey, `Let's talk about this: ${info.headline}`);
+  },
+
+  wsCardFocus(dedupeKey) {
+    const card = this._cardEl(dedupeKey);
+    const ta = card && card.querySelector('.iq-cardthread-ta');
+    if (ta) ta.focus();
+  },
+
+  /* A turn inside a card's own thread. Same governed runtime as everywhere else — it just
+     carries the observation as context and keeps its own conversation id. */
+  async cardSend(dedupeKey, opening) {
+    const info = (this._insights || {})[dedupeKey];
+    const card = this._cardEl(dedupeKey);
+    if (!card || !info) return;
+    const msgs = card.querySelector('.iq-cardthread-msgs');
+    const ta = card.querySelector('.iq-cardthread-ta');
+    const isOpening = opening != null;
+    const text = isOpening ? String(opening) : (ta?.value || '').trim();
+    if (!text || this._cardSending) return;
+    this._cardSending = true;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    if (msgs && !isOpening) msgs.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">${esc(text)}</div>`);
+    if (msgs) msgs.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-iq iq-pending" data-pending="1" role="status"><span class="iq-typing" aria-hidden="true"><i></i><i></i><i></i></span></div>`);
+    if (ta && !isOpening) { ta.value = ''; this._wsGrow(ta); }
+
+    this._cardThreads = this._cardThreads || {};
+    let j = null;
+    try {
+      const r = await fetch('/api/assistant/turn', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ text, conversationId: this._cardThreads[dedupeKey] || undefined,
+          about: { headline: info.headline, body: info.body } }) });
+      j = await r.json();
+      if (j && j.conversationId) this._cardThreads[dedupeKey] = j.conversationId;
+    } catch (_) { j = null; }
+
+    const pend = msgs && msgs.querySelector('[data-pending="1"]');
+    if (pend) {
+      pend.removeAttribute('data-pending');
+      if (j && j.ok) pend.innerHTML = this._renderAssistant(j);
+      else { pend.classList.add('iq-msg-error'); pend.innerHTML = `<div class="iq-error-text">I couldn't reach IntelliQ just now.</div>`; }
     }
-    // Open the conversation for them — the assistant speaks first, from the observation.
-    this.wsSend(`Let's talk about this: ${headline}`);
+    this._cardSending = false;
   },
 
   /* Close the thread and the card together. "Done" teaches the Confidence Engine this line of
      attention was worth raising; the card then leaves the list instead of nagging. */
-  async resolveInsightThread(action) {
-    const ctx = this._insightCtx;
-    this._insightCtx = null;
-    const ctxEl = document.getElementById('iq-threadctx'); if (ctxEl) ctxEl.remove();
-    if (!ctx || !ctx.dedupeKey) return;
+  async resolveInsightThread(dedupeKey, action) {
+    const info = (this._insights || {})[dedupeKey] || {};
     try {
-      await fetch(`/api/proactive/insights/${encodeURIComponent(ctx.dedupeKey)}/feedback`, {
+      await fetch(`/api/proactive/insights/${encodeURIComponent(dedupeKey)}/feedback`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
-        body: JSON.stringify({ dedupeKey: ctx.dedupeKey, patternType: ctx.patternType, action: action || 'useful' }),
+        body: JSON.stringify({ dedupeKey, patternType: info.patternType, action: action || 'useful' }),
       });
     } catch (_) {}
-    const card = document.querySelector(`.iq-insight[data-key="${(window.CSS && CSS.escape) ? CSS.escape(ctx.dedupeKey) : ctx.dedupeKey}"]`);
+    const card = this._cardEl(dedupeKey);
     if (card) card.remove();
   },
 
@@ -2800,7 +2858,6 @@ const MemberApp = {
      /api/assistant/conversations endpoints and the .tdy-* voice styling. */
   wsNewChat() {
     this._chatConvId = null;
-    this._insightCtx = null;                 // a fresh thread is not about the last card
     const c = document.getElementById('iq-conversation'); if (c) c.innerHTML = '';
     this.wsHistoryClose();
     const i = document.getElementById('iq-composer-input'); if (i) i.focus();
@@ -2918,10 +2975,9 @@ const MemberApp = {
         headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
         // subjectMemberId requests LEADER-SUPPORT context — server-validated every turn; the chip
         // makes it explicit, and it is only ever set from an authorised profile entry point.
-        // `about` is the observation card this thread was opened from — it tells the assistant
-        // what the conversation is about, so it starts where the person already is.
-        body: JSON.stringify({ text, conversationId: threaded ? (this._chatConvId || undefined) : undefined, lens: this._wsActiveLens || undefined, workItemId: this._wsWorkItemId || undefined, subjectMemberId: this._wsSubjectMemberId || undefined,
-          about: this._insightCtx ? { headline: this._insightCtx.headline, body: this._insightCtx.body } : undefined }) });
+        // A card's own thread carries its `about` context via cardSend; the main composer is the
+        // general conversation and carries none.
+        body: JSON.stringify({ text, conversationId: threaded ? (this._chatConvId || undefined) : undefined, lens: this._wsActiveLens || undefined, workItemId: this._wsWorkItemId || undefined, subjectMemberId: this._wsSubjectMemberId || undefined }) });
       clearTimeout(timer);
       if (r.status === 401) return { ok: false, reason: 'auth' };
       const j = await r.json();
