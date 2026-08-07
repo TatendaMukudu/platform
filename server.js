@@ -8042,7 +8042,16 @@ function _reasonReadAnswer(code, userId, { filter, lead, patterns, now = Date.no
     const opening = _actorLevel(code, userId) === 'leader'
       ? voice.leaderOpening({ name, timeOfDay: _timeOfDay(now), count: items.length, areaLabel: area, seed: userId + 'ask' })
       : voice.memberOpening({ name, timeOfDay: _timeOfDay(now), count: items.length, seed: userId + 'ask' });
-    const claims = items.slice(0, 3).map(a => a.claim);
+    // Speak to the person, not about them. A belief whose SUBJECT is the reader is rendered in
+    // its second-person self view ("You've eased off from your own normal"), never the
+    // leader-facing third person ("Ashton Mbeki has been pulling back") — which reads as being
+    // talked about behind your own back. Same transform the member brief already uses.
+    const claims = items.slice(0, 3).map(a => {
+      if (a.subjectId && a.subjectId === userId) {
+        try { const v = reason.subjectView({ id: a.beliefId, kind: a.kind, claim: a.claim, confidence: a.confidence }); if (v && v.claim) return v.claim; } catch (_) {}
+      }
+      return a.claim;
+    });
     const answer = [(lead && items.length) ? lead : opening, ...claims].join(' ').trim();
     return { answer, confidence: items.length ? 'medium' : 'confirmed', limitations: ['a read from recorded signals, not a prediction'], count: items.length };
   } catch (_) { return null; }
@@ -10661,6 +10670,18 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   const reasoningWanted = reasoningRegister.wantsReasoning(reg0) && requestCue && !(cls.command && cls.command.payload);
   let qa = null;
   if (cls.isQuestion || infoRequest) { try { qa = _assistantAnswer(code, userId, cls.questionText || text); } catch (_) { qa = null; } }
+  // ── RECALL ───────────────────────────────────────────────────────────────────
+  // "What did I just tell you?" is about THIS conversation, not the org's records. Answer it
+  // from the thread itself — deterministic, no model, no egress, and it cannot fabricate.
+  // Without this it fell through to the grounded read and dead-ended on evidence it never had.
+  if (reg0 === 'recall') {
+    const recalled = reasoningRegister.composeRecall(priorMessages);
+    qa = recalled
+      ? { answer: recalled, purpose: 'personal_assistance', confidence: 'confirmed', limitations: [],
+          cites: [], citations: [], provenance: [{ tag: 'conversation' }], register: 'recall' }
+      : { answer: `This is the start of our conversation — you haven't told me anything yet in this thread.`,
+          purpose: 'personal_assistance', confidence: 'confirmed', limitations: [], cites: [], citations: [], register: 'recall' };
+  }
   // The reasoning edge is a FALLBACK — it never overrides an answer the org's own data already
   // produced (that would hijack a grounded lookup like "how does our high press work").
   // A STANDING READ (the attention digest, returned when nothing matched the actual question)
@@ -10836,7 +10857,12 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   const parts = [];
   // Assigned-work assistance leads when the member is asking about their assigned work (even over a
   // generic Q&A answer) — they asked about the work, so answer about the work.
-  if (workLead) parts.push(workLead);
+  // An explicit assessment REQUEST leads over the ambiguous assigned-work clarifier: the person
+  // asked to BUILD one, not to be asked which existing item they meant. The clarifier still
+  // follows as context, so their existing items are never hidden from them.
+  const specificAnswer = qa && (qa.assessment || qa.register === 'recall');
+  if (specificAnswer) { parts.push(qa.answer); if (qa.assessment && workLead && workAmbiguous) parts.push(workLead); }
+  else if (workLead) parts.push(workLead);
   else if (hasAnswer) parts.push(qa.answer);
   else if (sensitive) parts.push("Thank you for telling me — that sounds like a lot to be carrying. It stays private with me, and I'm here.");
   else if (hasInsight) parts.push(groundedClaims[0].text);
