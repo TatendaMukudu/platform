@@ -50,6 +50,7 @@ const languageGuard = require('./ai/language-guard');
 const audit      = require('./ai/audit');
 const reasoningRegister = require('./ai/reasoning-register');
 const kernelCoreasoning = require('./ai/kernel-coreasoning');
+const composer          = require('./ai/composer');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
 const errorlog = require('./ai/errorlog');
@@ -154,6 +155,13 @@ function scheduleSave() {
    don't hold data longer than we need. Default 2 years; set RETENTION_DAYS to
    override. Runs on boot and daily. Only removes OLD data — recent is untouched. */
 const RETENTION_DAYS = parseInt(process.env.RETENTION_DAYS, 10) > 0 ? parseInt(process.env.RETENTION_DAYS, 10) : 730;
+
+/* THE COMPOSER SWITCH. Off: the deterministic templates write the reply and the model is a
+   fallback for their dead ends. On: the deterministic core retrieves + verifies, and the model
+   writes the one reply (see _composeTurn). A flag, not a fork, so it can be judged live and
+   turned off instantly if the grounding cage ever fails to hold. */
+const IQ_COMPOSER = process.env.IQ_COMPOSER === '1';
+
 function _purgeExpired(retentionDays = RETENTION_DAYS) {
   const cutoff = Date.now() - retentionDays * 86400000;
   const keep = ts => { const t = ts ? new Date(ts).getTime() : NaN; return !Number.isFinite(t) || t >= cutoff; };
@@ -8108,6 +8116,73 @@ async function _governedReason(code, userId, question, { register, priorMessages
   } catch (_) { return null; }
 }
 
+/* ── THE COMPOSER (IQ_COMPOSER=1) ────────────────────────────────────────────
+   The flip. Instead of the model waiting for the deterministic layer to fail, the deterministic
+   layer does what it is actually good at — RETRIEVE the authorised material and VERIFY what
+   came back — and the model writes the one reply.
+
+   Why: template concatenation produced replies that argued with themselves ("Happy to build you
+   an assessment… which one do you mean?… I can start one") and read "finishing" for a footballer
+   as finishing tasks. No amount of re-ordering templates fixes a system that does not comprehend
+   the question. Truth still comes from the deterministic core — but truth has to be GATHERED,
+   and it is gathered by conversation.
+
+   The cage is composer.verifyGrounding, applied in code AFTER the model writes: an invented
+   name, item title, or count about their records fails the turn and we degrade honestly rather
+   than ship a fabrication. Returns null when unavailable/unsafe so the caller keeps the old path. */
+async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [] } = {}) {
+  if (!IQ_COMPOSER || !ai.enabled() || !_llmBudgetOk(code)) return null;
+  try {
+    const u = orgUsers[code]?.[userId] || {};
+    const org = orgMeta[code] || {};
+    const now = Date.now();
+
+    // RETRIEVE — everything this reader is authorised to see, through the existing scoped paths.
+    let beliefs = [];
+    try {
+      const { agenda } = _reasonScopedAgenda(code, userId, now, false);
+      beliefs = agenda.filter(a => a.readiness === 'ripe').slice(0, 8).map(a => {
+        // Their own beliefs are stated to them in the second person, never about them.
+        if (a.subjectId && a.subjectId === userId) {
+          try { const v = reason.subjectView({ id: a.beliefId, kind: a.kind, claim: a.claim, confidence: a.confidence }); if (v && v.claim) return { text: v.claim }; } catch (_) {}
+        }
+        return { text: a.claim };
+      });
+    } catch (_) {}
+
+    let evidence = [];
+    try {
+      const g = _retrieveGrounding({ code, requesterId: userId, subjectId: userId, purpose: 'personal_assistance', query: question, limit: 8 });
+      evidence = (g.passages || []).map(p => ({ text: p.text, source: p.label || 'your record' }));
+    } catch (_) {}
+
+    const assignedWork = (workCtx && Array.isArray(workCtx.items))
+      ? workCtx.items.map(i => ({ title: i.title, status: i.status })) : [];
+
+    const contextText = composer.buildContext({
+      name: _firstName(code, userId), role: u.role || 'member',
+      domain: _domainDirective(code) ? String(org.orgName || '') + (org.orgMode ? ` (${org.orgMode})` : '') : (org.orgName || ''),
+      question, beliefs, evidence, assignedWork, priorMessages,
+      actions: (actions || []).map(a => ({ label: a.label })),
+    });
+
+    const reply = await ai.complete({ tier: 'reason', system: composer.SYSTEM_PROMPT, user: contextText, maxTokens: 700, temperature: 0.4 });
+    const written = reasoningRegister.polish(reply);
+    if (!written || written.length < 2) return null;
+
+    // VERIFY — the cage. An invented organisational specific fails the turn.
+    const roster = Object.values(orgUsers[code] || {}).filter(p => p && p.status !== 'removed' && p.name).map(p => p.name);
+    const check = composer.verifyGrounding(written, { contextText, roster, readerName: u.name || '' });
+    if (!check.ok) {
+      _captureError(new Error('composer grounding violation: ' + check.violations.join('; ')), { route: '/api/assistant/turn', method: 'POST', status: 200, orgCode: code });
+      _metric(code, 'composer_refused');
+      return null;                       // degrade to the deterministic path — never ship it
+    }
+    _metric(code, 'composer_used');
+    return { answer: written, grounded: beliefs.length + evidence.length > 0 };
+  } catch (_) { return null; }
+}
+
 /* KERNEL CO-REASONING — the LLM helps the brain reason about WHAT TO LOOK AT, never about who.
    Builds a DE-IDENTIFIED aggregate picture (counts + structure, no subject ids, no names),
    which is the guarantee that the model can't reason about an individual. It returns
@@ -10860,15 +10935,29 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // An explicit assessment REQUEST leads over the ambiguous assigned-work clarifier: the person
   // asked to BUILD one, not to be asked which existing item they meant. The clarifier still
   // follows as context, so their existing items are never hidden from them.
-  const specificAnswer = qa && (qa.assessment || qa.register === 'recall');
-  if (specificAnswer) { parts.push(qa.answer); if (qa.assessment && workLead && workAmbiguous) parts.push(workLead); }
-  else if (workLead) parts.push(workLead);
-  else if (hasAnswer) parts.push(qa.answer);
-  else if (sensitive) parts.push("Thank you for telling me — that sounds like a lot to be carrying. It stays private with me, and I'm here.");
-  else if (hasInsight) parts.push(groundedClaims[0].text);
-  if (checkinProp) parts.push("If it'd help, I can log this as today's check-in — nothing is saved until you confirm.");
-  if (otherProps.length) parts.push(`I can ${otherProps.map(p => p.label.toLowerCase()).join(', or ')} — say the word and I'll do it. Nothing happens until you confirm.`);
-  if (!hasInsight && !hasAction && !hasAnswer && !sensitive) parts.push('Noted. Tell me what you\'d like me to do with this, or ask me anything.');
+  // ── THE COMPOSER writes the whole reply when it is on (IQ_COMPOSER=1) ──────
+  // One voice, reasoning over the retrieved material, instead of templates concatenated into a
+  // reply that argues with itself. A safeguarding turn can never reach here — it returns the
+  // crisis response and exits the turn far above. If the composer is off, unavailable, or its
+  // output failed the grounding cage, we fall straight through to the deterministic composition.
+  let composedReply = null;
+  if (IQ_COMPOSER && (cls.isQuestion || infoRequest || reasoningWanted || assessmentAsk || sensitive)) {
+    composedReply = await _composeTurn(code, userId, cls.questionText || text, {
+      priorMessages, workCtx, actions: proposals,
+    });
+  }
+  if (composedReply) parts.push(composedReply.answer);
+  else {
+    const specificAnswer = qa && (qa.assessment || qa.register === 'recall');
+    if (specificAnswer) { parts.push(qa.answer); if (qa.assessment && workLead && workAmbiguous) parts.push(workLead); }
+    else if (workLead) parts.push(workLead);
+    else if (hasAnswer) parts.push(qa.answer);
+    else if (sensitive) parts.push("Thank you for telling me — that sounds like a lot to be carrying. It stays private with me, and I'm here.");
+    else if (hasInsight) parts.push(groundedClaims[0].text);
+    if (checkinProp) parts.push("If it'd help, I can log this as today's check-in — nothing is saved until you confirm.");
+    if (otherProps.length) parts.push(`I can ${otherProps.map(p => p.label.toLowerCase()).join(', or ')} — say the word and I'll do it. Nothing happens until you confirm.`);
+    if (!hasInsight && !hasAction && !hasAnswer && !sensitive) parts.push('Noted. Tell me what you\'d like me to do with this, or ask me anything.');
+  }
   const responseText = parts.join(' ');
 
   // Post-kernel bound (cite only owner-authorised basis; never raise confidence / drop limits).
@@ -11235,6 +11324,17 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
     // the thing to fill in, nothing more. Deterministic scaffold; the model only shapes wording.
     const topic = String(prop.payload?.topic || '').slice(0, 120).trim();
     const me = orgUsers[code]?.[userId];
+    // DEDUPE — asking twice must not pile up duplicates. If they already have an OPEN
+    // self-assigned assessment on this topic, point them back at it instead of making another.
+    const _topicKey = topic.toLowerCase();
+    const existing = (assessmentAssignments[code] || []).find(a => a && a.assigneeId === userId && a.selfAssigned
+      && a.status !== 'returned' && String(a.topic || '').toLowerCase() === _topicKey && _topicKey);
+    if (existing) {
+      prop.confirmed = { at: new Date().toISOString(), assignmentId: existing.id, reused: true };
+      scheduleSave();
+      return res.json({ ok: true, confirmed: 'assessment_start', assessment: _publicAssignment(existing),
+        note: `You already have “${existing.title}” open — I've left it where it is rather than starting a second one.` });
+    }
     const draft = {
       title: topic ? `Personal assessment — ${topic}` : 'Personal assessment',
       kind: 'general',
@@ -11265,7 +11365,7 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
     const a = { id: _shortId(), templateId: tpl.id, title: tpl.title, kind: tpl.kind,
       fields: JSON.parse(JSON.stringify(tpl.fields || [])), description: tpl.description, guidance: '',
       criteriaVersion: 1, assignerId: userId, assignerName: me?.name || 'Member',
-      assigneeId: userId, assigneeName: me?.name || 'Member', selfAssigned: true,
+      assigneeId: userId, assigneeName: me?.name || 'Member', selfAssigned: true, topic,
       status: 'assigned', response: {}, note: '', feedback: '', score: null, submissions: [],
       assignedAt: new Date().toISOString() };
     (assessmentAssignments[code] = assessmentAssignments[code] || []).push(a);
