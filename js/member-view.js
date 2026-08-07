@@ -28,6 +28,7 @@ const MemberApp = {
   _myGroups:    [],
   _cachedNotes: [],
   _chatConvId:  null,   // the member's live threaded conversation (same runtime as the leader)
+  _insightCtx:  null,   // the observation card THIS thread was opened from (a card is a thread)
 
   // Scenario runner
   _scenario:  null,
@@ -2537,6 +2538,7 @@ const MemberApp = {
     // Fresh render (e.g. navigating to Home) CLEARS any stale member/work context — a member
     // subject is never silently carried across navigation (Cut E). askAboutMember sets it after.
     this._wsSubjectMemberId = null; this._wsSubjectName = null; this._wsWorkItemId = null;
+    this._insightCtx = null;
     // It reads like a CHAT: the conversation flows down and the composer sits at the bottom of
     // the chat box, where you type — never above the thread, so a reply never pushes the input
     // away. Below it are the other boxes you move on to. Context (notes, work, plans) is
@@ -2667,9 +2669,12 @@ const MemberApp = {
                <button class="iq-fb" title="Not useful" onclick="MemberApp.insightFeedback(this,'not_useful',${attr(a.dedupeKey)},${attr(a.patternType)})">Not useful</button>
                <button class="iq-fb" title="Mute this" onclick="MemberApp.insightFeedback(this,'mute',${attr(a.dedupeKey)},${attr(a.patternType)})">Mute</button>
              </div>` : '';
+        // The card OPENS as a full thread — it is a conversation waiting to happen, not a
+        // notification. Tapping it starts a thread that already knows what it is about.
+        const open = `<button class="iq-insight-open" onclick="MemberApp.openInsightThread(${attr(a.dedupeKey)},${attr(a.headline)},${attr(a.body)},${attr(a.patternType || '')})">Talk this through</button>`;
         return `<div class="iq-insight ${POL[a.polarity] || 'iq-pol-neutral'}" data-key="${esc(a.dedupeKey)}">
           <div class="iq-insight-head"><span class="iq-insight-headline">${esc(a.headline)}</span>${rel}</div>
-          <div class="iq-insight-body">${esc(a.body)}</div>${explore}${act}${fb}</div>`;
+          <div class="iq-insight-body">${esc(a.body)}</div>${explore}${open}${act}${fb}</div>`;
       };
       const sections = ORDER
         .filter(b => groups[b] && groups[b].insights && groups[b].insights.length)
@@ -2696,6 +2701,48 @@ const MemberApp = {
   // Selecting a proactive suggestion brings it INTO the same assistant conversation — it is a
   // PROMPT, never an executed action. Anything consequential still flows turn→proposal→confirm.
   wsAttentionInto(text) { const i = document.getElementById('iq-composer-input'); if (i) i.value = text; this.wsSend(); },
+
+  /* ── A CARD IS A THREAD ───────────────────────────────────────────────────
+     An observation you cannot reply to is a dead end — it reads as being watched rather than
+     helped. Tapping one opens a FULL conversation that already knows what it is about: a fresh
+     thread, the observation pinned at the top as context, and the assistant opening the
+     discussion. Resolving it closes the card. Nothing is written without a confirmation. */
+  openInsightThread(dedupeKey, headline, body, patternType) {
+    this._insightCtx = { dedupeKey, headline, body, patternType };
+    this._chatConvId = null;                       // a card gets its OWN thread, never the last one
+    this.wsHistoryClose();
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const thread = document.getElementById('iq-conversation');
+    if (thread) {
+      thread.innerHTML = `
+        <div class="iq-threadctx" id="iq-threadctx">
+          <div class="iq-threadctx-label">Talking through</div>
+          <div class="iq-threadctx-head">${esc(headline)}</div>
+          ${body ? `<div class="iq-threadctx-body">${esc(body)}</div>` : ''}
+          <button class="iq-threadctx-close" onclick="MemberApp.resolveInsightThread('useful')">Done with this</button>
+        </div>`;
+      thread.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    // Open the conversation for them — the assistant speaks first, from the observation.
+    this.wsSend(`Let's talk about this: ${headline}`);
+  },
+
+  /* Close the thread and the card together. "Done" teaches the Confidence Engine this line of
+     attention was worth raising; the card then leaves the list instead of nagging. */
+  async resolveInsightThread(action) {
+    const ctx = this._insightCtx;
+    this._insightCtx = null;
+    const ctxEl = document.getElementById('iq-threadctx'); if (ctxEl) ctxEl.remove();
+    if (!ctx || !ctx.dedupeKey) return;
+    try {
+      await fetch(`/api/proactive/insights/${encodeURIComponent(ctx.dedupeKey)}/feedback`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ dedupeKey: ctx.dedupeKey, patternType: ctx.patternType, action: action || 'useful' }),
+      });
+    } catch (_) {}
+    const card = document.querySelector(`.iq-insight[data-key="${(window.CSS && CSS.escape) ? CSS.escape(ctx.dedupeKey) : ctx.dedupeKey}"]`);
+    if (card) card.remove();
+  },
 
   /* Per-insight feedback. useful/not_useful teach the Confidence Engine (pattern-type grain);
      mute suppresses THIS insight for THIS person. Optimistic: fade the card, never block. */
@@ -2753,6 +2800,7 @@ const MemberApp = {
      /api/assistant/conversations endpoints and the .tdy-* voice styling. */
   wsNewChat() {
     this._chatConvId = null;
+    this._insightCtx = null;                 // a fresh thread is not about the last card
     const c = document.getElementById('iq-conversation'); if (c) c.innerHTML = '';
     this.wsHistoryClose();
     const i = document.getElementById('iq-composer-input'); if (i) i.focus();
@@ -2870,7 +2918,10 @@ const MemberApp = {
         headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
         // subjectMemberId requests LEADER-SUPPORT context — server-validated every turn; the chip
         // makes it explicit, and it is only ever set from an authorised profile entry point.
-        body: JSON.stringify({ text, conversationId: threaded ? (this._chatConvId || undefined) : undefined, lens: this._wsActiveLens || undefined, workItemId: this._wsWorkItemId || undefined, subjectMemberId: this._wsSubjectMemberId || undefined }) });
+        // `about` is the observation card this thread was opened from — it tells the assistant
+        // what the conversation is about, so it starts where the person already is.
+        body: JSON.stringify({ text, conversationId: threaded ? (this._chatConvId || undefined) : undefined, lens: this._wsActiveLens || undefined, workItemId: this._wsWorkItemId || undefined, subjectMemberId: this._wsSubjectMemberId || undefined,
+          about: this._insightCtx ? { headline: this._insightCtx.headline, body: this._insightCtx.body } : undefined }) });
       clearTimeout(timer);
       if (r.status === 401) return { ok: false, reason: 'auth' };
       const j = await r.json();

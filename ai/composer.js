@@ -62,7 +62,7 @@ const _clip = (s, n = 400) => { const t = String(s == null ? '' : s); return t.l
    Pure string assembly over the already-scoped bundle the caller retrieved. Everything in
    here is authorised for this reader; the model may use anything it is given and nothing else. */
 function buildContext({
-  name = '', role = '', domain = '', question = '',
+  name = '', role = '', domain = '', question = '', about = null,
   beliefs = [],        // [{ text }]        the reasoner's reads about them (self-view)
   evidence = [],       // [{ text, source }] their own notes / authorised records
   assignedWork = [],   // [{ title, status }]
@@ -74,6 +74,16 @@ function buildContext({
   L.push(`Person: ${name || 'this person'}${role ? ` (${role})` : ''}`);
   if (domain) L.push(`Domain: ${domain}`);
   L.push('');
+
+  // A thread opened FROM an observation card carries what it is about, so the conversation
+  // starts where the person already is instead of from a blank page.
+  if (about && (about.headline || about.body)) {
+    L.push('THIS CONVERSATION WAS OPENED FROM SOMETHING THE SYSTEM NOTICED:');
+    if (about.headline) L.push(`  ${_clip(about.headline, 200)}`);
+    if (about.body) L.push(`  ${_clip(about.body, 300)}`);
+    L.push('  Start there. Open with what it means for them and one question that moves it forward.');
+    L.push('');
+  }
 
   const prior = (Array.isArray(priorMessages) ? priorMessages : []).filter(m => m && m.text).slice(-8);
   if (prior.length) {

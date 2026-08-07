@@ -8130,7 +8130,18 @@ async function _governedReason(code, userId, question, { register, priorMessages
    The cage is composer.verifyGrounding, applied in code AFTER the model writes: an invented
    name, item title, or count about their records fails the turn and we degrade honestly rather
    than ship a fabrication. Returns null when unavailable/unsafe so the caller keeps the old path. */
-async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [] } = {}) {
+/* A thread opened FROM an observation card tells us what it is about. The text is the person's
+   OWN card, echoed back by their own client — the same trust level as anything they type — so it
+   is hard-capped and treated as untrusted content inside the context block, never as instruction.
+   The grounding cage still verifies whatever the model writes on top of it. */
+function _turnAbout(about) {
+  if (!about || typeof about !== 'object') return null;
+  const h = String(about.headline || '').slice(0, 200).trim();
+  const b = String(about.body || '').slice(0, 300).trim();
+  return (h || b) ? { headline: h, body: b } : null;
+}
+
+async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null } = {}) {
   if (!IQ_COMPOSER || !ai.enabled() || !_llmBudgetOk(code)) return null;
   try {
     const u = orgUsers[code]?.[userId] || {};
@@ -8162,7 +8173,7 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     const contextText = composer.buildContext({
       name: _firstName(code, userId), role: u.role || 'member',
       domain: _domainDirective(code) ? String(org.orgName || '') + (org.orgMode ? ` (${org.orgMode})` : '') : (org.orgName || ''),
-      question, beliefs, evidence, assignedWork, priorMessages,
+      question, about, beliefs, evidence, assignedWork, priorMessages,
       actions: (actions || []).map(a => ({ label: a.label })),
     });
 
@@ -10943,7 +10954,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   let composedReply = null;
   if (IQ_COMPOSER && (cls.isQuestion || infoRequest || reasoningWanted || assessmentAsk || sensitive)) {
     composedReply = await _composeTurn(code, userId, cls.questionText || text, {
-      priorMessages, workCtx, actions: proposals,
+      priorMessages, workCtx, actions: proposals, about: _turnAbout(opts.about),
     });
   }
   if (composedReply) parts.push(composedReply.answer);
@@ -11033,7 +11044,7 @@ app.post('/api/assistant/turn', requireAuth, async (req, res) => {
   // happen INSIDE _assistantTurn, in a defined order (persist → ground). The endpoint
   // is a thin boundary — no second retrieval, no endpoint-specific privacy logic.
   try {
-    const r = await _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId, conversationId: req.body?.conversationId });
+    const r = await _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId, conversationId: req.body?.conversationId, about: req.body?.about });
     _metric(code, 'turn');
     res.json({ ok: true, turnId: r.turn.turnId, conversationId: r.conversationId || null, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response, saved: r.saved || null, capturePrompt: r.capturePrompt || null });
   } catch (e) {
