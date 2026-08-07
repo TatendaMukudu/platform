@@ -639,6 +639,7 @@ const NAV_ROUTES = {
   apps:            () => { if (typeof MemberApp !== 'undefined') MemberApp._renderApps(); },
   checkin:         () => { if (typeof MemberApp !== 'undefined') MemberApp._setupCheckinPrompt(); },
   notes:           () => { if (typeof MemberApp !== 'undefined') MemberApp._renderNotesPage(); },
+  inquiry:         () => { if (typeof MemberApp !== 'undefined') MemberApp._renderInquiryPage(); },
   inbox:           () => { if (typeof MemberApp !== 'undefined') MemberApp._renderInbox(); },
   stats:           () => { if (typeof MemberApp !== 'undefined') MemberApp._renderStats(); },
   // Leader Workspace — scoped to the node leader's subtree
@@ -704,6 +705,7 @@ const PAGE_TITLES = {
   apps:         'Apps',
   checkin:      'Check-In',
   notes:        'Notes',
+  inquiry:      'Inquiries',
   inbox:        'Updates',
   stats:        'Progress',
   // Leader Workspace — node leader scoped tools

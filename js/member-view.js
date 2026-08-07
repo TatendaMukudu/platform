@@ -29,7 +29,7 @@ const MemberApp = {
   _cachedNotes: [],
   _chatConvId:  null,   // the member's live threaded conversation (same runtime as the leader)
   _insights:    {},     // dedupeKey -> { headline, body, patternType } for the cards on screen
-  _cardThreads: {},     // dedupeKey -> conversationId — each card keeps its OWN thread
+  _cardThreads: null,   // dedupeKey -> conversationId (persisted; loaded lazily on first send)
 
   // Scenario runner
   _scenario:  null,
@@ -2675,7 +2675,6 @@ const MemberApp = {
   navGo(id) {
     this._navActive = id;
     this.navClose();
-    if (id === 'inquiry') { this._renderInquiryPage(); return; }
     if (typeof navigate === 'function') navigate(id === 'work' ? 'assessments' : id);
   },
   navNewChat() { this._navActive = 'home'; this.navClose(); if (typeof navigate === 'function') navigate('home'); setTimeout(() => this.wsNewChat(), 60); },
@@ -2685,14 +2684,12 @@ const MemberApp = {
      breathe and grouped by how settled each one is. State, not type: what is still moving,
      what has landed, and what has gone quiet without resolving. */
   async _renderInquiryPage() {
-    const el = document.getElementById('iq-myworkspace') || document.getElementById('page-content');
-    if (!el) return;
-    const esc = s => this._escape(String(s == null ? '' : s));
-    el.innerHTML = `<div id="iq-inquiries-page">Loading…</div>`;
-    let j; try { j = await fetch('/api/inquiry', { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
-    const list = (j && j.inquiries) || [];
     const box = document.getElementById('iq-inquiries-page');
     if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    box.innerHTML = `<div style="color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
+    let j; try { j = await fetch('/api/inquiry', { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
+    const list = (j && j.inquiries) || [];
     if (!list.length) {
       box.innerHTML = `<div class="iq-empty-title">Nothing being worked out yet</div>
         <div class="iq-empty-sub">Talk something through and IntelliQ starts building a picture of it here — including what it still does not know.</div>`;
@@ -2848,6 +2845,12 @@ const MemberApp = {
      helped. Tapping one opens a FULL conversation that already knows what it is about: a fresh
      thread, the observation pinned at the top as context, and the assistant opening the
      discussion. Resolving it closes the card. Nothing is written without a confirmation. */
+  /* A card's thread must survive a page reload, or every visit forks another conversation for
+     the same observation and Recents fills with duplicates of it. */
+  _lsCardThreads() { return `iq_cardthreads_${this._userId}`; },
+  _cardThreadsLoad() { try { return JSON.parse(localStorage.getItem(this._lsCardThreads()) || '{}') || {}; } catch (_) { return {}; } },
+  _cardThreadsSave() { try { localStorage.setItem(this._lsCardThreads(), JSON.stringify(this._cardThreads || {})); } catch (_) {} },
+
   _cardEl(dedupeKey) {
     const k = (window.CSS && CSS.escape) ? CSS.escape(dedupeKey) : dedupeKey;
     return document.querySelector(`.iq-insight[data-key="${k}"]`);
@@ -2906,7 +2909,7 @@ const MemberApp = {
     if (msgs) msgs.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-iq iq-pending" data-pending="1" role="status"><span class="iq-typing" aria-hidden="true"><i></i><i></i><i></i></span></div>`);
     if (ta && !isOpening) { ta.value = ''; this._wsGrow(ta); }
 
-    this._cardThreads = this._cardThreads || {};
+    this._cardThreads = this._cardThreads || this._cardThreadsLoad();
     let j = null;
     try {
       const r = await fetch('/api/assistant/turn', { method: 'POST',
@@ -2914,7 +2917,7 @@ const MemberApp = {
         body: JSON.stringify({ text, conversationId: this._cardThreads[dedupeKey] || undefined,
           about: { headline: info.headline, body: info.body } }) });
       j = await r.json();
-      if (j && j.conversationId) this._cardThreads[dedupeKey] = j.conversationId;
+      if (j && j.conversationId) { this._cardThreads[dedupeKey] = j.conversationId; this._cardThreadsSave(); }
     } catch (_) { j = null; }
 
     const pend = msgs && msgs.querySelector('[data-pending="1"]');
