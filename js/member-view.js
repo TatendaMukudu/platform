@@ -2675,7 +2675,6 @@ const MemberApp = {
   navGo(id) {
     this._navActive = id;
     this.navClose();
-    if (id === 'inquiry') { this._renderInquiryPage(); return; }
     if (typeof navigate === 'function') navigate(id === 'work' ? 'assessments' : id);
   },
   navNewChat() { this._navActive = 'home'; this.navClose(); if (typeof navigate === 'function') navigate('home'); setTimeout(() => this.wsNewChat(), 60); },
@@ -2685,14 +2684,12 @@ const MemberApp = {
      breathe and grouped by how settled each one is. State, not type: what is still moving,
      what has landed, and what has gone quiet without resolving. */
   async _renderInquiryPage() {
-    const el = document.getElementById('iq-myworkspace') || document.getElementById('page-content');
-    if (!el) return;
-    const esc = s => this._escape(String(s == null ? '' : s));
-    el.innerHTML = `<div id="iq-inquiries-page">Loading…</div>`;
-    let j; try { j = await fetch('/api/inquiry', { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
-    const list = (j && j.inquiries) || [];
     const box = document.getElementById('iq-inquiries-page');
     if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    box.innerHTML = `<div style="color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
+    let j; try { j = await fetch('/api/inquiry', { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
+    const list = (j && j.inquiries) || [];
     if (!list.length) {
       box.innerHTML = `<div class="iq-empty-title">Nothing being worked out yet</div>
         <div class="iq-empty-sub">Talk something through and IntelliQ starts building a picture of it here — including what it still does not know.</div>`;

@@ -8260,7 +8260,10 @@ function _inquiryFor(code, subjectRef, concept, label, domain, now) {
 }
 
 async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = [] } = {}) {
-  if (!IQ_COMPOSER || !ai.enabled() || !_llmBudgetOk(code)) return null;
+  if (!IQ_COMPOSER || !ai.enabled() || !_llmBudgetOk(code)) {
+    if (IQ_COMPOSER) console.log(`[intake] skipped — ${!ai.enabled() ? 'no model configured' : 'org over LLM budget'}`);
+    return null;
+  }
   const utterance = String(text || '').trim();
   if (utterance.length < 12) return null;              // "ok", "thanks" carry nothing to extract
   try {
@@ -8274,11 +8277,22 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
         `THEY JUST SAID: ${utterance.slice(0, 1500)}`].filter(Boolean).join('\n\n'),
       maxTokens: 700, temperature: 0.2, schema: ['proposals'],
     });
-    if (!out || !Array.isArray(out.proposals)) return null;
+    // Every stage below used to fail silently, so an empty Inquiries page was indistinguishable
+    // from a model returning nothing, a schema mismatch, or the grounding refusing everything.
+    // Each outcome now says which stage stopped it — a wrong answer is easier to fix than silence.
+    if (!out || !Array.isArray(out.proposals)) {
+      _metric(code, 'intake_no_proposals');
+      console.log('[intake] model returned no usable proposals');
+      return null;
+    }
 
     const { accepted, rejected } = diagnose.groundProposals(out.proposals, { utterance, turnId });
-    if (rejected.length) _metric(code, 'intake_refused', rejected.length);
-    if (!accepted.length) return null;
+    if (rejected.length) {
+      _metric(code, 'intake_refused', rejected.length);
+      console.log(`[intake] refused ${rejected.length}/${out.proposals.length}: ${rejected.slice(0, 3).map(r => r.reason).join(' | ')}`);
+    }
+    if (!accepted.length) { _metric(code, 'intake_all_refused'); return null; }
+    console.log(`[intake] accepted ${accepted.length}/${out.proposals.length} proposal(s)`);
 
     // Group by the concept each proposal names, so one utterance can touch several inquiries.
     const now = Date.now();
@@ -8304,8 +8318,15 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
       touched.push({ concept, yield: y.score, band: after.confidence.band });
     }
     scheduleSave();
+    console.log(`[intake] built ${touched.length} inquiry/ies: ${touched.map(t => `${t.concept}(${t.band})`).join(', ')}`);
     return touched;
-  } catch (_) { return null; }
+  } catch (e) {
+    // A swallowed exception here is indistinguishable from "the model found nothing", which is
+    // exactly what made an empty Inquiries page impossible to diagnose.
+    console.log('[intake] threw:', e && e.message);
+    _metric(code, 'intake_error');
+    return null;
+  }
 }
 
 /* KERNEL CO-REASONING — the LLM helps the brain reason about WHAT TO LOOK AT, never about who.

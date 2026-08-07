@@ -48,7 +48,27 @@ const LEVEL_RANK = { observation: 0, interpretation: 1, hypothesis: 2, conclusio
    supported hypothesis. Listing it keeps the refusal explicit rather than implied. */
 const MODEL_MAY_PROPOSE = new Set(['observation', 'interpretation', 'hypothesis']);
 
-const _norm = s => String(s == null ? '' : s).toLowerCase().replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, ' ').trim();
+const _norm = s => String(s == null ? '' : s).toLowerCase().replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[^a-z0-9' ]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+/* Does this span genuinely come from what they said? Exact containment first — that is the
+   guarantee we want. But a model that drops a filler word ("struggling with first touch" for
+   "struggling with my first touch") is still pointing at real words, and rejecting it throws
+   away a true observation. So we fall back to: every word of the span appears in the utterance,
+   in order. That still cannot admit an invented claim — every token has to be theirs. */
+function _spanIsTheirs(span, utterance) {
+  const s = _norm(span), u = _norm(utterance);
+  if (!s || !u) return false;
+  if (u.includes(s)) return true;
+  const words = s.split(' ').filter(Boolean);
+  if (words.length < 2) return false;                 // a single word is not a quotation
+  let from = 0;
+  for (const w of words) {
+    const at = u.indexOf(w, from);
+    if (at === -1) return false;                       // a word they never said → not theirs
+    from = at + w.length;
+  }
+  return true;
+}
 const _clamp01 = n => (Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0);
 
 /* ── 1. GROUNDING ────────────────────────────────────────────────────────────
@@ -60,7 +80,6 @@ const _clamp01 = n => (Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0);
    Returns { accepted, rejected } — rejected proposals carry the reason, which is worth logging:
    a model that keeps failing grounding is a model that is guessing. */
 function groundProposals(proposals, { utterance = '', turnId = '', knownObservationIds = [] } = {}) {
-  const hay = _norm(utterance);
   const accepted = [], rejected = [];
   const okIds = new Set(knownObservationIds);
 
@@ -80,7 +99,7 @@ function groundProposals(proposals, { utterance = '', turnId = '', knownObservat
     if (level === 'observation') {
       const span = String(p.sourceSpan || '').trim();
       if (!span) { rejected.push({ proposal: p, reason: 'observation without a source span' }); continue; }
-      if (!hay.includes(_norm(span))) {
+      if (!_spanIsTheirs(span, utterance)) {
         rejected.push({ proposal: p, reason: 'source span does not appear in what they said' });
         continue;
       }
