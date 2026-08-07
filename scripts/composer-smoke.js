@@ -92,6 +92,15 @@ ok('9 · …and to write plain prose with no markdown',
 // Visibility only ever widens through an explicit confirmation, so the model must never claim it.
 ok('9 · …and NEVER to claim it changed who can see something',
   /do NOT say it/.test(c.SYSTEM_PROMPT) && /only ever widens through an explicit confirmation/.test(c.SYSTEM_PROMPT));
+// It cannot see the screen. Sending someone hunting for a control that does not exist is its own
+// kind of fabrication — live, it invented "the privacy button, usually top right".
+// It cannot browse, so a link is always invented. Recommending WHAT to search for is allowed.
+ok('9 · …and never to produce a link or name a video it cannot have seen',
+  /NO LINKS, EVER/.test(c.SYSTEM_PROMPT) && /Never produce a link/.test(c.SYSTEM_PROMPT)
+  && /Recommending WHAT to look for is genuinely useful and allowed/.test(c.SYSTEM_PROMPT));
+ok('9 · …and never to describe the interface it cannot see',
+  /NEVER DESCRIBE THE INTERFACE/.test(c.SYSTEM_PROMPT)
+  && /Confirm, Edit \/ Correct, and/.test(c.SYSTEM_PROMPT));
 
 /* ── the honest degrade never fabricates ──────────────────────────────────── */
 ok('10 · with nothing recorded it says so and asks for what would build the picture',

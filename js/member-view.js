@@ -2676,7 +2676,8 @@ const MemberApp = {
         const open = `<button class="iq-insight-open" onclick="MemberApp.openInsightThread(${attr(a.dedupeKey)})">Talk this through</button>`;
         return `<div class="iq-insight ${POL[a.polarity] || 'iq-pol-neutral'}" data-key="${esc(a.dedupeKey)}">
           <div class="iq-insight-head"><span class="iq-insight-headline">${esc(a.headline)}</span>${rel}</div>
-          <div class="iq-insight-body">${esc(a.body)}</div>${explore}${open}${act}${fb}
+          <div class="iq-insight-body">${esc(a.body)}</div>${explore}
+          <div class="iq-insight-actions">${open}${act}</div>${fb}
           <div class="iq-cardthread" data-thread="${esc(a.dedupeKey)}" style="display:none"></div></div>`;
       };
       const sections = ORDER
