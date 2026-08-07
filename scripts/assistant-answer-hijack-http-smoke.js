@@ -52,6 +52,15 @@ const server = app.listen(0, async () => {
     ok('2 · confirming the assessment card succeeds (no "unknown proposal type")', conf.ok === true && conf.confirmed === 'assessment_start');
     ok('2 · …and it creates a real, self-assigned assessment to fill in', !!(conf.assessment && conf.assessment.id));
 
+    /* 2b — asking AGAIN for the same topic must not pile up a duplicate (it used to: each
+       confirm created another "How Do You Finish What You Start?" in their assigned work). */
+    const again = await turn("I'd like a short assessment to help me improve at finishing");
+    const prop2 = ((again.response && again.response.proposedActions) || []).find(p => p.actionType === 'assessment_start');
+    const conf2 = await fetch(base + `/api/assistant/turn/${encodeURIComponent(again.turnId)}/confirm`, {
+      method: 'POST', headers: H, body: JSON.stringify({ proposalId: prop2 && prop2.id }) }).then(r => r.json());
+    ok('2b · confirming the SAME topic again reuses the open one (no duplicate)',
+      conf2.ok === true && conf2.assessment && conf2.assessment.id === conf.assessment.id && /already have/i.test(conf2.note || ''));
+
     /* 3 — a status-style mention is NOT hijacked into an assessment request (no false positive) */
     const r3 = await turn('what is the assessment status for the squad?');
     ok('3 · a status question about assessments is not turned into an assessment request',
