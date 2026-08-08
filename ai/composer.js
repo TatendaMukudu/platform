@@ -87,6 +87,7 @@ function buildContext({
   beliefs = [],        // [{ text }]        the reasoner's reads about them (self-view)
   evidence = [],       // [{ text, source }] their own notes / authorised records
   assignedWork = [],   // [{ title, status }]
+  professionals = [],  // [{ name, title, remit }] who in this org handles what
   priorMessages = [],  // [{ role, text }]
   actions = [],        // [{ label }]       confirmable proposals available this turn
 } = {}) {
@@ -127,6 +128,20 @@ function buildContext({
   if (work.length) {
     L.push('THEIR ASSIGNED WORK:');
     for (const w of work) L.push(`  - “${_clip(w.title, 120)}” (${w.status || 'assigned'})`);
+    L.push('');
+  }
+
+  // WHO HANDLES WHAT HERE. Point at one of these by name when the matter is plainly theirs —
+  // and at nobody at all when the list is empty. Telling someone to "speak to the physio" in an
+  // organisation that has never named one sounds actionable and leads nowhere; it is the same
+  // failure as describing a button that does not exist, in a costume that hides it better.
+  const pros = (Array.isArray(professionals) ? professionals : []).filter(p => p && p.name && p.title).slice(0, 8);
+  if (pros.length) {
+    L.push('WHO HANDLES WHAT IN THIS ORGANISATION (name one of these only when the matter is clearly theirs; never invent a role):');
+    for (const p of pros) L.push(`  - ${p.name}, ${_clip(p.title, 60)}${p.remit ? ` — ${_clip(p.remit, 120)}` : ''}`);
+    L.push('');
+  } else {
+    L.push('NOBODY IS NAMED IN THIS ORGANISATION AS HANDLING ANYTHING SPECIFIC. Do not tell them to speak to a physio, a coach, a lead or any other role — you do not know that such a person exists here.');
     L.push('');
   }
 
