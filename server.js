@@ -1554,6 +1554,13 @@ app.post('/api/auth/complete-profile', requireAuth, (req, res) => {
     selectedValues   = [],
     personalMetrics  = [],
     freeText         = '',
+    // What people should come to this person for — asked of leaders and staff, in their own
+    // words. This is what lets the assistant send an ankle to the person who handles ankles
+    // instead of telling somebody to "speak to the physio" in a club that has never named one.
+    // Their phrasing is also what the matcher reads, so a club that says "S&C" and one that
+    // says "physical prep" both work without anyone editing code.
+    professionalTitle = '',
+    professionalRemit = '',
   } = req.body;
 
   // Required anchors — a member needs a goal + at least one value.
@@ -1578,11 +1585,19 @@ app.post('/api/auth/complete-profile', requireAuth, (req, res) => {
     setAt:      new Date().toISOString(),
   };
 
+  // A leader saying what to come to them for puts them in the org's directory. Members are not
+  // asked and cannot self-register: being routed other people's problems is a duty someone holds,
+  // not a status anyone can claim.
+  let listedAs = null;
+  if (['coach', 'admin', 'superadmin'].includes(user.role)) {
+    listedAs = _upsertProfessional(code, userId, professionalTitle, professionalRemit);
+  }
+
   // Mark profile complete on the user record
   user.profileComplete = true;
   scheduleSave();
 
-  res.json({ ok: true, user: { ...user, passwordHash: undefined } });
+  res.json({ ok: true, user: { ...user, passwordHash: undefined }, listedAs });
 });
 
 /* ── Complete organisation profile (SuperAdmin Layer 1 onboarding) ─────── *
@@ -1626,6 +1641,18 @@ app.post('/api/auth/complete-org-profile', requireAuth, (req, res) => {
     setBy: userId,
   };
   org.organizationProfileComplete = true;
+
+  // WHO HANDLES WHAT. The assistant can only point someone at a colleague it knows exists, so
+  // an organisation that never says who covers injury, or leadership, or selection, gets an
+  // assistant that either says nothing useful or invents a role. Optional here — a small org
+  // may genuinely have nobody — and leaders can add themselves as they onboard.
+  if (Array.isArray(req.body.professionals)) {
+    for (const p of req.body.professionals) {
+      const uid = p && String(p.userId || '').trim();
+      if (!uid || !(orgUsers[code] || {})[uid]) continue;      // never a name with nobody behind it
+      _upsertProfessional(code, uid, p.title, p.remit);
+    }
+  }
 
   // Flow the approved profile into the LIVE stores the app + AI actually read,
   // so values/goals/metrics set at creation reach the Advisor, Copilot, etc.
@@ -10746,6 +10773,25 @@ function _professionals(code) {
     return { userId: p.userId, name: u.name || '', title: String(p.title || '').trim(),
       remit: String(p.remit || '').trim() };
   }).filter(p => p && p.name && p.title);
+}
+
+/* Put someone in the directory, or update what they cover. Called from onboarding — both from
+   the org profile, where a superadmin names the people, and from a leader's own profile, where
+   they say what to come to them for. The second is the one that keeps it true: a directory
+   maintained only by an administrator is out of date the week after it is written, and the
+   words that matter for matching are the ones the person uses about their own job. */
+function _upsertProfessional(code, userId, title, remit) {
+  const t = String(title || '').trim().slice(0, 80);
+  const r = String(remit || '').trim().slice(0, 300);
+  const meta = orgMeta[code] || (orgMeta[code] = {});
+  const list = Array.isArray(meta.professionals) ? meta.professionals : (meta.professionals = []);
+  const at = list.findIndex(p => p && p.userId === userId);
+  // No title is a withdrawal from the directory, not an empty entry. Someone who stops covering
+  // something should stop being offered for it.
+  if (!t) { if (at >= 0) list.splice(at, 1); return null; }
+  const row = { userId, title: t, remit: r };
+  if (at >= 0) list[at] = row; else list.push(row);
+  return row;
 }
 
 function _assistantProposals(code, userId, interp, context, text, workCtx) {
