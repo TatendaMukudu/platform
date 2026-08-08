@@ -752,8 +752,55 @@ function consolidate(groups, { existing = {}, cap = 2 } = {}) {
   return { byConcept, primary, folded };
 }
 
+/* ── THE BOUNDED FRONTIER ────────────────────────────────────────────────────
+   How many open questions a person is worth holding at once.
+
+   Not a cap on what may be understood — a cap on what is being ACTIVELY WORKED. Attention is
+   the scarce thing: twelve half-live inquiries is not more understanding than five, it is less,
+   because nothing gets the evidence it needs to settle and the page stops being readable.
+
+   The rule is expected diagnostic yield, not age and not tidiness: of everything still open
+   about this person, which few would most change what we understand or do next. That question
+   already has an answer in ai/inquiry.js — impact, information gain, answer reliability,
+   urgency, minus the cost of asking. This does not reimplement it; the caller injects it.
+
+   Nothing is merged and nothing is deleted. Parking is reversible and evidence-driven: new
+   evidence raises an inquiry's value and it comes back. Merging on a cap would have made an
+   attention budget silently rewrite what the system believes is true, which is a different
+   thing entirely and not one a budget is entitled to do. */
+function boundFrontier(inquiries = [], { cap = 6, valueOf = null, now = Date.now() } = {}) {
+  const list = (Array.isArray(inquiries) ? inquiries : []).filter(Boolean);
+  const score = typeof valueOf === 'function' ? valueOf : (() => 0);
+  const scored = list.map(i => {
+    let v = 0;
+    try { v = Number(score(i)) || 0; } catch (_) { v = 0; }
+    return { inquiry: i, value: _clamp01(v) };
+  });
+  // Ties break toward the better-evidenced inquiry, then the more recently moved: between two
+  // equally valuable questions, hold the one we are further along with.
+  scored.sort((a, b) => (b.value - a.value)
+    || ((b.inquiry.signals || []).length - (a.inquiry.signals || []).length)
+    || ((b.inquiry.lastUpdatedAt || 0) - (a.inquiry.lastUpdatedAt || 0)));
+
+  const active = [], parked = [];
+  for (const s of scored) (active.length < Math.max(1, cap) ? active : parked).push(s);
+
+  for (const s of active) {
+    if (s.inquiry.parkedAt) { s.inquiry.parkedAt = null; s.inquiry.parkedBecause = null; }
+    s.inquiry.frontierValue = s.value;
+  }
+  for (const s of parked) {
+    s.inquiry.frontierValue = s.value;
+    if (!s.inquiry.parkedAt) {
+      s.inquiry.parkedAt = now;
+      s.inquiry.parkedBecause = 'other open questions would tell us more right now';
+    }
+  }
+  return { active: active.map(s => s.inquiry), parked: parked.map(s => s.inquiry) };
+}
+
 module.exports = {
-  LEVELS, LEVEL_RANK, MODEL_MAY_PROPOSE, INTAKE_PROMPT,
+  LEVELS, LEVEL_RANK, MODEL_MAY_PROPOSE, INTAKE_PROMPT, boundFrontier,
   groundProposals, deriveConfidence, newInquiry, newHypothesis, applyProposals, frontierFor,
   diagnosticYield, rankQuestions, nextNeed, consolidate,
   RELATIONSHIPS, resolveIdentity, addAlias,

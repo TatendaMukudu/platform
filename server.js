@@ -8284,7 +8284,9 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     // compounds instead of restarting. Stated as a working read with its confidence band, never
     // as settled fact: these are proposals the person has not confirmed into the record.
     const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
-    for (const inq of Object.values(mine).slice(0, 4)) {
+    // Only what is actively being worked. A parked question in context is the assistant raising
+    // something the kernel has already decided is not worth pursuing right now.
+    for (const inq of Object.values(mine).filter(i => i && !i.parkedAt).slice(0, 4)) {
       const lead = inq && (inq.hypotheses || []).find(h => h.id === inq.leadingHypothesisId);
       if (!lead) continue;
       beliefs.push({ text: `Working read on ${inq.topic.label || inq.topic.canonicalConcept} (${inq.confidence.band}, not confirmed): ${lead.statement}` });
@@ -8366,6 +8368,11 @@ function _inquiryFor(code, subjectRef, concept, label, domain, now) {
    evidence — the same thing renamed. A deterministic cap rather than a plea in the prompt: the
    model is asked to consolidate too, but the picture should not depend on it obliging. */
 const NEW_CONCEPT_CAP = 2;
+
+/* How many open questions about one person stay ACTIVELY worked at once. Not a limit on what
+   may be understood — a limit on what is being pursued, because attention is the scarce thing
+   and a dozen half-live inquiries is less understanding than a handful that get finished. */
+const ACTIVE_FRONTIER_CAP = 6;
 
 /* The open frontier for a subject, most-recently-touched first, carrying the stable id the
    comprehension layer must point at. It is shown what is already being worked out so it can
@@ -8564,6 +8571,32 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
       _metric(code, 'intake_applied');
       touched.push({ concept: key, yield: y.score, band: after.confidence.band });
     }
+    // THE BOUNDED FRONTIER. Attention is the scarce thing, so only so many questions stay
+    // actively worked — chosen by expected diagnostic yield, using the maths that already
+    // exists in ai/inquiry.js rather than a second, subtly different copy of it. Parking is
+    // reversible: new evidence raises an inquiry's value and it returns on the next turn.
+    try {
+      const all = Object.values(inquiryStates[code][subjectRef] || {});
+      const { parked } = diagnose.boundFrontier(all, { cap: ACTIVE_FRONTIER_CAP, now, valueOf: (inq) => {
+        const open = (inq.missingSignals || []);
+        if (!open.length) return 0;                       // nothing left to learn is nothing to hold
+        // One uncertainty per open question, scored on what answering it would be worth. Impact
+        // rises with how contested the inquiry is: a question that would separate two live
+        // hypotheses is worth more than one that confirms what is already the only reading.
+        const rivals = (inq.hypotheses || []).filter(h => h.status !== 'ruled_out').length;
+        return Math.max(...open.map(q => inquiry.questionValue({
+          claim: q.question,
+          type: 'missing_required',
+          impact: rivals > 1 ? 'high' : 'medium',
+          urgency: (inq.confidence && inq.confidence.band) === 'tentative' ? 'high' : 'normal',
+          hypotheses: (inq.hypotheses || []).map(h => ({ statement: h.statement })),
+          privacyClass: 'personal-private',
+          interruptionCost: typeof q.burden === 'number' ? q.burden : 0.3,
+        })));
+      } });
+      if (parked.length) console.log(`[intake] parked ${parked.length} lower-yield inquiry/ies`);
+    } catch (e) { console.log('[intake] frontier bounding skipped:', e && e.message); }
+
     scheduleSave();
     console.log(`[intake] built ${touched.length} inquiry/ies: ${touched.map(t => `${t.concept}(${t.band})`).join(', ')}`);
     return touched;
@@ -10805,6 +10838,32 @@ function _professionals(code) {
    they say what to come to them for. The second is the one that keeps it true: a directory
    maintained only by an administrator is out of date the week after it is written, and the
    words that matter for matching are the ones the person uses about their own job. */
+/* Who is responsible for this person, when nobody's REMIT covers what they raised.
+   Expertise routing answers "who handles injuries". This answers "who is responsible for
+   Ashton" — and there is always an answer to that, which is why offering nobody was the wrong
+   fallback. It reuses ai/org-routing rather than reimplementing it: ownership is explicit and
+   never inferred from ancestry, a node with several responsible parents is a conflict rather
+   than a silent winner, and the climb stops at the nearest leader. Those rules were argued out
+   once already; a second, subtly different copy of them is how two systems start disagreeing
+   about who is in charge. */
+function _responsibleLeader(code, userId) {
+  try {
+    const nodes = orgNodes[code] || {};
+    const graph = orgGraph.buildGraph(nodes);
+    const scope = orgGraph.scopeOfActor(nodes, userId);
+    const nodeId = scope.memberNodeIds[0] || scope.leaderNodeIds[0] || null;
+    if (!nodeId) return null;
+    const leaders = orgRouting._nearestLeaders(graph, nodeId).filter(id => id !== userId);
+    // More than one responsible parent is a genuine ambiguity, and org-routing treats it as a
+    // conflict for a human to settle. Picking one here would be exactly the silent choice it
+    // refuses to make, so offer nobody and let the existing conflict surface do its job.
+    if (leaders.length !== 1) return null;
+    const u = (orgUsers[code] || {})[leaders[0]];
+    if (!u || u.status === 'removed') return null;
+    return { userId: u.id, name: u.name || '', title: 'the person responsible for you here', remit: '' };
+  } catch (_) { return null; }
+}
+
 function _upsertProfessional(code, userId, title, remit) {
   const t = String(title || '').trim().slice(0, 80);
   const r = String(remit || '').trim().slice(0, 300);
@@ -10850,12 +10909,21 @@ function _assistantProposals(code, userId, interp, context, text, workCtx) {
       return new Set(terms.filter(t => said.includes(t))).size;
     };
     const best = pros.map(p => ({ p, n: scoreOf(p) })).sort((a, b) => b.n - a.n)[0];
-    if (best && best.n >= 2) {
+    // Remit first, responsibility second. When nobody's stated remit covers what they raised,
+    // there is still somebody responsible for them — offering nobody was treating "no expert"
+    // as "no one", which is not the same thing and leaves a person holding it alone.
+    // Only for something they are plainly working through, not for every passing sentence.
+    const worthCarrying = interp.intents.some(i => ['personal_reflection', 'observation', 'commitment', 'plan'].includes(i.type));
+    const to = (best && best.n >= 2) ? best.p : (worthCarrying ? _responsibleLeader(code, userId) : null);
+    if (to) {
+      const byRemit = !!(best && best.n >= 2);
       out.push({ id: 'prop_' + generateId(), actionType: 'share_with_professional', capability: 'workspace',
-        label: `Share this with ${best.p.name} (${best.p.title})`,
-        payload: { toUserId: best.p.userId, toName: best.p.name, toTitle: best.p.title, text: null /* filled from raw at confirm */ },
+        label: `Share this with ${to.name}${to.title ? ` (${to.title})` : ''}`,
+        payload: { toUserId: to.userId, toName: to.name, toTitle: to.title, text: null /* filled from raw at confirm */ },
         visibility: 'shared',
-        why: `${best.p.name} handles ${best.p.remit || best.p.title} here. Nothing is shared until you confirm, and you can edit exactly what they see.`,
+        why: byRemit
+          ? `${to.name} handles ${to.remit || to.title} here. Nothing is shared until you confirm, and you can edit exactly what they see.`
+          : `Nobody here is listed for this specifically, but ${to.name} is responsible for you. Nothing is shared until you confirm, and you can edit exactly what they see.`,
         requiredApproval: true,
         policyResult: { effect: 'allow', reason: 'member-initiated share of their own words' }, evidenceBasis: [] });
     }
@@ -11660,7 +11728,10 @@ app.get('/api/inquiry', requireAuth, (req, res) => {
     if (!i || !(i.signals || []).length) { delete mine[concept]; pruned++; }
   }
   if (pruned) { console.log(`[inquiry] pruned ${pruned} empty inquiry/ies for member:${userId}`); scheduleSave(); }
-  const inquiries = Object.values(mine).map(i => {
+  // Parked inquiries are still held and still revive on new evidence; they are simply not what
+  // is being worked on now. Showing them alongside the live ones would undo the point of having
+  // a frontier at all.
+  const inquiries = Object.values(mine).filter(i => !i.parkedAt).map(i => {
     const hyps = i.hypotheses || [];
     const lead = hyps.find(h => h.id === i.leadingHypothesisId) || null;
     const sig = (i.signals || []).filter(s => s.kind !== 'interpretation');

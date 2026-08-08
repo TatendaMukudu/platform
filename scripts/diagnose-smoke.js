@@ -419,5 +419,46 @@ ok('35 · the prompt defines every relationship the kernel accepts',
 ok('35 · …requires a target id for everything but NEW', /targetInquiryId is REQUIRED/.test(d.INTAKE_PROMPT));
 ok('35 · …and makes NEW something the model has to argue for', /may not declare NEW until/.test(d.INTAKE_PROMPT));
 
+/* ── 36 · THE BOUNDED FRONTIER ───────────────────────────────────────────────
+   A cap on what is actively WORKED, not on what may be understood. Parking must never touch
+   what the system believes — an attention budget is not entitled to rewrite the truth. */
+{
+  const inq = (id, value, signals = 1, open = 1) => ({
+    inquiryId: id, frontierValue: null, lastUpdatedAt: 0,
+    signals: Array.from({ length: signals }, (_, i) => ({ ref: `${id}_s${i}` })),
+    hypotheses: [{ id: `${id}_h`, statement: 'something', status: 'live' }],
+    missingSignals: Array.from({ length: open }, (_, i) => ({ question: `q${i}?` })),
+    confidence: { score: 0.3, band: 'emerging', because: [] }, _v: value,
+  });
+  const valueOf = (i) => i._v;
+  const all = [inq('a', 0.9), inq('b', 0.8), inq('c', 0.7), inq('d', 0.6), inq('e', 0.5), inq('f', 0.4), inq('g', 0.3), inq('h', 0.2)];
+
+  const r = d.boundFrontier(all, { cap: 6, valueOf, now: 1000 });
+  ok('36 · the frontier holds only the cap', r.active.length === 6);
+  ok('36 · …the highest expected yield is what is held', r.active.map(i => i.inquiryId).join('') === 'abcdef');
+  ok('36 · …and the rest are parked, not lost', r.parked.length === 2 && r.parked.every(i => i.parkedAt === 1000));
+  ok('36 · …parking says why, in words a person could read', r.parked.every(i => /would tell us more/.test(i.parkedBecause || '')));
+
+  // The line that matters: a budget may decide what we PURSUE, never what we BELIEVE.
+  const parked = r.parked[0];
+  ok('36 · parking changes no signal, hypothesis or confidence',
+    parked.signals.length === 1 && parked.hypotheses.length === 1 && parked.confidence.band === 'emerging');
+
+  // Reversible and evidence-driven: new evidence raises its value and it comes back.
+  parked._v = 0.99;
+  const r2 = d.boundFrontier(all, { cap: 6, valueOf, now: 2000 });
+  ok('36 · new evidence brings a parked inquiry back', r2.active.some(i => i.inquiryId === parked.inquiryId));
+  ok('36 · …and it is no longer marked parked', !parked.parkedAt);
+
+  // An inquiry with nothing left to ask is not something to hold open.
+  const done = inq('z', 0.95, 3, 0);
+  const r3 = d.boundFrontier([done, ...all], { cap: 2, valueOf: (i) => (i.missingSignals.length ? i._v : 0) });
+  ok('36 · an inquiry with nothing left to learn does not hold a slot', !r3.active.some(i => i.inquiryId === 'z'));
+
+  ok('36 · fewer inquiries than the cap parks nothing', d.boundFrontier([inq('x', 0.5)], { cap: 6, valueOf }).parked.length === 0);
+  ok('36 · a cap of zero still holds one — never nothing', d.boundFrontier(all, { cap: 0, valueOf }).active.length === 1);
+  ok('36 · a scorer that throws parks nobody unfairly', d.boundFrontier(all, { cap: 6, valueOf: () => { throw new Error('x'); } }).active.length === 6);
+}
+
 console.log(`\ndiagnose-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
