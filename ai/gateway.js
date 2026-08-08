@@ -98,6 +98,19 @@ function _isModelUnavailable(err) {
 const SAMPLING_OK = /^claude-(2|3|instant|haiku-4-5|sonnet-4-0|sonnet-4-5|sonnet-4-6|opus-4-0|opus-4-1|opus-4-5|opus-4-6)/;
 function _acceptsSampling(model) { return SAMPLING_OK.test(String(model || '')); }
 
+/* Pull the assistant's words out of a response.
+
+   This used to read content[0].text, which assumes the first block is the text one. It is not:
+   the newer models think by default when no `thinking` parameter is sent, and a thinking block
+   sits ahead of the answer with no `.text` at all — so the whole reply read as the empty string,
+   and JSON callers saw "unparseable" for a response that was perfectly well formed. Take every
+   text block, in order, and ignore the rest. */
+function _text(resp) {
+  const blocks = Array.isArray(resp?.content) ? resp.content : [];
+  return blocks.filter(b => b && b.type === 'text' && typeof b.text === 'string')
+    .map(b => b.text).join('').trim();
+}
+
 /* A 400 that names a sampling parameter — the shape of "this model dropped that knob". */
 function _isSamplingRejected(err) {
   const msg = (err?.message || '').toLowerCase();
@@ -145,7 +158,7 @@ async function complete({
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const resp = await call(primary);
-      return resp.content?.[0]?.text?.trim() || '';
+      return _text(resp);
     } catch (err) {
       lastErr = err;
 
@@ -157,7 +170,7 @@ async function complete({
         console.log(`[ai] ${primary} rejects sampling parameters — retrying without them`);
         try {
           const resp = await call(primary, true);
-          return resp.content?.[0]?.text?.trim() || '';
+          return _text(resp);
         } catch (err2) { lastErr = err2; }
       }
 
@@ -168,7 +181,7 @@ async function complete({
         console.log(`[ai] ${primary} unavailable on this account (${err?.status || '?'}) — falling back to ${FALLBACK_MODEL}`);
         try {
           const resp = await call(FALLBACK_MODEL);
-          return resp.content?.[0]?.text?.trim() || '';
+          return _text(resp);
         } catch (err2) { lastErr = err2; }
       }
 
@@ -208,6 +221,10 @@ function parseJSON(text) {
    null if any required key is missing so callers can fall back cleanly.
 ──────────────────────────────────────────────────────────────────────────── */
 async function completeJSON(opts) {
+  // Callers may pass a `diag` object to be told WHY this returned null. Two log lines that have
+  // to be correlated by timestamp is a worse tool than one line that carries its own reason —
+  // especially when the person reading them is on a phone, filtering a log they did not write.
+  const diag = opts.diag && typeof opts.diag === 'object' ? opts.diag : null;
   const text = await complete(opts);
   const obj  = parseJSON(text);
   // Both failures below return null and look identical to the caller, but they need opposite
@@ -219,14 +236,20 @@ async function completeJSON(opts) {
   // separate truncation from malformed without quoting a syllable of it.
   if (!obj) {
     const t = String(text || '');
-    console.log(`[ai] completeJSON unparseable — ${t.length} chars, ends "${t.slice(-1) || 'nothing'}" (a JSON object ends "}"; anything else means truncated — raise maxTokens)`);
+    const why = !t.length ? 'the model returned no text at all'
+      : t.endsWith('}') ? `${t.length} chars ending "}" — parsed as not-JSON, so the shape is wrong, not the length`
+      : `${t.length} chars ending "${t.slice(-1)}" — cut off mid-object, raise maxTokens`;
+    if (diag) { diag.reason = why; diag.chars = t.length; }
+    console.log(`[ai] completeJSON unparseable — ${why}`);
     return null;
   }
   if (Array.isArray(opts.schema)) {
     for (const key of opts.schema) {
       if (!(key in obj)) {
         // Top-level key names are structure, not content — safe to name.
-        console.log(`[ai] completeJSON parsed but has no "${key}" — got keys: ${Object.keys(obj).join(', ') || '(none)'}`);
+        const why = `parsed, but has no "${key}" — got keys: ${Object.keys(obj).join(', ') || '(none)'}`;
+        if (diag) { diag.reason = why; }
+        console.log(`[ai] completeJSON ${why}`);
         return null;
       }
     }
@@ -273,7 +296,7 @@ async function understand({ system, prompt, media, maxTokens = 700 }) {
       ...(system ? { system } : {}),
       messages: [{ role: 'user', content: blocks }],
     });
-    return resp.content?.[0]?.text?.trim() || '';
+    return _text(resp);
   }
 
   // Fallback: OpenAI vision (images) or inline text. OpenAI can't take a raw PDF,

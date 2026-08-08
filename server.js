@@ -8301,7 +8301,9 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
   try {
     const org = orgMeta[code] || {};
     const prior = (priorMessages || []).slice(-4).map(m => `${m.role === 'assistant' ? 'You' : 'Them'}: ${String(m.text || '').slice(0, 200)}`).join('\n');
+    const _diag = {};                                  // filled in when the call yields nothing usable
     const out = await ai.completeJSON({
+      diag: _diag,
       tier: 'micro',                                   // extraction, not open reasoning — the cheap tier fits
       system: diagnose.INTAKE_PROMPT,
       user: [org.orgName ? `Domain: ${org.orgName}${org.orgMode ? ` (${org.orgMode})` : ''}` : '',
@@ -8319,7 +8321,7 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
     // Each outcome now says which stage stopped it — a wrong answer is easier to fix than silence.
     if (!out || !Array.isArray(out.proposals)) {
       _metric(code, 'intake_no_proposals');
-      console.log('[intake] model returned no usable proposals');
+      console.log(`[intake] model returned no usable proposals — ${_diag.reason || 'no reason recorded'}`);
       return null;
     }
 
