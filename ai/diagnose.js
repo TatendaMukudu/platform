@@ -503,9 +503,13 @@ const INTAKE_PROMPT = [
   '  ],',
   '  "unknowns": [',
   '    { "question": "does it happen when you see the defender coming?",',
+  '      "concept": "football.first_touch",',
   '      "resolves": ["scanning_vs_execution"], "burden": 0.2 }',
   '  ]',
   '}',
+  '',
+  'Each unknown MUST name the "concept" it would resolve, using one of the domainConcept values',
+  'you used above. An unknown that belongs to everything belongs to nothing.',
   '',
   'A proposal is one of exactly three levels, and they must never be collapsed:',
   '  • "observation"    — what they actually reported. MUST carry "sourceSpan": a short quote',
@@ -521,6 +525,18 @@ const INTAKE_PROMPT = [
   'Name the domain concept precisely ("football.first_touch", "manufacturing.tolerance_drift"),',
   'because a vague concept cannot be retrieved or connected to anything later.',
   '',
+  'ONE PHENOMENON, ONE CONCEPT. This is the rule people get wrong most often. Someone describing',
+  'why they skip a session is telling you ONE story — do not file it as attendance_timing AND',
+  'attendance_pattern AND training_attendance AND motivation. Those are four names for the thing',
+  'they said once. Ask yourself what single ongoing phenomenon is being described and put the',
+  'observations, the interpretation and the hypothesis under that one concept. Use a second',
+  'concept only when they genuinely raised a SEPARATE matter that would still make sense if the',
+  'first had never come up.',
+  '',
+  'If you are shown concepts already open for this person, REUSE the exact string when it fits.',
+  'A near-synonym starts a second pile for the same thing, and two shallow piles are worth less',
+  'than one that is deepening.',
+  '',
   'Look for STRENGTHS and CONDITIONS FOR SUCCESS as carefully as for difficulties: what someone',
   'is unusually good at, and what circumstances bring out their best, matter just as much.',
   '',
@@ -535,8 +551,64 @@ const INTAKE_PROMPT = [
   '"burden" 0-1 (how much effort answering costs them). Rank nothing; the system ranks.',
 ].join('\n');
 
+/* ── CONSOLIDATION ───────────────────────────────────────────────────────────
+   How many inquiries one turn is allowed to become.
+
+   The first live turn produced five for one story: training_attendance, attendance_timing,
+   attendance_pattern, motivation, training_structure. All five were the same person explaining
+   the same Tuesday. Nothing was wrong with the extraction — each proposal was grounded — but
+   filing one phenomenon five ways gives five shallow piles instead of one that deepens, and a
+   picture that fragments faster than it accumulates is not a picture.
+
+   The intake prompt asks the model to consolidate. This does not depend on it obliging:
+
+     • A concept with no OBSERVATION of its own gets no inquiry. A hypothesis rests on
+       observations filed under some other concept; it belongs with them, not alone in a shell
+       carrying a confidence band and nothing recorded.
+     • A turn may open at most `cap` concepts that are NEW to this subject. Beyond that,
+       proposals fold into the primary.
+
+   Folding moves the filing, never the content: every accepted proposal still lands somewhere,
+   so consolidating costs no reasoning. The primary is the concept carrying the most
+   observations — what the person actually reported on, not what the model found interesting.
+
+   Returns { byConcept, primary, folded } and does not mutate its input. */
+function consolidate(groups, { existing = {}, cap = 2 } = {}) {
+  const byConcept = {};
+  for (const [c, props] of Object.entries(groups || {})) byConcept[c] = (props || []).slice();
+  const concepts = Object.keys(byConcept);
+  if (!concepts.length) return { byConcept, primary: null, folded: [] };
+
+  const observationsIn = c => byConcept[c].filter(p => p && p.level === 'observation').length;
+  // Observations first — the anchor is what they reported, not what the model found
+  // interesting. Then a concept already open for this subject, because folding into an
+  // established pile deepens it while folding it into a newcomer starts the sprawl over. Then
+  // total proposals, as the richer grouping. Name last, so the same input always consolidates
+  // the same way and the picture never depends on key order.
+  const primary = concepts.slice().sort((a, b) =>
+    (observationsIn(b) - observationsIn(a))
+    || ((existing[b] ? 1 : 0) - (existing[a] ? 1 : 0))
+    || (byConcept[b].length - byConcept[a].length)
+    || a.localeCompare(b))[0];
+
+  let opened = 0;
+  const folded = [];
+  for (const c of concepts) {
+    if (c === primary) continue;
+    let why = '';
+    if (!observationsIn(c)) why = 'no observation of its own';
+    else if (!existing[c] && opened >= cap) why = 'over the new-concept cap for one turn';
+    else if (!existing[c]) opened++;
+    if (!why) continue;
+    byConcept[primary].push(...byConcept[c]);
+    delete byConcept[c];
+    folded.push({ concept: c, why });
+  }
+  return { byConcept, primary, folded };
+}
+
 module.exports = {
   LEVELS, LEVEL_RANK, MODEL_MAY_PROPOSE, INTAKE_PROMPT,
   groundProposals, deriveConfidence, newInquiry, newHypothesis, applyProposals, frontierFor,
-  diagnosticYield, rankQuestions, nextNeed,
+  diagnosticYield, rankQuestions, nextNeed, consolidate,
 };

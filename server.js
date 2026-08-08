@@ -8291,6 +8291,21 @@ function _inquiryFor(code, subjectRef, concept, label, domain, now) {
   return bySubject[key];
 }
 
+/* How many concepts NEW to this person one turn may open. Two, because a person can genuinely
+   raise a second thing in one message, and because the third, fourth and fifth are — on the
+   evidence — the same thing renamed. A deterministic cap rather than a plea in the prompt: the
+   model is asked to consolidate too, but the picture should not depend on it obliging. */
+const NEW_CONCEPT_CAP = 2;
+
+/* The concepts already open for a subject, most-recently-touched first. Shown to the intake
+   model so it reuses a name instead of coining a synonym for something already being tracked. */
+function _openConcepts(code, subjectRef) {
+  const bySubject = (inquiryStates[code] || {})[subjectRef] || {};
+  return Object.values(bySubject)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+    .map(i => i && i.concept).filter(Boolean).slice(0, 12);
+}
+
 async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = [] } = {}) {
   if (!IQ_COMPOSER || !ai.enabled() || !_llmBudgetOk(code)) {
     if (IQ_COMPOSER) console.log(`[intake] skipped — ${!ai.enabled() ? 'no model configured' : 'org over LLM budget'}`);
@@ -8307,6 +8322,12 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
       tier: 'micro',                                   // extraction, not open reasoning — the cheap tier fits
       system: diagnose.INTAKE_PROMPT,
       user: [org.orgName ? `Domain: ${org.orgName}${org.orgMode ? ` (${org.orgMode})` : ''}` : '',
+        // The concepts already open for this person. Without them the model mints fresh names
+        // every turn and the same phenomenon accumulates aliases instead of evidence — the
+        // picture gets wider forever and never gets deeper.
+        _openConcepts(code, `member:${userId}`).length
+          ? `CONCEPTS ALREADY OPEN FOR THIS PERSON (reuse one verbatim when it fits, rather than coining a near-synonym):\n${_openConcepts(code, `member:${userId}`).map(c => `  ${c}`).join('\n')}`
+          : '',
         prior ? `RECENT CONVERSATION:\n${prior}` : '',
         `THEY JUST SAID: ${utterance.slice(0, 1500)}`].filter(Boolean).join('\n\n'),
       // The contract asks for several proposals, each carrying text, a source span, a domain
@@ -8356,16 +8377,37 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
       const c = String(p.domainConcept || p.concept || 'general').toLowerCase();
       (byConcept[c] = byConcept[c] || []).push(p);
     }
+
+    // One turn should deepen the picture, not spray it. The kernel decides how many inquiries
+    // this becomes; see diagnose.consolidate for why and on what rules.
+    const existing = (inquiryStates[code] || {})[subjectRef] || {};
+    const { byConcept: grouped, primary, folded } =
+      diagnose.consolidate(byConcept, { existing, cap: NEW_CONCEPT_CAP });
+    if (folded.length) {
+      console.log(`[intake] folded into ${primary}: ${folded.map(f => `${f.concept} (${f.why})`).join(', ')}`);
+    }
+
+    // What the model could not tell from what was said. Each unknown belongs to the inquiry it
+    // resolves — copying the whole list onto every concept put the identical question on all
+    // five cards, which reads as a system with one idea rather than a frontier per inquiry.
+    const unknowns = (Array.isArray(out.unknowns) ? out.unknowns : [])
+      .map(u => ({ question: String(u && u.question || '').slice(0, 300),
+        concept: String((u && u.concept) || '').toLowerCase(),
+        resolves: u && u.resolves,
+        burden: typeof (u && u.burden) === 'number' ? u.burden : 0.3 }))
+      .filter(u => u.question);
+
     const touched = [];
-    for (const [concept, props] of Object.entries(byConcept)) {
+    for (const [concept, props] of Object.entries(grouped)) {
       const inq = _inquiryFor(code, subjectRef, concept, props[0].label || concept, org.orgMode || '', now);
       const before = JSON.parse(JSON.stringify(inq));
       const after = diagnose.applyProposals(inq, props, { now });
-      // The collection frontier for this inquiry — what the model could not tell from what was said.
-      after.missingSignals = (Array.isArray(out.unknowns) ? out.unknowns : [])
-        .map(u => ({ question: String(u && u.question || '').slice(0, 300), resolves: u && u.resolves,
-          burden: typeof (u && u.burden) === 'number' ? u.burden : 0.3 }))
-        .filter(u => u.question).slice(0, 5);
+      // An unknown naming a live concept goes only there. One that names nothing, or names a
+      // concept that just folded away, goes to the primary — never to everybody.
+      after.missingSignals = unknowns
+        .filter(u => (grouped[u.concept] ? u.concept === concept : concept === primary))
+        .map(({ question, resolves, burden }) => ({ question, resolves, burden }))
+        .slice(0, 5);
       inquiryStates[code][subjectRef][concept] = after;
       const y = diagnose.diagnosticYield(before, after, { rejected });
       _metric(code, 'intake_applied');
