@@ -21,7 +21,7 @@ never takes the product down, and it runs on **either key alone**. Embeddings tu
 on automatically once `OPENAI_API_KEY` is present (no other config needed).
 
 Optional overrides (sensible defaults already set):
-- `AI_MODEL_REASON` (default `claude-sonnet-4-6`) · `AI_MODEL_MICRO` (default Haiku)
+- `AI_MODEL_REASON` (default `claude-sonnet-5`) · `AI_MODEL_MICRO` (default `claude-haiku-4-5`)
 - `OPENAI_MODEL` (default `gpt-4o-mini`)
 - `EMBEDDINGS_MODEL` (default `text-embedding-3-small`, dim 1536)
 

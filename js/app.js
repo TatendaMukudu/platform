@@ -6202,8 +6202,12 @@ function todayScrollThread() { const t = document.getElementById('today-thread')
 function todaySafeguardingCard(sg) {
   const esc = _escAdvisor;
   const rows = (sg.resources || []).map(x => `<div class="sg-res"><span class="sg-res-label">${esc(x.label)}</span><span class="sg-res-contact">${esc(x.contact)}</span></div>`).join('');
+  // On a crisis the warm words are the reply itself, so the card leads with a plain title.
+  // On a concern the reply answered what they actually said, so the card carries the offer of
+  // help in its own words — otherwise the resources arrive with no one having said anything.
+  const lead = sg.message ? esc(sg.message) : `You don't have to face this alone — reach out any time`;
   return `<div class="tdy-msg tdy-msg-assistant"><div class="sg-card">
-    <div class="sg-title">You don't have to face this alone — reach out any time</div>
+    <div class="sg-title">${lead}</div>
     ${rows}
     ${sg.escalated ? `<div class="sg-note">I've let your safeguarding lead know so a person can support you.</div>` : ''}
   </div></div>`;

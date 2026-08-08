@@ -5,7 +5,20 @@ services:
     buildCommand: npm install
     startCommand: node server.js
     envVars:
+      # Secrets — set in the Render dashboard, never in this file.
       - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: DATABASE_URL
         sync: false
       - key: PORT
         value: 3000
+      # The composer: the model writes every reply, the deterministic core
+      # retrieves what it may use and verifies what it wrote. Declared here
+      # rather than left as a dashboard-only value, because a flag that exists
+      # in exactly one place nobody can see is a flag that gets lost.
+      - key: IQ_COMPOSER
+        value: "1"
+      # AI_MODEL_REASON and AI_MODEL_MICRO are deliberately NOT declared.
+      # They are overrides; the defaults live in ai/gateway.js so there is one
+      # place to change the model, not two that can disagree. Set them in the
+      # dashboard only to pin a specific model against the code default.

@@ -20,9 +20,13 @@ const Anthropic = require('@anthropic-ai/sdk');
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+// Current model IDs. These are DEFAULTS, not a pin — AI_MODEL_MICRO/REASON
+// override either without a code change. Kept current deliberately: a stale
+// default is a silent downgrade, because nothing errors, the replies just
+// get worse.
 const MODELS = {
-  micro:  process.env.AI_MODEL_MICRO  || 'claude-haiku-4-5-20251001',
-  reason: process.env.AI_MODEL_REASON || 'claude-sonnet-4-6',
+  micro:  process.env.AI_MODEL_MICRO  || 'claude-haiku-4-5',
+  reason: process.env.AI_MODEL_REASON || 'claude-sonnet-5',
 };
 
 /* ── Provider setup ──────────────────────────────────────────────────────────

@@ -25,7 +25,7 @@ Scope was held exactly as set: **no migration, current behavior preserved.** Add
 **Couldn't boot here:** a live end-to-end advisor call needs `DATABASE_URL` + `ANTHROPIC_API_KEY` (neither is in this container). The endpoint reuses already-proven helpers (`getVisibleUserIds`, `_aggregateOrgData`, the data keys), so risk is low — but a real call against the deploy is the honest last check.
 
 ## Two notes
-- The `reason` tier defaults to **`claude-sonnet-4-6`**. If the account/key is Haiku-only, set `AI_MODEL_REASON=claude-haiku-4-5-20251001` in the env — otherwise the gateway auto-downshifts on first failure anyway.
+- The `reason` tier defaults to **`claude-sonnet-5`**. If the account/key is Haiku-only, set `AI_MODEL_REASON=claude-haiku-4-5` in the env — otherwise the gateway auto-downshifts on first failure anyway.
 - Committed `package-lock.json` (was untracked) for reproducible installs.
 
 ## Next options

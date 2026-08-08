@@ -8167,7 +8167,14 @@ function _turnAbout(about) {
 }
 
 async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null } = {}) {
-  if (!IQ_COMPOSER || !ai.enabled() || !_llmBudgetOk(code)) return null;
+  // Every stage below used to fail silently into the deterministic path. The symptom of a
+  // composer that never runs is not an error — it is a reply that reads like a template,
+  // which is indistinguishable from a composer that ran and wrote something dull. Each exit
+  // now says which stage stopped it, for the same reason the intake pass does.
+  if (!IQ_COMPOSER || !ai.enabled() || !_llmBudgetOk(code)) {
+    if (IQ_COMPOSER) console.log(`[composer] skipped — ${!ai.enabled() ? 'no model configured' : 'org over LLM budget'}`);
+    return null;
+  }
   try {
     const u = orgUsers[code]?.[userId] || {};
     const org = orgMeta[code] || {};
@@ -8237,19 +8244,32 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     // end of is not a better reply, and this is read on a phone.
     const reply = await ai.complete({ tier: 'reason', system: composer.SYSTEM_PROMPT, user: contextText, maxTokens: 320, temperature: 0.4 });
     const written = reasoningRegister.polish(reply);
-    if (!written || written.length < 2) return null;
+    if (!written || written.length < 2) {
+      console.log('[composer] model returned nothing usable');
+      return null;
+    }
 
     // VERIFY — the cage. An invented organisational specific fails the turn.
     const roster = Object.values(orgUsers[code] || {}).filter(p => p && p.status !== 'removed' && p.name).map(p => p.name);
     const check = composer.verifyGrounding(written, { contextText, roster, readerName: u.name || '' });
     if (!check.ok) {
+      // The violations are the interesting part: they say WHAT the model invented, which is the
+      // difference between tightening a prompt and widening a retrieval.
+      console.log(`[composer] refused — ${check.violations.join('; ')}`);
       _captureError(new Error('composer grounding violation: ' + check.violations.join('; ')), { route: '/api/assistant/turn', method: 'POST', status: 200, orgCode: code });
       _metric(code, 'composer_refused');
       return null;                       // degrade to the deterministic path — never ship it
     }
     _metric(code, 'composer_used');
     return { answer: written, grounded: beliefs.length + evidence.length > 0 };
-  } catch (_) { return null; }
+  } catch (e) {
+    // A swallowed exception here is the worst of the lot: a rejected model ID, an auth failure or
+    // a rate limit all look exactly like "the composer had nothing to say", and every reply in
+    // the product quietly reverts to templates with nothing anywhere saying why.
+    console.log('[composer] threw:', e && e.message);
+    _metric(code, 'composer_error');
+    return null;
+  }
 }
 
 /* ── THE EARS (semantic intake) ──────────────────────────────────────────────
@@ -10860,12 +10880,20 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
 
   // ── DUTY OF CARE (first, deterministic) ──────────────────────────────────────
   // Before anything else — and independent of the LLM — check the person's own words for risk.
-  // A crisis short-circuits the whole turn: no reasoning, no proposals, no capture card that
+  // A CRISIS short-circuits the whole turn: no reasoning, no proposals, no capture card that
   // could bury it. The person gets a warm, honest response with real resources; a flag routes
   // to the safeguarding lead. Only on the person's OWN turn (never a leader-support subject turn).
+  //
+  // A CONCERN does NOT short-circuit. It is defined as a caring nudge without forced
+  // escalation, and replacing someone's whole turn is a forced escalation of the conversation
+  // even when no flag routes: they said something real and got no answer to it. So the turn
+  // runs normally — reply, proposals, intake and all — and the offer of help is attached
+  // alongside it, where the frontend already renders it as its own card under the reply.
+  let _concern = null;
   if (opts.subjectMemberId == null) {
     const sg = _safeguardingCheck(code, userId, text);
-    if (sg) {
+    if (sg && sg.detection.severity !== 'crisis') { _concern = sg; }
+    else if (sg) {
       const nowIso = new Date().toISOString();
       const response = { responseText: sg.response.message, mode: 'safeguarding', lens: lens || null,
         proposedActions: [], primaryActions: [], moreActions: [], groundedClaims: [], inferred: [], limitations: [],
@@ -11193,6 +11221,13 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   const key = _wsKey(code, userId);
   const rawRef = 'raw_' + generateId();
   interp.originalInputRef = rawRef;
+  // The concern-tier offer of help, riding alongside the real answer rather than replacing it.
+  // `escalated: false` is load-bearing — nothing was routed to anyone, and the card says so by
+  // saying nothing. `message` carries the warm line the composed response would have led with.
+  if (_concern) {
+    response.safeguarding = { severity: _concern.response.severity, escalated: false,
+      message: _concern.response.message, resources: _concern.response.resources };
+  }
   const turn = { ...interp, lens: lens || null, rawInput: String(text || '').slice(0, 4000), _proposals: proposals, context, response, corrections: [] };
   delete turn.intents; delete turn.sensitivity;                    // keep the returned artifact bounded/clean
   const list = assistantTurns[key] || (assistantTurns[key] = []);
@@ -15887,7 +15922,8 @@ if (require.main === module) (async () => {
       // Say which voice is answering. A silent flag cost us a whole test round: the replies
       // looked unchanged and it took a code read to work out the composer had never been on.
       console.log(`[server]   Composer: ${IQ_COMPOSER ? 'ON — the model writes, the deterministic core grounds it' : 'off (set IQ_COMPOSER=1) — deterministic templates write the reply'}`);
-      console.log(`[server]   Reasoning model: ${process.env.AI_MODEL_REASON || 'claude-sonnet-4-6 (default; set AI_MODEL_REASON to change)'}`);
+      console.log(`[server]   Reasoning model: ${process.env.AI_MODEL_REASON || 'claude-sonnet-5 (default; set AI_MODEL_REASON to change)'}`);
+      console.log(`[server]   Intake model: ${process.env.AI_MODEL_MICRO || 'claude-haiku-4-5 (default; set AI_MODEL_MICRO to change)'}`);
       console.log(`[server]   Persistence: Neon Postgres (DATABASE_URL)`);
       console.log(`[server]   Retention: ${RETENTION_DAYS} days (RETENTION_DAYS to override)`);
       console.log('');

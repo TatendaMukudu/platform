@@ -18,10 +18,27 @@ for (const t of ['I feel completely worthless', "I can't cope anymore", 'I hate 
   ok(`2 · concern detected · "${t.slice(0, 28)}…"`, SG.detect(t).severity === 'concern');
 }
 
+/* 2b — the distress words still fire when they are about the PERSON, not a task */
+for (const t of ['I feel hopeless', "I'm worthless", 'everything feels pointless', 'I feel so alone',
+  "I can't go on", "I'm falling apart", "what's the point anymore"]) {
+  ok(`2b · concern detected · "${t.slice(0, 28)}…"`, SG.detect(t).severity === 'concern');
+}
+
 /* 3 — ordinary / performance text is NEVER false-flagged as a crisis */
 for (const t of ['how is the team doing', 'we need to work on defending set pieces', "I'm a bit tired after training",
   'the striker wants to end the game strongly', 'kill the tempo in the second half']) {
   ok(`3 · not flagged · "${t.slice(0, 30)}…"`, SG.detect(t).severity === 'none');
+}
+
+/* 3b — the same distress WORDS attached to a task, a drill or the team are not distress.
+   This is the regression that shipped: a member describing why they skip Tuesday sessions
+   ("it feels pointless walking in that late") was answered with crisis resources, and the
+   safeguarding short-circuit then swallowed the rest of the turn. */
+for (const t of ["I've missed the last three Tuesday sessions. I think it's because I come straight from work and don't get there until quarter past, so the warm-up has already gone and it feels pointless walking in that late. Saturdays I'm always there early.",
+  'that drill was pointless', 'the meeting felt pointless', 'this stat is worthless without the minutes played',
+  'we were hopeless in the first half', "I'm exhausted after that session", 'the defence is falling apart at corners',
+  'he keeps giving up on the press']) {
+  ok(`3b · task-attached, not flagged · "${t.slice(0, 34)}…"`, SG.detect(t).severity === 'none');
 }
 
 /* 4 — a crisis response is TRANSPARENT about escalation + carries resources (never hollow) */
