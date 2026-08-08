@@ -42,8 +42,8 @@ BASE_URL=https://your-app.onrender.com TOKEN=xxxxx MEMBER_ID=u_123 \
 Exit code `0` = all hard checks passed, `1` = a failure.
 
 > Note on the model tier: the Advisor uses the `reason` tier (default
-> `claude-sonnet-4-6`). If your key is Haiku-only, set
-> `AI_MODEL_REASON=claude-haiku-4-5-20251001` — the gateway also auto-downshifts
+> `claude-sonnet-5`). If your key is Haiku-only, set
+> `AI_MODEL_REASON=claude-haiku-4-5` — the gateway also auto-downshifts
 > on a model-unavailable error, so the call still succeeds.
 
 ---
