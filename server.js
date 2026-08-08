@@ -8377,12 +8377,15 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
           : '',
         prior ? `RECENT CONVERSATION:\n${prior}` : '',
         `THEY JUST SAID: ${utterance.slice(0, 1500)}`].filter(Boolean).join('\n\n'),
-      // The contract asks for several proposals, each carrying text, a source span, a domain
-      // concept, a basis, alternatives and falsifiers, plus the unknowns — richer input means a
-      // longer object, and an object cut off mid-write does not parse at all. 700 truncated a
-      // five-sentence message. Output is billed on what is generated, so headroom is close to
-      // free and the failure it prevents is total.
-      maxTokens: 2000, temperature: 0.2, schema: ['proposals'],
+      // The contract asks for several proposals — each with text, a source span, a domain
+      // concept, a basis, alternatives and falsifiers — plus a relationship claim per concept
+      // and the unknowns. An object cut off mid-write does not parse at all, so the ceiling has
+      // to clear the WHOLE contract, not the typical case: 700 truncated a five-sentence
+      // message, and 2000 truncated the same message once identity claims were added to the
+      // contract without the ceiling moving with them. Output is billed on what is generated,
+      // so headroom costs nothing on turns that do not use it and prevents total failure on
+      // the turns that do. Widen this whenever the contract grows.
+      maxTokens: 4000, temperature: 0.2, schema: ['proposals'],
     });
     // Every stage below used to fail silently, so an empty Inquiries page was indistinguishable
     // from a model returning nothing, a schema mismatch, or the grounding refusing everything.
@@ -11509,12 +11512,14 @@ app.get('/api/inquiry', requireAuth, (req, res) => {
   // reads to the person as the system claiming to work on something it has never had a fact
   // about. The kernel no longer creates these, but the ones written before it stopped are
   // still in the store, and nobody is going to run a migration for two bad rows.
+  // The test is SIGNALS, not signals-or-hypotheses. A hypothesis with no evidence under it is
+  // not a line of inquiry, it is a guess with a name — and that is exactly what these are:
+  // grouping split them from the observations in their basis, leaving the explanation stranded
+  // in a concept that had never observed anything. Letting a stranded hypothesis keep the card
+  // alive is what stopped the first pass clearing them.
   let pruned = 0;
   for (const [concept, i] of Object.entries(mine)) {
-    if (!i) { delete mine[concept]; pruned++; continue; }
-    const hasSignal = (i.signals || []).length > 0;
-    const hasHypothesis = (i.hypotheses || []).length > 0;
-    if (!hasSignal && !hasHypothesis) { delete mine[concept]; pruned++; }
+    if (!i || !(i.signals || []).length) { delete mine[concept]; pruned++; }
   }
   if (pruned) { console.log(`[inquiry] pruned ${pruned} empty inquiry/ies for member:${userId}`); scheduleSave(); }
   const inquiries = Object.values(mine).map(i => {
