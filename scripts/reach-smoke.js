@@ -80,6 +80,31 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
     /* 8 — an org that has named nobody offers nobody, rather than inventing a role */
     orgMeta[C].professionals = [];
     ok('8 · with nobody named, nothing is offered', !shareProp(await turn('ash', 'my left ankle has been stiff for two weeks, the pain is worse after training load')));
+
+    /* 9 — THE DIRECTORY FILLS ITSELF AT ONBOARDING. A directory only an administrator maintains
+       is stale the week after it is written, and the words that matter for matching are the ones
+       a person uses about their own job. So a leader completing their profile joins it. */
+    const onboard = await post('liv', '/api/auth/complete-profile', {
+      mainGoals: 'keep the squad available', selectedValues: ['care'],
+      professionalTitle: 'Medical lead', professionalRemit: 'injury, pain, stiffness and training load',
+    });
+    ok('9 · a leader completing onboarding joins the directory', onboard.j && onboard.j.ok && onboard.j.listedAs && onboard.j.listedAs.title === 'Medical lead');
+    ok('9 · …and is offered from that moment on',
+      !!shareProp(await turn('ash', 'my left ankle has been stiff for two weeks, the pain is worse the morning after training load')));
+
+    /* 10 — a member cannot list themselves. Being routed other people's problems is a duty
+       somebody holds, not a status anyone can claim. */
+    await post('sam', '/api/auth/complete-profile', {
+      mainGoals: 'play more', selectedValues: ['effort'],
+      professionalTitle: 'Chief Everything', professionalRemit: 'injury, pain, stiffness and training load',
+    });
+    ok('10 · a member cannot add themselves to the directory',
+      !(orgMeta[C].professionals || []).some(p => p.userId === 'sam'));
+
+    /* 11 — standing down is removal, not an empty row that still gets offered */
+    await post('liv', '/api/auth/complete-profile', { mainGoals: 'x', selectedValues: ['care'], professionalTitle: '', professionalRemit: '' });
+    ok('11 · clearing a title removes them from the directory',
+      !(orgMeta[C].professionals || []).some(p => p.userId === 'liv'));
   } catch (e) { fail++; console.log('  ✗ suite threw:', e && e.message); }
 
   server.close();
