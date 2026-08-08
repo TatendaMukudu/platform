@@ -11409,6 +11409,19 @@ app.delete('/api/library/folders/:id', requireAuth, (req, res) => {
 app.get('/api/inquiry', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+  // Drop the empty shells on the way past. An inquiry with no signal and no hypothesis is a
+  // concept name wearing a confidence band — "nothing recorded yet" under a heading, which
+  // reads to the person as the system claiming to work on something it has never had a fact
+  // about. The kernel no longer creates these, but the ones written before it stopped are
+  // still in the store, and nobody is going to run a migration for two bad rows.
+  let pruned = 0;
+  for (const [concept, i] of Object.entries(mine)) {
+    if (!i) { delete mine[concept]; pruned++; continue; }
+    const hasSignal = (i.signals || []).length > 0;
+    const hasHypothesis = (i.hypotheses || []).length > 0;
+    if (!hasSignal && !hasHypothesis) { delete mine[concept]; pruned++; }
+  }
+  if (pruned) { console.log(`[inquiry] pruned ${pruned} empty inquiry/ies for member:${userId}`); scheduleSave(); }
   const inquiries = Object.values(mine).map(i => {
     const hyps = i.hypotheses || [];
     const lead = hyps.find(h => h.id === i.leadingHypothesisId) || null;
