@@ -280,5 +280,57 @@ ok('5 · …and looks for strengths as hard as for difficulties (not a weakness 
     s3.timeline.length === s2.timeline.length);
 }
 
+/* ── 30 · CONSOLIDATION ──────────────────────────────────────────────────────
+   The shape that actually shipped: one member explaining one Tuesday produced five concepts,
+   two of them holding no observation at all, and the page filled with the same story filed
+   five ways. These use that exact grouping. */
+{
+  const obs = (c) => ({ level: 'observation', domainConcept: c });
+  const hyp = (c) => ({ level: 'hypothesis', domainConcept: c });
+  const live = {
+    'football.training_attendance': [obs('x'), obs('x'), hyp('x')],
+    'football.attendance_timing':   [obs('x'), obs('x')],
+    'football.training_structure':  [obs('x')],
+    'football.motivation':          [hyp('x')],                 // no observation — a shell
+    'football.attendance_pattern':  [hyp('x')],                 // no observation — a shell
+  };
+
+  const r = d.consolidate(live, { existing: {}, cap: 2 });
+  const kept = Object.keys(r.byConcept);
+  ok('30 · five concepts for one story consolidate down', kept.length < 5);
+  ok('30 · …the primary is the concept with the most observations',
+    r.primary === 'football.training_attendance');
+  ok('30 · …a concept with no observation of its own gets no inquiry',
+    !kept.includes('football.motivation') && !kept.includes('football.attendance_pattern'));
+  ok('30 · …and the new-concept cap holds the rest', kept.length <= 1 + 2);
+  ok('30 · …every folded concept says why', r.folded.every(f => f.concept && f.why));
+
+  // Folding must move the filing, never the content — consolidating cannot cost reasoning.
+  const before = Object.values(live).reduce((n, ps) => n + ps.length, 0);
+  const after = Object.values(r.byConcept).reduce((n, ps) => n + ps.length, 0);
+  ok('30 · …no accepted proposal is lost in the fold', after === before);
+
+  // A concept already open for this person is not "new", so an established pile keeps growing
+  // rather than being folded away by a cap meant for sprawl.
+  const r2 = d.consolidate(live, { existing: { 'football.training_structure': {} }, cap: 0 });
+  ok('30 · an already-open concept survives a cap of zero',
+    Object.keys(r2.byConcept).includes('football.training_structure'));
+
+  // Determinism: the same input must always consolidate the same way, or the picture depends
+  // on key order rather than on evidence.
+  const a = d.consolidate(live, { existing: {}, cap: 2 });
+  const b = d.consolidate(live, { existing: {}, cap: 2 });
+  ok('30 · consolidation is deterministic', JSON.stringify(Object.keys(a.byConcept)) === JSON.stringify(Object.keys(b.byConcept)));
+
+  ok('30 · a single concept is left alone', Object.keys(d.consolidate({ 'a.b': [obs('x')] }, {}).byConcept).length === 1);
+  ok('30 · an empty turn consolidates to nothing, not a crash', d.consolidate({}, {}).primary === null);
+}
+
+/* ── 31 · the intake contract must ask for what the routing needs ────────────
+   Each unknown carries the concept it resolves. Without it the whole list lands on every
+   inquiry and the identical question appears on every card. */
+ok('31 · the prompt requires a concept on each unknown', /"concept"/.test(d.INTAKE_PROMPT) && /unknown.*concept|concept.*resolve/i.test(d.INTAKE_PROMPT));
+ok('31 · …and tells the model one phenomenon is one concept', /ONE PHENOMENON, ONE CONCEPT/.test(d.INTAKE_PROMPT));
+
 console.log(`\ndiagnose-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
