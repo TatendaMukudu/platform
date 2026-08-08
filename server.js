@@ -8223,6 +8223,11 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
           .filter(a => a && a.assigneeId === userId)
           .slice(-12)
           .map(a => ({ title: a.title, status: a.status }));
+    // Who in this organisation handles what. Sent so the assistant can point at a real person
+    // with a real remit instead of a generic role, and so the grounding cage will refuse a name
+    // that is not on this list — the same protection that stops it inventing a teammate.
+    const professionals = _professionals(code);
+
     const assignedWork = _allWork.filter(w => _titleUsable(w.title));
     const _quarantined = _allWork.length - assignedWork.length;
     if (_quarantined) console.log(`[composer] held back ${_quarantined} assigned item(s) with unusable titles`);
@@ -8253,7 +8258,7 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     const contextText = composer.buildContext({
       name: _firstName(code, userId), role: u.role || 'member',
       domain: _domainDirective(code) ? String(org.orgName || '') + (org.orgMode ? ` (${org.orgMode})` : '') : (org.orgName || ''),
-      question, about, beliefs, evidence, assignedWork, priorMessages, need,
+      question, about, beliefs, evidence, assignedWork, priorMessages, need, professionals,
       actions: (actions || []).map(a => ({ label: a.label })),
     });
 
@@ -10597,7 +10602,16 @@ const LIB_TYPES = ['note', 'chat', 'artifact'];
 function _libFolders(code) { return libraryFolders[code] || (libraryFolders[code] = []); }
 function _libItems(code)   { return libraryItems[code]   || (libraryItems[code]   = []); }
 // What a viewer may see: their own items (any visibility) + anyone's SHARED items.
-function _libVisibleToUser(code, userId, item) { return item.ownerId === userId || item.visibility === 'shared'; }
+function _libVisibleToUser(code, userId, item) {
+  if (item.ownerId === userId) return true;
+  if (item.visibility !== 'shared') return false;
+  // An explicit audience NARROWS a share; it never widens one. Without this, "share this with
+  // the physio" would have meant "publish this to the organisation", because shared has always
+  // meant everyone here. Somebody handing over an injury, or anything else they chose one
+  // person for, must reach exactly that person.
+  if (Array.isArray(item.audience) && item.audience.length) return item.audience.includes(userId);
+  return true;
+}
 function _libItemSafe(item, userId) {
   return { id: item.id, type: item.type, title: item.title, body: item.body, sourceRef: item.sourceRef || null,
     folderId: item.folderId || null, visibility: item.visibility, createdAt: item.createdAt, updatedAt: item.updatedAt,
@@ -10711,6 +10725,29 @@ function _assistantInterpret(code, userId, text) {
 /* Build action PROPOSALS (never executed) from the interpretation. Each proposal names its
    capability, payload, visibility (private default), why, required approval, policy result and
    evidence basis. Persistent effects route ONLY through existing capabilities on confirmation. */
+/* ── WHO HANDLES WHAT ────────────────────────────────────────────────────────
+   An organisation's people are not interchangeable. Formations belong with the head coach,
+   leadership with whoever does performance, an ankle with medical — and which of those exist,
+   and who they are, differs per org. So it is configuration, not a hardcoded list of roles.
+
+   This exists because the assistant was telling Ashton to flag his ankle to "the physio or club
+   medical", which is not a person this system knows. Advice pointing at a role that may not
+   exist is a quieter version of inventing a button: it sounds actionable and leads nowhere. A
+   named person with a stated remit is either configured or it is not, and if it is not, the
+   assistant should say nothing rather than invent one.
+
+   The point is connection, not escalation. Nothing here reports anyone: it offers to open a
+   conversation the member was already being told to have. */
+function _professionals(code) {
+  const raw = (orgMeta[code] && orgMeta[code].professionals) || [];
+  return raw.map(p => {
+    const u = p && p.userId ? (orgUsers[code] || {})[p.userId] : null;
+    if (!u || u.status === 'removed') return null;             // never point at someone who left
+    return { userId: p.userId, name: u.name || '', title: String(p.title || '').trim(),
+      remit: String(p.remit || '').trim() };
+  }).filter(p => p && p.name && p.title);
+}
+
 function _assistantProposals(code, userId, interp, context, text, workCtx) {
   const out = [];
   const primary = interp.suggestedPrivacy;
@@ -10723,6 +10760,36 @@ function _assistantProposals(code, userId, interp, context, text, workCtx) {
       visibility: primary.visibility, why: primary.reason, requiredApproval: true,
       policyResult: { effect: 'allow', reason: 'personal capture — owner-scoped' }, evidenceBasis: [] });
   }
+  // REACH THE RIGHT PERSON. The assistant was already telling people to go and speak to someone;
+  // this offers to carry it, which is the difference between advice and a resource. The member
+  // stays in charge of every part of it: nothing is sent, nobody is notified, and the exact words
+  // are theirs to read and edit before they confirm. Declining costs them nothing and is not
+  // recorded as a refusal of anything.
+  //
+  // Offered only when the org has named someone whose remit plainly covers this, so the offer is
+  // never a gesture at a role that does not exist here.
+  {
+    const pros = _professionals(code);
+    const said = String(text || '').toLowerCase();
+    // Match on the org's OWN words for each person's remit rather than a vocabulary we invented,
+    // so a club that calls it "S&C" and one that calls it "physical prep" both work without a
+    // code change. Two matching words, because one is a coincidence.
+    const scoreOf = (p) => {
+      const terms = `${p.title} ${p.remit}`.toLowerCase().match(/[a-z]{4,}/g) || [];
+      return new Set(terms.filter(t => said.includes(t))).size;
+    };
+    const best = pros.map(p => ({ p, n: scoreOf(p) })).sort((a, b) => b.n - a.n)[0];
+    if (best && best.n >= 2) {
+      out.push({ id: 'prop_' + generateId(), actionType: 'share_with_professional', capability: 'workspace',
+        label: `Share this with ${best.p.name} (${best.p.title})`,
+        payload: { toUserId: best.p.userId, toName: best.p.name, toTitle: best.p.title, text: null /* filled from raw at confirm */ },
+        visibility: 'shared',
+        why: `${best.p.name} handles ${best.p.remit || best.p.title} here. Nothing is shared until you confirm, and you can edit exactly what they see.`,
+        requiredApproval: true,
+        policyResult: { effect: 'allow', reason: 'member-initiated share of their own words' }, evidenceBasis: [] });
+    }
+  }
+
   // Current-state CHECK-IN (Cut D): a confirmable "Log this as today's check-in?" proposal. NOTHING
   // is recorded here — the record is created only on confirm, through the canonical _recordCheckin
   // capability. A sensitive/urgent disclosure is NOT reduced to a logging card unless the user
@@ -11687,6 +11754,35 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
   // Idempotency / duplicate-submit guard: a proposal executes AT MOST once — no double write.
   if (prop.confirmed) return res.status(409).json({ error: 'already confirmed' });
   const overrides = req.body?.overrides || {};
+
+  if (prop.actionType === 'share_with_professional') {
+    // The member's own words, to one named person, at the member's instruction. Their edit wins
+    // over the original: what they read on the card is what is shared, which is the only way an
+    // edit box means anything. A share is a library item, not a notification and not a flag —
+    // this is a conversation being opened, not somebody being reported.
+    const body = String(overrides.text || turn.rawInput || '').trim().slice(0, 4000);
+    if (!body) return res.status(400).json({ ok: false, error: 'nothing_to_share' });
+    const to = (orgUsers[code] || {})[prop.payload.toUserId];
+    if (!to || to.status === 'removed') {
+      return res.status(200).json({ ok: true, confirmed: 'share_with_professional', outcome: 'recipient_unavailable',
+        note: `${prop.payload.toName} is no longer listed here, so nothing was shared.` });
+    }
+    const me = (orgUsers[code] || {})[userId] || {};
+    const item = { id: _shortId(), type: 'note',
+      title: `From ${me.name || 'a member'} — for ${prop.payload.toTitle}`,
+      body, sourceRef: `turn:${turn.turnId}`, folderId: null,
+      visibility: 'shared', audience: [prop.payload.toUserId],
+      ownerId: userId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    _libItems(code).push(item);
+    try {
+      _audit(code, { actor: userId, action: 'share_with_professional', subjectIds: [userId],
+        basis: `member shared their own words with ${prop.payload.toUserId} (${prop.payload.toTitle})` });
+    } catch (_) {}
+    prop.confirmed = { at: new Date().toISOString(), itemId: item.id, toUserId: prop.payload.toUserId };
+    scheduleSave();
+    return res.json({ ok: true, confirmed: 'share_with_professional', itemId: item.id,
+      note: `Shared with ${prop.payload.toName}. Only they can see it, and you can take it back at any time.` });
+  }
 
   if (prop.actionType === 'resolve_uncertainty') {
     // Carry the answer through to a GOVERNED evidence write, then let org-state
@@ -15880,6 +15976,9 @@ const PORT = process.env.PORT || 3000;
 // Export a minimal surface for the endpoint smoke test (in-process, DB_OPTIONAL).
 // Requiring this module never boots a listener — only running it directly does.
 module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired,
+  // exported for the truth layer: who an org has named as handling what, and the shared library
+  // a routed share lands in
+  orgMeta, libraryItems, _professionals,
   // exported for the truth layer: proves the role ladder never invents a title
   _subjectRoleContext, _domainDirective,
   // exported for the truth layer: the canonical evidence boundary + identity lifecycle
