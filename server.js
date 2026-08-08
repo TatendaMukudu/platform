@@ -1365,7 +1365,28 @@ app.put('/api/auth/update-user', requireAuth, async (req, res) => {
   // A role change is superadmin-only — a lower privilege can never escalate anyone (or themselves).
   if (updates.role !== undefined && actor.role !== 'superadmin') delete updates.role;
   const safe = ['name','firstName','lastName','role','supervisorId','group','status'];
+  const _wasRole = users[userId].role;
   safe.forEach(k => { if (updates[k] !== undefined) users[userId][k] = updates[k]; });
+
+  // A ROLE CHANGE HAS CONSEQUENCES BEYOND THE ROLE FIELD, and the directory is one of them.
+  //
+  // Promotion: profileComplete is already true, so onboarding never runs again and a promoted
+  // leader would never be asked what to come to them for — invisible to routing forever, with
+  // nothing anywhere saying why. They are flagged as owing that answer instead.
+  //
+  // Demotion is the direction that matters more. Someone who stood down stayed listed and kept
+  // being sent other people's injuries, because nothing connected losing the duty to losing the
+  // listing. That is a real person receiving real disclosures they no longer hold a role for.
+  const LEADS = ['coach', 'admin', 'superadmin'];
+  if (updates.role !== undefined && updates.role !== _wasRole) {
+    const nowLeader = LEADS.includes(users[userId].role);
+    if (!nowLeader) _upsertProfessional(code, userId, '', '');       // stood down: stop routing to them
+    else if (!LEADS.includes(_wasRole)) users[userId].needsProfessionalProfile = true;
+    try {
+      _audit(code, { actor: req.iqSession.userId, action: 'role_change', subjectIds: [userId],
+        basis: `${_wasRole || 'none'} -> ${users[userId].role}${!nowLeader ? ' (removed from the who-handles-what directory)' : ''}` });
+    } catch (_) {}
+  }
   // Recompute name if first/last changed
   if ((updates.firstName || updates.lastName) && !updates.name) {
     users[userId].name = `${users[userId].firstName || ''} ${users[userId].lastName || ''}`.trim();
@@ -10770,6 +10791,10 @@ function _professionals(code) {
   return raw.map(p => {
     const u = p && p.userId ? (orgUsers[code] || {})[p.userId] : null;
     if (!u || u.status === 'removed') return null;             // never point at someone who left
+    // The role is checked here as well as on the way in. Directory rows outlive the reasons they
+    // were written — a seeded org, an import, a bug in some future path — and the cost of a stale
+    // one is a person receiving disclosures they no longer hold a role for. Cheap to re-check.
+    if (!['coach', 'admin', 'superadmin'].includes(u.role)) return null;
     return { userId: p.userId, name: u.name || '', title: String(p.title || '').trim(),
       remit: String(p.remit || '').trim() };
   }).filter(p => p && p.name && p.title);

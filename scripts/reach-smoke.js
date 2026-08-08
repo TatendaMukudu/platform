@@ -105,6 +105,35 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
     await post('liv', '/api/auth/complete-profile', { mainGoals: 'x', selectedValues: ['care'], professionalTitle: '', professionalRemit: '' });
     ok('11 · clearing a title removes them from the directory',
       !(orgMeta[C].professionals || []).some(p => p.userId === 'liv'));
+
+    /* 12 — A ROLE CHANGE HAS CONSEQUENCES BEYOND THE ROLE FIELD.
+       Promotion: onboarding has already run, so nobody would ever ask a promoted leader what to
+       come to them for — invisible to routing forever, with nothing saying why.
+       Demotion matters more: someone who stood down kept being sent other people's injuries. */
+    orgUsers[C].boss = { id: 'boss', name: 'Priya Varma', role: 'superadmin', status: 'active' };
+    const asBoss = { Authorization: `Bearer ${issueToken('boss', C, 'superadmin')}`, 'Content-Type': 'application/json' };
+    const setRole = (who, role) => fetch(base + '/api/auth/update-user', { method: 'PUT', headers: asBoss,
+      body: JSON.stringify({ userId: who, updates: { role } }) }).then(r => r.json());
+
+    await setRole('sam', 'coach');
+    ok('12 · a promoted member is flagged as owing a remit, not left invisible',
+      orgUsers[C].sam.needsProfessionalProfile === true);
+
+    orgMeta[C].professionals = [{ userId: 'theo', title: 'Performance coach', remit: 'leadership, mindset and confidence' }];
+    ok('12 · …a listed leader is offered while they hold the role',
+      !!shareProp(await turn('ash', 'I want to work on my leadership and confidence and the right mindset')));
+    await setRole('theo', 'member');
+    ok('12 · …standing down removes them from the directory',
+      !(orgMeta[C].professionals || []).some(p => p.userId === 'theo'));
+    ok('12 · …and they are no longer offered anyone\'s disclosures',
+      !shareProp(await turn('ash', 'I want to work on my leadership and confidence and the right mindset')));
+
+    /* 13 — a stale row cannot route either. Directory entries outlive the reasons they were
+       written (a seed, an import, a future bug), and the cost of one is a person receiving
+       disclosures they no longer hold a role for. */
+    orgMeta[C].professionals = [{ userId: 'theo', title: 'Performance coach', remit: 'leadership, mindset and confidence' }];
+    ok('13 · a directory row for a non-leader is ignored, not honoured',
+      !shareProp(await turn('ash', 'I want to work on my leadership and confidence and the right mindset')));
   } catch (e) { fail++; console.log('  ✗ suite threw:', e && e.message); }
 
   server.close();
