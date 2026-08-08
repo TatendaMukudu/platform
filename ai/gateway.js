@@ -89,6 +89,12 @@ function _isModelUnavailable(err) {
   return status === 404 || (/model/.test(msg) && /(not.*found|does not exist|unknown|invalid)/.test(msg));
 }
 
+/* The floor: the model we fall back to when a configured one is not on this account.
+   Deliberately a constant rather than MODELS.micro. The downshift used to target the micro
+   tier, which quietly disabled itself the moment both tiers were set to the same model — the
+   configuration most likely to need it, since setting both is how you misconfigure both. */
+const FALLBACK_MODEL = 'claude-haiku-4-5';
+
 /* ── complete ──────────────────────────────────────────────────────────────
    Returns the assistant text (string). Retries network/5xx/429 with backoff.
    If the chosen tier's model is unavailable, downshifts once to `micro`
@@ -126,10 +132,13 @@ async function complete({
     } catch (err) {
       lastErr = err;
 
-      // Configured reasoning model not on this account → downshift once.
-      if (_isModelUnavailable(err) && fallbackToMicro && primary !== MODELS.micro) {
+      // Configured model not on this account → downshift once to the floor, and say so.
+      // Silence here is expensive: an unavailable model looks exactly like a model with
+      // nothing to say, and every caller degrades to templates without a word anywhere.
+      if (_isModelUnavailable(err) && fallbackToMicro && primary !== FALLBACK_MODEL) {
+        console.log(`[ai] ${primary} unavailable on this account (${err?.status || '?'}) — falling back to ${FALLBACK_MODEL}`);
         try {
-          const resp = await call(MODELS.micro);
+          const resp = await call(FALLBACK_MODEL);
           return resp.content?.[0]?.text?.trim() || '';
         } catch (err2) { lastErr = err2; }
       }
