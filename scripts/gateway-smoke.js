@@ -47,5 +47,22 @@ ok('5 · …and the downshift guard compares against that floor',
 /* 6 — a model that rejects sampling anyway is retried without it rather than failing. */
 ok('6 · a sampling rejection triggers a retry, not a dead turn', /_isSamplingRejected\(err\)/.test(src));
 
+/* 7 — the reply is read from the TEXT blocks, not from content[0]. The newer models think by
+   default when no `thinking` parameter is sent, so a thinking block sits ahead of the answer
+   with no `.text` on it — content[0].text is then undefined and a perfectly good response
+   reads as the empty string, which every JSON caller reports as "unparseable". */
+const _text = eval('(' + src.match(/function _text\(resp\) \{[\s\S]*?\n\}/)[0].replace('function _text', 'function') + ')');
+ok('7 · a thinking block ahead of the answer does not swallow it',
+  _text({ content: [{ type: 'thinking', thinking: '' }, { type: 'text', text: '{"proposals":[]}' }] }) === '{"proposals":[]}');
+ok('7 · …text split across blocks is rejoined in order',
+  _text({ content: [{ type: 'text', text: '{"a":' }, { type: 'text', text: '1}' }] }) === '{"a":1}');
+ok('7 · …a response with no text block is empty, not a crash',
+  _text({ content: [{ type: 'thinking', thinking: '' }] }) === '' && _text({}) === '');
+ok('7 · …and nothing still reads content[0] directly', !/content\?\.\[0\]\?\.text/.test(src));
+
+/* 8 — a null from completeJSON carries its reason to the caller, so one log line explains
+   itself rather than needing a second one correlated by timestamp. */
+ok('8 · completeJSON reports why it gave up', /diag\.reason = why/.test(src));
+
 console.log(`\ngateway-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
