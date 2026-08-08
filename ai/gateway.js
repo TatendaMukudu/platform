@@ -210,10 +210,25 @@ function parseJSON(text) {
 async function completeJSON(opts) {
   const text = await complete(opts);
   const obj  = parseJSON(text);
-  if (!obj) return null;
+  // Both failures below return null and look identical to the caller, but they need opposite
+  // fixes: unparseable usually means maxTokens cut the object off mid-write, while a missing
+  // key means the prompt and the schema disagree about what to call things.
+  //
+  // SHAPE ONLY, never content. This runs over a person's own words, and a log line on someone
+  // else's infrastructure is the last place those should appear. A length and a final character
+  // separate truncation from malformed without quoting a syllable of it.
+  if (!obj) {
+    const t = String(text || '');
+    console.log(`[ai] completeJSON unparseable — ${t.length} chars, ends "${t.slice(-1) || 'nothing'}" (a JSON object ends "}"; anything else means truncated — raise maxTokens)`);
+    return null;
+  }
   if (Array.isArray(opts.schema)) {
     for (const key of opts.schema) {
-      if (!(key in obj)) return null;
+      if (!(key in obj)) {
+        // Top-level key names are structure, not content — safe to name.
+        console.log(`[ai] completeJSON parsed but has no "${key}" — got keys: ${Object.keys(obj).join(', ') || '(none)'}`);
+        return null;
+      }
     }
   }
   return obj;
