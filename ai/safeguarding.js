@@ -35,11 +35,28 @@ const CRISIS = [
   /\b(i (feel|am)|feeling)\s+(unsafe|in danger)\b/,
 ];
 // Severe-distress patterns — a caring check + resources, no forced escalation.
+//
+// Every pattern here binds the feeling to the PERSON, or to their life as a whole.
+// That binding is load-bearing, not tidiness: a bare /\bpointless\b/ fires on "it
+// feels pointless walking in that late", which is a person describing a football
+// session, and answering that with crisis resources is its own harm. Someone who
+// gets the Samaritans number for a complaint about a drill learns the system does
+// not understand them, and discounts it on the day it matters. Sensitivity is
+// still the right instinct — it governs CRISIS above, where the cost of a miss is
+// unbounded — but sensitivity to the wrong thing is not sensitivity.
 const CONCERN = [
-  /\b(hopeless|worthless|pointless|can'?t (cope|go on|do this|take (it|this) any ?more)|giving up|falling apart|breaking down)\b/,
-  /\b(so|really|completely|totally|utterly)\s+(alone|empty|numb|overwhelmed|exhausted|broken|lost)\b/,
-  /\bhate\s+(myself|my life|everything)\b/,
-  /\bcry(ing)?\s+(all|every|myself)\b/,
+  // The strong words, applied to oneself. Intensifiers may sit in between.
+  /\b(i'?m|i am|im|i feel|i felt|i'?ve felt|i'?ve been|i just feel|feeling)\s+(so |really |completely |totally |utterly |just |quite |very |kind ?of |kinda |a bit )*(hopeless|worthless|pointless)\b/,
+  // Or applied to everything — the scope is their life, not one session.
+  /\b(everything|it all|all of it|life|nothing)\s+(is |feels? |seems? |just )*(hopeless|pointless|worthless|meaningless)\b/,
+  /\bwhat'?s the point (of it all|in (anything|any of it)|any ?more)\b/,
+  /\bi\s+(can'?t|cannot|can not)\s+(cope|go on|keep going|do this any ?more|take (it|this) any ?more)\b/,
+  /\b(i'?m|i am|im)\s+(giving up|falling apart|breaking down)\b/,
+  // The milder words need an intensifier as well as the binding: "I'm exhausted"
+  // after a Tuesday session is a fit person describing a hard session.
+  /\b(i'?m|i am|im|i feel|feeling)\s+(so|really|completely|totally|utterly)\s+(alone|empty|numb|overwhelmed|exhausted|broken|lost)\b/,
+  /\bi hate\s+(myself|my life|everything)\b/,
+  /\bcry(ing)?\s+(all the time|every (day|night)|myself to sleep)\b/,
   /\bnobody (cares|would notice|understands)\b/,
 ];
 
