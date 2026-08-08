@@ -89,6 +89,29 @@ function _isModelUnavailable(err) {
   return status === 404 || (/model/.test(msg) && /(not.*found|does not exist|unknown|invalid)/.test(msg));
 }
 
+/* Sampling parameters were removed from the newer models: sending `temperature` to Sonnet 5
+   is a 400 on every call, not a warning. This is an ALLOWLIST of the models that still take
+   it, and the direction of the asymmetry is the point — a model missing from the list loses
+   `temperature` and runs at its default, which is a shrug, whereas a model wrongly assumed to
+   accept it fails every request. Every model released from here is expected to reject it, so
+   the safe default for anything unrecognised is to leave it off. */
+const SAMPLING_OK = /^claude-(2|3|instant|haiku-4-5|sonnet-4-0|sonnet-4-5|sonnet-4-6|opus-4-0|opus-4-1|opus-4-5|opus-4-6)/;
+function _acceptsSampling(model) { return SAMPLING_OK.test(String(model || '')); }
+
+/* A 400 that names a sampling parameter — the shape of "this model dropped that knob". */
+function _isSamplingRejected(err) {
+  const msg = (err?.message || '').toLowerCase();
+  return (err?.status === 400 || err?.statusCode === 400)
+    && /temperature|top_p|top_k/.test(msg)
+    && /deprecat|not supported|unsupported|unexpected|removed/.test(msg);
+}
+
+/* The floor: the model we fall back to when a configured one is not on this account.
+   Deliberately a constant rather than MODELS.micro. The downshift used to target the micro
+   tier, which quietly disabled itself the moment both tiers were set to the same model — the
+   configuration most likely to need it, since setting both is how you misconfigure both. */
+const FALLBACK_MODEL = 'claude-haiku-4-5';
+
 /* ── complete ──────────────────────────────────────────────────────────────
    Returns the assistant text (string). Retries network/5xx/429 with backoff.
    If the chosen tier's model is unavailable, downshifts once to `micro`
@@ -110,10 +133,10 @@ async function complete({
     return _openaiComplete({ system, msgs, maxTokens, temperature });
   }
 
-  const call = (m) => client.messages.create({
+  const call = (m, dropSampling = false) => client.messages.create({
     model: m,
     max_tokens: maxTokens,
-    ...(temperature != null ? { temperature } : {}),
+    ...(temperature != null && !dropSampling && _acceptsSampling(m) ? { temperature } : {}),
     ...(system ? { system } : {}),
     messages: msgs,
   });
@@ -126,10 +149,25 @@ async function complete({
     } catch (err) {
       lastErr = err;
 
-      // Configured reasoning model not on this account → downshift once.
-      if (_isModelUnavailable(err) && fallbackToMicro && primary !== MODELS.micro) {
+      // The allowlist above is a guess about a model we may never have seen. When it guesses
+      // wrong the model says so precisely, so believe it and retry without the knob rather
+      // than failing the turn: an unrecognised new model should degrade to default sampling,
+      // never to a dead product.
+      if (_isSamplingRejected(err)) {
+        console.log(`[ai] ${primary} rejects sampling parameters — retrying without them`);
         try {
-          const resp = await call(MODELS.micro);
+          const resp = await call(primary, true);
+          return resp.content?.[0]?.text?.trim() || '';
+        } catch (err2) { lastErr = err2; }
+      }
+
+      // Configured model not on this account → downshift once to the floor, and say so.
+      // Silence here is expensive: an unavailable model looks exactly like a model with
+      // nothing to say, and every caller degrades to templates without a word anywhere.
+      if (_isModelUnavailable(err) && fallbackToMicro && primary !== FALLBACK_MODEL) {
+        console.log(`[ai] ${primary} unavailable on this account (${err?.status || '?'}) — falling back to ${FALLBACK_MODEL}`);
+        try {
+          const resp = await call(FALLBACK_MODEL);
           return resp.content?.[0]?.text?.trim() || '';
         } catch (err2) { lastErr = err2; }
       }
