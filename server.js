@@ -8307,7 +8307,12 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
       user: [org.orgName ? `Domain: ${org.orgName}${org.orgMode ? ` (${org.orgMode})` : ''}` : '',
         prior ? `RECENT CONVERSATION:\n${prior}` : '',
         `THEY JUST SAID: ${utterance.slice(0, 1500)}`].filter(Boolean).join('\n\n'),
-      maxTokens: 700, temperature: 0.2, schema: ['proposals'],
+      // The contract asks for several proposals, each carrying text, a source span, a domain
+      // concept, a basis, alternatives and falsifiers, plus the unknowns — richer input means a
+      // longer object, and an object cut off mid-write does not parse at all. 700 truncated a
+      // five-sentence message. Output is billed on what is generated, so headroom is close to
+      // free and the failure it prevents is total.
+      maxTokens: 2000, temperature: 0.2, schema: ['proposals'],
     });
     // Every stage below used to fail silently, so an empty Inquiries page was indistinguishable
     // from a model returning nothing, a schema mismatch, or the grounding refusing everything.
