@@ -8203,12 +8203,29 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     // an intent classifier decided the turn was "about assigned work", so "what assessments do I
     // have?" was answered "nothing recorded" while seven sat on their list — the model reporting
     // an empty context honestly. Their own list is cheap context and it is theirs; always send it.
-    const assignedWork = (workCtx && Array.isArray(workCtx.items) && workCtx.items.length)
+    // Quarantine titles that cannot be reasoned from. A title is not decoration here: it is
+    // the whole of what the composer knows about an assigned item, so a wrong one is not
+    // metadata dirt, it is a false premise. "A Check-In With Yourself" was cited to Ashton as
+    // evidence about finishing things, which it is not about — the model was reasoning
+    // correctly from something untrue. Held back rather than repaired, because guessing what
+    // an item was meant to be called would replace one invented premise with another.
+    const _titleUsable = (t) => {
+      const s = String(t || '').trim();
+      if (s.length < 8 || s.length > 120) return false;                 // a fragment or a paragraph
+      if (!/[a-z]/i.test(s)) return false;                              // no words in it
+      if (/^(untitled|new |draft|test|assessment|personal assessment)$/i.test(s)) return false;
+      if (/^(a |an |the )?check-?in with yourself$/i.test(s)) return false;  // says nothing about its subject
+      return /\s/.test(s);                                              // one word names nothing
+    };
+    const _allWork = (workCtx && Array.isArray(workCtx.items) && workCtx.items.length)
       ? workCtx.items.map(i => ({ title: i.title, status: i.status }))
       : (assessmentAssignments[code] || [])
           .filter(a => a && a.assigneeId === userId)
           .slice(-12)
           .map(a => ({ title: a.title, status: a.status }));
+    const assignedWork = _allWork.filter(w => _titleUsable(w.title));
+    const _quarantined = _allWork.length - assignedWork.length;
+    if (_quarantined) console.log(`[composer] held back ${_quarantined} assigned item(s) with unusable titles`);
 
     // WHAT THE EARS HAVE BUILT — the working picture from earlier turns, so the conversation
     // compounds instead of restarting. Stated as a working read with its confidence band, never
@@ -8297,13 +8314,43 @@ function _inquiryFor(code, subjectRef, concept, label, domain, now) {
    model is asked to consolidate too, but the picture should not depend on it obliging. */
 const NEW_CONCEPT_CAP = 2;
 
-/* The concepts already open for a subject, most-recently-touched first. Shown to the intake
-   model so it reuses a name instead of coining a synonym for something already being tracked. */
-function _openConcepts(code, subjectRef) {
+/* The open frontier for a subject, most-recently-touched first, carrying the stable id the
+   comprehension layer must point at. It is shown what is already being worked out so it can
+   say where new evidence belongs, rather than coining a name and thereby a second belief. */
+function _openFrontier(code, subjectRef) {
   const bySubject = (inquiryStates[code] || {})[subjectRef] || {};
-  return Object.values(bySubject)
-    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
-    .map(i => i && i.concept).filter(Boolean).slice(0, 12);
+  return Object.values(bySubject).filter(Boolean)
+    .sort((a, b) => (b.lastUpdatedAt || 0) - (a.lastUpdatedAt || 0))
+    .slice(0, 12)
+    .map(i => ({
+      inquiryId: i.inquiryId,
+      concept: (i.topic && i.topic.canonicalConcept) || '',
+      label: i.displayLabel || (i.topic && i.topic.label) || '',
+      meaning: i.canonicalMeaning || '',
+      aliases: Array.isArray(i.aliases) ? i.aliases : [],
+      band: (i.confidence && i.confidence.band) || 'tentative',
+      parentId: i.parentId || null,
+    }));
+}
+
+/* The same frontier as the model sees it: id, what it means, and every name already used for
+   it — so a synonym is visibly a synonym rather than an unclaimed gap. */
+function _frontierBrief(frontier) {
+  return frontier.map(f => {
+    const names = f.aliases.filter(a => a && a !== f.concept);
+    return `  ${f.inquiryId}  ${f.concept}${f.meaning ? ` — ${f.meaning}` : ''}`
+      + `${names.length ? ` [also called: ${names.join(', ')}]` : ''}`
+      + `${f.parentId ? ` (refines ${f.parentId})` : ''}`;
+  }).join('\n');
+}
+
+/* Find an inquiry by its stable id, whatever concept key it currently sits under. */
+function _inquiryById(code, subjectRef, inquiryId) {
+  const bySubject = (inquiryStates[code] || {})[subjectRef] || {};
+  for (const [key, i] of Object.entries(bySubject)) {
+    if (i && i.inquiryId === inquiryId) return { key, inquiry: i };
+  }
+  return null;
 }
 
 async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = [] } = {}) {
@@ -8316,17 +8363,17 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
   try {
     const org = orgMeta[code] || {};
     const prior = (priorMessages || []).slice(-4).map(m => `${m.role === 'assistant' ? 'You' : 'Them'}: ${String(m.text || '').slice(0, 200)}`).join('\n');
+    const _frontier = _openFrontier(code, `member:${userId}`);
     const _diag = {};                                  // filled in when the call yields nothing usable
     const out = await ai.completeJSON({
       diag: _diag,
       tier: 'micro',                                   // extraction, not open reasoning — the cheap tier fits
       system: diagnose.INTAKE_PROMPT,
       user: [org.orgName ? `Domain: ${org.orgName}${org.orgMode ? ` (${org.orgMode})` : ''}` : '',
-        // The concepts already open for this person. Without them the model mints fresh names
-        // every turn and the same phenomenon accumulates aliases instead of evidence — the
-        // picture gets wider forever and never gets deeper.
-        _openConcepts(code, `member:${userId}`).length
-          ? `CONCEPTS ALREADY OPEN FOR THIS PERSON (reuse one verbatim when it fits, rather than coining a near-synonym):\n${_openConcepts(code, `member:${userId}`).map(c => `  ${c}`).join('\n')}`
+        // The open frontier, with the ids the model must point at. Without it, it mints fresh
+        // names every turn and the same phenomenon accumulates beliefs instead of evidence.
+        _frontier.length
+          ? `OPEN INQUIRIES FOR THIS PERSON — for every concept you name, say where its evidence belongs by id. NEW must be argued for:\n${_frontierBrief(_frontier)}`
           : '',
         prior ? `RECENT CONVERSATION:\n${prior}` : '',
         `THEY JUST SAID: ${utterance.slice(0, 1500)}`].filter(Boolean).join('\n\n'),
@@ -8387,6 +8434,25 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
       console.log(`[intake] folded into ${primary}: ${folded.map(f => `${f.concept} (${f.why})`).join(', ')}`);
     }
 
+    // IDENTITY. What the model said about where each concept belongs, resolved against the
+    // frontier it was shown. This is the step that stops a rename from becoming a new belief.
+    const claims = new Map();
+    for (const c of (Array.isArray(out.concepts) ? out.concepts : [])) {
+      const key = String((c && c.concept) || '').toLowerCase();
+      if (key) claims.set(key, c);
+    }
+    // Where each surviving concept's evidence actually lands, and under which key.
+    const routeFor = (concept) => {
+      const claim = claims.get(concept) || {};
+      const r = diagnose.resolveIdentity({
+        concept,
+        relationship: claim.relationship,
+        targetId: claim.targetInquiryId || claim.targetConceptId,
+        reason: claim.reason,
+      }, _frontier);
+      return r;
+    };
+
     // What the model could not tell from what was said. Each unknown belongs to the inquiry it
     // resolves — copying the whole list onto every concept put the identical question on all
     // five cards, which reads as a system with one idea rather than a frontier per inquiry.
@@ -8399,19 +8465,48 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
 
     const touched = [];
     for (const [concept, props] of Object.entries(grouped)) {
-      const inq = _inquiryFor(code, subjectRef, concept, props[0].label || concept, org.orgMode || '', now);
+      const route = routeFor(concept);
+      // Evidence that merely relates to an open question does not open a line of its own.
+      if (route.action === 'link') {
+        const t = _inquiryById(code, subjectRef, route.targetId);
+        if (t) diagnose.addAlias(t.inquiry, concept, { at: new Date(now).toISOString(), relationship: 'RELATED_TO', targetId: route.targetId, concept, reason: route.reason });
+        console.log(`[intake] ${concept} -> related to ${route.targetId} (${route.reason})`);
+        continue;
+      }
+      // SAME_AS / SUPPORTS / CONTRADICTS: the evidence joins the inquiry that already exists.
+      // The concept becomes one more name for it — vocabulary changing, understanding continuous.
+      let inq, key = concept;
+      const existingTarget = route.action !== 'create' ? _inquiryById(code, subjectRef, route.targetId) : null;
+      if (route.action === 'apply' && existingTarget) {
+        inq = existingTarget.inquiry; key = existingTarget.key;
+        diagnose.addAlias(inq, concept, { at: new Date(now).toISOString(), relationship: 'SAME_AS', targetId: route.targetId, concept, reason: route.reason });
+        if (concept !== key) console.log(`[intake] ${concept} -> same as ${route.targetId} (${route.reason})`);
+      } else {
+        // REFINES hangs a genuine sub-question off its parent; NEW stands alone, having been
+        // argued for. Both are real lines of inquiry, so both get built.
+        inq = _inquiryFor(code, subjectRef, concept, props[0].label || concept, org.orgMode || '', now);
+        if (route.action === 'refine' && existingTarget) {
+          inq.parentId = existingTarget.inquiry.inquiryId;
+          console.log(`[intake] ${concept} -> refines ${route.targetId} (${route.reason})`);
+        } else {
+          console.log(`[intake] ${concept} -> new (${route.reason})`);
+        }
+        diagnose.addAlias(inq, concept, { at: new Date(now).toISOString(), relationship: route.action === 'refine' ? 'REFINES' : 'NEW', targetId: route.targetId || null, concept, reason: route.reason });
+      }
       const before = JSON.parse(JSON.stringify(inq));
       const after = diagnose.applyProposals(inq, props, { now });
       // An unknown naming a live concept goes only there. One that names nothing, or names a
       // concept that just folded away, goes to the primary — never to everybody.
       after.missingSignals = unknowns
-        .filter(u => (grouped[u.concept] ? u.concept === concept : concept === primary))
+        .filter(u => (grouped[u.concept] ? u.concept === concept : key === primary || concept === primary))
         .map(({ question, resolves, burden }) => ({ question, resolves, burden }))
         .slice(0, 5);
-      inquiryStates[code][subjectRef][concept] = after;
+      // Written back under the key the inquiry ALREADY lives at, not under the name this turn
+      // happened to use. That is the whole point: the vocabulary moved, the inquiry did not.
+      inquiryStates[code][subjectRef][key] = after;
       const y = diagnose.diagnosticYield(before, after, { rejected });
       _metric(code, 'intake_applied');
-      touched.push({ concept, yield: y.score, band: after.confidence.band });
+      touched.push({ concept: key, yield: y.score, band: after.confidence.band });
     }
     scheduleSave();
     console.log(`[intake] built ${touched.length} inquiry/ies: ${touched.map(t => `${t.concept}(${t.band})`).join(', ')}`);

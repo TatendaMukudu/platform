@@ -152,6 +152,18 @@ function deriveConfidence(signals = [], { now = Date.now(), halfLifeDays = 45 } 
   const independence = Math.min(1, (sources.size - 1) / 3 + (sources.size ? 0.34 : 0));
   because.push(`${sources.size} independent source${sources.size === 1 ? '' : 's'}`);
 
+  // TEMPORAL independence, which is a different thing and was missing. An evidentiary OCCASION
+  // is one telling: someone restating the same situation twice in a single message is one
+  // occasion, not two confirmations. Without this, paraphrase inflates confidence —
+  // attendance_timing reached "probable" off two sentences from one conversation, which is a
+  // system growing certain because a person spoke at length rather than because it learned
+  // anything. Two signals split across two weeks is real corroboration; two in one breath is not.
+  const occasions = new Set(list.map(s => `${s.source || 'self'}@${s.turnId || s.at || ''}`));
+  const temporal = Math.min(1, (occasions.size - 1) / 3 + (occasions.size ? 0.34 : 0));
+  if (occasions.size !== list.length) {
+    because.push(`${list.length} signals across ${occasions.size} occasion${occasions.size === 1 ? '' : 's'}`);
+  }
+
   const avg = (fn) => list.reduce((a, s) => a + fn(s), 0) / list.length;
   const directness  = avg(s => (s.directness === 'direct' ? 1 : 0.45));
   const authority   = avg(s => (s.authority === 'authoritative' ? 1 : s.authority === 'corroborated' ? 0.75 : 0.5));
@@ -166,13 +178,17 @@ function deriveConfidence(signals = [], { now = Date.now(), halfLifeDays = 45 } 
   const contradictionPenalty = contradictions ? Math.pow(0.45, contradictions) : 1;
   if (contradictions) because.push(`${contradictions} contradicting signal${contradictions === 1 ? '' : 's'}`);
 
-  // A single self-reported mention should never read as settled, however specific it is.
-  const singleSignalCeiling = list.length === 1 ? 0.45 : 1;
+  // One telling should never read as settled, however specific or however many ways it was
+  // phrased. The ceiling is on OCCASIONS, not signals — the point is that the person has only
+  // told us once, and saying it twice in that once does not make it twice true.
+  const singleOccasionCeiling = occasions.size === 1 ? 0.45 : 1;
   if (list.length === 1) because.push('only one signal so far');
+  else if (occasions.size === 1) because.push('all from one telling');
 
   const score = _clamp01(
-    independence * 0.30 + directness * 0.20 + authority * 0.20 + specificity * 0.15 + recency * 0.15
-  ) * contradictionPenalty * singleSignalCeiling;
+    independence * 0.22 + temporal * 0.18 + directness * 0.16
+    + authority * 0.16 + specificity * 0.14 + recency * 0.14
+  ) * contradictionPenalty * singleOccasionCeiling;
 
   const band = (_BANDS.find(b => score >= b.at) || _BANDS[_BANDS.length - 1]).band;
   return { score: Math.round(score * 100) / 100, band, because };
@@ -192,10 +208,24 @@ function deriveConfidence(signals = [], { now = Date.now(), halfLifeDays = 45 } 
    the shape of the evidence (how direct, whose authority, how specific, when, does it dissent).
    Rendering resolves refs through the normal authorised read, so a reader can only ever see
    what they were already entitled to see. */
-function newInquiry({ id, subjectRef, concept, label, domain = '', polarity = 'neutral', now = Date.now() } = {}) {
+function newInquiry({ id, subjectRef, concept, label, domain = '', polarity = 'neutral', now = Date.now(), parentId = null, canonicalMeaning = '' } = {}) {
   return {
     inquiryId: String(id || `inq_${now}`),
     subjectRef: String(subjectRef || ''),
+    // IDENTITY IS THE OBJECT, NOT THE STRING. The concept name is vocabulary: one more way this
+    // has been referred to. Keying understanding on the spelling meant a model saying
+    // "session_attendance" where it once said "training_attendance" created a second belief
+    // about the same thing — and then both crossed thresholds independently, so the system grew
+    // more confident precisely because it had grown less coherent. Aliases accumulate; the
+    // inquiry persists.
+    canonicalMeaning: String(canonicalMeaning || label || concept || ''),
+    displayLabel: String(label || concept || ''),
+    aliases: [String(concept || '')].filter(Boolean),
+    // REFINES gives the frontier a shape: "we know attendance is inconsistent; the open question
+    // is whether lateness or absence drives it" is a different statement from four flat cards.
+    parentId: parentId ? String(parentId) : null,
+    // Why this exists as its own line of inquiry, in the comprehension layer's own words.
+    provenance: [],                    // [{ at, relationship, targetId, concept, reason }]
     topic: { canonicalConcept: String(concept || ''), label: String(label || concept || ''), domain: String(domain || '') },
     polarity,                          // 'strength' | 'difficulty' | 'condition' | 'neutral'
     hypotheses: [],                    // [{ id, statement, confidence, supportRefs, challengeRefs, status }]
@@ -303,6 +333,9 @@ function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefO
         authority: isInterp ? 'unverified' : (p.authority || 'self_report'),
         source: isInterp ? 'interpretation' : (p.source || 'self'),
         specificity: isInterp ? 0.4 : p.specificity,
+        // The turn this came from, so confidence can tell one telling from two. Without it,
+        // three paraphrases of one sentence weigh as three occasions.
+        turnId: p.turnId || null,
         at: now, dissents: !!p.contradicts,
         // Which hypothesis this bears on, and which way. The model may say; if it does not,
         // the signal still counts toward the inquiry but weighs on nothing in particular.
@@ -525,6 +558,33 @@ const INTAKE_PROMPT = [
   'Name the domain concept precisely ("football.first_touch", "manufacturing.tolerance_drift"),',
   'because a vague concept cannot be retrieved or connected to anything later.',
   '',
+  'IDENTITY — THE MOST IMPORTANT PART. If you are shown OPEN INQUIRIES, every concept you name',
+  'must declare where its evidence belongs, in a "concepts" array alongside "proposals":',
+  '',
+  '  "concepts": [',
+  '    { "concept": "football.session_attendance", "relationship": "REFINES",',
+  '      "targetInquiryId": "inq_7f2a",',
+  '      "reason": "narrows the open attendance question to what happens once he is there" }',
+  '  ]',
+  '',
+  'relationship is one of:',
+  '  SAME_AS     — the same question already open, differently worded. Evidence joins it.',
+  '  REFINES     — a genuine sub-question OF an open one ("is it lateness or absence driving it?").',
+  '  SUPPORTS    — bears on an open question without being it.',
+  '  CONTRADICTS — cuts against what an open inquiry currently reads.',
+  '  RELATED_TO  — connected, but its own line.',
+  '  NEW         — none of the open inquiries can absorb this.',
+  '',
+  'targetInquiryId is REQUIRED for everything except NEW, and must be an id from the list.',
+  '',
+  'You may not declare NEW until you have considered every open inquiry and rejected it. If you',
+  'declare NEW, "reason" must say WHY none of them can hold this evidence. "New topic" is not a',
+  'reason. An unjustified NEW is treated as SAME_AS, because a second name for one question makes',
+  'the system more confident while making it less coherent — both halves grow certain separately.',
+  '',
+  'Wording is not identity. If the open list has "training_attendance" and you would have written',
+  '"session_attendance" for the same question, that is SAME_AS — say so and keep their words.',
+  '',
   'ONE PHENOMENON, ONE CONCEPT. This is the rule people get wrong most often. Someone describing',
   'why they skip a session is telling you ONE story — do not file it as attendance_timing AND',
   'attendance_pattern AND training_attendance AND motivation. Those are four names for the thing',
@@ -550,6 +610,91 @@ const INTAKE_PROMPT = [
   'that needs settling, in plain terms), "resolves" (what it would distinguish between), and',
   '"burden" 0-1 (how much effort answering costs them). Rank nothing; the system ranks.',
 ].join('\n');
+
+/* ── IDENTITY: WHERE DOES THIS EVIDENCE BELONG? ──────────────────────────────
+   The comprehension layer does not get to decide that something is new by inventing a name for
+   it. For every concept it proposes, it must state a RELATIONSHIP to the inquiries already open
+   for this person, and NEW is a claim it has to earn: it means "none of these can absorb this",
+   and it must say why.
+
+   The distinction being protected is real. "Does he attend training", "does he arrive on time"
+   and "how does he participate across sessions" are related but not identical, and string
+   normalisation would have destroyed that difference to fix a spelling problem. REFINES exists
+   so a genuine sub-question can hang off its parent instead of competing with it. */
+const RELATIONSHIPS = ['NEW', 'SAME_AS', 'REFINES', 'SUPPORTS', 'CONTRADICTS', 'RELATED_TO'];
+
+/* Where a proposed concept's evidence should land, given the open frontier.
+
+   Returns { action, targetId, reason }:
+     'apply'  — evidence joins an existing inquiry (SAME_AS, SUPPORTS, CONTRADICTS)
+     'refine' — a child inquiry under targetId (REFINES)
+     'create' — a genuinely new line of inquiry (NEW, justified)
+     'link'   — recorded as related, evidence stays where it was (RELATED_TO)
+
+   An unusable claim degrades toward the frontier, never away from it: a relationship naming a
+   target that does not exist, or a bare NEW with no reason while plausible inquiries are open,
+   becomes SAME_AS the nearest open inquiry rather than a new one. The failure mode of this
+   system is fragmentation, so ambiguity resolves toward coherence. */
+function resolveIdentity({ concept, relationship, targetId, reason = '' } = {}, frontier = []) {
+  const open = (Array.isArray(frontier) ? frontier : []).filter(f => f && f.inquiryId);
+  const byId = new Map(open.map(f => [String(f.inquiryId), f]));
+  const rel = RELATIONSHIPS.includes(String(relationship || '').toUpperCase())
+    ? String(relationship).toUpperCase() : '';
+
+  // An alias already in use is the same inquiry, whatever the model called the relationship.
+  // This is the one place a string decides anything, and only because the string was ours.
+  const byAlias = open.find(f => (f.aliases || []).some(a => _norm(a) === _norm(concept)));
+
+  if (!open.length) return { action: 'create', targetId: null, reason: reason || 'nothing open yet' };
+  if (byAlias && (!rel || rel === 'NEW')) {
+    return { action: 'apply', targetId: byAlias.inquiryId, reason: 'concept already an alias of this inquiry' };
+  }
+
+  const target = targetId ? byId.get(String(targetId)) : null;
+
+  // A relationship that needs a target but names one we do not have is not a decision; treat it
+  // as an unmade one rather than letting it open a new line by accident.
+  if (rel && rel !== 'NEW' && !target) {
+    return { action: 'apply', targetId: (byAlias || open[0]).inquiryId,
+      reason: `relationship ${rel} named an unknown target — held with the nearest open inquiry` };
+  }
+
+  switch (rel) {
+    case 'SAME_AS':
+    case 'SUPPORTS':
+    case 'CONTRADICTS':
+      return { action: 'apply', targetId: target.inquiryId, reason: reason || rel };
+    case 'REFINES':
+      return { action: 'refine', targetId: target.inquiryId, reason: reason || 'refines an open question' };
+    case 'RELATED_TO':
+      return { action: 'link', targetId: target.inquiryId, reason: reason || 'related' };
+    case 'NEW':
+      // NEW is only NEW when it was argued for. Unargued, with a frontier to compare against,
+      // it is the model coining a synonym — which is the behaviour this exists to stop.
+      if (String(reason || '').trim().length >= 12) {
+        return { action: 'create', targetId: null, reason };
+      }
+      return { action: 'apply', targetId: (byAlias || open[0]).inquiryId,
+        reason: 'claimed NEW without saying why none of the open inquiries fit' };
+    default:
+      return { action: 'apply', targetId: (byAlias || open[0]).inquiryId,
+        reason: 'no relationship stated — evidence held rather than given a new line' };
+  }
+}
+
+/* Record that a concept name refers to an inquiry. Names are vocabulary; this is how it grows. */
+function addAlias(inquiry, concept, provenance) {
+  const c = String(concept || '').trim();
+  if (!c) return inquiry;
+  if (!Array.isArray(inquiry.aliases)) inquiry.aliases = [];
+  if (!inquiry.aliases.some(a => _norm(a) === _norm(c))) inquiry.aliases.push(c);
+  if (provenance) {
+    if (!Array.isArray(inquiry.provenance)) inquiry.provenance = [];
+    inquiry.provenance.push(provenance);
+    if (inquiry.provenance.length > 20) inquiry.provenance.splice(0, inquiry.provenance.length - 20);
+  }
+  return inquiry;
+}
 
 /* ── CONSOLIDATION ───────────────────────────────────────────────────────────
    How many inquiries one turn is allowed to become.
@@ -611,4 +756,5 @@ module.exports = {
   LEVELS, LEVEL_RANK, MODEL_MAY_PROPOSE, INTAKE_PROMPT,
   groundProposals, deriveConfidence, newInquiry, newHypothesis, applyProposals, frontierFor,
   diagnosticYield, rankQuestions, nextNeed, consolidate,
+  RELATIONSHIPS, resolveIdentity, addAlias,
 };

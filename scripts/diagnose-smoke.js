@@ -332,5 +332,92 @@ ok('5 · …and looks for strengths as hard as for difficulties (not a weakness 
 ok('31 · the prompt requires a concept on each unknown', /"concept"/.test(d.INTAKE_PROMPT) && /unknown.*concept|concept.*resolve/i.test(d.INTAKE_PROMPT));
 ok('31 · …and tells the model one phenomenon is one concept', /ONE PHENOMENON, ONE CONCEPT/.test(d.INTAKE_PROMPT));
 
+/* ── 32 · IDENTITY: a rename must not become a second belief ─────────────────
+   The frontier Ashton actually had when message 2 arrived. */
+{
+  const frontier = [
+    { inquiryId: 'inq_a1', concept: 'football.training_attendance', aliases: ['football.training_attendance'], meaning: 'does he get to training' },
+    { inquiryId: 'inq_b2', concept: 'football.attendance_timing', aliases: ['football.attendance_timing'], meaning: 'does he arrive on time' },
+    { inquiryId: 'inq_c3', concept: 'football.match_performance', aliases: ['football.match_performance'], meaning: 'how he plays' },
+  ];
+  const R = (c, relationship, targetId, reason) => d.resolveIdentity({ concept: c, relationship, targetId, reason }, frontier);
+
+  ok('32 · SAME_AS routes evidence into the existing inquiry',
+    R('football.session_attendance', 'SAME_AS', 'inq_a1').action === 'apply');
+  ok('32 · …at the target it named', R('football.session_attendance', 'SAME_AS', 'inq_a1').targetId === 'inq_a1');
+  ok('32 · REFINES builds a child, not a rival',
+    R('football.lateness_vs_absence', 'REFINES', 'inq_a1').action === 'refine');
+  ok('32 · RELATED_TO does not open a line of its own',
+    R('football.work_schedule', 'RELATED_TO', 'inq_a1').action === 'link');
+  ok('32 · SUPPORTS lands on the question it bears on',
+    R('football.warmup_value', 'SUPPORTS', 'inq_b2').action === 'apply');
+
+  // The behaviour this whole mechanism exists for.
+  ok('32 · an ARGUED new concept is allowed to be new',
+    R('football.injury_niggle', 'NEW', null, 'a physical complaint, unrelated to whether or when he attends').action === 'create');
+  ok('32 · an UNARGUED NEW is not — that is how a synonym became a second belief',
+    R('football.session_attendance', 'NEW', null, '').action === 'apply');
+  ok('32 · …and a bare "new topic" does not count as an argument',
+    R('football.session_attendance', 'NEW', null, 'new topic').action === 'apply');
+
+  // Degradation must always run toward coherence, never toward fragmentation.
+  ok('32 · a relationship naming an unknown target holds rather than splits',
+    R('football.whatever', 'SAME_AS', 'inq_does_not_exist').action === 'apply');
+  ok('32 · no relationship at all holds rather than splits',
+    R('football.whatever', '', null).action === 'apply');
+  ok('32 · a garbage relationship holds rather than splits',
+    R('football.whatever', 'BANANA', 'inq_a1').action === 'apply');
+
+  // A name already known to be this inquiry is this inquiry, whatever the model claims.
+  const withAlias = [{ inquiryId: 'inq_a1', concept: 'football.training_attendance',
+    aliases: ['football.training_attendance', 'football.session_attendance'] }];
+  const aliased = d.resolveIdentity({ concept: 'football.session_attendance', relationship: 'NEW', reason: 'feels different to me' }, withAlias);
+  ok('32 · a known alias outranks a NEW claim', aliased.action === 'apply' && aliased.targetId === 'inq_a1');
+
+  // With nothing open there is nothing to reject, so a first concept is simply new.
+  ok('32 · the first concept for a person is new without argument',
+    d.resolveIdentity({ concept: 'football.anything', relationship: 'NEW' }, []).action === 'create');
+
+  // Names accumulate; the inquiry persists.
+  const inq = d.newInquiry({ id: 'inq_a1', concept: 'football.training_attendance', label: 'Training attendance' });
+  d.addAlias(inq, 'football.session_attendance', { at: 'now', relationship: 'SAME_AS', reason: 'same question' });
+  ok('33 · an alias is added, not swapped in',
+    inq.aliases.includes('football.training_attendance') && inq.aliases.includes('football.session_attendance'));
+  ok('33 · …the identity is the id, which never moved', inq.inquiryId === 'inq_a1');
+  ok('33 · …and why it was merged is on the record', inq.provenance.length === 1 && inq.provenance[0].reason === 'same question');
+  d.addAlias(inq, 'football.session_attendance');
+  ok('33 · re-adding a known alias changes nothing', inq.aliases.length === 2);
+}
+
+/* ── 34 · EVIDENCE INDEPENDENCE ──────────────────────────────────────────────
+   attendance_timing read "probable" off two sentences in one message. Two paraphrases from one
+   telling are closer to one evidentiary event than to two confirmations. */
+{
+  const sig = (turnId, at) => ({ ref: `r${Math.random()}`, kind: 'observation', directness: 'direct',
+    authority: 'self_report', source: 'self', specificity: 0.8, turnId, at });
+  const day = 86400000, t = Date.now();
+
+  const oneTelling = d.deriveConfidence([sig('t1', t), sig('t1', t)], { now: t });
+  ok('34 · two signals from ONE telling do not reach probable', oneTelling.band !== 'probable' && oneTelling.band !== 'supported');
+  ok('34 · …and the reason says so plainly', oneTelling.because.some(b => /one telling/.test(b)));
+
+  const twoTellings = d.deriveConfidence([sig('t1', t - 14 * day), sig('t2', t)], { now: t });
+  ok('34 · the same evidence across two tellings is worth more', twoTellings.score > oneTelling.score);
+
+  // Independence must still be about separateness, not volume: restating something five times
+  // in one message must not overtake saying it twice on two occasions.
+  const fiveInOne = d.deriveConfidence([sig('t1', t), sig('t1', t), sig('t1', t), sig('t1', t), sig('t1', t)], { now: t });
+  ok('34 · five restatements in one telling stay under two separate ones', fiveInOne.score < twoTellings.score);
+
+  const single = d.deriveConfidence([sig('t1', t)], { now: t });
+  ok('34 · a single signal still reads as one signal', single.because.some(b => /only one signal/.test(b)));
+}
+
+/* ── 35 · the contract asks for the commitment the routing depends on ────────── */
+ok('35 · the prompt defines every relationship the kernel accepts',
+  d.RELATIONSHIPS.every(r => new RegExp(r).test(d.INTAKE_PROMPT)));
+ok('35 · …requires a target id for everything but NEW', /targetInquiryId is REQUIRED/.test(d.INTAKE_PROMPT));
+ok('35 · …and makes NEW something the model has to argue for', /may not declare NEW until/.test(d.INTAKE_PROMPT));
+
 console.log(`\ndiagnose-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
