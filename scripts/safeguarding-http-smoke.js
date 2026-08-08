@@ -59,6 +59,15 @@ const server = app.listen(0, async () => {
 
     /* 6 — the resources are always available so the app can surface real help */
     ok('6 · crisis resources are readable by anyone (help is never gated)', (await get('sam', '/api/safeguarding/config')).j.resources.length >= 3);
+
+    /* 7 — a CONCERN supports WITHOUT hijacking the turn. The person said something real and
+       gets an answer to it; the offer of help rides alongside instead of replacing it. */
+    const cn = await turn('sam', "I feel completely worthless lately and I don't know what to do about training");
+    const cr2 = cn.response || {};
+    ok('7 · a concern does NOT short-circuit the turn (they still get answered)', cr2.mode !== 'safeguarding' && !!String(cr2.responseText || '').trim());
+    ok('7 · …but the offer of help rides alongside, with real resources', !!cr2.safeguarding && cr2.safeguarding.severity === 'concern' && (cr2.safeguarding.resources || []).some(x => /116 123/.test(x.contact)));
+    ok('7 · …and nothing is routed to anyone (agency stays with the person)', cr2.safeguarding.escalated === false
+      && (await get('director', '/api/safeguarding/flags')).j.flags.filter(f => f.status === 'open').length === 0);
   } catch (e) { fail++; console.log('  ✗ HTTP suite threw:', e && e.message); }
 
   server.close();
