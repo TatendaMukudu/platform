@@ -141,6 +141,86 @@ async function saveMain(data) {
   );
 }
 
+/* ── SPLIT PERSISTENCE ────────────────────────────────────────────────────── *
+   saveMain above writes the entire platform — every org, user, conversation and
+   inquiry — on every call. Neon sits outside Render, so each of those writes is
+   billed egress over the public internet, and a single conversation turn ships
+   the whole product twice. These functions write durable UNITS instead: one row
+   per store, per organisation, so a mutation costs what it changed.
+
+   Deliberately still key/value. The durable-unit boundary is the fix; a
+   relational schema is a different project with different risks.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* Write several units in ONE transaction. A save cycle that touches a
+   conversation and the inquiry it produced must land together or not at all —
+   otherwise a crash between two statements leaves the two halves of one logical
+   turn disagreeing, which the single-blob write could never do. */
+async function saveStores(units) {
+  if (!pool) return { rows: 0, bytes: 0 };
+  const entries = Object.entries(units || {});
+  if (!entries.length) return { rows: 0, bytes: 0 };
+
+  let bytes = 0;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const [key, value] of entries) {
+      const json = JSON.stringify(value);
+      bytes += Buffer.byteLength(json, 'utf8');
+      await client.query(
+        `INSERT INTO iq_store (store_key, store_value, updated_at)
+         VALUES ($1, $2::jsonb, NOW())
+         ON CONFLICT (store_key)
+         DO UPDATE SET store_value = EXCLUDED.store_value,
+                       updated_at  = NOW()`,
+        [key, json]
+      );
+    }
+    await client.query('COMMIT');
+    return { rows: entries.length, bytes };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;                       // caller keeps the units dirty and retries
+  } finally {
+    client.release();
+  }
+}
+
+/* Read every split unit back. Returns { 'store:orgUsers:acme': {...}, ... } —
+   reassembly into the in-memory shape belongs to the caller, which is the only
+   place that knows that shape. */
+async function loadStores() {
+  if (!pool) return {};
+  const res = await pool.query(
+    "SELECT store_key, store_value FROM iq_store WHERE store_key LIKE 'store:%'"
+  );
+  const out = {};
+  for (const r of res.rows) out[r.store_key] = r.store_value;
+  return out;
+}
+
+/* Remove unit rows that no longer exist in memory. Deletion was free under the
+   old model because the whole blob was replaced; under split rows an emptied
+   unit would otherwise persist forever as a ghost. */
+async function deleteStores(keys) {
+  if (!pool || !keys || !keys.length) return 0;
+  const res = await pool.query('DELETE FROM iq_store WHERE store_key = ANY($1::text[])', [keys]);
+  return res.rowCount || 0;
+}
+
+/* What the store actually costs, per row. The one number the bandwidth
+   investigation could not get from the repository. */
+async function storeSizes(limit = 20) {
+  if (!pool) return [];
+  const res = await pool.query(
+    `SELECT store_key, pg_column_size(store_value) AS bytes, updated_at
+       FROM iq_store ORDER BY pg_column_size(store_value) DESC LIMIT $1`,
+    [limit]
+  );
+  return res.rows;
+}
+
 /* ── pgvector (optional) ──────────────────────────────────────────────────── *
    Cross-member similarity storage. Entirely non-fatal: if pgvector isn't
    available (extension missing / permissions), it disables itself and the app
@@ -214,5 +294,6 @@ async function nearestMembers(orgCode, userId, k = 8) {
 
 module.exports = {
   init, loadMain, saveMain,
+  saveStores, loadStores, deleteStores, storeSizes,
   initVectors, vectorsReady, upsertMemberVector, nearestMembers,
 };

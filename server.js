@@ -119,37 +119,215 @@ app.use(express.static(path.join(__dirname), {
 const DATA_DIR   = process.env.DATA_DIR || path.join(__dirname, 'data');
 const STORE_FILE = path.join(DATA_DIR, 'store.json');
 
-let _saveTimer = null;
-function scheduleSave() {
-  if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(async () => {
-    try {
-      // Prune expired sessions before saving so the blob doesn't grow unbounded
-      const now = Date.now();
-      for (const [token, s] of Object.entries(activeSessions)) {
-        if (s.expiresAt < now) delete activeSessions[token];
+/* ══ PERSISTENCE BOUNDARY ═════════════════════════════════════════════════════
+   Every mutation in this file says the same thing — scheduleSave() — and means
+   "something durable may have changed". It does NOT say what. That is
+   deliberate and stays that way: 197 call sites each having to name the store
+   they touched is 197 chances to name the wrong one, and a mis-annotation loses
+   data with no test that naturally catches it. The boundary works out what
+   changed by comparing content, so correctness never depends on a caller
+   remembering anything.
+
+   What changed is HOW MUCH goes out. A single blob write shipped the entire
+   platform — every org, user, conversation and inquiry — to Neon, which lives
+   outside Render, on every save. One conversation turn uploaded the product
+   twice. Now a save writes only the durable units whose content actually moved.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Stores that belong to nobody in particular. Everything else is partitioned by
+   organisation — see _durableUnits for how, and why nothing can fall through. */
+const GLOBAL_STORES = new Set(['inviteTokens', 'pendingInvites', 'activeSessions']);
+
+/* Rebuilt from orgUsers at boot by _rebuildEmailIndex, so persisting it stores a
+   second copy of something we already hold and can regenerate exactly. */
+const DERIVED_STORES = new Set(['emailIndex']);
+
+/* Every store that carries durable state, by name. Kept as one list so a new
+   store is added in one place rather than three. */
+function _persistedStores() {
+  return {
+    orgMeta, orgUsers, inviteTokens, emailIndex, pendingInvites,
+    orgGroups, orgNotes, orgMessages, orgStore,
+    assignedScenarios, memberResults, memberCheckins,
+    memberGoals, weeklyAssessments, orgInterventions,
+    orgNodes, orgMetrics, orgValues, orgGoals, userPermissions,
+    userAiProfiles, advisorThreads, orgSignals, noticeFeedback,
+    userConsents, connectedSources, pendingActions,
+    assessmentTemplates, assessmentAssignments, orgTutorials, orgApiTokens,
+    orgConnections, orgOAuthApps, studioThreads, activeSessions,
+    rawEvidence, evidenceLog, orgMappings,
+    syncRuns, failedRecords, webhookDeliveries,
+    orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
+    proactivePrefs, insightSuppression, answerFeedback,
+    orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
+    reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
+    conversationSessions, assistantConversations, libraryFolders, libraryItems, safeguardingFlags,
+    inquiryStates,
+  };
+}
+
+/* Split the in-memory stores into the units we persist.
+
+   Partitioning is decided by asking whether a top-level key IS an org — either
+   directly ("trafford-united") or as the prefix of a composite key
+   ("trafford-united:ashton"). That is checked against orgMeta rather than
+   hardcoded per store, so a store added later partitions correctly with no
+   list to update and no chance of being quietly forgotten.
+
+   Anything that is not recognisably org-owned lands in a ":_" unit for that
+   store. It is the catch-all that makes the invariant true: no key can fall
+   through the classification and vanish. */
+function _durableUnits() {
+  const units = {};
+  const isOrg = (k) => Object.prototype.hasOwnProperty.call(orgMeta, k);
+  for (const [name, store] of Object.entries(_persistedStores())) {
+    if (DERIVED_STORES.has(name)) continue;
+    if (GLOBAL_STORES.has(name)) { units[`store:${name}`] = store; continue; }
+    for (const [key, value] of Object.entries(store || {})) {
+      const org = isOrg(key) ? key : (key.includes(':') && isOrg(key.split(':')[0]) ? key.split(':')[0] : '_');
+      const unitKey = `store:${name}:${org}`;
+      (units[unitKey] = units[unitKey] || {})[key] = value;
+    }
+  }
+  return units;
+}
+
+/* Reassemble the in-memory shape from split rows. Assignment is per top-level
+   key rather than Object.assign of a whole unit, because a unit holds only the
+   keys for one org and the same store holds keys for all of them. */
+function _applyUnits(rows) {
+  const stores = _persistedStores();
+  for (const [unitKey, value] of Object.entries(rows || {})) {
+    const parts = unitKey.split(':');            // store:<name>[:<org>]
+    const name = parts[1];
+    const target = stores[name];
+    if (!target || !value) continue;
+    for (const [k, v] of Object.entries(value)) target[k] = v;
+  }
+}
+
+/* Which representation is authoritative, and what gets written.
+
+     'split' (default) — durable units only. A mutation costs what it changed.
+     'dual'            — units AND the legacy `main` blob every cycle. Correct,
+                         and as expensive as before; a live rollback point for
+                         one release if the split rows need watching first.
+     'main'            — legacy blob only. Full rollback, no split rows.
+
+   The mode is read once. A half-migrated process that changed its mind mid-run
+   would be the one state nothing here could reason about. */
+const PERSISTENCE_MODE = ['split', 'dual', 'main'].includes(process.env.PERSISTENCE_MODE)
+  ? process.env.PERSISTENCE_MODE : 'split';
+
+const _saveHashes = new Map();       // unit key → hash of what is durably stored
+let _saveTimer = null, _saveInFlight = false, _saveDirty = false;
+let _lastSave = null;                // instrumentation for the bandwidth report
+
+const SAVE_DEBOUNCE_MS = Math.max(100, parseInt(process.env.SAVE_DEBOUNCE_MS, 10) || 1500);
+const _hash = (s) => require('crypto').createHash('sha1').update(s).digest('hex');
+
+/* A failed write must not wait for the next mutation to be retried — if the
+   failure is the last save of a quiet evening, that state is simply lost at the
+   next restart. Backoff, capped, so a database that is down is retried patiently
+   rather than hammered. */
+let _saveRetries = 0, _saveRetryTimer = null;
+function _scheduleRetry() {
+  if (_saveRetryTimer) return;
+  const base = Math.max(20, parseInt(process.env.SAVE_RETRY_MS, 10) || 5000);
+  const delay = Math.min(base * 12, base * Math.pow(2, _saveRetries++));
+  _saveRetryTimer = setTimeout(() => { _saveRetryTimer = null; _runSave(); }, delay);
+  if (_saveRetryTimer.unref) _saveRetryTimer.unref();
+}
+
+/* One writer, always. The old timer could fire a second save while the first was
+   still uploading, because the handle was never cleared after firing and the
+   write was awaited inside the callback — so under sustained mutation, full
+   uploads stacked. A save now either starts or marks the state dirty for the
+   one already running to pick up; there is never a second transaction in
+   flight, and a mutation arriving mid-save is never dropped. */
+async function _runSave() {
+  if (_saveInFlight) { _saveDirty = true; return; }
+  _saveInFlight = true;
+  try {
+    do {
+      _saveDirty = false;
+      const t0 = Date.now();
+
+      // Legacy mode: the blob is the store, exactly as before. No split rows, so
+      // nothing downstream can quietly start depending on them.
+      if (PERSISTENCE_MODE === 'main') {
+        try {
+          await db.saveMain(_persistedStores());
+          _saveRetries = 0;
+          _lastSave = { units: 1, bytes: 0, ms: Date.now() - t0, mode: 'main' };
+        } catch (e) {
+          console.error('[db] Save failed:', e.message);
+          _saveDirty = false; _scheduleRetry();
+        }
+        continue;
       }
-      await db.saveMain({
-        orgMeta, orgUsers, inviteTokens, emailIndex, pendingInvites,
-        orgGroups, orgNotes, orgMessages, orgStore,
-        assignedScenarios, memberResults, memberCheckins,
-        memberGoals, weeklyAssessments, orgInterventions,
-        orgNodes, orgMetrics, orgValues, orgGoals, userPermissions,
-        userAiProfiles, advisorThreads, orgSignals, noticeFeedback,
-        userConsents, connectedSources, pendingActions,
-        assessmentTemplates, assessmentAssignments, orgTutorials, orgApiTokens,
-        orgConnections, orgOAuthApps, studioThreads, activeSessions,
-        rawEvidence, evidenceLog, orgMappings,
-        syncRuns, failedRecords, webhookDeliveries,
-        orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
-        proactivePrefs, insightSuppression, answerFeedback,
-        orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
-        reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
-        conversationSessions, assistantConversations, libraryFolders, libraryItems, safeguardingFlags,
-        inquiryStates,
-      });
-    } catch(e) { console.error('[db] Save failed:', e.message); }
-  }, 500);
+
+      const units = _durableUnits();
+      const changed = {};
+      const hashes = {};
+      let bytes = 0;
+      for (const [key, value] of Object.entries(units)) {
+        const json = JSON.stringify(value);
+        const h = _hash(json);
+        hashes[key] = h;
+        if (_saveHashes.get(key) !== h) { changed[key] = value; bytes += Buffer.byteLength(json, 'utf8'); }
+      }
+      // A unit that no longer exists in memory must stop existing in the store.
+      // The blob write got deletion for free by replacing everything; split rows
+      // have to be told, or an emptied org lingers as a ghost forever.
+      const gone = [...(_saveHashes.keys())].filter(k => !(k in units));
+
+      if (!Object.keys(changed).length && !gone.length) { _lastSave = { units: 0, bytes: 0, ms: 0 }; continue; }
+
+      try {
+        await db.saveStores(changed);
+        if (gone.length) await db.deleteStores(gone);
+        // 'dual' keeps the legacy blob current so a rollback to 'main' loses
+        // nothing. It costs the full upload every cycle — that is the price of
+        // the rollback, and the reason it is not the default.
+        if (PERSISTENCE_MODE === 'dual') await db.saveMain(_persistedStores());
+        // Baseline advances ONLY after the write commits. A failed save must stay
+        // dirty and retry, never be remembered as persisted.
+        for (const [k, h] of Object.entries(hashes)) _saveHashes.set(k, h);
+        for (const k of gone) _saveHashes.delete(k);
+        _saveRetries = 0;
+        _lastSave = { units: Object.keys(changed).length, bytes, ms: Date.now() - t0, deleted: gone.length };
+        if (process.env.SAVE_TRACE === '1') {
+          console.log(`[save] ${_lastSave.units} unit(s), ${(bytes / 1024).toFixed(1)} KB, ${_lastSave.ms}ms${gone.length ? `, ${gone.length} removed` : ''}`);
+        }
+      } catch (e) {
+        console.error('[db] Save failed:', e.message);   // hashes untouched — still dirty
+        _saveDirty = false;                              // don't spin: back off instead
+        _scheduleRetry();
+      }
+    } while (_saveDirty);
+  } finally {
+    _saveInFlight = false;
+  }
+}
+
+function scheduleSave() {
+  if (_saveInFlight) { _saveDirty = true; return; }
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => { _saveTimer = null; _runSave(); }, SAVE_DEBOUNCE_MS);
+}
+
+/* Expired sessions used to be pruned inside the save callback, so persisting
+   state also mutated it — a side effect that made "when does a session expire?"
+   answerable only as "whenever something else happened to be saved". */
+function _pruneExpiredSessions() {
+  const now = Date.now();
+  let n = 0;
+  for (const [token, s] of Object.entries(activeSessions)) {
+    if (s.expiresAt < now) { delete activeSessions[token]; n++; }
+  }
+  if (n) scheduleSave();
+  return n;
 }
 
 /* ── Data retention (GDPR storage limitation) ─────────────────────────────────
@@ -16118,6 +16296,9 @@ const PORT = process.env.PORT || 3000;
 // Export a minimal surface for the endpoint smoke test (in-process, DB_OPTIONAL).
 // Requiring this module never boots a listener — only running it directly does.
 module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired,
+  // exported for the truth layer: the persistence boundary
+  _durableUnits, _applyUnits, _pruneExpiredSessions, _persistedStores, scheduleSave,
+  emailIndex, activeSessions, inviteTokens, userAiProfiles,
   // exported for the truth layer: who an org has named as handling what, and the shared library
   // a routed share lands in
   orgMeta, libraryItems, _professionals,
@@ -16204,10 +16385,42 @@ if (require.main === module) (async () => {
       }
     }
 
-    // 4. Populate in-memory stores
+    // 4. Populate in-memory stores.
+    //
+    //    The legacy blob is loaded first in every mode, because on the very first
+    //    boot after the migration it is the only thing that exists. Split rows,
+    //    if there are any, then REPLACE it rather than merging over it: a merge
+    //    would resurrect an org deleted after the migration, since `main` still
+    //    remembers it. Split rows existing at all means the split representation
+    //    is the live one, and it is complete by construction (_durableUnits
+    //    covers every persisted key, which persistence-smoke pins).
     _loadAllStores(storeData);
+    if (PERSISTENCE_MODE !== 'main') {
+      try {
+        const rows = await db.loadStores();
+        const n = Object.keys(rows).length;
+        if (n) {
+          for (const store of Object.values(_persistedStores())) {
+            for (const k of Object.keys(store)) delete store[k];
+          }
+          _applyUnits(rows);
+          console.log(`[db] Split persistence: ${n} durable unit(s) loaded (authoritative)`);
+        } else {
+          // First boot after the migration. `main` is left exactly as it is —
+          // it becomes the pre-migration restore point, and PERSISTENCE_MODE=main
+          // is the way back to it.
+          console.log('[db] No split rows yet — migrating from the legacy blob on first save.');
+          scheduleSave();
+        }
+      } catch (e) {
+        console.error('[db] Split load failed, continuing on the legacy blob:', e.message);
+      }
+    }
+    console.log(`[db] Persistence mode: ${PERSISTENCE_MODE}`);
 
-    // 5. Repair emailIndex (handles any missing entries from loaded data)
+    // 5. Repair emailIndex — no longer persisted at all; it is derived from
+    //    orgUsers, and storing a second copy of something we can regenerate
+    //    exactly was pure weight in every upload.
     _rebuildEmailIndex();
 
     // 5a. One home — sweep any legacy notes into the Library (idempotent; adds only the missing mirrors).
@@ -16272,6 +16485,10 @@ if (require.main === module) (async () => {
     //     on boot, then daily. Runs only in the live server (never in test mode).
     _purgeExpired();
     setInterval(() => { try { _purgeExpired(); } catch (e) { console.warn('[retention] purge failed:', e.message); } }, 24 * 60 * 60 * 1000).unref();
+    // Session expiry is now its own concern on its own clock, rather than
+    // something that happened to occur whenever a save did.
+    _pruneExpiredSessions();
+    setInterval(() => { try { _pruneExpiredSessions(); } catch (e) { console.warn('[sessions] prune failed:', e.message); } }, 60 * 60 * 1000).unref();
 
     // The reasoner heartbeat — the brain reasons on its own, not only when a leader
     // opens the app. One warm pass on boot, then every 30 min: beliefs form, accumulate,
