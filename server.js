@@ -52,6 +52,7 @@ const reasoningRegister = require('./ai/reasoning-register');
 const kernelCoreasoning = require('./ai/kernel-coreasoning');
 const composer          = require('./ai/composer');
 const diagnose          = require('./ai/diagnose');
+const contribution      = require('./ai/contribution');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
 const errorlog = require('./ai/errorlog');
@@ -162,7 +163,7 @@ function _persistedStores() {
     orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
     reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
     conversationSessions, assistantConversations, libraryFolders, libraryItems, safeguardingFlags,
-    inquiryStates,
+    inquiryStates, groupCandidates,
   };
 }
 
@@ -1821,6 +1822,18 @@ function _removePerson(code, userId, deleteData) {
       libraryItems[code] = libraryItems[code].filter(i => i && i.ownerId !== userId);
     if (Array.isArray(libraryFolders[code]))
       libraryFolders[code] = libraryFolders[code].filter(f => f && f.ownerId !== userId);
+
+    /* Group candidates they never acted on are private noticings and go entirely. What they
+       DELIBERATELY contributed is the group's material now and is kept — but the contributor is
+       unlinked, so the group keeps the finding without keeping the person. Erasure is a right
+       over one's own data, not a right to retract an account others have since reasoned from. */
+    if (Array.isArray(groupCandidates[code])) {
+      groupCandidates[code] = groupCandidates[code]
+        .filter(c => !(c.contributorId === userId && ['detected', 'dismissed', 'expired'].includes(c.status)))
+        .map(c => (c.contributorId === userId
+          ? { ...c, contributorId: '(erased)', contributorVisibility: 'anonymous', fromSubject: null }
+          : c));
+    }
 
     // Beliefs held ABOUT them. Org-level beliefs (no subject) are not personal
     // data and stay, so erasing one person doesn't blank the organisation's read.
@@ -8896,6 +8909,13 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
       for (const p of props) p.source = userId;
       const before = JSON.parse(JSON.stringify(inq));
       const after = diagnose.applyProposals(inq, props, { now });
+
+      /* Might any of this concern a group they belong to? Notice it — and do nothing else.
+         The evidence stays exactly where it is, private to them; what is recorded is a private
+         suggestion they may later act on. Membership noticed something; membership published
+         nothing. */
+      try { _noteGroupCandidates(code, userId, subjectRef, props, key, props[0].label || concept); }
+      catch (e) { console.warn('[group] candidate detection skipped:', e && e.message); }
       // An unknown naming a live concept goes only there. One that names nothing, or names a
       // concept that just folded away, goes to the primary — never to everybody.
       after.missingSignals = unknowns
@@ -10983,6 +11003,16 @@ process.on('unhandledRejection', (reason) => { console.warn('[unhandledRejection
 
 /* ── SAFEGUARDING — the duty of care, deterministic (works with the model OFF) ────────────── */
 const safeguardingFlags = {};  // code → [ { id, subjectId, subjectName, severity, category, excerpt, at, status, leadId, resolvedBy, resolvedAt } ]
+
+/* THE ONE NEW DURABLE CONCEPT GROUP NEEDED. Everything else — the subject, the inquiry, the
+   hypotheses, the confidence, the corrections — reuses what already exists. A candidate could
+   not, because it is precisely the thing that is NOT evidence: private to whoever produced it,
+   contributing nothing to any confidence, invisible to everyone else. Putting it in
+   inquiryStates would have made it count for exactly the thing it must not count for.
+
+   code → [ candidate ] — see ai/contribution.newCandidate. Holds REFERENCES to member evidence,
+   never a copy, so nothing in here can leak somebody's words. */
+const groupCandidates = {};
 function _sgResources(code) {
   const custom = orgMeta[code] && orgMeta[code].safeguardingResources;
   return (Array.isArray(custom) && custom.length) ? custom : safeguarding.DEFAULT_RESOURCES;
@@ -12042,6 +12072,246 @@ app.delete('/api/library/folders/:id', requireAuth, (req, res) => {
 });
 
 /* ── LIBRARY: ITEMS ──────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   GROUP — a node as a first-class subject of inquiry
+
+   No new intelligence. group:<nodeId> is a subjectRef like member:<userId>, and everything
+   downstream of it — identity resolution, hypotheses, confidence, origin, corrections, the
+   frontier — is the machinery Self already uses, untouched. What is new is the boundary in
+   front of it: the explicit step between something a person said and something the group is
+   allowed to treat as evidence.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Validate a node and give back its subjectRef. Deterministic, org-scoped, and the ONLY way a
+   group subject is ever addressed — so a node from another organisation cannot be named into
+   existence by putting its id in a URL. */
+function _groupSubjectRef(code, nodeId) {
+  const id = String(nodeId || '').trim();
+  if (!id) return { ok: false, error: 'node required' };
+  const node = (orgNodes[code] || {})[id];
+  // Absent and belonging-to-another-org are the same answer on purpose: distinguishing them
+  // would confirm that a node id exists somewhere, which is itself a cross-org leak.
+  if (!node) return { ok: false, error: 'node not found' };
+  return { ok: true, subjectRef: `group:${id}`, node };
+}
+
+const _nodeMembers = (code, nodeId) => ((orgNodes[code] || {})[nodeId] || {}).memberIds || [];
+const _nodeLeaders = (code, nodeId) => ((orgNodes[code] || {})[nodeId] || {}).leaderIds || [];
+const _inNode      = (code, nodeId, userId) => _nodeMembers(code, nodeId).includes(userId);
+const _leadsNode   = (code, nodeId, userId) => _nodeLeaders(code, nodeId).includes(userId);
+const _groupCands  = (code) => (groupCandidates[code] = groupCandidates[code] || []);
+
+/* A member's evidence noticed as possibly concerning a group. Called from intake; it records a
+   private noticing and nothing else. No group state changes here, and nothing becomes visible
+   to anybody — that needs a deliberate act, which is the next function down. */
+function _noteGroupCandidates(code, userId, subjectRefInquiry, props, concept, label) {
+  const user = orgUsers[code]?.[userId];
+  const nodeIds = (user && user.assignedNodeIds) || [];
+  if (!nodeIds.length) return 0;
+  let made = 0;
+  for (const p of props) {
+    // One node at a time: a member in two squads produces a candidate per squad, because the
+    // remark may concern one and not the other, and merging them would decide that for them.
+    for (const nodeId of nodeIds) {
+      const verdict = contribution.classifyScope(p, { nodeId });
+      if (verdict.scope !== 'GROUP_CANDIDATE' && verdict.scope !== 'BOTH') continue;
+      const list = _groupCands(code);
+      // Idempotent on replay: the same evidence never becomes two candidates for one node.
+      if (list.some(c => c.evidenceRef === p.id && c.nodeId === nodeId)) continue;
+      list.push(contribution.newCandidate({
+        id: 'gc_' + generateId(), orgCode: code, nodeId, contributorId: userId,
+        concept, label: label || concept, evidenceRef: p.id,
+        originRef: p.originRef || null, originKind: p.originKind || 'unknown',
+        occasion: p.turnId || null, authority: p.authority || 'self_report',
+        scope: verdict.scope, reason: verdict.reason, now: Date.now(),
+      }));
+      made++;
+    }
+  }
+  if (made) scheduleSave();
+  return made;
+}
+
+/* Feed everything CONTRIBUTED for a node+concept through the existing kernel, if the opening
+   rule is satisfied. Builds no hypotheses and computes no confidence — applyProposals does all
+   of it, exactly as for a member. */
+function _admitGroupContributions(code, nodeId, concept, { now = Date.now() } = {}) {
+  const subject = _groupSubjectRef(code, nodeId);
+  if (!subject.ok) return { opened: false, reason: subject.error };
+
+  const pending = _groupCands(code).filter(c =>
+    c.nodeId === nodeId && c.concept === concept && (c.status === 'contributed' || c.status === 'admitted'));
+  const decision = contribution.shouldOpenGroupInquiry(pending, { now });
+  if (!decision.open) return { opened: false, decision };
+
+  const org = orgMeta[code] || {};
+  const inq = _inquiryFor(code, subject.subjectRef, concept, pending[0].label || concept, org.orgMode || '', now);
+  const before = JSON.parse(JSON.stringify(inq));
+  const proposals = pending.filter(c => c.status === 'contributed').map(c => contribution.toGroupProposal(c, { now }));
+  if (proposals.length) {
+    const after = diagnose.applyProposals(inq, proposals, { now });
+    inquiryStates[code][subject.subjectRef][_inquiryKeyFor(code, subject.subjectRef, inq)] = after;
+    for (const c of pending) if (c.status === 'contributed') { c.status = 'admitted'; c.admittedAt = now; }
+  }
+  scheduleSave();
+  console.log(`[group] ${nodeId}/${concept} -> ${decision.rule}: ${decision.reason}`);
+  return { opened: true, decision, subjectRef: subject.subjectRef, added: proposals.length, before: before.confidence };
+}
+
+/* Which key an inquiry lives under for a subject. The store is keyed by concept, and a reused
+   inquiry keeps its original key however the vocabulary has since grown. */
+function _inquiryKeyFor(code, subjectRef, inq) {
+  const bySubject = (inquiryStates[code] || {})[subjectRef] || {};
+  for (const [k, v] of Object.entries(bySubject)) if (v && v.inquiryId === inq.inquiryId) return k;
+  return inq.topic ? inq.topic.canonicalConcept : inq.inquiryId;
+}
+
+/* GET /api/group/:nodeId/candidates — MY OWN noticings for this node, and nobody else's.
+   A candidate is not evidence and not a shared object; another member's is none of your
+   business, and a leader's position grants no view of it either. */
+app.get('/api/group/:nodeId/candidates', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const subject = _groupSubjectRef(code, req.params.nodeId);
+  if (!subject.ok) return res.status(404).json({ error: subject.error });
+  const nodeId = String(req.params.nodeId);
+  if (!_inNode(code, nodeId, userId) && !_leadsNode(code, nodeId, userId)) {
+    return res.status(403).json({ error: 'not part of this group' });
+  }
+  groupCandidates[code] = contribution.expireCandidates(_groupCands(code), Date.now());
+  const mine = groupCandidates[code].filter(c =>
+    c.nodeId === nodeId && c.contributorId === userId && c.status === 'detected');
+  res.json({
+    ok: true,
+    candidates: mine.map(c => ({
+      candidateId: c.candidateId, concept: c.concept, label: c.label, reason: c.reason,
+      scope: c.scope, createdAt: c.createdAt, expiresAt: c.expiresAt,
+    })),
+    note: 'Noticed, not shared. Nothing here is visible to anyone else or counted anywhere until you contribute it.',
+  });
+});
+
+/* POST /api/group/:nodeId/contribute — deliberately offer one of MY candidates to the group.
+   { candidateId, contributorVisibility?: 'named'|'anonymous' } */
+app.post('/api/group/:nodeId/contribute', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const subject = _groupSubjectRef(code, nodeId);
+  if (!subject.ok) return res.status(404).json({ error: subject.error });
+
+  const cand = _groupCands(code).find(c => c.candidateId === String((req.body || {}).candidateId || ''));
+  if (!cand || cand.nodeId !== nodeId) return res.status(404).json({ error: 'candidate not found' });
+  if (cand.status !== 'detected') return res.status(409).json({ error: `candidate already ${cand.status}` });
+
+  const leads = _leadsNode(code, nodeId, userId);
+  const gate = contribution.mayContribute({
+    actorId: userId, ownerId: cand.contributorId,
+    role: leads ? 'leader' : 'member',
+    inNode: _inNode(code, nodeId, userId), leadsNode: leads,
+    explicit: true,                                   // reaching this endpoint IS the deliberate act
+  });
+  if (!gate.allowed) return res.status(403).json({ error: gate.reason });
+
+  cand.status = 'contributed';
+  cand.contributedAt = Date.now();
+  cand.contributorRole = leads ? 'leader' : 'member';
+  cand.contributorVisibility = (req.body || {}).contributorVisibility === 'anonymous' ? 'anonymous' : 'named';
+  cand.explicitOpen = leads && (req.body || {}).open === true;
+  cand.fromSubject = `member:${userId}`;
+
+  const out = _admitGroupContributions(code, nodeId, cand.concept);
+  scheduleSave();
+  res.json({
+    ok: true, contributed: cand.candidateId, authority: gate.reason,
+    // Why the group inquiry did or did not open, in the same words the rule is written in.
+    groupInquiry: out.opened ? 'open' : 'not yet', decision: out.decision || null,
+  });
+});
+
+/* POST /api/group/:nodeId/withdraw — take back what I contributed. The group evidence is
+   superseded by the SAME correction machinery a member's own revision uses: nothing is deleted,
+   and the record still explains what was believed and why it stopped being believed. */
+app.post('/api/group/:nodeId/withdraw', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const subject = _groupSubjectRef(code, nodeId);
+  if (!subject.ok) return res.status(404).json({ error: subject.error });
+
+  const cand = _groupCands(code).find(c => c.candidateId === String((req.body || {}).candidateId || ''));
+  if (!cand || cand.nodeId !== nodeId) return res.status(404).json({ error: 'candidate not found' });
+  if (cand.contributorId !== userId) return res.status(403).json({ error: 'only the contributor may withdraw it' });
+  if (cand.status !== 'contributed' && cand.status !== 'admitted') {
+    return res.status(409).json({ error: 'nothing contributed to withdraw' });
+  }
+
+  const bySubject = (inquiryStates[code] || {})[subject.subjectRef] || {};
+  const now = Date.now();
+  for (const [k, inq] of Object.entries(bySubject)) {
+    if (!(inq.signals || []).some(s => s.ref === cand.evidenceRef)) continue;
+    bySubject[k] = diagnose.applyProposals(inq,
+      [contribution.withdrawalProposal(cand, { reason: String((req.body || {}).reason || ''), now })], { now });
+  }
+  cand.status = 'dismissed';
+  cand.withdrawnAt = now;
+  scheduleSave();
+  res.json({ ok: true, withdrawn: cand.candidateId });
+});
+
+/* POST /api/group/:nodeId/candidates/:candidateId/dismiss — no, this is not the group's. */
+app.post('/api/group/:nodeId/candidates/:candidateId/dismiss', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const cand = _groupCands(code).find(c => c.candidateId === String(req.params.candidateId));
+  if (!cand || cand.nodeId !== String(req.params.nodeId)) return res.status(404).json({ error: 'candidate not found' });
+  if (cand.contributorId !== userId) return res.status(403).json({ error: 'not yours to dismiss' });
+  cand.status = 'dismissed';
+  scheduleSave();
+  res.json({ ok: true, dismissed: cand.candidateId });
+});
+
+/* GET /api/group/:nodeId/inquiry — what the group is currently working out.
+
+   The privacy guarantee here is STRUCTURAL, not a filter someone has to remember to apply: the
+   inquiry kernel stores references and never text, so there is no verbatim span in a group
+   inquiry to leak. What comes back is the shape of the understanding — hypotheses, confidence,
+   how many independent origins it rests on, what is still unknown — which is what a group can
+   act on and contains nobody's words. */
+app.get('/api/group/:nodeId/inquiry', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const subject = _groupSubjectRef(code, nodeId);
+  if (!subject.ok) return res.status(404).json({ error: subject.error });
+  if (!_inNode(code, nodeId, userId) && !_leadsNode(code, nodeId, userId)) {
+    return res.status(403).json({ error: 'not part of this group' });
+  }
+
+  const bySubject = (inquiryStates[code] || {})[subject.subjectRef] || {};
+  const inquiries = Object.values(bySubject).filter(i => i && (i.signals || []).length && !i.parkedAt).map(i => {
+    const hyps = i.hypotheses || [];
+    const lead = hyps.find(h => h.id === i.leadingHypothesisId) || null;
+    const sig = (i.signals || []).filter(s => s.kind !== 'interpretation');
+    const active = sig.filter(s => diagnose.isActive(s));
+    return {
+      inquiryId: i.inquiryId, topic: i.topic, status: i.status,
+      hypothesis: lead ? lead.statement : null,
+      alternatives: hyps.filter(h => h !== lead).map(h => ({ statement: h.statement, band: h.confidence.band, status: h.status })),
+      confidence: i.confidence,
+      // What it rests on, counted the way confidence counts it: separate underlying occurrences,
+      // not how many times the thing has been said.
+      independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size,
+      contributors: new Set(active.map(s => s.contributorVisibility === 'anonymous' ? '(anonymous)' : s.contributedBy).filter(Boolean)).size,
+      signals: active.length,
+      corrected: sig.length - active.length,
+      contradictions: active.filter(s => s.dissents).length,
+      stillUnknown: (i.missingSignals || []).map(m => m.question),
+      timeline: (i.timeline || []).slice(-8).reverse().map(e => ({ at: e.at, kind: e.kind, summary: e.summary })),
+      lastUpdatedAt: i.lastUpdatedAt,
+    };
+  }).sort((a, b) => b.confidence.score - a.confidence.score);
+
+  _audit(code, { actor: userId, action: 'agenda_view', subjectIds: [], basis: 'group_inquiry' });
+  res.json({ ok: true, node: { nodeId, name: subject.node.name }, inquiries,
+    note: 'Built only from what people deliberately contributed. Nothing private enters here.' });
+});
+
 /* GET /api/library — items visible to me: my own (any visibility) + anyone's SHARED. Filter
    by ?folderId= (mine only) and ?scope=mine|shared|all. */
 /* GET /api/inquiry — what the ears have built about YOU, and only you. This is the working
@@ -16475,6 +16745,7 @@ function _loadAllStores(data) {
   Object.assign(libraryItems,   data.libraryItems   || {});
   Object.assign(inquiryStates,  data.inquiryStates  || {});
   Object.assign(safeguardingFlags, data.safeguardingFlags || {});
+  Object.assign(groupCandidates, data.groupCandidates || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -16516,6 +16787,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _durableUnits, _applyUnits, _pruneExpiredSessions, _persistedStores, scheduleSave,
   _reconstruct, _unclassified, _saveStats, PERSISTENCE_MODE,
   emailIndex, activeSessions, inviteTokens, userAiProfiles,
+  // exported for the truth layer: the group contribution boundary
+  groupCandidates, orgNodes, _groupSubjectRef, _noteGroupCandidates, _admitGroupContributions,
+  _inNode, _leadsNode,
   reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library
   // a routed share lands in

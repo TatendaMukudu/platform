@@ -522,6 +522,18 @@ function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefO
         // the signal still counts toward the inquiry but weighs on nothing in particular.
         supports: p.supports ? String(p.supports) : null,
         challenges: p.challenges ? String(p.challenges) : null,
+        /* Contribution provenance, when this evidence crossed a boundary to get here (see
+           ai/contribution.js). Absent for ordinary Self evidence, which never crossed one. The
+           kernel does not read these — they answer "who put this here and may they take it
+           back", which is a governance question, not an epistemic one. */
+        ...(p.contributedBy ? {
+          contributedBy: String(p.contributedBy),
+          contributedAt: p.contributedAt || now,
+          contributorRole: p.contributorRole || 'member',
+          contributorVisibility: p.contributorVisibility === 'anonymous' ? 'anonymous' : 'named',
+          verbatim: p.verbatim === true,
+          fromSubject: p.fromSubject || null,
+        } : {}),
       });
 
       /* A proposal may say it CORRECTS an earlier claim. Whether it gets to is decided here,
@@ -820,6 +832,17 @@ const INTAKE_PROMPT = [
   'cannot tell whether two accounts come from the same underlying occurrence, OMIT originRef. An',
   'omission is read as "not established" and treated cautiously. A GUESS that two reports are',
   'independent is the one error here with no floor under it — never guess in that direction.',
+  '',
+  'WHO IS THIS ABOUT? An observation may carry "concerns": "self", "group" or "both".',
+  '  self  — about this person: how they felt, what they did, what happened to them.',
+  '  group — about a team, class or department AS A COLLECTIVE: how it operates, what it is',
+  '          unclear about, a shared pattern. "Our press trigger is unclear" is group.',
+  '  both  — genuinely both ("I keep getting caught because we drop too early").',
+  '',
+  'Say "group" only when they were describing the collective, not merely when a group gets',
+  'mentioned: "I get nervous before matches" is self, even though matches involve a team. This',
+  'publishes nothing and shares nothing — it only lets the system offer them the choice later,',
+  'and their conversation stays private either way. When unsure, say self.',
   '',
   'CORRECTIONS. If what they are saying now revises something recorded EARLIER — "actually, I',
   'watched it back and my touch was fine, the problem was my body position" — add "corrects":',
