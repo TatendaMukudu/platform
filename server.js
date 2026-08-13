@@ -8864,8 +8864,19 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
       const existingTarget = route.action !== 'create' ? _inquiryById(code, subjectRef, route.targetId) : null;
       if (route.action === 'apply' && existingTarget) {
         inq = existingTarget.inquiry; key = existingTarget.key;
-        diagnose.addAlias(inq, concept, { at: new Date(now).toISOString(), relationship: 'SAME_AS', targetId: route.targetId, concept, reason: route.reason });
-        if (concept !== key) console.log(`[intake] ${concept} -> same as ${route.targetId} (${route.reason})`);
+        /* Record what the evidence actually DOES to this inquiry. This used to be hardcoded
+           'SAME_AS' for all three apply relationships, so evidence that cut AGAINST an inquiry
+           was filed as another way of saying the same thing — the disagreement erased at the
+           moment it arrived. */
+        diagnose.addAlias(inq, concept, { at: new Date(now).toISOString(), relationship: route.relationship || 'SAME_AS', targetId: route.targetId, concept, reason: route.reason });
+        if (route.relationship === 'CONTRADICTS') {
+          // A contradiction is not a second name for the question — it is evidence against what
+          // the inquiry currently reads, and the kernel weighs dissent explicitly.
+          for (const p of props) p.contradicts = true;
+          console.log(`[intake] ${concept} -> CONTRADICTS ${route.targetId} (${route.reason})`);
+        } else if (concept !== key) {
+          console.log(`[intake] ${concept} -> ${(route.relationship || 'same as').toLowerCase()} ${route.targetId} (${route.reason})`);
+        }
       } else {
         // REFINES hangs a genuine sub-question off its parent; NEW stands alone, having been
         // argued for. Both are real lines of inquiry, so both get built.
@@ -8878,6 +8889,11 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
         }
         diagnose.addAlias(inq, concept, { at: new Date(now).toISOString(), relationship: route.action === 'refine' ? 'REFINES' : 'NEW', targetId: route.targetId || null, concept, reason: route.reason });
       }
+      /* WHO SAID THIS IS NOT THE MODEL'S TO DECIDE. Independence is counted over sources, so a
+         model free to label its own proposals could turn one person's message into several
+         corroborating voices — the same failure origin exists to prevent, arriving by a
+         different door. The server knows who is speaking; it stamps them. */
+      for (const p of props) p.source = userId;
       const before = JSON.parse(JSON.stringify(inq));
       const after = diagnose.applyProposals(inq, props, { now });
       // An unknown naming a live concept goes only there. One that names nothing, or names a
@@ -12064,10 +12080,18 @@ app.get('/api/inquiry', requireAuth, (req, res) => {
       // statement from "X is nearly as well supported as the leading explanation".
       alternatives: hyps.filter(h => h !== lead).map(h => ({ statement: h.statement, band: h.confidence.band, status: h.status })),
       confidence: i.confidence,                     // { score, band, because } — deterministic
-      signals: sig.length,
+      // What CURRENTLY holds the picture up. A claim the person has since corrected is history,
+      // and counting it here would tell them the read rests on more than it does.
+      signals: sig.filter(s => diagnose.isActive(s)).length,
+      // Kept separately rather than hidden, because "you told us X, then corrected it" is a more
+      // trustworthy thing to be able to show than a number that quietly shrank.
+      corrected: sig.filter(s => !diagnose.isActive(s)).length,
+      // How many separate underlying occurrences this rests on, as opposed to how many times it
+      // has been mentioned. The distinction confidence is built on, made visible.
+      origins: new Set(sig.filter(s => diagnose.isActive(s) && s.originRef).map(s => s.originRef)).size,
       stillUnknown: (i.missingSignals || []).map(m => m.question),
       falsifiers: i.falsifiers || [],
-      contradictions: sig.filter(s => s.dissents).length,
+      contradictions: sig.filter(s => diagnose.isActive(s) && s.dissents).length,
       // HOW the understanding changed — most recent first, refs stripped (a reader gets the
       // shape of the history, not a back door to evidence they were never shown).
       timeline: (i.timeline || []).slice(-8).reverse().map(e => ({ at: e.at, kind: e.kind, summary: e.summary })),

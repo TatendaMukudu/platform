@@ -142,15 +142,109 @@ const _BANDS = [
   { at: 0.00, band: 'tentative' },
 ];
 
-function deriveConfidence(signals = [], { now = Date.now(), halfLifeDays = 45 } = {}) {
-  const list = (Array.isArray(signals) ? signals : []).filter(Boolean);
-  if (!list.length) return { score: 0, band: 'tentative', because: ['nothing recorded yet'] };
+/* ── ORIGIN ──────────────────────────────────────────────────────────────────
+   Three different questions that were previously one:
+
+     source    — who or what handed this evidence to IntelliQ
+     origin    — the underlying occurrence the evidence ultimately comes from
+     occasion  — the telling: when this particular account was given
+
+   The captain says after Saturday's match "their press kept forcing us backwards". Four
+   teammates later say "yeah, like the captain said". That is five sources, five occasions, and
+   ONE origin. It is not five people who noticed something.
+
+   Contrast: player A notices it, player B notices it independently, the coach notices it, and
+   video analysis identifies it. Same match — one occasion in the everyday sense — but four
+   origins, because four separate observations were made. Origin is about what was observed
+   separately, not about when.
+
+   originKind says what KIND of thing the evidence traces back to. It is deliberately coarse:
+   fine-grained provenance is the canonical evidence layer's job, and this kernel only needs
+   enough to weigh independence. */
+const ORIGIN_KINDS = [
+  'direct_observation',   // the source saw it themselves
+  'self_report',          // the subject describing their own experience
+  'reported',             // relaying what someone else observed — NOT an independent origin
+  'document',             // an import, file or record
+  'system',               // derived by IntelliQ from data it already holds
+  'unknown',              // we could not establish it. The default, and it is conservative.
+];
+
+/* How much credit reports of unestablished origin may earn between them, in units of "distinct
+   origin". Two, meaning at most one possible corroborator: without origin we cannot rule out
+   that a whole room is repeating one telling, so a room may never out-weigh two people known to
+   have seen a thing separately. Deliberately a small calibrated constant in the same spirit as
+   the occasion ceiling below, not a tunable. */
+const UNKNOWN_ORIGIN_CAP = 2;
+
+/* ── SIGNAL STATUS ───────────────────────────────────────────────────────────
+   A signal is 'active' until something says otherwise. The alternatives are what make a picture
+   correctable rather than merely accumulating:
+
+     superseded — a later account replaced this one ("I watched the video; my touch was fine")
+     withdrawn  — the source retracted it without replacing it
+
+   Neither deletes anything. The claim, its timestamp and its provenance all stay, because "we
+   believed X because of A, then A was corrected by B" is a far more trustworthy thing to be able
+   to say than pretending A never happened. They simply stop counting as current support. */
+const SIGNAL_STATUSES = ['active', 'superseded', 'withdrawn'];
+const isActive = s => !s || !s.status || s.status === 'active';
+
+/* How decisively the case against must beat the case for before an explanation is ruled out,
+   and how close the two must be to count as a live disagreement. The margin is what stops one
+   weak dissent felling a well-evidenced explanation; the contest band is what stops a real
+   disagreement being rounded to "still open, nothing to see". */
+const REFUTATION_MARGIN = 1.25;
+const CONTEST_MARGIN    = 0.6;
+
+function deriveConfidence(signals = [], { now = Date.now(), halfLifeDays = 45, asCounterEvidence = false } = {}) {
+  const all = (Array.isArray(signals) ? signals : []).filter(Boolean);
+  // A corrected signal stays in the record for history, but it is no longer something we
+  // believe. Counting it would mean a claim the person has since withdrawn still holds the
+  // picture up — see supersede().
+  const list = all.filter(s => isActive(s));
+  if (!list.length) {
+    return all.length
+      ? { score: 0, band: 'tentative', because: [`${all.length} signal${all.length === 1 ? '' : 's'}, all superseded or withdrawn`] }
+      : { score: 0, band: 'tentative', because: ['nothing recorded yet'] };
+  }
 
   const because = [];
-  // Independence: distinct sources, not repeat mentions from one place.
-  const sources = new Set(list.map(s => String(s.source || 'self')));
-  const independence = Math.min(1, (sources.size - 1) / 3 + (sources.size ? 0.34 : 0));
-  because.push(`${sources.size} independent source${sources.size === 1 ? '' : 's'}`);
+
+  /* INDEPENDENCE, measured in ORIGINS rather than sources.
+
+     `source` is who handed us the evidence. `origin` is the underlying occurrence it ultimately
+     comes from. They are not the same thing, and the difference is the whole reason this exists:
+     five teammates repeating what the captain said after Saturday's match is five sources and
+     ONE origin. Counting sources, the old behaviour, reads that as five confirmations — a system
+     growing certain because a room agreed with itself.
+
+     For one member talking about themselves this rarely bit, because a member IS one source. Add
+     a group, where several people discussing the same session is the ordinary case, and counting
+     sources manufactures confidence out of repetition. */
+  const known = new Map();          // originRef → true
+  const unknownSources = new Set();
+  for (const s of list) {
+    const ref = s.originRef ? String(s.originRef) : '';
+    if (ref) known.set(ref, true);
+    else unknownSources.add(String(s.source || 'self'));
+  }
+
+  /* Unknown origin is NOT independent origin. If we cannot tell whether five reports trace back
+     to one telling, crediting them as five clean confirmations invents the very independence we
+     failed to establish. But nor is unknown worthless — different people saying a thing is weak
+     evidence that they saw it separately. So unknown origins earn at most UNKNOWN_ORIGIN_CAP:
+     the credit of "possibly one corroborating voice", and never more, however large the room. */
+  const unknownEff = Math.min(UNKNOWN_ORIGIN_CAP, unknownSources.size);
+  const nEff = known.size + unknownEff;
+  const independence = Math.min(1, (nEff - 1) / 3 + (nEff ? 0.34 : 0));
+  if (known.size && unknownSources.size) {
+    because.push(`${known.size} distinct origin${known.size === 1 ? '' : 's'}, plus ${unknownSources.size} report${unknownSources.size === 1 ? '' : 's'} of unestablished origin`);
+  } else if (known.size) {
+    because.push(`${known.size} independent origin${known.size === 1 ? '' : 's'}`);
+  } else {
+    because.push(`${unknownSources.size} source${unknownSources.size === 1 ? '' : 's'}, origin not established`);
+  }
 
   // TEMPORAL independence, which is a different thing and was missing. An evidentiary OCCASION
   // is one telling: someone restating the same situation twice in a single message is one
@@ -174,21 +268,36 @@ function deriveConfidence(signals = [], { now = Date.now(), halfLifeDays = 45 } 
     return Math.pow(0.5, days / Math.max(1, halfLifeDays));
   });
 
-  const contradictions = list.filter(s => s.contradicts).length;
+  const contradictions = list.filter(s => s.contradicts || s.dissents).length;
   const contradictionPenalty = contradictions ? Math.pow(0.45, contradictions) : 1;
   if (contradictions) because.push(`${contradictions} contradicting signal${contradictions === 1 ? '' : 's'}`);
 
   // One telling should never read as settled, however specific or however many ways it was
   // phrased. The ceiling is on OCCASIONS, not signals — the point is that the person has only
   // told us once, and saying it twice in that once does not make it twice true.
-  const singleOccasionCeiling = occasions.size === 1 ? 0.45 : 1;
+  /* Both ceilings below cap how strongly a claim may be ASSERTED. They must not cap how strongly
+     it can be DOUBTED, which is a different act: it is properly easier to unsettle a claim than
+     to establish one, and one credible account saying "that isn't what happened" should register
+     fully even though the same account could not settle the matter by itself. Weighing
+     counter-evidence therefore skips them — otherwise a single contradiction is discounted for
+     being single, and a well-supported explanation becomes almost impossible to challenge. */
+  const singleOccasionCeiling = (occasions.size === 1 && !asCounterEvidence) ? 0.45 : 1;
   if (list.length === 1) because.push('only one signal so far');
   else if (occasions.size === 1) because.push('all from one telling');
+
+  /* The same ceiling, one level up. Everything tracing to ONE established origin is one thing
+     that happened, however many people relayed it and across however many days. Retelling is not
+     corroboration, so a single-origin picture cannot reach 'supported' on volume alone — it needs
+     a second origin. Set just above the single-occasion ceiling: a claim many people repeat over
+     weeks is worth marginally more than one said once, and much less than two people who saw it
+     separately. */
+  const singleOriginCeiling = (known.size === 1 && !unknownSources.size && !asCounterEvidence) ? 0.55 : 1;
+  if (singleOriginCeiling < 1 && list.length > 1) because.push('all tracing back to one origin');
 
   const score = _clamp01(
     independence * 0.22 + temporal * 0.18 + directness * 0.16
     + authority * 0.16 + specificity * 0.14 + recency * 0.14
-  ) * contradictionPenalty * singleOccasionCeiling;
+  ) * contradictionPenalty * singleOccasionCeiling * singleOriginCeiling;
 
   const band = (_BANDS.find(b => score >= b.at) || _BANDS[_BANDS.length - 1]).band;
   return { score: Math.round(score * 100) / 100, band, because };
@@ -265,6 +374,20 @@ function _recordTimeline(before, after, now) {
       refs: fresh.map(s => s.ref) });
   }
 
+  /* A correction is the most important thing that can happen to a picture, and the least
+     visible if it is not recorded: the signal is still there, it simply stopped counting. Saying
+     so is what lets the system explain "we thought X because of A; A was corrected by B". */
+  const wasActive = new Map((before.signals || []).map(s => [s.ref, !s.status || s.status === 'active']));
+  const corrected = (after.signals || []).filter(s => !isActive(s) && wasActive.get(s.ref) === true);
+  if (corrected.length) {
+    const withdrawn = corrected.filter(s => s.status === 'withdrawn').length;
+    events.push({ at: now, kind: 'correction',
+      summary: withdrawn === corrected.length
+        ? `${corrected.length} earlier account${corrected.length === 1 ? ' was' : 's were'} withdrawn`
+        : `${corrected.length} earlier account${corrected.length === 1 ? '' : 's'} corrected by later evidence`,
+      refs: corrected.map(s => s.ref) });
+  }
+
   const bHyp = new Set((before.hypotheses || []).map(h => h.id));
   for (const h of (after.hypotheses || [])) {
     if (!bHyp.has(h.id)) events.push({ at: now, kind: 'hypothesis', summary: `New explanation on the table: ${h.statement}`, refs: [] });
@@ -316,6 +439,59 @@ const _STATUS_FOR = (band, contradictions) =>
 
 /* Apply GROUNDED proposals to an inquiry. Nothing here becomes evidence — this is the working
    picture, from which a person may later confirm something into the real record. */
+/* Normalise whatever the intake layer said about where a claim comes from.
+
+   Conservative by construction: an unrecognised kind, or a kind that names no occurrence,
+   becomes 'unknown' with no originRef — which earns the capped credit rather than the
+   independence of an established origin. A claim of independence we cannot check is exactly
+   what this module exists to stop being free.
+
+   'reported' is the important case. Someone relaying what another person observed carries the
+   origin of the ORIGINAL observation, so the retelling adds a voice and not a witness. */
+function originOf(p = {}) {
+  const kindRaw = String(p.originKind || '').toLowerCase().replace(/[\s-]+/g, '_');
+  const kind = ORIGIN_KINDS.includes(kindRaw) ? kindRaw : 'unknown';
+  const ref = String(p.originRef || '').trim().slice(0, 120);
+  // A kind without a reference cannot be distinguished from any other occurrence of that kind,
+  // so it establishes nothing about independence and is recorded as unknown.
+  if (!ref) return { originKind: kind === 'unknown' ? 'unknown' : kind, originRef: null };
+  return { originKind: kind, originRef: ref };
+}
+
+/* ── CORRECTION ──────────────────────────────────────────────────────────────
+   "Actually, I watched the video — my touch was fine, the problem was my body position."
+
+   Correction and contradiction are different things and must not be conflated.
+
+     CONTRADICTION — two accounts disagree. The coach says positioning was the problem, the
+                     player says it was fine. BOTH stay live; the disagreement is the finding,
+                     and deciding it is not the kernel's to do silently.
+     CORRECTION    — the account is revised at its own source, or by something entitled to
+                     overrule it. The earlier claim stops being current. Nobody now asserts it.
+
+   So who may correct what is decided deterministically, never by the model's say-so: the same
+   source may always revise itself, and an authoritative record may overrule an unverified
+   report. Anything else claiming to correct is treated as a contradiction instead — which
+   preserves it, weighs it against the claim, and leaves the disagreement visible. */
+function canCorrect(prior, incoming) {
+  if (!prior || !incoming) return false;
+  const same = String(prior.source || '') === String(incoming.source || '');
+  if (same) return true;                                    // a source revising itself
+  return incoming.authority === 'authoritative' && prior.authority !== 'authoritative';
+}
+
+/* Mark a signal superseded or withdrawn, keeping it. Returns a NEW signal — callers work on
+   copies, so history cannot be edited by accident. */
+function supersede(signal, { by = null, at = Date.now(), reason = '', status = 'superseded' } = {}) {
+  return {
+    ...signal,
+    status: SIGNAL_STATUSES.includes(status) ? status : 'superseded',
+    supersededBy: by ? String(by) : null,
+    supersededAt: at,
+    supersededReason: String(reason || '').slice(0, 300),
+  };
+}
+
 function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefOf } = {}) {
   const next = JSON.parse(JSON.stringify(inquiry));
   // A proposal points at governed evidence. Until the caller supplies a real ref (the evidence
@@ -332,6 +508,11 @@ function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefO
         directness: isInterp ? 'inferred' : (p.directness || 'direct'),
         authority: isInterp ? 'unverified' : (p.authority || 'self_report'),
         source: isInterp ? 'interpretation' : (p.source || 'self'),
+        // WHAT THIS IS ULTIMATELY BASED ON. Absent means unknown, which is treated
+        // conservatively rather than as independent — see deriveConfidence. A retelling names
+        // the origin it is retelling, so relaying a thing never counts as observing it.
+        ...originOf(p),
+        status: 'active',
         specificity: isInterp ? 0.4 : p.specificity,
         // The turn this came from, so confidence can tell one telling from two. Without it,
         // three paraphrases of one sentence weigh as three occasions.
@@ -342,6 +523,29 @@ function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefO
         supports: p.supports ? String(p.supports) : null,
         challenges: p.challenges ? String(p.challenges) : null,
       });
+
+      /* A proposal may say it CORRECTS an earlier claim. Whether it gets to is decided here,
+         not by the model asserting it: the same source may revise itself, and an authoritative
+         record may overrule an unverified one. Anything else becomes a contradiction, so the
+         disagreement is kept and weighed rather than one side quietly winning. */
+      const targets = (Array.isArray(p.corrects) ? p.corrects : (p.corrects ? [p.corrects] : [])).map(String);
+      const incoming = next.signals[next.signals.length - 1];
+      for (const t of targets) {
+        const i = next.signals.findIndex(s => s.ref === t && s.ref !== ref);
+        if (i === -1) continue;
+        if (canCorrect(next.signals[i], incoming)) {
+          next.signals[i] = supersede(next.signals[i], {
+            by: ref, at: now,
+            reason: String(p.correctionReason || p.text || '').slice(0, 300),
+            status: p.withdraws ? 'withdrawn' : 'superseded',
+          });
+        } else {
+          // Not entitled to correct — so it disagrees instead, and both accounts stand.
+          incoming.dissents = true;
+          incoming.disputes = incoming.disputes || [];
+          if (!incoming.disputes.includes(t)) incoming.disputes.push(t);
+        }
+      }
     } else if (p.level === 'hypothesis') {
       // Rival explanations COEXIST. A new one never overwrites the old — they compete, and
       // evidence decides. This is the difference between reasoning and last-writer-wins.
@@ -378,8 +582,12 @@ function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefO
     // challenge into the evidence base was double-counting in the wrong direction — it made a
     // well-attacked explanation look better supported than a fresh rival, purely because more
     // had been said about it. Being argued with is not evidence in your favour.
-    const support = h.supportRefs.map(r => byRef.get(r)).filter(Boolean);
-    const nChallenges = h.challengeRefs.length;
+    //
+    // Corrected support is not support. A hypothesis resting on a claim its own source has since
+    // withdrawn must fall, or the picture is held up by something nobody asserts any more.
+    const support   = h.supportRefs.map(r => byRef.get(r)).filter(s => s && isActive(s));
+    const challenge = h.challengeRefs.map(r => byRef.get(r)).filter(s => s && isActive(s));
+    const nChallenges = challenge.length;
     const base = support.length ? deriveConfidence(support, { now })
       : { score: 0, band: 'tentative', because: ['nothing supports this yet'] };
     const score = Math.round(base.score * Math.pow(0.45, nChallenges) * 100) / 100;
@@ -388,7 +596,38 @@ function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefO
       band: (_BANDS.find(b => score >= b.at) || _BANDS[_BANDS.length - 1]).band,
       because: nChallenges ? [...base.because, `${nChallenges} piece${nChallenges === 1 ? '' : 's'} of evidence against it`] : base.because,
     };
-    h.status = h.challengeRefs.length && !h.supportRefs.length ? 'refuted' : h.status === 'settled' ? 'settled' : 'open';
+
+    /* REFUTATION IS A BALANCE, NOT A BIOGRAPHY.
+
+       The old rule was `challenged && never supported`, which handed permanent life to any
+       explanation that once had a single signal behind it: no quantity of later evidence could
+       rule it out, because history recorded that something had supported it once. A system that
+       cannot abandon an explanation is not reasoning, it is accumulating.
+
+       So the question is what the evidence says NOW. Support is weighed against challenge on the
+       same scale — both are just evidence — and the outcome is one of three honest positions:
+
+         refuted   — nothing live still supports it, or the case against clearly outweighs the
+                     case for. "Clearly" matters: one weak dissent must not fell a well-evidenced
+                     explanation, so the challenge has to beat support by a margin.
+         contested — real evidence on both sides and no clear winner. This is a finding in its
+                     own right, and flattening it to open/refuted would throw away the most
+                     interesting state a picture can be in.
+         open      — the ordinary case. */
+    const supportScore   = base.score;
+    const challengeScore = challenge.length ? deriveConfidence(challenge, { now, asCounterEvidence: true }).score : 0;
+    if (h.status === 'settled') {
+      // A settled hypothesis stays settled unless the evidence beneath it is actually gone.
+      if (!support.length) h.status = 'refuted';
+    } else if (nChallenges && !support.length) {
+      h.status = 'refuted';                                   // challenged, nothing live for it
+    } else if (nChallenges && challengeScore > supportScore * REFUTATION_MARGIN) {
+      h.status = 'refuted';                                   // the case against decisively wins
+    } else if (nChallenges && challengeScore >= supportScore * CONTEST_MARGIN) {
+      h.status = 'contested';                                 // genuine disagreement, unresolved
+    } else {
+      h.status = 'open';
+    }
   }
 
   // The leading hypothesis is whichever the evidence currently favours — not whichever arrived
@@ -401,9 +640,13 @@ function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefO
 
   // The INQUIRY's confidence is how well we understand the phenomenon — which is the leading
   // explanation's confidence, not the volume of signals collected about it.
-  const real = next.signals.filter(s => s.kind !== 'interpretation');
+  // Superseded signals are history, not evidence: a claim its own source has withdrawn cannot
+  // still be holding the inquiry's confidence up.
+  const real = next.signals.filter(s => s.kind !== 'interpretation' && isActive(s));
   next.confidence = lead && lead.confidence.score > 0 ? lead.confidence : deriveConfidence(real, { now });
-  next.status = _STATUS_FOR(next.confidence.band, real.filter(s => s.dissents).length);
+  next.status = lead && lead.status === 'contested'
+    ? 'disputed'
+    : _STATUS_FOR(next.confidence.band, real.filter(s => s.dissents).length);
   next.timeline = _recordTimeline(inquiry, next, now);
   next.lastUpdatedAt = now;
   return next;
@@ -558,6 +801,34 @@ const INTAKE_PROMPT = [
   'Name the domain concept precisely ("football.first_touch", "manufacturing.tolerance_drift"),',
   'because a vague concept cannot be retrieved or connected to anything later.',
   '',
+  'ORIGIN — WHAT IS THIS ULTIMATELY BASED ON? Every observation may carry "originKind", and',
+  '"originRef" naming the specific occurrence it traces back to:',
+  '  direct_observation — the speaker saw it themselves',
+  '  self_report        — the speaker describing their own experience',
+  '  reported           — the speaker relaying what SOMEONE ELSE observed',
+  '  document           — a file, record or import',
+  '  system             — derived from data already held',
+  '',
+  'Two accounts of the SAME underlying occurrence must share the same "originRef". If four people',
+  'each repeat what the captain said after Saturday\'s match, that is ONE origin repeated four',
+  'times, not four observations — give all four the captain\'s originRef and mark them "reported".',
+  'If two people each noticed a thing SEPARATELY, they are different origins, so give them',
+  'different refs.',
+  '',
+  'This decides nothing about confidence: the system computes that. What it must never do is',
+  'mistake a room agreeing with itself for several people finding the same thing out. So if you',
+  'cannot tell whether two accounts come from the same underlying occurrence, OMIT originRef. An',
+  'omission is read as "not established" and treated cautiously. A GUESS that two reports are',
+  'independent is the one error here with no floor under it — never guess in that direction.',
+  '',
+  'CORRECTIONS. If what they are saying now revises something recorded EARLIER — "actually, I',
+  'watched it back and my touch was fine, the problem was my body position" — add "corrects":',
+  '[the ids of the earlier observations it replaces] to the new observation, and',
+  '"correctionReason" saying briefly what changed. Use "withdraws": true when they are taking a',
+  'claim back without replacing it. Only use this when they are revising THEIR OWN earlier',
+  'account, or when an authoritative record overrules an unverified one. Two people simply',
+  'disagreeing is NOT a correction — that is a contradiction, and both accounts stay.',
+  '',
   'IDENTITY — THE MOST IMPORTANT PART. If you are shown OPEN INQUIRIES, every concept you name',
   'must declare where its evidence belongs, in a "concepts" array alongside "proposals":',
   '',
@@ -645,17 +916,28 @@ function resolveIdentity({ concept, relationship, targetId, reason = '' } = {}, 
   // This is the one place a string decides anything, and only because the string was ours.
   const byAlias = open.find(f => (f.aliases || []).some(a => _norm(a) === _norm(concept)));
 
-  if (!open.length) return { action: 'create', targetId: null, reason: reason || 'nothing open yet' };
+  /* THE RELATIONSHIP SURVIVES THE ROUTING DECISION.
+
+     SAME_AS, SUPPORTS and CONTRADICTS all route the same way — the evidence joins an inquiry
+     that already exists — and the first cut of this returned only that routing. The three were
+     therefore indistinguishable downstream, and the caller stamped every one of them SAME_AS.
+     Evidence that CUT AGAINST an inquiry was filed as another way of saying the same thing,
+     which is the exact opposite of what it meant. `relationship` is now returned alongside
+     `action` so that what the evidence DOES to the inquiry outlives the decision of where to
+     put it. */
+  if (!open.length) return { action: 'create', relationship: 'NEW', targetId: null, reason: reason || 'nothing open yet' };
   if (byAlias && (!rel || rel === 'NEW')) {
-    return { action: 'apply', targetId: byAlias.inquiryId, reason: 'concept already an alias of this inquiry' };
+    return { action: 'apply', relationship: 'SAME_AS', targetId: byAlias.inquiryId, reason: 'concept already an alias of this inquiry' };
   }
 
   const target = targetId ? byId.get(String(targetId)) : null;
 
   // A relationship that needs a target but names one we do not have is not a decision; treat it
-  // as an unmade one rather than letting it open a new line by accident.
+  // as an unmade one rather than letting it open a new line by accident. The stated relationship
+  // is still kept: a contradiction aimed at a target we cannot resolve is still a contradiction,
+  // and downgrading it to agreement would be the very flattening this guards against.
   if (rel && rel !== 'NEW' && !target) {
-    return { action: 'apply', targetId: (byAlias || open[0]).inquiryId,
+    return { action: 'apply', relationship: rel, targetId: (byAlias || open[0]).inquiryId,
       reason: `relationship ${rel} named an unknown target — held with the nearest open inquiry` };
   }
 
@@ -663,21 +945,21 @@ function resolveIdentity({ concept, relationship, targetId, reason = '' } = {}, 
     case 'SAME_AS':
     case 'SUPPORTS':
     case 'CONTRADICTS':
-      return { action: 'apply', targetId: target.inquiryId, reason: reason || rel };
+      return { action: 'apply', relationship: rel, targetId: target.inquiryId, reason: reason || rel };
     case 'REFINES':
-      return { action: 'refine', targetId: target.inquiryId, reason: reason || 'refines an open question' };
+      return { action: 'refine', relationship: 'REFINES', targetId: target.inquiryId, reason: reason || 'refines an open question' };
     case 'RELATED_TO':
-      return { action: 'link', targetId: target.inquiryId, reason: reason || 'related' };
+      return { action: 'link', relationship: 'RELATED_TO', targetId: target.inquiryId, reason: reason || 'related' };
     case 'NEW':
       // NEW is only NEW when it was argued for. Unargued, with a frontier to compare against,
       // it is the model coining a synonym — which is the behaviour this exists to stop.
       if (String(reason || '').trim().length >= 12) {
-        return { action: 'create', targetId: null, reason };
+        return { action: 'create', relationship: 'NEW', targetId: null, reason };
       }
-      return { action: 'apply', targetId: (byAlias || open[0]).inquiryId,
+      return { action: 'apply', relationship: 'SAME_AS', targetId: (byAlias || open[0]).inquiryId,
         reason: 'claimed NEW without saying why none of the open inquiries fit' };
     default:
-      return { action: 'apply', targetId: (byAlias || open[0]).inquiryId,
+      return { action: 'apply', relationship: 'SAME_AS', targetId: (byAlias || open[0]).inquiryId,
         reason: 'no relationship stated — evidence held rather than given a new line' };
   }
 }
@@ -804,4 +1086,7 @@ module.exports = {
   groundProposals, deriveConfidence, newInquiry, newHypothesis, applyProposals, frontierFor,
   diagnosticYield, rankQuestions, nextNeed, consolidate,
   RELATIONSHIPS, resolveIdentity, addAlias,
+  // Origin + correction: what evidence is based on, and what happens when it turns out to be wrong.
+  ORIGIN_KINDS, SIGNAL_STATUSES, UNKNOWN_ORIGIN_CAP, REFUTATION_MARGIN, CONTEST_MARGIN,
+  originOf, canCorrect, supersede, isActive,
 };

@@ -222,6 +222,42 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     (auditLog[code] || []).length === auditCount);
   ok('C · …nor another person\'s library item', (libraryItems[code] || []).length === 0 || (libraryItems[code] || []).every(i => i.ownerId !== userId));
 
+  /* The epistemic relationships added for Group — what evidence is BASED on, and what happened
+     when it turned out to be wrong — are worth nothing if a redeploy flattens them back into a
+     pile of equally-weighted claims. A correction that does not survive a restart is a system
+     that quietly re-believes what it was told to stop believing. */
+  console.log('\n  C — origin and correction relationships survive a restart');
+  {
+    const diagnose = require('../ai/diagnose.js');
+    let inq = diagnose.newInquiry({ id: 'inq_oc', subjectRef: `member:${userId}`, concept: 'first_touch', label: 'First touch' });
+    inq = diagnose.applyProposals(inq, [
+      { id: 'oc1', level: 'observation', text: 'touch was poor under pressure', sourceSpan: 'x',
+        source: userId, originKind: 'self_report', originRef: 'tue_session', specificity: 0.8, turnId: 'q1' },
+      { id: 'och', level: 'hypothesis', text: 'first touch technique', basis: ['oc1'] },
+    ]);
+    inq = diagnose.applyProposals(inq, [
+      { id: 'oc2', level: 'observation', text: 'watched it back, it was body position', sourceSpan: 'x',
+        source: userId, originKind: 'direct_observation', originRef: 'video_review', specificity: 0.9, turnId: 'q2',
+        corrects: ['oc1'], correctionReason: 'reviewed the video' },
+    ]);
+    inquiryStates[code] = inquiryStates[code] || {};
+    inquiryStates[code][`member:${userId}`] = { first_touch: inq };
+    scheduleSave(); await settle();
+    await restart(legacyBlob);
+
+    const back = ((inquiryStates[code] || {})[`member:${userId}`] || {}).first_touch;
+    const old  = back && back.signals.find(s => s.ref === 'oc1');
+    const fresh = back && back.signals.find(s => s.ref === 'oc2');
+    ok('C · origin survives the round trip', !!fresh && fresh.originRef === 'video_review' && fresh.originKind === 'direct_observation');
+    ok('C · a corrected claim comes back still corrected', !!old && old.status === 'superseded');
+    ok('C · …knowing what replaced it and why',
+      old.supersededBy === 'oc2' && /video/.test(old.supersededReason || ''));
+    ok('C · …and it does not silently resume counting as support',
+      diagnose.deriveConfidence(back.signals.filter(s => s.ref === 'oc1')).score === 0);
+    ok('C · the correction is still explainable from history',
+      (back.timeline || []).some(e => e.kind === 'correction'));
+  }
+
   // ── D. The ":_" catch-all preserves first and reports second ────────────────────────────
   console.log('\n  D — the catch-all is visible, not silent');
   _unclassified.clear();
