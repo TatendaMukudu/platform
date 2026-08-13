@@ -184,12 +184,38 @@ function _durableUnits() {
     if (DERIVED_STORES.has(name)) continue;
     if (GLOBAL_STORES.has(name)) { units[`store:${name}`] = store; continue; }
     for (const [key, value] of Object.entries(store || {})) {
-      const org = isOrg(key) ? key : (key.includes(':') && isOrg(key.split(':')[0]) ? key.split(':')[0] : '_');
+      let org = '_', why = '';
+      if (isOrg(key)) org = key;
+      else if (key.includes(':') && isOrg(key.split(':')[0])) org = key.split(':')[0];
+      else why = key.includes(':') ? `prefix "${key.split(':')[0]}" is not a known org`
+                                   : 'key is not a known org code and has no org prefix';
+      if (org === '_') _noteUnclassified(name, key, why);
       const unitKey = `store:${name}:${org}`;
       (units[unitKey] = units[unitKey] || {})[key] = value;
     }
   }
   return units;
+}
+
+/* The ":_" catch-all is what makes "no key can silently vanish" structurally
+   true, so it stays. The risk it carries is the opposite one: a genuine
+   classification mistake living there forever, costing a full-store rewrite on
+   every save and never being noticed. So it preserves the data first and
+   reports the anomaly second — never fatal, because refusing to persist
+   something we merely failed to classify would trade a visible cost for
+   invisible data loss, which is the wrong way round.
+
+   Deduped by store+key so a permanently-unclassifiable key logs once, not on
+   every save cycle. Readable at /api/admin/persistence. */
+const _unclassified = new Map();     // `${store}.${key}` → { store, key, why, count, firstAt }
+function _noteUnclassified(store, key, why) {
+  const id = `${store}.${key}`;
+  const seen = _unclassified.get(id);
+  if (seen) { seen.count++; return; }
+  _unclassified.set(id, { store, key, why, count: 1, firstAt: new Date().toISOString() });
+  if (process.env.SAVE_TRACE === '1' || process.env.NODE_ENV !== 'production') {
+    console.warn(`[persist] unclassified key → ${store}:_  key="${key}" (${why})`);
+  }
 }
 
 /* Reassemble the in-memory shape from split rows. Assignment is per top-level
@@ -223,6 +249,25 @@ const _saveHashes = new Map();       // unit key → hash of what is durably sto
 let _saveTimer = null, _saveInFlight = false, _saveDirty = false;
 let _lastSave = null;                // instrumentation for the bandwidth report
 
+/* Just enough counters to answer "did the architectural hypothesis hold?" after
+   a deploy, and no more. The question is whether writes now cost what changed;
+   these are the numbers that answer it, not a telemetry system. */
+const _saveStats = {
+  cycles: 0,           // save cycles that ran
+  noopCycles: 0,       // …of which wrote nothing (the baseline that must dominate when idle)
+  unitsWritten: 0,     // durable units actually written
+  bytesSerialised: 0,  // bytes hashed to decide what changed
+  bytesWritten: 0,     // bytes that actually left the process — the bandwidth number
+  deletes: 0,
+  queued: 0,           // follow-up saves coalesced into a run already in flight
+  retries: 0,          // backoff retries after a failed write
+  failures: 0,
+  totalMs: 0,
+  maxMs: 0,
+  largestUnit: null,   // { key, bytes } — the biggest single row we have written
+  startedAt: new Date().toISOString(),
+};
+
 const SAVE_DEBOUNCE_MS = Math.max(100, parseInt(process.env.SAVE_DEBOUNCE_MS, 10) || 1500);
 const _hash = (s) => require('crypto').createHash('sha1').update(s).digest('hex');
 
@@ -235,6 +280,7 @@ function _scheduleRetry() {
   if (_saveRetryTimer) return;
   const base = Math.max(20, parseInt(process.env.SAVE_RETRY_MS, 10) || 5000);
   const delay = Math.min(base * 12, base * Math.pow(2, _saveRetries++));
+  _saveStats.retries++;
   _saveRetryTimer = setTimeout(() => { _saveRetryTimer = null; _runSave(); }, delay);
   if (_saveRetryTimer.unref) _saveRetryTimer.unref();
 }
@@ -246,7 +292,7 @@ function _scheduleRetry() {
    one already running to pick up; there is never a second transaction in
    flight, and a mutation arriving mid-save is never dropped. */
 async function _runSave() {
-  if (_saveInFlight) { _saveDirty = true; return; }
+  if (_saveInFlight) { _saveDirty = true; _saveStats.queued++; return; }
   _saveInFlight = true;
   try {
     do {
@@ -267,22 +313,34 @@ async function _runSave() {
         continue;
       }
 
+      _saveStats.cycles++;
       const units = _durableUnits();
       const changed = {};
       const hashes = {};
-      let bytes = 0;
+      let bytes = 0, serialised = 0;
       for (const [key, value] of Object.entries(units)) {
         const json = JSON.stringify(value);
+        const size = Buffer.byteLength(json, 'utf8');
         const h = _hash(json);
         hashes[key] = h;
-        if (_saveHashes.get(key) !== h) { changed[key] = value; bytes += Buffer.byteLength(json, 'utf8'); }
+        serialised += size;
+        if (_saveHashes.get(key) !== h) {
+          changed[key] = value;
+          bytes += size;
+          if (!_saveStats.largestUnit || size > _saveStats.largestUnit.bytes) _saveStats.largestUnit = { key, bytes: size };
+        }
       }
+      _saveStats.bytesSerialised += serialised;
       // A unit that no longer exists in memory must stop existing in the store.
       // The blob write got deletion for free by replacing everything; split rows
       // have to be told, or an emptied org lingers as a ghost forever.
       const gone = [...(_saveHashes.keys())].filter(k => !(k in units));
 
-      if (!Object.keys(changed).length && !gone.length) { _lastSave = { units: 0, bytes: 0, ms: 0 }; continue; }
+      if (!Object.keys(changed).length && !gone.length) {
+        _saveStats.noopCycles++;
+        _lastSave = { units: 0, bytes: 0, ms: 0 };
+        continue;
+      }
 
       try {
         await db.saveStores(changed);
@@ -296,12 +354,21 @@ async function _runSave() {
         for (const [k, h] of Object.entries(hashes)) _saveHashes.set(k, h);
         for (const k of gone) _saveHashes.delete(k);
         _saveRetries = 0;
-        _lastSave = { units: Object.keys(changed).length, bytes, ms: Date.now() - t0, deleted: gone.length };
+        const ms = Date.now() - t0;
+        _lastSave = { units: Object.keys(changed).length, bytes, serialised, ms, deleted: gone.length, at: new Date().toISOString() };
+        _saveStats.unitsWritten += _lastSave.units;
+        _saveStats.bytesWritten += bytes;
+        _saveStats.deletes += gone.length;
+        _saveStats.totalMs += ms;
+        if (ms > _saveStats.maxMs) _saveStats.maxMs = ms;
         if (process.env.SAVE_TRACE === '1') {
-          console.log(`[save] ${_lastSave.units} unit(s), ${(bytes / 1024).toFixed(1)} KB, ${_lastSave.ms}ms${gone.length ? `, ${gone.length} removed` : ''}`);
+          const keys = Object.keys(changed).slice(0, 4).join(', ');
+          console.log(`[save] ${_lastSave.units} unit(s) ${(bytes / 1024).toFixed(1)} KB written of ${(serialised / 1024).toFixed(1)} KB held, ${ms}ms` +
+            `${gone.length ? `, ${gone.length} removed` : ''}${keys ? ` — ${keys}${_lastSave.units > 4 ? ', …' : ''}` : ''}`);
         }
       } catch (e) {
         console.error('[db] Save failed:', e.message);   // hashes untouched — still dirty
+        _saveStats.failures++;
         _saveDirty = false;                              // don't spin: back off instead
         _scheduleRetry();
       }
@@ -312,9 +379,47 @@ async function _runSave() {
 }
 
 function scheduleSave() {
-  if (_saveInFlight) { _saveDirty = true; return; }
+  if (_saveInFlight) { _saveDirty = true; _saveStats.queued++; return; }
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => { _saveTimer = null; _runSave(); }, SAVE_DEBOUNCE_MS);
+}
+
+/* The boot path, as one callable step so the migration it performs can actually
+   be tested rather than described. Restoring state is the single operation with
+   no second chance to get right, and it was previously inlined in the startup
+   IIFE where nothing could reach it.
+
+   The legacy blob loads first in every mode, because on the very first boot
+   after the migration it is the only thing that exists. Split rows, if there
+   are any, then REPLACE it rather than merging over it: a merge would
+   resurrect an org deleted after the migration, since `main` still remembers
+   it. Split rows existing at all means the split representation is the live
+   one, and it is complete by construction — _durableUnits covers every
+   persisted key, which persistence-smoke pins. */
+async function _reconstruct(storeData) {
+  _loadAllStores(storeData || {});
+  if (PERSISTENCE_MODE === 'main') return { mode: 'main', units: 0 };
+  try {
+    const rows = await db.loadStores();
+    const n = Object.keys(rows).length;
+    if (n) {
+      for (const store of Object.values(_persistedStores())) {
+        for (const k of Object.keys(store)) delete store[k];
+      }
+      _applyUnits(rows);
+      console.log(`[db] Split persistence: ${n} durable unit(s) loaded (authoritative)`);
+      return { mode: 'split', units: n, authoritative: 'split' };
+    }
+    // First boot after the migration. `main` is left exactly as it is — it
+    // becomes the pre-migration restore point, and PERSISTENCE_MODE=main is
+    // the way back to it.
+    console.log('[db] No split rows yet — migrating from the legacy blob on first save.');
+    scheduleSave();
+    return { mode: PERSISTENCE_MODE, units: 0, authoritative: 'main' };
+  } catch (e) {
+    console.error('[db] Split load failed, continuing on the legacy blob:', e.message);
+    return { mode: PERSISTENCE_MODE, units: 0, authoritative: 'main', error: e.message };
+  }
 }
 
 /* Expired sessions used to be pruned inside the save callback, so persisting
@@ -1694,6 +1799,45 @@ function _removePerson(code, userId, deleteData) {
       assessmentAssignments[code] = assessmentAssignments[code].filter(a => a.assigneeId !== userId && a.assignerId !== userId);
     if (Array.isArray(orgTutorials[code]))
       orgTutorials[code] = orgTutorials[code].filter(t => t.createdBy !== userId);
+
+    /* Eleven stores had a load path but were missing from the old save payload,
+       so everything below used to be erased by accident at the next restart —
+       which hid the fact that erasure never reached it. Now that they are
+       genuinely durable, Art 17 has to reach them explicitly, or a person who
+       asks to be forgotten keeps a permanent private chat history, a diagnostic
+       picture quoting them verbatim, and a safeguarding excerpt of their worst
+       day. This block is the durability fix's other half. */
+    // uKey is userKey(code, userId) — the same string _wsKey and _selfKey build.
+    delete assistantConversations[uKey];    // private chat history, verbatim
+    delete selfModelLedger[uKey];           // learned habits (private to them)
+    delete deliveryPrefs[uKey];             // opt-in record + quiet hours
+    delete pushSubs[uKey];                  // web-push endpoints
+
+    // The working diagnostic picture, which holds spans quoted from what they said.
+    if (inquiryStates[code]) delete inquiryStates[code][`member:${userId}`];
+
+    // Library items + folders they own (private notes, saved chats, artifacts).
+    if (Array.isArray(libraryItems[code]))
+      libraryItems[code] = libraryItems[code].filter(i => i && i.ownerId !== userId);
+    if (Array.isArray(libraryFolders[code]))
+      libraryFolders[code] = libraryFolders[code].filter(f => f && f.ownerId !== userId);
+
+    // Beliefs held ABOUT them. Org-level beliefs (no subject) are not personal
+    // data and stay, so erasing one person doesn't blank the organisation's read.
+    if (Array.isArray(reasonLedger[code]))
+      reasonLedger[code] = reasonLedger[code].filter(b => b && b.subjectId !== userId);
+
+    // Safeguarding flags carry an excerpt of their own words. A resolved concern
+    // about a person who has left is still personal data about that person.
+    if (Array.isArray(safeguardingFlags[code]))
+      safeguardingFlags[code] = safeguardingFlags[code].filter(f => f && f.subjectId !== userId);
+
+    /* auditLog is deliberately NOT cleared. It is content-free by construction
+       (ids and action names, never what was said) and hash-chained, so removing
+       entries would break the tamper-evidence the whole trail exists to provide.
+       Art 17(3)(b) permits retaining what is needed for a legal obligation, and
+       Art 5(2) accountability is exactly that: the record that the erasure
+       happened cannot itself be erasable. */
   }
 
   return { ok: true };
@@ -12036,6 +12180,54 @@ app.get('/api/admin/errors', requireAuth, (req, res) => {
   res.json({ ok: true, errors, scope: platform ? 'platform' : 'org', webhookConfigured: !!process.env.IQ_ERROR_WEBHOOK });
 });
 
+/* GET /api/admin/persistence — did the durable-unit hypothesis hold in production?
+   The one question the repository could never answer: writes should now cost what CHANGED,
+   not the whole platform. bytesWritten vs bytesSerialised is that ratio measured live.
+   Also surfaces ":_" classification anomalies (preserved data, reported second) and the
+   real row sizes from Postgres. Platform owner sees row sizes; an org superadmin sees the
+   save behaviour but not other orgs' row names. */
+app.get('/api/admin/persistence', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const platform = _isPlatformAdmin(req);
+  if (!platform && orgUsers[code]?.[userId]?.role !== 'superadmin') return res.status(403).json({ error: 'superadmin only' });
+
+  const units = _durableUnits();
+  const sizes = Object.entries(units).map(([k, v]) => ({ key: k, bytes: Buffer.byteLength(JSON.stringify(v), 'utf8') }))
+    .sort((a, b) => b.bytes - a.bytes);
+  const held = sizes.reduce((n, u) => n + u.bytes, 0);
+  const anomalies = [..._unclassified.values()];
+
+  const body = {
+    ok: true,
+    mode: PERSISTENCE_MODE,
+    debounceMs: SAVE_DEBOUNCE_MS,
+    saves: {
+      ..._saveStats,
+      // The headline: of everything we hold, what share actually leaves per cycle.
+      avgBytesPerWrite: _saveStats.cycles ? Math.round(_saveStats.bytesWritten / _saveStats.cycles) : 0,
+      writtenShare: _saveStats.bytesSerialised
+        ? +(_saveStats.bytesWritten / _saveStats.bytesSerialised).toFixed(5) : 0,
+      avgMs: _saveStats.cycles ? Math.round(_saveStats.totalMs / _saveStats.cycles) : 0,
+      inFlight: _saveInFlight,
+      pendingRetry: !!_saveRetryTimer,
+    },
+    lastSave: _lastSave,
+    inMemory: { units: sizes.length, bytes: held },
+    largestUnits: (platform ? sizes : sizes.filter(u => u.key.endsWith(`:${code}`) || !u.key.split(':')[2])).slice(0, 15),
+    // Preserved-but-unclassified keys. Never fatal; visible so a real mistake
+    // cannot live here forever costing a full-store rewrite unnoticed.
+    unclassified: platform ? anomalies : anomalies.filter(a => a.key === code || a.key.startsWith(`${code}:`)),
+  };
+
+  // Real stored sizes, which only Postgres knows. Platform owner only — row keys
+  // name other organisations.
+  if (platform) {
+    try { body.storedRows = await db.storeSizes(15); }
+    catch (e) { body.storedRows = { error: e.message }; }
+  }
+  res.json(body);
+});
+
 /* GET /api/admin/metrics — per-org usage (turns, LLM calls, logins, safeguarding flags). An
    org superadmin sees only their own org; the platform owner (x-platform-key) sees every org
    ranked by activity — "is anyone using it?" and "which org is driving LLM cost?". */
@@ -16298,7 +16490,9 @@ const PORT = process.env.PORT || 3000;
 module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired,
   // exported for the truth layer: the persistence boundary
   _durableUnits, _applyUnits, _pruneExpiredSessions, _persistedStores, scheduleSave,
+  _reconstruct, _unclassified, _saveStats, PERSISTENCE_MODE,
   emailIndex, activeSessions, inviteTokens, userAiProfiles,
+  reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library
   // a routed share lands in
   orgMeta, libraryItems, _professionals,
@@ -16394,28 +16588,7 @@ if (require.main === module) (async () => {
     //    remembers it. Split rows existing at all means the split representation
     //    is the live one, and it is complete by construction (_durableUnits
     //    covers every persisted key, which persistence-smoke pins).
-    _loadAllStores(storeData);
-    if (PERSISTENCE_MODE !== 'main') {
-      try {
-        const rows = await db.loadStores();
-        const n = Object.keys(rows).length;
-        if (n) {
-          for (const store of Object.values(_persistedStores())) {
-            for (const k of Object.keys(store)) delete store[k];
-          }
-          _applyUnits(rows);
-          console.log(`[db] Split persistence: ${n} durable unit(s) loaded (authoritative)`);
-        } else {
-          // First boot after the migration. `main` is left exactly as it is —
-          // it becomes the pre-migration restore point, and PERSISTENCE_MODE=main
-          // is the way back to it.
-          console.log('[db] No split rows yet — migrating from the legacy blob on first save.');
-          scheduleSave();
-        }
-      } catch (e) {
-        console.error('[db] Split load failed, continuing on the legacy blob:', e.message);
-      }
-    }
+    await _reconstruct(storeData);
     console.log(`[db] Persistence mode: ${PERSISTENCE_MODE}`);
 
     // 5. Repair emailIndex — no longer persisted at all; it is derived from
