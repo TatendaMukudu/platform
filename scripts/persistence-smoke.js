@@ -8,7 +8,9 @@
 
 process.env.DB_OPTIONAL = '1';
 process.env.SAVE_DEBOUNCE_MS = '30';                 // keep the suite quick
-process.env.SAVE_RETRY_MS    = '40';
+// Retry backoff sits well clear of `settle` below, so the two timescales cannot be confused:
+// settle must reliably cover a save, and must reliably NOT cover an automatic retry.
+process.env.SAVE_RETRY_MS    = '900';
 let pass = 0, fail = 0;
 const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n); } };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -34,7 +36,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     } finally { concurrent--; }
   };
   db.deleteStores = async (keys) => { deleted.push(...keys); return keys.length; };
-  const settle = async () => { await sleep(140); };
+  // Generous relative to the 30ms debounce on purpose: this suite asserts on WHETHER a write
+  // happened, so a slow machine must never be mistaken for a missing save.
+  const settle = async () => { await sleep(300); };
   const lastWrite = () => written[written.length - 1] || [];
 
   orgMeta.alpha = { orgName: 'Alpha FC', orgMode: 'sports' };
@@ -118,7 +122,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   failNext = true;
   scheduleSave(); await settle();
   ok('6b · the failed attempt wrote nothing', written.length === 0);
-  await sleep(400);                                   // no mutation, no scheduleSave — backoff only
+  await sleep(1400);                                  // no mutation, no scheduleSave — backoff only
   ok('6b · a failure retries itself on a backoff, with no further mutation',
     written.flat().includes('store:orgUsers:alpha'));
 
@@ -129,7 +133,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await sleep(45);                                    // mid-write
   inquiryStates.alpha['member:ash'].attendance.signals.push({ ref: 's2' });
   scheduleSave();
-  await sleep(300);
+  await sleep(500);
   ok('7 · maximum concurrent persistence transactions is exactly 1', maxConcurrent === 1);
   ok('7 · …and the mutation made during the save is still persisted',
     written.flat().includes('store:inquiryStates:alpha'));

@@ -536,6 +536,13 @@ function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefO
         } : {}),
       });
 
+      /* "I take that back" is not evidence FOR anything. A withdrawal exists so the record can
+         say the claim was retracted and by whom; counting it as a live observation would mean
+         retracting something left the evidence base exactly as large as before, which is how a
+         withdrawal ends up costing nothing. A correction that REPLACES a claim is different —
+         that one is a real account and counts normally. */
+      if (p.withdraws) next.signals[next.signals.length - 1].status = 'withdrawn';
+
       /* A proposal may say it CORRECTS an earlier claim. Whether it gets to is decided here,
          not by the model asserting it: the same source may revise itself, and an authoritative
          record may overrule an unverified one. Anything else becomes a contradiction, so the

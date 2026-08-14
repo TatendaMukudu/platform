@@ -53,6 +53,7 @@ const kernelCoreasoning = require('./ai/kernel-coreasoning');
 const composer          = require('./ai/composer');
 const diagnose          = require('./ai/diagnose');
 const contribution      = require('./ai/contribution');
+const forum             = require('./ai/forum');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
 const errorlog = require('./ai/errorlog');
@@ -163,7 +164,7 @@ function _persistedStores() {
     orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
     reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
     conversationSessions, assistantConversations, libraryFolders, libraryItems, safeguardingFlags,
-    inquiryStates, groupCandidates,
+    inquiryStates, groupCandidates, forumThreads,
   };
 }
 
@@ -1822,6 +1823,18 @@ function _removePerson(code, userId, deleteData) {
       libraryItems[code] = libraryItems[code].filter(i => i && i.ownerId !== userId);
     if (Array.isArray(libraryFolders[code]))
       libraryFolders[code] = libraryFolders[code].filter(f => f && f.ownerId !== userId);
+
+    /* Forum speech is personal data even though it was said in the open, so erasure removes the
+       words and the authorship. The turn is left as a tombstone rather than spliced out: a
+       thread that silently loses messages misrepresents the conversation that actually happened,
+       and replies to it would point at nothing. What the statement BECAME, if they contributed
+       it, is governed by the evidence lifecycle below, not by this. */
+    for (const thread of Object.values(forumThreads[code] || {})) {
+      for (let i = 0; i < (thread.messages || []).length; i++) {
+        if (thread.messages[i].authorId !== userId) continue;
+        thread.messages[i] = { ...thread.messages[i], authorId: null, text: '', status: 'removed', removedAt: Date.now() };
+      }
+    }
 
     /* Group candidates they never acted on are private noticings and go entirely. What they
        DELIBERATELY contributed is the group's material now and is kept — but the contributor is
@@ -12299,7 +12312,10 @@ app.get('/api/group/:nodeId/inquiry', requireAuth, (req, res) => {
       independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size,
       contributors: new Set(active.map(s => s.contributorVisibility === 'anonymous' ? '(anonymous)' : s.contributedBy).filter(Boolean)).size,
       signals: active.length,
-      corrected: sig.length - active.length,
+      // Claims that were CORRECTED — not every inactive signal. A retraction marker is itself
+      // inactive (taking something back is not evidence for anything), and counting it would
+      // report two corrections where one claim was withdrawn.
+      corrected: sig.filter(s => s.supersededBy).length,
       contradictions: active.filter(s => s.dissents).length,
       stillUnknown: (i.missingSignals || []).map(m => m.question),
       timeline: (i.timeline || []).slice(-8).reverse().map(e => ({ at: e.at, kind: e.kind, summary: e.summary })),
@@ -12310,6 +12326,171 @@ app.get('/api/group/:nodeId/inquiry', requireAuth, (req, res) => {
   _audit(code, { actor: userId, action: 'agenda_view', subjectIds: [], basis: 'group_inquiry' });
   res.json({ ok: true, node: { nodeId, name: subject.node.name }, inquiries,
     note: 'Built only from what people deliberately contributed. Nothing private enters here.' });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   FORUM — deliberation around a group inquiry
+
+   Forum creates SPEECH before it creates evidence. A message is conversation: not a signal, not
+   a contribution, not an origin, not corroboration. Ten people agreeing changes nothing, and
+   that is structural rather than a rule — the post path below touches forumThreads and nothing
+   else, and ai/forum.js contains no reference to evidence, confidence or origins at all.
+
+   Turning a statement into evidence is a separate, deliberate act by its author, and it goes
+   through ai/contribution.js — the SAME boundary everything else uses. There is no second
+   evidence pipeline here.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* code → { inquiryId → thread }. Org-partitioned at the top level, so it rides the existing
+   durable-unit machinery with no special handling. */
+const forumThreads = {};
+
+/* Every thread is anchored to a real group inquiry. There are deliberately no free-floating team
+   threads: an unanchored thread is a place where a topic accumulates apparent importance without
+   ever passing the evidence boundary, which is the confusion this whole layer exists to prevent. */
+function _forumThread(code, nodeId, inquiryId, { create = false } = {}) {
+  const subject = _groupSubjectRef(code, nodeId);
+  if (!subject.ok) return { ok: false, status: 404, error: subject.error };
+  const bySubject = (inquiryStates[code] || {})[subject.subjectRef] || {};
+  const inq = Object.values(bySubject).find(i => i && i.inquiryId === String(inquiryId));
+  if (!inq) return { ok: false, status: 404, error: 'no such inquiry for this group' };
+
+  const threads = (forumThreads[code] = forumThreads[code] || {});
+  if (!threads[inq.inquiryId] && create) {
+    threads[inq.inquiryId] = forum.newThread({ inquiryId: inq.inquiryId, nodeId, subjectRef: subject.subjectRef });
+  }
+  return { ok: true, thread: threads[inq.inquiryId] || null, inquiry: inq, subjectRef: subject.subjectRef };
+}
+
+function _forumAccess(code, nodeId, userId) {
+  return { inNode: _inNode(code, nodeId, userId), leadsNode: _leadsNode(code, nodeId, userId) };
+}
+
+/* GET /api/group/:nodeId/forum/:inquiryId — read the deliberation. */
+app.get('/api/group/:nodeId/forum/:inquiryId', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const t = _forumThread(code, nodeId, req.params.inquiryId);
+  if (!t.ok) return res.status(t.status).json({ error: t.error });
+  const access = _forumAccess(code, nodeId, userId);
+  if (!forum.mayRead(access)) return res.status(403).json({ error: 'not part of this group' });
+  res.json({
+    ok: true,
+    ...forum.visibleThread(t.thread || forum.newThread({ inquiryId: t.inquiry.inquiryId, nodeId })),
+    note: 'Discussion. Nothing said here counts as evidence unless its author deliberately offers it as their account.',
+  });
+});
+
+/* POST /api/group/:nodeId/forum/:inquiryId — say something. { text, replyTo? }
+
+   THE EPISTEMICALLY INERT PATH. Note what this handler does NOT do: it never reaches
+   applyProposals, never creates a candidate, never touches inquiryStates. */
+app.post('/api/group/:nodeId/forum/:inquiryId', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const t = _forumThread(code, nodeId, req.params.inquiryId, { create: true });
+  if (!t.ok) return res.status(t.status).json({ error: t.error });
+  const access = _forumAccess(code, nodeId, userId);
+  if (!forum.mayPost(access)) return res.status(403).json({ error: 'not part of this group' });
+
+  const text = String((req.body || {}).text || '').trim();
+  if (!text) return res.status(400).json({ error: 'text required' });
+
+  const msg = forum.newMessage({
+    id: 'fm_' + generateId(), authorId: userId, text,
+    replyTo: (req.body || {}).replyTo || null,
+  });
+  t.thread.messages.push(msg);
+  if (t.thread.messages.length > forum.THREAD_CAP) t.thread.messages.splice(0, t.thread.messages.length - forum.THREAD_CAP);
+  scheduleSave();
+  res.json({ ok: true, messageId: msg.messageId, epistemicEffect: 'none' });
+});
+
+/* PATCH /api/group/:nodeId/forum/:inquiryId/:messageId — edit or remove MY OWN speech.
+   { text } to edit, { remove: true } to withdraw it.
+
+   Editing speech never rewrites evidence. If this statement was contributed, the evidence stands
+   until the author corrects it through the evidence lifecycle — otherwise changing a sentence
+   would silently alter what an inquiry had been reasoned from, which is the mutable-history
+   failure the correction machinery exists to avoid. */
+app.patch('/api/group/:nodeId/forum/:inquiryId/:messageId', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const t = _forumThread(code, nodeId, req.params.inquiryId);
+  if (!t.ok || !t.thread) return res.status(404).json({ error: t.error || 'no discussion yet' });
+  const i = t.thread.messages.findIndex(m => m.messageId === String(req.params.messageId));
+  if (i === -1) return res.status(404).json({ error: 'message not found' });
+  if (!forum.mayEdit({ actorId: userId, message: t.thread.messages[i] })) {
+    return res.status(403).json({ error: 'only the author may change their own message' });
+  }
+  const had = t.thread.messages[i].contributedAs;
+  t.thread.messages[i] = (req.body || {}).remove === true
+    ? forum.removeMessage(t.thread.messages[i])
+    : forum.editMessage(t.thread.messages[i], (req.body || {}).text);
+  scheduleSave();
+  res.json({ ok: true, messageId: req.params.messageId,
+    // Said plainly, because the two lifecycles being separate is the point.
+    evidenceUnchanged: !!had,
+    note: had ? 'Your statement is still recorded as evidence. Withdraw it separately if you no longer stand behind it.' : undefined });
+});
+
+/* POST /api/group/:nodeId/forum/:inquiryId/:messageId/contribute — offer MY OWN statement as my
+   account. { echoes?: messageId }
+
+   This is the deliberate escape hatch the conservative relevance gate needs: a statement that is
+   genuinely about the group but phrased without collective language produces no automatic
+   candidate, and this is how its author says "yes, this one, on the record".
+
+   It enters through ai/contribution.js exactly as a Self-detected candidate does — same
+   ownership check, same opening rule, same kernel. Forum supplies words and provenance; it
+   decides nothing. */
+app.post('/api/group/:nodeId/forum/:inquiryId/:messageId/contribute', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const t = _forumThread(code, nodeId, req.params.inquiryId);
+  if (!t.ok || !t.thread) return res.status(t.status || 404).json({ error: t.error || 'no discussion yet' });
+  const msg = t.thread.messages.find(m => m.messageId === String(req.params.messageId));
+  const access = _forumAccess(code, nodeId, userId);
+
+  // Authorship, not leadership. A coach may run the squad and still not put words in a player's
+  // mouth — see ai/forum.mayContributeMessage.
+  const gate = forum.mayContributeMessage({ actorId: userId, message: msg, ...access });
+  if (!gate.allowed) return res.status(msg ? 403 : 404).json({ error: gate.reason });
+
+  /* FORUM IS NOT AN ORIGIN. An account of something the author saw is a genuine new origin; a
+     restatement of something already contributed carries the ORIGINAL's origin and is marked
+     reported, so public agreement can never become corroboration. */
+  const echoed = (req.body || {}).echoes
+    ? t.thread.messages.find(m => m.messageId === String((req.body || {}).echoes))
+    : null;
+  const origin = forum.originForMessage(msg, {
+    echoesMessage: echoed ? { contributedOrigin: (_groupCands(code).find(c => c.evidenceRef === echoed.contributedAs) || {}).originRef } : null,
+  });
+
+  const concept = (t.inquiry.topic && t.inquiry.topic.canonicalConcept) || t.inquiry.inquiryId;
+  const cand = contribution.newCandidate({
+    id: 'gc_' + generateId(), orgCode: code, nodeId, contributorId: userId,
+    concept, label: t.inquiry.displayLabel || concept,
+    evidenceRef: msg.messageId,
+    originRef: origin.originRef, originKind: origin.originKind,
+    occasion: msg.messageId, authority: access.leadsNode ? 'corroborated' : 'self_report',
+    scope: 'GROUP_CANDIDATE', reason: 'offered by its author in the group discussion',
+  });
+  cand.status = 'contributed';
+  cand.contributedAt = Date.now();
+  cand.contributorRole = access.leadsNode ? 'leader' : 'member';
+  cand.contributorVisibility = 'named';          // they said it in the open already
+  cand.fromSubject = `member:${userId}`;
+  cand.specificity = 0.6;
+  _groupCands(code).push(cand);
+
+  msg.contributedAs = msg.messageId;
+  msg.contributedAt = cand.contributedAt;
+
+  const out = _admitGroupContributions(code, nodeId, concept);
+  scheduleSave();
+  res.json({ ok: true, contributed: msg.messageId, origin: origin.originKind,
+    admitted: !!out.opened, decision: out.decision || null });
 });
 
 /* GET /api/library — items visible to me: my own (any visibility) + anyone's SHARED. Filter
@@ -12355,7 +12536,7 @@ app.get('/api/inquiry', requireAuth, (req, res) => {
       signals: sig.filter(s => diagnose.isActive(s)).length,
       // Kept separately rather than hidden, because "you told us X, then corrected it" is a more
       // trustworthy thing to be able to show than a number that quietly shrank.
-      corrected: sig.filter(s => !diagnose.isActive(s)).length,
+      corrected: sig.filter(s => s.supersededBy).length,
       // How many separate underlying occurrences this rests on, as opposed to how many times it
       // has been mentioned. The distinction confidence is built on, made visible.
       origins: new Set(sig.filter(s => diagnose.isActive(s) && s.originRef).map(s => s.originRef)).size,
@@ -16746,6 +16927,7 @@ function _loadAllStores(data) {
   Object.assign(inquiryStates,  data.inquiryStates  || {});
   Object.assign(safeguardingFlags, data.safeguardingFlags || {});
   Object.assign(groupCandidates, data.groupCandidates || {});
+  Object.assign(forumThreads,   data.forumThreads   || {});
   _rebuildEvidenceIndex();
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
@@ -16789,7 +16971,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   emailIndex, activeSessions, inviteTokens, userAiProfiles,
   // exported for the truth layer: the group contribution boundary
   groupCandidates, orgNodes, _groupSubjectRef, _noteGroupCandidates, _admitGroupContributions,
-  _inNode, _leadsNode,
+  _inNode, _leadsNode, forumThreads, _forumThread,
   reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library
   // a routed share lands in
