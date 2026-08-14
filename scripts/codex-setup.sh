@@ -20,10 +20,25 @@ REPO_DIR="${CODEX_REPO_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
 
 cd "$REPO_DIR" 2>/dev/null || { echo "codex-setup: no repo directory at $REPO_DIR"; exit 0; }
 
+# The remote is configured FIRST and unconditionally, before anything can go wrong with the
+# credential. An earlier version returned early when the token was missing, which left no
+# remote at all — so the failure read as "'origin' does not appear to be a git repository"
+# and pointed at the wrong problem entirely. A missing token and a missing remote are
+# different faults and must not produce the same symptom.
+git remote remove origin 2>/dev/null
+git remote add origin "$REPO_URL" || git remote set-url origin "$REPO_URL"
+
+git config --global user.name  "Codex"
+git config --global user.email "codex@users.noreply.github.com"
+git config --global push.default current
+
+# Presence only, never the value — this line goes into logs the agent may paste back.
+echo "codex-setup: GITHUB_TOKEN is ${GITHUB_TOKEN:+SET}${GITHUB_TOKEN:-NOT SET}"
+
 if [ -z "${GITHUB_TOKEN:-}" ]; then
-  echo "codex-setup: GITHUB_TOKEN is not set."
-  echo "codex-setup: clone and tests will work; PUSH WILL FAIL."
-  echo "codex-setup: add GITHUB_TOKEN as an environment variable in the Codex environment."
+  echo "codex-setup: remote configured, but there is no credential. PUSH WILL FAIL."
+  echo "codex-setup: add GITHUB_TOKEN to the Codex environment variables, then reset the cache."
+  echo "codex-setup: remote is $(git remote get-url origin 2>/dev/null || echo 'NOT SET')"
   exit 0
 fi
 
@@ -33,13 +48,6 @@ fi
 printf 'https://x-access-token:%s@github.com\n' "$GITHUB_TOKEN" > "$HOME/.git-credentials"
 chmod 600 "$HOME/.git-credentials"
 git config --global credential.helper store
-
-git remote remove origin 2>/dev/null
-git remote add origin "$REPO_URL" || git remote set-url origin "$REPO_URL"
-
-git config --global user.name  "Codex"
-git config --global user.email "codex@users.noreply.github.com"
-git config --global push.default current
 
 # Prove the credential actually works, without writing anything. --dry-run still contacts the
 # remote and authenticates, so a 403 surfaces HERE, at setup, rather than after an hour of
