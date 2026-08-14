@@ -1,10 +1,38 @@
 /* ============================================================
-   ai/admissibility.js — MAY THIS EVIDENCE GROUND AN ANSWER NOW? (pure)
+   ai/admissibility.js — MAY THIS SIGNAL GROUND AN ANSWER NOW? (pure)
 
-   The retrieval boundary decides what reaches an answer, and it had no awareness of signal
-   lifecycle. So a signal whose source has since withdrawn it could still ground a current
-   factual claim, and the correction that was supposed to matter changed nothing a reader
-   saw. Corrections became cosmetic. This is the gate that closes that.
+   ── Correcting the record on why this exists ────────────────────────────────────────────
+
+   This module was written on the claim that the retrieval boundary had no awareness of
+   evidence lifecycle, so corrections were cosmetic. THAT CLAIM WAS WRONG, and it survived
+   into a brief, a smoke suite and this header before anyone checked it against the code.
+
+   server.js `_kernelEvidence` — "the ONLY door to kernel reasoning" — opens with:
+
+       if (env.status !== 'active') return false;
+
+   Superseded, held, deleted and rejected ENVELOPES never reach `_retrieveGrounding`'s
+   candidate set, and because it is an allowlist it fails closed on lifecycle states nobody
+   has invented yet. That gate has been correct the whole time. Note also that envelopes and
+   signals have DIFFERENT vocabularies — lib/evidence.js uses
+   ['active','held','superseded','deleted','rejected'], diagnose.js uses
+   ['active','superseded','withdrawn'] — so a gate written for one does not fit the other.
+
+   ── What is genuinely missing, and is what this module actually does ────────────────────
+
+   Two narrower things, at the SIGNAL layer rather than the envelope layer:
+
+     1. `diagnose.isActive` fails OPEN on a missing signal. `isActive(null)` is true, so a
+        null or malformed entry in a signals array counts as current support. That is a real
+        hole, just a much smaller one than advertised.
+
+     2. Nothing reports WHY a signal was excluded. Filtering a withdrawn account out silently
+        makes the answer quietly shrink; the reader learns nothing was corrected. partition()
+        returns the exclusions and their reasons so a caller can say "three accounts, one
+        since withdrawn" instead of reporting two and sounding confident.
+
+   The module is worth keeping for those. It is not the missing lifecycle awareness it was
+   sold as, and pretending otherwise would leave a false map of the system in the codebase.
 
    ── One question, and only one ──────────────────────────────────────────────────────────
 
@@ -15,6 +43,7 @@
      counting independent origins     → ai/diagnose.js deriveConfidence (originRef)
      may evidence enter a group       → ai/contribution.js mayContribute
      who may read a subject at all    → the server's auth layer
+     envelope lifecycle at retrieval  → server.js _kernelEvidence (status !== 'active')
      predictive / diagnostic phrasing → ai/language-guard.js
 
    originKind in particular is NOT an admissibility input. 'reported' evidence is admissible

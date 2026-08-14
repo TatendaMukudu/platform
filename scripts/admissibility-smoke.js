@@ -8,12 +8,17 @@
 
    NOT REGISTERED in scripts/test.js yet. Register it in the same commit that adds the module.
 
-   ── What this is for ────────────────────────────────────────────────────────────────────
+   ── What this is for (corrected — the original justification was false) ─────────────────
 
-   `_retrieveGrounding` in server.js decides what evidence reaches an answer, and today it has
-   no awareness of signal lifecycle. So a signal the source has since withdrawn can still
-   ground a current factual claim, and the correction that was supposed to matter changes
-   nothing a reader sees. Corrections become cosmetic.
+   This suite was written on the claim that `_retrieveGrounding` had no awareness of evidence
+   lifecycle. It was not checked against the code first, and it was wrong. server.js
+   `_kernelEvidence` opens with `if (env.status !== 'active') return false;`, so superseded
+   envelopes never become candidates, and the allowlist form fails closed on future states.
+
+   What remains true, and what these cases actually pin, is narrower: `diagnose.isActive`
+   returns TRUE for a missing signal, and nothing anywhere reports why a signal was excluded.
+   The assertions below were unaffected by the correction — they always tested the signal
+   layer — but the reason they exist has been rewritten to match the system as it is.
 
    ── Why this is NOT just isActive ───────────────────────────────────────────────────────
 

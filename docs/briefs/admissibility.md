@@ -9,6 +9,26 @@ to make it green without editing it. Then `node scripts/test.js` must be green t
 
 ---
 
+> ## CORRECTED — the premise below was wrong
+>
+> This brief said the retrieval boundary had no awareness of evidence lifecycle. It does.
+> `_kernelEvidence` in server.js — "the ONLY door to kernel reasoning" — opens with
+> `if (env.status !== 'active') return false;`, so superseded envelopes never reach
+> `_retrieveGrounding`, and the allowlist form fails closed on lifecycle states not yet
+> invented. I asserted the opposite in three files without checking the code.
+>
+> Note too that the two layers use different vocabularies: `lib/evidence.js` envelopes are
+> `['active','held','superseded','deleted','rejected']`; `ai/diagnose.js` signals are
+> `['active','superseded','withdrawn']`. A gate written for one does not fit the other, so
+> "wire admissibility into `_retrieveGrounding`" was never the right follow-up.
+>
+> What is genuinely missing is smaller and real: `diagnose.isActive(null)` is `true`, so a
+> malformed signal counts as support; and nothing reports *why* a signal was excluded, which
+> is what makes a correction visible rather than a silently shorter answer.
+>
+> **The module is built and merged** (`ai/admissibility.js`, 25/25). This brief is kept as the
+> record of an architectural claim that the repository disproved.
+
 ## The task in one sentence
 
 Write `ai/admissibility.js` so that `node scripts/admissibility-smoke.js` passes.
