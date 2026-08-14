@@ -18,25 +18,18 @@ of good investigators who remember what they learned and can say what they do no
 
 ## The invariants — never trade these for a working demo
 
-These are enforced in code and covered by the truth layer. If your change makes one of them
+**They live in `AGENTS.md`, not here.** Read §2 of that file: the nine product laws, the
+privacy law, and the seven epistemic invariants that govern how the kernel is allowed to come
+to believe anything.
+
+They are enforced in code and covered by the truth layer. If your change makes one of them
 false, the change is wrong, not the invariant.
 
-- **The LLM proposes; deterministic code decides.** Permissions, identity, confidence, origin
-  counts and state transitions are computed, never generated. A model may never author a
-  permission or assert its own confidence.
-- **Evidence is referenced, never copied.** Inquiries hold refs and the shape of evidence, never
-  a person's words. This is what makes privacy structural rather than a filter someone remembers.
-- **Repetition is not corroboration.** Confidence counts independent *origins*, not sources or
-  voices. Ten people relaying one observation is one origin. Never mint an origin to make a
-  number move.
-- **Relevance is not authorisation.** Something can obviously concern a team and still belong
-  privately to one person. Two separate questions, two separate functions.
-- **Corrections preserve history.** Superseded evidence stops counting and never disappears. Do
-  not destructively rewrite the epistemic timeline.
-- **Speech is not evidence.** A Forum message changes nothing until its author deliberately
-  contributes it through the existing boundary.
-- **Fail closed.** Cross-org access, missing nodes, unknown origin, unclear scope — the safe
-  answer is the cheap one.
+This file deliberately does not restate them. `AGENTS.md` is the contract **every** implementer
+works under, human or otherwise; an invariant that is written down in only one agent's
+definition is not a shared rule, and a copy here would drift from the original the first time
+either changed. If you find yourself wanting to quote an invariant into a brief, link to
+`AGENTS.md` §2 instead.
 
 ## How to work
 

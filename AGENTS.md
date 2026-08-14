@@ -81,6 +81,44 @@ Sensitive / hardship information **may inform** the AI's reasoning but must
 **NEVER be revealed, quoted, or surfaced**. `ai/gateway.js` and the privacy gate
 classify + redact; `scripts/privacy-smoke.js` guards it. Do not weaken it.
 
+### The epistemic invariants (how the kernel is allowed to know things)
+
+The product laws above govern *what IntelliQ may say*. These govern *how it is
+allowed to come to believe it*. They are enforced in code, not by convention. If
+your change makes one of them false, the change is wrong, not the invariant.
+
+1. **The LLM proposes; deterministic code decides.** Permissions, identity,
+   confidence, origin counts and state transitions are computed, never generated.
+   A model may never author a permission. **A module may never assert its own
+   confidence or its own safety** — a `safe: true` or `confidence:` field that is
+   a hardcoded literal rather than a computed result is a bug, and any gate
+   downstream that trusts such a field inherits the bug.
+   Guarded by `ai/diagnose.js`, `scripts/reasoning-boundaries-smoke.js`.
+2. **Evidence is referenced, never copied.** Inquiries hold refs and the *shape*
+   of evidence, never a person's words. This is what makes privacy structural
+   rather than a filter someone remembers. An engine item that carries a raw
+   source object alongside its truncated fields has defeated the truncation.
+   Guarded by `scripts/evidence-smoke.js`, `scripts/private-evidence-smoke.js`.
+3. **Repetition is not corroboration.** Confidence counts independent *origins*,
+   not sources or voices. Ten people relaying one observation is one origin.
+   Never mint an origin to make a number move.
+   Guarded by `scripts/origin-correction-smoke.js`.
+4. **Relevance is not authorisation.** Something can obviously concern a team and
+   still belong privately to one person. Two separate questions, two separate
+   functions — never fold them into one check.
+   Guarded by `scripts/private-evidence-smoke.js`, `scripts/group-subject-smoke.js`.
+5. **Corrections preserve history.** Superseded evidence stops counting and never
+   disappears. Do not destructively rewrite the epistemic timeline.
+   Guarded by `ai/lifecycle.js`, `scripts/lifecycle-smoke.js`.
+6. **Speech is not evidence.** A Forum message changes nothing until its author
+   deliberately contributes it through the existing boundary.
+   Guarded by `ai/forum.js`, `ai/contribution.js`, `scripts/forum-smoke.js`.
+7. **Fail closed.** Cross-org access, missing nodes, unknown origin, unrecognised
+   status, unclear scope — the safe answer is the cheap one. Enumerating the *bad*
+   states and treating everything else as fine fails **open**: an unrecognised
+   future state slips through. Allowlist the good states instead.
+   Guarded by `scripts/cross-org-isolation-http-smoke.js`, `scripts/retrieval-smoke.js`.
+
 ---
 
 ## 3. How to work here
