@@ -1,113 +1,97 @@
-# Brief: Evidence Admissibility — retrieval boundary hardening
+# Brief: `ai/admissibility.js` — the retrieval-boundary lifecycle gate
 
-**For:** Implementation (user)  
-**From:** Architecture (Claude)  
-**Branch:** `claude/platform-work-summary-nmb0cm`  
-**Arbiter:** `node scripts/test.js` must be green.
-
-Read `AGENTS.md`, `.claude/agents/worker.md`, and `PERSISTENCE.md` first.
-
----
-
-## Why this exists
-
-The retrieval boundary (`_retrieveGrounding` in server.js) today has **zero awareness** of evidence status or origin structure. Three consequences:
-
-1. **Corrections become cosmetic.** A claim cites evidence that was later superseded → evidence is still returned, still grounds the answer, and the correction is invisible to the user.
-2. **Contradictions disappear.** Two active origins disagree on the same fact → both are returned (both ground the answer), but the system presents only the more confident-sounding text.
-3. **Privacy leaks silently.** A contributor provides sensitive Self evidence; later a Forum message attributes the same fact to "the group" → if the group query pulls Self evidence, the private origin becomes public.
-
-All three happen at retrieval time. This module is the gate that prevents them.
+**For:** Codex
+**From:** Claude (architecture)
+**Branch:** start from current `main`. Do NOT use `codex/outcome-priority-office` — it is
+withdrawn, see `docs/briefs/codex-fix-outcome-priority-office.md`.
+**Arbiter:** `scripts/admissibility-smoke.js` already exists and is currently RED. Your job is
+to make it green without editing it. Then `node scripts/test.js` must be green too.
 
 ---
 
-## Three points you must investigate first
+## The task in one sentence
 
-Before writing code, read and understand the shape of:
+Write `ai/admissibility.js` so that `node scripts/admissibility-smoke.js` passes.
 
-1. **Retrieve paths** (`_retrieveGrounding` in server.js) — Where does retrieval happen? What does it return? What context does it have access to? (Read the full function, including all branches.)
+The suite is the specification. It was written before the module, by someone who will not
+implement it, and it carries the reasoning for every rule in its comments — read those first,
+they explain *why* each case exists, which matters more than the assertions.
 
-2. **Diagnose kernel** (`ai/diagnose.js` header and the following functions: `isActive`, `originRef`, `originKind`, `deriveConfidence`) — How does the epistemic kernel track evidence status? What does "active" mean? What fields carry origin structure?
-
-3. **Evidence-producing paths** — Search the codebase for functions that create evidence objects. How is `status` set? When? By whom? (Look for places that push to `signals` array or create inquiry results.)
+**Do not edit the suite to make it pass.** If you believe an assertion is wrong, say so in the
+PR with your reasoning and leave it failing. Repository truth beats this brief, but a test you
+were asked to satisfy is not yours to weaken silently — that is the one move that makes the
+whole arrangement worthless.
 
 ---
 
-## Scope
+## What the module is
 
-**One new pure module.** `ai/admissibility.js`. No other files, no wiring, no test registration (that comes next). Nothing else.
+A pure gate answering exactly one question: **may this signal ground an answer right now?**
 
-### Contract
-
-```javascript
-admissible(evidence, { activeInquiries, allOrigins }) → { status, reason }
+```js
+admit(signal)       → { admissible: boolean, status: string, reason: string|null }
+partition(signals)  → { admissible: [...signals], excluded: [{ ref, status, reason }] }
 ```
 
-**Inputs:**
-- `evidence`: a single evidence object with fields `{ ref, status, originRef, originKind, ...}` (as defined in diagnose.js)
-- `activeInquiries`: set of inquiry IDs currently being reasoned over (to prevent privacy leaks)
-- `allOrigins`: map of `originRef → { originKind, ... }` (full origin metadata)
+`_retrieveGrounding` in `server.js` currently has no awareness of signal lifecycle, so a
+withdrawn account can still ground a current factual claim. That is what makes corrections
+cosmetic, and it is the gap this closes. **You are not wiring it in** — see out of scope.
 
-**Output:** `{ status: 'admissible' | 'superseded' | 'crossed_origin' | 'private' | 'unknown', reason: string }`
+## The two things that are easy to get wrong
 
-**Admissibility rules** (in precedence order):
+**1. Allowlist, never denylist.** `SIGNAL_STATUSES` in `ai/diagnose.js` is
+`['active','superseded','withdrawn']`. Admit only what you recognise as admissible; everything
+unrecognised is inadmissible. Excluding a list of known-bad values fails OPEN — the day
+someone adds `'disputed'`, every disputed signal starts grounding answers until a human
+notices. AGENTS.md §2 epistemic invariant 7.
 
-1. **Superseded** — `evidence.status !== 'active'`. Corrected evidence never grounds an answer, ever. (Do not try to "upgrade" old evidence or merge it with new.)
+**2. This is not `isActive`.** `ai/diagnose.js` has:
 
-2. **Crossed origin** — `evidence.originKind === 'Self'` AND NOT `evidence.originRef in activeInquiries`. A contributor's private evidence cannot ground an answer in a query they did not contribute to. (Note: multiple people *can* share a node/inquiry — the boundary is the originating contributor's inquiry, not the subject.)
+```js
+const isActive = s => !s || !s.status || s.status === 'active';
+```
 
-3. **Private** — `evidence.originKind === 'Self'` AND the inquiry is in `activeInquiries` but the contributor is known not to have accessed that inquiry. (This requires checking against the inquiries index; see how other modules do it. If unsure, return `unknown`, not an assumption.)
+`isActive(null)` is **true**. That is correct for the confidence kernel and wrong for a
+retrieval gate. You must be stricter for a missing or malformed signal, and identical for a
+signal with no status (legacy rows must keep working). The suite pins both directions, and the
+divergence must be deliberate and visible, not quiet.
 
-4. **Unknown** — evidence is missing a `status` or `originRef` field. **Fail closed.** Never assume "probably active" or "probably public." Return unknown.
+## Read before writing
 
-5. **Admissible** — passed all gates above.
+- `ai/diagnose.js` — the header, `SIGNAL_STATUSES`, `isActive`, `supersede`. This is the
+  vocabulary; do not invent a parallel one.
+- `scripts/admissibility-smoke.js` — the whole file, comments included.
+- `AGENTS.md` §2, the seven epistemic invariants.
 
-### Forbidden
+## Out of scope — these already have homes
 
-- Never compute confidence, ever. That's `ai/confidence.js`.
-- Never check permissions, roles, or org scope. Those are wired elsewhere.
-- Never call the LLM. This is deterministic.
-- Never mutate the evidence object.
-- Never assert its own confidence about the rules (only return what is *known* to be true).
-- Pure function: no I/O, no process state, no side effects.
+| Not your job | Where it lives |
+|---|---|
+| counting independent origins | `ai/diagnose.js:deriveConfidence` |
+| whether evidence may enter a group | `ai/contribution.js:mayContribute` |
+| who may read a subject | the server's auth layer |
+| predictive / diagnostic phrasing | `ai/language-guard.js` |
+| wiring into `_retrieveGrounding` | Claude, on the current branch |
 
----
+If a rule you are writing starts to look like confidence, authorisation or phrasing, it belongs
+in one of those instead. A second confidence function is a defect, not a feature.
 
-## Tests — `scripts/admissibility-smoke.js`, **not** registered in test.js yet
+Also: no new durable store, no changes to `ai/diagnose.js`, no changes to `server.js`.
 
-Deterministic, no LLM:
+## Registration
 
-1. **Superseded evidence is rejected** — an evidence object with `status: 'withdrawn'` returns `{ status: 'superseded', reason: '...' }`. (Not downgraded, not silently ignored — rejected.)
+Add `'admissibility-smoke.js'` to the suite list in `scripts/test.js` **in the same commit**
+that adds the module. An unregistered suite does not count — that is how three red suites got
+reported as done last time.
 
-2. **Active evidence is admissible** — an evidence object with `status: 'active'`, valid `originRef`, and `originKind` returns `{ status: 'admissible', reason: '' }`.
+## Acceptance
 
-3. **Crossed origin is rejected** — a Self evidence from contributor A, for an inquiry that A did not contribute to, returns `{ status: 'crossed_origin', reason: '...' }`. (Even if A is reading that inquiry, A's own Self evidence stays private.)
+Paste, verbatim, not summarised:
 
-4. **Missing status field** — an evidence object without a `status` field returns `{ status: 'unknown', reason: 'no status' }`.
+1. `node scripts/admissibility-smoke.js` — the full output.
+2. `node scripts/test.js` — the final verdict line.
+3. Anything in this brief or in the suite the repository proved wrong.
 
-5. **Missing originRef** — returns `{ status: 'unknown', reason: 'no originRef' }`.
+A red result reported honestly is worth more than a green one that was not run.
 
-6. **Future-proofing** — an evidence object with an unrecognized `status` (e.g., `'pending'`, a hypothetical future state) returns `{ status: 'unknown', reason: 'unrecognized status: pending' }`, never assumes it is active. This test guards against silent fail-open on new evidence states.
-
-7. **Batch with mixed admissibility** — call admissible on a list of 5 evidence objects (1 active, 1 superseded, 1 crossed origin, 1 unknown, 1 missing field). Assert that each is correctly classified, independent of the others.
-
----
-
-## Out of scope
-
-- Do not wire this into `_retrieveGrounding` yet (that's next).
-- Do not register the smoke suite in `scripts/test.js` yet (I will do that when I review).
-- Do not build "admissibility for groups" or "admissibility for external sources." This module handles the lifecycle gates only.
-- Do not create a new durable store or cache.
-- Do not move any logic from `ai/diagnose.js`.
-
----
-
-## Reporting
-
-Push the branch when complete. In the PR:
-
-- Files changed (should be two: `ai/admissibility.js` and `scripts/admissibility-smoke.js`).
-- Summary of the three investigation points (what you found about retrieval, diagnose kernel, evidence production).
-- Test results: run `node scripts/admissibility-smoke.js` and paste output.
-- Anything in this brief the repository proved wrong. Repository truth wins.
+**Push to a branch off current `main`.** Work that is not pushed did not happen.
