@@ -140,6 +140,11 @@ your change makes one of them false, the change is wrong, not the invariant.
 - **Never push to a branch you weren't asked to.** GitHub scope is limited to
   `tatendamukudu/platform`.
 - Open a PR only when asked. Every push triggers CI — keep it green.
+- **If you cannot push, say so immediately and stop.** Do not finish the work and report it
+  as done: a local commit dies with the container, and three tasks have already been lost
+  that way. Setup for the Codex environment is in `docs/CODEX_PUSH_PATH.md`; verify with
+  `git push --dry-run origin HEAD:refs/heads/codex/connectivity-check` BEFORE starting, not
+  after.
 
 ### Environment / safety
 
