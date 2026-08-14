@@ -1,10 +1,32 @@
 # Review: `codex/outcome-priority-office`
 
+> ## CORRECTED 2026-08-14 — read this first
+>
+> **Verdict is now: ABANDON THE BRANCH. Do not merge it, do not fix it, do not build on it.**
+>
+> The review below compared the branch against its own merge base (`2dec238`), so every file
+> in it read as new work. It was not new work — all five modules were already on `main` in
+> better condition. Against `main` the branch is a stale snapshot:
+> `88 files changed, 2697 insertions(+), 11856 deletions(-)`. Merging it would delete whole
+> smoke suites and most of `server.js`.
+>
+> **B1 and B2 below are wrong.** `main` already had the correct `.map(x => _s(x))`; the branch
+> has the broken `.map(_s)`. Implementing the fix brief would have reintroduced the bug in
+> three files. The five suites are registered on `main` and were green.
+>
+> **B3, B4 and C1 were real, and were live on `main`** — which is what actually mattered. B3
+> and B4 are now fixed and pinned by `scripts/epistemic-invariants-smoke.js`. C1 remains open
+> as a design decision.
+>
+> The methodological error, kept because it is the useful part: review a branch against the
+> **target** it would merge into, not against its own merge base. "What did this add since it
+> forked" is the wrong question when the branch is stale; "what would change if this merged"
+> is the right one.
+
 **Reviewer:** Claude (architecture)
 **Branch reviewed:** `codex/outcome-priority-office` @ `30a1110`
 **Base:** `2dec238` — behind current `main` (`0fb4078`), further behind the dev branch
-**Verdict: DO NOT MERGE AS-IS.** Four blocking defects. The code is salvageable; the
-sequencing is the bigger question.
+**Original verdict (superseded): DO NOT MERGE AS-IS.** Four blocking defects.
 
 ---
 
