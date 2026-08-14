@@ -151,6 +151,24 @@ discussion happens **in the repo**, not in a chat window:
 The rule: **a weigh-in that isn't in the repo didn't happen.** Same discipline as
 the truth layer — the shared record is the truth, not a self-report.
 
+### Briefs — the phone-friendly handoff
+
+Neither implementer can message the other directly, and the founder is often on a
+phone. So the handoff is a **file, not a paste**: architecture writes a bounded
+brief to `docs/briefs/<name>.md`, and the founder hands over one line —
+
+> Implement the brief at `docs/briefs/<name>.md`.
+
+That is the whole protocol. It costs one sentence to dispatch instead of an essay
+retyped on a phone, the brief is versioned alongside the code it describes, and
+a reviewer can diff the work against the instruction that produced it.
+
+A brief is bounded or it is not a brief. It names the scope, what is explicitly
+**out** of scope, the tests that must exist, and the arbiter (`node scripts/test.js`).
+It ends by inviting contradiction: **repository truth beats the brief**, including
+briefs written by whoever leads. An implementer who finds the brief wrong should
+say so in the PR rather than build the wrong thing carefully.
+
 ## 5. The council's division of labour
 
 - **Founder** — direction, taste, the final call on product.
