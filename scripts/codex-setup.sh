@@ -1,86 +1,133 @@
 #!/usr/bin/env bash
 # Codex environment setup — establishes a working PUSH path.
 #
-# Paste this into the Codex environment's "Maintenance setup script" field. It runs during
-# environment setup, where the network is available, and it is the only place the push path
-# can be configured: by the time the agent is running, `git push` needs a remote and a
-# credential that already exist.
+# Set the Codex environment's "Setup script" (Manual) to:  bash scripts/codex-setup.sh
+# Network access is always enabled for that step, which is why the remote and credential must
+# be established there. Putting the same line in "Maintenance script" too is safe — this is
+# idempotent — and re-verifies before every task.
 #
-# The failure this exists for: Codex could clone (its infrastructure does that) but never
-# push (the agent does that). Three completed tasks were stranded in containers that were
-# then reclaimed. The work was real; there was simply no way out of the box.
+# The failure this exists for: Codex could clone (its infrastructure does that) but never push
+# (the agent does that). Completed tasks were stranded in containers that were then reclaimed.
 #
-# Never fails the environment build. A missing token warns and continues — a broken setup
-# script would leave Codex unable to work at all, which is worse than unable to push.
+# Never fails the environment build. A broken setup script would leave Codex unable to work at
+# all, which is worse than unable to push.
+#
+# ── Why this is so defensive ───────────────────────────────────────────────────────────────
+# Three earlier versions each "fixed" the push path and each still failed, because each
+# assumed which step was broken instead of measuring it. This one measures: it verifies that
+# git config persisted, probes git's own credential system directly, and falls through a
+# ladder of strategies until a real dry-run push succeeds. It reports which rung worked.
 
 set -uo pipefail
 
 REPO_URL="https://github.com/TatendaMukudu/platform.git"
 REPO_DIR="${CODEX_REPO_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+CRED_FILE="/tmp/.codex-git-credentials"
+PROBE_REF="refs/heads/codex/connectivity-check"
 
 cd "$REPO_DIR" 2>/dev/null || { echo "codex-setup: no repo directory at $REPO_DIR"; exit 0; }
 
-# The remote is configured FIRST and unconditionally, before anything can go wrong with the
-# credential. An earlier version returned early when the token was missing, which left no
-# remote at all — so the failure read as "'origin' does not appear to be a git repository"
-# and pointed at the wrong problem entirely. A missing token and a missing remote are
-# different faults and must not produce the same symptom.
+say() { echo "codex-setup: $*"; }
+
+# Remote first and unconditionally. An earlier version returned early when the token was
+# missing, leaving no remote, so the symptom read as "'origin' does not appear to be a git
+# repository" — pointing at the clone rather than the credential. Different faults must not
+# produce the same message.
 git remote remove origin 2>/dev/null
-git remote add origin "$REPO_URL" || git remote set-url origin "$REPO_URL"
+git remote add origin "$REPO_URL" 2>/dev/null || git remote set-url origin "$REPO_URL"
+git config --global user.name  "Codex"           2>/dev/null
+git config --global user.email "codex@users.noreply.github.com" 2>/dev/null
+git config --global push.default current         2>/dev/null
 
-git config --global user.name  "Codex"
-git config --global user.email "codex@users.noreply.github.com"
-git config --global push.default current
-
-# Presence only, never the value — this line goes into logs the agent may paste back.
-#
-# The obvious one-liner is a trap and it leaked a live token once:
-#     echo "... ${GITHUB_TOKEN:+SET}${GITHUB_TOKEN:-NOT SET}"
-# ${VAR:-default} substitutes VAR'S VALUE when VAR is set, so the "NOT SET" branch printed the
-# secret exactly when there was a secret to print. Test a redaction against the SET case; the
-# unset case cannot reveal anything and proves nothing.
+# Presence only, never the value. The obvious one-liner is a trap and it leaked a live token:
+#     echo "${GITHUB_TOKEN:+SET}${GITHUB_TOKEN:-NOT SET}"
+# ${VAR:-default} substitutes VAR'S VALUE when set, so the branch labelled "NOT SET" printed
+# the secret exactly when there was one. Guarded by scripts/epistemic-invariants-smoke.js,
+# which runs this script WITH a token and asserts the value never reaches output.
 if [ -n "${GITHUB_TOKEN:-}" ]; then
-  echo "codex-setup: GITHUB_TOKEN is SET (${#GITHUB_TOKEN} chars)"
+  say "GITHUB_TOKEN is SET (${#GITHUB_TOKEN} chars)"
 else
-  echo "codex-setup: GITHUB_TOKEN is NOT SET"
-fi
-
-if [ -z "${GITHUB_TOKEN:-}" ]; then
-  echo "codex-setup: remote configured, but there is no credential. PUSH WILL FAIL."
-  echo "codex-setup: add GITHUB_TOKEN to the Codex environment variables, then reset the cache."
-  echo "codex-setup: remote is $(git remote get-url origin 2>/dev/null || echo 'NOT SET')"
+  say "GITHUB_TOKEN is NOT SET"
+  say "remote configured, but there is no credential. PUSH WILL FAIL."
+  say "add GITHUB_TOKEN to the Codex environment VARIABLES (not Secrets), then reset the cache."
   exit 0
 fi
 
-# Credentials live in a 0600 file, not in the remote URL. Putting the token in the URL means
-# `git remote -v` prints it, and it then rides into any log, transcript or error message the
-# agent pastes back. This keeps it out of all of them.
-#
-# The file path is ABSOLUTE and the helper names it explicitly. Relying on ~ failed in this
-# environment with "could not read Username for 'https://github.com'": the setup step and the
-# task step do not necessarily share $HOME, so a credential written to ~ at setup was simply
-# not there when the agent later tried to push. An absolute path is the same path for both.
-CRED_FILE="/tmp/.codex-git-credentials"
-printf 'https://x-access-token:%s@github.com\n' "$GITHUB_TOKEN" > "$CRED_FILE"
-chmod 600 "$CRED_FILE"
+say "HOME=${HOME:-<unset>}  user=$(id -un 2>/dev/null || echo '?')  git=$(git --version 2>/dev/null | awk '{print $3}')"
 
-# --system first so the config is found whatever $HOME turns out to be, falling back to
-# --global where there is no root. Both are set when possible; git reads system then global.
-git config --system credential.helper "store --file=$CRED_FILE" 2>/dev/null \
-  || echo "codex-setup: no system git config (not root) — using global only"
-git config --global credential.helper "store --file=$CRED_FILE"
+# Does git's credential system actually hand back a password for github.com? This is the
+# question the push is really asking, and asking it directly is the difference between knowing
+# and guessing. grep -q consumes the output, so the credential is never printed.
+cred_probe() {
+  printf 'protocol=https\nhost=github.com\n\n' \
+    | timeout 15 git credential fill 2>/dev/null \
+    | grep -q '^password='
+}
 
-echo "codex-setup: HOME=$HOME  user=$(id -un 2>/dev/null || echo '?')  credfile=$CRED_FILE"
+# The real test. Contacts the remote and authenticates without writing anything, so a 403
+# surfaces here rather than after an hour of undeliverable work.
+push_probe() {
+  timeout 45 git push --dry-run origin "HEAD:$PROBE_REF" >/dev/null 2>&1
+}
 
-# Prove the credential actually works, without writing anything. --dry-run still contacts the
-# remote and authenticates, so a 403 surfaces HERE, at setup, rather than after an hour of
-# work that then cannot be delivered.
-if git push --dry-run origin HEAD:refs/heads/codex/connectivity-check >/dev/null 2>&1; then
-  echo "codex-setup: push path VERIFIED — remote reachable and credential accepted."
+# ── Rung 1: credential helper with an absolute file ────────────────────────────────────────
+# Absolute, and the helper names it explicitly: the setup step and the task step do not
+# necessarily share $HOME, so a credential written to ~ can simply be absent later.
+printf 'https://x-access-token:%s@github.com\n' "$GITHUB_TOKEN" > "$CRED_FILE" 2>/dev/null
+chmod 600 "$CRED_FILE" 2>/dev/null
+git config --system credential.helper "store --file=$CRED_FILE" 2>/dev/null
+git config --global credential.helper "store --file=$CRED_FILE" 2>/dev/null
+
+# Verify the config PERSISTED rather than assuming it did — the previous version's blind spot.
+if [ -n "$(git config --get credential.helper 2>/dev/null)" ]; then
+  say "rung 1: credential.helper is configured"
 else
-  echo "codex-setup: push path NOT working. Clone and tests are fine; pushes will fail."
-  echo "codex-setup: check (1) Agent internet access is On, (2) the token has Contents: write"
-  echo "codex-setup: on TatendaMukudu/platform, (3) the token has not expired."
+  say "rung 1: git config did not persist a credential.helper (HOME unwritable?)"
+fi
+[ -s "$CRED_FILE" ] && say "rung 1: credential file written" || say "rung 1: credential file NOT written"
+cred_probe && say "rung 1: git credential fill RETURNS a credential" \
+           || say "rung 1: git credential fill returns nothing"
+
+if push_probe; then
+  say "push path VERIFIED via credential helper."
+  say "remote is $(git remote get-url origin)"
+  exit 0
 fi
 
-echo "codex-setup: remote is $(git remote get-url origin 2>/dev/null || echo 'NOT SET')"
+# ── Rung 2: url.insteadOf rewrite ──────────────────────────────────────────────────────────
+# Rewrites the URL at transport time, so `git remote -v` still prints a clean URL while the
+# push carries the token. Needs global config to be readable at push time.
+say "rung 1 failed — trying url.insteadOf"
+git config --global "url.https://x-access-token:${GITHUB_TOKEN}@github.com/.insteadOf" \
+  "https://github.com/" 2>/dev/null
+
+if push_probe; then
+  say "push path VERIFIED via url.insteadOf (remote -v stays clean)."
+  say "remote is $(git remote get-url origin)"
+  exit 0
+fi
+
+# ── Rung 3: token embedded in the remote URL ───────────────────────────────────────────────
+# Last resort, and it has a real cost: `git remote -v` will print the token. The container is
+# ephemeral and single-tenant so the exposure is bounded, but an agent that pastes `git remote
+# -v` into chat leaks it — which has already happened once tonight by a different route.
+say "rung 2 failed — trying an authenticated remote URL"
+git config --global --unset-all "url.https://x-access-token:${GITHUB_TOKEN}@github.com/.insteadOf" 2>/dev/null
+git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/TatendaMukudu/platform.git"
+
+if push_probe; then
+  say "push path VERIFIED via authenticated remote URL."
+  say "WARNING: the remote URL now contains the token."
+  say "WARNING: do NOT run or paste 'git remote -v' — it will print the credential."
+  exit 0
+fi
+
+# ── All rungs failed ───────────────────────────────────────────────────────────────────────
+git remote set-url origin "$REPO_URL"   # leave no token behind in a path that does not work
+say "push path NOT working after all three strategies."
+say "the token is present, so this is most likely the network: either Agent internet access is"
+say "off, or the proxy blocks writes to github.com. Check, in order:"
+say "  1. Agent internet access is On for this environment"
+say "  2. the token is unexpired and has Contents: Read and write on TatendaMukudu/platform"
+say "  3. the environment cache was reset after the token was added"
+say "remote is $(git remote get-url origin)"
