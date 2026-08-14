@@ -29,6 +29,19 @@ procedure. It does **not** build an agent framework.
 
 ---
 
+## If you cannot see the branch
+
+Codex's workspace is pinned to an older `main` and its proxy blocks GitHub, so it may be
+working from a tree that lacks this session's commits. **That is fine for this slice**, because
+the split below is deliberately conflict-free: sections 1, 2 and the test suite are all NEW
+files that merge cleanly onto any base. Section 3 (wiring `_assistantAnswer`) is the only part
+that touches existing code — **skip it if you cannot see this branch**, and say so in the PR.
+Claude does the wiring on the current branch, where the surrounding state is known.
+
+Do not register the suite in `scripts/test.js` if you are working from an older base — that file
+has gained several suites and the edit will conflict. Say in the PR that registration is pending
+and Claude will add the line.
+
 ## Scope
 
 Two new pure modules, and **one** existing path routed through them. Nothing else.
