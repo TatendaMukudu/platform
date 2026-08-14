@@ -88,6 +88,34 @@ pastes back into chat.
 
 ---
 
+## What actually fixed it
+
+Confirmed working 2026-08-14. The output of a healthy setup:
+
+```
+codex-setup: GITHUB_TOKEN is SET (93 chars)
+codex-setup: HOME=/root  user=root  git=2.43.0
+codex-setup: rung 1: credential.helper is configured
+codex-setup: rung 1: credential file written
+codex-setup: rung 1: git credential fill RETURNS a credential
+codex-setup: push path VERIFIED via credential helper.
+codex-setup: remote is https://github.com/TatendaMukudu/platform.git
+```
+
+**The decisive step was resetting the environment cache after adding `GITHUB_TOKEN`.** Post-setup
+caching is on, so a container restored from a cache built before the variable existed never
+sees it, and the setup script correctly reports no token — which reads as "the token is wrong"
+when in fact the token is simply not there yet.
+
+Every earlier round failed on this, not on the credential mechanism. Rung 1 — the plain
+credential helper — worked first time once the container was actually rebuilt. Rungs 2 and 3
+were never needed.
+
+The lesson worth keeping: **a cached container is stale state, and stale state was the cause of
+both halves of this problem.** The read path was 44 commits behind for the same reason.
+Whenever Codex behaves as though something you just configured does not exist, reset the cache
+before debugging anything else.
+
 ## Verifying it works
 
 After the environment rebuilds, the setup log should end with:
