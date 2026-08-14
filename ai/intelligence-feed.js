@@ -20,6 +20,8 @@
 
 'use strict';
 
+const guard = require('./language-guard');
+
 const SOURCES = Object.freeze([
   'reasoner', 'proactive', 'outcome_intelligence', 'process_reflection', 'self_model', 'org_playbook', 'extra',
 ]);
@@ -100,7 +102,14 @@ function normalizeArtifact(item = {}, opts = {}) {
     evidenceRefs: _arr(item.evidenceRefs || item.cites || item.supportingMoments, 100),
     rationale: _arr(item.rationale, 180),
     requiresConfirmation: suggestion ? suggestion.requiresConfirmation === true : item.requiresConfirmation === true,
-    safe: item.safe !== false,
+    /* Computed from the text this artifact will actually show, not inherited on trust.
+       `item.safe !== false` alone was a denylist: a producer that never sets the field — and
+       none of them do — got `safe: true` for free, and scoped-intelligence-packet:canUseItem
+       reads this as an authorisation gate. So unchecked text authorised itself.
+       An explicit upstream `safe: false` still wins; what changes is that silence no longer
+       counts as a clean bill of health. AGENTS.md §2 invariants 1 and 7. */
+    safe: item.safe !== false && [title, body, suggestion && suggestion.text]
+      .filter(Boolean).every(t => guard.describesOnly(t)),
     generatedBy: 'intelligence-feed',
     originalSource: source,
   };

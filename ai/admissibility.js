@@ -22,9 +22,13 @@
 
    Two narrower things, at the SIGNAL layer rather than the envelope layer:
 
-     1. `diagnose.isActive` fails OPEN on a missing signal. `isActive(null)` is true, so a
-        null or malformed entry in a signals array counts as current support. That is a real
-        hole, just a much smaller one than advertised.
+     1. `diagnose.isActive` fails OPEN in principle on a missing signal — `isActive(null)` is
+        true. In practice every call site already guards it: deriveConfidence does
+        `.filter(Boolean)` first, the hypothesis paths test `s && isActive(s)`, and consolidate
+        would throw on `s.kind` before reaching it. So this is a latent sharp edge on a shared
+        kernel helper, not a live defect, and saying otherwise (as an earlier draft of this
+        header did) overstates it. Worth gating at a boundary that takes untrusted input;
+        not worth alarm.
 
      2. Nothing reports WHY a signal was excluded. Filtering a withdrawn account out silently
         makes the answer quietly shrink; the reader learns nothing was corrected. partition()
