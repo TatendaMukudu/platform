@@ -19,6 +19,7 @@
 
 const graph = require('./org-graph');
 const priority = require('./priority-office');
+const guard = require('./language-guard');
 
 const QUESTION_KINDS = Object.freeze(['process_challenge', 'context_gap', 'policy_question', 'practice_question', 'goal_question']);
 const PACKET_SECTIONS = Object.freeze(['needs_attention', 'working_well', 'process_questions', 'outcome_history', 'personal_patterns', 'playbook', 'questions_upward', 'other']);
@@ -101,7 +102,9 @@ function questionArtifact(question = {}, scope = {}, nodes = {}) {
     carriesPrivateContent: false,
     reason: _s(question.reason || 'A scoped user raised a useful question for the web.', 180),
     requiresConfirmation: true,
-    safe: true,
+    // Computed. canUseItem below trusts this field as a gate, so declaring it true would
+    // let a module authorise its own output.
+    safe: guard.describesOnly(text) && sensitivity === 'normal',
   };
 }
 
@@ -132,7 +135,7 @@ function buildPacket({ actor = {}, nodes = [], feed = {}, questions = [], prefs 
       suggestion: { text: 'Route this question to the nearest responsible leader.', requiresConfirmation: true, proposalType: 'route_question' },
       limitations: ['answer_may_require_higher_scope'],
       rationale: ['bottom_up_question'],
-      safe: true,
+      safe: q.safe === true && guard.describesOnly(q.text),
       generatedBy: 'scoped-intelligence-packet',
     });
   }

@@ -13,11 +13,13 @@
    it also questions what is working so the organisation/person understands why it
    should be kept, repeated, or shared.
 
-   PURE: imports nothing, no DB, no AI, no IO. The caller owns privacy/scoping and
+   PURE: no DB, no AI, no IO. The caller owns privacy/scoping and
    supplies already-safe process observations.
    ============================================================ */
 
 'use strict';
+
+const guard = require('./language-guard');
 
 const LEVELS = ['personal', 'team', 'org'];
 const POLARITIES = ['friction', 'strength', 'neutral'];
@@ -113,7 +115,9 @@ function reflectSignal(signal = {}) {
     suggestedSurface: s.polarity === 'strength' ? 'process_strength' : 'process_attention',
     basis: s.level === 'personal' ? s.basis : [],
     limitations: [...new Set(['not_causal', ...s.limitations])],
-    safe: true,
+    // Computed, never declared: a module that stamps itself safe is asserting its own
+    // confidence, and priority-office/scoped-intelligence-packet trust this field.
+    safe: [question, _why(s)].every(t => guard.describesOnly(t)),
   };
 }
 

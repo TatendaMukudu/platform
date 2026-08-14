@@ -51,7 +51,6 @@ function normalizeItem(item = {}, source = 'unknown') {
     suggestion: suggestion ? { ...suggestion, requiresConfirmation: suggestion.requiresConfirmation === true } : null,
     limitations: Array.isArray(item.limitations) ? item.limitations.map(x => _s(x, 160)) : [],
     rationale: Array.isArray(item.rationale) ? item.rationale.map(x => _s(x, 160)) : [],
-    original: item,
   };
 }
 

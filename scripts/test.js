@@ -46,6 +46,7 @@ const SUITES = [
   'invariants.js',
   'packs-language-smoke.js', // domain LANGUAGE pass: org-voice directives, role-sensitivity, audit
   'domain-cleanup-smoke.js', // one language source: no legacy vertical prose; role ladder invents no titles
+  'epistemic-invariants-smoke.js', // AGENTS.md §2 made mechanical: computed safety/confidence, no raw passthrough, allowlist status
   'evidence-smoke.js',     // the canonical evidence envelope: normalise/validate/dedupe/promote
   'identity-reresolve-smoke.js', // the identity lifecycle: held-back evidence resolves + promotes once
   'mapping-smoke.js',            // the mapping contract: fingerprint/drift/transform/gate (pure)

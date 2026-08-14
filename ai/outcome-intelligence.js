@@ -13,11 +13,18 @@
      "This pattern has appeared 3 times. A supportive check-in was followed by
       improvement in 3 of 5 recorded cases here."
 
-   PURE: imports nothing, no DB, no AI, no IO. Identical records in, identical
-   brief out. The caller owns privacy/scoping before records reach this module.
+   PURE: no DB, no AI, no IO. Identical records in, identical brief out. The caller
+   owns privacy/scoping before records reach this module.
+
+   `safe` is COMPUTED, never declared. It is the result of running every line this
+   module emits through ai/language-guard.js — the one canonical no-prediction /
+   no-diagnosis check. A module that stamps itself safe is asserting its own
+   confidence, which AGENTS.md §2 forbids, and downstream gates trust the field.
    ============================================================ */
 
 'use strict';
+
+const guard = require('./language-guard');
 
 const OUTCOMES = ['improved', 'steady', 'worsened', 'unclear'];
 const SMALL_SAMPLE = 3;
@@ -128,7 +135,8 @@ function summarize(records = [], opts = {}) {
     };
   }).sort((a, b) => (b.totalCases - a.totalCases) || a.patternType.localeCompare(b.patternType));
 
-  return { patterns, generatedBy: 'outcome-intelligence', safe: true };
+  const safe = patterns.every(p => p.interventions.every(i => guard.describesOnly(i.line)));
+  return { patterns, generatedBy: 'outcome-intelligence', safe };
 }
 
 function outcomeLine(label, counts, total) {
@@ -163,7 +171,7 @@ function earlySignalBrief({ patternType, signalCount = 0, outcomeSummary = null,
       outcomeLine: 'No recorded outcome history for this pattern yet.',
       suggestedNextStep: null,
       limitations: [...limitations, 'no_outcome_history'],
-      safe: true,
+      safe: guard.describesOnly(signal),
     };
   }
 
@@ -179,7 +187,8 @@ function earlySignalBrief({ patternType, signalCount = 0, outcomeSummary = null,
       requiresConfirmation: true,
     },
     limitations,
-    safe: true,
+    safe: [signal, best.line, `${best.interventionLabel} has recorded outcome history for this pattern ${scopeLabel}. Review before acting.`]
+      .every(t => guard.describesOnly(t)),
   };
 }
 

@@ -103,7 +103,6 @@ function normalizeArtifact(item = {}, opts = {}) {
     safe: item.safe !== false,
     generatedBy: 'intelligence-feed',
     originalSource: source,
-    original: item,
   };
 }
 
@@ -231,7 +230,10 @@ function fromOrgPlaybook({ candidates = [], entries = [], reviews = [] } = {}) {
     level: 'org',
     polarity: 'strength',
     priority: 'low',
-    confidence: 'confirmed',
+    // The band computed when the practice was confirmed, not a fresh assertion that it is
+    // confirmed. playbookEntryFrom preserves it as confidenceAtConfirmation; hardcoding
+    // 'confirmed' here discarded a real derived value. Absent it, claim nothing.
+    confidence: e.confidenceAtConfirmation,
     title: e.subjectLabel || 'Confirmed practice',
     body: e.statement,
     evidenceRefs: e.supportingMoments || e.sample || [],
