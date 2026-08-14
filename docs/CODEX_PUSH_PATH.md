@@ -56,14 +56,31 @@ GITHUB_TOKEN = <the token>
 and `ANTHROPIC_API_KEY` (see `LIVE_SETUP.md`). If it ever lands in a commit, revoke it
 immediately — rotating is cheap, and a token in git history is public forever.
 
-### 4. Set the maintenance setup script
+### 4. Point the setup script at the repo
 
-Codex environment → **Maintenance setup script** → paste the contents of
-[`scripts/codex-setup.sh`](../scripts/codex-setup.sh).
+Codex environment → Edit → **Setup script** → set to `Manual` and enter one line:
+
+```
+bash scripts/codex-setup.sh
+```
+
+The repo is already cloned by the time this runs, so the script does not need pasting — only
+calling. On a phone that matters.
+
+**Use the Setup script field, not only the Maintenance one.** Codex states that network access
+is *always* enabled for the setup step, whereas everything else depends on the Agent internet
+access toggle. The remote and credential must be established somewhere network is guaranteed.
+
+Putting the same line in the **Maintenance script** field as well is recommended and safe: the
+script is idempotent, and maintenance runs before every task, so an expired token fails at
+minute zero rather than minute sixty.
 
 It configures the remote, stores the credential in a `0600` file, and — the part that matters —
-**verifies the push path at setup time** with `git push --dry-run`. A 403 then surfaces during
-environment build rather than after an hour of work that cannot be delivered.
+**verifies the push path** with `git push --dry-run`. A 403 then surfaces during environment
+build rather than after an hour of work that cannot be delivered.
+
+> With post-setup caching **On**, the credential is baked into the cached image. Reset the
+> cache when the token is rotated, or the expired one lingers.
 
 The token goes in `~/.git-credentials`, not in the remote URL, so `git remote -v` prints a
 clean URL. A token in the URL rides into every log, transcript and error message the agent
