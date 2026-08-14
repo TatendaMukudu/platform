@@ -33,7 +33,17 @@ git config --global user.email "codex@users.noreply.github.com"
 git config --global push.default current
 
 # Presence only, never the value — this line goes into logs the agent may paste back.
-echo "codex-setup: GITHUB_TOKEN is ${GITHUB_TOKEN:+SET}${GITHUB_TOKEN:-NOT SET}"
+#
+# The obvious one-liner is a trap and it leaked a live token once:
+#     echo "... ${GITHUB_TOKEN:+SET}${GITHUB_TOKEN:-NOT SET}"
+# ${VAR:-default} substitutes VAR'S VALUE when VAR is set, so the "NOT SET" branch printed the
+# secret exactly when there was a secret to print. Test a redaction against the SET case; the
+# unset case cannot reveal anything and proves nothing.
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  echo "codex-setup: GITHUB_TOKEN is SET (${#GITHUB_TOKEN} chars)"
+else
+  echo "codex-setup: GITHUB_TOKEN is NOT SET"
+fi
 
 if [ -z "${GITHUB_TOKEN:-}" ]; then
   echo "codex-setup: remote configured, but there is no credential. PUSH WILL FAIL."
@@ -45,9 +55,22 @@ fi
 # Credentials live in a 0600 file, not in the remote URL. Putting the token in the URL means
 # `git remote -v` prints it, and it then rides into any log, transcript or error message the
 # agent pastes back. This keeps it out of all of them.
-printf 'https://x-access-token:%s@github.com\n' "$GITHUB_TOKEN" > "$HOME/.git-credentials"
-chmod 600 "$HOME/.git-credentials"
-git config --global credential.helper store
+#
+# The file path is ABSOLUTE and the helper names it explicitly. Relying on ~ failed in this
+# environment with "could not read Username for 'https://github.com'": the setup step and the
+# task step do not necessarily share $HOME, so a credential written to ~ at setup was simply
+# not there when the agent later tried to push. An absolute path is the same path for both.
+CRED_FILE="/tmp/.codex-git-credentials"
+printf 'https://x-access-token:%s@github.com\n' "$GITHUB_TOKEN" > "$CRED_FILE"
+chmod 600 "$CRED_FILE"
+
+# --system first so the config is found whatever $HOME turns out to be, falling back to
+# --global where there is no root. Both are set when possible; git reads system then global.
+git config --system credential.helper "store --file=$CRED_FILE" 2>/dev/null \
+  || echo "codex-setup: no system git config (not root) — using global only"
+git config --global credential.helper "store --file=$CRED_FILE"
+
+echo "codex-setup: HOME=$HOME  user=$(id -un 2>/dev/null || echo '?')  credfile=$CRED_FILE"
 
 # Prove the credential actually works, without writing anything. --dry-run still contacts the
 # remote and authenticates, so a 403 surfaces HERE, at setup, rather than after an hour of

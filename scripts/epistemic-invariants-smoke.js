@@ -195,5 +195,58 @@ console.log('epistemic-invariants-smoke\n');
     isActive(null) === true && isActive(undefined) === true);
 }
 
+/* 4 — TOOLING MUST NOT LEAK SECRETS.
+
+   Not a kernel invariant, and it lives here rather than in a suite of its own because the
+   repo's rule is to consolidate rather than sprawl. It earns its place the same way every
+   other case here did: it is a bug that actually happened.
+
+   scripts/codex-setup.sh printed a live GitHub token into a log that was then pasted into
+   chat. The line was meant to report presence only, and the comment above it said exactly
+   that:
+
+       echo "... ${GITHUB_TOKEN:+SET}${GITHUB_TOKEN:-NOT SET}"
+
+   ${VAR:-default} substitutes VAR'S VALUE when VAR is set. So the branch labelled "NOT SET"
+   printed the secret, and did so precisely when there was a secret to print. Testing it with
+   the variable unset — the obvious thing to do — passes and proves nothing.
+
+   So: run the script WITH a token and assert the token never appears in its output. */
+{
+  const { execFileSync } = require('child_process');
+  const os = require('os');
+  const SENTINEL = 'ghp_SENTINEL_TOKEN_VALUE_THAT_MUST_NEVER_BE_PRINTED';
+  const script = path.join(__dirname, 'codex-setup.sh');
+
+  let out = '';
+  let ran = false;
+  if (fs.existsSync(script)) {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'credleak-'));
+    const tmpRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'credrepo-'));
+    try {
+      execFileSync('git', ['init', '-q', tmpRepo], { stdio: 'ignore' });
+      out = execFileSync('bash', [script], {
+        env: { ...process.env, GITHUB_TOKEN: SENTINEL, HOME: tmpHome, CODEX_REPO_DIR: tmpRepo },
+        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 30000,
+      });
+      ran = true;
+    } catch (e) {
+      // A failed push attempt is expected and fine — the sentinel is not a real credential.
+      // What matters is what reached stdout/stderr on the way.
+      out = `${(e.stdout || '')}${(e.stderr || '')}`;
+      ran = true;
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+      fs.rmSync(tmpRepo, { recursive: true, force: true });
+    }
+  }
+
+  ok('4 · the setup script runs with a token present (the case that can leak)', ran);
+  ok('4 · …and never prints the token itself', ran && !out.includes(SENTINEL));
+  ok('4 · …while still reporting that a token is present', ran && /GITHUB_TOKEN is SET/.test(out));
+  ok('4 · …and no git remote URL embeds a credential',
+    ran && !/https:\/\/[^\s/@]*:[^\s/@]*@github\.com/.test(out));
+}
+
 console.log(`\nepistemic-invariants-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
