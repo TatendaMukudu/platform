@@ -692,10 +692,27 @@ lands on `participation`.
 It also fails OPEN, which is the deeper fault. `ai/diagnose.js:169` documents `unknown` origin
 as "The default, and it is conservative." Here the default is the least conservative option.
 
-**TEST.** `scripts/activity-outcome-smoke.js` — written, 13 passed / 10 failed, not yet
-registered.
+That default is now fixed (`ai/packs.js`): a label shaped as a count of actions classifies as
+`participation` even when a broadly mapped source such as `metric` would call it an outcome, and
+an unclassified signal falls back to `participation` rather than asserting the stronger claim.
+Verified: `metric/tickets closed` -> participation, while `metric/customer satisfaction` and
+`metric/revenue` remain outcomes. `ai/primitives.js` was also tightened so PLATEAU requires
+materially flat movement rather than merely "not statistically unusual" — a 42% rise is no
+longer describable as flat despite steady effort.
 
-**STATUS: PARTIAL.** *The taxonomy and the reasoning exist; the default betrays them.*
+**TEST.** `scripts/activity-outcome-smoke.js` — 23 assertions, registered, green.
+
+**STATUS: PARTIAL — and the remaining gap is the second clause, not the first.**
+
+*Enforced:* activity does not masquerade as outcome, and the default fails closed to the weaker
+claim. That is the protective core of the law and it is now arbitrated.
+
+*Not enforced:* (a) the taxonomy has three of the four named levels — `participation`, `outcome`
+and improvement-as-baseline-shift exist; there is no distinct `output`. (b) "An Organisational
+Constitution may not define success purely as activity" — nothing validates a declared metric
+against the activity/outcome distinction. Searched `ai/org-context.js`; no such check exists.
+
+*This law bundles two rules and should probably be split — see the note in §16.*
 
 ---
 
@@ -901,6 +918,20 @@ search-box home screen makes it optional. Test that tension directly with users.
 | M2 | Activity ≠ output ≠ outcome ≠ improvement | PARTIAL |
 
 **17 ENFORCED · 13 PARTIAL · 5 SPECIFIED · 5 OPEN · 4 DISCOVER**
+
+---
+
+## A note on M2, for whoever writes v2
+
+LAW M2 as written contains two rules with different natures. "Activity is not outcome" is an
+epistemic constraint on the kernel, and it is now enforced and tested. "An Organisational
+Constitution may not define success purely as activity" is a constraint on what a *customer* may
+declare — it belongs with the constitutional boundary in §2, not with measurement, and enforcing
+it means validating org-declared metrics at onboarding.
+
+Bundling them means the law can never be honestly marked ENFORCED even when its protective core
+is complete, which is how a register loses its usefulness. Splitting them would let each carry
+its own status.
 
 ---
 
