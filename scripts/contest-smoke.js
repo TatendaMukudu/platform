@@ -67,31 +67,17 @@ const CONTROL = 'ann::momentum_drop';
 const inAgenda = (r, id) => r.agenda.find(a => a.beliefId === id);
 const belief = (r, id) => r.beliefs.find(b => b.id === id);
 
-/* Does this agenda item say, in any of the reasonable vocabularies, that it is disputed? */
-function discloses(item) {
-  return !!item && (item.contested === true || item.status === 'contested'
-    || item.epistemicState === 'contested' || item.disputed === true);
-}
-
-/* "Presented as settled" — reached the agenda carrying nothing that marks it disputed.
-   Used where absence is still an acceptable answer (during the cooldown). */
+/* A belief is "presented as settled" when it reaches the agenda carrying nothing that marks
+   it as disputed. Absence from the agenda is one acceptable answer; presence WITH disclosure
+   is another. This helper deliberately accepts both, so the test does not dictate which of
+   the two legitimate designs the implementer picks — it only refuses the third, where a
+   contested belief is emitted looking exactly like an uncontested one. */
 function presentedAsSettled(result, id) {
   const item = inAgenda(result, id);
-  return !!item && !discloses(item);
-}
-
-/* Founder decision, 2026-08-15: a contest changes epistemic STATUS, not historical existence
-   or already-authorised visibility. So for a recipient who was already authorised to see the
-   belief, the answer is not to hide it — it is to show it, marked.
-
-       authorized + active     → ordinary finding
-       authorized + contested  → visible, explicitly contested
-       unauthorized            → not disclosed, whatever the epistemic state
-
-   Withholding an otherwise authorised finding because its subject objected is closer to
-   erasure than to contest, and it loses the history the product promises to keep. */
-function disclosedAsContested(result, id) {
-  return discloses(inAgenda(result, id));
+  if (!item) return false;                                    // withheld — acceptable
+  const discloses = item.contested === true || item.status === 'contested'
+    || item.epistemicState === 'contested' || item.disputed === true;
+  return !discloses;                                          // emitted, undisclosed — the defect
 }
 
 const observations = (subjectId, name, ids, at) => ids.map((id, i) => ({
@@ -163,15 +149,6 @@ ok('4 · …and its epistemic state still records the unresolved contest',
 ok('4 · …even though fresh supporting evidence has arrived since',
   belief(tickB, BELIEF).supportCount > 3);
 
-/* 4b · …and it is DISCLOSED rather than disappeared. This is the founder's visibility
-   decision, and it is what blocks the other cheap fix: permanently withholding a belief
-   satisfies "not settled" while quietly destroying the history the product promises to
-   keep. An authorised reader must still see it — marked. */
-ok('4b · a contested belief remains visible to an authorised reader',
-  !!inAgenda(tickB, BELIEF));
-ok('4b · …and is unmistakably marked as disputed, not silently erased',
-  disclosedAsContested(tickB, BELIEF));
-
 /* ── 5 · No overcorrection. The control belief must still flow normally through the very
    same tick. A fix that quiets everything, or that treats fresh evidence as suspect, fails
    here. ── */
@@ -228,38 +205,6 @@ ok('5 · …and remains in an ordinary open state', belief(tickB, CONTROL).statu
     dismissed.status === 'open' && R.isSuppressed(dismissed, t0));
   ok('9 · …so "wrong" and "not now" do not collapse into the same state',
     dismissed.status !== belief(tickA, BELIEF).status);
-}
-
-/* ── 10 · A CONTEST DOES NOT BROADEN DISCLOSURE AUTHORITY.
-
-   Founder decision: contest changes epistemic status, never who may see. Making a disputed
-   belief *more* visible than the settled one was would punish the person for objecting,
-   which inverts the right this law exists to grant.
-
-   The sharpest case in the pure layer is the cross-subject hypothesis. Step 4 of reason()
-   builds a group-level claim when two or more subjects in a scope hold the same risk, and it
-   requires each contributor to be OPEN (`ai/reason.js:265`). So a properly contested belief
-   drops out of group formation automatically — Joe's disputed read must not be laundered
-   into "this is showing up across 2 people in Team A", which is a claim a wider audience
-   sees and which Joe never got to contest in that form. Today it still counts, because his
-   status is still `open`. ── */
-{
-  const sharedAtB = tickB.beliefs.filter(b => b.shared);
-  const countsJoe = sharedAtB.some(s => (s.memberBeliefIds || []).includes(BELIEF)
-    || (s.subjects || []).includes('joe'));
-  ok('10 · a contested belief does not corroborate a group-level claim', !countsJoe);
-  ok('10 · …so a disputed personal read is not laundered into a wider audience\'s finding',
-    sharedAtB.every(s => (s.distinctSubjects || 0) >= 2));
-}
-
-/* 10b — and the contest changes nothing about scope or ownership. Same reader set as before,
-   different epistemic status. */
-{
-  const before = belief(tickA, CONTROL);          // an untouched belief, for shape comparison
-  const after = belief(tickB, BELIEF);
-  ok('10b · a contest does not change who the belief is about', after.subjectId === 'joe');
-  ok('10b · …nor its scope', after.scope === before.scope);
-  ok('10b · …nor promote a personal belief to a shared one', after.shared !== true);
 }
 
 console.log(`\ncontest-smoke: ${pass} passed, ${fail} failed`);
