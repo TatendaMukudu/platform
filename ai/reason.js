@@ -234,8 +234,11 @@ function reason({ priorBeliefs = [], observations = [], now = Date.now(), scopeL
     b.confidence = _confWord(net);
     b.severity = b.support.reduce((s, r) => (SEV_RANK[r.severity] > SEV_RANK[s] ? r.severity : s), 'low');
     const dormant   = (now - b.lastSeen) > STALE;
-    const contested = counter > 0 && counter >= support;
-    b.status = dormant ? 'dormant' : contested ? 'contested' : 'open';
+    // A person's unresolved contest is epistemic counter-evidence, not an anti-nag timer.
+    // More supporting observations and the passage of time cannot silently settle it.
+    const subjectContest = b.contest && b.contest.status === 'unresolved';
+    const contested = subjectContest || (counter > 0 && counter >= support);
+    b.status = contested ? 'contested' : dormant ? 'dormant' : 'open';
     b.staleDays = Math.floor((now - b.lastSeen) / DAY);
   }
 
@@ -362,6 +365,7 @@ function agendaItem(b, now) {
     scopeText: b.shared ? (b.scopeText || null) : undefined,
     memberBeliefIds: b.shared ? (b.memberBeliefIds || []) : undefined,
     claim: b.claim, severity: b.severity, confidence: b.confidence, polarity: b.polarity,
+    status: b.status, contested: b.status === 'contested',
     urgency: _urgency(b, now), register, readiness,
     timing: _timing(b, register),
     why: `${b.claim} (${b.confidence}; ${b.supportCount} signal${s}${b.counterCount ? `, ${b.counterCount} against` : ''}).`,
@@ -493,7 +497,16 @@ function applyFeedback(beliefs, beliefId, response, now = Date.now(), by = null)
   if (!b) return null;
   b.feedback = { response, at: now, by: by || null };
   if (response === 'dismissed')   b.suppressUntil = now + DISMISS_COOLDOWN;
-  else if (response === 'wrong')  b.suppressUntil = now + WRONG_COOLDOWN;
+  else if (response === 'wrong') {
+    b.suppressUntil = now + WRONG_COOLDOWN;
+    // Only the affected person's own "wrong" is a contest. A leader's calibration
+    // response retains its existing cooldown semantics and cannot speak for the subject.
+    if (by && by === b.subjectId) {
+      b.contest = { status: 'unresolved', by, at: now };
+      _upsert(b.counter, { id: `contest:${by}`, t: now, by, kind: 'subject_contest' });
+      b.status = 'contested'; // immediate visibility; the tick recomputation also honours it
+    }
+  }
   else                            delete b.suppressUntil;   // acted / useful → re-engage
   return b;
 }
@@ -545,6 +558,7 @@ function subjectView(belief) {
     beliefId: belief.id,
     kind: belief.kind,
     claim: self ? self() : belief.claim,
+    status: belief.status,
     confidence: belief.confidence,
     whatWouldChangeIt: belief.whatWouldRefute || null,
     canContest: true,   // the person can always tell us it's wrong (rectification)

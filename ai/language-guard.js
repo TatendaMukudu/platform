@@ -29,7 +29,7 @@ const PREDICTIVE = new RegExp([
 // product facts ("the report will open") are allowed, while a person + outcome is not.
 // The subject list covers pronouns, person nouns, and names; the verb list is limited to
 // personal outcomes rather than every possible future-tense action.
-const PERSON_FUTURE = /\b(?:[Hh]e|[Ss]he|[Tt]hey|[Tt]his\s+(?:player|member|person|student|employee|athlete)|[A-Z][a-z]+)\s+(?:will|won't|will\s+not)\s+(?:quit|drop\s+out|fail|burn\s+out|leave|decline|recover)\b/;
+const PERSON_FUTURE = /\b(?:[Hh]e|[Ss]he|[Tt]hey|(?:(?:[Tt]his|[Tt]he|[Tt]hat|[Yy]our|[Oo]ur|[Aa]n?)\s+)?(?:player|member|person|student|employee|athlete)|[A-Z][a-z]+)\s+(?:will|won't|will\s+not)\s+(?:quit|drop\s+out|fail|burn\s+out|leave|decline|recover|disengage|withdraw|struggle)\b/;
 
 // Diagnosis — naming a clinical condition. IntelliQ never does this. These are STEMS
 // (diagnos → diagnose/diagnosis/diagnostic), so they don't take a trailing word boundary.

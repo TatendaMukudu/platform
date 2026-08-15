@@ -10422,6 +10422,7 @@ function _reasonAgendaSafe(item) {
     beliefId: item.beliefId, kind: item.kind, shared: !!item.shared,
     subjectId: item.subjectId || null, subjectName: item.subjectName || null,
     claim: item.claim, register: item.register, readiness: item.readiness,
+    status: item.status, contested: item.contested === true,
     confidence: item.confidence, severity: item.severity, polarity: item.polarity,
     urgency: item.urgency, why: item.why, challenge: item.challenge,
     timing: item.timing || null,             // the natural moment a real event creates
@@ -13821,7 +13822,7 @@ app.get('/api/brief', requireAuth, async (req, res) => {
     } else {
       // SCOPE: the member's OWN reads about themselves (their own evidence), never others'.
       reads = (reasonLedger[code] || [])
-        .filter(b => b.subjectId === userId && !b.shared && b.status !== 'dormant' && !reason.isSuppressed(b, now))
+        .filter(b => b.subjectId === userId && !b.shared && b.status === 'open' && !reason.isSuppressed(b, now))
         .map(b => { const v = reason.subjectView(b); return { text: v.claim, meta: v.confidence, polarity: b.polarity }; });
       // ROUTE: who this member can turn to.
       const rt = _orgAskRouteLeader(code, userId);
@@ -13837,7 +13838,7 @@ app.get('/api/brief', requireAuth, async (req, res) => {
     if (prefs.self_first) {
       // The person likes to clear their own things first — put their own reads ahead of the rest.
       const ownReads = (reasonLedger[code] || [])
-        .filter(b => b.subjectId === userId && !b.shared && b.status !== 'dormant' && !reason.isSuppressed(b, now))
+        .filter(b => b.subjectId === userId && !b.shared && b.status === 'open' && !reason.isSuppressed(b, now))
         .map(b => { const v = reason.subjectView(b); return { text: v.claim, meta: v.confidence, polarity: b.polarity, own: true }; });
       const already = new Set(reads.map(r => r.text));
       reads = [...ownReads.filter(r => !already.has(r.text)), ...reads];
@@ -13884,7 +13885,7 @@ function _deliveryReadsFor(code, userId, now) {
     reads = agenda.map(a => ({ text: a.claim, readiness: a.readiness, urgency: a.urgency, careFlag: careOf(a) }));
   } else {
     reads = ledger
-      .filter(b => b.subjectId === userId && !b.shared && b.status !== 'dormant' && !reason.isSuppressed(b, now))
+      .filter(b => b.subjectId === userId && !b.shared && b.status === 'open' && !reason.isSuppressed(b, now))
       .map(b => { const v = reason.subjectView(b); return { text: v.claim, readiness: b.readiness, urgency: b.urgency, careFlag: !!b.careFlag }; });
   }
   const timeOfDay = _timeOfDay(now);
@@ -14110,7 +14111,7 @@ app.get('/api/report/person/:userId', requireAuth, (req, res) => {
     reads = (reasonLedger[code] || [])
       // A shareable record: non-dormant, non-suppressed reads about them — and NOT a
       // care-flagged (sensitive wellbeing) read, which stays out of a handable artifact.
-      .filter(b => b.subjectId === targetId && !b.shared && !b.careFlag && b.status !== 'dormant' && !reason.isSuppressed(b, now))
+      .filter(b => b.subjectId === targetId && !b.shared && !b.careFlag && b.status === 'open' && !reason.isSuppressed(b, now))
       .map(b => ({ text: b.claim, basis: `reasoner · ${b.confidence || 'tentative'}` }));
   } catch (_) {}
   try {

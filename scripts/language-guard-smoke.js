@@ -35,6 +35,9 @@ const personProphecies = [
   'They will leave the squad.',
   'Marcus will decline over the next month.',
   "He won't recover in time.",
+  'The player will quit by December.',
+  'Your player will quit by December.',
+  'She will disengage before the next check-in.',
 ];
 personProphecies.forEach((t, i) => ok(`1b.${i + 1} · caught: "${t}"`, G.predictsOrDiagnoses(t)));
 
