@@ -106,10 +106,14 @@ function structuralPatterns(streams, now) {
   }
 
   // PLATEAU — a capability/outcome has been flat over a long window despite effort.
+  // "Not statistically unusual" is not the same as flat: gradual movement can remain
+  // inside the deviation threshold while still changing materially over the window.
   const effortSteady = of(PRIMITIVE.PARTICIPATION).some(p => !_declined(p));
   [...of(PRIMITIVE.CAPABILITY), ...of(PRIMITIVE.OUTCOME)].forEach(s => {
     const b = baseline.computeBaseline(s.series, now);
-    if (b.points >= 8 && !s.shift.unusual && effortSteady && !out.some(o => o.type === 'plateau')) {
+    const materiallyFlat = s.shift.direction === 'flat' ||
+      (Number.isFinite(s.shift.deviationPct) && Math.abs(s.shift.deviationPct) <= 5);
+    if (b.points >= 8 && materiallyFlat && effortSteady && !out.some(o => o.type === 'plateau')) {
       out.push({ type: 'plateau', severity: 'low',
         basis: `${s.label} has been flat for a while despite steady effort`,
         confidence: b.points >= 12 ? 'emerging' : 'tentative' });
