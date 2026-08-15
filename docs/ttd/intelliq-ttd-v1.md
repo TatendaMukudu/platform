@@ -496,22 +496,28 @@ history is preserved; the counterclaim becomes first-class evidence; IntelliQ ma
 belief as settled fact; downstream reasoning discloses the contest; high-impact uses may be
 suspended; IntelliQ seeks resolving evidence; resolution is itself evidence-backed and audited.
 
-**ENFORCEMENT.** Partial, and the shortfall is specific. **The state machine already exists** —
-`ai/reason.js:238` computes `dormant | contested | open`, and `:254-255` maps
-`contested → resolved` once resolving evidence arrives. But a *user's* contest does not drive it.
-`applyFeedback` (`ai/reason.js:490-499`) records `b.feedback` and sets
-`b.suppressUntil = now + WRONG_COOLDOWN` — a **timer, not a state**. `server.js:10572` writes a
-`belief_contest` audit event. `server.js:10252` states the design intent plainly: contest is "a
-signal to revisit, never an automatic change."
+**ENFORCEMENT.** A subject's own `wrong` sets a sticky `b.contest = { status: 'unresolved' }`
+(`ai/reason.js:applyFeedback`), which the per-tick status recomputation honours — so the state
+survives re-weighing rather than being overwritten from evidence counts. The contest is also
+`_upsert`ed into `b.counter` as `subject_contest`, making the disagreement visible to the
+reasoner rather than only to the audit log. Only the subject's own response counts; a leader's
+`wrong` keeps its cooldown semantics and cannot speak for them. `agendaItem` carries `status`
+and `contested`. At the boundary, `server.js:_reasonReadableBelief` allowlists `open` and
+`contested` — so an unrecognised future state fails closed — and contested beliefs bypass the
+anti-nag cooldown for authorised readers, marked by `_reasonDisclosureText`. Suppression
+governs push; contested state governs presentation.
 
-Consequence: a contested belief is hidden for a cooldown and then **returns automatically,
-unresolved, and presents as settled again**. That is the specific behaviour D4 prohibits.
+**TEST.** `scripts/contest-smoke.js` (27 assertions, pure) and
+`scripts/contest-http-smoke.js` (11, boundary). Both written before the implementation and by
+a different author; both registered.
 
-**TEST.** `scripts/self-model-http-smoke.js` covers the contest route's permissions, not its
-epistemic effect.
+**STATUS: ENFORCED.** *The first law to travel the full pipeline: founder decision → executable
+invariant → independent implementation → verified verdict.*
 
-**STATUS: PARTIAL.** *Closest large gap to being closed — the vocabulary and the state machine
-both exist; the user's contest simply is not wired to them.*
+*Two limits worth recording rather than losing. The disclosure marker on brief reads is appended
+to the claim text rather than carried as a structured field (the agenda item does carry
+`contested` structurally). And `/api/brief` is not covered by either suite — its reads pass
+through composition before becoming items, so the person report is where this class is caught.*
 
 ---
 
@@ -584,8 +590,11 @@ PR #58 adds `PERSON_FUTURE` closing the bald-prophecy gap.
 
 **TEST.** `scripts/language-guard-smoke.js`.
 
-**STATUS: PARTIAL on `main` today; ENFORCED when PR #58 merges.** A known false-positive class
-remains — `Sync will fail` matches `PERSON_FUTURE` because system nouns look like names.
+**STATUS: ENFORCED.** `PERSON_FUTURE` matches a person-or-name subject followed by an outcome
+verb, so "This player will quit by December" is caught while "The assessment will open tomorrow"
+passes. A known false-POSITIVE class remains — `The upload will fail` matches, because system
+nouns look like names. That over-blocks rather than under-blocks, so the law holds; the guard
+falls back to the deterministic line, which is safe. Worth narrowing, not urgent.
 
 ---
 
@@ -651,7 +660,10 @@ limitations; ranking is by efficacy with evidence strength preserved separately 
 
 **TEST.** `scripts/outcome-intelligence-smoke.js`, `scripts/outcome-ranking-smoke.js`.
 
-**STATUS: PARTIAL** on `main`; the efficacy ranking lands with PR #58.
+**STATUS: ENFORCED.** Ranking is by Wilson lower bound on the observed improvement rate
+(`ai/outcome-intelligence.js:_efficacyLowerBound`), so efficacy leads while thin evidence is
+discounted — 41/50 outranks 1/1 — and `improvedRate` and `total` stay separately reported
+rather than collapsed into the ordering key.
 
 ---
 
@@ -786,6 +798,7 @@ per-module copies.
 | O3 | Who authorises a safety disclosure under LAW S2, and what happens out of hours | Determines whether S2 is implementable as designed. |
 | O4 | When individual growth goals conflict with organisational goals, what does IntelliQ do? | Not yet posed sharply enough to answer; likely resolves into LAW A1's authority split. |
 | O5 | How is the Organisational Constitution amended, and by whom? | Governance question; affects whether org truth can be quietly rewritten to suit a narrative. |
+| O6 | May a contested belief with no activity for months go dormant? | Exposed by the U2 implementation. Contested now outranks dormant, so a contested belief never retires and the ledger is persisted. "Time is not resolution" is right, but dormancy is not resolution either — it is "nobody is discussing this any more". An abandoned contest currently has no path to close. |
 
 ## DISCOVER — settle with users, not internally
 
@@ -826,12 +839,12 @@ search-box home screen makes it optional. Test that tension directly with users.
 | A1 | Three authorities separately gated | PARTIAL |
 | P1 | Not surveillance — three structural properties | PARTIAL |
 | P4 | The person benefits first | PARTIAL |
-| U2 | A contest changes epistemic state | PARTIAL |
+| U2 | A contest changes epistemic state | ENFORCED |
 | U3 | May disagree, never an oracle | PARTIAL |
 | Q1 | Question before judgement | PARTIAL |
-| Q2 | Never predicts a person | PARTIAL (ENFORCED on PR #58 merge) |
+| Q2 | Never predicts a person | ENFORCED |
 | L2 | Learning is contextual | PARTIAL |
-| M1 | Advice without measurement is not intelligence | PARTIAL |
+| M1 | Advice without measurement is not intelligence | ENFORCED |
 | S2 | Safety exceptions narrow and governed | PARTIAL |
 | G3 | Complex system, simple model | PARTIAL |
 | C2 | Refusal explained, alternative offered, recorded | SPECIFIED |
@@ -842,7 +855,7 @@ search-box home screen makes it optional. Test that tension directly with users.
 | U4 | A person may decline attention | SPECIFIED |
 | M2 | Activity ≠ output ≠ outcome ≠ improvement | SPECIFIED |
 
-**14 ENFORCED · 14 PARTIAL · 6 SPECIFIED · 5 OPEN · 4 DISCOVER**
+**17 ENFORCED · 11 PARTIAL · 6 SPECIFIED · 6 OPEN · 4 DISCOVER**
 
 ---
 
