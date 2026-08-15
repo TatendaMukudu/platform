@@ -676,11 +676,26 @@ apart. An organisation that defines success as ticket volume will otherwise get 
 **INVARIANT.** IntelliQ distinguishes the four levels and will not report activity as
 improvement. An Organisational Constitution may not define success purely as activity.
 
-**ENFORCEMENT.** **None.** No such taxonomy exists anywhere in `ai/`.
+**ENFORCEMENT.** Partial, and an earlier draft of this document got it wrong. It said "no such
+taxonomy exists anywhere in `ai/`". It does. `ai/primitives.js:10-17` defines `outcome`
+("a result that matters relative to an aim") separately from `participation` ("showing up /
+doing the work — attendance, check-ins, activity"), and it is live (`server.js:38`). The kernel
+already reasons with the distinction: PLATEAU (`:108-117`) fires when a capability/outcome is
+flat *despite* steady participation, which is precisely the 70-tickets shape.
 
-**TEST.** None.
+The gap is which side of the line an unclassified signal lands on. `ai/packs.js:68` ends
+`primitiveForSignal` with `return SOURCE_PRIMITIVE[source] || 'outcome'` — defaulting to the
+STRONGEST claim. Verified live: `slack/messages sent`, `calendar/meetings held`,
+`tickets/tickets closed` and `metric/tickets closed` all classify as `outcome`. Only `checkin`
+lands on `participation`.
 
-**STATUS: SPECIFIED — NOT YET ENFORCED.**
+It also fails OPEN, which is the deeper fault. `ai/diagnose.js:169` documents `unknown` origin
+as "The default, and it is conservative." Here the default is the least conservative option.
+
+**TEST.** `scripts/activity-outcome-smoke.js` — written, 13 passed / 10 failed, not yet
+registered.
+
+**STATUS: PARTIAL.** *The taxonomy and the reasoning exist; the default betrays them.*
 
 ---
 
@@ -696,6 +711,36 @@ cause.
 **TEST.** `scripts/outcome-ranking-smoke.js` case 7, `scripts/invariants.js`.
 
 **STATUS: ENFORCED.**
+
+---
+
+### LAW O6 — Lifecycle state must not silently mutate epistemic truth
+
+**RATIONALE.** Founder decision, 2026-08-15. Whether something is still being *attended to* and
+whether it is still *true* are different questions, and letting the first quietly answer the
+second is how a system launders the passage of time into a conclusion:
+
+    dormant ≠ resolved · old ≠ false · inactive ≠ disproven
+    no longer surfaced ≠ erased · revived ≠ automatically settled
+
+**INVARIANT.** Epistemic state (open / contested / resolved) and lifecycle state (active /
+dormant / retired) are separate dimensions. `CONTESTED + DORMANT` is a valid combination:
+dormancy may stop active surfacing, and must never resolve the disagreement. A belief revived
+after dormancy returns **contested**, not settled. Only an evidence-backed resolution may close
+a contest. History persists; permanent operational heat is not the price of keeping it.
+
+**ENFORCEMENT.** Partial, and the shortfall is structural rather than behavioural. The two
+dimensions currently share one field: `ai/reason.js:238`
+`b.status = contested ? 'contested' : dormant ? 'dormant' : 'open'`. Because contested is tested
+first, a contested belief can never become dormant — so the *safety* half of the law holds
+(dormancy cannot resolve a contest, since it cannot occur), while the *separation* the law
+requires does not exist. A contested belief with no activity for 200 days stays contested,
+never retires, and the ledger is persisted.
+
+**TEST.** `scripts/contest-smoke.js` §4 proves time does not resolve a contest. Nothing tests
+`CONTESTED + DORMANT`, because it is not currently representable.
+
+**STATUS: PARTIAL.**
 
 ---
 
@@ -798,7 +843,6 @@ per-module copies.
 | O3 | Who authorises a safety disclosure under LAW S2, and what happens out of hours | Determines whether S2 is implementable as designed. |
 | O4 | When individual growth goals conflict with organisational goals, what does IntelliQ do? | Not yet posed sharply enough to answer; likely resolves into LAW A1's authority split. |
 | O5 | How is the Organisational Constitution amended, and by whom? | Governance question; affects whether org truth can be quietly rewritten to suit a narrative. |
-| O6 | May a contested belief with no activity for months go dormant? | Exposed by the U2 implementation. Contested now outranks dormant, so a contested belief never retires and the ledger is persisted. "Time is not resolution" is right, but dormancy is not resolution either — it is "nobody is discussing this any more". An abandoned contest currently has no path to close. |
 
 ## DISCOVER — settle with users, not internally
 
@@ -847,15 +891,16 @@ search-box home screen makes it optional. Test that tension directly with users.
 | M1 | Advice without measurement is not intelligence | ENFORCED |
 | S2 | Safety exceptions narrow and governed | PARTIAL |
 | G3 | Complex system, simple model | PARTIAL |
+| O6 | Lifecycle state must not mutate epistemic truth | PARTIAL |
 | C2 | Refusal explained, alternative offered, recorded | SPECIFIED |
 | E1 | Evidence establishes only within its class | SPECIFIED |
 | E3 | Lived experience not outvoted by instrumentation | SPECIFIED |
 | P5 | Consent before revealing another's contribution | SPECIFIED |
 | P6 | Anonymity means uninferable | SPECIFIED |
 | U4 | A person may decline attention | SPECIFIED |
-| M2 | Activity ≠ output ≠ outcome ≠ improvement | SPECIFIED |
+| M2 | Activity ≠ output ≠ outcome ≠ improvement | PARTIAL |
 
-**17 ENFORCED · 11 PARTIAL · 6 SPECIFIED · 6 OPEN · 4 DISCOVER**
+**17 ENFORCED · 13 PARTIAL · 5 SPECIFIED · 5 OPEN · 4 DISCOVER**
 
 ---
 
