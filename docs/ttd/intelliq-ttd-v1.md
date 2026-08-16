@@ -184,12 +184,21 @@ management while believing itself to be fair.
 **INVARIANT.** For any claim, only evidence whose class can establish that proposition may
 contribute support. Evidence outside the class contributes context, never support.
 
-**ENFORCEMENT.** None. `deriveConfidence` (`ai/diagnose.js:200-240`) counts independent origins
-regardless of class; `originKind` affects independence weighting, not admissible scope.
+**ENFORCEMENT.** Partial. `ai/evidence-class.js` owns the bounded evidence/claim vocabularies,
+fails unknown closed, and decides whether evidence may establish a proposition. Typed inquiry
+hypotheses in `ai/diagnose.js:applyProposals` partition both support and challenge refs before
+confidence or refutation is computed; excluded refs remain visible with a reason. Classification
+must come from governed caller functions — proposal-authored class fields are ignored. The
+remaining debt is to classify canonical envelope types at their governed adapters and supply
+those classifiers at every production `applyProposals` call; legacy untyped inquiries retain
+their previous behaviour until that migration is explicit.
 
-**TEST.** None.
+**TEST.** `scripts/evidence-class-smoke.js` attacks cross-class support and counter-evidence,
+defends every legitimate same-class claim, pins derived evidence to its input classes, and proves
+that a model proposal cannot author its own evidence permission.
 
-**STATUS: SPECIFIED — NOT YET ENFORCED.** *Highest-priority debt in this document.*
+**STATUS: PARTIAL.** *The deterministic boundary exists; production adapter classification is
+the remaining highest-priority debt.*
 
 ---
 
@@ -910,14 +919,14 @@ search-box home screen makes it optional. Test that tension directly with users.
 | G3 | Complex system, simple model | PARTIAL |
 | O6 | Lifecycle state must not mutate epistemic truth | PARTIAL |
 | C2 | Refusal explained, alternative offered, recorded | SPECIFIED |
-| E1 | Evidence establishes only within its class | SPECIFIED |
+| E1 | Evidence establishes only within its class | PARTIAL |
 | E3 | Lived experience not outvoted by instrumentation | SPECIFIED |
 | P5 | Consent before revealing another's contribution | SPECIFIED |
 | P6 | Anonymity means uninferable | SPECIFIED |
 | U4 | A person may decline attention | SPECIFIED |
 | M2 | Activity ≠ output ≠ outcome ≠ improvement | PARTIAL |
 
-**17 ENFORCED · 13 PARTIAL · 5 SPECIFIED · 5 OPEN · 4 DISCOVER**
+**17 ENFORCED · 14 PARTIAL · 4 SPECIFIED · 5 OPEN · 4 DISCOVER**
 
 ---
 

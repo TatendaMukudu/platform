@@ -39,6 +39,8 @@
    PURE: imports nothing, no IO, no network. The model call lives at the server edge.
    ============================================================ */
 
+const evidenceClass = require('./evidence-class');
+
 /* ── EPISTEMIC LEVELS ────────────────────────────────────────────────────────
    Ordered by how much they claim. A level may only rest on levels beneath it. */
 const LEVELS = ['observation', 'interpretation', 'hypothesis', 'conclusion'];
@@ -423,11 +425,15 @@ function _recordTimeline(before, after, now) {
    CHALLENGES it, and each hypothesis carries its own confidence — so three rival explanations
    can rise and fall independently as evidence arrives, which is what makes the reasoning
    longitudinal instead of a snapshot recomputed from a flat list. */
-function newHypothesis({ id, statement, now = Date.now() } = {}) {
+function newHypothesis({ id, statement, claimClass = 'unknown', now = Date.now() } = {}) {
   return {
     id: String(id || `hyp_${now}`),
     statement: String(statement || '').trim(),
-    supportRefs: [], challengeRefs: [],
+    claimClass: evidenceClass.claimClassOf(claimClass),
+    // Claimed refs preserve what was proposed; support/challenge refs are the admissible subset.
+    // Keeping both makes exclusion inspectable without letting a mismatch affect confidence.
+    claimedSupportRefs: [], claimedChallengeRefs: [],
+    supportRefs: [], challengeRefs: [], excludedSupport: [], excludedChallenge: [],
     confidence: { score: 0, band: 'tentative', because: ['nothing supports this yet'] },
     status: 'open',                    // open | leading | refuted | settled
     createdAt: now,
@@ -492,7 +498,9 @@ function supersede(signal, { by = null, at = Date.now(), reason = '', status = '
   };
 }
 
-function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefOf } = {}) {
+function applyProposals(inquiry, accepted = [], {
+  now = Date.now(), evidenceRefOf, evidenceClassFor, claimClassFor,
+} = {}) {
   const next = JSON.parse(JSON.stringify(inquiry));
   // A proposal points at governed evidence. Until the caller supplies a real ref (the evidence
   // this turn produced), we hold the proposal's own id — still a reference, never the content.
@@ -512,6 +520,12 @@ function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefO
         // conservatively rather than as independent — see deriveConfidence. A retelling names
         // the origin it is retelling, so relaying a thing never counts as observing it.
         ...originOf(p),
+        // Classification is supplied only by a governed deterministic caller. Proposal fields
+        // are deliberately ignored: a model may not author what its own evidence can establish.
+        evidenceClass: typeof evidenceClassFor === 'function'
+          ? evidenceClass.evidenceClassOf(evidenceClassFor(p)) : 'unknown',
+        basisClasses: typeof evidenceClassFor === 'function'
+          ? evidenceClass.basisClassesOf(evidenceClassFor(p)) : [],
         status: 'active',
         specificity: isInterp ? 0.4 : p.specificity,
         // The turn this came from, so confidence can tell one telling from two. Without it,
@@ -569,14 +583,21 @@ function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefO
       // Rival explanations COEXIST. A new one never overwrites the old — they compete, and
       // evidence decides. This is the difference between reasoning and last-writer-wins.
       let h = next.hypotheses.find(x => _norm(x.statement) === _norm(p.text));
-      if (!h) { h = newHypothesis({ id: p.id, statement: p.text, now }); next.hypotheses.push(h); }
+      if (!h) {
+        const governedClass = typeof claimClassFor === 'function' ? claimClassFor(p) : 'unknown';
+        h = newHypothesis({ id: p.id, statement: p.text, claimClass: governedClass, now });
+        next.hypotheses.push(h);
+      }
+      h.claimedSupportRefs = h.claimedSupportRefs || h.supportRefs.slice();
+      h.claimedChallengeRefs = h.claimedChallengeRefs || h.challengeRefs.slice();
       for (const b of (Array.isArray(p.basis) ? p.basis : [])) {
-        if (!h.supportRefs.includes(String(b))) h.supportRefs.push(String(b));
+        if (!h.claimedSupportRefs.includes(String(b))) h.claimedSupportRefs.push(String(b));
       }
       for (const alt of (Array.isArray(p.alternatives) ? p.alternatives : [])) {
         const t = String(alt || '').trim();
         if (t && !next.hypotheses.some(x => _norm(x.statement) === _norm(t))) {
-          next.hypotheses.push(newHypothesis({ id: `${p.id}_alt${next.hypotheses.length}`, statement: t, now }));
+          const governedClass = typeof claimClassFor === 'function' ? claimClassFor(p) : 'unknown';
+          next.hypotheses.push(newHypothesis({ id: `${p.id}_alt${next.hypotheses.length}`, statement: t, claimClass: governedClass, now }));
         }
       }
       for (const f of (Array.isArray(p.falsifiers) ? p.falsifiers : [])) {
@@ -589,8 +610,20 @@ function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefO
   // Route each signal to the hypotheses it bears on, so a rival can be CHALLENGED by the very
   // evidence that supports another — the thing a flat signal list could never express.
   for (const s of next.signals) {
-    if (s.supports) { const h = next.hypotheses.find(x => x.id === s.supports); if (h && !h.supportRefs.includes(s.ref)) h.supportRefs.push(s.ref); }
-    if (s.challenges) { const h = next.hypotheses.find(x => x.id === s.challenges); if (h && !h.challengeRefs.includes(s.ref)) h.challengeRefs.push(s.ref); }
+    if (s.supports) {
+      const h = next.hypotheses.find(x => x.id === s.supports);
+      if (h) {
+        h.claimedSupportRefs = h.claimedSupportRefs || h.supportRefs.slice();
+        if (!h.claimedSupportRefs.includes(s.ref)) h.claimedSupportRefs.push(s.ref);
+      }
+    }
+    if (s.challenges) {
+      const h = next.hypotheses.find(x => x.id === s.challenges);
+      if (h) {
+        h.claimedChallengeRefs = h.claimedChallengeRefs || h.challengeRefs.slice();
+        if (!h.claimedChallengeRefs.includes(s.ref)) h.claimedChallengeRefs.push(s.ref);
+      }
+    }
   }
 
   // Each hypothesis earns its OWN confidence from the evidence beneath it. Challenging
@@ -604,8 +637,25 @@ function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefO
     //
     // Corrected support is not support. A hypothesis resting on a claim its own source has since
     // withdrawn must fall, or the picture is held up by something nobody asserts any more.
-    const support   = h.supportRefs.map(r => byRef.get(r)).filter(s => s && isActive(s));
-    const challenge = h.challengeRefs.map(r => byRef.get(r)).filter(s => s && isActive(s));
+    h.claimedSupportRefs = h.claimedSupportRefs || h.supportRefs.slice();
+    h.claimedChallengeRefs = h.claimedChallengeRefs || h.challengeRefs.slice();
+    const candidateSupport = h.claimedSupportRefs.map(r => byRef.get(r)).filter(s => s && isActive(s));
+    const candidateChallenge = h.claimedChallengeRefs.map(r => byRef.get(r)).filter(s => s && isActive(s));
+    // Typed claims accept only evidence capable of establishing that proposition. Existing
+    // untyped inquiries remain readable as legacy state; new intake is required to classify.
+    const typed = evidenceClass.claimClassOf(h) !== 'unknown';
+    const partition = typed
+      ? evidenceClass.partitionSupport(candidateSupport, h)
+      : { admissible: candidateSupport, excluded: [] };
+    const challengePartition = typed
+      ? evidenceClass.partitionSupport(candidateChallenge, h)
+      : { admissible: candidateChallenge, excluded: [] };
+    const support = partition.admissible;
+    h.supportRefs = support.map(s => s.ref);
+    h.excludedSupport = partition.excluded;
+    const challenge = challengePartition.admissible;
+    h.challengeRefs = challenge.map(s => s.ref);
+    h.excludedChallenge = challengePartition.excluded;
     const nChallenges = challenge.length;
     const base = support.length ? deriveConfidence(support, { now })
       : { score: 0, band: 'tentative', because: ['nothing supports this yet'] };
