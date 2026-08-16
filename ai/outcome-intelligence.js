@@ -74,6 +74,18 @@ function normalizeRecord(record = {}) {
 function _emptyCounts() { return { improved: 0, steady: 0, worsened: 0, unclear: 0 }; }
 function _rate(n, total) { return total ? Math.round((n / total) * 100) : null; }
 
+// Wilson's lower bound ranks observed improvement while discounting results that rest on
+// very little evidence. The observed rate and sample size remain separate in the public
+// record; this value is only a deterministic ordering key.
+function _efficacyLowerBound(improved, total) {
+  if (!total) return 0;
+  const z = 1.96;
+  const rate = improved / total;
+  const z2 = z * z;
+  return (rate + z2 / (2 * total) - z * Math.sqrt((rate * (1 - rate) + z2 / (4 * total)) / total))
+    / (1 + z2 / total);
+}
+
 function summarize(records = [], opts = {}) {
   const targetPattern = opts.patternType ? _key(opts.patternType) : null;
   const targetScope = opts.scope != null ? _s(opts.scope, 120) : null;
@@ -125,7 +137,10 @@ function summarize(records = [], opts = {}) {
         limitations,
         line: outcomeLine(i.interventionLabel, i.counts, i.total),
       };
-    }).sort((a, b) => (b.useful - a.useful) || (b.total - a.total) || a.interventionType.localeCompare(b.interventionType));
+    }).sort((a, b) => {
+      const efficacy = _efficacyLowerBound(b.improved, b.total) - _efficacyLowerBound(a.improved, a.total);
+      return efficacy || (b.total - a.total) || a.interventionType.localeCompare(b.interventionType);
+    });
     return {
       patternType: p.patternType,
       totalCases: p.totalCases,

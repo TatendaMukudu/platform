@@ -25,11 +25,12 @@ const records = [
 const summary = oi.summarize(records, { patternType: 'momentum_drop' });
 const pat = summary.patterns[0];
 const best = oi.bestForPattern(summary, 'momentum_drop');
+const supportive = pat.interventions.find(i => i.interventionType === 'supportive_checkin');
 const brief = oi.earlySignalBrief({ patternType: 'momentum_drop', signalCount: 3, outcomeSummary: summary, scopeLabel: 'in this group' });
 
 ok('summarize returns one requested pattern', summary.patterns.length === 1 && pat.patternType === 'momentum_drop');
-ok('interventions are counted honestly', pat.totalCases === 4 && best.total === 3 && best.improved === 1 && best.steady === 1 && best.worsened === 1);
-ok('evidence refs are deduped and retained for audit', best.evidenceRefs.join(',') === 'e1,e2,e3');
+ok('interventions are counted honestly', pat.totalCases === 4 && supportive.total === 3 && supportive.improved === 1 && supportive.steady === 1 && supportive.worsened === 1);
+ok('evidence refs are deduped and retained for audit', supportive.evidenceRefs.join(',') === 'e1,e2,e3');
 ok('outcome line is historical, not predictive', /was followed by/.test(best.line) && oi.assertSafeText(best.line).ok);
 ok('early brief includes signal count and outcome history', /appeared 3 times/.test(brief.signal) && /recorded case/.test(brief.outcomeLine));
 ok('suggested next step is confirmation-gated', brief.suggestedNextStep && brief.suggestedNextStep.requiresConfirmation === true);
