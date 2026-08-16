@@ -671,6 +671,10 @@ const server = app.listen(0, async () => {
     await call(`/api/actions/${p2.j.action.id}/approve`, tokCoach, { method: 'POST' });
     const blocked = await call(`/api/actions/${p2.j.action.id}/execute`, tokCoach, { method: 'POST' });
     ok('a DENY policy hard-blocks execution even after approval', blocked.status === 403 && blocked.j?.decision?.denied === true);
+    ok('the constitutional refusal names its boundary and matched rule',
+       blocked.j?.refusal?.boundary === 'organisation_constitution' && !!blocked.j.refusal.ruleId);
+    ok('the constitutional refusal explains itself and offers a compliant alternative',
+       typeof blocked.j?.refusal?.explanation === 'string' && typeof blocked.j?.refusal?.alternative === 'string');
     await call('/api/policies/reset', tokCoach, { method: 'POST' });
 
     // ── MyWorkspace: one conversation-first surface; deterministic, visible privacy ─

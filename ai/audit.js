@@ -32,6 +32,7 @@ const ACTIONS = new Set([
   'subject_access',  // a person exercised their right to a copy of their own data (Art 15)
   'erasure',         // a person's data was erased (Art 17)
   'belief_contest',  // a subject contested a belief held about them
+  'constitutional_refusal', // an operation conflicted with the organisation constitution
   'outbound_delivery', // IntelliQ proactively reached a person off-platform (digest/alert)
 ]);
 

@@ -77,6 +77,7 @@ const evidence   = require('./lib/evidence');   // the canonical evidence envelo
 const mappingLib = require('./lib/mapping');     // the mapping approval lifecycle — the interpretation boundary
 const syncLib    = require('./lib/sync');        // sync reliability — classification, backoff, health, staleness
 const policyLib  = require('./lib/policy');      // the organisational constitution — what the assistant may DO
+const refusal    = require('./ai/refusal');      // explained + recorded constitutional denials
 const actionLib  = require('./lib/action');      // the universal Action Contract — the Execution Layer spine
 const workspaceLib = require('./lib/workspace'); // the unified personal workspace — typed, scoped items
 const reasoning  = require('./lib/reasoning');   // the three reasoning boundaries — pre-kernel / kernel / post-kernel
@@ -7198,7 +7199,13 @@ app.post('/api/actions/:id/execute', requireAuth, (req, res) => {
   if (a.status === 'executed') return res.status(409).json({ error: 'already executed' });
   const decision = _policyCheck(code, a, 'execute', req.iqSession.role);
   a.policy = decision;
-  if (decision.denied) { _actAudit(a, 'blocked', userId, { reason: decision.reason }); a.status = 'blocked'; scheduleSave(); return res.status(403).json({ error: 'policy forbids this action', decision }); }
+  if (decision.denied) {
+    const refused = refusal.fromPolicyDenial(decision, { capability: a.capability, verb: a.verb, stage: 'execute' });
+    _actAudit(a, 'blocked', userId, { reason: decision.reason });
+    _audit(code, { actor: userId, action: 'constitutional_refusal', subjectIds: [], basis: refused.auditBasis });
+    a.status = 'blocked'; scheduleSave();
+    return res.status(403).json({ error: refused.explanation, refusal: refused, decision });
+  }
   if (decision.requiresApproval && !a.approvals.length) { a.status = 'awaiting_approval'; _actAudit(a, 'awaiting_approval', userId); scheduleSave(); return res.status(409).json({ error: decision.escalate ? `must be escalated to ${decision.escalateTo}` : 'approval required before executing', decision }); }
   const cap = _CAPABILITIES[a.capability];
   try {

@@ -114,11 +114,17 @@ boundary is wrong.
 a compliant alternative where one exists, (d) records the conflict, (e) never weakens the
 boundary.
 
-**ENFORCEMENT.** None. `ai/audit.js` provides the recording substrate but has no refusal event.
+**ENFORCEMENT.** Partial. `ai/refusal.js` turns a deterministic policy denial into a bounded
+explanation, named constitutional boundary, compliant non-executing alternative and content-free
+audit label. The action execution boundary records `constitutional_refusal` in the tamper-evident
+audit trail without changing the deny decision. Other constitutional boundaries (for example,
+privacy-sensitive operating-context refusal) still need to converge on this contract.
 
-**TEST.** None.
+**TEST.** `scripts/constitutional-refusal-smoke.js` attacks silent, unrecorded and boundary-
+weakening refusals and defends the content-free record. `scripts/endpoint-smoke.js` exercises the
+real denied-action HTTP boundary.
 
-**STATUS: SPECIFIED — NOT YET ENFORCED.**
+**STATUS: PARTIAL.**
 
 ---
 
@@ -909,7 +915,7 @@ search-box home screen makes it optional. Test that tension directly with users.
 | S2 | Safety exceptions narrow and governed | PARTIAL |
 | G3 | Complex system, simple model | PARTIAL |
 | O6 | Lifecycle state must not mutate epistemic truth | PARTIAL |
-| C2 | Refusal explained, alternative offered, recorded | SPECIFIED |
+| C2 | Refusal explained, alternative offered, recorded | PARTIAL |
 | E1 | Evidence establishes only within its class | SPECIFIED |
 | E3 | Lived experience not outvoted by instrumentation | SPECIFIED |
 | P5 | Consent before revealing another's contribution | SPECIFIED |
@@ -917,7 +923,7 @@ search-box home screen makes it optional. Test that tension directly with users.
 | U4 | A person may decline attention | SPECIFIED |
 | M2 | Activity ≠ output ≠ outcome ≠ improvement | PARTIAL |
 
-**17 ENFORCED · 13 PARTIAL · 5 SPECIFIED · 5 OPEN · 4 DISCOVER**
+**17 ENFORCED · 14 PARTIAL · 4 SPECIFIED · 5 OPEN · 4 DISCOVER**
 
 ---
 

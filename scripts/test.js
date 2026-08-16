@@ -56,6 +56,7 @@ const SUITES = [
   'sync-smoke.js',               // sync reliability primitives (pure): classify/backoff/rate-limit/health/staleness
   'sync-reliability-smoke.js',   // sync reliability invariants: idempotent replay, correction, deletion, concurrency
   'policy-smoke.js',             // the organisational constitution: what the assistant may DO (pure)
+  'constitutional-refusal-smoke.js', // LAW C2: denied operations are explained, redirected, and recorded without weakening the boundary
   'action-smoke.js',             // the universal action contract: recommend→…→learn stage machine (pure)
   'reasoning-smoke.js',          // the three reasoning boundaries: pre-kernel/kernel/post-kernel (pure)
   'workspace-smoke.js',          // the unified workspace item model: typed, scoped, deterministic privacy (pure)
