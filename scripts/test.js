@@ -40,6 +40,7 @@ step('syntax — node --check all sources', () => {
 const SUITES = [
   'baseline-smoke.js',
   'intelligence-smoke.js',
+  'activity-outcome-smoke.js', // LAW M2: action volume is participation, never an outcome by default; genuine results remain outcomes
   'privacy-smoke.js',
   'person-model-smoke.js',
   'eval.js',

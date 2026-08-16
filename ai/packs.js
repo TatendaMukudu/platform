@@ -65,7 +65,15 @@ function primitiveForSignal(source, label) {
   if (/load|workload|demand|hours|minutes|volume|caseload/i.test(l)) return 'load';
   if (/skill|fitness|speed|strength|accuracy|rating|proficien|competen/i.test(l)) return 'capability';
   if (/budget|cost|capacity|headcount|inventory|funds/i.test(l)) return 'resource';
-  return SOURCE_PRIMITIVE[source] || 'outcome';
+  // Counts of actions describe participation, not whether those actions achieved a result.
+  // Prefer the weaker claim even when a broadly mapped source (for example `metric`) would
+  // otherwise call the stream an outcome.
+  if (/\b(?:messages?|meetings?|tickets?|calls?|emails?|issues?|commits?|tasks?|sessions?|forms?|actions?)\s+(?:sent|held|closed|made|touched|pushed|completed|submitted|attended|taken|logged|processed)\b/i.test(l)) {
+    return 'participation';
+  }
+  // Known sources retain their declared meaning. An unknown source is not enough evidence
+  // to assert the stronger `outcome` primitive, so it fails closed to participation.
+  return SOURCE_PRIMITIVE[source] || 'participation';
 }
 /* Valence comes from meaning, not the kernel: which direction is "good". */
 function valenceFor(label) {
