@@ -214,13 +214,28 @@ not hide the original defect pattern.
 ### 1. Establish the diff and its claimed boundary
 
 ```bash
-git log --reverse --format='%H%x09%an%x09%s'
-git show --stat --oneline <commit>
-git diff <commit>^ <commit> -- ai lib server.js js scripts docs/ttd
+git log --reverse --author='Claude' --format='%H%x09%an%x09%s'
+git show --stat --format=fuller <commit>
+
+# Inspect the complete change against every parent. For the initial commit, --root compares
+# against an empty tree. Do not add path filters here: they can hide part of the change.
+parents=$(git rev-list --parents -n 1 <commit>)
+set -- $parents
+commit=$1
+shift
+if [ "$#" -eq 0 ]; then
+  git diff-tree --root --no-commit-id -r -p "$commit"
+else
+  for parent in "$@"; do
+    git diff --find-renames --find-copies "$parent" "$commit"
+  done
+fi
 ```
 
 Write down the capability changed, the people/data affected, and the TTD laws touched. If no law
-appears relevant, explicitly record why; silence is not a scope decision.
+appears relevant, explicitly record why; silence is not a scope decision. Begin with the complete
+diff above, including configuration, dependencies, assets, migrations and documentation. Narrow
+to relevant paths only during the focused review passes, after the complete boundary is known.
 
 ### 2. Start with an adversarial case, not the happy path
 
