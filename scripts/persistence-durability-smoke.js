@@ -26,13 +26,15 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     orgMeta, orgUsers, inquiryStates, reasonLedger, selfModelLedger, auditLog, deliveryPrefs,
     pushSubs, inquiryDismissed, assistantConversations, libraryFolders, libraryItems,
     safeguardingFlags, userAiProfiles, orgNotes,
-    _durableUnits, _persistedStores, _reconstruct, _removePerson, _audit, _unclassified, scheduleSave,
+    _durableUnits, _persistedStores, _reconstruct, _removePerson, _audit, _unclassified,
+    _saveHashes, scheduleSave,
   } = S;
 
   /* A store that behaves like Postgres: rows keyed by store_key, values round-tripped through
      JSON. If anything in the durable shape cannot survive serialisation, this finds it. */
   const rows = {};
-  db.saveStores   = async (units) => { for (const [k, v] of Object.entries(units)) rows[k] = JSON.parse(JSON.stringify(v)); return { rows: 0, bytes: 0 }; };
+  let saveCalls = 0;
+  db.saveStores   = async (units) => { saveCalls++; for (const [k, v] of Object.entries(units)) rows[k] = JSON.parse(JSON.stringify(v)); return { rows: 0, bytes: 0 }; };
   db.deleteStores = async (keys)  => { for (const k of keys) delete rows[k]; return keys.length; };
   db.loadStores   = async ()      => JSON.parse(JSON.stringify(rows));
   db.saveMain     = async ()      => {};
@@ -100,7 +102,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   // ── B. Restart durability, store by store ──────────────────────────────────────────────
   scheduleSave(); await settle();
+  // A real restart has no in-process hash memory. Reconstruction must seed it from durable rows,
+  // or the first ordinary save after every deploy uploads the entire database again.
+  _saveHashes.clear();
   await restart();
+  const callsAfterRestart = saveCalls;
+  scheduleSave(); await settle();
+  ok('A · the first unchanged save after restart uploads nothing', saveCalls === callsAfterRestart);
 
   console.log('\n  B — the eleven, across a restart');
   ok('B · assistantConversations survives (private chat history is permanent)',

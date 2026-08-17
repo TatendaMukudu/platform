@@ -144,6 +144,13 @@ const GLOBAL_STORES = new Set(['inviteTokens', 'pendingInvites', 'activeSessions
    second copy of something we already hold and can regenerate exactly. */
 const DERIVED_STORES = new Set(['emailIndex']);
 
+// The two high-volume append stores get a finer durable topology. This changes persistence
+// shape only; their in-memory API stays untouched. Signals are bounded chunks so appending one
+// signal rewrites at most one chunk, while check-ins are already keyed per member and therefore
+// persist one member per row instead of rewriting every member in the organisation.
+const SIGNAL_CHUNK_SIZE = Math.max(25, parseInt(process.env.SIGNAL_CHUNK_SIZE, 10) || 100);
+const _unitPart = value => Buffer.from(String(value)).toString('base64url');
+
 /* Every store that carries durable state, by name. Kept as one list so a new
    store is added in one place rather than three. */
 function _persistedStores() {
@@ -192,6 +199,17 @@ function _durableUnits() {
       else why = key.includes(':') ? `prefix "${key.split(':')[0]}" is not a known org`
                                    : 'key is not a known org code and has no org prefix';
       if (org === '_') _noteUnclassified(name, key, why);
+      if (name === 'memberCheckins' && org !== '_') {
+        units[`store:${name}:${org}:entry:${_unitPart(key)}`] = { [key]: value };
+        continue;
+      }
+      if (name === 'orgSignals' && org !== '_' && Array.isArray(value)) {
+        for (let from = 0; from < value.length; from += SIGNAL_CHUNK_SIZE) {
+          const chunk = String(from / SIGNAL_CHUNK_SIZE).padStart(8, '0');
+          units[`store:${name}:${org}:chunk:${chunk}`] = { [key]: value.slice(from, from + SIGNAL_CHUNK_SIZE) };
+        }
+        continue;
+      }
       const unitKey = `store:${name}:${org}`;
       (units[unitKey] = units[unitKey] || {})[key] = value;
     }
@@ -225,12 +243,27 @@ function _noteUnclassified(store, key, why) {
    keys for one org and the same store holds keys for all of them. */
 function _applyUnits(rows) {
   const stores = _persistedStores();
-  for (const [unitKey, value] of Object.entries(rows || {})) {
+  const entries = Object.entries(rows || {}).sort(([a], [b]) => a.localeCompare(b));
+  const shardedSignals = new Set(entries.filter(([k]) => /^store:orgSignals:[^:]+:chunk:/.test(k)).map(([k]) => k.split(':')[2]));
+  const shardedCheckins = new Set(entries.filter(([k]) => /^store:memberCheckins:[^:]+:entry:/.test(k)).map(([k]) => k.split(':')[2]));
+  const loadedSignalKeys = new Set();
+  for (const [unitKey, value] of entries) {
     const parts = unitKey.split(':');            // store:<name>[:<org>]
     const name = parts[1];
+    const org = parts[2];
+    // If a migration was interrupted after writing new shards but before deleting the old row,
+    // the new topology is authoritative. Never load both and duplicate a person's history.
+    if (parts.length === 3 && ((name === 'orgSignals' && shardedSignals.has(org)) ||
+      (name === 'memberCheckins' && shardedCheckins.has(org)))) continue;
     const target = stores[name];
     if (!target || !value) continue;
-    for (const [k, v] of Object.entries(value)) target[k] = v;
+    for (const [k, v] of Object.entries(value)) {
+      if (name === 'orgSignals' && parts[3] === 'chunk') {
+        if (!loadedSignalKeys.has(k)) { target[k] = []; loadedSignalKeys.add(k); }
+        target[k].push(...(v || []));
+      }
+      else target[k] = v;
+    }
   }
 }
 
@@ -409,6 +442,19 @@ async function _reconstruct(storeData) {
         for (const k of Object.keys(store)) delete store[k];
       }
       _applyUnits(rows);
+      // A fresh process must know what is already durable. Without this baseline, the first
+      // ordinary mutation after every deploy uploads every row again. Keep loaded-but-obsolete
+      // keys as sentinels so a topology migration deletes them on the first successful save;
+      // only mark a current unit clean when that exact key was actually loaded.
+      _saveHashes.clear();
+      const current = _durableUnits();
+      for (const key of Object.keys(rows)) _saveHashes.set(key, '__loaded_obsolete__');
+      for (const [key, value] of Object.entries(current)) {
+        if (!Object.prototype.hasOwnProperty.call(rows, key)) continue;
+        const currentHash = _hash(JSON.stringify(value));
+        const loadedHash = _hash(JSON.stringify(rows[key]));
+        if (currentHash === loadedHash) _saveHashes.set(key, currentHash);
+      }
       console.log(`[db] Split persistence: ${n} durable unit(s) loaded (authoritative)`);
       return { mode: 'split', units: n, authoritative: 'split' };
     }
@@ -12713,7 +12759,7 @@ app.get('/api/admin/persistence', requireAuth, async (req, res) => {
     },
     lastSave: _lastSave,
     inMemory: { units: sizes.length, bytes: held },
-    largestUnits: (platform ? sizes : sizes.filter(u => u.key.endsWith(`:${code}`) || !u.key.split(':')[2])).slice(0, 15),
+    largestUnits: (platform ? sizes : sizes.filter(u => u.key.split(':')[2] === code || !u.key.split(':')[2])).slice(0, 15),
     // Preserved-but-unclassified keys. Never fatal; visible so a real mistake
     // cannot live here forever costing a full-store rewrite unnoticed.
     unclassified: platform ? anomalies : anomalies.filter(a => a.key === code || a.key.startsWith(`${code}:`)),
@@ -16995,7 +17041,7 @@ const PORT = process.env.PORT || 3000;
 module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired,
   // exported for the truth layer: the persistence boundary
   _durableUnits, _applyUnits, _pruneExpiredSessions, _persistedStores, scheduleSave,
-  _reconstruct, _unclassified, _saveStats, PERSISTENCE_MODE,
+  _reconstruct, _unclassified, _saveStats, _saveHashes, PERSISTENCE_MODE,
   emailIndex, activeSessions, inviteTokens, userAiProfiles,
   // exported for the truth layer: the group contribution boundary
   groupCandidates, orgNodes, _groupSubjectRef, _noteGroupCandidates, _admitGroupContributions,
