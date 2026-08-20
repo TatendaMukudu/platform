@@ -2,8 +2,24 @@
 
 **Authoritative for:** P0-1, P0-2, P0-3. Codex briefs reference this rather than restating it.
 **Companion to:** `docs/ttd/pilot-readiness-review.md`.
+**P0-D and P0-5 are briefed in `docs/briefs/p0-d-authority-and-p0-5-origin.md`** — both are pure
+`ai/` modules, overlap nothing here, and can run at the same time as any of the three below.
 
 The three briefs touch disjoint files and **can be dispatched in parallel**. See §Parallelism.
+
+## The whole pilot gate, verified on a clean `npm install`
+
+```
+evidence-durability-smoke:  0 passed,  9 failed     P0-1
+shutdown-durability-smoke:  0 passed,  7 failed     P0-2
+write-conflict-smoke:       0 passed,  7 failed     P0-3
+authority-truth-smoke:      0 passed, 14 failed     P0-D
+pilot-loop-smoke:          28 passed,  1 failed     P0-5
+```
+
+Five suites, 38 failing assertions, five files. None of these suites is registered in
+`scripts/test.js` yet except `pilot-loop-smoke`; register each one in the commit that makes it
+green.
 
 ---
 
@@ -206,5 +222,8 @@ contribute — the echo is minted as an independent `direct_observation` with it
 That is the "five teammates repeating the captain" case `ai/diagnose.js:218-224` exists to
 prevent, reachable through the forum, which is exactly where a room agrees with itself.
 
-Small fix, high value, in the flagship claim. Not briefed here to keep the parallel batch clean —
-brief it after the first three land.
+Small fix, high value, in the flagship claim.
+
+**Now briefed** — see `docs/briefs/p0-d-authority-and-p0-5-origin.md`, Brief 5. It turned out to
+touch only `ai/forum.js` and one call site, so it does not need to wait for the batch above; it
+can be dispatched immediately and merges cleanly against all three.
