@@ -140,14 +140,25 @@ invisible data loss, which is the wrong way round.
 | `SAVE_DEBOUNCE_MS` | `1500` | quiet period before a save cycle runs |
 | `SAVE_RETRY_MS` | `5000` | backoff base after a failed write (caps at 12x) |
 | `SAVE_TRACE` | off | `1` logs every save cycle |
+| `SIGNAL_CHUNK_SIZE` | `100` | maximum signal records per durable row (minimum 25) |
 
-## Known residual cost
+## High-volume stores
 
-`orgSignals` and `memberCheckins` are flat per-org collections, so appending one item rewrites the
-whole org's collection. On a two-org demo they are ~87% of persisted weight; one signal append
-costs ~153 KB against ~0.9 KB for a conversation turn. This is a **cost** characteristic, not a
-correctness one. Sub-partitioning them is deferred until production write-mix and egress figures
-show it is worth the risk.
+`orgSignals` and `memberCheckins` previously accounted for roughly 87% of persisted weight. The
+generic per-org split still made one signal append rewrite the org's complete signal history and
+one check-in rewrite every member's check-ins. They retain their existing in-memory shapes but now
+use finer durable units:
+
+- `orgSignals` uses stable, ordered chunks, so an append rewrites only the final bounded chunk.
+- `memberCheckins` uses one top-level member key per row, so one person's check-in never rewrites
+  another person's history.
+
+The first save after deploying this topology writes the new rows and removes the superseded
+per-org rows. If both shapes exist after an interrupted migration, reconstruction treats the new
+shards as authoritative and never loads both. The legacy `main` recovery row remains untouched.
+
+Reconstruction also seeds the persisted hash baseline. Without that baseline, the first ordinary
+save after every deploy uploaded every split row again even when almost nothing had changed.
 
 ## Tests
 

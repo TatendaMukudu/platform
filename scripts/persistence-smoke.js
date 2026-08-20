@@ -18,7 +18,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
   const db = require('../db.js');
   const S = require('../server.js');
-  const { orgMeta, orgUsers, inquiryStates, _durableUnits, _applyUnits, _persistedStores,
+  const { orgMeta, orgUsers, inquiryStates, orgSignals, memberCheckins,
+          _durableUnits, _applyUnits, _persistedStores,
           _pruneExpiredSessions, _rebuildEmailIndex, scheduleSave } = S;
 
   /* A fake store that records every transaction, so we can assert on what actually left the
@@ -45,6 +46,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   orgMeta.beta  = { orgName: 'Beta School', orgMode: 'education' };
   orgUsers.alpha = { ash: { id: 'ash', name: 'Ashton Mbeki', email: 'ash@alpha.test', role: 'member', status: 'active' } };
   orgUsers.beta  = { bo:  { id: 'bo',  name: 'Bo Lindqvist', email: 'bo@beta.test',  role: 'member', status: 'active' } };
+  orgSignals.alpha = Array.from({ length: 201 }, (_, i) => ({ id: `s${i}`, subjectId: 'ash', ts: i }));
+  memberCheckins['alpha:ash'] = [{ id: 'ca' }];
+  memberCheckins['alpha:lee'] = [{ id: 'cl' }];
 
   /* 1 — the classification loses nothing. Every top-level key of every persisted store must
      appear in exactly one durable unit, or the split silently drops data. */
@@ -65,6 +69,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     ok('1 · …and the two orgs do not share a unit',
       !('bo' in units['store:orgUsers:alpha']) && !('ash' in units['store:orgUsers:beta']));
     ok('1 · global stores are not partitioned', !!units['store:inviteTokens']);
+    ok('1b · a large signal stream is split into bounded chunks',
+      Object.keys(units).filter(k => k.startsWith('store:orgSignals:alpha:chunk:')).length === 3);
+    ok('1b · member check-ins persist one member per unit',
+      Object.keys(units).filter(k => k.startsWith('store:memberCheckins:alpha:entry:')).length === 2);
   }
 
   /* 2 — no mutation, no write. The baseline has to hold or every idle tick costs egress.
@@ -75,6 +83,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   written.length = 0;
   scheduleSave(); await settle();
   ok('2 · a save with nothing changed writes nothing', written.length === 0);
+
+  orgSignals.alpha.push({ id: 's201', subjectId: 'ash', ts: 201 });
+  scheduleSave(); await settle();
+  ok('2b · appending one signal rewrites only the final bounded chunk',
+    lastWrite().length === 1 && /store:orgSignals:alpha:chunk:00000002$/.test(lastWrite()[0]));
 
   /* 3 — THE HEADLINE. One org changing must not rewrite another org. This is the assertion the
      whole checkpoint exists for. */
@@ -201,6 +214,25 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     const units = _durableUnits();
     ok('13 · a key belonging to no known org still persists', !!units['store:orgNotes:_'] && 'not-an-org-code' in units['store:orgNotes:_']);
   }
+
+  /* 14 — an interrupted topology migration may leave old and new rows together. New shards are
+     authoritative; loading both would duplicate the very histories persistence protects. */
+  {
+    _applyUnits({
+      'store:orgSignals:alpha': { alpha: [{ id: 'legacy' }] },
+      'store:orgSignals:alpha:chunk:00000000': { alpha: [{ id: 'sharded' }] },
+      'store:memberCheckins:alpha': { 'alpha:ash': [{ id: 'legacy-checkin' }] },
+      'store:memberCheckins:alpha:entry:YWxwaGE6YXNo': { 'alpha:ash': [{ id: 'sharded-checkin' }] },
+    });
+    ok('14 · interrupted migration never loads both signal topologies',
+      orgSignals.alpha.length === 1 && orgSignals.alpha[0].id === 'sharded');
+    ok('14 · interrupted migration never loads both check-in topologies',
+      memberCheckins['alpha:ash'].length === 1 && memberCheckins['alpha:ash'][0].id === 'sharded-checkin');
+  }
+
+  const renderBlueprint = require('fs').readFileSync(require('path').join(__dirname, '..', 'render.yaml'), 'utf8');
+  ok('15 · the deploy blueprint explicitly pins split persistence',
+    /key:\s*PERSISTENCE_MODE[\s\S]{0,80}?value:\s*split/.test(renderBlueprint));
 
   console.log(`\npersistence-smoke: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

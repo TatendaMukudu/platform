@@ -12,6 +12,10 @@ services:
         sync: false
       - key: PORT
         value: 3000
+      # Keep Neon writes on the durable-unit path. `dual` and `main` upload the complete legacy
+      # blob on every save and can exhaust Render's outbound allowance under ordinary activity.
+      - key: PERSISTENCE_MODE
+        value: split
       # The composer: the model writes every reply, the deterministic core
       # retrieves what it may use and verifies what it wrote. Declared here
       # rather than left as a dashboard-only value, because a flag that exists
