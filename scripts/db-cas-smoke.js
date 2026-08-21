@@ -96,6 +96,8 @@ ok('4 · the legacy main blob is left alone, so the pre-migration restore point 
 ok('5 · concurrent creation of an absent unit is safe',
   splitWrites.some(s => /ON CONFLICT\s*\([^)]*\)\s*DO NOTHING/i.test(s)) ||
   splitWrites.some(s => /WHERE[\s\S]*iq_store\.rev\s*=/i.test(s)));
+ok('5 · a stale writer cannot resurrect a unit deleted after it was read',
+  splitWrites.some(s => /SELECT\s+\$1[\s\S]{0,120}?WHERE\s+\$3\s*=\s*0/i.test(s)));
 
 /* ── 6 · A CONFLICT IS NOT A FAILURE. Zero rows affected means another process got there first.
    That is a semantic answer the caller must be able to act on, and it must never be thrown as

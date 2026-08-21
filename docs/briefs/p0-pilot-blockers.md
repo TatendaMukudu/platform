@@ -39,9 +39,10 @@ writer and fails loudly on a semantic conflict. The actual production routes rem
 and `manage_tree` authorization remains unchanged. `orgUsers` node arrays remain a derived cache,
 rebuilt from authoritative `orgNodes` after commit or recovery.
 
-Final corrected results: `write-conflict-smoke` **21 passed, 0 failed**, `db-cas-smoke` **18 passed,
+Final corrected results: `write-conflict-smoke` **21 passed, 0 failed**, `db-cas-smoke` **19 passed,
 0 failed**, `persistence-cas-boundary-smoke` **9 passed, 0 failed**, and
-`delete-cas-boundary-smoke` **7 passed, 0 failed**. All four are registered
+`delete-cas-boundary-smoke` **7 passed, 0 failed**. The additional
+`tree-mutation-serialization-smoke` is **4 passed, 0 failed**. All five are registered
 in `scripts/test.js`. The adjudication's stated total of 19 for `write-conflict-smoke` was stale;
 the unchanged corrected file contains 21 assertions.
 
@@ -56,6 +57,10 @@ durable revision matches, rolling back the batch and returning semantic conflict
 Failed authoritative split reconstruction marks persistence unavailable, clears any partial
 revision/hash baseline, rejects mutating HTTP requests with 503, refuses ordinary persistence,
 and becomes ready only after a successful reconstruction establishes authoritative revisions.
+Protected tree mutations are serialized per tenant across the complete
+precondition/snapshot/mutation/CAS section, so overlapping requests cannot share unaccepted
+candidate state. A stale writer expecting a deleted row also cannot resurrect it: insertion is
+permitted only with expected revision zero.
 
 P0-6 inquiry semantic recovery remains unadjudicated. Uniform durable-unit CAS prevents a stale
 process from overwriting the unit, but no inquiry replay or merge policy was introduced. Before

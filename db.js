@@ -182,7 +182,8 @@ async function saveStores(units, { expect = {} } = {}) {
       bytes += Buffer.byteLength(json, 'utf8');
       const res = await client.query(
         `INSERT INTO iq_store (store_key, store_value, rev, updated_at)
-         VALUES ($1, $2::jsonb, 1, NOW())
+         SELECT $1, $2::jsonb, 1, NOW()
+          WHERE $3 = 0
          ON CONFLICT (store_key)
          DO UPDATE SET store_value = EXCLUDED.store_value,
                        rev         = iq_store.rev + 1,

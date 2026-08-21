@@ -582,8 +582,11 @@ Review also found and corrected two holes. `deleteStores` now uses tenant/store-
 inside one transaction, returning stale deletions as semantic conflicts. A failed authoritative
 split reconstruction now clears partial baselines, marks persistence unavailable, rejects mutating
 HTTP requests and protected saves, and permits persistence again only after successful
-reconstruction seeds revisions and hashes. Corrected suites: `write-conflict` 21/0, `db-cas` 18/0,
-`persistence-cas-boundary` 9/0, and `delete-cas-boundary` 7/0.
+reconstruction seeds revisions and hashes. Per-tenant tree mutation serialization now covers the
+complete semantic-to-durable acceptance section, and insert CAS refuses resurrection when a stale
+writer expected a deleted nonzero revision. Corrected suites: `write-conflict` 21/0, `db-cas` 19/0,
+`persistence-cas-boundary` 9/0, `delete-cas-boundary` 7/0, and
+`tree-mutation-serialization` 4/0.
 
 Render drain behavior remains a required pre-Falcon infrastructure verification. P0-6 remains
 explicitly unresolved.

@@ -2409,6 +2409,31 @@ app.get('/api/tree', requireAuth, (req, res) => {
   res.json({ ok: true, nodes });
 });
 
+// One tenant tree is one durable aggregate. Keep its complete
+// precondition->snapshot->mutation->CAS section ordered inside this process so
+// a later request cannot leak its unaccepted mutation into an earlier snapshot.
+const _treeMutationTails = new Map();
+function _serializeTreeMutation(req, res, next) {
+  const code = req.iqSession.orgCode;
+  const prior = _treeMutationTails.get(code) || Promise.resolve();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const tail = prior.then(() => gate);
+  _treeMutationTails.set(code, tail);
+  prior.then(() => {
+    let released = false;
+    const finish = () => {
+      if (released) return;
+      released = true;
+      if (_treeMutationTails.get(code) === tail) _treeMutationTails.delete(code);
+      release();
+    };
+    res.once('finish', finish);
+    res.once('close', finish);
+    next();
+  }).catch(next);
+}
+
 function _treePrecondition(res, node, ifRev) {
   if (ifRev === undefined) {
     res.status(428).json({ error: 'precondition required', field: 'ifRev' });
@@ -2443,7 +2468,7 @@ async function _commitTreeMutation(code, snapshot, res) {
   }
 }
 
-app.post('/api/tree/node', requirePermission('manage_tree'), async (req, res) => {
+app.post('/api/tree/node', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
   const code = req.iqSession.orgCode;
   const { name, parentId, description, ifRev } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
@@ -2477,7 +2502,7 @@ app.post('/api/tree/node', requirePermission('manage_tree'), async (req, res) =>
   res.json({ ok: true, node: orgNodes[code][nodeId] });
 });
 
-app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), async (req, res) => {
+app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
   const code   = req.iqSession.orgCode;
   const nodeId = req.params.nodeId;
   const node   = orgNodes[code]?.[nodeId];
@@ -2520,7 +2545,7 @@ app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), async (req, 
   res.json({ ok: true, node });
 });
 
-app.delete('/api/tree/node/:nodeId', requirePermission('manage_tree'), async (req, res) => {
+app.delete('/api/tree/node/:nodeId', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
   const code   = req.iqSession.orgCode;
   const nodeId = req.params.nodeId;
   const node   = orgNodes[code]?.[nodeId];
