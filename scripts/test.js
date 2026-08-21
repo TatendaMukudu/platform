@@ -55,6 +55,7 @@ const SUITES = [
   'shutdown-durability-smoke.js', // P0-2: debounced durable state is forced and failures stay loud
   'shutdown-boundary-smoke.js', // P0-2 production path: signals converge and evidence maintenance precedes final persistence
   'write-conflict-smoke.js', // P0-3: stale tree writers fail before replacing accepted state
+  'authority-truth-smoke.js', // P0-D: authority settles arrangements, never empirical truth
   'db-cas-smoke.js', // P0-3: every split durable-unit write uses PostgreSQL CAS
   'persistence-cas-boundary-smoke.js', // P0-3: reconstruction seeds hashes/revisions before ordinary saves
   'delete-cas-boundary-smoke.js', // P0-3: stale durable-unit deletion conflicts instead of destroying newer truth
