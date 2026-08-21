@@ -16,6 +16,7 @@
 const DAY = 86400000;
 const DOW = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 const RECORD_TYPES = Object.freeze(['event', 'objective', 'responsibility', 'requirement', 'rhythm', 'dependency', 'decision']);
+const ARRANGEMENT_ORIGIN = 'org_context_arrangement';
 
 /* Never allow operating context to encode private/sensitive/surveillance content.
    These are HARD blocks at extraction and validation — they can never become rules. */
@@ -210,13 +211,18 @@ function preview(proposals, ctx = {}) {
 function projectConfig(records, now = Date.now()) {
   const active = (records || []).filter(r => r.status === 'active' && r.confirmedAt &&
     (!r.effectiveFrom || Date.parse(r.effectiveFrom) <= now) && (!r.effectiveTo || Date.parse(r.effectiveTo) > now));
+  const assignedArrangementClaims = new Set(active
+    .filter(r => r.type === 'responsibility')
+    .flatMap(r => (r.fields && r.fields.claimTypes) || []));
   const cfg = { events: [], objectives: [], responsibilities: [], requirements: [], rhythms: [], dependencies: [], decisions: [] };
   for (const r of active) {
     const f = r.fields || {};
     if (r.type === 'event') cfg.events.push({ id: r.id, type: f.type || 'default', title: f.title, startAt: f.startAt, endAt: f.endAt || null, scope: f.scope || 'team', owner: f.owner || null, participants: f.participants || null });
     else if (r.type === 'objective') cfg.objectives.push({ id: r.id, title: f.title, priority: f.priority || 'normal', owner: f.owner || null, targetAt: f.targetAt || null, successCriteria: f.successCriteria || null });
-    else if (r.type === 'responsibility') cfg.responsibilities.push({ subject: f.role || f.subject, role: f.role || null, claimTypes: f.claimTypes || [], effectiveFrom: r.effectiveFrom, effectiveTo: r.effectiveTo });
-    else if (r.type === 'requirement') cfg.requirements.push({ id: r.id, claimType: f.claimType, neededBy: f.neededBy || null, freshDays: f.freshDays, expectedOwner: f.expectedOwner || null, matches: f.matches || null });
+    else if (r.type === 'responsibility') cfg.responsibilities.push({ subject: f.role || f.subject, role: f.role || null, claimTypes: f.claimTypes || [], claimOrigin: ARRANGEMENT_ORIGIN, effectiveFrom: r.effectiveFrom, effectiveTo: r.effectiveTo });
+    else if (r.type === 'requirement') cfg.requirements.push({ id: r.id, claimType: f.claimType,
+      claimOrigin: assignedArrangementClaims.has(f.claimType) ? ARRANGEMENT_ORIGIN : null,
+      neededBy: f.neededBy || null, freshDays: f.freshDays, expectedOwner: f.expectedOwner || null, matches: f.matches || null });
     else if (r.type === 'rhythm') cfg.rhythms.push({ id: r.id, process: f.process, cadenceDays: f.cadenceDays, expectedOutput: f.expectedOutput || null, owner: f.owner || null, lastOutputAt: f.lastOutputAt || null });
     else if (r.type === 'dependency') cfg.dependencies.push({ upstream: f.upstream, downstream: f.downstream, type: f.type || 'blocks', deadlineAt: f.deadlineAt || null });
     else if (r.type === 'decision') cfg.decisions.push({ id: r.id, question: f.question, owner: f.owner || null, requiredBy: f.requiredBy || null, requiredInputs: f.requiredInputs || [], status: f.status || 'open' });
@@ -224,5 +230,5 @@ function projectConfig(records, now = Date.now()) {
   return cfg;
 }
 
-module.exports = { RECORD_TYPES, FORBIDDEN, forbidden, extract, validate, detectCycles, authorityFor, preview, projectConfig,
+module.exports = { RECORD_TYPES, ARRANGEMENT_ORIGIN, FORBIDDEN, forbidden, extract, validate, detectCycles, authorityFor, preview, projectConfig,
   nextWeekday, parseClock, claimTypeOf };
