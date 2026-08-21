@@ -4,7 +4,7 @@
 
    WRITTEN BEFORE THE FIX, by the reviewer. Do not edit an assertion to make it pass.
 
-   NOT REGISTERED in scripts/test.js yet. Register it in the commit that makes it green.
+   Registered in scripts/test.js with the P0-2 implementation.
 
    ── The defect ──────────────────────────────────────────────────────────────────────────
 

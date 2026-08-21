@@ -52,6 +52,8 @@ const SUITES = [
   'evidence-smoke.js',     // the canonical evidence envelope: normalise/validate/dedupe/promote
   'evidence-durability-smoke.js', // P0-1: bounded hot evidence remains tenant-scoped, cold-resolvable and erasable
   'evidence-durability-boundaries-smoke.js', // P0-1 wiring: cap trigger, SQL scoping, retention, subject erasure, durable refs
+  'shutdown-durability-smoke.js', // P0-2: debounced durable state is forced and failures stay loud
+  'shutdown-boundary-smoke.js', // P0-2 production path: signals converge and evidence maintenance precedes final persistence
   'identity-reresolve-smoke.js', // the identity lifecycle: held-back evidence resolves + promotes once
   'mapping-smoke.js',            // the mapping contract: fingerprint/drift/transform/gate (pure)
   'mapping-lifecycle-smoke.js',  // the mapping approval lifecycle end to end (hold→approve→activate→reprocess)

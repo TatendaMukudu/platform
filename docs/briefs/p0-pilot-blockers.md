@@ -11,15 +11,15 @@ The three briefs touch disjoint files and **can be dispatched in parallel**. See
 
 ```
 evidence-durability-smoke: 25 passed,  0 failed     P0-1 IMPLEMENTED
-shutdown-durability-smoke:  0 passed,  7 failed     P0-2
+shutdown-durability-smoke:  7 passed,  0 failed     P0-2 IMPLEMENTED
 write-conflict-smoke:       0 passed,  7 failed     P0-3
 authority-truth-smoke:      0 passed, 14 failed     P0-D
 pilot-loop-smoke:          28 passed,  1 failed     P0-5
 ```
 
-Four remaining suites carry 29 failing assertions. `evidence-durability-smoke` and its production
-entry-point companion are registered in `scripts/test.js`; register each remaining suite in the
-commit that makes it green.
+Three remaining suites carry 22 failing assertions. The P0-1 and P0-2 contract/production-boundary
+suites are registered in `scripts/test.js`; register each remaining suite in the commit that makes
+it green.
 
 ---
 
@@ -230,7 +230,21 @@ window, plus any batch waiting on the retry backoff (`:283`), after the API retu
 **Invariant.** Once the API has acknowledged a mutation, graceful termination cannot silently
 discard it. A flush that cannot persist reports failure rather than exiting quietly.
 
-**Failing test.** `node scripts/shutdown-durability-smoke.js` — currently **0 passed, 7 failed**.
+**Initial RED.** `node scripts/shutdown-durability-smoke.js` was **0 passed, 7 failed**: no
+SIGTERM listener and no exported durability boundary.
+
+**Implemented invariant.** `_flushAndClose()` first awaits P0-1's
+`_awaitEvidenceMaintenance()`, rejects any reported evidence failure, then clears debounce/retry
+timers and forces the existing single persistence writer through `_flushPersistence()`. A failed
+forced save rejects instead of scheduling a silent successful exit. The routine is reusable for
+tests; production signals converge on one memoized `_gracefulShutdown()` promise.
+
+**Production ordering.** Enter shutdown state → reject new requests → close the listener and drain
+accepted requests → await evidence maintenance → force/await the final changed-unit persistence
+snapshot → exit 0 only on success. No database resource closes before durability settles.
+
+**Final GREEN.** `shutdown-durability-smoke.js` is **7 passed, 0 failed** and
+`shutdown-boundary-smoke.js` is **7 passed, 0 failed**. Both are registered in `scripts/test.js`.
 
 **Allowed surface.** `server.js` save scheduler and process lifecycle. Export the shutdown routine
 as `_flushAndClose` so it is testable without killing the test process.
@@ -239,7 +253,7 @@ as `_flushAndClose` so it is testable without killing the test process.
 Fire-and-forget — the flush must await the write. Exiting 0 after a failed flush. Rewriting every
 store on shutdown; `persistence-smoke` proves a mutation must cost only what it changed.
 
-**Acceptance.** `shutdown-durability-smoke` green and registered; `persistence-smoke` and
+**Acceptance met.** `shutdown-durability-smoke` green and registered; `persistence-smoke` and
 `persistence-durability-smoke` still green; full suite green.
 
 **Do not touch.** `db.js`, `ai/*`.

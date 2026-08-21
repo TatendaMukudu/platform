@@ -84,6 +84,9 @@ const capAdapters = require('./lib/adapters');   // capability → canonical evi
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+let _shuttingDown = false;
+let _httpServer = null;
+let _shutdownPromise = null;
 
 /* ── Process-level crash guards ───────────────────────────────────────────────
    A single unhandled async error should never take the whole server down and
@@ -94,6 +97,24 @@ process.on('unhandledRejection', (reason) => {
 });
 process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err && err.stack ? err.stack : err);
+});
+
+function _handleShutdownSignal(signal) {
+  _gracefulShutdown(signal).then(() => {
+    if (require.main === module) process.exit(0);
+  }).catch(err => {
+    console.error(`[shutdown] ${signal} failed:`, err && err.stack ? err.stack : err);
+    if (require.main === module) process.exit(1);
+  });
+}
+process.on('SIGTERM', () => _handleShutdownSignal('SIGTERM'));
+process.on('SIGINT',  () => _handleShutdownSignal('SIGINT'));
+
+// Requests already inside the app are allowed to finish. Once shutdown starts,
+// a keep-alive connection cannot begin a new mutation behind the final flush.
+app.use((req, res, next) => {
+  if (_shuttingDown) return res.status(503).json({ error: 'server_shutting_down' });
+  next();
 });
 
 // 25mb so base64 rich-media (images/PDF) in chat/scenarios isn't rejected by the
@@ -248,7 +269,8 @@ const PERSISTENCE_MODE = ['split', 'dual', 'main'].includes(process.env.PERSISTE
   ? process.env.PERSISTENCE_MODE : 'split';
 
 const _saveHashes = new Map();       // unit key → hash of what is durably stored
-let _saveTimer = null, _saveInFlight = false, _saveDirty = false;
+let _saveTimer = null, _saveInFlight = false, _saveDirty = false, _savePromise = null;
+let _lastSaveError = null;
 let _lastSave = null;                // instrumentation for the bandwidth report
 
 /* Just enough counters to answer "did the architectural hypothesis hold?" after
@@ -293,8 +315,7 @@ function _scheduleRetry() {
    uploads stacked. A save now either starts or marks the state dirty for the
    one already running to pick up; there is never a second transaction in
    flight, and a mutation arriving mid-save is never dropped. */
-async function _runSave() {
-  if (_saveInFlight) { _saveDirty = true; _saveStats.queued++; return; }
+async function _performSave(failLoud) {
   _saveInFlight = true;
   try {
     do {
@@ -306,11 +327,13 @@ async function _runSave() {
       if (PERSISTENCE_MODE === 'main') {
         try {
           await db.saveMain(_persistedStores());
+          _lastSaveError = null;
           _saveRetries = 0;
           _lastSave = { units: 1, bytes: 0, ms: Date.now() - t0, mode: 'main' };
         } catch (e) {
           console.error('[db] Save failed:', e.message);
-          _saveDirty = false; _scheduleRetry();
+          _lastSaveError = e; _saveDirty = false;
+          if (!failLoud) _scheduleRetry();
         }
         continue;
       }
@@ -339,6 +362,7 @@ async function _runSave() {
       const gone = [...(_saveHashes.keys())].filter(k => !(k in units));
 
       if (!Object.keys(changed).length && !gone.length) {
+        _lastSaveError = null;
         _saveStats.noopCycles++;
         _lastSave = { units: 0, bytes: 0, ms: 0 };
         continue;
@@ -368,22 +392,88 @@ async function _runSave() {
           console.log(`[save] ${_lastSave.units} unit(s) ${(bytes / 1024).toFixed(1)} KB written of ${(serialised / 1024).toFixed(1)} KB held, ${ms}ms` +
             `${gone.length ? `, ${gone.length} removed` : ''}${keys ? ` — ${keys}${_lastSave.units > 4 ? ', …' : ''}` : ''}`);
         }
+        _lastSaveError = null;
       } catch (e) {
         console.error('[db] Save failed:', e.message);   // hashes untouched — still dirty
+        _lastSaveError = e;
         _saveStats.failures++;
         _saveDirty = false;                              // don't spin: back off instead
-        _scheduleRetry();
+        if (!failLoud) _scheduleRetry();
       }
     } while (_saveDirty);
   } finally {
     _saveInFlight = false;
   }
+  if (failLoud && _lastSaveError) throw _lastSaveError;
+}
+
+function _runSave(opts = {}) {
+  if (_savePromise) {
+    _saveDirty = true;
+    _saveStats.queued++;
+    return _savePromise;
+  }
+  const failLoud = opts.failLoud === true;
+  const task = _performSave(failLoud);
+  _savePromise = task.finally(() => { if (_savePromise === wrapped) _savePromise = null; });
+  const wrapped = _savePromise;
+  return wrapped;
 }
 
 function scheduleSave() {
   if (_saveInFlight) { _saveDirty = true; _saveStats.queued++; return; }
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => { _saveTimer = null; _runSave(); }, SAVE_DEBOUNCE_MS);
+}
+
+async function _flushPersistence() {
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  if (_saveRetryTimer) { clearTimeout(_saveRetryTimer); _saveRetryTimer = null; }
+
+  // If a normal save is already running, mark it dirty so it takes one more
+  // authoritative snapshot, then wait for that single writer to finish.
+  if (_savePromise) {
+    _saveDirty = true;
+    await _savePromise;
+  }
+
+  // A failed normal save may have installed a retry while we awaited it.
+  if (_saveRetryTimer) { clearTimeout(_saveRetryTimer); _saveRetryTimer = null; }
+  await _runSave({ failLoud: true });
+  return { ok: true };
+}
+
+async function _flushAndClose() {
+  const evidenceResults = await _awaitEvidenceMaintenance();
+  const evidenceFailure = evidenceResults.find(result => result && result.ok === false);
+  if (evidenceFailure) throw new Error(evidenceFailure.error || 'evidence maintenance failed');
+
+  // Evidence maintenance can remove hot/raw records and calls scheduleSave().
+  // It must therefore finish before the final authoritative store snapshot.
+  await _flushPersistence();
+  return { ok: true };
+}
+
+function _stopHttpListener() {
+  if (!_httpServer || !_httpServer.listening) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    _httpServer.close(err => err ? reject(err) : resolve());
+    if (typeof _httpServer.closeIdleConnections === 'function') _httpServer.closeIdleConnections();
+  });
+}
+
+function _gracefulShutdown(signal = 'manual') {
+  if (_shutdownPromise) return _shutdownPromise;
+  _shuttingDown = true;
+  _shutdownPromise = (async () => {
+    // close() stops new connections and resolves only after requests already
+    // accepted by the server finish, so their mutations precede the flush.
+    await _stopHttpListener();
+    await _flushAndClose();
+    console.log(`[shutdown] ${signal} durability boundary complete`);
+    return { ok: true };
+  })();
+  return _shutdownPromise;
 }
 
 /* The boot path, as one callable step so the migration it performs can actually
@@ -6043,6 +6133,21 @@ async function _persistColdEnvelope(code, envelope) {
   await db.archiveColdEvidence(code, [{ envelope, rawRecord: prior?.rawRecord ?? null }]);
 }
 
+async function _commitColdEnvelopeMutation(code, envelope, mutate) {
+  const beforeEnvelope = JSON.parse(JSON.stringify(envelope));
+  const beforeSignals = Array.isArray(orgSignals[code]) ? orgSignals[code].slice() : null;
+  try {
+    const result = mutate();
+    await _persistColdEnvelope(code, envelope);
+    return result;
+  } catch (err) {
+    for (const key of Object.keys(envelope)) delete envelope[key];
+    Object.assign(envelope, beforeEnvelope);
+    if (beforeSignals) orgSignals[code] = beforeSignals;
+    throw err;
+  }
+}
+
 async function _evictWorkingSet(code, ids) {
   const wanted = new Set((ids || []).map(String));
   const hot = evidenceLog[code] || [];
@@ -6063,7 +6168,11 @@ async function _evictWorkingSet(code, ids) {
     _evictEvidenceVector(code, env.id);
     if (env.rawRef) delete rawEvidence[env.rawRef];
   }
-  evidenceLog[code] = hot.filter(env => !archivedIds.has(String(env && env.id)));
+  // Filter the CURRENT array, not the pre-await snapshot. Retention or subject
+  // erasure may have removed other records while PostgreSQL was committing;
+  // assigning from `hot` would resurrect those erased envelopes.
+  evidenceLog[code] = (evidenceLog[code] || [])
+    .filter(env => !archivedIds.has(String(env && env.id)));
   _rebuildEvidenceIndex();
   scheduleSave();
   return { ok: true, archived: candidates.length };
@@ -6534,10 +6643,12 @@ app.post('/api/evidence/:id/resolve', requirePermission('manage_settings'), asyn
   const subjectId = String(req.body?.subjectId || '');
   if (!orgUsers[code]?.[subjectId]) return res.status(400).json({ error: 'unknown subject' });
   if (!new Set(getVisibleUserIds(code, req.iqSession.userId)).has(subjectId)) return res.status(403).json({ error: 'subject not in your range' });
-  _appendResolution(code, env, { subjectId, confidence: 'confirmed', by: req.iqSession.userId, method: 'admin', reason: String(req.body?.reason || 'admin confirmed').slice(0, 200) });
-  delete env.candidate; delete env.candidateNote;
-  const promoted = _promoteEvidence(code, env);
-  if (resolved.cold) await _persistColdEnvelope(code, env);
+  const apply = () => {
+    _appendResolution(code, env, { subjectId, confidence: 'confirmed', by: req.iqSession.userId, method: 'admin', reason: String(req.body?.reason || 'admin confirmed').slice(0, 200) });
+    delete env.candidate; delete env.candidateNote;
+    return _promoteEvidence(code, env);
+  };
+  const promoted = resolved.cold ? await _commitColdEnvelopeMutation(code, env, apply) : apply();
   scheduleSave();
   res.json({ ok: true, promoted, evidenceId: env.id, subjectId });
 });
@@ -6549,9 +6660,11 @@ app.post('/api/evidence/:id/reject', requirePermission('manage_settings'), async
   if (!resolved.envelope) return res.status(404).json({ error: 'evidence not found' });
   const env = resolved.envelope;
   if (env.promoted) return res.status(409).json({ error: 'already promoted — reverse it instead' });
-  delete env.candidate; delete env.candidateNote;
-  _appendResolution(code, env, { subjectId: null, confidence: env.confidence === 'conflict' ? 'conflict' : 'unmatched', by: req.iqSession.userId, method: 'admin', status: 'rejected', reason: String(req.body?.reason || 'admin rejected').slice(0, 200) });
-  if (resolved.cold) await _persistColdEnvelope(code, env);
+  const apply = () => {
+    delete env.candidate; delete env.candidateNote;
+    _appendResolution(code, env, { subjectId: null, confidence: env.confidence === 'conflict' ? 'conflict' : 'unmatched', by: req.iqSession.userId, method: 'admin', status: 'rejected', reason: String(req.body?.reason || 'admin rejected').slice(0, 200) });
+  };
+  if (resolved.cold) await _commitColdEnvelopeMutation(code, env, apply); else apply();
   scheduleSave();
   res.json({ ok: true, evidenceId: env.id });
 });
@@ -6564,10 +6677,12 @@ app.post('/api/evidence/:id/reverse', requirePermission('manage_settings'), asyn
   if (!resolved.envelope) return res.status(404).json({ error: 'evidence not found' });
   const env = resolved.envelope;
   if (!env.promoted) return res.status(409).json({ error: 'not promoted' });
-  if (env.signalId && Array.isArray(orgSignals[code])) orgSignals[code] = orgSignals[code].filter(s => s.id !== env.signalId);
-  _appendResolution(code, env, { subjectId: null, confidence: 'unmatched', by: req.iqSession.userId, method: 'reversal', reason: String(req.body?.reason || 'admin reversed').slice(0, 200) });
-  env.promoted = false; env.signalId = null; env.promotedAt = null;
-  if (resolved.cold) await _persistColdEnvelope(code, env);
+  const apply = () => {
+    if (env.signalId && Array.isArray(orgSignals[code])) orgSignals[code] = orgSignals[code].filter(s => s.id !== env.signalId);
+    _appendResolution(code, env, { subjectId: null, confidence: 'unmatched', by: req.iqSession.userId, method: 'reversal', reason: String(req.body?.reason || 'admin reversed').slice(0, 200) });
+    env.promoted = false; env.signalId = null; env.promotedAt = null;
+  };
+  if (resolved.cold) await _commitColdEnvelopeMutation(code, env, apply); else apply();
   scheduleSave();
   res.json({ ok: true, evidenceId: env.id });
 });
@@ -17125,6 +17240,7 @@ const PORT = process.env.PORT || 3000;
 module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired,
   // exported for the truth layer: the persistence boundary
   _durableUnits, _applyUnits, _pruneExpiredSessions, _persistedStores, scheduleSave,
+  _flushPersistence, _flushAndClose, _gracefulShutdown,
   _reconstruct, _unclassified, _saveStats, PERSISTENCE_MODE,
   emailIndex, activeSessions, inviteTokens, userAiProfiles,
   // exported for the truth layer: the group contribution boundary
@@ -17348,7 +17464,7 @@ if (require.main === module) (async () => {
     });
 
     // 6. Start HTTP server
-    app.listen(PORT, () => {
+    _httpServer = app.listen(PORT, () => {
       console.log('');
       console.log(`[server] IntelliQ ready on port ${PORT}`);
       console.log(`[server]   API key: ${process.env.ANTHROPIC_API_KEY ? 'loaded' : 'MISSING — set ANTHROPIC_API_KEY'}`);

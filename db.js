@@ -252,7 +252,8 @@ async function archiveColdEvidence(orgCode, records) {
            SET envelope = EXCLUDED.envelope,
                raw_record = EXCLUDED.raw_record,
                archived_at = NOW(),
-               erased_at = NULL`,
+               erased_at = NULL
+         WHERE cold_evidence.erased_at IS NULL`,
         [orgCode, envelope.id, JSON.stringify(envelope), JSON.stringify(row.rawRecord ?? null)]
       );
     }
