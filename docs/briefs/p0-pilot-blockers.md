@@ -1,25 +1,41 @@
 # P0 pilot blockers — decisions and briefs
 
-**Authoritative for:** P0-1, P0-2, P0-3. Codex briefs reference this rather than restating it.
+**Authoritative for:** P0-1 and P0-2.
+**P0-3 IS SUPERSEDED.** Decision B and Brief 3 below are retained for history and **must not be
+implemented**. Codex correctly refused them: the smoke targeted routes that do not exist, the
+writers used a role that cannot edit the tree, and process-local revisions cannot detect the
+cross-process overwrite that P0-2's shutdown flush makes reachable on every deploy. The live
+contract is **`docs/briefs/p0-3-adjudication.md`**.
 **Companion to:** `docs/ttd/pilot-readiness-review.md`.
 **P0-D and P0-5 are briefed in `docs/briefs/p0-d-authority-and-p0-5-origin.md`** — both are pure
 `ai/` modules, overlap nothing here, and can run at the same time as any of the three below.
 
-The three briefs touch disjoint files and **can be dispatched in parallel**. See §Parallelism.
+The briefs touch disjoint files and **can be dispatched in parallel**. See §Parallelism.
 
-## The whole pilot gate, verified on a clean `npm install`
+## The whole pilot gate, verified on a clean `npm install` (re-run 2026-08-21)
 
 ```
 evidence-durability-smoke:  0 passed,  9 failed     P0-1
 shutdown-durability-smoke:  0 passed,  7 failed     P0-2
-write-conflict-smoke:       0 passed,  7 failed     P0-3
+write-conflict-smoke:       1 passed, 18 failed     P0-3   (rewritten — real routes, two layers)
+db-cas-smoke:               1 passed, 13 failed     P0-3   (new — the durable CAS contract)
 authority-truth-smoke:      0 passed, 14 failed     P0-D
 pilot-loop-smoke:          28 passed,  1 failed     P0-5
 ```
 
-Five suites, 38 failing assertions, five files. None of these suites is registered in
-`scripts/test.js` yet except `pilot-loop-smoke`; register each one in the commit that makes it
-green.
+Six suites, 62 failing assertions. The two passing assertions inside the P0-3 suites are
+deliberate and must stay green — they pin the corrected route and the legacy restore point.
+
+## P0-6 — inquiry-state concurrency · UNADJUDICATED
+
+Split out of P0-3 by `docs/briefs/p0-3-adjudication.md` §Decision 8. `inquiryStates` is written by
+evidence ingestion and the kernel, not by stale-client PUTs, and whether it is replayable from
+canonical evidence is unverified. **Not a pilot blocker on current evidence** — single process at
+Falcon scale, and uniform CAS closes its deploy-overlap exposure. What is open is the recovery
+path. Do not claim inquiry concurrency is protected; no assertion covers it.
+
+None of these suites is registered in `scripts/test.js` yet except `pilot-loop-smoke`; register
+each one in the commit that makes it green.
 
 ---
 
@@ -64,7 +80,11 @@ history the product does not yet have.
 
 ---
 
-# Decision B — Optimistic concurrency
+# Decision B — Optimistic concurrency  ·  SUPERSEDED
+
+> **Do not implement.** Replaced by `docs/briefs/p0-3-adjudication.md`. Retained for history.
+> It specifies process-local revisions only, which cannot detect cross-process overwrite, and
+> names `inquiryStates` in scope, which is now P0-6.
 
 ## DECISION
 
@@ -165,7 +185,11 @@ store on shutdown; `persistence-smoke` proves a mutation must cost only what it 
 
 ---
 
-# Brief 3 — P0-3 · Optimistic concurrency on shared objects
+# Brief 3 — P0-3 · Optimistic concurrency on shared objects  ·  SUPERSEDED
+
+> **Do not implement.** Replaced by `docs/briefs/p0-3-adjudication.md` §8. Its routes
+> (`/api/org/nodes`) do not exist, its writers are coaches (who lack `manage_tree`), and it
+> forbids touching `db.js` — where the guarantee actually has to live.
 
 **Problem.** Shared objects are mutated in place with no version and no conflict detection. Two
 leaders editing one node: the second write erases the first, both see success, nothing records the
