@@ -107,6 +107,7 @@ function decision(d = {}) {
 }
 function responsibility(r = {}) {
   return { kind: 'responsibility', subject: r.subject || null, type: r.type || 'owns', scope: r.scope || 'org',
+    claimTypes: (r.claimTypes || []).slice(0, 24), claimOrigin: r.claimOrigin || null,
     effectiveFrom: r.effectiveFrom || null, effectiveTo: r.effectiveTo || null,
     provenance: r.provenance || prov({ source: 'structure', kind: 'explicit', confidence: 0.8 }), confidence: r.confidence != null ? r.confidence : 0.8 };
 }
@@ -117,6 +118,7 @@ function dependency(d = {}) {
 }
 function requirement(r = {}) {
   return { kind: 'requirement', id: r.id || null, claimType: r.claimType || null, scope: r.scope || 'team',
+    claimOrigin: r.claimOrigin || null,
     expectedOwner: r.expectedOwner || null, neededBy: r.neededBy || null, freshDays: r.freshDays != null ? r.freshDays : 30,
     purpose: r.purpose || null, sensitivity: r.sensitivity || 'team-shared', forSubjectType: r.forSubjectType || null,
     forSubjectId: r.forSubjectId || null, consequenceIfAbsent: r.consequenceIfAbsent || 'a decision or event is under-prepared',
@@ -144,7 +146,7 @@ function resolveOwner({ requirement, event, decision, responsibilities, pack, co
   // 2 · role responsibility within scope.
   const ct = requirement && requirement.claimType;
   if (ct) {
-    const resp = (responsibilities || []).find(r => (pack.responsibilities[r.subject] || []).includes(ct));
+    const resp = (responsibilities || []).find(r => (r.claimTypes || []).includes(ct) || (pack.responsibilities[r.subject] || []).includes(ct));
     if (resp) return { owner: resp.subject, basis: 'role_responsibility', confidence: resp.confidence || 0.7, unresolved: false };
     // 3 · authoritative source type for the claim (pack default owner role for the event type).
     const roleForClaim = Object.keys(pack.responsibilities || {}).find(role => (pack.responsibilities[role] || []).includes(ct));
@@ -331,7 +333,7 @@ function stateToUncertainties(state, opts = {}) {
     const urgency = deriveUrgency({ neededByMs: cs.neededBy ? parseTime(cs.neededBy) : startMs, leadDays, now });
 
     const base = { affects: ev ? { type: 'event', id: ev.id, title: ev.title } : null,
-      claimType: req.claimType, requirementId: req.id,
+      claimType: req.claimType, claimOrigin: req.claimOrigin || null, requirementId: req.id,
       impact: impact.label, urgency: urgency.label, impactBasis: impact, urgencyBasis: urgency,
       requiredBy: cs.neededBy, resolutionOwner: req.expectedOwner, ownerBasis: req.ownerBasis, ownerAuthoritative: req.ownerBasis === 'direct_owner' || req.ownerBasis === 'role_responsibility',
       privacyClass: req.sensitivity, requiredFor: [req.consequenceIfAbsent], limitations: [] };

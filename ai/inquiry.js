@@ -218,9 +218,11 @@ function discriminate(u) {
 const OPERATIONAL_CLAIMS = new Set([
   'meeting_time', 'meeting_owner', 'completion_status',
   'kickoff_time', 'game_plan', 'availability', 'session_time',
+  'transport_confirmation', 'approval', 'owner', 'ownership',
 ]);
 
-function claimNature(claimType) {
+function claimNature(claimType, { origin = null } = {}) {
+  if (origin === 'org_context_arrangement') return 'operational';
   return OPERATIONAL_CLAIMS.has(String(claimType || '').trim()) ? 'operational' : 'empirical';
 }
 
@@ -229,7 +231,7 @@ function claimNature(claimType) {
    authoritative for THIS claim (reuses the evidence authority tiers). Recommends how
    the answer should enter canonical evidence: authoritative | reported | needs
    corroboration. Pure — the caller applies it through the governed door. */
-function adjudicateAnswer({ answer, isOwner = false, isLeader = false, isMember = false, claimLabel = 'this', claimType = null, hasExistingAuthoritative = false } = {}) {
+function adjudicateAnswer({ answer, isOwner = false, isLeader = false, isMember = false, claimLabel = 'this', claimType = null, claimOrigin = null, hasExistingAuthoritative = false } = {}) {
   const text = String(answer || '').trim();
   const l = text.toLowerCase();
   const out = (o) => ({ responseKind: 'observation', resolution: 'does_not_address', authority: 'shared_but_unverified',
@@ -247,7 +249,7 @@ function adjudicateAnswer({ answer, isOwner = false, isLeader = false, isMember 
   const interpretation = /\b(i (?:think|feel|reckon|believe|guess)|seems?|in my view|my sense)\b/i.test(l);
   const affirm = /\b(yes|yep|yeah|it (?:has|is|was)|(?:it'?s|its) (?:confirmed|done|sorted|booked|ready|approved|in place|complete)|confirmed|done|sorted|booked|approved|complete[d]?|finalis[a-z]*|in place|all set)\b/i.test(l);
   const negate = /\b(no|not (?:yet|done|confirmed|ready|sorted|approved)|still (?:waiting|pending|outstanding)|hasn'?t|haven'?t|won'?t|isn'?t)\b/i.test(l);
-  const empirical = claimNature(claimType) === 'empirical';
+  const empirical = claimNature(claimType, { origin: claimOrigin }) === 'empirical';
   const ownerIsAuthoritative = isOwner && !empirical;
   const definiteAuthority = ownerIsAuthoritative ? 'authoritative' : (isMember ? 'shared_but_unverified' : 'reported');
   const empiricalLimitation = 'empirical claims require corroborating observation or evidence, regardless of the answerer\'s role';
