@@ -112,13 +112,15 @@ const goodOp = {
 
 // 9 · ANSWER ADJUDICATION — an answer is not automatically truth
 {
-  const owner = IQ.adjudicateAnswer({ answer: 'Yes, transport has been confirmed.', isOwner: true, claimType: 'transport_confirmation', claimLabel: 'transport' });
+  // Use a classified operational arrangement: unknown claim types now deliberately
+  // fail closed as empirical under P0-D.
+  const owner = IQ.adjudicateAnswer({ answer: 'Yes, the meeting time has been confirmed.', isOwner: true, claimType: 'meeting_time', claimLabel: 'meeting time' });
   ok('9 · an OWNER’s clear confirmation resolves + is authoritative', owner.resolution === 'resolves' && owner.authority === 'authoritative' && owner.proposal && owner.proposal.corroborationNeeded === false);
-  const member = IQ.adjudicateAnswer({ answer: 'Yes, it’s confirmed.', isMember: true, claimType: 'transport_confirmation', claimLabel: 'transport' });
+  const member = IQ.adjudicateAnswer({ answer: 'Yes, it’s confirmed.', isMember: true, claimType: 'meeting_time', claimLabel: 'meeting time' });
   ok('9 · a member’s confirmation is shared-but-unverified (needs corroboration)', member.authority === 'shared_but_unverified' && member.proposal.corroborationNeeded === true);
-  const vague = IQ.adjudicateAnswer({ answer: 'Should be fine, I think.', isOwner: true, claimType: 'transport_confirmation', claimLabel: 'transport' });
+  const vague = IQ.adjudicateAnswer({ answer: 'Should be fine, I think.', isOwner: true, claimType: 'meeting_time', claimLabel: 'meeting time' });
   ok('9 · a vague answer never satisfies — needs corroboration, does not resolve', vague.authority === 'needs_corroboration' && vague.resolution !== 'resolves' && vague.proposal.corroborationNeeded === true);
-  const nonAns = IQ.adjudicateAnswer({ answer: 'Thanks!', isOwner: true, claimType: 'transport_confirmation' });
+  const nonAns = IQ.adjudicateAnswer({ answer: 'Thanks!', isOwner: true, claimType: 'meeting_time' });
   ok('9 · a non-answer produces NO proposal', nonAns.responseKind === 'non_answer' && nonAns.proposal === null);
   const clar = IQ.adjudicateAnswer({ answer: 'What do you mean by transport?', isOwner: true, claimType: 'transport_confirmation' });
   ok('9 · a question back is a clarification, no proposal', clar.responseKind === 'clarification' && clar.proposal === null);

@@ -128,10 +128,14 @@ function adjudicate({ answer, claim, actorIsOwner = false, actorIsLeader = false
     else outcome = 'ambiguous';
   }
   // An OPEN reflection claim is satisfied by any substantive answer; a hedged one is
-  // recorded but flagged and does NOT resolve.
+  // recorded but flagged and does NOT resolve. This is completion of a person's own
+  // response, not a declaration that its contents are empirically established.
+  const openAnswer = claim.kind === 'open' && adj.proposal && adj.proposal.definite !== false
+    && adj.authority !== 'needs_corroboration';
+  if (openAnswer) outcome = 'answered';
   const proposal = adj.proposal ? {
     claimRef: claim.ref, valueText: adj.proposal.valueText, notApplicable: false,
-    corroborationNeeded: adj.proposal.corroborationNeeded === true, definite: adj.proposal.definite !== false,
+    corroborationNeeded: openAnswer ? false : adj.proposal.corroborationNeeded === true, definite: adj.proposal.definite !== false,
     authority: adj.authority,
   } : null;
   return { outcome, notApplicable: false, proposal, authority: adj.authority, confidence: adj.confidence,
