@@ -1,25 +1,41 @@
 # P0 pilot blockers — decisions and briefs
 
-**Authoritative for:** P0-1, P0-2, P0-3. Codex briefs reference this rather than restating it.
+**Authoritative for:** P0-1 and P0-2.
+**P0-3 IS SUPERSEDED.** Decision B and Brief 3 below are retained for history and **must not be
+implemented**. Codex correctly refused them: the smoke targeted routes that do not exist, the
+writers used a role that cannot edit the tree, and process-local revisions cannot detect the
+cross-process overwrite that P0-2's shutdown flush makes reachable on every deploy. The live
+contract is **`docs/briefs/p0-3-adjudication.md`**.
 **Companion to:** `docs/ttd/pilot-readiness-review.md`.
 **P0-D and P0-5 are briefed in `docs/briefs/p0-d-authority-and-p0-5-origin.md`** — both are pure
 `ai/` modules, overlap nothing here, and can run at the same time as any of the three below.
 
-The three briefs touch disjoint files and **can be dispatched in parallel**. See §Parallelism.
+The briefs touch disjoint files and **can be dispatched in parallel**. See §Parallelism.
 
-## The whole pilot gate, verified on a clean `npm install`
+## The whole pilot gate, verified on a clean `npm install` (re-run 2026-08-21)
 
 ```
-evidence-durability-smoke: 25 passed,  0 failed     P0-1 IMPLEMENTED
-shutdown-durability-smoke:  7 passed,  0 failed     P0-2 IMPLEMENTED
-write-conflict-smoke:       0 passed,  7 failed     P0-3
+evidence-durability-smoke:  0 passed,  9 failed     P0-1
+shutdown-durability-smoke:  0 passed,  7 failed     P0-2
+write-conflict-smoke:       1 passed, 18 failed     P0-3   (rewritten — real routes, two layers)
+db-cas-smoke:               1 passed, 13 failed     P0-3   (new — the durable CAS contract)
 authority-truth-smoke:      0 passed, 14 failed     P0-D
 pilot-loop-smoke:          28 passed,  1 failed     P0-5
 ```
 
-Three remaining suites carry 22 failing assertions. The P0-1 and P0-2 contract/production-boundary
-suites are registered in `scripts/test.js`; register each remaining suite in the commit that makes
-it green.
+Six suites, 62 failing assertions. The two passing assertions inside the P0-3 suites are
+deliberate and must stay green — they pin the corrected route and the legacy restore point.
+
+## P0-6 — inquiry-state concurrency · UNADJUDICATED
+
+Split out of P0-3 by `docs/briefs/p0-3-adjudication.md` §Decision 8. `inquiryStates` is written by
+evidence ingestion and the kernel, not by stale-client PUTs, and whether it is replayable from
+canonical evidence is unverified. **Not a pilot blocker on current evidence** — single process at
+Falcon scale, and uniform CAS closes its deploy-overlap exposure. What is open is the recovery
+path. Do not claim inquiry concurrency is protected; no assertion covers it.
+
+None of these suites is registered in `scripts/test.js` yet except `pilot-loop-smoke`; register
+each one in the commit that makes it green.
 
 ---
 
@@ -27,40 +43,25 @@ it green.
 
 ## DECISION
 
-**An asynchronous resolution boundary plus a cold table.** Four parts, in order of importance:
+**A resolution boundary plus a cold table.** Three parts, in order of importance:
 
-1. **One function through which evidence is fetched by id.** `await _resolveEvidence(code, id)` returns
+1. **One function through which evidence is fetched by id.** `_resolveEvidence(code, id)` returns
    `{ envelope, cold: true|false }` or `{ unresolvable: true, reason }`. **It never returns
    `undefined`.** Today evidence is reachable only by scanning `evidenceLog[code]`, so "evicted"
    and "never existed" are indistinguishable to every caller — which is precisely why the bug is
-   invisible. The function is asynchronous because bounded-memory cold resolution requires
-   PostgreSQL I/O; loading cold history into a process-local shadow map is prohibited.
+   invisible.
 2. **Eviction writes to cold storage, it does not delete.** A `cold_evidence` table
-   (`org_code`, `evidence_id`, nullable `envelope` JSONB, nullable `raw_record` JSONB,
-   `archived_at`, nullable `erased_at`), written before the hot copy is removed. The raw record
-   moves with its envelope so the immutable provenance root does not stay in an unbounded
-   in-memory `rawEvidence` map.
-3. **Eviction is one asynchronous operation.** `await _evictWorkingSet(code, ids)` selects only
-   tenant-local hot envelopes, archives all selected rows successfully, and only then removes the
-   corresponding hot envelopes, raw records and vectors. A failed archive leaves every hot copy
-   and vector intact and reports failure.
-4. **Erasure reaches both tiers.** `await _eraseEvidence(code, id)` removes tenant-local hot,
-   cold content, raw content and vector copies. The cold row becomes a contentless tombstone
-   (`envelope = NULL`, `raw_record = NULL`, `erased_at = NOW()`) so an erased id remains
-   distinguishable from an id that never existed without retaining personal content. Durable
-   beliefs/inquiries keep the evidence id as history; future resolution returns an explicit
-   erased/deleted result rather than rewriting the reference.
+   (`org_code`, `evidence_id`, `envelope` JSONB, `archived_at`), written before the splice.
+3. **Eviction cleans the vector index.** `_evictEvidenceVector` is called for every evicted id.
 
 ## WHY
 
 Raising `EVIDENCE_LOG_CAP` defers the identical failure to month eight — it is not a fix, it is a
 delay with a number attached.
 
-The resolver is the load-bearing part. It is what makes "left the working set" a different fact
-from "gone", and it gives every future by-id path one place to ask. Without it, cold storage is
-just a second place data can be missing from. It cannot legitimately be synchronous: `db.js` uses
-the asynchronous `pg` API, while keeping all cold rows in memory would defeat the working-set
-boundary.
+The resolver is the load-bearing part and it is roughly twenty lines. It is what makes "left the
+working set" a different fact from "gone", and it gives every future retrieval path one place to
+ask. Without it, cold storage is just a second place data can be missing from.
 
 Per-year durable units were considered and rejected: clever, reuses the existing split, but leaves
 retrieval scanning an array and still gives callers no way to distinguish absent from archived.
@@ -69,24 +70,7 @@ retrieval scanning an array and still gives callers no way to distinguish absent
 
 > An evidence id that was ever recorded either resolves to its envelope, or resolves to an
 > explicit unresolvable answer naming why. Erasure is the only cause of permanent
-> unresolvability. Resolution remains true after process restart and is scoped by organisation.
-
-## AUTHORITATIVE SEQUENCE
-
-```
-select tenant-local hot candidates
-  → archive envelope + raw provenance in one durable cold write
-  → confirm archive success
-  → remove the corresponding vectors
-  → remove hot envelopes and process-local raw records
-```
-
-The hot cap is an eventual bound, not permission to lose data. `_recordEvidence` remains
-synchronous: when the cap is exceeded it schedules/coalesces `_evictWorkingSet` and returns with
-the excess evidence still hot. Archive failure may temporarily leave the working set over cap;
-it may never make it under cap by deleting the only resolvable copy. The shutdown work in Brief 2
-must await any pending archive task before process exit, or persist the still-hot excess through
-the existing store flush so the next process can retry eviction.
+> unresolvability.
 
 ## WHAT WE ARE DELIBERATELY NOT BUILDING YET
 
@@ -96,7 +80,11 @@ history the product does not yet have.
 
 ---
 
-# Decision B — Optimistic concurrency
+# Decision B — Optimistic concurrency  ·  SUPERSEDED
+
+> **Do not implement.** Replaced by `docs/briefs/p0-3-adjudication.md`. Retained for history.
+> It specifies process-local revisions only, which cannot detect cross-process overwrite, and
+> names `inquiryStates` in scope, which is now P0-6.
 
 ## DECISION
 
@@ -153,70 +141,21 @@ Beliefs then cite ids that no longer resolve, `_retrieveGrounding` silently retu
 
 **Invariant.** Decision A above.
 
-**Implemented test.** `node scripts/evidence-durability-smoke.js` — **25 passed, 0 failed**.
-`scripts/evidence-durability-boundaries-smoke.js` adds 8 passing production-entry-point guards for
-the cap trigger, SQL tenant scoping, retention, subject erasure, and durable reasoning references.
+**Failing test.** `node scripts/evidence-durability-smoke.js` — currently **0 passed, 9 failed**.
+It stops at the first case because `_resolveEvidence` does not exist; the remaining eight run once
+it does.
 
-The original 0/9 test was architecturally invalid in two places: it called a PostgreSQL-capable
-resolver synchronously, and it directly spliced/replaced `evidenceLog[code]`. Those mutations
-bypassed archive-before-removal and were satisfiable only by retaining a forbidden shadow copy in
-memory. The corrected suite awaits every cold-capable operation and drives eviction through
-`_evictWorkingSet` with a process-external fake cold table.
-
-**Allowed surface.** `server.js` (the ingest path around `:6034`, by-id evidence consumers,
-erasure/retention integration, exports), `db.js` (the cold table + archive/resolve/erase queries).
-Add the table in `init()` alongside the existing schema.
+**Allowed surface.** `server.js` (the ingest path around `:6034`, exports), `db.js` (the cold
+table + its two queries). Add the table in `init()` alongside the existing schema.
 
 **Prohibited shortcuts.** Raising `EVIDENCE_LOG_CAP`. Making the resolver return `undefined` for
 anything. Keeping the full history in memory to satisfy the resolver — the working set must stay
-bounded. Splicing before the archive promise resolves. Treating archive failure as successful
-eviction. Skipping vector cleanup. Leaving raw provenance in an unbounded process map. Making cold
-evidence unreachable by erasure. Querying cold evidence without `org_code` in the key/predicate.
+bounded. Skipping vector cleanup. Making cold evidence unreachable by erasure.
 
-**Acceptance met.** `evidence-durability-smoke` green and registered; `persistence-smoke`,
+**Acceptance.** `evidence-durability-smoke` green and registered; `persistence-smoke`,
 `retrieval-smoke`, `evidence-smoke`, `intake-smoke` still green; `node scripts/test.js` green.
 
 **Do not touch.** `ai/*` — this is a storage boundary, not a kernel change.
-
-## CALLER AND MUTATION AUDIT — VERIFIED 2026-08-21
-
-`_resolveEvidence` does not exist yet, so it has no production callers. Four current by-id reads
-must converge on it:
-
-| Current site | Migration | Classification |
-|---|---|---|
-| `POST /api/evidence/:id/resolve` (`server.js:6407-6420`) | make handler `async`; await resolver; operate on `result.envelope` | trivial await; already an HTTP async-capable boundary |
-| `POST /api/evidence/:id/reject` (`server.js:6423-6432`) | same | trivial await |
-| `POST /api/evidence/:id/reverse` (`server.js:6436-6446`) | same | trivial await |
-| `_inheritedVisibility` (`server.js:7385-7395`) | await every basis id through resolver | synchronous boundary requiring bounded propagation |
-
-The fourth path requires `_inheritedVisibility` and `_recordDerivedEvidence` to become async. Its
-single production caller is `GET /api/checkin/:memberId/intelligence`
-(`server.js:8070-8100`), whose Express handler can become async and await the derived write. The
-direct test callers of `_recordDerivedEvidence` must await it. This is a contained migration, not
-a kernel redesign. No `ai/*` module is involved.
-
-Whole-log scans such as `_kernelEvidence` are deliberately **hot working-set queries**, not by-id
-resolution. This brief does not add cold search or re-warming: current reasoning uses the bounded
-hot set, while audit/reconstruction of a cited id uses `_resolveEvidence`.
-
-Direct working-set mutation has also been audited:
-
-- The destructive volume splice at `server.js:6036-6038` must be replaced by scheduling the
-  authoritative eviction boundary.
-- `_purgeExpired` at `server.js:452-481` is policy erasure, not eviction. It must become async or
-  delegate each expired envelope to an async tenant-scoped erasure batch so cold rows and vectors
-  are also removed.
-- `_deleteImport` and source/workspace deletions change lifecycle status and evict vectors; they do
-  not erase historical envelopes and therefore must not be rewritten as cold eviction.
-- Test-only array mutation in `turn-grounding-smoke.js` and `inquiry-smoke.js` is fixture cleanup,
-  not a production storage path.
-
-`_removePerson(..., deleteData=true)` currently removes many personal stores but does not remove
-canonical evidence about/by the person. Cold storage makes that existing Art 17 gap more serious.
-Implementation must either route matching hot/cold evidence through a tenant-scoped subject
-erasure helper in this blocker or record it as a separately failing privacy blocker before pilot;
-it may not claim erasure completeness while cold personal rows remain.
 
 ---
 
@@ -230,21 +169,7 @@ window, plus any batch waiting on the retry backoff (`:283`), after the API retu
 **Invariant.** Once the API has acknowledged a mutation, graceful termination cannot silently
 discard it. A flush that cannot persist reports failure rather than exiting quietly.
 
-**Initial RED.** `node scripts/shutdown-durability-smoke.js` was **0 passed, 7 failed**: no
-SIGTERM listener and no exported durability boundary.
-
-**Implemented invariant.** `_flushAndClose()` first awaits P0-1's
-`_awaitEvidenceMaintenance()`, rejects any reported evidence failure, then clears debounce/retry
-timers and forces the existing single persistence writer through `_flushPersistence()`. A failed
-forced save rejects instead of scheduling a silent successful exit. The routine is reusable for
-tests; production signals converge on one memoized `_gracefulShutdown()` promise.
-
-**Production ordering.** Enter shutdown state → reject new requests → close the listener and drain
-accepted requests → await evidence maintenance → force/await the final changed-unit persistence
-snapshot → exit 0 only on success. No database resource closes before durability settles.
-
-**Final GREEN.** `shutdown-durability-smoke.js` is **7 passed, 0 failed** and
-`shutdown-boundary-smoke.js` is **7 passed, 0 failed**. Both are registered in `scripts/test.js`.
+**Failing test.** `node scripts/shutdown-durability-smoke.js` — currently **0 passed, 7 failed**.
 
 **Allowed surface.** `server.js` save scheduler and process lifecycle. Export the shutdown routine
 as `_flushAndClose` so it is testable without killing the test process.
@@ -253,14 +178,18 @@ as `_flushAndClose` so it is testable without killing the test process.
 Fire-and-forget — the flush must await the write. Exiting 0 after a failed flush. Rewriting every
 store on shutdown; `persistence-smoke` proves a mutation must cost only what it changed.
 
-**Acceptance met.** `shutdown-durability-smoke` green and registered; `persistence-smoke` and
+**Acceptance.** `shutdown-durability-smoke` green and registered; `persistence-smoke` and
 `persistence-durability-smoke` still green; full suite green.
 
 **Do not touch.** `db.js`, `ai/*`.
 
 ---
 
-# Brief 3 — P0-3 · Optimistic concurrency on shared objects
+# Brief 3 — P0-3 · Optimistic concurrency on shared objects  ·  SUPERSEDED
+
+> **Do not implement.** Replaced by `docs/briefs/p0-3-adjudication.md` §8. Its routes
+> (`/api/org/nodes`) do not exist, its writers are coaches (who lack `manage_tree`), and it
+> forbids touching `db.js` — where the guarantee actually has to live.
 
 **Problem.** Shared objects are mutated in place with no version and no conflict detection. Two
 leaders editing one node: the second write erases the first, both see success, nothing records the
