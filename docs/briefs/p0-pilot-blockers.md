@@ -39,14 +39,23 @@ writer and fails loudly on a semantic conflict. The actual production routes rem
 and `manage_tree` authorization remains unchanged. `orgUsers` node arrays remain a derived cache,
 rebuilt from authoritative `orgNodes` after commit or recovery.
 
-Final local results: `write-conflict-smoke` **21 passed, 0 failed**, `db-cas-smoke` **14 passed,
-0 failed**, and `persistence-cas-boundary-smoke` **4 passed, 0 failed**. All three are registered
+Final corrected results: `write-conflict-smoke` **21 passed, 0 failed**, `db-cas-smoke` **18 passed,
+0 failed**, `persistence-cas-boundary-smoke` **9 passed, 0 failed**, and
+`delete-cas-boundary-smoke` **7 passed, 0 failed**. All four are registered
 in `scripts/test.js`. The adjudication's stated total of 19 for `write-conflict-smoke` was stale;
 the unchanged corrected file contains 21 assertions.
 
-Live two-session PostgreSQL verification remains a deployment check because this environment has
-no `DATABASE_URL`, PostgreSQL client, or local PostgreSQL server. It must be performed before
-merge/deploy using §9 of `p0-3-adjudication.md`; source-shape tests do not substitute for it.
+Independent review completed the live PostgreSQL write-CAS proof against PostgreSQL 16.13: the
+first writer advanced revision 0 to 1, the overlapping stale writer affected zero rows, and the
+accepted value remained. This implementation environment still has no PostgreSQL runtime, so the
+new revision-aware deletion SQL is pinned structurally and at the server boundary but awaits the
+same live verification before merge/deploy.
+
+Two review corrections are now enforced. `deleteStores` deletes each split row only when its
+durable revision matches, rolling back the batch and returning semantic conflicts otherwise.
+Failed authoritative split reconstruction marks persistence unavailable, clears any partial
+revision/hash baseline, rejects mutating HTTP requests with 503, refuses ordinary persistence,
+and becomes ready only after a successful reconstruction establishes authoritative revisions.
 
 P0-6 inquiry semantic recovery remains unadjudicated. Uniform durable-unit CAS prevents a stale
 process from overwriting the unit, but no inquiry replay or merge policy was introduced. Before

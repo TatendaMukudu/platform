@@ -225,10 +225,35 @@ async function loadStores({ withRevisions = false } = {}) {
 /* Remove unit rows that no longer exist in memory. Deletion was free under the
    old model because the whole blob was replaced; under split rows an emptied
    unit would otherwise persist forever as a ghost. */
-async function deleteStores(keys) {
-  if (!pool || !keys || !keys.length) return 0;
-  const res = await pool.query('DELETE FROM iq_store WHERE store_key = ANY($1::text[])', [keys]);
-  return res.rowCount || 0;
+async function deleteStores(keys, { expect = {} } = {}) {
+  if (!pool || !keys || !keys.length) return { rows: 0, conflicts: [] };
+  const client = await pool.connect();
+  const conflicts = [];
+  let rows = 0;
+  try {
+    await client.query('BEGIN');
+    for (const key of keys) {
+      const res = await client.query(
+        `DELETE FROM iq_store
+          WHERE store_key = $1
+            AND rev = $2`,
+        [key, Number(expect[key] || 0)]
+      );
+      if (res.rowCount === 1) rows++;
+      else conflicts.push(key);
+    }
+    if (conflicts.length) {
+      await client.query('ROLLBACK');
+      return { rows: 0, conflicts };
+    }
+    await client.query('COMMIT');
+    return { rows, conflicts: [] };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /* What the store actually costs, per row. The one number the bandwidth

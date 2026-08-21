@@ -110,5 +110,16 @@ ok('7 · the store exports the compare-and-swap surface the server needs',
   typeof db.saveStores === 'function' && typeof db.loadStores === 'function' &&
   /saveStores[\s\S]{0,200}expect/.test(SRC));
 
+/* ── 8 · DELETION USES THE SAME AUTHORITY. Removing a row is a durable mutation, not an
+   escape hatch around CAS. ── */
+ok('8 · deleteStores accepts expected durable revisions',
+  /function deleteStores\s*\(\s*keys\s*,\s*(opts|options|\{)/.test(SRC));
+ok('8 · split-unit deletion predicates on both key and revision',
+  /DELETE FROM iq_store[\s\S]{0,180}?store_key\s*=\s*\$1[\s\S]{0,120}?rev\s*=\s*\$2/i.test(SRC));
+ok('8 · stale deletes are returned as semantic conflicts',
+  /deleteStores[\s\S]{0,1200}?conflicts\.push\(key\)[\s\S]{0,500}?return\s*\{[^}]*conflicts/.test(SRC));
+ok('8 · no unconditional split-unit batch delete survives',
+  !/DELETE FROM iq_store WHERE store_key = ANY/i.test(SRC));
+
 console.log(`\ndb-cas-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

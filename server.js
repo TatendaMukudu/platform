@@ -87,6 +87,10 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 let _shuttingDown = false;
 let _httpServer = null;
 let _shutdownPromise = null;
+let _persistenceReady = {
+  ready: process.env.DB_OPTIONAL === '1' || process.env.NODE_ENV === 'test' || process.env.PERSISTENCE_MODE === 'main',
+  error: null,
+};
 
 /* ── Process-level crash guards ───────────────────────────────────────────────
    A single unhandled async error should never take the whole server down and
@@ -114,6 +118,9 @@ process.on('SIGINT',  () => _handleShutdownSignal('SIGINT'));
 // a keep-alive connection cannot begin a new mutation behind the final flush.
 app.use((req, res, next) => {
   if (_shuttingDown) return res.status(503).json({ error: 'server_shutting_down' });
+  if (!_persistenceReady.ready && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    return res.status(503).json({ error: 'store unavailable' });
+  }
   next();
 });
 
@@ -370,8 +377,27 @@ async function _performSave(failLoud) {
       }
 
       try {
+        if (!_persistenceReady.ready) {
+          _lastSaveError = new Error(_persistenceReady.error || 'durable persistence is not ready');
+          _lastSaveError.code = 'PERSISTENCE_NOT_READY';
+          console.error('[db] Save refused:', _lastSaveError.message);
+          _saveDirty = false;
+          continue;
+        }
         const expect = {};
         for (const key of Object.keys(changed)) expect[key] = _unitRevs.get(key) || 0;
+        const deleteExpect = {};
+        for (const key of gone) deleteExpect[key] = _unitRevs.get(key) || 0;
+        const deleted = gone.length
+          ? await db.deleteStores(gone, { expect: deleteExpect })
+          : { rows: 0, conflicts: [] };
+        if (deleted && deleted.conflicts && deleted.conflicts.length) {
+          await _reloadDurableUnits(deleted.conflicts);
+          _lastSaveError = new Error(`durable delete conflict: ${deleted.conflicts.join(', ')}`);
+          _lastSaveError.code = 'DURABLE_CONFLICT';
+          _saveDirty = false;
+          continue;
+        }
         const saved = await db.saveStores(changed, { expect }) || { conflicts: [] };
         if (saved.conflicts && saved.conflicts.length) {
           await _reloadDurableUnits(saved.conflicts);
@@ -380,7 +406,6 @@ async function _performSave(failLoud) {
           _saveDirty = false;
           continue;
         }
-        if (gone.length) await db.deleteStores(gone);
         // 'dual' keeps the legacy blob current so a rollback to 'main' loses
         // nothing. It costs the full upload every cycle — that is the price of
         // the rollback, and the reason it is not the default.
@@ -503,7 +528,11 @@ function _gracefulShutdown(signal = 'manual') {
    persisted key, which persistence-smoke pins. */
 async function _reconstruct(storeData) {
   _loadAllStores(storeData || {});
-  if (PERSISTENCE_MODE === 'main') return { mode: 'main', units: 0 };
+  if (PERSISTENCE_MODE === 'main') {
+    _persistenceReady = { ready: true, error: null };
+    return { mode: 'main', units: 0 };
+  }
+  _persistenceReady = { ready: false, error: 'authoritative split persistence has not loaded' };
   try {
     const loaded = await db.loadStores({ withRevisions: true });
     // Older adapters/tests may still return the default units-only shape. The
@@ -522,6 +551,7 @@ async function _reconstruct(storeData) {
         _saveHashes.set(key, _hash(JSON.stringify(value)));
         _unitRevs.set(key, Number(revisions[key] || 0));
       }
+      _persistenceReady = { ready: true, error: null };
       console.log(`[db] Split persistence: ${n} durable unit(s) loaded (authoritative)`);
       return { mode: 'split', units: n, authoritative: 'split' };
     }
@@ -529,11 +559,15 @@ async function _reconstruct(storeData) {
     // becomes the pre-migration restore point, and PERSISTENCE_MODE=main is
     // the way back to it.
     console.log('[db] No split rows yet — migrating from the legacy blob on first save.');
+    _persistenceReady = { ready: true, error: null };
     scheduleSave();
     return { mode: PERSISTENCE_MODE, units: 0, authoritative: 'main' };
   } catch (e) {
-    console.error('[db] Split load failed, continuing on the legacy blob:', e.message);
-    return { mode: PERSISTENCE_MODE, units: 0, authoritative: 'main', error: e.message };
+    _unitRevs.clear();
+    _saveHashes.clear();
+    _persistenceReady = { ready: false, error: `authoritative split load failed: ${e.message}` };
+    console.error('[db] Split load failed; durable mutations are unavailable:', e.message);
+    return { mode: PERSISTENCE_MODE, units: 0, authoritative: 'unavailable', error: e.message };
   }
 }
 
@@ -554,6 +588,11 @@ async function _reloadDurableUnits(keys) {
 }
 
 async function _saveProtectedUnit(storeName, code) {
+  if (!_persistenceReady.ready) {
+    const err = new Error(_persistenceReady.error || 'durable persistence is not ready');
+    err.code = 'PERSISTENCE_NOT_READY';
+    throw err;
+  }
   const key = `store:${storeName}:${code}`;
   const unit = _durableUnits()[key];
   const result = await db.saveStores({ [key]: unit }, { expect: { [key]: _unitRevs.get(key) || 0 } });
@@ -563,6 +602,10 @@ async function _saveProtectedUnit(storeName, code) {
   _unitRevs.set(key, (_unitRevs.get(key) || 0) + 1);
   _saveHashes.set(key, _hash(JSON.stringify(unit)));
   return { ok: true };
+}
+
+function _persistenceReadiness() {
+  return { ..._persistenceReady };
 }
 
 /* Expired sessions used to be pruned inside the save callback, so persisting
@@ -17343,6 +17386,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _durableUnits, _applyUnits, _pruneExpiredSessions, _persistedStores, scheduleSave,
   _flushPersistence, _flushAndClose, _gracefulShutdown,
   _reconstruct, _unclassified, _saveStats, PERSISTENCE_MODE, _unitRevs,
+  _persistenceReadiness,
   _saveProtectedUnit, _backfillUserNodeIds,
   emailIndex, activeSessions, inviteTokens, userAiProfiles,
   // exported for the truth layer: the group contribution boundary

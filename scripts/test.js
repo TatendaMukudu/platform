@@ -57,6 +57,7 @@ const SUITES = [
   'write-conflict-smoke.js', // P0-3: stale tree writers fail before replacing accepted state
   'db-cas-smoke.js', // P0-3: every split durable-unit write uses PostgreSQL CAS
   'persistence-cas-boundary-smoke.js', // P0-3: reconstruction seeds hashes/revisions before ordinary saves
+  'delete-cas-boundary-smoke.js', // P0-3: stale durable-unit deletion conflicts instead of destroying newer truth
   'identity-reresolve-smoke.js', // the identity lifecycle: held-back evidence resolves + promotes once
   'mapping-smoke.js',            // the mapping contract: fingerprint/drift/transform/gate (pure)
   'mapping-lifecycle-smoke.js',  // the mapping approval lifecycle end to end (hold→approve→activate→reprocess)

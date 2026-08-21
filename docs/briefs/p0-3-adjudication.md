@@ -573,7 +573,17 @@ The 14-step contract is implemented on the integration base containing P0-1 and 
 local counts are `write-conflict-smoke` 21/0, `db-cas-smoke` 14/0, and the independent startup
 boundary test `persistence-cas-boundary-smoke` 4/0. All are registered in the truth layer.
 
-The manual §9 PostgreSQL verification is still required before merge/deploy. The implementation
-environment did not provide `DATABASE_URL`, `psql`, a PostgreSQL server, or a container runtime,
-so no live output has been invented. Render drain behavior is likewise recorded as a required
-pre-Falcon infrastructure verification. P0-6 remains explicitly unresolved.
+Independent review subsequently completed the §9 write-CAS proof against PostgreSQL 16.13. One
+overlapping writer advanced revision 0 to 1; the stale writer blocked, then affected zero rows,
+and the accepted value remained. The correction environment still provided no PostgreSQL runtime,
+so revision-aware deletion retains a live pre-merge verification item.
+
+Review also found and corrected two holes. `deleteStores` now uses tenant/store-key revision CAS
+inside one transaction, returning stale deletions as semantic conflicts. A failed authoritative
+split reconstruction now clears partial baselines, marks persistence unavailable, rejects mutating
+HTTP requests and protected saves, and permits persistence again only after successful
+reconstruction seeds revisions and hashes. Corrected suites: `write-conflict` 21/0, `db-cas` 18/0,
+`persistence-cas-boundary` 9/0, and `delete-cas-boundary` 7/0.
+
+Render drain behavior remains a required pre-Falcon infrastructure verification. P0-6 remains
+explicitly unresolved.
