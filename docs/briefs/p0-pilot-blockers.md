@@ -26,6 +26,32 @@ pilot-loop-smoke:          28 passed,  1 failed     P0-5
 Six suites, 62 failing assertions. The two passing assertions inside the P0-3 suites are
 deliberate and must stay green — they pin the corrected route and the legacy restore point.
 
+## P0-3 implementation result (2026-08-21)
+
+The corrected two-layer contract is implemented on the P0-1/P0-2 integration base. Same-process
+tree edits use object `rev` plus caller-supplied `ifRev`; PostgreSQL protects every split
+`store:<name>:<org>` unit with an atomic revision predicate. Tree `POST`/`PUT`/`DELETE` operations
+cross that durable boundary before returning success, while other writes retain the debounce.
+
+Reconstruction now loads durable revisions and seeds both `_unitRevs` and `_saveHashes`, so an
+ordinary login cannot classify an unchanged boot snapshot as dirty. Shutdown uses the same CAS
+writer and fails loudly on a semantic conflict. The actual production routes remain `/api/tree`,
+and `manage_tree` authorization remains unchanged. `orgUsers` node arrays remain a derived cache,
+rebuilt from authoritative `orgNodes` after commit or recovery.
+
+Final local results: `write-conflict-smoke` **21 passed, 0 failed**, `db-cas-smoke` **14 passed,
+0 failed**, and `persistence-cas-boundary-smoke` **4 passed, 0 failed**. All three are registered
+in `scripts/test.js`. The adjudication's stated total of 19 for `write-conflict-smoke` was stale;
+the unchanged corrected file contains 21 assertions.
+
+Live two-session PostgreSQL verification remains a deployment check because this environment has
+no `DATABASE_URL`, PostgreSQL client, or local PostgreSQL server. It must be performed before
+merge/deploy using §9 of `p0-3-adjudication.md`; source-shape tests do not substitute for it.
+
+P0-6 inquiry semantic recovery remains unadjudicated. Uniform durable-unit CAS prevents a stale
+process from overwriting the unit, but no inquiry replay or merge policy was introduced. Before
+the Falcon pilot, infrastructure must also verify Render's drain behavior during deploy overlap.
+
 ## P0-6 — inquiry-state concurrency · UNADJUDICATED
 
 Split out of P0-3 by `docs/briefs/p0-3-adjudication.md` §Decision 8. `inquiryStates` is written by

@@ -227,7 +227,8 @@ const OrgTree = {
     try {
       const res  = await fetch('/api/tree/node', {
         method: 'POST', headers: Auth._headers(),
-        body: JSON.stringify({ name, description: desc, parentId: parentId || null }),
+        body: JSON.stringify({ name, description: desc, parentId: parentId || null,
+          ifRev: parentId ? this._nodes[parentId]?.rev : undefined }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
@@ -298,12 +299,11 @@ const OrgTree = {
     try {
       const res  = await fetch(`/api/tree/node/${nodeId}`, {
         method: 'PUT', headers: Auth._headers(),
-        body: JSON.stringify({ name, description: desc }),
+        body: JSON.stringify({ name, description: desc, ifRev: this._nodes[nodeId]?.rev }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
-      this._nodes[nodeId].name        = data.node.name;
-      this._nodes[nodeId].description = data.node.description || '';
+      this._nodes[nodeId] = data.node;
       _closeInlineModal();
       this.render('org-tree-container');
       showToast('Saved', 'success');
@@ -315,6 +315,7 @@ const OrgTree = {
     try {
       const res  = await fetch(`/api/tree/node/${nodeId}`, {
         method: 'DELETE', headers: Auth._headers(),
+        body: JSON.stringify({ ifRev: this._nodes[nodeId]?.rev }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
@@ -370,7 +371,7 @@ const OrgTree = {
     try {
       const res  = await fetch(`/api/tree/node/${nodeId}`, {
         method: 'PUT', headers: Auth._headers(),
-        body: JSON.stringify({ parentId: newParentId }),
+        body: JSON.stringify({ parentId: newParentId, ifRev: node.rev }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
@@ -452,12 +453,11 @@ const OrgTree = {
     try {
       const res  = await fetch(`/api/tree/node/${nodeId}`, {
         method: 'PUT', headers: Auth._headers(),
-        body: JSON.stringify({ memberIds, leaderIds }),
+        body: JSON.stringify({ memberIds, leaderIds, ifRev: this._nodes[nodeId]?.rev }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error);
-      this._nodes[nodeId].memberIds = data.node.memberIds;
-      this._nodes[nodeId].leaderIds = data.node.leaderIds;
+      this._nodes[nodeId] = data.node;
       _closeInlineModal();
       this.render('org-tree-container');
       showToast('Assignments saved', 'success');

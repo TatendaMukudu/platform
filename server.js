@@ -269,6 +269,7 @@ const PERSISTENCE_MODE = ['split', 'dual', 'main'].includes(process.env.PERSISTE
   ? process.env.PERSISTENCE_MODE : 'split';
 
 const _saveHashes = new Map();       // unit key → hash of what is durably stored
+const _unitRevs = new Map();         // unit key → PostgreSQL revision last observed
 let _saveTimer = null, _saveInFlight = false, _saveDirty = false, _savePromise = null;
 let _lastSaveError = null;
 let _lastSave = null;                // instrumentation for the bandwidth report
@@ -369,7 +370,16 @@ async function _performSave(failLoud) {
       }
 
       try {
-        await db.saveStores(changed);
+        const expect = {};
+        for (const key of Object.keys(changed)) expect[key] = _unitRevs.get(key) || 0;
+        const saved = await db.saveStores(changed, { expect }) || { conflicts: [] };
+        if (saved.conflicts && saved.conflicts.length) {
+          await _reloadDurableUnits(saved.conflicts);
+          _lastSaveError = new Error(`durable conflict: ${saved.conflicts.join(', ')}`);
+          _lastSaveError.code = 'DURABLE_CONFLICT';
+          _saveDirty = false;
+          continue;
+        }
         if (gone.length) await db.deleteStores(gone);
         // 'dual' keeps the legacy blob current so a rollback to 'main' loses
         // nothing. It costs the full upload every cycle — that is the price of
@@ -377,8 +387,11 @@ async function _performSave(failLoud) {
         if (PERSISTENCE_MODE === 'dual') await db.saveMain(_persistedStores());
         // Baseline advances ONLY after the write commits. A failed save must stay
         // dirty and retry, never be remembered as persisted.
-        for (const [k, h] of Object.entries(hashes)) _saveHashes.set(k, h);
-        for (const k of gone) _saveHashes.delete(k);
+        for (const [k, h] of Object.entries(hashes)) {
+          _saveHashes.set(k, h);
+          if (Object.prototype.hasOwnProperty.call(changed, k)) _unitRevs.set(k, (_unitRevs.get(k) || 0) + 1);
+        }
+        for (const k of gone) { _saveHashes.delete(k); _unitRevs.delete(k); }
         _saveRetries = 0;
         const ms = Date.now() - t0;
         _lastSave = { units: Object.keys(changed).length, bytes, serialised, ms, deleted: gone.length, at: new Date().toISOString() };
@@ -492,13 +505,23 @@ async function _reconstruct(storeData) {
   _loadAllStores(storeData || {});
   if (PERSISTENCE_MODE === 'main') return { mode: 'main', units: 0 };
   try {
-    const rows = await db.loadStores();
+    const loaded = await db.loadStores({ withRevisions: true });
+    // Older adapters/tests may still return the default units-only shape. The
+    // production DB returns the revision-bearing shape requested above.
+    const rows = loaded.units || loaded;
+    const revisions = loaded.revisions || {};
     const n = Object.keys(rows).length;
     if (n) {
       for (const store of Object.values(_persistedStores())) {
         for (const k of Object.keys(store)) delete store[k];
       }
       _applyUnits(rows);
+      _saveHashes.clear();
+      _unitRevs.clear();
+      for (const [key, value] of Object.entries(rows)) {
+        _saveHashes.set(key, _hash(JSON.stringify(value)));
+        _unitRevs.set(key, Number(revisions[key] || 0));
+      }
       console.log(`[db] Split persistence: ${n} durable unit(s) loaded (authoritative)`);
       return { mode: 'split', units: n, authoritative: 'split' };
     }
@@ -512,6 +535,34 @@ async function _reconstruct(storeData) {
     console.error('[db] Split load failed, continuing on the legacy blob:', e.message);
     return { mode: PERSISTENCE_MODE, units: 0, authoritative: 'main', error: e.message };
   }
+}
+
+async function _reloadDurableUnits(keys) {
+  const wanted = new Set(keys || []);
+  if (!wanted.size) return;
+  const loaded = await db.loadStores({ withRevisions: true });
+  const rows = {}, revisions = loaded.revisions || {};
+  for (const [key, value] of Object.entries(loaded.units || {})) {
+    if (wanted.has(key)) rows[key] = value;
+  }
+  if (Object.keys(rows).length) _applyUnits(rows);
+  for (const [key, value] of Object.entries(rows)) {
+    _saveHashes.set(key, _hash(JSON.stringify(value)));
+    _unitRevs.set(key, Number(revisions[key] || 0));
+  }
+  _backfillUserNodeIds();
+}
+
+async function _saveProtectedUnit(storeName, code) {
+  const key = `store:${storeName}:${code}`;
+  const unit = _durableUnits()[key];
+  const result = await db.saveStores({ [key]: unit }, { expect: { [key]: _unitRevs.get(key) || 0 } });
+  if (result && result.conflicts && result.conflicts.includes(key)) {
+    return { conflict: true };
+  }
+  _unitRevs.set(key, (_unitRevs.get(key) || 0) + 1);
+  _saveHashes.set(key, _hash(JSON.stringify(unit)));
+  return { ok: true };
 }
 
 /* Expired sessions used to be pruned inside the save callback, so persisting
@@ -2311,14 +2362,53 @@ app.post('/api/auth/set-password', async (req, res) => {
 app.get('/api/tree', requireAuth, (req, res) => {
   const code  = req.iqSession.orgCode;
   const nodes = Object.values(orgNodes[code] || {});
+  for (const node of nodes) if (!Number.isInteger(node.rev)) node.rev = 0;
   res.json({ ok: true, nodes });
 });
 
-app.post('/api/tree/node', requirePermission('manage_tree'), (req, res) => {
+function _treePrecondition(res, node, ifRev) {
+  if (ifRev === undefined) {
+    res.status(428).json({ error: 'precondition required', field: 'ifRev' });
+    return false;
+  }
+  if (!Number.isInteger(node.rev)) node.rev = 0;
+  if (!Number.isInteger(ifRev) || ifRev !== node.rev) {
+    res.status(409).json({ error: 'conflict', currentRev: node.rev });
+    return false;
+  }
+  return true;
+}
+
+async function _commitTreeMutation(code, snapshot, res) {
+  try {
+    const saved = await _saveProtectedUnit('orgNodes', code);
+    if (saved.conflict) {
+      orgNodes[code] = snapshot;
+      await _reloadDurableUnits([`store:orgNodes:${code}`]);
+      _backfillUserNodeIds();
+      res.status(409).json({ error: 'conflict', reason: 'changed elsewhere' });
+      return false;
+    }
+    _backfillUserNodeIds();
+    return true;
+  } catch (err) {
+    orgNodes[code] = snapshot;
+    _backfillUserNodeIds();
+    console.error('[tree] durable save failed:', err && err.message);
+    res.status(503).json({ error: 'store unavailable' });
+    return false;
+  }
+}
+
+app.post('/api/tree/node', requirePermission('manage_tree'), async (req, res) => {
   const code = req.iqSession.orgCode;
-  const { name, parentId, description } = req.body;
+  const { name, parentId, description, ifRev } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
   if (!orgNodes[code]) orgNodes[code] = {};
+  const parent = parentId ? orgNodes[code][parentId] : null;
+  if (parentId && !parent) return res.status(404).json({ error: 'Parent node not found' });
+  if (parent && !_treePrecondition(res, parent, ifRev)) return;
+  const snapshot = JSON.parse(JSON.stringify(orgNodes[code]));
   const nodeId = 'nd_' + generateId();
   const now    = new Date().toISOString();
   orgNodes[code][nodeId] = {
@@ -2329,6 +2419,7 @@ app.post('/api/tree/node', requirePermission('manage_tree'), (req, res) => {
     childNodeIds: [],
     memberIds:   [],
     leaderIds:   [],
+    rev:         0,
     createdAt:   now,
     updatedAt:   now,
   };
@@ -2337,16 +2428,19 @@ app.post('/api/tree/node', requirePermission('manage_tree'), (req, res) => {
     if (!orgNodes[code][parentId].childNodeIds) orgNodes[code][parentId].childNodeIds = [];
     orgNodes[code][parentId].childNodeIds.push(nodeId);
     orgNodes[code][parentId].updatedAt = now;
+    orgNodes[code][parentId].rev = (orgNodes[code][parentId].rev || 0) + 1;
   }
-  scheduleSave();
+  if (!(await _commitTreeMutation(code, snapshot, res))) return;
   res.json({ ok: true, node: orgNodes[code][nodeId] });
 });
 
-app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), (req, res) => {
+app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), async (req, res) => {
   const code   = req.iqSession.orgCode;
   const nodeId = req.params.nodeId;
   const node   = orgNodes[code]?.[nodeId];
   if (!node) return res.status(404).json({ error: 'Node not found' });
+  if (!_treePrecondition(res, node, req.body.ifRev)) return;
+  const snapshot = JSON.parse(JSON.stringify(orgNodes[code]));
   const { name, description, parentId, memberIds, leaderIds } = req.body;
   const now = new Date().toISOString();
   if (name        !== undefined) node.name        = name.trim();
@@ -2366,25 +2460,30 @@ app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), (req, res) =
       const op = orgNodes[code][node.parentId];
       op.childNodeIds = (op.childNodeIds || []).filter(id => id !== nodeId);
       op.updatedAt = now;
+      op.rev = (Number.isInteger(op.rev) ? op.rev : 0) + 1;
     }
     // Add to new parent
     if (parentId && orgNodes[code][parentId]) {
       if (!orgNodes[code][parentId].childNodeIds) orgNodes[code][parentId].childNodeIds = [];
       orgNodes[code][parentId].childNodeIds.push(nodeId);
       orgNodes[code][parentId].updatedAt = now;
+      orgNodes[code][parentId].rev = (Number.isInteger(orgNodes[code][parentId].rev) ? orgNodes[code][parentId].rev : 0) + 1;
     }
     node.parentId = parentId || null;
   }
   node.updatedAt = now;
-  scheduleSave();
+  node.rev++;
+  if (!(await _commitTreeMutation(code, snapshot, res))) return;
   res.json({ ok: true, node });
 });
 
-app.delete('/api/tree/node/:nodeId', requirePermission('manage_tree'), (req, res) => {
+app.delete('/api/tree/node/:nodeId', requirePermission('manage_tree'), async (req, res) => {
   const code   = req.iqSession.orgCode;
   const nodeId = req.params.nodeId;
   const node   = orgNodes[code]?.[nodeId];
   if (!node) return res.status(404).json({ error: 'Node not found' });
+  if (!_treePrecondition(res, node, req.body.ifRev)) return;
+  const snapshot = JSON.parse(JSON.stringify(orgNodes[code]));
   const now = new Date().toISOString();
   // Remove nodeId from user caches before deleting
   _syncUserNodeArrays(code, nodeId, node.memberIds || [], [], node.leaderIds || [], []);
@@ -2393,16 +2492,18 @@ app.delete('/api/tree/node/:nodeId', requirePermission('manage_tree'), (req, res
     const p = orgNodes[code][node.parentId];
     p.childNodeIds = (p.childNodeIds || []).filter(id => id !== nodeId);
     p.updatedAt = now;
+    p.rev = (Number.isInteger(p.rev) ? p.rev : 0) + 1;
   }
   // Reparent children to deleted node's parent
   (node.childNodeIds || []).forEach(childId => {
     if (orgNodes[code][childId]) {
       orgNodes[code][childId].parentId  = node.parentId;
       orgNodes[code][childId].updatedAt = now;
+      orgNodes[code][childId].rev = (Number.isInteger(orgNodes[code][childId].rev) ? orgNodes[code][childId].rev : 0) + 1;
     }
   });
   delete orgNodes[code][nodeId];
-  scheduleSave();
+  if (!(await _commitTreeMutation(code, snapshot, res))) return;
   res.json({ ok: true });
 });
 
@@ -17241,7 +17342,8 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: the persistence boundary
   _durableUnits, _applyUnits, _pruneExpiredSessions, _persistedStores, scheduleSave,
   _flushPersistence, _flushAndClose, _gracefulShutdown,
-  _reconstruct, _unclassified, _saveStats, PERSISTENCE_MODE,
+  _reconstruct, _unclassified, _saveStats, PERSISTENCE_MODE, _unitRevs,
+  _saveProtectedUnit, _backfillUserNodeIds,
   emailIndex, activeSessions, inviteTokens, userAiProfiles,
   // exported for the truth layer: the group contribution boundary
   groupCandidates, orgNodes, _groupSubjectRef, _noteGroupCandidates, _admitGroupContributions,

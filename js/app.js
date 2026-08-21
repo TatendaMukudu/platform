@@ -3292,11 +3292,13 @@ async function _submitAddPerson() {
     if (nodeId && OrgTree._nodes[nodeId]) {
       const currentIds = OrgTree._nodes[nodeId].memberIds || [];
       if (!currentIds.includes(data.user.id)) {
-        await fetch(`/api/tree/node/${nodeId}`, {
+        const treeRes = await fetch(`/api/tree/node/${nodeId}`, {
           method: 'PUT', headers: Auth._headers(),
-          body: JSON.stringify({ memberIds: [...currentIds, data.user.id] }),
+          body: JSON.stringify({ memberIds: [...currentIds, data.user.id], ifRev: OrgTree._nodes[nodeId].rev }),
         });
-        OrgTree._nodes[nodeId].memberIds = [...currentIds, data.user.id];
+        const treeData = await treeRes.json();
+        if (!treeData.ok) throw new Error(treeData.error || 'The organisation tree changed. Reload and try again.');
+        OrgTree._nodes[nodeId] = treeData.node;
       }
     }
 

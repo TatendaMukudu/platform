@@ -53,8 +53,10 @@ const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS iq_store (
     store_key   TEXT        PRIMARY KEY,
     store_value JSONB       NOT NULL DEFAULT '{}',
+    rev         BIGINT      NOT NULL DEFAULT 0,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+  ALTER TABLE iq_store ADD COLUMN IF NOT EXISTS rev BIGINT NOT NULL DEFAULT 0;
   CREATE TABLE IF NOT EXISTS cold_evidence (
     org_code    TEXT        NOT NULL,
     evidence_id TEXT        NOT NULL,
@@ -165,29 +167,37 @@ async function saveMain(data) {
    conversation and the inquiry it produced must land together or not at all —
    otherwise a crash between two statements leaves the two halves of one logical
    turn disagreeing, which the single-blob write could never do. */
-async function saveStores(units) {
-  if (!pool) return { rows: 0, bytes: 0 };
+async function saveStores(units, { expect = {} } = {}) {
+  if (!pool) return { rows: 0, bytes: 0, conflicts: [] };
   const entries = Object.entries(units || {});
-  if (!entries.length) return { rows: 0, bytes: 0 };
+  if (!entries.length) return { rows: 0, bytes: 0, conflicts: [] };
 
   let bytes = 0;
+  const conflicts = [];
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     for (const [key, value] of entries) {
       const json = JSON.stringify(value);
       bytes += Buffer.byteLength(json, 'utf8');
-      await client.query(
-        `INSERT INTO iq_store (store_key, store_value, updated_at)
-         VALUES ($1, $2::jsonb, NOW())
+      const res = await client.query(
+        `INSERT INTO iq_store (store_key, store_value, rev, updated_at)
+         VALUES ($1, $2::jsonb, 1, NOW())
          ON CONFLICT (store_key)
          DO UPDATE SET store_value = EXCLUDED.store_value,
-                       updated_at  = NOW()`,
-        [key, json]
+                       rev         = iq_store.rev + 1,
+                       updated_at  = NOW()
+          WHERE iq_store.rev = $3`,
+        [key, json, Number(expect[key] || 0)]
       );
+      if (res.rowCount !== 1) conflicts.push(key);
+    }
+    if (conflicts.length) {
+      await client.query('ROLLBACK');
+      return { rows: 0, bytes, conflicts };
     }
     await client.query('COMMIT');
-    return { rows: entries.length, bytes };
+    return { rows: entries.length, bytes, conflicts: [] };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw err;                       // caller keeps the units dirty and retries
@@ -199,14 +209,17 @@ async function saveStores(units) {
 /* Read every split unit back. Returns { 'store:orgUsers:acme': {...}, ... } —
    reassembly into the in-memory shape belongs to the caller, which is the only
    place that knows that shape. */
-async function loadStores() {
-  if (!pool) return {};
+async function loadStores({ withRevisions = false } = {}) {
+  if (!pool) return withRevisions ? { units: {}, revisions: {} } : {};
   const res = await pool.query(
-    "SELECT store_key, store_value FROM iq_store WHERE store_key LIKE 'store:%'"
+    "SELECT store_key, store_value, rev FROM iq_store WHERE store_key LIKE 'store:%'"
   );
-  const out = {};
-  for (const r of res.rows) out[r.store_key] = r.store_value;
-  return out;
+  const units = {}, revisions = {};
+  for (const r of res.rows) {
+    units[r.store_key] = r.store_value;
+    revisions[r.store_key] = Number(r.rev || 0);
+  }
+  return withRevisions ? { units, revisions } : units;
 }
 
 /* Remove unit rows that no longer exist in memory. Deletion was free under the

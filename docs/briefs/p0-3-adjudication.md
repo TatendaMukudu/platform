@@ -564,3 +564,16 @@ adjudication rather than lost here.
 `_saveHashes` full-rewrite is live now, fires on the first login after any deploy, and is three
 lines to fix. It is folded into Step 2.6 because uniform CAS is what makes it *safe*, but if any
 part of this work ships alone, ship that.
+
+---
+
+# 11 · Implementation record (2026-08-21)
+
+The 14-step contract is implemented on the integration base containing P0-1 and P0-2. The final
+local counts are `write-conflict-smoke` 21/0, `db-cas-smoke` 14/0, and the independent startup
+boundary test `persistence-cas-boundary-smoke` 4/0. All are registered in the truth layer.
+
+The manual §9 PostgreSQL verification is still required before merge/deploy. The implementation
+environment did not provide `DATABASE_URL`, `psql`, a PostgreSQL server, or a container runtime,
+so no live output has been invented. Render drain behavior is likewise recorded as a required
+pre-Falcon infrastructure verification. P0-6 remains explicitly unresolved.
