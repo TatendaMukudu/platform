@@ -10,16 +10,16 @@ The three briefs touch disjoint files and **can be dispatched in parallel**. See
 ## The whole pilot gate, verified on a clean `npm install`
 
 ```
-evidence-durability-smoke:  0 passed,  9 failed     P0-1
+evidence-durability-smoke: 25 passed,  0 failed     P0-1 IMPLEMENTED
 shutdown-durability-smoke:  0 passed,  7 failed     P0-2
 write-conflict-smoke:       0 passed,  7 failed     P0-3
 authority-truth-smoke:      0 passed, 14 failed     P0-D
 pilot-loop-smoke:          28 passed,  1 failed     P0-5
 ```
 
-Five suites, 38 failing assertions, five files. None of these suites is registered in
-`scripts/test.js` yet except `pilot-loop-smoke`; register each one in the commit that makes it
-green.
+Four remaining suites carry 29 failing assertions. `evidence-durability-smoke` and its production
+entry-point companion are registered in `scripts/test.js`; register each remaining suite in the
+commit that makes it green.
 
 ---
 
@@ -153,8 +153,9 @@ Beliefs then cite ids that no longer resolve, `_retrieveGrounding` silently retu
 
 **Invariant.** Decision A above.
 
-**Failing test.** `node scripts/evidence-durability-smoke.js` — currently **0 passed, 25 failed**.
-Six interface assertions fail before the nineteen behavioural cases can run.
+**Implemented test.** `node scripts/evidence-durability-smoke.js` — **25 passed, 0 failed**.
+`scripts/evidence-durability-boundaries-smoke.js` adds 8 passing production-entry-point guards for
+the cap trigger, SQL tenant scoping, retention, subject erasure, and durable reasoning references.
 
 The original 0/9 test was architecturally invalid in two places: it called a PostgreSQL-capable
 resolver synchronously, and it directly spliced/replaced `evidenceLog[code]`. Those mutations
@@ -172,7 +173,7 @@ bounded. Splicing before the archive promise resolves. Treating archive failure 
 eviction. Skipping vector cleanup. Leaving raw provenance in an unbounded process map. Making cold
 evidence unreachable by erasure. Querying cold evidence without `org_code` in the key/predicate.
 
-**Acceptance.** `evidence-durability-smoke` green and registered; `persistence-smoke`,
+**Acceptance met.** `evidence-durability-smoke` green and registered; `persistence-smoke`,
 `retrieval-smoke`, `evidence-smoke`, `intake-smoke` still green; `node scripts/test.js` green.
 
 **Do not touch.** `ai/*` — this is a storage boundary, not a kernel change.

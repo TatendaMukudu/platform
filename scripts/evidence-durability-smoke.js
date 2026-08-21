@@ -5,8 +5,7 @@
    WRITTEN BEFORE THE FIX, by the reviewer. These cases are the specification. Do not edit an
    assertion to make it pass — if one is wrong, say so in the PR and leave it red.
 
-   NOT REGISTERED in scripts/test.js yet. Register it in the implementation commit that makes
-   it green.
+   Registered in scripts/test.js with the P0-1 implementation.
 
    The hot evidence log is a bounded working set. Cold evidence is PostgreSQL state, not an
    in-memory shadow. Consequently all cold-capable operations are asynchronous:

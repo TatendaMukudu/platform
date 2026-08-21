@@ -55,6 +55,15 @@ const SCHEMA_SQL = `
     store_value JSONB       NOT NULL DEFAULT '{}',
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
   );
+  CREATE TABLE IF NOT EXISTS cold_evidence (
+    org_code    TEXT        NOT NULL,
+    evidence_id TEXT        NOT NULL,
+    envelope    JSONB,
+    raw_record  JSONB,
+    archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    erased_at   TIMESTAMPTZ,
+    PRIMARY KEY (org_code, evidence_id)
+  );
 `;
 
 /* ── init ─────────────────────────────────────────────────────────────────── *
@@ -221,6 +230,99 @@ async function storeSizes(limit = 20) {
   return res.rows;
 }
 
+/* ── COLD EVIDENCE ────────────────────────────────────────────────────────── *
+   The hot evidence log is a bounded reasoning working set. These rows are the
+   durable reference target for evidence that leaves it. Every operation is
+   tenant-scoped by the composite (org_code, evidence_id) key. */
+async function archiveColdEvidence(orgCode, records) {
+  const rows = Array.isArray(records) ? records : [records];
+  if (!rows.length) return { archived: 0 };
+  if (!pool) return { archived: rows.length };
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const row of rows) {
+      const envelope = row && (row.envelope || row);
+      if (!envelope || !envelope.id) throw new Error('cold evidence requires an evidence id');
+      await client.query(
+        `INSERT INTO cold_evidence
+           (org_code, evidence_id, envelope, raw_record, archived_at, erased_at)
+         VALUES ($1, $2, $3::jsonb, $4::jsonb, NOW(), NULL)
+         ON CONFLICT (org_code, evidence_id) DO UPDATE
+           SET envelope = EXCLUDED.envelope,
+               raw_record = EXCLUDED.raw_record,
+               archived_at = NOW(),
+               erased_at = NULL`,
+        [orgCode, envelope.id, JSON.stringify(envelope), JSON.stringify(row.rawRecord ?? null)]
+      );
+    }
+    await client.query('COMMIT');
+    return { archived: rows.length };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function resolveColdEvidence(orgCode, evidenceId) {
+  if (!pool) return null;
+  const res = await pool.query(
+    `SELECT envelope, raw_record AS "rawRecord", archived_at AS "archivedAt",
+            erased_at AS "erasedAt"
+       FROM cold_evidence
+      WHERE org_code = $1 AND evidence_id = $2`,
+    [orgCode, evidenceId]
+  );
+  return res.rows[0] || null;
+}
+
+/* Erasure retains only the composite identity and timestamp. That contentless
+   tombstone distinguishes an erased id from one that never existed without
+   retaining the envelope or raw personal content. */
+async function eraseColdEvidence(orgCode, evidenceId) {
+  if (!pool) return { erased: true };
+  await pool.query(
+    `INSERT INTO cold_evidence
+       (org_code, evidence_id, envelope, raw_record, archived_at, erased_at)
+     VALUES ($1, $2, NULL, NULL, NOW(), NOW())
+     ON CONFLICT (org_code, evidence_id) DO UPDATE
+       SET envelope = NULL, raw_record = NULL, erased_at = NOW()
+     WHERE cold_evidence.org_code = $1 AND cold_evidence.evidence_id = $2`,
+    [orgCode, evidenceId]
+  );
+  return { erased: true };
+}
+
+async function eraseColdEvidenceForSubject(orgCode, userId) {
+  if (!pool) return { erased: 0 };
+  const res = await pool.query(
+    `UPDATE cold_evidence
+        SET envelope = NULL, raw_record = NULL, erased_at = NOW()
+      WHERE org_code = $1
+        AND erased_at IS NULL
+        AND (envelope->>'subjectId' = $2 OR envelope->>'ownerRef' = $2
+             OR envelope->'attributes'->>'contributorId' = $2)`,
+    [orgCode, userId]
+  );
+  return { erased: res.rowCount || 0 };
+}
+
+async function eraseColdEvidenceBefore(orgCode, cutoffIso) {
+  if (!pool) return { erased: 0 };
+  const res = await pool.query(
+    `UPDATE cold_evidence
+        SET envelope = NULL, raw_record = NULL, erased_at = NOW()
+      WHERE org_code = $1
+        AND erased_at IS NULL
+        AND COALESCE(envelope->>'observedAt', envelope->>'createdAt') IS NOT NULL
+        AND (COALESCE(envelope->>'observedAt', envelope->>'createdAt'))::timestamptz < $2::timestamptz`,
+    [orgCode, cutoffIso]
+  );
+  return { erased: res.rowCount || 0 };
+}
+
 /* ── pgvector (optional) ──────────────────────────────────────────────────── *
    Cross-member similarity storage. Entirely non-fatal: if pgvector isn't
    available (extension missing / permissions), it disables itself and the app
@@ -295,5 +397,7 @@ async function nearestMembers(orgCode, userId, k = 8) {
 module.exports = {
   init, loadMain, saveMain,
   saveStores, loadStores, deleteStores, storeSizes,
+  archiveColdEvidence, resolveColdEvidence, eraseColdEvidence,
+  eraseColdEvidenceForSubject, eraseColdEvidenceBefore,
   initVectors, vectorsReady, upsertMemberVector, nearestMembers,
 };

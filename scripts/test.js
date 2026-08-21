@@ -50,6 +50,8 @@ const SUITES = [
   'epistemic-invariants-smoke.js', // AGENTS.md §2 made mechanical: computed safety/confidence, no raw passthrough, allowlist status
   'admissibility-smoke.js',        // the retrieval gate: superseded evidence stops grounding answers, and says so
   'evidence-smoke.js',     // the canonical evidence envelope: normalise/validate/dedupe/promote
+  'evidence-durability-smoke.js', // P0-1: bounded hot evidence remains tenant-scoped, cold-resolvable and erasable
+  'evidence-durability-boundaries-smoke.js', // P0-1 wiring: cap trigger, SQL scoping, retention, subject erasure, durable refs
   'identity-reresolve-smoke.js', // the identity lifecycle: held-back evidence resolves + promotes once
   'mapping-smoke.js',            // the mapping contract: fingerprint/drift/transform/gate (pure)
   'mapping-lifecycle-smoke.js',  // the mapping approval lifecycle end to end (hold→approve→activate→reprocess)

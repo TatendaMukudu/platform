@@ -469,12 +469,20 @@ function _purgeExpired(retentionDays = RETENTION_DAYS) {
   for (const code of Object.keys(evidenceLog)) {
     if (!Array.isArray(evidenceLog[code])) continue;
     const before = evidenceLog[code].length;
+    const expiredIds = [];
     evidenceLog[code] = evidenceLog[code].filter(env => {
       if (keep(env.observedAt || env.createdAt)) return true;
+      expiredIds.push(env.id);
       if (env.rawRef) delete rawEvidence[env.rawRef];
+      try { _evictEvidenceVector(code, env.id); } catch (_) {}
       return false;
     });
     removed += before - evidenceLog[code].length;
+    const cutoffIso = new Date(cutoff).toISOString();
+    _trackEvidenceMaintenance((async () => {
+      await Promise.all(expiredIds.map(id => db.eraseColdEvidence(code, id)));
+      await db.eraseColdEvidenceBefore(code, cutoffIso);
+    })(), `retention:${code}`);
   }
   if (typeof _rebuildEvidenceIndex === 'function') _rebuildEvidenceIndex();
   if (removed) { console.log(`[retention] purged ${removed} record(s) older than ${retentionDays}d`); scheduleSave(); }
@@ -1037,7 +1045,9 @@ const oauthPending          = {};  // state → { code(org), userId, provider, t
 const rawEvidence           = {};  // rawRef → { org, provider, receivedAt, record }
 const evidenceLog           = {};  // orgCode → [ envelope ]
 const _evidenceSeen         = {};  // orgCode → Set(dedupeKey)  (rebuilt on load; dedupe index)
-const EVIDENCE_LOG_CAP      = 8000; // per-org retention cap for the in-memory/blob log
+const EVIDENCE_LOG_CAP      = Math.max(1, parseInt(process.env.EVIDENCE_LOG_CAP, 10) || 8000);
+const _evidenceEvictionPending = new Map(); // orgCode → one coalesced archive task
+const _evidenceMaintenancePending = new Set(); // retention/subject erasure tasks for P0-2 to await
 // The Mapping Approval layer — the interpretation boundary. A registry of VERSIONED
 // mapping contracts per org. Only an ACTIVE version may promote evidence; editing an
 // approved version forks a new draft (versions are immutable). See lib/mapping.js.
@@ -1711,6 +1721,7 @@ function _removePerson(code, userId, deleteData) {
   if (!users || !users[userId]) return { ok: false, error: 'User not found' };
 
   const user  = users[userId];
+  let evidenceErasure = null;
   const email = (user.email || '').toLowerCase();
   const name  = user.name  || '';
 
@@ -1864,18 +1875,27 @@ function _removePerson(code, userId, deleteData) {
        Art 17(3)(b) permits retaining what is needed for a legal obligation, and
        Art 5(2) accountability is exactly that: the record that the erasure
        happened cannot itself be erasable. */
+
+    // Canonical evidence is a separate durable boundary. Start its tenant-scoped
+    // erasure here; the HTTP deletion route awaits this promise before acknowledging.
+    evidenceErasure = _trackEvidenceMaintenance(
+      _eraseSubjectEvidence(code, userId), `subject-erasure:${code}:${userId}`);
   }
 
-  return { ok: true };
+  return { ok: true, evidenceErasure };
 }
 
-app.delete('/api/auth/users/:userId', requirePermission('delete_members'), (req, res) => {
+app.delete('/api/auth/users/:userId', requirePermission('delete_members'), async (req, res) => {
   const code       = req.iqSession.orgCode;
   const { userId } = req.params;
   const deleteData = req.query.deleteData === 'true';
 
   const result = _removePerson(code, userId, deleteData);
   if (!result.ok) return res.status(404).json(result);
+  if (result.evidenceErasure) {
+    const erasure = await result.evidenceErasure;
+    if (erasure && erasure.ok === false) return res.status(500).json({ error: 'evidence erasure failed' });
+  }
   // ACCOUNTABILITY — erasure (Art 17) is itself an accountable event. The trail records
   // THAT a person's data was erased (who did it, whose data) without retaining the data.
   if (deleteData) _audit(code, { actor: req.iqSession.userId, action: 'erasure', subjectIds: [userId], basis: 'right to erasure (Art 17)' });
@@ -5991,6 +6011,108 @@ function _rebuildEvidenceIndex() {
   }
 }
 
+function _trackEvidenceMaintenance(promise, label) {
+  const task = Promise.resolve(promise).catch(err => {
+    console.error(`[evidence] ${label || 'maintenance'} failed:`, err && err.message);
+    return { ok: false, error: err && err.message };
+  }).finally(() => _evidenceMaintenancePending.delete(task));
+  _evidenceMaintenancePending.add(task);
+  return task;
+}
+
+async function _awaitEvidenceMaintenance() {
+  const eviction = [..._evidenceEvictionPending.values()];
+  const maintenance = [..._evidenceMaintenancePending];
+  return Promise.all([...eviction, ...maintenance]);
+}
+
+async function _resolveEvidence(code, id) {
+  const evidenceId = String(id || '');
+  const hot = (evidenceLog[code] || []).find(env => env && env.id === evidenceId);
+  if (hot) return { envelope: hot, cold: false };
+  const cold = await db.resolveColdEvidence(code, evidenceId);
+  if (!cold) return { unresolvable: true, reason: 'evidence_not_found' };
+  if (cold.erasedAt || cold.erased_at || !cold.envelope) {
+    return { unresolvable: true, reason: 'evidence_erased' };
+  }
+  return { envelope: cold.envelope, cold: true };
+}
+
+async function _persistColdEnvelope(code, envelope) {
+  const prior = await db.resolveColdEvidence(code, envelope.id);
+  await db.archiveColdEvidence(code, [{ envelope, rawRecord: prior?.rawRecord ?? null }]);
+}
+
+async function _evictWorkingSet(code, ids) {
+  const wanted = new Set((ids || []).map(String));
+  const hot = evidenceLog[code] || [];
+  const candidates = hot.filter(env => env && wanted.has(String(env.id)));
+  if (!candidates.length) return { ok: true, archived: 0 };
+  const records = candidates.map(envelope => ({
+    envelope,
+    rawRecord: envelope.rawRef && rawEvidence[envelope.rawRef]
+      ? rawEvidence[envelope.rawRef].record : null,
+  }));
+
+  // The await is the law: no process-local copy moves until the whole durable
+  // archive batch commits. archiveColdEvidence rolls its transaction back on error.
+  await db.archiveColdEvidence(code, records);
+
+  const archivedIds = new Set(candidates.map(env => String(env.id)));
+  for (const env of candidates) {
+    _evictEvidenceVector(code, env.id);
+    if (env.rawRef) delete rawEvidence[env.rawRef];
+  }
+  evidenceLog[code] = hot.filter(env => !archivedIds.has(String(env && env.id)));
+  _rebuildEvidenceIndex();
+  scheduleSave();
+  return { ok: true, archived: candidates.length };
+}
+
+function _scheduleEvidenceEviction(code) {
+  if (_evidenceEvictionPending.has(code)) return _evidenceEvictionPending.get(code);
+  const task = (async () => {
+    while ((evidenceLog[code] || []).length > EVIDENCE_LOG_CAP) {
+      const excess = evidenceLog[code].length - EVIDENCE_LOG_CAP;
+      const ids = evidenceLog[code].slice(0, excess).map(env => env.id);
+      await _evictWorkingSet(code, ids);
+    }
+    return { ok: true };
+  })().catch(err => {
+    console.error(`[evidence] cold archive failed for ${code}:`, err && err.message);
+    return { ok: false, error: err && err.message };
+  }).finally(() => _evidenceEvictionPending.delete(code));
+  _evidenceEvictionPending.set(code, task);
+  return task;
+}
+
+async function _eraseEvidence(code, id) {
+  const evidenceId = String(id || '');
+  // Tombstone durable content first. If it fails, leave the process-local copy
+  // intact so erasure can be retried without losing the only resolvable record.
+  await db.eraseColdEvidence(code, evidenceId);
+  const hot = evidenceLog[code] || [];
+  const matches = hot.filter(env => env && env.id === evidenceId);
+  for (const env of matches) {
+    if (env.rawRef) delete rawEvidence[env.rawRef];
+    _evictEvidenceVector(code, env.id);
+  }
+  evidenceLog[code] = hot.filter(env => !(env && env.id === evidenceId));
+  _rebuildEvidenceIndex();
+  scheduleSave();
+  return { ok: true, erased: true };
+}
+
+async function _eraseSubjectEvidence(code, userId) {
+  const ids = (evidenceLog[code] || [])
+    .filter(env => env && (env.subjectId === userId || env.ownerRef === userId ||
+      env.attributes?.contributorId === userId))
+    .map(env => env.id);
+  for (const id of ids) await _eraseEvidence(code, id);
+  const cold = await db.eraseColdEvidenceForSubject(code, userId);
+  return { ok: true, hotErased: ids.length, coldErased: cold.erased || 0 };
+}
+
 /* Remove a promoted signal from the kernel (used by correction, deletion, reversal). */
 function _withdrawSignal(code, env) {
   if (env && env.signalId && Array.isArray(orgSignals[code])) orgSignals[code] = orgSignals[code].filter(s => s.id !== env.signalId);
@@ -6034,8 +6156,7 @@ function _recordEvidence(code, envInput, rawRecord) {
   const log = evidenceLog[code] || (evidenceLog[code] = []);
   log.push(env);
   if (log.length > EVIDENCE_LOG_CAP) {
-    const dropped = log.splice(0, log.length - EVIDENCE_LOG_CAP);
-    dropped.forEach(d => { if (d.rawRef) delete rawEvidence[d.rawRef]; });
+    _scheduleEvidenceEviction(code);
   }
   return { stored: true, id: env.id, promotable: evidence.promotable(env), envelope: env };
 }
@@ -6404,10 +6525,11 @@ app.post('/api/identity/reresolve', requirePermission('manage_settings'), (req, 
 
 /* Admin CONFIRMS a specific person for a held-back envelope → resolve + promote once.
    Fuzzy never confirms itself; this is where a human closes the loop. */
-app.post('/api/evidence/:id/resolve', requirePermission('manage_settings'), (req, res) => {
+app.post('/api/evidence/:id/resolve', requirePermission('manage_settings'), async (req, res) => {
   const code = req.iqSession.orgCode;
-  const env = (evidenceLog[code] || []).find(e => e.id === req.params.id);
-  if (!env) return res.status(404).json({ error: 'evidence not found' });
+  const resolved = await _resolveEvidence(code, req.params.id);
+  if (!resolved.envelope) return res.status(404).json({ error: 'evidence not found' });
+  const env = resolved.envelope;
   if (env.promoted) return res.status(409).json({ error: 'already resolved and promoted' });
   const subjectId = String(req.body?.subjectId || '');
   if (!orgUsers[code]?.[subjectId]) return res.status(400).json({ error: 'unknown subject' });
@@ -6415,32 +6537,37 @@ app.post('/api/evidence/:id/resolve', requirePermission('manage_settings'), (req
   _appendResolution(code, env, { subjectId, confidence: 'confirmed', by: req.iqSession.userId, method: 'admin', reason: String(req.body?.reason || 'admin confirmed').slice(0, 200) });
   delete env.candidate; delete env.candidateNote;
   const promoted = _promoteEvidence(code, env);
+  if (resolved.cold) await _persistColdEnvelope(code, env);
   scheduleSave();
   res.json({ ok: true, promoted, evidenceId: env.id, subjectId });
 });
 
 /* Admin dismisses a proposed/unmatched item (won't promote; drops out of the queue). */
-app.post('/api/evidence/:id/reject', requirePermission('manage_settings'), (req, res) => {
+app.post('/api/evidence/:id/reject', requirePermission('manage_settings'), async (req, res) => {
   const code = req.iqSession.orgCode;
-  const env = (evidenceLog[code] || []).find(e => e.id === req.params.id);
-  if (!env) return res.status(404).json({ error: 'evidence not found' });
+  const resolved = await _resolveEvidence(code, req.params.id);
+  if (!resolved.envelope) return res.status(404).json({ error: 'evidence not found' });
+  const env = resolved.envelope;
   if (env.promoted) return res.status(409).json({ error: 'already promoted — reverse it instead' });
   delete env.candidate; delete env.candidateNote;
   _appendResolution(code, env, { subjectId: null, confidence: env.confidence === 'conflict' ? 'conflict' : 'unmatched', by: req.iqSession.userId, method: 'admin', status: 'rejected', reason: String(req.body?.reason || 'admin rejected').slice(0, 200) });
+  if (resolved.cold) await _persistColdEnvelope(code, env);
   scheduleSave();
   res.json({ ok: true, evidenceId: env.id });
 });
 
 /* REVERSAL — undo a resolution: remove the emitted signal and return the envelope
    to unmatched so it can be re-resolved. Real, not cosmetic. */
-app.post('/api/evidence/:id/reverse', requirePermission('manage_settings'), (req, res) => {
+app.post('/api/evidence/:id/reverse', requirePermission('manage_settings'), async (req, res) => {
   const code = req.iqSession.orgCode;
-  const env = (evidenceLog[code] || []).find(e => e.id === req.params.id);
-  if (!env) return res.status(404).json({ error: 'evidence not found' });
+  const resolved = await _resolveEvidence(code, req.params.id);
+  if (!resolved.envelope) return res.status(404).json({ error: 'evidence not found' });
+  const env = resolved.envelope;
   if (!env.promoted) return res.status(409).json({ error: 'not promoted' });
   if (env.signalId && Array.isArray(orgSignals[code])) orgSignals[code] = orgSignals[code].filter(s => s.id !== env.signalId);
   _appendResolution(code, env, { subjectId: null, confidence: 'unmatched', by: req.iqSession.userId, method: 'reversal', reason: String(req.body?.reason || 'admin reversed').slice(0, 200) });
   env.promoted = false; env.signalId = null; env.promotedAt = null;
+  if (resolved.cold) await _persistColdEnvelope(code, env);
   scheduleSave();
   res.json({ ok: true, evidenceId: env.id });
 });
@@ -7382,12 +7509,12 @@ function _recordKernelDerivation(code, { type, result, basis, confidence, limita
 /* The visibility ceiling a DERIVED output inherits from its basis — the most
    restrictive of any basis evidence. Derived evidence can never be broader than its
    narrowest input (no broadening exceptions for personal_private in this commit). */
-function _inheritedVisibility(code, basisIds) {
-  const log = evidenceLog[code] || [];
+async function _inheritedVisibility(code, basisIds) {
   const order = { private: 3, sensitive: 2, normal: 1 };
   let worst = 'normal', owner = null;
-  (basisIds || []).forEach(id => {
-    const env = log.find(e => e.id === id);
+  const resolved = await Promise.all((basisIds || []).map(id => _resolveEvidence(code, id)));
+  resolved.forEach(result => {
+    const env = result && result.envelope;
     if (env && order[env.visibility] > order[worst]) { worst = env.visibility; owner = env.ownerRef || owner; }
     else if (env && env.visibility === 'private' && !owner) owner = env.ownerRef;
   });
@@ -7396,8 +7523,8 @@ function _inheritedVisibility(code, basisIds) {
 /* Record CANONICAL DERIVED evidence (a personal pattern/recommendation) inheriting an
    owner-only ceiling when any basis is private. It goes back through the SAME store —
    there is no separate personal-memory path outside canonical evidence. */
-function _recordDerivedEvidence(code, { subjectId, ownerId, type, label, valueText, basisIds, confidence }) {
-  const inh = _inheritedVisibility(code, basisIds);
+async function _recordDerivedEvidence(code, { subjectId, ownerId, type, label, valueText, basisIds, confidence }) {
+  const inh = await _inheritedVisibility(code, basisIds);
   const r = _recordEvidence(code, {
     provider: 'kernel', source: 'derived', subjectId: subjectId || ownerId || null,
     ownerRef: inh.visibility === 'private' ? (inh.ownerRef || ownerId) : null,
@@ -8067,7 +8194,7 @@ app.get('/api/checkin/me/intelligence', requireAuth, (req, res) => {
 /* Leader-facing check-in intelligence — leader_support (private excluded before
    context). Grounded, non-diagnostic, post-kernel bounded; suppresses a duplicate
    recommendation while an intervention is active; de-escalates on recovery. */
-app.get('/api/checkin/:memberId/intelligence', requireAuth, (req, res) => {
+app.get('/api/checkin/:memberId/intelligence', requireAuth, async (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const memberId = req.params.memberId;
   const member = orgUsers[code]?.[memberId];
@@ -8089,7 +8216,7 @@ app.get('/api/checkin/:memberId/intelligence', requireAuth, (req, res) => {
   // Record a meaningful recommendation as canonical derived evidence (no auto-promote).
   let recEvidenceId = null;
   if (recommend && st.basisEvidenceIds.length) {
-    const rec = _recordDerivedEvidence(code, { subjectId: memberId, type: 'observation',
+    const rec = await _recordDerivedEvidence(code, { subjectId: memberId, type: 'observation',
       label: 'Check-in support recommendation', valueText: text.slice(0, 400), basisIds: st.basisEvidenceIds });
     recEvidenceId = rec && rec.id ? rec.id : null;
   }
@@ -16957,6 +17084,9 @@ function _loadAllStores(data) {
   Object.assign(groupCandidates, data.groupCandidates || {});
   Object.assign(forumThreads,   data.forumThreads   || {});
   _rebuildEvidenceIndex();
+  for (const code of Object.keys(evidenceLog)) {
+    if ((evidenceLog[code] || []).length > EVIDENCE_LOG_CAP) _scheduleEvidenceEviction(code);
+  }
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
   const _savedSessions = data.activeSessions || {};
@@ -17008,6 +17138,8 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _subjectRoleContext, _domainDirective,
   // exported for the truth layer: the canonical evidence boundary + identity lifecycle
   _ingestGeneric, _recordEvidence, _reresolveUnmatched, _promoteEvidence, evidenceLog, rawEvidence, orgSignals, orgUsers,
+  _resolveEvidence, _evictWorkingSet, _eraseEvidence, _eraseSubjectEvidence,
+  _scheduleEvidenceEviction, _awaitEvidenceMaintenance, EVIDENCE_LOG_CAP,
   // exported for the truth layer: the mapping approval lifecycle
   _proposeMapping, _reprocessHeld, _activeMapping, orgMappings,
   // exported for the truth layer: sync reliability
