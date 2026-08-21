@@ -584,9 +584,16 @@ split reconstruction now clears partial baselines, marks persistence unavailable
 HTTP requests and protected saves, and permits persistence again only after successful
 reconstruction seeds revisions and hashes. Per-tenant tree mutation serialization now covers the
 complete semantic-to-durable acceptance section, and insert CAS refuses resurrection when a stale
-writer expected a deleted nonzero revision. Corrected suites: `write-conflict` 21/0, `db-cas` 19/0,
+writer expected a deleted nonzero revision. The initial filtered insert/upsert correction was
+invalid for positive revisions because PostgreSQL produced no insert candidate and never reached
+`ON CONFLICT`; the final implementation uses separate expected-zero INSERT and positive-revision
+UPDATE statements. Corrected suites: `write-conflict` 21/0, `db-cas` 21/0,
 `persistence-cas-boundary` 9/0, `delete-cas-boundary` 7/0, and
 `tree-mutation-serialization` 4/0.
+
+`scripts/db-cas-live.js` records the permanent live PostgreSQL matrix for create, current update,
+stale update, delete, blocked resurrection, and legitimate recreation. It requires
+`DATABASE_URL` and remains outside the deterministic DB-free suite.
 
 Render drain behavior remains a required pre-Falcon infrastructure verification. P0-6 remains
 explicitly unresolved.

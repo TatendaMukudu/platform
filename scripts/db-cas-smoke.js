@@ -52,6 +52,7 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
    restore point (server.js:416) and is deliberately NOT protected — see the brief, Decision 2. */
 const _stmts = SRC.split(/`/).filter(s => /INSERT INTO iq_store/i.test(s));
 const splitWrites = _stmts.filter(s => !/VALUES\s*\(\s*'main'/i.test(s));
+const updateWrites = SRC.split(/`/).filter(s => /UPDATE iq_store/i.test(s));
 
 console.log('db-cas-smoke — P0-3b: the durable compare-and-swap contract\n');
 
@@ -74,10 +75,12 @@ ok('2 · …and returns it to the caller rather than discarding it',
 /* ── 3 · WRITES ARE CONDITIONAL. This is the whole blocker. ── */
 ok('3 · saveStores accepts the revisions the caller expects to be replacing',
   /function saveStores\s*\(\s*units\s*,\s*(opts|options|\{)/.test(SRC));
-ok('3 · every split-unit write carries a revision predicate',
-  splitWrites.length > 0 && splitWrites.every(s => /WHERE[\s\S]*iq_store\.rev/i.test(s)));
+ok('3 · existing rows use a key-and-revision UPDATE predicate',
+  updateWrites.some(s => /WHERE\s+store_key\s*=\s*\$1[\s\S]{0,100}?AND\s+rev\s*=\s*\$3/i.test(s)));
 ok('3 · …and a successful write advances the revision',
-  splitWrites.some(s => /SET[\s\S]*\brev\s*=\s*(iq_store\.rev\s*\+\s*1|EXCLUDED\.rev)/i.test(s)));
+  updateWrites.some(s => /SET[\s\S]*\brev\s*=\s*rev\s*\+\s*1/i.test(s)));
+ok('3 · …and returns the advanced revision from the same atomic statement',
+  updateWrites.some(s => /RETURNING\s+rev/i.test(s)));
 
 /* ── 4 · NO UNCONDITIONAL PATH SURVIVES.
 
@@ -85,8 +88,7 @@ ok('3 · …and a successful write advances the revision',
    the unconditional one must be gone, or every ordinary debounced save silently undoes the
    protection on the very next cycle. ── */
 ok('4 · no split-unit write remains that replaces store_value with no predicate',
-  splitWrites.every(s => !/DO UPDATE SET[\s\S]*store_value\s*=\s*EXCLUDED\.store_value/i.test(s)
-                       || /WHERE[\s\S]*iq_store\.rev/i.test(s)));
+  splitWrites.every(s => !/DO UPDATE SET[\s\S]*store_value\s*=\s*EXCLUDED\.store_value/i.test(s)));
 ok('4 · the legacy main blob is left alone, so the pre-migration restore point still works',
   _stmts.some(s => /VALUES\s*\(\s*'main'/i.test(s)));
 
@@ -94,10 +96,14 @@ ok('4 · the legacy main blob is left alone, so the pre-migration restore point 
    accepted rows. An absent unit is revision 0; the first writer inserts revision 1; a second
    concurrent insert must lose rather than overwrite. ── */
 ok('5 · concurrent creation of an absent unit is safe',
-  splitWrites.some(s => /ON CONFLICT\s*\([^)]*\)\s*DO NOTHING/i.test(s)) ||
-  splitWrites.some(s => /WHERE[\s\S]*iq_store\.rev\s*=/i.test(s)));
+  splitWrites.some(s => /ON CONFLICT\s*\([^)]*\)\s*DO NOTHING/i.test(s)));
 ok('5 · a stale writer cannot resurrect a unit deleted after it was read',
-  splitWrites.some(s => /SELECT\s+\$1[\s\S]{0,120}?WHERE\s+\$3\s*=\s*0/i.test(s)));
+  /expected\s*===\s*0/.test(SRC) &&
+  splitWrites.some(s => /ON CONFLICT\s*\([^)]*\)\s*DO NOTHING/i.test(s)) &&
+  updateWrites.some(s => /AND\s+rev\s*=\s*\$3/i.test(s)));
+ok('5 · creation and update are separate SQL paths, never a filtered insert/upsert hybrid',
+  !splitWrites.some(s => /SELECT\s+\$1[\s\S]{0,120}?WHERE\s+\$3\s*=\s*0/i.test(s)) &&
+  !splitWrites.some(s => /DO UPDATE/i.test(s)));
 
 /* ── 6 · A CONFLICT IS NOT A FAILURE. Zero rows affected means another process got there first.
    That is a semantic answer the caller must be able to act on, and it must never be thrown as

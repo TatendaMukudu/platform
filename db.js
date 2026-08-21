@@ -180,17 +180,25 @@ async function saveStores(units, { expect = {} } = {}) {
     for (const [key, value] of entries) {
       const json = JSON.stringify(value);
       bytes += Buffer.byteLength(json, 'utf8');
-      const res = await client.query(
-        `INSERT INTO iq_store (store_key, store_value, rev, updated_at)
-         SELECT $1, $2::jsonb, 1, NOW()
-          WHERE $3 = 0
-         ON CONFLICT (store_key)
-         DO UPDATE SET store_value = EXCLUDED.store_value,
-                       rev         = iq_store.rev + 1,
-                       updated_at  = NOW()
-          WHERE iq_store.rev = $3`,
-        [key, json, Number(expect[key] || 0)]
-      );
+      const expected = Number(expect[key] || 0);
+      const res = expected === 0
+        ? await client.query(
+          `INSERT INTO iq_store (store_key, store_value, rev, updated_at)
+           VALUES ($1, $2::jsonb, 1, NOW())
+           ON CONFLICT (store_key) DO NOTHING
+           RETURNING rev`,
+          [key, json]
+        )
+        : await client.query(
+          `UPDATE iq_store
+              SET store_value = $2::jsonb,
+                  rev = rev + 1,
+                  updated_at = NOW()
+            WHERE store_key = $1
+              AND rev = $3
+          RETURNING rev`,
+          [key, json, expected]
+        );
       if (res.rowCount !== 1) conflicts.push(key);
     }
     if (conflicts.length) {
