@@ -12,7 +12,7 @@ contract is **`docs/briefs/p0-3-adjudication.md`**.
 
 The briefs touch disjoint files and **can be dispatched in parallel**. See Â§Parallelism.
 
-## The whole pilot gate, verified on a clean `npm install` (re-run 2026-08-21)
+## Adjudication RED baseline (re-run 2026-08-21 before implementation)
 
 ```
 evidence-durability-smoke:  0 passed,  9 failed     P0-1
@@ -60,8 +60,8 @@ canonical evidence is unverified. **Not a pilot blocker on current evidence** â€
 Falcon scale, and uniform CAS closes its deploy-overlap exposure. What is open is the recovery
 path. Do not claim inquiry concurrency is protected; no assertion covers it.
 
-None of these suites is registered in `scripts/test.js` yet except `pilot-loop-smoke`; register
-each one in the commit that makes it green.
+The P0-1, P0-2, and corrected P0-3 suites are now registered in `scripts/test.js`. Other RED
+blocker suites remain unregistered until their own implementation makes them green.
 
 ---
 
