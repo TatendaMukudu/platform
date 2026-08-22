@@ -53,7 +53,18 @@ const SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS iq_store (
     store_key   TEXT        PRIMARY KEY,
     store_value JSONB       NOT NULL DEFAULT '{}',
+    rev         BIGINT      NOT NULL DEFAULT 0,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  );
+  ALTER TABLE iq_store ADD COLUMN IF NOT EXISTS rev BIGINT NOT NULL DEFAULT 0;
+  CREATE TABLE IF NOT EXISTS cold_evidence (
+    org_code    TEXT        NOT NULL,
+    evidence_id TEXT        NOT NULL,
+    envelope    JSONB,
+    raw_record  JSONB,
+    archived_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    erased_at   TIMESTAMPTZ,
+    PRIMARY KEY (org_code, evidence_id)
   );
 `;
 
@@ -156,29 +167,46 @@ async function saveMain(data) {
    conversation and the inquiry it produced must land together or not at all —
    otherwise a crash between two statements leaves the two halves of one logical
    turn disagreeing, which the single-blob write could never do. */
-async function saveStores(units) {
-  if (!pool) return { rows: 0, bytes: 0 };
+async function saveStores(units, { expect = {} } = {}) {
+  if (!pool) return { rows: 0, bytes: 0, conflicts: [] };
   const entries = Object.entries(units || {});
-  if (!entries.length) return { rows: 0, bytes: 0 };
+  if (!entries.length) return { rows: 0, bytes: 0, conflicts: [] };
 
   let bytes = 0;
+  const conflicts = [];
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     for (const [key, value] of entries) {
       const json = JSON.stringify(value);
       bytes += Buffer.byteLength(json, 'utf8');
-      await client.query(
-        `INSERT INTO iq_store (store_key, store_value, updated_at)
-         VALUES ($1, $2::jsonb, NOW())
-         ON CONFLICT (store_key)
-         DO UPDATE SET store_value = EXCLUDED.store_value,
-                       updated_at  = NOW()`,
-        [key, json]
-      );
+      const expected = Number(expect[key] || 0);
+      const res = expected === 0
+        ? await client.query(
+          `INSERT INTO iq_store (store_key, store_value, rev, updated_at)
+           VALUES ($1, $2::jsonb, 1, NOW())
+           ON CONFLICT (store_key) DO NOTHING
+           RETURNING rev`,
+          [key, json]
+        )
+        : await client.query(
+          `UPDATE iq_store
+              SET store_value = $2::jsonb,
+                  rev = rev + 1,
+                  updated_at = NOW()
+            WHERE store_key = $1
+              AND rev = $3
+          RETURNING rev`,
+          [key, json, expected]
+        );
+      if (res.rowCount !== 1) conflicts.push(key);
+    }
+    if (conflicts.length) {
+      await client.query('ROLLBACK');
+      return { rows: 0, bytes, conflicts };
     }
     await client.query('COMMIT');
-    return { rows: entries.length, bytes };
+    return { rows: entries.length, bytes, conflicts: [] };
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
     throw err;                       // caller keeps the units dirty and retries
@@ -190,23 +218,51 @@ async function saveStores(units) {
 /* Read every split unit back. Returns { 'store:orgUsers:acme': {...}, ... } —
    reassembly into the in-memory shape belongs to the caller, which is the only
    place that knows that shape. */
-async function loadStores() {
-  if (!pool) return {};
+async function loadStores({ withRevisions = false } = {}) {
+  if (!pool) return withRevisions ? { units: {}, revisions: {} } : {};
   const res = await pool.query(
-    "SELECT store_key, store_value FROM iq_store WHERE store_key LIKE 'store:%'"
+    "SELECT store_key, store_value, rev FROM iq_store WHERE store_key LIKE 'store:%'"
   );
-  const out = {};
-  for (const r of res.rows) out[r.store_key] = r.store_value;
-  return out;
+  const units = {}, revisions = {};
+  for (const r of res.rows) {
+    units[r.store_key] = r.store_value;
+    revisions[r.store_key] = Number(r.rev || 0);
+  }
+  return withRevisions ? { units, revisions } : units;
 }
 
 /* Remove unit rows that no longer exist in memory. Deletion was free under the
    old model because the whole blob was replaced; under split rows an emptied
    unit would otherwise persist forever as a ghost. */
-async function deleteStores(keys) {
-  if (!pool || !keys || !keys.length) return 0;
-  const res = await pool.query('DELETE FROM iq_store WHERE store_key = ANY($1::text[])', [keys]);
-  return res.rowCount || 0;
+async function deleteStores(keys, { expect = {} } = {}) {
+  if (!pool || !keys || !keys.length) return { rows: 0, conflicts: [] };
+  const client = await pool.connect();
+  const conflicts = [];
+  let rows = 0;
+  try {
+    await client.query('BEGIN');
+    for (const key of keys) {
+      const res = await client.query(
+        `DELETE FROM iq_store
+          WHERE store_key = $1
+            AND rev = $2`,
+        [key, Number(expect[key] || 0)]
+      );
+      if (res.rowCount === 1) rows++;
+      else conflicts.push(key);
+    }
+    if (conflicts.length) {
+      await client.query('ROLLBACK');
+      return { rows: 0, conflicts };
+    }
+    await client.query('COMMIT');
+    return { rows, conflicts: [] };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /* What the store actually costs, per row. The one number the bandwidth
@@ -219,6 +275,100 @@ async function storeSizes(limit = 20) {
     [limit]
   );
   return res.rows;
+}
+
+/* ── COLD EVIDENCE ────────────────────────────────────────────────────────── *
+   The hot evidence log is a bounded reasoning working set. These rows are the
+   durable reference target for evidence that leaves it. Every operation is
+   tenant-scoped by the composite (org_code, evidence_id) key. */
+async function archiveColdEvidence(orgCode, records) {
+  const rows = Array.isArray(records) ? records : [records];
+  if (!rows.length) return { archived: 0 };
+  if (!pool) return { archived: rows.length };
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const row of rows) {
+      const envelope = row && (row.envelope || row);
+      if (!envelope || !envelope.id) throw new Error('cold evidence requires an evidence id');
+      await client.query(
+        `INSERT INTO cold_evidence
+           (org_code, evidence_id, envelope, raw_record, archived_at, erased_at)
+         VALUES ($1, $2, $3::jsonb, $4::jsonb, NOW(), NULL)
+         ON CONFLICT (org_code, evidence_id) DO UPDATE
+           SET envelope = EXCLUDED.envelope,
+               raw_record = EXCLUDED.raw_record,
+               archived_at = NOW(),
+               erased_at = NULL
+         WHERE cold_evidence.erased_at IS NULL`,
+        [orgCode, envelope.id, JSON.stringify(envelope), JSON.stringify(row.rawRecord ?? null)]
+      );
+    }
+    await client.query('COMMIT');
+    return { archived: rows.length };
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function resolveColdEvidence(orgCode, evidenceId) {
+  if (!pool) return null;
+  const res = await pool.query(
+    `SELECT envelope, raw_record AS "rawRecord", archived_at AS "archivedAt",
+            erased_at AS "erasedAt"
+       FROM cold_evidence
+      WHERE org_code = $1 AND evidence_id = $2`,
+    [orgCode, evidenceId]
+  );
+  return res.rows[0] || null;
+}
+
+/* Erasure retains only the composite identity and timestamp. That contentless
+   tombstone distinguishes an erased id from one that never existed without
+   retaining the envelope or raw personal content. */
+async function eraseColdEvidence(orgCode, evidenceId) {
+  if (!pool) return { erased: true };
+  await pool.query(
+    `INSERT INTO cold_evidence
+       (org_code, evidence_id, envelope, raw_record, archived_at, erased_at)
+     VALUES ($1, $2, NULL, NULL, NOW(), NOW())
+     ON CONFLICT (org_code, evidence_id) DO UPDATE
+       SET envelope = NULL, raw_record = NULL, erased_at = NOW()
+     WHERE cold_evidence.org_code = $1 AND cold_evidence.evidence_id = $2`,
+    [orgCode, evidenceId]
+  );
+  return { erased: true };
+}
+
+async function eraseColdEvidenceForSubject(orgCode, userId) {
+  if (!pool) return { erased: 0 };
+  const res = await pool.query(
+    `UPDATE cold_evidence
+        SET envelope = NULL, raw_record = NULL, erased_at = NOW()
+      WHERE org_code = $1
+        AND erased_at IS NULL
+        AND (envelope->>'subjectId' = $2 OR envelope->>'ownerRef' = $2
+             OR envelope->'attributes'->>'contributorId' = $2)`,
+    [orgCode, userId]
+  );
+  return { erased: res.rowCount || 0 };
+}
+
+async function eraseColdEvidenceBefore(orgCode, cutoffIso) {
+  if (!pool) return { erased: 0 };
+  const res = await pool.query(
+    `UPDATE cold_evidence
+        SET envelope = NULL, raw_record = NULL, erased_at = NOW()
+      WHERE org_code = $1
+        AND erased_at IS NULL
+        AND COALESCE(envelope->>'observedAt', envelope->>'createdAt') IS NOT NULL
+        AND (COALESCE(envelope->>'observedAt', envelope->>'createdAt'))::timestamptz < $2::timestamptz`,
+    [orgCode, cutoffIso]
+  );
+  return { erased: res.rowCount || 0 };
 }
 
 /* ── pgvector (optional) ──────────────────────────────────────────────────── *
@@ -295,5 +445,7 @@ async function nearestMembers(orgCode, userId, k = 8) {
 module.exports = {
   init, loadMain, saveMain,
   saveStores, loadStores, deleteStores, storeSizes,
+  archiveColdEvidence, resolveColdEvidence, eraseColdEvidence,
+  eraseColdEvidenceForSubject, eraseColdEvidenceBefore,
   initVectors, vectorsReady, upsertMemberVector, nearestMembers,
 };

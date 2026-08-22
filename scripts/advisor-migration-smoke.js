@@ -32,6 +32,7 @@ const {
 let pass = 0, fail = 0;
 const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n); } };
 
+(async () => {
 const CODE = 'adv';
 _loadAllStores({
   orgMeta:  { [CODE]: { orgName: 'Advisory Co', createdAt: new Date().toISOString() } },
@@ -144,7 +145,7 @@ ok('32. forcing the private ID into the basis still never cites it to the leader
 // E. DERIVED EVIDENCE — a meaningful recommendation becomes canonical evidence
 // ─────────────────────────────────────────────────────────────────────────────
 const before = ev().length;
-const rec = _recordDerivedEvidence(CODE, { subjectId: 'sam', type: 'observation', label: 'Advisor recommendation', valueText: 'Have a supportive 1:1 with Sam this week.', basisIds: kr.basis });
+const rec = await _recordDerivedEvidence(CODE, { subjectId: 'sam', type: 'observation', label: 'Advisor recommendation', valueText: 'Have a supportive 1:1 with Sam this week.', basisIds: kr.basis });
 ok('33. a recommendation is recorded as canonical derived evidence', !!rec && rec.stored && ev().length === before + 1);
 const recEnv = ev().find(e => e.id === rec.id);
 ok('34. the derived recommendation is NOT private (basis carries none)', recEnv && recEnv.visibility !== 'private' && !recEnv.ownerRef);
@@ -152,7 +153,7 @@ ok('35. the derived recommendation carries its basis (derivedFrom)', recEnv && A
 ok('36. the derived recommendation does NOT auto-promote (no recursive self-feed)', recEnv && recEnv.promoted !== true);
 
 // A recommendation grounded in a PRIVATE basis inherits an owner-only ceiling.
-const privRec = _recordDerivedEvidence(CODE, { subjectId: 'sam', ownerId: 'sam', type: 'observation', label: 'Personal pattern', valueText: 'derived from private material', basisIds: [privNote.id] });
+const privRec = await _recordDerivedEvidence(CODE, { subjectId: 'sam', ownerId: 'sam', type: 'observation', label: 'Personal pattern', valueText: 'derived from private material', basisIds: [privNote.id] });
 const privRecEnv = ev().find(e => e.id === privRec.id);
 ok('37. a recommendation from PRIVATE basis inherits owner-only visibility', privRecEnv && privRecEnv.visibility === 'private' && privRecEnv.ownerRef === 'sam');
 
@@ -187,3 +188,4 @@ ok('45. a leader-support context over Sam never contains ANY private-visibility 
 
 console.log(`\n=== advisor-migration-smoke: ${pass} passed, ${fail} failed ===\n`);
 process.exit(fail ? 1 : 0);
+})().catch(e => { console.error(e); process.exit(1); });

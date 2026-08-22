@@ -50,6 +50,15 @@ const SUITES = [
   'epistemic-invariants-smoke.js', // AGENTS.md §2 made mechanical: computed safety/confidence, no raw passthrough, allowlist status
   'admissibility-smoke.js',        // the retrieval gate: superseded evidence stops grounding answers, and says so
   'evidence-smoke.js',     // the canonical evidence envelope: normalise/validate/dedupe/promote
+  'evidence-durability-smoke.js', // P0-1: bounded hot evidence remains tenant-scoped, cold-resolvable and erasable
+  'evidence-durability-boundaries-smoke.js', // P0-1 wiring: cap trigger, SQL scoping, retention, subject erasure, durable refs
+  'shutdown-durability-smoke.js', // P0-2: debounced durable state is forced and failures stay loud
+  'shutdown-boundary-smoke.js', // P0-2 production path: signals converge and evidence maintenance precedes final persistence
+  'write-conflict-smoke.js', // P0-3: stale tree writers fail before replacing accepted state
+  'db-cas-smoke.js', // P0-3: every split durable-unit write uses PostgreSQL CAS
+  'persistence-cas-boundary-smoke.js', // P0-3: reconstruction seeds hashes/revisions before ordinary saves
+  'delete-cas-boundary-smoke.js', // P0-3: stale durable-unit deletion conflicts instead of destroying newer truth
+  'tree-mutation-serialization-smoke.js', // P0-3: overlapping tree requests cannot share unaccepted candidates
   'identity-reresolve-smoke.js', // the identity lifecycle: held-back evidence resolves + promotes once
   'mapping-smoke.js',            // the mapping contract: fingerprint/drift/transform/gate (pure)
   'mapping-lifecycle-smoke.js',  // the mapping approval lifecycle end to end (hold→approve→activate→reprocess)

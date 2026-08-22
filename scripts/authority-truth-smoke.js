@@ -1,0 +1,165 @@
+/* Truth layer — P0-D: AUTHORITY DECIDES WHAT MAY BE SETTLED, NEVER WHAT IS TRUE.
+
+   Pilot blocker. See docs/briefs/p0-d-authority-and-p0-5-origin.md.
+
+   WRITTEN BEFORE THE FIX, by the reviewer. Do not edit an assertion to make it pass.
+
+   NOT REGISTERED in scripts/test.js yet. Register it in the commit that makes it green.
+
+   ── The defect ──────────────────────────────────────────────────────────────────────────
+
+   ai/inquiry.js  adjudicateAnswer()  — three branches (negate, affirm, plain statement) all
+   read:
+
+       authority:  isOwner ? 'authoritative' : (isMember ? 'shared_but_unverified' : 'reported')
+       confidence: isOwner ? 'high' : 'medium'
+       proposal:   { …, corroborationNeeded: !isOwner }
+
+   `isOwner` is a ROLE fact — this person is the responsible owner for this requirement. For
+   an OPERATIONAL claim that is exactly right: the coach who sets kick-off time IS the system
+   of record for kick-off time, and their word settles it.
+
+   For an EMPIRICAL claim it is a category error. "The squad is fatigued", "morale is down",
+   "attendance improved" are propositions about the world. No role makes one true. Today the
+   owner asserting one is recorded `authoritative`, `high`, `corroborationNeeded: false` — and
+   ai/org-state.js:217 then treats it as SATISFYING the requirement, so a single leader's
+   impression closes an empirical question that no evidence ever supported.
+
+   That is the one place in the system where position outranks evidence.
+
+   ── The invariant ───────────────────────────────────────────────────────────────────────
+
+       A person's role may determine what they are entitled to DECIDE. It may never
+       determine whether an empirical proposition is TRUE. An empirical claim always needs
+       corroboration, whoever made it.
+
+   ── The model ───────────────────────────────────────────────────────────────────────────
+
+   `claimNature(claimType)` → 'operational' | 'empirical'.
+
+   OPERATIONAL is an ALLOW-LIST, drawn from the claim types the packs actually define
+   (ai/org-state.js:61-80): meeting_time, meeting_owner, completion_status, kickoff_time,
+   game_plan, availability, session_time. Anything not on the list is EMPIRICAL.
+
+   Fail closed, and note which way "closed" points: an unrecognised claim type must NOT
+   inherit owner authority. Getting that backwards would mean every new claim type ships
+   with the defect until someone remembers to classify it.
+
+   Run: node scripts/authority-truth-smoke.js */
+
+'use strict';
+
+const inquiry = require('../ai/inquiry.js');
+
+let pass = 0, fail = 0;
+const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n); } };
+
+console.log('authority-truth-smoke — P0-D\n');
+
+/* ── 1 · The nature of a claim is a thing the system can state. ──────────────────────────
+   Without this there is nothing for the adjudicator to consult, and the distinction can only
+   live in a comment. */
+const nature = inquiry.claimNature;
+ok('1 · claimNature(claimType) is exported', typeof nature === 'function');
+
+if (typeof nature !== 'function') {
+  console.log('\n  → ai/inquiry.js does not export claimNature. The remaining cases cannot run.');
+  console.log(`\nauthority-truth-smoke: ${pass} passed, ${fail + 13} failed`);
+  process.exit(1);
+}
+
+/* ── 2 · The operational allow-list is the one the packs actually use. ───────────────────
+   These are arrangements a responsible owner DECIDES. Their word settling them is correct
+   and must not regress — this half of the test exists to stop the fix over-reaching. ── */
+{
+  const OPERATIONAL = ['meeting_time', 'meeting_owner', 'completion_status',
+                       'kickoff_time', 'game_plan', 'availability', 'session_time'];
+  ok('2 · every claim type the packs define is operational',
+    OPERATIONAL.every(ct => nature(ct) === 'operational'));
+}
+
+/* ── 3 · Everything else is empirical, INCLUDING what nobody has classified yet. ─────────
+   The direction of the default is the whole safety property. ── */
+{
+  ok('3 · a proposition about the world is empirical',
+    nature('team_morale') === 'empirical' && nature('fatigue') === 'empirical');
+  ok('3 · an unrecognised claim type defaults to empirical, never to operational',
+    nature('some_claim_type_invented_next_year') === 'empirical');
+  ok('3 · a missing claim type defaults to empirical',
+    nature(null) === 'empirical' && nature(undefined) === 'empirical' && nature('') === 'empirical');
+}
+
+/* ── 4 · NO REGRESSION. An owner still settles an operational claim.
+   If this fails, the fix has broken the thing the system gets right today. ── */
+{
+  const r = inquiry.adjudicateAnswer({
+    answer: 'Yes, kick-off is confirmed for 2pm.',
+    isOwner: true, claimType: 'kickoff_time', claimLabel: 'Kick-off time',
+  });
+  ok('4 · the owner of an operational claim is still authoritative', r.authority === 'authoritative');
+  ok('4 · …and it still satisfies the requirement without corroboration',
+    r.proposal && r.proposal.corroborationNeeded === false);
+}
+
+/* ── 5 · THE HEADLINE. The same person, the same confidence, an empirical claim.
+   Being the responsible leader does not make a proposition about the world true. ── */
+{
+  const r = inquiry.adjudicateAnswer({
+    answer: 'Yes, the squad has definitely been fatigued this week.',
+    isOwner: true, claimType: 'team_fatigue', claimLabel: 'Squad fatigue',
+  });
+  ok('5 · an owner asserting an EMPIRICAL claim is not authoritative',
+    r.authority !== 'authoritative');
+  ok('5 · …and it always needs corroboration, whoever said it',
+    !!r.proposal && r.proposal.corroborationNeeded === true);
+  ok('5 · …and confidence is not raised to high by role alone',
+    r.confidence !== 'high');
+  ok('5 · …and the reason is stated, not silently applied',
+    Array.isArray(r.limitations) && r.limitations.some(l => /corroborat|empirical|observ|evidence/i.test(l)));
+}
+
+/* ── 6 · The same holds for the other two branches that read isOwner.
+   Fixing only the affirmative path leaves the identical hole one sentence away. ── */
+{
+  const stmt = inquiry.adjudicateAnswer({
+    answer: 'Attendance has been dropping since the schedule changed.',
+    isOwner: true, claimType: 'attendance_trend', claimLabel: 'Attendance',
+  });
+  ok('6 · a plain empirical statement by the owner needs corroboration',
+    !!stmt.proposal && stmt.proposal.corroborationNeeded === true && stmt.authority !== 'authoritative');
+
+  const neg = inquiry.adjudicateAnswer({
+    answer: 'No, morale has not recovered.',
+    isOwner: true, claimType: 'team_morale', claimLabel: 'Morale',
+    hasExistingAuthoritative: true,
+  });
+  ok('6 · an empirical negation by the owner needs corroboration',
+    !!neg.proposal && neg.proposal.corroborationNeeded === true && neg.authority !== 'authoritative');
+}
+
+/* ── 7 · Nature belongs to the CLAIM, not to the answerer.
+   If who is speaking could change whether something is empirical, the whole distinction
+   collapses back into authority. ── */
+{
+  const asOwner  = inquiry.adjudicateAnswer({ answer: 'Yes, the group is tired.', isOwner: true,  claimType: 'team_fatigue' });
+  const asMember = inquiry.adjudicateAnswer({ answer: 'Yes, the group is tired.', isMember: true, claimType: 'team_fatigue' });
+  ok('7 · an empirical claim needs corroboration regardless of who answered',
+    asOwner.proposal.corroborationNeeded === true && asMember.proposal.corroborationNeeded === true);
+  ok('7 · …and neither answerer is recorded as authoritative on it',
+    asOwner.authority !== 'authoritative' && asMember.authority !== 'authoritative');
+}
+
+/* ── 8 · Nothing else moves. A hedged answer was already handled correctly and must stay
+   that way — this fix adds a reason for corroboration, it does not change the vocabulary. ── */
+{
+  const vague = inquiry.adjudicateAnswer({ answer: 'It should be fine I think.', isOwner: true, claimType: 'kickoff_time' });
+  ok('8 · a hedged answer is still a non-definite, needs-corroboration placeholder',
+    vague.authority === 'needs_corroboration' && vague.proposal.definite === false);
+
+  const nonAnswer = inquiry.adjudicateAnswer({ answer: 'thanks', isOwner: true, claimType: 'team_fatigue' });
+  ok('8 · an acknowledgement is still not an answer and proposes nothing',
+    nonAnswer.responseKind === 'non_answer' && nonAnswer.proposal === null);
+}
+
+console.log(`\nauthority-truth-smoke: ${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

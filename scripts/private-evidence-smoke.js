@@ -20,6 +20,7 @@ const wlib = require('../lib/workspace');
 let pass = 0, fail = 0;
 const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n); } };
 
+(async () => {
 const CODE = 'priv';
 _loadAllStores({ orgMeta: { [CODE]: { orgName: 'Priv Co', createdAt: new Date().toISOString() } }, orgUsers: { [CODE]: {
   ana: { id: 'ana', name: 'Ana', email: 'ana@co.fc', role: 'member', orgCode: CODE, status: 'active' },
@@ -69,7 +70,7 @@ ok('10. private evidence cannot be a leader-facing citation',
 ok('11. private evidence id is absent from the leader-authorised set (no indirect leak)', !leaderAuthorised.includes(pe.id));
 
 // (12) Private derived evidence inherits owner-only visibility.
-const derived = _recordDerivedEvidence(CODE, { subjectId: 'ana', ownerId: 'ana', type: 'observation', label: 'repeated concern', valueText: 'a recurring low mood', basisIds: [pe.id] });
+const derived = await _recordDerivedEvidence(CODE, { subjectId: 'ana', ownerId: 'ana', type: 'observation', label: 'repeated concern', valueText: 'a recurring low mood', basisIds: [pe.id] });
 ok('12. a pattern derived from private evidence inherits PRIVATE visibility + owner',
    derived.stored && derived.envelope.visibility === 'private' && derived.envelope.ownerRef === 'ana');
 
@@ -105,3 +106,4 @@ ok('18. no reasoning artifact persists chain-of-thought',
 
 console.log(`\n=== private-evidence-smoke: ${pass} passed, ${fail} failed ===\n`);
 process.exit(fail ? 1 : 0);
+})().catch(e => { console.error(e); process.exit(1); });

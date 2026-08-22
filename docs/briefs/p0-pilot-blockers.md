@@ -1,9 +1,87 @@
 # P0 pilot blockers — decisions and briefs
 
-**Authoritative for:** P0-1, P0-2, P0-3. Codex briefs reference this rather than restating it.
+**Authoritative for:** P0-1 and P0-2.
+**P0-3 IS SUPERSEDED.** Decision B and Brief 3 below are retained for history and **must not be
+implemented**. Codex correctly refused them: the smoke targeted routes that do not exist, the
+writers used a role that cannot edit the tree, and process-local revisions cannot detect the
+cross-process overwrite that P0-2's shutdown flush makes reachable on every deploy. The live
+contract is **`docs/briefs/p0-3-adjudication.md`**.
 **Companion to:** `docs/ttd/pilot-readiness-review.md`.
+**P0-D and P0-5 are briefed in `docs/briefs/p0-d-authority-and-p0-5-origin.md`** — both are pure
+`ai/` modules, overlap nothing here, and can run at the same time as any of the three below.
 
-The three briefs touch disjoint files and **can be dispatched in parallel**. See §Parallelism.
+The briefs touch disjoint files and **can be dispatched in parallel**. See §Parallelism.
+
+## Adjudication RED baseline (re-run 2026-08-21 before implementation)
+
+```
+evidence-durability-smoke:  0 passed,  9 failed     P0-1
+shutdown-durability-smoke:  0 passed,  7 failed     P0-2
+write-conflict-smoke:       1 passed, 18 failed     P0-3   (rewritten — real routes, two layers)
+db-cas-smoke:               1 passed, 13 failed     P0-3   (new — the durable CAS contract)
+authority-truth-smoke:      0 passed, 14 failed     P0-D
+pilot-loop-smoke:          28 passed,  1 failed     P0-5
+```
+
+Six suites, 62 failing assertions. The two passing assertions inside the P0-3 suites are
+deliberate and must stay green — they pin the corrected route and the legacy restore point.
+
+## P0-3 implementation result (2026-08-21)
+
+The corrected two-layer contract is implemented on the P0-1/P0-2 integration base. Same-process
+tree edits use object `rev` plus caller-supplied `ifRev`; PostgreSQL protects every split
+`store:<name>:<org>` unit with an atomic revision predicate. Tree `POST`/`PUT`/`DELETE` operations
+cross that durable boundary before returning success, while other writes retain the debounce.
+
+Reconstruction now loads durable revisions and seeds both `_unitRevs` and `_saveHashes`, so an
+ordinary login cannot classify an unchanged boot snapshot as dirty. Shutdown uses the same CAS
+writer and fails loudly on a semantic conflict. The actual production routes remain `/api/tree`,
+and `manage_tree` authorization remains unchanged. `orgUsers` node arrays remain a derived cache,
+rebuilt from authoritative `orgNodes` after commit or recovery.
+
+Final corrected results: `write-conflict-smoke` **21 passed, 0 failed**, `db-cas-smoke` **21 passed,
+0 failed**, `persistence-cas-boundary-smoke` **9 passed, 0 failed**, and
+`delete-cas-boundary-smoke` **7 passed, 0 failed**. The additional
+`tree-mutation-serialization-smoke` is **4 passed, 0 failed**. All five are registered
+in `scripts/test.js`. The adjudication's stated total of 19 for `write-conflict-smoke` was stale;
+the unchanged corrected file contains 21 assertions.
+
+Independent review completed the live PostgreSQL write-CAS proof against PostgreSQL 16.13: the
+first writer advanced revision 0 to 1, the overlapping stale writer affected zero rows, and the
+accepted value remained. This implementation environment still has no PostgreSQL runtime, so the
+new revision-aware deletion SQL is pinned structurally and at the server boundary but awaits the
+same live verification before merge/deploy.
+
+Two review corrections are now enforced. `deleteStores` deletes each split row only when its
+durable revision matches, rolling back the batch and returning semantic conflicts otherwise.
+Failed authoritative split reconstruction marks persistence unavailable, clears any partial
+revision/hash baseline, rejects mutating HTTP requests with 503, refuses ordinary persistence,
+and becomes ready only after a successful reconstruction establishes authoritative revisions.
+Protected tree mutations are serialized per tenant across the complete
+precondition/snapshot/mutation/CAS section, so overlapping requests cannot share unaccepted
+candidate state. A stale writer expecting a deleted row also cannot resurrect it: insertion is
+permitted only with expected revision zero.
+
+The final SQL correction uses two explicit paths rather than a filtered insert/upsert. Expected
+revision zero performs `INSERT ... ON CONFLICT DO NOTHING`; a positive expected revision performs
+`UPDATE ... WHERE store_key = $1 AND rev = $3`. Both use `RETURNING rev`, and zero affected rows
+remain a semantic conflict. `scripts/db-cas-live.js` permanently captures the six-case PostgreSQL
+verification, but requires `DATABASE_URL` and is intentionally outside the DB-free truth layer.
+
+P0-6 inquiry semantic recovery remains unadjudicated. Uniform durable-unit CAS prevents a stale
+process from overwriting the unit, but no inquiry replay or merge policy was introduced. Before
+the Falcon pilot, infrastructure must also verify Render's drain behavior during deploy overlap.
+
+## P0-6 — inquiry-state concurrency · UNADJUDICATED
+
+Split out of P0-3 by `docs/briefs/p0-3-adjudication.md` §Decision 8. `inquiryStates` is written by
+evidence ingestion and the kernel, not by stale-client PUTs, and whether it is replayable from
+canonical evidence is unverified. **Not a pilot blocker on current evidence** — single process at
+Falcon scale, and uniform CAS closes its deploy-overlap exposure. What is open is the recovery
+path. Do not claim inquiry concurrency is protected; no assertion covers it.
+
+The P0-1, P0-2, and corrected P0-3 suites are now registered in `scripts/test.js`. Other RED
+blocker suites remain unregistered until their own implementation makes them green.
 
 ---
 
@@ -48,7 +126,11 @@ history the product does not yet have.
 
 ---
 
-# Decision B — Optimistic concurrency
+# Decision B — Optimistic concurrency  ·  SUPERSEDED
+
+> **Do not implement.** Replaced by `docs/briefs/p0-3-adjudication.md`. Retained for history.
+> It specifies process-local revisions only, which cannot detect cross-process overwrite, and
+> names `inquiryStates` in scope, which is now P0-6.
 
 ## DECISION
 
@@ -149,7 +231,11 @@ store on shutdown; `persistence-smoke` proves a mutation must cost only what it 
 
 ---
 
-# Brief 3 — P0-3 · Optimistic concurrency on shared objects
+# Brief 3 — P0-3 · Optimistic concurrency on shared objects  ·  SUPERSEDED
+
+> **Do not implement.** Replaced by `docs/briefs/p0-3-adjudication.md` §8. Its routes
+> (`/api/org/nodes`) do not exist, its writers are coaches (who lack `manage_tree`), and it
+> forbids touching `db.js` — where the guarantee actually has to live.
 
 **Problem.** Shared objects are mutated in place with no version and no conflict detection. Two
 leaders editing one node: the second write erases the first, both see success, nothing records the
@@ -206,5 +292,8 @@ contribute — the echo is minted as an independent `direct_observation` with it
 That is the "five teammates repeating the captain" case `ai/diagnose.js:218-224` exists to
 prevent, reachable through the forum, which is exactly where a room agrees with itself.
 
-Small fix, high value, in the flagship claim. Not briefed here to keep the parallel batch clean —
-brief it after the first three land.
+Small fix, high value, in the flagship claim.
+
+**Now briefed** — see `docs/briefs/p0-d-authority-and-p0-5-origin.md`, Brief 5. It turned out to
+touch only `ai/forum.js` and one call site, so it does not need to wait for the batch above; it
+can be dispatched immediately and merges cleanly against all three.

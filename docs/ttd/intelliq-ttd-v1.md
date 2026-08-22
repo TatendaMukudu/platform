@@ -2,6 +2,15 @@
 
 **Status:** authoritative as of 2026-08-15. Supersedes ad-hoc product statements elsewhere.
 **Preceded by:** `docs/ttd/round-3-cross-examination.md` (the audit this document answers).
+**Extended by:** `docs/ttd/intelliq-constitution.md` — the constitutional addendum that records
+what IntelliQ *is* (an organisational intelligence harness with a deterministic substrate under
+replaceable intelligence engines), the product object model (High / Low / Inquiry / Focus / Web),
+the no-LLM capability audit, and the infrastructure gap register. Where the addendum states a
+law, it uses the same status vocabulary as this document and is subordinate to it.
+**Web adjudication:** `docs/ttd/web-semantics-and-continuous-intelligence.md` — the structural
+Web law, the Web/governance/kernel/projection separation, the SELF and ORG perspectives on
+High / Low / Inquiry / Focus, the continuous Web intelligence execution model, and the no-LLM
+capability floor. Also subordinate to this document and using the same status vocabulary.
 
 This document says two different things, and never confuses them:
 
