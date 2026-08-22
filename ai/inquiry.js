@@ -18,6 +18,9 @@
      this person the safest, least-costly way to resolve it?"
    ============================================================ */
 
+// Pure, IO-free dependency: the kernel's canonical empirical identity vocabulary.
+const { EMPIRICAL_CONCEPTS } = require('./primitives');
+
 const UNCERTAINTY = Object.freeze({
   MISSING_REQUIRED:     'missing_required',      // a claim that SHOULD exist for a live decision is absent
   STALE:                'stale',                 // a required claim exists but is past its useful life
@@ -222,8 +225,16 @@ const OPERATIONAL_CLAIMS = new Set([
 ]);
 
 function claimNature(claimType, { origin = null } = {}) {
+  if (typeof claimType !== 'string') return 'empirical';
+  const identity = claimType.trim().toLowerCase();
+  if (!identity) return 'empirical';
+  if (EMPIRICAL_CONCEPTS.has(identity)) return 'empirical';
+  // Human-curated operational judgement outranks token matching: kickoff_time,
+  // for example, stays operational although `time` is an empirical concept.
+  if (OPERATIONAL_CLAIMS.has(identity)) return 'operational';
+  if (identity.split('_').some(token => EMPIRICAL_CONCEPTS.has(token))) return 'empirical';
   if (origin === 'org_context_arrangement') return 'operational';
-  return OPERATIONAL_CLAIMS.has(String(claimType || '').trim()) ? 'operational' : 'empirical';
+  return 'empirical';
 }
 
 /* ANSWER ADJUDICATION — when an answer eventually arrives it does NOT auto-become

@@ -13,6 +13,8 @@
    rules — those are hard-blocked before they can ever reach the state model.
    ============================================================ */
 
+const { EMPIRICAL_CONCEPTS } = require('./primitives');
+
 const DAY = 86400000;
 const DOW = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 const RECORD_TYPES = Object.freeze(['event', 'objective', 'responsibility', 'requirement', 'rhythm', 'dependency', 'decision']);
@@ -213,7 +215,13 @@ function projectConfig(records, now = Date.now()) {
     (!r.effectiveFrom || Date.parse(r.effectiveFrom) <= now) && (!r.effectiveTo || Date.parse(r.effectiveTo) > now));
   const assignedArrangementClaims = new Set(active
     .filter(r => r.type === 'responsibility')
-    .flatMap(r => (r.fields && r.fields.claimTypes) || []));
+    .flatMap(r => (r.fields && r.fields.claimTypes) || [])
+    .filter(claimType => {
+      if (typeof claimType !== 'string') return false;
+      const identity = claimType.trim().toLowerCase();
+      return identity && !EMPIRICAL_CONCEPTS.has(identity) &&
+        !identity.split('_').some(token => EMPIRICAL_CONCEPTS.has(token));
+    }));
   const cfg = { events: [], objectives: [], responsibilities: [], requirements: [], rhythms: [], dependencies: [], decisions: [] };
   for (const r of active) {
     const f = r.fields || {};
