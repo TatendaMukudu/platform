@@ -52,6 +52,7 @@
 const inquiry = require('../ai/inquiry.js');
 const orgContext = require('../ai/org-context.js');
 const orgState = require('../ai/org-state.js');
+const primitives = require('../ai/primitives.js');
 
 let pass = 0, fail = 0;
 const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n); } };
@@ -206,6 +207,87 @@ if (typeof nature !== 'function') {
   const nonAnswer = inquiry.adjudicateAnswer({ answer: 'thanks', isOwner: true, claimType: 'team_fatigue' });
   ok('8 · an acknowledgement is still not an answer and proposes nothing',
     nonAnswer.responseKind === 'non_answer' && nonAnswer.proposal === null);
+}
+
+/* ── 9 · Responsibility for an empirical topic never becomes truth authority. ── */
+{
+  const now = Date.parse('2026-08-21T12:00:00Z');
+  const proposals = [
+    ...orgContext.extract('Sam is responsible for attendance', { now }).proposals,
+    ...orgContext.extract('attendance must be confirmed', { now }).proposals,
+  ];
+  const records = proposals.map((p, i) => ({ id: `attendance_${i}`, type: p.type,
+    fields: p.fields, status: 'active', confirmedAt: new Date(now).toISOString() }));
+  const config = orgContext.projectConfig(records, now);
+  const state = orgState.deriveOrgState({ now, organisation: { id: 'org-a' },
+    structure: { responsibilities: config.responsibilities }, configuration: config, evidence: [] });
+  const uncertainty = orgState.stateToUncertainties(state).find(u => u.claimType === 'attendance');
+  const answer = inquiry.adjudicateAnswer({ answer: 'Yes, attendance has improved.', isOwner: true,
+    claimType: 'attendance', claimOrigin: uncertainty && uncertainty.claimOrigin });
+  ok('9 · attendance responsibility routes to its owner without granting truth authority',
+    !!uncertainty && String(uncertainty.resolutionOwner).toLowerCase() === 'sam' && answer.authority !== 'authoritative');
+  ok('9 · the empirical answer inherits neither high confidence nor satisfaction',
+    answer.confidence !== 'high' && answer.proposal.corroborationNeeded === true &&
+    answer.limitations.some(l => /empirical|evidence|corroborat/i.test(l)));
+}
+
+ok('10 · exact empirical identity overrides a hand-constructed arrangement marker',
+  nature('attendance', { origin: orgContext.ARRANGEMENT_ORIGIN }) === 'empirical');
+
+/* The genuine pitch-booking path in §3b remains the Boundary A/B operational proof (§11/12). */
+
+{
+  const packTypes = Object.values(orgState.PACKS).flatMap(pack => Object.keys(pack.requirements));
+  const contextTypes = ['transport confirmation', 'approval', 'owner', 'ownership'].map(label =>
+    orgContext.extract(`${label} must be confirmed`).proposals.find(p => p.type === 'requirement').fields.claimType);
+  const operational = [...new Set([...packTypes, ...contextTypes])];
+  ok('13 · all eleven curated operational identities survive with and without provenance',
+    operational.length === 11 && operational.every(ct => nature(ct) === 'operational' &&
+      nature(ct, { origin: orgContext.ARRANGEMENT_ORIGIN }) === 'operational'));
+}
+
+ok('14 · every canonical empirical identity resists owner role plus arrangement provenance',
+  primitives.EMPIRICAL_CONCEPTS instanceof Set && primitives.EMPIRICAL_CONCEPTS.size > 60 &&
+  [...primitives.EMPIRICAL_CONCEPTS].every(ct => {
+    const answer = inquiry.adjudicateAnswer({ answer: 'Yes, definitely.', isOwner: true,
+      claimType: ct, claimOrigin: orgContext.ARRANGEMENT_ORIGIN });
+    return nature(ct, { origin: orgContext.ARRANGEMENT_ORIGIN }) === 'empirical' &&
+      answer.authority !== 'authoritative' && answer.confidence !== 'high' &&
+      answer.proposal.corroborationNeeded === true;
+  }));
+
+{
+  const derived = ['attendance_rate', 'engagement_dropped', 'wellbeing_score',
+    'morale_trend', 'performance_review'];
+  ok('15 · derived empirical identities resist arrangement provenance', derived.every(ct =>
+    nature(ct, { origin: orgContext.ARRANGEMENT_ORIGIN }) === 'empirical'));
+  ok('15 · token matching never degrades into substring matching',
+    nature('disapproval', { origin: orgContext.ARRANGEMENT_ORIGIN }) === 'operational' &&
+    nature('downer', { origin: orgContext.ARRANGEMENT_ORIGIN }) === 'operational');
+}
+
+{
+  const now = Date.parse('2026-08-21T12:00:00Z');
+  const projected = claim => {
+    const proposals = [
+      ...orgContext.extract(`Sam is responsible for ${claim}`, { now }).proposals,
+      ...orgContext.extract(`${claim} must be confirmed`, { now }).proposals,
+    ];
+    return orgContext.projectConfig(proposals.map((p, i) => ({ id: `${claim}_${i}`,
+      type: p.type, fields: p.fields, status: 'active', confirmedAt: new Date(now).toISOString() })), now);
+  };
+  ok('16 · projectConfig withholds arrangement provenance from known empirical claims',
+    projected('attendance').requirements[0].claimOrigin === null);
+  ok('16 · projectConfig retains arrangement provenance for an unknown assigned arrangement',
+    projected('pitch booking').requirements[0].claimOrigin === orgContext.ARRANGEMENT_ORIGIN);
+}
+
+{
+  const malformed = [undefined, null, '', '   ', 123, {}];
+  ok('17 · malformed identities remain empirical even when a marker is supplied', malformed.every(ct =>
+    nature(ct, { origin: orgContext.ARRANGEMENT_ORIGIN }) === 'empirical'));
+  ok('17 · arbitrary unknown identities without provenance remain empirical',
+    ['__proto__', 'constructor', 'brand_new_type'].every(ct => nature(ct) === 'empirical'));
 }
 
 console.log(`\nauthority-truth-smoke: ${pass} passed, ${fail} failed`);
