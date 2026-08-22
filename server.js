@@ -10408,6 +10408,7 @@ function _activeQuestionFrom(code, userId, uncertaintyId) {
   const plans = inquiry.planInquiries(uncertainties.map(inquiry.buildUncertainty), { threshold: 0, maxAsks: 50 }).plans;
   const plan = plans.find(p => p.uncertaintyId === uncertaintyId);
   return { uncertaintyId, type: u.type, claimType: u.claimType || null, requirementId: u.requirementId || null,
+    claimOrigin: u.claimOrigin || null,
     claimLabel: String((u.claimType || 'this')).replace(/_/g, ' '), eventId: u.affects ? u.affects.id : null,
     questionText: plan ? plan.question : (u.claim || 'this'), ownerRef: u.resolutionOwner || null,
     privacyClass: u.privacyClass || 'team-shared', fingerprint: _orgEvidenceFingerprint(code), setAt: new Date().toISOString() };
@@ -12248,7 +12249,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     const isLeaderActor = _isLeader(code, userId);
     const isOwner = _actorIsOwner(code, userId, aq.ownerRef);
     const hasAuth = (evidenceLog[code] || []).some(e => e.status === 'active' && e.source === 'system_of_record' && e.attributes && e.attributes.category === aq.claimType && e.attributes.corroborationNeeded !== true);
-    const adj = inquiry.adjudicateAnswer({ answer: text, isOwner, isLeader: isLeaderActor, isMember: !isLeaderActor, claimLabel: aq.claimLabel, claimType: aq.claimType, hasExistingAuthoritative: hasAuth });
+    const adj = inquiry.adjudicateAnswer({ answer: text, isOwner, isLeader: isLeaderActor, isMember: !isLeaderActor, claimLabel: aq.claimLabel, claimType: aq.claimType, claimOrigin: aq.claimOrigin, hasExistingAuthoritative: hasAuth });
     if (adj.proposal) {
       const p = { id: 'prop_' + generateId(), actionType: 'resolve_uncertainty', capability: 'org_context',
         label: `Record answer: ${aq.questionText}`, why: (adj.limitations[0] || `Recorded as ${adj.authority.replace(/_/g, ' ')}`),

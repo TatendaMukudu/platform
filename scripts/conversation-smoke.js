@@ -30,8 +30,8 @@ ok('2 · an old answer past freshness → stale', cls({ what_you_did: [{ at: new
 ok('2 · only a hedged answer → partially_known (not resolved)', cls({ what_you_did: [{ at: new Date(NOW).toISOString(), authority: 'needs_corroboration', definite: false, corroborationNeeded: true, contentHash: 'a' }] })[0].state === 'partially_known');
 ok('2 · two definite answers, different authority + content → disputed', cls({ what_you_did: [{ at: new Date(NOW).toISOString(), authority: 'authoritative', definite: true, contentHash: 'a' }, { at: new Date(NOW).toISOString(), authority: 'reported', definite: true, contentHash: 'b' }] })[0].state === 'disputed');
 // A FACTUAL claim needs authoritative evidence; a member's reported answer leaves it partially_known.
-const factualReq = C.requiredClaims({ fields: [{ label: 'Kickoff confirmed', kind: 'factual' }] });
-ok('2 · a factual claim with only a reported answer stays partially_known (authority matters)', C.classifyClaims(factualReq, { evidenceByRef: { kickoff_confirmed: [{ at: new Date(NOW).toISOString(), authority: 'reported', definite: true, contentHash: 'a' }] }, now: NOW })[0].state === 'partially_known');
+const factualReq = C.requiredClaims({ fields: [{ ref: 'kickoff_time', label: 'Kickoff time', kind: 'factual' }] });
+ok('2 · a factual claim with only a reported answer stays partially_known (authority matters)', C.classifyClaims(factualReq, { evidenceByRef: { kickoff_time: [{ at: new Date(NOW).toISOString(), authority: 'reported', definite: true, contentHash: 'a' }] }, now: NOW })[0].state === 'partially_known');
 
 /* ── 3 · plan + orientation ── */
 const plan = C.buildPlan({ definition: def, now: NOW, purpose: 'assessment', subjectRef: 'joe' });

@@ -18,6 +18,9 @@
      this person the safest, least-costly way to resolve it?"
    ============================================================ */
 
+// Pure, IO-free dependency: the kernel's canonical empirical identity vocabulary.
+const { EMPIRICAL_CONCEPTS } = require('./primitives');
+
 const UNCERTAINTY = Object.freeze({
   MISSING_REQUIRED:     'missing_required',      // a claim that SHOULD exist for a live decision is absent
   STALE:                'stale',                 // a required claim exists but is past its useful life
@@ -212,12 +215,34 @@ function discriminate(u) {
   return ranked[0] || null;
 }
 
+/* Authority can settle an organisational arrangement, but it cannot settle an
+   empirical proposition. Keep the operational side as a fail-closed allow-list:
+   every new or malformed claim type remains empirical until deliberately added. */
+const OPERATIONAL_CLAIMS = new Set([
+  'meeting_time', 'meeting_owner', 'completion_status',
+  'kickoff_time', 'game_plan', 'availability', 'session_time',
+  'transport_confirmation', 'approval', 'owner', 'ownership',
+]);
+
+function claimNature(claimType, { origin = null } = {}) {
+  if (typeof claimType !== 'string') return 'empirical';
+  const identity = claimType.trim().toLowerCase();
+  if (!identity) return 'empirical';
+  if (EMPIRICAL_CONCEPTS.has(identity)) return 'empirical';
+  // Human-curated operational judgement outranks token matching: kickoff_time,
+  // for example, stays operational although `time` is an empirical concept.
+  if (OPERATIONAL_CLAIMS.has(identity)) return 'operational';
+  if (identity.split('_').some(token => EMPIRICAL_CONCEPTS.has(token))) return 'empirical';
+  if (origin === 'org_context_arrangement') return 'operational';
+  return 'empirical';
+}
+
 /* ANSWER ADJUDICATION — when an answer eventually arrives it does NOT auto-become
    truth. Classify observation vs interpretation, and whether the answerer is
    authoritative for THIS claim (reuses the evidence authority tiers). Recommends how
    the answer should enter canonical evidence: authoritative | reported | needs
    corroboration. Pure — the caller applies it through the governed door. */
-function adjudicateAnswer({ answer, isOwner = false, isLeader = false, isMember = false, claimLabel = 'this', claimType = null, hasExistingAuthoritative = false } = {}) {
+function adjudicateAnswer({ answer, isOwner = false, isLeader = false, isMember = false, claimLabel = 'this', claimType = null, claimOrigin = null, hasExistingAuthoritative = false } = {}) {
   const text = String(answer || '').trim();
   const l = text.toLowerCase();
   const out = (o) => ({ responseKind: 'observation', resolution: 'does_not_address', authority: 'shared_but_unverified',
@@ -235,6 +260,10 @@ function adjudicateAnswer({ answer, isOwner = false, isLeader = false, isMember 
   const interpretation = /\b(i (?:think|feel|reckon|believe|guess)|seems?|in my view|my sense)\b/i.test(l);
   const affirm = /\b(yes|yep|yeah|it (?:has|is|was)|(?:it'?s|its) (?:confirmed|done|sorted|booked|ready|approved|in place|complete)|confirmed|done|sorted|booked|approved|complete[d]?|finalis[a-z]*|in place|all set)\b/i.test(l);
   const negate = /\b(no|not (?:yet|done|confirmed|ready|sorted|approved)|still (?:waiting|pending|outstanding)|hasn'?t|haven'?t|won'?t|isn'?t)\b/i.test(l);
+  const empirical = claimNature(claimType, { origin: claimOrigin }) === 'empirical';
+  const ownerIsAuthoritative = isOwner && !empirical;
+  const definiteAuthority = ownerIsAuthoritative ? 'authoritative' : (isMember ? 'shared_but_unverified' : 'reported');
+  const empiricalLimitation = 'empirical claims require corroborating observation or evidence, regardless of the answerer\'s role';
 
   // A hedged/uncertain answer NEVER satisfies AND is not DEFINITE (it's a placeholder,
   // not a competing truth — it can't create a dispute). Stored as needs-corroboration.
@@ -250,31 +279,33 @@ function adjudicateAnswer({ answer, isOwner = false, isLeader = false, isMember 
   // keeps the requirement open (no false satisfaction).
   if (negate) return out({
     responseKind: 'assertion', resolution: hasExistingAuthoritative ? 'contradicts' : 'does_not_address',
-    authority: isOwner ? 'authoritative' : (isMember ? 'shared_but_unverified' : 'reported'),
-    confidence: isOwner ? 'high' : 'medium', classification: hasExistingAuthoritative ? 'negation_contradicts' : 'negation_open',
-    proposal: hasExistingAuthoritative ? { claimType, valueText: `${claimLabel}: ${text}`, corroborationNeeded: !isOwner, definite: true } : null,
-    limitations: hasExistingAuthoritative ? ['conflicts with an existing record — both are preserved'] : ['the requirement remains unmet'] });
+    authority: definiteAuthority,
+    confidence: ownerIsAuthoritative ? 'high' : 'medium', classification: hasExistingAuthoritative ? 'negation_contradicts' : 'negation_open',
+    proposal: hasExistingAuthoritative ? { claimType, valueText: `${claimLabel}: ${text}`, corroborationNeeded: !ownerIsAuthoritative, definite: true } : null,
+    limitations: hasExistingAuthoritative
+      ? ['conflicts with an existing record — both are preserved', ...(empirical ? [empiricalLimitation] : [])]
+      : ['the requirement remains unmet', ...(empirical ? [empiricalLimitation] : [])] });
 
   // A clear affirmative assertion RESOLVES — but authority depends on WHO answered, not
   // that it was typed into the assistant. Only the responsible owner makes it
   // authoritative; anyone else is reported/unverified (needs corroboration to satisfy).
   if (affirm) {
-    const authority = isOwner ? 'authoritative' : (isMember ? 'shared_but_unverified' : 'reported');
+    const authority = definiteAuthority;
     const authoritative = authority === 'authoritative';
     return out({
       responseKind: 'assertion',
       resolution: hasExistingAuthoritative && !authoritative ? 'contradicts' : 'resolves',
       authority, confidence: authoritative ? 'high' : 'medium', classification: authoritative ? 'owner_confirms' : 'reported_confirms',
       proposal: { claimType, valueText: `${claimLabel}: ${text}`, corroborationNeeded: !authoritative, definite: true },
-      limitations: authoritative ? [] : ['recorded as reported — an authoritative owner confirmation is still needed to satisfy the requirement'] });
+      limitations: authoritative ? [] : [empirical ? empiricalLimitation : 'recorded as reported — an authoritative owner confirmation is still needed to satisfy the requirement'] });
   }
 
   // A plain factual statement (not obviously yes/no) → treat as an observation of the claim.
   return out({ responseKind: 'observation', resolution: 'partially_resolves',
-    authority: isOwner ? 'authoritative' : (isMember ? 'shared_but_unverified' : 'reported'),
-    confidence: isOwner ? 'medium' : 'low', classification: 'statement',
-    proposal: { claimType, valueText: `${claimLabel}: ${text}`, corroborationNeeded: !isOwner, definite: true },
-    limitations: isOwner ? [] : ['recorded as reported'] });
+    authority: definiteAuthority,
+    confidence: ownerIsAuthoritative ? 'medium' : 'low', classification: 'statement',
+    proposal: { claimType, valueText: `${claimLabel}: ${text}`, corroborationNeeded: !ownerIsAuthoritative, definite: true },
+    limitations: ownerIsAuthoritative ? [] : [empirical ? empiricalLimitation : 'recorded as reported'] });
 }
 
 /* THE PLANNER — turn raw uncertainties into a ranked, deduped, capped set of
@@ -321,5 +352,5 @@ function planInquiries(uncertainties, opts = {}) {
 module.exports = {
   UNCERTAINTY, IMPACT, URGENCY,
   buildUncertainty, infoGain, answerReliability, askCosts, questionValue,
-  phraseQuestion, critique, healthGuard, route, discriminate, adjudicateAnswer, planInquiries,
+  phraseQuestion, critique, healthGuard, route, discriminate, claimNature, adjudicateAnswer, planInquiries,
 };
