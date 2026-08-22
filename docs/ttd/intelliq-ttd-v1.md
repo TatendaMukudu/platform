@@ -7,6 +7,10 @@ what IntelliQ *is* (an organisational intelligence harness with a deterministic 
 replaceable intelligence engines), the product object model (High / Low / Inquiry / Focus / Web),
 the no-LLM capability audit, and the infrastructure gap register. Where the addendum states a
 law, it uses the same status vocabulary as this document and is subordinate to it.
+**Web adjudication:** `docs/ttd/web-semantics-and-continuous-intelligence.md` — the structural
+Web law, the Web/governance/kernel/projection separation, the SELF and ORG perspectives on
+High / Low / Inquiry / Focus, the continuous Web intelligence execution model, and the no-LLM
+capability floor. Also subordinate to this document and using the same status vocabulary.
 
 This document says two different things, and never confuses them:
 

@@ -7,6 +7,12 @@ reconciliation. **Nothing implemented in this pass.**
 `leadership-intelligence.md` (privacy), `lab-and-deliberate-development.md` (Focus),
 `product-compression-and-forum-intelligence.md` (Forum), `conversation-as-capability.md`.
 
+**Extended by:** `web-semantics-and-continuous-intelligence.md` — the Web adjudication. It
+supersedes this document's treatment of the Web wherever the two differ: it defines the
+structural Web law (self, one level above, everything beneath), separates Web scope from
+governance, kernel and projection, rules on the SELF/ORG perspective for each object, and
+specifies the continuous Web intelligence worker and its no-LLM floor.
+
 Status vocabulary is inherited from TTD v1: **ENFORCED · PARTIAL · SPECIFIED · OPEN · DISCOVER**,
 plus **LEGACY** and **MISSING** for this document's reconciliation tables. No claim is marked
 ENFORCED without a cited file.
