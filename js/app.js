@@ -6652,12 +6652,11 @@ async function renderIntelligence(refresh) {
     // Attention is not only problems: balance WORTH RECOGNISING (positive patterns the
     // kernel already found) with NEEDS YOUR ATTENTION. Split by the item's own
     // patternType — no new reasoning, just a projection of existing findings.
-    const POSITIVE = new Set(['recovering', 'quiet_improvement']);
-    const recognise = (d.items || []).filter(it => POSITIVE.has(it.patternType));
-    const needs     = (d.items || []).filter(it => !POSITIVE.has(it.patternType));
+    const recognise = (d.items || []).filter(it => it.kind === 'high');
+    const needs     = (d.items || []).filter(it => it.kind !== 'high');
     const teamSections = (recognise.length || needs.length)
-      ? `${recognise.length ? `<div class="intel-section intel-section--positive"><b>Worth recognising</b> — ${recognise.length} ${_v(recognise.length === 1 ? 'member' : 'members')} doing well</div><div class="intel-list">${recognise.map(_intelCard).join('')}</div>` : ''}
-         ${needs.length ? `<details class="intel-collapse" open><summary class="intel-section"><b>Needs your attention</b> — ${needs.length} ${_v(needs.length === 1 ? 'member' : 'members')} could use you</summary><div class="intel-list">${needs.map(_intelCard).join('')}</div></details>` : ''}`
+      ? `${recognise.length ? `<div class="intel-section intel-section--positive"><b>Web Highs</b></div><div class="intel-list">${recognise.map(_intelCard).join('')}</div>` : ''}
+         ${needs.length ? `<details class="intel-collapse" open><summary class="intel-section"><b>Web Lows</b></summary><div class="intel-list">${needs.map(_intelCard).join('')}</div></details>` : ''}`
       : `<div class="intel-section"><b>Your ${_v('members')}</b> — all steady this week</div><div class="intel-empty">Nothing needs your attention right now — all steady across your people. When a pattern emerges, it appears here with the evidence and a suggested next step.</div>`;
 
     el.innerHTML = `
@@ -6941,21 +6940,17 @@ function _intelCard(it) {
   return `
     <div class="intel-card" style="border-left:3px solid ${sevColor}">
       <div class="intel-card-head">
-        <span class="intel-card-name">${_escAdvisor(it.name)}</span>
+        <span class="intel-card-name">${_escAdvisor(it.headline || 'Across your visible scope')}</span>
         <span class="intel-chips">${chips}${it.reliability && it.reliability !== 'calibrating' ? `<span class="intel-rel">${_escAdvisor(it.reliability)}</span>` : ''}</span>
       </div>
-      <div class="intel-why"><strong>Why now:</strong> ${_escAdvisor(it.whyNow)}</div>
+      <div class="intel-why">${_escAdvisor(it.body || it.whyNow)}</div>
       ${(it.deviations || []).length ? `<div class="intel-dev">${it.deviations.slice(0, 3).map(_intelDevChip).join('')}</div>` : ''}
       ${(it.connections || []).length ? `<div class="intel-conn">${_escAdvisor(it.connections[0].basis)} <span class="intel-conn-hint">(a connection, not a cause)</span></div>` : ''}
       ${ev ? `<details class="intel-ev"><summary>Evidence basis</summary><ul>${ev}</ul></details>` : ''}
       ${it.careFlag ? `<div class="intel-care">There may be personal context here — lead with care. Details are kept private.</div>` : ''}
-      <div class="intel-action"><strong>Try:</strong> ${_escAdvisor(it.recommendedAction)}</div>
+      ${it.suggestion?.text || it.recommendedAction ? `<div class="intel-action"><strong>Consider:</strong> ${_escAdvisor(it.suggestion?.text || it.recommendedAction)}</div>` : ''}
       ${it.learnedNote ? `<div class="intel-learned">${_escAdvisor(it.learnedNote)}</div>` : ''}
-      <div class="intel-cta" id="intel-cta-${it.memberId}">
-        <button class="intel-btn" onclick="intelAct('${it.memberId}','${it.patternType || ''}',this)">I acted on this</button>
-        <button class="intel-btn intel-btn-ghost" onclick="showProfile('${it.memberId}')">Open profile</button>
-        <button class="intel-btn intel-btn-ghost" title="Teaches the system this kind of flag isn't useful here" onclick="intelDismiss('${it.patternType || ''}','${it.memberId}',this)">Not useful</button>
-      </div>
+      ${it.perspective !== 'web' ? `<div class="intel-cta" id="intel-cta-${it.memberId}"><button class="intel-btn intel-btn-ghost" onclick="showProfile('${it.memberId}')">Open profile</button></div>` : ''}
     </div>`;
 }
 
@@ -6968,66 +6963,6 @@ function _intelDevChip(d) {
     <span style="color:${col}">${arrow}</span> ${_escAdvisor(d.label)} ${d.direction} their usual</span>`;
 }
 
-async function intelAct(memberId, patternType, btn) {
-  const action = prompt('What did you do? A quick note of the action you took:');
-  if (!action || !action.trim()) return;
-  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-  try {
-    const res = await fetch('/api/intelligence/act', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
-      body: JSON.stringify({ orgCode: AppState.orgCode, memberId, patternType, action }),
-    });
-    const d = await res.json();
-    if (!res.ok || !d.ok) throw new Error(d.error || 'failed');
-    // Acting on a flag teaches the Confidence Engine it was useful.
-    if (patternType) intelNoticeFeedback(patternType, 'useful');
-    const cta = document.getElementById('intel-cta-' + memberId);
-    if (cta) cta.innerHTML = `
-      <span class="intel-logged">Logged — how did it go?</span>
-      <button class="intel-oc" onclick="intelOutcome('${d.interventionId}','positive',this)">Helped</button>
-      <button class="intel-oc" onclick="intelOutcome('${d.interventionId}','neutral',this)">No change</button>
-      <button class="intel-oc" onclick="intelOutcome('${d.interventionId}','negative',this)">Worse</button>`;
-  } catch (e) {
-    if (btn) { btn.disabled = false; btn.textContent = 'I acted on this'; }
-    showToast('Could not log the action', 'warning');
-  }
-}
-
-/* Teach the Confidence Engine which kinds of noticing are useful here. */
-async function intelNoticeFeedback(type, feedback) {
-  if (!type) return;
-  try {
-    await fetch('/api/intelligence/notice-feedback', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
-      body: JSON.stringify({ orgCode: AppState.orgCode, type, feedback }),
-    });
-  } catch (_) { /* fire-and-forget */ }
-}
-
-async function intelDismiss(type, memberId, btn) {
-  intelNoticeFeedback(type, 'dismiss');
-  const card = btn?.closest('.intel-card');
-  if (card) { card.style.opacity = '0.45'; const cta = document.getElementById('intel-cta-' + memberId); if (cta) cta.innerHTML = `<span class="intel-logged">Noted — you'll see less of this kind here.</span>`; }
-}
-
-async function intelOutcome(interventionId, outcome, btn) {
-  if (btn) btn.disabled = true;
-  try {
-    const res = await fetch('/api/intelligence/outcome', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
-      body: JSON.stringify({ orgCode: AppState.orgCode, interventionId, outcome }),
-    });
-    const d = await res.json();
-    if (!res.ok || !d.ok) throw new Error();
-    const p = btn?.parentElement;
-    if (p) p.innerHTML = `<span class="intel-logged">Outcome recorded — the system learns from this for similar patterns.</span>`;
-  } catch (e) {
-    if (btn) btn.disabled = false;
-    showToast('Could not record the outcome', 'warning');
-  }
-}
-
-
 /* ── Leader People ───────────────────────────────────────── *
  * Answers: "Who am I responsible for?"
  * Full subtree member list with check-in status, role, and
@@ -7036,14 +6971,7 @@ async function intelOutcome(interventionId, outcome, btn) {
 let _leaderTree         = { tree: [], unassigned: [] };
 let _leaderPeopleSearch = '';
 
-let _leaderStatus = {};        // userId → { status, topLabel } from the kernel roster
 let _peopleSummaryHTML = '';   // the calm counts strip, prepended to the tree
-const _PEOPLE_STATUS = {
-  attention: { label: 'Needs attention', cls: 'ps-attention' },
-  improving: { label: 'Improving',       cls: 'ps-improving' },
-  steady:    { label: 'Steady',          cls: 'ps-steady'    },
-  'no-data': { label: 'No data yet',      cls: 'ps-nodata'   },
-};
 
 async function renderLeaderPeople() {
   const el       = document.getElementById('ldr-people-content');
@@ -7062,17 +6990,7 @@ async function renderLeaderPeople() {
     if (!data.ok) throw new Error('Request failed');
     const ros = rosRes.ok ? await rosRes.json() : { roster: [], counts: {}, count: 0 };
 
-    _leaderStatus = {};
-    (ros.roster || []).forEach(r => { _leaderStatus[r.id] = r; });
-
-    const c = ros.counts || {};
-    _peopleSummaryHTML = `
-      <div class="ppl-summary">
-        ${c.attention ? `<span class="ppl-sum ps-attention">${c.attention} need attention</span>` : ''}
-        ${c.improving ? `<span class="ppl-sum ps-improving">${c.improving} improving</span>` : ''}
-        <span class="ppl-sum ps-steady">${c.steady || 0} steady</span>
-        ${c['no-data'] ? `<span class="ppl-sum ps-nodata">${c['no-data']} no data yet</span>` : ''}
-      </div>`;
+    _peopleSummaryHTML = `<div class="ppl-summary"><span class="ppl-sum">${ros.count || 0} people in your visible scope</span></div>`;
 
     _leaderTree = { tree: data.tree || [], unassigned: data.unassigned || [] };
     const n = data.totalVisible || ros.count || 0;
@@ -7093,21 +7011,16 @@ function _leaderMemberRowHTML(m) {
   const initials  = (m.name || '?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
   const roleLabel = Auth.ROLE_LABELS?.[m.role] || m.role || 'Member';
   const isPending = !m.passwordSet;
-  // The kernel's at-a-glance read for this person (self-relative, no score).
-  const st  = _leaderStatus[m.userId];
-  const ps  = st ? (_PEOPLE_STATUS[st.status] || _PEOPLE_STATUS['no-data']) : null;
-  const attn = st && st.status === 'attention';
   return `
-    <div class="leader-member-row${attn ? ' lm-row--stale' : ''}" onclick="showProfile('${m.userId}')" style="cursor:pointer">
+    <div class="leader-member-row" onclick="showProfile('${m.userId}')" style="cursor:pointer">
       <div class="lm-avatar">${initials}</div>
       <div class="lm-info">
         <div class="lm-name">${_escAdvisor(m.name)}
           ${isPending ? `<span class="lm-badge lm-badge--pending">PENDING</span>` : ''}
         </div>
-        <div class="lm-meta">${_escAdvisor(roleLabel)}${st && st.topLabel ? ' · ' + _escAdvisor(st.topLabel) : (m.email ? ' · ' + _escAdvisor(m.email) : '')}</div>
+        <div class="lm-meta">${_escAdvisor(roleLabel)}${m.email ? ' · ' + _escAdvisor(m.email) : ''}</div>
       </div>
       <div class="lm-status">
-        ${ps ? `<span class="ppl-chip ${ps.cls}">${ps.label}</span>` : `<span class="ppl-chip ps-nodata">—</span>`}
         <button class="lm-observe" title="Recognise or note"
           onclick="event.stopPropagation();leaderObserve('${m.userId}','${(m.name||'').replace(/['"\\<>]/g,'')}')">Recognise</button>
       </div>

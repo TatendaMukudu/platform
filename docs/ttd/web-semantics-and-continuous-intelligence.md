@@ -1040,3 +1040,26 @@ of the 48 `getVisibleUserIds` sites. Each is real; none is Falcon's blocker.
 Write the test before the change, and confirm it fails for the reason you expect. Three of the
 gaps in this document — GW-6 most sharply — exist because an assertion was written to pass rather
 than to arbitrate. A test that has never failed has proved nothing.
+
+---
+
+## 19. W-1 / W-2 implementation audit
+
+The W-1 migration keeps the People roster operational (identity and role) while removing its
+standing per-person behavioural verdict. The Team briefing now projects only cohort-level kernel
+patterns that clear the existing confidence gate and a minimum two-person aggregation floor.
+Those artifacts carry `perspective: 'web'`, cannot carry `subjectId`, and pass the canonical
+`audienceSafe` boundary. W-3 and W-4 scope semantics remain unchanged.
+
+The registered no-LLM harness classifies the dependencies it traverses as follows:
+
+* **Optional enrichment:** the briefing narrative and reasoned prompt wording. The deterministic
+  aggregate High/Low is complete without either and therefore the Web route does not invoke them.
+* **No required model dependency:** canonical evidence/provenance, kernel pattern detection,
+  unresolved Inquiry state, existing Focus state, authorization, scope, and projection.
+* **No unexpected dependency in the tested loop:** the harness replaces model completion exports
+  with throwing counters and proves the production HTTP path makes zero calls.
+
+The harness does not create an Inquiry or redesign Focus. It proves an already-open Inquiry and an
+existing Focus survive and remain inspectable as deterministic organizational state. Continuous
+worker-created Inquiries remain propose-only. P0-5, W-3, and W-4 remain open.

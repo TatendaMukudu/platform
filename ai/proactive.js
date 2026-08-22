@@ -212,10 +212,11 @@ function _hash(str) {
    Everything renderable to a leader is directional + care-first by construction. */
 function toInsight(finding, opts = {}) {
   const audience = opts.audience === 'leader' ? 'leader' : 'self';
+  const perspective = opts.perspective === 'web' ? 'web' : 'self';
   const patternType = finding.patternType || finding.type || finding.kind || 'unknown';
-  const subjectId = opts.subjectId || finding.subjectId || null;
+  const subjectId = perspective === 'web' ? null : (opts.subjectId || finding.subjectId || null);
   const subjectName = opts.subjectName || finding.name || null;
-  const subjectLabel = audience === 'leader' ? (subjectName || 'this person') : 'you';
+  const subjectLabel = perspective === 'web' ? 'your visible scope' : (audience === 'leader' ? (subjectName || 'this person') : 'you');
 
   // Message resolution, in order:
   //  1. finding.render — a dynamic, audience-shaped message (milestone/opportunity),
@@ -249,6 +250,7 @@ function toInsight(finding, opts = {}) {
     dedupeKey,
     patternType,
     audience,
+    perspective,
     subjectId,
     subjectLabel,
     polarity,
@@ -295,6 +297,7 @@ function audienceSafe(insight) {
     .filter(Boolean).join('  ');
 
   if (PROTECTED_RE.test(rendered)) violations.push('protected_trait_language');
+  if (insight.perspective === 'web' && insight.subjectId != null) violations.push('web_subject_exposed');
 
   if (insight.audience === 'leader') {
     if (SCORE_RE.test(rendered))  violations.push('numeric_leak');

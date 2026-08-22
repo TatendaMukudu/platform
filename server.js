@@ -4147,6 +4147,33 @@ function _sanitizeBriefingForLeader(data) {
   return { ...data, summary: _stripLeaderNumbers(data.summary), items };
 }
 
+/* Aggregate already-detected kernel findings into audience-safe Web projections.
+   A Web item is about a cohort, never a disguised person read: no subject id/name,
+   raw basis, quote or member count is carried in the artifact. Two independent
+   people is the existing minimum aggregate floor for this presentation surface. */
+function _webIntelligence(patternCounts, reliabilityByType, now) {
+  const out = [];
+  for (const [type, count] of Object.entries(patternCounts || {})) {
+    if (count < 2 || !confidence.shouldSurface(reliabilityByType[type])) continue;
+    const polarity = proactive.PATTERN_POLARITY[type] || 'neutral';
+    const positive = polarity === 'progress' || polarity === 'milestone';
+    const label = intel.PATTERN_LABEL[type] || String(type).replace(/_/g, ' ');
+    const finding = {
+      type, polarity, severity: positive ? 'low' : 'medium', confidence: 'emerging',
+      render: { leader: {
+        headline: positive ? 'A Web High is emerging' : 'A Web Low deserves attention',
+        body: `${label} is appearing across your visible scope. This is an aggregate pattern, not a conclusion about any individual.`,
+        suggestion: positive ? 'Consider protecting what is working.' : 'Consider reviewing the conditions around this pattern.',
+      } },
+    };
+    const projected = proactive.toInsight(finding, {
+      audience: 'leader', perspective: 'web', reliabilityLabel: confidence.label(reliabilityByType[type]), now,
+    });
+    if (proactive.audienceSafe(projected).ok) out.push({ ...projected, kind: positive ? 'high' : 'low' });
+  }
+  return out;
+}
+
 app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
   const { orgCode, userId } = req.iqSession;
   const code = orgCode;
@@ -4188,9 +4215,7 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
     findings.forEach(f => { patternCounts[f.type] = (patternCounts[f.type] || 0) + 1; });
     items.push(item);
   });
-  const SEV = { high: 0, medium: 1, low: 2 };
-  items.sort((a, b) => SEV[a.severity] - SEV[b.severity]);
-  const top = items.slice(0, 15);
+  const top = _webIntelligence(patternCounts, reliabilityByType, now).slice(0, 15);
 
   const participation = members.length ? Math.round((activeWeek / members.length) * 100) : 0;
   const drops = patternCounts.momentum_drop || 0, ups = patternCounts.quiet_improvement || 0;
@@ -4211,27 +4236,16 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
     Promise.resolve(p).then(v => v, () => undefined),
     new Promise(r => setTimeout(() => r(undefined), AI_BRIEF_MS)),
   ]);
-  const narrativeP = ai.enabled() ? ai.complete({
-    tier: 'reason', maxTokens: 200,
-    system: [
-      `You are Platform Intelligence, briefing a leader in 2-3 sentences: the shape of the week and the ONE thing to prioritise. Aggregate only — NEVER name an individual (the leader sees the named list separately). Honest and directional — say "pattern" or "early signal", never "prediction" and never scores.`,
-      _worldviewDirective(code),
-      _domainDirective(code),
-    ].filter(Boolean).join('\n\n'),
-    user: brief,
-  }) : Promise.resolve(null);
-  const [narrative, promptsRaw] = await Promise.all([ _capAI(narrativeP), _capAI(_reasonedPrompts(code, userId, now)) ]);
-
   let data = {
     ok: true,
     generatedAt: new Date().toISOString(),
     domain: _domainStamp(code),
-    summary: narrative || (top.length
-      ? `${top.length} ${_vc(code, top.length === 1 ? 'member' : 'members')} show patterns worth a look this week.`
-      : `Your ${_vc(code, 'group')} looks steady — ${activeWeek}/${members.length} active, nothing flagged.`),
+    summary: top.length
+      ? `There are aggregate patterns worth a look across your visible ${_vc(code, 'group')}.`
+      : `No aggregate pattern currently clears the privacy and confidence floors for your visible ${_vc(code, 'group')}.`,
     rollup: { memberCount: members.length, activeThisWeek: activeWeek, participation, momentum, patternCounts },
     items: top,
-    prompts: Array.isArray(promptsRaw) ? promptsRaw : [],
+    prompts: [],
   };
   // The Team briefing is ALWAYS leader-facing → strip every per-member NUMBER
   // (deviation %, mood x/5, "usual" values) and raw evidence basis. A leader gets
@@ -4264,30 +4278,9 @@ app.get('/api/intelligence/roster', requireAuth, (req, res) => {
   const members = getVisibleUserIds(code, userId)
     .map(id => orgUsers[code]?.[id]).filter(u => u && u.id !== userId && u.role !== 'superadmin');
 
-  const counts = { attention: 0, improving: 0, steady: 0, 'no-data': 0 };
-  const roster = members.map(u => {
-    let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { m = null; }
-    const findings = m ? [...intel.detectPatterns(m), ...(m.structural || [])] : [];
-    const lastDays = m?.lastActivityT ? Math.floor((now - m.lastActivityT) / 86400000) : null;
-    const hasData = (m?.moodSeries?.length || 0) > 0 || (m?.signalSeries?.length || 0) > 0 || lastDays != null;
-
-    let status = 'steady', topLabel = null;
-    if (!hasData) { status = 'no-data'; }
-    else {
-      const urgent  = findings.find(f => f.severity === 'high') || findings.find(f => f.severity === 'medium');
-      const improve = findings.find(f => f.type === 'quiet_improvement');
-      if (urgent)       { status = 'attention'; topLabel = intel.PATTERN_LABEL[urgent.type] || urgent.type; }
-      else if (improve) { status = 'improving'; topLabel = 'Quietly improving'; }
-      else              { status = 'steady'; }
-    }
-    counts[status]++;
-    return { id: u.id, name: u.name || '', status, topLabel, lastActiveDays: lastDays };
-  });
-
-  const ORDER = { attention: 0, improving: 1, steady: 2, 'no-data': 3 };
-  roster.sort((a, b) => ORDER[a.status] - ORDER[b.status] || a.name.localeCompare(b.name));
-
-  const data = { ok: true, count: members.length, counts, roster, orgWide: isAdmin };
+  const roster = members.map(u => ({ id: u.id, name: u.name || '', role: u.role || 'member' }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const data = { ok: true, count: members.length, counts: { total: members.length }, roster, orgWide: isAdmin };
   rosterCache[key] = { data, ts: Date.now() };
   res.json(data);
 });
@@ -17407,6 +17400,7 @@ const PORT = process.env.PORT || 3000;
 // Export a minimal surface for the endpoint smoke test (in-process, DB_OPTIONAL).
 // Requiring this module never boots a listener — only running it directly does.
 module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired,
+  _webIntelligence,
   // exported for the truth layer: the persistence boundary
   _durableUnits, _applyUnits, _pruneExpiredSessions, _persistedStores, scheduleSave,
   _flushPersistence, _flushAndClose, _gracefulShutdown,
