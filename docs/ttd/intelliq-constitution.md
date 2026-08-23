@@ -117,7 +117,7 @@ and a verdict. It runs the whole loop and remembers nothing about why.
 header: *"A PARENT sees UP THE WHOLE SUBTREE beneath it… A CHILD sees ONLY what comes from its
 DIRECT PARENT — not its siblings, not other branches, not its grandparents."*
 
-**It is wired at nine production call sites**, not aspirational:
+**It is wired at ten production call sites in `server.js`** (corrected from "nine"), not aspirational:
 
 | Site | Use |
 |---|---|

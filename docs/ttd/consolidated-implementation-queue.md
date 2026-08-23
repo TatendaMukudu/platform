@@ -1,5 +1,12 @@
 # Consolidated implementation queue
 
+> **PARTIAL.** The 46-item register and its priority classes remain valid as a catalogue.
+> **Its blocker classification is SUPERSEDED** by
+> `docs/ttd/pilot-blocker-challenge-and-packets.md` (Stage 16), which challenged every claimed
+> blocker and reduced eight to six — demoting J2, C3, C6 and C7, and promoting O-1 and GI-6.
+> For implementation order, read that document.
+
+
 **Status:** the single ordered queue. Supersedes every prior queue.
 **Stage G** of the architecture loop. Preceded by `810e396` (PR #74 correction contract).
 **Written against:** `810e396`.

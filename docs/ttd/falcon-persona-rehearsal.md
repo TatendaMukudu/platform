@@ -270,7 +270,8 @@ gaps and the least *urgent*.
 
 ## 4 · WHAT FALCON GETS ON DAY ONE, HONESTLY
 
-**Assuming the eight pilot blockers land and nothing else.**
+**Assuming the six pilot blockers land and nothing else** (reduced from eight at Stage 16 —
+`docs/ttd/pilot-blocker-challenge-and-packets.md`).
 
 | Persona | Receives |
 |---|---|

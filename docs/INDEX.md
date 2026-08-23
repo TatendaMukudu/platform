@@ -1,162 +1,207 @@
-# IntelliQ architecture index
+# IntelliQ — architecture index
 
-**Purpose:** find the authoritative contract in under a minute. Read this before any other document.
-**Stage H** of the architecture loop. Preceded by `702fce8`.
-**Written against:** `702fce8`.
+**The one page.** If you read nothing else, read §1. Everything below it is navigation.
+**Written against:** `dc5429c`.
 
 ---
 
-## 1 · Read this first
+## 1 · THE ONE PAGE
 
-| If you are about to… | Read |
+### What is IntelliQ?
+
+> An **organisational intelligence harness**: a governed, deterministic substrate holding an
+> organisation's evidence, provenance, structure, scope, privacy, authority, corrections, Inquiry
+> state, Focus state, actions, outcomes and memory — over which **replaceable** models reason.
+>
+> **Models propose. The kernel adjudicates.** No organisational truth may live only in a model,
+> prompt, embedding, provider store or generated summary.
+
+### Which document is authoritative?
+
+| Question | Document |
 |---|---|
-| implement anything | `docs/ttd/consolidated-implementation-queue.md` — **the single queue** |
-| correct PR #74 | `docs/briefs/pr74-correction-contract.md` |
-| implement W-3 or W-4 | `docs/briefs/w3-w4-implementation-contract.md` |
-| ask what IntelliQ *is* | `docs/ttd/intelliq-constitution.md` §1, §12 |
-| ask whether a law is enforced | `docs/ttd/intelliq-ttd-v1.md` — status per law |
-| ask what is broken | `docs/ttd/intelliq-constitution.md` §13 — **the single gap register** |
-| ask about scope, Web or privacy | `docs/ttd/web-semantics-and-continuous-intelligence.md` |
-| ask about Self vs Web | `docs/ttd/self-and-web-orchestration.md` |
-| ask about model cost or tiers | `docs/ttd/model-worker-economics.md` |
-| propose an ontology or a graph DB | `docs/ttd/organisational-ontology-investigation.md` — **the answer is already no** |
+| **What must I build next?** | `ttd/pilot-blocker-challenge-and-packets.md` — **ten packets, the only order that matters** |
+| What is IntelliQ / what is broken? | `ttd/intelliq-constitution.md` §1, §12, §13 |
+| Is a law enforced? | `ttd/intelliq-ttd-v1.md` |
+| Scope, Web, privacy floors | `ttd/web-semantics-and-continuous-intelligence.md` |
+| Self vs Web | `ttd/self-web-production-trace.md` (traced) → `ttd/self-and-web-orchestration.md` (laws) |
+| Do we need an ontology / graph DB? | `ttd/organisational-ontology-investigation.md` — **the answer is no** |
+| What does Falcon actually get? | `ttd/falcon-persona-rehearsal.md` |
+
+### What is implemented?
+
+Evidence lifecycle · provenance and origin counting · corrections and supersession · contest state ·
+P0-D authority-vs-truth · P0-3 durable CAS · Web scope (`ai/org-graph.js`) · privacy projection
+(`audienceSafe`) · robust statistics (median/MAD baselines, Wilson efficacy) · deterministic pattern
+detection · **group** Inquiry creation · Focus persistence and outcome learning · org memory ·
+event sourcing and CQRS in all but name.
+
+### What is partial?
+
+Leader privacy projection (PR #74, uncorrected) · Web governs 11 of 67 scope call sites · Focus is
+seven fields · Self High/Low cannot see the reader's own private evidence (**T-1**) · corrections do
+not reach already-emitted signals (**T-2**) · the no-LLM claim is unproven.
+
+### What blocks Falcon? — **SIX**
+
+| # | Blocker | Packet |
+|---|---|---|
+| **B1** | Real no-LLM suite — six of eight current assertions are green by construction | **1** |
+| **B2** | Two-sided cohort floor — measured person-level disclosure | **2** |
+| **B3** | Count origins not people; derive confidence | **3** |
+| **B4** | Derive `perspective` from `subjectRef` | **4** |
+| **B5** | Person-model distinct-days — one bad day labels a child for the pilot | **5** |
+| **B6** | Invalidate on person removal — an erasure that does not erase | **6** |
+
+**Conditionals:** J2 `focus.origin` *if* coach-created Focus ships · C6/C7 *if* Falcon deploys
+no-egress.
+
+### What is the next code task?
+
+> **Packet 1 — `scripts/no-llm-floor-smoke.js`.** Spec: `briefs/no-llm-capability-matrix.md`.
+> It sequences first because Packets 2-4 cannot otherwise be shown to work.
+
+### Which founder decisions remain?
+
+**Two, neither blocking.** `D-W3` (coach-created vs proposed Focus — the field lands regardless) and
+`D-E2` (quality floor for a cheap model — needs a post-pilot benchmark). The other eleven are
+resolved: see `ttd/founder-decision-reduction.md`.
+
+### What must NOT be built yet?
+
+Graph database · new ontology substrate · LangChain / LangGraph / AutoGen / Temporal / Ray ·
+per-person agents · peer/comparison Web · GNNs or graph analytics · local-model infrastructure ·
+model routing tables · High/Low stores · Forum UI · full W-4 migration · `webCandidates` store ·
+decision-as-history (J4) · behaviour→aim bearings (J5).
+
+---
 
 ## 2 · Order of authority
 
 ```
-FOUNDING PRODUCT INTENT      founder statements in session; not a file
-  └─ CONSTITUTION            intelliq-constitution.md
-      └─ TTD v1              intelliq-ttd-v1.md — enforcement status of every law
-          └─ ADJUDICATIONS   web-semantics…, self-and-web…, peer-web…, ontology…, product-reconciliation…
-              └─ BRIEFS      docs/briefs/* — mechanical, cite line numbers
-                  └─ INVARIANTS   scripts/*-smoke.js registered in scripts/test.js
-                      └─ PRODUCTION   server.js, ai/*, js/app.js
+FOUNDING INTENT → CONSTITUTION → TTD v1 → ADJUDICATIONS → BRIEFS → INVARIANTS → PRODUCTION
 ```
 
-**A lower layer may narrow an upper one, never widen it.** Where a document and the code disagree,
-**the code is the finding and the document is the defect** — corrected in place, with the correction
-marked, never silently edited.
+A lower layer may narrow an upper one, never widen it. **Where a document and the code disagree, the
+code is the finding and the document is the defect** — corrected in place with the correction marked,
+never silently edited.
 
-## 3 · Status vocabulary
-
-`CURRENT` · `SUPERSEDED` · `EXPLORATION` (not law) · `IMPLEMENTED` · `PARTIAL` · `SPECIFIED`
-(decided, unenforced) · `DISCOVER` (settled by pilot evidence) · `FUTURE`
+**Status vocabulary:** `CURRENT` · `SUPERSEDED` · `EXPLORATION` · `IMPLEMENTED` · `PARTIAL` ·
+`SPECIFIED` · `DISCOVER` · `FUTURE`.
 
 ---
 
-## 4 · Document register
+## 3 · Document register
 
-### Governing — read these
-
-| Document | Status | Governs | Lines |
-|---|---|---|---|
-| `INDEX.md` | **CURRENT** | navigation | this |
-| `ttd/intelliq-ttd-v1.md` | **CURRENT** | enforcement status of every law | 964 |
-| `ttd/intelliq-constitution.md` | **CURRENT** | identity, object model, gap register §13, doc hierarchy §14, the infrastructure question §12 | 571 |
-| `ttd/consolidated-implementation-queue.md` | **CURRENT** | **the only queue**; supersedes all others | 190 |
-
-### Adjudications — current law on their subject
-
-| Document | Status | Governs | Note |
-|---|---|---|---|
-| `ttd/web-semantics-and-continuous-intelligence.md` | **CURRENT** | Web law, scope/governance/kernel/projection, aggregation §22, privacy floors §23 | §19 reserved for PR #74; §20 carries corrections to §1/§14 |
-| `ttd/self-and-web-orchestration.md` | **CURRENT** | the two-scope law and its crossings | Stage C |
-| `ttd/peer-web-semantics.md` | **CURRENT** | peer awareness as a separate edge class | Stage D; blocked on D-P1/D-P2 |
-| `ttd/model-worker-economics.md` | **CURRENT** | tiers, router, budgets, the crappy-model benchmark | Stage A |
-| `ttd/deterministic-web-intelligence.md` | **CURRENT** | the intelligence ladder; what needs no model | Stage B |
-| `ttd/organisational-ontology-investigation.md` | **CURRENT** | verdict ADOPT NARROWLY; J1-J5 | Stage E ratifies it |
-| `ttd/ontology-integration-and-decay.md` | **CURRENT** | ontology ratification, O-1 decay options | Stage E |
-| `ttd/product-reconciliation-audit.md` | **CURRENT** | High/Low/Inquiry/Focus vs repository truth | |
-| `ttd/leadership-intelligence.md` | **PARTIAL** | leader privacy; its central finding is being fixed by PR #74 | |
-| `ttd/organisational-harness-addendum.md` | **PARTIAL** | hierarchy, decisions, temporal truth, P0-D origin | §1 "leader sees descendants" is now the **old** law — W-3 supersedes |
-| `ttd/organisational-harness-review.md` | **PARTIAL** | organisational purpose, `orgGoals` | P0-A framing overtaken — see queue §3 |
-
-### Briefs — mechanical, implementation-ready
-
-| Document | Status | Note |
-|---|---|---|
-| `briefs/pr74-correction-contract.md` | **CURRENT** | nine corrections, line-pinned at `1c02dc9` |
-| `briefs/w3-w4-implementation-contract.md` | **CURRENT** | W-3 + the 71-site scope audit |
-| `briefs/p0-d-empirical-precedence.md` | **IMPLEMENTED** | landed as PR #73 |
-| `briefs/p0-3-adjudication.md` | **IMPLEMENTED** | landed as PR #72 |
-| `briefs/p0-d-authority-and-p0-5-origin.md` | **PARTIAL** | P0-D landed; P0-5 relocates as P0-5′ |
-| `briefs/admissibility.md` | **IMPLEMENTED** | `ai/admissibility.js` exists |
-| `briefs/d1-d2-founder-decisions.md` | **IMPLEMENTED** | |
-| `briefs/principal-agent-slice-1.md` | **PARTIAL** | roles and claim validation |
-| `briefs/p0-pilot-blockers.md` | **SUPERSEDED** | self-marked; P0-3 section must not be implemented |
-| `briefs/codex-fix-outcome-priority-office.md` | **SUPERSEDED** | self-marked withdrawn |
-
-### Explorations — not law
-
-| Document | Status | Note |
-|---|---|---|
-| `ttd/product-compression-and-forum-intelligence.md` | **EXPLORATION** | Forum-as-destination is retired; its **laws** survive (constitution §5.1) |
-| `ttd/lab-and-deliberate-development.md` | **EXPLORATION** | predates the object-model ratification |
-| `ttd/conversation-as-capability.md` | **EXPLORATION** | Forum/Focus convergence |
-| `ttd/expression-and-initiative.md` | **EXPLORATION** | |
-| `ttd/pilot-plan-and-market.md` | **SUPERSEDED** | its task list is now the consolidated queue |
-
-### History — retained, not current
+### Governing
 
 | Document | Status |
 |---|---|
-| `ttd/round-3-cross-examination.md` | **SUPERSEDED** by TTD v1 |
-| `ttd/pilot-readiness-review.md` | **SUPERSEDED** by constitution §13 |
+| `INDEX.md` | **CURRENT** |
+| `ttd/intelliq-ttd-v1.md` | **CURRENT** — enforcement status per law |
+| `ttd/intelliq-constitution.md` | **CURRENT** — identity §1, infrastructure question §12, gap register §13 |
+| `ttd/pilot-blocker-challenge-and-packets.md` | **CURRENT** — **the queue and the packets** |
+| `ttd/consolidated-implementation-queue.md` | **PARTIAL** — 46-item register still valid; **its blocker classification is superseded** |
+
+### Adjudications — current law on their subject
+
+| Document | Status | Note |
+|---|---|---|
+| `ttd/web-semantics-and-continuous-intelligence.md` | **CURRENT** | §19 reserved for PR #74; §20 carries corrections; §23 floor corrected to two-sided |
+| `ttd/self-web-production-trace.md` | **CURRENT** | the traced call graph; corrects Stage C |
+| `ttd/self-and-web-orchestration.md` | **CURRENT** | the crossing laws; §1 corrected |
+| `ttd/privacy-inference-attacks.md` | **CURRENT** | 25 attacks, 12 invariants, the two-sided floor |
+| `ttd/founder-decision-reduction.md` | **CURRENT** | thirteen → two |
+| `ttd/falcon-persona-rehearsal.md` | **CURRENT** | six personas, seventeen scenarios |
+| `ttd/peer-web-semantics.md` | **CURRENT** | peers are a separate edge class; deferred to SCALE |
+| `ttd/model-worker-economics.md` | **CURRENT** | tiers, router, call map |
+| `ttd/deterministic-web-intelligence.md` | **CURRENT** | the intelligence ladder |
+| `ttd/organisational-ontology-investigation.md` | **CURRENT** | ADOPT NARROWLY; J1-J5 |
+| `ttd/ontology-integration-and-decay.md` | **CURRENT** | ratification + O-1 options |
+| `ttd/product-reconciliation-audit.md` | **CURRENT** | object model vs repository |
+| `ttd/leadership-intelligence.md` | **PARTIAL** | its finding is what PR #74 corrects |
+| `ttd/organisational-harness-addendum.md` | **PARTIAL** | §1 is the **old** Web law |
+| `ttd/organisational-harness-review.md` | **PARTIAL** | `orgGoals` framing overtaken |
+
+### Briefs — implementation-ready
+
+| Document | Status |
+|---|---|
+| `briefs/pr74-final-correction-contract.md` | **CURRENT** — nine corrections with adversarial passes |
+| `briefs/no-llm-capability-matrix.md` | **CURRENT** — Packet 1 |
+| `briefs/web-final-contract.md` | **CURRENT** — W-3, invalidation, W-4 parity (Packets 6, 8, 9) |
+| `briefs/object-and-focus-contract.md` | **CURRENT** — object matrix + Focus |
+| `briefs/person-model-temporal-contract.md` | **CURRENT** — Packet 5 |
+| `briefs/p0-5-prime-origin-contract.md` | **CURRENT** — origin independence |
+| `briefs/gateway-and-benchmark-contract.md` | **CURRENT** — Packet 7 + benchmark |
+| `briefs/w3-w4-implementation-contract.md` | **PARTIAL** — superseded by `web-final-contract.md`; §3 audit still valid |
+| `briefs/pr74-correction-contract.md` | **SUPERSEDED** — its C1 fix is defeated by the complement attack |
+| `briefs/p0-d-empirical-precedence.md` · `briefs/p0-3-adjudication.md` · `briefs/admissibility.md` · `briefs/d1-d2-founder-decisions.md` | **IMPLEMENTED** |
+| `briefs/p0-d-authority-and-p0-5-origin.md` · `briefs/principal-agent-slice-1.md` | **PARTIAL** |
+| `briefs/p0-pilot-blockers.md` · `briefs/codex-fix-outcome-priority-office.md` | **SUPERSEDED** |
+
+### Explorations and history — not law
+
+`ttd/product-compression-and-forum-intelligence.md` · `ttd/lab-and-deliberate-development.md` ·
+`ttd/conversation-as-capability.md` · `ttd/expression-and-initiative.md` (**EXPLORATION**) ·
+`ttd/round-3-cross-examination.md` · `ttd/pilot-readiness-review.md` · `ttd/pilot-plan-and-market.md`
+(**SUPERSEDED**).
 
 ---
 
-## 5 · Contradictions found and resolved in this pass
+## 4 · Contradictions found and corrected
 
-Recorded rather than silently edited, per §2.
+Recorded, never silently edited. **Six of these are corrections to my own earlier work.**
 
-| # | Where | Contradiction | Resolution |
-|---|---|---|---|
-| 1 | `web-semantics…` §1, §14, D-W1 | claimed `org-graph-smoke.js:33` must be amended for W-3 | **Wrong — measured 18/18 pass.** Corrected in §20; the real change is `scoped-intelligence-packet-smoke.js:47` |
-| 2 | PR #74 review | classified `understand`/`transcribe` as live model escapes | **Latent, not live** — no caller exists. Stage A. The real bug is `canTranscribe()` ignoring the switch |
-| 3 | `harness-review` §1 | *"`orgGoals` … consumed by no reasoning subsystem anywhere"* | **Overtaken** — now read at `server.js:17028` into a citable string. Still no deterministic consumer |
-| 4 | `harness-addendum` §1 | *"a leader sees their node plus all descendants"* — ENFORCED | **Now the old law.** W-3 adds one level up |
-| 5 | `harness-addendum` §7 | *"epistemic scope distinct from authorisation — PARTIAL"* | **Now named**: Web ≠ governance ≠ kernel ≠ projection |
-| 6 | constitution §2.4 | *"wired at nine call sites"* | **Eleven** in `server.js` |
-| 7 | constitution §6 G4/G8 | duplicated GW-7 and GW-11 | merged; §13 is the single register |
-| 8 | across the TTD | Forum as a live destination | absorbed; laws survive, UI feeder does not |
-| 9 | multiple queues | five separate implementation orders | one queue; `consolidated-implementation-queue.md` governs |
+| # | Claim | Correction |
+|---|---|---|
+| 1 | `org-graph-smoke.js:33` must be amended for W-3 | **False** — measured 18/18 pass. The real change is `scoped-intelligence-packet-smoke.js:47` |
+| 2 | `understand`/`transcribe` are live model escapes | **Latent** — no caller. The live bug is `canTranscribe()` ignoring the switch |
+| 3 | *"a plain member sees descendant-node people"* | **False** — `member` has `view_team: false`. The real leak is any `view_team` holder seeing under nodes they merely *belong to*, crossing sibling branches |
+| 4 | `_commitTreeMutation` is the single choke point | **False** — `_removePerson` is a second path that invalidates nothing |
+| 5 | *"drop `patternCounts` below `MIN_COHORT`"* fixes C1 | **Insufficient** — `k = n` clears the floor and names everyone |
+| 6 | `_kernelEvidence`'s branches are the Self/Web split | **Incomplete** — the Self *pattern* pipeline bypasses that door entirely |
+| 7 | D-W5 and D-E3 block current work | **Neither does** |
+| 8 | J2 is a pilot blocker because intent is unrecoverable | **False** — one creation path exists, so back-fill is deterministic |
+| 9 | Web is wired at nine call sites | **Ten** |
+| 10 | `orgGoals` is consumed by nothing | **Overtaken** — read at `server.js:17028`, still no deterministic consumer |
+
+---
+
+## 5 · Tests currently green by construction
+
+| Test | Why it proves nothing |
+|---|---|
+| `pilot-loop-smoke §10` (both assertions) | one is `typeof x === 'function'`; the other contains `&& false` |
+| `no-llm-harness-smoke` — provenance, Inquiry, Focus | **fixture readback** — all three pass with no HTTP request |
+| `no-llm-harness-smoke` — "different projections" | compares two **different endpoints**; passes on an org with zero evidence |
+| `no-llm-harness-smoke` — "private evidence absent" | asserts a value that could never appear in that response |
+| `no-llm-harness-smoke` — "deterministic-only active" | passes with no key regardless of the switch |
+
+**Six of eight.** Packet 1 replaces them with twenty mutation-tested assertions.
 
 ## 6 · Claims stronger than their tests
 
-Tracked so nothing is marked ENFORCED without an arbiter.
-
-| Claim | Test status |
+| Claim | Reality |
 |---|---|
-| "a meaningful capability survives with models disabled" | **weaker than claimed** — 6 of 8 assertions green by construction (C5) |
-| "the Web governs scope" | governs 11 of 67 scope call sites (GW-1) |
-| Self/Web two-scope law | **enforced but unarbitrated** — no test asserts it (T-C4) |
-| responsibility does not widen a Web | **true but untested** (T-B.2) |
-| Focus outcome crossing carries no subject | **true but untested** (T-C7) |
-| `pilot-loop-smoke §10` LLM independence | **green by construction** — `&& false` (GW-6) |
+| "a meaningful capability survives with models disabled" | true, **unproven** — Packet 1 |
+| "the Web governs scope" | 11 of 67 scope call sites |
+| Self/Web two-scope law | enforced, **unarbitrated** — no test asserts it |
+| responsibility does not widen a Web | true, **untested** (W3-11) |
+| Focus outcome crossing carries no subject | true, **untested** |
+| a superadmin cannot read a private capture | true, **untested** (R-3) |
+| origin independence across turns | **prompt-enforced only** — P0-5′ O-12 |
 
-## 7 · Founder decisions outstanding
+---
 
-Consolidated from every stage. Full scenarios and options live in the cited documents.
+## 7 · Founder decisions
 
-| Id | Decision | Blocks | Recommendation |
-|---|---|---|---|
-| **D-C1** | may private evidence count toward a Web aggregate? | G3, future Focus aggregates | consented aggregation post-pilot; current law until then |
-| **D-E3 / C7** | do embeddings join the deterministic switch? | **the no-LLM claim wording** | yes — join the switch |
-| **D-W3** | coach-created vs proposed personal Focus | enforcement, not the field | add `origin.by` now regardless |
-| **D-W5** | may a plain member see descendant-node people? | **W-4** | keep as documented governance widening, pinned by the parity test |
-| **D-W6** | does a leader's upward scope include the parent's own evidence? | **W-3 sign-off** | yes |
-| **D-W7** | is `top_leader` structural or coverage-based? | W-3 | structural |
-| **D-W4** | may the worker open a group Inquiry unprompted? | worker authority | propose-only for the pilot |
-| **D-P1** | how many peer nodes must an aggregate span? | comparison Web | ≥3 plus leave-one-out stability |
-| **D-P2** | is a node leader's identifiability person-level? | peer phrasing | no, with a no-naming rule |
-| **D-O1** | is a dormant behavioural dimension quiet or forgotten? | nothing | person-controlled erase; dormant default |
-| **D-B1** | may a sweep say a Focus rests on a refuted Inquiry? | B1 surfacing | yes, as an offer to revisit |
-| **D-E1** | is a local T1 a pilot selling point? | nothing | design for it, build nothing |
-| **D-E2** | acceptable quality floor for T1 on member-facing text? | **E4 re-tiering** | needs the benchmark first |
+| Id | Decision | Status |
+|---|---|---|
+| **D-W3** | coach-created vs proposed Focus | **OPEN** — non-blocking; the field lands regardless |
+| **D-E2** | quality floor for a cheap model on member-facing text | **OPEN** — needs the post-pilot benchmark |
+| D-W5 · D-W6 · D-W7 · D-W4 · D-B1 | — | **resolved** — repository/safety dominant |
+| D-C1 · D-E3 · D-O1 · D-E1 | — | **resolved** — answered by ratified direction |
+| D-P1 · D-P2 | peer aggregates | **deferred** — comparison Web is SCALE |
 
-> **SUPERSEDED by `docs/ttd/founder-decision-reduction.md` (Stage 1).** The thirteen reduce to
-> **two that genuinely require the founder — D-W3 and D-E2 — and neither blocks any pre-pilot
-> work.** Five are already answered by ratified direction (D-W6, D-E3, D-C1, D-O1, D-E1), four are
-> dominated by repository or safety consequence (D-W7, D-W5, D-W4, D-B1), and two defer to pilot
-> evidence (D-P1, D-P2). **D-W5's recommendation above is reversed** — its premise was wrong; see
-> the reduction §4. Read that document, not this table.
+One item needs founder **awareness**, not a decision: the 3(a2) lateral leak (§4 row 3).
