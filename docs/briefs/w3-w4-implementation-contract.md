@@ -356,13 +356,20 @@ getUserNodeIds(orgCode, requestingUserId).forEach(nid =>
   getDescendantNodeIds(orgCode, nid).forEach(d => { if (d !== nid) addPeople(d); }));
 ```
 
-A **plain member** of a node sees the people in all descendant nodes. `orgGraph`'s member rule grants
-the exact opposite — own node plus direct parents, nothing below. The two mechanisms disagree about
-what a member may see, and the person-level one wins because it guards the endpoints.
+> **CORRECTED at Stage 1 (`docs/ttd/founder-decision-reduction.md` §4).** The paragraph below
+> originally read *"a plain member of a node sees the people in all descendant nodes"*. **That is
+> false.** `server.js:1781` sets `view_team: false` for the `member` role, and 3(a2) sits inside
+> `if (_userHasPerm(…, 'view_team'))`, so it **never fires for a plain member**.
 
-Note it is additionally gated on `_userHasPerm('view_team')`, so it is not every member — but the
-comment says "hierarchy leadership" while the code says "any node this user belongs to". That
-mismatch is the bug surface.
+The real divergence is narrower and sharper. 3(a2) keys on `getUserNodeIds` (`:2654`), which returns
+nodes where the user is a member **or** a leader. So for any `view_team` holder — superadmin, admin,
+coach, or a member-role node leader via `LEADER_GRANTS` (`:2591`) — it grants the people under
+**every node they merely belong to**, including nodes they do not lead.
+
+Concrete leak: a coach who leads `Soccer` and is also a *member* of `Sport` receives every person
+under `Sport`, including `Rugby`. That is lateral person-level access across a sibling branch, which
+branch isolation forbids. And the code contradicts its own comment — it says "hierarchy
+**leadership**" and keys on **membership**, while rule (a) already handles leadership correctly.
 
 **W-4 must not begin until this is settled**, because every ENUMERATE migration inherits whichever
 answer is chosen. It is a founder decision (D-W5, §6).

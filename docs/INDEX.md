@@ -154,5 +154,9 @@ Consolidated from every stage. Full scenarios and options live in the cited docu
 | **D-E1** | is a local T1 a pilot selling point? | nothing | design for it, build nothing |
 | **D-E2** | acceptable quality floor for T1 on member-facing text? | **E4 re-tiering** | needs the benchmark first |
 
-**Two of thirteen block current work:** D-W5 (W-4) and D-E3 (the no-LLM claim). D-W6 and D-W7 block
-W-3 sign-off but both have unambiguous recommendations.
+> **SUPERSEDED by `docs/ttd/founder-decision-reduction.md` (Stage 1).** The thirteen reduce to
+> **two that genuinely require the founder — D-W3 and D-E2 — and neither blocks any pre-pilot
+> work.** Five are already answered by ratified direction (D-W6, D-E3, D-C1, D-O1, D-E1), four are
+> dominated by repository or safety consequence (D-W7, D-W5, D-W4, D-B1), and two defer to pilot
+> evidence (D-P1, D-P2). **D-W5's recommendation above is reversed** — its premise was wrong; see
+> the reduction §4. Read that document, not this table.
