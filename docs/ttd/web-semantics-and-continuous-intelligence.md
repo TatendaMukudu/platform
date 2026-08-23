@@ -1216,6 +1216,19 @@ for every Web magnitude statement. It publishes a rate only at n≥4, refuses to
 under a 20-point gap, tiers confidence at n≥12, and phrases the output as a cohort claim with a
 count-based basis and no person in it.
 
+### L-W16b (proposed) — the floor is TWO-SIDED
+
+> **CORRECTION, Stage 3 (`docs/ttd/privacy-inference-attacks.md`).** The floors below are
+> **one-sided and therefore incomplete**. An aggregate over cohort `k` drawn from a visible
+> population `n` must satisfy **both** `k >= MIN_COHORT` **and** `n - k >= MIN_COHORT`.
+>
+> Measured: a two-member scope where both members decline yields `patternCounts: {momentum_drop: 2}`
+> and surfaces two Web Lows. `k = 2` satisfies the floor; `k == n` means the leader has learned that
+> **both named people** have momentum drop. An aggregate covering the whole population is a complete
+> person-level disclosure.
+>
+> The same applies to rates: `100%` and `0%` disclose everyone at any `n`.
+
 ### L-W16 (proposed) — magnitude is gated by shape, not by intent
 
 > The floor a statement must clear is determined by its **shape**, not by who is reading it:
