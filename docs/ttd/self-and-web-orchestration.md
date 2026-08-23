@@ -14,6 +14,15 @@ intelligence).
 
 ## 1 · Executive finding
 
+> **CORRECTED at Stage 4 (`docs/ttd/self-web-production-trace.md` §8).** This section states that
+> `_kernelEvidence`'s two branches are the Self/Web split. That is true of the **door** and
+> incomplete as a description of the **product**: the Self *pattern* pipeline
+> (`_buildMemberIntelInput`, `server.js:3836`) bypasses that door entirely, reading `orgSignals`,
+> `memberCheckins` and assessments at an **organisation** purpose. Consequently **private evidence
+> never produces a Self High or Self Low** — only a contentless `careFlag` and a count-based privacy
+> reassurance. Laws L-C1 to L-C7 below are unaffected and still hold.
+
+
 **The law is already implemented, at one door, and it is stricter than the founder's own example.**
 
 `server.js:7758-7759` defines the two scopes as a purpose vocabulary:
