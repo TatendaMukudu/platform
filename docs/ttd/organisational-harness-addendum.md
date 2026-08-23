@@ -1,5 +1,10 @@
 # Addendum — hierarchy, adaptive questioning, decisions, temporal truth
 
+> **PARTIAL.** Section 1's "a leader sees their node plus all descendants" is now the OLD law —
+> W-3 adds one organisational level up. Section 7's "epistemic scope distinct from authorisation"
+> is now named in `web-semantics-and-continuous-intelligence.md` §3. P0-D has landed; P0-A/B/C are
+> tracked in `consolidated-implementation-queue.md`. See `docs/INDEX.md`.
+
 **Baseline:** `docs/ttd/organisational-harness-review.md`, accepted.
 **Verdict in one line: one new P0, everything else is P1/P2 or already built.**
 

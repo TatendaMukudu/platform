@@ -1,5 +1,10 @@
 # Architecture review — what is IntelliQ harnessed to?
 
+> **PARTIAL.** Section 1's finding that `orgGoals` is "consumed by no reasoning subsystem
+> anywhere" is overtaken: it is now read at `server.js:17028` into a citable string, though still
+> by no deterministic consumer. The duplication with org-context objectives stands.
+> See `docs/INDEX.md`.
+
 **Reviewer:** Claude (architecture) · `main` @ `8e13bce`
 **Headline: the premise is substantially already built. Do not create a new primitive.**
 

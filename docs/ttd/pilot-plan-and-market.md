@@ -1,5 +1,8 @@
 # Pilot work plan + market position
 
+> **SUPERSEDED** for the work plan by `docs/ttd/consolidated-implementation-queue.md`, which is
+> now the only queue. The market-position material is retained and unsuperseded.
+
 **Written:** 2026-08-15, ahead of the 21:00 Codex session.
 **Companion to:** `docs/ttd/pilot-readiness-review.md` (the audit these tasks come from).
 

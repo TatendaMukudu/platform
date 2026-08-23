@@ -15,6 +15,9 @@ capability floor. Also subordinate to this document and using the same status vo
 (Web law) and W-4 (scope convergence) brief: the measured scope delta, the complete 71-site scope
 call-site audit classified into GATE / ENUMERATE / FILTER / WEB / BRIDGE, the graph-invalidation
 contract, and the executable invariants to write before any code.
+**START HERE:** `docs/INDEX.md` — the document register, order of authority, status of every
+document, contradictions resolved, and the outstanding founder decisions.
+**The only implementation queue** is `docs/ttd/consolidated-implementation-queue.md`.
 **Document hierarchy and the consolidated gap register** live in `intelliq-constitution.md` §13-§14.
 **Ontology investigation:** `docs/ttd/organisational-ontology-investigation.md` — verdict ADOPT
 NARROWLY. IntelliQ already contains an implicit ontology (epistemic levels, reified signals with

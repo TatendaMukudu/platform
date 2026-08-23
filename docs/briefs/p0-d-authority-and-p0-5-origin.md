@@ -1,5 +1,9 @@
 # P0-D and P0-5 — the two epistemic blockers
 
+> **PARTIAL.** P0-D landed as PR #73. P0-5 relocates as P0-5' — the law survives the Forum being
+> absorbed; the Forum UI feeder is not worth fixing. See
+> `web-semantics-and-continuous-intelligence.md` §27.
+
 **Companion to:** `docs/briefs/p0-pilot-blockers.md` (P0-1, P0-2, P0-3).
 **Sources:** `docs/ttd/organisational-harness-addendum.md` §authority-vs-truth;
 `docs/ttd/pilot-readiness-review.md`.
