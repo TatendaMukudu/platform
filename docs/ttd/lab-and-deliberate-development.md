@@ -1,5 +1,8 @@
 # Lab, deliberate development, and the three intelligences
 
+> **EXPLORATION, NOT LAW.** Predates the High/Low/Inquiry/Focus/Web ratification. Where it and
+> `intelliq-constitution.md` §2 differ, the constitution governs.
+
 **Status:** architecture exploration. Nothing implemented. Nothing queued ahead of the pilot
 blockers.
 

@@ -1040,3 +1040,360 @@ of the 48 `getVisibleUserIds` sites. Each is real; none is Falcon's blocker.
 Write the test before the change, and confirm it fails for the reason you expect. Three of the
 gaps in this document — GW-6 most sharply — exist because an assertion was written to pass rather
 than to arbitrate. A test that has never failed has proved nothing.
+
+---
+
+> **§19 is reserved** for the W-1/W-2 implementation audit added on `codex/web-intelligence-no-llm`
+> (PR #74). Sections below start at §20 so the two can merge without conflict.
+
+---
+
+## 20. Corrections to this document
+
+Two claims in §1 and §14 were derived by reading rather than running, and both are wrong. They are
+corrected here rather than silently edited, because one of them changed a founder decision.
+
+**§1 / §14 / D-W1 — `scripts/org-graph-smoke.js:33` does NOT need amending.** The claim was that
+this assertion positively encodes the old leader law and must be changed as a ratified law change.
+The W-3 patch was applied and the suite run: **18 passed, 0 failed.** `visibleScope` adds a parent
+*id* and never re-expands downward from it, so no `includes` / `!includes` assertion in that file
+flips.
+
+**The test that does change is `scripts/scoped-intelligence-packet-smoke.js:47`**, and there is
+exactly one across the whole registry. It is a strict equality on the entire scope set
+(`=== 'salesA'`) and its name states the old law. Full detail, measured before/after tables, and the
+replacement assertion are in `docs/briefs/w3-w4-implementation-contract.md` §0-§2.
+
+**A regression this document missed entirely:** W-3 breaks `role` derivation at
+`ai/scoped-intelligence-packet.js:41`, which computes `top_leader` by set-size equality. In a
+two-tier organisation — Falcon's actual shape — every node leader becomes `top_leader` once W-3
+lands. Measured, and specified in the brief §2.3.
+
+---
+
+## 21. Deterministic capability matrix
+
+The W-2 language in §12 was too coarse. This is the precise version. Six verbs, because collapsing
+them is how "we have Inquiry without a model" gets claimed on the strength of a seeded fixture:
+
+| Verb | Meaning |
+|---|---|
+| **PERSIST** | the state survives a restart |
+| **DERIVE** | the state is computed from other state |
+| **MAINTAIN** | existing state is updated as the world changes |
+| **DISCOVER** | new state is created that nobody asked for |
+| **PROJECT** | state is filtered/shaped for a particular actor |
+| **EXPLAIN** | state is rendered into language for a human |
+
+`DET` = deterministic today. `OPT` = model optional (deterministic path exists). `REQ` = model
+required (no deterministic path). `—` = capability absent.
+
+| Capability | Persist | Derive | Maintain | Discover | Project | Explain | Production path | Test |
+|---|---|---|---|---|---|---|---|---|
+| Evidence ingestion (structured) | DET | DET | DET | n/a | DET | OPT | `evidenceLog`, intake | `evidence-smoke` |
+| Evidence ingestion (free text) | DET | **REQ** | REQ | REQ | DET | OPT | `_intakeTurn:9175` | — |
+| Provenance (`originRef`/`originKind`) | DET | DET | DET | n/a | DET | OPT | `ai/contribution.js:242` | `pilot-loop-smoke §3` |
+| Correction / supersession | DET | DET | DET | n/a | DET | OPT | `ai/diagnose.js:485` | `admissibility-smoke` |
+| Contest state | DET | DET | DET | n/a | DET | OPT | `server.js:10890` | `contest-smoke` |
+| Privacy projection | n/a | DET | n/a | n/a | DET | DET | `audienceSafe:291` | `proactive-smoke` |
+| Web scope | n/a | DET | DET | n/a | DET | n/a | `ai/org-graph.js` | `org-graph-smoke` |
+| **High / Low derivation** | **n/a — derived** | DET | DET | DET | DET | OPT | polarity → `behaviour.plan` | `no-llm-harness §2` |
+| **Inquiry — group** | DET | DET | DET | **DET** | DET | OPT | `_admitGroupContributions:12588` | `group-subject-smoke` |
+| **Inquiry — personal, free text** | DET | **REQ** | **REQ** | **REQ** | DET | OPT | `_intakeTurn:9175` | — |
+| Inquiry — from org-state gaps | **—** | DET | — | DET (proposal only) | DET | OPT | `stateToUncertainties:317` → `planInquiries:285` | `inquiry-smoke` |
+| **Focus — persistence** | DET | n/a | n/a | n/a | DET | n/a | `userAiProfiles`, `_persistedStores:184` | — |
+| **Focus — creation** | DET | — | n/a | — | n/a | n/a | `/api/me/prepared/act:4838` only | — |
+| **Focus — progress** | **—** | — | — | — | — | — | absent | — |
+| Focus — outcome learning | DET | DET | DET | n/a | DET | n/a | `/api/me/focus/outcome:4865` → `_recordNoticeFeedback` | — |
+| Org pattern detection | n/a | DET | DET | DET | DET | OPT | `intel.detectPatterns:188`, `primitives.structuralPatterns:66` | `intelligence-smoke` |
+| Independent-origin aggregation | DET | DET | n/a | DET | DET | OPT | `shouldOpenGroupInquiry:194` | `pilot-loop-smoke §4` (**failing — P0-5**) |
+| Contradiction detection | DET | DET | DET | DET | DET | OPT | `stateToUncertainties:343` | `org-state-smoke` |
+| Leader intelligence | n/a | DET | DET | DET | **PARTIAL** | OPT | `/api/intelligence/briefing` | `web-intelligence-smoke` (PR #74) |
+| Member org intelligence | n/a | — | — | — | **—** | — | absent — gap G3 | — |
+| Actor-specific projection | n/a | DET | DET | n/a | DET | n/a | `_reasonScopedAgenda:10878`, `buildPacket:116` | `scoped-intelligence-packet-smoke` |
+| Organisational memory | DET | DET | DET | n/a | DET | OPT | `orgStateHistory`, `ai/org-memory.js` | `org-memory-smoke` |
+| Retrieval (keyword/structured) | DET | DET | n/a | n/a | DET | OPT | `_retrieveGrounding` | `retrieval-smoke` |
+| **Semantic retrieval** | DET | **REQ** | n/a | n/a | DET | OPT | `ai/embeddings.js` — OpenAI | — |
+| **NL interpretation** | n/a | **REQ** | n/a | REQ | n/a | REQ | `ai/gateway.js` | — |
+| **NL explanation** | n/a | **OPT** | n/a | n/a | n/a | OPT | `reason.speak` → optional restyle | `reason-smoke` |
+| **Hypothesis generation** | DET | DET | DET | DET | DET | OPT | `ai/diagnose.js` | `diagnose-smoke` |
+
+### The four honest gaps this matrix exposes
+
+1. **Personal Inquiry from free text is model-REQUIRED.** `_intakeTurn` returns early when
+   `!ai.enabled()`. Nothing else writes `inquiryStates` for `member:*`. Any "Inquiry survives without
+   a model" claim must say **group** Inquiry.
+2. **Focus has persistence and outcome learning but no derivation, no discovery and no progress.**
+   Focus is currently a durable note with a feedback hook.
+3. **Member organisational intelligence does not exist.** G3. There is no path by which a player
+   learns "the team's recovery consistency improved". This is the largest product gap in the matrix
+   and it is the one the founder's §4 asks for.
+4. **Semantic retrieval is a learned-model dependency outside the deterministic switch.**
+   `ai/embeddings.js:20` — `enabled()` is `!!KEY`.
+
+---
+
+## 22. Web epistemic aggregation contract
+
+The PR #74 review proved, live, that counting people clears the floor where one origin was retold by
+three of them. This is the contract that closes it. It invents nothing: every rule below already
+exists in `ai/contribution.js` and is being applied to a second surface.
+
+### L-W14 (proposed) — people are not origins
+
+> A Web aggregate counts **distinct `originRef` values**, never distinct people. Where a finding
+> cannot be traced to an origin, it contributes to no count.
+
+### What is counted
+
+| Quantity | Definition | Existing authority |
+|---|---|---|
+| `contributors` | distinct subject ids whose findings support the pattern | `ai/contribution.js:201` |
+| `independentOrigins` | distinct `originRef` among those findings | `ai/contribution.js:203` |
+| `authorities` | findings whose evidence is `authoritative` | `ai/contribution.js:207` |
+
+### When a Web High or Low may appear
+
+Both must hold:
+
+1. `contributors >= MIN_COHORT` (2) — the privacy floor, `server.js:16932`.
+2. One of the three existing opening rules, applied unchanged from
+   `ai/contribution.js:213-223`:
+   - `LEADER_OPENED` — a node leader deliberately raised it;
+   - `AUTHORITATIVE_SOURCE` — at least one authoritative account;
+   - `INDEPENDENT_CORROBORATION` — `independentOrigins >= 2` **and** `contributors >= 2`.
+
+If `contributors >= 2` but `independentOrigins < 2`, the verdict is **`ECHO`** and **no Web artifact
+is produced**. Not a weaker one — none.
+
+### The named cases
+
+| Case | Result |
+|---|---|
+| One origin repeated by ten people | **ECHO — nothing surfaces.** Ten contributors, one origin. |
+| Three independent origins across three people | Web High/Low surfaces at the kernel's own confidence |
+| Two people, two origins | Surfaces — the minimum honest case |
+| Two people, two origins, one later corrected | Recount on the corrected set; if it drops below the rule, the artifact **withdraws** |
+| Evidence conflicts | The kernel's `contested` state governs. A contested belief may surface **as contested**, never as a settled Web Low |
+| Cohort below the privacy floor | Nothing surfaces, **and no count is published** (§23) |
+| One member in several Web-relevant nodes | One candidate **per node**, never merged — `server.js:12562`, law L-W8 |
+
+### Confidence and severity must be derived, never asserted
+
+PR #74 hardcodes `confidence: 'emerging'` and `severity: positive ? 'low' : 'medium'`
+(`server.js:4162`). Both must come from the constituent kernel findings — the minimum confidence
+across contributing origins, and the maximum severity — so a Web artifact can never assert more than
+the kernel established.
+
+> **L-W15 (proposed).** A Web aggregate's confidence is the **minimum** confidence of its
+> contributing origins; its severity is the **maximum** severity of its constituent findings. No Web
+> artifact may carry a confidence or severity that no underlying finding carries.
+
+### Provenance travels with the aggregate
+
+A Web artifact carries, internally and never rendered: `originRefs[]`, `contributorCount`,
+`independentOriginCount`, `openingRule`, `minConfidence`, `maxSeverity`, `computedAtFingerprint`.
+This is what makes withdrawal-on-correction possible and what an audit reads. It is
+`basis`-equivalent and obeys the same rule: **never rendered to a leader.**
+
+---
+
+## 23. Privacy / magnitude contract
+
+The repository already answers this and nobody wrote it down. Three thresholds exist, each attached
+to a different **shape of disclosure**, and they are principled rather than arbitrary.
+
+| Shape of statement | Floor | Constant | Location |
+|---|---|---|---|
+| "a pattern exists across your Web" (existence, direction) | **n ≥ 2** | `MIN_COHORT` | `server.js:16932` |
+| "this action helped" (outcome guidance) | **n ≥ 2** | `MIN_SAMPLE` | `server.js:16934` |
+| **"X% of people…" (any rate or percentage)** | **n ≥ 4** | `MIN_SEG` | `server.js:3240` |
+| "…and we are reasonably sure" (confidence above `tentative`) | **n ≥ 12** | (inline) | `server.js:3250` |
+| A *comparison* between two rates | **≥ 20 percentage-point difference** | (inline) | `server.js:3243` |
+
+`_orgDiscoveries` (`server.js:3240-3250`) is the reference implementation and should be the template
+for every Web magnitude statement. It publishes a rate only at n≥4, refuses to report a comparison
+under a 20-point gap, tiers confidence at n≥12, and phrases the output as a cohort claim with a
+count-based basis and no person in it.
+
+### L-W16 (proposed) — magnitude is gated by shape, not by intent
+
+> The floor a statement must clear is determined by its **shape**, not by who is reading it:
+> existence and direction at n≥2; any rate, percentage or proportion at n≥4; confidence above
+> `tentative` at n≥12; a comparison of two rates only at a ≥20-point difference. A statement that
+> cannot clear the floor for its shape must be **downgraded to a shape it can clear, or withheld** —
+> never rounded, bucketed or fuzzed into looking safe.
+
+### What this settles without a founder decision
+
+The founder's target sentences resolve mechanically:
+
+| Target sentence | Shape | Floor | Verdict |
+|---|---|---|---|
+| "Recovery consistency has improved across your Web." | existence + direction | n≥2 | permitted at 2 |
+| "Attendance has declined across two groups for four weeks." | existence + scope + duration, **no rate** | n≥2 per group | permitted; duration comes from the belief's own `firstSeen` |
+| "This Focus appears associated with improvement across **40%** of the relevant Web." | **rate** | **n≥4** | permitted only at n≥4 |
+
+**No new threshold is required and no founder decision is needed for the common cases.** That is the
+most useful single finding of this pass.
+
+### The kernel may know more than the interface may say
+
+> **L-W17 (proposed).** Floors constrain **projection**, never **computation**. The kernel computes
+> over the full admissible set at any cohort size; the floors decide what may be rendered. A floor
+> implemented by discarding data upstream is a bug, because it corrupts later recomputation when the
+> cohort grows.
+
+### The live violation this contract closes
+
+`/api/intelligence/briefing` returns `rollup.patternCounts`, `participation`, `activeThisWeek` and
+`momentum` **unfiltered**, in the same payload whose `summary` says the floors were applied.
+Measured on a two-person scope: `items: []`, summary "No aggregate pattern currently clears the
+privacy and confidence floors", `patternCounts: {momentum_drop: 1}`. `_sanitizeBriefingForLeader`
+(`server.js:4134`) touches only `summary` and `items`. This is correction 1 of the PR #74 list.
+
+---
+
+## 24. Continuous Web intelligence contract
+
+§6-§7 established the execution model (option D, already built). This adds the loop's stage
+ownership so the worker can be extended mechanically.
+
+| Stage | Owner today | Deterministic? | Change required |
+|---|---|---|---|
+| OBSERVE | `evidenceLog`, connectors, check-ins | yes | none |
+| NORMALIZE | `ai/comprehend.js`, `understanding.sanitizeFeatures` | yes | none |
+| ADMIT | `_kernelEvidence` status gate, `ai/admissibility.js` | yes | none |
+| FOLD | `reason.reason:171` via `_reasonTick:10761` | yes | skip when fingerprint unmoved |
+| COMPARE | `_orgEvidenceFingerprint:9863`, `orgMemory.changedSince:406` | yes | **add graph fingerprint (§25)** |
+| DETECT | `detectPatterns`, `structuralPatterns`, `stateToUncertainties` | yes | none |
+| PROJECT | `_reasonScopedAgenda:10878`, `buildPacket:116` | yes | **consult Web, not only people (W-4)** |
+| PRIORITIZE | `priority.stamp` | yes | none |
+| PRESENT | `behaviour.plan`, `audienceSafe` | yes | apply §22-§23 contracts |
+| LEARN | `ai/confidence.js` ← `_recordNoticeFeedback` | yes | **feedback path severed by PR #74** |
+
+### Authority limits — unchanged and restated
+
+> **L-W4 (restated).** The worker may read admissible state, compute candidates, and write exactly
+> one class of durable record: a candidate. It may not write a belief, an evidence envelope, an
+> Inquiry transition, a Focus, or any confidence value.
+
+> **L-W18 (proposed).** The worker may **propose** a group Inquiry when
+> `shouldOpenGroupInquiry` returns `open: true`, but may not **open** one unprompted during the
+> pilot. The kernel's authority is unchanged; only the worker's licence to exercise it is withheld.
+> *(This is D-W4, still open.)*
+
+### The learning loop regression
+
+PR #74 removed `intelAct`, `intelDismiss`, `intelOutcome` and `intelNoticeFeedback` from `js/app.js`.
+`/api/intelligence/act`, `/outcome` and `/notice-feedback` remain server-side with **zero callers**.
+`_webIntelligence` gates on `confidence.shouldSurface(reliabilityByType[type])` — so the output now
+depends on a signal whose only input path was deleted. `shouldSurface(undefined)` returns `true`
+(`ai/confidence.js:35`), so nothing breaks; the loop simply never learns. Correction 6 of the PR #74
+list.
+
+---
+
+## 25. Graph invalidation contract
+
+Full specification, measured cache inventory and the five tests are in
+`docs/briefs/w3-w4-implementation-contract.md` §5. The law:
+
+> **L-W13 (proposed).** Any mutation of organisational structure invalidates every derived
+> projection whose scope could have changed, for **every affected actor** — not only the actor who
+> moved. Consistency boundary: **the next read.**
+
+Measured today: `rosterCache` and `intelBriefingCache` are TTL-only at `BRIEFING_TTL = 2h`
+(`server.js:3632`) and no structural mutation clears either. `_orgEvidenceFingerprint` contains
+nothing derived from `orgNodes`. `_commitTreeMutation` (`server.js:2450`) is the single choke point
+and calls only `_backfillUserNodeIds()`.
+
+---
+
+## 26. Focus future contract
+
+Not implemented, not redesigned. Specified only enough that the later exercise is mechanical.
+
+### Origin vocabulary — repository-aligned
+
+The founder's seven candidate names collapse to a **two-axis** model, because the repository already
+separates *who acted* from *what prompted it* everywhere else:
+
+```
+origin: { by: 'self' | 'coach' | 'leader' | 'system',        // WHO put it there
+          from: null | { kind: 'inquiry'|'high'|'low', ref } }  // WHAT prompted it
+```
+
+`SELF_CREATED` is `{by:'self', from:null}`; `INQUIRY_DERIVED` is `{by:'self'|'coach', from:{kind:'inquiry'}}`;
+`SYSTEM_PROPOSED` is `{by:'system', from:…}` and **requires acceptance before `status: 'active'`**.
+Two axes rather than seven enum values, because the seven conflate actor with provenance and would
+make "coach-created from an Inquiry" unrepresentable.
+
+`from` is gap **G2** — the origin foreign key four audits have now independently found.
+
+### Fields
+
+```
+{ id, text, type, status, outcome, createdAt, resolvedAt,   // exist today
+  origin: { by, from },        // NEW — G2
+  subjectRef,                  // NEW — 'member:<id>' | 'group:<nodeId>'
+  scopeNodeId,                 // NEW — null = personal
+  participantIds: [],          // NEW — G1, the bridge
+  ownerId, creatorId,          // NEW
+  goal, evidenceRefs: [],      // NEW
+  progress: [], interventionRefs: [] }   // NEW
+```
+
+### The two laws that must hold from the first line of code
+
+> **L-F1.** Being invited into a Focus grants **participation in that object and its own record**.
+> It adds no node to `Web(participant)`, grants no sibling/ancestor/descendant visibility, and does
+> not survive the Focus closing. *(L-W9, applied.)*
+
+> **L-F2.** A coach-created Focus about a player records the coach's statement at the coach's
+> evidence class. It does not become empirical truth about the player. **P0-D precedence is
+> unchanged**: an empirical claim stays empirical regardless of who created the Focus.
+
+`participantIds` must be an explicit list. Inferring participation from message authorship would
+make *reading a thread* into a grant.
+
+**D-W3 (coach-created vs proposed personal Focus) stays open.** The `origin.by` field must be added
+anyway, before the pilot writes records — otherwise whichever way the decision goes cannot be
+enforced against records created meanwhile, and back-filling means guessing at intent never recorded.
+
+---
+
+## 27. P0-5′ — where the Forum origin law relocates
+
+`pilot-loop-smoke §4` (*"an echo does NOT become an independent origin"*) is the one failing
+assertion in the registry, and it fails against the **Forum** feeder. Forum is being absorbed
+(`docs/ttd/product-compression-and-forum-intelligence.md`), so fixing the Forum UI path is effort
+spent on a feature being retired.
+
+**The law survives the container.** It is not a Forum law; it is a contribution-boundary law:
+
+> **AUTHORSHIP IS PRESERVED. AN ECHO DOES NOT BECOME AN INDEPENDENT ORIGIN.**
+
+Its home is `ai/contribution.js` — `toGroupProposal` (`:242`) already states it: *"ORIGIN SURVIVES
+INTACT… Contribution is a change of audience, not a change of what the evidence is based on."*
+
+### Future contribution boundaries the law must cover
+
+| Boundary | Status | P0-5′ must assert |
+|---|---|---|
+| Group Inquiry contribution | **exists** — `_admitGroupContributions:12588` | retelling keeps its `originRef`; ECHO blocks opening |
+| **Focus collaboration** | not built | a participant's restatement of the owner's account creates no second origin |
+| **Inquiry collaboration** (cross-node) | not built | a bridged participant's echo is not corroboration |
+| **Web-derived aggregate** | PR #74 | §22 — counts origins, not people |
+
+### What P0-5′ should test
+
+1. Two people, one `originRef` → `ECHO`, no inquiry opened, **no Web artifact**.
+2. Two people, two `originRef`s → `INDEPENDENT_CORROBORATION`, opens.
+3. A retelling contributed to a group keeps `originKind: 'retelling'` and the **original**
+   `originRef` — no new origin minted at the boundary.
+4. The same three assertions at the **Web aggregation** boundary (§22).
+5. Authorship survives: the contributor is recorded, and is not the origin.
+
+Assertions 1-3 belong in `group-subject-smoke` (already `IQ_DETERMINISTIC_ONLY`). Assertion 4 belongs
+wherever Web aggregation lands. **Do not fix the Forum UI feeder.**

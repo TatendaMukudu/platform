@@ -11,6 +11,11 @@ law, it uses the same status vocabulary as this document and is subordinate to i
 Web law, the Web/governance/kernel/projection separation, the SELF and ORG perspectives on
 High / Low / Inquiry / Focus, the continuous Web intelligence execution model, and the no-LLM
 capability floor. Also subordinate to this document and using the same status vocabulary.
+**Implementation contract:** `docs/briefs/w3-w4-implementation-contract.md` — the mechanical W-3
+(Web law) and W-4 (scope convergence) brief: the measured scope delta, the complete 71-site scope
+call-site audit classified into GATE / ENUMERATE / FILTER / WEB / BRIDGE, the graph-invalidation
+contract, and the executable invariants to write before any code.
+**Document hierarchy and the consolidated gap register** live in `intelliq-constitution.md` §13-§14.
 
 This document says two different things, and never confuses them:
 

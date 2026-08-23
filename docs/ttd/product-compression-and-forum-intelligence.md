@@ -1,5 +1,9 @@
 # Product compression, conversational objects, and forum intelligence
 
+> **EXPLORATION, NOT LAW.** Contains product framing later retired — Forum as a destination,
+> reflection/assessment surfaces. Forum's *laws* survive (`intelliq-constitution.md` §5.1); its UI
+> feeder does not. Ratified positions live in the constitution and the Web adjudication.
+
 **Status:** architecture exploration. Nothing implemented. Nothing queued ahead of the pilot
 blockers.
 

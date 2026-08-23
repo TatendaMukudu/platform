@@ -1,5 +1,8 @@
 # Pilot readiness review
 
+> **SUPERSEDED BY** `docs/ttd/intelliq-constitution.md` §13, the consolidated gap register.
+> This review's blocker list has been merged there. Retained as history.
+
 **Reviewer:** Claude (architecture)
 **Date:** 2026-08-15 · `main` @ `a6cdaf3`
 **Verdict: READY AFTER BLOCKERS.** Four blockers, all small, all cited. None is a redesign.
