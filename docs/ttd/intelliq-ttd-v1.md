@@ -16,6 +16,10 @@ capability floor. Also subordinate to this document and using the same status vo
 call-site audit classified into GATE / ENUMERATE / FILTER / WEB / BRIDGE, the graph-invalidation
 contract, and the executable invariants to write before any code.
 **Document hierarchy and the consolidated gap register** live in `intelliq-constitution.md` §13-§14.
+**Ontology investigation:** `docs/ttd/organisational-ontology-investigation.md` — verdict ADOPT
+NARROWLY. IntelliQ already contains an implicit ontology (epistemic levels, reified signals with
+provenance, typed inquiry relationships, behaviour-as-contextual-observation). What is missing is
+four foreign keys and one new claim type, not a substrate.
 
 This document says two different things, and never confuses them:
 
