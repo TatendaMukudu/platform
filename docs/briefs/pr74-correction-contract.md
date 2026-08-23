@@ -1,5 +1,13 @@
 # PR #74 correction contract
 
+> **SUPERSEDED by `docs/briefs/pr74-final-correction-contract.md` (Stage 2).**
+> **Do not implement from this document.** Its C1 fix — "drop every `patternCounts` entry whose
+> count < MIN_COHORT" — is defeated by the complement attack: a two-member scope where both members
+> decline yields `count = 2`, which passes the filter while naming everyone. The final contract
+> carries the two-sided floor, plus a naive-fix/adversarial pass on every correction.
+> Retained as history.
+
+
 **Status:** implementation brief. Architecture is settled here; Codex implements decisions.
 **Stage F** of the architecture loop. Preceded by `938207b`.
 **Target branch:** `codex/web-intelligence-no-llm` @ `1c02dc9`. **Do not modify PR #74 from any
