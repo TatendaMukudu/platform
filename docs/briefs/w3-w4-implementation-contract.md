@@ -448,7 +448,14 @@ and reaches `inquiryStates[…] = after` at `:9351` only via `ai.completeJSON` p
 With models disabled, **no personal Inquiry is created or updated from free text.** Any no-LLM claim
 covering "Inquiry" must say *group* Inquiry, or say "maintained, not discovered".
 
-### 4.4 Graph mutation has exactly one choke point
+### 4.4 Graph mutation choke point
+
+> **CORRECTED at Stage 9 (`docs/briefs/web-final-contract.md` §2.1): there are TWO paths, not one.**
+> `_removePerson` (`server.js:1903`) strips `node.memberIds`/`node.leaderIds` at `:1932-1933`, calls
+> neither `_commitTreeMutation` nor `_backfillUserNodeIds`, and invalidates nothing across 167 lines.
+> Because `rosterCache` holds names and is TTL-only at 2h, an erased person's name is still served
+> from every leader's cached roster for up to two hours.
+
 
 `_commitTreeMutation` (`server.js:2450`) is the sole commit path for tree changes. It calls
 `_backfillUserNodeIds()` and invalidates **no reasoning cache**. That makes the invalidation fix

@@ -1318,7 +1318,9 @@ Full specification, measured cache inventory and the five tests are in
 
 Measured today: `rosterCache` and `intelBriefingCache` are TTL-only at `BRIEFING_TTL = 2h`
 (`server.js:3632`) and no structural mutation clears either. `_orgEvidenceFingerprint` contains
-nothing derived from `orgNodes`. `_commitTreeMutation` (`server.js:2450`) is the single choke point
+nothing derived from `orgNodes`. `_commitTreeMutation` (`server.js:2450`) was described as the
+single choke point — **corrected at Stage 9: `_removePerson` (`:1903`) is a second path that
+invalidates nothing, leaving an erased person's name in cached rosters for up to 2h**
 and calls only `_backfillUserNodeIds()`.
 
 ---
