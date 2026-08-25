@@ -22,4 +22,9 @@ compatibility signal; classify this **ALMA-P1** because it can make an “AI kno
 temporarily repeat a corrected characterization, without widening access or changing durable
 evidence truth.
 
-No P0-5 Forum-origin behavior was changed by this baseline program.
+P0-5 prime-origin behavior is now pinned at the durable contribution and Web
+boundaries rather than inferred from Forum speech. Machine summaries and
+extractions preserve the originating human reference, echoes do not corroborate,
+and genuine independent observations remain admissible. The ratified O-12/O-14
+cross-turn model-origin corruption probes remain benchmark work, not a pilot
+production claim.
