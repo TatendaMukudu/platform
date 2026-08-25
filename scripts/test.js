@@ -85,7 +85,10 @@ const SUITES = [
   'assistant-interface-smoke.js',  // unified MyWorkspace INTERFACE: one composer/identity, lenses as bounded hints, confirmable proposal cards
   'proactive-smoke.js',            // the proactive surfacing layer: post-kernel ProactiveInsight projection, surfacing policy, audience safety, bounded preferences
   'web-intelligence-smoke.js',      // W-1: leader roster is neutral; briefing is useful, aggregate, governed Web intelligence
-  'no-llm-harness-smoke.js',        // W-2: real production-boundary High/Low, evidence, Inquiry, Focus, scope and privacy with models disabled
+  'no-llm-floor-smoke.js',          // B1: mutation-sensitive production floor with every model exit disabled
+  'privacy-inference-smoke.js',     // B2/B3: two-sided cohorts + independent-origin aggregation
+  'person-model-temporal-smoke.js', // B5: durable traits require distinct days; dormancy/correction/reactivation
+  'graph-invalidation-smoke.js',    // B6: graph mutations invalidate all affected reader projections
   'governance-smoke.js',           // architectural gravity: proactive DELIVERY lives ONLY in ai/behaviour.js; every surface consumes one pipeline
   'retrieval-smoke.js',            // grounded retrieval over canonical evidence: authorised-before-composition, cited, no-key extractive, full privacy/integrity matrix
   'intake-smoke.js',               // universal evidence intake: one governed ingestion boundary (text/md/pdf/docx/csv/json) → canonical evidence → grounded retrieval; dedup/supersede/delete, provenance, privacy

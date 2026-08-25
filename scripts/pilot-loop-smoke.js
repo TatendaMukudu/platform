@@ -183,12 +183,7 @@ let corrected;
 /* ── 10 · LLM INDEPENDENCE. Every assertion above ran with no model, no key and no network.
    That is the architectural claim: remove the reasoning model and IntelliQ becomes less
    articulate, not less intelligent. ── */
-{
-  const gateway = require('../ai/gateway.js');
-  ok('10 · the whole loop above ran with no model call', typeof gateway.deterministicOnly === 'function');
-  ok('10 · …and the kernel modules import no gateway at all',
-    !Object.keys(require.cache).some(k => /ai[/\\]gateway\.js$/.test(k) && false));
-}
+// Superseded by registered no-llm-floor-smoke, which instruments every model exit.
 
 console.log(`\npilot-loop-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
