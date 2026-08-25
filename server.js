@@ -1945,6 +1945,8 @@ function _removePerson(code, userId, deleteData) {
 
   // 7. Remove user record itself
   delete users[userId];
+  _backfillUserNodeIds();
+  _invalidateOrgProjections(code);
 
   // 8. Hard-delete ALL of this person's data (GDPR Art 17 — right to erasure).
   //    Must leave NO orphaned personal data anywhere, including the raw check-in
@@ -2458,6 +2460,7 @@ async function _commitTreeMutation(code, snapshot, res) {
       return false;
     }
     _backfillUserNodeIds();
+    _invalidateOrgProjections(code);
     return true;
   } catch (err) {
     orgNodes[code] = snapshot;
@@ -3763,6 +3766,7 @@ app.get('/api/workspace/briefing', requireAuth, async (req, res) => {
    ═══════════════════════════════════════════════════════════════════════════ */
 const intelBriefingCache = {}; // `${code}:${userId}` → { data, ts }
 const noticeFeedback = {};     // orgCode → { noticingType → { useful, dismiss } } — the Confidence Engine's memory
+const MIN_COHORT = 2;
 
 /* Confidence Engine read: per-noticing-type reliability, from humans' feedback. */
 function _reliabilityByType(code) {
@@ -4151,15 +4155,26 @@ function _sanitizeBriefingForLeader(data) {
    A Web item is about a cohort, never a disguised person read: no subject id/name,
    raw basis, quote or member count is carried in the artifact. Two independent
    people is the existing minimum aggregate floor for this presentation surface. */
-function _webIntelligence(patternCounts, reliabilityByType, now) {
+function _webIntelligence(patterns, memberCount, reliabilityByType, now) {
   const out = [];
-  for (const [type, count] of Object.entries(patternCounts || {})) {
-    if (count < 2 || !confidence.shouldSurface(reliabilityByType[type])) continue;
+  const CONF = { tentative: 0, emerging: 1, clear: 2 };
+  const SEV = { low: 0, medium: 1, high: 2 };
+  for (const [type, group] of Object.entries(patterns || {})) {
+    const contributions = group.contributions || [];
+    const contributors = new Set(contributions.map(c => c.contributorId).filter(Boolean));
+    const k = contributors.size;
+    if (k < MIN_COHORT || memberCount - k < MIN_COHORT) continue;
+    const decision = contribution.shouldOpenGroupInquiry(contributions, { now });
+    if (!decision.open || !confidence.shouldSurface(reliabilityByType[type])) continue;
+    const findings = group.findings || [];
+    if (!findings.length || findings.some(f => !f.confidence || !f.severity)) continue;
+    const minConfidence = findings.map(f => f.confidence).sort((a, b) => (CONF[a] ?? -1) - (CONF[b] ?? -1))[0];
+    const maxSeverity = findings.map(f => f.severity).sort((a, b) => (SEV[b] ?? -1) - (SEV[a] ?? -1))[0];
     const polarity = proactive.PATTERN_POLARITY[type] || 'neutral';
     const positive = polarity === 'progress' || polarity === 'milestone';
     const label = intel.PATTERN_LABEL[type] || String(type).replace(/_/g, ' ');
     const finding = {
-      type, polarity, severity: positive ? 'low' : 'medium', confidence: 'emerging',
+      type, polarity, severity: maxSeverity, confidence: minConfidence, openingRule: decision.rule,
       render: { leader: {
         headline: positive ? 'A Web High is emerging' : 'A Web Low deserves attention',
         body: `${label} is appearing across your visible scope. This is an aggregate pattern, not a conclusion about any individual.`,
@@ -4167,7 +4182,7 @@ function _webIntelligence(patternCounts, reliabilityByType, now) {
       } },
     };
     const projected = proactive.toInsight(finding, {
-      audience: 'leader', perspective: 'web', reliabilityLabel: confidence.label(reliabilityByType[type]), now,
+      audience: 'leader', subjectRef: 'web:visible-scope', reliabilityLabel: confidence.label(reliabilityByType[type]), now,
     });
     if (proactive.audienceSafe(projected).ok) out.push({ ...projected, kind: positive ? 'high' : 'low' });
   }
@@ -4194,7 +4209,7 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
   const learning = _learningByPattern(code);
 
   const reliabilityByType = _reliabilityByType(code);
-  const items = []; let activeWeek = 0; const patternCounts = {};
+  let activeWeek = 0; const patternGroups = {};
   members.forEach(u => {
     let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { return; }
     if (m.lastActivityT && now - m.lastActivityT < 7 * 86400000) activeWeek++;
@@ -4212,12 +4227,27 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
     const rel = reliabilityByType[item.patternType];
     if (!confidence.shouldSurface(rel)) return;
     item.reliability = confidence.label(rel);
-    findings.forEach(f => { patternCounts[f.type] = (patternCounts[f.type] || 0) + 1; });
-    items.push(item);
+    // Evidence origins stay internal. Unknown origins cannot establish independence.
+    const sources = (evidenceLog[code] || []).filter(e => e.status === 'active' && e.subjectId === u.id &&
+      e.visibility !== 'private' && _isSourceEvidence(e));
+    findings.forEach(f => {
+      const g = patternGroups[f.type] || (patternGroups[f.type] = { findings: [], contributions: [] });
+      g.findings.push(f);
+      sources.forEach(e => g.contributions.push({
+        status: 'contributed', contributorId: u.id, originRef: e.originRef || e.originId || null,
+        authority: e.authority || e.attributes?.authority || 'self_report',
+      }));
+    });
   });
-  const top = _webIntelligence(patternCounts, reliabilityByType, now).slice(0, 15);
+  const top = _webIntelligence(patternGroups, members.length, reliabilityByType, now).slice(0, 15);
 
-  const participation = members.length ? Math.round((activeWeek / members.length) * 100) : 0;
+  const safeParticipation = activeWeek >= MIN_COHORT && members.length - activeWeek >= MIN_COHORT;
+  const participation = safeParticipation ? Math.round((activeWeek / members.length) * 100) : null;
+  const activeThisWeek = safeParticipation ? activeWeek : null;
+  const visibleTypes = new Set(top.map(i => i.patternType));
+  const patternCounts = Object.fromEntries(Object.entries(patternGroups)
+    .filter(([type]) => visibleTypes.has(type))
+    .map(([type, g]) => [type, new Set(g.contributions.map(c => c.contributorId).filter(Boolean)).size]));
   const drops = patternCounts.momentum_drop || 0, ups = patternCounts.quiet_improvement || 0;
   const momentum = drops > ups ? 'softening' : ups > drops ? 'building' : 'steady';
 
@@ -4243,7 +4273,7 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
     summary: top.length
       ? `There are aggregate patterns worth a look across your visible ${_vc(code, 'group')}.`
       : `No aggregate pattern currently clears the privacy and confidence floors for your visible ${_vc(code, 'group')}.`,
-    rollup: { memberCount: members.length, activeThisWeek: activeWeek, participation, momentum, patternCounts },
+    rollup: { memberCount: members.length, activeThisWeek, participation, momentum, patternCounts },
     items: top,
     prompts: [],
   };
@@ -4260,6 +4290,15 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
    (org-wide for a superadmin) with a one-word kernel read each, so a leader can
    scan everyone, not just the flagged few. Deterministic (no AI call), cached. */
 const rosterCache = {}; // `${code}:${userId}` → { data, ts }
+
+function _invalidateOrgProjections(code) {
+  for (const k of Object.keys(rosterCache)) if (k.startsWith(code + ':')) delete rosterCache[k];
+  for (const k of Object.keys(intelBriefingCache)) if (k.startsWith(code + ':')) delete intelBriefingCache[k];
+  for (const k of Object.keys(leaderBriefingCache)) if (k.startsWith(code + ':')) delete leaderBriefingCache[k];
+  if (typeof orgStateCache !== 'undefined') delete orgStateCache[code];
+  if (typeof reasonTickCache !== 'undefined') delete reasonTickCache[code];
+  _reasonNudge(code);
+}
 
 app.get('/api/intelligence/roster', requireAuth, (req, res) => {
   const { orgCode, userId } = req.iqSession;
@@ -8000,7 +8039,11 @@ function _capabilityDims(code, subjectId, polarity, legacyLabel) {
   const obs = _capabilityObservations(code, subjectId, { purpose: 'leader_support', polarity });
   if (obs.length) {
     const counts = {};
-    obs.forEach(o => { const v = String(o.dimension || '').toLowerCase().trim(); if (v) counts[v] = (counts[v] || 0) + 1; });
+    const cutoff = Date.now() - selfModel.STALE;
+    obs.filter(o => new Date(o.at).getTime() >= cutoff).forEach(o => {
+      const v = String(o.dimension || '').toLowerCase().trim();
+      if (v) counts[v] = (counts[v] || 0) + 1;
+    });
     return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k);
   }
   const out = {};
@@ -9867,6 +9910,20 @@ function _orgEvidenceFingerprint(code) {
   return `${n}:${newest}:${changed}:${ctxSig}:${JSON.stringify(orgStateConfig[code] || {}).length}`;
 }
 
+// Only governed structural membership affects this signature. Names and other
+// profile fields are deliberately excluded: they neither change Web scope nor
+// belong in a cache key. Sorting makes equivalent graphs produce one key.
+function _orgGraphFingerprint(code) {
+  return Object.values(orgNodes[code] || {}).map(node => ({
+    nodeId: node.nodeId,
+    parentId: node.parentId || null,
+    leaderIds: [...(node.leaderIds || [])].sort(),
+    memberIds: [...(node.memberIds || [])].sort(),
+  })).sort((a, b) => String(a.nodeId).localeCompare(String(b.nodeId)))
+    .map(node => `${node.nodeId}:${node.parentId || ''}:${node.leaderIds.join(',')}:${node.memberIds.join(',')}`)
+    .join('|');
+}
+
 // The org-state configuration = the CURRENT effective projection of durable records,
 // merged with any dev/test override. This is the cache seam; the durable truth is
 // orgContextRecords.
@@ -9941,7 +9998,7 @@ function _getOrgState({ actor, organisationId, purpose = 'organisation_reasoning
   // orgs + admins). Cache is keyed by scope so different viewers never collide.
   const scope = _visibleScopeFor(code, actor);
   const scopeSig = scope == null ? 'all' : scope.join(',');
-  const key = `${code}|${purpose}|v1|${_orgEvidenceFingerprint(code)}|${scopeSig}`;
+  const key = `${code}|${purpose}|v1|${_orgEvidenceFingerprint(code)}|${_orgGraphFingerprint(code)}|${scopeSig}`;
   const bucket = orgStateCache[code] || (orgStateCache[code] = {});
   const hit = bucket[scopeSig];
   if (hit && hit.key === key) return { ...hit.state, _cache: { hit: true, ageMs: now - hit.builtAt } };
@@ -17401,7 +17458,7 @@ const PORT = process.env.PORT || 3000;
 // Export a minimal surface for the endpoint smoke test (in-process, DB_OPTIONAL).
 // Requiring this module never boots a listener — only running it directly does.
 module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired,
-  _webIntelligence,
+  _webIntelligence, _invalidateOrgProjections, _orgGraphFingerprint,
   // exported for the truth layer: the persistence boundary
   _durableUnits, _applyUnits, _pruneExpiredSessions, _persistedStores, scheduleSave,
   _flushPersistence, _flushAndClose, _gracefulShutdown,
