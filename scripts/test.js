@@ -87,6 +87,7 @@ const SUITES = [
   'web-intelligence-smoke.js',      // W-1: leader roster is neutral; briefing is useful, aggregate, governed Web intelligence
   'no-llm-floor-smoke.js',          // B1: mutation-sensitive production floor with every model exit disabled
   'privacy-inference-smoke.js',     // B2/B3: two-sided cohorts + independent-origin aggregation
+  'origin-independence-smoke.js',   // P0-5′: transformations preserve prime origins; echoes never corroborate
   'person-model-temporal-smoke.js', // B5: durable traits require distinct days; dormancy/correction/reactivation
   'graph-invalidation-smoke.js',    // B6: graph mutations invalidate all affected reader projections
   'governance-smoke.js',           // architectural gravity: proactive DELIVERY lives ONLY in ai/behaviour.js; every surface consumes one pipeline
