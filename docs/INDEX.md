@@ -20,7 +20,8 @@
 
 | Question | Document |
 |---|---|
-| **What must I build next?** | `ttd/pilot-blocker-challenge-and-packets.md` — **ten packets, the only order that matters** |
+| **What must I build next?** | `briefs/codex-pilot-programme.md` — **the work order: seven lanes, a conflict matrix, and the run order** |
+| What is the reasoning behind those lanes? | `ttd/pilot-blocker-challenge-and-packets.md` |
 | What is IntelliQ / what is broken? | `ttd/intelliq-constitution.md` §1, §12, §13 |
 | Is a law enforced? | `ttd/intelliq-ttd-v1.md` |
 | Scope, Web, privacy floors | `ttd/web-semantics-and-continuous-intelligence.md` |
@@ -133,6 +134,7 @@ never silently edited.
 
 | Document | Status |
 |---|---|
+| `briefs/codex-pilot-programme.md` | **CURRENT** — **the work order.** §0 settles TTD-vs-R&D authority; §1 the ground rules; §9 the conflict matrix |
 | `briefs/pr74-final-correction-contract.md` | **CURRENT** — nine corrections with adversarial passes |
 | `briefs/no-llm-capability-matrix.md` | **CURRENT** — Packet 1 |
 | `briefs/web-final-contract.md` | **CURRENT** — W-3, invalidation, W-4 parity (Packets 6, 8, 9) |
