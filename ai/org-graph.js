@@ -69,6 +69,9 @@ function visibleScope(graph, { leaderNodeIds = [], memberNodeIds = [] } = {}) {
     if (!graph.byId.has(n)) continue;
     seen.add(n);
     for (const d of descendants(graph, n)) seen.add(d);
+    // Add only the immediate parent IDs. Traversing from those parents would
+    // silently widen a leader into sibling branches and grandparents.
+    for (const p of (graph.parentsOf.get(n) || [])) seen.add(p);
   }
   for (const n of memberNodeIds) {
     if (!graph.byId.has(n)) continue;

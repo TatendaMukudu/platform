@@ -38,7 +38,11 @@ function actorScope(nodes = [], actor = {}) {
     memberNodeIds: actor.memberNodeIds || graph.scopeOfActor(nodes, userId).memberNodeIds,
   };
   const visibleNodes = graph.visibleScope(g, declared);
-  const role = declared.leaderNodeIds.length ? (visibleNodes.length === g.byId.size && g.byId.size > 0 ? 'top_leader' : 'leader') : 'member';
+  // W-3 can make a branch leader see every node in a shallow graph. Authority
+  // therefore comes from leading a root node, never from incidental coverage.
+  const leadsARootNode = declared.leaderNodeIds.some(
+    n => g.byId.has(n) && (g.parentsOf.get(n) || new Set()).size === 0);
+  const role = declared.leaderNodeIds.length ? (leadsARootNode ? 'top_leader' : 'leader') : 'member';
   return { graph: g, userId, role, leaderNodeIds: declared.leaderNodeIds, memberNodeIds: declared.memberNodeIds, visibleNodes };
 }
 

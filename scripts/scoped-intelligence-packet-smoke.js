@@ -42,9 +42,10 @@ const ids = p => p.queue.map(i => i.id).sort();
 
 ok('CEO packet reaches the full web', ceo.role === 'top_leader' && ['root','sales','salesA','salesB','ops','opsA'].every(n => ceo.visibleNodes.includes(n)));
 ok('CEO can see sales and ops scoped artifacts', ids(ceo).includes('sales-risk') && ids(ceo).includes('ops-risk'));
-ok('branch lead sees own subtree but not sibling branch under CEO', ids(sales).includes('sales-risk') && ids(sales).includes('sales-win') && !ids(sales).includes('ops-risk'));
+ok('branch lead sees own subtree plus parent context but not sibling branch under CEO', sales.visibleNodes.includes('root') && ids(sales).includes('sales-risk') && ids(sales).includes('sales-win') && !ids(sales).includes('ops-risk'));
 ok('other branch lead sees own subtree but not sales branch', ids(ops).includes('ops-risk') && !ids(ops).includes('sales-risk'));
-ok('least leader only sees their immediate led branch below', packet.buildPacket({ actor: { userId: 'salesALead' }, nodes, feed: normalized }).visibleNodes.join(',') === 'salesA');
+ok('least leader sees their led branch and direct parent only', packet.buildPacket({ actor: { userId: 'salesALead' }, nodes, feed: normalized }).visibleNodes.join(',') === 'sales,salesA');
+ok('branch leaders are not promoted to top leader when parent context completes a two-tier graph', packet.actorScope([{ nodeId: 'top', leaderIds: ['topLead'] }, { nodeId: 'team', parentId: 'top', leaderIds: ['teamLead'] }], { userId: 'teamLead' }).role === 'leader');
 ok('member packet includes self and direct parent context, not sibling or grandparent', maya.visibleNodes.includes('salesA') && maya.visibleNodes.includes('sales') && !maya.visibleNodes.includes('root') && !maya.visibleNodes.includes('salesB'));
 ok('member can use own personal artifact', ids(maya).includes('maya-self'));
 ok('member cannot consume sibling branch artifact', !ids(niko).includes('sales-risk') && ids(niko).includes('sales-win'));

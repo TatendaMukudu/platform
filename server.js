@@ -17986,7 +17986,7 @@ const PORT = process.env.PORT || 3000;
 // Export a minimal surface for the endpoint smoke test (in-process, DB_OPTIONAL).
 // Requiring this module never boots a listener — only running it directly does.
 module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired,
-  _webIntelligence, _invalidateOrgProjections, _orgGraphFingerprint,
+  _webIntelligence, _invalidateOrgProjections, _orgGraphFingerprint, getVisibleUserIds,
   // exported for the truth layer: the persistence boundary
   _durableUnits, _applyUnits, _pruneExpiredSessions, _persistedStores, scheduleSave,
   _flushPersistence, _flushAndClose, _gracefulShutdown,
