@@ -4152,6 +4152,12 @@ function _stripLeaderNumbers(s) {
 function _sanitizeBriefingForLeader(data) {
   if (!data) return data;
   const items = (data.items || []).map(it => {
+    // A WEB item is already audience-safe by construction: it named nobody to begin with, and
+    // _webIntelligence checked it against the frozen WEB_ARTIFACT_KEYS allow-list before
+    // emitting it. Running it through the person sanitizer ADDS fields the allow-list forbids
+    // (evidence, patterns, deviations, connections, graph), so the artifact then fails the very
+    // fail-closed check that was built to protect it. Leave it exactly as it was passed.
+    if (it && it.perspective === 'web') return it;
     // Presence of private context is itself private information. Omit the flag
     // rather than setting it false so the leader payload has no side channel.
     const { careFlag: _privateContext, ...safe } = it;
@@ -4227,7 +4233,7 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
   const learning = _learningByPattern(code);
 
   const reliabilityByType = _reliabilityByType(code);
-  let activeWeek = 0; const patternGroups = {};
+  let activeWeek = 0; const patternGroups = {}; const personItems = [];
   members.forEach(u => {
     let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { return; }
     if (m.lastActivityT && now - m.lastActivityT < 7 * 86400000) activeWeek++;
@@ -4245,6 +4251,16 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
     const rel = reliabilityByType[item.patternType];
     if (!confidence.shouldSurface(rel)) return;
     item.reliability = confidence.label(rel);
+    // KEEP the person item. It is what lets a leader act on one person and record what
+    // happened, which is the loop the whole outcome-learning layer feeds on. An earlier pass
+    // computed these and then discarded them, emitting only the aggregate Web items — which
+    // made POST /api/intelligence/act unreachable and left the leader with a page that
+    // reports and cannot be answered. Aggregate reporting and per-person action are two
+    // different jobs and the surface needs both.
+    //
+    // Every privacy correction still applies: _sanitizeBriefingForLeader below strips the
+    // numbers, the raw evidence basis and the careFlag side channel from exactly these items.
+    personItems.push(item);
     // Evidence origins stay internal. Unknown origins cannot establish independence.
     const sources = (evidenceLog[code] || []).filter(e => e.status === 'active' && e.subjectId === u.id &&
       e.visibility !== 'private' && _isSourceEvidence(e));
@@ -4292,7 +4308,8 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
       ? `There are aggregate patterns worth a look across your visible ${_vc(code, 'group')}.`
       : `No aggregate pattern currently clears the privacy and confidence floors for your visible ${_vc(code, 'group')}.`,
     rollup: { memberCount: members.length, activeThisWeek, participation, momentum, patternCounts },
-    items: top,
+    // Aggregate first (the group is the subject), then the people a leader can act on today.
+    items: [...top, ...personItems.slice(0, 15)],
     prompts: [],
   };
   // The Team briefing is ALWAYS leader-facing → strip every per-member NUMBER

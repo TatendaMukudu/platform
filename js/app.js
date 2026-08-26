@@ -6652,11 +6652,22 @@ async function renderIntelligence(refresh) {
     // Attention is not only problems: balance WORTH RECOGNISING (positive patterns the
     // kernel already found) with NEEDS YOUR ATTENTION. Split by the item's own
     // patternType — no new reasoning, just a projection of existing findings.
-    const recognise = (d.items || []).filter(it => it.kind === 'high');
-    const needs     = (d.items || []).filter(it => it.kind !== 'high');
-    const teamSections = (recognise.length || needs.length)
-      ? `${recognise.length ? `<div class="intel-section intel-section--positive"><b>Web Highs</b></div><div class="intel-list">${recognise.map(_intelCard).join('')}</div>` : ''}
-         ${needs.length ? `<details class="intel-collapse" open><summary class="intel-section"><b>Web Lows</b></summary><div class="intel-list">${needs.map(_intelCard).join('')}</div></details>` : ''}`
+    // AGGREGATE and PEOPLE are two different jobs and the page needs both. The Web items say
+    // what is true of the group without naming anyone; the person items are the ones a leader
+    // can actually act on today, and acting is what feeds the outcome loop. Showing only the
+    // aggregate leaves a page that reports and cannot be answered.
+    const web     = (d.items || []).filter(it => it.perspective === 'web');
+    const people  = (d.items || []).filter(it => it.perspective !== 'web');
+    const webHigh = web.filter(it => it.kind === 'high');
+    const webLow  = web.filter(it => it.kind !== 'high');
+    const POSITIVE = new Set(['recovering', 'quiet_improvement']);
+    const recognise = people.filter(it => POSITIVE.has(it.patternType));
+    const needs     = people.filter(it => !POSITIVE.has(it.patternType));
+    const teamSections = (webHigh.length || webLow.length || recognise.length || needs.length)
+      ? `${webHigh.length ? `<div class="intel-section intel-section--positive"><b>Web Highs</b> — patterns across your scope, no one named</div><div class="intel-list">${webHigh.map(_intelCard).join('')}</div>` : ''}
+         ${webLow.length ? `<details class="intel-collapse" open><summary class="intel-section"><b>Web Lows</b> — patterns across your scope, no one named</summary><div class="intel-list">${webLow.map(_intelCard).join('')}</div></details>` : ''}
+         ${recognise.length ? `<div class="intel-section intel-section--positive"><b>Worth recognising</b> — ${recognise.length} ${_v(recognise.length === 1 ? 'member' : 'members')} doing well</div><div class="intel-list">${recognise.map(_intelCard).join('')}</div>` : ''}
+         ${needs.length ? `<details class="intel-collapse" open><summary class="intel-section"><b>Needs your attention</b> — ${needs.length} ${_v(needs.length === 1 ? 'member' : 'members')} could use you</summary><div class="intel-list">${needs.map(_intelCard).join('')}</div></details>` : ''}`
       : `<div class="intel-section"><b>Your ${_v('members')}</b> — all steady this week</div><div class="intel-empty">Nothing needs your attention right now — all steady across your people. When a pattern emerges, it appears here with the evidence and a suggested next step.</div>`;
 
     el.innerHTML = `
@@ -7059,8 +7070,78 @@ function _intelCard(it) {
       ${it.careFlag ? `<div class="intel-care">There may be personal context here — lead with care. Details are kept private.</div>` : ''}
       ${it.suggestion?.text || it.recommendedAction ? `<div class="intel-action"><strong>Consider:</strong> ${_escAdvisor(it.suggestion?.text || it.recommendedAction)}</div>` : ''}
       ${it.learnedNote ? `<div class="intel-learned">${_escAdvisor(it.learnedNote)}</div>` : ''}
-      ${it.perspective !== 'web' ? `<div class="intel-cta" id="intel-cta-${it.memberId}"><button class="intel-btn intel-btn-ghost" onclick="showProfile('${it.memberId}')">Open profile</button></div>` : ''}
+      ${it.perspective !== 'web' && it.memberId ? `<div class="intel-cta" id="intel-cta-${it.memberId}">
+        <button class="intel-btn" onclick="intelAct('${it.memberId}','${it.patternType || ''}',this)">I acted on this</button>
+        <button class="intel-btn intel-btn-ghost" onclick="showProfile('${it.memberId}')">Open profile</button>
+        <button class="intel-btn intel-btn-ghost" title="Teaches the system this kind of flag isn't useful here" onclick="intelDismiss('${it.patternType || ''}','${it.memberId}',this)">Not useful</button>
+      </div>` : ''}
     </div>`;
+}
+
+/* ── THE LEADER'S OUTCOME LOOP ───────────────────────────────────────────────
+   Notice, act, say what happened, learn. Restored after a pass that emitted only
+   aggregate Web items and left POST /api/intelligence/act with no caller in the
+   entire front end — an outcome loop the pilot exists to test, unreachable.
+
+   These act on PERSON items only. A Web item names nobody, so there is nobody to
+   act on and no card renders these buttons. */
+async function intelAct(memberId, patternType, btn) {
+  const action = prompt('What did you do? A quick note of the action you took:');
+  if (!action || !action.trim()) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const res = await fetch('/api/intelligence/act', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
+      body: JSON.stringify({ orgCode: AppState.orgCode, memberId, patternType, action }),
+    });
+    const d = await res.json();
+    if (!res.ok || !d.ok) throw new Error(d.error || 'failed');
+    // Acting on a flag teaches the Confidence Engine it was useful.
+    if (patternType) intelNoticeFeedback(patternType, 'useful');
+    const cta = document.getElementById('intel-cta-' + memberId);
+    if (cta) cta.innerHTML = `
+      <span class="intel-logged">Logged — how did it go?</span>
+      <button class="intel-oc" onclick="intelOutcome('${d.interventionId}','positive',this)">Helped</button>
+      <button class="intel-oc" onclick="intelOutcome('${d.interventionId}','neutral',this)">No change</button>
+      <button class="intel-oc" onclick="intelOutcome('${d.interventionId}','negative',this)">Worse</button>`;
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'I acted on this'; }
+    showToast('Could not log the action', 'warning');
+  }
+}
+
+/* Teach the Confidence Engine which kinds of noticing are useful here. */
+async function intelNoticeFeedback(type, feedback) {
+  if (!type) return;
+  try {
+    await fetch('/api/intelligence/notice-feedback', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
+      body: JSON.stringify({ orgCode: AppState.orgCode, type, feedback }),
+    });
+  } catch (_) { /* fire-and-forget */ }
+}
+
+async function intelDismiss(type, memberId, btn) {
+  intelNoticeFeedback(type, 'dismiss');
+  const card = btn?.closest('.intel-card');
+  if (card) { card.style.opacity = '0.45'; const cta = document.getElementById('intel-cta-' + memberId); if (cta) cta.innerHTML = `<span class="intel-logged">Noted — you'll see less of this kind here.</span>`; }
+}
+
+async function intelOutcome(interventionId, outcome, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/intelligence/outcome', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
+      body: JSON.stringify({ orgCode: AppState.orgCode, interventionId, outcome }),
+    });
+    const d = await res.json();
+    if (!res.ok || !d.ok) throw new Error();
+    const p = btn?.parentElement;
+    if (p) p.innerHTML = `<span class="intel-logged">Outcome recorded — the system learns from this for similar patterns.</span>`;
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    showToast('Could not record the outcome', 'warning');
+  }
 }
 
 /* Self-relative deviation chip — "vs their OWN normal", the Behaviour Engine view. */

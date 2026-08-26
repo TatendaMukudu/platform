@@ -20,8 +20,19 @@ const server=S.app.listen(0,async()=>{const base=`http://127.0.0.1:${server.addr
  const roster=await call('/api/intelligence/roster?refresh=1',lead); const blob=JSON.stringify(roster.j);
  ok('roster retains neutral identities without behavioral labels',roster.status===200&&roster.j.roster.length===4&&!/topLabel|"status"|Gone quiet|Pulling away|invisible load/.test(blob));
  const brief=await call('/api/intelligence/briefing?refresh=1',lead);
- ok('briefing returns useful governed aggregate intelligence',brief.status===200&&brief.j.items.length>0&&brief.j.items.every(i=>i.perspective==='web'&&i.subjectId==null));
- ok('briefing exposes no person or private evidence',!/Alice|Bob|origin:a6|"basis":\[[^\]]+/.test(JSON.stringify(brief.j)));
+ // The briefing carries BOTH: aggregate Web items that name nobody, and the people this
+ // leader is responsible for. The original form of this assertion required every item to be
+ // a Web item, which encoded "the leader may not see individuals" as law. That is not the
+ // architecture's position anywhere else — the roster endpoint names the same people, the
+ // assistant answers "how is Jordan doing", and /api/intelligence/act takes a memberId — and
+ // making one payload aggregate-only left the outcome loop with no caller. So the property is
+ // split: what must hold of a WEB item, and what must hold of the payload as a whole.
+ ok('briefing carries governed aggregate intelligence',brief.status===200&&brief.j.items.length>0&&brief.j.items.some(i=>i.perspective==='web'));
+ ok('every Web item is subject-free',brief.j.items.filter(i=>i.perspective==='web').every(i=>i.subjectId==null&&proactive.audienceSafe(i).ok));
+ ok('a person item names someone this leader is responsible for',brief.j.items.some(i=>i.perspective!=='web'&&/Alice|Bob/.test(JSON.stringify(i))));
+ // The three properties that must hold whether or not people are named: no private origin,
+ // no raw evidence basis, and nobody outside the reader's scope — here, another org's member.
+ ok('briefing exposes no private origin, no raw basis, and nobody outside scope',!/origin:a6|"basis":\[[^\]]+|Secret Other/.test(JSON.stringify(brief.j)));
  ok('ordinary member cannot call leader surfaces',(await call('/api/intelligence/briefing',member)).status===403&&(await call('/api/intelligence/roster',member)).status===403);
  const ob=await call('/api/intelligence/briefing?refresh=1',other); ok('tenant isolation holds',ob.status===200&&!/Alice|Bob|origin:a6/.test(JSON.stringify(ob.j)));
 }catch(e){fail++;console.log('  ✗ suite threw',e.message)}finally{server.close();console.log(`\nweb-intelligence-smoke: ${pass} passed, ${fail} failed`);process.exit(fail?1:0)}});

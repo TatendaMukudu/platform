@@ -554,6 +554,24 @@ const inq = (o = {}) => ({
       /\/api\/inquiry\/lead/.test(app) && /_renderLeadInquiry\(\)/.test(app));
     ok('13 · …and it says where the question came from', /About you/.test(app) && /linq-head/.test(app));
     ok('13 · the open-question strip has styles', /\.linq-card\{/.test(css));
+
+    // THE LOOP THE PILOT EXISTS TO TEST. An earlier pass emitted only aggregate Web items,
+    // which left POST /api/intelligence/act with no caller anywhere in the front end: the
+    // leader could read a page and could not answer it, and the Confidence Engine stopped
+    // receiving the feedback it learns from. Nothing went red, because no assertion asked
+    // whether a server route still had a caller. This one does.
+    const srv = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+    for (const route of ['/api/intelligence/act', '/api/intelligence/outcome', '/api/intelligence/notice-feedback']) {
+      const declared = srv.includes(`app.post('${route}'`);
+      const called = app.includes(`fetch('${route}'`);
+      ok(`13 · ${route} is declared AND reachable from the UI`, declared && called);
+    }
+    ok('13 · the leader can record that they acted, and how it went',
+      /function intelAct\(/.test(app) && /function intelOutcome\(/.test(app));
+    ok('13 · aggregate and person items are rendered as different things',
+      /perspective === 'web'/.test(app) && /Needs your attention/.test(app));
+    ok('13 · only a person item carries the act buttons — a Web item names nobody',
+      /it\.perspective !== 'web' && it\.memberId \?/.test(app));
   }
 
   // ── 14. THE ONE RANKING OVER SELF AND TEAM ─────────────────────────────────────────────────
