@@ -27,6 +27,7 @@ const orgMemory  = require('./ai/org-memory');
 const orgGraph   = require('./ai/org-graph');
 const orgAnswer  = require('./ai/org-answer');
 const orgRouting = require('./ai/org-routing');
+const teamState  = require('./ai/team-state');
 const conversation   = require('./ai/conversation');
 const assessmentView = require('./ai/assessment-view');
 const orgLearning= require('./ai/org-learning');
@@ -192,7 +193,7 @@ function _persistedStores() {
     orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
     reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
     conversationSessions, assistantConversations, libraryFolders, libraryItems, safeguardingFlags,
-    inquiryStates, groupCandidates, forumThreads,
+    inquiryStates, groupCandidates, forumThreads, teamFocuses,
   };
 }
 
@@ -2041,6 +2042,19 @@ function _removePerson(code, userId, deleteData) {
         .map(c => (c.contributorId === userId
           ? { ...c, contributorId: '(erased)', contributorVisibility: 'anonymous', fromSubject: null }
           : c));
+    }
+
+    /* A team Focus is the GROUP'S commitment, so the commitment survives — but who set it is
+       personal data and is unlinked, exactly as a contribution's contributor is. The provenance
+       shape is preserved rather than deleted: a Focus that loses its `origin` entirely would
+       become indistinguishable from one created before origin existed, and outcome learning
+       would silently start crediting it to the system. */
+    for (const list of Object.values(teamFocuses[code] || {})) {
+      for (let i = 0; i < list.length; i++) {
+        const f = list[i];
+        if (f.origin && f.origin.by === userId) f.origin = { ...f.origin, by: '(erased)' };
+        if (f.outcome && f.outcome.recordedBy === userId) f.outcome = { ...f.outcome, recordedBy: '(erased)' };
+      }
     }
 
     // Beliefs held ABOUT them. Org-level beliefs (no subject) are not personal
@@ -12664,6 +12678,12 @@ app.post('/api/group/:nodeId/contribute', requireAuth, (req, res) => {
   cand.contributedAt = Date.now();
   cand.contributorRole = leads ? 'leader' : 'member';
   cand.contributorVisibility = (req.body || {}).contributorVisibility === 'anonymous' ? 'anonymous' : 'named';
+  // Whether this is something working well or something worth attention is the CONTRIBUTOR'S
+  // call, recorded here with the same provenance as the rest of the contribution. The system
+  // does not classify it: a sentiment lexicon deciding a team's Highs and Lows is the same
+  // mistake as the one that destroyed meaning at the Self layer, made at group scale where
+  // being wrong is more expensive. Absent or unrecognised means 'unsure', which decides nothing.
+  cand.valence = teamState.VALENCES.includes((req.body || {}).valence) ? (req.body || {}).valence : 'unsure';
   cand.explicitOpen = leads && (req.body || {}).open === true;
   cand.fromSubject = `member:${userId}`;
 
@@ -12723,23 +12743,27 @@ app.post('/api/group/:nodeId/candidates/:candidateId/dismiss', requireAuth, (req
    inquiry to leak. What comes back is the shape of the understanding — hypotheses, confidence,
    how many independent origins it rests on, what is still unknown — which is what a group can
    act on and contains nobody's words. */
-app.get('/api/group/:nodeId/inquiry', requireAuth, (req, res) => {
-  const { orgCode: code, userId } = req.iqSession;
-  const nodeId = String(req.params.nodeId);
+/* The group's inquiries, projected once and shared by every reader of them. Extracted so the
+   team-grain surface below cannot drift into a second, subtly different projection of the same
+   state — which is how two views of one truth start disagreeing about what the group believes. */
+function _groupInquiryProjections(code, nodeId) {
   const subject = _groupSubjectRef(code, nodeId);
-  if (!subject.ok) return res.status(404).json({ error: subject.error });
-  if (!_inNode(code, nodeId, userId) && !_leadsNode(code, nodeId, userId)) {
-    return res.status(403).json({ error: 'not part of this group' });
-  }
-
+  if (!subject.ok) return [];
   const bySubject = (inquiryStates[code] || {})[subject.subjectRef] || {};
-  const inquiries = Object.values(bySubject).filter(i => i && (i.signals || []).length && !i.parkedAt).map(i => {
+  return Object.values(bySubject).filter(i => i && (i.signals || []).length && !i.parkedAt).map(i => {
     const hyps = i.hypotheses || [];
     const lead = hyps.find(h => h.id === i.leadingHypothesisId) || null;
     const sig = (i.signals || []).filter(s => s.kind !== 'interpretation');
     const active = sig.filter(s => diagnose.isActive(s));
+    // Valence, derived from what the contributors called it — never from the text. Contested
+    // is a first-class outcome, not a tie to be broken: if people described the same thing in
+    // opposite directions, the group does not agree yet, and reporting it as a High or a Low
+    // would settle on the leader's behalf a disagreement they are the one who should see.
+    const forThis = _groupCands(code).filter(c => c.nodeId === nodeId && c.concept === ((i.topic && i.topic.canonicalConcept) || ''));
+    const val = teamState.valenceOf(forThis);
     return {
       inquiryId: i.inquiryId, topic: i.topic, status: i.status,
+      polarity: val.polarity, contested: val.contested, valenceReason: val.reason,
       hypothesis: lead ? lead.statement : null,
       alternatives: hyps.filter(h => h !== lead).map(h => ({ statement: h.statement, band: h.confidence.band, status: h.status })),
       confidence: i.confidence,
@@ -12758,10 +12782,144 @@ app.get('/api/group/:nodeId/inquiry', requireAuth, (req, res) => {
       lastUpdatedAt: i.lastUpdatedAt,
     };
   }).sort((a, b) => b.confidence.score - a.confidence.score);
+}
 
+/* Everyone who may read this group's own state: its members and its leaders. Deliberately NOT
+   "anyone whose Web reaches this node" — a leader two tiers up sees the node through the scoped
+   projection, which is where the aggregate floors are applied. This door is the group reading
+   itself, which is a different question with a different answer. */
+function _mayReadGroup(code, nodeId, userId) {
+  return _inNode(code, nodeId, userId) || _leadsNode(code, nodeId, userId);
+}
+
+app.get('/api/group/:nodeId/inquiry', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const subject = _groupSubjectRef(code, nodeId);
+  if (!subject.ok) return res.status(404).json({ error: subject.error });
+  if (!_mayReadGroup(code, nodeId, userId)) {
+    return res.status(403).json({ error: 'not part of this group' });
+  }
+
+  const inquiries = _groupInquiryProjections(code, nodeId);
   _audit(code, { actor: userId, action: 'agenda_view', subjectIds: [], basis: 'group_inquiry' });
   res.json({ ok: true, node: { nodeId, name: subject.node.name }, inquiries,
     note: 'Built only from what people deliberately contributed. Nothing private enters here.' });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TEAM FOCUS — a group's commitment, with an origin and an outcome
+
+   Origin exists from the first record on purpose. It cannot be back-filled: what a Focus was
+   created OUT OF is not recoverable from anything else the system holds once the record exists
+   without it. And `from` — proposed out of an inquiry, or simply decided by a leader — is what
+   stops outcome learning from crediting the system for a coach's own idea, which would make
+   every efficacy number afterwards wrong in a direction nobody could detect.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* code → { nodeId → [focus] }. Org-partitioned at the top level like every other store here. */
+const teamFocuses = {};
+const _teamFocuses = (code, nodeId) => {
+  const byNode = (teamFocuses[code] = teamFocuses[code] || {});
+  return (byNode[nodeId] = byNode[nodeId] || []);
+};
+
+/* POST /api/group/:nodeId/focus — { text, fromInquiryId?, reviewAt? }
+   Leaders only. A Focus is a commitment the group is asked to act on; a member proposing one is
+   a different object (a question, which already has a route upward) and must not be conflated. */
+app.post('/api/group/:nodeId/focus', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const subject = _groupSubjectRef(code, nodeId);
+  if (!subject.ok) return res.status(404).json({ error: subject.error });
+  if (!_leadsNode(code, nodeId, userId)) return res.status(403).json({ error: 'only a leader of this group may set its focus' });
+
+  const text = String((req.body || {}).text || '').trim().slice(0, 300);
+  if (!text) return res.status(400).json({ error: 'text required' });
+
+  // A named origin inquiry must actually be this group's. Accepting an unverified id would let
+  // a Focus claim it came out of evidence that does not exist, which is the one lie this field
+  // exists to make impossible.
+  const fromInquiryId = String((req.body || {}).fromInquiryId || '').trim();
+  let originInquiry = null;
+  if (fromInquiryId) {
+    const bySubject = (inquiryStates[code] || {})[subject.subjectRef] || {};
+    originInquiry = Object.values(bySubject).find(i => i && i.inquiryId === fromInquiryId) || null;
+    if (!originInquiry) return res.status(404).json({ error: 'no such inquiry for this group' });
+  }
+
+  const now = Date.now();
+  const focus = {
+    focusId: 'tf_' + generateId(),
+    nodeId, text, status: 'active',
+    createdAt: now,
+    reviewAt: Number.isFinite(Number((req.body || {}).reviewAt)) ? Number((req.body || {}).reviewAt) : null,
+    origin: {
+      by: userId,
+      at: now,
+      from: originInquiry ? 'inquiry' : 'leader',
+      inquiryId: originInquiry ? originInquiry.inquiryId : null,
+    },
+    outcome: null,
+  };
+  _teamFocuses(code, nodeId).unshift(focus);
+  _audit(code, { actor: userId, action: 'team_focus_set', subjectIds: [], basis: focus.origin.from });
+  scheduleSave();
+  res.json({ ok: true, focus: teamState.normalizeFocus(focus) });
+});
+
+/* POST /api/group/:nodeId/focus/:focusId/outcome — { result, note?, status? }
+   What actually happened. `unclear` is a first-class answer and the surface says so: a focus
+   that ran alongside six other changes has an honest result of "we cannot separate it", and
+   recording that is worth more than a guess that later gets counted as evidence. */
+app.post('/api/group/:nodeId/focus/:focusId/outcome', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const subject = _groupSubjectRef(code, nodeId);
+  if (!subject.ok) return res.status(404).json({ error: subject.error });
+  if (!_leadsNode(code, nodeId, userId)) return res.status(403).json({ error: 'only a leader of this group may close its focus' });
+
+  const focus = _teamFocuses(code, nodeId).find(f => f.focusId === String(req.params.focusId));
+  if (!focus) return res.status(404).json({ error: 'focus not found' });
+
+  const result = teamState.OUTCOME_RESULTS.includes((req.body || {}).result) ? (req.body || {}).result : 'unclear';
+  focus.outcome = {
+    result, note: String((req.body || {}).note || '').trim().slice(0, 300),
+    recordedBy: userId, at: Date.now(),
+  };
+  const status = (req.body || {}).status;
+  focus.status = teamState.FOCUS_STATUSES.includes(status) ? status : 'done';
+  _audit(code, { actor: userId, action: 'team_focus_outcome', subjectIds: [], basis: result });
+  scheduleSave();
+  res.json({ ok: true, focus: teamState.normalizeFocus(focus) });
+});
+
+/* GET /api/group/:nodeId/state — THE TEAM-GRAIN SURFACE
+
+   High, Low, Inquiry, Focus, and what IntelliQ can honestly say about the gap between them.
+   Assembly only: every claim here was established by the kernel before this endpoint ran, and
+   ai/team-state.js can narrow one but never strengthen one.
+
+   `withheld` is returned rather than dropped. A leader told "there is a finding here, but too
+   few people have spoken for it to be said without pointing at individuals" can act on that —
+   they can ask more people. A leader shown nothing concludes there is nothing. */
+app.get('/api/group/:nodeId/state', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const subject = _groupSubjectRef(code, nodeId);
+  if (!subject.ok) return res.status(404).json({ error: subject.error });
+  if (!_mayReadGroup(code, nodeId, userId)) {
+    return res.status(403).json({ error: 'not part of this group' });
+  }
+
+  const state = teamState.buildTeamState({
+    node: { nodeId, name: subject.node.name, memberCount: _nodeMembers(code, nodeId).length },
+    inquiries: _groupInquiryProjections(code, nodeId),
+    focuses: _teamFocuses(code, nodeId),
+    now: Date.now(),
+  });
+  _audit(code, { actor: userId, action: 'team_state_view', subjectIds: [], basis: 'group_state' });
+  res.json({ ok: true, ...state });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -17367,6 +17525,7 @@ function _loadAllStores(data) {
   Object.assign(safeguardingFlags, data.safeguardingFlags || {});
   Object.assign(groupCandidates, data.groupCandidates || {});
   Object.assign(forumThreads,   data.forumThreads   || {});
+  Object.assign(teamFocuses,    data.teamFocuses    || {});
   _rebuildEvidenceIndex();
   for (const code of Object.keys(evidenceLog)) {
     if ((evidenceLog[code] || []).length > EVIDENCE_LOG_CAP) _scheduleEvidenceEviction(code);
@@ -17417,6 +17576,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: the group contribution boundary
   groupCandidates, orgNodes, _groupSubjectRef, _noteGroupCandidates, _admitGroupContributions,
   _inNode, _leadsNode, forumThreads, _forumThread,
+  teamFocuses, _teamFocuses, _groupInquiryProjections, _mayReadGroup,
   reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library
   // a routed share lands in
