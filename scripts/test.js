@@ -86,6 +86,7 @@ const SUITES = [
   'proactive-smoke.js',            // the proactive surfacing layer: post-kernel ProactiveInsight projection, surfacing policy, audience safety, bounded preferences
   'web-intelligence-smoke.js',      // W-1: leader roster is neutral; briefing is useful, aggregate, governed Web intelligence
   'web-scope-w3-smoke.js',          // W-3: leaders gain direct-parent context without sibling/grandparent/person/private expansion
+  'scope-parity-smoke.js',          // W-4 measurement: names current governance/Web scope divergences without migrating them
   'no-llm-floor-smoke.js',          // Lane A: twenty mutation-sensitive HTTP capabilities with every model exit disabled AND dummy credentials present, so the SWITCH is what is proven, not the absence of a key
   'non-interference-smoke.js',      // Lane C: private context cannot alter leader briefing, register, or recommendation
   'privacy-inference-smoke.js',     // B2/B3: two-sided cohorts + independent-origin aggregation
