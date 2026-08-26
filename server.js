@@ -13064,20 +13064,13 @@ app.post('/api/group/:nodeId/focus', requireAuth, (req, res) => {
     if (!originInquiry) return res.status(404).json({ error: 'no such inquiry for this group' });
   }
 
-  const now = Date.now();
-  const focus = {
-    focusId: 'tf_' + generateId(),
-    nodeId, text, status: 'active',
-    createdAt: now,
-    reviewAt: Number.isFinite(Number((req.body || {}).reviewAt)) ? Number((req.body || {}).reviewAt) : null,
-    origin: {
-      by: userId,
-      at: now,
-      from: originInquiry ? 'inquiry' : 'leader',
-      inquiryId: originInquiry ? originInquiry.inquiryId : null,
-    },
-    outcome: null,
-  };
+  // ONE constructor, shared with the demo seed — see ai/team-state.js newFocus. Building the
+  // record inline here as well would be a second definition of what a Focus is, and a seeded
+  // record in a shape the real path could never produce diverges silently.
+  const focus = teamState.newFocus({
+    focusId: 'tf_' + generateId(), nodeId, text, by: userId, now: Date.now(),
+    reviewAt: (req.body || {}).reviewAt, inquiry: originInquiry,
+  });
   _teamFocuses(code, nodeId).unshift(focus);
   _audit(code, { actor: userId, action: 'team_focus_set', subjectIds: [], basis: focus.origin.from });
   scheduleSave();
@@ -13098,13 +13091,12 @@ app.post('/api/group/:nodeId/focus/:focusId/outcome', requireAuth, (req, res) =>
   const focus = _teamFocuses(code, nodeId).find(f => f.focusId === String(req.params.focusId));
   if (!focus) return res.status(404).json({ error: 'focus not found' });
 
-  const result = teamState.OUTCOME_RESULTS.includes((req.body || {}).result) ? (req.body || {}).result : 'unclear';
-  focus.outcome = {
-    result, note: String((req.body || {}).note || '').trim().slice(0, 300),
-    recordedBy: userId, at: Date.now(),
-  };
-  const status = (req.body || {}).status;
-  focus.status = teamState.FOCUS_STATUSES.includes(status) ? status : 'done';
+  const body = req.body || {};
+  teamState.recordFocusOutcome(focus, {
+    result: body.result, note: body.note, by: userId, now: Date.now(),
+    status: teamState.FOCUS_STATUSES.includes(body.status) ? body.status : 'done',
+  });
+  const result = focus.outcome.result;
   _audit(code, { actor: userId, action: 'team_focus_outcome', subjectIds: [], basis: result });
   scheduleSave();
   res.json({ ok: true, focus: teamState.normalizeFocus(focus) });

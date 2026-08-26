@@ -237,6 +237,33 @@ function openQuestion(inquiries = [], { alreadyShown = [] } = {}) {
    simply decided on. Without the distinction, outcome learning silently credits the
    system for a coach's own idea, and every efficacy number afterwards is wrong in a
    direction nobody can detect. */
+/* THE ONE PLACE A TEAM FOCUS IS CONSTRUCTED. Extracted here, and used by the server route and
+   by the demo seed alike, so there is exactly one definition of what a Focus is. Two
+   constructors is how a seeded record ends up in a shape the real path could never produce —
+   which then diverges silently, in front of a customer.
+
+   `from` is derived from whether an originating inquiry was actually supplied. It is never
+   passed in, because a caller that can declare its own origin can claim the system proposed
+   what the leader in fact decided alone, and outcome learning would credit itself. */
+function newFocus({ focusId, nodeId, text, by, now = Date.now(), reviewAt = null, inquiry = null } = {}) {
+  return {
+    focusId: _s(focusId, 64), nodeId: _s(nodeId, 64), text: _s(text, 300), status: 'active',
+    createdAt: now, reviewAt: Number.isFinite(Number(reviewAt)) ? Number(reviewAt) : null,
+    origin: { by: _s(by, 64) || null, at: now, from: inquiry ? 'inquiry' : 'leader',
+      inquiryId: inquiry ? _s(inquiry.inquiryId, 64) : null }, outcome: null,
+  };
+}
+
+/* Closing the loop. An unrecognised result becomes `unclear` rather than the value supplied:
+   a focus that ran alongside six other changes honestly cannot be separated, and recording
+   that is worth more than a guess which later counts as evidence. */
+function recordFocusOutcome(focus, { result, note = '', by, now = Date.now(), status = 'done' } = {}) {
+  focus.outcome = { result: OUTCOME_RESULTS.includes(result) ? result : 'unclear',
+    note: _s(note, 300), recordedBy: _s(by, 64) || null, at: now };
+  focus.status = FOCUS_STATUSES.includes(status) ? status : 'done';
+  return focus;
+}
+
 function normalizeFocus(focus = {}) {
   const origin = focus.origin || {};
   const outcome = focus.outcome || null;
@@ -410,6 +437,6 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
 
 module.exports = {
   VALENCES, POLARITY, MIN_COHORT, MIN_ORIGINS, FOCUS_STATUSES, OUTCOME_RESULTS,
-  valenceOf, cohortFloor, fitForSurface, openQuestion, normalizeFocus,
+  valenceOf, cohortFloor, fitForSurface, openQuestion, newFocus, recordFocusOutcome, normalizeFocus,
   statementFor, buildTeamState,
 };
