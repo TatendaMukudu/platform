@@ -471,3 +471,183 @@ For each lane, in the commit body and once at the end:
    to earlier claims made with confidence. Finding a sixth is a good outcome, not a problem.
 4. Anything you did **not** do, and why. A lane finished at 70% and reported as done is the worst
    outcome available.
+
+---
+
+# PHASE 2 — the last stretch to the pilot
+
+**Everything above is done except Lane G and half of Lane E.** Phase 2 finishes those and adds
+the three things that actually decide whether the demo works on the day.
+
+**Before starting anything in Phase 2:**
+
+```
+git fetch origin && git rebase origin/claude/platform-work-summary-nmb0cm
+```
+
+Lane A was implemented twice because a branch was cut twenty minutes before the status block
+that would have prevented it. Rebasing first costs nothing and prevents that entirely.
+
+---
+
+## H1 · LANE G — the gateway (unchanged from §8, restated for convenience)
+
+**Independent of everything. Small, and it is a live cost risk the moment a real org starts using
+the product.**
+
+1. **Move `_llmBudgetOk` inside the gateway.** Grep it in `server.js`. Fixing call sites one by
+   one is one chance per site to miss one; moving the check into `ai/gateway.js` fixes them all
+   and makes the next call site safe by default.
+2. **`canTranscribe()` must respect `IQ_DETERMINISTIC_ONLY`.** A no-egress org is advertised a
+   capability it has disabled. `understand` and `transcribe` are latent (no caller); only
+   `canTranscribe()` is live. Do not "fix" the latent ones.
+3. **Token-denominated telemetry.** A call counter cannot distinguish 160 tokens from 4,000, and
+   without that the cost of a pilot cannot be forecast at all.
+
+**Acceptance.** A new `scripts/gateway-budget-smoke.js`. At minimum: a call made with the budget
+exhausted is refused *inside the gateway* rather than at the call site; `canTranscribe()` returns
+false under the deterministic switch; and token counts accumulate per org. Mutation-test each.
+
+**Do not** re-tier any call site to a cheaper model. The integrity benchmark runs first.
+
+---
+
+## H2 · LANE E — finish the Web scope work
+
+**Strictly serial. Contract: `docs/briefs/web-final-contract.md`.**
+
+E2 (invalidation) landed. Two things did not:
+
+### H2a · W-3 — a leader gains direct parents
+
+Founder law FW-2. In `ai/org-graph.js` `visibleScope`, the **member** loop already adds direct
+parents. The **leader** loop does not, and that is the change:
+
+```js
+for (const n of leaderNodeIds) {
+  if (!graph.byId.has(n)) continue;
+  seen.add(n);
+  for (const d of descendants(graph, n)) seen.add(d);
+  for (const p of (graph.parentsOf.get(n) || [])) seen.add(p);   // W-3: one level up
+}
+```
+
+**It comes with a regression that must be fixed in the same change.** `ai/scoped-intelligence-packet.js`
+derives the role by comparing set sizes:
+
+```js
+const role = declared.leaderNodeIds.length
+  ? (visibleNodes.length === g.byId.size && g.byId.size > 0 ? 'top_leader' : 'leader')
+  : 'member';
+```
+
+Once a leader can see one level up, in a two-tier organisation every node leader's visible set
+equals the whole graph, so **every coach becomes `top_leader`**. Derive the role from something
+that is actually true of a top leader — leading a node with no parents — not from a size
+comparison that W-3 invalidates.
+
+**Correction already recorded, do not repeat it:** `scripts/org-graph-smoke.js` does **not** need
+amending — measured 18/18 pass. The suite that changes is
+`scripts/scoped-intelligence-packet-smoke.js`.
+
+Eight invariants are listed in the contract. Implement all eight.
+
+### H2b · W-4 parity harness
+
+**No production change.** A new test file that enumerates where `orgGraph`, `getVisibleUserIds`
+and `_inNode`/`_leadsNode` disagree, across the 71 audited scope call sites. It measures the
+divergence so a later migration is safe. **Do not migrate anything.**
+
+---
+
+## H3 · THE PILOT REHEARSAL — a seeded organisation that walks the whole loop
+
+**The highest-value item in Phase 2, and the one nothing has ever proven.**
+
+Every suite in this repository tests a slice. Nothing has ever run the product as a deployment:
+one organisation, real people, from an empty database to a screen a coach would recognise. Until
+that runs, "ready for the pilot" is an inference from unit tests.
+
+### The build
+
+A new `scripts/pilot-rehearsal.js`. Not a smoke test — a **scripted deployment** that starts from
+an empty store and drives production HTTP routes only, in the order a real month would happen:
+
+1. Create the organisation and its tree. One team node under one parent. A coach who leads it,
+   twelve members in it. This is deliberately a shape that is neither Falcon nor Alma
+   specifically — a node is a node.
+2. Members talk to IntelliQ over `/api/assistant/turn` across several distinct days. Some
+   material is personal, some uses collective language.
+3. Members read their own noticings at `/api/group/:nodeId/candidates` and contribute some of
+   them at `/api/group/:nodeId/contribute` with a declared valence. **Some decline.** At least
+   one is withdrawn afterwards.
+4. A second independent origin arrives for one concept, so a group inquiry opens on the rule
+   rather than on a fixture.
+5. The coach reads `/api/inquiry/lead`, `/api/group/:nodeId/state` and
+   `/api/intelligence/briefing`, and asks the assistant "how is the team doing?".
+6. The coach sets a team Focus from the open inquiry, and later records its outcome.
+7. The coach acts on one person item and records how it went.
+8. One member is removed with erasure. Every read is taken again.
+
+### What it must assert
+
+Not "did it return 200". At each step, **what a human would see**:
+
+- after step 4, the team surface reports a Low with a real basis, not an empty screen
+- after step 5, the assistant's answer names no individual
+- after step 6, `IntelliQ:` says something specific about what is not yet known
+- after step 8, the removed person is gone from every read with no TTL wait, and the group keeps
+  the finding they contributed
+
+### What it must print
+
+A transcript. The literal text a coach would read at each step, to stdout, so a human can look at
+it and say whether it is any good. **That output is the deliverable as much as the pass/fail.**
+
+### The honest part
+
+Report what the rehearsal shows, including if it is thin. If the screen is empty at step 5, say
+so — that is the finding, and it is far better to have it now than on the day.
+
+---
+
+## H4 · SEED DATA THAT REACHES THE NEW SURFACES
+
+`scripts/seed-club.js` and `scripts/seed.js` predate group inquiries, contribution valence, team
+Focus and the team-grain surface. A demo seeded with them opens on an empty team screen.
+
+Extend the existing seed — do not write a third one — so that a freshly seeded organisation
+already has: one open group inquiry with two independent origins, one contributed High, one
+contributed Low, one team Focus with an outcome recorded, and at least one finding **withheld**
+by the cohort floor so the "not shown yet" path is visible.
+
+**Seeded state must be produced by calling the same functions the product calls.** A seed that
+writes `inquiryStates` directly creates records the real path could never produce, and the first
+time that diverges it will do so silently in front of a customer.
+
+---
+
+## H5 · WHAT ONLY A HUMAN OR A BROWSER CAN DO
+
+Out of scope for Codex, recorded so it is not assumed done:
+
+- **Nothing has been opened in a browser.** The front-end assertions are structural — they catch
+  a route losing its caller, not a layout that is broken or unreadable.
+- **Live PostgreSQL CAS and stale-delete** need `DATABASE_URL`.
+- **Render overlap and drain** need a staging environment.
+
+---
+
+## H6 · ORDER
+
+```
+H1 (gateway)  ─┐
+H2 (W-3, then parity) ─┼→ H3 (rehearsal) → H4 (seed, informed by what the rehearsal showed)
+```
+
+H1 and H2 are independent of each other and of H3's design, but **H3 must run after them** so the
+rehearsal exercises the final scope rules rather than the current ones. H4 comes last because the
+rehearsal is what tells you which seeded state actually matters.
+
+**If only one agent is available: H2 → H1 → H3 → H4.** W-3 first because it changes what every
+scope consumer sees, and everything after it should be measured against the final rule.

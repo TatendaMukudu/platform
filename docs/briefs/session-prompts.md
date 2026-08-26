@@ -9,6 +9,11 @@ Repeating any of that in a prompt is wasted budget.
 
 **Replace anything in `<angle brackets>`.**
 
+**Prepend this to any prompt that will write code**, whether to Claude or Codex — a branch cut
+even twenty minutes stale is how Lane A got implemented twice:
+
+> First: `git fetch origin && git rebase origin/claude/platform-work-summary-nmb0cm`.
+
 ---
 
 ## 1 · Review a Codex PR
@@ -159,7 +164,94 @@ Repeating any of that in a prompt is wasted budget.
 
 ---
 
-## 10 · The standing preferences
+## 10 · Review a Codex PR by mutation (the strong version)
+
+Use this instead of #1 when the PR claims to have fixed something important.
+
+> Independent review of PR `<N>` in `TatendaMukudu/platform`. REVIEW ONLY — no fixes, no merge,
+> no modifying production code or tests to get green.
+>
+> Read `docs/INDEX.md` and `docs/briefs/codex-pilot-programme.md` §1 first.
+>
+> Method, in this order. Do not skip to the code.
+>
+> 1. Check the branch out in a worktree so my branch is untouched.
+> 2. Run `npm test`. Green is the starting point, not the finding.
+> 3. For each claim in the PR body, find the assertion that supposedly proves it, then
+>    **break the production line it covers and confirm it goes red.** Restore. An assertion that
+>    stays green is the finding.
+> 4. Specifically hunt the two failure modes we keep hitting: an assertion comparing two
+>    DIFFERENT endpoints (which can never converge), and an assertion checking for a value that
+>    could never have appeared in that payload anyway. Prove it by running the assertion against
+>    an org with zero data — if it still passes, it proves nothing.
+> 5. Check whether anything was REMOVED. Diff for deleted functions and orphaned routes: grep
+>    every server route the PR touches for a caller in the front end.
+> 6. Test whether it merges cleanly onto my branch, and whether the merged result is green.
+>
+> Verdict: APPROVE, CORRECTIONS REQUIRED, or REJECT. Corrections numbered, each naming the file
+> and the specific defect, each with the mutation that exposed it. Say plainly what you could not
+> verify.
+
+---
+
+## 11 · Merge and reconcile two Codex PRs
+
+> PRs `<A>` and `<B>` in `TatendaMukudu/platform` both target my branch and overlap.
+>
+> Review both by mutation (see prompt 10), then merge both into
+> `claude/platform-work-summary-nmb0cm` — not into main.
+>
+> Where they conflict, pick the stronger implementation on evidence and say why in the merge
+> commit. Do not split the difference to avoid choosing.
+>
+> If merging one breaks a test the other wrote, that is a design conflict, not a bug. Tell me what
+> the disagreement actually is before resolving it, and if you resolve it, split the assertion
+> into the property that must hold and the design decision it was bundled with — never weaken it.
+>
+> `npm test` must print TRUTH LAYER GREEN before you push.
+
+---
+
+## 12 · Audit the suite for assertions that cannot fail
+
+> In `TatendaMukudu/platform`, find every assertion that is green by construction.
+>
+> For each suite in `scripts/test.js`, take the assertions that carry the most weight and break
+> the production line each one covers. Anything that stays green goes on the list.
+>
+> Known patterns to hunt: fixture readback with no HTTP request; comparing two different
+> endpoints; asserting a value that could never appear in that payload; `typeof x === 'function'`;
+> anything with `&& false` in it; and a route asserted to exist with nothing asserting it has a
+> caller.
+>
+> Report the list. Do not fix anything in this session — I want to see the size of it first.
+
+---
+
+## 13 · Rehearse the pilot end to end
+
+> Run `scripts/pilot-rehearsal.js` in `TatendaMukudu/platform` and show me the transcript.
+>
+> Then tell me, as a coach would experience it: is this any good? Where does it read as thin,
+> confusing, or like the system nagging? Where would a real coach stop trusting it?
+>
+> Be blunt. An honest "the screen is empty at step 5" is worth more to me than a pass.
+>
+> No fixes in this session.
+
+---
+
+## 14 · Close superseded PRs
+
+> In `TatendaMukudu/platform`, tell me which open PRs are now superseded by what has already
+> merged into `claude/platform-work-summary-nmb0cm`.
+>
+> For each: the number, whether its content actually landed, and whether anything in it would be
+> LOST by closing it. Do not close anything yet — give me the list and I will decide.
+
+---
+
+## 15 · The standing preferences
 
 Worth pasting once into any long session:
 
