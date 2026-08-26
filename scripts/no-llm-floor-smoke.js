@@ -10,11 +10,14 @@ const S=require('../server');let pass=0,fail=0;const ok=(n,c)=>{c?pass++:fail++;
 const C='floor',O='other',now=Date.now(),D=86400000;
 const user=(id,role='member',org=C)=>({id,name:id.toUpperCase(),email:`${id}@x`,role,orgCode:org,status:'active'});
 const ev=(id,sub,v,d,visibility='shared')=>({id,orgCode:C,status:'active',subjectId:sub,type:'metric',label:'mood',visibility,value:v,observedAt:new Date(now-d*D).toISOString(),provider:'checkin',source:'observed',originRef:`origin:${id}`,originKind:'direct_observation'});
-const users={lead:user('lead','superadmin'),coach:user('coach','coach'),a:user('a'),b:user('b'),c:user('c'),d:user('d'),out:user('out')};
-const nodes={team:{nodeId:'team',name:'Team',parentId:null,childNodeIds:[],leaderIds:['coach'],memberIds:['a','b','c','d'],rev:0}};
+const users={lead:user('lead','superadmin'),coach:user('coach','coach'),out:user('out')};
+// FOURTEEN members. The cohort floor is five and two-sided, so a four-person node can never
+// publish anything and could only prove that the floor refuses, never that it permits.
+const SQUAD=['a','b','c','d','e','f','g','h','i','j','k','l','m','n'];for(const id of SQUAD)users[id]=user(id);
+const nodes={team:{nodeId:'team',name:'Team',parentId:null,childNodeIds:[],leaderIds:['coach'],memberIds:SQUAD,rev:0}};
 const series=(s,old,recent)=>[ev(`${s}1`,s,old,30),ev(`${s}2`,s,old,25),ev(`${s}3`,s,old,20),ev(`${s}4`,s,recent,5),ev(`${s}5`,s,recent,3),ev(`${s}6`,s,recent,1)];
-S._loadAllStores({orgMeta:{[C]:{orgName:'Floor'},[O]:{orgName:'Other'}},orgUsers:{[C]:users,[O]:{alien:user('alien','member',O)}},orgNodes:{[C]:nodes,[O]:{}},evidenceLog:{[C]:[...series('a',4,2),...series('b',4,2),...series('c',2,4),...series('d',2,4),ev('private','a',1,1,'private')]}});S._backfillUserNodeIds();S._rebuildEmailIndex();
-for(const [id,origin] of [['a','oa'],['b','ob']])S._noteGroupCandidates(C,id,`member:${id}`,[{id:`ge_${id}`,level:'observation',text:'shape unclear',sourceSpan:'our shape is unclear',concerns:'group',originRef:origin,originKind:'direct_observation',turnId:`turn_${id}`}],'shape','Shape');
+S._loadAllStores({orgMeta:{[C]:{orgName:'Floor'},[O]:{orgName:'Other'}},orgUsers:{[C]:users,[O]:{alien:user('alien','member',O)}},orgNodes:{[C]:nodes,[O]:{}},evidenceLog:{[C]:[...['a','b','c','d','e','f'].flatMap(id=>series(id,4,2)),...['g','h','i','j','k','l','m','n'].flatMap(id=>series(id,2,4)),ev('private','a',1,1,'private')]}});S._backfillUserNodeIds();S._rebuildEmailIndex();
+for(const id of ['a','b','c','d','e'])S._noteGroupCandidates(C,id,`member:${id}`,[{id:`ge_${id}`,level:'observation',text:'shape unclear',sourceSpan:'our shape is unclear',concerns:'group',originRef:`o_${id}`,originKind:'direct_observation',turnId:`turn_${id}`}],'shape','Shape');
 (async()=>{const server=S.app.listen(0);await new Promise(r=>server.once('listening',r));const base=`http://127.0.0.1:${server.address().port}`;
  const token=(id,org=C)=>S.issueToken(id,org,(S.orgUsers[org]||{})[id]?.role||'member');
  const call=async(method,path,id='a',body,org=C)=>{const r=await fetch(base+path,{method,headers:{Authorization:`Bearer ${token(id,org)}`,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});return{status:r.status,body:await r.json().catch(()=>({}))}};
@@ -29,19 +32,22 @@ for(const [id,origin] of [['a','oa'],['b','ob']])S._noteGroupCandidates(C,id,`me
   r=await call('GET','/api/group/team/state','alien',undefined,O);ok('A04 cross-tenant group read fails closed',r.status===404);
   // A05 mutation: seed/auto-open inquiry before explicit contribution.
   r=await call('GET','/api/group/team/state','coach');ok('A05 no group claim exists before deliberate contribution',r.status===200&&!r.body.low&&!r.body.high);
-  const ca=S.groupCandidates[C].find(x=>x.contributorId==='a'),cb=S.groupCandidates[C].find(x=>x.contributorId==='b');
+  const cand=id=>S.groupCandidates[C].find(x=>x.contributorId===id&&x.status==='detected');
   // A06 mutation: make a single ordinary origin open the inquiry.
-  r=await call('POST','/api/group/team/contribute','a',{candidateId:ca.candidateId,valence:'worth_attention'});ok('A06 one ordinary contribution stays below threshold',r.status===200&&r.body.groupInquiry==='not yet');
+  r=await call('POST','/api/group/team/contribute','a',{candidateId:cand('a').candidateId,valence:'worth_attention'});ok('A06 one ordinary contribution stays below threshold',r.status===200&&r.body.groupInquiry==='not yet');
   // A07 mutation: stop the second independent contribution from opening.
-  r=await call('POST','/api/group/team/contribute','b',{candidateId:cb.candidateId,valence:'worth_attention'});ok('A07 second independent origin opens group Inquiry',r.status===200&&r.body.groupInquiry==='open');
+  r=await call('POST','/api/group/team/contribute','b',{candidateId:cand('b').candidateId,valence:'worth_attention'});ok('A07 second independent origin opens group Inquiry',r.status===200&&r.body.groupInquiry==='open');
+  // Opening the inquiry and PUBLISHING it are different rules: two independent origins open it,
+  // five contributors of fourteen clear the disclosure floor. Both exercised, neither conflated.
+  for(const id of ['c','d','e'])await call('POST','/api/group/team/contribute',id,{candidateId:cand(id).candidateId,valence:'worth_attention'});
   // A08 mutation: mint/replace origins in toGroupProposal.
-  r=await call('GET','/api/group/team/inquiry','coach');const inquiryId=r.body.inquiries?.[0]?.inquiryId;ok('A08 HTTP Inquiry read reports two preserved independent origins',r.status===200&&r.body.inquiries[0].independentOrigins===2);
+  r=await call('GET','/api/group/team/inquiry','coach');const inquiryId=r.body.inquiries?.[0]?.inquiryId;ok('A08 HTTP Inquiry read preserves every contributor origin, minting none',r.status===200&&r.body.inquiries[0].independentOrigins===5&&r.body.inquiries[0].contributors===5);
   // A09 mutation: drop contributed valence in the projection.
   r=await call('GET','/api/group/team/state','coach');ok('A09 contributed difficulty becomes a team Low',r.status===200&&r.body.low?.kind==='low');
   // A10 mutation: remove the team surface privacy marker.
   r=await call('GET','/api/group/team/state','a');ok('A10 member gets the same privacy-safe team grain',r.status===200&&r.body.carriesPrivateContent===false&&!JSON.stringify(r.body).includes('origin:private'));
   // A11 mutation: allow an all-member basis through cohortFloor.
-  r=await call('GET','/api/group/team/state','coach');ok('A11 two-sided cohort basis names a safe 2-of-4 aggregate',r.body.low?.basis?.contributors===2&&r.body.low?.basis?.of===4);
+  r=await call('GET','/api/group/team/state','coach');ok('A11 two-sided cohort basis names a safe 5-of-14 aggregate',r.body.low?.basis?.contributors===5&&r.body.low?.basis?.of===14);
   // A12 mutation: remove prepared/act creation.
   r=await call('POST','/api/me/prepared/act','a',{text:'Protect recovery',type:'momentum_drop',decision:'approve'});const focusId=r.body.focuses?.[0]?.id;ok('A12 owner creates Focus through mutation route',r.status===200&&!!focusId);
   // A13 mutation: remove focus/outcome state transition.

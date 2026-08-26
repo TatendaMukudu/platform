@@ -12,7 +12,9 @@ let pass=0,fail=0;const ok=(n,c)=>{c?pass++:fail++;console.log(c?'  PASS':'  FAI
  const surface=T.buildTeamState({node:{...node,memberCount:node.memberIds.length},
   inquiries:S._groupInquiryProjections(DEMO_CODE,node.nodeId),focuses:S._teamFocuses(DEMO_CODE,node.nodeId),now:Date.now()});
  // H4-1 mutation: remove either role_clarity offer in extendDemoTeamSurface.
- ok('H4-1 seed has an open group Inquiry with two independent origins',surface.low?.basis?.independentOrigins===2);
+ // Five contributors, five distinct origins — the seed offers a genuinely corroborated finding
+ // rather than one account retold, and it clears the two-sided floor of five at fourteen members.
+ ok('H4-1 seed has an open group Inquiry resting on five independent origins',surface.low?.basis?.independentOrigins===5&&surface.low?.basis?.contributors===5&&surface.low?.basis?.of===14);
  // H4-2 mutation: change the peer_support contribution valence.
  ok('H4-2 seed has a contributed High',surface.high?.about==='Peer support'&&surface.high.source==='contributed');
  // H4-3 mutation: change the role_clarity contribution valence.

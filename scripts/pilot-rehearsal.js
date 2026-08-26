@@ -135,10 +135,13 @@ S._rebuildEmailIndex();
         sourceSpan: 'Our shape after we concede is unclear, we all end up chasing',
         concerns: 'group', originRef, originKind: 'direct_observation', turnId: `t_${id}`,
       }]);
-      for (const [id, origin] of [['m0', 'o_tue'], ['m1', 'o_sat'], ['m2', 'o_sat'], ['m3', 'o_sun']]) {
+      // Six people notice it, on five separate occasions — m2 is retelling m1's Saturday, which
+      // is the case the origin rule exists to catch, and one of them will decline entirely.
+      for (const [id, origin] of [['m0', 'o_tue'], ['m1', 'o_sat'], ['m2', 'o_sat'], ['m3', 'o_sun'],
+                                  ['m4', 'o_wed'], ['m5', 'o_thu'], ['m6', 'o_fri']]) {
         S._noteGroupCandidates(C, id, `member:${id}`, prop(id, origin), 'shape', 'Shape after conceding');
       }
-      note(`Standing in for the model: four members' remarks noticed as possibly concerning the squad.`);
+      note(`Standing in for the model: seven members' remarks noticed as possibly concerning the squad.`);
     }
 
     // ── 3 ─────────────────────────────────────────────────────────────────────
@@ -182,6 +185,13 @@ S._rebuildEmailIndex();
 
       note(`Dara reads theirs and decides it is not the squad's business. Nothing is recorded.`);
       await POST('m3', `/api/group/mens/candidates/${candOf('m3').candidateId}/dismiss`, {});
+
+      // The disclosure floor is a SEPARATE, stricter rule than the one that opened the inquiry:
+      // five contributors of twelve, both sides clear. Three more offer theirs.
+      for (const id of ['m4', 'm5', 'm6']) {
+        await POST(id, '/api/group/mens/contribute', { candidateId: candOf(id).candidateId, valence: 'worth_attention' });
+      }
+      note(`Three more offer theirs. Five of twelve have now spoken — enough to say it without pointing at anyone.`);
 
       const inq = await GET('m0', '/api/group/mens/inquiry');
       inquiryId = inq.body.inquiries[0].inquiryId;

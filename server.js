@@ -28,6 +28,7 @@ const orgGraph   = require('./ai/org-graph');
 const orgAnswer  = require('./ai/org-answer');
 const orgRouting = require('./ai/org-routing');
 const teamState  = require('./ai/team-state');
+const audience   = require('./ai/audience');
 const conversation   = require('./ai/conversation');
 const assessmentView = require('./ai/assessment-view');
 const orgLearning= require('./ai/org-learning');
@@ -3780,7 +3781,22 @@ app.get('/api/workspace/briefing', requireAuth, async (req, res) => {
    ═══════════════════════════════════════════════════════════════════════════ */
 const intelBriefingCache = {}; // `${code}:${userId}` → { data, ts }
 const noticeFeedback = {};     // orgCode → { noticingType → { useful, dismiss } } — the Confidence Engine's memory
-const MIN_COHORT = 2;
+/* THE COHORT FLOOR — founder decision, August 2026, for the pilot.
+
+   Five, not two. Two was reasoned from first principles about small teams; every published
+   standard we could find sits at five or ten — the employee-listening norm, and US education
+   disclosure practice under FERPA/PTAC guidance. See docs/ttd/competitive-landscape-and-borrows.md.
+
+   Deliberately a CONSTANT and not a setting. A per-organisation override was considered and
+   declined for the pilot: a floor that can be lowered is a floor that gets lowered the first
+   time a demo looks thin, and the whole value of the number is that it does not move under
+   pressure.
+
+   The consequence is accepted rather than engineered around: a group that cannot produce a
+   safe aggregate does not produce one, and IntelliQ says so in words. A six-person coaching
+   group can never publish a group finding at this floor. That is the correct behaviour, not a
+   gap — the alternative is publishing something that names people by arithmetic. */
+const MIN_COHORT = 5;
 
 /* Confidence Engine read: per-noticing-type reliability, from humans' feedback. */
 function _reliabilityByType(code) {
@@ -13142,6 +13158,79 @@ app.post('/api/group/:nodeId/focus/:focusId/outcome', requireAuth, (req, res) =>
   res.json({ ok: true, focus: teamState.normalizeFocus(focus) });
 });
 
+/* ── "CAN MY COACH SEE WHAT I JUST SAID?" ────────────────────────────────────
+   Answered from state, never by a model.
+
+   INQUIRY FORMATION IS NOT DISCLOSURE. This endpoint exists to make that law inspectable
+   rather than merely true. A private conversation may update a private inquiry, raise a private
+   noticing and change what IntelliQ privately wonders about — and none of that is a
+   contribution. A person is entitled to see, deterministically, that nothing crossed.
+
+   Every input is a fact the kernel already holds: who owns the record, what audience it
+   carries, whether it was contributed, and who leads the node TODAY. Nothing is inferred and
+   nothing is cached, so a membership change is reflected on the next read rather than after a
+   sweep. */
+function _evidenceAudienceAnswer(code, userId, env) {
+  const ref = env.audience && audience.isResolvable(env.audience)
+    ? env.audience : audience.audienceRef({ kind: 'self' });
+  const node = ref.nodeId ? (orgNodes[code] || {})[ref.nodeId] : null;
+
+  // Contributed means the POINT crossed into the group's reasoning. It never means the words
+  // did — a group inquiry holds references, never text — and the answer says so.
+  const contributed = (groupCandidates[code] || []).some(c =>
+    c.evidenceRef === env.id && (c.status === 'contributed' || c.status === 'admitted'));
+
+  // A person must know the limits of the promise BEFORE they rely on it. Stated for every
+  // record rather than only for records that have already tripped something, because a
+  // exception disclosed only once it applies is not notice.
+  const safetyException = 'If something you tell IntelliQ suggests you are at risk of harm, a safeguarding lead is told. That is the one case where safety comes before privacy, and it is decided by a fixed rule rather than by a model.';
+
+  return audience.whoCanSee(
+    { audience: ref, ownerId: env.ownerRef || env.subjectId || null, visibility: env.visibility, contributed, safetyException },
+    { nodes: orgNodes[code] || {}, nodeName: (node && node.name) || '' },
+  );
+}
+
+/* GET /api/evidence/:id/audience — who can see this one thing, and how we know.
+
+   Only the person it belongs to may ask. That is not a formality: "does a record with this id
+   exist" is itself information, so a stranger and a missing record must get the same answer. */
+app.get('/api/evidence/:id/audience', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const env = (evidenceLog[code] || []).find(e => e && e.id === String(req.params.id));
+  // Absent and not-yours are the same 404 on purpose — distinguishing them confirms existence.
+  if (!env || (env.ownerRef !== userId && env.subjectId !== userId)) {
+    return res.status(404).json({ error: 'not found' });
+  }
+  res.json({ ok: true, evidenceId: env.id, ..._evidenceAudienceAnswer(code, userId, env) });
+});
+
+/* GET /api/me/audiences — the audiences this person can choose between, named and explained,
+   BEFORE they say anything. The list is built from their real nodes, so it never offers an
+   audience that does not exist for them. */
+app.get('/api/me/audiences', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const user = (orgUsers[code] || {})[userId] || {};
+  const out = [audience.describe(audience.audienceRef({ kind: 'self' }))];
+  const seen = new Set();
+  for (const nodeId of [...(user.assignedNodeIds || []), ...(user.leadershipNodeIds || [])]) {
+    if (seen.has(nodeId)) continue;
+    seen.add(nodeId);
+    const node = (orgNodes[code] || {})[nodeId];
+    if (!node) continue;
+    for (const kind of ['node_leaders', 'node_members', 'node_forum']) {
+      const ref = audience.audienceRef({ kind, nodeId });
+      const d = audience.describe(ref, { nodeName: node.name });
+      // The count is the honest part: "Coaching staff · Men's Soccer (2 people)" tells someone
+      // far more than the label alone, and it is resolved now rather than remembered.
+      d.reaches = audience.resolve(ref, { ownerId: userId, nodes: orgNodes[code] || {} }).userIds.length;
+      out.push(d);
+    }
+  }
+  res.json({ ok: true, audiences: out,
+    note: 'Nothing here claims anonymity. A group finding is aggregated and held back below the disclosure floor, which is not the same as being anonymous to someone who knows the roster.' });
+});
+
 /* GET /api/group/mine — the groups this user may read a state for.
 
    Their own declared nodes and nothing else: the ones they LEAD, then the ones they belong
@@ -17418,7 +17507,7 @@ app.get('/api/member/:memberId/similar', requireAuth, async (req, res) => {
   // A cohort of one is not a cohort — and its "shared pattern" could point a
   // leader straight at a single identifiable person, breaking the anonymity
   // promise. Require at least MIN_COHORT before framing anything around it.
-  const MIN_COHORT = 2;
+  const MIN_COHORT = 5;   // see the module-level constant: founder decision, August 2026
   // Never present a single outcome (1/1) as if it were evidence — require a
   // minimum sample before a "what helped" type is shown as guidance.
   const MIN_SAMPLE = 2;

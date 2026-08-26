@@ -63,9 +63,14 @@ const POLARITY = Object.freeze({
   NEUTRAL: 'neutral',
 });
 
-/* The cohort floor. Two, matching server.js MIN_COHORT — the same number, not a second
-   opinion about it. Raising it is a policy change and belongs where that constant lives. */
-const MIN_COHORT = 2;
+/* The cohort floor. FIVE, matching server.js MIN_COHORT — the same number, not a second
+   opinion about it. Founder decision of August 2026: every published standard sits at five or
+   ten, and two was our own reasoning rather than anyone's practice.
+
+   Not configurable, deliberately. A floor that can be lowered is a floor that gets lowered the
+   first time a demo looks thin. When a group cannot clear it, the surface refuses and explains
+   itself through `withheld` rather than quietly relaxing. */
+const MIN_COHORT = 5;
 
 /* Independent origins required before a group claim may be surfaced as a High or a Low.
    Matches ai/contribution.js MIN_INDEPENDENT_ORIGINS, and for the same reason. */

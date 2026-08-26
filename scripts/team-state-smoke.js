@@ -79,41 +79,42 @@ const inq = (o = {}) => ({
 
   // ── 2. THE TWO-SIDED COHORT FLOOR ──────────────────────────────────────────────────────────
   console.log('\n  L-PR1 — a count is a disclosure in BOTH directions');
-  ok('2 · 3 of 8 clears both sides', T.cohortFloor(3, 8).ok);
-  ok('2 · 1 of 8 fails the low side', !T.cohortFloor(1, 8).ok);
-  ok('2 · THE COMPLEMENT ATTACK: 2 of 2 satisfies k>=2 and is still refused',
-    !T.cohortFloor(2, 2).ok);
+  ok('2 · 6 of 12 clears both sides', T.cohortFloor(6, 12).ok);
+  ok('2 · 1 of 12 fails the low side', !T.cohortFloor(1, 12).ok);
+  ok('2 · 4 of 12 is refused — it used to pass, and the floor moved', !T.cohortFloor(4, 12).ok);
+  ok('2 · THE COMPLEMENT ATTACK: 5 of 5 satisfies k>=5 and is still refused',
+    !T.cohortFloor(5, 5).ok);
   ok('2 · …and the refusal names the reason (naming k names the rest)',
-    /names the rest/.test(T.cohortFloor(2, 2).reason));
-  ok('2 · 3 of 4 is refused — one person left uncounted', !T.cohortFloor(3, 4).ok);
-  ok('2 · 4 of 6 is the smallest shape that passes', T.cohortFloor(4, 6).ok && !T.cohortFloor(4, 5).ok);
-  ok('2 · contributors cannot be their own denominator', !T.cohortFloor(3, 3).ok);
-  ok('2 · more contributors than members is refused, not clamped', !T.cohortFloor(9, 8).ok);
+    /names the rest/.test(T.cohortFloor(5, 5).reason));
+  ok('2 · 8 of 12 is refused — only four left uncounted', !T.cohortFloor(8, 12).ok);
+  ok('2 · 5 of 10 is the smallest shape that passes', T.cohortFloor(5, 10).ok && !T.cohortFloor(5, 9).ok);
+  ok('2 · contributors cannot be their own denominator', !T.cohortFloor(6, 6).ok);
+  ok('2 · more contributors than members is refused, not clamped', !T.cohortFloor(13, 12).ok);
 
   // ── 3. FITNESS TO BE SURFACED ──────────────────────────────────────────────────────────────
   console.log('\n  L-OR1 + L-DC1 — what may be put in front of a leader as a fact');
   ok('3 · a well-evidenced claim in a big enough group passes',
-    T.fitForSurface(inq({ origins: 3, contributors: 3 }), { cohortSize: 9 }).ok);
+    T.fitForSurface(inq({ origins: 3, contributors: 6 }), { cohortSize: 14 }).ok);
   {
-    const f = T.fitForSurface(inq({ origins: 1, contributors: 4 }), { cohortSize: 12 });
+    const f = T.fitForSurface(inq({ origins: 1, contributors: 6 }), { cohortSize: 14 });
     ok('3 · ONE ORIGIN RETOLD BY FOUR is refused', !f.ok);
     ok('3 · …named as repetition, not corroboration',
       f.blocked.some(b => b.gate === 'origins' && /repetition/.test(b.reason)));
   }
   {
-    const f = T.fitForSurface(inq({ origins: 3, contributors: 2 }), { cohortSize: 2 });
-    ok('3 · a two-person squad cannot have a High, however well evidenced', !f.ok);
+    const f = T.fitForSurface(inq({ origins: 3, contributors: 5 }), { cohortSize: 5 });
+    ok('3 · a five-person squad cannot have a High, however well evidenced', !f.ok);
     ok('3 · …blocked on the cohort, not on the evidence',
       f.blocked.some(b => b.gate === 'cohort') && !f.blocked.some(b => b.gate === 'origins'));
   }
   ok('3 · a `tentative` band is too early to show anyone',
-    !T.fitForSurface(inq({ band: 'tentative' }), { cohortSize: 9 }).ok);
+    !T.fitForSurface(inq({ band: 'tentative', contributors: 6 }), { cohortSize: 14 }).ok);
   ok('3 · `emerging` is the floor and it passes',
-    T.fitForSurface(inq({ band: 'emerging' }), { cohortSize: 9 }).ok);
+    T.fitForSurface(inq({ band: 'emerging', contributors: 6 }), { cohortSize: 14 }).ok);
   ok('3 · a DISPUTED inquiry is never surfaced as settled',
-    !T.fitForSurface(inq({ status: 'disputed' }), { cohortSize: 9 }).ok);
+    !T.fitForSurface(inq({ status: 'disputed', contributors: 6 }), { cohortSize: 14 }).ok);
   ok('3 · every refusal explains itself — a silent drop is indistinguishable from no finding',
-    T.fitForSurface(inq({ origins: 0, band: 'tentative' }), { cohortSize: 2 }).blocked.length === 3);
+    T.fitForSurface(inq({ origins: 0, band: 'tentative', contributors: 1 }), { cohortSize: 3 }).blocked.length === 3);
 
   // ── 4. THE OPEN QUESTION ───────────────────────────────────────────────────────────────────
   console.log('\n  INQUIRY — the one artifact on this surface that names nobody');
@@ -140,7 +141,7 @@ const inq = (o = {}) => ({
     // A question contains no count and names nobody, so it is deliberately NOT floor-gated.
     // Gating it would suppress the one safe-by-construction artifact here.
     const q = T.openQuestion([inq({ contributors: 2, origins: 1, band: 'tentative', stillUnknown: ['why?'] })]);
-    ok('4 · a question survives in a two-person group where a High could not', q !== null);
+    ok('4 · a question survives in a small group where a High could not', q !== null);
   }
   {
     // An inquiry already shown as the High or the Low has its unknown spoken to by the closing
@@ -178,16 +179,16 @@ const inq = (o = {}) => ({
     inquiries: [
       inq({ inquiryId: 'high1', polarity: T.POLARITY.WORKING_WELL, label: 'player-led communication',
         hypothesis: 'Player-led communication has improved over the last two sessions',
-        band: 'probable', origins: 3, contributors: 4, at: 3000,
+        band: 'probable', origins: 3, contributors: 6, at: 3000,
         stillUnknown: ['Does the improvement hold after a loss?'] }),
       inq({ inquiryId: 'low1', polarity: T.POLARITY.WORTH_ATTENTION, label: 'substitute role clarity',
         hypothesis: 'Substitute role clarity is emerging as something worth attention',
-        band: 'emerging', origins: 2, contributors: 3, at: 2000,
+        band: 'emerging', origins: 2, contributors: 5, at: 2000,
         stillUnknown: ['What would make the substitute role clear?'] }),
       // The Inquiry line is its OWN artifact, not a by-product of a High or a Low: an open
       // question nobody has called either way, which is exactly why it is still a question.
       inq({ inquiryId: 'q1', polarity: T.POLARITY.NEUTRAL, label: 'communication after losses',
-        band: 'emerging', origins: 2, contributors: 3, at: 2500,
+        band: 'emerging', origins: 2, contributors: 5, at: 2500,
         stillUnknown: ['Why does communication drop after difficult results?', 'Is it every loss or only close ones?'] }),
     ],
     focuses: [{ focusId: 'tf1', text: 'Test player-led post-match debriefs for the next two matches',
@@ -208,16 +209,16 @@ const inq = (o = {}) => ({
   ok('6 · the surface declares it carries no private content', state.carriesPrivateContent === false);
 
   // ── 7. THE SAME SCREEN IN A SMALL GROUP ────────────────────────────────────────────────────
-  console.log('\n  THE SAME SCREEN, SIX PEOPLE — where the floors actually bite');
+  console.log('\n  THE SAME SCREEN, A SMALL GROUP — where the floors actually bite');
   const small = T.buildTeamState({
-    node: { nodeId: 'subs', name: 'Substitutes', memberCount: 6 },
+    node: { nodeId: 'subs', name: 'Substitutes', memberCount: 10 },
     inquiries: [
       inq({ inquiryId: 'l', polarity: T.POLARITY.WORTH_ATTENTION, label: 'substitute role clarity',
-        band: 'probable', origins: 3, contributors: 5, stillUnknown: ['What would make the role clear?'] }),
+        band: 'probable', origins: 3, contributors: 8, stillUnknown: ['What would make the role clear?'] }),
     ],
     focuses: [], now: 5000,
   });
-  ok('7 · 5 of 6 is refused — one person left uncounted names them', small.low === null);
+  ok('7 · 8 of 10 is refused — two left uncounted, below the floor of five', small.low === null);
   ok('7 · the finding is REPORTED AS WITHHELD, not silently dropped',
     small.withheld.length === 1 && small.withheld[0].kind === 'low');
   ok('7 · what is withheld is named by TOPIC — never by restating the claim',
@@ -240,7 +241,7 @@ const inq = (o = {}) => ({
   {
     const s = T.buildTeamState({
       node: { nodeId: 'n', name: 'Squad', memberCount: 20 },
-      inquiries: [inq({ polarity: T.POLARITY.NEUTRAL, contested: true, origins: 4, contributors: 6,
+      inquiries: [inq({ polarity: T.POLARITY.NEUTRAL, contested: true, origins: 4, contributors: 8,
         band: 'supported', stillUnknown: ['Which account is right?'] })],
       focuses: [], now: 1,
     });
@@ -258,7 +259,7 @@ const inq = (o = {}) => ({
     const classroom = T.buildTeamState({
       node: { nodeId: 'yr9_maths', name: 'Year 9 Maths', memberCount: 28 },
       inquiries: [inq({ inquiryId: 'c1', polarity: T.POLARITY.WORTH_ATTENTION,
-        label: 'homework completion after assessment weeks', band: 'probable', origins: 3, contributors: 5,
+        label: 'homework completion after assessment weeks', band: 'probable', origins: 3, contributors: 8,
         hypothesis: 'Homework completion drops in the week after an assessment' })],
       focuses: [], now: 1,
     });
@@ -273,15 +274,15 @@ const inq = (o = {}) => ({
   {
     const detected = { findingId:'det_withdrawal', type:'withdrawal', about:'Participation',
       claim:'Participation is below the group baseline', polarity:'risk', confidence:'emerging',
-      status:'observed', memberCount:2 };
-    const s = T.buildTeamState({ node:{nodeId:'n',name:'Node',memberCount:4}, findings:[detected] });
-    ok('F01 · a detected two-of-four participation decline becomes a Low without contributions',
+      status:'observed', memberCount:6 };
+    const s = T.buildTeamState({ node:{nodeId:'n',name:'Node',memberCount:14}, findings:[detected] });
+    ok('F01 · a detected six-of-fourteen participation decline becomes a Low without contributions',
       s.low && s.low.source === 'detected' && s.low.detectedType === 'withdrawal');
     ok('F02 · detected and contributed findings are explicitly distinguishable',
-      s.low.source === 'detected' && T.buildTeamState({node:{memberCount:8},inquiries:[inq({polarity:T.POLARITY.WORTH_ATTENTION})]}).low.source === 'contributed');
-    const one = T.buildTeamState({ node:{nodeId:'n',name:'Node',memberCount:4}, findings:[{...detected,memberCount:1}] });
+      s.low.source === 'detected' && T.buildTeamState({node:{memberCount:14},inquiries:[inq({polarity:T.POLARITY.WORTH_ATTENTION,contributors:6})]}).low.source === 'contributed');
+    const one = T.buildTeamState({ node:{nodeId:'n',name:'Node',memberCount:14}, findings:[{...detected,memberCount:1}] });
     ok('F03 · a one-member detected pattern never becomes a team finding',!one.low && one.withheld[0]?.source === 'detected');
-    const all = T.buildTeamState({ node:{nodeId:'n',name:'Node',memberCount:4}, findings:[{...detected,memberCount:4}] });
+    const all = T.buildTeamState({ node:{nodeId:'n',name:'Node',memberCount:14}, findings:[{...detected,memberCount:14}] });
     ok('F04 · the two-sided floor also refuses an all-member detected finding',!all.low && all.withheld[0]?.blocked[0]?.gate === 'cohort');
   }
 
@@ -294,13 +295,16 @@ const inq = (o = {}) => ({
   orgMeta[CODE]  = { orgName: 'Alma', orgMode: 'sports' };
   orgMeta[OTHER] = { orgName: 'Riverside School', orgMode: 'education' };
   const mk = (id, name, role = 'member') => ({ id, name, email: `${id}@x.test`, role, status: 'active', assignedNodeIds: [], leadershipNodeIds: [] });
-  orgUsers[CODE] = { p1: mk('p1', 'Ash'), p2: mk('p2', 'Bo'), p3: mk('p3', 'Cass'), p4: mk('p4', 'Dee'),
-                     coach: mk('coach', 'Jordan', 'coach'), outsider: mk('outsider', 'Eli') };
+  // FOURTEEN members, not four. At a cohort floor of five the two-sided rule needs at least
+  // ten people before ANY count is publishable, so a four-person fixture could only ever prove
+  // that the floor refuses — never that it also permits.
+  orgUsers[CODE] = { coach: mk('coach', 'Jordan', 'coach'), outsider: mk('outsider', 'Eli') };
+  for (let i = 1; i <= 14; i++) orgUsers[CODE][`p${i}`] = mk(`p${i}`, `Player ${i}`);
   orgUsers[OTHER] = { far: mk('far', 'Fen') };
   orgNodes[CODE] = { mens: { nodeId: 'mens', name: "Men's Soccer", parentId: null, childNodeIds: [],
-                             memberIds: ['p1', 'p2', 'p3', 'p4'], leaderIds: ['coach'] } };
+                             memberIds: [...Array(14)].map((_, i) => `p${i + 1}`), leaderIds: ['coach'] } };
   orgNodes[OTHER] = { yr9: { nodeId: 'yr9', name: 'Year 9', parentId: null, childNodeIds: [], memberIds: ['far'], leaderIds: [] } };
-  for (const u of ['p1', 'p2', 'p3', 'p4']) orgUsers[CODE][u].assignedNodeIds = ['mens'];
+  for (let i = 1; i <= 14; i++) orgUsers[CODE][`p${i}`].assignedNodeIds = ['mens'];
   orgUsers[CODE].coach.leadershipNodeIds = ['mens'];
 
   const server = app.listen(0);
@@ -340,11 +344,14 @@ const inq = (o = {}) => ({
     const out=[]; for(let d=90;d>=20;d-=5)out.push(e(`${id}_${d}`,id,5,d));
     [10,6,3,1].forEach(d=>out.push(e(`${id}_${d}`,id,recent,d))); return out;
   };
-  evidenceLog[CODE] = [...stream('p1',1),...stream('p2',1),...stream('p3',5),...stream('p4',5)];
+  evidenceLog[CODE] = [
+    ...['p1','p2','p3','p4','p5','p6'].flatMap(id => stream(id, 1)),
+    ...['p7','p8','p9','p10','p11','p12','p13','p14'].flatMap(id => stream(id, 5)),
+  ];
   const detectedBefore = await GET(CODE,'coach','/api/group/mens/state');
   ok('F05 · admissible group streams produce a detected Low without contributions',
     detectedBefore.body.low && detectedBefore.body.low.source === 'detected' && detectedBefore.body.low.detectedType === 'withdrawal');
-  [10,6,3,1].forEach(d => evidenceLog[CODE].push(e(`private_attack_${d}`,'p3',100,d,'private')));
+  [10,6,3,1].forEach(d => evidenceLog[CODE].push(e(`private_attack_${d}`,'p7',100,d,'private')));
   const detectedAfter = await GET(CODE,'coach','/api/group/mens/state');
   ok('F06 · a private capture changes nothing about the detected group surface',
     JSON.stringify({high:detectedBefore.body.high,low:detectedBefore.body.low,withheld:detectedBefore.body.withheld,statement:detectedBefore.body.statement}) ===
@@ -427,15 +434,7 @@ const inq = (o = {}) => ({
     orgUsers[CODE].coach = mk('coach', 'Jordan', 'coach');
     orgUsers[CODE].coach.leadershipNodeIds = ['mens'];
     orgNodes[CODE].mens.leaderIds = ['coach'];
-    orgNodes[CODE].mens.memberIds = ['p1', 'p2', 'p3', 'p4'];
-    // Widen the squad so a real finding can clear the two-sided floor — the small-group case
-    // is already pinned in §7, and here we need the surface to actually speak.
-    for (let i = 5; i <= 14; i++) {
-      const id = `p${i}`;
-      orgUsers[CODE][id] = mk(id, `Player ${i}`);
-      orgUsers[CODE][id].assignedNodeIds = ['mens'];
-      orgNodes[CODE].mens.memberIds.push(id);
-    }
+    orgNodes[CODE].mens.memberIds = [...Array(14)].map((_, i) => `p${i + 1}`);
 
     // A group inquiry the kernel already holds, and the contributor-declared valence that
     // makes it a High. Both written the way the real paths write them.
@@ -448,23 +447,17 @@ const inq = (o = {}) => ({
         hypotheses: [{ id: 'h1', statement: 'Player-led communication has improved over the last two sessions',
           confidence: { score: 0.6, band: 'probable' }, status: 'active', supportRefs: [], challengeRefs: [] }],
         leadingHypothesisId: 'h1',
-        signals: [
-          { ref: 'e1', kind: 'observation', originRef: 'o_tue', contributedBy: 'p1', contributorVisibility: 'named', at: 1 },
-          { ref: 'e2', kind: 'observation', originRef: 'o_sat', contributedBy: 'p2', contributorVisibility: 'named', at: 2 },
-          { ref: 'e3', kind: 'observation', originRef: 'o_sun', contributedBy: 'p3', contributorVisibility: 'named', at: 3 },
-          { ref: 'e4', kind: 'observation', originRef: 'o_mon', contributedBy: 'p4', contributorVisibility: 'named', at: 4 },
-        ],
+        // SIX contributors, so the two-sided floor is cleared at fourteen members: six named,
+        // eight uncounted, both sides above five.
+        signals: ['p1','p2','p3','p4','p5','p6'].map((id, i) => (
+          { ref: `e${i}`, kind: 'observation', originRef: `o_${i}`, contributedBy: id, contributorVisibility: 'named', at: i + 1 })),
         missingSignals: [{ question: 'Does the improvement hold after a loss?' }],
         confidence: { score: 0.6, band: 'probable', because: [] },
         status: 'probable', timeline: [], createdAt: 1, lastUpdatedAt: 9,
       },
     };
-    groupCandidates[CODE] = [
-      { candidateId: 'gc1', nodeId: 'mens', concept: 'communication', contributorId: 'p1', status: 'admitted', valence: 'working_well' },
-      { candidateId: 'gc2', nodeId: 'mens', concept: 'communication', contributorId: 'p2', status: 'admitted', valence: 'working_well' },
-      { candidateId: 'gc3', nodeId: 'mens', concept: 'communication', contributorId: 'p3', status: 'admitted', valence: 'working_well' },
-      { candidateId: 'gc4', nodeId: 'mens', concept: 'communication', contributorId: 'p4', status: 'admitted', valence: 'working_well' },
-    ];
+    groupCandidates[CODE] = ['p1','p2','p3','p4','p5','p6'].map((id, i) => (
+      { candidateId: `gc${i}`, nodeId: 'mens', concept: 'communication', contributorId: id, status: 'admitted', valence: 'working_well' }));
 
     const r = await GET(CODE, 'coach', '/api/group/mens/state');
     ok('12 · the surface reads the kernel\'s own inquiry as a High',

@@ -28,7 +28,8 @@
 | Self vs Web | `ttd/self-web-production-trace.md` (traced) → `ttd/self-and-web-orchestration.md` (laws) |
 | Do we need an ontology / graph DB? | `ttd/organisational-ontology-investigation.md` — **the answer is no** |
 | What does Falcon actually get? | `ttd/falcon-persona-rehearsal.md` |
-| **Who do we compete with, and what should we borrow?** | `ttd/competitive-landscape-and-borrows.md` — **§3 is the finding that should change a decision** |
+| **Who do we compete with, and what should we borrow?** | `ttd/competitive-landscape-and-borrows.md` |
+| **Who will know I said this?** | `ai/audience.js` — audience is a durable REFERENCE resolved at read time; `GET /api/evidence/:id/audience` answers it deterministically |
 | **What are we deliberately NOT deciding?** | `rnd/intelliq-rnd-program.md` — **non-authoritative; never a reason to build** |
 
 ### What is implemented?
@@ -40,7 +41,7 @@ detection · **group** Inquiry creation · Focus persistence and outcome learnin
 event sourcing and CQRS in all but name · **the team-grain surface** (`ai/team-state.js`:
 High / Low / Inquiry / Focus over one node, two-sided floor enforced, origin-counted,
 `GET /api/group/:nodeId/state`) · **team Focus with `origin { by, at, from, inquiryId }` and an
-outcome loop** · **the agent answering team questions at the team's grain**.
+outcome loop** · **the agent answering team questions at the team's grain** · **named audiences** (`ai/audience.js`) and a deterministic answer to "can my coach see what I just said?".
 
 ### What is partial?
 

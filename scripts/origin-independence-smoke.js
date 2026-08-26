@@ -5,14 +5,19 @@ process.env.DB_OPTIONAL='1';process.env.NODE_ENV='test';
 const c=require('../ai/contribution'),d=require('../ai/diagnose'),S=require('../server');let pass=0,fail=0;const ok=(n,x)=>{x?pass++:fail++;console.log(x?'  ✓':'  ✗',n)};
 const contribution=(who,origin,id=who)=>({status:'contributed',contributorId:who,evidenceRef:`e_${id}`,concept:'shape',label:'Shape',originRef:origin,originKind:'direct_observation',occasion:`t_${id}`,authority:'self_report'});
 const decision=x=>c.shouldOpenGroupInquiry(x,{now:Date.now()});
-const web=x=>S._webIntelligence({momentum_drop:{findings:x.map(()=>({type:'momentum_drop',confidence:'clear',severity:'medium'})),contributions:x}},Math.max(4,x.length+2),{momentum_drop:{}},Date.now());
+const web=x=>S._webIntelligence({momentum_drop:{findings:x.map(()=>({type:'momentum_drop',confidence:'clear',severity:'medium'})),contributions:x}},Math.max(12,x.length+5),{momentum_drop:{}},Date.now());
 const one=[contribution('a','prime')];const repeat=[contribution('a','prime','1'),contribution('a','prime','2')];
 ok('O-1 one person repeating one origin remains one origin',decision(repeat).independentOrigins===1&&!decision(repeat).open);
 const echoes=Array.from({length:10},(_,i)=>contribution(`p${i}`,'prime',i));
 ok('O-2 ten people repeating one origin receive ECHO',decision(echoes).rule==='ECHO'&&decision(echoes).independentOrigins===1);
 ok('O-2 repeated origin creates no Web artifact',web(echoes).length===0);
+// Two independent origins is what OPENS an inquiry (the origin rule). Publishing it as a Web
+// artifact is a separate, stricter question — the cohort floor of five — so the fixture
+// carries five contributors to exercise both rules rather than conflating them.
 const independent=[contribution('a','oa'),contribution('b','ob')];
-ok('O-3 two people with two origins open',decision(independent).rule==='INDEPENDENT_CORROBORATION'&&web(independent).length===1);
+const publishable=['a','b','c','d','e'].map(id=>contribution(id,`o_${id}`));
+ok('O-3 two people with two origins open the inquiry',decision(independent).rule==='INDEPENDENT_CORROBORATION');
+ok('O-3 …and a cohort that also clears the disclosure floor may be published',web(publishable).length===1);
 const original=contribution('a','human-origin');
 const summary=c.toGroupProposal({...original,evidenceRef:'summary',originKind:'machine_summary'});
 const extraction=c.toGroupProposal({...original,evidenceRef:'extract',originKind:'machine_extraction'});

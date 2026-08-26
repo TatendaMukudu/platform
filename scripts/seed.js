@@ -60,12 +60,18 @@ function extendSeedTeamSurface(store, { code, coachId, memberIds, teamId }) {
     S._admitGroupContributions(code, teamId, concept);
     return candidate;
   };
-  offer({ who: memberIds[0], id: 'seed_low_a', concept: 'role_clarity', label: 'Role clarity', valence: 'worth_attention' });
-  offer({ who: memberIds[1], id: 'seed_low_b', concept: 'role_clarity', label: 'Role clarity', valence: 'worth_attention' });
-  offer({ who: memberIds[2], id: 'seed_high_a', concept: 'peer_support', label: 'Peer support', valence: 'working_well' });
-  offer({ who: memberIds[3], id: 'seed_high_b', concept: 'peer_support', label: 'Peer support', valence: 'working_well' });
+  // FIVE contributors per concept, not two. The cohort floor is five and two-sided, so a
+  // demo seeded with two would open on an empty screen — which is honest but useless as a seed.
+  // Widening the seed is the correct response; lowering the floor to make a demo look busy is
+  // exactly the pressure the floor exists to resist.
+  for (let i = 0; i < 5; i++) {
+    offer({ who: memberIds[i], id: `seed_low_${i}`, concept: 'role_clarity', label: 'Role clarity', valence: 'worth_attention' });
+  }
+  for (let i = 5; i < 10; i++) {
+    offer({ who: memberIds[i], id: `seed_high_${i}`, concept: 'peer_support', label: 'Peer support', valence: 'working_well' });
+  }
   // One leader-opened finding is real but cannot clear the two-sided cohort floor.
-  offer({ who: memberIds[4], id: 'seed_withheld', concept: 'travel_routine', label: 'Travel routine',
+  offer({ who: memberIds[10], id: 'seed_withheld', concept: 'travel_routine', label: 'Travel routine',
     valence: 'worth_attention', authority: 'authoritative' });
 
   const lowInquiry = Object.values(S.inquiryStates[code][`group:${teamId}`])
@@ -84,13 +90,30 @@ async function buildDemoStore() {
   const pass = await bcrypt.hash('demo1234', SALT);
 
   const coachId = rid();
+  /* FOURTEEN athletes, not six.
+
+     This is the cohort floor showing up in the demo data, and it is the right way round. At a
+     two-sided floor of five, a six-person group can never publish a group finding at any number
+     of contributors — five named leaves one uncounted, and one is below the floor. A six-athlete
+     demo would therefore open on a permanently empty team surface.
+
+     The fix is a realistic squad, not a lower floor. It is also a real pilot fact: a group needs
+     at least ten people before the team surface can say anything at all about it. */
   const athletes = [
-    { key: 'maya',    name: 'Maya Chen',     pos: 'Midfield', kind: 'quiet'     },
-    { key: 'deshawn', name: 'Deshawn Ellis', pos: 'Forward',  kind: 'overload'  },
-    { key: 'priya',   name: 'Priya Anand',   pos: 'Defense',  kind: 'improving' },
-    { key: 'jordan',  name: 'Jordan Lee',    pos: 'Keeper',   kind: 'steady'    },
-    { key: 'sam',     name: 'Sam Fox',       pos: 'Wing',     kind: 'steady'    },
-    { key: 'chris',   name: 'Chris Obi',     pos: 'Center',   kind: 'steady'    },
+    { key: 'maya',    name: 'Maya Chen',      pos: 'Midfield', kind: 'quiet'     },
+    { key: 'deshawn', name: 'Deshawn Ellis',  pos: 'Forward',  kind: 'overload'  },
+    { key: 'priya',   name: 'Priya Anand',    pos: 'Defense',  kind: 'improving' },
+    { key: 'jordan',  name: 'Jordan Lee',     pos: 'Keeper',   kind: 'steady'    },
+    { key: 'sam',     name: 'Sam Fox',        pos: 'Wing',     kind: 'steady'    },
+    { key: 'chris',   name: 'Chris Obi',      pos: 'Center',   kind: 'steady'    },
+    { key: 'tomas',   name: 'Tomas Varga',    pos: 'Defense',  kind: 'steady'    },
+    { key: 'noor',    name: 'Noor Haddad',    pos: 'Midfield', kind: 'improving' },
+    { key: 'kofi',    name: 'Kofi Mensah',    pos: 'Forward',  kind: 'steady'    },
+    { key: 'lena',    name: 'Lena Brandt',    pos: 'Wing',     kind: 'quiet'     },
+    { key: 'ravi',    name: 'Ravi Iyer',      pos: 'Center',   kind: 'steady'    },
+    { key: 'aoife',   name: 'Aoife Byrne',    pos: 'Defense',  kind: 'steady'    },
+    { key: 'yuki',    name: 'Yuki Tanaka',    pos: 'Midfield', kind: 'improving' },
+    { key: 'marco',   name: 'Marco Ferrari',  pos: 'Keeper',   kind: 'steady'    },
   ].map(a => ({ ...a, id: rid(), email: `${a.key}@demo.club` }));
 
   // ── stores ────────────────────────────────────────────────────────────────
