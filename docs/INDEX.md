@@ -44,10 +44,9 @@ outcome loop** · **the agent answering team questions at the team's grain**.
 
 Leader privacy projection (PR #74, uncorrected) · Web governs 11 of 67 scope call sites · Focus is
 seven fields · Self High/Low cannot see the reader's own private evidence (**T-1**) · corrections do
-not reach already-emitted signals (**T-2**) · the no-LLM claim is unproven · **the team-grain
-surface has no UI** — the endpoints and the conversational answer exist, the screen does not ·
-**valence has no capture UI**, so a contributor cannot yet declare working-well / worth-attention
-from the product.
+not reach already-emitted signals (**T-2**) · the no-LLM claim is unproven · **the team surface has
+no team-level pattern detection** — Highs and Lows come from contributed group inquiries only, so a
+group with no contributions is silent even when its members' streams are moving.
 
 ### What blocks Falcon? — **SIX**
 

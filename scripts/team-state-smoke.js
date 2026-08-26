@@ -485,6 +485,27 @@ const inq = (o = {}) => ({
     ok('13 · the strip has styles, so it is not invisible on the page', /\.tstate-card\{/.test(css));
     ok('13 · a failing group read cannot take down the leader home',
       /catch \(_\) \{ box\.innerHTML = ''; \}/.test(app));
+
+    // Without a way to declare valence, every contribution defaults to `unsure`, no inquiry
+    // ever gains a polarity, and the team surface can never show a High or a Low at all.
+    // The capture path is therefore load-bearing, not a nicety.
+    const mv = fs.readFileSync(path.join(__dirname, '..', 'js', 'member-view.js'), 'utf8');
+    const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+    const mcss = fs.readFileSync(path.join(__dirname, '..', 'css', 'member.css'), 'utf8');
+    ok('13 · the member surface has a slot for their own group noticings',
+      /id="me-group"/.test(html) && /_renderGroupNoticings\(\)/.test(mv));
+    ok('13 · it reads the member\'s OWN candidates, which nobody else can see',
+      /\/candidates`/.test(mv));
+    ok('13 · contributing declares a valence — the three the kernel accepts, and no others',
+      /'working_well'/.test(mv) && /'worth_attention'/.test(mv) && /'unsure'/.test(mv));
+    ok('13 · declining is offered as an equal option, not a hidden one',
+      /dismissNoticing/.test(mv) && /Keep it to myself/.test(mv));
+    ok('13 · the card says plainly that nothing is shared yet',
+      /Nobody can see this yet/.test(mv));
+    ok('13 · after contributing, the member is told whether it actually opened anything',
+      /does not open anything/.test(mv));
+    ok('13 · the noticing card is styled to look private, not like a notification',
+      /\.mg-card \{/.test(mcss));
   }
 
   server.close();
