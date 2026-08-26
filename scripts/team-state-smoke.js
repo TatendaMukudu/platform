@@ -269,9 +269,26 @@ const inq = (o = {}) => ({
   }
 
   // ── 11. OVER HTTP, WITH THE REAL SERVER ────────────────────────────────────────────────────
+  console.log('\n  DETECTED GROUP PATTERNS — existing kernel, team grain');
+  {
+    const detected = { findingId:'det_withdrawal', type:'withdrawal', about:'Participation',
+      claim:'Participation is below the group baseline', polarity:'risk', confidence:'emerging',
+      status:'observed', memberCount:2 };
+    const s = T.buildTeamState({ node:{nodeId:'n',name:'Node',memberCount:4}, findings:[detected] });
+    ok('F01 · a detected two-of-four participation decline becomes a Low without contributions',
+      s.low && s.low.source === 'detected' && s.low.detectedType === 'withdrawal');
+    ok('F02 · detected and contributed findings are explicitly distinguishable',
+      s.low.source === 'detected' && T.buildTeamState({node:{memberCount:8},inquiries:[inq({polarity:T.POLARITY.WORTH_ATTENTION})]}).low.source === 'contributed');
+    const one = T.buildTeamState({ node:{nodeId:'n',name:'Node',memberCount:4}, findings:[{...detected,memberCount:1}] });
+    ok('F03 · a one-member detected pattern never becomes a team finding',!one.low && one.withheld[0]?.source === 'detected');
+    const all = T.buildTeamState({ node:{nodeId:'n',name:'Node',memberCount:4}, findings:[{...detected,memberCount:4}] });
+    ok('F04 · the two-sided floor also refuses an all-member detected finding',!all.low && all.withheld[0]?.blocked[0]?.gate === 'cohort');
+  }
+
+  // ── 12. OVER HTTP, WITH THE REAL SERVER ────────────────────────────────────────────────────
   console.log('\n  HTTP — the endpoints, the roles, and the org boundary');
   const S = require('../server.js');
-  const { app, orgMeta, orgUsers, orgNodes, issueToken, _teamFocuses } = S;
+  const { app, orgMeta, orgUsers, orgNodes, issueToken, _teamFocuses, evidenceLog } = S;
 
   const CODE = 'alma', OTHER = 'riverside';
   orgMeta[CODE]  = { orgName: 'Alma', orgMode: 'sports' };
@@ -310,6 +327,29 @@ const inq = (o = {}) => ({
     (await GET(CODE, 'coach', '/api/group/yr9/state')).status === 404);
   ok('11 · …and a user from that org cannot reach it through this org either',
     (await GET(OTHER, 'far', '/api/group/mens/state')).status === 404);
+
+  // Organisationally-admissible typed streams: p1/p2 decline, p3/p4 stay
+  // steady. The aggregate therefore moves, and exactly two members independently
+  // exhibit the same existing structural pattern.
+  const tnow = Date.now(), day = 86400000;
+  const e = (id, subjectId, value, days, visibility = 'shared') => ({ id, orgCode:CODE,
+    status:'active', subjectId, type:'metric', label:'attendance', value,
+    observedAt:new Date(tnow-days*day).toISOString(), visibility,
+    promoted:visibility !== 'private', attributes:{primitive:'participation',valence:'up-good'} });
+  const stream = (id, recent) => {
+    const out=[]; for(let d=90;d>=20;d-=5)out.push(e(`${id}_${d}`,id,5,d));
+    [10,6,3,1].forEach(d=>out.push(e(`${id}_${d}`,id,recent,d))); return out;
+  };
+  evidenceLog[CODE] = [...stream('p1',1),...stream('p2',1),...stream('p3',5),...stream('p4',5)];
+  const detectedBefore = await GET(CODE,'coach','/api/group/mens/state');
+  ok('F05 · admissible group streams produce a detected Low without contributions',
+    detectedBefore.body.low && detectedBefore.body.low.source === 'detected' && detectedBefore.body.low.detectedType === 'withdrawal');
+  [10,6,3,1].forEach(d => evidenceLog[CODE].push(e(`private_attack_${d}`,'p3',100,d,'private')));
+  const detectedAfter = await GET(CODE,'coach','/api/group/mens/state');
+  ok('F06 · a private capture changes nothing about the detected group surface',
+    JSON.stringify({high:detectedBefore.body.high,low:detectedBefore.body.low,withheld:detectedBefore.body.withheld,statement:detectedBefore.body.statement}) ===
+    JSON.stringify({high:detectedAfter.body.high,low:detectedAfter.body.low,withheld:detectedAfter.body.withheld,statement:detectedAfter.body.statement}));
+  evidenceLog[CODE] = []; // isolate the pre-existing Focus/Inquiry acceptance cases below
 
   console.log('\n  WHICH GROUPS AM I PART OF');
   {
