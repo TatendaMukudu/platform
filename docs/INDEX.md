@@ -134,7 +134,8 @@ never silently edited.
 
 | Document | Status |
 |---|---|
-| `briefs/codex-pilot-programme.md` | **CURRENT** — **the work order.** §0 settles TTD-vs-R&D authority; §1 the ground rules; §9 the conflict matrix |
+| `briefs/codex-pilot-programme.md` | **CURRENT** — **the work order.** §0 settles TTD-vs-R&D authority; §1 the ground rules; §9 the conflict matrix. **Carries a correction: PR #76 claims Lanes A/B/D/E already** |
+| `briefs/session-prompts.md` | **CURRENT** — ten copy-paste session prompts |
 | `briefs/pr74-final-correction-contract.md` | **CURRENT** — nine corrections with adversarial passes |
 | `briefs/no-llm-capability-matrix.md` | **CURRENT** — Packet 1 |
 | `briefs/web-final-contract.md` | **CURRENT** — W-3, invalidation, W-4 parity (Packets 6, 8, 9) |
