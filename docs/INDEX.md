@@ -27,6 +27,7 @@
 | Self vs Web | `ttd/self-web-production-trace.md` (traced) → `ttd/self-and-web-orchestration.md` (laws) |
 | Do we need an ontology / graph DB? | `ttd/organisational-ontology-investigation.md` — **the answer is no** |
 | What does Falcon actually get? | `ttd/falcon-persona-rehearsal.md` |
+| **What are we deliberately NOT deciding?** | `rnd/intelliq-rnd-program.md` — **non-authoritative; never a reason to build** |
 
 ### What is implemented?
 
@@ -139,6 +140,16 @@ never silently edited.
 | `briefs/p0-d-empirical-precedence.md` · `briefs/p0-3-adjudication.md` · `briefs/admissibility.md` · `briefs/d1-d2-founder-decisions.md` | **IMPLEMENTED** |
 | `briefs/p0-d-authority-and-p0-5-origin.md` · `briefs/principal-agent-slice-1.md` | **PARTIAL** |
 | `briefs/p0-pilot-blockers.md` · `briefs/codex-fix-outcome-priority-office.md` | **SUPERSEDED** |
+
+### R&D — explicitly non-authoritative
+
+| Document | Status |
+|---|---|
+| `rnd/intelliq-rnd-program.md` | **NON-AUTHORITATIVE** — 31 programmes; nothing here may be cited as a reason to build |
+| `rnd/audience-relative-reasoning-investigation.md` | **RESEARCH** — verdict STRONG DIRECTION; its bounded fix is queued work, its generalisation is not |
+
+`docs/rnd/` is **not** an implementation queue. Promotion out of it is one-way and requires a named
+founder decision. If an item appears both here and in the queue, the queue governs.
 
 ### Explorations and history — not law
 
