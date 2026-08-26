@@ -1,5 +1,8 @@
 # Brief: `ai/admissibility.js` — the retrieval-boundary lifecycle gate
 
+> **IMPLEMENTED.** `ai/admissibility.js` exists and is covered by `admissibility-smoke`.
+> Retained as the reasoning behind the module.
+
 **For:** Codex
 **From:** Claude (architecture)
 **Branch:** start from current `main`. Do NOT use `codex/outcome-priority-office` — it is

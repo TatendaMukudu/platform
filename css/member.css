@@ -543,6 +543,16 @@
 .iq-briefing-badge { font-size: 0.66rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--accent); margin-bottom: 0.4rem; }
 .iq-briefing-text { font-size: 0.9rem; line-height: 1.55; color: var(--text-primary); }
 .me-section-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); margin: 1rem 0 0.5rem; }
+/* Group noticings — private to the person who produced them, and it must LOOK private.
+   No accent colour, no badge, no count: nothing that reads as a notification demanding an
+   answer. A prompt that feels urgent gets contributed to make it go away, which is exactly
+   the deliberate act this boundary exists to require. */
+.mg-card { padding: 0.85rem 0.95rem; }
+.mg-why { font-size: 0.76rem; color: var(--text-secondary); line-height: 1.45; margin-top: 0.25rem; }
+.mg-ask { font-size: 0.78rem; color: var(--text-primary); margin: 0.65rem 0 0.4rem; }
+.mg-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.mg-note { font-size: 0.7rem; color: var(--text-muted); line-height: 1.45; margin-top: 0.55rem; }
+
 .me-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.5rem; }
 .me-row-text { font-size: 0.86rem; color: var(--text-primary); line-height: 1.45; }
 .me-row-conf { font-size: 0.7rem; color: var(--text-muted); text-transform: capitalize; margin-top: 2px; }

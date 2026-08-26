@@ -2357,6 +2357,31 @@ img { max-width: 100%; }
 .pm-similar-chip { font-size: 0.74rem; background: var(--surface-1, var(--bg)); border: 1px solid var(--border); border-radius: 999px; padding: 0.15rem 0.55rem; color: var(--text-secondary); }
 .pm-similar-foot { font-size: 0.66rem; color: var(--text-muted); margin-top: 0.5rem; font-style: italic; }
 
+/* ── The open question, first on the leader's home ────────────────────────────
+   The one element on the page allowed a border accent, because it is the one element that
+   asks the reader for something rather than reporting to them. */
+.linq-card{background:var(--surface-1);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:12px;padding:.9rem 1.1rem;margin-bottom:.8rem}
+.linq-head{font-size:.68rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin-bottom:.4rem}
+.linq-q{font-size:1rem;line-height:1.45;color:var(--text-primary)}
+.linq-flag{margin-top:.5rem;font-size:.76rem;line-height:1.45;color:var(--text-secondary)}
+.linq-more{margin-top:.5rem;font-size:.72rem;color:var(--text-muted);line-height:1.45}
+
+/* ── The team as a subject — High / Low / Inquiry / Focus ─────────────────────
+   Sits above the per-person list on the leader's home. Deliberately quiet: no colour
+   coding by polarity, because a Low is not an alarm and a High is not a trophy — both
+   are reads the group can act on, and colouring them teaches a leader to skim for red. */
+.tstate-card{background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:1rem 1.1rem;margin-bottom:.8rem}
+.tstate-head{display:flex;align-items:baseline;justify-content:space-between;gap:.6rem;margin-bottom:.7rem}
+.tstate-name{font-size:1rem;font-weight:700;color:var(--text-primary)}
+.tstate-count{font-size:.72rem;color:var(--text-muted);white-space:nowrap}
+.tstate-line{display:flex;gap:.7rem;padding:.4rem 0;border-top:1px solid var(--border)}
+.tstate-line:first-of-type{border-top:none;padding-top:0}
+.tstate-label{flex:0 0 4.6rem;font-size:.72rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);padding-top:.15rem}
+.tstate-text{flex:1;font-size:.9rem;line-height:1.5;color:var(--text-primary)}
+.tstate-sub{display:block;font-size:.72rem;color:var(--text-muted);margin-top:.15rem}
+.tstate-withheld{margin-top:.6rem;padding:.5rem .65rem;background:var(--surface-2,var(--bg));border-radius:8px;font-size:.76rem;line-height:1.45;color:var(--text-secondary)}
+.tstate-says{margin-top:.75rem;padding-top:.7rem;border-top:1px solid var(--border);font-size:.85rem;line-height:1.5;color:var(--text-secondary);font-style:italic}
+
 /* ── Platform Intelligence — the one leader briefing surface ─────────────────── */
 .intel-summary{display:flex;align-items:flex-start;gap:.7rem;background:var(--surface-1);border:1px solid var(--border);border-radius:12px;padding:1rem 1.1rem;margin-bottom:1rem}
 .intel-summary-icon{font-size:1.4rem;line-height:1}

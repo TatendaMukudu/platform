@@ -1,5 +1,8 @@
 # Brief: Principal Agent, slice 1 — roles and claim validation
 
+> **PARTIAL.** Retained as history. Current implementation order is
+> `docs/ttd/consolidated-implementation-queue.md`.
+
 **For:** Codex (implementer)
 **From:** Claude (architecture)
 **Branch:** `claude/platform-work-summary-nmb0cm`

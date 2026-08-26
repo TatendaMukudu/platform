@@ -27,6 +27,7 @@ const orgMemory  = require('./ai/org-memory');
 const orgGraph   = require('./ai/org-graph');
 const orgAnswer  = require('./ai/org-answer');
 const orgRouting = require('./ai/org-routing');
+const teamState  = require('./ai/team-state');
 const conversation   = require('./ai/conversation');
 const assessmentView = require('./ai/assessment-view');
 const orgLearning= require('./ai/org-learning');
@@ -84,6 +85,13 @@ const capAdapters = require('./lib/adapters');   // capability → canonical evi
 
 const app    = express();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+let _shuttingDown = false;
+let _httpServer = null;
+let _shutdownPromise = null;
+let _persistenceReady = {
+  ready: process.env.DB_OPTIONAL === '1' || process.env.NODE_ENV === 'test' || process.env.PERSISTENCE_MODE === 'main',
+  error: null,
+};
 
 /* ── Process-level crash guards ───────────────────────────────────────────────
    A single unhandled async error should never take the whole server down and
@@ -94,6 +102,27 @@ process.on('unhandledRejection', (reason) => {
 });
 process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err && err.stack ? err.stack : err);
+});
+
+function _handleShutdownSignal(signal) {
+  _gracefulShutdown(signal).then(() => {
+    if (require.main === module) process.exit(0);
+  }).catch(err => {
+    console.error(`[shutdown] ${signal} failed:`, err && err.stack ? err.stack : err);
+    if (require.main === module) process.exit(1);
+  });
+}
+process.on('SIGTERM', () => _handleShutdownSignal('SIGTERM'));
+process.on('SIGINT',  () => _handleShutdownSignal('SIGINT'));
+
+// Requests already inside the app are allowed to finish. Once shutdown starts,
+// a keep-alive connection cannot begin a new mutation behind the final flush.
+app.use((req, res, next) => {
+  if (_shuttingDown) return res.status(503).json({ error: 'server_shutting_down' });
+  if (!_persistenceReady.ready && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    return res.status(503).json({ error: 'store unavailable' });
+  }
+  next();
 });
 
 // 25mb so base64 rich-media (images/PDF) in chat/scenarios isn't rejected by the
@@ -164,7 +193,7 @@ function _persistedStores() {
     orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
     reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
     conversationSessions, assistantConversations, libraryFolders, libraryItems, safeguardingFlags,
-    inquiryStates, groupCandidates, forumThreads,
+    inquiryStates, groupCandidates, forumThreads, teamFocuses,
   };
 }
 
@@ -248,7 +277,9 @@ const PERSISTENCE_MODE = ['split', 'dual', 'main'].includes(process.env.PERSISTE
   ? process.env.PERSISTENCE_MODE : 'split';
 
 const _saveHashes = new Map();       // unit key → hash of what is durably stored
-let _saveTimer = null, _saveInFlight = false, _saveDirty = false;
+const _unitRevs = new Map();         // unit key → PostgreSQL revision last observed
+let _saveTimer = null, _saveInFlight = false, _saveDirty = false, _savePromise = null;
+let _lastSaveError = null;
 let _lastSave = null;                // instrumentation for the bandwidth report
 
 /* Just enough counters to answer "did the architectural hypothesis hold?" after
@@ -293,8 +324,7 @@ function _scheduleRetry() {
    uploads stacked. A save now either starts or marks the state dirty for the
    one already running to pick up; there is never a second transaction in
    flight, and a mutation arriving mid-save is never dropped. */
-async function _runSave() {
-  if (_saveInFlight) { _saveDirty = true; _saveStats.queued++; return; }
+async function _performSave(failLoud) {
   _saveInFlight = true;
   try {
     do {
@@ -306,11 +336,13 @@ async function _runSave() {
       if (PERSISTENCE_MODE === 'main') {
         try {
           await db.saveMain(_persistedStores());
+          _lastSaveError = null;
           _saveRetries = 0;
           _lastSave = { units: 1, bytes: 0, ms: Date.now() - t0, mode: 'main' };
         } catch (e) {
           console.error('[db] Save failed:', e.message);
-          _saveDirty = false; _scheduleRetry();
+          _lastSaveError = e; _saveDirty = false;
+          if (!failLoud) _scheduleRetry();
         }
         continue;
       }
@@ -339,22 +371,53 @@ async function _runSave() {
       const gone = [...(_saveHashes.keys())].filter(k => !(k in units));
 
       if (!Object.keys(changed).length && !gone.length) {
+        _lastSaveError = null;
         _saveStats.noopCycles++;
         _lastSave = { units: 0, bytes: 0, ms: 0 };
         continue;
       }
 
       try {
-        await db.saveStores(changed);
-        if (gone.length) await db.deleteStores(gone);
+        if (!_persistenceReady.ready) {
+          _lastSaveError = new Error(_persistenceReady.error || 'durable persistence is not ready');
+          _lastSaveError.code = 'PERSISTENCE_NOT_READY';
+          console.error('[db] Save refused:', _lastSaveError.message);
+          _saveDirty = false;
+          continue;
+        }
+        const expect = {};
+        for (const key of Object.keys(changed)) expect[key] = _unitRevs.get(key) || 0;
+        const deleteExpect = {};
+        for (const key of gone) deleteExpect[key] = _unitRevs.get(key) || 0;
+        const deleted = gone.length
+          ? await db.deleteStores(gone, { expect: deleteExpect })
+          : { rows: 0, conflicts: [] };
+        if (deleted && deleted.conflicts && deleted.conflicts.length) {
+          await _reloadDurableUnits(deleted.conflicts);
+          _lastSaveError = new Error(`durable delete conflict: ${deleted.conflicts.join(', ')}`);
+          _lastSaveError.code = 'DURABLE_CONFLICT';
+          _saveDirty = false;
+          continue;
+        }
+        const saved = await db.saveStores(changed, { expect }) || { conflicts: [] };
+        if (saved.conflicts && saved.conflicts.length) {
+          await _reloadDurableUnits(saved.conflicts);
+          _lastSaveError = new Error(`durable conflict: ${saved.conflicts.join(', ')}`);
+          _lastSaveError.code = 'DURABLE_CONFLICT';
+          _saveDirty = false;
+          continue;
+        }
         // 'dual' keeps the legacy blob current so a rollback to 'main' loses
         // nothing. It costs the full upload every cycle — that is the price of
         // the rollback, and the reason it is not the default.
         if (PERSISTENCE_MODE === 'dual') await db.saveMain(_persistedStores());
         // Baseline advances ONLY after the write commits. A failed save must stay
         // dirty and retry, never be remembered as persisted.
-        for (const [k, h] of Object.entries(hashes)) _saveHashes.set(k, h);
-        for (const k of gone) _saveHashes.delete(k);
+        for (const [k, h] of Object.entries(hashes)) {
+          _saveHashes.set(k, h);
+          if (Object.prototype.hasOwnProperty.call(changed, k)) _unitRevs.set(k, (_unitRevs.get(k) || 0) + 1);
+        }
+        for (const k of gone) { _saveHashes.delete(k); _unitRevs.delete(k); }
         _saveRetries = 0;
         const ms = Date.now() - t0;
         _lastSave = { units: Object.keys(changed).length, bytes, serialised, ms, deleted: gone.length, at: new Date().toISOString() };
@@ -368,22 +431,88 @@ async function _runSave() {
           console.log(`[save] ${_lastSave.units} unit(s) ${(bytes / 1024).toFixed(1)} KB written of ${(serialised / 1024).toFixed(1)} KB held, ${ms}ms` +
             `${gone.length ? `, ${gone.length} removed` : ''}${keys ? ` — ${keys}${_lastSave.units > 4 ? ', …' : ''}` : ''}`);
         }
+        _lastSaveError = null;
       } catch (e) {
         console.error('[db] Save failed:', e.message);   // hashes untouched — still dirty
+        _lastSaveError = e;
         _saveStats.failures++;
         _saveDirty = false;                              // don't spin: back off instead
-        _scheduleRetry();
+        if (!failLoud) _scheduleRetry();
       }
     } while (_saveDirty);
   } finally {
     _saveInFlight = false;
   }
+  if (failLoud && _lastSaveError) throw _lastSaveError;
+}
+
+function _runSave(opts = {}) {
+  if (_savePromise) {
+    _saveDirty = true;
+    _saveStats.queued++;
+    return _savePromise;
+  }
+  const failLoud = opts.failLoud === true;
+  const task = _performSave(failLoud);
+  _savePromise = task.finally(() => { if (_savePromise === wrapped) _savePromise = null; });
+  const wrapped = _savePromise;
+  return wrapped;
 }
 
 function scheduleSave() {
   if (_saveInFlight) { _saveDirty = true; _saveStats.queued++; return; }
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => { _saveTimer = null; _runSave(); }, SAVE_DEBOUNCE_MS);
+}
+
+async function _flushPersistence() {
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  if (_saveRetryTimer) { clearTimeout(_saveRetryTimer); _saveRetryTimer = null; }
+
+  // If a normal save is already running, mark it dirty so it takes one more
+  // authoritative snapshot, then wait for that single writer to finish.
+  if (_savePromise) {
+    _saveDirty = true;
+    await _savePromise;
+  }
+
+  // A failed normal save may have installed a retry while we awaited it.
+  if (_saveRetryTimer) { clearTimeout(_saveRetryTimer); _saveRetryTimer = null; }
+  await _runSave({ failLoud: true });
+  return { ok: true };
+}
+
+async function _flushAndClose() {
+  const evidenceResults = await _awaitEvidenceMaintenance();
+  const evidenceFailure = evidenceResults.find(result => result && result.ok === false);
+  if (evidenceFailure) throw new Error(evidenceFailure.error || 'evidence maintenance failed');
+
+  // Evidence maintenance can remove hot/raw records and calls scheduleSave().
+  // It must therefore finish before the final authoritative store snapshot.
+  await _flushPersistence();
+  return { ok: true };
+}
+
+function _stopHttpListener() {
+  if (!_httpServer || !_httpServer.listening) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    _httpServer.close(err => err ? reject(err) : resolve());
+    if (typeof _httpServer.closeIdleConnections === 'function') _httpServer.closeIdleConnections();
+  });
+}
+
+function _gracefulShutdown(signal = 'manual') {
+  if (_shutdownPromise) return _shutdownPromise;
+  _shuttingDown = true;
+  _shutdownPromise = (async () => {
+    // close() stops new connections and resolves only after requests already
+    // accepted by the server finish, so their mutations precede the flush.
+    await _stopHttpListener();
+    await _flushAndClose();
+    console.log(`[shutdown] ${signal} durability boundary complete`);
+    return { ok: true };
+  })();
+  return _shutdownPromise;
 }
 
 /* The boot path, as one callable step so the migration it performs can actually
@@ -400,15 +529,30 @@ function scheduleSave() {
    persisted key, which persistence-smoke pins. */
 async function _reconstruct(storeData) {
   _loadAllStores(storeData || {});
-  if (PERSISTENCE_MODE === 'main') return { mode: 'main', units: 0 };
+  if (PERSISTENCE_MODE === 'main') {
+    _persistenceReady = { ready: true, error: null };
+    return { mode: 'main', units: 0 };
+  }
+  _persistenceReady = { ready: false, error: 'authoritative split persistence has not loaded' };
   try {
-    const rows = await db.loadStores();
+    const loaded = await db.loadStores({ withRevisions: true });
+    // Older adapters/tests may still return the default units-only shape. The
+    // production DB returns the revision-bearing shape requested above.
+    const rows = loaded.units || loaded;
+    const revisions = loaded.revisions || {};
     const n = Object.keys(rows).length;
     if (n) {
       for (const store of Object.values(_persistedStores())) {
         for (const k of Object.keys(store)) delete store[k];
       }
       _applyUnits(rows);
+      _saveHashes.clear();
+      _unitRevs.clear();
+      for (const [key, value] of Object.entries(rows)) {
+        _saveHashes.set(key, _hash(JSON.stringify(value)));
+        _unitRevs.set(key, Number(revisions[key] || 0));
+      }
+      _persistenceReady = { ready: true, error: null };
       console.log(`[db] Split persistence: ${n} durable unit(s) loaded (authoritative)`);
       return { mode: 'split', units: n, authoritative: 'split' };
     }
@@ -416,12 +560,53 @@ async function _reconstruct(storeData) {
     // becomes the pre-migration restore point, and PERSISTENCE_MODE=main is
     // the way back to it.
     console.log('[db] No split rows yet — migrating from the legacy blob on first save.');
+    _persistenceReady = { ready: true, error: null };
     scheduleSave();
     return { mode: PERSISTENCE_MODE, units: 0, authoritative: 'main' };
   } catch (e) {
-    console.error('[db] Split load failed, continuing on the legacy blob:', e.message);
-    return { mode: PERSISTENCE_MODE, units: 0, authoritative: 'main', error: e.message };
+    _unitRevs.clear();
+    _saveHashes.clear();
+    _persistenceReady = { ready: false, error: `authoritative split load failed: ${e.message}` };
+    console.error('[db] Split load failed; durable mutations are unavailable:', e.message);
+    return { mode: PERSISTENCE_MODE, units: 0, authoritative: 'unavailable', error: e.message };
   }
+}
+
+async function _reloadDurableUnits(keys) {
+  const wanted = new Set(keys || []);
+  if (!wanted.size) return;
+  const loaded = await db.loadStores({ withRevisions: true });
+  const rows = {}, revisions = loaded.revisions || {};
+  for (const [key, value] of Object.entries(loaded.units || {})) {
+    if (wanted.has(key)) rows[key] = value;
+  }
+  if (Object.keys(rows).length) _applyUnits(rows);
+  for (const [key, value] of Object.entries(rows)) {
+    _saveHashes.set(key, _hash(JSON.stringify(value)));
+    _unitRevs.set(key, Number(revisions[key] || 0));
+  }
+  _backfillUserNodeIds();
+}
+
+async function _saveProtectedUnit(storeName, code) {
+  if (!_persistenceReady.ready) {
+    const err = new Error(_persistenceReady.error || 'durable persistence is not ready');
+    err.code = 'PERSISTENCE_NOT_READY';
+    throw err;
+  }
+  const key = `store:${storeName}:${code}`;
+  const unit = _durableUnits()[key];
+  const result = await db.saveStores({ [key]: unit }, { expect: { [key]: _unitRevs.get(key) || 0 } });
+  if (result && result.conflicts && result.conflicts.includes(key)) {
+    return { conflict: true };
+  }
+  _unitRevs.set(key, (_unitRevs.get(key) || 0) + 1);
+  _saveHashes.set(key, _hash(JSON.stringify(unit)));
+  return { ok: true };
+}
+
+function _persistenceReadiness() {
+  return { ..._persistenceReady };
 }
 
 /* Expired sessions used to be pruned inside the save callback, so persisting
@@ -469,12 +654,20 @@ function _purgeExpired(retentionDays = RETENTION_DAYS) {
   for (const code of Object.keys(evidenceLog)) {
     if (!Array.isArray(evidenceLog[code])) continue;
     const before = evidenceLog[code].length;
+    const expiredIds = [];
     evidenceLog[code] = evidenceLog[code].filter(env => {
       if (keep(env.observedAt || env.createdAt)) return true;
+      expiredIds.push(env.id);
       if (env.rawRef) delete rawEvidence[env.rawRef];
+      try { _evictEvidenceVector(code, env.id); } catch (_) {}
       return false;
     });
     removed += before - evidenceLog[code].length;
+    const cutoffIso = new Date(cutoff).toISOString();
+    _trackEvidenceMaintenance((async () => {
+      await Promise.all(expiredIds.map(id => db.eraseColdEvidence(code, id)));
+      await db.eraseColdEvidenceBefore(code, cutoffIso);
+    })(), `retention:${code}`);
   }
   if (typeof _rebuildEvidenceIndex === 'function') _rebuildEvidenceIndex();
   if (removed) { console.log(`[retention] purged ${removed} record(s) older than ${retentionDays}d`); scheduleSave(); }
@@ -1037,7 +1230,9 @@ const oauthPending          = {};  // state → { code(org), userId, provider, t
 const rawEvidence           = {};  // rawRef → { org, provider, receivedAt, record }
 const evidenceLog           = {};  // orgCode → [ envelope ]
 const _evidenceSeen         = {};  // orgCode → Set(dedupeKey)  (rebuilt on load; dedupe index)
-const EVIDENCE_LOG_CAP      = 8000; // per-org retention cap for the in-memory/blob log
+const EVIDENCE_LOG_CAP      = Math.max(1, parseInt(process.env.EVIDENCE_LOG_CAP, 10) || 8000);
+const _evidenceEvictionPending = new Map(); // orgCode → one coalesced archive task
+const _evidenceMaintenancePending = new Set(); // retention/subject erasure tasks for P0-2 to await
 // The Mapping Approval layer — the interpretation boundary. A registry of VERSIONED
 // mapping contracts per org. Only an ACTIVE version may promote evidence; editing an
 // approved version forks a new draft (versions are immutable). See lib/mapping.js.
@@ -1711,6 +1906,7 @@ function _removePerson(code, userId, deleteData) {
   if (!users || !users[userId]) return { ok: false, error: 'User not found' };
 
   const user  = users[userId];
+  let evidenceErasure = null;
   const email = (user.email || '').toLowerCase();
   const name  = user.name  || '';
 
@@ -1750,6 +1946,8 @@ function _removePerson(code, userId, deleteData) {
 
   // 7. Remove user record itself
   delete users[userId];
+  _backfillUserNodeIds();
+  _invalidateOrgProjections(code);
 
   // 8. Hard-delete ALL of this person's data (GDPR Art 17 — right to erasure).
   //    Must leave NO orphaned personal data anywhere, including the raw check-in
@@ -1848,6 +2046,19 @@ function _removePerson(code, userId, deleteData) {
           : c));
     }
 
+    /* A team Focus is the GROUP'S commitment, so the commitment survives — but who set it is
+       personal data and is unlinked, exactly as a contribution's contributor is. The provenance
+       shape is preserved rather than deleted: a Focus that loses its `origin` entirely would
+       become indistinguishable from one created before origin existed, and outcome learning
+       would silently start crediting it to the system. */
+    for (const list of Object.values(teamFocuses[code] || {})) {
+      for (let i = 0; i < list.length; i++) {
+        const f = list[i];
+        if (f.origin && f.origin.by === userId) f.origin = { ...f.origin, by: '(erased)' };
+        if (f.outcome && f.outcome.recordedBy === userId) f.outcome = { ...f.outcome, recordedBy: '(erased)' };
+      }
+    }
+
     // Beliefs held ABOUT them. Org-level beliefs (no subject) are not personal
     // data and stay, so erasing one person doesn't blank the organisation's read.
     if (Array.isArray(reasonLedger[code]))
@@ -1864,18 +2075,27 @@ function _removePerson(code, userId, deleteData) {
        Art 17(3)(b) permits retaining what is needed for a legal obligation, and
        Art 5(2) accountability is exactly that: the record that the erasure
        happened cannot itself be erasable. */
+
+    // Canonical evidence is a separate durable boundary. Start its tenant-scoped
+    // erasure here; the HTTP deletion route awaits this promise before acknowledging.
+    evidenceErasure = _trackEvidenceMaintenance(
+      _eraseSubjectEvidence(code, userId), `subject-erasure:${code}:${userId}`);
   }
 
-  return { ok: true };
+  return { ok: true, evidenceErasure };
 }
 
-app.delete('/api/auth/users/:userId', requirePermission('delete_members'), (req, res) => {
+app.delete('/api/auth/users/:userId', requirePermission('delete_members'), async (req, res) => {
   const code       = req.iqSession.orgCode;
   const { userId } = req.params;
   const deleteData = req.query.deleteData === 'true';
 
   const result = _removePerson(code, userId, deleteData);
   if (!result.ok) return res.status(404).json(result);
+  if (result.evidenceErasure) {
+    const erasure = await result.evidenceErasure;
+    if (erasure && erasure.ok === false) return res.status(500).json({ error: 'evidence erasure failed' });
+  }
   // ACCOUNTABILITY — erasure (Art 17) is itself an accountable event. The trail records
   // THAT a person's data was erased (who did it, whose data) without retaining the data.
   if (deleteData) _audit(code, { actor: req.iqSession.userId, action: 'erasure', subjectIds: [userId], basis: 'right to erasure (Art 17)' });
@@ -2201,14 +2421,79 @@ app.post('/api/auth/set-password', async (req, res) => {
 app.get('/api/tree', requireAuth, (req, res) => {
   const code  = req.iqSession.orgCode;
   const nodes = Object.values(orgNodes[code] || {});
+  for (const node of nodes) if (!Number.isInteger(node.rev)) node.rev = 0;
   res.json({ ok: true, nodes });
 });
 
-app.post('/api/tree/node', requirePermission('manage_tree'), (req, res) => {
+// One tenant tree is one durable aggregate. Keep its complete
+// precondition->snapshot->mutation->CAS section ordered inside this process so
+// a later request cannot leak its unaccepted mutation into an earlier snapshot.
+const _treeMutationTails = new Map();
+function _serializeTreeMutation(req, res, next) {
   const code = req.iqSession.orgCode;
-  const { name, parentId, description } = req.body;
+  const prior = _treeMutationTails.get(code) || Promise.resolve();
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const tail = prior.then(() => gate);
+  _treeMutationTails.set(code, tail);
+  prior.then(() => {
+    let released = false;
+    const finish = () => {
+      if (released) return;
+      released = true;
+      if (_treeMutationTails.get(code) === tail) _treeMutationTails.delete(code);
+      release();
+    };
+    res.once('finish', finish);
+    res.once('close', finish);
+    next();
+  }).catch(next);
+}
+
+function _treePrecondition(res, node, ifRev) {
+  if (ifRev === undefined) {
+    res.status(428).json({ error: 'precondition required', field: 'ifRev' });
+    return false;
+  }
+  if (!Number.isInteger(node.rev)) node.rev = 0;
+  if (!Number.isInteger(ifRev) || ifRev !== node.rev) {
+    res.status(409).json({ error: 'conflict', currentRev: node.rev });
+    return false;
+  }
+  return true;
+}
+
+async function _commitTreeMutation(code, snapshot, res) {
+  try {
+    const saved = await _saveProtectedUnit('orgNodes', code);
+    if (saved.conflict) {
+      orgNodes[code] = snapshot;
+      await _reloadDurableUnits([`store:orgNodes:${code}`]);
+      _backfillUserNodeIds();
+      res.status(409).json({ error: 'conflict', reason: 'changed elsewhere' });
+      return false;
+    }
+    _backfillUserNodeIds();
+    _invalidateOrgProjections(code);
+    return true;
+  } catch (err) {
+    orgNodes[code] = snapshot;
+    _backfillUserNodeIds();
+    console.error('[tree] durable save failed:', err && err.message);
+    res.status(503).json({ error: 'store unavailable' });
+    return false;
+  }
+}
+
+app.post('/api/tree/node', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
+  const code = req.iqSession.orgCode;
+  const { name, parentId, description, ifRev } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
   if (!orgNodes[code]) orgNodes[code] = {};
+  const parent = parentId ? orgNodes[code][parentId] : null;
+  if (parentId && !parent) return res.status(404).json({ error: 'Parent node not found' });
+  if (parent && !_treePrecondition(res, parent, ifRev)) return;
+  const snapshot = JSON.parse(JSON.stringify(orgNodes[code]));
   const nodeId = 'nd_' + generateId();
   const now    = new Date().toISOString();
   orgNodes[code][nodeId] = {
@@ -2219,6 +2504,7 @@ app.post('/api/tree/node', requirePermission('manage_tree'), (req, res) => {
     childNodeIds: [],
     memberIds:   [],
     leaderIds:   [],
+    rev:         0,
     createdAt:   now,
     updatedAt:   now,
   };
@@ -2227,16 +2513,19 @@ app.post('/api/tree/node', requirePermission('manage_tree'), (req, res) => {
     if (!orgNodes[code][parentId].childNodeIds) orgNodes[code][parentId].childNodeIds = [];
     orgNodes[code][parentId].childNodeIds.push(nodeId);
     orgNodes[code][parentId].updatedAt = now;
+    orgNodes[code][parentId].rev = (orgNodes[code][parentId].rev || 0) + 1;
   }
-  scheduleSave();
+  if (!(await _commitTreeMutation(code, snapshot, res))) return;
   res.json({ ok: true, node: orgNodes[code][nodeId] });
 });
 
-app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), (req, res) => {
+app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
   const code   = req.iqSession.orgCode;
   const nodeId = req.params.nodeId;
   const node   = orgNodes[code]?.[nodeId];
   if (!node) return res.status(404).json({ error: 'Node not found' });
+  if (!_treePrecondition(res, node, req.body.ifRev)) return;
+  const snapshot = JSON.parse(JSON.stringify(orgNodes[code]));
   const { name, description, parentId, memberIds, leaderIds } = req.body;
   const now = new Date().toISOString();
   if (name        !== undefined) node.name        = name.trim();
@@ -2256,25 +2545,30 @@ app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), (req, res) =
       const op = orgNodes[code][node.parentId];
       op.childNodeIds = (op.childNodeIds || []).filter(id => id !== nodeId);
       op.updatedAt = now;
+      op.rev = (Number.isInteger(op.rev) ? op.rev : 0) + 1;
     }
     // Add to new parent
     if (parentId && orgNodes[code][parentId]) {
       if (!orgNodes[code][parentId].childNodeIds) orgNodes[code][parentId].childNodeIds = [];
       orgNodes[code][parentId].childNodeIds.push(nodeId);
       orgNodes[code][parentId].updatedAt = now;
+      orgNodes[code][parentId].rev = (Number.isInteger(orgNodes[code][parentId].rev) ? orgNodes[code][parentId].rev : 0) + 1;
     }
     node.parentId = parentId || null;
   }
   node.updatedAt = now;
-  scheduleSave();
+  node.rev++;
+  if (!(await _commitTreeMutation(code, snapshot, res))) return;
   res.json({ ok: true, node });
 });
 
-app.delete('/api/tree/node/:nodeId', requirePermission('manage_tree'), (req, res) => {
+app.delete('/api/tree/node/:nodeId', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
   const code   = req.iqSession.orgCode;
   const nodeId = req.params.nodeId;
   const node   = orgNodes[code]?.[nodeId];
   if (!node) return res.status(404).json({ error: 'Node not found' });
+  if (!_treePrecondition(res, node, req.body.ifRev)) return;
+  const snapshot = JSON.parse(JSON.stringify(orgNodes[code]));
   const now = new Date().toISOString();
   // Remove nodeId from user caches before deleting
   _syncUserNodeArrays(code, nodeId, node.memberIds || [], [], node.leaderIds || [], []);
@@ -2283,16 +2577,18 @@ app.delete('/api/tree/node/:nodeId', requirePermission('manage_tree'), (req, res
     const p = orgNodes[code][node.parentId];
     p.childNodeIds = (p.childNodeIds || []).filter(id => id !== nodeId);
     p.updatedAt = now;
+    p.rev = (Number.isInteger(p.rev) ? p.rev : 0) + 1;
   }
   // Reparent children to deleted node's parent
   (node.childNodeIds || []).forEach(childId => {
     if (orgNodes[code][childId]) {
       orgNodes[code][childId].parentId  = node.parentId;
       orgNodes[code][childId].updatedAt = now;
+      orgNodes[code][childId].rev = (Number.isInteger(orgNodes[code][childId].rev) ? orgNodes[code][childId].rev : 0) + 1;
     }
   });
   delete orgNodes[code][nodeId];
-  scheduleSave();
+  if (!(await _commitTreeMutation(code, snapshot, res))) return;
   res.json({ ok: true });
 });
 
@@ -3484,6 +3780,7 @@ app.get('/api/workspace/briefing', requireAuth, async (req, res) => {
    ═══════════════════════════════════════════════════════════════════════════ */
 const intelBriefingCache = {}; // `${code}:${userId}` → { data, ts }
 const noticeFeedback = {};     // orgCode → { noticingType → { useful, dismiss } } — the Confidence Engine's memory
+const MIN_COHORT = 2;
 
 /* Confidence Engine read: per-noticing-type reliability, from humans' feedback. */
 function _reliabilityByType(code) {
@@ -3854,8 +4151,18 @@ function _stripLeaderNumbers(s) {
    numbers or raw evidence basis. One source → every leader surface inherits it. */
 function _sanitizeBriefingForLeader(data) {
   if (!data) return data;
-  const items = (data.items || []).map(it => ({
-    ...it,
+  const items = (data.items || []).map(it => {
+    // A WEB item is already audience-safe by construction: it named nobody to begin with, and
+    // _webIntelligence checked it against the frozen WEB_ARTIFACT_KEYS allow-list before
+    // emitting it. Running it through the person sanitizer ADDS fields the allow-list forbids
+    // (evidence, patterns, deviations, connections, graph), so the artifact then fails the very
+    // fail-closed check that was built to protect it. Leave it exactly as it was passed.
+    if (it && it.perspective === 'web') return it;
+    // Presence of private context is itself private information. Omit the flag
+    // rather than setting it false so the leader payload has no side channel.
+    const { careFlag: _privateContext, ...safe } = it;
+    return ({
+    ...safe,
     whyNow: _stripLeaderNumbers(it.whyNow),
     recommendedAction: _stripLeaderNumbers(it.recommendedAction),
     learnedNote: it.learnedNote ? _stripLeaderNumbers(it.learnedNote) : it.learnedNote,
@@ -3864,8 +4171,46 @@ function _sanitizeBriefingForLeader(data) {
     deviations: (it.deviations || []).map(d => ({ label: d.label, direction: d.direction, confidence: d.confidence })), // no pct/normal/recent
     connections: (it.connections || []).map(c => ({ ...c, basis: _stripLeaderNumbers(c.basis) })),
     graph: undefined,                                      // node/edge internals not for the leader UI
-  }));
+  }); });
   return { ...data, summary: _stripLeaderNumbers(data.summary), items };
+}
+
+/* Aggregate already-detected kernel findings into audience-safe Web projections.
+   A Web item is about a cohort, never a disguised person read: no subject id/name,
+   raw basis, quote or member count is carried in the artifact. Two independent
+   people is the existing minimum aggregate floor for this presentation surface. */
+function _webIntelligence(patterns, memberCount, reliabilityByType, now) {
+  const out = [];
+  const CONF = { tentative: 0, emerging: 1, clear: 2 };
+  const SEV = { low: 0, medium: 1, high: 2 };
+  for (const [type, group] of Object.entries(patterns || {})) {
+    const contributions = group.contributions || [];
+    const contributors = new Set(contributions.map(c => c.contributorId).filter(Boolean));
+    const k = contributors.size;
+    if (k < MIN_COHORT || memberCount - k < MIN_COHORT) continue;
+    const decision = contribution.shouldOpenGroupInquiry(contributions, { now });
+    if (!decision.open || !confidence.shouldSurface(reliabilityByType[type])) continue;
+    const findings = group.findings || [];
+    if (!findings.length || findings.some(f => !f.confidence || !f.severity)) continue;
+    const minConfidence = findings.map(f => f.confidence).sort((a, b) => (CONF[a] ?? -1) - (CONF[b] ?? -1))[0];
+    const maxSeverity = findings.map(f => f.severity).sort((a, b) => (SEV[b] ?? -1) - (SEV[a] ?? -1))[0];
+    const polarity = proactive.PATTERN_POLARITY[type] || 'neutral';
+    const positive = polarity === 'progress' || polarity === 'milestone';
+    const label = intel.PATTERN_LABEL[type] || String(type).replace(/_/g, ' ');
+    const finding = {
+      type, polarity, severity: maxSeverity, confidence: minConfidence, openingRule: decision.rule,
+      render: { leader: {
+        headline: positive ? 'A Web High is emerging' : 'A Web Low deserves attention',
+        body: `${label} is appearing across your visible scope. This is an aggregate pattern, not a conclusion about any individual.`,
+        suggestion: positive ? 'Consider protecting what is working.' : 'Consider reviewing the conditions around this pattern.',
+      } },
+    };
+    const projected = proactive.toInsight(finding, {
+      audience: 'leader', subjectRef: 'web:visible-scope', reliabilityLabel: confidence.label(reliabilityByType[type]), now,
+    });
+    if (proactive.audienceSafe(projected).ok) out.push({ ...projected, kind: positive ? 'high' : 'low' });
+  }
+  return out;
 }
 
 app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
@@ -3888,7 +4233,7 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
   const learning = _learningByPattern(code);
 
   const reliabilityByType = _reliabilityByType(code);
-  const items = []; let activeWeek = 0; const patternCounts = {};
+  let activeWeek = 0; const patternGroups = {}; const personItems = [];
   members.forEach(u => {
     let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { return; }
     if (m.lastActivityT && now - m.lastActivityT < 7 * 86400000) activeWeek++;
@@ -3906,14 +4251,37 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
     const rel = reliabilityByType[item.patternType];
     if (!confidence.shouldSurface(rel)) return;
     item.reliability = confidence.label(rel);
-    findings.forEach(f => { patternCounts[f.type] = (patternCounts[f.type] || 0) + 1; });
-    items.push(item);
+    // KEEP the person item. It is what lets a leader act on one person and record what
+    // happened, which is the loop the whole outcome-learning layer feeds on. An earlier pass
+    // computed these and then discarded them, emitting only the aggregate Web items — which
+    // made POST /api/intelligence/act unreachable and left the leader with a page that
+    // reports and cannot be answered. Aggregate reporting and per-person action are two
+    // different jobs and the surface needs both.
+    //
+    // Every privacy correction still applies: _sanitizeBriefingForLeader below strips the
+    // numbers, the raw evidence basis and the careFlag side channel from exactly these items.
+    personItems.push(item);
+    // Evidence origins stay internal. Unknown origins cannot establish independence.
+    const sources = (evidenceLog[code] || []).filter(e => e.status === 'active' && e.subjectId === u.id &&
+      e.visibility !== 'private' && _isSourceEvidence(e));
+    findings.forEach(f => {
+      const g = patternGroups[f.type] || (patternGroups[f.type] = { findings: [], contributions: [] });
+      g.findings.push(f);
+      sources.forEach(e => g.contributions.push({
+        status: 'contributed', contributorId: u.id, originRef: e.originRef || e.originId || null,
+        authority: e.authority || e.attributes?.authority || 'self_report',
+      }));
+    });
   });
-  const SEV = { high: 0, medium: 1, low: 2 };
-  items.sort((a, b) => SEV[a.severity] - SEV[b.severity]);
-  const top = items.slice(0, 15);
+  const top = _webIntelligence(patternGroups, members.length, reliabilityByType, now).slice(0, 15);
 
-  const participation = members.length ? Math.round((activeWeek / members.length) * 100) : 0;
+  const safeParticipation = activeWeek >= MIN_COHORT && members.length - activeWeek >= MIN_COHORT;
+  const participation = safeParticipation ? Math.round((activeWeek / members.length) * 100) : null;
+  const activeThisWeek = safeParticipation ? activeWeek : null;
+  const visibleTypes = new Set(top.map(i => i.patternType));
+  const patternCounts = Object.fromEntries(Object.entries(patternGroups)
+    .filter(([type]) => visibleTypes.has(type))
+    .map(([type, g]) => [type, new Set(g.contributions.map(c => c.contributorId).filter(Boolean)).size]));
   const drops = patternCounts.momentum_drop || 0, ups = patternCounts.quiet_improvement || 0;
   const momentum = drops > ups ? 'softening' : ups > drops ? 'building' : 'steady';
 
@@ -3932,27 +4300,17 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
     Promise.resolve(p).then(v => v, () => undefined),
     new Promise(r => setTimeout(() => r(undefined), AI_BRIEF_MS)),
   ]);
-  const narrativeP = ai.enabled() ? ai.complete({
-    tier: 'reason', maxTokens: 200,
-    system: [
-      `You are Platform Intelligence, briefing a leader in 2-3 sentences: the shape of the week and the ONE thing to prioritise. Aggregate only — NEVER name an individual (the leader sees the named list separately). Honest and directional — say "pattern" or "early signal", never "prediction" and never scores.`,
-      _worldviewDirective(code),
-      _domainDirective(code),
-    ].filter(Boolean).join('\n\n'),
-    user: brief,
-  }) : Promise.resolve(null);
-  const [narrative, promptsRaw] = await Promise.all([ _capAI(narrativeP), _capAI(_reasonedPrompts(code, userId, now)) ]);
-
   let data = {
     ok: true,
     generatedAt: new Date().toISOString(),
     domain: _domainStamp(code),
-    summary: narrative || (top.length
-      ? `${top.length} ${_vc(code, top.length === 1 ? 'member' : 'members')} show patterns worth a look this week.`
-      : `Your ${_vc(code, 'group')} looks steady — ${activeWeek}/${members.length} active, nothing flagged.`),
-    rollup: { memberCount: members.length, activeThisWeek: activeWeek, participation, momentum, patternCounts },
-    items: top,
-    prompts: Array.isArray(promptsRaw) ? promptsRaw : [],
+    summary: top.length
+      ? `There are aggregate patterns worth a look across your visible ${_vc(code, 'group')}.`
+      : `No aggregate pattern currently clears the privacy and confidence floors for your visible ${_vc(code, 'group')}.`,
+    rollup: { memberCount: members.length, activeThisWeek, participation, momentum, patternCounts },
+    // Aggregate first (the group is the subject), then the people a leader can act on today.
+    items: [...top, ...personItems.slice(0, 15)],
+    prompts: [],
   };
   // The Team briefing is ALWAYS leader-facing → strip every per-member NUMBER
   // (deviation %, mood x/5, "usual" values) and raw evidence basis. A leader gets
@@ -3967,6 +4325,15 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
    (org-wide for a superadmin) with a one-word kernel read each, so a leader can
    scan everyone, not just the flagged few. Deterministic (no AI call), cached. */
 const rosterCache = {}; // `${code}:${userId}` → { data, ts }
+
+function _invalidateOrgProjections(code) {
+  for (const k of Object.keys(rosterCache)) if (k.startsWith(code + ':')) delete rosterCache[k];
+  for (const k of Object.keys(intelBriefingCache)) if (k.startsWith(code + ':')) delete intelBriefingCache[k];
+  for (const k of Object.keys(leaderBriefingCache)) if (k.startsWith(code + ':')) delete leaderBriefingCache[k];
+  if (typeof orgStateCache !== 'undefined') delete orgStateCache[code];
+  if (typeof reasonTickCache !== 'undefined') delete reasonTickCache[code];
+  _reasonNudge(code);
+}
 
 app.get('/api/intelligence/roster', requireAuth, (req, res) => {
   const { orgCode, userId } = req.iqSession;
@@ -3985,30 +4352,9 @@ app.get('/api/intelligence/roster', requireAuth, (req, res) => {
   const members = getVisibleUserIds(code, userId)
     .map(id => orgUsers[code]?.[id]).filter(u => u && u.id !== userId && u.role !== 'superadmin');
 
-  const counts = { attention: 0, improving: 0, steady: 0, 'no-data': 0 };
-  const roster = members.map(u => {
-    let m; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { m = null; }
-    const findings = m ? [...intel.detectPatterns(m), ...(m.structural || [])] : [];
-    const lastDays = m?.lastActivityT ? Math.floor((now - m.lastActivityT) / 86400000) : null;
-    const hasData = (m?.moodSeries?.length || 0) > 0 || (m?.signalSeries?.length || 0) > 0 || lastDays != null;
-
-    let status = 'steady', topLabel = null;
-    if (!hasData) { status = 'no-data'; }
-    else {
-      const urgent  = findings.find(f => f.severity === 'high') || findings.find(f => f.severity === 'medium');
-      const improve = findings.find(f => f.type === 'quiet_improvement');
-      if (urgent)       { status = 'attention'; topLabel = intel.PATTERN_LABEL[urgent.type] || urgent.type; }
-      else if (improve) { status = 'improving'; topLabel = 'Quietly improving'; }
-      else              { status = 'steady'; }
-    }
-    counts[status]++;
-    return { id: u.id, name: u.name || '', status, topLabel, lastActiveDays: lastDays };
-  });
-
-  const ORDER = { attention: 0, improving: 1, steady: 2, 'no-data': 3 };
-  roster.sort((a, b) => ORDER[a.status] - ORDER[b.status] || a.name.localeCompare(b.name));
-
-  const data = { ok: true, count: members.length, counts, roster, orgWide: isAdmin };
+  const roster = members.map(u => ({ id: u.id, name: u.name || '', role: u.role || 'member' }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const data = { ok: true, count: members.length, counts: { total: members.length }, roster, orgWide: isAdmin };
   rosterCache[key] = { data, ts: Date.now() };
   res.json(data);
 });
@@ -5991,6 +6337,127 @@ function _rebuildEvidenceIndex() {
   }
 }
 
+function _trackEvidenceMaintenance(promise, label) {
+  const task = Promise.resolve(promise).catch(err => {
+    console.error(`[evidence] ${label || 'maintenance'} failed:`, err && err.message);
+    return { ok: false, error: err && err.message };
+  }).finally(() => _evidenceMaintenancePending.delete(task));
+  _evidenceMaintenancePending.add(task);
+  return task;
+}
+
+async function _awaitEvidenceMaintenance() {
+  const eviction = [..._evidenceEvictionPending.values()];
+  const maintenance = [..._evidenceMaintenancePending];
+  return Promise.all([...eviction, ...maintenance]);
+}
+
+async function _resolveEvidence(code, id) {
+  const evidenceId = String(id || '');
+  const hot = (evidenceLog[code] || []).find(env => env && env.id === evidenceId);
+  if (hot) return { envelope: hot, cold: false };
+  const cold = await db.resolveColdEvidence(code, evidenceId);
+  if (!cold) return { unresolvable: true, reason: 'evidence_not_found' };
+  if (cold.erasedAt || cold.erased_at || !cold.envelope) {
+    return { unresolvable: true, reason: 'evidence_erased' };
+  }
+  return { envelope: cold.envelope, cold: true };
+}
+
+async function _persistColdEnvelope(code, envelope) {
+  const prior = await db.resolveColdEvidence(code, envelope.id);
+  await db.archiveColdEvidence(code, [{ envelope, rawRecord: prior?.rawRecord ?? null }]);
+}
+
+async function _commitColdEnvelopeMutation(code, envelope, mutate) {
+  const beforeEnvelope = JSON.parse(JSON.stringify(envelope));
+  const beforeSignals = Array.isArray(orgSignals[code]) ? orgSignals[code].slice() : null;
+  try {
+    const result = mutate();
+    await _persistColdEnvelope(code, envelope);
+    return result;
+  } catch (err) {
+    for (const key of Object.keys(envelope)) delete envelope[key];
+    Object.assign(envelope, beforeEnvelope);
+    if (beforeSignals) orgSignals[code] = beforeSignals;
+    throw err;
+  }
+}
+
+async function _evictWorkingSet(code, ids) {
+  const wanted = new Set((ids || []).map(String));
+  const hot = evidenceLog[code] || [];
+  const candidates = hot.filter(env => env && wanted.has(String(env.id)));
+  if (!candidates.length) return { ok: true, archived: 0 };
+  const records = candidates.map(envelope => ({
+    envelope,
+    rawRecord: envelope.rawRef && rawEvidence[envelope.rawRef]
+      ? rawEvidence[envelope.rawRef].record : null,
+  }));
+
+  // The await is the law: no process-local copy moves until the whole durable
+  // archive batch commits. archiveColdEvidence rolls its transaction back on error.
+  await db.archiveColdEvidence(code, records);
+
+  const archivedIds = new Set(candidates.map(env => String(env.id)));
+  for (const env of candidates) {
+    _evictEvidenceVector(code, env.id);
+    if (env.rawRef) delete rawEvidence[env.rawRef];
+  }
+  // Filter the CURRENT array, not the pre-await snapshot. Retention or subject
+  // erasure may have removed other records while PostgreSQL was committing;
+  // assigning from `hot` would resurrect those erased envelopes.
+  evidenceLog[code] = (evidenceLog[code] || [])
+    .filter(env => !archivedIds.has(String(env && env.id)));
+  _rebuildEvidenceIndex();
+  scheduleSave();
+  return { ok: true, archived: candidates.length };
+}
+
+function _scheduleEvidenceEviction(code) {
+  if (_evidenceEvictionPending.has(code)) return _evidenceEvictionPending.get(code);
+  const task = (async () => {
+    while ((evidenceLog[code] || []).length > EVIDENCE_LOG_CAP) {
+      const excess = evidenceLog[code].length - EVIDENCE_LOG_CAP;
+      const ids = evidenceLog[code].slice(0, excess).map(env => env.id);
+      await _evictWorkingSet(code, ids);
+    }
+    return { ok: true };
+  })().catch(err => {
+    console.error(`[evidence] cold archive failed for ${code}:`, err && err.message);
+    return { ok: false, error: err && err.message };
+  }).finally(() => _evidenceEvictionPending.delete(code));
+  _evidenceEvictionPending.set(code, task);
+  return task;
+}
+
+async function _eraseEvidence(code, id) {
+  const evidenceId = String(id || '');
+  // Tombstone durable content first. If it fails, leave the process-local copy
+  // intact so erasure can be retried without losing the only resolvable record.
+  await db.eraseColdEvidence(code, evidenceId);
+  const hot = evidenceLog[code] || [];
+  const matches = hot.filter(env => env && env.id === evidenceId);
+  for (const env of matches) {
+    if (env.rawRef) delete rawEvidence[env.rawRef];
+    _evictEvidenceVector(code, env.id);
+  }
+  evidenceLog[code] = hot.filter(env => !(env && env.id === evidenceId));
+  _rebuildEvidenceIndex();
+  scheduleSave();
+  return { ok: true, erased: true };
+}
+
+async function _eraseSubjectEvidence(code, userId) {
+  const ids = (evidenceLog[code] || [])
+    .filter(env => env && (env.subjectId === userId || env.ownerRef === userId ||
+      env.attributes?.contributorId === userId))
+    .map(env => env.id);
+  for (const id of ids) await _eraseEvidence(code, id);
+  const cold = await db.eraseColdEvidenceForSubject(code, userId);
+  return { ok: true, hotErased: ids.length, coldErased: cold.erased || 0 };
+}
+
 /* Remove a promoted signal from the kernel (used by correction, deletion, reversal). */
 function _withdrawSignal(code, env) {
   if (env && env.signalId && Array.isArray(orgSignals[code])) orgSignals[code] = orgSignals[code].filter(s => s.id !== env.signalId);
@@ -6034,8 +6501,7 @@ function _recordEvidence(code, envInput, rawRecord) {
   const log = evidenceLog[code] || (evidenceLog[code] = []);
   log.push(env);
   if (log.length > EVIDENCE_LOG_CAP) {
-    const dropped = log.splice(0, log.length - EVIDENCE_LOG_CAP);
-    dropped.forEach(d => { if (d.rawRef) delete rawEvidence[d.rawRef]; });
+    _scheduleEvidenceEviction(code);
   }
   return { stored: true, id: env.id, promotable: evidence.promotable(env), envelope: env };
 }
@@ -6404,43 +6870,55 @@ app.post('/api/identity/reresolve', requirePermission('manage_settings'), (req, 
 
 /* Admin CONFIRMS a specific person for a held-back envelope → resolve + promote once.
    Fuzzy never confirms itself; this is where a human closes the loop. */
-app.post('/api/evidence/:id/resolve', requirePermission('manage_settings'), (req, res) => {
+app.post('/api/evidence/:id/resolve', requirePermission('manage_settings'), async (req, res) => {
   const code = req.iqSession.orgCode;
-  const env = (evidenceLog[code] || []).find(e => e.id === req.params.id);
-  if (!env) return res.status(404).json({ error: 'evidence not found' });
+  const resolved = await _resolveEvidence(code, req.params.id);
+  if (!resolved.envelope) return res.status(404).json({ error: 'evidence not found' });
+  const env = resolved.envelope;
   if (env.promoted) return res.status(409).json({ error: 'already resolved and promoted' });
   const subjectId = String(req.body?.subjectId || '');
   if (!orgUsers[code]?.[subjectId]) return res.status(400).json({ error: 'unknown subject' });
   if (!new Set(getVisibleUserIds(code, req.iqSession.userId)).has(subjectId)) return res.status(403).json({ error: 'subject not in your range' });
-  _appendResolution(code, env, { subjectId, confidence: 'confirmed', by: req.iqSession.userId, method: 'admin', reason: String(req.body?.reason || 'admin confirmed').slice(0, 200) });
-  delete env.candidate; delete env.candidateNote;
-  const promoted = _promoteEvidence(code, env);
+  const apply = () => {
+    _appendResolution(code, env, { subjectId, confidence: 'confirmed', by: req.iqSession.userId, method: 'admin', reason: String(req.body?.reason || 'admin confirmed').slice(0, 200) });
+    delete env.candidate; delete env.candidateNote;
+    return _promoteEvidence(code, env);
+  };
+  const promoted = resolved.cold ? await _commitColdEnvelopeMutation(code, env, apply) : apply();
   scheduleSave();
   res.json({ ok: true, promoted, evidenceId: env.id, subjectId });
 });
 
 /* Admin dismisses a proposed/unmatched item (won't promote; drops out of the queue). */
-app.post('/api/evidence/:id/reject', requirePermission('manage_settings'), (req, res) => {
+app.post('/api/evidence/:id/reject', requirePermission('manage_settings'), async (req, res) => {
   const code = req.iqSession.orgCode;
-  const env = (evidenceLog[code] || []).find(e => e.id === req.params.id);
-  if (!env) return res.status(404).json({ error: 'evidence not found' });
+  const resolved = await _resolveEvidence(code, req.params.id);
+  if (!resolved.envelope) return res.status(404).json({ error: 'evidence not found' });
+  const env = resolved.envelope;
   if (env.promoted) return res.status(409).json({ error: 'already promoted — reverse it instead' });
-  delete env.candidate; delete env.candidateNote;
-  _appendResolution(code, env, { subjectId: null, confidence: env.confidence === 'conflict' ? 'conflict' : 'unmatched', by: req.iqSession.userId, method: 'admin', status: 'rejected', reason: String(req.body?.reason || 'admin rejected').slice(0, 200) });
+  const apply = () => {
+    delete env.candidate; delete env.candidateNote;
+    _appendResolution(code, env, { subjectId: null, confidence: env.confidence === 'conflict' ? 'conflict' : 'unmatched', by: req.iqSession.userId, method: 'admin', status: 'rejected', reason: String(req.body?.reason || 'admin rejected').slice(0, 200) });
+  };
+  if (resolved.cold) await _commitColdEnvelopeMutation(code, env, apply); else apply();
   scheduleSave();
   res.json({ ok: true, evidenceId: env.id });
 });
 
 /* REVERSAL — undo a resolution: remove the emitted signal and return the envelope
    to unmatched so it can be re-resolved. Real, not cosmetic. */
-app.post('/api/evidence/:id/reverse', requirePermission('manage_settings'), (req, res) => {
+app.post('/api/evidence/:id/reverse', requirePermission('manage_settings'), async (req, res) => {
   const code = req.iqSession.orgCode;
-  const env = (evidenceLog[code] || []).find(e => e.id === req.params.id);
-  if (!env) return res.status(404).json({ error: 'evidence not found' });
+  const resolved = await _resolveEvidence(code, req.params.id);
+  if (!resolved.envelope) return res.status(404).json({ error: 'evidence not found' });
+  const env = resolved.envelope;
   if (!env.promoted) return res.status(409).json({ error: 'not promoted' });
-  if (env.signalId && Array.isArray(orgSignals[code])) orgSignals[code] = orgSignals[code].filter(s => s.id !== env.signalId);
-  _appendResolution(code, env, { subjectId: null, confidence: 'unmatched', by: req.iqSession.userId, method: 'reversal', reason: String(req.body?.reason || 'admin reversed').slice(0, 200) });
-  env.promoted = false; env.signalId = null; env.promotedAt = null;
+  const apply = () => {
+    if (env.signalId && Array.isArray(orgSignals[code])) orgSignals[code] = orgSignals[code].filter(s => s.id !== env.signalId);
+    _appendResolution(code, env, { subjectId: null, confidence: 'unmatched', by: req.iqSession.userId, method: 'reversal', reason: String(req.body?.reason || 'admin reversed').slice(0, 200) });
+    env.promoted = false; env.signalId = null; env.promotedAt = null;
+  };
+  if (resolved.cold) await _commitColdEnvelopeMutation(code, env, apply); else apply();
   scheduleSave();
   res.json({ ok: true, evidenceId: env.id });
 });
@@ -7382,12 +7860,12 @@ function _recordKernelDerivation(code, { type, result, basis, confidence, limita
 /* The visibility ceiling a DERIVED output inherits from its basis — the most
    restrictive of any basis evidence. Derived evidence can never be broader than its
    narrowest input (no broadening exceptions for personal_private in this commit). */
-function _inheritedVisibility(code, basisIds) {
-  const log = evidenceLog[code] || [];
+async function _inheritedVisibility(code, basisIds) {
   const order = { private: 3, sensitive: 2, normal: 1 };
   let worst = 'normal', owner = null;
-  (basisIds || []).forEach(id => {
-    const env = log.find(e => e.id === id);
+  const resolved = await Promise.all((basisIds || []).map(id => _resolveEvidence(code, id)));
+  resolved.forEach(result => {
+    const env = result && result.envelope;
     if (env && order[env.visibility] > order[worst]) { worst = env.visibility; owner = env.ownerRef || owner; }
     else if (env && env.visibility === 'private' && !owner) owner = env.ownerRef;
   });
@@ -7396,8 +7874,8 @@ function _inheritedVisibility(code, basisIds) {
 /* Record CANONICAL DERIVED evidence (a personal pattern/recommendation) inheriting an
    owner-only ceiling when any basis is private. It goes back through the SAME store —
    there is no separate personal-memory path outside canonical evidence. */
-function _recordDerivedEvidence(code, { subjectId, ownerId, type, label, valueText, basisIds, confidence }) {
-  const inh = _inheritedVisibility(code, basisIds);
+async function _recordDerivedEvidence(code, { subjectId, ownerId, type, label, valueText, basisIds, confidence }) {
+  const inh = await _inheritedVisibility(code, basisIds);
   const r = _recordEvidence(code, {
     provider: 'kernel', source: 'derived', subjectId: subjectId || ownerId || null,
     ownerRef: inh.visibility === 'private' ? (inh.ownerRef || ownerId) : null,
@@ -7596,7 +8074,11 @@ function _capabilityDims(code, subjectId, polarity, legacyLabel) {
   const obs = _capabilityObservations(code, subjectId, { purpose: 'leader_support', polarity });
   if (obs.length) {
     const counts = {};
-    obs.forEach(o => { const v = String(o.dimension || '').toLowerCase().trim(); if (v) counts[v] = (counts[v] || 0) + 1; });
+    const cutoff = Date.now() - selfModel.STALE;
+    obs.filter(o => new Date(o.at).getTime() >= cutoff).forEach(o => {
+      const v = String(o.dimension || '').toLowerCase().trim();
+      if (v) counts[v] = (counts[v] || 0) + 1;
+    });
     return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k]) => k);
   }
   const out = {};
@@ -8067,7 +8549,7 @@ app.get('/api/checkin/me/intelligence', requireAuth, (req, res) => {
 /* Leader-facing check-in intelligence — leader_support (private excluded before
    context). Grounded, non-diagnostic, post-kernel bounded; suppresses a duplicate
    recommendation while an intervention is active; de-escalates on recovery. */
-app.get('/api/checkin/:memberId/intelligence', requireAuth, (req, res) => {
+app.get('/api/checkin/:memberId/intelligence', requireAuth, async (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const memberId = req.params.memberId;
   const member = orgUsers[code]?.[memberId];
@@ -8089,7 +8571,7 @@ app.get('/api/checkin/:memberId/intelligence', requireAuth, (req, res) => {
   // Record a meaningful recommendation as canonical derived evidence (no auto-promote).
   let recEvidenceId = null;
   if (recommend && st.basisEvidenceIds.length) {
-    const rec = _recordDerivedEvidence(code, { subjectId: memberId, type: 'observation',
+    const rec = await _recordDerivedEvidence(code, { subjectId: memberId, type: 'observation',
       label: 'Check-in support recommendation', valueText: text.slice(0, 400), basisIds: st.basisEvidenceIds });
     recEvidenceId = rec && rec.id ? rec.id : null;
   }
@@ -9155,6 +9637,97 @@ function _reasonPersonAnswer(code, userId, personId, personName, { now = Date.no
   } catch (_) { return null; }
 }
 
+/* ── "HOW IS THE TEAM DOING?" ────────────────────────────────────────────────
+   The question a coach actually asks, answered from the group's own state rather than from a
+   list of reads about individuals.
+
+   Those are different questions and the difference is the whole point. A rundown of four
+   people is not a picture of a team, and — worse — it puts named individuals in front of a
+   leader who asked about the group. The team-grain surface answers at the grain that was
+   asked: what is working, what needs attention, what is still open, what we are trying.
+
+   WHICH NODE. A leader is answered about the nodes they LEAD; a member about the nodes they
+   BELONG to. Never descendants: "the team" means the group you are actually in, and widening
+   it to everything below you turns a question about your squad into a report on the club.
+
+   The asker may also name a group ("how are the U18s doing?"), which is matched against node
+   names in their own scope — so naming a node they cannot see finds nothing rather than
+   confirming it exists.
+
+   Returns null when the asker leads and belongs to nothing, so the caller falls through to
+   the existing read. Nothing here widens scope: every node considered is one this user is
+   already declared on. */
+function _teamStateAnswer(code, userId, question, { now = Date.now() } = {}) {
+  try {
+    const user = (orgUsers[code] || {})[userId];
+    if (!user) return null;
+    const led = (user.leadershipNodeIds || []).slice();
+    const belongs = (user.assignedNodeIds || []).slice();
+    let nodeIds = led.length ? led : belongs;
+    if (!nodeIds.length) return null;
+
+    // A named group narrows it, and can only ever narrow: the candidate set is already this
+    // user's own nodes, so a name they are not on matches nothing.
+    const q = String(question || '').toLowerCase();
+    const named = nodeIds.filter(id => {
+      const n = (orgNodes[code] || {})[id];
+      const name = String((n && n.name) || '').toLowerCase().trim();
+      return name.length >= 3 && q.includes(name);
+    });
+    if (named.length) nodeIds = named;
+
+    const states = nodeIds
+      .map(nodeId => {
+        const node = (orgNodes[code] || {})[nodeId];
+        if (!node) return null;
+        return teamState.buildTeamState({
+          node: { nodeId, name: node.name, memberCount: (node.memberIds || []).length },
+          inquiries: _groupInquiryProjections(code, nodeId),
+          focuses: _teamFocuses(code, nodeId),
+          now,
+        });
+      })
+      .filter(Boolean)
+      // Groups with something to say first, but a group with nothing to say is still reported
+      // rather than dropped: "nothing has crossed the line yet" is a real answer about that
+      // group, and silently omitting it would read as though it had not been looked at.
+      .sort((a, b) => ((b.high ? 1 : 0) + (b.low ? 1 : 0) + (b.question ? 1 : 0))
+                    - ((a.high ? 1 : 0) + (a.low ? 1 : 0) + (a.question ? 1 : 0)))
+      .slice(0, 2);
+    if (!states.length) return null;
+
+    const lines = [];
+    let found = 0;
+    for (const s of states) {
+      const part = [];
+      if (states.length > 1) part.push(`${s.node.name}:`);
+      if (s.high) { part.push(`Working well — ${s.high.claim || s.high.about}.`); found++; }
+      if (s.low) { part.push(`Worth attention — ${s.low.claim || s.low.about}.`); found++; }
+      if (s.question) { part.push(`Still open — ${s.question.question}`); found++; }
+      if (s.focus && s.focus.status === 'active') { part.push(`Current focus — ${s.focus.text}.`); found++; }
+      // Withheld findings are NAMED, never restated. A leader told there is something here that
+      // too few people have spoken to can go and ask; a leader shown nothing concludes nothing
+      // is there. That difference is the reason the floors are survivable as a product.
+      if (s.withheld.length) {
+        part.push(`There ${s.withheld.length === 1 ? 'is one thing' : `are ${s.withheld.length} things`} I can't put in front of you yet — too few people have spoken about ${s.withheld.length === 1 ? 'it' : 'them'} to say so without pointing at individuals.`);
+      }
+      part.push(s.statement);
+      lines.push(part.join(' '));
+    }
+
+    return {
+      answer: lines.join(' '),
+      confidence: found ? 'medium' : 'confirmed',
+      limitations: [
+        'a read of the group, built only from what people deliberately contributed',
+        'group claims are held back below the disclosure floor rather than named',
+      ],
+      count: found,
+      nodes: states.map(s => s.node.nodeId),
+    };
+  } catch (_) { return null; }
+}
+
 function _assistantAnswer(code, userId, question) {
   const q = String(question || '').toLowerCase().trim();
   if (!q) return null;
@@ -9240,11 +9813,27 @@ function _assistantAnswer(code, userId, question) {
     if (r) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
     else { answer = `Nothing's flagged right now.`; confidence = 'confirmed'; }
   } else if (teamStatusQ) {
-    // TEAM/ORG STATUS — "how's the team/organisation doing?" answered from the reasoner's
-    // already-scoped read (the same grounded "what I'm seeing" the Today voice shows).
-    const r = _reasonReadAnswer(code, userId);
-    if (r) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
-    else { answer = `I don't have a clear read on that just yet.`; confidence = 'none'; }
+    // TEAM/ORG STATUS — "how's the team doing?" is a question about the GROUP, so it is
+    // answered at the group's grain first: what is working, what needs attention, what is
+    // still open, what we are trying. Falling straight to the per-person reasoner read (as
+    // this branch used to) answered a different question and put named individuals in front
+    // of someone who had asked about the team.
+    const t = _teamStateAnswer(code, userId, question);
+    if (t && t.count) {
+      answer = t.answer; confidence = t.confidence; limitations = t.limitations;
+      try { _audit(code, { actor: userId, action: 'team_state_view', subjectIds: [], basis: 'assistant team status' }); } catch (_) {}
+    } else {
+      // No group finding has crossed the line yet. The reasoner's scoped read is the honest
+      // second answer — and if the asker is on a node, the group's own "nothing yet, and
+      // here is why" is carried with it rather than being replaced by a list of people.
+      const r = _reasonReadAnswer(code, userId);
+      if (r) {
+        answer = t ? `${t.answer} ${r.answer}`.trim() : r.answer;
+        confidence = r.confidence;
+        limitations = t ? [...t.limitations, ...r.limitations] : r.limitations;
+      } else if (t) { answer = t.answer; confidence = t.confidence; limitations = t.limitations; }
+      else { answer = `I don't have a clear read on that just yet.`; confidence = 'none'; }
+    }
   } else {
     // GROUNDED RETRIEVAL over authorised free-text evidence (the "answer from what
     // it holds" path). Authorisation happened in the gateway; compose ONLY from the
@@ -9463,6 +10052,20 @@ function _orgEvidenceFingerprint(code) {
   return `${n}:${newest}:${changed}:${ctxSig}:${JSON.stringify(orgStateConfig[code] || {}).length}`;
 }
 
+// Only governed structural membership affects this signature. Names and other
+// profile fields are deliberately excluded: they neither change Web scope nor
+// belong in a cache key. Sorting makes equivalent graphs produce one key.
+function _orgGraphFingerprint(code) {
+  return Object.values(orgNodes[code] || {}).map(node => ({
+    nodeId: node.nodeId,
+    parentId: node.parentId || null,
+    leaderIds: [...(node.leaderIds || [])].sort(),
+    memberIds: [...(node.memberIds || [])].sort(),
+  })).sort((a, b) => String(a.nodeId).localeCompare(String(b.nodeId)))
+    .map(node => `${node.nodeId}:${node.parentId || ''}:${node.leaderIds.join(',')}:${node.memberIds.join(',')}`)
+    .join('|');
+}
+
 // The org-state configuration = the CURRENT effective projection of durable records,
 // merged with any dev/test override. This is the cache seam; the durable truth is
 // orgContextRecords.
@@ -9537,7 +10140,7 @@ function _getOrgState({ actor, organisationId, purpose = 'organisation_reasoning
   // orgs + admins). Cache is keyed by scope so different viewers never collide.
   const scope = _visibleScopeFor(code, actor);
   const scopeSig = scope == null ? 'all' : scope.join(',');
-  const key = `${code}|${purpose}|v1|${_orgEvidenceFingerprint(code)}|${scopeSig}`;
+  const key = `${code}|${purpose}|v1|${_orgEvidenceFingerprint(code)}|${_orgGraphFingerprint(code)}|${scopeSig}`;
   const bucket = orgStateCache[code] || (orgStateCache[code] = {});
   const hit = bucket[scopeSig];
   if (hit && hit.key === key) return { ...hit.state, _cache: { hit: true, ageMs: now - hit.builtAt } };
@@ -9997,6 +10600,7 @@ function _activeQuestionFrom(code, userId, uncertaintyId) {
   const plans = inquiry.planInquiries(uncertainties.map(inquiry.buildUncertainty), { threshold: 0, maxAsks: 50 }).plans;
   const plan = plans.find(p => p.uncertaintyId === uncertaintyId);
   return { uncertaintyId, type: u.type, claimType: u.claimType || null, requirementId: u.requirementId || null,
+    claimOrigin: u.claimOrigin || null,
     claimLabel: String((u.claimType || 'this')).replace(/_/g, ' '), eventId: u.affects ? u.affects.id : null,
     questionText: plan ? plan.question : (u.claim || 'this'), ownerRef: u.resolutionOwner || null,
     privacyClass: u.privacyClass || 'team-shared', fingerprint: _orgEvidenceFingerprint(code), setAt: new Date().toISOString() };
@@ -11837,7 +12441,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     const isLeaderActor = _isLeader(code, userId);
     const isOwner = _actorIsOwner(code, userId, aq.ownerRef);
     const hasAuth = (evidenceLog[code] || []).some(e => e.status === 'active' && e.source === 'system_of_record' && e.attributes && e.attributes.category === aq.claimType && e.attributes.corroborationNeeded !== true);
-    const adj = inquiry.adjudicateAnswer({ answer: text, isOwner, isLeader: isLeaderActor, isMember: !isLeaderActor, claimLabel: aq.claimLabel, claimType: aq.claimType, hasExistingAuthoritative: hasAuth });
+    const adj = inquiry.adjudicateAnswer({ answer: text, isOwner, isLeader: isLeaderActor, isMember: !isLeaderActor, claimLabel: aq.claimLabel, claimType: aq.claimType, claimOrigin: aq.claimOrigin, hasExistingAuthoritative: hasAuth });
     if (adj.proposal) {
       const p = { id: 'prop_' + generateId(), actionType: 'resolve_uncertainty', capability: 'org_context',
         label: `Record answer: ${aq.questionText}`, why: (adj.limitations[0] || `Recorded as ${adj.authority.replace(/_/g, ' ')}`),
@@ -12253,6 +12857,12 @@ app.post('/api/group/:nodeId/contribute', requireAuth, (req, res) => {
   cand.contributedAt = Date.now();
   cand.contributorRole = leads ? 'leader' : 'member';
   cand.contributorVisibility = (req.body || {}).contributorVisibility === 'anonymous' ? 'anonymous' : 'named';
+  // Whether this is something working well or something worth attention is the CONTRIBUTOR'S
+  // call, recorded here with the same provenance as the rest of the contribution. The system
+  // does not classify it: a sentiment lexicon deciding a team's Highs and Lows is the same
+  // mistake as the one that destroyed meaning at the Self layer, made at group scale where
+  // being wrong is more expensive. Absent or unrecognised means 'unsure', which decides nothing.
+  cand.valence = teamState.VALENCES.includes((req.body || {}).valence) ? (req.body || {}).valence : 'unsure';
   cand.explicitOpen = leads && (req.body || {}).open === true;
   cand.fromSubject = `member:${userId}`;
 
@@ -12312,23 +12922,27 @@ app.post('/api/group/:nodeId/candidates/:candidateId/dismiss', requireAuth, (req
    inquiry to leak. What comes back is the shape of the understanding — hypotheses, confidence,
    how many independent origins it rests on, what is still unknown — which is what a group can
    act on and contains nobody's words. */
-app.get('/api/group/:nodeId/inquiry', requireAuth, (req, res) => {
-  const { orgCode: code, userId } = req.iqSession;
-  const nodeId = String(req.params.nodeId);
+/* The group's inquiries, projected once and shared by every reader of them. Extracted so the
+   team-grain surface below cannot drift into a second, subtly different projection of the same
+   state — which is how two views of one truth start disagreeing about what the group believes. */
+function _groupInquiryProjections(code, nodeId) {
   const subject = _groupSubjectRef(code, nodeId);
-  if (!subject.ok) return res.status(404).json({ error: subject.error });
-  if (!_inNode(code, nodeId, userId) && !_leadsNode(code, nodeId, userId)) {
-    return res.status(403).json({ error: 'not part of this group' });
-  }
-
+  if (!subject.ok) return [];
   const bySubject = (inquiryStates[code] || {})[subject.subjectRef] || {};
-  const inquiries = Object.values(bySubject).filter(i => i && (i.signals || []).length && !i.parkedAt).map(i => {
+  return Object.values(bySubject).filter(i => i && (i.signals || []).length && !i.parkedAt).map(i => {
     const hyps = i.hypotheses || [];
     const lead = hyps.find(h => h.id === i.leadingHypothesisId) || null;
     const sig = (i.signals || []).filter(s => s.kind !== 'interpretation');
     const active = sig.filter(s => diagnose.isActive(s));
+    // Valence, derived from what the contributors called it — never from the text. Contested
+    // is a first-class outcome, not a tie to be broken: if people described the same thing in
+    // opposite directions, the group does not agree yet, and reporting it as a High or a Low
+    // would settle on the leader's behalf a disagreement they are the one who should see.
+    const forThis = _groupCands(code).filter(c => c.nodeId === nodeId && c.concept === ((i.topic && i.topic.canonicalConcept) || ''));
+    const val = teamState.valenceOf(forThis);
     return {
       inquiryId: i.inquiryId, topic: i.topic, status: i.status,
+      polarity: val.polarity, contested: val.contested, valenceReason: val.reason,
       hypothesis: lead ? lead.statement : null,
       alternatives: hyps.filter(h => h !== lead).map(h => ({ statement: h.statement, band: h.confidence.band, status: h.status })),
       confidence: i.confidence,
@@ -12347,10 +12961,248 @@ app.get('/api/group/:nodeId/inquiry', requireAuth, (req, res) => {
       lastUpdatedAt: i.lastUpdatedAt,
     };
   }).sort((a, b) => b.confidence.score - a.confidence.score);
+}
 
+/* Everyone who may read this group's own state: its members and its leaders. Deliberately NOT
+   "anyone whose Web reaches this node" — a leader two tiers up sees the node through the scoped
+   projection, which is where the aggregate floors are applied. This door is the group reading
+   itself, which is a different question with a different answer. */
+function _mayReadGroup(code, nodeId, userId) {
+  return _inNode(code, nodeId, userId) || _leadsNode(code, nodeId, userId);
+}
+
+/* Run the existing structural detector at group grain. Only canonical evidence
+   admitted for group_reasoning enters; private material is excluded by
+   _kernelEvidence before streams exist. A detected team finding also records how
+   many member streams independently exhibit the same structure so team-state can
+   apply its two-sided cohort floor. */
+function _groupPatternFindings(code, nodeId, now = Date.now()) {
+  const members = new Set(_nodeMembers(code, nodeId));
+  const admitted = _kernelEvidence(code, { purpose: 'group_reasoning' }).filter(e =>
+    members.has(e.subjectId) && Number.isFinite(Number(e.value)) && e.attributes &&
+    Object.values(primitives.PRIMITIVE).includes(e.attributes.primitive));
+  const byMember = new Map(), aggregate = new Map();
+  for (const e of admitted) {
+    const primitive = e.attributes.primitive, valence = e.attributes.valence || 'up-good';
+    const key = `${primitive}:${e.label || primitive}`, t = new Date(e.observedAt).getTime();
+    if (!Number.isFinite(t)) continue;
+    const stream = { key, label: e.label || primitive, primitive, valence };
+    const mm = byMember.get(e.subjectId) || new Map(); byMember.set(e.subjectId, mm);
+    const ms = mm.get(key) || { ...stream, series: [] }; mm.set(key, ms); ms.series.push({ t, v: Number(e.value) });
+    const ag = aggregate.get(key) || { ...stream, days: new Map() }; aggregate.set(key, ag);
+    const day = Math.floor(t / 86400000), vals = ag.days.get(day) || []; vals.push(Number(e.value)); ag.days.set(day, vals);
+  }
+  const affected = new Map();
+  for (const [memberId, streams] of byMember) {
+    for (const f of primitives.structuralPatterns([...streams.values()], now)) {
+      const set = affected.get(f.type) || new Set(); set.add(memberId); affected.set(f.type, set);
+    }
+  }
+  const groupStreams = [...aggregate.values()].map(s => ({ key: s.key, label: s.label,
+    primitive: s.primitive, valence: s.valence,
+    series: [...s.days].map(([day, vals]) => ({ t: day * 86400000, v: vals.reduce((a, n) => a + n, 0) / vals.length })).sort((a, b) => a.t - b.t) }));
+  return primitives.structuralPatterns(groupStreams, now).map(f => ({
+    findingId: `det_${nodeId}_${f.type}`, type: f.type, about: primitives.STRUCTURE_LABEL[f.type] || f.type.replace(/_/g, ' '),
+    claim: f.basis, basis: f.basis, confidence: f.confidence, status: 'observed',
+    polarity: proactive.PATTERN_POLARITY[f.type] || 'neutral', memberCount: (affected.get(f.type) || new Set()).size,
+  }));
+}
+
+app.get('/api/group/:nodeId/inquiry', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const subject = _groupSubjectRef(code, nodeId);
+  if (!subject.ok) return res.status(404).json({ error: subject.error });
+  if (!_mayReadGroup(code, nodeId, userId)) {
+    return res.status(403).json({ error: 'not part of this group' });
+  }
+
+  const inquiries = _groupInquiryProjections(code, nodeId);
   _audit(code, { actor: userId, action: 'agenda_view', subjectIds: [], basis: 'group_inquiry' });
   res.json({ ok: true, node: { nodeId, name: subject.node.name }, inquiries,
     note: 'Built only from what people deliberately contributed. Nothing private enters here.' });
+});
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TEAM FOCUS — a group's commitment, with an origin and an outcome
+
+   Origin exists from the first record on purpose. It cannot be back-filled: what a Focus was
+   created OUT OF is not recoverable from anything else the system holds once the record exists
+   without it. And `from` — proposed out of an inquiry, or simply decided by a leader — is what
+   stops outcome learning from crediting the system for a coach's own idea, which would make
+   every efficacy number afterwards wrong in a direction nobody could detect.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* code → { nodeId → [focus] }. Org-partitioned at the top level like every other store here. */
+const teamFocuses = {};
+const _teamFocuses = (code, nodeId) => {
+  const byNode = (teamFocuses[code] = teamFocuses[code] || {});
+  return (byNode[nodeId] = byNode[nodeId] || []);
+};
+
+/* POST /api/group/:nodeId/focus — { text, fromInquiryId?, reviewAt? }
+   Leaders only. A Focus is a commitment the group is asked to act on; a member proposing one is
+   a different object (a question, which already has a route upward) and must not be conflated. */
+app.post('/api/group/:nodeId/focus', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const subject = _groupSubjectRef(code, nodeId);
+  if (!subject.ok) return res.status(404).json({ error: subject.error });
+  if (!_leadsNode(code, nodeId, userId)) return res.status(403).json({ error: 'only a leader of this group may set its focus' });
+
+  const text = String((req.body || {}).text || '').trim().slice(0, 300);
+  if (!text) return res.status(400).json({ error: 'text required' });
+
+  // A named origin inquiry must actually be this group's. Accepting an unverified id would let
+  // a Focus claim it came out of evidence that does not exist, which is the one lie this field
+  // exists to make impossible.
+  const fromInquiryId = String((req.body || {}).fromInquiryId || '').trim();
+  let originInquiry = null;
+  if (fromInquiryId) {
+    const bySubject = (inquiryStates[code] || {})[subject.subjectRef] || {};
+    originInquiry = Object.values(bySubject).find(i => i && i.inquiryId === fromInquiryId) || null;
+    if (!originInquiry) return res.status(404).json({ error: 'no such inquiry for this group' });
+  }
+
+  const focus = teamState.newFocus({ focusId: 'tf_' + generateId(), nodeId, text, by: userId,
+    now: Date.now(), reviewAt: (req.body || {}).reviewAt, inquiry: originInquiry });
+  _teamFocuses(code, nodeId).unshift(focus);
+  _audit(code, { actor: userId, action: 'team_focus_set', subjectIds: [], basis: focus.origin.from });
+  scheduleSave();
+  res.json({ ok: true, focus: teamState.normalizeFocus(focus) });
+});
+
+/* POST /api/group/:nodeId/focus/:focusId/outcome — { result, note?, status? }
+   What actually happened. `unclear` is a first-class answer and the surface says so: a focus
+   that ran alongside six other changes has an honest result of "we cannot separate it", and
+   recording that is worth more than a guess that later gets counted as evidence. */
+app.post('/api/group/:nodeId/focus/:focusId/outcome', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const subject = _groupSubjectRef(code, nodeId);
+  if (!subject.ok) return res.status(404).json({ error: subject.error });
+  if (!_leadsNode(code, nodeId, userId)) return res.status(403).json({ error: 'only a leader of this group may close its focus' });
+
+  const focus = _teamFocuses(code, nodeId).find(f => f.focusId === String(req.params.focusId));
+  if (!focus) return res.status(404).json({ error: 'focus not found' });
+
+  teamState.recordFocusOutcome(focus, { result: (req.body || {}).result, note: (req.body || {}).note,
+    by: userId, now: Date.now(), status: (req.body || {}).status });
+  const result = focus.outcome.result;
+  _audit(code, { actor: userId, action: 'team_focus_outcome', subjectIds: [], basis: result });
+  scheduleSave();
+  res.json({ ok: true, focus: teamState.normalizeFocus(focus) });
+});
+
+/* GET /api/group/mine — the groups this user may read a state for.
+
+   Their own declared nodes and nothing else: the ones they LEAD, then the ones they belong
+   to. Deliberately not descendants — this answers "which groups am I part of", and a leader
+   two tiers up reads what is below them through the scoped projection, where the aggregate
+   floors are applied. Mixing the two here would make this endpoint a second scope mechanism
+   with its own opinion, which is how the three that already exist came to disagree. */
+app.get('/api/group/mine', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const user = (orgUsers[code] || {})[userId] || {};
+  const seen = new Set();
+  const groups = [];
+  for (const [nodeIds, role] of [[user.leadershipNodeIds || [], 'leader'], [user.assignedNodeIds || [], 'member']]) {
+    for (const nodeId of nodeIds) {
+      if (seen.has(nodeId)) continue;
+      const node = (orgNodes[code] || {})[nodeId];
+      if (!node) continue;
+      seen.add(nodeId);
+      groups.push({ nodeId, name: node.name, role, memberCount: (node.memberIds || []).length });
+    }
+  }
+  res.json({ ok: true, groups });
+});
+
+/* GET /api/inquiry/lead — THE ONE OPEN QUESTION THIS PERSON SHOULD SEE FIRST
+
+   A home page should open with what is unresolved, not with what is settled. A High is a
+   report; an Inquiry is an invitation, and it is the only artifact on either surface that
+   asks the reader for something.
+
+   SELF AND TEAM COMPETE ON ONE RANKING. Splitting them into two lists would make the reader
+   decide which list to look at, which is the judgement the ranking exists to make. The rule
+   is the one ai/team-state.js already uses: contested first (a disagreement is the most
+   useful thing to resolve), then how much is still unknown, then recency.
+
+   Nothing here widens scope. Self inquiries belong to the reader by construction; group
+   inquiries come from _groupInquiryProjections over the reader's own declared nodes, and a
+   question is safe to surface at any cohort size because it carries no count and names
+   nobody — the same reasoning ai/team-state.js applies. */
+function _leadInquiry(code, userId) {
+  const all = [];
+
+  // SELF — the reader's own frontier. Projected into the same shape a group inquiry uses so
+  // one ranking can order both; a second shape here would be a second opinion about what
+  // "most open" means.
+  const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+  for (const i of Object.values(mine)) {
+    if (!i || i.parkedAt || i.status === 'resolved') continue;
+    if (!(i.missingSignals || []).length) continue;
+    all.push({
+      inquiryId: i.inquiryId, topic: i.topic, status: i.status,
+      confidence: i.confidence || { band: 'tentative' },
+      contested: (i.signals || []).some(s => s && s.dissents),
+      stillUnknown: (i.missingSignals || []).map(m => m.question).filter(Boolean),
+      lastUpdatedAt: i.lastUpdatedAt,
+      _source: 'self', _where: 'you',
+    });
+  }
+
+  // TEAM — every group the reader leads or belongs to. Their own declared nodes only.
+  const user = (orgUsers[code] || {})[userId] || {};
+  const nodeIds = [...new Set([...(user.leadershipNodeIds || []), ...(user.assignedNodeIds || [])])];
+  for (const nodeId of nodeIds) {
+    const node = (orgNodes[code] || {})[nodeId];
+    if (!node) continue;
+    for (const p of _groupInquiryProjections(code, nodeId)) {
+      all.push({ ...p, _source: 'team', _where: node.name, _nodeId: nodeId });
+    }
+  }
+
+  const top = teamState.openQuestion(all);
+  if (!top) return null;
+  const src = all.find(a => a.inquiryId === top.inquiryId) || {};
+  return { ...top, source: src._source || 'team', where: src._where || '', nodeId: src._nodeId || null };
+}
+
+app.get('/api/inquiry/lead', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const lead = _leadInquiry(code, userId);
+  res.json({ ok: true, lead });
+});
+
+/* GET /api/group/:nodeId/state — THE TEAM-GRAIN SURFACE
+
+   High, Low, Inquiry, Focus, and what IntelliQ can honestly say about the gap between them.
+   Assembly only: every claim here was established by the kernel before this endpoint ran, and
+   ai/team-state.js can narrow one but never strengthen one.
+
+   `withheld` is returned rather than dropped. A leader told "there is a finding here, but too
+   few people have spoken for it to be said without pointing at individuals" can act on that —
+   they can ask more people. A leader shown nothing concludes there is nothing. */
+app.get('/api/group/:nodeId/state', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const nodeId = String(req.params.nodeId);
+  const subject = _groupSubjectRef(code, nodeId);
+  if (!subject.ok) return res.status(404).json({ error: subject.error });
+  if (!_mayReadGroup(code, nodeId, userId)) {
+    return res.status(403).json({ error: 'not part of this group' });
+  }
+
+  const state = teamState.buildTeamState({
+    node: { nodeId, name: subject.node.name, memberCount: _nodeMembers(code, nodeId).length },
+    inquiries: _groupInquiryProjections(code, nodeId),
+    findings: _groupPatternFindings(code, nodeId),
+    focuses: _teamFocuses(code, nodeId),
+    now: Date.now(),
+  });
+  _audit(code, { actor: userId, action: 'team_state_view', subjectIds: [], basis: 'group_state' });
+  res.json({ ok: true, ...state });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -16956,7 +17808,11 @@ function _loadAllStores(data) {
   Object.assign(safeguardingFlags, data.safeguardingFlags || {});
   Object.assign(groupCandidates, data.groupCandidates || {});
   Object.assign(forumThreads,   data.forumThreads   || {});
+  Object.assign(teamFocuses,    data.teamFocuses    || {});
   _rebuildEvidenceIndex();
+  for (const code of Object.keys(evidenceLog)) {
+    if ((evidenceLog[code] || []).length > EVIDENCE_LOG_CAP) _scheduleEvidenceEviction(code);
+  }
   // Restore sessions, pruning any that expired while the server was down
   const _now = Date.now();
   const _savedSessions = data.activeSessions || {};
@@ -16993,13 +17849,18 @@ const PORT = process.env.PORT || 3000;
 // Export a minimal surface for the endpoint smoke test (in-process, DB_OPTIONAL).
 // Requiring this module never boots a listener — only running it directly does.
 module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired,
+  _webIntelligence, _invalidateOrgProjections, _orgGraphFingerprint,
   // exported for the truth layer: the persistence boundary
   _durableUnits, _applyUnits, _pruneExpiredSessions, _persistedStores, scheduleSave,
-  _reconstruct, _unclassified, _saveStats, PERSISTENCE_MODE,
+  _flushPersistence, _flushAndClose, _gracefulShutdown,
+  _reconstruct, _unclassified, _saveStats, PERSISTENCE_MODE, _unitRevs,
+  _persistenceReadiness,
+  _saveProtectedUnit, _backfillUserNodeIds,
   emailIndex, activeSessions, inviteTokens, userAiProfiles,
   // exported for the truth layer: the group contribution boundary
   groupCandidates, orgNodes, _groupSubjectRef, _noteGroupCandidates, _admitGroupContributions,
   _inNode, _leadsNode, forumThreads, _forumThread,
+  teamFocuses, _teamFocuses, _groupInquiryProjections, _groupPatternFindings, _mayReadGroup, _teamStateAnswer, _leadInquiry,
   reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library
   // a routed share lands in
@@ -17008,6 +17869,8 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _subjectRoleContext, _domainDirective,
   // exported for the truth layer: the canonical evidence boundary + identity lifecycle
   _ingestGeneric, _recordEvidence, _reresolveUnmatched, _promoteEvidence, evidenceLog, rawEvidence, orgSignals, orgUsers,
+  _resolveEvidence, _evictWorkingSet, _eraseEvidence, _eraseSubjectEvidence,
+  _scheduleEvidenceEviction, _awaitEvidenceMaintenance, EVIDENCE_LOG_CAP,
   // exported for the truth layer: the mapping approval lifecycle
   _proposeMapping, _reprocessHeld, _activeMapping, orgMappings,
   // exported for the truth layer: sync reliability
@@ -17216,7 +18079,7 @@ if (require.main === module) (async () => {
     });
 
     // 6. Start HTTP server
-    app.listen(PORT, () => {
+    _httpServer = app.listen(PORT, () => {
       console.log('');
       console.log(`[server] IntelliQ ready on port ${PORT}`);
       console.log(`[server]   API key: ${process.env.ANTHROPIC_API_KEY ? 'loaded' : 'MISSING — set ANTHROPIC_API_KEY'}`);

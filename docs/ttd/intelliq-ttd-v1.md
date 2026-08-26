@@ -2,6 +2,27 @@
 
 **Status:** authoritative as of 2026-08-15. Supersedes ad-hoc product statements elsewhere.
 **Preceded by:** `docs/ttd/round-3-cross-examination.md` (the audit this document answers).
+**Extended by:** `docs/ttd/intelliq-constitution.md` — the constitutional addendum that records
+what IntelliQ *is* (an organisational intelligence harness with a deterministic substrate under
+replaceable intelligence engines), the product object model (High / Low / Inquiry / Focus / Web),
+the no-LLM capability audit, and the infrastructure gap register. Where the addendum states a
+law, it uses the same status vocabulary as this document and is subordinate to it.
+**Web adjudication:** `docs/ttd/web-semantics-and-continuous-intelligence.md` — the structural
+Web law, the Web/governance/kernel/projection separation, the SELF and ORG perspectives on
+High / Low / Inquiry / Focus, the continuous Web intelligence execution model, and the no-LLM
+capability floor. Also subordinate to this document and using the same status vocabulary.
+**Implementation contract:** `docs/briefs/w3-w4-implementation-contract.md` — the mechanical W-3
+(Web law) and W-4 (scope convergence) brief: the measured scope delta, the complete 71-site scope
+call-site audit classified into GATE / ENUMERATE / FILTER / WEB / BRIDGE, the graph-invalidation
+contract, and the executable invariants to write before any code.
+**START HERE:** `docs/INDEX.md` — the document register, order of authority, status of every
+document, contradictions resolved, and the outstanding founder decisions.
+**The only implementation queue** is `docs/ttd/consolidated-implementation-queue.md`.
+**Document hierarchy and the consolidated gap register** live in `intelliq-constitution.md` §13-§14.
+**Ontology investigation:** `docs/ttd/organisational-ontology-investigation.md` — verdict ADOPT
+NARROWLY. IntelliQ already contains an implicit ontology (epistemic levels, reified signals with
+provenance, typed inquiry relationships, behaviour-as-contextual-observation). What is missing is
+four foreign keys and one new claim type, not a substrate.
 
 This document says two different things, and never confuses them:
 

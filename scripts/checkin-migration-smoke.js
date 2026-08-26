@@ -33,6 +33,8 @@ const {
 let pass = 0, fail = 0;
 const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n); } };
 
+(async () => {
+
 const CODE = 'chk', OTHER = 'chk2';
 const NOW = Date.parse('2026-06-30T12:00:00.000Z');
 const DAY = 86400000;
@@ -124,7 +126,7 @@ ok('25. causation is not inferred without support (no causal claim in the kernel
    !/because|caused by|due to/i.test(JSON.stringify(stSam.kernelArt.result)));
 
 // Self-feeding prevention — a derived recommendation must not become mood proof.
-const derived = _recordDerivedEvidence(CODE, { subjectId: 'sam', type: 'metric', label: 'Self-rated mood (derived)', valueText: 'derived', basisIds: stSam.basisEvidenceIds });
+const derived = await _recordDerivedEvidence(CODE, { subjectId: 'sam', type: 'metric', label: 'Self-rated mood (derived)', valueText: 'derived', basisIds: stSam.basisEvidenceIds });
 const moodAfterDerived = _canonicalMoodSeries(CODE, 'sam').length;
 ev().push();  // no-op to keep lint calm
 ok('26. counterevidence + limitations are preserved on the kernel artifact', Array.isArray(stSam.kernelArt.limitations) && stSam.kernelArt.limitations.length > 0);
@@ -181,7 +183,7 @@ ok('40d. the member-intelligence engine mood series is canonical-sourced',
 // F. INTERVENTION + OUTCOMES — de-escalation, suppression, canonical derived evidence
 // ─────────────────────────────────────────────────────────────────────────────
 const beforeRec = ev().length;
-const recDerived = _recordDerivedEvidence(CODE, { subjectId: 'sam', type: 'observation', label: 'Check-in support recommendation', valueText: 'A supportive 1:1 this week.', basisIds: leaderState.basisEvidenceIds });
+const recDerived = await _recordDerivedEvidence(CODE, { subjectId: 'sam', type: 'observation', label: 'Check-in support recommendation', valueText: 'A supportive 1:1 this week.', basisIds: leaderState.basisEvidenceIds });
 ok('41. a check-in recommendation becomes canonical derived evidence', ev().length === beforeRec + 1 && ev().find(e => e.id === recDerived.id));
 const recEnv = ev().find(e => e.id === recDerived.id);
 ok('42. a recommendation does NOT auto-promote (no self-reinforcing org signal)', recEnv.promoted !== true);
@@ -236,3 +238,4 @@ ok('E2E-E. self-feeding: a stored recommendation is not treated as independent p
 
 console.log(`\n=== checkin-migration-smoke: ${pass} passed, ${fail} failed ===\n`);
 process.exit(fail ? 1 : 0);
+})().catch(e => { console.error(e); process.exit(1); });

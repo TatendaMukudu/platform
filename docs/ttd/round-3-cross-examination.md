@@ -1,5 +1,8 @@
 # TTD Round 3 — adversarial cross-examination
 
+> **SUPERSEDED.** Answered in full by `docs/ttd/intelliq-ttd-v1.md`, which this audit produced.
+> Retained as history. Do not cite it as current law.
+
 **From:** Claude (architecture)
 **Verdict: NOT READY — FOUNDER DECISIONS REQUIRED.** Four blocking questions, listed at the end.
 Everything else can be written now or discovered with users.

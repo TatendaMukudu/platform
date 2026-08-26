@@ -3292,11 +3292,13 @@ async function _submitAddPerson() {
     if (nodeId && OrgTree._nodes[nodeId]) {
       const currentIds = OrgTree._nodes[nodeId].memberIds || [];
       if (!currentIds.includes(data.user.id)) {
-        await fetch(`/api/tree/node/${nodeId}`, {
+        const treeRes = await fetch(`/api/tree/node/${nodeId}`, {
           method: 'PUT', headers: Auth._headers(),
-          body: JSON.stringify({ memberIds: [...currentIds, data.user.id] }),
+          body: JSON.stringify({ memberIds: [...currentIds, data.user.id], ifRev: OrgTree._nodes[nodeId].rev }),
         });
-        OrgTree._nodes[nodeId].memberIds = [...currentIds, data.user.id];
+        const treeData = await treeRes.json();
+        if (!treeData.ok) throw new Error(treeData.error || 'The organisation tree changed. Reload and try again.');
+        OrgTree._nodes[nodeId] = treeData.node;
       }
     }
 
@@ -6650,15 +6652,27 @@ async function renderIntelligence(refresh) {
     // Attention is not only problems: balance WORTH RECOGNISING (positive patterns the
     // kernel already found) with NEEDS YOUR ATTENTION. Split by the item's own
     // patternType — no new reasoning, just a projection of existing findings.
+    // AGGREGATE and PEOPLE are two different jobs and the page needs both. The Web items say
+    // what is true of the group without naming anyone; the person items are the ones a leader
+    // can actually act on today, and acting is what feeds the outcome loop. Showing only the
+    // aggregate leaves a page that reports and cannot be answered.
+    const web     = (d.items || []).filter(it => it.perspective === 'web');
+    const people  = (d.items || []).filter(it => it.perspective !== 'web');
+    const webHigh = web.filter(it => it.kind === 'high');
+    const webLow  = web.filter(it => it.kind !== 'high');
     const POSITIVE = new Set(['recovering', 'quiet_improvement']);
-    const recognise = (d.items || []).filter(it => POSITIVE.has(it.patternType));
-    const needs     = (d.items || []).filter(it => !POSITIVE.has(it.patternType));
-    const teamSections = (recognise.length || needs.length)
-      ? `${recognise.length ? `<div class="intel-section intel-section--positive"><b>Worth recognising</b> — ${recognise.length} ${_v(recognise.length === 1 ? 'member' : 'members')} doing well</div><div class="intel-list">${recognise.map(_intelCard).join('')}</div>` : ''}
+    const recognise = people.filter(it => POSITIVE.has(it.patternType));
+    const needs     = people.filter(it => !POSITIVE.has(it.patternType));
+    const teamSections = (webHigh.length || webLow.length || recognise.length || needs.length)
+      ? `${webHigh.length ? `<div class="intel-section intel-section--positive"><b>Web Highs</b> — patterns across your scope, no one named</div><div class="intel-list">${webHigh.map(_intelCard).join('')}</div>` : ''}
+         ${webLow.length ? `<details class="intel-collapse" open><summary class="intel-section"><b>Web Lows</b> — patterns across your scope, no one named</summary><div class="intel-list">${webLow.map(_intelCard).join('')}</div></details>` : ''}
+         ${recognise.length ? `<div class="intel-section intel-section--positive"><b>Worth recognising</b> — ${recognise.length} ${_v(recognise.length === 1 ? 'member' : 'members')} doing well</div><div class="intel-list">${recognise.map(_intelCard).join('')}</div>` : ''}
          ${needs.length ? `<details class="intel-collapse" open><summary class="intel-section"><b>Needs your attention</b> — ${needs.length} ${_v(needs.length === 1 ? 'member' : 'members')} could use you</summary><div class="intel-list">${needs.map(_intelCard).join('')}</div></details>` : ''}`
       : `<div class="intel-section"><b>Your ${_v('members')}</b> — all steady this week</div><div class="intel-empty">Nothing needs your attention right now — all steady across your people. When a pattern emerges, it appears here with the evidence and a suggested next step.</div>`;
 
     el.innerHTML = `
+      <div id="lead-inquiry"></div>
+      <div id="team-state"></div>
       ${youStrip}
       <div id="team-prompts"></div>
       <div id="team-watch"></div>
@@ -6676,6 +6690,8 @@ async function renderIntelligence(refresh) {
       </div>
       <div id="org-discoveries"></div>
       <div class="intel-foot">Patterns &amp; early signals, each compared to a person's own normal — directional, never scores. Private detail informs the read but is never shown.</div>`;
+    _renderLeadInquiry();  // the open question, self or team, ABOVE everything settled
+    _renderTeamState();  // the GROUP as the subject — High, Low, Inquiry, Focus. Above the people, deliberately.
     _renderTeamPrompts(d.prompts || []);  // "want me to…" — proactive offers the leader can approve in one tap
     _renderTeamWatch();  // proactive early-warning banner, populated after the main read
     _renderDiscoveries();  // "how your organisation learns" — the research surface
@@ -6688,6 +6704,111 @@ async function renderIntelligence(refresh) {
       el.innerHTML = `<div class="intel-empty">${slow ? 'This is taking longer than usual.' : 'Home is unavailable right now.'} <button class="intel-refresh" onclick="renderIntelligence(true)">↻ Try again</button></div>`;
     }
   }
+}
+
+/* ── THE OPEN QUESTION, FIRST ─────────────────────────────────────────────────
+   Home opens with what is unresolved, not with what is settled. A High is a report; an
+   Inquiry is the only thing on this page that asks the reader for something, so it leads.
+
+   Self and team compete on one ranking, decided server-side. Two lists would hand the reader
+   the judgement the ranking exists to make. The strip says WHERE the question came from —
+   "about you" or the group's name — because "why am I being asked this" is the first thing a
+   coach will want to know, and a question with no provenance reads as the system nagging. */
+async function _renderLeadInquiry() {
+  const box = document.getElementById('lead-inquiry');
+  if (!box) return;
+  try {
+    const res = await fetch('/api/inquiry/lead', { headers: Auth._headers() });
+    if (!res.ok) { box.innerHTML = ''; return; }
+    const lead = (await res.json()).lead;
+    if (!lead || !lead.question) { box.innerHTML = ''; return; }
+    const esc = _escAdvisor;
+    const where = lead.source === 'self' ? 'About you' : esc(lead.where || 'Your group');
+    box.innerHTML = `
+      <div class="linq-card">
+        <div class="linq-head">Open question · ${where}</div>
+        <div class="linq-q">${esc(lead.question)}</div>
+        ${lead.contested ? `<div class="linq-flag">People here describe this differently — that disagreement is the useful part.</div>` : ''}
+        ${(lead.otherUnknowns || []).length ? `<div class="linq-more">Also open: ${(lead.otherUnknowns || []).map(esc).join(' · ')}</div>` : ''}
+      </div>`;
+  } catch (_) { box.innerHTML = ''; }
+}
+
+/* ── THE TEAM AS A SUBJECT ────────────────────────────────────────────────────
+   High, Low, Inquiry, Focus — the group read at the group's own grain, above the list of
+   people, because a rundown of individuals is not a picture of a team.
+
+   Everything rendered here was decided server-side by ai/team-state.js: which claim clears
+   the disclosure floor, which rests on enough independent origins, what may be said at all.
+   This function adds no judgement of its own — if the server withheld something, the strip
+   says so in the server's own words rather than quietly rendering less.
+
+   Failure is silent by design. This is one strip on a page that already works without it;
+   a group surface that cannot load should not take down the leader's home. */
+async function _renderTeamState() {
+  const box = document.getElementById('team-state');
+  if (!box) return;
+  try {
+    const mineRes = await fetch('/api/group/mine', { headers: Auth._headers() });
+    if (!mineRes.ok) { box.innerHTML = ''; return; }
+    const groups = (await mineRes.json()).groups || [];
+    // Groups they lead first; at most two, because a third card pushes the people below the
+    // fold and this strip is context for that list, not a replacement for it.
+    const pick = [...groups.filter(g => g.role === 'leader'), ...groups.filter(g => g.role !== 'leader')].slice(0, 2);
+    if (!pick.length) { box.innerHTML = ''; return; }
+
+    const states = (await Promise.all(pick.map(g =>
+      fetch(`/api/group/${encodeURIComponent(g.nodeId)}/state`, { headers: Auth._headers() })
+        .then(r => (r.ok ? r.json() : null)).catch(() => null)
+    ))).filter(s => s && s.ok);
+    if (!states.length) { box.innerHTML = ''; return; }
+
+    box.innerHTML = states.map(_teamStateCard).join('');
+  } catch (_) { box.innerHTML = ''; }
+}
+
+function _teamStateCard(s) {
+  const esc = _escAdvisor;
+  // A line is rendered only when the server sent one. An empty High is not "no highs" — it is
+  // "nothing has cleared the bar", which the closing statement is what says so. Padding the
+  // card with "None yet" placeholders would make an honest silence look like a broken screen.
+  const line = (label, text, sub) => text ? `
+    <div class="tstate-line">
+      <div class="tstate-label">${esc(label)}</div>
+      <div class="tstate-text">${esc(text)}${sub ? `<span class="tstate-sub">${esc(sub)}</span>` : ''}</div>
+    </div>` : '';
+
+  const basis = b => b && b.independentOrigins
+    ? `${b.independentOrigins} independent ${b.independentOrigins === 1 ? 'account' : 'accounts'}`
+    : '';
+
+  // What was found but may not be said. Named by topic, never restated — a leader who knows
+  // something is being held back can go and ask; a leader shown nothing concludes nothing is
+  // there. That difference is what makes the disclosure floor survivable as a product.
+  const withheld = (s.withheld || []).length ? `
+    <div class="tstate-withheld">
+      Not shown yet: ${(s.withheld || []).map(w => esc(w.about)).join(', ')} — too few people have spoken about
+      ${(s.withheld || []).length === 1 ? 'it' : 'them'} to say so without pointing at individuals.
+    </div>` : '';
+
+  const focus = s.focus && s.focus.status === 'active' ? s.focus : null;
+  const focusSub = focus
+    ? (focus.origin && focus.origin.from === 'inquiry' ? 'from an open inquiry' : 'set by a leader')
+    : '';
+
+  return `
+    <div class="tstate-card">
+      <div class="tstate-head">
+        <div class="tstate-name">${esc(s.node.name)}</div>
+        <div class="tstate-count">${s.node.memberCount} ${_v(s.node.memberCount === 1 ? 'member' : 'members')}</div>
+      </div>
+      ${line('High', s.high && (s.high.claim || s.high.about), basis(s.high && s.high.basis))}
+      ${line('Low', s.low && (s.low.claim || s.low.about), basis(s.low && s.low.basis))}
+      ${line('Inquiry', s.question && s.question.question, s.question && s.question.contested ? 'people describe this differently' : '')}
+      ${line('Focus', focus && focus.text, focusSub)}
+      ${withheld}
+      <div class="tstate-says">${esc(s.statement)}</div>
+    </div>`;
 }
 
 /* The proactive voice — "want me to…". Renders the briefing's prompt offers, each
@@ -6939,33 +7060,31 @@ function _intelCard(it) {
   return `
     <div class="intel-card" style="border-left:3px solid ${sevColor}">
       <div class="intel-card-head">
-        <span class="intel-card-name">${_escAdvisor(it.name)}</span>
+        <span class="intel-card-name">${_escAdvisor(it.headline || 'Across your visible scope')}</span>
         <span class="intel-chips">${chips}${it.reliability && it.reliability !== 'calibrating' ? `<span class="intel-rel">${_escAdvisor(it.reliability)}</span>` : ''}</span>
       </div>
-      <div class="intel-why"><strong>Why now:</strong> ${_escAdvisor(it.whyNow)}</div>
+      <div class="intel-why">${_escAdvisor(it.body || it.whyNow)}</div>
       ${(it.deviations || []).length ? `<div class="intel-dev">${it.deviations.slice(0, 3).map(_intelDevChip).join('')}</div>` : ''}
       ${(it.connections || []).length ? `<div class="intel-conn">${_escAdvisor(it.connections[0].basis)} <span class="intel-conn-hint">(a connection, not a cause)</span></div>` : ''}
       ${ev ? `<details class="intel-ev"><summary>Evidence basis</summary><ul>${ev}</ul></details>` : ''}
       ${it.careFlag ? `<div class="intel-care">There may be personal context here — lead with care. Details are kept private.</div>` : ''}
-      <div class="intel-action"><strong>Try:</strong> ${_escAdvisor(it.recommendedAction)}</div>
+      ${it.suggestion?.text || it.recommendedAction ? `<div class="intel-action"><strong>Consider:</strong> ${_escAdvisor(it.suggestion?.text || it.recommendedAction)}</div>` : ''}
       ${it.learnedNote ? `<div class="intel-learned">${_escAdvisor(it.learnedNote)}</div>` : ''}
-      <div class="intel-cta" id="intel-cta-${it.memberId}">
+      ${it.perspective !== 'web' && it.memberId ? `<div class="intel-cta" id="intel-cta-${it.memberId}">
         <button class="intel-btn" onclick="intelAct('${it.memberId}','${it.patternType || ''}',this)">I acted on this</button>
         <button class="intel-btn intel-btn-ghost" onclick="showProfile('${it.memberId}')">Open profile</button>
         <button class="intel-btn intel-btn-ghost" title="Teaches the system this kind of flag isn't useful here" onclick="intelDismiss('${it.patternType || ''}','${it.memberId}',this)">Not useful</button>
-      </div>
+      </div>` : ''}
     </div>`;
 }
 
-/* Self-relative deviation chip — "vs their OWN normal", the Behaviour Engine view. */
-function _intelDevChip(d) {
-  const arrow = d.direction === 'below' ? '↓' : '↑';
-  const col = d.direction === 'below' ? 'var(--danger)' : 'var(--success)';
-  // Direction only — never the member's numbers (deviation %, "usual" value).
-  return `<span class="intel-devchip" title="vs their own normal · ${_escAdvisor(d.confidence || '')}">
-    <span style="color:${col}">${arrow}</span> ${_escAdvisor(d.label)} ${d.direction} their usual</span>`;
-}
+/* ── THE LEADER'S OUTCOME LOOP ───────────────────────────────────────────────
+   Notice, act, say what happened, learn. Restored after a pass that emitted only
+   aggregate Web items and left POST /api/intelligence/act with no caller in the
+   entire front end — an outcome loop the pilot exists to test, unreachable.
 
+   These act on PERSON items only. A Web item names nobody, so there is nobody to
+   act on and no card renders these buttons. */
 async function intelAct(memberId, patternType, btn) {
   const action = prompt('What did you do? A quick note of the action you took:');
   if (!action || !action.trim()) return;
@@ -7025,6 +7144,14 @@ async function intelOutcome(interventionId, outcome, btn) {
   }
 }
 
+/* Self-relative deviation chip — "vs their OWN normal", the Behaviour Engine view. */
+function _intelDevChip(d) {
+  const arrow = d.direction === 'below' ? '↓' : '↑';
+  const col = d.direction === 'below' ? 'var(--danger)' : 'var(--success)';
+  // Direction only — never the member's numbers (deviation %, "usual" value).
+  return `<span class="intel-devchip" title="vs their own normal · ${_escAdvisor(d.confidence || '')}">
+    <span style="color:${col}">${arrow}</span> ${_escAdvisor(d.label)} ${d.direction} their usual</span>`;
+}
 
 /* ── Leader People ───────────────────────────────────────── *
  * Answers: "Who am I responsible for?"
@@ -7034,14 +7161,7 @@ async function intelOutcome(interventionId, outcome, btn) {
 let _leaderTree         = { tree: [], unassigned: [] };
 let _leaderPeopleSearch = '';
 
-let _leaderStatus = {};        // userId → { status, topLabel } from the kernel roster
 let _peopleSummaryHTML = '';   // the calm counts strip, prepended to the tree
-const _PEOPLE_STATUS = {
-  attention: { label: 'Needs attention', cls: 'ps-attention' },
-  improving: { label: 'Improving',       cls: 'ps-improving' },
-  steady:    { label: 'Steady',          cls: 'ps-steady'    },
-  'no-data': { label: 'No data yet',      cls: 'ps-nodata'   },
-};
 
 async function renderLeaderPeople() {
   const el       = document.getElementById('ldr-people-content');
@@ -7060,17 +7180,7 @@ async function renderLeaderPeople() {
     if (!data.ok) throw new Error('Request failed');
     const ros = rosRes.ok ? await rosRes.json() : { roster: [], counts: {}, count: 0 };
 
-    _leaderStatus = {};
-    (ros.roster || []).forEach(r => { _leaderStatus[r.id] = r; });
-
-    const c = ros.counts || {};
-    _peopleSummaryHTML = `
-      <div class="ppl-summary">
-        ${c.attention ? `<span class="ppl-sum ps-attention">${c.attention} need attention</span>` : ''}
-        ${c.improving ? `<span class="ppl-sum ps-improving">${c.improving} improving</span>` : ''}
-        <span class="ppl-sum ps-steady">${c.steady || 0} steady</span>
-        ${c['no-data'] ? `<span class="ppl-sum ps-nodata">${c['no-data']} no data yet</span>` : ''}
-      </div>`;
+    _peopleSummaryHTML = `<div class="ppl-summary"><span class="ppl-sum">${ros.count || 0} people in your visible scope</span></div>`;
 
     _leaderTree = { tree: data.tree || [], unassigned: data.unassigned || [] };
     const n = data.totalVisible || ros.count || 0;
@@ -7091,21 +7201,16 @@ function _leaderMemberRowHTML(m) {
   const initials  = (m.name || '?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
   const roleLabel = Auth.ROLE_LABELS?.[m.role] || m.role || 'Member';
   const isPending = !m.passwordSet;
-  // The kernel's at-a-glance read for this person (self-relative, no score).
-  const st  = _leaderStatus[m.userId];
-  const ps  = st ? (_PEOPLE_STATUS[st.status] || _PEOPLE_STATUS['no-data']) : null;
-  const attn = st && st.status === 'attention';
   return `
-    <div class="leader-member-row${attn ? ' lm-row--stale' : ''}" onclick="showProfile('${m.userId}')" style="cursor:pointer">
+    <div class="leader-member-row" onclick="showProfile('${m.userId}')" style="cursor:pointer">
       <div class="lm-avatar">${initials}</div>
       <div class="lm-info">
         <div class="lm-name">${_escAdvisor(m.name)}
           ${isPending ? `<span class="lm-badge lm-badge--pending">PENDING</span>` : ''}
         </div>
-        <div class="lm-meta">${_escAdvisor(roleLabel)}${st && st.topLabel ? ' · ' + _escAdvisor(st.topLabel) : (m.email ? ' · ' + _escAdvisor(m.email) : '')}</div>
+        <div class="lm-meta">${_escAdvisor(roleLabel)}${m.email ? ' · ' + _escAdvisor(m.email) : ''}</div>
       </div>
       <div class="lm-status">
-        ${ps ? `<span class="ppl-chip ${ps.cls}">${ps.label}</span>` : `<span class="ppl-chip ps-nodata">—</span>`}
         <button class="lm-observe" title="Recognise or note"
           onclick="event.stopPropagation();leaderObserve('${m.userId}','${(m.name||'').replace(/['"\\<>]/g,'')}')">Recognise</button>
       </div>

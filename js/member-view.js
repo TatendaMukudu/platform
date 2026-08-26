@@ -392,6 +392,94 @@ const MemberApp = {
       prepEl.innerHTML = html;
     }
     this._renderMeNotes();
+    this._renderGroupNoticings();
+  },
+
+  /* ── THINGS THAT MIGHT CONCERN YOUR GROUP ─────────────────────────────────
+     The boundary between something you said and something the team is allowed to treat as
+     evidence, rendered as what it actually is: YOUR list, private to you.
+
+     Nothing here is visible to a teammate or to a leader. Nothing here counts toward
+     anything. The system noticed that a remark might concern a group you are in, and it is
+     asking — it is not publishing. That asymmetry is the entire point of this surface, so it
+     is said in plain words on the card rather than assumed to be understood.
+
+     Contributing asks TWO things, because they are different questions: do you want the
+     group to have this, and is it something working well or something worth attention. The
+     second is yours to answer — the system does not read your sentence and decide it for you,
+     and a team's Highs and Lows are built from those answers rather than from a sentiment
+     model's guess about your words. */
+  async _renderGroupNoticings() {
+    const el = document.getElementById('me-group');
+    if (!el) return;
+    const esc = t => this._escape(t || '');
+    try {
+      const mineRes = await fetch('/api/group/mine', { headers: this._authHeaders() });
+      if (!mineRes.ok) { el.innerHTML = ''; return; }
+      const groups = ((await mineRes.json()).groups || []);
+      if (!groups.length) { el.innerHTML = ''; return; }
+
+      const blocks = (await Promise.all(groups.map(async g => {
+        const r = await fetch(`/api/group/${encodeURIComponent(g.nodeId)}/candidates`, { headers: this._authHeaders() })
+          .then(x => (x.ok ? x.json() : null)).catch(() => null);
+        const cands = (r && r.candidates) || [];
+        if (!cands.length) return '';
+        return `
+          <div class="me-section-label">Might concern ${esc(g.name)} — yours alone until you say otherwise</div>
+          ${cands.map(c => `
+            <div class="card mg-card" id="mg-${esc(c.candidateId)}">
+              <div class="me-row-text">${esc(c.label || c.concept)}</div>
+              <div class="mg-why">${esc(c.reason || '')}</div>
+              <div class="mg-ask">If you offer this to ${esc(g.name)}, how would you describe it?</div>
+              <div class="mg-actions">
+                <button class="btn btn-outline btn-sm" onclick="MemberApp.contributeNoticing('${esc(g.nodeId)}','${esc(c.candidateId)}','working_well')">Working well</button>
+                <button class="btn btn-outline btn-sm" onclick="MemberApp.contributeNoticing('${esc(g.nodeId)}','${esc(c.candidateId)}','worth_attention')">Worth attention</button>
+                <button class="btn btn-outline btn-sm" onclick="MemberApp.contributeNoticing('${esc(g.nodeId)}','${esc(c.candidateId)}','unsure')">Not sure</button>
+                <button class="btn btn-outline btn-sm" onclick="MemberApp.dismissNoticing('${esc(g.nodeId)}','${esc(c.candidateId)}')">Keep it to myself</button>
+              </div>
+              <div class="mg-note">Nobody can see this yet. Offering it shares the point, not your words.</div>
+            </div>`).join('')}`;
+      }))).filter(Boolean);
+
+      el.innerHTML = blocks.join('');
+    } catch (_) { el.innerHTML = ''; }
+  },
+
+  /* Deliberately offering one noticing to a group, with how you'd describe it. The server
+     re-checks everything — whose candidate it is, whether they may contribute it, whether the
+     group inquiry opens at all — so this button asks, it does not authorise. */
+  async contributeNoticing(nodeId, candidateId, valence) {
+    const card = document.getElementById(`mg-${candidateId}`);
+    try {
+      const res = await fetch(`/api/group/${encodeURIComponent(nodeId)}/contribute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+        body: JSON.stringify({ candidateId, valence }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (card) {
+        // Say what actually happened, including "this alone does not open anything" — a member
+        // who thinks they raised a team issue and did not is worse off than one who was told.
+        card.innerHTML = res.ok
+          ? `<div class="me-row-text">Offered to the group.</div>
+             <div class="mg-note">${d.groupInquiry === 'open'
+               ? 'The group is now working on this.'
+               : 'On its own this does not open anything — it needs another independent account, or a leader to open it.'}</div>`
+          : `<div class="mg-note">${this._escape(d.error || 'Could not offer that right now.')}</div>`;
+      }
+    } catch (_) {
+      if (card) card.innerHTML = `<div class="mg-note">Could not offer that right now.</div>`;
+    }
+  },
+
+  /* No, this is not the group's. It does not come back. */
+  async dismissNoticing(nodeId, candidateId) {
+    try {
+      await fetch(`/api/group/${encodeURIComponent(nodeId)}/candidates/${encodeURIComponent(candidateId)}/dismiss`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() } });
+    } catch (_) {}
+    const card = document.getElementById(`mg-${candidateId}`);
+    if (card) card.remove();
   },
 
   /* Notes, clumped into the Me tab — your saved memory, right where you live.

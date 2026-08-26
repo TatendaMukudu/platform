@@ -39,6 +39,36 @@ const STRUCTURE_LABEL = {
   overload:   'Overload risk',
   plateau:    'Plateau',
 };
+
+/* Canonical empirical identities — the measured dimensions and observed structures
+   already owned by the kernel. This is the single machine-readable vocabulary used
+   by claim classification and org-context provenance hygiene. Adding an identity is
+   a deliberate epistemic change, not a display-language tweak.
+
+   Sources: this module's primitive taxonomy and documented examples; ai/reason.js
+   AXIS keys/axis names; ai/understanding.js THEME_ALLOWLIST; ai/packs.js valenceFor
+   down-good terms; STRUCTURE_LABEL keys; plus founder-ratified morale/performance. */
+const EMPIRICAL_CONCEPTS = Object.freeze(new Set([
+  ...Object.values(PRIMITIVE),
+  'attendance', 'wellbeing', 'mood', 'stress', 'workload', 'skill', 'fitness',
+  'competence', 'grade', 'kpi', 'win', 'recovery', 'communication', 'mentoring',
+  'helping', 'activity', 'time', 'budget', 'capacity',
+  // ai/reason.js AXIS keys and axis names.
+  'momentum_drop', 'recovering', 'quiet_improvement', 'repeated_concern',
+  'baseline_shift', 'member_team_divergence', 'invisible_load', 'overload',
+  'withdrawal', 'data_gap', 'isolation', 'plateau',
+  'momentum', 'concern', 'baseline', 'alignment', 'load', 'engagement',
+  'connection', 'growth',
+  // ai/understanding.js THEME_ALLOWLIST.
+  'motivation', 'confidence', 'fatigue', 'focus', 'belonging', 'conflict',
+  'recognition', 'progress', 'setback', 'support_need', 'logistics',
+  // ai/packs.js valenceFor down-good terms.
+  'burnout', 'anxiety', 'pain', 'absence', 'turnover', 'incident', 'defect',
+  'error', 'risk',
+  ...Object.keys(STRUCTURE_LABEL),
+  // Founder additions: distinct concepts, not aliases for mood/outcome.
+  'morale', 'performance',
+]));
 const STRUCTURE_ACTION = {
   withdrawal: 'Reach out — participation is dropping from their own normal. Ask what changed, listen first.',
   data_gap:   'Reconnect, no assumptions — they were regular, then went quiet. A simple “thinking of you, how are things?” is enough.',
@@ -124,4 +154,4 @@ function structuralPatterns(streams, now) {
   return out.sort((a, b) => SEV[a.severity] - SEV[b.severity]).slice(0, 4);
 }
 
-module.exports = { PRIMITIVE, STRUCTURE_LABEL, STRUCTURE_ACTION, structuralPatterns };
+module.exports = { PRIMITIVE, EMPIRICAL_CONCEPTS, STRUCTURE_LABEL, STRUCTURE_ACTION, structuralPatterns };

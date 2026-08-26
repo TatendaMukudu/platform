@@ -1,5 +1,7 @@
 # Brief: D1 and D2 — two founder decisions, already expressed as tests
 
+> **IMPLEMENTED.** Retained as the record of the decisions.
+
 **For:** Codex
 **From:** Claude (architecture)
 **Branch:** start from current `main`, push to `codex/d1-d2-decisions`, open a PR.

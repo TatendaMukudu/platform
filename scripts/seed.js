@@ -37,6 +37,49 @@ const MOODLBL = { 1: 'Rough', 2: 'Low', 3: 'Okay', 4: 'Good', 5: 'Great' };
 /* Pure builder — returns the demo org's store slice (no DB writes). Reused by the
    CLI below and by the optional SEED_DEMO boot path in server.js (free tier has
    no shell, so the demo is seedable via an env flag instead). */
+function extendSeedTeamSurface(store, { code, coachId, memberIds, teamId }) {
+  // The seed deliberately crosses the same candidate/admission and Focus constructors as
+  // production. It never fabricates a completed Inquiry record by assigning inquiryStates.
+  const contribution = require('../ai/contribution');
+  const teamState = require('../ai/team-state');
+  const S = require('../server');
+  S._loadAllStores(store);
+  S._backfillUserNodeIds();
+  const offer = ({ who, id, concept, label, valence, authority = 'self_report', explicitOpen = false }) => {
+    S._noteGroupCandidates(code, who, `member:${who}`, [{ id, level: 'observation', text: label,
+      sourceSpan: `Our ${label}`, concerns: 'group', originRef: `seed_origin:${id}`, originKind: 'direct_observation',
+      authority, turnId: `seed_turn:${id}` }], concept, label);
+    const candidate = S.groupCandidates[code].find(c => c.evidenceRef === id && c.nodeId === teamId);
+    const leads = (store.orgNodes[code][teamId].leaderIds || []).includes(who);
+    const gate = contribution.mayContribute({ actorId: who, ownerId: who, role: leads ? 'leader' : 'member',
+      inNode: (store.orgNodes[code][teamId].memberIds || []).includes(who), leadsNode: leads, explicit: true });
+    if (!candidate || !gate.allowed) throw new Error(`demo contribution refused for ${concept}`);
+    candidate.status = 'contributed'; candidate.contributedAt = Date.now(); candidate.valence = valence;
+    candidate.contributorRole = leads ? 'leader' : 'member'; candidate.explicitOpen = explicitOpen;
+    candidate.fromSubject = `member:${who}`;
+    S._admitGroupContributions(code, teamId, concept);
+    return candidate;
+  };
+  offer({ who: memberIds[0], id: 'seed_low_a', concept: 'role_clarity', label: 'Role clarity', valence: 'worth_attention' });
+  offer({ who: memberIds[1], id: 'seed_low_b', concept: 'role_clarity', label: 'Role clarity', valence: 'worth_attention' });
+  offer({ who: memberIds[2], id: 'seed_high_a', concept: 'peer_support', label: 'Peer support', valence: 'working_well' });
+  offer({ who: memberIds[3], id: 'seed_high_b', concept: 'peer_support', label: 'Peer support', valence: 'working_well' });
+  // One leader-opened finding is real but cannot clear the two-sided cohort floor.
+  offer({ who: memberIds[4], id: 'seed_withheld', concept: 'travel_routine', label: 'Travel routine',
+    valence: 'worth_attention', authority: 'authoritative' });
+
+  const lowInquiry = Object.values(S.inquiryStates[code][`group:${teamId}`])
+    .find(inquiry => inquiry.topic.canonicalConcept === 'role_clarity');
+  const focus = teamState.newFocus({ focusId: 'tf_demo_role_clarity', nodeId: teamId,
+    text: 'Clarify roles before the next shared session', by: coachId, now: Date.now(), inquiry: lowInquiry });
+  teamState.recordFocusOutcome(focus, { result: 'better', note: 'Questions became more specific.', by: coachId, now: Date.now() });
+  S._teamFocuses(code, teamId).unshift(focus);
+
+  store.groupCandidates = { [code]: JSON.parse(JSON.stringify(S.groupCandidates[code])) };
+  store.inquiryStates = { [code]: JSON.parse(JSON.stringify(S.inquiryStates[code])) };
+  store.teamFocuses = { [code]: JSON.parse(JSON.stringify(S.teamFocuses[code])) };
+}
+
 async function buildDemoStore() {
   const pass = await bcrypt.hash('demo1234', SALT);
 
@@ -51,7 +94,7 @@ async function buildDemoStore() {
   ].map(a => ({ ...a, id: rid(), email: `${a.key}@demo.club` }));
 
   // ── stores ────────────────────────────────────────────────────────────────
-  const orgMeta = {}, orgUsers = { [CODE]: {} }, emailIndex = {};
+  const orgMeta = {}, orgUsers = { [CODE]: {} }, emailIndex = {}, orgNodes = { [CODE]: {} };
   const memberGoals = {}, memberCheckins = {}, orgSignals = { [CODE]: [] };
   const orgGroups = {}, orgValues = {}, orgGoals = {};
 
@@ -155,8 +198,18 @@ async function buildDemoStore() {
     goals: ['Reach the regional final', 'Everyone healthy at season end'],
     traits: ['Discipline', 'Team-first'], copilotEnabled: false, createdAt: iso(dAgo(200)),
   }];
+  const rootId = 'demo_programme', teamId = 'demo_varsity';
+  orgNodes[CODE][rootId] = { nodeId: rootId, name: 'Demo Athletic Club', parentId: null,
+    childNodeIds: [teamId], memberIds: [], leaderIds: [coachId], rev: 0 };
+  orgNodes[CODE][teamId] = { nodeId: teamId, name: 'Varsity Squad', parentId: rootId,
+    childNodeIds: [], memberIds: athletes.map(a => a.id), leaderIds: [coachId], rev: 0 };
+  orgUsers[CODE][coachId].leadershipNodeIds = [rootId, teamId];
+  orgUsers[CODE][coachId].assignedNodeIds = [teamId];
+  athletes.forEach(a => { orgUsers[CODE][a.id].assignedNodeIds = [teamId]; orgUsers[CODE][a.id].leadershipNodeIds = []; });
 
-  return { orgMeta, orgUsers, emailIndex, memberGoals, memberCheckins, orgSignals, orgGroups, orgValues, orgGoals };
+  const store = { orgMeta, orgUsers, emailIndex, orgNodes, memberGoals, memberCheckins, orgSignals, orgGroups, orgValues, orgGoals };
+  extendSeedTeamSurface(store, { code: CODE, coachId, memberIds: athletes.map(a => a.id), teamId });
+  return store;
 }
 
 /* ── COMPANY demo — the SAME kernel, a business domain ──────────────────────
@@ -315,6 +368,6 @@ async function main() {
   process.exit(0);
 }
 
-module.exports = { buildDemoStore, buildCompanyDemoStore, mergeDemo, DEMO_CODE, COMPANY_CODE };
+module.exports = { buildDemoStore, buildCompanyDemoStore, extendSeedTeamSurface, mergeDemo, DEMO_CODE, COMPANY_CODE };
 
 if (require.main === module) main().catch(err => { console.error('[seed] failed:', err); process.exit(1); });

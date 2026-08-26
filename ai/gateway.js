@@ -279,6 +279,7 @@ function canUnderstand(kind) {
   return HAVE_CLAUDE || HAVE_OPENAI;
 }
 async function understand({ system, prompt, media, maxTokens = 700 }) {
+  if (deterministicOnly()) throw new Error('LLM disabled (deterministic-only mode)');
   const text = prompt || 'Describe this and pull out what matters.';
 
   // Preferred path: Claude (handles image, native PDF, and inline text).
@@ -334,8 +335,9 @@ async function understand({ system, prompt, media, maxTokens = 700 }) {
    user transcription needs a key) rather than fabricating a transcript. */
 const OPENAI_TRANSCRIBE_URL   = process.env.OPENAI_TRANSCRIBE_URL || 'https://api.openai.com/v1/audio/transcriptions';
 const OPENAI_TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || 'whisper-1';
-function canTranscribe() { return HAVE_OPENAI; }
+function canTranscribe() { return !deterministicOnly() && HAVE_OPENAI; }
 async function transcribe(buffer, { filename = 'audio.webm', mimetype = 'audio/webm' } = {}) {
+  if (deterministicOnly()) throw new Error('LLM disabled (deterministic-only mode)');
   if (!HAVE_OPENAI) throw new Error('transcription-unavailable');
   const fd = new FormData();
   fd.append('file', new Blob([buffer], { type: mimetype }), filename);

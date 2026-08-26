@@ -434,8 +434,12 @@ async function buildClubStore() {
     emailIndex[em] = { orgCode: CODE, userId: uid };
   });
 
+  const store = { orgMeta, orgUsers, emailIndex, orgNodes, orgValues, orgGoals, orgMetrics, userPermissions, memberGoals, memberCheckins, orgSignals, assessmentTemplates, assessmentAssignments, orgTutorials, orgInterventions, studioThreads, orgGroups };
+  const { extendSeedTeamSurface } = require('./seed');
+  extendSeedTeamSurface(store, { code: CODE, coachId: firstTeamStaff.head,
+    memberIds: orgNodes[CODE][firstTeam].memberIds, teamId: firstTeam });
   return {
-    store: { orgMeta, orgUsers, emailIndex, orgNodes, orgValues, orgGoals, orgMetrics, userPermissions, memberGoals, memberCheckins, orgSignals, assessmentTemplates, assessmentAssignments, orgTutorials, orgInterventions, studioThreads, orgGroups },
+    store,
     summary: {
       code: CODE, orgName: 'Trafford United FC',
       players: playerCount, staff: staffCount, users: Object.keys(orgUsers[CODE]).length,

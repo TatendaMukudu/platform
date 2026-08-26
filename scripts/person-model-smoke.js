@@ -10,25 +10,26 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
 
 // ── privacy-by-construction: only vocabulary tokens are ever stored ─────────
 let m = pm.blankModel();
-pm.update(m, { motivators: 'progress', communication: 'brief' });
+const T0 = Date.UTC(2026, 0, 1), PDAY = 86400000;
+pm.update(m, { motivators: 'progress', communication: 'brief', at: T0 });
 pm.update(m, { overwhelmers: "I've been really struggling with my mum's illness" }); // raw text
 ok('raw text/sentence is NOT stored (ignored)', Object.keys(m.overwhelmers).length === 0);
 ok('unknown token is ignored', (pm.update(pm.blankModel(), { motivators: 'blockchain' }).motivators.blockchain === undefined));
-ok('valid tokens are counted', m.motivators.progress === 1 && m.communication.brief === 1);
+ok('valid tokens retain one distinct observation day', m.motivators.progress.days.length === 1 && m.communication.brief.days.length === 1);
 
 // ── honesty: understanding is confidence-gated (evidence floor) ─────────────
 let m2 = pm.blankModel();
-pm.update(m2, { motivators: 'teammates' });
-pm.update(m2, { motivators: 'teammates' });
-ok('below floor → not asserted', pm.understanding(m2).motivators === undefined);
-pm.update(m2, { motivators: 'teammates' }); // now at floor (3)
-ok('at floor → asserted with evidence', pm.understanding(m2).motivators?.value === 'teammates');
-ok('isEvidenced true once a dimension clears the floor', pm.isEvidenced(m2) === true);
+pm.update(m2, { motivators: 'teammates', at: T0 });
+pm.update(m2, { motivators: 'teammates', at: T0 + PDAY });
+ok('below floor → not asserted', pm.understanding(m2, { now: T0 + 2 * PDAY }).motivators === undefined);
+pm.update(m2, { motivators: 'teammates', at: T0 + 2 * PDAY });
+ok('at floor → asserted with distinct-day evidence', pm.understanding(m2, { now: T0 + 2 * PDAY }).motivators?.evidence === 3);
+ok('isEvidenced true once a dimension clears the floor', pm.isEvidenced(m2, { now: T0 + 2 * PDAY }) === true);
 
 // tie → not asserted (we don't guess between equals)
 let m3 = pm.blankModel();
-['direct','direct','direct','gentle','gentle','gentle'].forEach(t => pm.update(m3, { communication: t }));
-ok('a tie is NOT asserted (honest)', pm.understanding(m3).communication === undefined);
+['direct','gentle'].forEach(t => [0,1,2].forEach(d => pm.update(m3, { communication: t, at: T0 + d * PDAY })));
+ok('a tie is NOT asserted (honest)', pm.understanding(m3, { now: T0 + 2 * PDAY }).communication === undefined);
 
 // ── the org boundary: publicProjection leaks NOTHING private ────────────────
 const pub = pm.publicProjection(m2);
@@ -47,7 +48,7 @@ const rNone = agents.reason({ id:'y', name:'Y', now, moodSeries: [], deviations:
 ok('reason marks output internal', rNone.internal === true);
 ok('reason is honest: no patterns → confidence "none"', rNone.confidence === 'none');
 
-const r = agents.reason(input, { model: m2 });
+const r = agents.reason(input, { model: pm.update(pm.update(pm.update(pm.blankModel(), { motivators:'teammates', at:now-2*DAY }), { motivators:'teammates', at:now-DAY }), { motivators:'teammates', at:now }) });
 ok('reason surfaces confidence-gated understanding', r.understanding.motivators?.value === 'teammates');
 ok('reason output contains no raw member text', !/struggling|illness|mum/i.test(JSON.stringify(r)));
 
