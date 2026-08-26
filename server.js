@@ -13001,6 +13001,30 @@ app.post('/api/group/:nodeId/focus/:focusId/outcome', requireAuth, (req, res) =>
   res.json({ ok: true, focus: teamState.normalizeFocus(focus) });
 });
 
+/* GET /api/group/mine — the groups this user may read a state for.
+
+   Their own declared nodes and nothing else: the ones they LEAD, then the ones they belong
+   to. Deliberately not descendants — this answers "which groups am I part of", and a leader
+   two tiers up reads what is below them through the scoped projection, where the aggregate
+   floors are applied. Mixing the two here would make this endpoint a second scope mechanism
+   with its own opinion, which is how the three that already exist came to disagree. */
+app.get('/api/group/mine', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const user = (orgUsers[code] || {})[userId] || {};
+  const seen = new Set();
+  const groups = [];
+  for (const [nodeIds, role] of [[user.leadershipNodeIds || [], 'leader'], [user.assignedNodeIds || [], 'member']]) {
+    for (const nodeId of nodeIds) {
+      if (seen.has(nodeId)) continue;
+      const node = (orgNodes[code] || {})[nodeId];
+      if (!node) continue;
+      seen.add(nodeId);
+      groups.push({ nodeId, name: node.name, role, memberCount: (node.memberIds || []).length });
+    }
+  }
+  res.json({ ok: true, groups });
+});
+
 /* GET /api/group/:nodeId/state — THE TEAM-GRAIN SURFACE
 
    High, Low, Inquiry, Focus, and what IntelliQ can honestly say about the gap between them.

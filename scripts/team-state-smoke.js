@@ -311,6 +311,22 @@ const inq = (o = {}) => ({
   ok('11 · …and a user from that org cannot reach it through this org either',
     (await GET(OTHER, 'far', '/api/group/mens/state')).status === 404);
 
+  console.log('\n  WHICH GROUPS AM I PART OF');
+  {
+    const r = await GET(CODE, 'coach', '/api/group/mine');
+    ok('11 · a leader is told which groups they lead',
+      r.status === 200 && r.body.groups.length === 1 && r.body.groups[0].role === 'leader');
+    ok('11 · …with the name and size the surface needs, and nothing more',
+      Object.keys(r.body.groups[0]).sort().join(',') === 'memberCount,name,nodeId,role');
+  }
+  ok('11 · a member is told the groups they belong to',
+    (await GET(CODE, 'p1', '/api/group/mine')).body.groups[0].role === 'member');
+  {
+    const r = await GET(CODE, 'outsider', '/api/group/mine');
+    ok('11 · someone on no node is told so, rather than shown the org',
+      r.status === 200 && r.body.groups.length === 0);
+  }
+
   console.log('\n  FOCUS OVER HTTP');
   ok('11 · a member may not set the group\'s focus',
     (await POST(CODE, 'p1', '/api/group/mens/focus', { text: 'do a thing' })).status === 403);
@@ -444,6 +460,31 @@ const inq = (o = {}) => ({
     const t = S._teamStateAnswer(CODE, 'coach', "how are the women's soccer doing?");
     ok('12 · naming a group outside your own nodes matches nothing and reveals nothing',
       t && (t.nodes || []).every(n => n === 'mens'));
+  }
+
+  // ── 13. THE SCREEN IS ACTUALLY WIRED ───────────────────────────────────────────────────────
+  // A surface with endpoints and no renderer is not a product. These are structural checks on
+  // the front end, not a browser test: they catch the specific failure of shipping the API and
+  // forgetting the screen, which is exactly what happened to the group layer before this.
+  console.log('\n  THE SCREEN');
+  {
+    const fs = require('fs'), path = require('path');
+    const app = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
+    const css = fs.readFileSync(path.join(__dirname, '..', 'css', 'styles.css'), 'utf8');
+    ok('13 · the leader home has a slot for the group', /id="team-state"/.test(app));
+    ok('13 · …and calls the renderer that fills it', /_renderTeamState\(\)/.test(app));
+    ok('13 · the renderer reads the governed endpoints, not a second source',
+      /\/api\/group\/mine/.test(app) && /\/api\/group\/\$\{encodeURIComponent\(g\.nodeId\)\}\/state/.test(app));
+    ok('13 · the card renders all four lines plus what IntelliQ says',
+      /'High'/.test(app) && /'Low'/.test(app) && /'Inquiry'/.test(app) && /'Focus'/.test(app) && /tstate-says/.test(app));
+    ok('13 · withheld findings are surfaced to the leader, not dropped by the front end',
+      /tstate-withheld/.test(app) && /Not shown yet/.test(app));
+    ok('13 · every rendered value goes through the escaper',
+      !/\$\{s\.(high|low|question|focus|statement)[^}]*\}/.test(app.slice(app.indexOf('function _teamStateCard'), app.indexOf('function _teamStateCard') + 3000)
+        .replace(/esc\([^)]*\)/g, 'ESC')));
+    ok('13 · the strip has styles, so it is not invisible on the page', /\.tstate-card\{/.test(css));
+    ok('13 · a failing group read cannot take down the leader home',
+      /catch \(_\) \{ box\.innerHTML = ''; \}/.test(app));
   }
 
   server.close();

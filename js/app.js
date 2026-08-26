@@ -6661,6 +6661,7 @@ async function renderIntelligence(refresh) {
       : `<div class="intel-section"><b>Your ${_v('members')}</b> — all steady this week</div><div class="intel-empty">Nothing needs your attention right now — all steady across your people. When a pattern emerges, it appears here with the evidence and a suggested next step.</div>`;
 
     el.innerHTML = `
+      <div id="team-state"></div>
       ${youStrip}
       <div id="team-prompts"></div>
       <div id="team-watch"></div>
@@ -6678,6 +6679,7 @@ async function renderIntelligence(refresh) {
       </div>
       <div id="org-discoveries"></div>
       <div class="intel-foot">Patterns &amp; early signals, each compared to a person's own normal — directional, never scores. Private detail informs the read but is never shown.</div>`;
+    _renderTeamState();  // the GROUP as the subject — High, Low, Inquiry, Focus. Above the people, deliberately.
     _renderTeamPrompts(d.prompts || []);  // "want me to…" — proactive offers the leader can approve in one tap
     _renderTeamWatch();  // proactive early-warning banner, populated after the main read
     _renderDiscoveries();  // "how your organisation learns" — the research surface
@@ -6690,6 +6692,83 @@ async function renderIntelligence(refresh) {
       el.innerHTML = `<div class="intel-empty">${slow ? 'This is taking longer than usual.' : 'Home is unavailable right now.'} <button class="intel-refresh" onclick="renderIntelligence(true)">↻ Try again</button></div>`;
     }
   }
+}
+
+/* ── THE TEAM AS A SUBJECT ────────────────────────────────────────────────────
+   High, Low, Inquiry, Focus — the group read at the group's own grain, above the list of
+   people, because a rundown of individuals is not a picture of a team.
+
+   Everything rendered here was decided server-side by ai/team-state.js: which claim clears
+   the disclosure floor, which rests on enough independent origins, what may be said at all.
+   This function adds no judgement of its own — if the server withheld something, the strip
+   says so in the server's own words rather than quietly rendering less.
+
+   Failure is silent by design. This is one strip on a page that already works without it;
+   a group surface that cannot load should not take down the leader's home. */
+async function _renderTeamState() {
+  const box = document.getElementById('team-state');
+  if (!box) return;
+  try {
+    const mineRes = await fetch('/api/group/mine', { headers: Auth._headers() });
+    if (!mineRes.ok) { box.innerHTML = ''; return; }
+    const groups = (await mineRes.json()).groups || [];
+    // Groups they lead first; at most two, because a third card pushes the people below the
+    // fold and this strip is context for that list, not a replacement for it.
+    const pick = [...groups.filter(g => g.role === 'leader'), ...groups.filter(g => g.role !== 'leader')].slice(0, 2);
+    if (!pick.length) { box.innerHTML = ''; return; }
+
+    const states = (await Promise.all(pick.map(g =>
+      fetch(`/api/group/${encodeURIComponent(g.nodeId)}/state`, { headers: Auth._headers() })
+        .then(r => (r.ok ? r.json() : null)).catch(() => null)
+    ))).filter(s => s && s.ok);
+    if (!states.length) { box.innerHTML = ''; return; }
+
+    box.innerHTML = states.map(_teamStateCard).join('');
+  } catch (_) { box.innerHTML = ''; }
+}
+
+function _teamStateCard(s) {
+  const esc = _escAdvisor;
+  // A line is rendered only when the server sent one. An empty High is not "no highs" — it is
+  // "nothing has cleared the bar", which the closing statement is what says so. Padding the
+  // card with "None yet" placeholders would make an honest silence look like a broken screen.
+  const line = (label, text, sub) => text ? `
+    <div class="tstate-line">
+      <div class="tstate-label">${esc(label)}</div>
+      <div class="tstate-text">${esc(text)}${sub ? `<span class="tstate-sub">${esc(sub)}</span>` : ''}</div>
+    </div>` : '';
+
+  const basis = b => b && b.independentOrigins
+    ? `${b.independentOrigins} independent ${b.independentOrigins === 1 ? 'account' : 'accounts'}`
+    : '';
+
+  // What was found but may not be said. Named by topic, never restated — a leader who knows
+  // something is being held back can go and ask; a leader shown nothing concludes nothing is
+  // there. That difference is what makes the disclosure floor survivable as a product.
+  const withheld = (s.withheld || []).length ? `
+    <div class="tstate-withheld">
+      Not shown yet: ${(s.withheld || []).map(w => esc(w.about)).join(', ')} — too few people have spoken about
+      ${(s.withheld || []).length === 1 ? 'it' : 'them'} to say so without pointing at individuals.
+    </div>` : '';
+
+  const focus = s.focus && s.focus.status === 'active' ? s.focus : null;
+  const focusSub = focus
+    ? (focus.origin && focus.origin.from === 'inquiry' ? 'from an open inquiry' : 'set by a leader')
+    : '';
+
+  return `
+    <div class="tstate-card">
+      <div class="tstate-head">
+        <div class="tstate-name">${esc(s.node.name)}</div>
+        <div class="tstate-count">${s.node.memberCount} ${_v(s.node.memberCount === 1 ? 'member' : 'members')}</div>
+      </div>
+      ${line('High', s.high && (s.high.claim || s.high.about), basis(s.high && s.high.basis))}
+      ${line('Low', s.low && (s.low.claim || s.low.about), basis(s.low && s.low.basis))}
+      ${line('Inquiry', s.question && s.question.question, s.question && s.question.contested ? 'people describe this differently' : '')}
+      ${line('Focus', focus && focus.text, focusSub)}
+      ${withheld}
+      <div class="tstate-says">${esc(s.statement)}</div>
+    </div>`;
 }
 
 /* The proactive voice — "want me to…". Renders the briefing's prompt offers, each

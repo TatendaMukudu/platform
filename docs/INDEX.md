@@ -35,13 +35,19 @@ Evidence lifecycle · provenance and origin counting · corrections and superses
 P0-D authority-vs-truth · P0-3 durable CAS · Web scope (`ai/org-graph.js`) · privacy projection
 (`audienceSafe`) · robust statistics (median/MAD baselines, Wilson efficacy) · deterministic pattern
 detection · **group** Inquiry creation · Focus persistence and outcome learning · org memory ·
-event sourcing and CQRS in all but name.
+event sourcing and CQRS in all but name · **the team-grain surface** (`ai/team-state.js`:
+High / Low / Inquiry / Focus over one node, two-sided floor enforced, origin-counted,
+`GET /api/group/:nodeId/state`) · **team Focus with `origin { by, at, from, inquiryId }` and an
+outcome loop** · **the agent answering team questions at the team's grain**.
 
 ### What is partial?
 
 Leader privacy projection (PR #74, uncorrected) · Web governs 11 of 67 scope call sites · Focus is
 seven fields · Self High/Low cannot see the reader's own private evidence (**T-1**) · corrections do
-not reach already-emitted signals (**T-2**) · the no-LLM claim is unproven.
+not reach already-emitted signals (**T-2**) · the no-LLM claim is unproven · **the team-grain
+surface has no UI** — the endpoints and the conversational answer exist, the screen does not ·
+**valence has no capture UI**, so a contributor cannot yet declare working-well / worth-attention
+from the product.
 
 ### What blocks Falcon? — **SIX**
 
