@@ -55,6 +55,7 @@ const SUITES = [
   'shutdown-durability-smoke.js', // P0-2: debounced durable state is forced and failures stay loud
   'shutdown-boundary-smoke.js', // P0-2 production path: signals converge and evidence maintenance precedes final persistence
   'write-conflict-smoke.js', // P0-3: stale tree writers fail before replacing accepted state
+  'authority-truth-smoke.js', // P0-D: authority settles arrangements, never empirical truth
   'db-cas-smoke.js', // P0-3: every split durable-unit write uses PostgreSQL CAS
   'persistence-cas-boundary-smoke.js', // P0-3: reconstruction seeds hashes/revisions before ordinary saves
   'delete-cas-boundary-smoke.js', // P0-3: stale durable-unit deletion conflicts instead of destroying newer truth
@@ -83,6 +84,12 @@ const SUITES = [
   'assistant-runtime-smoke.js',    // unified MyWorkspace assistant runtime: one composer, bounded turn, confirmable proposals
   'assistant-interface-smoke.js',  // unified MyWorkspace INTERFACE: one composer/identity, lenses as bounded hints, confirmable proposal cards
   'proactive-smoke.js',            // the proactive surfacing layer: post-kernel ProactiveInsight projection, surfacing policy, audience safety, bounded preferences
+  'web-intelligence-smoke.js',      // W-1: leader roster is neutral; briefing is useful, aggregate, governed Web intelligence
+  'no-llm-floor-smoke.js',          // B1: mutation-sensitive production floor with every model exit disabled
+  'privacy-inference-smoke.js',     // B2/B3: two-sided cohorts + independent-origin aggregation
+  'origin-independence-smoke.js',   // P0-5′: transformations preserve prime origins; echoes never corroborate
+  'person-model-temporal-smoke.js', // B5: durable traits require distinct days; dormancy/correction/reactivation
+  'graph-invalidation-smoke.js',    // B6: graph mutations invalidate all affected reader projections
   'governance-smoke.js',           // architectural gravity: proactive DELIVERY lives ONLY in ai/behaviour.js; every surface consumes one pipeline
   'retrieval-smoke.js',            // grounded retrieval over canonical evidence: authorised-before-composition, cited, no-key extractive, full privacy/integrity matrix
   'intake-smoke.js',               // universal evidence intake: one governed ingestion boundary (text/md/pdf/docx/csv/json) → canonical evidence → grounded retrieval; dedup/supersede/delete, provenance, privacy

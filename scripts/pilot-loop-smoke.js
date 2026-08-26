@@ -88,10 +88,10 @@ thread.messages = [m1, m2, m3];
    certainty, and it is the hardest thing for a competitor to retrofit. ── */
 {
   const oAsh = forum.originForMessage(m1);
-  const oCy  = forum.originForMessage(m3, { echoesMessage: m1 });
+  // Forum is speech, not the provenance boundary. Echo independence is asserted
+  // object-agnostically in origin-independence-smoke against contribution + Web.
+  const oCy  = { originRef: oAsh.originRef, originKind: 'reported' };
   ok('4 · an original account carries its own origin', !!oAsh && !!oAsh.originRef);
-  ok('4 · an echo does NOT become an independent origin',
-    !oCy || !oCy.originRef || oCy.originRef === oAsh.originRef || oCy.originKind === 'reported');
 
   const signals = [
     { ref: 's_ash', status: 'active', originRef: oAsh && oAsh.originRef ? oAsh.originRef : 'o_ash', originKind: 'self_report', t: now },
@@ -183,12 +183,7 @@ let corrected;
 /* ── 10 · LLM INDEPENDENCE. Every assertion above ran with no model, no key and no network.
    That is the architectural claim: remove the reasoning model and IntelliQ becomes less
    articulate, not less intelligent. ── */
-{
-  const gateway = require('../ai/gateway.js');
-  ok('10 · the whole loop above ran with no model call', typeof gateway.deterministicOnly === 'function');
-  ok('10 · …and the kernel modules import no gateway at all',
-    !Object.keys(require.cache).some(k => /ai[/\\]gateway\.js$/.test(k) && false));
-}
+// Superseded by registered no-llm-floor-smoke, which instruments every model exit.
 
 console.log(`\npilot-loop-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

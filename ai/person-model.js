@@ -19,6 +19,8 @@
    ============================================================ */
 
 'use strict';
+const { STALE, REJECT } = require('./self-model');
+const DAY = 86400000;
 
 // Fixed vocabularies. update() ignores anything not on these lists, which is
 // what guarantees "no raw text ever enters the model".
@@ -58,7 +60,16 @@ function update(model, obs = {}) {
     if (typeof token !== 'string') return;
     const t = token.toLowerCase().trim();
     if (!VOCAB[dim].includes(t)) return;      // not in vocabulary → ignored
-    m[dim][t] = (m[dim][t] || 0) + 1;
+    const at = Number.isFinite(Number(obs.at)) ? Number(obs.at) : Date.now();
+    const day = Math.floor(at / DAY);
+    const prior = m[dim][t];
+    const rec = prior && typeof prior === 'object'
+      ? prior : { days: [], firstSeen: null, lastSeen: null };
+    if (!rec.days.includes(day)) rec.days.push(day);
+    rec.days.sort((a, b) => a - b);
+    rec.firstSeen = rec.firstSeen == null ? at : Math.min(rec.firstSeen, at);
+    rec.lastSeen = rec.lastSeen == null ? at : Math.max(rec.lastSeen, at);
+    m[dim][t] = rec;
     touched = true;
   };
 
@@ -75,34 +86,46 @@ function update(model, obs = {}) {
   return m;
 }
 
+function correct(model, { dimension, token, at = Date.now() } = {}) {
+  const m = _isValidModel(model) ? model : blankModel();
+  const rec = m[dimension]?.[String(token || '').toLowerCase().trim()];
+  if (rec && typeof rec === 'object') rec.rejectedUntil = at + REJECT;
+  return m;
+}
+
 /* The leading token for a dimension IF it clears the evidence floor and is
    actually ahead of the runner-up. Otherwise null (honest: we don't know yet). */
-function _leader(counts, floor) {
-  const pairs = Object.entries(counts || {}).sort((a, b) => b[1] - a[1]);
+function _leader(counts, floor, now) {
+  const pairs = Object.entries(counts || {}).map(([token, rec]) => {
+    if (!rec || typeof rec !== 'object') return null; // old count shape: history with unknown time
+    if (!Number.isFinite(rec.lastSeen) || now - rec.lastSeen > STALE) return null;
+    if (Number.isFinite(rec.rejectedUntil) && now < rec.rejectedUntil) return null;
+    return [token, Array.isArray(rec.days) ? rec.days.length : 0, rec];
+  }).filter(Boolean).sort((a, b) => b[1] - a[1]);
   if (!pairs.length) return null;
-  const [topTok, topN] = pairs[0];
+  const [topTok, topN, rec] = pairs[0];
   if (topN < floor) return null;
   const runnerUp = pairs[1] ? pairs[1][1] : 0;
   if (topN === runnerUp) return null;         // tie → not yet confident
-  return { value: topTok, evidence: topN };
+  return { value: topTok, evidence: topN, firstSeen: rec.firstSeen, lastSeen: rec.lastSeen };
 }
 
 /* understanding(model) — the confidence-gated summary the Coach may use.
    Only dimensions that clear the floor appear. This is the ONLY thing that
    should shape a person-facing reflection. */
-function understanding(model, { floor = FLOOR } = {}) {
+function understanding(model, { floor = FLOOR, now = Date.now() } = {}) {
   const m = _isValidModel(model) ? model : blankModel();
   const out = {};
   for (const d of DIMENSIONS) {
-    const led = _leader(m[d], floor);
+    const led = _leader(m[d], floor, now);
     if (led) out[d] = led;
   }
   return out;
 }
 
 /* Whether we understand a person at all yet (any evidenced dimension). */
-function isEvidenced(model) {
-  return Object.keys(understanding(model)).length > 0;
+function isEvidenced(model, opts) {
+  return Object.keys(understanding(model, opts)).length > 0;
 }
 
 /* publicProjection(model) — what PLATFORM (leaders/org) may see. By law: nothing
@@ -117,4 +140,5 @@ function publicProjection(model) {
 module.exports = {
   VOCAB, DIMENSIONS, FLOOR,
   blankModel, update, understanding, isEvidenced, publicProjection,
+  correct,
 };

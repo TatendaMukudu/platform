@@ -212,10 +212,14 @@ function _hash(str) {
    Everything renderable to a leader is directional + care-first by construction. */
 function toInsight(finding, opts = {}) {
   const audience = opts.audience === 'leader' ? 'leader' : 'self';
+  // Perspective is derived from the governed subject reference. Producers cannot
+  // relabel a person artifact as Web merely by passing an option.
+  const subjectRef = opts.subjectRef || finding.subjectRef || null;
+  const perspective = typeof subjectRef === 'string' && subjectRef.startsWith('web:') ? 'web' : 'self';
   const patternType = finding.patternType || finding.type || finding.kind || 'unknown';
-  const subjectId = opts.subjectId || finding.subjectId || null;
+  const subjectId = perspective === 'web' ? null : (opts.subjectId || finding.subjectId || null);
   const subjectName = opts.subjectName || finding.name || null;
-  const subjectLabel = audience === 'leader' ? (subjectName || 'this person') : 'you';
+  const subjectLabel = perspective === 'web' ? 'your visible scope' : (audience === 'leader' ? (subjectName || 'this person') : 'you');
 
   // Message resolution, in order:
   //  1. finding.render — a dynamic, audience-shaped message (milestone/opportunity),
@@ -249,6 +253,7 @@ function toInsight(finding, opts = {}) {
     dedupeKey,
     patternType,
     audience,
+    perspective,
     subjectId,
     subjectLabel,
     polarity,
@@ -270,8 +275,9 @@ function toInsight(finding, opts = {}) {
     } : null,
     // Internal only. The surfacing layer keeps evidence for AUDIT, but the leader UI
     // must never render it — audienceSafe() checks the rendered fields, not this.
-    basis: audience === 'leader' ? [] : (Array.isArray(finding.basis) ? finding.basis : finding.basis ? [finding.basis] : []),
+    basis: perspective === 'web' || audience === 'leader' ? [] : (Array.isArray(finding.basis) ? finding.basis : finding.basis ? [finding.basis] : []),
     careFlag: !!finding.careFlag,
+    ...(finding.openingRule ? { openingRule: finding.openingRule } : {}),
     surfacedAt: opts.now ? new Date(opts.now).toISOString() : new Date().toISOString(),
   };
 }
@@ -287,6 +293,11 @@ const QUOTE_RE = /[“"«][^”"»]{25,}[”"»]/;                            //
 // Protected-trait vocabulary must never appear in any rendered proactive text,
 // for any audience. IntelliQ never names or infers these.
 const PROTECTED_RE = /\b(race|ethnic(?:ity)?|religio(?:n|us)|sexual|gender identity|disab(?:led|ility)|pregnan|diagnos|depress(?:ed|ion)|anxiety disorder|medicat|therapy|HIV|immigration)\b/i;
+const WEB_ARTIFACT_KEYS = Object.freeze([
+  'id', 'dedupeKey', 'patternType', 'audience', 'perspective', 'subjectId', 'subjectLabel',
+  'polarity', 'priority', 'explore', 'severity', 'kernelConfidence', 'reliabilityLabel',
+  'headline', 'body', 'suggestion', 'basis', 'careFlag', 'openingRule', 'surfacedAt', 'kind',
+]);
 
 function audienceSafe(insight) {
   const violations = [];
@@ -295,6 +306,11 @@ function audienceSafe(insight) {
     .filter(Boolean).join('  ');
 
   if (PROTECTED_RE.test(rendered)) violations.push('protected_trait_language');
+  if (insight.perspective === 'web') {
+    if (insight.subjectId != null) violations.push('web_subject_exposed');
+    if (Array.isArray(insight.basis) && insight.basis.length) violations.push('web_basis_exposed');
+    if (Object.keys(insight).some(key => !WEB_ARTIFACT_KEYS.includes(key))) violations.push('web_unknown_field');
+  }
 
   if (insight.audience === 'leader') {
     if (SCORE_RE.test(rendered))  violations.push('numeric_leak');
@@ -407,6 +423,7 @@ module.exports = {
   normalizePreferences, applyPreferences,
   MESSAGES, EXPLORE, PREF_SCHEMA, PREF_DEFAULTS,
   PATTERN_POLARITY,
+  WEB_ARTIFACT_KEYS,
   // exported for tests
   _hash, _fallback,
 };
