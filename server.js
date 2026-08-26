@@ -3964,6 +3964,46 @@ function _buildMemberIntelInput(code, u, now) {
     Object.values(groups).forEach(st => { if (st.series.length >= 6) streams.push(st); });
   } catch (_) {}
 
+  /* CANONICAL PRIMITIVE STREAMS — any admissible metric that declares what KIND of thing it is.
+
+     Found by the pilot rehearsal: before this, a member's numeric evidence reached the pattern
+     engine only if it was labelled /mood/i, arrived through the legacy signal store, or was an
+     assessment. An imported stream labelled "session engagement" or "wellbeing" produced no
+     briefing at all — the leader's page was empty, with no error. That is a hardcoded vocabulary
+     dependency in a layer whose whole claim is to be domain-free, and it is a live import risk
+     for any organisation that does not happen to use our word for it.
+
+     The group-grain detector (_groupPatternFindings) already reads attributes.primitive from
+     canonical evidence. This is the same read at person grain, so the two agree about what a
+     stream is instead of drawing from different sources.
+
+     Streams are keyed by primitive AND label so two different measures are never pooled: a
+     five-point wellbeing scale and a session count are both 'participation', and averaging them
+     would produce a trend about nothing. */
+  try {
+    const byKind = {};
+    _kernelEvidence(code, { purpose: 'organisation_reasoning' }).forEach(env => {
+      if (env.subjectId !== u.id || env.type !== 'metric') return;
+      const primitive = env.attributes && env.attributes.primitive;
+      if (!Object.values(primitives.PRIMITIVE).includes(primitive)) return;
+      // Already covered above, and pooling them here would double-count the same observation.
+      if (/mood/i.test(env.label || '')) return;
+      const t = new Date(env.observedAt || env.retrievedAt || 0).getTime();
+      const v = Number(env.value);
+      if (!Number.isFinite(t) || !Number.isFinite(v)) return;
+      const label = String(env.label || primitive).slice(0, 60);
+      const key = `canonical:${primitive}:${label}`;
+      (byKind[key] = byKind[key] || {
+        key, label, primitive,
+        // The evidence declares which way is good; absent that, up-good is the conservative
+        // reading because it makes a DROP the thing that gets noticed.
+        valence: (env.attributes && env.attributes.valence) || 'up-good',
+        series: [],
+      }).series.push({ t, v });
+    });
+    Object.values(byKind).forEach(st => { if (st.series.length >= 6) streams.push(st); });
+  } catch (_) {}
+
   let connections = [];
   try { connections = agents.crossSignal(streams, now); } catch (_) {}
   // The Universal Pattern Engine: domain-free structures (withdrawal/isolation/

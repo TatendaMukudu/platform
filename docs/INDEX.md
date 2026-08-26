@@ -28,6 +28,7 @@
 | Self vs Web | `ttd/self-web-production-trace.md` (traced) → `ttd/self-and-web-orchestration.md` (laws) |
 | Do we need an ontology / graph DB? | `ttd/organisational-ontology-investigation.md` — **the answer is no** |
 | What does Falcon actually get? | `ttd/falcon-persona-rehearsal.md` |
+| **Who do we compete with, and what should we borrow?** | `ttd/competitive-landscape-and-borrows.md` — **§3 is the finding that should change a decision** |
 | **What are we deliberately NOT deciding?** | `rnd/intelliq-rnd-program.md` — **non-authoritative; never a reason to build** |
 
 ### What is implemented?
@@ -120,6 +121,7 @@ never silently edited.
 | `ttd/privacy-inference-attacks.md` | **CURRENT** | 25 attacks, 12 invariants, the two-sided floor |
 | `ttd/founder-decision-reduction.md` | **CURRENT** | thirteen → two |
 | `ttd/falcon-persona-rehearsal.md` | **CURRENT** | six personas, seventeen scenarios |
+| `ttd/competitive-landscape-and-borrows.md` | **CURRENT** | market and architecture research; the cohort-floor finding is a live founder decision |
 | `ttd/peer-web-semantics.md` | **CURRENT** | peers are a separate edge class; deferred to SCALE |
 | `ttd/model-worker-economics.md` | **CURRENT** | tiers, router, call map |
 | `ttd/deterministic-web-intelligence.md` | **CURRENT** | the intelligence ladder |

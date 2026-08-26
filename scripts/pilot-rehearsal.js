@@ -47,21 +47,23 @@ orgNodes[C] = {
   mens: { nodeId: 'mens', name: "Men's Soccer", parentId: 'club', childNodeIds: [], leaderIds: ['coach'], memberIds: NAMES.map((_, i) => `m${i}`) },
 };
 
-/* Evidence: a mood/check-in stream per member.
+/* Evidence: a participation stream per member, labelled "session engagement" ON PURPOSE.
 
-   NOTE, found by running this rehearsal: the leader briefing's pattern detection reads
-   _canonicalMoodSeries, which requires `type === 'metric'` AND a label matching /mood/i. An
-   identical stream labelled "session engagement" produces NO briefing items at all — the coach's
-   home page is empty. That is a hardcoded vocabulary dependency in a layer that is otherwise
-   domain-free, and it is a live import risk: a school sending "wellbeing" or "check-in score"
-   gets nothing. Recorded here rather than worked around silently.
+   The first run of this rehearsal used that label and the leader briefing returned NOTHING —
+   pattern detection read only /mood/i-labelled metrics, the legacy signal store and
+   assessments, so an ordinary imported stream produced an empty coach page with no error.
+   Competitors ingest arbitrary metric vocabularies as a matter of course.
 
-   Original comment follows.
-   Evidence: a participation stream per member. Six of the twelve ease off over the last
-   fortnight; the rest hold steady. Distinct days throughout, because one bad day must never
+   The label stays deliberately un-blessed so this suite keeps proving that canonical evidence
+   reaches the pattern engine on the strength of its declared PRIMITIVE rather than on whether
+   it happens to use our word. Renaming it to "mood" would make the suite green and the defect
+   invisible.
+
+   Six of the twelve ease off over the last fortnight; the rest hold steady. Distinct days
+   throughout, because one bad day must never
    assert anything about a person. */
 const ev = (id, subjectId, value, daysAgo, visibility = 'shared') => ({
-  id, orgCode: C, status: 'active', subjectId, type: 'metric', label: 'mood',
+  id, orgCode: C, status: 'active', subjectId, type: 'metric', label: 'session engagement',
   visibility, value, observedAt: new Date(now - daysAgo * DAY).toISOString(),
   provider: 'checkin', source: 'observed',
   originRef: `origin:${id}`, originKind: 'direct_observation',
@@ -72,7 +74,11 @@ const ev = (id, subjectId, value, daysAgo, visibility = 'shared') => ({
 const log = [];
 NAMES.forEach((_, i) => {
   const easesOff = i < 6;
-  [30, 26, 22, 18].forEach((d, k) => log.push(ev(`b_${i}_${k}`, `m${i}`, 4, d)));
+  // SIX baseline points, not four. ai/baseline.js MIN_POINTS is 5 and the recent window is
+  // excluded from the baseline, so five prior observations are the floor before ANY pattern can
+  // fire. Worth knowing for a pilot starting from an empty database: roughly five check-ins per
+  // person before a coach's page can say anything at all.
+  [40, 36, 32, 28, 24, 20].forEach((d, k) => log.push(ev(`b_${i}_${k}`, `m${i}`, 4, d)));
   [10, 7, 4, 2].forEach((d, k) => log.push(ev(`r_${i}_${k}`, `m${i}`, easesOff ? 2 : 4, d)));
 });
 // One private capture. It must change nothing a leader sees, anywhere in this rehearsal.
