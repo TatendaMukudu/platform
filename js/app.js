@@ -6661,6 +6661,7 @@ async function renderIntelligence(refresh) {
       : `<div class="intel-section"><b>Your ${_v('members')}</b> — all steady this week</div><div class="intel-empty">Nothing needs your attention right now — all steady across your people. When a pattern emerges, it appears here with the evidence and a suggested next step.</div>`;
 
     el.innerHTML = `
+      <div id="lead-inquiry"></div>
       <div id="team-state"></div>
       ${youStrip}
       <div id="team-prompts"></div>
@@ -6679,6 +6680,7 @@ async function renderIntelligence(refresh) {
       </div>
       <div id="org-discoveries"></div>
       <div class="intel-foot">Patterns &amp; early signals, each compared to a person's own normal — directional, never scores. Private detail informs the read but is never shown.</div>`;
+    _renderLeadInquiry();  // the open question, self or team, ABOVE everything settled
     _renderTeamState();  // the GROUP as the subject — High, Low, Inquiry, Focus. Above the people, deliberately.
     _renderTeamPrompts(d.prompts || []);  // "want me to…" — proactive offers the leader can approve in one tap
     _renderTeamWatch();  // proactive early-warning banner, populated after the main read
@@ -6692,6 +6694,34 @@ async function renderIntelligence(refresh) {
       el.innerHTML = `<div class="intel-empty">${slow ? 'This is taking longer than usual.' : 'Home is unavailable right now.'} <button class="intel-refresh" onclick="renderIntelligence(true)">↻ Try again</button></div>`;
     }
   }
+}
+
+/* ── THE OPEN QUESTION, FIRST ─────────────────────────────────────────────────
+   Home opens with what is unresolved, not with what is settled. A High is a report; an
+   Inquiry is the only thing on this page that asks the reader for something, so it leads.
+
+   Self and team compete on one ranking, decided server-side. Two lists would hand the reader
+   the judgement the ranking exists to make. The strip says WHERE the question came from —
+   "about you" or the group's name — because "why am I being asked this" is the first thing a
+   coach will want to know, and a question with no provenance reads as the system nagging. */
+async function _renderLeadInquiry() {
+  const box = document.getElementById('lead-inquiry');
+  if (!box) return;
+  try {
+    const res = await fetch('/api/inquiry/lead', { headers: Auth._headers() });
+    if (!res.ok) { box.innerHTML = ''; return; }
+    const lead = (await res.json()).lead;
+    if (!lead || !lead.question) { box.innerHTML = ''; return; }
+    const esc = _escAdvisor;
+    const where = lead.source === 'self' ? 'About you' : esc(lead.where || 'Your group');
+    box.innerHTML = `
+      <div class="linq-card">
+        <div class="linq-head">Open question · ${where}</div>
+        <div class="linq-q">${esc(lead.question)}</div>
+        ${lead.contested ? `<div class="linq-flag">People here describe this differently — that disagreement is the useful part.</div>` : ''}
+        ${(lead.otherUnknowns || []).length ? `<div class="linq-more">Also open: ${(lead.otherUnknowns || []).map(esc).join(' · ')}</div>` : ''}
+      </div>`;
+  } catch (_) { box.innerHTML = ''; }
 }
 
 /* ── THE TEAM AS A SUBJECT ────────────────────────────────────────────────────

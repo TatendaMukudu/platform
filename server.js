@@ -13025,6 +13025,64 @@ app.get('/api/group/mine', requireAuth, (req, res) => {
   res.json({ ok: true, groups });
 });
 
+/* GET /api/inquiry/lead — THE ONE OPEN QUESTION THIS PERSON SHOULD SEE FIRST
+
+   A home page should open with what is unresolved, not with what is settled. A High is a
+   report; an Inquiry is an invitation, and it is the only artifact on either surface that
+   asks the reader for something.
+
+   SELF AND TEAM COMPETE ON ONE RANKING. Splitting them into two lists would make the reader
+   decide which list to look at, which is the judgement the ranking exists to make. The rule
+   is the one ai/team-state.js already uses: contested first (a disagreement is the most
+   useful thing to resolve), then how much is still unknown, then recency.
+
+   Nothing here widens scope. Self inquiries belong to the reader by construction; group
+   inquiries come from _groupInquiryProjections over the reader's own declared nodes, and a
+   question is safe to surface at any cohort size because it carries no count and names
+   nobody — the same reasoning ai/team-state.js applies. */
+function _leadInquiry(code, userId) {
+  const all = [];
+
+  // SELF — the reader's own frontier. Projected into the same shape a group inquiry uses so
+  // one ranking can order both; a second shape here would be a second opinion about what
+  // "most open" means.
+  const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+  for (const i of Object.values(mine)) {
+    if (!i || i.parkedAt || i.status === 'resolved') continue;
+    if (!(i.missingSignals || []).length) continue;
+    all.push({
+      inquiryId: i.inquiryId, topic: i.topic, status: i.status,
+      confidence: i.confidence || { band: 'tentative' },
+      contested: (i.signals || []).some(s => s && s.dissents),
+      stillUnknown: (i.missingSignals || []).map(m => m.question).filter(Boolean),
+      lastUpdatedAt: i.lastUpdatedAt,
+      _source: 'self', _where: 'you',
+    });
+  }
+
+  // TEAM — every group the reader leads or belongs to. Their own declared nodes only.
+  const user = (orgUsers[code] || {})[userId] || {};
+  const nodeIds = [...new Set([...(user.leadershipNodeIds || []), ...(user.assignedNodeIds || [])])];
+  for (const nodeId of nodeIds) {
+    const node = (orgNodes[code] || {})[nodeId];
+    if (!node) continue;
+    for (const p of _groupInquiryProjections(code, nodeId)) {
+      all.push({ ...p, _source: 'team', _where: node.name, _nodeId: nodeId });
+    }
+  }
+
+  const top = teamState.openQuestion(all);
+  if (!top) return null;
+  const src = all.find(a => a.inquiryId === top.inquiryId) || {};
+  return { ...top, source: src._source || 'team', where: src._where || '', nodeId: src._nodeId || null };
+}
+
+app.get('/api/inquiry/lead', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const lead = _leadInquiry(code, userId);
+  res.json({ ok: true, lead });
+});
+
 /* GET /api/group/:nodeId/state — THE TEAM-GRAIN SURFACE
 
    High, Low, Inquiry, Focus, and what IntelliQ can honestly say about the gap between them.
@@ -17707,7 +17765,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: the group contribution boundary
   groupCandidates, orgNodes, _groupSubjectRef, _noteGroupCandidates, _admitGroupContributions,
   _inNode, _leadsNode, forumThreads, _forumThread,
-  teamFocuses, _teamFocuses, _groupInquiryProjections, _mayReadGroup, _teamStateAnswer,
+  teamFocuses, _teamFocuses, _groupInquiryProjections, _mayReadGroup, _teamStateAnswer, _leadInquiry,
   reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library
   // a routed share lands in

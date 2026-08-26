@@ -506,6 +506,62 @@ const inq = (o = {}) => ({
       /does not open anything/.test(mv));
     ok('13 · the noticing card is styled to look private, not like a notification',
       /\.mg-card \{/.test(mcss));
+
+    ok('13 · home opens with the OPEN QUESTION, above everything settled',
+      app.indexOf('id="lead-inquiry"') < app.indexOf('id="team-state"')
+      && app.indexOf('id="lead-inquiry"') > 0);
+    ok('13 · …fed by the one ranking that puts self and team on the same list',
+      /\/api\/inquiry\/lead/.test(app) && /_renderLeadInquiry\(\)/.test(app));
+    ok('13 · …and it says where the question came from', /About you/.test(app) && /linq-head/.test(app));
+    ok('13 · the open-question strip has styles', /\.linq-card\{/.test(css));
+  }
+
+  // ── 14. THE ONE RANKING OVER SELF AND TEAM ─────────────────────────────────────────────────
+  console.log('\n  THE LEAD INQUIRY — self and team on one list');
+  {
+    const { inquiryStates } = S;
+    inquiryStates[CODE]['member:coach'] = {
+      preparation: {
+        inquiryId: 'inq_self', subjectRef: 'member:coach',
+        topic: { canonicalConcept: 'preparation', label: 'how I prepare sessions' },
+        hypotheses: [], leadingHypothesisId: null,
+        signals: [{ ref: 's1', kind: 'observation', at: 1 }],
+        missingSignals: [{ question: 'What makes a session land for this group?' }],
+        confidence: { score: 0.3, band: 'emerging' }, status: 'exploring',
+        timeline: [], createdAt: 1, lastUpdatedAt: 100,
+      },
+    };
+    const r = await GET(CODE, 'coach', '/api/inquiry/lead');
+    ok('14 · a leader with both a self and a team question gets exactly one',
+      r.status === 200 && r.body.lead && typeof r.body.lead.question === 'string');
+    ok('14 · …tagged with where it came from', ['self', 'team'].includes(r.body.lead.source));
+
+    // Contested wins over everything, across the self/team line — the ranking is one ranking.
+    inquiryStates[CODE]['member:coach'].preparation.signals.push({ ref: 's2', kind: 'observation', dissents: true, at: 2 });
+    const r2 = await GET(CODE, 'coach', '/api/inquiry/lead');
+    ok('14 · a CONTESTED self question outranks an uncontested team one',
+      r2.body.lead.source === 'self' && r2.body.lead.contested === true);
+    ok('14 · …and the strip can say it is about them', r2.body.lead.where === 'you');
+
+    // A person with nothing open gets null, not an invented question.
+    ok('14 · nothing open returns nothing, never a filler question',
+      (await GET(CODE, 'outsider', '/api/inquiry/lead')).body.lead === null);
+
+    // The reader's own frontier cannot leak: another member's self inquiry is not in scope.
+    inquiryStates[CODE]['member:p2'] = {
+      confidence_thing: {
+        inquiryId: 'inq_p2_private', subjectRef: 'member:p2',
+        topic: { canonicalConcept: 'nerves', label: 'nerves before matches' },
+        hypotheses: [], signals: [{ ref: 'x', kind: 'observation', dissents: true, at: 9 }],
+        missingSignals: [{ question: 'PRIVATE_MARKER_should_never_surface' }, { question: 'b' }, { question: 'c' }],
+        confidence: { band: 'probable' }, status: 'exploring', timeline: [], createdAt: 1, lastUpdatedAt: 99999,
+      },
+    };
+    const r3 = await GET(CODE, 'coach', '/api/inquiry/lead');
+    ok('14 · another person\'s own frontier never reaches the leader\'s home',
+      !/PRIVATE_MARKER/.test(JSON.stringify(r3.body)));
+    ok('14 · …not even though it is contested, newer and has more unknowns',
+      r3.body.lead.inquiryId !== 'inq_p2_private');
   }
 
   server.close();

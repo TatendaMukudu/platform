@@ -2357,6 +2357,15 @@ img { max-width: 100%; }
 .pm-similar-chip { font-size: 0.74rem; background: var(--surface-1, var(--bg)); border: 1px solid var(--border); border-radius: 999px; padding: 0.15rem 0.55rem; color: var(--text-secondary); }
 .pm-similar-foot { font-size: 0.66rem; color: var(--text-muted); margin-top: 0.5rem; font-style: italic; }
 
+/* ── The open question, first on the leader's home ────────────────────────────
+   The one element on the page allowed a border accent, because it is the one element that
+   asks the reader for something rather than reporting to them. */
+.linq-card{background:var(--surface-1);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:12px;padding:.9rem 1.1rem;margin-bottom:.8rem}
+.linq-head{font-size:.68rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin-bottom:.4rem}
+.linq-q{font-size:1rem;line-height:1.45;color:var(--text-primary)}
+.linq-flag{margin-top:.5rem;font-size:.76rem;line-height:1.45;color:var(--text-secondary)}
+.linq-more{margin-top:.5rem;font-size:.72rem;color:var(--text-muted);line-height:1.45}
+
 /* ── The team as a subject — High / Low / Inquiry / Focus ─────────────────────
    Sits above the per-person list on the leader's home. Deliberately quiet: no colour
    coding by polarity, because a Low is not an alarm and a High is not a trophy — both
