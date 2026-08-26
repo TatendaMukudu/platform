@@ -4147,8 +4147,12 @@ function _stripLeaderNumbers(s) {
    numbers or raw evidence basis. One source → every leader surface inherits it. */
 function _sanitizeBriefingForLeader(data) {
   if (!data) return data;
-  const items = (data.items || []).map(it => ({
-    ...it,
+  const items = (data.items || []).map(it => {
+    // Presence of private context is itself private information. Omit the flag
+    // rather than setting it false so the leader payload has no side channel.
+    const { careFlag: _privateContext, ...safe } = it;
+    return ({
+    ...safe,
     whyNow: _stripLeaderNumbers(it.whyNow),
     recommendedAction: _stripLeaderNumbers(it.recommendedAction),
     learnedNote: it.learnedNote ? _stripLeaderNumbers(it.learnedNote) : it.learnedNote,
@@ -4157,7 +4161,7 @@ function _sanitizeBriefingForLeader(data) {
     deviations: (it.deviations || []).map(d => ({ label: d.label, direction: d.direction, confidence: d.confidence })), // no pct/normal/recent
     connections: (it.connections || []).map(c => ({ ...c, basis: _stripLeaderNumbers(c.basis) })),
     graph: undefined,                                      // node/edge internals not for the leader UI
-  }));
+  }); });
   return { ...data, summary: _stripLeaderNumbers(data.summary), items };
 }
 
