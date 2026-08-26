@@ -9,26 +9,44 @@
 
 > ## STATUS — READ BEFORE ANY LANE
 >
-> **Lanes A, B, C, D, E and F are DONE and merged into `claude/platform-work-summary-nmb0cm`.**
-> PR #76 delivered A/B/D/E; PR #77 delivered A (a stronger second implementation, which won the
-> conflict), C and F. Both were reviewed by mutation testing before merging.
+> **Only H1 and H2 remain.** Everything else in this document is done and merged into
+> `claude/platform-work-summary-nmb0cm`.
 >
-> | Lane | State | Proven by |
-> |---|---|---|
-> | **A** no-LLM floor | done | `no-llm-floor-smoke` — 20 assertions, dummy provider credentials present so the SWITCH is what is proven, not the absence of a key |
-> | **B** privacy corrections | done | two-sided floor and origin counting both go red under mutation; `privacy-inference-smoke`, `origin-independence-smoke` |
-> | **C** non-interference | done | `non-interference-smoke` — both leaks close, both go red under mutation |
-> | **D** person model + erasure | done | `person-model-temporal-smoke`, `graph-invalidation-smoke`; both invalidation call sites load-bearing |
-> | **E** Web scope | **partial** — E2 invalidation done; **W-3 and the parity harness are still outstanding** |
-> | **F** team pattern detection | done | group streams via `_kernelEvidence` with an organisational purpose; detected findings clear the same two-sided floor |
-> | **G** gateway | **outstanding** — `_llmBudgetOk` still outside the gateway; token telemetry absent |
+> | Lane | State |
+> |---|---|
+> | **A** no-LLM floor | done — `no-llm-floor-smoke`, 20 assertions, dummy credentials present so the SWITCH is what is proven |
+> | **B** privacy corrections | done — two-sided floor and origin counting both go red under mutation |
+> | **C** non-interference | done — `non-interference-smoke`; both `careFlag` leaks closed |
+> | **D** person model + erasure | done — distinct days, staleness, both invalidation call sites |
+> | **E** Web scope | **PARTIAL — H2 is what remains** |
+> | **F** team pattern detection | done — group streams via `_kernelEvidence` at an organisational purpose |
+> | **G** gateway | **OUTSTANDING — this is H1** |
+> | H3 pilot rehearsal | done — `scripts/pilot-rehearsal.js`, prints the transcript a coach would read |
+> | H4 demo seed | done — crosses the real contribution boundary; squad widened to fourteen |
 >
-> **What remains: Lane G, and Lane E's W-3 plus the parity harness.** Nothing else in this
-> document is unstarted.
+> ### Landed since this document was written — do NOT rebuild any of it
 >
-> **Two defects were found in review and fixed on the branch, not in the PRs:** the leader's
-> outcome loop had become unreachable from the UI, and the person sanitizer was adding fields
-> that the frozen Web allow-list forbids. Both now carry regression assertions.
+> - **`ai/audience.js`** — named audiences. An audience is a durable REFERENCE `{ kind, nodeId }`
+>   resolved against CURRENT membership at read time, never a stored list. It NARROWS and never
+>   grants; admissibility is still `_kernelEvidence` first. Do not turn it into a permission
+>   system and do not add a kind without a deterministic resolver.
+> - **`GET /api/evidence/:id/audience`** and **`GET /api/me/audiences`** — "can my coach see what
+>   I just said?", answered from state.
+> - **`scripts/audience-disclosure-smoke.js`** — 46 assertions. INQUIRY FORMATION IS NOT
+>   DISCLOSURE, proven adversarially.
+> - **The cohort floor is now 5**, two-sided, and **deliberately not configurable**. Founder
+>   decision, August 2026.
+>
+> ### Three things you must not undo
+>
+> 1. **Do not lower `MIN_COHORT`, and do not make it a setting.** A floor that can be lowered is
+>    a floor that gets lowered the first time a demo looks thin. If a group cannot publish
+>    safely, the correct behaviour is to refuse and explain — which the surface already does.
+> 2. **Do not narrow a test fixture back down.** Several suites now use twelve- and
+>    fourteen-person cohorts *because* the floor is five: a four-person fixture can only ever
+>    prove that the floor refuses, never that it also permits. Those numbers are load-bearing.
+> 3. **Do not touch `ai/audience.js`, `ai/team-state.js` or `scripts/audience-disclosure-smoke.js`**
+>    unless your lane genuinely requires it. Neither H1 nor H2 does.
 
 ---
 
