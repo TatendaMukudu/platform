@@ -276,7 +276,12 @@ function toInsight(finding, opts = {}) {
     // Internal only. The surfacing layer keeps evidence for AUDIT, but the leader UI
     // must never render it — audienceSafe() checks the rendered fields, not this.
     basis: perspective === 'web' || audience === 'leader' ? [] : (Array.isArray(finding.basis) ? finding.basis : finding.basis ? [finding.basis] : []),
-    careFlag: !!finding.careFlag,
+    // A WEB artifact has no subject, so there is nobody it could be carrying private context
+    // ABOUT — and the presence of the flag is itself a side channel, which is the whole reason
+    // the leader sanitizer omits it rather than setting it false. So a Web artifact does not
+    // carry the key at all, and WEB_ARTIFACT_KEYS below no longer permits it: a producer that
+    // attaches one fails audienceSafe and is dropped, rather than passing with `false`.
+    ...(perspective === 'web' ? {} : { careFlag: !!finding.careFlag }),
     ...(finding.openingRule ? { openingRule: finding.openingRule } : {}),
     surfacedAt: opts.now ? new Date(opts.now).toISOString() : new Date().toISOString(),
   };
@@ -296,7 +301,7 @@ const PROTECTED_RE = /\b(race|ethnic(?:ity)?|religio(?:n|us)|sexual|gender ident
 const WEB_ARTIFACT_KEYS = Object.freeze([
   'id', 'dedupeKey', 'patternType', 'audience', 'perspective', 'subjectId', 'subjectLabel',
   'polarity', 'priority', 'explore', 'severity', 'kernelConfidence', 'reliabilityLabel',
-  'headline', 'body', 'suggestion', 'basis', 'careFlag', 'openingRule', 'surfacedAt', 'kind',
+  'headline', 'body', 'suggestion', 'basis', 'openingRule', 'surfacedAt', 'kind',
 ]);
 
 function audienceSafe(insight) {
