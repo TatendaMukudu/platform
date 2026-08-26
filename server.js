@@ -4151,8 +4151,12 @@ function _stripLeaderNumbers(s) {
    numbers or raw evidence basis. One source → every leader surface inherits it. */
 function _sanitizeBriefingForLeader(data) {
   if (!data) return data;
-  const items = (data.items || []).map(it => ({
-    ...it,
+  const items = (data.items || []).map(it => {
+    // Presence of private context is itself private information. Omit the flag
+    // rather than setting it false so the leader payload has no side channel.
+    const { careFlag: _privateContext, ...safe } = it;
+    return ({
+    ...safe,
     whyNow: _stripLeaderNumbers(it.whyNow),
     recommendedAction: _stripLeaderNumbers(it.recommendedAction),
     learnedNote: it.learnedNote ? _stripLeaderNumbers(it.learnedNote) : it.learnedNote,
@@ -4161,7 +4165,7 @@ function _sanitizeBriefingForLeader(data) {
     deviations: (it.deviations || []).map(d => ({ label: d.label, direction: d.direction, confidence: d.confidence })), // no pct/normal/recent
     connections: (it.connections || []).map(c => ({ ...c, basis: _stripLeaderNumbers(c.basis) })),
     graph: undefined,                                      // node/edge internals not for the leader UI
-  }));
+  }); });
   return { ...data, summary: _stripLeaderNumbers(data.summary), items };
 }
 
@@ -12950,6 +12954,43 @@ function _mayReadGroup(code, nodeId, userId) {
   return _inNode(code, nodeId, userId) || _leadsNode(code, nodeId, userId);
 }
 
+/* Run the existing structural detector at group grain. Only canonical evidence
+   admitted for group_reasoning enters; private material is excluded by
+   _kernelEvidence before streams exist. A detected team finding also records how
+   many member streams independently exhibit the same structure so team-state can
+   apply its two-sided cohort floor. */
+function _groupPatternFindings(code, nodeId, now = Date.now()) {
+  const members = new Set(_nodeMembers(code, nodeId));
+  const admitted = _kernelEvidence(code, { purpose: 'group_reasoning' }).filter(e =>
+    members.has(e.subjectId) && Number.isFinite(Number(e.value)) && e.attributes &&
+    Object.values(primitives.PRIMITIVE).includes(e.attributes.primitive));
+  const byMember = new Map(), aggregate = new Map();
+  for (const e of admitted) {
+    const primitive = e.attributes.primitive, valence = e.attributes.valence || 'up-good';
+    const key = `${primitive}:${e.label || primitive}`, t = new Date(e.observedAt).getTime();
+    if (!Number.isFinite(t)) continue;
+    const stream = { key, label: e.label || primitive, primitive, valence };
+    const mm = byMember.get(e.subjectId) || new Map(); byMember.set(e.subjectId, mm);
+    const ms = mm.get(key) || { ...stream, series: [] }; mm.set(key, ms); ms.series.push({ t, v: Number(e.value) });
+    const ag = aggregate.get(key) || { ...stream, days: new Map() }; aggregate.set(key, ag);
+    const day = Math.floor(t / 86400000), vals = ag.days.get(day) || []; vals.push(Number(e.value)); ag.days.set(day, vals);
+  }
+  const affected = new Map();
+  for (const [memberId, streams] of byMember) {
+    for (const f of primitives.structuralPatterns([...streams.values()], now)) {
+      const set = affected.get(f.type) || new Set(); set.add(memberId); affected.set(f.type, set);
+    }
+  }
+  const groupStreams = [...aggregate.values()].map(s => ({ key: s.key, label: s.label,
+    primitive: s.primitive, valence: s.valence,
+    series: [...s.days].map(([day, vals]) => ({ t: day * 86400000, v: vals.reduce((a, n) => a + n, 0) / vals.length })).sort((a, b) => a.t - b.t) }));
+  return primitives.structuralPatterns(groupStreams, now).map(f => ({
+    findingId: `det_${nodeId}_${f.type}`, type: f.type, about: primitives.STRUCTURE_LABEL[f.type] || f.type.replace(/_/g, ' '),
+    claim: f.basis, basis: f.basis, confidence: f.confidence, status: 'observed',
+    polarity: proactive.PATTERN_POLARITY[f.type] || 'neutral', memberCount: (affected.get(f.type) || new Set()).size,
+  }));
+}
+
 app.get('/api/group/:nodeId/inquiry', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const nodeId = String(req.params.nodeId);
@@ -13155,6 +13196,7 @@ app.get('/api/group/:nodeId/state', requireAuth, (req, res) => {
   const state = teamState.buildTeamState({
     node: { nodeId, name: subject.node.name, memberCount: _nodeMembers(code, nodeId).length },
     inquiries: _groupInquiryProjections(code, nodeId),
+    findings: _groupPatternFindings(code, nodeId),
     focuses: _teamFocuses(code, nodeId),
     now: Date.now(),
   });
@@ -17817,7 +17859,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: the group contribution boundary
   groupCandidates, orgNodes, _groupSubjectRef, _noteGroupCandidates, _admitGroupContributions,
   _inNode, _leadsNode, forumThreads, _forumThread,
-  teamFocuses, _teamFocuses, _groupInquiryProjections, _mayReadGroup, _teamStateAnswer, _leadInquiry,
+  teamFocuses, _teamFocuses, _groupInquiryProjections, _groupPatternFindings, _mayReadGroup, _teamStateAnswer, _leadInquiry,
   reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library
   // a routed share lands in

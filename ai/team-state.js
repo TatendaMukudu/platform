@@ -319,7 +319,7 @@ function _lower(s) { const t = _s(s); return t ? t[0].toLowerCase() + t.slice(1)
    `withheld` is returned rather than dropped. A leader who is told "there is a finding
    here but too few people have spoken for it to be said safely" can act on that — they
    can ask more people. A leader who is shown nothing concludes there is nothing. */
-function buildTeamState({ node = {}, inquiries = [], focuses = [], now = Date.now() } = {}) {
+function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = [], now = Date.now() } = {}) {
   const memberCount = _num(node.memberCount);
   const withheld = [];
   const surfaceable = { strength: [], difficulty: [] };
@@ -345,7 +345,7 @@ function buildTeamState({ node = {}, inquiries = [], focuses = [], now = Date.no
     if (!inq) return null;
     const fit = fitForSurface(inq, { cohortSize: memberCount });
     return {
-      kind,
+      kind, source: 'contributed',
       inquiryId: _s(inq.inquiryId, 64),
       about: _s((inq.topic && (inq.topic.label || inq.topic.canonicalConcept)) || '', 120),
       claim: _s(inq.hypothesis, 300) || null,
@@ -360,8 +360,29 @@ function buildTeamState({ node = {}, inquiries = [], focuses = [], now = Date.no
     };
   };
 
-  const high = project(surfaceable.strength.slice().sort(_rank)[0], 'high');
-  const low = project(surfaceable.difficulty.slice().sort(_rank)[0], 'low');
+  // Detected findings are observations over admissible group streams, not things
+  // people told the group. They therefore carry a distinct source and must clear
+  // the same two-sided disclosure floor before becoming a team claim.
+  const detected = { high: [], low: [] };
+  for (const f of _arr(findings)) {
+    const polarity = _s(f.polarity, 32);
+    const kind = ['strength', 'progress', 'milestone', 'opportunity'].includes(polarity) ? 'high'
+      : ['risk', 'friction'].includes(polarity) ? 'low' : null;
+    if (!kind) continue;
+    const floor = cohortFloor(f.memberCount, memberCount);
+    if (!floor.ok || f.confidence === 'tentative' || f.status === 'disputed') {
+      withheld.push({ about: _s(f.about || f.type || 'something', 120), kind,
+        source: 'detected', blocked: [{ gate: floor.ok ? 'standing' : 'cohort', reason: floor.ok ? 'the detected pattern is still tentative or disputed' : floor.reason }] });
+      continue;
+    }
+    detected[kind].push({ kind, source: 'detected', findingId: _s(f.findingId || f.type, 64),
+      about: _s(f.about || f.type, 120), claim: _s(f.claim || f.basis, 300) || null,
+      band: _s(f.confidence, 32), status: _s(f.status || 'observed', 32),
+      basis: { members: _num(f.memberCount), of: memberCount }, detectedType: _s(f.type, 64) });
+  }
+
+  const high = project(surfaceable.strength.slice().sort(_rank)[0], 'high') || detected.high[0] || null;
+  const low = project(surfaceable.difficulty.slice().sort(_rank)[0], 'low') || detected.low[0] || null;
   const question = openQuestion(inquiries, {
     alreadyShown: [high && high.inquiryId, low && low.inquiryId].filter(Boolean),
   });

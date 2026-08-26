@@ -85,7 +85,8 @@ const SUITES = [
   'assistant-interface-smoke.js',  // unified MyWorkspace INTERFACE: one composer/identity, lenses as bounded hints, confirmable proposal cards
   'proactive-smoke.js',            // the proactive surfacing layer: post-kernel ProactiveInsight projection, surfacing policy, audience safety, bounded preferences
   'web-intelligence-smoke.js',      // W-1: leader roster is neutral; briefing is useful, aggregate, governed Web intelligence
-  'no-llm-floor-smoke.js',          // B1: mutation-sensitive production floor with every model exit disabled
+  'no-llm-floor-smoke.js',          // Lane A: twenty mutation-sensitive HTTP capabilities with every model exit disabled AND dummy credentials present, so the SWITCH is what is proven, not the absence of a key
+  'non-interference-smoke.js',      // Lane C: private context cannot alter leader briefing, register, or recommendation
   'privacy-inference-smoke.js',     // B2/B3: two-sided cohorts + independent-origin aggregation
   'origin-independence-smoke.js',   // P0-5′: transformations preserve prime origins; echoes never corroborate
   'person-model-temporal-smoke.js', // B5: durable traits require distinct days; dormancy/correction/reactivation

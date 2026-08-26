@@ -319,7 +319,11 @@ function reason({ priorBeliefs = [], observations = [], now = Date.now(), scopeL
                    review is the right register, not an emotional check-in. */
 function _register(b) {
   if (b.polarity === 'progress') return 'acknowledge';
-  const wellbeing = WELLBEING_AXES.has(b.axis) || b.careFlag || b.severity === 'high';
+  // Private context may shape the subject's own support, but it cannot steer an
+  // organisational recommendation. Register is derived only from the admissible
+  // claim axis and severity, so two leader-visible worlds that differ solely by
+  // private evidence remain semantically identical.
+  const wellbeing = WELLBEING_AXES.has(b.axis) || b.severity === 'high';
   return wellbeing ? 'support' : 'scout';
 }
 
