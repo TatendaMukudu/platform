@@ -479,14 +479,26 @@ For each lane, in the commit body and once at the end:
 **Everything above is done except Lane G and half of Lane E.** Phase 2 finishes those and adds
 the three things that actually decide whether the demo works on the day.
 
-**Before starting anything in Phase 2:**
+**Before starting anything in Phase 2 — confirm the branch, and say what you found:**
 
 ```
-git fetch origin && git rebase origin/claude/platform-work-summary-nmb0cm
+git fetch --prune origin
+git checkout claude/platform-work-summary-nmb0cm
+git reset --hard origin/claude/platform-work-summary-nmb0cm
+git log --oneline -5
 ```
 
-Lane A was implemented twice because a branch was cut twenty minutes before the status block
-that would have prevented it. Rebasing first costs nothing and prevents that entirely.
+**All current work lives on `claude/platform-work-summary-nmb0cm`.** Not `work`, not `main` —
+both are weeks behind and nothing lands on them.
+
+Two duplications have already happened for this exact reason. Lane A was implemented twice
+because a branch was cut twenty minutes before the status block that would have prevented it.
+Worse, an agent left on `work` — 80 commits and eleven days behind — re-implemented roughly
+3,500 lines that already existed: the no-LLM guards, CAS durability, `claimNature`, the
+person-model temporal fixes and the whole team-grain surface.
+
+Being on the wrong branch does not fail loudly. It produces confident duplicate work, and the
+cost is only visible afterwards. Checking costs one command.
 
 ---
 

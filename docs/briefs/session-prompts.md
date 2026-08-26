@@ -7,12 +7,29 @@ lines: the detail lives in the repo, and pointing at a document costs a fraction
 page answers what IntelliQ is, what is implemented, what is broken and what must not be built.
 Repeating any of that in a prompt is wasted budget.
 
+## THE BRANCH — prepend this to every prompt that will write code
+
+**All current work lives on `claude/platform-work-summary-nmb0cm`.** Not `work`, not `main`.
+`origin/work` and `origin/main` are both weeks behind and are not where anything lands.
+
+This is not a formality. An agent left on `work` re-implemented roughly 3,500 lines of already
+existing code — the no-LLM guards, CAS durability, `claimNature`, the person-model temporal
+fixes and the whole team-grain surface — because it never saw any of it. Being on the wrong
+branch does not fail loudly; it just produces confident duplicate work.
+
+> Before anything else, confirm the branch and say what you found:
+>
+> ```
+> git fetch --prune origin
+> git checkout claude/platform-work-summary-nmb0cm
+> git reset --hard origin/claude/platform-work-summary-nmb0cm
+> git log --oneline -5
+> ```
+>
+> If you were on a different branch, say so and tell me what you had done there before you
+> reset — do not silently discard it, and do not silently carry it over either.
+
 **Replace anything in `<angle brackets>`.**
-
-**Prepend this to any prompt that will write code**, whether to Claude or Codex — a branch cut
-even twenty minutes stale is how Lane A got implemented twice:
-
-> First: `git fetch origin && git rebase origin/claude/platform-work-summary-nmb0cm`.
 
 ---
 
