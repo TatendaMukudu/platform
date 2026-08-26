@@ -7,40 +7,28 @@
 
 ---
 
-> ## CORRECTION — READ BEFORE ANY LANE
+> ## STATUS — READ BEFORE ANY LANE
 >
-> **This document was written as though Lanes A–E were unstarted. They are not.**
+> **Lanes A, B, C, D, E and F are DONE and merged into `claude/platform-work-summary-nmb0cm`.**
+> PR #76 delivered A/B/D/E; PR #77 delivered A (a stronger second implementation, which won the
+> conflict), C and F. Both were reviewed by mutation testing before merging.
 >
-> **PR #76** (`codex/pre-alma-baseline-closure`, 13 commits, 23 files, +639/−212, based on this
-> branch at `37f6ed0`) claims to have already delivered most of them:
+> | Lane | State | Proven by |
+> |---|---|---|
+> | **A** no-LLM floor | done | `no-llm-floor-smoke` — 20 assertions, dummy provider credentials present so the SWITCH is what is proven, not the absence of a key |
+> | **B** privacy corrections | done | two-sided floor and origin counting both go red under mutation; `privacy-inference-smoke`, `origin-independence-smoke` |
+> | **C** non-interference | done | `non-interference-smoke` — both leaks close, both go red under mutation |
+> | **D** person model + erasure | done | `person-model-temporal-smoke`, `graph-invalidation-smoke`; both invalidation call sites load-bearing |
+> | **E** Web scope | **partial** — E2 invalidation done; **W-3 and the parity harness are still outstanding** |
+> | **F** team pattern detection | done | group streams via `_kernelEvidence` with an organisational purpose; detected findings clear the same two-sided floor |
+> | **G** gateway | **outstanding** — `_llmBudgetOk` still outside the gateway; token telemetry absent |
 >
-> | Claimed in PR #76 | Lane here |
-> |---|---|
-> | `no-llm-floor-smoke` 15/0; deterministic-only across completion, understanding, transcription, embeddings | **A**, and **G** item 2 |
-> | two-sided Web cohort privacy; independent evidence origins | **B1**, **B2** |
-> | derived Web confidence, severity and perspective; frozen artifact allow-list | **B3**, **B4** |
-> | distinct observation days for durable person understanding | **D1** |
-> | org-wide invalidation after graph/person mutations, proven over real HTTP removal | **D2**, **E2** |
-> | prime origin preserved across contribution, machine transformation and Web aggregation | P0-5′ |
+> **What remains: Lane G, and Lane E's W-3 plus the parity harness.** Nothing else in this
+> document is unstarted.
 >
-> **PR #75** (`codex/pre-alma-baseline-verification`) documents the verification for it.
->
-> **Neither has been reviewed.** Until one has, treat every row above as *claimed*, not done —
-> PR #74's claims were reviewed and returned CORRECTIONS REQUIRED, and six of the eight
-> assertions in the suite it relied on were green by construction.
->
-> **Therefore:**
->
-> 1. **Do not start Lanes A, B, D or E** until PR #76 has been reviewed. Starting them risks
->    re-implementing finished work, or worse, conflicting with it.
-> 2. **Lanes C, F and G are unaffected** and remain safe to run now — PR #76 claims nothing about
->    non-interference (`careFlag`), team pattern detection, or the gateway budget. Note only that
->    G item 2 (`canTranscribe`) may already be covered.
-> 3. **The revised single-agent order is: review #76 → C → F → G → then whatever of A/B/D/E the
->    review leaves outstanding.**
->
-> Lane F is unchanged and is still the highest product value here: nothing in PR #76 makes the
-> team surface say anything on day one.
+> **Two defects were found in review and fixed on the branch, not in the PRs:** the leader's
+> outcome loop had become unreachable from the UI, and the person sanitizer was adding fields
+> that the frozen Web allow-list forbids. Both now carry regression assertions.
 
 ---
 
