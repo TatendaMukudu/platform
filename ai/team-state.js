@@ -195,11 +195,21 @@ function _rank(a, b) {
    Deliberately NOT floor-gated on the cohort. A question contains no count and names
    nobody — "why does communication drop after difficult results?" discloses nothing
    about who said it. Gating it would suppress the one artifact on this surface that is
-   safe by construction, which is how a privacy control turns into a silence bug. */
-function openQuestion(inquiries = []) {
+   safe by construction, which is how a privacy control turns into a silence bug.
+
+   `alreadyShown` is the set of inquiries the surface is already reporting as the High or
+   the Low. A question drawn from one of those is not wrong, but it is REDUNDANT — the
+   High's own unknown is what the closing statement already speaks to, so promoting it to
+   the Inquiry line spends the surface's third slot restating its first. An inquiry that is
+   ONLY a question is the more informative answer, so it wins whenever one exists; a
+   surfaced inquiry's unknown is still used rather than showing nothing. */
+function openQuestion(inquiries = [], { alreadyShown = [] } = {}) {
   const live = _arr(inquiries).filter(i => i && i.status !== 'resolved' && _arr(i.stillUnknown).length);
   if (!live.length) return null;
+  const shown = new Set(_arr(alreadyShown).map(id => _s(id, 64)));
   const sorted = live.slice().sort((a, b) => {
+    const sa = shown.has(_s(a.inquiryId, 64)) ? 1 : 0, sb = shown.has(_s(b.inquiryId, 64)) ? 1 : 0;
+    if (sa !== sb) return sa - sb;
     const ca = a.contested === true ? 1 : 0, cb = b.contested === true ? 1 : 0;
     if (ca !== cb) return cb - ca;
     const ua = _arr(a.stillUnknown).length, ub = _arr(b.stillUnknown).length;
@@ -352,7 +362,9 @@ function buildTeamState({ node = {}, inquiries = [], focuses = [], now = Date.no
 
   const high = project(surfaceable.strength.slice().sort(_rank)[0], 'high');
   const low = project(surfaceable.difficulty.slice().sort(_rank)[0], 'low');
-  const question = openQuestion(inquiries);
+  const question = openQuestion(inquiries, {
+    alreadyShown: [high && high.inquiryId, low && low.inquiryId].filter(Boolean),
+  });
 
   const allFocuses = _arr(focuses).map(normalizeFocus)
     .sort((a, b) => b.createdAt - a.createdAt);

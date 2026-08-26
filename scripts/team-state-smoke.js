@@ -142,6 +142,19 @@ const inq = (o = {}) => ({
     const q = T.openQuestion([inq({ contributors: 2, origins: 1, band: 'tentative', stillUnknown: ['why?'] })]);
     ok('4 · a question survives in a two-person group where a High could not', q !== null);
   }
+  {
+    // An inquiry already shown as the High or the Low has its unknown spoken to by the closing
+    // statement. Promoting it to the Inquiry line as well spends the surface's third slot
+    // restating its first, so a standalone question outranks it.
+    const q = T.openQuestion([
+      inq({ inquiryId: 'shown', at: 9000, stillUnknown: ['Does it hold after a loss?'] }),
+      inq({ inquiryId: 'only_a_question', at: 1, stillUnknown: ['Why does communication drop after difficult results?'] }),
+    ], { alreadyShown: ['shown'] });
+    ok('4 · a question already carried by a High does not also become THE Inquiry',
+      q.inquiryId === 'only_a_question');
+  }
+  ok('4 · …but a surfaced inquiry\'s unknown is still used rather than showing nothing',
+    T.openQuestion([inq({ inquiryId: 'shown', stillUnknown: ['x'] })], { alreadyShown: ['shown'] }) !== null);
 
   // ── 5. FOCUS CARRIES ORIGIN FROM THE FIRST RECORD ──────────────────────────────────────────
   console.log('\n  FOCUS — origin cannot be back-filled, so it exists from record one');
@@ -348,6 +361,89 @@ const inq = (o = {}) => ({
     ok('11 · …and from the outcome they recorded', after.outcome.recordedBy === '(erased)');
     ok('11 · the origin SHAPE survives, so a real origin is never mistaken for a missing one',
       after.origin.from === 'leader' && after.origin.at > 0);
+  }
+
+  // ── 12. THE AGENT ANSWERS AT THE GRAIN THAT WAS ASKED ──────────────────────────────────────
+  console.log('\n  THE AGENT — "how is the team doing?"');
+  {
+    const { inquiryStates, groupCandidates } = S;
+    // Restore the coach: §11 erased them, and the agent path needs a leader to answer for.
+    orgUsers[CODE].coach = mk('coach', 'Jordan', 'coach');
+    orgUsers[CODE].coach.leadershipNodeIds = ['mens'];
+    orgNodes[CODE].mens.leaderIds = ['coach'];
+    orgNodes[CODE].mens.memberIds = ['p1', 'p2', 'p3', 'p4'];
+    // Widen the squad so a real finding can clear the two-sided floor — the small-group case
+    // is already pinned in §7, and here we need the surface to actually speak.
+    for (let i = 5; i <= 14; i++) {
+      const id = `p${i}`;
+      orgUsers[CODE][id] = mk(id, `Player ${i}`);
+      orgUsers[CODE][id].assignedNodeIds = ['mens'];
+      orgNodes[CODE].mens.memberIds.push(id);
+    }
+
+    // A group inquiry the kernel already holds, and the contributor-declared valence that
+    // makes it a High. Both written the way the real paths write them.
+    inquiryStates[CODE] = inquiryStates[CODE] || {};
+    inquiryStates[CODE]['group:mens'] = {
+      communication: {
+        inquiryId: 'inq_comm', subjectRef: 'group:mens',
+        topic: { canonicalConcept: 'communication', label: 'player-led communication', domain: 'sports' },
+        displayLabel: 'player-led communication',
+        hypotheses: [{ id: 'h1', statement: 'Player-led communication has improved over the last two sessions',
+          confidence: { score: 0.6, band: 'probable' }, status: 'active', supportRefs: [], challengeRefs: [] }],
+        leadingHypothesisId: 'h1',
+        signals: [
+          { ref: 'e1', kind: 'observation', originRef: 'o_tue', contributedBy: 'p1', contributorVisibility: 'named', at: 1 },
+          { ref: 'e2', kind: 'observation', originRef: 'o_sat', contributedBy: 'p2', contributorVisibility: 'named', at: 2 },
+          { ref: 'e3', kind: 'observation', originRef: 'o_sun', contributedBy: 'p3', contributorVisibility: 'named', at: 3 },
+          { ref: 'e4', kind: 'observation', originRef: 'o_mon', contributedBy: 'p4', contributorVisibility: 'named', at: 4 },
+        ],
+        missingSignals: [{ question: 'Does the improvement hold after a loss?' }],
+        confidence: { score: 0.6, band: 'probable', because: [] },
+        status: 'probable', timeline: [], createdAt: 1, lastUpdatedAt: 9,
+      },
+    };
+    groupCandidates[CODE] = [
+      { candidateId: 'gc1', nodeId: 'mens', concept: 'communication', contributorId: 'p1', status: 'admitted', valence: 'working_well' },
+      { candidateId: 'gc2', nodeId: 'mens', concept: 'communication', contributorId: 'p2', status: 'admitted', valence: 'working_well' },
+      { candidateId: 'gc3', nodeId: 'mens', concept: 'communication', contributorId: 'p3', status: 'admitted', valence: 'working_well' },
+      { candidateId: 'gc4', nodeId: 'mens', concept: 'communication', contributorId: 'p4', status: 'admitted', valence: 'working_well' },
+    ];
+
+    const r = await GET(CODE, 'coach', '/api/group/mens/state');
+    ok('12 · the surface reads the kernel\'s own inquiry as a High',
+      r.body.high && r.body.high.about === 'player-led communication');
+    ok('12 · the claim is the kernel\'s hypothesis, not a restatement',
+      /improved over the last two sessions/.test(r.body.high.claim));
+
+    const turn = await POST(CODE, 'coach', '/api/assistant/turn', { text: "How is the team doing?" });
+    const said = String(turn.body.reply || turn.body.answer || JSON.stringify(turn.body));
+    ok('12 · the agent answers a team question at the TEAM\'s grain',
+      /player-led communication|Working well/i.test(said));
+    ok('12 · …and names the open question rather than closing it',
+      /hold after a loss|don't yet know|Still open/i.test(said));
+    ok('12 · …without naming an individual player',
+      !/\bPlayer \d+\b/.test(said) && !/\bAsh\b|\bBo\b|\bCass\b|\bDee\b/.test(said));
+
+    // The same question from a member of the group. The group's state is the group's, so a
+    // member gets the same picture — this is the Web→Self direction that is safe because the
+    // artifact was already floor-gated and names nobody.
+    const memberTurn = await POST(CODE, 'p1', '/api/assistant/turn', { text: "How is the team doing?" });
+    const memberSaid = String(memberTurn.body.reply || memberTurn.body.answer || JSON.stringify(memberTurn.body));
+    ok('12 · a member asking about their own team gets the group picture too',
+      /player-led communication|Working well/i.test(memberSaid));
+    ok('12 · …and still no individual is named',
+      !/\bPlayer \d+\b/.test(memberSaid));
+
+    // Someone on no node at all falls through to the existing read rather than erroring.
+    ok('12 · a person on no node falls through instead of failing',
+      S._teamStateAnswer(CODE, 'outsider', 'how is the team doing?') === null);
+
+    // Naming a group they are not on narrows to nothing, and cannot confirm it exists.
+    orgNodes[CODE].womens = { nodeId: 'womens', name: "Women's Soccer", parentId: null, childNodeIds: [], memberIds: ['p2'], leaderIds: [] };
+    const t = S._teamStateAnswer(CODE, 'coach', "how are the women's soccer doing?");
+    ok('12 · naming a group outside your own nodes matches nothing and reveals nothing',
+      t && (t.nodes || []).every(n => n === 'mens'));
   }
 
   server.close();

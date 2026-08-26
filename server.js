@@ -9580,6 +9580,97 @@ function _reasonPersonAnswer(code, userId, personId, personName, { now = Date.no
   } catch (_) { return null; }
 }
 
+/* ── "HOW IS THE TEAM DOING?" ────────────────────────────────────────────────
+   The question a coach actually asks, answered from the group's own state rather than from a
+   list of reads about individuals.
+
+   Those are different questions and the difference is the whole point. A rundown of four
+   people is not a picture of a team, and — worse — it puts named individuals in front of a
+   leader who asked about the group. The team-grain surface answers at the grain that was
+   asked: what is working, what needs attention, what is still open, what we are trying.
+
+   WHICH NODE. A leader is answered about the nodes they LEAD; a member about the nodes they
+   BELONG to. Never descendants: "the team" means the group you are actually in, and widening
+   it to everything below you turns a question about your squad into a report on the club.
+
+   The asker may also name a group ("how are the U18s doing?"), which is matched against node
+   names in their own scope — so naming a node they cannot see finds nothing rather than
+   confirming it exists.
+
+   Returns null when the asker leads and belongs to nothing, so the caller falls through to
+   the existing read. Nothing here widens scope: every node considered is one this user is
+   already declared on. */
+function _teamStateAnswer(code, userId, question, { now = Date.now() } = {}) {
+  try {
+    const user = (orgUsers[code] || {})[userId];
+    if (!user) return null;
+    const led = (user.leadershipNodeIds || []).slice();
+    const belongs = (user.assignedNodeIds || []).slice();
+    let nodeIds = led.length ? led : belongs;
+    if (!nodeIds.length) return null;
+
+    // A named group narrows it, and can only ever narrow: the candidate set is already this
+    // user's own nodes, so a name they are not on matches nothing.
+    const q = String(question || '').toLowerCase();
+    const named = nodeIds.filter(id => {
+      const n = (orgNodes[code] || {})[id];
+      const name = String((n && n.name) || '').toLowerCase().trim();
+      return name.length >= 3 && q.includes(name);
+    });
+    if (named.length) nodeIds = named;
+
+    const states = nodeIds
+      .map(nodeId => {
+        const node = (orgNodes[code] || {})[nodeId];
+        if (!node) return null;
+        return teamState.buildTeamState({
+          node: { nodeId, name: node.name, memberCount: (node.memberIds || []).length },
+          inquiries: _groupInquiryProjections(code, nodeId),
+          focuses: _teamFocuses(code, nodeId),
+          now,
+        });
+      })
+      .filter(Boolean)
+      // Groups with something to say first, but a group with nothing to say is still reported
+      // rather than dropped: "nothing has crossed the line yet" is a real answer about that
+      // group, and silently omitting it would read as though it had not been looked at.
+      .sort((a, b) => ((b.high ? 1 : 0) + (b.low ? 1 : 0) + (b.question ? 1 : 0))
+                    - ((a.high ? 1 : 0) + (a.low ? 1 : 0) + (a.question ? 1 : 0)))
+      .slice(0, 2);
+    if (!states.length) return null;
+
+    const lines = [];
+    let found = 0;
+    for (const s of states) {
+      const part = [];
+      if (states.length > 1) part.push(`${s.node.name}:`);
+      if (s.high) { part.push(`Working well — ${s.high.claim || s.high.about}.`); found++; }
+      if (s.low) { part.push(`Worth attention — ${s.low.claim || s.low.about}.`); found++; }
+      if (s.question) { part.push(`Still open — ${s.question.question}`); found++; }
+      if (s.focus && s.focus.status === 'active') { part.push(`Current focus — ${s.focus.text}.`); found++; }
+      // Withheld findings are NAMED, never restated. A leader told there is something here that
+      // too few people have spoken to can go and ask; a leader shown nothing concludes nothing
+      // is there. That difference is the reason the floors are survivable as a product.
+      if (s.withheld.length) {
+        part.push(`There ${s.withheld.length === 1 ? 'is one thing' : `are ${s.withheld.length} things`} I can't put in front of you yet — too few people have spoken about ${s.withheld.length === 1 ? 'it' : 'them'} to say so without pointing at individuals.`);
+      }
+      part.push(s.statement);
+      lines.push(part.join(' '));
+    }
+
+    return {
+      answer: lines.join(' '),
+      confidence: found ? 'medium' : 'confirmed',
+      limitations: [
+        'a read of the group, built only from what people deliberately contributed',
+        'group claims are held back below the disclosure floor rather than named',
+      ],
+      count: found,
+      nodes: states.map(s => s.node.nodeId),
+    };
+  } catch (_) { return null; }
+}
+
 function _assistantAnswer(code, userId, question) {
   const q = String(question || '').toLowerCase().trim();
   if (!q) return null;
@@ -9665,11 +9756,27 @@ function _assistantAnswer(code, userId, question) {
     if (r) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
     else { answer = `Nothing's flagged right now.`; confidence = 'confirmed'; }
   } else if (teamStatusQ) {
-    // TEAM/ORG STATUS — "how's the team/organisation doing?" answered from the reasoner's
-    // already-scoped read (the same grounded "what I'm seeing" the Today voice shows).
-    const r = _reasonReadAnswer(code, userId);
-    if (r) { answer = r.answer; confidence = r.confidence; limitations = r.limitations; }
-    else { answer = `I don't have a clear read on that just yet.`; confidence = 'none'; }
+    // TEAM/ORG STATUS — "how's the team doing?" is a question about the GROUP, so it is
+    // answered at the group's grain first: what is working, what needs attention, what is
+    // still open, what we are trying. Falling straight to the per-person reasoner read (as
+    // this branch used to) answered a different question and put named individuals in front
+    // of someone who had asked about the team.
+    const t = _teamStateAnswer(code, userId, question);
+    if (t && t.count) {
+      answer = t.answer; confidence = t.confidence; limitations = t.limitations;
+      try { _audit(code, { actor: userId, action: 'team_state_view', subjectIds: [], basis: 'assistant team status' }); } catch (_) {}
+    } else {
+      // No group finding has crossed the line yet. The reasoner's scoped read is the honest
+      // second answer — and if the asker is on a node, the group's own "nothing yet, and
+      // here is why" is carried with it rather than being replaced by a list of people.
+      const r = _reasonReadAnswer(code, userId);
+      if (r) {
+        answer = t ? `${t.answer} ${r.answer}`.trim() : r.answer;
+        confidence = r.confidence;
+        limitations = t ? [...t.limitations, ...r.limitations] : r.limitations;
+      } else if (t) { answer = t.answer; confidence = t.confidence; limitations = t.limitations; }
+      else { answer = `I don't have a clear read on that just yet.`; confidence = 'none'; }
+    }
   } else {
     // GROUNDED RETRIEVAL over authorised free-text evidence (the "answer from what
     // it holds" path). Authorisation happened in the gateway; compose ONLY from the
@@ -17576,7 +17683,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: the group contribution boundary
   groupCandidates, orgNodes, _groupSubjectRef, _noteGroupCandidates, _admitGroupContributions,
   _inNode, _leadsNode, forumThreads, _forumThread,
-  teamFocuses, _teamFocuses, _groupInquiryProjections, _mayReadGroup,
+  teamFocuses, _teamFocuses, _groupInquiryProjections, _mayReadGroup, _teamStateAnswer,
   reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library
   // a routed share lands in
