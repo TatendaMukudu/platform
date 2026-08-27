@@ -5942,12 +5942,23 @@ async function renderToday() {
       </div>
       <div class="tdy-privacy">Private &amp; yours · history is only visible to you · nothing informs the org until you confirm</div>
     </div>
+    <!-- THE OPEN QUESTION AND THE GROUP, ON HOME.
+
+         These were built onto renderIntelligence, which is the separate Team view — one click
+         away behind "Open the full team briefing". That was a mistake: renderToday IS the
+         coach's home (see the 'leader-home' route), so the four objects the product is about
+         were not on the page a coach actually lands on. Both renderers write to the same
+         container, so the same two strips serve both. -->
+    <div id="lead-inquiry"></div>
+    <div id="team-state"></div>
     <div id="today-voice"></div>
     <div id="today-inquiry"></div>
     <div id="today-feed"><div style="padding:1.2rem;text-align:center;color:var(--text-muted)">Gathering what needs you…</div></div>
     <div style="text-align:center;margin-top:1.2rem"><button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="renderIntelligence(true)">Open the full team briefing →</button></div>`;
   todayLoadVoice();
   todayLoadInquiry();
+  _renderLeadInquiry();   // the open question, self or team, above everything settled
+  _renderTeamState();     // High / Low / Inquiry / Focus for each group this person is in
   todayLoadFeed();
 }
 
@@ -6754,7 +6765,11 @@ async function _renderTeamState() {
     const groups = (await mineRes.json()).groups || [];
     // Groups they lead first; at most two, because a third card pushes the people below the
     // fold and this strip is context for that list, not a replacement for it.
-    const pick = [...groups.filter(g => g.role === 'leader'), ...groups.filter(g => g.role !== 'leader')].slice(0, 2);
+    // A node with no members is a container, not a team — it can never produce a finding, and
+    // rendering it puts an empty card above the real one. Found in the first browser pass: the
+    // coach leads the root node too, so "Demo Athletic Club · 0 people" sat above the squad.
+    const real = groups.filter(g => (g.memberCount || 0) > 0);
+    const pick = [...real.filter(g => g.role === 'leader'), ...real.filter(g => g.role !== 'leader')].slice(0, 2);
     if (!pick.length) { box.innerHTML = ''; return; }
 
     const states = (await Promise.all(pick.map(g =>
