@@ -268,7 +268,83 @@ Use this instead of #1 when the PR claims to have fixed something important.
 
 ---
 
-## 15 · The standing preferences
+## 16 · Codex — the curiosity stopping rule
+
+> Confirm the branch first (see THE BRANCH above), then read
+> `docs/briefs/codex-pilot-programme.md` §0 and §1.
+>
+> **The law to implement: IntelliQ must not become an interrogation machine.**
+>
+> Every interaction currently may open a new first-class inquiry. It should not. The kernel must
+> prefer, in this order, before ever creating one:
+>
+> 1. attach the evidence to an existing inquiry
+> 2. update the uncertainty on one
+> 3. challenge an existing hypothesis
+> 4. create a private candidate
+> 5. do nothing
+>
+> **Enforce the order in the kernel, not in the prompt.** `ai/diagnose.js` already refuses a
+> proposed `conclusion`; this is the same shape. A model may propose `create`; the kernel checks
+> whether an existing inquiry on that subject could hold it — by concept, alias, or `SAME_AS`
+> route — and downgrades to attach if so. Grep `_openFrontier`, `NEW_CONCEPT_CAP`,
+> `ACTIVE_FRONTIER_CAP` and the route actions in `server.js`; the routing machinery exists and is
+> currently trusted rather than checked.
+>
+> **The stopping rule, deterministic:**
+>
+> - A question may only be asked when it is attached to an inquiry with a live `missingSignals`
+>   entry. No free-floating questions.
+> - The same unknown is not re-asked within a cooling window.
+> - An unknown a person did not engage with is marked and not re-asked. Declined means declined.
+> - A hard per-conversation cap, so a bad turn cannot produce an interrogation.
+>
+> Pick the constants, put the reasoning in a comment beside each, and say in your report what you
+> picked and why. Where a genuine fork exists, pick the quieter branch.
+>
+> **Acceptance:** a new suite. At minimum — twenty routine interactions on one subject produce no
+> more than the cap in new first-class inquiries; a second remark on an existing concept attaches
+> rather than creating; a `create` proposal for something an existing inquiry already covers is
+> downgraded by the kernel with the model unchanged; the same unknown is not asked twice inside
+> the window; and a declined unknown is never re-asked.
+>
+> Mutation-test every assertion (§1.3). Do not merge, do not open a PR, do not touch
+> `ai/audience.js`, `ai/team-state.js` or any cohort fixture. Push the branch and report per §11.
+
+---
+
+## 17 · Codex — the safeguarding boundary, documentation only
+
+> Confirm the branch first, then read `docs/briefs/codex-pilot-programme.md` §0 and §1.
+>
+> **DOCUMENTATION ONLY. No production code. No test changes.**
+>
+> `ai/safeguarding.js` already exists and is already deterministic, two-tier and
+> model-independent. Your job is to write down exactly what it guarantees, from the code — not
+> to extend it.
+>
+> Write `docs/ttd/safeguarding-boundary.md` covering:
+>
+> 1. What exists: both tiers, what triggers each, what each does, what is org-overridable, and
+>    where the flag is routed. Quote the code.
+> 2. What advance notice a participant currently gets, where they get it, and whether it is
+>    shown before they speak or only after something trips. Say plainly if the answer is "only
+>    after".
+> 3. The line: STEER Education markets identifying students with concerns who show no visible
+>    signs. State what IntelliQ does instead, and be honest that this is a narrower promise.
+> 4. What is deliberately NOT there — no classifier, no risk score, no diagnostic inference, no
+>    inferred mental-health state. Say why, in the architecture's own terms.
+> 5. What decisions remain, and mark each as founder or legal rather than engineering.
+>
+> **Do not invent a threshold. Do not add a pattern. Do not build a classifier. Do not describe
+> a capability the code does not have.** If you find the code does less than the documents claim,
+> that is the finding — the code is the finding and the document is the defect.
+>
+> Do not merge, do not open a PR. Push the branch and report per §11.
+
+---
+
+## 18 · The standing preferences
 
 Worth pasting once into any long session:
 
