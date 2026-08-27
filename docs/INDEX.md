@@ -1,7 +1,8 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `dc5429c`.
+**Written against:** `48d5bf0`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
 ---
 
@@ -48,30 +49,39 @@ outcome loop** · **the agent answering team questions at the team's grain** · 
 
 ### What is partial?
 
-Leader privacy projection (PR #74, uncorrected) · Web governs 11 of 67 scope call sites · Focus is
-seven fields · Self High/Low cannot see the reader's own private evidence (**T-1**) · corrections do
-not reach already-emitted signals (**T-2**) · the no-LLM claim is unproven · **the team surface has
-no team-level pattern detection** — Highs and Lows come from contributed group inquiries only, so a
-group with no contributions is silent even when its members' streams are moving.
+**92 of 298 routes have no front-end caller** (`ttd/duplication-sweep.md` §B) · polarity is bucketed
+three ways under three names (`ttd/layer-map.md` §1) · `orgGroups` and `orgNodes` are two group
+models · Focus has two constructors · corrections do not reach already-emitted signals (**T-2**) ·
+Web governs a minority of scope call sites, measured by `scope-parity-smoke`.
 
-### What blocks Falcon? — **SIX**
+### What blocks Falcon?
 
-| # | Blocker | Packet |
+**Nothing on the original list.** All six are closed, each proven by mutation:
+
+| Was | Closed by |
+|---|---|
+| Real no-LLM suite | `no-llm-floor-smoke` — 20 assertions, dummy credentials so the SWITCH is what is proven |
+| Two-sided cohort floor | `team-state.cohortFloor`, now at **5**; complement attack refused |
+| Count origins, derive confidence | `contribution.shouldOpenGroupInquiry`, `fitForSurface` |
+| Derive `perspective` from `subjectRef` | `proactive.toInsight`; a caller cannot launder a person artifact |
+| Person-model distinct days | `person-model-temporal-smoke` |
+| Invalidate on person removal | `graph-invalidation-smoke`; both call sites load-bearing |
+
+**What is actually left before the pilot:**
+
+| # | Thing | Where |
 |---|---|---|
-| **B1** | Real no-LLM suite — six of eight current assertions are green by construction | **1** |
-| **B2** | Two-sided cohort floor — measured person-level disclosure | **2** |
-| **B3** | Count origins not people; derive confidence | **3** |
-| **B4** | Derive `perspective` from `subjectRef` | **4** |
-| **B5** | Person-model distinct-days — one bad day labels a child for the pilot | **5** |
-| **B6** | Invalidate on person removal — an erasure that does not erase | **6** |
-
-**Conditionals:** J2 `focus.origin` *if* coach-created Focus ships · C6/C7 *if* Falcon deploys
-no-egress.
+| 1 | The safeguarding lead has no screen — a routed flag nobody can see | `ttd/duplication-sweep.md` §B1 |
+| 2 | One polarity vocabulary; three exist | `ttd/layer-map.md` §1 |
+| 3 | Self Highs and Lows, derived | `ttd/object-as-conversation.md` §4 G2 |
+| 4 | The front end reflecting the object model | `ttd/object-as-conversation.md` |
+| 5 | Live database run, staging deploy, real users | needs Render |
 
 ### What is the next code task?
 
-> **Packet 1 — `scripts/no-llm-floor-smoke.js`.** Spec: `briefs/no-llm-capability-matrix.md`.
-> It sequences first because Packets 2-4 cannot otherwise be shown to work.
+> **A screen for the safeguarding lead.** The backend is finished; the flag is routed to somebody
+> with nowhere to read it. Everything else on the list is a product improvement. This one is a
+> safety gap.
 
 ### Which founder decisions remain?
 
