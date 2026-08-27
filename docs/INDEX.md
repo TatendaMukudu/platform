@@ -30,6 +30,7 @@
 | Do we need an ontology / graph DB? | `ttd/organisational-ontology-investigation.md` — **the answer is no** |
 | What does Falcon actually get? | `ttd/falcon-persona-rehearsal.md` |
 | **Who do we compete with, and what should we borrow?** | `ttd/competitive-landscape-and-borrows.md` |
+| **What has the founder decided?** | `ttd/founder-decisions-2026-08.md` — **binding**: one home, Focus works three ways, a human closes an inquiry, High and Low only |
 | **What does each layer do, and what is wrong?** | `ttd/layer-map.md` — **read this if you are unsure what is right** |
 | **What is duplicated, and what is hiding?** | `ttd/duplication-sweep.md` — 92 of 298 routes have no front-end caller |
 | **What is home meant to look like?** | `ttd/object-as-conversation.md` — every object is a thread; **design, not yet built** |
@@ -85,9 +86,10 @@ Web governs a minority of scope call sites, measured by `scope-parity-smoke`.
 
 ### Which founder decisions remain?
 
-**Two, neither blocking.** `D-W3` (coach-created vs proposed Focus — the field lands regardless) and
-`D-E2` (quality floor for a cheap model — needs a post-pilot benchmark). The other eleven are
-resolved: see `ttd/founder-decision-reduction.md`.
+**One.** `D-E2` — the quality floor for a cheap model, which needs a post-pilot benchmark.
+
+`D-W3` is **settled** by `ttd/founder-decisions-2026-08.md` D2: a Focus works three ways — self,
+invited and assigned — and anyone in the organisation may invite anyone into one.
 
 ### What must NOT be built yet?
 
@@ -136,6 +138,7 @@ never silently edited.
 | `ttd/founder-decision-reduction.md` | **CURRENT** | thirteen → two |
 | `ttd/falcon-persona-rehearsal.md` | **CURRENT** | six personas, seventeen scenarios |
 | `ttd/competitive-landscape-and-borrows.md` | **CURRENT** | market and architecture research |
+| `ttd/founder-decisions-2026-08.md` | **CURRENT** | four decisions taken in session; D2 promotes focus participants and extends the audience model |
 | `ttd/duplication-sweep.md` | **CURRENT** | six duplicated concepts; 92 orphaned routes; the scanner checks functions, not routes |
 | `ttd/layer-map.md` | **CURRENT** | ten layers traced; the only genuinely confused one is naming, duplicated three times |
 | `ttd/object-as-conversation.md` | **CURRENT** | the home/nav/thread design. Mostly assembly; one missing primitive; self High/Low is a founder decision |
