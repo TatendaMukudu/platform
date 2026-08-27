@@ -3052,7 +3052,17 @@ app.get('/api/intelligence/watch', requireAuth, (req, res) => {
     if (!findings.length) return;
     const item = intel.composeBriefingItem(m, findings);
     if (!item) return;
-    const row = { memberId: item.memberId, name: item.name, why: item.whyNow, action: item.recommendedAction, careFlag: item.careFlag, patternType: item.patternType, severity: item.severity };
+    /* SAME LEADER RULES AS THE BRIEFING. Found by a browser pass, a month before the pilot:
+       this row shipped `careFlag` and raw deviation percentages straight to a coach's screen,
+       because the corrections that cleaned the briefing were applied to
+       _sanitizeBriefingForLeader and this endpoint never went through it.
+
+       careFlag is OMITTED rather than set false — the presence of private context is itself
+       private information, which is the whole reason the briefing omits it. And the numbers are
+       stripped: a leader gets direction and care, never a member's figures. */
+    const row = { memberId: item.memberId, name: item.name,
+      why: _stripLeaderNumbers(item.whyNow), action: _stripLeaderNumbers(item.recommendedAction),
+      patternType: item.patternType, severity: item.severity };
     // Positive momentum is worth surfacing too (recognise it, don't just fight fires).
     if (/improv|recover/i.test(item.patternType)) {
       row.factors = _personStrengths(code, id);   // WHAT'S working (grounded, privacy-safe)
