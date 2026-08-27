@@ -58,6 +58,48 @@ let _runtimeNoLLM = false;
 function deterministicOnly() { return ENV_NO_LLM || _runtimeNoLLM; }
 function setDeterministicOnly(on) { if (!ENV_NO_LLM) _runtimeNoLLM = !!on; return deterministicOnly(); }
 
+/* Admission belongs at the provider boundary: omitted attribution falls into
+   one conservative shared bucket, so a new caller can reduce availability but
+   can never create an unmetered provider call. */
+const _budget = new Map();
+const _usage = new Map();
+let _limits = {
+  hourly: parseInt(process.env.IQ_LLM_ORG_HOURLY, 10) > 0 ? parseInt(process.env.IQ_LLM_ORG_HOURLY, 10) : 240,
+  daily: parseInt(process.env.IQ_LLM_ORG_DAILY, 10) > 0 ? parseInt(process.env.IQ_LLM_ORG_DAILY, 10) : 2000,
+};
+function _org(v) { return String(v || 'unattributed').trim().toLowerCase() || 'unattributed'; }
+function _window(key, ms, now) {
+  const prior = _budget.get(key);
+  if (prior && now - prior.startedAt < ms) return prior;
+  const fresh = { startedAt: now, count: 0 };
+  _budget.set(key, fresh);
+  return fresh;
+}
+function _consumeBudget(org, now = Date.now()) {
+  const id = _org(org);
+  const hourly = _window(`${id}|h`, 3600000, now);
+  const daily = _window(`${id}|d`, 86400000, now);
+  if (hourly.count >= _limits.hourly || daily.count >= _limits.daily) return false;
+  hourly.count++; daily.count++;
+  return true;
+}
+function budgetAvailable(org, now = Date.now()) {
+  const id = _org(org);
+  return _window(`${id}|h`, 3600000, now).count < _limits.hourly
+    && _window(`${id}|d`, 86400000, now).count < _limits.daily;
+}
+function _recordUsage({ org, taskType = 'unspecified', tier = 'micro', promptTokens = 0, completionTokens = 0, cacheHit = false }) {
+  const id = _org(org), key = `${id}|${taskType}|${tier}`;
+  const row = _usage.get(key) || { org: id, taskType, tier, promptTokens: 0, completionTokens: 0, calls: 0, cacheHits: 0 };
+  row.promptTokens += Number(promptTokens) || 0;
+  row.completionTokens += Number(completionTokens) || 0;
+  row.calls++;
+  if (cacheHit) row.cacheHits++;
+  _usage.set(key, row);
+}
+function usageFor(org) { return [..._usage.values()].filter(r => r.org === _org(org)).map(r => ({ ...r })); }
+function _resetGatewayState({ hourly = 240, daily = 2000 } = {}) { _budget.clear(); _usage.clear(); _limits = { hourly, daily }; }
+
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /* Only text messages can cross to the OpenAI fallback (vision blocks stay on Claude). */
@@ -66,7 +108,7 @@ function _isTextOnly(msgs) {
 }
 
 /* OpenAI chat-completions via fetch — no extra SDK. Returns assistant text. */
-async function _openaiComplete({ system, msgs, maxTokens, temperature, model }) {
+async function _openaiComplete({ system, msgs, maxTokens, temperature, model, org, taskType, tier }) {
   const messages = [];
   if (system) messages.push({ role: 'system', content: system });
   for (const m of msgs) messages.push({ role: m.role, content: m.content });
@@ -80,6 +122,7 @@ async function _openaiComplete({ system, msgs, maxTokens, temperature, model }) 
   });
   if (!res.ok) throw new Error('openai HTTP ' + res.status);
   const data = await res.json();
+  _recordUsage({ org, taskType, tier, promptTokens: data.usage?.prompt_tokens, completionTokens: data.usage?.completion_tokens });
   return data.choices?.[0]?.message?.content?.trim() || '';
 }
 
@@ -132,18 +175,23 @@ const FALLBACK_MODEL = 'claude-haiku-4-5';
 ──────────────────────────────────────────────────────────────────────────── */
 async function complete({
   tier = 'micro', model, system, messages, user,
-  maxTokens = 400, temperature, fallbackToMicro = true,
+  maxTokens = 400, temperature, fallbackToMicro = true, org, taskType = 'unspecified',
 }) {
   // No-egress backstop: refuse to call any model in deterministic-only mode, even if a
   // key is present and a caller forgot to check enabled(). Nothing leaves the box.
   if (deterministicOnly()) throw new Error('LLM disabled (deterministic-only mode)');
+  if (!_consumeBudget(org)) {
+    const err = new Error('LLM budget exhausted');
+    err.code = 'LLM_BUDGET_EXHAUSTED';
+    throw err;
+  }
 
   const primary = model || MODELS[tier] || MODELS.micro;
   const msgs    = messages || [{ role: 'user', content: user }];
 
   // If there's no Claude key but there is an OpenAI key, run OpenAI directly.
   if (!HAVE_CLAUDE && HAVE_OPENAI && _isTextOnly(msgs)) {
-    return _openaiComplete({ system, msgs, maxTokens, temperature });
+    return _openaiComplete({ system, msgs, maxTokens, temperature, org, taskType, tier });
   }
 
   const call = (m, dropSampling = false) => client.messages.create({
@@ -158,6 +206,7 @@ async function complete({
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const resp = await call(primary);
+      _recordUsage({ org, taskType, tier, promptTokens: resp?.usage?.input_tokens, completionTokens: resp?.usage?.output_tokens });
       return _text(resp);
     } catch (err) {
       lastErr = err;
@@ -170,6 +219,7 @@ async function complete({
         console.log(`[ai] ${primary} rejects sampling parameters — retrying without them`);
         try {
           const resp = await call(primary, true);
+          _recordUsage({ org, taskType, tier, promptTokens: resp?.usage?.input_tokens, completionTokens: resp?.usage?.output_tokens });
           return _text(resp);
         } catch (err2) { lastErr = err2; }
       }
@@ -181,6 +231,7 @@ async function complete({
         console.log(`[ai] ${primary} unavailable on this account (${err?.status || '?'}) — falling back to ${FALLBACK_MODEL}`);
         try {
           const resp = await call(FALLBACK_MODEL);
+          _recordUsage({ org, taskType, tier: 'micro', promptTokens: resp?.usage?.input_tokens, completionTokens: resp?.usage?.output_tokens });
           return _text(resp);
         } catch (err2) { lastErr = err2; }
       }
@@ -194,7 +245,7 @@ async function complete({
 
   // Claude failed after retries → automatic OpenAI fallback (text only) if available.
   if (HAVE_OPENAI && _isTextOnly(msgs)) {
-    try { return await _openaiComplete({ system, msgs, maxTokens, temperature }); }
+    try { return await _openaiComplete({ system, msgs, maxTokens, temperature, org, taskType, tier }); }
     catch (err3) { lastErr = err3; }
   }
   throw lastErr;
@@ -350,4 +401,5 @@ async function transcribe(buffer, { filename = 'audio.webm', mimetype = 'audio/w
   return String(j.text || '').trim();
 }
 
-module.exports = { complete, completeJSON, parseJSON, MODELS, client, enabled, canTranscribe, transcribe, canUnderstand, understand, deterministicOnly, setDeterministicOnly };
+module.exports = { complete, completeJSON, parseJSON, MODELS, client, enabled, canTranscribe, transcribe, canUnderstand, understand, deterministicOnly, setDeterministicOnly,
+  budgetAvailable, usageFor, _consumeBudget, _resetGatewayState };

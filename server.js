@@ -11667,13 +11667,9 @@ const LLM_ORG_DAILY  = parseInt(process.env.IQ_LLM_ORG_DAILY, 10)  > 0 ? parseIn
 /* Is this org under its LLM budget? Counts one call if allowed. Over budget → false, and the
    caller degrades to the deterministic path (never errors). */
 function _llmBudgetOk(code) {
-  if (!ai.enabled()) return false;                          // no model anyway
-  const now = Date.now();
-  const h = rateLimit.hit(_llmRateStore, (code || 'org') + '|h', { limit: LLM_ORG_HOURLY, windowMs: 3600000, now });
-  const d = rateLimit.hit(_llmRateStore, (code || 'org') + '|d', { limit: LLM_ORG_DAILY, windowMs: 86400000, now });
-  const okBudget = h.allowed && d.allowed;
-  if (okBudget) _metric(code, 'llm_call');   // cost attribution: one counted model call for this org
-  return okBudget;
+  // Compatibility/readiness probe only. The provider boundary performs the
+  // consuming admission check, so call-site omissions cannot bypass budget.
+  return ai.enabled() && ai.budgetAvailable(code);
 }
 setInterval(() => { try { rateLimit.sweep(_loginRateStore, { windowMs: LOGIN_WIN }); rateLimit.sweep(_llmRateStore, { windowMs: 86400000 }); } catch (_) {} }, 3600000).unref?.();
 
