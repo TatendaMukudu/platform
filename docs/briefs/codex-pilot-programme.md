@@ -9,8 +9,11 @@
 
 > ## STATUS — READ BEFORE ANY LANE
 >
-> **Only H1 and H2 remain.** Everything else in this document is done and merged into
-> `claude/platform-work-summary-nmb0cm`.
+> **PHASE 2 IS COMPLETE.** Every lane in this document is done and merged into
+> `claude/platform-work-summary-nmb0cm`. H1 and H2 landed from `codex/h2-h1-final`, reviewed by
+> mutation: removing the W-3 line kills four assertions, reverting the role derivation to the
+> size comparison kills two across two suites, and dropping the budget consumption at the
+> provider boundary kills two.
 >
 > | Lane | State |
 > |---|---|
@@ -18,9 +21,9 @@
 > | **B** privacy corrections | done — two-sided floor and origin counting both go red under mutation |
 > | **C** non-interference | done — `non-interference-smoke`; both `careFlag` leaks closed |
 > | **D** person model + erasure | done — distinct days, staleness, both invalidation call sites |
-> | **E** Web scope | **PARTIAL — H2 is what remains** |
+> | **E** Web scope | done — W-3, the `top_leader` fix, and `scope-parity-smoke` |
 > | **F** team pattern detection | done — group streams via `_kernelEvidence` at an organisational purpose |
-> | **G** gateway | **OUTSTANDING — this is H1** |
+> | **G** gateway | done — budget consumed at the provider boundary, `canTranscribe` respects the switch, token telemetry per org/task/tier |
 > | H3 pilot rehearsal | done — `scripts/pilot-rehearsal.js`, prints the transcript a coach would read |
 > | H4 demo seed | done — crosses the real contribution boundary; squad widened to fourteen |
 >
