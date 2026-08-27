@@ -93,15 +93,19 @@ The largest genuine gap. There is **no self-grain High/Low concept anywhere in t
 Highs and Lows come from contributed group inquiries and detected group patterns. The Self layer
 has beliefs, patterns and insights — but nothing named or shaped as a High or a Low.
 
-Two options, and this is a founder decision:
+**FOUNDER DECISION TAKEN, August 2026: derive them from the polarity map, exactly as the team
+ones are derived.** Not declared by the person — projected from the polarity that
+`ai/proactive.js` `PATTERN_POLARITY` already assigns to every detected pattern.
 
-- **(a) Derive them.** A self High/Low is a projection of an existing self pattern, using the
-  polarity map that already exists. Cheap, consistent, and adds no new store.
-- **(b) Declare them.** The person names their own High or Low, as contributors already declare
-  valence at the group boundary. Truer to "valence is a human judgement", but it asks more of a
-  person before they have anything to say.
+This is smaller than it first appeared. `docs/ttd/layer-map.md` §1 shows the bucketing already
+exists three times over: `ai/behaviour.js` calls it *Worth celebrating / Needs attention*,
+`ai/scoped-intelligence-packet.js` calls it *working_well / needs_attention*, and
+`ai/team-state.js` calls it *High / Low*. Self Highs and Lows are the third name applied to the
+first two, not a new engine.
 
-**(a) is the smaller step and does not preclude (b).** Recommendation: derive first.
+**So the work is a rename and a projection, and it comes with an obligation:** pick ONE
+vocabulary and make the others aliases of it. Leaving three parallel bucketings is how this
+became confusing in the first place.
 
 ### G3 · Nav is flat
 

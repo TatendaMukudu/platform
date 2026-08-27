@@ -29,6 +29,7 @@
 | Do we need an ontology / graph DB? | `ttd/organisational-ontology-investigation.md` — **the answer is no** |
 | What does Falcon actually get? | `ttd/falcon-persona-rehearsal.md` |
 | **Who do we compete with, and what should we borrow?** | `ttd/competitive-landscape-and-borrows.md` |
+| **What does each layer do, and what is wrong?** | `ttd/layer-map.md` — **read this if you are unsure what is right** |
 | **What is home meant to look like?** | `ttd/object-as-conversation.md` — every object is a thread; **design, not yet built** |
 | **Who will know I said this?** | `ai/audience.js` — audience is a durable REFERENCE resolved at read time; `GET /api/evidence/:id/audience` answers it deterministically |
 | **What are we deliberately NOT deciding?** | `rnd/intelliq-rnd-program.md` — **non-authoritative; never a reason to build** |
@@ -124,6 +125,7 @@ never silently edited.
 | `ttd/founder-decision-reduction.md` | **CURRENT** | thirteen → two |
 | `ttd/falcon-persona-rehearsal.md` | **CURRENT** | six personas, seventeen scenarios |
 | `ttd/competitive-landscape-and-borrows.md` | **CURRENT** | market and architecture research |
+| `ttd/layer-map.md` | **CURRENT** | ten layers traced; the only genuinely confused one is naming, duplicated three times |
 | `ttd/object-as-conversation.md` | **CURRENT** | the home/nav/thread design. Mostly assembly; one missing primitive; self High/Low is a founder decision |
 | `ttd/peer-web-semantics.md` | **CURRENT** | peers are a separate edge class; deferred to SCALE |
 | `ttd/model-worker-economics.md` | **CURRENT** | tiers, router, call map |
