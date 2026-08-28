@@ -58,13 +58,14 @@
    performs no IO, calls no model, and is deterministic. Composing here rather than at each caller
    is what stops the same object reading differently on the team surface and on home. */
 const voice = require('./voice');
+const polarityOwner = require('./intelligence-feed');
 
 const VALENCES = Object.freeze(['working_well', 'worth_attention', 'unsure']);
 
 /* Inquiry polarity, already a field on the inquiry object (ai/diagnose.js). */
 const POLARITY = Object.freeze({
   WORKING_WELL: 'strength',
-  WORTH_ATTENTION: 'difficulty',
+  WORTH_ATTENTION: 'friction',
   NEUTRAL: 'neutral',
 });
 
@@ -359,7 +360,7 @@ function _lower(s) { const t = _s(s); return t ? t[0].toLowerCase() + t.slice(1)
 function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = [], now = Date.now() } = {}) {
   const memberCount = _num(node.memberCount);
   const withheld = [];
-  const surfaceable = { strength: [], difficulty: [] };
+  const surfaceable = { high: [], low: [] };
 
   for (const inq of _arr(inquiries)) {
     const polarity = _s(inq.polarity, 32) || POLARITY.NEUTRAL;
@@ -375,7 +376,8 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
       });
       continue;
     }
-    surfaceable[polarity === POLARITY.WORKING_WELL ? 'strength' : 'difficulty'].push(inq);
+    const bucket = polarityOwner.bucketOf({ polarity, patternType: inq.patternType || inq.type });
+    if (bucket) surfaceable[bucket].push(inq);
   }
 
   const project = (inq, kind) => {
@@ -421,9 +423,8 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
   // the same two-sided disclosure floor before becoming a team claim.
   const detected = { high: [], low: [] };
   for (const f of _arr(findings)) {
-    const polarity = _s(f.polarity, 32);
-    const kind = ['strength', 'progress', 'milestone', 'opportunity'].includes(polarity) ? 'high'
-      : ['risk', 'friction'].includes(polarity) ? 'low' : null;
+    const findingPolarity = _s(f.polarity, 32);
+    const kind = polarityOwner.bucketOf({ polarity: findingPolarity, patternType: f.type });
     if (!kind) continue;
     const floor = cohortFloor(f.memberCount, memberCount);
     if (!floor.ok || f.confidence === 'tentative' || f.status === 'disputed') {
@@ -437,8 +438,8 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
       basis: { members: _num(f.memberCount), of: memberCount }, detectedType: _s(f.type, 64) });
   }
 
-  const high = project(surfaceable.strength.slice().sort(_rank)[0], 'high') || detected.high[0] || null;
-  const low = project(surfaceable.difficulty.slice().sort(_rank)[0], 'low') || detected.low[0] || null;
+  const high = project(surfaceable.high.slice().sort(_rank)[0], 'high') || detected.high[0] || null;
+  const low = project(surfaceable.low.slice().sort(_rank)[0], 'low') || detected.low[0] || null;
   const question = openQuestion(inquiries, {
     alreadyShown: [high && high.inquiryId, low && low.inquiryId].filter(Boolean),
   });

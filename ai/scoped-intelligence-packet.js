@@ -20,9 +20,10 @@
 const graph = require('./org-graph');
 const priority = require('./priority-office');
 const guard = require('./language-guard');
+const polarity = require('./intelligence-feed');
 
 const QUESTION_KINDS = Object.freeze(['process_challenge', 'context_gap', 'policy_question', 'practice_question', 'goal_question']);
-const PACKET_SECTIONS = Object.freeze(['needs_attention', 'working_well', 'process_questions', 'outcome_history', 'personal_patterns', 'playbook', 'questions_upward', 'other']);
+const PACKET_SECTIONS = Object.freeze(['high', 'low', 'process_questions', 'outcome_history', 'personal_patterns', 'playbook', 'questions_upward', 'other']);
 
 function _s(v, n = 240) { return String(v == null ? '' : v).trim().slice(0, n); }
 function _key(v) { return _s(v || 'unknown', 100).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unknown'; }
@@ -74,8 +75,8 @@ function sectionOf(item = {}) {
   if (item.source === 'process_reflection' || item.kind === 'process_question') return 'process_questions';
   if (item.source === 'self_model') return 'personal_patterns';
   if (item.source === 'org_playbook') return 'playbook';
-  if (item.polarity === 'risk' || item.polarity === 'friction') return 'needs_attention';
-  if (['progress', 'strength', 'milestone', 'opportunity'].includes(item.polarity)) return 'working_well';
+  const bucket = polarity.bucketOf(item);
+  if (bucket) return bucket;
   return 'other';
 }
 

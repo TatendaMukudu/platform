@@ -2017,7 +2017,7 @@ async function _renderLeaderSupport(memberId, memberName) {
           ${a.suggestion && a.suggestion.text ? `<div class="ls-approach"><span>Suggested approach</span> ${esc(a.suggestion.text)}</div>` : ''}
         </div>`).join('') + `</div>`;
     };
-    const body = section('needs_attention', 'May need you') + section('worth_celebrating', 'Worth recognising');
+    const body = section('low', 'Low') + section('high', 'High');
     slot.innerHTML = `<div class="ls-card">
       <div class="ls-title">How to support ${esc(first)}</div>
       <div class="ls-note">A directional, privacy-safe read. ${esc(first)}’s private details stay private — this is only what you’re authorised to see, and it points you toward a good conversation, it doesn’t replace one.</div>

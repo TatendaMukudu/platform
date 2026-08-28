@@ -4574,11 +4574,11 @@ function _selfOpportunities(m, subjectId) {
 }
 
 /* Build the ATTENTION ENGINE surface for a viewer — grouped into Home's buckets
-   (needs attention / worth celebrating / opportunities). Every insight is a
+   (High / Low; neutral remains in the feed). Every insight is a
    projection of an existing kernel output; polarity is a projection, priority is
    independent of it. Surface-only — suggestions are proposal-gated.
    audience 'self'   → viewer's own attention (specific, their own evidence).
-   audience 'leader' → about `subjectId`, directional + care-first, NO opportunities.
+   audience 'leader' → about `subjectId`, directional + care-first.
    Authorisation is the CALLER's responsibility (endpoints below gate leader reads). */
 function _proactiveInsights(code, viewerId, opts = {}) {
   const audience   = opts.audience === 'leader' ? 'leader' : 'self';
@@ -4607,7 +4607,7 @@ function _proactiveInsights(code, viewerId, opts = {}) {
   _streakMilestones(code, subjectId, now).forEach(f => add(f, audience));
 
   if (audience === 'self') {
-    // Opportunities — self only (a leader never gets person-opportunities).
+    // Opportunities are ordinary Highs under D4; projection still governs their detail.
     _selfOpportunities(m, viewerId).forEach(f => add(f, 'self'));
     // Deterministic attention items (own scope only).
     let att = []; try { att = _composeToday(code, viewerId) || []; } catch (_) {}

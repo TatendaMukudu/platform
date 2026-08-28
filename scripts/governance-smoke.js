@@ -21,6 +21,7 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
 
 const behaviour = read('ai/behaviour.js');
 const proactive = read('ai/proactive.js');
+const polarityOwner = read('ai/intelligence-feed.js');
 const server    = read('server.js');
 
 // The server + ai COMPUTATION layer, excluding the behaviour layer itself.
@@ -28,14 +29,18 @@ const aiFiles = fs.readdirSync(path.join(root, 'ai')).filter(f => f.endsWith('.j
 const computeLayer = ['server.js', ...aiFiles];
 
 // 1 · behaviour is structurally pure — it cannot reason, read evidence, or change visibility.
-ok('behaviour.js imports nothing (pure delivery layer)', !/\brequire\s*\(/.test(behaviour));
+ok('behaviour.js imports only the canonical polarity owner',
+   [...behaviour.matchAll(/require\(['"]([^'"]+)['"]\)/g)].map(m => m[1]).join(',') === './intelligence-feed');
 
 // 2 · delivery lives in behaviour: it owns plan() + opening().
 ok('behaviour.js owns plan() + opening()', /function plan\s*\(/.test(behaviour) && /function opening\s*\(/.test(behaviour));
 
-// 3 · the bucket taxonomy (the grouping decision) is DEFINED only in behaviour.js.
-ok('the bucket taxonomy is defined once — behaviour.js only',
-   /worth_celebrating/.test(behaviour) && computeLayer.every(f => !/worth_celebrating/.test(read(f))));
+// 3 · polarity meaning and High/Low membership are DEFINED once in intelligence-feed.
+ok('the polarity taxonomy is defined once — intelligence-feed owns High/Low membership',
+   /const POLARITY_BUCKET = Object\.freeze/.test(polarityOwner) &&
+   /function bucketOf\s*\(/.test(polarityOwner) &&
+   !/const POLARITY_BUCKET\s*=/.test(behaviour) &&
+   ['ai/scoped-intelligence-packet.js', 'ai/team-state.js', 'ai/diagnose.js'].every(f => !/const POLARITY_BUCKET\s*=/.test(read(f))));
 
 // 4 · the attention OPENING greeting is composed only in behaviour.js.
 ok('the opening greeting is composed once — behaviour.js only',

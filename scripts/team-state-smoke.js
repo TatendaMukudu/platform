@@ -626,7 +626,7 @@ const inq = (o = {}) => ({
     inquiries: [{
       inquiryId: 'i1', topic: { label: 'Attendance' }, hypothesis: 'exams are competing for time',
       status: 'probable', confidence: { band: 'probable', score: 0.6 },
-      polarity: 'difficulty',
+      polarity: 'friction',
       independentOrigins: 3, contributors: 6,
       stillUnknown: ['Whether the players who dropped off are the ones sitting exams'],
       falsifiers: ['If attendance stays low after exams finish'],

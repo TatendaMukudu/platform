@@ -36,8 +36,11 @@
    "the line keeps missing tolerance after the tooling change", or "our reps aren't converting
    enterprise demos".
 
-   PURE: imports nothing, no IO, no network. The model call lives at the server edge.
+   PURE: imports only the canonical polarity vocabulary, no IO or network. The model call lives
+   at the server edge.
    ============================================================ */
+
+const polarityOwner = require('./intelligence-feed');
 
 /* ── EPISTEMIC LEVELS ────────────────────────────────────────────────────────
    Ordered by how much they claim. A level may only rest on levels beneath it. */
@@ -336,7 +339,7 @@ function newInquiry({ id, subjectRef, concept, label, domain = '', polarity = 'n
     // Why this exists as its own line of inquiry, in the comprehension layer's own words.
     provenance: [],                    // [{ at, relationship, targetId, concept, reason }]
     topic: { canonicalConcept: String(concept || ''), label: String(label || concept || ''), domain: String(domain || '') },
-    polarity,                          // 'strength' | 'difficulty' | 'condition' | 'neutral'
+    polarity: polarityOwner.normalizePolarity(polarity), // one canonical vocabulary; legacy aliases normalize at intake
     hypotheses: [],                    // [{ id, statement, confidence, supportRefs, challengeRefs, status }]
     leadingHypothesisId: null,
     signals: [],                       // [{ ref, kind, directness, authority, specificity, at, dissents }] — REFS ONLY

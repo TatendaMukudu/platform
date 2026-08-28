@@ -52,7 +52,7 @@ const server = app.listen(0, async () => {
     ok('1 · the packet returns a unified queue with a single lead', a.ok && Array.isArray(a.queue) && a.queue.length > 0 && a.lead);
     ok('1 · …drawn from more than one engine (reasoner + playbook both present)',
        new Set(a.queue.map(i => i.source)).size >= 2 && a.queue.some(i => i.source === 'reasoner') && a.queue.some(i => i.source === 'org_playbook'));
-    ok('1 · …grouped into sections the UI can render', a.sections && Array.isArray(a.sections.needs_attention));
+    ok('1 · …grouped into canonical High and Low sections', a.sections && Array.isArray(a.sections.high) && Array.isArray(a.sections.low));
 
     /* 2 — the reasoner risk leads over a steady playbook practice (priority ranking works) */
     ok('2 · a risk read is ranked ahead of a low-priority strength', a.lead.source === 'reasoner' && /Joe's momentum/.test(a.lead.title + ' ' + a.lead.body));

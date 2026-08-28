@@ -27,6 +27,22 @@ const SOURCES = Object.freeze([
 ]);
 const LEVELS = Object.freeze(['personal', 'person', 'team', 'org', 'scope']);
 const POLARITIES = Object.freeze(['risk', 'progress', 'milestone', 'opportunity', 'friction', 'strength', 'neutral']);
+const POLARITY_ALIASES = Object.freeze({
+  difficulty: 'friction',
+  condition: 'opportunity',
+  working_well: 'strength',
+  worth_attention: 'friction',
+});
+const POLARITY_BUCKET = Object.freeze({
+  risk: 'low',
+  friction: 'low',
+  progress: 'high',
+  milestone: 'high',
+  opportunity: 'high',
+  strength: 'high',
+  neutral: null,
+});
+const BUCKETS = Object.freeze(['high', 'low']);
 const PRIORITIES = Object.freeze(['urgent', 'high', 'medium', 'low', 'none']);
 const CONFIDENCES = Object.freeze(['confirmed', 'clear', 'reliable', 'well_supported', 'supported', 'emerging', 'promising', 'tentative', 'calibrating', 'low', 'none']);
 
@@ -71,6 +87,23 @@ function _id(source, kind, item) {
     ('if_' + _hash(JSON.stringify([source, kind, item.patternType || item.kind || item.type, item.subjectId || item.scope, item.title || item.headline || item.claim || item.statement || item.body || item.question]))), 140);
 }
 
+/* The ONE polarity vocabulary and High/Low decision. Producers retain the specific polarity
+   because risk is not friction and progress is not strength; consumers ask this owner only
+   whether the finding is a High, a Low, or neither. `data_gap` is our missing information,
+   never a Low about the person (D6), regardless of an older producer's polarity. */
+function normalizePolarity(value, fallback = 'neutral') {
+  const key = _key(value);
+  const canonical = POLARITY_ALIASES[key] || key;
+  return POLARITIES.includes(canonical) ? canonical : fallback;
+}
+function bucketOf(itemOrPolarity) {
+  const item = itemOrPolarity && typeof itemOrPolarity === 'object' ? itemOrPolarity : null;
+  const patternType = _key(item && (item.patternType || item.type || item.kind));
+  if (patternType === 'data_gap') return null;
+  const polarity = normalizePolarity(item ? item.polarity : itemOrPolarity);
+  return POLARITY_BUCKET[polarity] || null;
+}
+
 function normalizeArtifact(item = {}, opts = {}) {
   const source = _oneOf(SOURCES, opts.source || item.source || item.generatedBy, 'extra');
   const kind = _key(opts.kind || item.feedKind || item.itemKind || item.kind || SOURCE_KIND[source] || 'artifact');
@@ -90,7 +123,7 @@ function normalizeArtifact(item = {}, opts = {}) {
     subjectLabel: item.subjectLabel || item.subjectName ? _s(item.subjectLabel || item.subjectName, 120) : null,
     scope: item.scope != null ? _s(item.scope, 140) : null,
     patternType,
-    polarity: _oneOf(POLARITIES, item.polarity, item.outcomeLine ? 'neutral' : 'neutral'),
+    polarity: normalizePolarity(item.polarity),
     priority,
     confidence,
     title,
@@ -305,7 +338,8 @@ function toPriorityInput(feed = {}) {
 }
 
 module.exports = {
-  SOURCES, LEVELS, POLARITIES, PRIORITIES, CONFIDENCES, SOURCE_KIND,
+  SOURCES, LEVELS, POLARITIES, POLARITY_ALIASES, POLARITY_BUCKET, BUCKETS,
+  PRIORITIES, CONFIDENCES, SOURCE_KIND, normalizePolarity, bucketOf,
   normalizeArtifact, collect, finalize, toPriorityInput,
   fromReasoner, fromProactive, fromOutcomeBriefs, fromProcessReflections, fromSelfModel, fromOrgPlaybook,
   _key,

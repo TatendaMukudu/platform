@@ -10,14 +10,16 @@
    outcome-intelligence briefs, unified feed items, confidence labels, and explicit
    user-behaviour preferences. Output is a ranked queue the UI can consume later.
 
-   PURE: imports nothing, no DB, no AI, no IO.
+   PURE: imports only the canonical polarity owner, no DB, no AI, no IO.
    ============================================================ */
 
 'use strict';
 
+const polarityOwner = require('./intelligence-feed');
+
 const PRIORITY_RANK = { urgent: 0, high: 1, medium: 2, low: 3, none: 4 };
 const CONF_RANK = { confirmed: 0, clear: 1, reliable: 1, well_supported: 1, supported: 1, emerging: 2, promising: 2, tentative: 3, calibrating: 3, low: 3, none: 4 };
-const POLARITY_RANK = { risk: 0, friction: 0, neutral: 1, opportunity: 2, progress: 3, strength: 3, milestone: 3 };
+const POLARITY_RANK = Object.freeze({ low: 0, neither: 1, high: 2 });
 
 function _s(v, n = 160) { return String(v == null ? '' : v).trim().slice(0, n); }
 function _key(v) { return _s(v || 'unknown', 80).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'unknown'; }
@@ -58,7 +60,8 @@ function _score(item, prefs = {}) {
   let score = 0;
   score += (4 - _rank(PRIORITY_RANK, item.priority, 4)) * 100;
   score += (4 - _rank(CONF_RANK, item.confidence, 4)) * 20;
-  score += (4 - _rank(POLARITY_RANK, item.polarity, 2)) * 8;
+  const polarityBucket = polarityOwner.bucketOf(item) || 'neither';
+  score += (2 - _rank(POLARITY_RANK, polarityBucket, 1)) * 8;
   if (item.limitations.includes('no_outcome_history')) score -= 10;
   if (item.limitations.includes('small_sample')) score -= 5;
   const preferred = Array.isArray(prefs.preferredBuckets) ? prefs.preferredBuckets.map(_key) : [];

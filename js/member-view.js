@@ -2878,9 +2878,9 @@ const MemberApp = {
       const attr = s => JSON.stringify(esc(s)).replace(/"/g, '&quot;');
       box.classList.remove('is-loading');
       // ATTENTION ENGINE: Home is "Your Attention" — a balance of what needs action,
-      // progress worth celebrating, and opportunities worth pursuing. Same kernel,
+      // Highs and Lows from the same kernel,
       // different projections; attention is simply "this matters".
-      const ORDER = ['needs_attention', 'worth_celebrating', 'opportunities'];
+      const ORDER = ['high', 'low'];
       const POL = { risk: 'iq-pol-risk', progress: 'iq-pol-progress', milestone: 'iq-pol-progress', opportunity: 'iq-pol-opp', neutral: 'iq-pol-neutral' };
       const renderInsight = a => {
         const rel = a.reliabilityLabel && a.reliabilityLabel !== 'calibrating'

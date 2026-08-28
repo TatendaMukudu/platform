@@ -36,9 +36,9 @@
    opportunity) carry their own polarity on the finding. */
 const PATTERN_POLARITY = {
   // negative — needs attention
-  baseline_shift: 'risk', momentum_drop: 'risk', repeated_concern: 'risk',
+  baseline_shift: 'neutral', momentum_drop: 'risk', repeated_concern: 'risk',
   member_team_divergence: 'risk', invisible_load: 'risk', withdrawal: 'risk',
-  data_gap: 'risk', isolation: 'risk', overload: 'risk', plateau: 'risk',
+  data_gap: 'neutral', isolation: 'risk', overload: 'risk', plateau: 'risk',
   // positive — worth celebrating (already emitted by the kernel today)
   recovering: 'progress', quiet_improvement: 'progress',
 };

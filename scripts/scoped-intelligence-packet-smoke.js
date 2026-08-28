@@ -42,6 +42,7 @@ const ids = p => p.queue.map(i => i.id).sort();
 
 ok('CEO packet reaches the full web', ceo.role === 'top_leader' && ['root','sales','salesA','salesB','ops','opsA'].every(n => ceo.visibleNodes.includes(n)));
 ok('CEO can see sales and ops scoped artifacts', ids(ceo).includes('sales-risk') && ids(ceo).includes('ops-risk'));
+ok('packet puts polar findings only in canonical High and Low sections', ceo.sections.low.some(i => i.id === 'sales-risk') && ceo.sections.high.some(i => i.id === 'sales-win') && !Object.keys(ceo.sections).some(k => ['needs_attention','working_well','worth_celebrating','opportunities'].includes(k)));
 ok('branch lead sees own subtree plus parent context but not sibling branch under CEO', sales.visibleNodes.includes('root') && ids(sales).includes('sales-risk') && ids(sales).includes('sales-win') && !ids(sales).includes('ops-risk'));
 ok('other branch lead sees own subtree but not sales branch', ids(ops).includes('ops-risk') && !ids(ops).includes('sales-risk'));
 ok('least leader sees their led branch and direct parent only', packet.buildPacket({ actor: { userId: 'salesALead' }, nodes, feed: normalized }).visibleNodes.join(',') === 'sales,salesA');

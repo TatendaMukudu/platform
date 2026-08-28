@@ -47,6 +47,12 @@ ok('priority lead favors high-priority risk/friction before lower-priority stren
 ok('usage habit creates ask-first offer without silently changing the lead', stamped.askFirst && stamped.askFirst.requiresConfirmation === true && stamped.lead.id === po.stamp(priorityInput).lead.id);
 ok('suppression happens before the feed reaches ranking', feed.collect({ reasoner }, { suppressed: ['b1'] }).items.length === 0);
 ok('collection is deterministic', JSON.stringify(feed.collect({ reasoner, proactive, outcomeIntelligence, processReflection, selfModel, orgPlaybook })) === JSON.stringify(feed.collect({ reasoner, proactive, outcomeIntelligence, processReflection, selfModel, orgPlaybook })));
+ok('canonical polarity vocabulary has exactly the seven ratified values', [...feed.POLARITIES].sort().join(',') === ['risk','friction','progress','milestone','opportunity','strength','neutral'].sort().join(','));
+ok('risk and friction are Low', ['risk', 'friction'].every(p => feed.bucketOf(p) === 'low'));
+ok('progress, milestone, opportunity and strength are High', ['progress', 'milestone', 'opportunity', 'strength'].every(p => feed.bucketOf(p) === 'high'));
+ok('neutral and data gaps enter neither bucket', feed.bucketOf('neutral') === null && feed.bucketOf({ polarity: 'risk', patternType: 'data_gap' }) === null);
+ok('legacy producer terms normalize at the one owner', feed.normalizePolarity('difficulty') === 'friction' && feed.normalizePolarity('condition') === 'opportunity');
+ok('unknown polarity fails closed to neutral and neither', feed.normalizePolarity('surprise') === 'neutral' && feed.bucketOf('surprise') === null);
 
 console.log(`\n=== intelligence-feed-smoke: ${pass} passed, ${fail} failed ===\n`);
 process.exit(fail ? 1 : 0);

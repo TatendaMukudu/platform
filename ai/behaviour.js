@@ -23,20 +23,19 @@
    verified ProactiveInsight artifacts; it never generates them.
    ============================================================ */
 
+const polarity = require('./intelligence-feed');
+
 // Ordering constants — delivery concerns, so they live here (not in projection).
 const SEV_RANK  = { high: 0, medium: 1, low: 2 };
 const CONF_RANK = { clear: 0, confirmed: 0, emerging: 1, medium: 1, tentative: 2, low: 2, calibrating: 2 };
 
-// Polarity → Home bucket. Attention is not positive or negative; these are just
-// where each kind of "this matters" is delivered on the surface.
-const BUCKET = { risk: 'needs_attention', neutral: 'needs_attention',
-                 progress: 'worth_celebrating', milestone: 'worth_celebrating',
-                 opportunity: 'opportunities' };
-const BUCKET_LABEL = { needs_attention: 'Needs attention', worth_celebrating: 'Worth celebrating', opportunities: 'Opportunities' };
+// High/Low membership belongs to the feed's one polarity owner. Behaviour only decides
+// ordering, volume and empty-state copy inside those two product buckets.
+const BUCKET = polarity.POLARITY_BUCKET;
+const BUCKET_LABEL = { high: 'High', low: 'Low' };
 const BUCKET_EMPTY = {
-  needs_attention:   { self: 'Nothing needs your attention right now.',      leader: 'Nothing needs your attention right now.' },
-  worth_celebrating: { self: 'Nothing to celebrate just yet — keep going.',  leader: 'No standout progress to flag this week.' },
-  opportunities:     { self: 'No new opportunities right now.',              leader: '' },
+  high: { self: 'No High to surface right now.', leader: 'No High to surface right now.' },
+  low:  { self: 'Nothing needs your attention right now.', leader: 'Nothing needs your attention right now.' },
 };
 
 // SILENCE copy — the absence of attention is a confident, intentional state, not a
@@ -48,7 +47,7 @@ const CALM = {
 function _calm(audience) { return CALM[audience] || CALM.self; }
 
 /* The bucket an insight is delivered into — derived from its polarity. */
-function bucketOf(insight) { return (insight && BUCKET[insight.polarity]) || 'needs_attention'; }
+function bucketOf(insight) { return polarity.bucketOf(insight); }
 
 /* Rank WITHIN a bucket by PRIORITY (independent of polarity), then confidence,
    then a stable id — so a milestone can outrank a low risk, and vice versa. */
@@ -62,8 +61,8 @@ function _rankCmp(a, b) {
 
 /* ── plan() — the canonical grouping / ordering / volume / silence decision ────
    Groups verified insights into Home's buckets, ranks within each, caps volume,
-   and returns first-class empty states. Leaders never receive an opportunities
-   bucket about a person (that projection choice is honoured here on delivery too).
+   and returns first-class empty states. Neutral findings remain in the feed but enter
+   neither bucket; opportunity and milestone are Highs under D4.
    Returns { empty, message, groups: { bucket: { label, empty, message, insights } } }.
    Each surfaced insight is annotated with its delivered `bucket`. Pure. */
 function plan(insights, opts = {}) {
@@ -71,11 +70,10 @@ function plan(insights, opts = {}) {
   const limit = Number.isInteger(opts.limit) ? opts.limit : 3;
   const suppressed = opts.suppressed instanceof Set ? opts.suppressed
                    : new Set(Array.isArray(opts.suppressed) ? opts.suppressed : []);
-  const order = ['needs_attention', 'worth_celebrating', 'opportunities'];
+  const order = polarity.BUCKETS;
   const groups = {};
   let total = 0;
   for (const b of order) {
-    if (audience === 'leader' && b === 'opportunities') continue;   // no person-opportunities to a leader
     const seen = new Set();
     const ranked = (insights || [])
       .filter(i => i && bucketOf(i) === b)
@@ -111,7 +109,7 @@ function opening(planned, opts = {}) {
     return { empty: true, greeting: `${hello} ${planned && planned.message ? planned.message : _calm(audience, opts.now)}`, sections: [], invitation: null };
   }
   // Lead with a win when there is one — emotional balance is the point.
-  const ORDER = [['worth_celebrating', 'Worth celebrating'], ['needs_attention', 'Needs attention'], ['opportunities', 'Opportunity']];
+  const ORDER = [['high', 'High'], ['low', 'Low']];
   const sections = [];
   for (const [key, label] of ORDER) {
     const g = planned.groups && planned.groups[key];
