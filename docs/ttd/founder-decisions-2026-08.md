@@ -227,22 +227,157 @@ belongs to L9/L10 when we reach them.
 
 ---
 
-## WHAT THESE EIGHT CHANGE ABOUT THE PLAN
+## D9 · AN INQUIRY CLOSES TWO WAYS — AND IT IS A CONVERSATION LIKE EVERY OTHER OBJECT
+
+**Decision, part one — closing.** Two outcomes, both recorded, both readable afterwards:
+
+1. **Answered.** The person names what we now believe. That statement becomes **evidence, with
+   their authority behind it** — not a note on the inquiry.
+2. **Dropped.** No longer worth pursuing. Nothing is concluded, and nothing is asserted.
+
+**Why part one is the epistemic ladder working exactly as designed, not an exception to it.**
+`ai/diagnose.js:49` — `MODEL_MAY_PROPOSE` admits `observation`, `interpretation`, `hypothesis`
+and refuses `conclusion`. It has always refused it *from the model*. A person concluding is the
+rung the ladder was reserving. So "answered" is not a new privilege; it is the first thing in the
+product that uses the one the architecture already held open.
+
+**Decision, part two — the founder's addition, which is larger than the question I asked:**
+
+> *"Remember you can interact with inquiries and either challenge them or confirm them through
+> speaking to them (like the chat for Highs, Lows or Focuses). We can do the same with inquiries
+> and add further evidence or help the algorithm more."*
+
+So an inquiry is not a card with two buttons on it. It is a **thread**, like every other object
+(`ttd/object-as-conversation.md`), and speaking into that thread is how a person challenges,
+confirms, or adds. Answering and dropping are things you say, not controls you press.
+
+**This is mostly already built.** `ai/diagnose.js` already accepts grounded proposals, already
+distinguishes support from challenge per hypothesis (`supportRefs` / `challengeRefs`), already
+supersedes rather than deletes (`supersede()`, line 485), and already records how the
+understanding changed (`_recordTimeline`, line 380). What is missing is the thread binding — the
+one field in `object-as-conversation.md` G1 — not a mechanism.
+
+**Decision, part three — inquiries compete for home.**
+
+> *"Inquiries can also appear on home, just like Highs, Lows and Focus questions — whatever needs
+> answering most."*
+
+`GET /api/inquiry/lead` already produces one ranking across self and team inquiries. It must now
+rank across **all four kinds**. That is an extension of an existing ranking, but it needs a
+comparable value across objects of different types, and that comparison does not exist yet.
+
+**Decision, part four — an inquiry with no evidence for six weeks drops out, per D8.**
+
+### The tension in part four, resolved rather than ignored
+
+D3 says **only a human closes an inquiry**. Part four lets one leave on its own. Those are only
+consistent if the distinction is held exactly:
+
+> L-D9 · An inquiry that fades has **not been resolved**. It leaves the live set carrying no
+> conclusion, and the fade may never write `status: 'resolved'` or record an answer.
+
+Three consequences, none optional:
+
+- **Fading is dormancy, not closure**, and it is reversible: one new signal wakes it.
+- **A faded inquiry and a dropped one must be distinguishable in history.** *Nobody had anything
+  to add* and *a person decided this no longer matters* are different facts about the
+  organisation, and collapsing them loses the more interesting one.
+- **Six weeks is the founder's number and is currently a number in a sentence.** It must become
+  one named constant, used by Highs, Lows and inquiries alike, in one place — not three literals.
+
+**Related, and already in the code:** `status` today is derived (`_STATUS_FOR`, `ai/diagnose.js:437`)
+from confidence band and contradictions, and `'resolved'` is listed at line 346 but **unreachable
+— nothing writes it**. D9 is what makes that value real.
+
+---
+
+## D10 · PARKED IS VISIBLE, AND SAYS WHY
+
+**Decision:** a parked inquiry sits below the live ones in the bucket, showing the reason it was
+set aside.
+
+**What this exposes.** `diagnose.boundFrontier` (line 1097) already keeps the top `cap` inquiries
+active and parks the rest with `parkedBecause: 'other open questions would tell us more right
+now'` — automatically, reversibly, and **without telling anyone**. The string was written to be
+read and has never been rendered.
+
+**Why showing it is the right call.** The system is already making a judgement about what matters
+most. A judgement a person cannot see is a judgement they cannot correct — and correction is the
+one thing this architecture is built around.
+
+**What it costs.** The bucket is longer, and a person may disagree with the ranking. That
+disagreement is worth having.
+
+---
+
+## D11 · THE STATUS VOCABULARY STAYS INTERNAL
+
+**Decision:** the thread says *"what we have points both ways"* and shows both sides. The word
+**disputed** does not appear on screen.
+
+**The specific risk.** `_STATUS_FOR` sets `disputed` the moment admissible evidence contradicts
+itself — which on a team inquiry is often two people honestly describing the same week
+differently. Rendered as a label, that reads as *the team is in conflict*. Same information,
+materially different claim.
+
+**The general rule this establishes for L9:** `exploring · probable · supported · disputed` are
+**kernel state, not product language**. Every one of them needs a plain-language projection before
+it reaches a person, and `ai/voice.js` is where that belongs.
+
+---
+
+## D12 · THE FRONTIER AND THE FALSIFIERS ARE BOTH ON SCREEN
+
+**Decision:** the thread shows what we think, **what would show it is wrong**, and what is still
+unknown.
+
+**This is the missing "maturity", and it is already computed.** Every inquiry carries
+`missingSignals` — the collection frontier — and `falsifiers`, *what would show the leading
+hypothesis is wrong* (`ai/diagnose.js:343-344`). Both reach the API: `stillUnknown` and
+`falsifiers` are both emitted at `server.js:13563-13564`. **Neither appears anywhere in
+`js/app.js` or `js/member-view.js`.** Grep returns nothing.
+
+So the visible arc the founder has been asking for — *opened → evidence accumulating → this is
+what would change our mind → settled or dropped* — is not missing from the system. It is missing
+from the screen.
+
+**Why showing falsifiers is a product claim and not just honesty.** Every competitor's dashboard
+tells you what it concluded. Stating what would overturn it is the thing an insight engine cannot
+say and a truth-maintenance kernel can. It is the clearest single expression of the difference,
+and it costs nothing to render because it is already in the payload.
+
+**The one constraint:** a falsifier is stated as *what would change our mind*, never as a
+challenge to the person. Wording goes through `ai/voice.js` like everything else in L9.
+
+---
+
+## WHAT THESE TWELVE CHANGE ABOUT THE PLAN
 
 The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one insertion.
 
 | # | Step | Changed by |
 |---|---|---|
 | 0 | **One polarity vocabulary — High and Low**, with a third outcome underneath: neither | D4, plus D5 and D6. Now a prerequisite: self Highs and Lows cannot be derived into a vocabulary that has not been chosen. The bucketing table is: `risk`/`friction` → Low; `progress`/`milestone`/`opportunity`/`strength` → High; `neutral` → neither; `data_gap` → neither, by name |
-| 1 | `about` binding on the conversation store | unchanged |
+| 1 | `about` binding on the conversation store | unchanged — **and D9 raises its priority: an inquiry is a thread too, so this is now load-bearing for four object kinds, not three** |
 | 2 | Self High/Low, derived from the polarity map | D4 settles the names |
 | 3 | **Focus participants and invitation** | **D2 — new step, and the largest of them** |
-| 4 | The four buckets and the thread view, one home | D1 — one home, and the bucket IS the existing card feed under a filter. **D7 — one bucket endpoint taking a scope, not a role** |
-| 5 | Inquiry resolution by a person | D3 |
-| 6 | Fade on stale evidence | **D8 — new step. Depends on 1, because a faded card must still open** |
-| 7 | Curiosity in the thread, under the stopping rule | unchanged |
+| 4 | The four buckets and the thread view, one home | D1 — one home, and the bucket IS the existing card feed under a filter. **D7 — one bucket endpoint taking a scope, not a role.** **D10 — parked inquiries render below the live ones with their reason** |
+| 5 | Inquiry resolution by a person — **answered or dropped** | D3, extended by **D9**. Depends on 1: answering and dropping happen by speaking into the thread |
+| 6 | Fade on stale evidence, **one constant for all four kinds** | **D8, extended by D9 part four.** Depends on 1, because a faded card must still open. A faded inquiry is dormant, never resolved (L-D9) |
+| 7 | **Plain-language projection of kernel status** | **D11 — new step.** `exploring / probable / supported / disputed` never reach a screen unprojected |
+| 8 | **The frontier and the falsifiers in the thread** | **D12 — new step, and the cheapest of them: both are already in the payload at `server.js:13563-13564`** |
+| 9 | **One ranking across all four kinds for home** | **D9 part three.** `/api/inquiry/lead` ranks inquiries today; it needs a value comparable across object types, which does not exist yet |
+| 10 | Curiosity in the thread, under the stopping rule | unchanged |
 
 **D2 is the one to be careful with.** It introduces the first object whose audience is a set of
 people rather than a node, and the first `ai/audience.js` kind that does not resolve through
 `orgNodes`. That is a real extension of the privacy model — narrow, defensible, and not to be
 done casually alongside a UI change.
+
+**Step 1 is now the bottleneck.** Five of the twelve decisions — D9 in three of its four parts,
+D10, D12 and the readable-history halves of D8 — all resolve to *the object opens as a thread*.
+Nothing above it can be finished without it, and it remains one field.
+
+**Step 8 is the cheapest thing on this list.** The falsifiers and the frontier are computed,
+governed, and already serialised onto the response. Rendering them is a front-end change against
+a payload that exists today.
