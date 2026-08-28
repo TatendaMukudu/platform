@@ -61,9 +61,14 @@ const server = S.app.listen(0, async () => {
     const body = await response.json();
     const stateItem = (body.items || []).find(item => item.memberId === 'state');
     const capabilityItem = (body.items || []).find(item => item.memberId === 'cap');
+    /* Both numeric forms, not just the scale. This member's mood falls 4.2 -> 2.1, so the
+       leaky sentence is "mood is ~48% below their usual" — a PERCENTAGE on a state primitive,
+       which is precisely the leak a browser pass found on /api/intelligence/watch. Asserting
+       only on "/5" would pass while the percentage branch was broken. */
     check('D26-1 a member state figure never reaches the leader briefing response',
       response.status === 200 && stateItem && stateItem.fingerprint === undefined &&
-      !/\b\d+(?:\.\d+)?\s*\/\s*5\b/.test(JSON.stringify(stateItem)));
+      !/\b\d+(?:\.\d+)?\s*\/\s*5\b/.test(JSON.stringify(stateItem)) &&
+      !/\b\d+(?:\.\d+)?\s*%/.test(JSON.stringify(stateItem)));
     check('D26-2 a member capability percentage survives the same leader briefing response',
       response.status === 200 && capabilityItem && /Pass completion[^.]*83%/.test(capabilityItem.whyNow || ''));
   } catch (error) {

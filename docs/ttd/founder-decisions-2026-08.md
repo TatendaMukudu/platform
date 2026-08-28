@@ -4,6 +4,85 @@
 Taken directly by the founder in session. Each is recorded with what it settles, what it costs,
 and what it now requires.
 
+**How to use this document.** It is the answer to *"what has the founder actually decided?"* —
+the store, so nothing has to be re-derived or re-asked. Read the index, then only the decisions
+your task touches. Nothing here is a suggestion: a decision is overridden by the founder, never by
+an agent finding it inconvenient.
+
+---
+
+## THE INDEX — thirty-seven decisions, one line each
+
+**The shape of the product**
+
+| | Decision | Read it if you are touching |
+|---|---|---|
+| **D1** | One home for everyone. The nav opens **buckets** — the existing card feed, filtered — not new lists | any front-end work |
+| **D13** | Every object is a thread, and **priority** ranks them all. Never ordered by kind | Home, ranking |
+| **D22** | Cold start **is** the inquiry engine. Import, cadence and the no-baseline layers are the three speed levers | the pilot's first fortnight |
+| **D24** | `js/app.js` absorbs `js/member-view.js`. This ends with a file **deleted** | the front end. Do it LAST |
+| **D31** | IntelliQ **informs**; the nine-route action loop stays dark for the pilot | anything about acting |
+| **D33** | The pilot must prove all three: nothing breaks · sustained use · one real thing uncovered | triage, scope cuts |
+
+**Highs, Lows and polarity**
+
+| | Decision | |
+|---|---|---|
+| **D4** | **High and Low only.** `opportunity` and `milestone` fold into High | the bucketing layer |
+| **D5** | A **neutral** change is in neither bucket | `baseline_shift` |
+| **D6** | `data_gap` is **our** gap, not a Low about the person | `proactive.js` |
+| **D8/D17** | Findings **park** on priority; nothing is ever abandoned. Only the timeline compacts | lifecycle, retention |
+
+**Inquiry**
+
+| | Decision | |
+|---|---|---|
+| **D3** | Only a **human** closes an inquiry | `diagnose.js` |
+| **D9** | It closes two ways — **answered** (becomes evidence) or **dropped**. And it is a thread you speak into | inquiry work |
+| **D10** | **Parked is visible**, with its reason | `boundFrontier` |
+| **D11** | `exploring / probable / supported / disputed` are kernel state, **never** product language | projection |
+| **D12** | The **frontier and the falsifiers** go on screen. Both are already in the payload | the thread |
+| **D36** | A challenged finding is **contested**, never deleted | `diagnose.js` |
+
+**Focus**
+
+| | Decision | |
+|---|---|---|
+| **D2** | Focus works three ways: self, **invited**, assigned. Participants are a new audience shape | `audience.js` |
+| **D14** | **Two shapes** — a *room* and a *parallel* focus. The parallel focus **is** assessment | the focus model |
+| **D14b** | **No numbers on a person.** Nobody scores anyone — not a leader, not the model | assessment |
+
+**Privacy, scope and answerability**
+
+| | Decision | |
+|---|---|---|
+| **D7** | **One bucket surface taking a scope, not a role.** A coach is a person with a wider Web | every read path |
+| **D15** | Shared-focus words are **admissible but never quoted** outside the participant set | focus, projection |
+| **D16** | `@intelliQ` in a room answers from the **intersection** of every participant's scope | the agent |
+| **D18** | A person **sees their whole record** and can withdraw from it | `/api/me/*` |
+| **D19** | A withdrawal **recomputes and tells** whoever saw the old picture. Closes T-2 | corrections |
+| **D20** | Classification keeps its **bias toward over-protection**. A person may not lower their own | `privacy.js` |
+| **D21** | The safeguarding exception is stated **before** anyone speaks | onboarding |
+| **D26** | **The primitive decides, not the digit.** Only `state` and `relational` lose their figures | leader surfaces |
+| **D27** | A **leader is a subject**, under the same floor. Never attributable | upward evidence |
+| **D28** | **History follows the person** when they move group | the org graph |
+| **D29** | *POST-PILOT.* One identity, several memberships, cross-org sharing by **consent** | identity. Do not start |
+| **D32** | Suppression is **visible, within the viewer's own scope** | the Confidence Engine |
+| **D37** | Several nodes = the **union of memberships**, never of leaderships | scope composition |
+
+**Voice and capture**
+
+| | Decision | |
+|---|---|---|
+| **D23** | Numbers are never **composed into** leader text. Superseded in part by D26 | composers |
+| **D25** | **The model reads. The kernel writes.** One model call per inbound turn, zero for every card | cost, the agent |
+| **D30** | The deterministic voice is **one layer living in four homes**. `ai/voice.js` is the home | the composer |
+| **D34** | The voice is **a colleague who noticed** — not an instrument, not a coach | every sentence |
+| **D35** | **The conversation is the check-in.** No form. This promotes the curiosity stopping rule to a dependency | capture |
+
+**The laws these created** — `L-D15` · `L-D16` · `L-D19` · `L-D23` · `L-D26` · `L-D27` · `L-D29` ·
+`L-D32` · `L-D35` · `L-D37` · `L-OC1`. Each is stated inline with the decision that produced it.
+
 ---
 
 ## D1 · ONE HOME, FOR EVERYONE

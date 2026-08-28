@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `e23dd05`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `ba5e4d5`. **Branch:** `claude/platform-work-summary-nmb0cm`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
 ---
@@ -30,9 +30,9 @@
 | Do we need an ontology / graph DB? | `ttd/organisational-ontology-investigation.md` — **the answer is no** |
 | What does Falcon actually get? | `ttd/falcon-persona-rehearsal.md` |
 | **Who do we compete with, and what should we borrow?** | `ttd/competitive-landscape-and-borrows.md` |
-| **What has the founder decided?** | `ttd/founder-decisions-2026-08.md` — **binding**: one home, Focus works three ways, a human closes an inquiry, High and Low only |
+| **What has the founder decided?** | `ttd/founder-decisions-2026-08.md` — **binding, 37 decisions, indexed at the top.** Read the index, then only what your task touches. This is the store: nothing in it should ever be re-derived or re-asked |
 | **What does each layer do, and what is wrong?** | `ttd/layer-map.md` — **read this if you are unsure what is right** |
-| **What is duplicated, and what is hiding?** | `ttd/duplication-sweep.md` — 92 of 298 routes have no front-end caller |
+| **What is duplicated, and what is hiding?** | `ttd/duplication-sweep.md` — 89 of 298 routes have no front-end caller |
 | **What is home meant to look like?** | `ttd/object-as-conversation.md` — every object is a thread; **design, not yet built** |
 | **Who will know I said this?** | `ai/audience.js` — audience is a durable REFERENCE resolved at read time; `GET /api/evidence/:id/audience` answers it deterministically |
 | **What are we deliberately NOT deciding?** | `rnd/intelliq-rnd-program.md` — **non-authoritative; never a reason to build** |
@@ -50,10 +50,17 @@ outcome loop** · **the agent answering team questions at the team's grain** · 
 
 ### What is partial?
 
-**92 of 298 routes have no front-end caller** (`ttd/duplication-sweep.md` §B) · polarity is bucketed
-three ways under three names (`ttd/layer-map.md` §1) · `orgGroups` and `orgNodes` are two group
-models · Focus has two constructors · corrections do not reach already-emitted signals (**T-2**) ·
-Web governs a minority of scope call sites, measured by `scope-parity-smoke`.
+**89 of 298 routes have no front-end caller** (`ttd/duplication-sweep.md` §B; three were closed by
+the safeguarding and answerability screens) · **polarity is bucketed FIVE ways, not three** —
+`ai/diagnose.js:339` uses `strength / difficulty / condition / neutral`, two of which are not in the
+frozen `POLARITIES` list at all (`ttd/layer-map.md` §1) · the **deterministic voice** lives in four
+homes and is not recognised as one layer (**D30**) · `orgGroups` and `orgNodes` are two group
+models · Focus has two constructors · corrections do not reach already-emitted signals (**T-2**,
+now founder decision **D19**) · Web governs a minority of scope call sites, measured by
+`scope-parity-smoke`.
+
+**The nine-route action loop** (`propose · draft · approve · reject · execute · observe · evaluate`)
+is complete, tested and deliberately dark for the pilot — **D31**. It is not missing.
 
 ### What blocks Falcon?
 
@@ -70,28 +77,39 @@ Web governs a minority of scope call sites, measured by `scope-parity-smoke`.
 
 **What is actually left before the pilot:**
 
-| # | Thing | Where |
-|---|---|---|
-| 1 | The safeguarding lead has no screen — a routed flag nobody can see | `ttd/duplication-sweep.md` §B1 |
-| 2 | One polarity vocabulary; three exist | `ttd/layer-map.md` §1 |
-| 3 | Self Highs and Lows, derived | `ttd/object-as-conversation.md` §4 G2 |
-| 4 | The front end reflecting the object model | `ttd/object-as-conversation.md` |
-| 5 | Live database run, staging deploy, real users | needs Render |
+**D33 splits this list.** Anything protecting *"nothing breaks"* is pilot-blocking; everything else
+is better product, not a broken one.
+
+| # | Thing | Bar | Where |
+|---|---|---|---|
+| 1 | ~~Safeguarding lead has no screen~~ | — | **DONE** — `safeguarding-screen-smoke` |
+| 2 | ~~A person cannot see their own record~~ | — | **DONE** — `answerability-screen-smoke` |
+| 3 | ~~Leader surfaces strip performance figures~~ | — | **DONE** — D26, `primitive-number-disclosure-http-smoke` |
+| 4 | **One polarity vocabulary; FIVE exist** | product | `ttd/layer-map.md` §1 · prompt ready at `briefs/session-prompts.md` §22 |
+| 5 | **Withdrawal recomputes and tells (T-2)** | **BLOCKING** | founder decision **D19** |
+| 6 | **A finding about a leader must not be attributable** | **BLOCKING** | founder decision **D27** |
+| 7 | **The safeguarding exception stated before anyone speaks** | **BLOCKING** | **D21** — partly landed with the answerability screen |
+| 8 | The thread — `about` on the conversation store | product | `ttd/object-as-conversation.md` G1. **Five decisions depend on it** |
+| 9 | Self Highs and Lows, derived | product | `ttd/object-as-conversation.md` §4 G2 |
+| 10 | The front end reflecting the object model | product | `ttd/object-as-conversation.md`, **D24 — do it last** |
+| 11 | Live database run, staging deploy, real users | — | needs Render |
+
+**One thing does not exist and four decisions need it:** a record of **what was shown to whom**.
+D19, D27, D28 and the awkward half of D8/D17 all resolve to it. Build it once.
 
 ### What is the next code task?
 
-> **A screen for the safeguarding lead.** The backend is finished; the flag is routed to somebody
-> with nowhere to read it. Everything else on the list is a product improvement. This one is a
-> safety gap.
-
-The work order for it is written and ready to send: `briefs/session-prompts.md` **§19**.
+> **One polarity vocabulary.** Step 0 of the plan and a prerequisite for the thread, the buckets
+> and self Highs/Lows. The work order is written: `briefs/session-prompts.md` **§22**.
 
 ### Which founder decisions remain?
 
-**One.** `D-E2` — the quality floor for a cheap model, which needs a post-pilot benchmark.
+**Thirty-seven have been taken** — see `ttd/founder-decisions-2026-08.md`, indexed at the top.
 
-`D-W3` is **settled** by `ttd/founder-decisions-2026-08.md` D2: a Focus works three ways — self,
-invited and assigned — and anyone in the organisation may invite anyone into one.
+Still open: `D-E2`, the quality floor for a cheap model, which needs a post-pilot benchmark. Plus
+two flagged inside the record rather than settled: whether a leader sees a finding about themselves
+at the same moment their manager does (**D27**), and how to notify a person whose Low was parked
+while a coach was acting on it (**D8/D17**).
 
 ### What must NOT be built yet?
 
