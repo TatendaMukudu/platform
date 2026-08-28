@@ -616,6 +616,35 @@ const inq = (o = {}) => ({
   }
 
   server.close();
-  console.log(`\n  ${pass} passed, ${fail} failed\n`);
+  
+/* D30 — the team surface and home must say the SAME thing about the same object. Composing at
+   each caller is precisely how one concept came to read four different ways, so the projection
+   carries the kernel's sentences and the renderer adds none of its own. */
+{
+  const st = T.buildTeamState({
+    node: { nodeId: 'n1', name: 'U18s', memberCount: 12 },
+    inquiries: [{
+      inquiryId: 'i1', topic: { label: 'Attendance' }, hypothesis: 'exams are competing for time',
+      status: 'probable', confidence: { band: 'probable', score: 0.6 },
+      polarity: 'difficulty',
+      independentOrigins: 3, contributors: 6,
+      stillUnknown: ['Whether the players who dropped off are the ones sitting exams'],
+      falsifiers: ['If attendance stays low after exams finish'],
+      lastUpdatedAt: Date.now(),
+    }],
+    findings: [], focuses: [], now: Date.now(),
+  });
+  const surfaced = st.low || st.high;
+  ok('T-D30 a surfaced team claim carries the composed explanation, not raw fields alone',
+    !!(surfaced && surfaced.explained && surfaced.explained.claim));
+  ok('T-D30b it carries the provenance chip the kernel wrote',
+    !!(surfaced && surfaced.explained && /people/.test(surfaced.explained.provenance || '')));
+  ok('T-D30c it carries what would change our mind — the line no competitor can write',
+    !!(surfaced && surfaced.explained && (surfaced.explained.wouldChangeMyMind || []).length === 1));
+  ok('T-D30d no kernel band word reaches the composed text',
+    !!surfaced && !/\b(probable|supported|tentative)\b/.test(JSON.stringify(surfaced.explained)));
+}
+
+console.log(`\n  ${pass} passed, ${fail} failed\n`);
   process.exit(fail ? 1 : 0);
 })().catch(e => { console.error(e); process.exit(1); });

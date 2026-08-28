@@ -7133,9 +7133,19 @@ function _teamStateCard(s) {
       <div class="tstate-text">${esc(text)}${sub ? `<span class="tstate-sub">${esc(sub)}</span>` : ''}</div>
     </div>` : '';
 
-  const basis = b => b && b.independentOrigins
-    ? `${b.independentOrigins} independent ${b.independentOrigins === 1 ? 'account' : 'accounts'}`
-    : '';
+  /* The provenance chip, from the kernel (D30). It was assembled here from `basis` — which meant
+     the same evidence read one way on this card and another way on home. Now the sentence comes
+     composed and this falls back only for an older payload. */
+  const basis = (b, x) => (x && x.provenance) ? x.provenance
+    : (b && b.independentOrigins
+      ? `${b.independentOrigins} independent ${b.independentOrigins === 1 ? 'account' : 'accounts'}`
+      : '');
+
+  /* WHAT WOULD CHANGE OUR MIND, on the team card. One line, and the line no competitor can
+     write. Rendered only when the kernel produced one — an invented falsifier would be worse
+     than none, because it is a promise about how we would be corrected. */
+  const changeMind = x => (x && (x.wouldChangeMyMind || []).length)
+    ? `<div class="tstate-falsify">Would change our mind: ${esc(x.wouldChangeMyMind[0])}</div>` : '';
 
   // What was found but may not be said. Named by topic, never restated — a leader who knows
   // something is being held back can go and ask; a leader shown nothing concludes nothing is
@@ -7157,8 +7167,10 @@ function _teamStateCard(s) {
         <div class="tstate-name">${esc(s.node.name)}</div>
         <div class="tstate-count">${s.node.memberCount} ${_v(s.node.memberCount === 1 ? 'member' : 'members')}</div>
       </div>
-      ${line('High', s.high && (s.high.claim || s.high.about), basis(s.high && s.high.basis))}
-      ${line('Low', s.low && (s.low.claim || s.low.about), basis(s.low && s.low.basis))}
+      ${line('High', s.high && (s.high.claim || s.high.about), basis(s.high && s.high.basis, s.high && s.high.explained))}
+      ${changeMind(s.high && s.high.explained)}
+      ${line('Low', s.low && (s.low.claim || s.low.about), basis(s.low && s.low.basis, s.low && s.low.explained))}
+      ${changeMind(s.low && s.low.explained)}
       ${line('Inquiry', s.question && s.question.question, s.question && s.question.contested ? 'people describe this differently' : '')}
       ${line('Focus', focus && focus.text, focusSub)}
       ${withheld}

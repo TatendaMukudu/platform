@@ -54,6 +54,11 @@
    same provenance as everything else. Three values only — the third is not a hedge, it
    is the honest answer when someone genuinely does not know, and it is load-bearing:
    an inquiry nobody can call is an Inquiry, which is the correct place for it. */
+/* The ONE dependency, and it does not cost this module its purity: ai/voice.js imports nothing,
+   performs no IO, calls no model, and is deterministic. Composing here rather than at each caller
+   is what stops the same object reading differently on the team surface and on home. */
+const voice = require('./voice');
+
 const VALENCES = Object.freeze(['working_well', 'worth_attention', 'unsure']);
 
 /* Inquiry polarity, already a field on the inquiry object (ai/diagnose.js). */
@@ -388,6 +393,25 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
       // a group claim is entitled to know how much it rests on.
       basis: { independentOrigins: fit.origins, contributors: fit.contributors, of: memberCount },
       stillUnknown: _arr(inq.stillUnknown).slice(0, 3).map(u => _s(u, 300)),
+      /* THE COMPOSED EXPLANATION (D30). Composed here, beside the projection, so the team surface
+         and the lead question say the SAME thing about the same object — each surface phrasing it
+         itself is exactly how one concept came to read four different ways.
+
+         `banded: false` is deliberate and narrow: fitForSurface has already put these counts
+         through the two-sided floor, and this module already reports them in `basis`. The subject
+         is the GROUP, not a leader, so L-D27's banding rule is not the one that applies. A
+         leader-subject finding is §24's job and must not reuse this path. */
+      explained: voice.explainObject({
+        kind, label: _s((inq.topic && (inq.topic.label || inq.topic.canonicalConcept)) || '', 120),
+        claim: _s(inq.hypothesis, 300) || '',
+        band: fit.band,
+        independentOrigins: fit.origins, contributors: fit.contributors,
+        stillUnknown: _arr(inq.stillUnknown).slice(0, 3),
+        falsifiers: _arr(inq.falsifiers).slice(0, 3),
+        contested: inq.contested === true,
+        banded: false,
+        seed: _s(inq.inquiryId, 64),
+      }),
       lastUpdatedAt: _num(inq.lastUpdatedAt),
     };
   };

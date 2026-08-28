@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `ba5e4d5`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `d830aee`. **Branch:** `claude/platform-work-summary-nmb0cm`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
 ---
@@ -53,8 +53,9 @@ outcome loop** · **the agent answering team questions at the team's grain** · 
 **87 of 298 routes have no front-end caller** (`ttd/duplication-sweep.md` §B; three were closed by
 the safeguarding and answerability screens) · **polarity is bucketed FIVE ways, not three** —
 `ai/diagnose.js:339` uses `strength / difficulty / condition / neutral`, two of which are not in the
-frozen `POLARITIES` list at all (`ttd/layer-map.md` §1) · the **deterministic voice** lives in four
-homes and is not recognised as one layer (**D30**) · `orgGroups` and `orgNodes` are two group
+frozen `POLARITIES` list at all (`ttd/layer-map.md` §1) · the **deterministic voice** now has a home
+(`ai/voice.explainObject`, **D30**) but `ai/proactive.js`'s 30 message tables have not yet moved
+into it · `orgGroups` and `orgNodes` are two group
 models · Focus has two constructors · corrections do not reach already-emitted signals (**T-2**,
 now founder decision **D19**) · Web governs a minority of scope call sites, measured by
 `scope-parity-smoke`.
