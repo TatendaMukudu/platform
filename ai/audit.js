@@ -33,17 +33,23 @@ const ACTIONS = new Set([
   'erasure',         // a person's data was erased (Art 17)
   'belief_contest',  // a subject contested a belief held about them
   'outbound_delivery', // IntelliQ proactively reached a person off-platform (digest/alert)
+  'finding_view',    // a governed finding was emitted to a person (emission proxy, not a read receipt)
 ]);
 
 const _h = s => crypto.createHash('sha256').update(String(s)).digest('hex');
 const _clean = (v, max) => (v == null ? null : String(v).slice(0, max || 120));
+const _findingRef = v => {
+  const ref = _clean(v, 160);
+  return ref && /^[A-Za-z0-9:_-]+$/.test(ref) ? ref : null;
+};
 
 /* Build ONE normalized, content-free entry chained to the previous one. `prev` is the last
    entry in the log (or null for the first). Returns the entry to append; never mutates the
    log. `subjectIds` is the set of people whose data this access touched (deduped). */
-function record({ actor = null, action = '', subjectIds = [], basis = null, at = 0 } = {}, prev = null) {
+function record({ actor = null, action = '', subjectIds = [], findingRefs = [], basis = null, at = 0 } = {}, prev = null) {
   if (!ACTIONS.has(action)) return null;                       // allow-list guard — unknown actions are refused
   const subjects = [...new Set((Array.isArray(subjectIds) ? subjectIds : [subjectIds]).filter(Boolean).map(s => _clean(s, 80)))].sort();
+  const findings = [...new Set((Array.isArray(findingRefs) ? findingRefs : [findingRefs]).map(_findingRef).filter(Boolean))].sort();
   const seq = prev && Number.isFinite(prev.seq) ? prev.seq + 1 : 0;
   const prevHash = prev && prev.hash ? prev.hash : 'GENESIS';
   const body = {
@@ -51,6 +57,7 @@ function record({ actor = null, action = '', subjectIds = [], basis = null, at =
     actor: _clean(actor, 80),
     action,
     subjectIds: subjects,
+    findingRefs: findings,             // stable references only; never headline, basis, figure or prose
     basis: _clean(basis, 120),         // a short label ("scoped team read"), never content
     at: Number.isFinite(at) ? at : 0,
   };
@@ -92,9 +99,15 @@ function actorTrail(log, actor) {
    Returns { ok, brokenAt } — the seq of the first entry whose hash doesn't reproduce (a
    tamper), or ok:true if the whole trail is intact. This is the tamper-evidence guarantee. */
 function verify(log) {
-  let prevHash = 'GENESIS';
+  // A bounded log may have deliberately forgotten its oldest prefix. The first retained
+  // prevHash is therefore the chain anchor; every retained body remains tamper-evident.
+  let prevHash = log && log.length ? (log[0].prevHash || 'GENESIS') : 'GENESIS';
   for (const e of (log || [])) {
-    const body = { seq: e.seq, actor: e.actor, action: e.action, subjectIds: e.subjectIds, basis: e.basis, at: e.at };
+    const body = { seq: e.seq, actor: e.actor, action: e.action, subjectIds: e.subjectIds };
+    // Legacy entries predate findingRefs. Preserve their historical hash while chaining the
+    // new field into every entry that actually carries it.
+    if (Array.isArray(e.findingRefs)) body.findingRefs = e.findingRefs;
+    Object.assign(body, { basis: e.basis, at: e.at });
     const expect = _h(prevHash + '|' + JSON.stringify(body));
     if (e.prevHash !== prevHash || e.hash !== expect) return { ok: false, brokenAt: e.seq };
     prevHash = e.hash;

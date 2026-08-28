@@ -3043,7 +3043,7 @@ app.get('/api/intelligence/watch', requireAuth, (req, res) => {
   if (!_isLeader(code, userId)) return res.status(403).json({ error: 'Leaders only' });
   const ids = getVisibleUserIds(code, userId).filter(id => id !== userId);
   const now = Date.now();
-  const emerging = [], attention = [], rising = [];
+  const emerging = [], attention = [], rising = [], emittedFindings = [];
   ids.forEach(id => {
     const u = orgUsers[code]?.[id];
     if (!u || u.role === 'superadmin') return;
@@ -3052,6 +3052,7 @@ app.get('/api/intelligence/watch', requireAuth, (req, res) => {
     if (!findings.length) return;
     const item = intel.composeBriefingItem(m, findings, {}, { audience: 'leader' });
     if (!item) return;
+    emittedFindings.push(item);
     /* SAME LEADER RULES AS THE BRIEFING. Found by a browser pass, a month before the pilot:
        this row shipped `careFlag` and raw deviation percentages straight to a coach's screen,
        because the corrections that cleaned the briefing were applied to
@@ -3071,7 +3072,11 @@ app.get('/api/intelligence/watch', requireAuth, (req, res) => {
     else if (item.severity === 'high') attention.push(row);
     else emerging.push(row);
   });
-  res.json({ ok: true, scanned: ids.length, emerging: emerging.slice(0, 8), attention: attention.slice(0, 8), rising: rising.slice(0, 6) });
+  const response = { ok: true, scanned: ids.length, emerging: emerging.slice(0, 8), attention: attention.slice(0, 8), rising: rising.slice(0, 6) };
+  const emittedIds = new Set([...response.emerging, ...response.attention, ...response.rising].map(row => `${row.memberId}:${row.patternType}`));
+  const audited = emittedFindings.filter(item => emittedIds.has(`${item.memberId}:${item.patternType}`));
+  _auditFindingEmission(code, userId, audited, audited.map(item => item.memberId), 'leader intelligence watch');
+  res.json(response);
 });
 
 /* A person's recurring strengths, pulled from their assessment signals — the
@@ -3437,6 +3442,7 @@ app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
     } catch (_) { out = null; }
   }
   const d = (out && out.title) ? out : fallback;
+  if (item) _auditFindingEmission(code, userId, [item], [memberId], 'leader prepared action');
   res.json({
     ok: true, aiUsed: !!(out && out.title), memberId, memberName: subject.name || '',
     draft: {
@@ -4296,6 +4302,8 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
   const cacheKey = `${code}:${userId}`;
   const cached = intelBriefingCache[cacheKey];
   if (cached && req.query.refresh !== '1' && Date.now() - cached.ts < BRIEFING_TTL) {
+    _auditFindingEmission(code, userId, cached.data.items || [],
+      (cached.data.items || []).map(item => item.memberId).filter(Boolean), 'leader intelligence briefing');
     return res.json({ ...cached.data, cached: true });
   }
 
@@ -4388,6 +4396,8 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
   // while outcome/capability/participation/load/resource figures remain visible under D26.
   // Raw evidence and private-context side channels are still removed for every primitive.
   data = _sanitizeBriefingForLeader(data);
+  _auditFindingEmission(code, userId, data.items || [],
+    (data.items || []).map(item => item.memberId).filter(Boolean), 'leader intelligence briefing');
   intelBriefingCache[cacheKey] = { data, ts: Date.now() };
   res.json(data);
 });
@@ -4617,6 +4627,8 @@ function _proactiveInsights(code, viewerId, opts = {}) {
 app.get('/api/proactive/insights', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const out = _proactiveInsights(code, userId, { audience: 'self' });
+  const emitted = Object.values(out.groups || {}).flatMap(group => group.insights || []);
+  _auditFindingEmission(code, userId, emitted, [userId], 'personal insight surface');
   res.json({ ok: true, ...out });
 });
 
@@ -4630,6 +4642,8 @@ app.get('/api/assistant/opening', requireAuth, (req, res) => {
   const grouped = _proactiveInsights(code, userId, { audience: 'self' });
   const user = orgUsers[code]?.[userId];
   const opening = behaviour.opening(grouped, { audience: 'self', name: user?.name, now: Date.now() });
+  const emitted = Object.values(grouped.groups || {}).flatMap(group => group.insights || []);
+  _auditFindingEmission(code, userId, emitted, [userId], 'personal assistant opening');
   res.json({ ok: true, opening, empty: grouped.empty });
 });
 
@@ -4643,6 +4657,8 @@ app.get('/api/proactive/insights/leader/:subjectId', requireAuth, (req, res) => 
     && (_userHasPerm(code, userId, 'view_insights') || _userHasPerm(code, userId, 'review_checkins'));
   if (!canSupport) return res.status(403).json({ error: 'Not authorised to support this member.' });
   const out = _proactiveInsights(code, userId, { audience: 'leader', subjectId });
+  const emitted = Object.values(out.groups || {}).flatMap(group => group.insights || []);
+  _auditFindingEmission(code, userId, emitted, [subjectId], 'leader personal insight surface');
   res.json({ ok: true, ...out });
 });
 
@@ -4871,6 +4887,7 @@ app.get('/api/me/context', requireAuth, async (req, res) => {
     .sort((a, b) => new Date(b.ts) - new Date(a.ts)).slice(0, 3)
     .map(s => ({ text: s.valueText || 'recognised your work', by: s.data.byName || 'Someone on your team', date: s.ts }));
 
+  _auditFindingEmission(code, userId, _attInsights, [userId], 'personal context surface');
   res.json({
     ok: true, name: me.name, greeting, opening, ask, returning, quietDays, newSince, noticed, questions, prepared, focuses, recognitions,
     understanding: agents.personModel.understanding(mem.model),
@@ -10056,6 +10073,27 @@ function _audit(code, fields) {
   } catch (e) { console.warn('[audit] record failed:', e && e.message); }
 }
 
+/* Record that governed findings reached an API response. This is an EMISSION receipt, not
+   proof that a human read the screen. References are stable identities/dedupe keys only; the
+   audit boundary rejects prose, so the durable trail remains content-free after erasure. */
+function _findingRef(item) {
+  if (!item || typeof item !== 'object') return null;
+  if (item.id) return String(item.id);
+  if (item.dedupeKey) return String(item.dedupeKey);
+  if (item.beliefId) return `belief:${item.beliefId}`;
+  const subject = item.memberId || item.subjectId;
+  const kind = item.patternType || item.type;
+  return subject && kind ? `finding:${subject}:${kind}` : null;
+}
+function _findingRefs(items) {
+  return [...new Set((items || []).map(_findingRef).filter(Boolean))].sort();
+}
+function _auditFindingEmission(code, actor, items, subjectIds, basis) {
+  const findingRefs = _findingRefs(items);
+  if (!findingRefs.length) return;
+  _audit(code, { actor, action: 'finding_view', subjectIds, findingRefs, basis });
+}
+
 function _orgPack(code) {
   const cfg = orgStateConfig[code];
   if (cfg && cfg.pack) return cfg.pack;
@@ -14835,19 +14873,21 @@ app.get('/api/brief', requireAuth, async (req, res) => {
     const now = Date.now();
     const level = _actorLevel(code, userId);
     const practices = (orgPlaybook[code] || []).filter(e => e.status === 'active' && e.statement).slice(0, 3).map(e => e.statement);
-    let reads = [], routeTo = null, rollupHeadline = null, areaLabel = _orgAskAreaLabel(code, userId);
+    let reads = [], emittedFindings = [], routeTo = null, rollupHeadline = null, areaLabel = _orgAskAreaLabel(code, userId);
 
     if (level === 'leader') {
       // SCOPE: the leader's own scoped agenda (a sibling branch never appears).
       const { agenda } = _reasonScopedAgenda(code, userId, now, false);
+      emittedFindings = agenda.filter(a => a.readiness === 'ripe');
       reads = agenda.filter(a => a.readiness === 'ripe').map(a => ({ text: a.claim, meta: a.confidence, polarity: a.polarity }));
       // AGGREGATE: an honest headline composed from the beliefs already present (no new read).
       const prog = reads.filter(r => r.polarity === 'progress').length, risk = reads.filter(r => r.polarity === 'risk').length;
       if (prog > 0 && prog >= risk) rollupHeadline = `${areaLabel} has had a good week`;
     } else {
       // SCOPE: the member's OWN reads about themselves (their own evidence), never others'.
-      reads = (reasonLedger[code] || [])
-        .filter(b => b.subjectId === userId && !b.shared && _reasonReadableBelief(b, now))
+      emittedFindings = (reasonLedger[code] || [])
+        .filter(b => b.subjectId === userId && !b.shared && _reasonReadableBelief(b, now));
+      reads = emittedFindings
         .map(b => { const v = reason.subjectView(b); return { text: _reasonDisclosureText(v.claim, b), meta: v.confidence, polarity: b.polarity }; });
       // ROUTE: who this member can turn to.
       const rt = _orgAskRouteLeader(code, userId);
@@ -14876,6 +14916,8 @@ app.get('/api/brief', requireAuth, async (req, res) => {
     const opening = level === 'leader'
       ? voice.leaderOpening({ name, timeOfDay, count: reads.length, rollupHeadline, areaLabel, seed: userId + level })
       : voice.memberOpening({ name, timeOfDay, count: reads.length, seed: userId + level });
+    _auditFindingEmission(code, userId, emittedFindings,
+      emittedFindings.map(item => item.subjectId).filter(Boolean), level === 'leader' ? 'leader brief' : 'personal brief');
     res.json({ ok: true, level, opening, items: composed.items, offers: composed.offers, applied: composed.applied || [] });
   } catch (e) {
     console.warn('[brief] failed:', e && e.message);
