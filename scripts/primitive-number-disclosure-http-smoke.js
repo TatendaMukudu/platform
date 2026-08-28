@@ -61,10 +61,10 @@ const server = S.app.listen(0, async () => {
     const body = await response.json();
     const stateItem = (body.items || []).find(item => item.memberId === 'state');
     const capabilityItem = (body.items || []).find(item => item.memberId === 'cap');
-    check('D26-1 a member state figure never reaches the leader response',
+    check('D26-1 a member state figure never reaches the leader briefing response',
       response.status === 200 && stateItem && stateItem.fingerprint === undefined &&
       !/\b\d+(?:\.\d+)?\s*\/\s*5\b/.test(JSON.stringify(stateItem)));
-    check('D26-2 a member capability percentage survives the same leader response',
+    check('D26-2 a member capability percentage survives the same leader briefing response',
       response.status === 200 && capabilityItem && /Pass completion[^.]*83%/.test(capabilityItem.whyNow || ''));
   } catch (error) {
     failed++; console.log('  FAIL HTTP suite threw:', error && error.message);
