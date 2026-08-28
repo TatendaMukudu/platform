@@ -11,7 +11,7 @@ an agent finding it inconvenient.
 
 ---
 
-## THE INDEX — forty-four decisions, one line each
+## THE INDEX — forty-eight decisions, one line each
 
 **The shape of the product**
 
@@ -79,6 +79,10 @@ an agent finding it inconvenient.
 | **D42** | The superadmin is authoritative about **intent**, never about anyone's experience. Two hats, never merged | authority, org context |
 | **D43** | A node lead has **full lifecycle inside their own branch** — move, invite, remove | permissions |
 | **D44** | An onboarding answer is context **and** evidence **and** a frontier seed. One claim, one timestamp | intake |
+| **D45** | **Speech is not evidence until contributed.** `ai/forum.js`'s rule holds everywhere | forum, focus rooms |
+| **D46** | Intent changes by **supersession**; inquiries on the old goal are flagged, never closed | org context |
+| **D47** | A branch sets its own **route**, never its own **destination**. Comparison stays aggregate | node intent |
+| **D48** | **Maturity is an outcome, not a display filter.** Priority decides what shows; watch the maturity RATE | Home, the pilot metric |
 | **D40** | On leaving: their record goes, the team's history stays and **recomputes** | deletion |
 | **D41** | **Nothing extra is refused.** IntelliQ hears anything, reasons about work, performance and wellbeing | the agent |
 
@@ -1513,7 +1517,160 @@ neither of them is fabricated.
 
 ---
 
-## WHAT THESE FORTY-FOUR CHANGE ABOUT THE PLAN
+## D45 · SPEECH IS NOT EVIDENCE UNTIL SOMEBODY CONTRIBUTES IT
+
+The founder asked for my recommendation, having said: *"You could accumulate some great evidence in
+forums. That's the point of them — to incite better evidence for us as well as the org. It only
+makes our algo stronger."*
+
+**Decision: `ai/forum.js`'s rule holds, everywhere.** Speech in a shared thread is speech. It
+becomes evidence when a person **deliberately contributes it** through the existing boundary
+(`ai/contribution.js`).
+
+**This does not cost the founder what they wanted.** Deliberate contribution *is* the mechanism by
+which forum speech becomes evidence. The rule is not *forums produce nothing*; it is *the person
+decides which of their words count*. The way to get more good evidence out of a forum is to make
+contributing a first-class, obvious act inside the thread — not to remove the boundary.
+
+### The decisive argument is statistical
+
+**A forum is the most correlated environment in the product.** Everyone hears everyone. Confidence
+here rests on `MIN_INDEPENDENT_ORIGINS` and the **`ECHO` verdict**, which exist to refuse counting
+one conversation as several.
+
+> Ten people agreeing in a thread is **one** conversation, not ten independent origins.
+
+Auto-ingesting forum speech would manufacture corroboration exactly where independence is weakest,
+and confidence would rise fastest precisely when it should rise slowest. That is the single most
+dangerous failure available to a system whose whole confidence model is origin counting.
+
+**A second reason, about trust rather than statistics:** in deliberation people think out loud,
+argue positions they do not hold, and change their mind mid-thread. Recording all of it as evidence
+files abandoned positions as though they were held — and people who learn that will stop
+deliberating honestly.
+
+### What this settles about D14 and D15
+
+- **D15 is narrowed and made precise.** *Contributed* words from a shared focus are org-admissible
+  and never quoted outside the participant set. Uncontributed speech is not admissible at all.
+- **D14's room focus is mostly already built.** `ai/forum.js` is many people, one thread, bound to
+  an inquiry, with the evidence boundary already correct. The room focus is forum threads bound to
+  a **focus** as well as to an inquiry.
+- `ai/forum.js`'s guarantee is structural rather than a rule anyone must remember — the module
+  *contains no reference to evidence, confidence, origins or hypotheses, and so cannot produce
+  any*. That property must survive this work.
+
+---
+
+## D46 · A CHANGE OF INTENT FLAGS INQUIRIES, IT NEVER CLOSES THEM
+
+**Decision:** when the organisation's declared intent changes, inquiries that rested on the old
+goal are **marked** — *this rested on a goal that has changed* — and a person decides.
+
+**Consistent with D3 and D9:** only a human closes an inquiry. A goal changing is not a person
+deciding a question is answered, and auto-closing on it would be the system concluding by the back
+door for the second time.
+
+### And the change of intent is itself evidence
+
+**Intent changes by supersession, never by overwrite.** `orgValues`, `orgGoals`, `orgMetrics` and
+`orgProfile` (summary, environment, success definition, desired traits) exist today as plain
+objects — a change would silently overwrite them.
+
+That would corrupt history. Every finding produced under the old goal was **correct at the time**;
+overwrite the goal and those findings look like errors. Supersede it and three things hold:
+
+- old findings stay correct-as-of,
+- the timeline shows *the organisation changed direction on this date*,
+- and **"we changed our approach in March" becomes an organisational fact IntelliQ can reason
+  about** — which is exactly the kind of truth this system exists to hold.
+
+`supersede()` already exists in `ai/diagnose.js` and does this for signals. Same mechanism, new
+subject.
+
+---
+
+## D47 · A BRANCH SETS ITS OWN ROUTE, NOT ITS OWN DESTINATION
+
+The founder was torn between *narrowing only* and *freely*, and the reasoning produced a better
+answer than either option offered:
+
+> *"In some orgs it's that freedom that incites creativity. We're not here to align an org — maybe
+> over time — but to use strengths and narrow weaknesses in order to reach those goals and the
+> frame the org wants to move in. Hervey House and George Grey House at Falcon can have completely
+> different outlooks on how to converge onto the same goal."*
+
+**Decision: different routes, one destination.**
+
+| | Who declares it |
+|---|---|
+| **Ends** — what the organisation is for, what success means | **The superadmin.** The frame, per D42. A branch may not contradict it |
+| **Route** — how this squad, house or department gets there; what it emphasises; how it works | **The node lead, freely.** Divergence in method is not an error |
+
+**Why this is better than "narrowing only".** Narrowing would have forced every branch's approach to
+be a subset of the org's, which is precisely the alignment the founder says we are not here to
+impose. A house's different outlook is a strength to be used, not a deviation to be corrected.
+
+**Why it is better than "freely".** Unrestricted branch intent makes *"compared to what"*
+ambiguous for anybody in two branches (D37) and leaves nothing common for divergence to be
+measured against. One destination keeps the comparison meaningful.
+
+### What this makes possible, and the limit on it
+
+Two branches pursuing the same end by different routes is the ideal comparative case: **which
+approach is working**. That is real organisational learning and it is what the founder is
+describing.
+
+> L-D47 · Comparison between branches is **aggregate only**. `ttd/peer-web-semantics.md` already
+> settled this: peers grant *aggregate eligibility* and are structurally incapable of reaching
+> evidence — *"peer awareness does not equal peer person-level disclosure."* Comparing two houses'
+> approaches must never become comparing two houses' people.
+
+---
+
+## D48 · MATURITY IS AN OUTCOME, NOT A DISPLAY FILTER
+
+The founder's correction, and it changes what "inquiry maturity" means:
+
+> *"I don't think count matters. The most high-priority inquiries show up even if they are
+> premature — and that's what insights maturity: when they are proved right or wrong, and it
+> changes or affirms the direction we are looking in."*
+
+**Decision, in three parts:**
+
+**1 · Premature is not a reason to hide something.** Priority decides what surfaces (D13). A
+tentative inquiry that matters more than a supported one goes above it. Maturity is not a
+qualification for being shown.
+
+**2 · Maturity is what happens *to* a surfaced inquiry** — it is proved right or wrong, and the
+direction is affirmed or changed. It is an outcome observed after the fact, not a gate applied
+beforehand.
+
+**3 · The number on screen is a real product constraint**, and the founder named the failure:
+
+> *"They probably get annoying if someone sees 20 on the screen every day — that chases users away
+> if there's too many at one go for Highs, Lows, inquiries and focuses."*
+
+**D1 already solves this and the connection is worth making explicit.** Home is **one** thing — the
+single most-needing-an-answer question — with the composer under it and nothing else above the
+fold. The buckets hold the rest, each a ranked feed a person chooses to open. Nobody is shown
+twenty of anything; they are shown one, and can go looking for more.
+
+`diagnose.boundFrontier` already caps the active frontier (default 6) and parks the remainder with
+a reason — which D10 makes visible. So the mechanism exists; what D48 settles is that the cap is a
+**display and attention** decision, never an epistemic one. **Nothing is suppressed for being
+immature, and nothing is promoted for being mature.**
+
+### What we watch during the pilot
+
+**The maturity rate, not the count** — what proportion of surfaced inquiries reach a resolution
+that affirms or changes direction. Raw counts fall for a stable organisation and rise for a
+changing one, so the count alone misleads in exactly the case that matters most. Under D33 this is
+the best available evidence for bar two: that the algorithm is doing the right thing.
+
+---
+
+## WHAT THESE FORTY-EIGHT CHANGE ABOUT THE PLAN
 
 The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one insertion.
 
