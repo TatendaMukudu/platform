@@ -32,6 +32,12 @@ Three separate modules bucket that same field, and each names its buckets differ
 | `ai/behaviour.js` | risk, neutral → one bucket; progress, milestone → another; opportunity → a third | **Needs attention · Worth celebrating · Opportunities** |
 | `ai/scoped-intelligence-packet.js` | risk, friction → one; progress, strength, milestone, opportunity → another | **needs_attention · working_well** |
 | `ai/team-state.js` | worth_attention → Low; working_well → High | **High · Low** |
+| `ai/process-reflection.js` · `ai/process-observations.js` | a fourth producer, not a fourth bucketing: it **emits** `strength` and `friction` for routines, handoffs and rituals | **strength · friction** |
+
+**Note added after the founder interview:** `strength` and `friction` are absent from
+`PATTERN_POLARITY` (`ai/proactive.js:37`) because that table covers *person* patterns only. They
+are alive and load-bearing in the process layer. Anyone auditing polarity from `PATTERN_POLARITY`
+alone will conclude they are dead values. They are not.
 
 So:
 
@@ -145,11 +151,22 @@ Three things. All of them are in L6 and L10.
 
 1. **Three vocabularies for one polarity.** Pick one. `High` and `Low` are the founder's words and
    the product's words; the others should become aliases of them, not parallel systems.
+   **SETTLED — `ttd/founder-decisions-2026-08.md` D4.**
 2. **`opportunity` has no agreed home.** Its own bucket in one module, a High in another, absent
-   from the third. Decide once.
+   from the third. Decide once. **SETTLED — D4: it folds into High.**
 3. **The front end does not reflect the object model.** The backend has Inquiry, Focus, High, Low
    at two grains. The front end has Today, Team, and a scatter of cards. That gap is the whole of
-   `docs/ttd/object-as-conversation.md`.
+   `docs/ttd/object-as-conversation.md`. **Now also governed by D7: one bucket surface taking a
+   scope, not one surface per role.**
+
+**The full bucketing table, after D4 through D7 — this is the single source for L6:**
+
+| Polarity | Bucket |
+|---|---|
+| `risk`, `friction` | **Low** |
+| `progress`, `milestone`, `opportunity`, `strength` | **High** |
+| `neutral` | **neither** — visible in the feed, counted in no bucket (D5) |
+| `data_gap` (by pattern name, whatever its polarity) | **neither** — it is our gap, not theirs (D6) |
 
 ---
 
