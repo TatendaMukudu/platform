@@ -692,8 +692,12 @@ and **covered** by the two layers that never needed a baseline.
 
 ## D23 · NUMBERS ARE NEVER COMPOSED INTO LEADER TEXT
 
-**Decision:** leader-facing composition is not given a member's raw numbers in the first place.
-`_stripLeaderNumbers` stays, as a backstop, and stops being the boundary.
+> **SUPERSEDED IN PART BY D26.** The mechanism below stands — the boundary moves to the composer.
+> **Which** numbers it applies to was wrong, and D26 corrects it: the primitive decides, not the
+> digit. Read D26 before acting on this.
+
+**Decision:** leader-facing composition is not given a member's **protected** numbers in the first
+place. `_stripLeaderNumbers` stays, as a backstop, and stops being the boundary.
 
 **Why the current arrangement failed.** `_stripLeaderNumbers` (`server.js:4208`) is a regex over an
 already-composed sentence — it deletes `(100%)`, `2.1/5`, `83%`. It can only remove what it
@@ -774,7 +778,159 @@ so nobody quietly reverses it by adding a model call to a card renderer.
 
 ---
 
-## WHAT THESE TWENTY-FIVE CHANGE ABOUT THE PLAN
+## D26 · THE PRIMITIVE DECIDES, NOT THE DIGIT
+
+The founder challenged D23 and was right:
+
+> *"What if those numbers are stats or sales or something? It can't output them? And remember we
+> will encounter many organisations which will prioritise performance — because wellbeing doesn't
+> win you games. It helps."*
+
+**Decision:** a leader may see the figure for `outcome`, `capability`, `participation`, `load` and
+`resource`. Only `state` (wellbeing) and `relational` (connection) become direction words.
+
+> L-D26 · What protects a number is the **primitive it was captured under**, never the fact that
+> it is a number. Goals, sales, attendance, minutes and budget are the job. Mood and connection
+> are not.
+
+### This is a live defect, not a hypothetical
+
+`_stripLeaderNumbers` (`server.js:4208`) removes **any** percentage:
+
+```js
+.replace(/\b\d+(?:\.\d+)?\s*%/g, '')    // "83%"
+```
+
+It cannot distinguish `2.1/5 mood` from `83% pass completion`, so it deletes both. It is applied
+to `summary`, `whyNow`, `recommendedAction`, `learnedNote` and every `connections[].basis` — so
+**every leader surface in the product is already stripping legitimate performance data today.**
+A coach reading "pass completion is at" is looking at this bug.
+
+### What this does to the positioning, said plainly
+
+**IntelliQ is not a wellbeing product that tolerates performance.** It is a performance system
+whose distinctive claim is that it handles the private layer correctly. The founder's sentence is
+the market truth: *wellbeing doesn't win you games — it helps.* An organisation buying this is
+buying better decisions about performance; the reason it can be trusted with the private half is
+the moat, not the pitch.
+
+**A product that redacted a striker's conversion rate from their own coach would be broken**, and
+we would have shipped it.
+
+### What it requires
+
+The composers need the primitive alongside the value, which L3 already attaches
+(`ai/primitives.js` tags every measurement with its primitive and its direction). The gate becomes
+`primitive === 'state' || primitive === 'relational'` at composition time, and
+`_stripLeaderNumbers` narrows to those two paths as a backstop rather than running over every
+leader-facing string.
+
+**Unchanged:** an aggregate `state` figure over a cohort that satisfies the two-sided floor is a
+different object from one person's mood, and the floor already governs it.
+
+---
+
+## D27 · A LEADER IS A SUBJECT, UNDER THE SAME FLOOR AS EVERYONE
+
+**Decision:** a member's words may become evidence about a leader. A claim about a leader surfaces
+only once the two-sided cohort floor is satisfied — the same floor that protects everybody.
+
+**Why this is the symmetrical answer and not the risky one.** The alternative — leaders are never
+subjects — means the system is structurally incapable of noticing that the problem is the coach.
+That is not neutrality; it is a designed blind spot, and every organisation that has ever needed
+this product has had one.
+
+**What already protects it, with nothing new built:**
+
+- **The two-sided floor** (`MIN_COHORT = 5`): one annoyed player is never a finding, and neither
+  is all-but-five agreeing.
+- **Origin counting, not contributor counting.** `MIN_INDEPENDENT_ORIGINS` and the `ECHO` verdict
+  already refuse to treat one person saying the same thing three times, or three people
+  paraphrasing one conversation, as independent corroboration. Without this, a single loud voice
+  would manufacture a finding about their coach.
+
+**The new obligation, and it is the whole risk of D27:**
+
+> L-D27 · A finding about a leader must never be attributable to the people who contributed to it.
+> Not by name, not by count small enough to identify, not by phrasing that reveals who spoke.
+
+Retaliation is the failure mode. The floor makes the finding statistical; the projection layer
+must keep it that way. **Where does it go?** To that leader's own leader, and to the leader
+themselves — not to their team, which would hand them the list of who to ask.
+
+**Open, and flagged rather than decided:** whether a leader sees a finding about themselves at the
+same moment their manager does. That is a fairness question, not an architecture one.
+
+---
+
+## D28 · HISTORY FOLLOWS THE PERSON
+
+**Decision:** when someone moves group — under-16s to under-18s, one department to another — their
+baseline, patterns and threads move with them. **It is their record, not the group's.** What
+changes is who may see it: the old leader loses access, the new leader gains it, from the moment
+of the move.
+
+**Why this is right and not merely convenient.** A baseline is *this person's own normal*. Reset it
+and you have thrown away the only thing that makes a deviation meaningful — and you re-trigger the
+two-week cold start (D22) on somebody who has been in the organisation for two years.
+
+**Most of this already works.** `ai/audience.js` resolves audience as a **reference** — `{ kind,
+nodeId }` resolved at read time, never a stored list. So a person changing node changes what
+resolves, automatically, with no migration. The design anticipated this.
+
+**What does not work, and it is D19 again.** The old leader loses *access* the moment the move
+happens. They do not lose what they were *shown* last week. Nothing in the system remembers that a
+card was delivered, so nothing can be reconciled after a move. The same missing record of delivery
+blocks D19, D27's retaliation guard and this.
+
+**Stated honestly:** access ends at the boundary; memory does not, and no software fixes that. What
+we owe is that the system stops feeding it, immediately, which the audience reference already does.
+
+---
+
+## D29 · ONE PERSON, SEVERAL MEMBERSHIPS — AND SHARING IS THE PERSON'S TO GIVE
+
+**Decision:** a person is one identity with separate memberships. Each organisation sees only its
+own evidence. **The person may choose to let one organisation see something from another**, and
+nobody else may make that choice for them.
+
+**What stands in the way, precisely.** `emailIndex` (`server.js:1151`) maps one lowercase email to
+exactly one `{ orgCode, userId }`, it is rebuilt from `orgUsers` at startup, and registration
+rejects a duplicate outright: *"An account with this email already exists."* A player at a club who
+is also at a school **cannot currently exist**. That is not an oversight — it is tenant isolation
+enforced at the identity layer.
+
+### This is the one decision that touches a law, and it must be built as an exception
+
+Tenant isolation is a constitutional invariant. D29 does not repeal it:
+
+> L-D29 · Cross-organisation visibility is a **narrow, explicit, person-initiated, revocable
+> grant** over named evidence. It is never a widening of the tenant boundary, never a default,
+> never inheritable, and never grantable by an administrator of either organisation.
+
+Three properties that follow, none negotiable:
+
+- **The grant is a reference, resolved at read time** — the same shape as every audience in the
+  system, so revoking it takes effect immediately and everywhere.
+- **It narrows, never grants.** A grant may expose evidence the receiving org could otherwise not
+  see; it may never expose evidence the *granting* org holds about **other people**.
+- **Both sides are told.** A school seeing something from a club must know it came from a club,
+  and the club must know it was shared.
+
+### Sequencing, stated so nobody starts it early
+
+**POST-PILOT.** The membership split alone touches identity, registration, session, the email
+index and every `orgCode`-keyed store in the system — and the consent surface on top of it is the
+first disclosure mechanism that crosses a tenant boundary. The pilot does not need it. Doing it
+badly under time pressure would compromise the one property the product cannot lose.
+
+**What the pilot should do instead:** nothing, and know why. If a pilot participant is genuinely in
+two organisations, they hold two accounts, and we write that down as a known limitation rather than
+rushing the fix.
+
+---
+
+## WHAT THESE TWENTY-NINE CHANGE ABOUT THE PLAN
 
 The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one insertion.
 
@@ -794,8 +950,18 @@ The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one i
 | 11 | **The answerability screen — your record, your audiences, the safeguarding exception** | **D18 and D21.** Wiring, not building: `/api/me/data`, `/api/me/export`, `/api/me/audiences` all exist with no caller |
 | 12 | **Withdrawal recomputes, and whoever saw the old picture is told** | **D19 — closes T-2, and the most expensive item here.** Needs a record of what was shown to whom, which does not exist |
 | 13 | **Import, so the pilot does not start at zero** | **D22.** `/api/signals/import` and `/api/signals/import-csv` exist and are orphaned. The single largest cold-start lever, and it is wiring |
-| 14 | **Numbers never composed into leader text** | **D23.** A pass over the leader-facing composers, plus a per-surface assertion over the real HTTP response |
+| 14 | **The primitive decides which numbers a leader sees** | **D23 as corrected by D26 — and this one is a live defect, not new work.** Performance figures are being stripped from leader surfaces today |
 | 15 | **`js/app.js` absorbs `js/member-view.js`** | **D24.** Largest change on the plan, no halfway point, and it must come LAST — after the object model stops moving |
+| 16 | Leaders as subjects, under the floor | **D27.** The floor and origin counting already exist; the projection guard against attribution does not |
+| — | **POST-PILOT: one identity, several memberships, cross-org consent** | **D29.** Touches tenant isolation. Explicitly not pilot work, and not to be started early |
+
+### The single thread running through the unbuilt half
+
+**A record of what was shown to whom does not exist**, and four separate decisions need it:
+**D19** (tell whoever saw a finding that changed), **D27** (never attribute a finding about a
+leader), **D28** (reconcile after a person moves group), and the awkward half of **D8/D17**
+(something you acted on has been parked). Building it once serves all four. Building it four times
+is how this repository got three polarity vocabularies.
 
 **D2 is the one to be careful with.** It introduces the first object whose audience is a set of
 people rather than a node, and the first `ai/audience.js` kind that does not resolve through
