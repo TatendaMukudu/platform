@@ -224,6 +224,107 @@ Never a mark on a person.
 
 ---
 
+## 6c · THE SCREENS
+
+Mobile-first, one column, text-first. No cards inside cards, no side panels, no tabs within tabs.
+One accent colour. If a screen needs a scrollbar to make sense, it is wrong.
+
+### Home — one object, one composer, one trust link
+
+```
+  ≡                              Tatenda
+
+  Evening, Tatenda.                          <- ai/voice.js greeting
+
+  Attendance in the U18s has dropped         <- the single highest-priority object,
+  from its usual. I think exams are             any kind (D13, D48)
+  competing for time.
+
+  Fairly confident — three people,           <- confidence.because, as English
+  two independent sources, four weeks
+
+  Open >
+
+  +--------------------------------------+
+  |  Ask IntelliQ anything…         [->] |
+  +--------------------------------------+
+
+  Who can see what I say here?             <- GET /api/evidence/:id/audience
+```
+
+### Nav — names, NO COUNT BADGES
+
+```
+  Inquiries · Focuses · Highs · Lows
+  ----------------------------------
+  My data & privacy
+```
+
+A badge reading "12 Lows" builds the same inbox anxiety as twenty cards on a screen, in miniature
+(founder, D48). Names only.
+
+### A bucket — live first, then parked WITH THE REASON
+
+```
+  Lows
+
+  [ Attendance is below its usual · Fairly confident ]
+  [ The Monday handoff keeps costing the team time · Emerging ]
+
+  Set aside for now
+  [ Sleep is down from your normal ·
+    "other open questions would tell us more right now" ]
+```
+
+That parked reason is `boundFrontier`'s `parkedBecause`, written to be read and never rendered
+(D10). Showing it is how a person can disagree with the ranking.
+
+### A thread — FOUR HEADINGS, and that is the whole design
+
+```
+  < Lows
+
+  Attendance in the U18s has dropped from its usual.
+  I think exams are competing for time. Fairly confident.
+
+  Why I think that
+    Three people said it independently, over four weeks.   <- independentOrigins, COUNTS not quotes
+
+  What I still don't know
+    Whether the players who dropped off are the ones        <- missingSignals (stillUnknown)
+    sitting exams.
+
+  What would change my mind
+    If attendance stays low after exams finish.             <- falsifiers
+
+  ---------------------------------------------------------
+  [ conversation turns scroll here ]
+  +--------------------------------------+
+  |  Add what you know…             [->] |
+  +--------------------------------------+
+```
+
+**Composed fresh from the object every time, never stored** (§2). **No buttons:** an inquiry is
+closed by saying so (D9) and challenged by saying so (D36).
+
+**The one concession to discoverability:** a single overflow with exactly two items — *Mark
+answered · Set aside*. Nobody guesses they can close a thing by talking about it. If we want zero
+controls instead, the fallback is the agent asking *"do you want to call this answered?"* when it
+looks settled — which is D3 behaving correctly anyway.
+
+### Contested — a state, never an error
+
+```
+  Contested
+  You said this isn't right — the bus timetable changed. That's on
+  the record, and it's pulled my confidence down. Both accounts are kept.
+```
+
+No warning colour. *"Both accounts are kept"* is the moment a person learns this system does not
+overwrite them, and it is worth more than any feature.
+
+---
+
 ## 7 · THE ONE-LINE VERSION
 
 > IntelliQ already knows why every object exists and what it rests on. This work makes it say so,
