@@ -660,6 +660,7 @@ const NAV_ROUTES = {
   scenarios:       () => renderScenarios(),
   organisation:    () => renderMyTeam(),
   people:          () => renderPeople(),
+  safeguarding:   () => renderSafeguardingQueue(),
   alerts:          () => renderAlerts(),
   reports:         () => renderReports(),
   settings:        () => renderSettings(),
@@ -730,6 +731,7 @@ const PAGE_TITLES = {
   // Management
   organisation: 'Organisation',
   people:       'Members',
+  safeguarding: 'Safeguarding',
   alerts:       'Alerts & Notifications',
   reports:      'Reports & Stat Sheets',
   settings:     'Platform Settings',
@@ -1542,6 +1544,7 @@ function renderTopbar(){
         navigate(btn.dataset.page);
       });
     });
+    _addSafeguardingNav(links, ic);
   }
 
   // Proactive-updates opt-in — the assistant reaching you off-platform. Everyone controls
@@ -1555,6 +1558,25 @@ function renderTopbar(){
     const btn = document.getElementById('iq-proactive-toggle');
     if (btn) btn.addEventListener('click', () => { try { IQPush.enable(); } catch (_) {} });
   }
+}
+
+// Safeguarding is a named responsibility, not a general management permission. The server
+// remains authoritative; this check only decides whether to show the convenient navigation link.
+async function _addSafeguardingNav(links, icon) {
+  try {
+    const response = await fetch('/api/safeguarding/config', { headers: Auth._headers() });
+    const config = response.ok ? await response.json() : null;
+    if (!config || config.isLead !== true || !links.isConnected) return;
+    const button = document.createElement('button');
+    button.className = 'topbar-account-link safeguarding-nav-link';
+    button.dataset.page = 'safeguarding';
+    button.innerHTML = `<span class="tal-ic">${icon('shield')}</span>Safeguarding`;
+    button.addEventListener('click', () => {
+      document.getElementById('topbar-account-menu')?.classList.remove('open');
+      navigate('safeguarding');
+    });
+    links.appendChild(button);
+  } catch (_) { /* navigation convenience fails closed; direct route remains server-authorised */ }
 }
 
 /* ── Proactive delivery: the client opt-in ───────────────────────────────────
@@ -2112,6 +2134,94 @@ function markAllRead(){
   updateAlertBadge();
   renderAlerts();
   showToast('All alerts marked as read','success');
+}
+
+/* ── SAFEGUARDING LEAD QUEUE ────────────────────────────── */
+async function renderSafeguardingQueue() {
+  const container = document.getElementById('safeguarding-content');
+  if (!container) return;
+  container.innerHTML = '<div class="empty-state"><p>Loading safeguarding queue…</p></div>';
+
+  try {
+    const [flagsResponse, configResponse] = await Promise.all([
+      fetch('/api/safeguarding/flags', { headers: Auth._headers() }),
+      fetch('/api/safeguarding/config', { headers: Auth._headers() }),
+    ]);
+    if (flagsResponse.status === 403) {
+      container.innerHTML = '<div class="empty-state"><p>This queue is available only to the designated safeguarding lead.</p></div>';
+      return;
+    }
+    if (!flagsResponse.ok || !configResponse.ok) throw new Error('Safeguarding queue unavailable');
+    const data = await flagsResponse.json();
+    const config = await configResponse.json();
+    if (data.isLead !== true || config.isLead !== true) {
+      container.innerHTML = '<div class="empty-state"><p>This queue is available only to the designated safeguarding lead.</p></div>';
+      return;
+    }
+
+    const flags = Array.isArray(data.flags) ? data.flags : [];
+    // The API is newest-first. Preserve that order within each status; never compute a risk rank.
+    const ordered = flags.filter(flag => flag.status === 'open')
+      .concat(flags.filter(flag => flag.status === 'resolved'));
+    const resources = Array.isArray(config.resources) ? config.resources : [];
+    if (!ordered.length) {
+      container.innerHTML = '<div class="empty-state"><p>No safeguarding flags are waiting.</p></div>';
+      return;
+    }
+
+    container.innerHTML = ordered.map(flag => {
+      const open = flag.status === 'open';
+      const when = flag.at ? new Date(flag.at).toLocaleString() : 'Time unavailable';
+      const resourceList = resources.length
+        ? `<ul style="margin:0.45rem 0 0;padding-left:1.2rem">${resources.map(resource => {
+          if (typeof resource === 'string') return `<li>${_escHtml(resource)}</li>`;
+          const label = resource.label || resource.name || 'Support resource';
+          const contact = resource.contact || resource.url || '';
+          return `<li>${_escHtml(label)}${contact ? ` — ${_escHtml(contact)}` : ''}</li>`;
+        }).join('')}</ul>`
+        : '<p style="margin:0.45rem 0 0;color:var(--text-muted)">No organisation resources configured.</p>';
+      return `<article class="card safeguarding-flag" data-status="${open ? 'open' : 'resolved'}" style="margin-bottom:1rem">
+        <div class="card-body">
+          <div style="display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;flex-wrap:wrap">
+            <div><strong>${_escHtml(flag.subjectName || flag.subjectId || 'Unknown member')}</strong>
+              <div style="font-size:0.75rem;color:var(--text-muted)">${_escHtml(when)}</div></div>
+            <div><span class="badge">${_escHtml(flag.severity || 'unspecified')}</span>
+              <span class="badge">${_escHtml(flag.category || 'uncategorised')}</span></div>
+          </div>
+          <blockquote style="margin:1rem 0;padding:0.8rem 1rem;border-left:3px solid var(--accent);background:var(--surface-2);white-space:pre-wrap">${_escHtml(flag.excerpt || '')}</blockquote>
+          <div style="font-size:0.78rem;color:var(--text-secondary)"><strong>Support resources</strong>${resourceList}</div>
+          ${open ? `<div style="margin-top:1rem"><label style="display:block;font-size:0.78rem;margin-bottom:0.35rem">Resolution note (optional)</label>
+            <textarea class="form-input safeguarding-resolution-note" maxlength="500" rows="3" style="width:100%"></textarea>
+            <button class="btn btn-accent btn-sm safeguarding-resolve" data-flag-id="${_escHtml(flag.id || '')}" style="margin-top:0.5rem">Resolve</button>
+            <div class="safeguarding-resolve-error" role="alert" style="display:none;color:var(--danger);font-size:0.75rem;margin-top:0.4rem"></div></div>`
+            : `<div style="margin-top:1rem;font-size:0.78rem;color:var(--text-muted)">Resolved${flag.resolvedAt ? ` ${_escHtml(new Date(flag.resolvedAt).toLocaleString())}` : ''}${flag.resolutionNote ? ` — ${_escHtml(flag.resolutionNote)}` : ''}</div>`}
+        </div>
+      </article>`;
+    }).join('');
+
+    container.querySelectorAll('.safeguarding-resolve').forEach(button => {
+      button.addEventListener('click', () => resolveSafeguardingFlag(button));
+    });
+  } catch (_) {
+    container.innerHTML = '<div class="empty-state"><p>The safeguarding queue could not be loaded. Please try again.</p></div>';
+  }
+}
+
+async function resolveSafeguardingFlag(button) {
+  const card = button.closest('.safeguarding-flag');
+  const note = card?.querySelector('.safeguarding-resolution-note')?.value || '';
+  const error = card?.querySelector('.safeguarding-resolve-error');
+  button.disabled = true;
+  try {
+    const response = await fetch(`/api/safeguarding/flags/${encodeURIComponent(button.dataset.flagId)}/resolve`, {
+      method: 'POST', headers: Auth._headers(), body: JSON.stringify({ note }),
+    });
+    if (!response.ok) throw new Error('Resolution was not saved');
+    await renderSafeguardingQueue();
+  } catch (e) {
+    button.disabled = false;
+    if (error) { error.textContent = e.message; error.style.display = 'block'; }
+  }
 }
 
 /* ── ALERT COMPOSE FLOW ──────────────────────────────────── */
