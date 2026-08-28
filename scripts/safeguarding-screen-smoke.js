@@ -31,8 +31,13 @@ check('S3 the queue reads flags and organisation resources through their governe
   queue.includes("fetch('/api/safeguarding/flags'") && queue.includes("fetch('/api/safeguarding/config'"));
 check('S4 a direct non-lead visit fails closed without rendering flag content',
   queue.includes('flagsResponse.status === 403') && queue.includes('available only to the designated safeguarding lead'));
+/* Whitespace-insensitive on purpose: the previous form embedded a literal newline and six
+   spaces, so reformatting the source turned this red for a reason that was not behaviour.
+   A test that fails on indentation teaches people to distrust it. Same claim, same mutation
+   sensitivity — reorder the concat or introduce a severity sort and it still goes red. */
 check('S5 open flags are placed before resolved flags without severity re-ranking',
-  queue.includes("flags.filter(flag => flag.status === 'open')\n      .concat(flags.filter(flag => flag.status === 'resolved'))"));
+  /flags\s*\.filter\(\s*flag\s*=>\s*flag\.status === 'open'\s*\)\s*\.concat\(\s*flags\.filter\(\s*flag\s*=>\s*flag\.status === 'resolved'\s*\)\s*\)/.test(queue)
+  && !/\bsort\(/.test(queue));
 check('S6 the lead card renders identity, time, detector severity/category, excerpt and resources',
   ['flag.subjectName', 'flag.at', 'flag.severity', 'flag.category', 'flag.excerpt', 'config.resources', 'resource.contact'].every(token => queue.includes(token)));
 check('S7 resolution posts the optional bounded note to the existing route',

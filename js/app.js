@@ -1567,6 +1567,9 @@ async function _addSafeguardingNav(links, icon) {
     const response = await fetch('/api/safeguarding/config', { headers: Auth._headers() });
     const config = response.ok ? await response.json() : null;
     if (!config || config.isLead !== true || !links.isConnected) return;
+    // renderTopbar() resets links.innerHTML synchronously but this fetch is async, so two
+    // renders in flight together would each append and the lead would see two links.
+    if (links.querySelector('.safeguarding-nav-link')) return;
     const button = document.createElement('button');
     button.className = 'topbar-account-link safeguarding-nav-link';
     button.dataset.page = 'safeguarding';
