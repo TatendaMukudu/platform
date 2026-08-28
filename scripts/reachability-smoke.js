@@ -64,7 +64,7 @@ const KNOWN_ORPHANS = new Set([
   '/api/identity/review', '/api/inquiry/recommendations', '/api/intelligence/success',
   '/api/intelliq/intervention/:id', '/api/kernel/coreasoning', '/api/knowledge/health',
   '/api/mappings/awaiting', '/api/me/actions', '/api/me/actions/:id/approve',
-  '/api/me/actions/:id/reject', '/api/me/audiences', '/api/me/data', '/api/me/export',
+  '/api/me/actions/:id/reject',
   '/api/me/sources/contribute', '/api/me/sources/pull', '/api/member/checkin', '/api/member/join',
   '/api/notes/pinned', '/api/org-context/import/preview', '/api/org-context/role-bindings',
   '/api/org-state', '/api/org/divisions', '/api/org/profile', '/api/permissions',

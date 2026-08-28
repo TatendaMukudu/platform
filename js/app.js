@@ -639,6 +639,7 @@ const NAV_ROUTES = {
   apps:            () => { if (typeof MemberApp !== 'undefined') MemberApp._renderApps(); },
   checkin:         () => { if (typeof MemberApp !== 'undefined') MemberApp._setupCheckinPrompt(); },
   notes:           () => { if (typeof MemberApp !== 'undefined') MemberApp._renderNotesPage(); },
+  'my-data':       () => renderMyData(),
   inquiry:         () => { if (typeof MemberApp !== 'undefined') MemberApp._renderInquiryPage(); },
   inbox:           () => { if (typeof MemberApp !== 'undefined') MemberApp._renderInbox(); },
   stats:           () => { if (typeof MemberApp !== 'undefined') MemberApp._renderStats(); },
@@ -706,6 +707,7 @@ const PAGE_TITLES = {
   apps:         'Apps',
   checkin:      'Check-In',
   notes:        'Notes',
+  'my-data':    'My data & privacy',
   inquiry:      'Inquiries',
   inbox:        'Updates',
   stats:        'Progress',
@@ -1529,14 +1531,16 @@ function renderTopbar(){
   const links = document.getElementById('topbar-account-links');
   if (links) {
     const ic = (name) => (typeof ICON !== 'undefined' && ICON[name]) ? ICON[name] : '';
+    const PERSONAL = [
+      { id: 'my-data', label: 'My data & privacy', icon: 'person' },
+    ];
     const SETUP = [
       { id: 'people',       label: 'People',       perm: 'view_members',    icon: 'person'   },
       { id: 'organisation', label: 'Organisation', perm: 'view_team',       icon: 'building'  },
       { id: 'settings',     label: 'Settings',     perm: 'manage_settings', icon: 'settings' },
     ].filter(l => Auth.canDo(l.perm));
-    links.innerHTML = SETUP.length
-      ? SETUP.map(l => `<button class="topbar-account-link" data-page="${l.id}"><span class="tal-ic">${ic(l.icon)}</span>${l.label}</button>`).join('')
-      : '';
+    const ACCOUNT_LINKS = [...PERSONAL, ...SETUP];
+    links.innerHTML = ACCOUNT_LINKS.map(l => `<button class="topbar-account-link" data-page="${l.id}"><span class="tal-ic">${ic(l.icon)}</span>${l.label}</button>`).join('');
     links.querySelectorAll('.topbar-account-link[data-page]').forEach(btn => {
       btn.addEventListener('click', () => {
         const menu = document.getElementById('topbar-account-menu');
@@ -2223,6 +2227,87 @@ async function resolveSafeguardingFlag(button) {
     await renderSafeguardingQueue();
   } catch (e) {
     button.disabled = false;
+    if (error) { error.textContent = e.message; error.style.display = 'block'; }
+  }
+}
+
+/* ── MY DATA & PRIVACY ─────────────────────────────────────
+   A self-scoped reader only. The server chooses the subject from the authenticated session;
+   this client supplies no person id and never passes the response through a leader projection. */
+const ANSWERABILITY_SAFEGUARDING_EXCEPTION = 'If something you tell IntelliQ suggests you are at risk of harm, a safeguarding lead is told. That is the one case where safety comes before privacy, and it is decided by a fixed rule rather than by a model.';
+
+function _answerabilityRecords(items, emptyText) {
+  if (!Array.isArray(items) || !items.length) return `<p style="color:var(--text-muted);margin:0">${_escHtml(emptyText)}</p>`;
+  return items.map(item => {
+    const detail = JSON.stringify(item, null, 2) || 'No details available';
+    return `<pre style="white-space:pre-wrap;overflow-wrap:anywhere;background:var(--surface-2);padding:0.75rem;border-radius:8px;margin:0 0 0.6rem">${_escHtml(detail)}</pre>`;
+  }).join('');
+}
+
+async function renderMyData() {
+  const container = document.getElementById('my-data-content');
+  if (!container) return;
+  container.innerHTML = '<div class="empty-state"><p>Loading your record…</p></div>';
+  try {
+    const [dataResponse, audiencesResponse] = await Promise.all([
+      fetch('/api/me/data', { headers: Auth._headers() }),
+      fetch('/api/me/audiences', { headers: Auth._headers() }),
+    ]);
+    if (!dataResponse.ok || !audiencesResponse.ok) throw new Error('Your record is unavailable');
+    const data = await dataResponse.json();
+    const audienceData = await audiencesResponse.json();
+    const held = data.held || {};
+    const audiences = Array.isArray(audienceData.audiences) ? audienceData.audiences : [];
+
+    const audienceCards = audiences.length ? audiences.map(item => `<div class="card" style="margin-bottom:0.6rem"><div class="card-body">
+      <strong>${_escHtml(item.label || item.kind || 'Audience')}</strong>${Number.isFinite(item.reaches) ? `<span class="badge" style="margin-left:0.5rem">${item.reaches} people</span>` : ''}
+      <p style="margin:0.4rem 0 0;color:var(--text-secondary)">${_escHtml(item.explanation || '')}</p>
+    </div></div>`).join('') : '<p style="color:var(--text-muted)">No wider audiences are available to you.</p>';
+
+    const trail = Array.isArray(held.accessTrail) ? held.accessTrail : [];
+    const trailRows = trail.length ? trail.map(entry => `<div style="padding:0.7rem 0;border-bottom:1px solid var(--border)">
+      <strong>${_escHtml(entry.actor || 'System')}</strong> · ${_escHtml(entry.action || 'access')}
+      <div style="font-size:0.75rem;color:var(--text-muted)">${_escHtml(entry.at ? new Date(entry.at).toLocaleString() : 'Time unavailable')} · ${_escHtml(entry.basis || 'No basis recorded')}</div>
+    </div>`).join('') : '<p style="color:var(--text-muted);margin:0">No access has been recorded yet.</p>';
+
+    container.innerHTML = `<section class="card" style="margin-bottom:1rem"><div class="card-body">
+      <h2 style="margin-top:0">What we hold</h2>
+      <h3>Reads about me</h3>${_answerabilityRecords(held.reads, 'No reads are currently held about you.')}
+      <h3>Working habits</h3>${_answerabilityRecords(held.workingHabits, 'No working habits have been learned yet.')}
+      <h3>My notes</h3>${_answerabilityRecords(held.myNotes, 'You have not added any notes.')}
+      <button class="btn btn-outline btn-sm" id="download-my-data">Download my data</button>
+      <div id="download-my-data-error" role="alert" style="display:none;color:var(--danger);font-size:0.75rem;margin-top:0.4rem"></div>
+    </div></section>
+    <section class="card" style="margin-bottom:1rem"><div class="card-body">
+      <h2 style="margin-top:0">Who has looked</h2>
+      <p style="color:var(--text-secondary)">This trail records who accessed your data, when, and why. It does not copy what they saw.</p>
+      ${trailRows}
+    </div></section>
+    <section style="margin-bottom:1rem">
+      <div class="card" style="margin-bottom:1rem"><div class="card-body">
+        <h2 style="margin-top:0">Who I speak to</h2>
+        <p style="color:var(--text-secondary)">${_escHtml(audienceData.note || '')}</p>
+        <p style="padding:0.8rem 1rem;border-left:3px solid var(--accent);background:var(--surface-2)">${_escHtml(ANSWERABILITY_SAFEGUARDING_EXCEPTION)}</p>
+      </div></div>${audienceCards}
+    </section>`;
+    document.getElementById('download-my-data')?.addEventListener('click', downloadMyData);
+  } catch (_) {
+    container.innerHTML = '<div class="empty-state"><p>Your data and privacy record could not be loaded. Please try again.</p></div>';
+  }
+}
+
+async function downloadMyData() {
+  const error = document.getElementById('download-my-data-error');
+  try {
+    const response = await fetch('/api/me/export', { headers: Auth._headers() });
+    if (!response.ok) throw new Error('Your download could not be prepared');
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'intelliq-my-data.json';
+    document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+  } catch (e) {
     if (error) { error.textContent = e.message; error.style.display = 'block'; }
   }
 }
