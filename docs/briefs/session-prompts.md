@@ -469,6 +469,72 @@ wiring, not building.
 
 ---
 
+## 21 · Codex — the primitive decides, not the digit (READY TO SEND)
+
+Founder decision **D26**. This is a **live defect**, not new scope: every leader surface is
+stripping legitimate performance figures today.
+
+> Confirm the branch first (see THE BRANCH above), run `bash scripts/codex-preflight.sh`, and
+> read `docs/INDEX.md`, then `ttd/founder-decisions-2026-08.md` **D26** and **D23**.
+>
+> **The defect.** `_stripLeaderNumbers` (`server.js:4208`) deletes **every** percentage and every
+> `n/5` from leader-facing text:
+>
+> ```js
+> .replace(/\b\d+(?:\.\d+)?\s*%/g, '')    // "83%"
+> ```
+>
+> It cannot tell `2.1/5 mood` from `83% pass completion`, so it deletes both. It runs over
+> `summary`, `whyNow`, `recommendedAction`, `learnedNote` and every `connections[].basis`
+> (`server.js:3064` and `4232-4241`). A coach reading *"pass completion is at"* is looking at this
+> bug. A product that redacts a striker's conversion rate from their own coach is broken.
+>
+> **The rule (D26).** What protects a number is **the primitive it was captured under**, never the
+> fact that it is a number. `ai/primitives.js:30` defines the vocabulary:
+>
+> | Primitive | Leader sees the figure |
+> |---|---|
+> | `outcome`, `capability`, `participation`, `load`, `resource` | **YES** — this is the job |
+> | `state` (wellbeing), `relational` (connection) | **NO** — direction words only |
+>
+> **Scope:**
+>
+> 1. Make the protection primitive-aware. A leader-facing composer should not be handed a
+>    **protected** figure in the first place; `_stripLeaderNumbers` narrows to the `state` and
+>    `relational` paths and becomes a backstop rather than the boundary.
+> 2. Leave every other privacy behaviour exactly as it is.
+>
+> **The hard part, and I want a report rather than a guess.** `whyNow`, `recommendedAction` and
+> `learnedNote` are already-composed strings by the time they reach the sanitiser — they may not
+> carry which primitive each figure came from. **Investigate before you change anything.** If the
+> primitive is not available at composition time, say so, tell me what it would take to thread it
+> through, and implement the narrowest honest version rather than pattern-matching the text for
+> words like "mood". A regex that guesses the primitive from the sentence is the same defect again
+> with more steps.
+>
+> **Constraints — this task's specific way of going wrong is weakening a privacy test to let
+> performance numbers through:**
+>
+> - **Do not weaken, delete or relax any existing assertion.** Not C05, not C06, not the
+>   non-interference suite, not the leader-projection suites. If an existing test fails, that is a
+>   finding to report, not an obstacle to remove.
+> - A `state` figure reaching a leader is a privacy failure and must stay impossible.
+> - An aggregate `state` figure over a cohort that satisfies the two-sided floor is a different
+>   object from one person's mood. Do not touch that path.
+> - No emojis (`CLAUDE.md`).
+>
+> **Definition of done:** `npm test` green, plus a suite asserting **both** directions over the
+> real HTTP response, not the source text:
+> - a member's `state` figure never appears on a leader-facing response, and
+> - a member's `outcome` or `capability` figure **does**.
+>
+> The second assertion is the one that would have caught this. Send a **mutation map**: for each
+> assertion, the one-line production change that turns it red.
+>
+> Do not merge, do not open a PR. Push the branch and report per §11.
+
+---
+
 ## 18 · The standing preferences
 
 Worth pasting once into any long session:
