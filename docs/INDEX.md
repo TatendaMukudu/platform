@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `d830aee`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `6fbeb2f`. **Branch:** `claude/platform-work-summary-nmb0cm`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
 ---
@@ -97,8 +97,9 @@ is better product, not a broken one.
 | 10 | The front end reflecting the object model | product | `ttd/object-as-conversation.md`, **D24 — do it last** |
 | 11 | Live database run, staging deploy, real users | — | needs Render |
 
-**One thing does not exist and four decisions need it:** a record of **what was shown to whom**.
-D19, D27, D28 and the awkward half of D8/D17 all resolve to it. Build it once.
+**The record of what was shown to whom now EXISTS** — `finding_view` audit entries,
+`finding-emission-audit-smoke`. D19, D27, D28 and the awkward half of D8/D17 all depend on it and
+can now be built. Nothing else is blocked on a missing substrate.
 
 ### What is the next code task?
 
