@@ -1059,7 +1059,128 @@ in a way that the buckets and threads are not.
 
 ---
 
-## WHAT THESE THIRTY-THREE CHANGE ABOUT THE PLAN
+## D34 · THE VOICE IS A COLLEAGUE WHO NOTICED
+
+**Decision:** warm, direct, first person, no hedging theatre. Someone on your side who happened to
+see something — not an instrument, and not a coach with a view.
+
+> *"Your load is up and your sleep is down. Worth a look?"*
+
+**The two it is not, and why each was rejected:**
+
+- **Not a neutral instrument.** *"Load: up. Sleep: down. These moved together."* is defensible and
+  unreadable. A product nobody wants to open protects nobody.
+- **Not a coach.** *"That combination usually catches up with people — I'd ease off this week"* is
+  the most useful sentence and the one the epistemic ladder forbids. It predicts, and
+  `ai/language-guard.js` would reject it — correctly.
+
+**What this means concretely for D30's composer:**
+
+| Do | Do not |
+|---|---|
+| First person. *"I noticed"*, not *"it has been observed"* | Hedge decoratively. *"It may possibly be the case that perhaps"* reads as evasion, not care |
+| State the two facts and their relation | State a cause. They moved together; we do not know why |
+| End with a question the person can actually answer | End with advice |
+| Say what would change our mind (D12) | Say what will happen (`language-guard` rejects it anyway) |
+
+**The line between warm and presumptuous:** a colleague who noticed does not tell you what it
+means for you. It tells you what it saw and asks. Every message that ends in an instruction has
+crossed into the coach voice.
+
+---
+
+## D35 · THE CONVERSATION IS THE CHECK-IN
+
+**Decision:** there is no form. You talk to IntelliQ when you have something to say; it asks when
+it needs something. Capture is a by-product of the conversation.
+
+**Why this coheres with D22 rather than contradicting it.** I had offered "a short daily prompt"
+as the fast route to a baseline — five days instead of five weeks. Removing the form appears to
+remove that lever. It does not, because **the inquiry frontier is the prompt.** D22 already put
+Inquiries at the top of Home on day one; at zero evidence every claim is a `MISSING_REQUIRED`
+uncertainty, and asking is what the layer does. IntelliQ asks more in the first fortnight because
+it needs more, not because a schedule fired.
+
+**The consequence, and it is the risk of D35:**
+
+> L-D35 · When conversation is the only capture mechanism, every unanswered question is pressure
+> to ask again. The curiosity stopping rule is therefore not a refinement — it is what stops the
+> capture mechanism becoming an interrogation.
+
+`briefs/session-prompts.md` §16 is written and unrun. **D35 promotes it from a nicety to a
+dependency**, and it must land before the thread work ships, exactly as
+`object-as-conversation.md` G5 already warned.
+
+**What it costs, said plainly.** Baselines build unevenly — a talkative person gets a normal in a
+week, a quiet one may never get one. That is honest: we know less about people who tell us less,
+and a system that pretended otherwise would be inventing. The `data_gap` pattern already names
+this case, and D6 already ruled it is not a Low about them.
+
+---
+
+## D36 · A CHALLENGED FINDING IS CONTESTED, NOT DELETED
+
+**Decision, in the founder's words:**
+
+> *"They say so and it becomes challenge evidence, and that thread is not removed but marked as
+> contested until proven otherwise."*
+
+**The word is already in the code.** `ai/diagnose.js:646` sets `h.status = 'contested'` for
+*genuine disagreement, unresolved*. The founder named the existing state without being shown it,
+which is a good sign the model matches how a person actually thinks about this.
+
+**What happens, mechanically, and all of it exists:**
+
+1. The person's account enters as a signal that **challenges** the hypothesis — `challengeRefs`,
+   not `supportRefs`.
+2. Confidence falls, because contradiction pulls it down hard (`ai/diagnose.js:135`).
+3. The finding is **marked contested and stays visible**. Nothing is deleted; `supersede()` keeps
+   the superseded record.
+4. The timeline records that the understanding changed and why.
+
+**Why "until proven otherwise" is the important half.** Contested is not a resting state — it is a
+question. It resolves when evidence accumulates on one side, or when a person closes it (D3, D9).
+A finding that sits contested forever is one nobody is answering, and D22's priority ranking should
+treat that as interesting rather than settled.
+
+**And the rejected alternative matters.** "The person says so and it is removed" is the intuitive
+answer and it breaks the product: a system that deletes what it is told to delete cannot notice a
+pattern somebody consistently denies — which is precisely the pattern most worth noticing. Keeping
+it contested preserves both the person's account **and** the system's, and lets evidence decide.
+
+---
+
+## D37 · SEVERAL NODES MEANS THE UNION OF WHAT EACH GRANTS
+
+**Decision:** a person's Web is the union of what each of their nodes grants.
+`user.assignedNodeIds` and `user.leadershipNodeIds` are already arrays (`server.js:2418`), so this
+is a confirmation of the existing shape, not a change to it.
+
+**Why union is right.** Being in the leadership group genuinely should widen what you see. Treating
+each node as its own world would make one person three separate records and destroy the single
+baseline that D28 just protected.
+
+### The precision this needs, or it breaks a law
+
+**Branch isolation is asserted in three modules** — `ai/org-routing.js:16` and `:79`,
+`ai/org-answer.js:6` — and executably at `scripts/org-graph-smoke.js:33` and `:44`: *a sibling
+branch's items never appear.* A naive union across two sibling nodes would hand one person a view
+across both branches, which is exactly what those three modules forbid.
+
+> L-D37 · Union composes **memberships**, never **leaderships**. Being a member of two sibling
+> nodes gives a person each node's member-level view. It never composes into a leader's rollup
+> across branches, and it never grants evidence access to a branch they do not lead.
+
+**Stated the other way round:** the union is over what each node grants *this person in that node's
+own right*. A member seat in two places is two member seats. It is not a wider seat.
+
+**And membership is still a reference.** `ai/audience.js` resolves at read time, so adding somebody
+to a node changes what they see immediately and removing them revokes it immediately — including
+across the union. Nothing is stored, so nothing goes stale.
+
+---
+
+## WHAT THESE THIRTY-SEVEN CHANGE ABOUT THE PLAN
 
 The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one insertion.
 
@@ -1075,7 +1196,7 @@ The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one i
 | 7 | **Plain-language projection of kernel status** | **D11 — new step.** `exploring / probable / supported / disputed` never reach a screen unprojected |
 | 8 | **The frontier and the falsifiers in the thread** | **D12 — new step, and the cheapest of them: both are already in the payload at `server.js:13563-13564`** |
 | 9 | **One priority, ranking all four kinds, deciding Home** | **D9 part three, named by D13.** `/api/inquiry/lead` ranks inquiries today. Three ranking mechanisms already exist — pick one and make the others feed it, do not add a fourth |
-| 10 | Curiosity in the thread, under the stopping rule | unchanged |
+| 10 | **Curiosity in the thread, under the stopping rule** | **PROMOTED by D35.** With conversation as the only capture mechanism, the stopping rule is what keeps capture from becoming interrogation. `session-prompts.md` §16, written and unrun — it must land before the thread work ships |
 | 11 | **The answerability screen — your record, your audiences, the safeguarding exception** | **D18 and D21.** Wiring, not building: `/api/me/data`, `/api/me/export`, `/api/me/audiences` all exist with no caller |
 | 12 | **Withdrawal recomputes, and whoever saw the old picture is told** | **D19 — closes T-2, and the most expensive item here.** Needs a record of what was shown to whom, which does not exist |
 | 13 | **Import, so the pilot does not start at zero** | **D22.** `/api/signals/import` and `/api/signals/import-csv` exist and are orphaned. The single largest cold-start lever, and it is wiring |
