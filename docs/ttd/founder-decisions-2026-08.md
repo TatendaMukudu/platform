@@ -11,7 +11,7 @@ an agent finding it inconvenient.
 
 ---
 
-## THE INDEX — thirty-seven decisions, one line each
+## THE INDEX — forty-one decisions, one line each
 
 **The shape of the product**
 
@@ -69,6 +69,15 @@ an agent finding it inconvenient.
 | **D29** | *POST-PILOT.* One identity, several memberships, cross-org sharing by **consent** | identity. Do not start |
 | **D32** | Suppression is **visible, within the viewer's own scope** | the Confidence Engine |
 | **D37** | Several nodes = the **union of memberships**, never of leaderships | scope composition |
+
+**The organisation itself**
+
+| | Decision | |
+|---|---|---|
+| **D38** | Contribution is **anonymous by default**, may be named. The precondition for D27 | `contribution.js` |
+| **D39** | An admin builds the tree; **the gaps in it become day-zero inquiries** | onboarding, cold start |
+| **D40** | On leaving: their record goes, the team's history stays and **recomputes** | deletion |
+| **D41** | **Nothing extra is refused.** IntelliQ hears anything, reasons about work, performance and wellbeing | the agent |
 
 **Voice and capture**
 
@@ -1259,7 +1268,123 @@ across the union. Nothing is stored, so nothing goes stale.
 
 ---
 
-## WHAT THESE THIRTY-SEVEN CHANGE ABOUT THE PLAN
+## D38 · CONTRIBUTION IS ANONYMOUS BY DEFAULT, AND MAY BE NAMED
+
+**Decision:** a contribution to a group inquiry is counted, not attributed. The person may choose
+to put their name to it.
+
+**The mechanism already exists.** `ai/contribution.js:266` carries
+`contributorVisibility: 'anonymous' | 'named'`. What was missing was the policy, and the default
+was the whole question.
+
+**Why this is the decision that makes D27 survivable.** D27 lets a leader be the subject of a
+finding. That is only safe if nobody can be identified for having contributed to it — otherwise
+the first honest player pays for it. Anonymous-by-default is not a courtesy here; it is the
+precondition for upward evidence existing at all.
+
+**And it raises the load on machinery that already exists.** If contributors are not visible,
+nobody can eyeball whether five contributions came from five people or one person five times.
+The system must guarantee that itself, and it does:
+
+- `MIN_INDEPENDENT_ORIGINS` and the **`ECHO` verdict** already refuse to count one person
+  repeating themselves, or several people paraphrasing one conversation, as independent
+  corroboration.
+- The **two-sided floor** at 5 still applies.
+
+> L-D38 · Anonymity is about *attribution*, never about *counting*. The kernel always knows who
+> contributed — it must, to count origins honestly. What changes is who is ever shown.
+
+**What it costs.** Some drive-by complaining, and a person who wants to stand behind something has
+to opt in to doing so. Both accepted: the opt-in exists precisely so conviction can be expressed.
+
+---
+
+## D39 · AN ADMIN BUILDS THE TREE, AND THE GAPS BECOME THE FIRST INQUIRIES
+
+**Decision:** a person creates the nodes and puts people in them. **IntelliQ treats what is
+missing from that structure as its opening questions.**
+
+**Why this is more than an onboarding preference.** D22 said the cold start *is* the inquiry engine,
+and then D35 removed the form — so on day zero there is no evidence about anybody and no way to
+manufacture it. But the **organisation's own shape** needs no baseline and no history. It is
+knowable immediately, and it is genuinely uncertain.
+
+**Concrete day-zero inquiries, all computable before a single person speaks:**
+
+| Inquiry | Why it is real |
+|---|---|
+| *Nobody is the safeguarding lead* | `orgMeta[code].safeguardingLeadId` is **read in two places and written nowhere**. Every org currently falls back to its superadmin, silently. This was found in the §19 review and D39 gives it a home |
+| *This node has no leader* | `node.leaderIds` empty — a group nobody is answerable for |
+| *This person is in no node* | Invisible to every scope computation, so nothing will ever reach them |
+| *This node has one member* | A group of one is not a group; the cohort floor will never let it say anything |
+| *Two nodes have the same people* | The duplicate-structure case that makes every rollup double-count |
+
+**So the answer to "what does IntelliQ do on day one" is now concrete.** Not an empty state, not a
+form: it asks about the organisation, because that is the one subject it can already reason about.
+
+**What is rejected and why.** *Building the tree from conversation* is the magical option and it
+gets an org chart confidently wrong — an inferred reporting line is an authority claim, and
+authority is exactly what this kernel refuses to infer.
+
+---
+
+## D40 · THEIR RECORD GOES; THE TEAM'S HISTORY STAYS AND RECOMPUTES
+
+**Decision:** when a person leaves, their personal evidence is withdrawn and stops informing
+anything. Team findings already established stand — **but they recompute without that person**.
+
+**The consequence, which is the whole decision:** a finding whose floor only held because of the
+person who left **fails the floor and drops**. Four contributors where five were needed is not a
+publishable claim, and it does not become one by having been true last week.
+
+**A good deal of this is already built.** The person-deletion path (`server.js:~1995-2050`) already
+removes their private chat history, self-model, delivery preferences, push subscriptions, their
+`member:` inquiry state, their library items, their assessment records — and, notably, **erases
+their identity from group contributions while keeping the contribution**
+(`contributorId: '(erased)'`, `contributorVisibility: 'anonymous'`, `server.js:2046`). Somebody
+thought about this properly.
+
+**What is missing is the recomputation and the telling**, and it is D19 again:
+
+> L-D40 · A departure that silently removes a team finding is a correction nobody was told about.
+> Whoever was shown it is owed the same notice D19 requires for a withdrawal.
+
+**Why full erasure was rejected.** Recomputing every team finding as if the person had never
+existed lets one departure rewrite an organisation's history — including findings other people
+contributed to and still stand behind. Their evidence is theirs to remove; the fact that a team
+once concluded something is not solely theirs to erase.
+
+---
+
+## D41 · NOTHING EXTRA IS REFUSED — BUT IntelliQ STAYS IN ITS LANE
+
+**Decision:** IntelliQ will talk about anything a person raises. It only ever **reasons** about
+work, performance and wellbeing. It does not become a general assistant.
+
+**The founder's reasoning, which is the safeguarding argument in a different setting:** refusing to
+hear something is how people learn not to speak. A product that shuts down at the first hard
+sentence teaches the person not to write the second one — and the second one is the one that
+matters.
+
+**Note that this is exactly why the safeguarding path is a *response*, not a refusal.**
+`ai/safeguarding.js` answers, stays present, and names real help. It never declines the
+conversation. D41 generalises that posture to everything else.
+
+**The two limits, restated so "no extra refusals" is not misread as "no limits":**
+
+- **The epistemic ladder still holds.** No prediction, no diagnosis, no conclusion from the model —
+  `ai/language-guard.js` is *deliberately aggressive* and stays that way.
+- **Reasoning stays in scope.** Someone can talk about anything; what enters the evidence log and
+  informs findings is work, performance and wellbeing. Listening is not the same as recording, and
+  `ai/contribution.js` already separates relevance from authorisation for exactly this reason.
+
+**What is rejected.** An explicit no-go topic list — medical, legal, protected characteristics —
+would put a wall exactly where a person is most likely to be reaching for help, which is the
+failure D21 and the safeguarding design exist to prevent.
+
+---
+
+## WHAT THESE FORTY-ONE CHANGE ABOUT THE PLAN
 
 The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one insertion.
 

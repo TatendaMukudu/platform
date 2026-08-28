@@ -30,7 +30,7 @@
 | Do we need an ontology / graph DB? | `ttd/organisational-ontology-investigation.md` — **the answer is no** |
 | What does Falcon actually get? | `ttd/falcon-persona-rehearsal.md` |
 | **Who do we compete with, and what should we borrow?** | `ttd/competitive-landscape-and-borrows.md` |
-| **What has the founder decided?** | `ttd/founder-decisions-2026-08.md` — **binding, 37 decisions, indexed at the top.** Read the index, then only what your task touches. This is the store: nothing in it should ever be re-derived or re-asked |
+| **What has the founder decided?** | `ttd/founder-decisions-2026-08.md` — **binding, 41 decisions, indexed at the top.** Read the index, then only what your task touches. This is the store: nothing in it should ever be re-derived or re-asked |
 | **What does each layer do, and what is wrong?** | `ttd/layer-map.md` — **read this if you are unsure what is right** |
 | **What is duplicated, and what is hiding?** | `ttd/duplication-sweep.md` — 89 of 298 routes have no front-end caller |
 | **What is home meant to look like?** | `ttd/object-as-conversation.md` — every object is a thread; **design, not yet built** |
@@ -104,7 +104,7 @@ D19, D27, D28 and the awkward half of D8/D17 all resolve to it. Build it once.
 
 ### Which founder decisions remain?
 
-**Thirty-seven have been taken** — see `ttd/founder-decisions-2026-08.md`, indexed at the top.
+**Forty-one have been taken** — see `ttd/founder-decisions-2026-08.md`, indexed at the top.
 
 Still open: `D-E2`, the quality floor for a cheap model, which needs a post-pilot benchmark. Plus
 two flagged inside the record rather than settled: whether a leader sees a finding about themselves
