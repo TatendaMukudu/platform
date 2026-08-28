@@ -254,13 +254,16 @@ function composeBriefingItem(m, findings, learning = {}, { audience = 'subject' 
 
   const findingPrimitive = f => f.primitives || fallbackPrimitives[f.type] || [];
   const leader = audience === 'leader';
+  // Project the basis before assembling the leader sentence. The composed sentence therefore
+  // never contains a protected figure; primitiveText repeats the rule only as a backstop.
+  const whyBasis = leader ? leaderText(top.basis, whyPrimitives) : top.basis;
   return {
     memberId: m.id,
     name:     m.name,
     severity: top.severity,
     patterns: findings.map(f => ({ type: f.type, label: label(f),
       basis: leader ? leaderText(f.basis, findingPrimitive(f)) : f.basis, confidence: f.confidence })),
-    whyNow:   primitiveText(`${label(top)} — ${top.basis}.`, whyPrimitives),
+    whyNow:   primitiveText(`${label(top)} — ${whyBasis}.`, whyPrimitives),
     evidence: leader ? [] : findings.map(f => f.basis),
     recommendedAction,
     learnedNote: learnedNote ? primitiveText(learnedNote, ['outcome']) : null,
