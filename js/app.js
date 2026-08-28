@@ -7001,12 +7001,26 @@ async function _renderLeadInquiry() {
     if (!lead || !lead.question) { box.innerHTML = ''; return; }
     const esc = _escAdvisor;
     const where = lead.source === 'self' ? 'About you' : esc(lead.where || 'Your group');
+    /* The sentences come from the kernel (ai/voice.explainObject, D30), not from here. This
+       function assembles no prose of its own — that is what let every surface phrase the same
+       object its own way, and it is why "the deterministic voice" ended up living in four homes.
+       If `explained` is missing (an older payload) we fall back to the bare question rather than
+       inventing a sentence. */
+    const x = lead.explained || null;
+    const block = (title, lines) => (lines && lines.length)
+      ? `<div class="linq-block"><div class="linq-block-t">${esc(title)}</div>${lines.map(l => `<div class="linq-block-l">${esc(l)}</div>`).join('')}</div>`
+      : '';
     box.innerHTML = `
       <div class="linq-card">
         <div class="linq-head">Open question · ${where}</div>
-        <div class="linq-q">${esc(lead.question)}</div>
-        ${lead.contested ? `<div class="linq-flag">People here describe this differently — that disagreement is the useful part.</div>` : ''}
-        ${(lead.otherUnknowns || []).length ? `<div class="linq-more">Also open: ${(lead.otherUnknowns || []).map(esc).join(' · ')}</div>` : ''}
+        ${x && x.headline ? `<div class="linq-q">${esc(x.headline)}</div>` : `<div class="linq-q">${esc(lead.question)}</div>`}
+        ${x && x.claim ? `<div class="linq-claim">${esc(x.claim)}</div>` : ''}
+        ${x && x.provenance ? `<div class="linq-prov">${esc(x.provenance)}</div>` : ''}
+        ${x && x.contested ? `<div class="linq-flag">${esc(x.contested)}</div>`
+          : (lead.contested ? `<div class="linq-flag">People here describe this differently — that disagreement is the useful part.</div>` : '')}
+        ${x ? block('What I still don’t know', x.stillUnknown) : (lead.question ? block('What I still don’t know', [lead.question]) : '')}
+        ${x ? block('What would change my mind', x.wouldChangeMyMind) : ''}
+        ${x && x.setAside ? `<div class="linq-more">Set aside: ${esc(x.setAside)}</div>` : ''}
       </div>`;
   } catch (_) { box.innerHTML = ''; }
 }

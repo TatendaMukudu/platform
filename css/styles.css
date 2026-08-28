@@ -2366,6 +2366,16 @@ img { max-width: 100%; }
 .linq-flag{margin-top:.5rem;font-size:.76rem;line-height:1.45;color:var(--text-secondary)}
 .linq-more{margin-top:.5rem;font-size:.72rem;color:var(--text-muted);line-height:1.45}
 
+/* The composed explanation (D30/D34). Typographic hierarchy only — no colour carries meaning
+   here, because the moment a High is green and a Low is red a PERSON becomes a colour, which is
+   D14b and the no-dashboard rule. The claim reads slightly larger than its evidence; the
+   provenance chip is deliberately quiet because it is there to be checked, not read every time. */
+.linq-claim{margin-top:.45rem;font-size:.92rem;line-height:1.5;color:var(--text-primary)}
+.linq-prov{margin-top:.35rem;font-size:.72rem;color:var(--text-muted);letter-spacing:.01em}
+.linq-block{margin-top:.85rem}
+.linq-block-t{font-size:.68rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted);margin-bottom:.25rem}
+.linq-block-l{font-size:.82rem;line-height:1.5;color:var(--text-secondary);margin-bottom:.2rem}
+
 /* ── The team as a subject — High / Low / Inquiry / Focus ─────────────────────
    Sits above the per-person list on the leader's home. Deliberately quiet: no colour
    coding by polarity, because a Low is not an alarm and a High is not a trophy — both

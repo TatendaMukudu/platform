@@ -13063,6 +13063,10 @@ function _groupInquiryProjections(code, nodeId) {
       corrected: sig.filter(s => s.supersededBy).length,
       contradictions: active.filter(s => s.dissents).length,
       stillUnknown: (i.missingSignals || []).map(m => m.question),
+      // WHAT WOULD SHOW THIS IS WRONG (D12). Computed on every inquiry since diagnose.js was
+      // written and never projected, so the one line no competitor can produce reached no caller.
+      falsifiers: (i.falsifiers || []).slice(0, 3)
+        .map(f => String((f && (f.statement || f.text)) || f || '').slice(0, 300)).filter(Boolean),
       timeline: (i.timeline || []).slice(-8).reverse().map(e => ({ at: e.at, kind: e.kind, summary: e.summary })),
       lastUpdatedAt: i.lastUpdatedAt,
     };
@@ -13355,7 +13359,30 @@ function _leadInquiry(code, userId) {
   const top = teamState.openQuestion(all);
   if (!top) return null;
   const src = all.find(a => a.inquiryId === top.inquiryId) || {};
-  return { ...top, source: src._source || 'team', where: src._where || '', nodeId: src._nodeId || null };
+
+  /* THE COMPOSED EXPLANATION (D30). The front end no longer assembles a sentence out of these
+     fields — it renders text the kernel wrote. Deterministic, no model call, and it means every
+     surface says the same thing about the same object instead of each one phrasing it its own way.
+
+     `banded` is TRUE for anything at team grain: L-D27 forbids a count small enough to identify
+     who spoke, and this endpoint cannot know whether the subject is a leader. A self inquiry is
+     the reader's own record, so their own counts are theirs to see. */
+  const explained = voice.explainObject({
+    kind: 'inquiry',
+    label: top.about || top.question,
+    claim: src.hypothesis || '',
+    band: top.band,
+    because: ((src.confidence || {}).because) || [],
+    independentOrigins: src.independentOrigins || 0,
+    contributors: src.contributors || 0,
+    stillUnknown: [top.question, ...(top.otherUnknowns || [])].filter(Boolean),
+    falsifiers: src.falsifiers || [],
+    contested: top.contested === true,
+    banded: src._source !== 'self',
+    seed: top.inquiryId || '',
+  });
+
+  return { ...top, explained, source: src._source || 'team', where: src._where || '', nodeId: src._nodeId || null };
 }
 
 app.get('/api/inquiry/lead', requireAuth, (req, res) => {

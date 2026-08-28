@@ -125,6 +125,10 @@ for (const r of ['/api/intelligence/act', '/api/intelligence/outcome', '/api/int
 console.log('\n  RECENT SURFACES');
 ok('the team surface is reachable', front.includes('/api/group/mine') && front.includes('/state'));
 ok('the open question is reachable', front.includes('/api/inquiry/lead'));
+/* D30 — the front end must RENDER the kernel's sentences, not assemble its own. A renderer that
+   builds prose from raw fields is how one object came to read differently on every surface. */
+ok('the lead question renders the composed explanation, not hand-built prose',
+  front.includes('lead.explained') && front.includes('wouldChangeMyMind'));
 
 console.log(`\nreachability-smoke: ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
