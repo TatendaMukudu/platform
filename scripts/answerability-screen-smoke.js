@@ -28,8 +28,13 @@ const screenSentence = (app.match(/const ANSWERABILITY_SAFEGUARDING_EXCEPTION = 
 
 check('A1 My data is a real route with a real page',
   /'my-data':\s*\(\)\s*=>\s*renderMyData\(\)/.test(nav) && html.includes('id="page-my-data"'));
+/* Whitespace-insensitive: the previous form pinned a literal newline and six spaces, so
+   reformatting turned this red for a reason that was not behaviour. Same claim, same mutation
+   sensitivity — permission-gate the entry or drop it from ACCOUNT_LINKS and it still goes red. */
 check('A2 every authenticated person gets the account-menu entry without a management permission',
-  topbar.includes("const PERSONAL = [\n      { id: 'my-data'") && topbar.includes('const ACCOUNT_LINKS = [...PERSONAL, ...SETUP]'));
+  /const PERSONAL\s*=\s*\[\s*\{\s*id:\s*'my-data'/.test(topbar)
+  && /const ACCOUNT_LINKS\s*=\s*\[\s*\.\.\.PERSONAL,\s*\.\.\.SETUP\s*\]/.test(topbar)
+  && !/PERSONAL[\s\S]{0,80}Auth\.canDo/.test(topbar));
 check('A3 the screen can request only the authenticated caller, never a supplied subject',
   screen.includes("fetch('/api/me/data', { headers: Auth._headers() })") && !/subjectId|userId|\/api\/report\/person|leader-facing/.test(screen));
 check('A4 the screen names all three answerability sections',

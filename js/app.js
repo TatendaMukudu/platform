@@ -2306,7 +2306,11 @@ async function downloadMyData() {
     const link = document.createElement('a');
     link.href = url;
     link.download = 'intelliq-my-data.json';
-    document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+    document.body.appendChild(link); link.click(); link.remove();
+    // Revoked on the next tick, not inline: revoking synchronously after click() races the
+    // browser starting the download, and some browsers abandon it. A person exercising a
+    // subject access right must not get a silent no-op.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   } catch (e) {
     if (error) { error.textContent = e.message; error.style.display = 'block'; }
   }
