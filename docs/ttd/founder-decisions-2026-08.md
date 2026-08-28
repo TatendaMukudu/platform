@@ -529,7 +529,118 @@ recurrence, and noticing recurrence is what this system is for.
 
 ---
 
-## WHAT THESE SEVENTEEN CHANGE ABOUT THE PLAN
+## D18 · A PERSON SEES THEIR WHOLE RECORD, AND CAN WITHDRAW FROM IT
+
+**Decision:** the full record, plus the ability to withdraw any piece so it stops informing
+anything. Withdrawal **supersedes rather than deletes** — the fact that something existed
+survives, its influence does not.
+
+### The finding that came with this question
+
+**The entire capability is built and unreachable.** Three routes, no caller anywhere:
+
+| Route | What it already does |
+|---|---|
+| `GET /api/me/export` | The complete GDPR Art 15/20 bundle. Its own note reads *"This is all the personal data IntelliQ holds about you."* Strips the password hash, returns everything else |
+| `GET /api/me/data` | The subject access request — the reads held about them in **their own subject view rather than the leader-facing projection**, their private self-model, their own notes, and **the content-free trail of who accessed their data and why**. The request is itself logged as a `subject_access` event, because exercising the right is an access too |
+| `GET /api/me/audiences` | The audiences a person can choose between, named and explained, **before they say anything** — built from their real nodes, so it never offers one that does not exist for them |
+
+`POST /api/group/:nodeId/withdraw` — *take back what I contributed* — also exists, and
+`_withdrawSignal` (`server.js:6528`) already withdraws a promoted signal while keeping the
+evidence intact.
+
+**So D18 is a wiring task, not a build.** Someone wrote the answerability layer properly and then
+never gave it a screen. That is the same failure as the safeguarding queue, and it is the second
+time this sweep has found it.
+
+**Note for the pilot specifically:** with under-18s involved, *"show me everything you hold about
+me"* is a question that will be asked by a parent, and the honest answer already exists in one
+JSON response.
+
+---
+
+## D19 · A WITHDRAWAL RECOMPUTES, AND WHOEVER SAW THE OLD PICTURE IS TOLD
+
+**Decision:** everything resting on withdrawn evidence recomputes immediately, and anyone who was
+shown a finding that has since changed is told that it changed.
+
+**This closes T-2**, the blocker `docs/INDEX.md` names as *"corrections do not reach
+already-emitted signals"* — the last of the original set still open.
+
+**Why the second half is the hard half and the important one.** Recomputing is mechanical: the
+kernel already recomputes confidence from signals rather than accumulating it, so a withdrawn
+signal changes the answer the next time anything asks. What does **not** exist is any memory of
+*who was shown what*. A coach who read a card on Tuesday and acts on it on Friday has no way to
+learn it stopped being true on Wednesday.
+
+> L-D19 · If a person was shown a finding, and that finding materially changes because evidence
+> was withdrawn or corrected, they are told. Silence would let a correction be honoured by the
+> kernel and ignored by the organisation.
+
+**What it requires that does not exist:** a record of delivery — which findings reached which
+person, when. Nothing in the system currently remembers that a card was read.
+
+**The cost, stated plainly.** This is the most expensive of the twenty-one decisions to build,
+and the notification it produces is inherently awkward: *the thing you acted on has changed*. That
+awkwardness is the product working. An organisation that cannot be told it was wrong is the thing
+this system exists to replace.
+
+---
+
+## D20 · CLASSIFICATION KEEPS ITS BIAS TOWARD OVER-PROTECTION
+
+**Decision:** the sensitivity bias in `ai/privacy.js` stays exactly where it is. A person may not
+lower their own classification.
+
+**What that means concretely.** `family`, `mother`, `father`, `death`, `injury` are RESTRICTED, so
+*"my dad can't drive me to training"* is restricted. `stress`, `worried`, `relationship`, `quit`,
+`alone` are SENSITIVE, so *"I'm worried about Saturday"* is sensitive. Both are over-classified in
+the literal sense, and both stay that way.
+
+**The reasoning the code already gives, and the founder confirmed:** over-protecting costs only
+the ability to **quote**. Under-protecting breaks the product law. Those two errors are not
+comparable and should not be traded off as if they were.
+
+**Why "let the person lower it themselves" was refused, and this is the part worth writing down:**
+consent given under observation is not consent. A player asked by a coach to unlock something they
+said has not made a free choice, and a setting that permits it makes the coach's asking possible.
+Removing the control removes the pressure.
+
+**And D15 makes the cost smaller than it was.** Quoting across a focus boundary is already
+forbidden. Over-classification now costs less than it did when the question was first written into
+the code.
+
+---
+
+## D21 · THE SAFEGUARDING EXCEPTION IS STATED BEFORE ANYONE SPEAKS
+
+**Decision:** a plain statement at sign-up — everything you say is private, with one exception,
+and here is exactly what it is. The in-the-moment message stays as it is.
+
+**What exists.** `safeguarding.composeResponse` already tells the person at the moment it happens:
+*"I'm not keeping this to myself: I've let your safeguarding lead know so a real person can be
+there for you."* That is the right message and it is not changing.
+
+**What does not exist.** Any notice **before** they speak. `server.js:13192` holds the sentence
+that should be shown — *"If something you tell IntelliQ suggests you are at risk of harm, a
+safeguarding lead is told. That is the one case where safety comes before privacy, and it is
+decided by a fixed rule rather than by a model."* — and it is not shown at sign-up.
+
+**Why after-the-fact notice alone is not enough.** A person who learns the boundary only when they
+cross it learns it at the worst possible moment, and learns it as a betrayal rather than as a
+rule they had already accepted. The sentence is already written and already true.
+
+**The objection, recorded because it is real:** telling people up front makes some of them guard
+what they say. That cost is accepted. A rule people do not know about is not a safeguarding policy;
+it is surveillance with a good motive.
+
+**Interaction with D18:** `GET /api/me/audiences` explains a person's audiences *before they say
+anything*, and is unreachable. The advance safeguarding notice belongs on the same surface. One
+screen answers both.
+
+---
+
+## WHAT THESE TWENTY-ONE CHANGE ABOUT THE PLAN
 
 The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one insertion.
 
@@ -546,6 +657,8 @@ The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one i
 | 8 | **The frontier and the falsifiers in the thread** | **D12 — new step, and the cheapest of them: both are already in the payload at `server.js:13563-13564`** |
 | 9 | **One priority, ranking all four kinds, deciding Home** | **D9 part three, named by D13.** `/api/inquiry/lead` ranks inquiries today. Three ranking mechanisms already exist — pick one and make the others feed it, do not add a fourth |
 | 10 | Curiosity in the thread, under the stopping rule | unchanged |
+| 11 | **The answerability screen — your record, your audiences, the safeguarding exception** | **D18 and D21.** Wiring, not building: `/api/me/data`, `/api/me/export`, `/api/me/audiences` all exist with no caller |
+| 12 | **Withdrawal recomputes, and whoever saw the old picture is told** | **D19 — closes T-2, and the most expensive item here.** Needs a record of what was shown to whom, which does not exist |
 
 **D2 is the one to be careful with.** It introduces the first object whose audience is a set of
 people rather than a node, and the first `ai/audience.js` kind that does not resolve through
