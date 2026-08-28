@@ -535,6 +535,82 @@ stripping legitimate performance figures today.
 
 ---
 
+## 22 · Codex — one polarity, across the whole algorithm (READY TO SEND)
+
+Founder decisions **D4, D5, D6** and **D7**. Step 0 of the plan and a prerequisite for everything
+after it. Bigger than §19–§21: this touches seven modules.
+
+> Confirm the branch first (see THE BRANCH above), run `bash scripts/codex-preflight.sh`, then read
+> `docs/INDEX.md`, `ttd/layer-map.md` §1 and §3, and `ttd/founder-decisions-2026-08.md` **D4, D5,
+> D6, D7**.
+>
+> **One concept — is this good or does it need work — is implemented FIVE times under five
+> vocabularies. Consolidate it into one owner. Do not add a sixth.**
+>
+> **Where it lives today:**
+>
+> | Module | What it does |
+> |---|---|
+> | `ai/intelligence-feed.js:29` | `POLARITIES` — the frozen 7-value vocabulary. The nearest thing to an owner |
+> | `ai/proactive.js:37` | `PATTERN_POLARITY` — person patterns → `risk` / `progress` only |
+> | `ai/behaviour.js` | **Three** buckets: *Needs attention · Worth celebrating · Opportunities*. Puts `neutral` in needs-attention |
+> | `ai/scoped-intelligence-packet.js:77-78` | **Two** buckets: `needs_attention` / `working_well`. Puts `opportunity` in working_well |
+> | `ai/team-state.js:61,401-402` | **Two**: High / Low, with `WORKING_WELL: 'strength'` |
+> | `ai/process-reflection.js:50-51`, `ai/process-observations.js:48-49` | **Emits** `strength` / `friction` for routines and handoffs |
+> | `ai/diagnose.js:339` | **A FIFTH vocabulary**: `'strength' \| 'difficulty' \| 'condition' \| 'neutral'`. `difficulty` and `condition` are not in `POLARITIES` at all |
+>
+> **The target, from D4/D5/D6 — this is the whole specification:**
+>
+> | Polarity | Bucket |
+> |---|---|
+> | `risk`, `friction` | **Low** |
+> | `progress`, `milestone`, `opportunity`, `strength` | **High** |
+> | `neutral` | **neither** — appears in the feed, counted in no bucket (D5) |
+> | `data_gap`, **by pattern name whatever its polarity** | **neither** (D6) — our gap, not theirs |
+>
+> **Scope:**
+>
+> 1. **One pure module owns this** — `ai/polarity.js`. It owns the vocabulary, the bucket function,
+>    and the two names. Pure: no IO, no model, imports nothing but what it must.
+> 2. Every module above **imports it**. `behaviour.js`, `scoped-intelligence-packet.js` and
+>    `team-state.js` keep their public field names if callers depend on them, but the *decision*
+>    comes from one place. No module computes a bucket itself.
+> 3. `data_gap` is an override by pattern name, not a polarity mapping. Keep that distinction
+>    visible in the code — it is a different kind of rule and will confuse the next reader if it is
+>    folded into the table.
+>
+> **Two things to REPORT rather than decide:**
+>
+> - **`ai/diagnose.js`'s `difficulty` and `condition`.** `difficulty` plausibly maps to Low.
+>   `condition` has no obvious home — it may not be a polarity at all. **Do not guess.** Tell me
+>   what they are used for and what you think, and leave `diagnose.js` alone until I answer.
+> - **`ai/behaviour.js` puts `neutral` in needs-attention today.** Under D5 that changes, and it
+>   will change what a leader sees. Say which surfaces move.
+>
+> **Constraints — the specific way this task goes wrong is a "unification" that quietly changes
+> what someone sees:**
+>
+> - **Do not weaken, delete or relax any existing assertion.** A failing test is a finding to
+>   report, not an obstacle to remove. If a suite fails because a bucket legitimately moved under
+>   D4/D5/D6, **widen the fixture, never the assertion**, and say so explicitly in your report.
+> - Do not change detection, severity, confidence, or any threshold. This is bucketing and naming
+>   only — the underlying `polarity` field is untouched.
+> - Do not change what any endpoint returns in shape. Field names stay unless you say otherwise.
+> - `ai/team-state.js`'s cohort floor and every disclosure rule are out of scope and must not move.
+> - No emojis (`CLAUDE.md`).
+>
+> **Definition of done:** `npm test` green, plus a suite that proves there is exactly ONE bucketing
+> decision — including an assertion that fails if any module reintroduces its own. Send a
+> **mutation map**: for each assertion, the one-line production change that turns it red.
+>
+> **Adjacent, do not fix it here, just note if you see it:** `fallbackPrimitives` in
+> `ai/intelligence.js` is a new pattern→primitive table living alongside `PATTERN_POLARITY`,
+> `PATTERN_LABEL` and `STRUCTURE_LABEL`. Same family of problem, separate piece of work.
+>
+> Do not merge, do not open a PR. Push the branch and report per §11.
+
+---
+
 ## 18 · The standing preferences
 
 Worth pasting once into any long session:
