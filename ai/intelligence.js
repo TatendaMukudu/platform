@@ -30,6 +30,21 @@ const avg    = a => a.reduce((s, v) => s + v, 0) / a.length;
 const round1 = n => Math.round(n * 10) / 10;
 const conf   = n => (n >= 6 ? 'clear' : n >= 3 ? 'emerging' : 'tentative');
 const SEV_RANK = { high: 0, medium: 1, low: 2 };
+const PROTECTED_FIGURE_PRIMITIVES = new Set(['state', 'relational']);
+
+/* D26: numeric syntax is not sensitive by itself. Only text whose primitive provenance is
+   state/relational (or absent, which fails closed) loses personal scale/percentage figures.
+   Both leader composition and the server backstop call this one rule. */
+function leaderText(text, primitiveTags = []) {
+  const tags = Array.isArray(primitiveTags) ? primitiveTags.filter(Boolean) : [];
+  const protect = !tags.length || tags.some(tag => PROTECTED_FIGURE_PRIMITIVES.has(tag));
+  const value = String(text == null ? '' : text);
+  if (!protect) return value;
+  return value
+    .replace(/\s*\(\s*\d+(?:\.\d+)?\s*%\s*\)/g, '')
+    .replace(/\b\d+(?:\.\d+)?\s*\/\s*5\b/g, '')
+    .replace(/\b\d+(?:\.\d+)?\s*%/g, '');
+}
 
 const PATTERN_LABEL = {
   baseline_shift:         'Unusual for them',
@@ -207,7 +222,7 @@ function detectPatterns(m) {
    `learning`: optional map patternType → { action, positive, total } from the
    org's own outcomes, so the recommended action reflects what has helped before.
    Nothing here contains private content. */
-function composeBriefingItem(m, findings, learning = {}) {
+function composeBriefingItem(m, findings, learning = {}, { audience = 'subject' } = {}) {
   if (!findings.length) return null;
   const top = findings[0];
   const label = f => PATTERN_LABEL[f.type] || f.type;
@@ -224,8 +239,10 @@ function composeBriefingItem(m, findings, learning = {}) {
   // Carry primitive provenance with composed text without changing its JSON/string shape.
   // The leader projection can then protect state/relational figures without guessing from words.
   const primitiveText = (text, ps) => {
-    const tagged = new String(text); // JSON.stringify and interpolation still produce plain text
-    Object.defineProperty(tagged, 'primitives', { value: [...new Set((ps || []).filter(Boolean))] });
+    const tags = [...new Set((ps || []).filter(Boolean))];
+    const projected = audience === 'leader' ? leaderText(text, tags) : text;
+    const tagged = new String(projected); // JSON.stringify and interpolation still produce plain text
+    Object.defineProperty(tagged, 'primitives', { value: tags });
     return tagged;
   };
   const fallbackPrimitives = {
@@ -235,28 +252,36 @@ function composeBriefingItem(m, findings, learning = {}) {
   };
   const whyPrimitives = top.primitives || fallbackPrimitives[top.type] || [];
 
+  const findingPrimitive = f => f.primitives || fallbackPrimitives[f.type] || [];
+  const leader = audience === 'leader';
   return {
     memberId: m.id,
     name:     m.name,
     severity: top.severity,
-    patterns: findings.map(f => ({ type: f.type, label: label(f), basis: f.basis, confidence: f.confidence })),
+    patterns: findings.map(f => ({ type: f.type, label: label(f),
+      basis: leader ? leaderText(f.basis, findingPrimitive(f)) : f.basis, confidence: f.confidence })),
     whyNow:   primitiveText(`${label(top)} — ${top.basis}.`, whyPrimitives),
-    evidence: findings.map(f => f.basis),
+    evidence: leader ? [] : findings.map(f => f.basis),
     recommendedAction,
     learnedNote: learnedNote ? primitiveText(learnedNote, ['outcome']) : null,
     // A soft, contentless nudge: there may be private context informing this.
     careFlag: !!m.hasSensitiveContext,
     patternType: top.type,
     // Self-relative evidence (Behavior Engine) — the "vs their own normal" view.
-    deviations: (m.deviations || []).map(d => ({ label: d.label, direction: d.direction, deviationPct: d.deviationPct, recent: d.recent, normal: d.normal, confidence: d.confidence })),
-    fingerprint: m.fingerprint || null,
+    deviations: (m.deviations || []).map(d => leader
+      ? ({ label: d.label, direction: d.direction, confidence: d.confidence })
+      : ({ label: d.label, direction: d.direction, deviationPct: d.deviationPct, recent: d.recent, normal: d.normal, confidence: d.confidence })),
+    fingerprint: leader ? null : (m.fingerprint || null),
     // Cross-signal connections — things that moved together for them (never causal).
-    connections: (m.connections || []).map(c => ({ ...c, basis: primitiveText(c.basis, c.primitives || []) })),
+    connections: (m.connections || []).map(c => {
+      const { strength, ...safe } = c;
+      return { ...(leader ? safe : c), basis: primitiveText(c.basis, c.primitives || []) };
+    }),
   };
 }
 
 module.exports = {
-  detectPatterns, composeBriefingItem,
+  detectPatterns, composeBriefingItem, leaderText,
   PATTERN_LABEL, DEFAULT_ACTION,
   // exported for tests
   _detectors: { momentumDrop, quietImprovement, repeatedConcern, memberTeamDivergence, invisibleLoad },

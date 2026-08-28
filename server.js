@@ -3050,7 +3050,7 @@ app.get('/api/intelligence/watch', requireAuth, (req, res) => {
     let m = null; try { m = _buildMemberIntelInput(code, u, now); } catch (_) { m = null; }
     const findings = m ? intel.detectPatterns(m) : [];
     if (!findings.length) return;
-    const item = intel.composeBriefingItem(m, findings);
+    const item = intel.composeBriefingItem(m, findings, {}, { audience: 'leader' });
     if (!item) return;
     /* SAME LEADER RULES AS THE BRIEFING. Found by a browser pass, a month before the pilot:
        this row shipped `careFlag` and raw deviation percentages straight to a coach's screen,
@@ -3058,8 +3058,8 @@ app.get('/api/intelligence/watch', requireAuth, (req, res) => {
        _sanitizeBriefingForLeader and this endpoint never went through it.
 
        careFlag is OMITTED rather than set false — the presence of private context is itself
-       private information, which is the whole reason the briefing omits it. And the numbers are
-       stripped: a leader gets direction and care, never a member's figures. */
+       private information, which is the whole reason the briefing omits it. State/relational
+       figures are already absent from leader composition; this backstop preserves that rule. */
     const row = { memberId: item.memberId, name: item.name,
       why: _stripLeaderNumbers(item.whyNow), action: _stripLeaderNumbers(item.recommendedAction),
       patternType: item.patternType, severity: item.severity };
@@ -3420,7 +3420,7 @@ app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
 
   let m = null; try { m = _buildMemberIntelInput(code, subject, Date.now()); } catch (_) {}
   const findings = m ? intel.detectPatterns(m) : [];
-  const item = findings.length ? intel.composeBriefingItem(m, findings) : null;
+  const item = findings.length ? intel.composeBriefingItem(m, findings, {}, { audience: 'leader' }) : null;
   const first = subject.name ? subject.name.split(' ')[0] : 'they';
 
   // Deterministic, care-first fallback — always works.
@@ -4214,18 +4214,12 @@ async function _reasonedPrompts(code, userId, now) {
    The primitive provenance is attached at composition time, never guessed from the wording. */
 function _stripLeaderNumbers(s) {
   const tags = s && typeof s === 'object' && Array.isArray(s.primitives) ? s.primitives : [];
-  const protectedFigure = !tags.length || tags.some(p => p === primitives.PRIMITIVE.STATE || p === primitives.PRIMITIVE.RELATIONAL);
-  let text = String(s == null ? '' : s);
-  if (protectedFigure) text = text
-    .replace(/\s*\(\s*\d+(?:\.\d+)?\s*%\s*\)/g, '')       // "(100%)"
-    .replace(/\b\d+(?:\.\d+)?\s*\/\s*5\b/g, '')           // "2.1/5"
-    .replace(/\b\d+(?:\.\d+)?\s*%/g, '');                 // "83%"
-  return text
+  return intel.leaderText(s, tags)
     .replace(/\*\*/g, '')                                 // markdown bold markers → plain
     .replace(/\s{2,}/g, ' ').replace(/\s+([;.,])/g, '$1').replace(/\(\s*\)/g, '').trim();
 }
-/* Make the Team briefing audience-safe: direction + care only, never a member's
-   numbers or raw evidence basis. One source → every leader surface inherits it. */
+/* Make the Team briefing audience-safe: state/relational direction, job-relevant figures, and
+   no raw evidence basis. One source means every leader surface inherits the same D26 rule. */
 function _sanitizeBriefingForLeader(data) {
   if (!data) return data;
   const items = (data.items || []).map(it => {
@@ -4321,7 +4315,7 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
     const findings = [...intel.detectPatterns(m), ...(m.structural || [])]
       .sort((a, b) => SEVR[a.severity] - SEVR[b.severity]);
     if (!findings.length) return;
-    const item = intel.composeBriefingItem(m, findings, learning);
+    const item = intel.composeBriefingItem(m, findings, learning, { audience: 'leader' });
     if (!item) return;
     item.graph = { nodes: m.streams || [], edges: item.connections || [] }; // honest, correlational
     // Confidence Engine: suppress a noticing type that's earned enough feedback and
@@ -4336,8 +4330,8 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
     // reports and cannot be answered. Aggregate reporting and per-person action are two
     // different jobs and the surface needs both.
     //
-    // Every privacy correction still applies: _sanitizeBriefingForLeader below strips the
-    // numbers, the raw evidence basis and the careFlag side channel from exactly these items.
+    // Every privacy correction still applies: leader composition omits protected figures and
+    // _sanitizeBriefingForLeader remains the backstop for evidence/careFlag side channels.
     personItems.push(item);
     // Evidence origins stay internal. Unknown origins cannot establish independence.
     const sources = (evidenceLog[code] || []).filter(e => e.status === 'active' && e.subjectId === u.id &&
@@ -4390,9 +4384,9 @@ app.get('/api/intelligence/briefing', requireAuth, async (req, res) => {
     items: [...top, ...personItems.slice(0, 15)],
     prompts: [],
   };
-  // The Team briefing is ALWAYS leader-facing → strip every per-member NUMBER
-  // (deviation %, mood x/5, "usual" values) and raw evidence basis. A leader gets
-  // DIRECTION + care + a suggested step, never a member's private figures.
+  // The Team briefing is ALWAYS leader-facing: state/relational figures stay direction-only,
+  // while outcome/capability/participation/load/resource figures remain visible under D26.
+  // Raw evidence and private-context side channels are still removed for every primitive.
   data = _sanitizeBriefingForLeader(data);
   intelBriefingCache[cacheKey] = { data, ts: Date.now() };
   res.json(data);
@@ -7525,7 +7519,7 @@ const _CAPABILITIES = {
       try {
         const m = _buildMemberIntelInput(code, subject, Date.now());
         const findings = m ? intel.detectPatterns(m) : [];
-        if (findings.length) { const item = intel.composeBriefingItem(m, findings); whyNow = item.whyNow; }
+        if (findings.length) { const item = intel.composeBriefingItem(m, findings, {}, { audience: 'leader' }); whyNow = item.whyNow; }
         evidenceRefs = _gatherSignals(code, 'member', subjectId, 5).map(s => s.id);
       } catch (_) {}
       return { rationale: `${first} could use support — ${whyNow}.`, evidenceRefs, subjectId };
