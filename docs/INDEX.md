@@ -102,6 +102,17 @@ D19, D27, D28 and the awkward half of D8/D17 all resolve to it. Build it once.
 > **One polarity vocabulary.** Step 0 of the plan and a prerequisite for the thread, the buckets
 > and self Highs/Lows. The work order is written: `briefs/session-prompts.md` **§22**.
 
+**The Codex queue, in order — all written, all ready to send:**
+
+| | Work order | Bar |
+|---|---|---|
+| 1 | **§22** one polarity vocabulary | product, but step 0 for everything |
+| 2 | **§24** a finding about a leader is never attributable (D27) | **BLOCKING** |
+| 3 | **§25** a withdrawal tells whoever saw the old picture (D19, closes T-2) | **BLOCKING** |
+
+§19, §20, §21 and §23 are done. §16 (the curiosity stopping rule) is written and unrun, and
+**D35 promoted it to a dependency** of the thread work.
+
 ### Which founder decisions remain?
 
 **Forty-eight have been taken** — see `ttd/founder-decisions-2026-08.md`, indexed at the top.

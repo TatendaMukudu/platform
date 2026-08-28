@@ -676,6 +676,89 @@ once. Pilot-blocking under D33 bar one. Touches none of the modules §22 is chan
 
 ---
 
+## 24 · Codex — a finding about a leader is never attributable (READY TO SEND)
+
+Founder decisions **D27** and **D38**. Pilot-blocking under D33 bar one.
+
+> Branch first (see THE BRANCH above), run `bash scripts/codex-preflight.sh`, read `docs/INDEX.md`
+> and `ttd/founder-decisions-2026-08.md` **D27**, **D38**.
+>
+> **D27 makes a leader a legitimate subject of evidence — a squad can say training has been
+> disorganised for three weeks. D38 makes contribution anonymous by default. The risk is
+> retaliation, and the guard does not exist yet.**
+>
+> **The law to enforce:**
+>
+> > A finding whose subject is a leader must never be attributable to the people who contributed
+> > to it — not by name, not by a count small enough to identify, not by phrasing that reveals who
+> > spoke.
+>
+> **Already built, do not rebuild:** the two-sided cohort floor (`ai/team-state.js cohortFloor`,
+> `MIN_COHORT = 5`), `MIN_INDEPENDENT_ORIGINS` and the `ECHO` verdict, and
+> `contribution.contributorVisibility`.
+>
+> **Scope:**
+> 1. A projection guard for a leader-subject finding: no contributor ids, no contributor names, no
+>    exact contributor count, and no verbatim contributed text.
+> 2. **Routing.** It goes to that leader's own leader, and to the leader themselves. **Never to
+>    their own team** — that hands them the list of who to ask.
+> 3. Fail closed: if the subject's leader status cannot be determined, treat it as a leader
+>    finding and apply the guard.
+>
+> **Report, do not decide:** whether the leader sees it at the same moment their manager does.
+> That is flagged as open in D27 and is the founder's call.
+>
+> **Constraints:** do not weaken any existing assertion; do not change the floor; do not change
+> what a non-leader finding looks like; no emojis.
+>
+> **Done:** `npm test` green plus a suite over the real HTTP boundary proving a leader-subject
+> finding carries no contributor identity, no exact count, and does not reach the subject's own
+> team. Send a **mutation map**.
+>
+> Do not merge, do not open a PR. Push the branch and report per §11.
+
+---
+
+## 25 · Codex — a withdrawal tells whoever saw the old picture (READY TO SEND)
+
+Founder decision **D19**, closing **T-2**. Pilot-blocking. **Depends on §23, which has landed** —
+`finding_view` audit entries now record which findings were emitted to whom.
+
+> Branch first (see THE BRANCH above), run `bash scripts/codex-preflight.sh`, read `docs/INDEX.md`
+> and `ttd/founder-decisions-2026-08.md` **D19**, then **D40**.
+>
+> **The gap.** The kernel recomputes correctly when evidence is withdrawn. Nobody is told. A coach
+> who read a card on Tuesday acts on it on Friday having never learned it stopped being true on
+> Wednesday. `docs/INDEX.md` calls this **T-2** and it is the last original blocker still open.
+>
+> **The record now exists** — `finding_view` entries in the audit log name which findings reached
+> which person (`scripts/finding-emission-audit-smoke.js`). This work uses it.
+>
+> **Scope:**
+> 1. When evidence is withdrawn, superseded or corrected, determine which previously-emitted
+>    findings **materially changed** — gone, or moved bucket, or dropped a confidence band.
+> 2. For each, find who was shown it, from the emission record.
+> 3. Tell them, through the delivery layer that already exists (`ai/delivery.js`, `deliveryPrefs`).
+>
+> **Also covered by the same mechanism (D40):** a person leaving recomputes team findings, and a
+> finding whose cohort floor only held because of them **drops**. Whoever saw it is owed the same
+> notice. Build one path, not two.
+>
+> **Constraints:**
+> - The notice says a finding **changed**; it never restates the withdrawn content. Nothing that
+>   was withdrawn may appear in the message that says it was withdrawn.
+> - Respect `deliveryPrefs` and the existing opt-in. This is not a new channel.
+> - Do not weaken any existing assertion. Do not change the audit log's content-free guarantee.
+> - No emojis.
+>
+> **Done:** `npm test` green plus a suite proving that withdrawing evidence behind an emitted
+> finding produces a notice to the person who saw it, **and that the notice contains none of the
+> withdrawn content**. The second assertion is the one that matters. Send a **mutation map**.
+>
+> Do not merge, do not open a PR. Push the branch and report per §11.
+
+---
+
 ## 18 · The standing preferences
 
 Worth pasting once into any long session:
