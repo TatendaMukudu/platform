@@ -44,8 +44,22 @@ check('A3 the screen can request only the authenticated caller, never a supplied
   screen.includes("fetch('/api/me/data', { headers: Auth._headers() })") && !/subjectId|userId|\/api\/report\/person|leader-facing/.test(screen));
 check('A4 the screen names all three answerability sections',
   ['What we hold', 'Who has looked', 'Who I speak to'].every(label => screen.includes(label)));
-check('A5 the subject-view reads, private habits and own notes come directly from the one response',
-  ['held.reads', 'held.workingHabits', 'held.myNotes'].every(field => screen.includes(field)));
+check('A5 the subject-view reads and own notes come directly from the one response',
+  ['held.reads', 'held.myNotes'].every(field => screen.includes(field)));
+/* The "it knows me" surface. /api/self/patterns and /api/self/:habitId/feedback were both built
+   and both orphaned — a private model of how somebody works, that the person could not see and
+   could not refuse. Rendering the kernel's PATTERN KEY would be a leak of internal vocabulary,
+   so the sentence is composed here and the key never reaches a screen. */
+check('A5b what IntelliQ has learned about you is shown, refusable, and never shows a raw pattern key',
+  screen.includes("fetch('/api/self/patterns'")
+  && app.includes("/api/self/${encodeURIComponent(habitId)}/feedback")
+  && ['accept', 'dismiss', 'reject'].every(r => app.includes(`data-response="${r}"`))
+  && app.includes('_SELF_PATTERN_TEXT')
+  // The key must not be RENDERED. Asserting it is absent from the source would be wrong — the
+  // lookup table has to contain it — so this asserts the renderer goes through the translator
+  // and never interpolates the raw pattern into markup.
+  && screen.includes('_selfPatternText(h.pattern)')
+  && !/\$\{_?escHtml\(h\.pattern\)\}|\$\{h\.pattern\}/.test(screen));
 check('A6 the access trail comes from that response and renders only its content-free fields',
   screen.includes('held.accessTrail') && ['entry.actor', 'entry.action', 'entry.at', 'entry.basis'].every(field => screen.includes(field)));
 check('A7 audiences come from the self-scoped endpoint and the D21 exception is SERVED, not copied',

@@ -32,7 +32,7 @@
 | **Who do we compete with, and what should we borrow?** | `ttd/competitive-landscape-and-borrows.md` |
 | **What has the founder decided?** | `ttd/founder-decisions-2026-08.md` — **binding, 48 decisions, indexed at the top.** Read the index, then only what your task touches. This is the store: nothing in it should ever be re-derived or re-asked |
 | **What does each layer do, and what is wrong?** | `ttd/layer-map.md` — **read this if you are unsure what is right** |
-| **What is duplicated, and what is hiding?** | `ttd/duplication-sweep.md` — 89 of 298 routes have no front-end caller |
+| **What is duplicated, and what is hiding?** | `ttd/duplication-sweep.md` — 87 of 298 routes have no front-end caller |
 | **What is home meant to look like?** | `ttd/object-as-conversation.md` — every object is a thread; **design, not yet built** |
 | **Who will know I said this?** | `ai/audience.js` — audience is a durable REFERENCE resolved at read time; `GET /api/evidence/:id/audience` answers it deterministically |
 | **What are we deliberately NOT deciding?** | `rnd/intelliq-rnd-program.md` — **non-authoritative; never a reason to build** |
@@ -50,7 +50,7 @@ outcome loop** · **the agent answering team questions at the team's grain** · 
 
 ### What is partial?
 
-**89 of 298 routes have no front-end caller** (`ttd/duplication-sweep.md` §B; three were closed by
+**87 of 298 routes have no front-end caller** (`ttd/duplication-sweep.md` §B; three were closed by
 the safeguarding and answerability screens) · **polarity is bucketed FIVE ways, not three** —
 `ai/diagnose.js:339` uses `strength / difficulty / condition / neutral`, two of which are not in the
 frozen `POLARITIES` list at all (`ttd/layer-map.md` §1) · the **deterministic voice** lives in four
@@ -91,6 +91,8 @@ is better product, not a broken one.
 | 7 | ~~The safeguarding exception stated before anyone speaks~~ | — | **DONE** — D21, `advance-notice-http-smoke`; one home in `ai/safeguarding.SAFETY_EXCEPTION` |
 | 8 | The thread — `about` on the conversation store | product | `ttd/object-as-conversation.md` G1. **Five decisions depend on it** |
 | 9 | Self Highs and Lows, derived | product | `ttd/object-as-conversation.md` §4 G2 |
+| — | ~~The composer — `ai/voice.js` explains a governed object~~ | — | **DONE** — `voice-composer-smoke`, wired into `/api/inquiry/lead` |
+| — | ~~"What I've learned about how you work"~~ | — | **DONE** — `/api/self/patterns` and its feedback route are no longer orphaned |
 | 10 | The front end reflecting the object model | product | `ttd/object-as-conversation.md`, **D24 — do it last** |
 | 11 | Live database run, staging deploy, real users | — | needs Render |
 

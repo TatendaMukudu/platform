@@ -2328,6 +2328,39 @@ async function renderMyData() {
       <p style="margin:0.4rem 0 0;color:var(--text-secondary)">${_escHtml(item.explanation || '')}</p>
     </div></div>`).join('') : '<p style="color:var(--text-muted)">No wider audiences are available to you.</p>';
 
+    /* WHAT INTELLIQ HAS LEARNED ABOUT HOW YOU WORK — /api/self/patterns, self-only, and until
+       now it had no caller at all. This is the "it knows me" surface, and it is the reason a
+       person comes back: not that the product can do anything, but that it knows THIS situation.
+
+       Rendered as sentences rather than as the raw ledger. A habit is only ever claimed after it
+       has recurred on DISTINCT DAYS (ai/self-model.js `_conf`), so the day count is the evidence
+       and it is shown. Every proposal is yours to accept, park or refuse outright — the model of
+       you is not something that happens TO you. */
+    let selfBlock = '';
+    try {
+      const sp = await fetch('/api/self/patterns', { headers: Auth._headers() });
+      if (sp.ok) {
+        const { proposals = [], learned = [] } = await sp.json();
+        const live = learned.filter(h => h && h.status !== 'dormant');
+        const learnedRows = live.length ? live.map(h => `<div style="padding:0.6rem 0;border-bottom:1px solid var(--border)">
+          ${_escHtml(h.label ? `${_selfPatternText(h.pattern)} — ${h.label}` : _selfPatternText(h.pattern))}
+          <div style="font-size:0.75rem;color:var(--text-muted)">Seen on ${h.seenOnDays} separate day${h.seenOnDays === 1 ? '' : 's'} · ${_escHtml(h.confidence || 'tentative')}</div>
+        </div>`).join('') : '<p style="color:var(--text-muted);margin:0">Nothing yet — I learn this from how you actually use IntelliQ, not from a questionnaire.</p>';
+        const proposalRows = proposals.map(p => `<div class="card" style="margin:0.6rem 0"><div class="card-body">
+          <p style="margin:0 0 0.6rem">${_escHtml(p.text)}</p>
+          <button class="btn btn-accent btn-sm self-habit" data-habit="${_escHtml(p.habitId)}" data-response="accept">Yes, do that</button>
+          <button class="btn btn-outline btn-sm self-habit" data-habit="${_escHtml(p.habitId)}" data-response="dismiss">Not now</button>
+          <button class="btn btn-outline btn-sm self-habit" data-habit="${_escHtml(p.habitId)}" data-response="reject">That's not me</button>
+        </div></div>`).join('');
+        selfBlock = `<section class="card" style="margin-bottom:1rem"><div class="card-body">
+          <h2 style="margin-top:0">What I've learned about how you work</h2>
+          <p style="color:var(--text-secondary)">This is private to you. No leader sees any of it.</p>
+          ${learnedRows}
+          ${proposalRows ? `<h3>Things I could do for you</h3>${proposalRows}` : ''}
+        </div></section>`;
+      }
+    } catch (_) { /* the record still renders without it */ }
+
     const trail = Array.isArray(held.accessTrail) ? held.accessTrail : [];
     const trailRows = trail.length ? trail.map(entry => `<div style="padding:0.7rem 0;border-bottom:1px solid var(--border)">
       <strong>${_escHtml(entry.actor || 'System')}</strong> · ${_escHtml(entry.action || 'access')}
@@ -2337,7 +2370,6 @@ async function renderMyData() {
     container.innerHTML = `<section class="card" style="margin-bottom:1rem"><div class="card-body">
       <h2 style="margin-top:0">What we hold</h2>
       <h3>Reads about me</h3>${_answerabilityRecords(held.reads, 'No reads are currently held about you.')}
-      <h3>Working habits</h3>${_answerabilityRecords(held.workingHabits, 'No working habits have been learned yet.')}
       <h3>My notes</h3>${_answerabilityRecords(held.myNotes, 'You have not added any notes.')}
       <button class="btn btn-outline btn-sm" id="download-my-data">Download my data</button>
       <div id="download-my-data-error" role="alert" style="display:none;color:var(--danger);font-size:0.75rem;margin-top:0.4rem"></div>
@@ -2353,11 +2385,39 @@ async function renderMyData() {
         <p style="color:var(--text-secondary)">${_escHtml(audienceData.note || '')}</p>
         ${safetyException ? `<p style="padding:0.8rem 1rem;border-left:3px solid var(--accent);background:var(--surface-2)">${_escHtml(safetyException)}</p>` : ''}
       </div></div>${audienceCards}
-    </section>`;
+    </section>
+    ${selfBlock}`;
     document.getElementById('download-my-data')?.addEventListener('click', downloadMyData);
+    container.querySelectorAll('.self-habit').forEach(b => b.addEventListener('click', () => respondToHabit(b)));
   } catch (_) {
     container.innerHTML = '<div class="empty-state"><p>Your data and privacy record could not be loaded. Please try again.</p></div>';
   }
+}
+
+/* A learned habit, in a person's own words. The kernel's pattern keys are internal vocabulary
+   (D11, generalised) — nobody should read "own_assessment_first" on a screen. An unrecognised
+   key returns a neutral sentence rather than the raw key, because the raw key is a leak of
+   internal naming and reads as a bug. */
+const _SELF_PATTERN_TEXT = {
+  opens_view:           'You usually open this first thing',
+  own_work_first:       'You tend to clear your own things before the team’s',
+  own_assessment_first: 'You do your own assessments before setting other people’s',
+  readiness_first:      'You check team readiness before anything else',
+};
+function _selfPatternText(pattern) { return _SELF_PATTERN_TEXT[pattern] || 'A way of working I have noticed'; }
+
+/* accept applies it · dismiss parks it briefly · reject stands it down for a long time.
+   Your model, your call — ai/self-model.js applyFeedback. */
+async function respondToHabit(button) {
+  const habitId = button.dataset.habit, response = button.dataset.response;
+  button.disabled = true;
+  try {
+    const r = await fetch(`/api/self/${encodeURIComponent(habitId)}/feedback`, {
+      method: 'POST', headers: Auth._headers(), body: JSON.stringify({ response }),
+    });
+    if (!r.ok) throw new Error('not saved');
+    await renderMyData();
+  } catch (_) { button.disabled = false; }
 }
 
 async function downloadMyData() {

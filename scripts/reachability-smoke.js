@@ -70,7 +70,7 @@ const KNOWN_ORPHANS = new Set([
   '/api/org-state', '/api/org/divisions', '/api/org/profile', '/api/permissions',
   '/api/policies/evaluate', '/api/proactive/preferences', '/api/reason/brief', '/api/reason/me',
   '/api/reason/understand', '/api/report/person/:userId',
-  '/api/self/:habitId/feedback', '/api/self/observe', '/api/self/patterns',
+  '/api/self/observe',
   '/api/signals/import', '/api/signals/import-csv', '/api/signals/recent', '/api/signals/sources',
   '/api/weekly/member', '/api/weekly/org', '/api/weekly/synthesis',
   '/api/workspace/briefing', '/api/workspace/classify', '/api/workspace/group-health',
