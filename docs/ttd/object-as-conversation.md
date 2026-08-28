@@ -170,6 +170,60 @@ build them first against placeholder data, which is how a second store gets crea
 
 ---
 
+## 6b · THE FRONT-END DESIGN, IN FULL
+
+**Founder direction, August 2026:** *"I wanted a minimalistic, simplistic view, because good
+products are often simple."* Correct, and the discipline below is what makes it stay simple.
+
+### The whole product is a chat with four filing cabinets
+
+- **Home is ONE thing** — greeting, the single highest-priority question (self or team, one
+  ranking, D13), and the composer. Nothing else above the fold. No summary, no counts, no badge.
+- **Nav is four buckets** — Inquiries · Focuses · Highs · Lows. The existing card feed, filtered
+  (D1). No new component.
+- **Every card opens as a conversation** (D9, D13).
+
+### Three levels, and the third is not UI
+
+| | What | Why |
+|---|---|---|
+| **1 · The card** | One sentence, plain language, stated as a claim. How sure we are, in words | *"Attendance in the U18s has dropped from its usual. I think exams are competing for time — fairly confident."* |
+| **2 · The thread** | Why it is here · what it rests on, **counts not quotes** · what is still unknown · what would change our mind. Then the conversation | Everything in this row already exists in the payload |
+| **3 · —** | **There is no level 3.** If they want more they ask, and the agent answers | The discipline: whenever tempted to add a panel, make it something the agent can say instead |
+
+### The four moments that show the kernel, each one line
+
+Not features — sentences. The kernel becomes visible through what the text is allowed to contain.
+
+1. **"What would change my mind."** `falsifiers`, already at `server.js:13564`. A system that
+   regenerates a summary each time has no stable belief to falsify. No competitor can write this
+   line.
+2. **"Who can see this?"** next to the composer — `GET /api/evidence/:id/audience` answers it
+   deterministically. A player asking *can my coach see this* and getting a real answer instead of
+   a privacy policy is the most trust-building second in the product.
+3. **Confidence with its reasons.** `confidence.because` is already an array of plain reasons.
+   *"Fairly confident — three people, two independent sources, over four weeks."* Origin counting,
+   made visible.
+4. **The timeline** — *"here is how my understanding of this changed."* Belief revision made
+   visible. The most differentiated thing in the system, and it currently has no pixels.
+
+Plus **contested** (D36) shown as a state with both sides, not as an error. That is the moment a
+person realises they were taken seriously.
+
+### What must NOT be built
+
+> **No dashboard. None.** No charts of people, no red/amber/green on humans, no engagement
+> metrics, no leaderboards, no scores (D14b).
+
+A dashboard asserts that the numbers speak for themselves, which is exactly what a truth
+maintenance system denies. Every competitor leads with one; building one would make us look like
+them while discarding the only thing that makes us different.
+
+**If a number is shown it is about a THING** — attendance, pass completion, session load (D26).
+Never a mark on a person.
+
+---
+
 ## 7 · THE ONE-LINE VERSION
 
 > IntelliQ already knows why every object exists and what it rests on. This work makes it say so,
