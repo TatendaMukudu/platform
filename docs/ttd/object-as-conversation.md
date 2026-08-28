@@ -325,6 +325,68 @@ overwrite them, and it is worth more than any feature.
 
 ---
 
+## 6d · THE COMPOSER — the most important thing left to build
+
+**Founder, August 2026:** *"The composer may be our most important because that's our mouth.
+Without it we are a shit product. People come back because they think you guys can do anything —
+that's the capability we need."*
+
+### What makes a rich answer rich
+
+The founder brought ChatGPT screenshots — a map card, a pricing table, a source chip. **The map is
+the least useful element on that screen.** What makes it work is: a **table** instead of a
+paragraph, **bold on the figures that matter**, a short caveat after it, and a grey provenance
+chip reading *"Campus Village Flint +2"*.
+
+That chip is why the numbers are believable. **IntelliQ has strictly better provenance than a web
+citation and renders none of it:** not a website, but *three people said this independently over
+four weeks, two corroborated by a non-person source* — plus what would change our mind.
+
+### The constraint, stated so nobody designs around a capability we lack
+
+**There is no outbound fetch anywhere in `server.js` or `ai/`.** Maps, YouTube and web links are
+new capability and would put ungoverned content inside a system whose whole claim is that
+everything rests on governed evidence. Not never — but not before the pilot, and not as the way
+to make answers feel rich.
+
+> **Naming warning.** "Web" in this codebase means the ORGANISATIONAL web — scope,
+> `getVisibleUserIds`. It does not mean the internet. Keep the words apart.
+
+### Seven response shapes
+
+The composer picks a shape rather than always returning prose.
+
+| Shape | When | Source — all already computed |
+|---|---|---|
+| A sentence | most of the time | `ai/voice.js` (D30) |
+| **A provenance chip** | **always, under any claim** | `independentOrigins`, `contributors`, the span |
+| A comparison table | periods, teams, approaches | governed; **aggregate only** (L-D47) |
+| A trend line | your own stream over time | your `series` — **self only**, never a leader (D26) |
+| A timeline | "how my understanding changed" | `inquiry.timeline` |
+| A "moved together" graph | correlational, **never causal** | `item.graph = { nodes, edges }` — computed on every briefing, rendered never |
+| An object card | when the answer IS a High, Low or inquiry | the existing card |
+
+**The rule that makes this defensible:** every rich element is a rendering of governed evidence,
+and every one carries its own provenance. That is what a web-citation card cannot do.
+
+### Built, and not shown — the highest-value orphans for the composer
+
+| Route | Its own description | Why it matters |
+|---|---|---|
+| `GET /api/self/patterns` | *"full transparency into everything it has learned about your working habits. Self only"* | **The "it knows me" surface.** The single highest-value orphan in the codebase |
+| `POST /api/assistant/remember` | *"capture a fact for IntelliQ to retain. Private by default"* | Memory. People return to assistants that remember them |
+| `POST /api/artifact/render` | *"compose a DRAFT summary/email from the reader's governed data"* | "Write that up for the parents", governed |
+| `GET /api/weekly/synthesis` | this week's inputs, synthesised | A rhythm |
+| `GET /api/inquiry/recommendations` | leader-only, **recommendation-only** | What to ask next |
+
+### The composer's job, in one line
+
+> Understand anything a person says (the model, D25), answer from governed evidence in the right
+> shape with its provenance attached (the kernel), and ask the next best question — **under the
+> stopping rule, which D35 made a dependency rather than a refinement.**
+
+---
+
 ## 7 · THE ONE-LINE VERSION
 
 > IntelliQ already knows why every object exists and what it rests on. This work makes it say so,
