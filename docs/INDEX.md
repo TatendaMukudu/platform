@@ -90,7 +90,7 @@ is better product, not a broken one.
 | 5 | **Withdrawal recomputes and tells (T-2)** | **BLOCKING** | founder decision **D19** |
 | 6 | **A finding about a leader must not be attributable** | **BLOCKING** | founder decision **D27** |
 | 7 | ~~The safeguarding exception stated before anyone speaks~~ | — | **DONE** — D21, `advance-notice-http-smoke`; one home in `ai/safeguarding.SAFETY_EXCEPTION` |
-| 8 | The thread — `about` on the conversation store | product | `ttd/object-as-conversation.md` G1. **Five decisions depend on it** |
+| 8 | ~~The thread — `about` on the conversation store~~ | — | **DONE** — `thread-binding-http-smoke`; the bottleneck five decisions waited on. The thread VIEW is still to build |
 | 9 | Self Highs and Lows, derived | product | `ttd/object-as-conversation.md` §4 G2 |
 | — | ~~The composer — `ai/voice.js` explains a governed object~~ | — | **DONE** — `voice-composer-smoke`, wired into `/api/inquiry/lead` |
 | — | ~~"What I've learned about how you work"~~ | — | **DONE** — `/api/self/patterns` and its feedback route are no longer orphaned |

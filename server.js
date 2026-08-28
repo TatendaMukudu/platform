@@ -11849,13 +11849,43 @@ function _migrateLegacyNotesToLibrary() {
 
 /* Resolve the conversation for this turn: an existing one the user owns, or a fresh thread.
    Only ever returns a conversation in THIS user's own list, so history is self-only by construction. */
-function _resolveConversation(key, requestedId, firstText, now) {
+/* WHAT THIS THREAD IS ABOUT — the one field the object-as-conversation design needs
+   (`ttd/object-as-conversation.md` G1). `assistantConversations` was keyed by workspace only, so
+   a conversation had no subject: the list was one flat pile and nothing could be "the thread about
+   this inquiry".
+
+   IT IS A LABEL ON YOUR OWN THREAD, NEVER A CLAIM OF ACCESS. Deliberately NOT validated against
+   the object store, for two reasons that both matter:
+     • validating would leak existence — a 404 for one id and a 200 for another tells an
+       unauthorised person which inquiries are real;
+     • the binding grants nothing. These conversations are already self-only by construction
+       (every route is keyed by the caller's own wsKey), so a label cannot widen a read.
+   L-OC1 still governs what may cross: a conversation may add evidence to an object through the
+   normal contribution boundary, and may never hold a claim the object does not. */
+const ABOUT_KINDS = new Set(['inquiry', 'focus', 'high', 'low']);
+function _aboutRef(v) {
+  if (!v) return null;
+  const kind = String((typeof v === 'object' ? v.kind : String(v).split(':')[0]) || '').toLowerCase();
+  const id = String((typeof v === 'object' ? v.id : String(v).split(':').slice(1).join(':')) || '').slice(0, 64);
+  if (!ABOUT_KINDS.has(kind) || !id || !/^[A-Za-z0-9:_-]+$/.test(id)) return null;
+  return `${kind}:${id}`;
+}
+
+function _resolveConversation(key, requestedId, firstText, now, about = null) {
   const list = _assistantConvs(key);
   let c = requestedId ? list.find(x => x.id === String(requestedId)) : null;
   if (!c) {
     c = { id: 'conv_' + generateId(), title: _convTitle(firstText), createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString(), messages: [] };
+    const ref = _aboutRef(about);
+    if (ref) c.about = ref;
     list.push(c);
     if (list.length > CONV_CAP) list.splice(0, list.length - CONV_CAP);
+  } else if (!c.about) {
+    // A thread may LEARN what it is about — someone starts talking and then opens the object —
+    // but it may never be re-pointed at a different one. Rebinding would silently move a
+    // conversation's history under a subject it was not held about.
+    const ref = _aboutRef(about);
+    if (ref) c.about = ref;
   }
   return c;
 }
@@ -12344,7 +12374,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // opening line the client sends. Otherwise Recents fills up with "Let's talk about this: …"
   // repeated, which is machine chatter presented as though the person had written it.
   const _convSeed = (opts.about && opts.about.headline) ? String(opts.about.headline) : text;
-  const _conv = _resolveConversation(_convKey, opts.conversationId, _convSeed, Date.now());
+  const _conv = _resolveConversation(_convKey, opts.conversationId, _convSeed, Date.now(), opts.about || null);
   const priorMessages = (_conv.messages || []).slice(-8).map(m => ({ role: m.role, text: m.text }));
 
   // ── DUTY OF CARE (first, deterministic) ──────────────────────────────────────
@@ -12755,11 +12785,18 @@ app.post('/api/assistant/turn', requireAuth, async (req, res) => {
 /* GET /api/assistant/conversations — list the user's threads, newest first (no message bodies). */
 app.get('/api/assistant/conversations', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
-  const list = (assistantConversations[_wsKey(code, userId)] || [])
-    .map(c => ({ id: c.id, title: c.title, createdAt: c.createdAt, updatedAt: c.updatedAt, messageCount: (c.messages || []).length,
+  /* ?about=inquiry:i_123 — the thread about ONE object (object-as-conversation G1). This is what
+     makes "open the inquiry and see the conversation you have already had about it" a query
+     rather than a second store. An unparseable ref filters to nothing rather than falling back to
+     everything: silently widening a filter is how a scoped read becomes an unscoped one. */
+  const want = req.query.about ? _aboutRef(req.query.about) : null;
+  const filtered = (assistantConversations[_wsKey(code, userId)] || [])
+    .filter(c => !req.query.about || (want && c.about === want));
+  const list = filtered
+    .map(c => ({ id: c.id, title: c.title, about: c.about || null, createdAt: c.createdAt, updatedAt: c.updatedAt, messageCount: (c.messages || []).length,
       preview: ((c.messages || []).slice(-1)[0] || {}).text ? String((c.messages || []).slice(-1)[0].text).slice(0, 120) : '' }))
     .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-  res.json({ ok: true, conversations: list });
+  res.json({ ok: true, conversations: list, about: want || null });
 });
 
 /* GET /api/assistant/conversations/:id — the full thread (self-only), with provenance so the UI
@@ -12768,7 +12805,7 @@ app.get('/api/assistant/conversations/:id', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const conv = (assistantConversations[_wsKey(code, userId)] || []).find(c => c.id === req.params.id);
   if (!conv) return res.status(404).json({ error: 'not found' });
-  res.json({ ok: true, conversation: { id: conv.id, title: conv.title, createdAt: conv.createdAt, updatedAt: conv.updatedAt },
+  res.json({ ok: true, conversation: { id: conv.id, title: conv.title, about: conv.about || null, createdAt: conv.createdAt, updatedAt: conv.updatedAt },
     messages: (conv.messages || []).map(m => ({ role: m.role, text: m.text, at: m.at, reasoning: !!m.reasoning, register: m.register || null, provenance: m.provenance || [] })) });
 });
 
