@@ -351,7 +351,185 @@ challenge to the person. Wording goes through `ai/voice.js` like everything else
 
 ---
 
-## WHAT THESE TWELVE CHANGE ABOUT THE PLAN
+## D13 · EVERY OBJECT IS A THREAD, AND PRIORITY IS WHAT RANKS THEM
+
+**Decision:** Inquiries, Highs, Lows and Focuses are all threads. There is no card-only object.
+
+**And the rename that matters:** what I had been calling *maturity* the founder calls **priority**,
+and priority is what decides the Home screen.
+
+> *"That goes with 'maturity' — or rather 'priority' — and then that's what decides what shows up
+> on our Home screen."*
+
+That is the answer to the gap left open in D9 part three. `/api/inquiry/lead` ranks inquiries
+against each other; Home needs one ranking across four kinds, and **priority is the currency it
+is denominated in**.
+
+**The warning that comes with it.** There are already at least three ranking mechanisms —
+`PRIORITIES` in `ai/intelligence-feed.js`, the impact/urgency scoring in `ai/inquiry.js`
+(`rankQuestions`, line 721, *value of answering divided by cost to the person*), and the
+`valueOf` callback in `diagnose.boundFrontier` (line 1083). This is the polarity problem again,
+one layer up: **one concept, three implementations.** Choosing priority as the currency means
+picking one of these and making the others feed it, not adding a fourth.
+
+---
+
+## D14 · FOCUS HAS TWO SHAPES — AND THAT IS WHAT REPLACES ASSESSMENT
+
+The founder asked the question back rather than answering it, which was the right move:
+
+> *"How can we take the best of the other world and now implement it in Focus? It's not a
+> terrible idea to be assigned a focus by a coach and be able to interact with the focus or thread
+> individually."*
+
+**Decision: two shapes, both real.**
+
+| Shape | What it is | Replaces |
+|---|---|---|
+| **Room focus** | One thread, several people, everyone reads everyone. The chaplain's group, the players working on something together. | forum threads, group work |
+| **Parallel focus** | One focus, **one private thread per person**. The coach sees each; the players do not see each other. | the whole assign / submit / return lifecycle |
+
+**The parallel focus is the important one, because it is assessment without assignment.** A coach
+sets one focus for twelve players and gets twelve conversations. Nobody was assigned anything;
+everybody was invited into their own thread on the same subject.
+
+### What carries over from assessments, and what dies
+
+| From the assessment machinery | Fate |
+|---|---|
+| Assignment | **Becomes invitation** — D2's third case, where declining carries different social weight |
+| Templates and fields | **Survive**, as an optional structure a focus opens with. Not a form to fill; a prompt to start from |
+| The individual thread | **Survives** — it is the parallel focus |
+| Leader feedback | **Survives** as the leader's words in that person's thread |
+| `ai/assessment-view.js` | **Survives, and matters more.** It already separates a generated projection from real individual human feedback from missing context, and detects duplicated placeholder feedback so it is never presented as a person's own note. A thread world needs that more than a card world did |
+| **Score** | **DIES.** See below |
+| submit / return / status lifecycle | **Dies.** A conversation is not returned |
+
+### D14b · NO NUMBERS ON A PERSON
+
+**Decision: response is words only. Nobody scores a person — not a leader, and not the model.**
+
+I offered "a leader may score, the model may never" as the recommendation. The founder went
+further and removed the number entirely.
+
+**What it costs, stated plainly:** comparability over time. A number can be plotted; a paragraph
+cannot. A coach tracking twelve players across a season loses the one artifact that made progress
+legible at a glance.
+
+**What it buys.** A score is a conclusion about a person wearing the clothes of a measurement.
+The epistemic ladder refuses `conclusion` from the model (`ai/diagnose.js:49`) and D3 reserves
+closure for people — a leader-issued score would have been the one place a bare conclusion about
+a human being entered the record with nothing underneath it. Removing it makes the rule
+consistent rather than nearly consistent.
+
+**Note, not an objection:** measurement of *things* is untouched. Primitives, baselines and
+detection (L3, L4) all continue. What is refused is a person receiving a mark.
+
+---
+
+## D15 · WHAT IS SAID IN A SHARED FOCUS IS ADMISSIBLE, AND NEVER QUOTED
+
+**Decision:** words spoken in a shared focus become **org-admissible evidence** — they can inform
+patterns, confidence and the organisational picture — but **the words themselves never appear
+outside the participant set.**
+
+The founder chose "fully org-admissible", then on the chaplain case chose "feeds the picture,
+never quoted". Those are not in tension; together they are the sharper rule:
+
+> L-D15 · Admissibility and visibility are separate powers. Evidence from a shared focus may be
+> **reasoned over** at org scope. Its **verbatim content** is bounded by the focus's participant
+> set, permanently.
+
+**This is the architecture we already have, used correctly.** `_kernelEvidence` decides what may
+be reasoned over; the projection layer (L9 — `ai/voice.js`, `_sanitizeBriefingForLeader`) decides
+what words a person reads. They were always two layers. D15 is the first decision that depends on
+them being two.
+
+**Precedent already in the code:** a group inquiry reports `independentOrigins` and `contributors`
+as counts and never as quotes. The safeguarding excerpt is the single deliberate exception, and it
+exists precisely because a duty of care outranks confidentiality — which is what makes it an
+exception rather than a pattern.
+
+### The attack this must survive, and why it already does
+
+"Admissible but never quoted" is worthless if the derived claim reconstructs the words. A finding
+drawn from a three-person chaplain focus, published to the team, **is** a quote with extra steps.
+
+**The two-sided cohort floor already blocks it.** `k >= MIN_COHORT` and `n − k >= MIN_COHORT`,
+with `MIN_COHORT = 5`: a claim resting on three contributors cannot be published, and neither can
+one resting on all-but-three. No new mechanism is needed — but the floor must be **enforced on
+anything derived from focus evidence**, which sharpens D2.
+
+### Amendment to D2
+
+D2 said: *"nothing derived FROM a set of focuses may be published without the floor."* Under D15
+that is too narrow. **Corrected:** the floor applies to anything derived from focus evidence,
+whether from one focus or many. A single small focus is exactly the dangerous case.
+
+---
+
+## D16 · @intelliQ ANSWERS IN THE NARROWEST SCOPE IN THE ROOM
+
+**Decision:** in a shared focus, IntelliQ answers only from the **intersection** of every
+participant's admissible set.
+
+**The problem it solves.** A coach and four players are in a room. The coach types `@intelliQ`.
+Answering in the coach's scope would broadcast the coach's wider view into a room of players — a
+leak with no one to blame for it, because everybody involved was authorised for their own half.
+
+> L-D16 · A response in a shared thread is admissible only if it would be admissible for **every**
+> participant individually. Scope in a room is an intersection, never a union and never the
+> asker's.
+
+**What it costs, and what must be said out loud.** A coach asking in a room gets a thinner answer
+than the same coach asking alone. If that is silent it reads as the product being weak. **IntelliQ
+must say which scope it is answering in** — *"answering with what everyone here can see"* — so the
+coach understands the constraint rather than discovering it as a defect.
+
+**Implementation note:** `_kernelEvidence` already computes per-viewer admissible sets. The
+intersection is over participants, resolved at read time, exactly like `ai/audience.js`. It
+narrows and never grants — the same property every audience rule in this system has.
+
+**And the summoning rule, from the founder:** `@intelliQ` is required only in a focus with more
+than one collaborator. In a solo focus the assistant is simply present.
+
+---
+
+## D17 · NOTHING IS ABANDONED. THE TIMELINE COMPACTS
+
+**Decision, and a correction to D8/D9 in the founder's own words:**
+
+> *"Parking an inquiry, not dropping it. In an optimal world Highs, Lows, Inquiries should not be
+> abandoned, as they are only advantageous to keep in the event that it happens again and it'll
+> help us more with patterns. But if they consume too much memory then we have to be realistic."*
+
+So the six-week rule from D9 is **park, not drop**. Nothing leaves because it got old. Things are
+set aside because something else is a higher priority right now, and because a screen holds a
+finite number of threads — which is D13's ranking doing its job, not a lifecycle event.
+
+**And when memory does force realism, this is the order:**
+
+| Kept forever | Compacts |
+|---|---|
+| Evidence — already immutable and superseded rather than deleted | — |
+| Authored statements: hypotheses, what a person actually said | — |
+| Signals (references into evidence, not copies) | — |
+| — | **The timeline.** `_recordTimeline` (`ai/diagnose.js:380`) logs every band change, every status change, every new hypothesis. It grows without bound and is the one structure whose bulk is not meaning |
+
+**Why this is the right thing to shed.** Confidence is a pure function of the signals
+(`ai/diagnose.js` — it recomputes, it does not accumulate), so it need never be stored to be
+recovered. The timeline is the only part that is genuinely a log. Compact it to its milestones —
+*opened, first hypothesis, confidence crossed a band, contradicted, parked, closed* — and the arc
+a person reads survives while the noise does not.
+
+**What is not on the table:** deleting evidence, deleting what somebody said, or deleting an
+object. The founder's reason is a product reason and it is correct — *"in the event that it
+happens again, it'll help us more with patterns."* An organisation that forgets cannot notice a
+recurrence, and noticing recurrence is what this system is for.
+
+---
+
+## WHAT THESE SEVENTEEN CHANGE ABOUT THE PLAN
 
 The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one insertion.
 
@@ -360,13 +538,13 @@ The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one i
 | 0 | **One polarity vocabulary — High and Low**, with a third outcome underneath: neither | D4, plus D5 and D6. Now a prerequisite: self Highs and Lows cannot be derived into a vocabulary that has not been chosen. The bucketing table is: `risk`/`friction` → Low; `progress`/`milestone`/`opportunity`/`strength` → High; `neutral` → neither; `data_gap` → neither, by name |
 | 1 | `about` binding on the conversation store | unchanged — **and D9 raises its priority: an inquiry is a thread too, so this is now load-bearing for four object kinds, not three** |
 | 2 | Self High/Low, derived from the polarity map | D4 settles the names |
-| 3 | **Focus participants and invitation** | **D2 — new step, and the largest of them** |
+| 3 | **Focus participants and invitation — in two shapes, room and parallel** | **D2, now much larger under D14.** The parallel focus is what retires assign/submit/return/score. **D15** governs what its words may do; **D16** governs what `@intelliQ` may answer in a room |
 | 4 | The four buckets and the thread view, one home | D1 — one home, and the bucket IS the existing card feed under a filter. **D7 — one bucket endpoint taking a scope, not a role.** **D10 — parked inquiries render below the live ones with their reason** |
 | 5 | Inquiry resolution by a person — **answered or dropped** | D3, extended by **D9**. Depends on 1: answering and dropping happen by speaking into the thread |
-| 6 | Fade on stale evidence, **one constant for all four kinds** | **D8, extended by D9 part four.** Depends on 1, because a faded card must still open. A faded inquiry is dormant, never resolved (L-D9) |
+| 6 | **Park on priority, not fade on age** | **D8 and D9 part four, both corrected by D17.** Nothing is abandoned. Depends on 1, because a parked object must still open. A parked inquiry is dormant, never resolved (L-D9) |
 | 7 | **Plain-language projection of kernel status** | **D11 — new step.** `exploring / probable / supported / disputed` never reach a screen unprojected |
 | 8 | **The frontier and the falsifiers in the thread** | **D12 — new step, and the cheapest of them: both are already in the payload at `server.js:13563-13564`** |
-| 9 | **One ranking across all four kinds for home** | **D9 part three.** `/api/inquiry/lead` ranks inquiries today; it needs a value comparable across object types, which does not exist yet |
+| 9 | **One priority, ranking all four kinds, deciding Home** | **D9 part three, named by D13.** `/api/inquiry/lead` ranks inquiries today. Three ranking mechanisms already exist — pick one and make the others feed it, do not add a fourth |
 | 10 | Curiosity in the thread, under the stopping rule | unchanged |
 
 **D2 is the one to be careful with.** It introduces the first object whose audience is a set of
