@@ -23,8 +23,13 @@ const nav = app.slice(app.indexOf('const NAV_ROUTES'), app.indexOf('function nav
 const topbar = app.slice(app.indexOf('function renderTopbar'), app.indexOf('async function _addSafeguardingNav'));
 const screen = app.slice(app.indexOf('async function renderMyData'), app.indexOf('/* ── ALERT COMPOSE FLOW'));
 const orphanSet = reachability.slice(reachability.indexOf('const KNOWN_ORPHANS'), reachability.indexOf('const server'));
-const serverSentence = (server.match(/const safetyException = '([^']+)'/) || [])[1];
-const screenSentence = (app.match(/const ANSWERABILITY_SAFEGUARDING_EXCEPTION = '([^']+)'/) || [])[1];
+/* D21 moved the sentence to its ONE home, ai/safeguarding.SAFETY_EXCEPTION, and serves it on
+   GET /api/safeguarding/config. This assertion therefore got STRONGER, not looser: it used to
+   compare two hardcoded literals and pass as long as they matched, which meant two copies of a
+   safety promise were acceptable so long as somebody kept them in step. It now requires that
+   the client hold no copy at all. */
+const sgModule = read('ai/safeguarding.js');
+const ownedSentence = (sgModule.match(/const SAFETY_EXCEPTION = '([^']+)'/) || [])[1];
 
 check('A1 My data is a real route with a real page',
   /'my-data':\s*\(\)\s*=>\s*renderMyData\(\)/.test(nav) && html.includes('id="page-my-data"'));
@@ -43,8 +48,15 @@ check('A5 the subject-view reads, private habits and own notes come directly fro
   ['held.reads', 'held.workingHabits', 'held.myNotes'].every(field => screen.includes(field)));
 check('A6 the access trail comes from that response and renders only its content-free fields',
   screen.includes('held.accessTrail') && ['entry.actor', 'entry.action', 'entry.at', 'entry.basis'].every(field => screen.includes(field)));
-check('A7 audiences come from the self-scoped endpoint and carry the exact D21 exception',
-  screen.includes("fetch('/api/me/audiences', { headers: Auth._headers() })") && serverSentence && screenSentence === serverSentence);
+check('A7 audiences come from the self-scoped endpoint and the D21 exception is SERVED, not copied',
+  screen.includes("fetch('/api/me/audiences', { headers: Auth._headers() })")
+  // The sentence exists exactly once, in the module that owns the duty of care.
+  && !!ownedSentence && ownedSentence.includes('safeguarding lead is told')
+  // The server serves it from that home rather than re-typing it.
+  && /safetyException: safeguarding\.SAFETY_EXCEPTION/.test(server)
+  // The client fetches it and holds no copy of its own. A literal here again fails this.
+  && screen.includes("fetch('/api/safeguarding/config'")
+  && !app.includes('a safeguarding lead is told. That is the one case'));
 check('A8 download uses the self-scoped export as a file',
   screen.includes("fetch('/api/me/export', { headers: Auth._headers() })") && screen.includes("link.download = 'intelliq-my-data.json'"));
 check('A9 no general evidence-withdrawal affordance was invented', !/withdraw/i.test(screen));

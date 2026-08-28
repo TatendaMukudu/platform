@@ -13233,7 +13233,8 @@ function _evidenceAudienceAnswer(code, userId, env) {
   // A person must know the limits of the promise BEFORE they rely on it. Stated for every
   // record rather than only for records that have already tripped something, because a
   // exception disclosed only once it applies is not notice.
-  const safetyException = 'If something you tell IntelliQ suggests you are at risk of harm, a safeguarding lead is told. That is the one case where safety comes before privacy, and it is decided by a fixed rule rather than by a model.';
+  // ONE HOME: ai/safeguarding.SAFETY_EXCEPTION (D21). Never re-typed here or anywhere else.
+  const safetyException = safeguarding.SAFETY_EXCEPTION;
 
   return audience.whoCanSee(
     { audience: ref, ownerId: env.ownerRef || env.subjectId || null, visibility: env.visibility, contributed, safetyException },
@@ -13781,7 +13782,52 @@ app.get('/api/admin/metrics', requireAuth, (req, res) => {
    so the app can always surface real help; the lead identity is not exposed to members). */
 app.get('/api/safeguarding/config', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
-  res.json({ ok: true, resources: _sgResources(code), isLead: _isSgLead(code, userId) });
+  res.json({ ok: true, resources: _sgResources(code), isLead: _isSgLead(code, userId),
+    safetyException: safeguarding.SAFETY_EXCEPTION });   // D21 — served, never re-typed by a client
+});
+
+/* ── NOTICES — what a person must be shown BEFORE they speak (founder decision D21) ──────────
+   A NOTICE IS NOT A CONSENT, and the distinction is the point. Consent can be refused; this
+   cannot. The safeguarding rule applies whether or not anybody agrees to it, so what is recorded
+   is that the person was SHOWN it — never that they permitted it. Storing it as a grantable
+   consent would let somebody reasonably believe they had declined it, which would be worse than
+   not telling them at all.
+
+   It rides in the existing consent ledger under a `notice:` prefix rather than in a new store:
+   `userConsents` is already durable, already versioned, and is already erased with the person
+   (`server.js` delete-user path). A parallel store would be a fifth thing to keep in step. */
+const NOTICES = Object.freeze({ safeguarding: () => safeguarding.SAFETY_EXCEPTION });
+const _noticeScope = id => `notice:${id}`;
+
+app.get('/api/me/notices', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const held = _getConsents(code, userId);
+  res.json({ ok: true, version: CONSENT_VERSION,
+    notices: Object.keys(NOTICES).map(id => {
+      const rec = held[_noticeScope(id)] || null;
+      return {
+        id, text: NOTICES[id](),
+        // Acknowledged only if it was acknowledged at THIS version. Restating a changed notice
+        // is the whole reason the version is recorded.
+        acknowledged: !!(rec && rec.acknowledged && rec.version === CONSENT_VERSION),
+        acknowledgedAt: (rec && rec.at) || null,
+      };
+    }) });
+});
+
+/* POST /api/me/notices/ack — "I have been shown this." There is no decline, because there is
+   nothing here to decline. Self-scoped: a person may only ever acknowledge on their own behalf. */
+app.post('/api/me/notices/ack', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const id = String((req.body && req.body.id) || '');
+  if (!Object.prototype.hasOwnProperty.call(NOTICES, id)) return res.status(400).json({ error: 'unknown notice' });
+  const held = _getConsents(code, userId);
+  held[_noticeScope(id)] = { acknowledged: true, at: new Date().toISOString(), version: CONSENT_VERSION };
+  // Deliberately NOT written to the audit log. That log is a fixed vocabulary of accountable
+  // READS and EXPORTS of personal data, kept narrow precisely so free text cannot creep into it.
+  // Being shown a notice is neither, and the consent ledger's timestamp is already the record.
+  scheduleSave();
+  res.json({ ok: true, id, acknowledged: true, version: CONSENT_VERSION });
 });
 
 /* GET /api/assistant/turn/:turnId — inspect the bounded interpretation artifact (self-only). */

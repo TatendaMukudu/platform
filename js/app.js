@@ -1402,6 +1402,11 @@ function launchApp(){
   app.style.display = '';
   app.classList.add('visible');
 
+  // D21 — the safeguarding exception is stated BEFORE anyone speaks. Fired here, at the one
+  // point every person passes through on the way in, so it cannot be missed by whichever home
+  // they land on. Non-blocking to render: the panel shows over the app rather than delaying it.
+  showAdvanceNotices();
+
   try {
     renderSidebar();
     renderTopbar();
@@ -2231,10 +2236,67 @@ async function resolveSafeguardingFlag(button) {
   }
 }
 
+/* ── ADVANCE NOTICE (D21) ──────────────────────────────────
+   Safeguarding is the one place a person's words cross a boundary without their say-so. Telling
+   them at the moment it happens is honest but late — somebody who learns the rule only by
+   crossing it learns it as a betrayal rather than as something they already knew.
+
+   It is a NOTICE, not a consent: there is no decline, because the rule applies either way. The
+   button says "I understand", never "I agree", and what is recorded is that the person was
+   shown it. The text is never hardcoded here — it comes from the server's single home. */
+async function showAdvanceNotices() {
+  try {
+    const response = await fetch('/api/me/notices', { headers: Auth._headers() });
+    if (!response.ok) return;
+    const pending = ((await response.json()).notices || []).filter(n => n && n.acknowledged === false && n.text);
+    if (!pending.length || document.getElementById('advance-notice')) return;
+
+    const panel = document.createElement('div');
+    panel.id = 'advance-notice';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.style.cssText = 'position:fixed;inset:0;z-index:9000;display:flex;align-items:center;justify-content:center;padding:1.5rem;background:rgba(0,0,0,0.55)';
+    panel.innerHTML = `<div class="card" style="max-width:34rem;width:100%"><div class="card-body">
+      <h2 style="margin-top:0">Before you start</h2>
+      <p style="color:var(--text-secondary)">What you say to IntelliQ is private. There is one exception, and you should know it now rather than find it out later.</p>
+      ${pending.map(n => `<p style="padding:0.9rem 1rem;border-left:3px solid var(--accent);background:var(--surface-2)">${_escHtml(n.text)}</p>`).join('')}
+      <button class="btn btn-accent" id="advance-notice-ack" style="margin-top:0.75rem">I understand</button>
+      <div id="advance-notice-error" role="alert" style="display:none;color:var(--danger);font-size:0.75rem;margin-top:0.5rem"></div>
+    </div></div>`;
+    document.body.appendChild(panel);
+
+    document.getElementById('advance-notice-ack')?.addEventListener('click', async (ev) => {
+      const button = ev.currentTarget;
+      const error = document.getElementById('advance-notice-error');
+      button.disabled = true;
+      try {
+        // Every pending notice is acknowledged before the panel closes. If any POST fails the
+        // panel STAYS — a notice recorded as shown when it was not is the one outcome worse
+        // than showing it twice.
+        for (const n of pending) {
+          const r = await fetch('/api/me/notices/ack', {
+            method: 'POST', headers: Auth._headers(), body: JSON.stringify({ id: n.id }),
+          });
+          if (!r.ok) throw new Error('Could not record that you have seen this. Please try again.');
+        }
+        panel.remove();
+      } catch (e) {
+        button.disabled = false;
+        if (error) { error.textContent = e.message; error.style.display = 'block'; }
+      }
+    });
+  } catch (_) { /* never block the app on this; the in-the-moment message still applies */ }
+}
+
 /* ── MY DATA & PRIVACY ─────────────────────────────────────
    A self-scoped reader only. The server chooses the subject from the authenticated session;
    this client supplies no person id and never passes the response through a leader projection. */
-const ANSWERABILITY_SAFEGUARDING_EXCEPTION = 'If something you tell IntelliQ suggests you are at risk of harm, a safeguarding lead is told. That is the one case where safety comes before privacy, and it is decided by a fixed rule rather than by a model.';
+/* The safeguarding exception is NOT held here. It has one home — ai/safeguarding.SAFETY_EXCEPTION
+   — and reaches this page through GET /api/safeguarding/config. It used to be a second copy of
+   the sentence kept equal to the server's only by a test comparing two string literals; a promise
+   about somebody's safety should not be maintained by string comparison. If the fetch fails we
+   render nothing rather than a remembered version, because a stale safety promise is worse than
+   an absent one. */
 
 function _answerabilityRecords(items, emptyText) {
   if (!Array.isArray(items) || !items.length) return `<p style="color:var(--text-muted);margin:0">${_escHtml(emptyText)}</p>`;
@@ -2249,13 +2311,15 @@ async function renderMyData() {
   if (!container) return;
   container.innerHTML = '<div class="empty-state"><p>Loading your record…</p></div>';
   try {
-    const [dataResponse, audiencesResponse] = await Promise.all([
+    const [dataResponse, audiencesResponse, sgResponse] = await Promise.all([
       fetch('/api/me/data', { headers: Auth._headers() }),
       fetch('/api/me/audiences', { headers: Auth._headers() }),
+      fetch('/api/safeguarding/config', { headers: Auth._headers() }),
     ]);
     if (!dataResponse.ok || !audiencesResponse.ok) throw new Error('Your record is unavailable');
     const data = await dataResponse.json();
     const audienceData = await audiencesResponse.json();
+    const safetyException = sgResponse.ok ? (await sgResponse.json()).safetyException || '' : '';
     const held = data.held || {};
     const audiences = Array.isArray(audienceData.audiences) ? audienceData.audiences : [];
 
@@ -2287,7 +2351,7 @@ async function renderMyData() {
       <div class="card" style="margin-bottom:1rem"><div class="card-body">
         <h2 style="margin-top:0">Who I speak to</h2>
         <p style="color:var(--text-secondary)">${_escHtml(audienceData.note || '')}</p>
-        <p style="padding:0.8rem 1rem;border-left:3px solid var(--accent);background:var(--surface-2)">${_escHtml(ANSWERABILITY_SAFEGUARDING_EXCEPTION)}</p>
+        ${safetyException ? `<p style="padding:0.8rem 1rem;border-left:3px solid var(--accent);background:var(--surface-2)">${_escHtml(safetyException)}</p>` : ''}
       </div></div>${audienceCards}
     </section>`;
     document.getElementById('download-my-data')?.addEventListener('click', downloadMyData);

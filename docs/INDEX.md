@@ -88,7 +88,7 @@ is better product, not a broken one.
 | 4 | **One polarity vocabulary; FIVE exist** | product | `ttd/layer-map.md` §1 · prompt ready at `briefs/session-prompts.md` §22 |
 | 5 | **Withdrawal recomputes and tells (T-2)** | **BLOCKING** | founder decision **D19** |
 | 6 | **A finding about a leader must not be attributable** | **BLOCKING** | founder decision **D27** |
-| 7 | **The safeguarding exception stated before anyone speaks** | **BLOCKING** | **D21** — partly landed with the answerability screen |
+| 7 | ~~The safeguarding exception stated before anyone speaks~~ | — | **DONE** — D21, `advance-notice-http-smoke`; one home in `ai/safeguarding.SAFETY_EXCEPTION` |
 | 8 | The thread — `about` on the conversation store | product | `ttd/object-as-conversation.md` G1. **Five decisions depend on it** |
 | 9 | Self Highs and Lows, derived | product | `ttd/object-as-conversation.md` §4 G2 |
 | 10 | The front end reflecting the object model | product | `ttd/object-as-conversation.md`, **D24 — do it last** |

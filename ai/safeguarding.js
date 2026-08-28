@@ -95,4 +95,14 @@ function composeResponse({ name = '', severity = 'crisis', resources = DEFAULT_R
   };
 }
 
-module.exports = { detect, composeResponse, DEFAULT_RESOURCES };
+/* THE ONE HOME for the sentence a person must read BEFORE they say anything (founder decision
+   D21). It lived as a function-local const in server.js and as a second copy in js/app.js, kept
+   equal only by a test comparing the two literals. A promise about somebody's safety should not
+   be maintained by string comparison, so it lives here — in the module that owns the duty of
+   care — and everything else reads it.
+
+   It is a NOTICE, not a consent. Nobody may decline it; the rule applies either way. What is
+   recorded is that a person was shown it, never that they permitted it. */
+const SAFETY_EXCEPTION = 'If something you tell IntelliQ suggests you are at risk of harm, a safeguarding lead is told. That is the one case where safety comes before privacy, and it is decided by a fixed rule rather than by a model.';
+
+module.exports = { detect, composeResponse, DEFAULT_RESOURCES, SAFETY_EXCEPTION };
