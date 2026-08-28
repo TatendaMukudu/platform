@@ -11,7 +11,7 @@ an agent finding it inconvenient.
 
 ---
 
-## THE INDEX — forty-one decisions, one line each
+## THE INDEX — forty-four decisions, one line each
 
 **The shape of the product**
 
@@ -76,6 +76,9 @@ an agent finding it inconvenient.
 |---|---|---|
 | **D38** | Contribution is **anonymous by default**, may be named. The precondition for D27 | `contribution.js` |
 | **D39** | An admin builds the tree; **the gaps in it become day-zero inquiries** | onboarding, cold start |
+| **D42** | The superadmin is authoritative about **intent**, never about anyone's experience. Two hats, never merged | authority, org context |
+| **D43** | A node lead has **full lifecycle inside their own branch** — move, invite, remove | permissions |
+| **D44** | An onboarding answer is context **and** evidence **and** a frontier seed. One claim, one timestamp | intake |
 | **D40** | On leaving: their record goes, the team's history stays and **recomputes** | deletion |
 | **D41** | **Nothing extra is refused.** IntelliQ hears anything, reasons about work, performance and wellbeing | the agent |
 
@@ -1384,7 +1387,133 @@ failure D21 and the safeguarding design exist to prevent.
 
 ---
 
-## WHAT THESE FORTY-ONE CHANGE ABOUT THE PLAN
+## D42 · THE TRUTH HARNESS IS THE ORGANISATION'S *INTENT*, NEVER ANYONE'S EXPERIENCE
+
+The founder wrote: *"Superadmin is our truth harness and everybody else's truth is compared to that
+truth to produce Highs, Lows, Focuses and Inquiries."* Asked which of two readings that was, they
+chose **authoritative about intent**.
+
+**Decision:** the superadmin declares what the organisation is **for**, how it operates, and what
+matters. That is the reference frame. Everyone else describes what they **experience**. The
+**gap between the two is what becomes an inquiry.**
+
+**Why this is a strong product idea rather than a hierarchy.** Nobody in this system is
+authoritative about another person's experience — but somebody has to be authoritative about what
+the organisation is *trying* to do, or there is nothing for experience to be measured against and
+every finding floats. The frame makes divergence meaningful.
+
+**And the machinery is already there.** `member_team_divergence` exists as a pattern type today.
+What D42 adds is the other half of the comparison: a declared organisational intent for lived
+experience to diverge *from*.
+
+### The reading that was rejected, and what it would have broken
+
+*"Where the superadmin's account and a member's account conflict about what happened, the
+superadmin's stands."* That collapses authority into truth, and it would break three things this
+product is built on:
+
+- **P0-D**, whose entire subject is *authority does not equal truth* — and which is asserted
+  executably by `authority-truth-smoke`.
+- **D36's contested state.** If the boss automatically wins, nothing is ever contested; it is
+  simply overruled.
+- **The confidence model.** `ai/diagnose.js:263` already weights `authoritative` at 1.0 against
+  0.5 for a plain report — authority is **weight**, not a verdict, and a contradicting account
+  still pulls confidence down hard.
+
+### The guard this needs, because a superadmin is usually also a person
+
+The founder also said the superadmin gets **personal onboarding if they are themselves in the
+tree**. That is right, and it creates the one way D42 could go wrong:
+
+> L-D42 · A superadmin wears two hats and the kernel must never merge them. Their **declarations
+> about the organisation** are the frame. Their **own evidence as a participant** — their mood,
+> their load, their patterns — is personal evidence like anybody else's, subject to D7, D26 and
+> every disclosure rule. A superadmin's bad week is not an organisational fact.
+
+Without that line, the person who configures the system becomes the standard everyone is measured
+against, which is precisely the reading D42 rejected.
+
+---
+
+## D43 · A NODE LEAD HAS FULL LIFECYCLE INSIDE THEIR OWN BRANCH
+
+**Decision, in the founder's framing:** *"like a general in war and soldiers who can make their own
+decisions."* A node lead may **move people within their subtree, invite new people into it, and
+remove people from the organisation.**
+
+**Structure follows the same isolation as reading.** A lead acts only inside the branch they lead;
+a sibling branch is unreachable structurally exactly as it is unreachable for reading
+(`ai/org-routing.js:16`, `:79`; `ai/org-answer.js:6`).
+
+**Why the founder went further than my recommendation.** I proposed movement only, keeping
+invitation and removal with the superadmin. The founder took all three, on the grounds that a
+smaller organisation has no IT function and a superadmin who must approve every roster change is a
+bottleneck that stops the product being used. That is correct about how clubs actually work.
+
+### Two consequences that follow, named rather than argued against
+
+**1 · Removal is a bigger act here than in most products, because of D40.** When a lead removes
+somebody, that person's evidence is withdrawn and **team findings recompute without them** — so a
+finding whose cohort floor only held because of the departed person silently drops. A roster
+change becomes a change to what the organisation believes.
+
+> L-D43 · Removal by a node lead is a correction event. Whoever was shown a finding that has now
+> dropped is owed the notice D19 requires. It is audited like any other authority act.
+
+**2 · The attack, stated plainly because it is real.** A lead who is the subject of an emerging
+finding (D27) can remove the people contributing to it. D38's anonymity means they cannot see
+*who* — but they can still remove people. Three things blunt it and none of them are new work:
+
+- Contributions **survive the contributor** (`contributorId: '(erased)'`, `server.js:2046`), so
+  removing somebody does not remove what they contributed.
+- Removal is **audited**, and the audit trail is visible to the person's own record (D18).
+- A finding about a leader goes to **that leader's own leader** (D27), who can see the removals.
+
+**Worth revisiting post-pilot, not now:** whether removal of a person who has contributed to a live
+inquiry about the remover should require a second pair of eyes. Flagged, not decided.
+
+---
+
+## D44 · AN ONBOARDING ANSWER IS ALL THREE — WITH ONE PRECISION
+
+The founder refused to pick and gave the reasoning, which is better than the options I offered:
+
+> *"Whatever you say shapes what IntelliQ says next. Our business is the best next question. The
+> next is important because it proves we are taking what the user says seriously. What is the point
+> of the algorithm taking something and not surfacing it later? Your word is your bond and we're
+> going to work on what it is you're seeing. We're not here to shift perspective but to work
+> alongside it."*
+
+**Decision: an onboarding answer is context, is evidence, and seeds the frontier. All three.**
+
+| Role | What it means |
+|---|---|
+| **Context** | It informs reasoning immediately and shapes the next question |
+| **Evidence** | It enters the log as a real, self-reported claim with its own authority — because a system that takes something and never surfaces it has not taken it seriously |
+| **Frontier seed** | It creates an expectation IntelliQ watches for, and can later be found to differ from |
+
+### The one precision, and it is technical rather than a disagreement
+
+**A self-report is evidence of a CLAIM, not of an OBSERVATION.** *"I usually train four times a
+week"* is one thing somebody said at one moment. It is not four observed sessions.
+
+**The architecture already prevents the failure by construction**, which is why all three
+genuinely fit together: an onboarding answer becomes **one evidence envelope with one
+`observedAt`**. It therefore contributes at most one baseline point. Nothing can expand a claim
+about typical behaviour into synthetic history, because there is only one timestamp to hang it on.
+
+So the founder's rule holds exactly as stated — *your word is your bond* — and `MIN_POINTS = 5`
+still means five real moments. The claim is recorded, acted on, watched for, and if observation
+later disagrees with it, that is **D36's contested state**, not an error.
+
+**This also sharpens D22's cold start.** Onboarding answers do not remove the two-week floor on
+self-relative detection — but they give the inquiry engine something real to be curious about on
+day one, alongside D39's structural gaps. Day zero now has two genuine sources of content and
+neither of them is fabricated.
+
+---
+
+## WHAT THESE FORTY-FOUR CHANGE ABOUT THE PLAN
 
 The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one insertion.
 
