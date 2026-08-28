@@ -61,10 +61,10 @@ const server = S.app.listen(0, async () => {
       response.status === 200 && expectedRefs.length >= 2 && entry &&
       JSON.stringify(entry.findingRefs) === JSON.stringify(expectedRefs));
 
-    const serialized = JSON.stringify(entry || {});
+    const serialized = JSON.stringify(S.auditLog[CODE] || []);
     const allowedKeys = ['seq', 'actor', 'action', 'subjectIds', 'findingRefs', 'basis', 'at', 'prevHash', 'hash'];
     check('E2 the durable emission record is references-only and contains no finding content or figures',
-      entry && Object.keys(entry).every(key => allowedKeys.includes(key)) &&
+      entry && (S.auditLog[CODE] || []).every(auditEntry => Object.keys(auditEntry).every(key => allowedKeys.includes(key))) &&
       !/Private State Person|Performance Person|Pass completion|Momentum dropping|83%|2\.1\/5/.test(serialized));
 
     check('E3 finding references participate in the intact hash chain', audit.verify(S.auditLog[CODE] || []).ok === true);
@@ -72,11 +72,16 @@ const server = S.app.listen(0, async () => {
     tampered[tampered.length - 1].findingRefs = ['finding:forged:claim'];
     check('E4 changing a recorded finding reference breaks chain verification', audit.verify(tampered).ok === false);
 
+    check('E5 adding finding references does not weaken the audit action allow-list',
+      audit.record({ actor: 'lead', action: 'finding_headline', subjectIds: ['cap'],
+        findingRefs: ['finding:cap:plateau'], basis: 'leader intelligence briefing', at: now },
+      audit.tip(S.auditLog[CODE] || [])) === null);
+
     for (let i = 0; i < 5001; i++) {
       S._audit(CODE, { actor: 'lead', action: 'finding_view', subjectIds: ['cap'],
         findingRefs: [`finding:cap:bounded_${i}`], basis: 'leader intelligence briefing' });
     }
-    check('E5 emission recording respects AUDIT_CAP and the retained chain still verifies',
+    check('E6 emission recording respects AUDIT_CAP and the retained chain still verifies',
       S.auditLog[CODE].length === 5000 && audit.verify(S.auditLog[CODE]).ok === true);
   } catch (error) {
     failed++; console.log('  FAIL suite threw:', error && error.message);
