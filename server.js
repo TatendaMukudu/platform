@@ -3933,7 +3933,12 @@ function _buildMemberIntelInput(code, u, now) {
     helping:            _weeklyCounts(helpingSeries.map(h => h.t), now),
   };
   let deviations = [], fingerprint = null;
-  try { const b = baseline.analyze(dimSeries, now); deviations = b.deviations; fingerprint = b.fingerprint; } catch (_) {}
+  try {
+    const b = baseline.analyze(dimSeries, now);
+    const dimensionPrimitive = { mood: 'state', check_in_frequency: 'participation', reflection_cadence: 'participation', contribution: 'participation', helping: 'relational' };
+    deviations = b.deviations.map(d => ({ ...d, primitive: dimensionPrimitive[d.dimension] || null }));
+    fingerprint = b.fingerprint;
+  } catch (_) {}
 
   // ── Cross-signal reasoning (ai/agents): honest connections across ANY streams ──
   // The five behavioural dimensions PLUS any raw numeric signal (a stat, a grade,
@@ -3971,6 +3976,7 @@ function _buildMemberIntelInput(code, u, now) {
       // Signals may declare their own primitive/valence (best); else infer universally.
       primitive: s.primitive || packs.primitiveForSignal(s.source, s.label),
       valence:   s.valence   || packs.valenceFor(s.label),
+      unit: s.unit || null,
       series: [],
     }).series.push({ t, v: Number(s.valueNum) });
   });
@@ -4020,7 +4026,7 @@ function _buildMemberIntelInput(code, u, now) {
       const label = String(env.label || primitive).slice(0, 60);
       const key = `canonical:${primitive}:${label}`;
       (byKind[key] = byKind[key] || {
-        key, label, primitive,
+        key, label, primitive, unit: env.unit || null,
         // The evidence declares which way is good; absent that, up-good is the conservative
         // reading because it makes a DROP the thing that gets noticed.
         valence: (env.attributes && env.attributes.valence) || 'up-good',
@@ -4047,7 +4053,7 @@ function _buildMemberIntelInput(code, u, now) {
     hasSensitiveContext,
     deviations, fingerprint, connections, structural,
     // The ephemeral relationship graph (honest: correlational, never causal).
-    streams: streams.map(s => ({ key: s.key, label: s.label, primitive: s.primitive })),
+    streams: streams.map(s => ({ key: s.key, label: s.label, primitive: s.primitive, unit: s.unit || null })),
   };
 }
 
@@ -4203,13 +4209,18 @@ async function _reasonedPrompts(code, userId, now) {
    Consolidates: who-needs-attention + why-now + evidence + recommended action +
    group rollup (folds the old Group Health / Org Health / Intelligence pages).
    Privacy-safe throughout; the only AI call is the aggregate summary (gateway). */
-/* Strip every leaked NUMBER from a leader-facing string — deviation percentages,
-   mood x/5, and raw markdown bold — leaving direction words intact. */
+/* Strip protected figures from leader-facing text. Untyped text fails closed for backwards
+   compatibility; typed outcome/capability/participation/load/resource text keeps its figures.
+   The primitive provenance is attached at composition time, never guessed from the wording. */
 function _stripLeaderNumbers(s) {
-  return String(s == null ? '' : s)
+  const tags = s && typeof s === 'object' && Array.isArray(s.primitives) ? s.primitives : [];
+  const protectedFigure = !tags.length || tags.some(p => p === primitives.PRIMITIVE.STATE || p === primitives.PRIMITIVE.RELATIONAL);
+  let text = String(s == null ? '' : s);
+  if (protectedFigure) text = text
     .replace(/\s*\(\s*\d+(?:\.\d+)?\s*%\s*\)/g, '')       // "(100%)"
     .replace(/\b\d+(?:\.\d+)?\s*\/\s*5\b/g, '')           // "2.1/5"
-    .replace(/\b\d+(?:\.\d+)?\s*%/g, '')                  // "83%"
+    .replace(/\b\d+(?:\.\d+)?\s*%/g, '');                 // "83%"
+  return text
     .replace(/\*\*/g, '')                                 // markdown bold markers → plain
     .replace(/\s{2,}/g, ' ').replace(/\s+([;.,])/g, '$1').replace(/\(\s*\)/g, '').trim();
 }
@@ -4235,7 +4246,8 @@ function _sanitizeBriefingForLeader(data) {
     evidence: [],                                          // raw numeric basis never reaches a leader
     patterns: (it.patterns || []).map(p => ({ type: p.type, label: p.label, confidence: p.confidence })),  // drop numeric basis
     deviations: (it.deviations || []).map(d => ({ label: d.label, direction: d.direction, confidence: d.confidence })), // no pct/normal/recent
-    connections: (it.connections || []).map(c => ({ ...c, basis: _stripLeaderNumbers(c.basis) })),
+    fingerprint: undefined,                                // personal normals include protected state figures
+    connections: (it.connections || []).map(({ strength: _relationalFigure, primitives: _primitiveTags, ...c }) => ({ ...c, basis: _stripLeaderNumbers(c.basis) })),
     graph: undefined,                                      // node/edge internals not for the leader UI
   }); });
   return { ...data, summary: _stripLeaderNumbers(data.summary), items };
@@ -7908,7 +7920,7 @@ function _kernelEvidence(code, opts = {}) {
     if (env.visibility === 'private') return false;
     return env.promoted === true;
   }).map(env => ({ evidenceId: env.id, subjectId: env.subjectId, ownerRef: env.ownerRef || null, type: env.type,
-    label: env.label, value: env.value, valueText: env.valueText, observedAt: env.observedAt,
+    label: env.label, value: env.value, unit: env.unit || null, valueText: env.valueText, observedAt: env.observedAt,
     visibility: env.visibility, attributes: env.attributes || null, purpose, __canonical: true }));
 }
 /* Guard used by the gateway + tests: a raw capability record is NOT canonical. */

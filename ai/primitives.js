@@ -103,7 +103,8 @@ function structuralPatterns(streams, now) {
   //  person never trips withdrawal; that case is data_gap below.)
   of(PRIMITIVE.PARTICIPATION).filter(_declined).slice(0, 1).forEach(s =>
     out.push({ type: 'withdrawal', severity: _sevFromPct(s.shift.deviationPct),
-      basis: `participation (${s.label}) is ${_pct(s.shift)}below their usual`, confidence: s.shift.confidence }));
+      basis: `participation (${s.label}) is ${_pct(s.shift)}below their usual`, confidence: s.shift.confidence,
+      primitives: [PRIMITIVE.PARTICIPATION] }));
 
   // DATA GAP — they have a real history but have gone SILENT lately. This is
   // distinct from withdrawal (reduced-but-present): it's uncertainty, not a claim
@@ -117,14 +118,15 @@ function structuralPatterns(streams, now) {
     if (b.points >= baseline.MIN_POINTS && recentN === 0) {
       out.push({ type: 'data_gap', severity: 'medium',
         basis: `${s.label}: no activity in ~2 weeks, though they were regular before`,
-        confidence: b.points >= 12 ? 'emerging' : 'tentative' });
+        confidence: b.points >= 12 ? 'emerging' : 'tentative', primitives: [PRIMITIVE.PARTICIPATION] });
     }
   });
 
   // ISOLATION — a relational (connection) stream is thinning.
   of(PRIMITIVE.RELATIONAL).filter(_declined).slice(0, 1).forEach(s =>
     out.push({ type: 'isolation', severity: 'medium',
-      basis: `connection (${s.label}) is thinning vs their usual`, confidence: s.shift.confidence }));
+      basis: `connection (${s.label}) is thinning vs their usual`, confidence: s.shift.confidence,
+      primitives: [PRIMITIVE.RELATIONAL] }));
 
   // OVERLOAD — demand is elevated AND an up-good wellbeing state is declining.
   const loadUp    = of(PRIMITIVE.LOAD).filter(_rose);
@@ -132,7 +134,8 @@ function structuralPatterns(streams, now) {
   if (loadUp.length && stateDown.length) {
     out.push({ type: 'overload', severity: 'high',
       basis: `${loadUp[0].label} is up while ${stateDown[0].label} is down — a load/strain mismatch`,
-      confidence: _minConf(loadUp[0].shift.confidence, stateDown[0].shift.confidence) });
+      confidence: _minConf(loadUp[0].shift.confidence, stateDown[0].shift.confidence),
+      primitives: [PRIMITIVE.LOAD, PRIMITIVE.STATE] });
   }
 
   // PLATEAU — a capability/outcome has been flat over a long window despite effort.
@@ -144,9 +147,10 @@ function structuralPatterns(streams, now) {
     const materiallyFlat = s.shift.direction === 'flat' ||
       (Number.isFinite(s.shift.deviationPct) && Math.abs(s.shift.deviationPct) <= 5);
     if (b.points >= 8 && materiallyFlat && effortSteady && !out.some(o => o.type === 'plateau')) {
+      const figure = Number.isFinite(s.shift.recent) ? ` at ${s.shift.recent}${s.unit || ''}` : '';
       out.push({ type: 'plateau', severity: 'low',
-        basis: `${s.label} has been flat for a while despite steady effort`,
-        confidence: b.points >= 12 ? 'emerging' : 'tentative' });
+        basis: `${s.label} is${figure} and has been flat for a while despite steady effort`,
+        confidence: b.points >= 12 ? 'emerging' : 'tentative', primitives: [s.primitive] });
     }
   });
 

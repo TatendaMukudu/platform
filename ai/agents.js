@@ -179,6 +179,7 @@ function crossSignal(streams, now, { minCorr = 0.6, max = 3 } = {}) {
       const confidence = (n >= 12 && Math.abs(r) >= 0.75) ? 'clear' : n >= 8 ? 'emerging' : 'tentative';
       out.push({
         a: A.label, b: B.label, relation,
+        primitives: [A.primitive, B.primitive].filter(Boolean),
         strength: Math.round(Math.abs(r) * 100) / 100, confidence,
         basis: relation === 'together'
           ? `${A.label} and ${B.label} have risen and fallen together for them lately`

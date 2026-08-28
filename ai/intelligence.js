@@ -178,7 +178,8 @@ function baselineShift(m) {
   const basis = 'unusual for them — ' + devs.slice(0, 2)
     .map(d => `${d.label} ${d.direction} their usual${Number.isFinite(d.deviationPct) ? ` (${Math.abs(d.deviationPct)}%)` : ''}`)
     .join('; ');
-  return { type: 'baseline_shift', severity, basis, confidence: top.confidence };
+  return { type: 'baseline_shift', severity, basis, confidence: top.confidence,
+    primitives: [...new Set(devs.map(d => d.primitive).filter(Boolean))] };
 }
 
 const DETECTORS = [baselineShift, momentumDrop, quietImprovement, recovering, repeatedConcern, memberTeamDivergence, invisibleLoad];
@@ -220,15 +221,29 @@ function composeBriefingItem(m, findings, learning = {}) {
     ? `Here, "${learned.action}" has tended to help with this pattern (${learned.positive}/${learned.total} positive).`
     : null;
 
+  // Carry primitive provenance with composed text without changing its JSON/string shape.
+  // The leader projection can then protect state/relational figures without guessing from words.
+  const primitiveText = (text, ps) => {
+    const tagged = new String(text); // JSON.stringify and interpolation still produce plain text
+    Object.defineProperty(tagged, 'primitives', { value: [...new Set((ps || []).filter(Boolean))] });
+    return tagged;
+  };
+  const fallbackPrimitives = {
+    baseline_shift: (top.primitives || []), momentum_drop: ['state'], quiet_improvement: ['state'],
+    recovering: ['state'], repeated_concern: ['state', 'capability'],
+    member_team_divergence: ['state'], invisible_load: ['relational', 'state'],
+  };
+  const whyPrimitives = top.primitives || fallbackPrimitives[top.type] || [];
+
   return {
     memberId: m.id,
     name:     m.name,
     severity: top.severity,
     patterns: findings.map(f => ({ type: f.type, label: label(f), basis: f.basis, confidence: f.confidence })),
-    whyNow:   `${label(top)} — ${top.basis}.`,
+    whyNow:   primitiveText(`${label(top)} — ${top.basis}.`, whyPrimitives),
     evidence: findings.map(f => f.basis),
     recommendedAction,
-    learnedNote,
+    learnedNote: learnedNote ? primitiveText(learnedNote, ['outcome']) : null,
     // A soft, contentless nudge: there may be private context informing this.
     careFlag: !!m.hasSensitiveContext,
     patternType: top.type,
@@ -236,7 +251,7 @@ function composeBriefingItem(m, findings, learning = {}) {
     deviations: (m.deviations || []).map(d => ({ label: d.label, direction: d.direction, deviationPct: d.deviationPct, recent: d.recent, normal: d.normal, confidence: d.confidence })),
     fingerprint: m.fingerprint || null,
     // Cross-signal connections — things that moved together for them (never causal).
-    connections: m.connections || [],
+    connections: (m.connections || []).map(c => ({ ...c, basis: primitiveText(c.basis, c.primitives || []) })),
   };
 }
 
