@@ -11,13 +11,19 @@ and what it now requires.
 **Decision:** a player and a coach open the same home. The most-needing-an-answer question at the
 top, the composer underneath it, and nothing else above the fold. Claude's home is the reference.
 
-**And the founder's own observation, which is the useful part:** the Inquiries, Highs, Lows and
-Focuses lists should *look like how home used to*. The card feed that is on the leader's Today
-page today is already the right rendering for a list — it just needs to become four filtered
-lists instead of one mixed one.
+**And the founder's own observation, which is the useful part — corrected in their own words:**
 
-**What this settles.** No separate member and leader home to design, and no new list component to
-invent.
+> *"They are not lists. They are in the nav, and when you click on them you essentially see what
+> we used to have, but in their respective buckets."*
+
+So the four nav entries are **buckets, not lists**, and the distinction is not cosmetic: a *list*
+implies a new component to design, and a *bucket* is the card feed that is already on the
+leader's Today page, filtered to one kind. Same cards, same renderer, same affordances. The only
+change is the filter and the nav entry that applies it.
+
+**What this settles.** No separate member and leader home to design, and **no new list component
+to invent** — anyone who writes a second card renderer for the buckets has misread this
+decision.
 
 **What it requires.** `js/app.js` and `js/member-view.js` currently render two different homes.
 One of them wins. The grain differs by *what a person may see* — which `_kernelEvidence` and
@@ -116,7 +122,7 @@ The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one i
 | 1 | `about` binding on the conversation store | unchanged |
 | 2 | Self High/Low, derived from the polarity map | D4 settles the names |
 | 3 | **Focus participants and invitation** | **D2 — new step, and the largest of them** |
-| 4 | The four lists and the thread view, one home | D1 — one home, and the list reuses the existing card feed |
+| 4 | The four buckets and the thread view, one home | D1 — one home, and the bucket IS the existing card feed under a filter |
 | 5 | Inquiry resolution by a person | D3 |
 | 6 | Curiosity in the thread, under the stopping rule | unchanged |
 

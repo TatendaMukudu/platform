@@ -344,6 +344,69 @@ Use this instead of #1 when the PR claims to have fixed something important.
 
 ---
 
+## 19 · Codex — the safeguarding lead's screen (READY TO SEND)
+
+The next code task named in `docs/INDEX.md`. Self-contained, needs no founder decision, and the
+backend is finished — three routes exist with **no front-end caller anywhere**. A crisis flag is
+currently routed to a named safe adult who has no screen to see it on.
+
+> Confirm the branch first (see THE BRANCH above), run `bash scripts/codex-preflight.sh`, and
+> read `docs/INDEX.md` before anything else.
+>
+> **Build the safeguarding lead's queue in the front end. Back end is done — do not rewrite it.**
+>
+> **What already exists, exactly:**
+>
+> - `GET /api/safeguarding/flags` — lead or superadmin only, 403 otherwise, and the read is
+>   itself audited. Returns `{ ok, isLead, flags, openCount }`, newest first.
+> - `POST /api/safeguarding/flags/:id/resolve` — body `{ note }`, truncated to 500 chars. Sets
+>   `status`, `resolvedBy`, `resolvedAt`, `resolutionNote`. Audited.
+> - `GET /api/safeguarding/config` — readable by anyone. Returns `{ resources, isLead }`. The
+>   lead's identity is deliberately **not** exposed to members.
+> - A flag is `{ id, subjectId, subjectName, severity, category, excerpt, at, status, leadId,
+>   resolvedBy, resolvedAt, resolutionNote }`. `excerpt` is the member's own words, capped at 300
+>   characters by `_recordSafeguardingFlag`.
+> - `_isSgLead(code, userId)` — the configured `orgMeta[code].safeguardingLeadId`, else the org's
+>   active superadmin.
+>
+> **Scope — one commit:**
+>
+> 1. A queue screen: open flags first, then resolved. Per flag: who, when, severity, category,
+>    the excerpt, and the resources from `/api/safeguarding/config`.
+> 2. Resolve, with an optional note.
+> 3. A nav entry that appears only when `isLead` is true. Treat this as **convenience, not a
+>    boundary** — the server already 403s, and the screen must degrade correctly if a
+>    non-lead reaches it by URL.
+> 4. Remove the three routes from `KNOWN_ORPHANS` in `scripts/reachability-smoke.js`. That set is
+>    frozen debt and the suite asserts it still describes reality — leaving them in **fails the
+>    suite**, which is the point.
+>
+> **Constraints, each of which is a way this could go wrong:**
+>
+> - The excerpt reaches the lead and **nobody else**. Not a leader briefing, not the team surface,
+>   not `_kernelEvidence` under `ORG_PURPOSES`, not an inquiry signal. Do not widen a single
+>   read path to make the screen easier to build.
+> - **No classifier, no risk score, no re-ranking.** Render `severity` as the deterministic
+>   detector set it. If you find yourself sorting by anything you computed, stop.
+> - The cohort floor does not apply here and must not be invoked — a flag is about one named
+>   person and is not an aggregate claim.
+> - Do not change `ai/safeguarding.js`, the detector, or any threshold.
+>
+> **One finding you will hit, and I want it reported rather than silently fixed:**
+> `orgMeta[code].safeguardingLeadId` is **read in two places and written nowhere** — there is no
+> route and no UI that designates the lead, so today every org falls back to its superadmin. Say
+> so in your report. A superadmin-only setter is welcome as a **separate second commit**, not
+> folded into the screen.
+>
+> **Definition of done:** `npm test` green, plus a new suite that fails when the screen is
+> reverted. Give me a **mutation map** with your report — for each assertion you add, the
+> one-line production change that turns it red. An assertion with no such line is not proving
+> anything.
+>
+> Do not merge, do not open a PR. Push the branch and report per §11.
+
+---
+
 ## 18 · The standing preferences
 
 Worth pasting once into any long session:

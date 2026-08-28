@@ -84,6 +84,8 @@ Web governs a minority of scope call sites, measured by `scope-parity-smoke`.
 > with nowhere to read it. Everything else on the list is a product improvement. This one is a
 > safety gap.
 
+The work order for it is written and ready to send: `briefs/session-prompts.md` **§19**.
+
 ### Which founder decisions remain?
 
 **One.** `D-E2` — the quality floor for a cheap model, which needs a post-pilot benchmark.

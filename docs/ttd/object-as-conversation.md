@@ -10,16 +10,25 @@ shape.
 ## 1 · THE SHAPE
 
 > Home is the question and the composer. Nav is Inquiries, Focuses, Highs, Lows. Each opens a
-> list. Each item opens a **thread** — and the thread behaves exactly like a conversation with
-> an assistant that already knows why the thing exists.
+> **bucket** — which is the card feed home used to be, filtered to that one kind. Each card opens
+> a **thread** — and the thread behaves exactly like a conversation with an assistant that
+> already knows why the thing exists.
+
+**The founder's words, kept because they are the specification:** *"they are not lists, they are
+in the nav — and when you click on them you essentially see what we used to have, but in their
+respective buckets."*
+
+That is a instruction about **reuse, not layout**. The card feed on the leader's Today page is
+the rendering. Nothing new is designed; the existing feed is filtered four ways and each way is
+given a nav entry. Anyone who builds a new list component has misread this.
 
 Concretely:
 
 | Where | What |
 |---|---|
 | **Home** | The single most-needing-an-answer question — self **or** team, one ranking — and the composer under it. Nothing else above the fold. |
-| **Nav** | Four lists: Inquiries · Focuses · Highs · Lows. Each at both grains. |
-| **A list** | The objects of that kind this person may see, most-alive first. |
+| **Nav** | Four entries: Inquiries · Focuses · Highs · Lows. Each at both grains. |
+| **A bucket** | The card feed as it exists today, filtered to one kind, most-alive first. Same cards, same renderer, same affordances. |
 | **An item, never opened** | Opens with IntelliQ explaining itself: what this is, why it is here, and the evidence it rests on. |
 | **An item assigned by a coach** | Explains what was said that led to it, summarised, plus the further evidence behind the assignment. |
 | **A self-created item** | Explains why *you* created it, and what it rests on. |
@@ -109,9 +118,14 @@ became confusing in the first place.
 
 ### G3 · Nav is flat
 
-Every leader route currently resolves to `leader-home`. Four lists means four routes, two
-renderers each (list and thread), at both grains, in two view files (`js/app.js` for leaders,
-`js/member-view.js` for members). This is the bulk of the work and none of it is deep.
+Every leader route currently resolves to `leader-home`. Four buckets means four routes and a
+**filter argument to the feed that already renders**, plus one new renderer — the thread. Not
+two renderers each: the bucket renderer already exists and is in production on Today. The work
+spans both view files (`js/app.js` for leaders, `js/member-view.js` for members). This is the
+bulk of the work and none of it is deep.
+
+**The failure mode to name in advance:** writing a second card renderer for the buckets. Two
+renderers for the same card is how the polarity vocabulary ended up existing three times.
 
 ### G4 · The opening message must not become an assertion
 
@@ -137,10 +151,10 @@ Four steps, each independently shippable and each testable.
 |---|---|---|
 | **1** | `about` on the conversation store, plus `GET /api/objects/:kind` (the list) and `GET /api/objects/:kind/:id/thread` (the thread). The thread's opening message is composed, never stored. | — |
 | **2** | Self High/Low, derived from existing self patterns (G2 option a) | founder decision |
-| **3** | The four nav lists and the thread view, leader and member | 1, 2 |
+| **3** | The four nav buckets — the existing feed, filtered — and the thread view, leader and member | 1, 2 |
 | **4** | Curiosity in the thread — next best question, under the stopping rule | §16 stopping rule |
 
-**Do not start at 3.** The list and thread views are the visible part and the temptation is to
+**Do not start at 3.** The bucket and thread views are the visible part and the temptation is to
 build them first against placeholder data, which is how a second store gets created by accident.
 
 ---
