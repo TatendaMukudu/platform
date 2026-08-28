@@ -611,6 +611,71 @@ after it. Bigger than §19–§21: this touches seven modules.
 
 ---
 
+## 23 · Codex — what was shown to whom (READY TO SEND)
+
+**The single missing thing that four founder decisions need** — D19, D27, D28 and D40. Build it
+once. Pilot-blocking under D33 bar one. Touches none of the modules §22 is changing.
+
+> Confirm the branch first (see THE BRANCH above), run `bash scripts/codex-preflight.sh`, then read
+> `docs/INDEX.md` and `ttd/founder-decisions-2026-08.md` **D19**, then D27, D28 and D40.
+>
+> **The gap.** Nothing in IntelliQ remembers that a finding was shown to a person. So when
+> evidence is withdrawn, when a person leaves, or when a correction lands, the kernel updates
+> and **the organisation is never told** — a coach who read a card on Tuesday acts on it on Friday
+> having never learned it stopped being true on Wednesday. `docs/INDEX.md` calls this **T-2**.
+>
+> **Build the RECORD only. Not the notification, not the recomputation, not any UI.**
+>
+> **Use the audit log — do not create a parallel store.** `auditLog` (`server.js:10018`) is already
+> hash-chained, content-free by construction, capped at `AUDIT_CAP`, durable through
+> `scheduleSave()`, and **deliberately preserved when a user is deleted** (`server.js:2073`). It is
+> the right substrate and a second store would be the fifth parallel thing this sweep has found.
+>
+> **Scope:**
+>
+> 1. Extend the audit entry so it can carry **which findings were shown**, not only which subjects
+>    were touched. `_audit(code, { actor, action, subjectIds, basis })` today records *"this leader
+>    viewed a briefing about these people"*. It needs to record *"...and these were the findings
+>    they saw."*
+> 2. **References, never content.** A finding id or dedupe key. No headline, no basis text, no
+>    numbers. The audit log's content-free guarantee is what makes it safe to keep after deletion,
+>    and it must survive this change intact.
+> 3. Record at the points where a finding actually reaches a person:
+>    `GET /api/intelligence/briefing`, `GET /api/intelligence/watch`,
+>    `POST /api/intelligence/prepare`, and the member's own surfaces.
+> 4. `ai/audit.js` `record()` gates on a known action and builds the hash chain. Make the new field
+>    pass that gate **without weakening the gate** and without breaking chain verification.
+>
+> **An honest limitation to state in your report rather than paper over:** an API response is not
+> proof a human read anything. This records *emission*, which is the best available proxy. Name it
+> that way in the code comment so nobody later mistakes it for read-receipt.
+>
+> **Explicitly NOT in scope:** notifying anyone, recomputing anything, changing any API response
+> shape, any front end. D19's notification is the next piece of work and depends on this one.
+>
+> **Constraints:**
+>
+> - **Do not weaken, delete or relax any existing assertion.** A failing test is a finding to
+>   report, not an obstacle to remove.
+> - The audit log stays **content-free**. If your change puts a member's words or figures into it,
+>   that is the defect, not the feature.
+> - Do not change what any endpoint returns.
+> - Respect `AUDIT_CAP`. This log is written on every briefing fetch; it must not grow unbounded.
+> - No emojis (`CLAUDE.md`).
+>
+> **Definition of done:** `npm test` green, plus a suite that proves, over the real HTTP boundary:
+> - fetching a leader briefing writes an audit entry naming the finding references it emitted,
+> - **no finding text, headline, basis or number appears anywhere in the audit log**,
+> - the hash chain still verifies after the change,
+> - the cap still applies.
+>
+> The second assertion is the one that matters most. Send a **mutation map**: for each assertion,
+> the one-line production change that turns it red.
+>
+> Do not merge, do not open a PR. Push the branch and report per §11.
+
+---
+
 ## 18 · The standing preferences
 
 Worth pasting once into any long session:
