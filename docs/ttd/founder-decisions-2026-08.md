@@ -930,7 +930,136 @@ rushing the fix.
 
 ---
 
-## WHAT THESE TWENTY-NINE CHANGE ABOUT THE PLAN
+## D30 · THE DETERMINISTIC VOICE IS THREE FUNCTIONS TODAY, AND SHOULD BE ONE LAYER
+
+The founder asked, after D25: *"So when does the deterministic voice come in then?"* The honest
+answer required checking, and it corrects the impression D25 gives.
+
+**What `ai/voice.js` actually exports:**
+
+```js
+module.exports = { greeting, leaderOpening, memberOpening, _pick, _num };
+```
+
+**Three functions, and all three produce salutations.** Every caller is an opening line
+(`server.js:9020`, `12423`, `14871`, `14913`). D25 said *the kernel writes* — and the kernel's
+writing capability today is a greeting generator.
+
+### But the deterministic voice is much bigger than that. It is just not in `voice.js`
+
+| Where | What it holds |
+|---|---|
+| `ai/proactive.js` `MESSAGES` | **30 headline/body/suggestion sets** — a fixed, human-written pair for every pattern, at both audiences. This is the largest body of deterministic prose in the product |
+| `ai/primitives.js` `STRUCTURE_LABEL` | The plain names: *Pulling back · Gone quiet · Becoming isolated · Overload risk · Plateau* |
+| `ai/assessment-view.js` | Member-facing composition, plus the generic-feedback detector |
+| `ai/voice.js` | Greetings |
+
+**So this is the polarity problem a third time: one concept, four homes.** The deterministic voice
+exists and is substantial; nobody has ever called it one layer, so nobody maintains it as one.
+
+### Decision
+
+**`ai/voice.js` is the home.** The scattered tables consolidate into it, and it gains the one thing
+none of them do: **composing an object's explanation** — what this is, why it is here, what it
+rests on, what is still unknown, and what would change our mind (D12).
+
+**When it comes in, concretely:**
+
+| Surface | Voice |
+|---|---|
+| Every card, bucket, briefing, digest, High, Low | **Deterministic. Always.** Zero model calls |
+| The **opening message** of every thread (D9, D13) | **Deterministic**, composed fresh from the object each time — never stored (`object-as-conversation.md` §2) |
+| The record on the answerability screen (D18) | **Deterministic** — this is the JSON-dump finding, and it is the same job |
+| Understanding an inbound turn | **The model** |
+| A reply inside a thread | **The model**, from kernel-supplied facts, through `ai/language-guard.js` |
+
+**Sequencing note:** the founder chose to solve the answerability screen's raw-JSON problem as part
+of the thread work rather than separately, because a composed explanation is one problem. D30 is
+the layer both of them land on.
+
+---
+
+## D31 · IntelliQ INFORMS. FOR THE PILOT, IT DOES NOT ACT
+
+**Decision:** the action layer stays dark for the pilot.
+
+**What is being left switched off, so nobody thinks it is missing.** Nine routes implementing a
+complete loop — `propose · draft · approve · reject · execute · observe · evaluate` — with policy
+evaluation and a DENY rule that hard-blocks execution *even after human approval*. It is built, it
+is tested, and it has no caller.
+
+**The reasoning, which is the point:** a system that acts on a wrong belief does damage that a
+system which merely reports one does not. The pilot exists to find out whether the beliefs are
+right. Acting on them before that answer exists inverts the order of the experiment.
+
+**Not a permanent judgement.** The loop is well made and the policy engine is the right shape.
+This is a sequencing decision: earn the trust, then spend it.
+
+---
+
+## D32 · SUPPRESSION IS VISIBLE — WITHIN THE VIEWER'S OWN SCOPE
+
+**Decision, in the founder's words:**
+
+> *"Tell everyone what it's stopped surfacing ONLY WITHIN THEIR SCOPE or web. Only within what
+> they have access to."*
+
+**What is being disclosed.** The Confidence Engine (`ai/confidence.js`) already suppresses an
+entire *kind* of noticing once it has earned six pieces of feedback in that organisation and
+proven mostly unhelpful (`shouldSurface`: `tier === 'unproven' && total >= 6`). It is live, it is
+silent, and nobody has ever been told.
+
+**Why telling people matters.** Learning from an organisation without telling it is precisely what
+we criticise other products for. A finding that stops appearing is indistinguishable from a
+finding that stopped happening, and those are very different facts about a team.
+
+**And the founder's constraint is the interesting half — this is D7 applied to suppression:**
+
+> L-D32 · What a person may learn about what IntelliQ has stopped saying is bounded by the same
+> scope as what they may see it say. Suppression transparency is scoped, never global.
+
+So a member sees what has been suppressed in their own web; a leader sees it across theirs; nobody
+learns what a sibling branch has tuned out. The disclosure inherits `getVisibleUserIds` and
+`ai/audience.js` unchanged — no new mechanism, and no new leak.
+
+**The objection, recorded:** visibility invites gaming, since a group that dislikes a finding now
+knows how to switch it off. Mitigated by the floor of six and by the fact that the suppression is
+per *kind*, not per person — and accepted, because the alternative is a silent editor.
+
+---
+
+## D33 · WHAT THE PILOT HAS TO PROVE
+
+The founder refused to choose one and gave the hierarchy instead, which is more useful:
+
+> *"All three. I don't want anything breaking. Getting things wrong logic-wise, sure — that's why
+> we are doing a pilot and that's why software always has updates. Sustained use confirms that the
+> algorithm does the right thing, because why would I be talking to a random AI anyway unless I
+> truly believed it knew me, knew my team and my environment and was genuinely helping. And the
+> first one explains itself. If we can uncover at least one thing, then we are proving our
+> thesis."*
+
+**Read as three different kinds of claim, because they fail differently:**
+
+| | Bar | What failing it means |
+|---|---|---|
+| **Nothing breaks** | No leak, no false accusation, no safeguarding failure, no privacy complaint | **Disqualifying.** The moat did not hold. Not recoverable by iteration |
+| **Sustained use** | People keep speaking to it across the whole period | **The evidence for the reasoning.** The founder's argument: nobody keeps talking to an AI unless they believe it knows them. Use is not a vanity metric here — it is the proxy for whether the picture is true |
+| **One real thing uncovered** | An inquiry the org could not answer alone, evidence from several people, closed by a human who learned something | **The thesis.** One is enough |
+
+**The distinction the founder drew and it should govern how we triage bugs:** *getting things wrong
+logic-wise is expected; breaking is not.* A wrong hypothesis is the system working — it will be
+challenged, superseded, and the timeline will show it changed. A leaked figure is not a wrong
+hypothesis; it is a broken promise, and no update repairs the fact that somebody read it.
+
+**What this means for the remaining build order.** Everything that protects bar one comes before
+anything that improves bars two and three. D26 (the primitive decides), D23 (numbers never
+composed in), D19 (withdrawal recomputes and tells) and D27's attribution guard are pilot-blocking
+in a way that the buckets and threads are not.
+
+---
+
+## WHAT THESE THIRTY-THREE CHANGE ABOUT THE PLAN
 
 The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one insertion.
 
@@ -954,6 +1083,15 @@ The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one i
 | 15 | **`js/app.js` absorbs `js/member-view.js`** | **D24.** Largest change on the plan, no halfway point, and it must come LAST — after the object model stops moving |
 | 16 | Leaders as subjects, under the floor | **D27.** The floor and origin counting already exist; the projection guard against attribution does not |
 | — | **POST-PILOT: one identity, several memberships, cross-org consent** | **D29.** Touches tenant isolation. Explicitly not pilot work, and not to be started early |
+
+### D33 splits this list in two
+
+**Pilot-blocking (bar one — "nothing breaks"):** D26 the primitive decides · D23 numbers never
+composed in · D19 withdrawal recomputes and tells · D27's attribution guard · D21 advance notice.
+These protect a promise, and a broken promise is not repaired by an update.
+
+**Everything else is bars two and three** — better product, not a broken one. If time runs out,
+it runs out here.
 
 ### The single thread running through the unbuilt half
 
