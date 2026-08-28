@@ -648,7 +648,133 @@ screen answers both.
 
 ---
 
-## WHAT THESE TWENTY-ONE CHANGE ABOUT THE PLAN
+## D22 · COLD START IS THE INQUIRY ENGINE — AND PRIORITY OUTRANKS KIND, ALWAYS
+
+**Decision, part one:** on day one Home opens with **Inquiries**. At zero evidence every claim the
+organisation needs is a `MISSING_REQUIRED` uncertainty, which is precisely what `ai/inquiry.js`
+computes. The cold start is not an empty state; it is the one moment the inquiry layer is doing
+its loudest work.
+
+**Decision, part two — the founder's extension, and it generalises D13:**
+
+> *"But even after — if an inquiry holds more priority than a High or Low or Focus question, it
+> takes precedence after that period."*
+
+So Home is **never** ordered by kind. Not in week one, not in month six. One priority ranking over
+all four object types, permanently. There is no "inquiries phase" that ends.
+
+### The founder's question: how do we get useful faster than a fortnight?
+
+**First, a correction to my own premise.** I said structural patterns — withdrawal, isolation,
+overload, plateau — would fire without history. **They do not.** Every one of them goes through
+`baseline.shift`, `_declined` or `_rose` (`ai/primitives.js:97-140`). There is no person-level
+pattern in this system that works without a baseline. The two-week floor is real and it applies to
+the whole detection layer.
+
+**Second, the threshold must not move.** `MIN_POINTS = 5` is what makes median-and-MAD meaningful.
+At three points one bad day moves the "normal" and the system manufactures false Lows. Lowering it
+makes IntelliQ wrong faster, not useful faster — and a pilot's first week of false negatives is
+survivable in a way its first week of false accusations is not.
+
+**Three levers that are real, in order of size:**
+
+| Lever | Why it works | Status |
+|---|---|---|
+| **Import what the club already has** | `MIN_POINTS` counts observations, not weeks. Five weeks of an existing attendance register is five points **on day one**. `ai/adapters.js` turns any source into the universal per-member shape, and *"a new source needs an adapter here and nothing else in the kernel"* | **`POST /api/signals/import` and `/api/signals/import-csv` both exist and are BOTH ORPHANED.** The largest cold-start lever in the product has no caller |
+| **Cadence, not threshold** | Five observations at weekly check-in is five *weeks*. At daily, it is five *days*. Nothing in the kernel changes — only how often a person is asked | Front-load the first fortnight. A product decision, no code |
+| **The layers that genuinely need no history** | Group inquiries count **contributions and independent origins**, not history — a team inquiry with five contributors on day three is a real finding. Org-structure facts (who has no leader, an unconfigured safeguarding lead, coverage gaps) are computable immediately | Partly built |
+
+**The honest summary:** the fortnight is a property of self-relative measurement and cannot be
+engineered away. It can be **skipped** by importing history, **shortened** by asking more often,
+and **covered** by the two layers that never needed a baseline.
+
+---
+
+## D23 · NUMBERS ARE NEVER COMPOSED INTO LEADER TEXT
+
+**Decision:** leader-facing composition is not given a member's raw numbers in the first place.
+`_stripLeaderNumbers` stays, as a backstop, and stops being the boundary.
+
+**Why the current arrangement failed.** `_stripLeaderNumbers` (`server.js:4208`) is a regex over an
+already-composed sentence — it deletes `(100%)`, `2.1/5`, `83%`. It can only remove what it
+recognises, and it only protects a surface that remembers to call it. `/api/intelligence/watch`
+did not, and nothing went red until a browser pass looked at the page.
+
+> L-D23 · A leader-facing composer must not receive a member's raw figures. Removing something
+> after composition means the composer had it, and the next composer will too.
+
+**What it costs.** A pass over every leader-facing composer, changing what is passed in rather
+than what is filtered out. Larger than keeping the filter, and it is the difference between a rule
+and a habit.
+
+**Worth adding alongside, not instead:** an assertion per leader-facing endpoint that the numbers
+are absent from the **actual HTTP response**. The existing regression for this reads `server.js` as
+text; that catches a reversion of the exact line and does not cross the HTTP boundary.
+
+---
+
+## D24 · ONE FRONT END — `js/app.js` ABSORBS `js/member-view.js`
+
+**Decision:** one file. `js/member-view.js` (3,496 lines) is absorbed into `js/app.js` (7,887
+lines) and deleted.
+
+**Why absorption and not a shared module.** A shared module leaves two homes in existence, and two
+things that render the same object drift the first time one is edited alone. That is exactly how
+the polarity vocabulary came to exist three times. **This change should end with a file deleted,
+not a file added.**
+
+**What makes it tractable rather than reckless:** D7 already did the hard thinking. What is left
+after D7 is not a role difference at all — it is a scope difference, and scope is computed on the
+server by `getVisibleUserIds` and `_kernelEvidence`. The front end does not need to know which
+kind of person it is rendering for.
+
+**The risk, named:** this is the single largest change on the plan, it touches the only two files
+a user actually sees, and it has no natural halfway point. It should not be attempted in the same
+commit as anything else, and it must come **after** the object model settles — otherwise it is
+converging two files onto a target that is still moving.
+
+---
+
+## D25 · THE MODEL READS. THE KERNEL WRITES.
+
+The founder's answer was a real hesitation, and it deserves a real resolution:
+
+> *"I would like to say deterministic by default… but that's tough, because how does it
+> effectively communicate with users?"*
+
+**Decision: split by direction, not by surface.**
+
+| Direction | Who does it | Why |
+|---|---|---|
+| **Inbound** — understanding what a person actually said, in their own words, and turning it into claims, intents and evidence | **The model.** `ai/comprehend.js`, `ai/intake.js` | This genuinely requires language understanding. No table of phrasings will ever parse what a seventeen-year-old types at 11pm |
+| **Outbound** — saying what we know, why we think it, what would change our mind | **The kernel.** `ai/voice.js` | The facts are already structured. Composing them needs arrangement, not invention — and invention is the failure mode |
+
+**Why this answers the hesitation rather than dodging it.** The founder's worry is about
+communication, and communication is mostly an *inbound* problem. A person must be able to say
+anything and be understood. What comes back does not need to be creative; it needs to be true,
+specific, and about them — and `ai/voice.js` already composes warm sentences from given facts with
+stable, seeded variety so the same state always reads the same way.
+
+**Where the model may still phrase an outbound sentence**, and the conditions, all of which exist:
+
+- only from facts the kernel supplied,
+- only through `ai/language-guard.js`, which is *deliberately aggressive* — anything predictive or
+  diagnostic is rejected and the deterministic sentence is shown instead,
+- and a rejection is silent, because the fallback is a good sentence rather than an error.
+
+**What this buys on cost, which the founder has asked about repeatedly.** One model call per
+inbound turn. **Zero** for every card, every bucket, every briefing, every High, every Low, every
+weekly digest. The expensive surfaces are the ones nobody types into, and under D25 none of them
+cost anything.
+
+**And it is already the shape of the system.** `ai/voice.js` is pure and imports nothing.
+`ai/language-guard.js` exists specifically for *"the LLM edges"*. The no-LLM floor suite already
+proves the product works with the model off. D25 does not introduce this architecture; it names it
+so nobody quietly reverses it by adding a model call to a card renderer.
+
+---
+
+## WHAT THESE TWENTY-FIVE CHANGE ABOUT THE PLAN
 
 The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one insertion.
 
@@ -667,6 +793,9 @@ The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one i
 | 10 | Curiosity in the thread, under the stopping rule | unchanged |
 | 11 | **The answerability screen — your record, your audiences, the safeguarding exception** | **D18 and D21.** Wiring, not building: `/api/me/data`, `/api/me/export`, `/api/me/audiences` all exist with no caller |
 | 12 | **Withdrawal recomputes, and whoever saw the old picture is told** | **D19 — closes T-2, and the most expensive item here.** Needs a record of what was shown to whom, which does not exist |
+| 13 | **Import, so the pilot does not start at zero** | **D22.** `/api/signals/import` and `/api/signals/import-csv` exist and are orphaned. The single largest cold-start lever, and it is wiring |
+| 14 | **Numbers never composed into leader text** | **D23.** A pass over the leader-facing composers, plus a per-surface assertion over the real HTTP response |
+| 15 | **`js/app.js` absorbs `js/member-view.js`** | **D24.** Largest change on the plan, no halfway point, and it must come LAST — after the object model stops moving |
 
 **D2 is the one to be careful with.** It introduces the first object whose audience is a set of
 people rather than a node, and the first `ai/audience.js` kind that does not resolve through
