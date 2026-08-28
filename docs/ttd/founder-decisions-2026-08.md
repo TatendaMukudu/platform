@@ -549,9 +549,17 @@ survives, its influence does not.
 `_withdrawSignal` (`server.js:6528`) already withdraws a promoted signal while keeping the
 evidence intact.
 
-**So D18 is a wiring task, not a build.** Someone wrote the answerability layer properly and then
-never gave it a screen. That is the same failure as the safeguarding queue, and it is the second
-time this sweep has found it.
+**So the SEEING half of D18 is a wiring task, not a build.** Someone wrote the answerability layer
+properly and then never gave it a screen. That is the same failure as the safeguarding queue, and
+it is the second time this sweep has found it.
+
+**The WITHDRAWING half is not.** `POST /api/group/:nodeId/withdraw` covers taking back a group
+contribution and already has a caller. There is **no general route** for withdrawing a single
+piece of evidence about yourself — `_withdrawSignal` is internal, and nothing exposes it. That
+half is new backend, and it is entangled with D19: a withdrawal that does not recompute and does
+not tell anyone is worse than no withdrawal at all, because it looks like it worked.
+
+**So D18 splits into two pieces of work, and only the first is cheap.**
 
 **Note for the pilot specifically:** with under-18s involved, *"show me everything you hold about
 me"* is a question that will be asked by a parent, and the honest answer already exists in one

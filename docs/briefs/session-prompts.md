@@ -407,6 +407,68 @@ currently routed to a named safe adult who has no screen to see it on.
 
 ---
 
+## 20 · Codex — the answerability screen (READY TO SEND)
+
+Founder decisions **D18** and **D21**, `ttd/founder-decisions-2026-08.md`. Same shape as §19 and
+Codex did that one well: three governed routes exist, all correct, none reachable. This is
+wiring, not building.
+
+> Confirm the branch first (see THE BRANCH above), run `bash scripts/codex-preflight.sh`, and
+> read `docs/INDEX.md`, then `ttd/founder-decisions-2026-08.md` **D18 and D21**.
+>
+> **Build the answerability screen: what IntelliQ holds about me, who has looked at it, who I
+> speak to, and the one exception. The back end exists — do not rewrite it.**
+>
+> **What already exists, with no caller anywhere:**
+>
+> - `GET /api/me/data` — the subject access request. Returns the reads held about this person
+>   **in their own subject view, never the leader-facing projection**; their private self-model;
+>   the notes they authored; and the content-free trail of **who accessed their data and why**.
+>   The request is itself logged as a `subject_access` event.
+> - `GET /api/me/export` — the complete GDPR Art 15/20 bundle. Self-scoped, password hash
+>   stripped. Its own note reads *"This is all the personal data IntelliQ holds about you."*
+> - `GET /api/me/audiences` — the audiences this person can choose between, named and explained,
+>   built from their real nodes so it never offers one that does not exist for them.
+> - `server.js:13192` holds the safeguarding sentence that D21 requires be shown before a person
+>   speaks. Use it **verbatim**. Do not rewrite it, soften it, or write your own.
+>
+> **Scope — one commit:**
+>
+> 1. A screen with three sections: **what we hold** (`/api/me/data`), **who has looked**
+>    (the access trail from the same response), and **who I speak to** (`/api/me/audiences`).
+> 2. The safeguarding exception (D21), stated plainly on the audiences section — this is where a
+>    person learns the boundary **before** they cross it.
+> 3. Download my data — `/api/me/export`, as a file.
+> 4. Reachable by **every** person, member and leader alike. This is not a management surface.
+> 5. Remove the three routes from `KNOWN_ORPHANS` in `scripts/reachability-smoke.js`. That set is
+>    frozen debt and the suite asserts it still describes reality.
+>
+> **Explicitly NOT in scope — do not build it, do not stub it, do not add a disabled button:**
+> withdrawing a piece of evidence. `POST /api/group/:nodeId/withdraw` covers group contributions
+> and already has a caller; there is no general route and there must not be one yet. A withdrawal
+> that does not recompute and does not tell the people who saw the old picture is worse than none,
+> because it looks like it worked. That is founder decision D19 and it is a separate piece of work.
+>
+> **Constraints:**
+>
+> - `/api/me/data` returns the person's **own** subject view. Never render it through any
+>   leader-facing helper, and never enrich it with anything from another endpoint.
+> - The access trail is content-free by design. Do not join it against anything that would give
+>   it content.
+> - Everything here is self-scoped by the server. Do not add a user parameter, a lookup, or an
+>   admin variant. A screen that can show someone else's record is the defect this whole layer
+>   exists to prevent.
+> - No emojis (`CLAUDE.md`).
+>
+> **Definition of done:** `npm test` green, plus a suite that fails when the screen is reverted.
+> Send a **mutation map** with your report — for each assertion, the one-line production change
+> that turns it red. Include one assertion that would go red if the screen were ever made to
+> accept a subject other than the caller.
+>
+> Do not merge, do not open a PR. Push the branch and report per §11.
+
+---
+
 ## 18 · The standing preferences
 
 Worth pasting once into any long session:
