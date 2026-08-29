@@ -315,6 +315,83 @@ S._rebuildEmailIndex();
       ok('9 · a commitment survives its author being erased', !!focus && focus.text.length > 0);
     }
 
+    // ── 10 ────────────────────────────────────────────────────────────────────
+    /* Everything above is the COACH's journey, and it predates the person-facing work. This step
+       walks what a PLAYER actually meets, in order, because that is who the pilot puts this in
+       front of first — and the transcript is the deliverable. If any of these sentences read
+       badly to a human, that is a finding no assertion can produce. */
+    step(10, 'WHAT A PLAYER ACTUALLY MEETS, IN ORDER.');
+    {
+      // D21 — the boundary is stated BEFORE they speak, not when they cross it.
+      const notices = await GET('m2', '/api/me/notices');
+      const sg = (notices.body.notices || []).find(n => n.id === 'safeguarding');
+      say('');
+      say('      BEFORE THEY SAY ANYTHING');
+      say(`      "${sg && sg.text}"`);
+      ok('10 · the one exception to privacy is stated before a person speaks',
+        !!sg && sg.acknowledged === false && /safeguarding lead is told/.test(sg.text));
+
+      // The trust question, answered deterministically rather than promised in a paragraph.
+      const audiences = await GET('m2', '/api/me/audiences');
+      say('');
+      say('      "WHO CAN SEE WHAT I SAY HERE?"');
+      for (const a of (audiences.body.audiences || []).slice(0, 3)) {
+        say(`      · ${a.label || a.kind}${Number.isFinite(a.reaches) ? ` — reaches ${a.reaches}` : ''}`);
+      }
+      ok('10 · the question "who can see this" has a real answer, not a policy',
+        audiences.status === 200 && (audiences.body.audiences || []).length > 0);
+
+      // D18 — their own record, in their own subject view.
+      const mine = await GET('m2', '/api/me/data');
+      const held = mine.body.held || {};
+      const trail = held.accessTrail || [];
+      say('');
+      say('      THEIR OWN RECORD');
+      say(`      reads held about them: ${(held.reads || []).length} · own notes: ${(held.myNotes || []).length}`);
+      say(`      who has looked: ${trail.length} recorded access(es), content-free`);
+      ok('10 · a person can see their own record and who has looked at it', mine.status === 200 && !!mine.body.held);
+      /* Content-freedom is a SHAPE guarantee, not a word blacklist: the audit entry carries a
+         fixed vocabulary of fields and nothing else, so there is nowhere for content to sit. A
+         blacklist would pass for any sentence nobody thought to ban. */
+      const ALLOWED = new Set(['actor', 'action', 'at', 'basis', 'subjectIds', 'findingRefs', 'seq', 'hash', 'prevHash']);
+      ok('10 · the access trail is content-free BY SHAPE — no field outside the fixed vocabulary',
+        trail.length > 0 && trail.every(e => Object.keys(e).every(k => ALLOWED.has(k))));
+
+      // D4/D5/D6 — their own Highs and Lows, bucketed by the one owner.
+      const own = await GET('m2', '/api/proactive/insights');
+      const groups = own.body.groups || {};
+      say('');
+      say('      THEIR OWN HIGHS AND LOWS');
+      for (const [name, g] of Object.entries(groups)) {
+        say(`      ${String(name).padEnd(6)} ${g.insights && g.insights.length ? g.insights[0].title || g.insights[0].headline : (g.message || '—')}`);
+      }
+      ok('10 · a person is shown their own Highs and Lows, self-scoped',
+        own.status === 200 && Object.keys(groups).length > 0);
+    }
+
+    // ── 11 ────────────────────────────────────────────────────────────────────
+    /* THE SENTENCES THEMSELVES. Not that a field is populated — what a human would READ. This is
+       the composer (D30/D34) on the object that ranks highest, and it is the single screen the
+       product is judged on. */
+    step(11, 'THE OPEN QUESTION, AS A PERSON READS IT.');
+    {
+      const lead = await GET('coach', '/api/inquiry/lead');
+      const x = lead.body.lead && lead.body.lead.explained;
+      say('');
+      if (x) {
+        say(`      ${x.headline}`);
+        say(`      ${x.claim}`);
+        if (x.provenance) say(`      ${x.provenance}`);
+        if ((x.stillUnknown || []).length) { say(''); say('      What I still don\'t know'); x.stillUnknown.forEach(u => say(`        ${u}`)); }
+        if ((x.wouldChangeMyMind || []).length) { say(''); say('      What would change my mind'); x.wouldChangeMyMind.forEach(f => say(`        ${f}`)); }
+        if (x.contested) { say(''); say(`      ${x.contested}`); }
+      } else { say('      (no open question ranked at this point in the rehearsal)'); }
+      ok('11 · the lead question arrives composed, not as raw fields for a client to assemble',
+        !lead.body.lead || (!!x && typeof x.claim === 'string' && x.claim.length > 0));
+      ok('11 · no kernel band word reaches the person',
+        !x || !/\b(probable|supported|tentative|disputed|exploring)\b/.test(JSON.stringify(x)));
+    }
+
     // ── VERDICT ───────────────────────────────────────────────────────────────
     say(`\n${'═'.repeat(72)}`);
     say('  WHAT A COACH WOULD HAVE SEEN, END TO END');
