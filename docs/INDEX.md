@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `81447fc`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `9913369`. **Branch:** `claude/platform-work-summary-nmb0cm`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
 ---
@@ -54,8 +54,7 @@ outcome loop** · **the agent answering team questions at the team's grain** · 
 the safeguarding and answerability screens) · the **deterministic voice** now has a home
 (`ai/voice.explainObject`, **D30**) but `ai/proactive.js`'s 30 message tables have not yet moved
 into it · `orgGroups` and `orgNodes` are two group
-models · Focus has two constructors · corrections do not reach already-emitted signals (**T-2**,
-now founder decision **D19**) · Web governs a minority of scope call sites, measured by
+models · Focus has two constructors · Web governs a minority of scope call sites, measured by
 `scope-parity-smoke`.
 
 **The nine-route action loop** (`propose · draft · approve · reject · execute · observe · evaluate`)
@@ -85,7 +84,7 @@ is better product, not a broken one.
 | 2 | ~~A person cannot see their own record~~ | — | **DONE** — `answerability-screen-smoke` |
 | 3 | ~~Leader surfaces strip performance figures~~ | — | **DONE** — D26, `primitive-number-disclosure-http-smoke` |
 | 4 | ~~One polarity vocabulary; FIVE existed~~ | — | **DONE** — §22, `ai/intelligence-feed.js` owns `bucketOf`; `governance-smoke` asserts no other module may author one. **OPEN: `condition` was mapped to `opportunity` (High) — founder to rule; see below** |
-| 5 | **Withdrawal recomputes and tells (T-2)** | **BLOCKING** | founder decision **D19** |
+| 5 | ~~Withdrawal recomputes and tells (T-2)~~ | — | **DONE** — §25, `finding-change-notice-http-smoke`; the notice is content-free by construction. **T-2 closed** |
 | 6 | ~~A finding about a leader must not be attributable~~ | — | **DONE** — §24, `leader-subject-projection-http-smoke`; routes to the subject and their own leader only, fails closed on an unidentifiable subject |
 | 7 | ~~The safeguarding exception stated before anyone speaks~~ | — | **DONE** — D21, `advance-notice-http-smoke`; one home in `ai/safeguarding.SAFETY_EXCEPTION` |
 | 8 | ~~The thread — `about` on the conversation store~~ | — | **DONE** — `thread-binding-http-smoke`; the bottleneck five decisions waited on. The thread VIEW is still to build |
@@ -101,9 +100,12 @@ can now be built. Nothing else is blocked on a missing substrate.
 
 ### What is the next code task?
 
-> **§25 — a withdrawal tells whoever saw the old picture.** The last bar-one blocker, and the
-> last of the original six: it closes **T-2**. The emission record it needs already exists
-> (`finding_view`, §23). The work order is written.
+> **BAR ONE IS COMPLETE.** Every "nothing breaks" blocker under D33 is closed and
+> mutation-tested. What remains is product, not breakage.
+>
+> **§26 — self Highs and Lows**, then §27 the thread view. But the highest-value item on the whole
+> list is **#11: a live database run with real people.** It is the only thing here that cannot be
+> compressed at the end, and the only way to find the class of bug no suite catches.
 
 **One founder ruling is outstanding on work already merged.** §22 mapped `diagnose.js`'s
 `condition` to `opportunity`, which files it as a **High**. `ai/diagnose.js:311` describes the
@@ -116,14 +118,14 @@ report rather than decide this and decided it; the mapping stands until the foun
 
 | | Work order | Bar |
 |---|---|---|
-| 1 | **§25** a withdrawal tells whoever saw the old picture (D19, closes T-2) | **BLOCKING** |
-| 2 | **§26** self Highs and Lows, derived (G2) | product — unblocked by §22 |
-| 3 | **§27** the thread view (§6c) | product — both halves already built |
-| 4 | **§16** the curiosity stopping rule | **a dependency of §27 under D35** |
-| 5 | **§28** world-model reconciliation — `briefs/world-model-reconciliation.md` | read-only, **deliberately last** |
+| 1 | **§26** self Highs and Lows, derived (G2) | product — unblocked by §22 |
+| 2 | **§27** the thread view (§6c) | product — both halves already built |
+| 3 | **§16** the curiosity stopping rule | **a dependency of §27 under D35** |
+| 4 | **§28** world-model reconciliation — `briefs/world-model-reconciliation.md` | read-only, **deliberately last** |
 
 **Done:** §19 safeguarding screen · §20 answerability screen · §21 the primitive decides ·
-§22 one polarity vocabulary · §23 what was shown to whom · §24 the leader attribution guard.
+§22 one polarity vocabulary · §23 what was shown to whom · §24 the leader attribution guard ·
+§25 the withdrawal notice.
 
 **§28 is last on purpose** — read-only, and R&D where nothing is a reason to build. But its bet
 is well founded: **five capabilities this session turned out to be already built and merely

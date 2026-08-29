@@ -3,6 +3,7 @@
 process.env.DB_OPTIONAL = '1';
 process.env.IQ_DETERMINISTIC_ONLY = '1';
 const S = require('../server');
+const delivery = require('../ai/delivery');
 let pass = 0, fail = 0;
 const ok = (name, condition) => { if (condition) { pass++; console.log('  PASS', name); } else { fail++; console.log('  FAIL', name); } };
 const code = 'finding-change';
@@ -37,6 +38,15 @@ const server = S.app.listen(0, async () => {
     const attempt = await S._deliverFindingChanges(code, 'coach', { now: new Date('2026-08-29T12:00:00Z').getTime() });
     const notice = JSON.stringify(attempt.payloads || []);
     ok('N3 the notice contains none of the withdrawn content', /finding you were shown/i.test(notice) && !/training is chaos|red cones|withdrawn sentence|session_order|p1/.test(notice));
+    /* N3 exercises the 'gone' branch, because that is what a withdrawal produces. The OTHER
+       branch — a bucket move or a confidence drop — has its own sentence, and a leak there would
+       be just as bad and was untested. Asserted at the composer, since it is pure. Every change
+       kind, and a deliberately hostile `detail` that must not appear whatever a caller passes. */
+    const everyKind = ['gone', 'bucket', 'confidence', 'changed', 'anything-else']
+      .map(change => JSON.stringify(delivery.composeFindingChangeNotice({ change, url: '/', detail: 'training is chaos', finding: 'red cones' })));
+    ok('N3b no change kind can leak content, and a caller cannot inject it',
+      everyKind.every(n => /finding you were shown/i.test(n) && !/training is chaos|red cones/.test(n)));
+
     ok('N4 the audit trail stays references-only after reconciliation', !/training is chaos|red cones|withdrawn sentence/.test(JSON.stringify(S.auditLog[code] || [])));
   } catch (e) { fail++; console.log('  FAIL suite threw', e && e.message); }
   finally { server.close(() => { console.log(`\nfinding-change-notice-http-smoke: ${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); }); }
