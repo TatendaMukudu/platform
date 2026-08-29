@@ -229,7 +229,11 @@ Never a mark on a person.
 Mobile-first, one column, text-first. No cards inside cards, no side panels, no tabs within tabs.
 One accent colour. If a screen needs a scrollbar to make sense, it is wrong.
 
-**BUILD STATUS, so nobody re-derives what exists.** The composer (`ai/voice.explainObject`) is
+**BUILD STATUS, so nobody re-derives what exists.** The **inquiry thread is built** —
+`GET /api/inquiry/:id/thread` composes the opening on every read and never stores it (L-OC1,
+mutation-tested by `object-conversation-screen-http-smoke` OC3). It is **self-scoped and
+inquiry-only**: a Focus, High or Low has no thread route yet, and a team inquiry cannot be opened
+this way. The composer (`ai/voice.explainObject`) is
 built and live: the lead question renders the claim, the provenance chip and the four blocks; the
 team card renders the chip and *"Would change our mind"*. The trust link under the composer is
 live. The typography below is applied to the lead card. **Still to build:** the four nav buckets,

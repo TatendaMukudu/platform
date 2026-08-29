@@ -91,7 +91,7 @@ is better product, not a broken one.
 | 9 | ~~Self Highs and Lows, derived~~ | — | **DONE — and it needed NO production code.** §26 found the projection already worked through `behaviour.plan` + `bucketOf` on `/api/proactive/insights` (reachable from `member-view.js:2879`). `self-high-low-smoke` pins it |
 | — | ~~The composer — `ai/voice.js` explains a governed object~~ | — | **DONE** — `voice-composer-smoke`, wired into `/api/inquiry/lead` |
 | — | ~~"What I've learned about how you work"~~ | — | **DONE** — `/api/self/patterns` and its feedback route are no longer orphaned |
-| 10 | The front end reflecting the object model | product | `ttd/object-as-conversation.md`, **D24 — do it last** |
+| 10 | The front end reflecting the object model | product | §27 landed the **inquiry** thread (`object-conversation-screen-http-smoke`, L-OC1 mutation-tested). **Remaining: the four nav buckets (§29), and threads for Focus/High/Low** · then **D24 last** |
 | 11 | Live database run, staging deploy, real users | — | needs Render |
 
 **The record of what was shown to whom now EXISTS** — `finding_view` audit entries,
