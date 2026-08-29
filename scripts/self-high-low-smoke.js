@@ -32,6 +32,25 @@ ok('a data gap appears in neither bucket even when an older producer labels it r
   feed.bucketOf(gapWithLegacyRisk) === null
   && Object.values(behaviour.plan([gapWithLegacyRisk], { audience: 'self' }).groups).every(group => group.insights.length === 0));
 
+/* THE POSITIVE CASE, and it is the one that matters. Emptying the entire bucket table still
+   passed every assertion above, because they all check that something is ABSENT — so a projection
+   that produced no Highs and no Lows at all looked perfectly healthy. This is the D26 lesson
+   again: the assertion that catches a real regression is the one saying the feature WORKS. */
+const aLow = proactive.toInsight(
+  { type: 'withdrawal', severity: 'high', confidence: 'clear' },
+  { audience: 'self', subjectId: 'member' },
+);
+const aHigh = proactive.toInsight(
+  { type: 'recovering', severity: 'medium', confidence: 'clear' },
+  { audience: 'self', subjectId: 'member' },
+);
+ok('a self finding that needs attention IS bucketed as a Low',
+  feed.bucketOf(aLow) === 'low'
+  && (behaviour.plan([aLow], { audience: 'self' }).groups.low || {}).insights.length === 1);
+ok('a self finding that is going well IS bucketed as a High',
+  feed.bucketOf(aHigh) === 'high'
+  && (behaviour.plan([aHigh], { audience: 'self' }).groups.high || {}).insights.length === 1);
+
 const CODE = 'self-hl';
 const DAY = 86400000;
 const now = Date.now();

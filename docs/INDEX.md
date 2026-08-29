@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `9913369`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `5bb30cb`. **Branch:** `claude/platform-work-summary-nmb0cm`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
 ---
@@ -88,7 +88,7 @@ is better product, not a broken one.
 | 6 | ~~A finding about a leader must not be attributable~~ | — | **DONE** — §24, `leader-subject-projection-http-smoke`; routes to the subject and their own leader only, fails closed on an unidentifiable subject |
 | 7 | ~~The safeguarding exception stated before anyone speaks~~ | — | **DONE** — D21, `advance-notice-http-smoke`; one home in `ai/safeguarding.SAFETY_EXCEPTION` |
 | 8 | ~~The thread — `about` on the conversation store~~ | — | **DONE** — `thread-binding-http-smoke`; the bottleneck five decisions waited on. The thread VIEW is still to build |
-| 9 | Self Highs and Lows, derived | product | `ttd/object-as-conversation.md` §4 G2 |
+| 9 | ~~Self Highs and Lows, derived~~ | — | **DONE — and it needed NO production code.** §26 found the projection already worked through `behaviour.plan` + `bucketOf` on `/api/proactive/insights` (reachable from `member-view.js:2879`). `self-high-low-smoke` pins it |
 | — | ~~The composer — `ai/voice.js` explains a governed object~~ | — | **DONE** — `voice-composer-smoke`, wired into `/api/inquiry/lead` |
 | — | ~~"What I've learned about how you work"~~ | — | **DONE** — `/api/self/patterns` and its feedback route are no longer orphaned |
 | 10 | The front end reflecting the object model | product | `ttd/object-as-conversation.md`, **D24 — do it last** |
@@ -103,9 +103,12 @@ can now be built. Nothing else is blocked on a missing substrate.
 > **BAR ONE IS COMPLETE.** Every "nothing breaks" blocker under D33 is closed and
 > mutation-tested. What remains is product, not breakage.
 >
-> **§26 — self Highs and Lows**, then §27 the thread view. But the highest-value item on the whole
-> list is **#11: a live database run with real people.** It is the only thing here that cannot be
-> compressed at the end, and the only way to find the class of bug no suite catches.
+> **§27 — the thread view.** Both halves already exist: the `about` binding and
+> `voice.explainObject`.
+>
+> **But the highest-value item on the whole list is #11: a live database run with real people.**
+> It is the only thing here that cannot be compressed at the end, and the only way to find the
+> class of bug no suite catches. Everything else remaining is product polish.
 
 ### Which founder decisions remain?
 
