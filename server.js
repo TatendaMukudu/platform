@@ -6569,12 +6569,15 @@ function _recordEvidence(code, envInput, rawRecord) {
   const seen = _evidenceSeen[code] || (_evidenceSeen[code] = new Map());
   const key = evidence.dedupeKey(env);
   const prior = seen.get(key);
+  let correctedFindingStates = null;
   if (prior) {
     // Same factual identity. If the VALUE is unchanged it's a true duplicate (a
     // retry / overlapping sync) → collapse. If the value changed it's a CORRECTION →
     // supersede the prior fact rather than create a competing truth.
     const samePayload = prior.value === env.value && (prior.valueText || null) === (env.valueText || null);
     if (samePayload) return { stored: false, duplicate: true, id: prior.id, promotable: false, envelope: prior };
+    correctedFindingStates = new Map(Object.keys(orgNodes[code] || {})
+      .map(nodeId => [nodeId, _groupFindingStates(code, nodeId)]));
     prior.status = 'superseded'; prior.supersededBy = env.id; prior.supersededAt = new Date().toISOString();
     _withdrawSignal(code, prior);   // the old signal is withdrawn; the corrected one promotes below
     try { _evictEvidenceVector(code, prior.id); } catch (_) {}  // stale vector must not linger
@@ -6592,6 +6595,9 @@ function _recordEvidence(code, envInput, rawRecord) {
   if (log.length > EVIDENCE_LOG_CAP) {
     _scheduleEvidenceEviction(code);
   }
+  // The caller promotes the replacement immediately after this choke point. Reconcile on the
+  // microtask boundary so the comparison sees the complete withdraw-then-promote correction.
+  if (correctedFindingStates) _scheduleCorrectedGroupFindingReconciliation(code, correctedFindingStates);
   return { stored: true, id: env.id, promotable: evidence.promotable(env), envelope: env };
 }
 
@@ -10082,9 +10088,68 @@ function _findingRef(item) {
   if (item.id) return String(item.id);
   if (item.dedupeKey) return String(item.dedupeKey);
   if (item.beliefId) return `belief:${item.beliefId}`;
+  if (item.inquiryId) return `inquiry:${item.inquiryId}`;
+  if (item.findingId) return `finding:${item.findingId}`;
   const subject = item.memberId || item.subjectId;
   const kind = item.patternType || item.type;
   return subject && kind ? `finding:${subject}:${kind}` : null;
+}
+
+const _BAND_ORDER = Object.freeze({ tentative: 0, emerging: 1, probable: 2, supported: 3, clear: 4, confirmed: 5 });
+function _groupFindingStates(code, nodeId) {
+  const subject = _groupSubjectRef(code, nodeId);
+  if (!subject.ok) return new Map();
+  const state = teamState.buildTeamState({
+    node: { nodeId, name: subject.node.name, memberCount: _nodeMembers(code, nodeId).length },
+    inquiries: _groupInquiryProjections(code, nodeId), findings: _groupPatternFindings(code, nodeId),
+    focuses: _teamFocuses(code, nodeId), now: Date.now(),
+  });
+  const out = new Map();
+  for (const item of [state.high, state.low].filter(Boolean)) {
+    const ref = _findingRef(item);
+    if (ref) out.set(ref, { bucket: item.kind, band: item.band || 'tentative' });
+  }
+  return out;
+}
+function _materialFindingChanges(before, after) {
+  const changed = [];
+  for (const [findingRef, prior] of (before || new Map())) {
+    const next = after && after.get(findingRef);
+    if (!next) changed.push({ findingRef, change: 'gone' });
+    else if (next.bucket !== prior.bucket) changed.push({ findingRef, change: 'bucket' });
+    else if ((_BAND_ORDER[next.band] ?? 0) < (_BAND_ORDER[prior.band] ?? 0)) changed.push({ findingRef, change: 'confidence' });
+  }
+  return changed;
+}
+function _queueFindingChangeNotices(code, changes) {
+  const emitted = auditLog[code] || [], queued = [];
+  for (const change of changes || []) {
+    const viewers = [...new Set(emitted.filter(e => e.action === 'finding_view' &&
+      (e.findingRefs || []).includes(change.findingRef)).map(e => e.actor).filter(Boolean))];
+    for (const userId of viewers) {
+      const key = userKey(code, userId);
+      const prefs = { ...delivery.DEFAULT_PREFS, ...(deliveryPrefs[key] || {}) };
+      if (!prefs.enabled || !prefs.channels || (!prefs.channels.push && !prefs.channels.email)) continue;
+      const pending = Array.isArray(prefs.pendingFindingChanges) ? prefs.pendingFindingChanges.slice() : [];
+      if (!pending.some(p => p.findingRef === change.findingRef && p.change === change.change))
+        pending.push({ findingRef: change.findingRef, change: change.change, queuedAt: Date.now() });
+      prefs.pendingFindingChanges = pending.slice(-50);
+      deliveryPrefs[key] = prefs;
+      queued.push({ userId, findingRef: change.findingRef, change: change.change });
+    }
+  }
+  if (queued.length) scheduleSave();
+  return queued;
+}
+function _reconcileGroupFindingChanges(code, nodeId, before) {
+  return _queueFindingChangeNotices(code, _materialFindingChanges(before, _groupFindingStates(code, nodeId)));
+}
+function _scheduleCorrectedGroupFindingReconciliation(code, beforeByNode) {
+  queueMicrotask(() => {
+    try {
+      for (const [nodeId, before] of beforeByNode || []) _reconcileGroupFindingChanges(code, nodeId, before);
+    } catch (e) { console.warn('[finding-change] reconciliation failed:', e && e.message); }
+  });
 }
 function _findingRefs(items) {
   return [...new Set((items || []).map(_findingRef).filter(Boolean))].sort();
@@ -13035,6 +13100,7 @@ app.post('/api/group/:nodeId/withdraw', requireAuth, (req, res) => {
     return res.status(409).json({ error: 'nothing contributed to withdraw' });
   }
 
+  const beforeFindings = _groupFindingStates(code, nodeId);
   const bySubject = (inquiryStates[code] || {})[subject.subjectRef] || {};
   const now = Date.now();
   for (const [k, inq] of Object.entries(bySubject)) {
@@ -13044,8 +13110,9 @@ app.post('/api/group/:nodeId/withdraw', requireAuth, (req, res) => {
   }
   cand.status = 'dismissed';
   cand.withdrawnAt = now;
+  const notices = _reconcileGroupFindingChanges(code, nodeId, beforeFindings);
   scheduleSave();
-  res.json({ ok: true, withdrawn: cand.candidateId });
+  res.json({ ok: true, withdrawn: cand.candidateId, changeNoticesQueued: notices.length });
 });
 
 /* POST /api/group/:nodeId/candidates/:candidateId/dismiss — no, this is not the group's. */
@@ -13504,6 +13571,7 @@ app.get('/api/group/:nodeId/state', requireAuth, (req, res) => {
     focuses: ordinaryGroupReader ? _teamFocuses(code, nodeId) : [],
     now: Date.now(),
   });
+  _auditFindingEmission(code, userId, [state.high, state.low].filter(Boolean), [], 'group state');
   _audit(code, { actor: userId, action: 'team_state_view', subjectIds: [], basis: 'group_state' });
   res.json({ ok: true, ...state });
 });
@@ -15154,6 +15222,32 @@ async function _deliverDigest(code, userId, { force = false } = {}) {
   return { sent: true, payload, delivered, subscriptions: subs.length, channelReady: PUSH_READY };
 }
 
+/* Pending D19 records are references and change kinds only. They use the existing consent,
+   channel, cadence and quiet-hour policy; withdrawn content never enters deliveryPrefs. */
+async function _deliverFindingChanges(code, userId, { now = Date.now() } = {}) {
+  const key = userKey(code, userId);
+  const prefs = { ...delivery.DEFAULT_PREFS, ...(deliveryPrefs[key] || {}) };
+  const pending = Array.isArray(prefs.pendingFindingChanges) ? prefs.pendingFindingChanges : [];
+  const decision = delivery.shouldDeliver({ prefs, now, hasContent: pending.length > 0 });
+  if (!decision.send) return { sent: false, reason: decision.reason, pending: pending.length, payloads: [] };
+  const subs = pushSubs[key] || [];
+  const payloads = pending.map(p => delivery.composeFindingChangeNotice({ change: p.change, url: '/' }));
+  let delivered = 0;
+  for (const payload of payloads) for (const sub of subs) {
+    const result = await _sendPush(sub, payload);
+    if (result.ok) delivered++;
+  }
+  if (delivered > 0) {
+    prefs.pendingFindingChanges = [];
+    prefs.lastSentAt = now;
+    deliveryPrefs[key] = prefs;
+    _audit(code, { actor: 'system', action: 'outbound_delivery', subjectIds: [userId],
+      basis: `finding change · ${payloads.length} notice(s) · ${delivered}/${subs.length} push` });
+    scheduleSave();
+  }
+  return { sent: delivered > 0, reason: delivered > 0 ? 'ok' : 'channel_not_ready', pending: pending.length, payloads, delivered };
+}
+
 /* The DELIVERY SWEEP — the heartbeat's outbound beat. For every org that permits outbound,
    every person opted in gets their digest considered (the gate decides if it actually goes).
    Bounded + per-person isolated: one failure never stops the rest. Returns how many sent. */
@@ -15165,7 +15259,11 @@ async function _deliverySweep() {
       const key = userKey(code, uid);
       const p = deliveryPrefs[key];
       if (!p || !p.enabled) continue;                 // opt-in only
-      try { const r = await _deliverDigest(code, uid, { force: false }); if (r.sent) sent++; }
+      try {
+        const corrections = await _deliverFindingChanges(code, uid);
+        if (corrections.pending > 0) { if (corrections.sent) sent++; continue; }
+        const r = await _deliverDigest(code, uid, { force: false }); if (r.sent) sent++;
+      }
       catch (e) { console.warn(`[delivery] sweep failed for ${code}:${uid}:`, e && e.message); }
     }
   }
@@ -18273,7 +18371,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: the accountability trail (access log + SAR + tamper-evidence)
   _audit, auditLog, _removePerson,
   // exported for the truth layer: outbound delivery (compose + gate + sweep)
-  _deliverDigest, _deliverySweep, _deliveryReadsFor, deliveryPrefs, pushSubs,
+  _deliverDigest, _deliverFindingChanges, _deliverySweep, _deliveryReadsFor, deliveryPrefs, pushSubs,
   // exported for the truth layer: autonomous inquiry (proactive, governed questions)
   _pendingInquiries, _lifecycleUncertainties, inquiryDismissed,
   // exported for the truth layer: the unified attention pipeline (feed → scope → rank)

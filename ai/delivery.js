@@ -109,7 +109,21 @@ function composeAlert({ name = '', read = null, url = '/' } = {}) {
   };
 }
 
+/* Correction notices are content-free by construction. The withdrawn finding never enters this
+   composer; the recipient is told only that a projection they previously saw has changed. */
+function composeFindingChangeNotice({ change = 'changed', url = '/' } = {}) {
+  return {
+    kind: 'finding_change',
+    title: 'An IntelliQ finding changed',
+    body: change === 'gone'
+      ? 'A finding you were shown is no longer current. Open IntelliQ for the updated picture.'
+      : 'A finding you were shown has changed. Open IntelliQ for the updated picture.',
+    url,
+    itemCount: 1,
+  };
+}
+
 module.exports = {
-  DEFAULT_PREFS, eligibleReads, alertWorthy, shouldDeliver, composeDigest, composeAlert,
+  DEFAULT_PREFS, eligibleReads, alertWorthy, shouldDeliver, composeDigest, composeAlert, composeFindingChangeNotice,
   _inQuietHours, _hour,
 };
