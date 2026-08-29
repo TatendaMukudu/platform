@@ -9771,7 +9771,8 @@ function _teamStateAnswer(code, userId, question, { now = Date.now() } = {}) {
         if (!node) return null;
         return teamState.buildTeamState({
           node: { nodeId, name: node.name, memberCount: (node.memberIds || []).length },
-          inquiries: _groupInquiryProjections(code, nodeId),
+          inquiries: _groupInquiryProjections(code, nodeId).filter(p =>
+            p.leaderSubject !== true || _leaderSubjectReaders(code, nodeId, p).includes(userId)),
           focuses: _teamFocuses(code, nodeId),
           now,
         });
@@ -12999,7 +13000,7 @@ app.post('/api/group/:nodeId/contribute', requireAuth, (req, res) => {
   cand.status = 'contributed';
   cand.contributedAt = Date.now();
   cand.contributorRole = leads ? 'leader' : 'member';
-  cand.contributorVisibility = (req.body || {}).contributorVisibility === 'anonymous' ? 'anonymous' : 'named';
+  cand.contributorVisibility = (req.body || {}).contributorVisibility === 'named' ? 'named' : 'anonymous';
   // Whether this is something working well or something worth attention is the CONTRIBUTOR'S
   // call, recorded here with the same provenance as the rest of the contribution. The system
   // does not classify it: a sentiment lexicon deciding a team's Highs and Lows is the same
@@ -13083,8 +13084,17 @@ function _groupInquiryProjections(code, nodeId) {
     // would settle on the leader's behalf a disagreement they are the one who should see.
     const forThis = _groupCands(code).filter(c => c.nodeId === nodeId && c.concept === ((i.topic && i.topic.canonicalConcept) || ''));
     const val = teamState.valenceOf(forThis);
+    const subjectRef = String(i.subjectRef || subject.subjectRef);
+    const subjectId = subjectRef.startsWith('member:') ? subjectRef.slice(7) : null;
+    const knownPerson = subjectId && !!(orgUsers[code] || {})[subjectId];
+    const isLeader = !!subjectId && Object.values(orgNodes[code] || {}).some(n =>
+      Array.isArray(n && n.leaderIds) && n.leaderIds.includes(subjectId));
+    // Fail closed: a named person whose leader status cannot be established receives the same
+    // retaliation protection as a leader. `group:*` is known to be a group, not an unknown person.
+    const leaderSubject = subjectRef.startsWith('member:') && (!knownPerson || isLeader);
     return {
       inquiryId: i.inquiryId, topic: i.topic, status: i.status,
+      subjectRef, subjectId, leaderSubject,
       polarity: val.polarity, contested: val.contested, valenceReason: val.reason,
       hypothesis: lead ? lead.statement : null,
       alternatives: hyps.filter(h => h !== lead).map(h => ({ statement: h.statement, band: h.confidence.band, status: h.status })),
@@ -13092,7 +13102,9 @@ function _groupInquiryProjections(code, nodeId) {
       // What it rests on, counted the way confidence counts it: separate underlying occurrences,
       // not how many times the thing has been said.
       independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size,
-      contributors: new Set(active.map(s => s.contributorVisibility === 'anonymous' ? '(anonymous)' : s.contributedBy).filter(Boolean)).size,
+      // Anonymity changes attribution, never counting (L-D38). The kernel retains identity so
+      // five anonymous people remain five contributors rather than one "anonymous" voice.
+      contributors: new Set(active.map(s => s.contributedBy).filter(Boolean)).size,
       signals: active.length,
       // Claims that were CORRECTED — not every inactive signal. A retraction marker is itself
       // inactive (taking something back is not evidence for anything), and counting it would
@@ -13108,6 +13120,29 @@ function _groupInquiryProjections(code, nodeId) {
       lastUpdatedAt: i.lastUpdatedAt,
     };
   }).sort((a, b) => b.confidence.score - a.confidence.score);
+}
+
+function _leaderSubjectReaders(code, nodeId, projection) {
+  if (!projection || projection.leaderSubject !== true || !projection.subjectId) return [];
+  const subjectId = projection.subjectId;
+  const nodes = Object.values(orgNodes[code] || {});
+  const led = nodes.filter(n => Array.isArray(n && n.leaderIds) && n.leaderIds.includes(subjectId));
+  const parentIds = new Set(led.flatMap(n => n.parentIds || (n.parentId ? [n.parentId] : [])));
+  const managers = nodes.filter(n => parentIds.has(n.nodeId)).flatMap(n => n.leaderIds || []);
+  return [...new Set([subjectId, ...managers])];
+}
+
+function _safeLeaderSubjectProjection(projection) {
+  if (!projection || projection.leaderSubject !== true) return projection;
+  return {
+    inquiryId: projection.inquiryId, topic: projection.topic, status: projection.status,
+    subjectRef: projection.subjectRef, subjectId: projection.subjectId, leaderSubject: true,
+    polarity: projection.polarity, contested: projection.contested,
+    hypothesis: null, alternatives: [], confidence: projection.confidence,
+    contributors: 'several', independentOrigins: 'several', signals: null,
+    corrected: projection.corrected, contradictions: projection.contradictions,
+    stillUnknown: [], falsifiers: [], timeline: [], lastUpdatedAt: projection.lastUpdatedAt,
+  };
 }
 
 /* Everyone who may read this group's own state: its members and its leaders. Deliberately NOT
@@ -13160,11 +13195,16 @@ app.get('/api/group/:nodeId/inquiry', requireAuth, (req, res) => {
   const nodeId = String(req.params.nodeId);
   const subject = _groupSubjectRef(code, nodeId);
   if (!subject.ok) return res.status(404).json({ error: subject.error });
-  if (!_mayReadGroup(code, nodeId, userId)) {
+  const projected = _groupInquiryProjections(code, nodeId);
+  const routed = projected.filter(p => p.leaderSubject === true && _leaderSubjectReaders(code, nodeId, p).includes(userId));
+  const ordinary = _mayReadGroup(code, nodeId, userId);
+  if (!ordinary && !routed.length) {
     return res.status(403).json({ error: 'not part of this group' });
   }
 
-  const inquiries = _groupInquiryProjections(code, nodeId);
+  const inquiries = (ordinary
+    ? projected.filter(p => p.leaderSubject !== true || routed.includes(p))
+    : routed).map(_safeLeaderSubjectProjection);
   _audit(code, { actor: userId, action: 'agenda_view', subjectIds: [], basis: 'group_inquiry' });
   res.json({ ok: true, node: { nodeId, name: subject.node.name }, inquiries,
     note: 'Built only from what people deliberately contributed. Nothing private enters here.' });
@@ -13389,6 +13429,7 @@ function _leadInquiry(code, userId) {
     const node = (orgNodes[code] || {})[nodeId];
     if (!node) continue;
     for (const p of _groupInquiryProjections(code, nodeId)) {
+      if (p.leaderSubject === true && !_leaderSubjectReaders(code, nodeId, p).includes(userId)) continue;
       all.push({ ...p, _source: 'team', _where: node.name, _nodeId: nodeId });
     }
   }
@@ -13442,15 +13483,25 @@ app.get('/api/group/:nodeId/state', requireAuth, (req, res) => {
   const nodeId = String(req.params.nodeId);
   const subject = _groupSubjectRef(code, nodeId);
   if (!subject.ok) return res.status(404).json({ error: subject.error });
-  if (!_mayReadGroup(code, nodeId, userId)) {
+  const projected = _groupInquiryProjections(code, nodeId);
+  const ordinaryGroupReader = _mayReadGroup(code, nodeId, userId);
+  const routedLeaderFindings = projected.filter(p =>
+    p.leaderSubject === true && _leaderSubjectReaders(code, nodeId, p).includes(userId));
+  if (!ordinaryGroupReader && !routedLeaderFindings.length) {
     return res.status(403).json({ error: 'not part of this group' });
   }
 
+  // This records emission, not proof that a human read the response. Leader-subject findings go
+  // only to the subject and their own leader. Members of the subject's team receive none of them.
+  const inquiries = ordinaryGroupReader
+    ? projected.filter(p => p.leaderSubject !== true || routedLeaderFindings.includes(p))
+    : routedLeaderFindings;
+
   const state = teamState.buildTeamState({
     node: { nodeId, name: subject.node.name, memberCount: _nodeMembers(code, nodeId).length },
-    inquiries: _groupInquiryProjections(code, nodeId),
-    findings: _groupPatternFindings(code, nodeId),
-    focuses: _teamFocuses(code, nodeId),
+    inquiries,
+    findings: ordinaryGroupReader ? _groupPatternFindings(code, nodeId) : [],
+    focuses: ordinaryGroupReader ? _teamFocuses(code, nodeId) : [],
     now: Date.now(),
   });
   _audit(code, { actor: userId, action: 'team_state_view', subjectIds: [], basis: 'group_state' });

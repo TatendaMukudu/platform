@@ -365,6 +365,7 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
   for (const inq of _arr(inquiries)) {
     const polarity = _s(inq.polarity, 32) || POLARITY.NEUTRAL;
     if (polarity !== POLARITY.WORKING_WELL && polarity !== POLARITY.WORTH_ATTENTION) continue;
+    const leaderSubject = inq.leaderSubject === true;
     const fit = fitForSurface(inq, { cohortSize: memberCount });
     if (!fit.ok) {
       withheld.push({
@@ -372,7 +373,11 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
         // safe; restating the finding you just refused to surface is not.
         about: _s((inq.topic && (inq.topic.label || inq.topic.canonicalConcept)) || 'something', 120),
         kind: polarity === POLARITY.WORKING_WELL ? 'high' : 'low',
-        blocked: fit.blocked,
+        // Even a withheld leader-subject finding cannot disclose the small count that caused
+        // withholding; the gate is useful, its identifying arithmetic is not.
+        blocked: leaderSubject
+          ? fit.blocked.map(b => ({ gate: b.gate, reason: 'not enough safely attributable support to disclose' }))
+          : fit.blocked,
       });
       continue;
     }
@@ -383,18 +388,23 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
   const project = (inq, kind) => {
     if (!inq) return null;
     const fit = fitForSurface(inq, { cohortSize: memberCount });
+    const leaderSubject = inq.leaderSubject === true;
     return {
       kind, source: 'contributed',
       inquiryId: _s(inq.inquiryId, 64),
       about: _s((inq.topic && (inq.topic.label || inq.topic.canonicalConcept)) || '', 120),
-      claim: _s(inq.hypothesis, 300) || null,
+      // L-D27: a leader-subject projection cannot repeat contributed phrasing. The topic and
+      // kernel standing remain useful; the contributed account itself stays behind the boundary.
+      claim: leaderSubject ? null : (_s(inq.hypothesis, 300) || null),
       band: fit.band,
       status: _s(inq.status, 32),
       // Counts survive here only because fitForSurface already put them through the
       // two-sided floor. They are reported because a leader deciding whether to act on
       // a group claim is entitled to know how much it rests on.
-      basis: { independentOrigins: fit.origins, contributors: fit.contributors, of: memberCount },
-      stillUnknown: _arr(inq.stillUnknown).slice(0, 3).map(u => _s(u, 300)),
+      basis: leaderSubject
+        ? { contributors: 'several', population: 'the group' }
+        : { independentOrigins: fit.origins, contributors: fit.contributors, of: memberCount },
+      stillUnknown: leaderSubject ? [] : _arr(inq.stillUnknown).slice(0, 3).map(u => _s(u, 300)),
       /* THE COMPOSED EXPLANATION (D30). Composed here, beside the projection, so the team surface
          and the lead question say the SAME thing about the same object — each surface phrasing it
          itself is exactly how one concept came to read four different ways.
@@ -405,13 +415,13 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
          leader-subject finding is §24's job and must not reuse this path. */
       explained: voice.explainObject({
         kind, label: _s((inq.topic && (inq.topic.label || inq.topic.canonicalConcept)) || '', 120),
-        claim: _s(inq.hypothesis, 300) || '',
+        claim: leaderSubject ? '' : (_s(inq.hypothesis, 300) || ''),
         band: fit.band,
         independentOrigins: fit.origins, contributors: fit.contributors,
         stillUnknown: _arr(inq.stillUnknown).slice(0, 3),
         falsifiers: _arr(inq.falsifiers).slice(0, 3),
         contested: inq.contested === true,
-        banded: false,
+        banded: leaderSubject,
         seed: _s(inq.inquiryId, 64),
       }),
       lastUpdatedAt: _num(inq.lastUpdatedAt),

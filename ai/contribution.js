@@ -263,7 +263,7 @@ function toGroupProposal(contribution = {}, { now = Date.now() } = {}) {
     contributedAt: c.contributedAt || now,
     contributorRole: c.contributorRole || 'member',
     // Whether the contributor is named to other members, or the account stands without them.
-    contributorVisibility: c.contributorVisibility === 'anonymous' ? 'anonymous' : 'named',
+    contributorVisibility: c.contributorVisibility === 'named' ? 'named' : 'anonymous',
     // Contributions are never verbatim: the group holds the claim and a reference, not the text.
     verbatim: false,
     fromSubject: c.fromSubject || null,
