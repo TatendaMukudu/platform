@@ -102,13 +102,29 @@ can now be built. Nothing else is blocked on a missing substrate.
 
 > **BAR ONE IS COMPLETE.** Every "nothing breaks" blocker under D33 is closed and
 > mutation-tested. What remains is product, not breakage.
->
-> **§27 — the thread view.** Both halves already exist: the `about` binding and
-> `voice.explainObject`.
->
-> **But the highest-value item on the whole list is #11: a live database run with real people.**
+
+**The Codex queue, in order — all written, all ready to send:**
+
+| | Work order | What it is |
+|---|---|---|
+| 1 | **§29** the four nav buckets (D1) | the last piece of the shape. **Reuse the feed — do not write a second card renderer** |
+| 2 | **§30** one voice — move `proactive.js`'s 30 message tables into `ai/voice.js` (D30) | backend; will not collide with §29 |
+| 3 | **§16** the curiosity stopping rule | **required before the thread may ask questions** (D35) |
+| 4 | **§28** world-model reconciliation | **READ-ONLY** — `briefs/world-model-reconciliation.md` |
+| 5 | **§31** one home — `app.js` absorbs `member-view.js` (D24) | **LAST.** Ends with a file deleted |
+
+**Done:** §19 safeguarding screen · §20 answerability screen · §21 the primitive decides ·
+§22 one polarity vocabulary · §23 what was shown to whom · §24 the leader attribution guard ·
+§25 the withdrawal notice · §26 self Highs and Lows (**no production code needed**) ·
+§27 the inquiry thread.
+
+**Objective is NOT a bucket and must not become one yet.** D4 settles the nav at four. Whether
+`Objective` needs to exist at all — REUSE / ALIAS / EXTEND / NEW — is exactly what **§28** decides,
+and `briefs/world-model-reconciliation.md` forbids creating it before that answer.
+
+> **The highest-value item on the whole list remains #11: a live database run with real people.**
 > It is the only thing here that cannot be compressed at the end, and the only way to find the
-> class of bug no suite catches. Everything else remaining is product polish.
+> class of bug no suite catches.
 
 ### Which founder decisions remain?
 
