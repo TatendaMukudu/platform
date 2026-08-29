@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `4e632ac`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `81447fc`. **Branch:** `claude/platform-work-summary-nmb0cm`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
 ---
@@ -86,7 +86,7 @@ is better product, not a broken one.
 | 3 | ~~Leader surfaces strip performance figures~~ | — | **DONE** — D26, `primitive-number-disclosure-http-smoke` |
 | 4 | ~~One polarity vocabulary; FIVE existed~~ | — | **DONE** — §22, `ai/intelligence-feed.js` owns `bucketOf`; `governance-smoke` asserts no other module may author one. **OPEN: `condition` was mapped to `opportunity` (High) — founder to rule; see below** |
 | 5 | **Withdrawal recomputes and tells (T-2)** | **BLOCKING** | founder decision **D19** |
-| 6 | **A finding about a leader must not be attributable** | **BLOCKING** | founder decision **D27** |
+| 6 | ~~A finding about a leader must not be attributable~~ | — | **DONE** — §24, `leader-subject-projection-http-smoke`; routes to the subject and their own leader only, fails closed on an unidentifiable subject |
 | 7 | ~~The safeguarding exception stated before anyone speaks~~ | — | **DONE** — D21, `advance-notice-http-smoke`; one home in `ai/safeguarding.SAFETY_EXCEPTION` |
 | 8 | ~~The thread — `about` on the conversation store~~ | — | **DONE** — `thread-binding-http-smoke`; the bottleneck five decisions waited on. The thread VIEW is still to build |
 | 9 | Self Highs and Lows, derived | product | `ttd/object-as-conversation.md` §4 G2 |
@@ -101,9 +101,9 @@ can now be built. Nothing else is blocked on a missing substrate.
 
 ### What is the next code task?
 
-> **§24 — a finding about a leader is never attributable.** A bar-one blocker under D33: D27
-> makes a leader a legitimate subject and D38 makes contribution anonymous, so the retaliation
-> guard is the missing half. The work order is written.
+> **§25 — a withdrawal tells whoever saw the old picture.** The last bar-one blocker, and the
+> last of the original six: it closes **T-2**. The emission record it needs already exists
+> (`finding_view`, §23). The work order is written.
 
 **One founder ruling is outstanding on work already merged.** §22 mapped `diagnose.js`'s
 `condition` to `opportunity`, which files it as a **High**. `ai/diagnose.js:311` describes the
@@ -116,15 +116,14 @@ report rather than decide this and decided it; the mapping stands until the foun
 
 | | Work order | Bar |
 |---|---|---|
-| 1 | **§24** a finding about a leader is never attributable (D27) | **BLOCKING** |
-| 2 | **§25** a withdrawal tells whoever saw the old picture (D19, closes T-2) | **BLOCKING** |
-| 3 | **§26** self Highs and Lows, derived (G2) | product — unblocked by §22 |
-| 4 | **§27** the thread view (§6c) | product — both halves already built |
-| 5 | **§16** the curiosity stopping rule | **a dependency of §27 under D35** |
-| 6 | **§28** ontology reconciliation | documentation only, **deliberately last** |
+| 1 | **§25** a withdrawal tells whoever saw the old picture (D19, closes T-2) | **BLOCKING** |
+| 2 | **§26** self Highs and Lows, derived (G2) | product — unblocked by §22 |
+| 3 | **§27** the thread view (§6c) | product — both halves already built |
+| 4 | **§16** the curiosity stopping rule | **a dependency of §27 under D35** |
+| 5 | **§28** ontology reconciliation | documentation only, **deliberately last** |
 
 **Done:** §19 safeguarding screen · §20 answerability screen · §21 the primitive decides ·
-§22 one polarity vocabulary · §23 what was shown to whom.
+§22 one polarity vocabulary · §23 what was shown to whom · §24 the leader attribution guard.
 
 **§28 is last on purpose.** It is an investigation, it lands in R&D where nothing is a reason to
 build, and two ontology documents already exist — `ttd/organisational-ontology-investigation.md`
