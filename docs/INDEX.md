@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `6fbeb2f`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `4e632ac`. **Branch:** `claude/platform-work-summary-nmb0cm`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
 ---
@@ -51,9 +51,7 @@ outcome loop** · **the agent answering team questions at the team's grain** · 
 ### What is partial?
 
 **87 of 298 routes have no front-end caller** (`ttd/duplication-sweep.md` §B; three were closed by
-the safeguarding and answerability screens) · **polarity is bucketed FIVE ways, not three** —
-`ai/diagnose.js:339` uses `strength / difficulty / condition / neutral`, two of which are not in the
-frozen `POLARITIES` list at all (`ttd/layer-map.md` §1) · the **deterministic voice** now has a home
+the safeguarding and answerability screens) · the **deterministic voice** now has a home
 (`ai/voice.explainObject`, **D30**) but `ai/proactive.js`'s 30 message tables have not yet moved
 into it · `orgGroups` and `orgNodes` are two group
 models · Focus has two constructors · corrections do not reach already-emitted signals (**T-2**,
@@ -86,7 +84,7 @@ is better product, not a broken one.
 | 1 | ~~Safeguarding lead has no screen~~ | — | **DONE** — `safeguarding-screen-smoke` |
 | 2 | ~~A person cannot see their own record~~ | — | **DONE** — `answerability-screen-smoke` |
 | 3 | ~~Leader surfaces strip performance figures~~ | — | **DONE** — D26, `primitive-number-disclosure-http-smoke` |
-| 4 | **One polarity vocabulary; FIVE exist** | product | `ttd/layer-map.md` §1 · prompt ready at `briefs/session-prompts.md` §22 |
+| 4 | ~~One polarity vocabulary; FIVE existed~~ | — | **DONE** — §22, `ai/intelligence-feed.js` owns `bucketOf`; `governance-smoke` asserts no other module may author one. **OPEN: `condition` was mapped to `opportunity` (High) — founder to rule; see below** |
 | 5 | **Withdrawal recomputes and tells (T-2)** | **BLOCKING** | founder decision **D19** |
 | 6 | **A finding about a leader must not be attributable** | **BLOCKING** | founder decision **D27** |
 | 7 | ~~The safeguarding exception stated before anyone speaks~~ | — | **DONE** — D21, `advance-notice-http-smoke`; one home in `ai/safeguarding.SAFETY_EXCEPTION` |
@@ -103,19 +101,35 @@ can now be built. Nothing else is blocked on a missing substrate.
 
 ### What is the next code task?
 
-> **One polarity vocabulary.** Step 0 of the plan and a prerequisite for the thread, the buckets
-> and self Highs/Lows. The work order is written: `briefs/session-prompts.md` **§22**.
+> **§24 — a finding about a leader is never attributable.** A bar-one blocker under D33: D27
+> makes a leader a legitimate subject and D38 makes contribution anonymous, so the retaliation
+> guard is the missing half. The work order is written.
+
+**One founder ruling is outstanding on work already merged.** §22 mapped `diagnose.js`'s
+`condition` to `opportunity`, which files it as a **High**. `ai/diagnose.js:311` describes the
+value as *"a strength or a difficulty or a condition for success"* — an enabling circumstance, not
+good news. Under **D5** a thing that is neither good nor bad belongs in **neither bucket**, which
+argues for `neutral`. It is one line in `ai/intelligence-feed.js` either way. Codex was asked to
+report rather than decide this and decided it; the mapping stands until the founder rules.
 
 **The Codex queue, in order — all written, all ready to send:**
 
 | | Work order | Bar |
 |---|---|---|
-| 1 | **§22** one polarity vocabulary | product, but step 0 for everything |
-| 2 | **§24** a finding about a leader is never attributable (D27) | **BLOCKING** |
-| 3 | **§25** a withdrawal tells whoever saw the old picture (D19, closes T-2) | **BLOCKING** |
+| 1 | **§24** a finding about a leader is never attributable (D27) | **BLOCKING** |
+| 2 | **§25** a withdrawal tells whoever saw the old picture (D19, closes T-2) | **BLOCKING** |
+| 3 | **§26** self Highs and Lows, derived (G2) | product — unblocked by §22 |
+| 4 | **§27** the thread view (§6c) | product — both halves already built |
+| 5 | **§16** the curiosity stopping rule | **a dependency of §27 under D35** |
+| 6 | **§28** ontology reconciliation | documentation only, **deliberately last** |
 
-§19, §20, §21 and §23 are done. §16 (the curiosity stopping rule) is written and unrun, and
-**D35 promoted it to a dependency** of the thread work.
+**Done:** §19 safeguarding screen · §20 answerability screen · §21 the primitive decides ·
+§22 one polarity vocabulary · §23 what was shown to whom.
+
+**§28 is last on purpose.** It is an investigation, it lands in R&D where nothing is a reason to
+build, and two ontology documents already exist — `ttd/organisational-ontology-investigation.md`
+records the verdict *"do we need an ontology / graph DB? — the answer is no"*. The prompt requires
+reading both before starting.
 
 ### Which founder decisions remain?
 

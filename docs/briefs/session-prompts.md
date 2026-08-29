@@ -759,6 +759,132 @@ Founder decision **D19**, closing **T-2**. Pilot-blocking. **Depends on §23, wh
 
 ---
 
+## 26 · Codex — self Highs and Lows (READY TO SEND, after §24/§25)
+
+Founder decisions **D4, D5, D6**; `object-as-conversation.md` §4 **G2**. Unblocked now that §22
+gave polarity one owner — self Highs and Lows could not be derived into a vocabulary that had not
+been chosen.
+
+> Branch first, run `bash scripts/codex-preflight.sh`, read `docs/INDEX.md` and
+> `ttd/founder-decisions-2026-08.md` **D4, D5, D6**.
+>
+> **There is no self-grain High or Low anywhere in the code.** Team Highs and Lows come from
+> contributed group inquiries and detected group patterns. The Self layer has beliefs, patterns
+> and insights — but nothing named or shaped as a High or a Low.
+>
+> **This is a projection, not an engine.** Do not write a detector. The polarity is already
+> assigned (`ai/proactive.js` `PATTERN_POLARITY`), the buckets are already owned
+> (`ai/intelligence-feed.js` `bucketOf` — §22), and the person's own insights are already produced
+> by `_proactiveInsights(code, userId, { audience: 'self' })`. Bucket what exists.
+>
+> Scope: a person's own Highs and Lows, self-only, derived by passing their own insights through
+> the ONE bucket owner. `neutral` lands in neither bucket (D5); `data_gap` lands in neither
+> whatever its polarity, because it is our gap and not theirs (D6).
+>
+> Constraints: no new detection, no new thresholds, no second bucket table (`governance-smoke`
+> asserts there is exactly one and it is mutation-tested). Self-scoped — a leader must never reach
+> this path. Do not weaken any existing assertion. No emojis.
+>
+> Done: `npm test` green plus a suite proving a `neutral` self finding appears in neither bucket,
+> a `data_gap` appears in neither, and no leader can read another person's self Highs and Lows.
+> Send a **mutation map**. Do not merge, do not open a PR.
+
+---
+
+## 27 · Codex — the thread view (READY TO SEND, after §26)
+
+`ttd/object-as-conversation.md` §2, §6c; founder decisions **D9, D12, D13, D36**.
+
+> Branch first, run `bash scripts/codex-preflight.sh`, read `ttd/object-as-conversation.md`
+> **§2, §6c** and `ttd/founder-decisions-2026-08.md` **D9, D12, D36**.
+>
+> **Both halves already exist.** The binding: `about` on the conversation store, with
+> `GET /api/assistant/conversations?about=inquiry:i_1` (`thread-binding-http-smoke`). The
+> sentences: `ai/voice.explainObject` (`voice-composer-smoke`). This assembles them into the
+> screen in §6c.
+>
+> **THE LAW THIS COULD BREAK, and it is the whole risk:**
+>
+> > L-OC1 · The opening explanation is **COMPOSED FROM THE OBJECT, EVERY TIME**, and never
+> > stored. Only the human turns and the agent's replies are stored. A conversation may add
+> > evidence to an object through the normal boundary; it may never hold a claim the object does
+> > not.
+>
+> Storing the opening message would create a second place organisational truth lives, and the two
+> would drift the first time a correction landed in one and not the other. If you find yourself
+> writing it into `assistantConversations`, stop.
+>
+> Scope: an object opens to the four blocks from §6c — the claim, *why I think that*, *what I
+> still don't know*, *what would change my mind* — then the conversation, then the composer. Four
+> headings, that is the whole design. **No buttons:** an inquiry is closed by saying so (D9) and
+> challenged by saying so (D36). One overflow with exactly two items (*Mark answered · Set aside*)
+> is the only permitted control.
+>
+> Constraints: render text the kernel composed, never assemble prose from raw fields
+> (`reachability-smoke` asserts this for the lead question already). No colour carries meaning —
+> D14b and the no-dashboard rule. No emojis.
+>
+> Done: `npm test` green plus a suite proving the opening message is composed on every read and
+> appears nowhere in the conversation store. Send a **mutation map**. Do not merge, no PR.
+
+---
+
+## 28 · Codex — ontology reconciliation (DOCUMENTATION ONLY, back of the queue)
+
+Founder brief, August 2026. **Explicitly last.** It is an investigation, it lands in R&D where
+nothing is a reason to build, and the pilot needs a deployed product rather than a richer world
+model. Run it when the blocking work is done.
+
+> Branch first, run `bash scripts/codex-preflight.sh`.
+>
+> **DOCUMENTATION ONLY. No production code. No test changes. Do NOT create a second ontology.**
+>
+> **READ THE PRIOR ART FIRST AND SAY WHAT IT ALREADY SETTLED:**
+> `ttd/organisational-ontology-investigation.md` (whose recorded verdict is *"do we need an
+> ontology / graph DB? — the answer is no"*) and `ttd/ontology-integration-and-decay.md`. A new
+> ontology substrate is on `docs/INDEX.md`'s **must NOT be built yet** list. If your finding
+> contradicts either document, that contradiction IS the finding — name it, do not quietly
+> overrule it.
+>
+> Reconstruct the ontology grammar **from repository truth**, not from intention. For each of
+> entity/object · subject · concept/type · relation/link · event · evidence · observation/signal ·
+> claim/hypothesis · context · state · outcome: say what represents it, where, and whether it is a
+> true ontology primitive or an application record that merely references one.
+>
+> Then answer, from the code:
+> 1. Can generic statements be expressed without bespoke architecture per relationship — *Actor
+>    MEMBER_OF Group*, *Evidence BEARS_ON Relation*, *Outcome FOLLOWS Focus*, *Context CONSTRAINS
+>    Actor*? These are **semantics, not proposed enums.**
+> 2. **Can a RELATION itself be the subject of an Inquiry** — can *"D contributes to leadership
+>    within Group X"* be an uncertain, evidence-backed, contestable claim? Can a relation be
+>    identified, time-bounded, supported, challenged, given provenance, revised and retired?
+> 3. Can a relationship be true **in one context and not another** without duplicating records or
+>    introducing globally positive/negative labels?
+> 4. Can *"D increasingly appears to occupy an informal leadership role"* be represented without
+>    ever asserting *"D IS a leader"*?
+> 5. Which of UNKNOWN · CONTESTED · CONTRADICTED · INSUFFICIENT EVIDENCE · MISSING RELATIONSHIP ·
+>    MISSING CONTEXT already have equivalents? **Do not invent what exists.** A missing explanation
+>    must stay missing — the system may never manufacture an edge to make its world coherent.
+> 6. Can Inquiry traverse relations to find contradictions, unexplained outcomes, missing
+>    relationships and competing explanations? The value of an ontology is discriminating
+>    questions, not a prettier graph.
+> 7. Can Actor, Group and Organisation share ONE generic substrate?
+> 8. What duplicate ontology architecture already exists?
+>
+> **A starting read to confirm or refute, not to accept:** `subjectRef` is a free string carrying
+> `member:<id>` or `group:<nodeId>`, so `relation:` is not forbidden but nothing supports it and
+> every consumer assumes the two known kinds. Relations exist as two unrelated things — `orgNodes`
+> structure via `parentId`, and `item.graph = { nodes, edges }` which is explicitly *correlational,
+> never causal*. Context looks like the weakest area. **Verify all of that; I may be wrong.**
+>
+> Write `docs/ttd/ontology-reconciliation.md` and finish with exactly ONE verdict:
+> **ALREADY SUFFICIENT** · **NEEDS SMALL GENERALISATION** · **OVERLAPPING PRIMITIVES REQUIRING
+> CONSOLIDATION** · **MISSING A GENUINELY NECESSARY PRIMITIVE**.
+>
+> Do not merge, do not open a PR. Push the branch and report per §11.
+
+---
+
 ## 18 · The standing preferences
 
 Worth pasting once into any long session:

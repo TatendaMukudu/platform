@@ -105,8 +105,8 @@ no model.
 ### L6 · BUCKETING AND NAMING — what to call it on screen
 `ai/behaviour.js` · `ai/scoped-intelligence-packet.js` · `ai/team-state.js`
 
-**Status: DUPLICATED THREE TIMES.** This is the only genuinely confused layer in the system, and
-it is a naming problem rather than a logic problem.
+**Status: CONSOLIDATED.** Was duplicated five times under five vocabularies. One owner now:
+`ai/intelligence-feed.js`. Kept here as the record of what the confusion looked like.
 
 ### L7 · INQUIRY — what we are still working out
 `ai/diagnose.js` · `ai/inquiry.js` · `ai/contribution.js`
@@ -149,9 +149,12 @@ from L6 showing through.
 
 Three things. All of them are in L6 and L10.
 
-1. **Three vocabularies for one polarity.** Pick one. `High` and `Low` are the founder's words and
-   the product's words; the others should become aliases of them, not parallel systems.
-   **SETTLED — `ttd/founder-decisions-2026-08.md` D4.**
+1. ~~**Three vocabularies for one polarity**~~ — it was FIVE. **CLOSED IN CODE**, not just decided:
+   `ai/intelligence-feed.js` owns `POLARITY_BUCKET` and `bucketOf()`; `behaviour`,
+   `scoped-intelligence-packet`, `team-state` and `priority-office` all read from it, and
+   `governance-smoke` asserts no other module may author one (mutation-tested).
+   `difficulty` normalises to `friction`; **`condition` was mapped to `opportunity` and that
+   single mapping is still open for the founder** — see `docs/INDEX.md`.
 2. **`opportunity` has no agreed home.** Its own bucket in one module, a High in another, absent
    from the third. Decide once. **SETTLED — D4: it folds into High.**
 3. **The front end does not reflect the object model.** The backend has Inquiry, Focus, High, Low
