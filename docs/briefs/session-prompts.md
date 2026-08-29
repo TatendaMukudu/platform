@@ -829,57 +829,33 @@ been chosen.
 
 ---
 
-## 28 · Codex — ontology reconciliation (DOCUMENTATION ONLY, back of the queue)
+## 28 · Codex — world-model reconciliation (DOCUMENTATION ONLY, back of the queue)
 
-Founder brief, August 2026. **Explicitly last.** It is an investigation, it lands in R&D where
-nothing is a reason to build, and the pilot needs a deployed product rather than a richer world
-model. Run it when the blocking work is done.
+**Supersedes the earlier ontology-only §28.** The brief now lives in the repository rather than in
+a chat box, so it is read with the rest of the context and never re-pasted:
+`docs/briefs/world-model-reconciliation.md`.
 
-> Branch first, run `bash scripts/codex-preflight.sh`.
+**Explicitly last.** It is read-only, it lands in R&D where nothing is a reason to build, and the
+pilot needs a deployed product before a richer world model. **But its central bet has been right
+five times out of five in this repository** — see §0 of the brief — so it is worth running
+properly once the blocking work is done.
+
+> Branch first (see THE BRANCH above), run `bash scripts/codex-preflight.sh`.
 >
-> **DOCUMENTATION ONLY. No production code. No test changes. Do NOT create a second ontology.**
+> **PHASE 1 IS READ-ONLY. No production code. No test changes. No new files except the report.**
 >
-> **READ THE PRIOR ART FIRST AND SAY WHAT IT ALREADY SETTLED:**
-> `ttd/organisational-ontology-investigation.md` (whose recorded verdict is *"do we need an
-> ontology / graph DB? — the answer is no"*) and `ttd/ontology-integration-and-decay.md`. A new
-> ontology substrate is on `docs/INDEX.md`'s **must NOT be built yet** list. If your finding
-> contradicts either document, that contradiction IS the finding — name it, do not quietly
-> overrule it.
+> Read `docs/briefs/world-model-reconciliation.md` **in full** and execute it exactly. It carries
+> its own constraints, its three gap tests, the mandatory ontology and polarity reconciliations,
+> the duplication audit, the invariants, and the implementation gate.
 >
-> Reconstruct the ontology grammar **from repository truth**, not from intention. For each of
-> entity/object · subject · concept/type · relation/link · event · evidence · observation/signal ·
-> claim/hypothesis · context · state · outcome: say what represents it, where, and whether it is a
-> true ontology primitive or an application record that merely references one.
+> Before anything else, read the prior art it names — `ttd/organisational-ontology-investigation.md`
+> and `ttd/ontology-integration-and-decay.md` — and say what they already settled. **If your
+> finding contradicts either, that contradiction IS the finding.** Also read
+> `ttd/founder-decisions-2026-08.md`: several questions in the brief are already settled there
+> (D2, D5, D14, D14b, D15, D25, D38, D42).
 >
-> Then answer, from the code:
-> 1. Can generic statements be expressed without bespoke architecture per relationship — *Actor
->    MEMBER_OF Group*, *Evidence BEARS_ON Relation*, *Outcome FOLLOWS Focus*, *Context CONSTRAINS
->    Actor*? These are **semantics, not proposed enums.**
-> 2. **Can a RELATION itself be the subject of an Inquiry** — can *"D contributes to leadership
->    within Group X"* be an uncertain, evidence-backed, contestable claim? Can a relation be
->    identified, time-bounded, supported, challenged, given provenance, revised and retired?
-> 3. Can a relationship be true **in one context and not another** without duplicating records or
->    introducing globally positive/negative labels?
-> 4. Can *"D increasingly appears to occupy an informal leadership role"* be represented without
->    ever asserting *"D IS a leader"*?
-> 5. Which of UNKNOWN · CONTESTED · CONTRADICTED · INSUFFICIENT EVIDENCE · MISSING RELATIONSHIP ·
->    MISSING CONTEXT already have equivalents? **Do not invent what exists.** A missing explanation
->    must stay missing — the system may never manufacture an edge to make its world coherent.
-> 6. Can Inquiry traverse relations to find contradictions, unexplained outcomes, missing
->    relationships and competing explanations? The value of an ontology is discriminating
->    questions, not a prettier graph.
-> 7. Can Actor, Group and Organisation share ONE generic substrate?
-> 8. What duplicate ontology architecture already exists?
->
-> **A starting read to confirm or refute, not to accept:** `subjectRef` is a free string carrying
-> `member:<id>` or `group:<nodeId>`, so `relation:` is not forbidden but nothing supports it and
-> every consumer assumes the two known kinds. Relations exist as two unrelated things — `orgNodes`
-> structure via `parentId`, and `item.graph = { nodes, edges }` which is explicitly *correlational,
-> never causal*. Context looks like the weakest area. **Verify all of that; I may be wrong.**
->
-> Write `docs/ttd/ontology-reconciliation.md` and finish with exactly ONE verdict:
-> **ALREADY SUFFICIENT** · **NEEDS SMALL GENERALISATION** · **OVERLAPPING PRIMITIVES REQUIRING
-> CONSOLIDATION** · **MISSING A GENUINELY NECESSARY PRIMITIVE**.
+> Write `docs/ttd/world-model-reconciliation-findings.md`. Finish with the ontology verdict AND the
+> implementation gate letter. **On C or D, STOP.**
 >
 > Do not merge, do not open a PR. Push the branch and report per §11.
 

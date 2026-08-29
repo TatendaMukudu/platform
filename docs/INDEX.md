@@ -120,15 +120,17 @@ report rather than decide this and decided it; the mapping stands until the foun
 | 2 | **§26** self Highs and Lows, derived (G2) | product — unblocked by §22 |
 | 3 | **§27** the thread view (§6c) | product — both halves already built |
 | 4 | **§16** the curiosity stopping rule | **a dependency of §27 under D35** |
-| 5 | **§28** ontology reconciliation | documentation only, **deliberately last** |
+| 5 | **§28** world-model reconciliation — `briefs/world-model-reconciliation.md` | read-only, **deliberately last** |
 
 **Done:** §19 safeguarding screen · §20 answerability screen · §21 the primitive decides ·
 §22 one polarity vocabulary · §23 what was shown to whom · §24 the leader attribution guard.
 
-**§28 is last on purpose.** It is an investigation, it lands in R&D where nothing is a reason to
-build, and two ontology documents already exist — `ttd/organisational-ontology-investigation.md`
-records the verdict *"do we need an ontology / graph DB? — the answer is no"*. The prompt requires
-reading both before starting.
+**§28 is last on purpose** — read-only, and R&D where nothing is a reason to build. But its bet
+is well founded: **five capabilities this session turned out to be already built and merely
+hidden** (the safeguarding queue, the answerability layer, `/api/self/patterns`, `falsifiers`, the
+import routes), and two concepts existed several times over. The brief is
+`briefs/world-model-reconciliation.md`; it requires reading the two existing ontology documents
+first and treats any contradiction with them as the finding.
 
 ### Which founder decisions remain?
 
