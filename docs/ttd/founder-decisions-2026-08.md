@@ -11,7 +11,7 @@ an agent finding it inconvenient.
 
 ---
 
-## THE INDEX — forty-eight decisions, one line each
+## THE INDEX — forty-nine decisions, one line each
 
 **The shape of the product**
 
@@ -83,6 +83,7 @@ an agent finding it inconvenient.
 | **D46** | Intent changes by **supersession**; inquiries on the old goal are flagged, never closed | org context |
 | **D47** | A branch sets its own **route**, never its own **destination**. Comparison stays aggregate | node intent |
 | **D48** | **Maturity is an outcome, not a display filter.** Priority decides what shows; watch the maturity RATE | Home, the pilot metric |
+| **D49** | A **condition for success is a High** — `condition` stays mapped to `opportunity` | polarity |
 | **D40** | On leaving: their record goes, the contribution **survives anonymised**. Leaving is not withdrawing — **CORRECTED** | deletion |
 | **D41** | **Nothing extra is refused.** IntelliQ hears anything, reasons about work, performance and wellbeing | the agent |
 
@@ -1697,7 +1698,25 @@ the best available evidence for bar two: that the algorithm is doing the right t
 
 ---
 
-## WHAT THESE FORTY-EIGHT CHANGE ABOUT THE PLAN
+## D49 · A CONDITION FOR SUCCESS IS A HIGH
+
+**Decision:** `condition` stays mapped to `opportunity`, so it buckets as a **High**. Codex's §22
+mapping stands; no code change.
+
+**What it means.** *"She plays better when sessions start on time"* appears among her Highs
+rather than in neither bucket.
+
+**The tension, recorded because it is real and was accepted, not missed.** D5 says a thing that
+is neither good nor bad belongs in neither bucket, so the buckets keep meaning something. A
+condition is arguably information about *what helps*, not news about *how someone is doing* — and
+this places it beside *"her passing improved"*, which is a different kind of statement.
+
+**The founder's call is the other reading: discovering what helps somebody IS good news.** It is
+one line in `ai/intelligence-feed.js` if experience contradicts it.
+
+---
+
+## WHAT THESE FORTY-NINE CHANGE ABOUT THE PLAN
 
 The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one insertion.
 

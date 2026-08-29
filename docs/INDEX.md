@@ -30,7 +30,7 @@
 | Do we need an ontology / graph DB? | `ttd/organisational-ontology-investigation.md` — **the answer is no** |
 | What does Falcon actually get? | `ttd/falcon-persona-rehearsal.md` |
 | **Who do we compete with, and what should we borrow?** | `ttd/competitive-landscape-and-borrows.md` |
-| **What has the founder decided?** | `ttd/founder-decisions-2026-08.md` — **binding, 48 decisions, indexed at the top.** Read the index, then only what your task touches. This is the store: nothing in it should ever be re-derived or re-asked |
+| **What has the founder decided?** | `ttd/founder-decisions-2026-08.md` — **binding, 49 decisions, indexed at the top.** Read the index, then only what your task touches. This is the store: nothing in it should ever be re-derived or re-asked |
 | **What does each layer do, and what is wrong?** | `ttd/layer-map.md` — **read this if you are unsure what is right** |
 | **What is duplicated, and what is hiding?** | `ttd/duplication-sweep.md` — 87 of 298 routes have no front-end caller |
 | **What is home meant to look like?** | `ttd/object-as-conversation.md` — every object is a thread; **design, not yet built** |
@@ -83,7 +83,7 @@ is better product, not a broken one.
 | 1 | ~~Safeguarding lead has no screen~~ | — | **DONE** — `safeguarding-screen-smoke` |
 | 2 | ~~A person cannot see their own record~~ | — | **DONE** — `answerability-screen-smoke` |
 | 3 | ~~Leader surfaces strip performance figures~~ | — | **DONE** — D26, `primitive-number-disclosure-http-smoke` |
-| 4 | ~~One polarity vocabulary; FIVE existed~~ | — | **DONE** — §22, `ai/intelligence-feed.js` owns `bucketOf`; `governance-smoke` asserts no other module may author one. **OPEN: `condition` was mapped to `opportunity` (High) — founder to rule; see below** |
+| 4 | ~~One polarity vocabulary; FIVE existed~~ | — | **DONE** — §22, `ai/intelligence-feed.js` owns `bucketOf`; `governance-smoke` asserts no other module may author one. **SETTLED — D49: a condition for success is a High; the mapping stands** |
 | 5 | ~~Withdrawal recomputes and tells (T-2)~~ | — | **DONE** — §25, `finding-change-notice-http-smoke`; the notice is content-free by construction. **T-2 closed** |
 | 6 | ~~A finding about a leader must not be attributable~~ | — | **DONE** — §24, `leader-subject-projection-http-smoke`; routes to the subject and their own leader only, fails closed on an unidentifiable subject |
 | 7 | ~~The safeguarding exception stated before anyone speaks~~ | — | **DONE** — D21, `advance-notice-http-smoke`; one home in `ai/safeguarding.SAFETY_EXCEPTION` |
@@ -107,36 +107,9 @@ can now be built. Nothing else is blocked on a missing substrate.
 > list is **#11: a live database run with real people.** It is the only thing here that cannot be
 > compressed at the end, and the only way to find the class of bug no suite catches.
 
-**One founder ruling is outstanding on work already merged.** §22 mapped `diagnose.js`'s
-`condition` to `opportunity`, which files it as a **High**. `ai/diagnose.js:311` describes the
-value as *"a strength or a difficulty or a condition for success"* — an enabling circumstance, not
-good news. Under **D5** a thing that is neither good nor bad belongs in **neither bucket**, which
-argues for `neutral`. It is one line in `ai/intelligence-feed.js` either way. Codex was asked to
-report rather than decide this and decided it; the mapping stands until the founder rules.
-
-**The Codex queue, in order — all written, all ready to send:**
-
-| | Work order | Bar |
-|---|---|---|
-| 1 | **§26** self Highs and Lows, derived (G2) | product — unblocked by §22 |
-| 2 | **§27** the thread view (§6c) | product — both halves already built |
-| 3 | **§16** the curiosity stopping rule | **a dependency of §27 under D35** |
-| 4 | **§28** world-model reconciliation — `briefs/world-model-reconciliation.md` | read-only, **deliberately last** |
-
-**Done:** §19 safeguarding screen · §20 answerability screen · §21 the primitive decides ·
-§22 one polarity vocabulary · §23 what was shown to whom · §24 the leader attribution guard ·
-§25 the withdrawal notice.
-
-**§28 is last on purpose** — read-only, and R&D where nothing is a reason to build. But its bet
-is well founded: **five capabilities this session turned out to be already built and merely
-hidden** (the safeguarding queue, the answerability layer, `/api/self/patterns`, `falsifiers`, the
-import routes), and two concepts existed several times over. The brief is
-`briefs/world-model-reconciliation.md`; it requires reading the two existing ontology documents
-first and treats any contradiction with them as the finding.
-
 ### Which founder decisions remain?
 
-**Forty-eight have been taken** — see `ttd/founder-decisions-2026-08.md`, indexed at the top.
+**Forty-nine have been taken** — see `ttd/founder-decisions-2026-08.md`, indexed at the top.
 
 Still open: `D-E2`, the quality floor for a cheap model, which needs a post-pilot benchmark. Plus
 two flagged inside the record rather than settled: whether a leader sees a finding about themselves
