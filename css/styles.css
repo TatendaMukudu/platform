@@ -2410,6 +2410,15 @@ img { max-width: 100%; }
 .linq-block-l{font-size:.88rem;line-height:1.6;color:var(--text-secondary);max-width:62ch;margin-bottom:.35rem}
 .linq-block-l:last-child{margin-bottom:0}
 .linq-more{margin-top:1rem;font-size:.74rem;color:var(--text-muted);line-height:1.55;max-width:62ch}
+.iq-object-thread{position:relative;max-width:720px;margin:0 auto;padding-bottom:1rem}
+.iq-thread-back{border:0;background:none;color:var(--text-muted);padding:0;margin:0 0 1rem;cursor:pointer}
+.iq-thread-overflow{position:absolute;right:0;top:0}
+.iq-thread-overflow-toggle{border:1px solid var(--border);background:var(--bg-surface);color:var(--text-secondary);border-radius:8px;padding:.35rem .65rem}
+.iq-thread-overflow-menu{position:absolute;right:0;top:2.2rem;min-width:150px;background:var(--bg-surface);border:1px solid var(--border);border-radius:10px;padding:.3rem;z-index:2}
+.iq-thread-overflow-menu button{display:block;width:100%;border:0;background:none;color:var(--text-primary);text-align:left;padding:.55rem .65rem;border-radius:7px}
+.iq-object-turns{border-top:1px solid var(--border);margin-top:1.5rem;padding-top:1.25rem;display:flex;flex-direction:column;gap:.7rem}
+.iq-object-composer{display:flex;gap:.5rem;margin-top:1rem}.iq-object-composer textarea{flex:1;resize:vertical;border:1px solid var(--border);border-radius:10px;background:var(--bg-surface);color:var(--text-primary);padding:.7rem}
+.iq-object-composer button{align-self:flex-end;border:0;border-radius:9px;background:var(--accent);color:#fff;padding:.65rem .9rem}
 
 /* ── The team as a subject — High / Low / Inquiry / Focus ─────────────────────
    Sits above the per-person list on the leader's home. Deliberately quiet: no colour

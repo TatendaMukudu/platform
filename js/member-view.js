@@ -2798,7 +2798,7 @@ const MemberApp = {
       if (!items.length) return '';
       return `<div class="iq-att-section"><div class="iq-att-label">${esc(g.label)}</div>${items.map(i => {
         const conf = i.confidence || {}; const topic = i.topic || {};
-        return `<div class="iq-inq">
+        return `<div class="iq-inq" role="button" tabindex="0" onclick="MemberApp.openInquiryThread('${esc(i.inquiryId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();MemberApp.openInquiryThread('${esc(i.inquiryId)}')}">
           <div class="iq-inq-head"><span class="iq-inq-topic">${esc(topic.label || topic.canonicalConcept || 'Working it out')}</span>
             <span class="iq-inq-band iq-band-${esc(conf.band || 'tentative')}">${esc(conf.band || 'tentative')}</span></div>
           ${i.hypothesis ? `<div class="iq-inq-hyp">${esc(i.hypothesis)}</div>` : ''}
@@ -2810,6 +2810,67 @@ const MemberApp = {
           }</details>` : ''}
         </div>`; }).join('')}</div>`;
     }).join('') + `<div class="iq-inq-note">${esc(j.note || '')}</div>`;
+  },
+
+  /* L-OC1 — the opening comes from GET /api/inquiry/:id/thread on every open. It is not a
+     synthetic assistant message and is never added to the conversation array. */
+  async openInquiryThread(inquiryId) {
+    const box = document.getElementById('iq-inquiries-page');
+    if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    box.innerHTML = `<div style="color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
+    try {
+      const response = await fetch(`/api/inquiry/${encodeURIComponent(inquiryId)}/thread`, { headers: this._authHeaders() });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error('not found');
+      const x = data.opening || {};
+      this._inquiryThread = { inquiryId, about: data.about, conversationId: data.conversation && data.conversation.id };
+      const lines = value => (Array.isArray(value) ? value : []).map(line => `<div class="linq-block-l">${esc(line)}</div>`).join('') || `<div class="linq-block-l">Nothing recorded yet.</div>`;
+      const turns = (data.messages || []).map(m => `<div class="iq-msg iq-msg-${m.role === 'user' ? 'user' : 'iq'}">${esc(m.text)}</div>`).join('');
+      box.innerHTML = `
+        <div class="iq-object-thread">
+          <button class="iq-thread-back" type="button" onclick="MemberApp._renderInquiryPage()">Back to Inquiries</button>
+          <div class="iq-thread-overflow">
+            <button class="iq-thread-overflow-toggle" type="button" aria-label="More options" onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden">More</button>
+            <div class="iq-thread-overflow-menu" hidden>
+              <button type="button" onclick="MemberApp.inquiryOverflow('answered')">Mark answered</button>
+              <button type="button" onclick="MemberApp.inquiryOverflow('aside')">Set aside</button>
+            </div>
+          </div>
+          <section class="linq-block"><h2 class="linq-block-t">The claim</h2><div class="linq-q">${esc(x.headline || '')}</div><div class="linq-claim">${esc(x.claim || '')}</div></section>
+          <section class="linq-block"><h2 class="linq-block-t">Why I think that</h2>${lines([x.whyIThinkThat || x.provenance].filter(Boolean))}</section>
+          <section class="linq-block"><h2 class="linq-block-t">What I still don’t know</h2>${lines(x.stillUnknown)}</section>
+          <section class="linq-block"><h2 class="linq-block-t">What would change my mind</h2>${lines(x.wouldChangeMyMind)}</section>
+          <div class="iq-object-turns" id="iq-object-turns">${turns}</div>
+          <div class="iq-object-composer"><textarea id="iq-object-input" rows="2" placeholder="Add what you know…"></textarea><button type="button" onclick="MemberApp.inquirySend()">Send</button></div>
+        </div>`;
+    } catch (_) {
+      box.innerHTML = `<div class="iq-empty-sub">This inquiry could not be opened right now.</div>`;
+    }
+  },
+
+  inquiryOverflow(action) {
+    const input = document.getElementById('iq-object-input');
+    if (!input) return;
+    input.value = action === 'answered' ? 'I consider this answered: ' : 'Set this inquiry aside.';
+    input.focus();
+  },
+
+  async inquirySend() {
+    const input = document.getElementById('iq-object-input');
+    const thread = this._inquiryThread;
+    const text = String(input && input.value || '').trim();
+    if (!text || !thread) return;
+    input.disabled = true;
+    try {
+      const response = await fetch('/api/assistant/turn', { method: 'POST', headers: this._authHeaders(), body: JSON.stringify({
+        text, conversationId: thread.conversationId || undefined, about: thread.about,
+      }) });
+      const data = await response.json();
+      if (!data.ok) throw new Error('turn failed');
+      thread.conversationId = data.conversationId;
+      await this.openInquiryThread(thread.inquiryId);
+    } catch (_) { input.disabled = false; }
   },
 
   /* WHAT I'M WORKING OUT — the inquiries the ears have built from conversation. This is the

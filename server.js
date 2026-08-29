@@ -13800,6 +13800,48 @@ app.get('/api/inquiry', requireAuth, (req, res) => {
   res.json({ ok: true, inquiries, note: 'A working picture built from conversation. Nothing here is recorded as fact until you confirm it.' });
 });
 
+/* GET /api/inquiry/:id/thread — an inquiry rendered as a conversation, not copied into one.
+   L-OC1: `opening` is composed from the current object on every read. It is deliberately never
+   appended to assistantConversations; that store contains only the human turns and IntelliQ's
+   replies. An HTTP response proves emission, not that a human read it. */
+app.get('/api/inquiry/:id/thread', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+  const inquiry = Object.values(mine).find(i => i && i.inquiryId === String(req.params.id));
+  if (!inquiry) return res.status(404).json({ error: 'not found' });
+
+  const hypotheses = inquiry.hypotheses || [];
+  const lead = hypotheses.find(h => h && h.id === inquiry.leadingHypothesisId) || null;
+  const active = (inquiry.signals || []).filter(s => s && s.kind !== 'interpretation' && diagnose.isActive(s));
+  const opening = voice.explainObject({
+    kind: 'inquiry',
+    label: (inquiry.topic && (inquiry.topic.label || inquiry.topic.canonicalConcept)) || 'Something is still being worked out',
+    claim: lead ? lead.statement : '',
+    band: (inquiry.confidence || {}).band,
+    because: (inquiry.confidence || {}).because || [],
+    contributors: new Set(active.map(s => s.contributedBy).filter(Boolean)).size,
+    independentOrigins: new Set(active.map(s => s.originRef).filter(Boolean)).size,
+    stillUnknown: (inquiry.missingSignals || []).map(m => (m && m.question) || m).filter(Boolean),
+    falsifiers: inquiry.falsifiers || [],
+    contested: inquiry.status === 'disputed' || active.some(s => s.dissents),
+    banded: false,
+    seed: inquiry.inquiryId,
+  });
+
+  const about = `inquiry:${inquiry.inquiryId}`;
+  const conversation = (assistantConversations[_wsKey(code, userId)] || [])
+    .filter(c => c && c.about === about)
+    .sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0] || null;
+  res.json({
+    ok: true, about, opening,
+    conversation: conversation ? { id: conversation.id, updatedAt: conversation.updatedAt } : null,
+    messages: conversation ? (conversation.messages || []).map(m => ({
+      role: m.role, text: m.text, at: m.at, reasoning: !!m.reasoning,
+      register: m.register || null, provenance: m.provenance || [],
+    })) : [],
+  });
+});
+
 app.get('/api/library', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const scope = ['mine', 'shared', 'all'].includes(req.query.scope) ? req.query.scope : 'all';
