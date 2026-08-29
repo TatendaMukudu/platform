@@ -83,7 +83,7 @@ an agent finding it inconvenient.
 | **D46** | Intent changes by **supersession**; inquiries on the old goal are flagged, never closed | org context |
 | **D47** | A branch sets its own **route**, never its own **destination**. Comparison stays aggregate | node intent |
 | **D48** | **Maturity is an outcome, not a display filter.** Priority decides what shows; watch the maturity RATE | Home, the pilot metric |
-| **D40** | On leaving: their record goes, the team's history stays and **recomputes** | deletion |
+| **D40** | On leaving: their record goes, the contribution **survives anonymised**. Leaving is not withdrawing — **CORRECTED** | deletion |
 | **D41** | **Nothing extra is refused.** IntelliQ hears anything, reasons about work, performance and wellbeing | the agent |
 
 **Voice and capture**
@@ -1335,14 +1335,41 @@ authority is exactly what this kernel refuses to infer.
 
 ---
 
-## D40 · THEIR RECORD GOES; THE TEAM'S HISTORY STAYS AND RECOMPUTES
+## D40 · THEIR RECORD GOES; THE TEAM'S HISTORY STAYS
 
-**Decision:** when a person leaves, their personal evidence is withdrawn and stops informing
-anything. Team findings already established stand — **but they recompute without that person**.
+> **CORRECTED, August 2026.** As first written, D40 contradicted itself: its headline said a
+> departure recomputes team findings so one may drop, while its own rationale said a departure
+> must not rewrite what an organisation learned. Codex hit the contradiction implementing D19,
+> refused to weaken the assertion that caught it, and stopped. **That was the right call and the
+> defect was in this decision, not in the tests.**
+>
+> **The resolution: LEAVING IS NOT WITHDRAWING.** They are two different acts and the code already
+> separates them, in a comment that says it better than the original decision did —
+> *"the group keeps the finding without keeping the person. Erasure is a right over one's own
+> data, not a right to retract an account others have since reasoned from"* (`server.js:2040`).
+>
+> | Act | What happens | Does a finding drop? |
+> |---|---|---|
+> | **Leaving** the organisation | The personal record goes. The contribution **survives, anonymised** — `contributorId: '(erased)'`. Counts are unchanged | **No** |
+> | **Withdrawing** a contribution — `POST /api/group/:nodeId/withdraw`, *"take back what I contributed"* | Superseded by the same correction machinery a revision uses. The count falls | **Yes, and this is D19's case** |
+>
+> So **D19 stands unchanged** — a withdrawal recomputes and tells whoever saw the old picture.
+> **D40 no longer claims a departure does the same.** A person who leaves has stopped
+> participating; they have not retracted what they said, and the people who corroborated them
+> still stand behind it.
+>
+> **What this means for §25:** implement the notification on the **withdrawal** path only. Do not
+> touch the erasure path, and do not make a departure recompute team findings. The suite Codex
+> stopped on is correct and stays as it is.
 
-**The consequence, which is the whole decision:** a finding whose floor only held because of the
-person who left **fails the floor and drops**. Four contributors where five were needed is not a
-publishable claim, and it does not become one by having been true last week.
+**Decision:** when a person leaves, their personal record goes and stops informing anything about
+them. Their contributions to group findings **survive without them**, anonymised.
+
+**Superseded reasoning, kept because the error is instructive:** the original text claimed a
+finding whose floor only held because of the person who left **fails the floor and drops**. That
+would let one departure rewrite an organisation's history — which the paragraph below already
+publishable claim. **The corrected position is that a departure does not remove their
+contribution at all, so the count does not fall and the question does not arise.**
 
 **A good deal of this is already built.** The person-deletion path (`server.js:~1995-2050`) already
 removes their private chat history, self-model, delivery preferences, push subscriptions, their

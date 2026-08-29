@@ -740,9 +740,17 @@ Founder decision **D19**, closing **T-2**. Pilot-blocking. **Depends on §23, wh
 > 2. For each, find who was shown it, from the emission record.
 > 3. Tell them, through the delivery layer that already exists (`ai/delivery.js`, `deliveryPrefs`).
 >
-> **Also covered by the same mechanism (D40):** a person leaving recomputes team findings, and a
-> finding whose cohort floor only held because of them **drops**. Whoever saw it is owed the same
-> notice. Build one path, not two.
+> **DO NOT touch the erasure path. D40 was CORRECTED after a first attempt at this task stopped
+> on a contradiction — correctly.** Leaving is not withdrawing:
+> - **Leaving** the organisation erases the person's record but their contribution **survives,
+>   anonymised** (`server.js:2040` — *"the group keeps the finding without keeping the person"*).
+>   Counts do not change and no finding drops. **The existing assertions covering this are right
+>   and stay exactly as they are.**
+> - **Withdrawing** — `POST /api/group/:nodeId/withdraw`, *"take back what I contributed"* — is the
+>   explicit act. The count falls, a finding may fall below the floor, and **this** is what needs
+>   the notice.
+>
+> Implement the notification on the **withdrawal and correction paths only**.
 >
 > **Constraints:**
 > - The notice says a finding **changed**; it never restates the withdrawn content. Nothing that
