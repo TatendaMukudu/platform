@@ -837,6 +837,73 @@ been chosen.
 
 ---
 
+## 29 · Codex — the four nav buckets (READY TO SEND)
+
+Founder decision **D1**; `object-as-conversation.md` §1, §6c. The last piece of the shape.
+
+> Branch first (see THE BRANCH above), run `bash scripts/codex-preflight.sh`, read
+> `ttd/object-as-conversation.md` **§1 and §6c** and `ttd/founder-decisions-2026-08.md` **D1, D13,
+> D48**.
+>
+> **The founder's words are the specification:** *"they are not lists, they are in the nav — and
+> when you click on them you essentially see what we used to have, but in their respective
+> buckets."*
+>
+> **This is REUSE, not layout.** The card feed already renders. Four nav entries —
+> **Inquiries · Focuses · Highs · Lows** — each showing that feed filtered to one kind.
+> **Anyone who writes a second card renderer has misread this**, and two renderers for one card is
+> how the polarity vocabulary came to exist five times.
+>
+> Scope:
+> 1. Four nav entries, at both grains. Each opens the existing feed, filtered.
+> 2. Ordered by **priority, never by kind** (D13, D48). Premature is not a reason to hide
+>    something; maturity is an outcome, not a filter.
+> 3. **Parked items appear below the live ones, with the reason** — `parkedBecause` already exists
+>    and has never been rendered (D10).
+> 4. **No count badges.** A badge reading "12 Lows" builds the same inbox anxiety as twenty cards
+>    (D48). Names only.
+> 5. Each card opens the thread §27 built.
+>
+> Constraints: no second card renderer · no new list component · no colour carries meaning (D14b,
+> the no-dashboard rule) · render text the kernel composed, never assemble prose from raw fields ·
+> do not weaken any existing assertion · no emojis.
+>
+> Done: `npm test` green plus a suite proving each bucket contains only its own kind, ordering is
+> by priority rather than kind, and parked items render with their reason. Send a **mutation
+> map**. Do not merge, no PR.
+
+---
+
+## 30 · Codex — one voice: move the message tables into `ai/voice.js` (READY TO SEND)
+
+Founder decision **D30**, second half. Backend only — will not collide with §29.
+
+> Branch first, run `bash scripts/codex-preflight.sh`, read `ttd/founder-decisions-2026-08.md`
+> **D30** and **D34**.
+>
+> **The deterministic voice lives in four homes and is maintained as one by nobody.**
+> `ai/voice.js` now owns `explainObject` and the provenance chip — but **30 headline/body/suggestion
+> sets still sit in `ai/proactive.js` `MESSAGES`**, the plain pattern names sit in
+> `ai/primitives.js` `STRUCTURE_LABEL`, and `ai/assessment-view.js` composes its own.
+>
+> Scope: consolidate them into `ai/voice.js`. `proactive.js` keeps producing artifacts; it stops
+> owning prose.
+>
+> **The voice is "a colleague who noticed" (D34)** — warm, first person, no hedging theatre, and
+> it never ends in an instruction. A sentence that tells somebody what to do has become the coach
+> voice, and `ai/language-guard.js` would reject it as a prediction anyway.
+>
+> Constraints: **the wording of every existing message must survive byte-identical unless you say
+> otherwise and why** — this is a move, not a rewrite. `ai/voice.js` stays **pure**: no IO, no
+> model, deterministic, same state always reads the same way. Do not weaken any existing
+> assertion. No emojis.
+>
+> Done: `npm test` green plus an assertion that no module outside `ai/voice.js` authors
+> person-facing prose for a pattern — the same shape as `governance-smoke`'s single-owner check
+> for polarity. Send a **mutation map**. Do not merge, no PR.
+
+---
+
 ## 28 · Codex — world-model reconciliation (DOCUMENTATION ONLY, back of the queue)
 
 **Supersedes the earlier ontology-only §28.** The brief now lives in the repository rather than in
@@ -866,6 +933,36 @@ properly once the blocking work is done.
 > implementation gate letter. **On C or D, STOP.**
 >
 > Do not merge, do not open a PR. Push the branch and report per §11.
+
+## 31 · Codex — ONE HOME: `js/app.js` absorbs `js/member-view.js` (LAST BUILD TASK)
+
+Founder decision **D24**. **The largest change on the plan, and it must come after everything
+else** — converging two files onto a target that is still moving is how the most work gets wasted.
+
+> Branch first, run `bash scripts/codex-preflight.sh`, read `ttd/founder-decisions-2026-08.md`
+> **D24, D1, D7**.
+>
+> **`js/app.js` is ~7,900 lines and `js/member-view.js` ~3,500. One home means ONE FILE.**
+> **This change must end with `js/member-view.js` DELETED**, not with a third file added — a shared
+> module leaves two homes in existence and they drift the first time one is edited alone.
+>
+> **What makes it tractable:** D7 already did the thinking. After D7 there is no role difference
+> left — only a **scope** difference, and scope is computed on the server by `getVisibleUserIds`
+> and `_kernelEvidence`. **The front end does not need to know which kind of person it is
+> rendering for.** Any test asserting a leader's surface differs in SHAPE from a member's is
+> asserting the wrong thing; the difference is the subject set.
+>
+> Constraints: no behaviour changes in the same commit as the move · do not weaken any existing
+> assertion · every currently-reachable route stays reachable (`reachability-smoke` will catch it)
+> · no emojis.
+>
+> Done: `npm test` green, `js/member-view.js` no longer exists, and `reachability-smoke` still
+> passes. Send a **mutation map**. Do not merge, no PR.
+>
+> **If partway through this looks like it will not land cleanly, STOP and report.** A half-merged
+> front end is worse than two coherent files.
+
+---
 
 ---
 
