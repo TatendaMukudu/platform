@@ -24,7 +24,9 @@ const ok = (name, condition) => { if (condition) { pass++; console.log('  PASS',
     inquiryId: 'inq_leader_subject', subjectRef: 'member:coach', topic: { canonicalConcept: 'session_organisation', label: 'session organisation' },
     hypotheses: [{ id: 'h1', statement: 'Pat said Coach Lee made training chaotic for exactly three weeks', confidence: { band: 'probable' }, status: 'active' }], leadingHypothesisId: 'h1',
     signals: contributorIds.map((id, i) => ({ ref: `e${i}`, kind: 'observation', originRef: `origin${i}`, contributedBy: id, contributorVisibility: 'named', at: i + 1, status: 'active' })),
-    missingSignals: [], confidence: { score: 0.7, band: 'probable', because: [] }, status: 'probable', timeline: [], lastUpdatedAt: 10,
+    missingSignals: [{ question: 'Ask Pat whether Coach Lee said it after Tuesday training' }],
+    falsifiers: [{ statement: 'Pat retracts the exact chaotic-training account' }],
+    confidence: { score: 0.7, band: 'probable', because: [] }, status: 'probable', timeline: [], lastUpdatedAt: 10,
   } } };
   groupCandidates[code] = contributorIds.map((id, i) => ({ candidateId: `c${i}`, nodeId: 'team', concept: 'session_organisation', contributorId: id, status: 'admitted', valence: 'worth_attention' }));
   const server = app.listen(0); await new Promise(resolve => server.once('listening', resolve));
@@ -33,8 +35,8 @@ const ok = (name, condition) => { if (condition) { pass++; console.log('  PASS',
   try {
     const subject = await get('coach'), manager = await get('boss'), teammate = await get('p1');
     ok('L27-1 the finding routes to the subject and their own leader', subject.status === 200 && subject.body.low && manager.status === 200 && manager.body.low);
-    const emitted = JSON.stringify([subject.body.low, manager.body.low]);
-    ok('L27-2 no contributor identity or contributed phrasing crosses HTTP', !contributorIds.some(id => emitted.includes(id)) && !/Pat said|Coach Lee|chaotic|three weeks/.test(emitted));
+    const emitted = JSON.stringify([subject.body, manager.body]);
+    ok('L27-2 no contributor identity or contributed phrasing crosses HTTP', !contributorIds.some(id => emitted.includes(id)) && !/Pat said|Pat whether|Pat retracts|Coach Lee|chaotic|three weeks/.test(emitted));
     ok('L27-3 no exact contributor, origin, or cohort count crosses HTTP', !/"contributors"\s*:\s*5|"independentOrigins"\s*:\s*5|"of"\s*:\s*14/.test(emitted) && /several people/.test(emitted));
     ok('L27-4 the subject leader own team receives no leader-subject finding', teammate.status === 200 && teammate.body.low === null && teammate.body.high === null);
     const proposal = require('../ai/contribution').toGroupProposal({

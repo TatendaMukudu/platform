@@ -409,17 +409,15 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
          and the lead question say the SAME thing about the same object — each surface phrasing it
          itself is exactly how one concept came to read four different ways.
 
-         `banded: false` is deliberate and narrow: fitForSurface has already put these counts
-         through the two-sided floor, and this module already reports them in `basis`. The subject
-         is the GROUP, not a leader, so L-D27's banding rule is not the one that applies. A
-         leader-subject finding is §24's job and must not reuse this path. */
+         Group-subject counts have already passed the two-sided floor and remain exact. A
+         leader-subject finding instead uses the banded L-D27 projection. */
       explained: voice.explainObject({
         kind, label: _s((inq.topic && (inq.topic.label || inq.topic.canonicalConcept)) || '', 120),
         claim: leaderSubject ? '' : (_s(inq.hypothesis, 300) || ''),
         band: fit.band,
         independentOrigins: fit.origins, contributors: fit.contributors,
-        stillUnknown: _arr(inq.stillUnknown).slice(0, 3),
-        falsifiers: _arr(inq.falsifiers).slice(0, 3),
+        stillUnknown: leaderSubject ? [] : _arr(inq.stillUnknown).slice(0, 3),
+        falsifiers: leaderSubject ? [] : _arr(inq.falsifiers).slice(0, 3),
         contested: inq.contested === true,
         banded: leaderSubject,
         seed: _s(inq.inquiryId, 64),
@@ -450,7 +448,8 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
 
   const high = project(surfaceable.high.slice().sort(_rank)[0], 'high') || detected.high[0] || null;
   const low = project(surfaceable.low.slice().sort(_rank)[0], 'low') || detected.low[0] || null;
-  const question = openQuestion(inquiries, {
+  const question = openQuestion(_arr(inquiries).map(inq => inq && inq.leaderSubject === true
+    ? { ...inq, stillUnknown: [] } : inq), {
     alreadyShown: [high && high.inquiryId, low && low.inquiryId].filter(Boolean),
   });
 
