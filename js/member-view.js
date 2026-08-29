@@ -2657,7 +2657,12 @@ const MemberApp = {
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M5 13l7-7 7 7"/></svg>
           </button>
         </div>
-        <div class="iq-composer-hint">Private by default · attach a file to teach IntelliQ · Enter to send</div>
+        <!-- THE TRUST MOMENT (object-as-conversation §6d). "Private by default" was already
+             true and already said; what was missing was somewhere to CHECK it. A person asking
+             "can my coach see this?" and getting a real answer instead of a privacy policy is the
+             most trust-building second in the product, and the answer is deterministic —
+             ai/audience.js resolves it rather than a paragraph promising it. -->
+        <div class="iq-composer-hint">Private by default · <button type="button" class="iq-hint-link" onclick="navigate('my-data')">Who can see what I say here?</button> · Enter to send</div>
         </div>
       </div>
       <div id="iq-brief" aria-live="polite"></div>

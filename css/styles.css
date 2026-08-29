@@ -2360,21 +2360,56 @@ img { max-width: 100%; }
 /* ── The open question, first on the leader's home ────────────────────────────
    The one element on the page allowed a border accent, because it is the one element that
    asks the reader for something rather than reporting to them. */
-.linq-card{background:var(--surface-1);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:12px;padding:.9rem 1.1rem;margin-bottom:.8rem}
-.linq-head{font-size:.68rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin-bottom:.4rem}
-.linq-q{font-size:1rem;line-height:1.45;color:var(--text-primary)}
-.linq-flag{margin-top:.5rem;font-size:.76rem;line-height:1.45;color:var(--text-secondary)}
-.linq-more{margin-top:.5rem;font-size:.72rem;color:var(--text-muted);line-height:1.45}
+/* ── THE OPEN QUESTION — the one thing above the fold (object-as-conversation §6c) ───────────
+   The design brief was "minimalistic, simplistic, because good products are simple". The way that
+   is achieved here is TYPOGRAPHIC HIERARCHY AND WHITESPACE, never colour:
 
-/* The composed explanation (D30/D34). Typographic hierarchy only — no colour carries meaning
-   here, because the moment a High is green and a Low is red a PERSON becomes a colour, which is
-   D14b and the no-dashboard rule. The claim reads slightly larger than its evidence; the
-   provenance chip is deliberately quiet because it is there to be checked, not read every time. */
-.linq-claim{margin-top:.45rem;font-size:.92rem;line-height:1.5;color:var(--text-primary)}
-.linq-prov{margin-top:.35rem;font-size:.72rem;color:var(--text-muted);letter-spacing:.01em}
-.linq-block{margin-top:.85rem}
-.linq-block-t{font-size:.68rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--text-muted);margin-bottom:.25rem}
-.linq-block-l{font-size:.82rem;line-height:1.5;color:var(--text-secondary);margin-bottom:.2rem}
+     • the headline is the largest thing on the screen, because it is the thing being said;
+     • the claim reads at body size, because it is a sentence a person reads, not a label;
+     • the provenance chip is deliberately quiet — it exists to be CHECKED, not read every time;
+     • the four blocks are separated by space rather than by rules, boxes or tints.
+
+   NO COLOUR CARRIES MEANING. The moment a High is green and a Low is red, a PERSON becomes a
+   colour — which is D14b and the no-dashboard rule. The single accent is the left edge, and it
+   marks "this is the thing that needs you", not "this is bad".
+
+   Measure is capped at ~62 characters. Long lines are the most common reason a calm layout still
+   reads as heavy, and this card is mostly prose. */
+.linq-card{
+  background:var(--surface-1);border:1px solid var(--border);
+  border-left:3px solid var(--accent);border-radius:14px;
+  padding:1.3rem 1.4rem 1.4rem;margin-bottom:1rem;
+}
+.linq-head{
+  font-size:.66rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--text-muted);margin-bottom:.75rem;
+}
+/* The claim being made. The largest thing here, and the only thing at this size. */
+.linq-q{
+  font-size:1.18rem;font-weight:600;line-height:1.35;color:var(--text-primary);
+  max-width:62ch;letter-spacing:-.01em;
+}
+/* What IntelliQ makes of it — a sentence, at reading size. */
+.linq-claim{margin-top:.7rem;font-size:.95rem;line-height:1.6;color:var(--text-primary);max-width:62ch}
+/* Counts and independence. Quiet on purpose: there to be checked, not read every time. */
+.linq-prov{margin-top:.5rem;font-size:.74rem;line-height:1.5;color:var(--text-muted);letter-spacing:.005em}
+/* Contested (D36). Not a warning colour — "both accounts are kept" is reassurance, not alarm. */
+.linq-flag{
+  margin-top:.9rem;padding:.6rem .8rem;border-radius:8px;
+  background:var(--surface-2,var(--bg));
+  font-size:.8rem;line-height:1.55;color:var(--text-secondary);max-width:62ch;
+}
+/* The four blocks. Separated by space, and by one hairline before the first of them — the only
+   rule on the card, standing in for §6c's divider between the claim and its reasoning. */
+.linq-block{margin-top:1.15rem}
+.linq-block:first-of-type{margin-top:1.35rem;padding-top:1.25rem;border-top:1px solid var(--border)}
+.linq-block-t{
+  font-size:.66rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-muted);margin-bottom:.4rem;
+}
+.linq-block-l{font-size:.88rem;line-height:1.6;color:var(--text-secondary);max-width:62ch;margin-bottom:.35rem}
+.linq-block-l:last-child{margin-bottom:0}
+.linq-more{margin-top:1rem;font-size:.74rem;color:var(--text-muted);line-height:1.55;max-width:62ch}
 
 /* ── The team as a subject — High / Low / Inquiry / Focus ─────────────────────
    Sits above the per-person list on the leader's home. Deliberately quiet: no colour
@@ -2391,7 +2426,7 @@ img { max-width: 100%; }
 .tstate-sub{display:block;font-size:.72rem;color:var(--text-muted);margin-top:.15rem}
 /* "Would change our mind" — sits under the claim it could overturn, deliberately quiet. It is
    not a warning and must not read as one; it is the product being honest about its own limits. */
-.tstate-falsify{margin:-.15rem 0 .5rem 0;padding-left:.1rem;font-size:.72rem;line-height:1.45;color:var(--text-muted)}
+.tstate-falsify{margin:-.1rem 0 .7rem 0;font-size:.74rem;line-height:1.55;color:var(--text-muted);max-width:62ch}
 .tstate-withheld{margin-top:.6rem;padding:.5rem .65rem;background:var(--surface-2,var(--bg));border-radius:8px;font-size:.76rem;line-height:1.45;color:var(--text-secondary)}
 .tstate-says{margin-top:.75rem;padding-top:.7rem;border-top:1px solid var(--border);font-size:.85rem;line-height:1.5;color:var(--text-secondary);font-style:italic}
 
