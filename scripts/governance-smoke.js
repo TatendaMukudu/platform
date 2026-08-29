@@ -36,11 +36,26 @@ ok('behaviour.js imports only the canonical polarity owner',
 ok('behaviour.js owns plan() + opening()', /function plan\s*\(/.test(behaviour) && /function opening\s*\(/.test(behaviour));
 
 // 3 · polarity meaning and High/Low membership are DEFINED once in intelligence-feed.
-ok('the polarity taxonomy is defined once — intelligence-feed owns High/Low membership',
+/* Widened from three named files to EVERY module. The point of consolidating five vocabularies
+   into one owner is that a sixth cannot appear, and an assertion watching only the three files we
+   happened to think of would not notice the seventh.
+
+   It looks for an AUTHORED table — a literal mapping a polarity value to a bucket — because that
+   is the shape all five of the originals had. Reading the owner is exactly what we want, so
+   aliasing POLARITY_BUCKET or calling bucketOf() is not a finding. A first draft of this check
+   flagged `const bucket = polarityOwner.bucketOf(...)` in three modules; that was the assertion
+   being wrong, not the code. */
+ok('the polarity taxonomy is defined once — intelligence-feed owns High/Low membership, and no other module authors one',
    /const POLARITY_BUCKET = Object\.freeze/.test(polarityOwner) &&
    /function bucketOf\s*\(/.test(polarityOwner) &&
-   !/const POLARITY_BUCKET\s*=/.test(behaviour) &&
-   ['ai/scoped-intelligence-packet.js', 'ai/team-state.js', 'ai/diagnose.js'].every(f => !/const POLARITY_BUCKET\s*=/.test(read(f))));
+   aiFiles.filter(f => f !== 'ai/intelligence-feed.js').every(f => {
+     const src = read(f);
+     return !/const POLARITY_BUCKET\s*=\s*(Object\.freeze\s*\()?\{/.test(src)
+       && !/['"]?(risk|friction|progress|milestone|opportunity|strength)['"]?\s*:\s*['"](high|low|worth_attention|needs_attention|working_well)['"]/.test(src);
+   }) &&
+   // …and the consumers actually go through the owner rather than quietly hardcoding a result.
+   ['ai/behaviour.js', 'ai/scoped-intelligence-packet.js', 'ai/team-state.js', 'ai/priority-office.js']
+     .every(f => /polarity(Owner)?\.(bucketOf|POLARITY_BUCKET)/.test(read(f))));
 
 // 4 · the attention OPENING greeting is composed only in behaviour.js.
 ok('the opening greeting is composed once — behaviour.js only',
