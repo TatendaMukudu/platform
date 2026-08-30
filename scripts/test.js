@@ -211,6 +211,7 @@ const SUITES = [
   'voice-composer-smoke.js',        // D30/D34 — the composer: four blocks, provenance banded by default, no prediction, no kernel word, survives the language guard
   'thread-binding-http-smoke.js',   // object-as-conversation G1 — a thread knows what it is about; the binding is a label on your own thread, never a claim of access, and an unparseable scope filters to nothing
   'curiosity-stopping-smoke.js', // D35: conversation-only inquiry and question caps, cooldown, and permanent decline
+  'curiosity-stopping-wired-http-smoke.js', // D35, WIRED: the kernel above is actually called — every Lane C call site in server.js turns an assertion here red when removed
   'nav-buckets-http-smoke.js', // D1/D7/D10/D13: one filtered four-bucket surface at both grains; priority, parked reasons and L-OC1 threads
   'object-conversation-screen-http-smoke.js', // L-OC1: an inquiry thread composes its four-block opening from current object state on every HTTP read and never stores that projection as conversation truth
   'advance-notice-http-smoke.js',   // D21 — the safeguarding exception is served from one home, shown before anyone speaks, and recorded as an acknowledgement rather than a grantable consent
