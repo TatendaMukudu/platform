@@ -1156,14 +1156,34 @@ const pendingInvites = {}; // token → { email, orgCode, role, ... }
 const orgNodes        = {};  // orgCode → { nodeId → OrgNode }
 /* D54: orgNodes is the sole group model. The view preserves the legacy HTTP shape without
    preserving a second collection; every returned object is the canonical node itself. */
+/* The two legacy names are PROJECTIONS, never stored fields. They must be non-enumerable, for
+   two reasons that both bit before this was written down:
+     • persistence content-hashes JSON.stringify(unit) to decide what changed, so an enumerable
+       accessor makes merely READING a group dirty the store and manufacture CAS conflicts
+       between concurrent readers
+     • an enumerable accessor serialises as data, and on reload the guard below would see a real
+       `leadIds` property, decline to reinstall the accessor, and leave a plain array that no
+       longer writes through — two names for leadership inside one object, silently diverging.
+       Leadership decides visibility, so that divergence is a privacy defect, not a cosmetic one.
+   Any such property already on disk is absorbed back into leaderIds and removed. */
 function _groupView(node) {
   if (!node) return null;
-  if (!Object.getOwnPropertyDescriptor(node, 'id')) Object.defineProperty(node, 'id', { enumerable: true, get: () => node.nodeId });
-  if (!Object.getOwnPropertyDescriptor(node, 'leadIds')) Object.defineProperty(node, 'leadIds', { enumerable: true,
+  const lead = Object.getOwnPropertyDescriptor(node, 'leadIds');
+  if (lead && !lead.get) {                                  // persisted by an earlier build
+    if (!Array.isArray(node.leaderIds)) node.leaderIds = Array.isArray(node.leadIds) ? node.leadIds : [];
+    delete node.leadIds;
+  }
+  const id = Object.getOwnPropertyDescriptor(node, 'id');
+  if (id && !id.get) delete node.id;
+  if (!Object.getOwnPropertyDescriptor(node, 'id')) Object.defineProperty(node, 'id', { configurable: true, enumerable: false, get: () => node.nodeId });
+  if (!Object.getOwnPropertyDescriptor(node, 'leadIds')) Object.defineProperty(node, 'leadIds', { configurable: true, enumerable: false,
     get: () => node.leaderIds || [], set: value => { node.leaderIds = Array.isArray(value) ? value : []; } });
   return node;
 }
 function _groups(code) { return Object.values(orgNodes[code] || {}).map(_groupView).filter(Boolean); }
+/* What goes over the wire keeps the legacy shape a front end already reads. This is the only
+   place the projections become data, and it is a copy — the stored node is untouched. */
+function _groupWire(node) { return node ? { ...node, id: node.id, leadIds: node.leadIds } : null; }
 function _upsertGroupNode(code, group = {}) {
   const nodeId = String(group.nodeId || group.id || generateId());
   const nodes = orgNodes[code] || (orgNodes[code] = {});
@@ -14815,7 +14835,7 @@ app.get('/api/groups', requireAuth, (req, res) => {
   if (memberId) {
     groups = groups.filter(g => g.memberIds.includes(memberId) || g.leadIds.includes(memberId));
   }
-  res.json({ groups });
+  res.json({ groups: groups.map(_groupWire) });
 });
 
 /* ── Update group ────────────────────────────────────────────────────────── */
@@ -14833,7 +14853,7 @@ app.put('/api/groups/:groupId', requireAuth, (req, res) => {
   if (memberIds   !== undefined) g.memberIds   = memberIds;
   if (leadIds     !== undefined) g.leadIds     = leadIds;
   scheduleSave();
-  res.json({ ok: true, group: g });
+  res.json({ ok: true, group: _groupWire(g) });
 });
 
 /* ── Set a group's GOALS & TRAITS (the TEAM frame) ────────────────────────────
@@ -14861,7 +14881,7 @@ app.put('/api/groups/:groupId/aims', requireAuth, (req, res) => {
   if (goals  !== undefined) g.goals  = goals;
   if (traits !== undefined) g.traits = traits;
   scheduleSave();
-  res.json({ ok: true, group: g });
+  res.json({ ok: true, group: _groupWire(g) });
 });
 
 /* ── PUT /api/groups/:groupId/copilot-settings — lead enables/disables Copilot ─
