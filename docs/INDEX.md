@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `744ef22`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `bb37a31`. **Branch:** `claude/platform-work-summary-nmb0cm`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
 ---
@@ -112,10 +112,11 @@ The lanes, and the individual prompts they replace:
 
 | Lane | Work | Was |
 |---|---|---|
-| **A** | the four nav buckets, plus thread routes for Focus/High/Low (D1) | §29 |
-| **B** | one voice — `proactive.js`'s 30 message tables move into `ai/voice.js` (D30) | §30 |
-| **C** | the curiosity stopping rule — **a dependency, not a refinement** (D35) | §16 |
-| **D** | world-model reconciliation — **READ-ONLY**, runs at any point | §28 |
+| ~~**A**~~ | ~~the four nav buckets~~ | **DONE** — `dbd4433`, `nav-buckets-http-smoke`. One shared renderer (A5 pins it), L-OC1 holds for all four kinds (A4 mutation-tested) |
+| ~~**B**~~ | ~~one voice~~ | **DONE** — `bb37a31`. **All 65 strings moved byte-identical** (verified by diff); `governance-smoke` now asserts `ai/voice.js` is the sole owner |
+| **C** | the curiosity stopping rule (D35) — **scope corrected**: conversation path only; `/api/inquiry/pending` is out of scope and must not change | §16 |
+| ~~**D**~~ | ~~world-model reconciliation~~ | **DONE** — `6689216`. **~80% already existed**; gate C, adjudicated as D50–D54 |
+| **F** | the five consolidations (D50–D54) — **unblocked** | new |
 | **E** | one home — `app.js` absorbs `member-view.js` (D24). **LAST**, ends with a file deleted | §31 |
 
 **Done:** §19 safeguarding screen · §20 answerability screen · §21 the primitive decides ·
