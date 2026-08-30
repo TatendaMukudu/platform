@@ -211,6 +211,7 @@ const SUITES = [
   'voice-composer-smoke.js',        // D30/D34 — the composer: four blocks, provenance banded by default, no prediction, no kernel word, survives the language guard
   'thread-binding-http-smoke.js',   // object-as-conversation G1 — a thread knows what it is about; the binding is a label on your own thread, never a claim of access, and an unparseable scope filters to nothing
   'group-model-owner-smoke.js', // D54: legacy loads and routes converge on orgNodes, the sole group model
+  'objective-owner-smoke.js', // D50: org-context objectives are canonical; orgGoals is a non-persisted superseding view
   'curiosity-stopping-smoke.js', // D35: conversation-only inquiry and question caps, cooldown, and permanent decline
   'curiosity-stopping-wired-http-smoke.js', // D35, WIRED: the kernel above is actually called — every Lane C call site in server.js turns an assertion here red when removed
   'nav-buckets-http-smoke.js', // D1/D7/D10/D13: one filtered four-bucket surface at both grains; priority, parked reasons and L-OC1 threads

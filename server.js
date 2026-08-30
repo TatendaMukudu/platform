@@ -183,7 +183,7 @@ function _persistedStores() {
     orgNotes, orgMessages, orgStore,
     assignedScenarios, memberResults, memberCheckins,
     memberGoals, weeklyAssessments, orgInterventions,
-    orgNodes, orgMetrics, orgValues, orgGoals, userPermissions,
+    orgNodes, orgMetrics, orgValues, userPermissions,
     userAiProfiles, advisorThreads, orgSignals, noticeFeedback,
     userConsents, connectedSources, pendingActions,
     assessmentTemplates, assessmentAssignments, orgTutorials, orgApiTokens,
@@ -192,7 +192,7 @@ function _persistedStores() {
     syncRuns, failedRecords, webhookDeliveries,
     orgPolicies, actionsLog, orgCalendar, workspaceItems, reasoningArtifacts,
     proactivePrefs, insightSuppression, answerFeedback,
-    orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed,
+    orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed, orgContextRecords,
     reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
     conversationSessions, assistantConversations, libraryFolders, libraryItems, safeguardingFlags,
     inquiryStates, groupCandidates, forumThreads, teamFocuses,
@@ -1203,7 +1203,6 @@ const orgGroups = new Proxy({}, { get: (_, code) => typeof code === 'string' ? _
   ownKeys: () => Reflect.ownKeys(orgNodes), getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }) });
 const orgMetrics      = {};  // orgCode → [{ metricId, name, source, order }]
 const orgValues       = {};  // orgCode → [string]
-const orgGoals        = {};  // orgCode → [{ goalId, text, createdAt }]
 const userPermissions = {};  // orgCode → { userId → { perm → bool } }
 
 // ── Memory Engine ──────────────────────────────────────────────────────────
@@ -10058,6 +10057,54 @@ const orgStateConfig = {};
 // like everything else — NOT a side database. org-state projects the CURRENT effective
 // set from here. Per org.
 const orgContextRecords = {};
+/* D50: objectives live in orgContextRecords. The legacy orgGoals name is a
+   compatibility view and is never part of the durable shape. */
+function _objectiveRecords(code, all = false) {
+  return (orgContextRecords[code] || []).filter(r => r.type === 'objective' && (all || r.status === 'active'));
+}
+function _legacyObjectiveRecord(code, goal = {}) {
+  const now = goal.createdAt || new Date().toISOString();
+  return { id: String(goal.goalId || `ctx_${generateId()}`), org: code, type: 'objective',
+    fields: { title: String(goal.text || goal.title || '').trim() }, scope: { kind: 'team' }, visibility: 'organization',
+    authority: 'organizational', actorId: null, actorRole: 'migration', effectiveFrom: now,
+    effectiveTo: goal.status && goal.status !== 'active' ? now : null,
+    status: goal.status && goal.status !== 'active' ? 'superseded' : 'active', supersedes: null, supersededBy: null,
+    provenance: { source: 'legacy_org_goals', confirmedAt: now, confidence: 1, kind: 'explicit' }, confirmedAt: now, createdAt: now };
+}
+function _migrateLegacyGoals(legacy = {}) {
+  for (const [code, goals] of Object.entries(legacy || {})) {
+    const records = orgContextRecords[code] || (orgContextRecords[code] = []);
+    for (const goal of (goals || [])) if (!records.some(r => r.type === 'objective' && r.id === goal.goalId)) records.push(_legacyObjectiveRecord(code, goal));
+  }
+}
+function _supersedeObjective(code, prior, fields, actorId = null) {
+  const now = new Date().toISOString();
+  prior.status = 'superseded'; prior.effectiveTo = now;
+  const next = { ...prior, id: `ctx_${generateId()}`, fields: { ...(prior.fields || {}), ...fields }, status: 'active',
+    effectiveFrom: now, effectiveTo: null, supersedes: prior.id, supersededBy: null,
+    actorId: actorId || prior.actorId, confirmedAt: now, createdAt: now,
+    provenance: { ...(prior.provenance || {}), source: 'goal_api', confirmedAt: now } };
+  prior.supersededBy = next.id;
+  (orgContextRecords[code] = orgContextRecords[code] || []).push(next);
+  delete orgStateCache[code]; scheduleSave();
+  return next;
+}
+function _goalView(code, rec) {
+  const view = {};
+  Object.defineProperties(view, {
+    goalId: { enumerable: true, get: () => rec.id },
+    text: { enumerable: true, get: () => String(rec.fields?.title || ''), set: value => _supersedeObjective(code, rec, { title: String(value || '').trim() }) },
+    createdAt: { enumerable: true, get: () => rec.createdAt || rec.confirmedAt },
+    status: { enumerable: true, get: () => rec.status === 'active' ? 'active' : 'inactive' },
+  });
+  return view;
+}
+const orgGoals = new Proxy({}, {
+  get: (_, code) => typeof code === 'string' ? _objectiveRecords(code).map(r => _goalView(code, r)) : undefined,
+  set: (_, code, goals) => { _migrateLegacyGoals({ [code]: goals }); return true; },
+  ownKeys: () => Reflect.ownKeys(orgContextRecords),
+  getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }),
+});
 // Projection cache — one slot per org, keyed by a fingerprint of evidence + config +
 // policy version, so any change invalidates it. Never crosses a tenant boundary.
 const orgStateCache = {};
@@ -14757,28 +14804,29 @@ app.post('/api/goals', requirePermission('manage_goals'), (req, res) => {
   const code = req.iqSession.orgCode;
   const { text } = req.body;
   if (!text) return res.status(400).json({ error: 'text required' });
-  if (!orgGoals[code]) orgGoals[code] = [];
-  const goal = { goalId: 'goal_' + generateId(), text: text.trim(), createdAt: new Date().toISOString(), status: 'active' };
-  orgGoals[code].push(goal);
-  scheduleSave();
-  res.json({ ok: true, goal });
+  const rec = _legacyObjectiveRecord(code, { goalId: 'goal_' + generateId(), text: text.trim(), createdAt: new Date().toISOString() });
+  rec.actorId = req.iqSession.userId; rec.actorRole = _actorRole(code, req.iqSession.userId); rec.provenance.source = 'goal_api';
+  (orgContextRecords[code] = orgContextRecords[code] || []).push(rec); delete orgStateCache[code]; scheduleSave();
+  res.json({ ok: true, goal: _goalView(code, rec) });
 });
 
 app.put('/api/goals/:goalId', requirePermission('manage_goals'), (req, res) => {
   const code = req.iqSession.orgCode;
-  const goal = (orgGoals[code] || []).find(g => g.goalId === req.params.goalId);
-  if (!goal) return res.status(404).json({ error: 'Goal not found' });
-  if (req.body.text   !== undefined) goal.text   = req.body.text.trim();
-  if (req.body.status !== undefined) goal.status = req.body.status;
-  scheduleSave();
-  res.json({ ok: true, goal });
+  const prior = _objectiveRecords(code).find(r => r.id === req.params.goalId);
+  if (!prior) return res.status(404).json({ error: 'Goal not found' });
+  if (req.body.status !== undefined && req.body.status !== 'active') {
+    prior.status = 'superseded'; prior.effectiveTo = new Date().toISOString(); delete orgStateCache[code]; scheduleSave();
+    return res.json({ ok: true, goal: _goalView(code, prior) });
+  }
+  const next = req.body.text !== undefined ? _supersedeObjective(code, prior, { title: req.body.text.trim() }, req.iqSession.userId) : prior;
+  res.json({ ok: true, goal: _goalView(code, next) });
 });
 
 app.delete('/api/goals/:goalId', requirePermission('manage_goals'), (req, res) => {
   const code = req.iqSession.orgCode;
-  if (!orgGoals[code]) return res.status(404).json({ error: 'Not found' });
-  orgGoals[code] = orgGoals[code].filter(g => g.goalId !== req.params.goalId);
-  scheduleSave();
+  const goal = _objectiveRecords(code).find(r => r.id === req.params.goalId);
+  if (!goal) return res.status(404).json({ error: 'Not found' });
+  goal.status = 'superseded'; goal.effectiveTo = new Date().toISOString(); delete orgStateCache[code]; scheduleSave();
   res.json({ ok: true });
 });
 
@@ -18372,7 +18420,8 @@ function _loadAllStores(data) {
   Object.assign(orgNodes,         data.orgNodes         || {});
   Object.assign(orgMetrics,       data.orgMetrics       || {});
   Object.assign(orgValues,        data.orgValues        || {});
-  Object.assign(orgGoals,         data.orgGoals         || {});
+  Object.assign(orgContextRecords,data.orgContextRecords|| {});
+  _migrateLegacyGoals(data.orgGoals || {});
   Object.assign(userPermissions,  data.userPermissions  || {});
   _migrateLegacyGroups(data.orgGroups || {});
   Object.assign(orgNotes,         data.orgNotes         || {});
