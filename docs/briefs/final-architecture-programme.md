@@ -131,6 +131,17 @@ contradicts either, that contradiction IS the finding.**
 Write `docs/ttd/world-model-reconciliation-findings.md`. Finish with the ontology verdict **and**
 the implementation gate letter. **On C or D, STOP** — those require founder adjudication.
 
+> **THE STOP IS SCOPED TO LANE D. It does not halt this programme.**
+>
+> A C or D verdict stops **world-model implementation**, because ownership across overlapping
+> primitives is the founder's to settle. It has no bearing on Lanes A, B, C or E: nav buckets,
+> the voice consolidation, the stopping rule and the one-home merge do not depend on which
+> primitive owns Objective, Goal, Focus or Relation, and none of them touch that question.
+>
+> **Ran D first and got C? Report it, then carry on with A, B, C and E.** An earlier wording of
+> this rule was ambiguous and halted the whole run; that was a defect in this document, not in
+> the agent that obeyed it.
+
 **Its central bet has been confirmed six times in this repository** (see §0 of the brief): the
 safeguarding queue, the answerability layer, `/api/self/patterns`, `falsifiers`, the import
 routes, and self Highs and Lows all turned out to be already built. **Start from the prior that it
