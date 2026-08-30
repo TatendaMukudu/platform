@@ -25,6 +25,7 @@ const orgContext = require('./ai/org-context');
 const readiness  = require('./ai/readiness');
 const orgMemory  = require('./ai/org-memory');
 const orgGraph   = require('./ai/org-graph');
+const subjectRef = require('./ai/subject-ref');
 const orgAnswer  = require('./ai/org-answer');
 const orgRouting = require('./ai/org-routing');
 const teamState  = require('./ai/team-state');
@@ -9325,7 +9326,18 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
    Nothing here becomes evidence or touches the belief ledger. It builds a working picture the
    person can later confirm from. That boundary is the whole reason this is safe to run
    automatically on every turn. */
+function _resolveSubjectRef(code, ref) {
+  const parsed = subjectRef.parse(ref);
+  if (!parsed) return null;
+  if (parsed.kind === 'member' && !orgUsers[code]?.[parsed.id]) return null;
+  if (parsed.kind === 'group' && !orgNodes[code]?.[parsed.id]) return null;
+  if (parsed.kind === 'organisation' && parsed.id !== code) return null;
+  // Relationship claims are inquiry identities, not graph edges. Their existence
+  // is established by the inquiry record itself at the D53 boundary.
+  return parsed;
+}
 function _inquiryFor(code, subjectRef, concept, label, domain, now) {
+  if (!_resolveSubjectRef(code, subjectRef)) return null;
   const byOrg = inquiryStates[code] || (inquiryStates[code] = {});
   const bySubject = byOrg[subjectRef] || (byOrg[subjectRef] = {});
   const key = String(concept || 'general').toLowerCase();
@@ -18578,6 +18590,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: universal evidence intake
   _ingestArtifact, _deleteImport, _sanitizeBriefingForLeader, _stripLeaderNumbers, _deriveOrgUncertainties,
   _getOrgState, _buildOrgStateInputs, orgStateConfig, orgContextRecords, _confirmOrgContext,
+  _resolveSubjectRef, _inquiryFor,
   _teamReadiness, roleBindings, _bindRole, activeQuestions, _activeQuestionFrom, _writeResolutionEvidence,
   // exported for the truth layer: organisational memory (Phase A) — the derived-state timeline
   orgStateHistory, _recordOrgSnapshot,
