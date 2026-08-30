@@ -114,7 +114,7 @@ The lanes, and the individual prompts they replace:
 |---|---|---|
 | ~~**A**~~ | ~~the four nav buckets~~ | **DONE** — `dbd4433`, `nav-buckets-http-smoke`. One shared renderer (A5 pins it), L-OC1 holds for all four kinds (A4 mutation-tested) |
 | ~~**B**~~ | ~~one voice~~ | **DONE** — `bb37a31`. **All 65 strings moved byte-identical** (verified by diff); `governance-smoke` now asserts `ai/voice.js` is the sole owner |
-| **C** | the curiosity stopping rule (D35) — **scope corrected**: conversation path only; `/api/inquiry/pending` is out of scope and must not change | §16 |
+| ~~**C**~~ | ~~the curiosity stopping rule (D35)~~ | **DONE** — `e07e60a` + `11e7a39`. Kernel in `ai/diagnose.js`, all five assertions bite. **Review found the six `server.js` call sites entirely untested** — every one could be deleted with the suite green; `curiosity-stopping-wired-http-smoke` now turns red on each. `/api/inquiry/pending` untouched, as the corrected scope requires |
 | ~~**D**~~ | ~~world-model reconciliation~~ | **DONE** — `6689216`. **~80% already existed**; gate C, adjudicated as D50–D54 |
 | **F** | the five consolidations (D50–D54) — **unblocked** | new |
 | **E** | one home — `app.js` absorbs `member-view.js` (D24). **LAST**, ends with a file deleted | §31 |
