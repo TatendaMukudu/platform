@@ -180,7 +180,7 @@ const DERIVED_STORES = new Set(['emailIndex']);
 function _persistedStores() {
   return {
     orgMeta, orgUsers, inviteTokens, emailIndex, pendingInvites,
-    orgGroups, orgNotes, orgMessages, orgStore,
+    orgNotes, orgMessages, orgStore,
     assignedScenarios, memberResults, memberCheckins,
     memberGoals, weeklyAssessments, orgInterventions,
     orgNodes, orgMetrics, orgValues, orgGoals, userPermissions,
@@ -1154,6 +1154,33 @@ const pendingInvites = {}; // token → { email, orgCode, role, ... }
 
 // ── Sprint 2 stores ────────────────────────────────────────────────────────
 const orgNodes        = {};  // orgCode → { nodeId → OrgNode }
+/* D54: orgNodes is the sole group model. The view preserves the legacy HTTP shape without
+   preserving a second collection; every returned object is the canonical node itself. */
+function _groupView(node) {
+  if (!node) return null;
+  if (!Object.getOwnPropertyDescriptor(node, 'id')) Object.defineProperty(node, 'id', { enumerable: true, get: () => node.nodeId });
+  if (!Object.getOwnPropertyDescriptor(node, 'leadIds')) Object.defineProperty(node, 'leadIds', { enumerable: true,
+    get: () => node.leaderIds || [], set: value => { node.leaderIds = Array.isArray(value) ? value : []; } });
+  return node;
+}
+function _groups(code) { return Object.values(orgNodes[code] || {}).map(_groupView).filter(Boolean); }
+function _upsertGroupNode(code, group = {}) {
+  const nodeId = String(group.nodeId || group.id || generateId());
+  const nodes = orgNodes[code] || (orgNodes[code] = {});
+  nodes[nodeId] = { ...(nodes[nodeId] || {}), ...group, nodeId,
+    leaderIds: Array.isArray(group.leaderIds) ? group.leaderIds : (group.leadIds || []), memberIds: group.memberIds || [] };
+  delete nodes[nodeId].id; delete nodes[nodeId].leadIds;
+  return nodes[nodeId];
+}
+function _migrateLegacyGroups(legacy = {}) {
+  for (const [code, groups] of Object.entries(legacy || {})) for (const g of (groups || [])) {
+    _upsertGroupNode(code, g);
+  }
+}
+// Test/legacy import compatibility only: assignments migrate into orgNodes; reads are live views.
+const orgGroups = new Proxy({}, { get: (_, code) => typeof code === 'string' ? _groups(code) : undefined,
+  set: (_, code, groups) => { _migrateLegacyGroups({ [code]: groups }); return true; },
+  ownKeys: () => Reflect.ownKeys(orgNodes), getOwnPropertyDescriptor: () => ({ enumerable: true, configurable: true }) });
 const orgMetrics      = {};  // orgCode → [{ metricId, name, source, order }]
 const orgValues       = {};  // orgCode → [string]
 const orgGoals        = {};  // orgCode → [{ goalId, text, createdAt }]
@@ -1706,8 +1733,8 @@ app.post('/api/auth/join-invite', async (req, res) => {
   emailIndex[emailNorm] = { orgCode: code, userId };
 
   // Auto-add to group if specified
-  if (invite.group && orgGroups[code]) {
-    const gObj = orgGroups[code].find(g => g.name.toLowerCase() === (invite.group || '').toLowerCase());
+  if (invite.group) {
+    const gObj = _groups(code).find(g => g.name.toLowerCase() === (invite.group || '').toLowerCase());
     if (gObj && !gObj.memberIds.includes(userId)) gObj.memberIds.push(userId);
   }
   invite.useCount = (invite.useCount || 0) + 1;
@@ -1937,7 +1964,7 @@ function _removePerson(code, userId, deleteData) {
   });
 
   // 5. Remove from all groups (memberIds and leadIds)
-  const groups = orgGroups[code] || [];
+  const groups = _groups(code);
   groups.forEach(g => {
     if (g.memberIds) g.memberIds = g.memberIds.filter(id => id !== userId && id !== name);
     if (g.leadIds)   g.leadIds   = g.leadIds.filter(id   => id !== userId && id !== name);
@@ -2633,7 +2660,7 @@ function _isLeader(orgCode, userId) {
   if ((user.leadershipNodeIds || []).length) return true;
   const users = orgUsers[orgCode] || {};
   if (Object.values(users).some(u => u.id !== userId && u.supervisorId === userId)) return true;
-  if ((orgGroups[orgCode] || []).some(g => (g.leadIds || []).includes(userId))) return true;
+  if (_groups(orgCode).some(g => (g.leadIds || []).includes(userId))) return true;
   if (_leadsViaHierarchy(orgCode, userId)) return true;
   return false;
 }
@@ -2836,7 +2863,7 @@ function getVisibleUserIds(orgCode, requestingUserId) {
     getSupervisedSubtreeIds(orgCode, requestingUserId).forEach(id => visibleIds.add(id));
 
     // (c) Members of any group this user leads
-    (orgGroups[orgCode] || [])
+    _groups(orgCode)
       .filter(g => (g.leadIds || []).includes(requestingUserId))
       .forEach(g => (g.memberIds || []).forEach(id => visibleIds.add(id)));
 
@@ -3871,7 +3898,7 @@ function _trajectoryFromMood(series, now) {
 
 /* Team trajectory: pooled mood direction of the member's first group's peers. */
 function _teamTrajectory(code, u, now) {
-  const g = (orgGroups[code] || []).find(x =>
+  const g = _groups(code).find(x =>
     (x.memberIds || []).includes(u.id) || (x.leadIds || []).includes(u.id));
   if (!g) return null;
   const peers = [...new Set([...(g.memberIds || []), ...(g.leadIds || [])])].filter(id => id !== u.id);
@@ -6312,7 +6339,7 @@ app.post('/api/admin/seed-demo-club', requirePermission('manage_settings'), asyn
     Object.assign(orgTutorials, store.orgTutorials);
     Object.assign(orgInterventions, store.orgInterventions);
     Object.assign(studioThreads, store.studioThreads);
-    Object.assign(orgGroups, store.orgGroups);
+    _migrateLegacyGroups(store.orgGroups);
     _rebuildEmailIndex();
     scheduleSave();
     console.log(`[seed-demo-club] installed ${summary.orgName} (${summary.users} users, ${summary.checkins} check-ins)`);
@@ -14585,7 +14612,7 @@ app.get('/api/org/divisions', requireAuth, (req, res) => {
   const overall = _aggregatePeople(code, range, now, monday);
 
   // Per sub-unit — only groups that intersect the range, only the visible members.
-  const units = (orgGroups[code] || [])
+  const units = _groups(code)
     .map(g => ({ g, ids: (g.memberIds || []).filter(id => rangeSet.has(id)) }))
     .filter(x => x.ids.length)
     .map(({ g, ids }) => ({ id: g.id, name: g.name, ..._aggregatePeople(code, ids, now, monday) }));
@@ -14759,7 +14786,6 @@ app.put('/api/permissions', requirePermission('manage_permissions'), (req, res) 
    GROUPS — Sub-teams within an org
    ═══════════════════════════════════════════════════════════════════════════ */
 
-const orgGroups   = {};  // populated at startup via _loadAllStores()
 const orgNotes    = {};
 const orgMessages = {};
 
@@ -14775,9 +14801,8 @@ app.post('/api/groups/create', requireAuth, (req, res) => {
   if (!_isLeader(code, req.iqSession.userId) && orgUsers[code]?.[req.iqSession.userId]?.role !== 'superadmin') {
     return res.status(403).json({ error: 'Only a leader can create groups.' });
   }
-  if (!orgGroups[code]) orgGroups[code] = [];
   const group = { id: groupId(), name, description: description || '', memberIds: memberIds || [], leadIds: leadIds || [], goals: [], traits: [], copilotEnabled: false, createdAt: new Date().toISOString() };
-  orgGroups[code].push(group);
+  _upsertGroupNode(code, group);
   scheduleSave();
   res.json({ ok: true, group });
 });
@@ -14786,7 +14811,7 @@ app.post('/api/groups/create', requireAuth, (req, res) => {
 app.get('/api/groups', requireAuth, (req, res) => {
   const orgCode = req.iqSession.orgCode;   // own org only — never read another org's groups
   const { memberId } = req.query;
-  let groups = orgGroups[orgCode] || [];
+  let groups = _groups(orgCode);
   if (memberId) {
     groups = groups.filter(g => g.memberIds.includes(memberId) || g.leadIds.includes(memberId));
   }
@@ -14800,7 +14825,7 @@ app.put('/api/groups/:groupId', requireAuth, (req, res) => {
   if (!_isLeader(code, req.iqSession.userId) && orgUsers[code]?.[req.iqSession.userId]?.role !== 'superadmin') {
     return res.status(403).json({ error: 'Only a leader can edit groups.' });
   }
-  const groups = orgGroups[code] || [];   // scoped to the caller's own org — never another's
+  const groups = _groups(code);   // scoped to the caller's own org — never another's
   const g      = groups.find(g => g.id === req.params.groupId);
   if (!g) return res.status(404).json({ error: 'Group not found' });
   if (name        !== undefined) g.name        = name;
@@ -14818,7 +14843,7 @@ app.put('/api/groups/:groupId', requireAuth, (req, res) => {
 app.put('/api/groups/:groupId/aims', requireAuth, (req, res) => {
   const { orgCode, userId } = req.iqSession;
   const code   = orgCode;
-  const groups = orgGroups[code] || [];
+  const groups = _groups(code);
   const g      = groups.find(g => g.id === req.params.groupId);
   if (!g) return res.status(404).json({ error: 'Group not found' });
 
@@ -14844,7 +14869,7 @@ app.put('/api/groups/:groupId/aims', requireAuth, (req, res) => {
 app.put('/api/groups/:groupId/copilot-settings', requireAuth, (req, res) => {
   const { orgCode, userId } = req.iqSession;
   const code = orgCode;
-  const g    = (orgGroups[code] || []).find(g => g.id === req.params.groupId);
+  const g    = _groups(code).find(g => g.id === req.params.groupId);
   if (!g) return res.status(404).json({ error: 'Group not found' });
   const isLead  = (g.leadIds || []).includes(userId);
   const isAdmin = orgUsers[code]?.[userId]?.role === 'superadmin' || _userHasPerm(code, userId, 'manage_settings');
@@ -14863,7 +14888,7 @@ app.put('/api/groups/:groupId/copilot-settings', requireAuth, (req, res) => {
 app.get('/api/groups/:groupId/copilot', requireAuth, async (req, res) => {
   const { orgCode, userId } = req.iqSession;
   const code = orgCode;
-  const g    = (orgGroups[code] || []).find(g => g.id === req.params.groupId);
+  const g    = _groups(code).find(g => g.id === req.params.groupId);
   if (!g) return res.status(404).json({ error: 'Group not found' });
 
   const isLead  = (g.leadIds || []).includes(userId);
@@ -14981,8 +15006,8 @@ app.delete('/api/groups/:groupId', requireAuth, (req, res) => {
   if (!_isLeader(code, req.iqSession.userId) && orgUsers[code]?.[req.iqSession.userId]?.role !== 'superadmin') {
     return res.status(403).json({ error: 'Only a leader can delete groups.' });
   }
-  if (!orgGroups[code]) return res.status(404).json({ error: 'Org not found' });
-  orgGroups[code] = orgGroups[code].filter(g => g.id !== req.params.groupId);
+  if (!orgNodes[code]) return res.status(404).json({ error: 'Org not found' });
+  delete orgNodes[code][req.params.groupId];
   scheduleSave();
   res.json({ ok: true });
 });
@@ -15058,7 +15083,7 @@ app.get('/api/notes', requireAuth, (req, res) => {
   const requesterId = req.iqSession.userId;
   if (!code || !requesterId) return res.status(403).json({ error: 'Forbidden' });
 
-  const myGroups = (orgGroups[code] || []).filter(g =>
+  const myGroups = _groups(code).filter(g =>
     g.memberIds.includes(requesterId) || g.leadIds.includes(requesterId)
   ).map(g => g.id);
 
@@ -15683,7 +15708,7 @@ app.get('/api/messages', requireAuth, (req, res) => {
   const requesterId = req.iqSession.userId;
   if (!code || !requesterId) return res.status(403).json({ error: 'Forbidden' });
 
-  const myGroups = (orgGroups[code] || []).filter(g =>
+  const myGroups = _groups(code).filter(g =>
     g.memberIds.includes(requesterId) || g.leadIds.includes(requesterId)
   ).map(g => g.id);
 
@@ -15732,7 +15757,7 @@ app.get('/api/groups/:groupId/feed', requireAuth, (req, res) => {
   if (!code || !requesterId) return res.status(403).json({ error: 'Forbidden' });
   const gid  = req.params.groupId;
 
-  const groups = orgGroups[code] || [];
+  const groups = _groups(code);
   const group  = groups.find(g => g.id === gid);
   if (group) {
     const isMemberOrLead = group.memberIds.includes(requesterId) || group.leadIds.includes(requesterId);
@@ -15953,16 +15978,13 @@ app.post('/api/auth/bulk-import', requireAuth, async (req, res) => {
 
     // Auto-create group if it doesn't exist
     if (group) {
-      if (!orgGroups[code]) orgGroups[code] = [];
-      const groupExists = orgGroups[code].some(g => g.name.toLowerCase() === group.toLowerCase());
+      const groupExists = _groups(code).some(g => g.name.toLowerCase() === group.toLowerCase());
       if (!groupExists) {
-        orgGroups[code].push({
-          id: generateId(), name: group, orgCode: code,
-          memberIds: [], createdAt: new Date().toISOString(),
-        });
+        const nodeId = generateId();
+        (orgNodes[code] = orgNodes[code] || {})[nodeId] = { nodeId, name: group, orgCode: code, memberIds: [], leaderIds: [], createdAt: new Date().toISOString() };
       }
       // Add member to group
-      const gObj = orgGroups[code].find(g => g.name.toLowerCase() === group.toLowerCase());
+      const gObj = _groups(code).find(g => g.name.toLowerCase() === group.toLowerCase());
       if (gObj && !gObj.memberIds.includes(userId)) gObj.memberIds.push(userId);
     }
 
@@ -17114,7 +17136,7 @@ function _memberGoalsFor(code, u) {
 function _aggregateOrgData(code) {
   const users  = orgUsers[code]  || {};
   const meta   = orgMeta[code]   || {};
-  const groups = orgGroups[code] || [];
+  const groups = _groups(code);
 
   const WEEK_MS       = 7  * 24 * 60 * 60 * 1000;
   const MONTH_MS      = 30 * 24 * 60 * 60 * 1000;
@@ -18042,7 +18064,7 @@ function _advisorKernelReasoning(code, member, requesterId) {
   citable.push(anchored
     ? `MEMBER aim(s): ${goals.map(g => g.title || g.text).filter(Boolean).join('; ')}`
     : 'MEMBER aim(s): none stated yet — treat as UNANCHORED; the absence is itself the finding.');
-  (orgGroups[code] || [])
+  _groups(code)
     .filter(g => (g.memberIds || []).includes(memberId) || (g.leadIds || []).includes(memberId))
     .forEach(g => citable.push(`TEAM context — ${g.name}${g.description ? `: ${g.description}` : ''}`));
   if ((orgValues[code] || []).length) citable.push(`ORG values (guardrails): ${orgValues[code].join(', ')}`);
@@ -18121,7 +18143,7 @@ app.post('/api/signals/ingest', requireAuth, (req, res) => {
   const canAttach = (s) => {
     if (s.subjectType === 'org') return _userHasPerm(code, userId, 'view_team') || orgUsers[code]?.[userId]?.role === 'superadmin';
     if (s.subjectType === 'group') {
-      const g = (orgGroups[code] || []).find(x => x.id === s.subjectId);
+      const g = _groups(code).find(x => x.id === s.subjectId);
       return !!g && ((g.leadIds || []).includes(userId) || orgUsers[code]?.[userId]?.role === 'superadmin');
     }
     // member: self, or a member you can see
@@ -18171,7 +18193,7 @@ app.get('/api/signals/recent', requireAuth, (req, res) => {
   const { orgCode, userId } = req.iqSession;
   const code    = orgCode;
   const visible = new Set(getVisibleUserIds(code, userId));
-  const ledGroupIds = new Set((orgGroups[code] || []).filter(g => (g.leadIds || []).includes(userId)).map(g => g.id));
+  const ledGroupIds = new Set(_groups(code).filter(g => (g.leadIds || []).includes(userId)).map(g => g.id));
 
   const inScope = s =>
     s.createdBy === userId ||
@@ -18181,7 +18203,7 @@ app.get('/api/signals/recent', requireAuth, (req, res) => {
 
   const subjectName = s => {
     if (s.subjectType === 'org') return 'Organization';
-    if (s.subjectType === 'group') return (orgGroups[code] || []).find(g => g.id === s.subjectId)?.name || 'Group';
+    if (s.subjectType === 'group') return _groups(code).find(g => g.id === s.subjectId)?.name || 'Group';
     return orgUsers[code]?.[s.subjectId]?.name || 'Member';
   };
 
@@ -18332,7 +18354,7 @@ function _loadAllStores(data) {
   Object.assign(orgValues,        data.orgValues        || {});
   Object.assign(orgGoals,         data.orgGoals         || {});
   Object.assign(userPermissions,  data.userPermissions  || {});
-  Object.assign(orgGroups,        data.orgGroups        || {});
+  _migrateLegacyGroups(data.orgGroups || {});
   Object.assign(orgNotes,         data.orgNotes         || {});
   Object.assign(orgMessages,      data.orgMessages      || {});
   Object.assign(orgStore,         data.orgStore         || {});
