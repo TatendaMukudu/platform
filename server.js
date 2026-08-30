@@ -1333,7 +1333,7 @@ function _focusFromGoal(code, userId, goal, opts = {}) {
     participation: opts.participation || 'self', shape: opts.shape || 'parallel', participants: opts.participants || [userId],
     invitedBy: opts.invitedBy || null, acceptedAt: opts.acceptedAt || new Date().toISOString(),
     status: 'active', outcome: null, createdAt: opts.createdAt || new Date().toISOString() };
-  mem.focuses.unshift(focus); return focus;
+  mem.focuses.unshift(focus); _beginFocusAction(code, focus, opts.invitedBy || userId, { subjectId: userId }); return focus;
 }
 function _migrateLegacyMemberGoals() {
   for (const [key, rec] of Object.entries(memberGoals)) {
@@ -5072,10 +5072,11 @@ app.post('/api/me/prepared/act', requireAuth, (req, res) => {
   const mem = _getMemory(code, userId);
   if (decision === 'approve') {
     mem.focuses = mem.focuses || [];
-    mem.focuses.unshift({
+    const focus = {
       id: 'foc_' + generateId(), text: String(text).slice(0, 300), type: type || null,
       status: 'active', outcome: null, createdAt: new Date().toISOString(),
-    });
+    };
+    mem.focuses.unshift(focus); _beginFocusAction(code, focus, userId, { subjectId: userId });
   } else {
     // Dismiss teaches the Confidence Engine this kind of nudge didn't land for them.
     if (type) { try { _recordNoticeFeedback(code, type, 'dismiss'); } catch (_) {} }
@@ -5103,6 +5104,7 @@ app.post('/api/me/focus/outcome', requireAuth, (req, res) => {
   f.status = 'done';
   f.outcome = outcome;
   f.resolvedAt = new Date().toISOString();
+  _completeFocusAction(code, f, outcome, userId);
 
   // LEARN — feed the Confidence Engine so what genuinely helps this person
   // surfaces more, and what doesn't fades.
@@ -7775,6 +7777,26 @@ app.get('/api/actions/:id', requireAuth, (req, res) => {
   if (!a) return res.status(404).json({ error: 'not found' });
   res.json({ ok: true, action: a });
 });
+
+/* D52 compatibility boundary: a visible Focus is backed by the existing Action
+   lifecycle. Focus creation already is the human approval, so the underlying
+   action enters the observe stage; outcome recording closes evaluate/learn. */
+function _beginFocusAction(code, focus, actorId, { subjectId = null, groupRef = null } = {}) {
+  const action = actionLib.buildAction({ id: `act_${generateId()}`, org: code, capability: 'intervention', verb: 'create',
+    authority: 'execute', actorId, subjectId, groupRef, rationale: 'Approved Focus', evidenceRefs: [], status: 'executed' });
+  action.focusRef = focus.focusId || focus.id; action.stage = 'observe'; action.status = 'executed';
+  action.approvals.push({ by: actorId, at: new Date().toISOString(), note: 'Focus approved' });
+  _actionsFor(code).push(action);
+  return action;
+}
+function _completeFocusAction(code, focus, outcome, actorId) {
+  const ref = focus.focusId || focus.id;
+  const action = _actionsFor(code).find(a => a.focusRef === ref) || null;
+  if (!action) return null;
+  action.observation = { result: outcome, observedBy: actorId, at: new Date().toISOString() };
+  action.stage = 'learn'; action.status = 'evaluated'; action.evaluation = { result: outcome, improved: outcome === 'helped' || outcome === 'better' };
+  return action;
+}
 
 /* PROPOSE — the capability RECOMMENDS (grounded), and we snapshot the policy decision
    for the intended authority so the human sees up front what will/won't be allowed. */
@@ -13466,7 +13488,7 @@ app.post('/api/group/:nodeId/focus', requireAuth, (req, res) => {
     focusId: 'tf_' + generateId(), nodeId, text, by: userId, now: Date.now(),
     reviewAt: (req.body || {}).reviewAt, inquiry: originInquiry,
   });
-  _teamFocuses(code, nodeId).unshift(focus);
+  _teamFocuses(code, nodeId).unshift(focus); _beginFocusAction(code, focus, userId, { groupRef: `group:${nodeId}` });
   _audit(code, { actor: userId, action: 'team_focus_set', subjectIds: [], basis: focus.origin.from });
   scheduleSave();
   res.json({ ok: true, focus: teamState.normalizeFocus(focus) });
@@ -13491,6 +13513,7 @@ app.post('/api/group/:nodeId/focus/:focusId/outcome', requireAuth, (req, res) =>
     result: body.result, note: body.note, by: userId, now: Date.now(),
     status: teamState.FOCUS_STATUSES.includes(body.status) ? body.status : 'done',
   });
+  _completeFocusAction(code, focus, (req.body || {}).result, userId);
   const result = focus.outcome.result;
   _audit(code, { actor: userId, action: 'team_focus_outcome', subjectIds: [], basis: result });
   scheduleSave();
