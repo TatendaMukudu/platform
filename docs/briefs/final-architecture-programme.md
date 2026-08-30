@@ -34,8 +34,10 @@ indexed at the top — read the index, then only what a lane touches).
 | **C** stopping rule | none | after B | — | none | none |
 | **D** world-model | none | none | none | — | none |
 | **E** one home | **after A** | none | none | none | — |
+| **F** consolidations | none | none | none | **after D** | before E is safest |
 
 **D writes no production code and can be run at any point, including first.**
+**F is unblocked** — Lane D returned gate C and the founder has adjudicated (D50–D54).
 
 ---
 
@@ -174,11 +176,43 @@ intact.
 
 ---
 
+## LANE F · THE FIVE CONSOLIDATIONS — *unblocked, gate C adjudicated*
+
+Lane D returned **gate C** and the founder has now ruled. **D50–D54** in
+`ttd/founder-decisions-2026-08.md` name the winner in each case. Lane D's own §11 minimum delta
+applies: **0 new stores · 0 new engines · 0 new truth layers · 0 new evidence paths · 0 new
+persistence · 0 new graph infrastructure.**
+
+| | Decision | The consolidation |
+|---|---|---|
+| **D50** | Objective lives in the **org-context record** | `orgGoals` becomes an alias pointing at it. Changes supersede, never overwrite (D46) |
+| **D51** | **A Goal IS a Focus** | No separate goal lifecycle. Reuse the Focus shape — self, invited, assigned (D2), room and parallel (D14). An assigned goal creates a shared space between coach and person |
+| **D52** | Focus runs on the **Action/Intervention loop** | The nine-route `propose → approve → execute → observe → evaluate`, because it is the only one that closes back into evidence. Focus is the product name; that loop runs underneath. **D31 still holds for autonomous execution** — this uses the outcome-learning half, not action without approval |
+| **D53** | **A relationship claim IS an Inquiry** | *"D contributes to leadership in Group X"* becomes an inquiry, inheriting support, challenge, confidence, correction, contested state, falsifiers, the timeline, the cohort floor and the audience model. **NO EDGE STORE** |
+| **D54** | **`orgNodes`** is the group model | Migrate callers off legacy `orgGroups`; do not maintain both |
+
+**Also from Lane D §11, and it is the one genuinely new mechanism:** a **typed, fail-closed
+subject-ref parser** supporting the existing `member:` and `group:` plus `organisation:` and a
+relationship-claim kind. **Unknown subject kinds must fail closed** — Lane D's invariant 14.
+
+**Do these one at a time, smallest first, committing separately.** D54 and D50 are the smallest;
+D51 and D52 touch the most callers; D53 needs the subject-ref parser first.
+
+**If any consolidation would change what a person sees, STOP and report before doing it.** These
+are ownership moves, not behaviour changes.
+
+**Constraints:** every one of Lane D's 15 invariants (§12 of the findings) holds throughout —
+especially *organisational goals never silently become personal goals*, *polarity is never a
+permanent property of an actor*, and *no ontology edge is manufactured for coherence*.
+
+---
+
 ## 1 · WHAT THIS PROGRAMME IS NOT
 
-- **Not licence to build an Objective, Goal, Trait or Focus subsystem.** Lane D decides whether any
-  of those need to exist at all. Building one first is precisely the duplication the brief exists
-  to prevent.
+- **Not licence to build an Objective, Goal, Trait or Focus subsystem.** Lane D ruled and the
+  founder adjudicated: every one of them REUSES something that already exists (D50–D54). A Goal
+  is a Focus; a relationship is an Inquiry. **Anything that creates a new store here has misread
+  the whole programme.**
 - **Not licence to add a dashboard**, a score on a person (D14b), a colour that carries meaning
   (D14b), or a second store of anything.
 - **Not licence to widen a scope, lower a floor, or relax an audience rule** to make a lane land.

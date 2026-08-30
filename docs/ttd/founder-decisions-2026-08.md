@@ -11,7 +11,7 @@ an agent finding it inconvenient.
 
 ---
 
-## THE INDEX — forty-nine decisions, one line each
+## THE INDEX — fifty-four decisions, one line each
 
 **The shape of the product**
 
@@ -84,6 +84,16 @@ an agent finding it inconvenient.
 | **D47** | A branch sets its own **route**, never its own **destination**. Comparison stays aggregate | node intent |
 | **D48** | **Maturity is an outcome, not a display filter.** Priority decides what shows; watch the maturity RATE | Home, the pilot metric |
 | **D49** | A **condition for success is a High** — `condition` stays mapped to `opportunity` | polarity |
+
+**The five ownership calls (Lane D, gate C)**
+
+| | Decision | |
+|---|---|---|
+| **D50** | An **Objective** lives in the org-context record — with who declared it and when | org intent |
+| **D51** | **A Goal IS a Focus** — self, invited, assigned; room or parallel. No second lifecycle | goals, focus |
+| **D52** | **Focus runs on the Action/Intervention loop** — the only one that closes back into evidence | intervention |
+| **D53** | **A relationship claim IS an Inquiry.** No edge store | the world model |
+| **D54** | **`orgNodes`** is the group model; `orgGroups` is legacy | org graph |
 | **D40** | On leaving: their record goes, the contribution **survives anonymised**. Leaving is not withdrawing — **CORRECTED** | deletion |
 | **D41** | **Nothing extra is refused.** IntelliQ hears anything, reasons about work, performance and wellbeing | the agent |
 
@@ -1716,7 +1726,73 @@ one line in `ai/intelligence-feed.js` if experience contradicts it.
 
 ---
 
-## WHAT THESE FORTY-NINE CHANGE ABOUT THE PLAN
+## D50–D54 · THE FIVE OWNERSHIP CALLS
+
+Lane D found ~80% of the world model already built and returned **gate C: overlapping primitives
+requiring consolidation**. Five things do jobs that two or three other things also do. These pick
+the winner in each case. **No new stores, no new engines, no new ontology.**
+
+### D50 · An Objective lives where the organisation's intent lives
+
+*"Leadership is something we develop here"* is stored in the **org-context record**, beside the
+organisation's purpose, values and definition of success — so it carries **who declared it and
+when**, and changes by supersession with the old version kept (D46). `orgGoals` becomes an alias
+pointing at it.
+
+**Why this and not the plain list:** without provenance nobody can ask *"who decided leadership
+mattered, and when did that change?"* — and a mid-season change would overwrite silently, which
+D46 forbids.
+
+### D51 · A GOAL IS A FOCUS. Same shape, same three ways.
+
+The founder rejected the offered options and gave a better answer:
+
+> *"It's the same as focuses, but for goals. You can get assigned a certain goal or trait to work
+> on by your coach if he wants you to develop. Works similarly to shared focus with the two of
+> you. Can make it a room one with a copy or a forum one."*
+
+**Decision:** a Goal reuses the Focus shape entirely — **self, invited, assigned** (D2) — in
+**both shapes**, room and parallel (D14). An assigned goal creates a shared space between the
+coach and the person.
+
+**This is a stronger reuse than the one recommended**, which proposed a separate person-owned aim
+lifecycle. There is no second lifecycle: a Goal is a Focus with a longer horizon.
+
+**And it preserves the rule that mattered.** *"A leader wanting something is not the person's
+goal"* survives for free, because invitation and acceptance are already explicit in the Focus
+shape. No new state machine is needed to protect it.
+
+### D52 · Focus runs on the Action/Intervention loop
+
+Three things do this today. The winner is the nine-route
+`propose → approve → execute → observe → evaluate` loop, **because it is the only one that closes
+back into evidence** — so the organisation learns whether a focus worked. The personal profile
+focus has no outcome loop at all; `teamFocuses` has one but only at team grain.
+
+**Focus is the word a person sees. The Action loop is what runs underneath.** Note this switches
+that loop on, which D31 kept dark for the pilot — **D31 still holds for autonomous action**;
+what is being used here is the outcome-learning half, not execution without approval.
+
+### D53 · A relationship claim IS an Inquiry. No edge store.
+
+*"D contributes to leadership in Group X"* is an uncertain claim, so it is held as one.
+
+**What this buys, free, from machinery that is already built and already tested:** support and
+challenge · confidence derived from evidence · correction and supersession · contested state ·
+falsifiers · a timeline of how the understanding changed · the cohort floor · the audience model.
+
+A dedicated edge table would need every one of those rebuilt for a second kind of object. This is
+the single largest saving in the whole reconciliation.
+
+### D54 · `orgNodes` is the group model — taken on the recommendation
+
+`orgGroups` is legacy and `docs/INDEX.md` already carries "two group models" as duplication debt.
+Callers migrate; both are not maintained. **Flag if this is wrong** — it is the one of the five
+taken without a founder question, because nothing in the product depends on `orgGroups` surviving.
+
+---
+
+## WHAT THESE FIFTY-FOUR CHANGE ABOUT THE PLAN
 
 The sequence in `docs/ttd/object-as-conversation.md` §5 still holds, with one insertion.
 
