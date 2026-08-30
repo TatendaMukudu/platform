@@ -9382,12 +9382,14 @@ function _resolveSubjectRef(code, ref) {
   return parsed;
 }
 function _inquiryFor(code, subjectRef, concept, label, domain, now) {
-  if (!_resolveSubjectRef(code, subjectRef)) return null;
+  const subject = _resolveSubjectRef(code, subjectRef);
+  if (!subject) return null;
   const byOrg = inquiryStates[code] || (inquiryStates[code] = {});
   const bySubject = byOrg[subjectRef] || (byOrg[subjectRef] = {});
   const key = String(concept || 'general').toLowerCase();
   if (!bySubject[key]) {
     bySubject[key] = diagnose.newInquiry({ id: 'inq_' + generateId(), subjectRef, concept: key, label, domain, now });
+    if (subject.kind === 'relationship-claim') bySubject[key].relationshipClaim = { claimId: subject.id };
   }
   return bySubject[key];
 }

@@ -215,6 +215,7 @@ const SUITES = [
   'subject-ref-smoke.js', // Lane F: typed member/group/organisation/relationship subjects; unknown kinds fail closed
   'goal-focus-owner-smoke.js', // D51: personal goals are Focus records; legacy profile storage carries no goal copy
   'focus-action-owner-smoke.js', // D52: Focus is projected over the existing Action outcome-learning loop
+  'relationship-inquiry-owner-smoke.js', // D53: relationship claims reuse Inquiry; no edge store
   'curiosity-stopping-smoke.js', // D35: conversation-only inquiry and question caps, cooldown, and permanent decline
   'curiosity-stopping-wired-http-smoke.js', // D35, WIRED: the kernel above is actually called — every Lane C call site in server.js turns an assertion here red when removed
   'nav-buckets-http-smoke.js', // D1/D7/D10/D13: one filtered four-bucket surface at both grains; priority, parked reasons and L-OC1 threads
