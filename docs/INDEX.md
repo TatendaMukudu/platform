@@ -103,15 +103,20 @@ can now be built. Nothing else is blocked on a missing substrate.
 > **BAR ONE IS COMPLETE.** Every "nothing breaks" blocker under D33 is closed and
 > mutation-tested. What remains is product, not breakage.
 
-**The Codex queue, in order — all written, all ready to send:**
+**ONE WORK ORDER FINISHES THE ARCHITECTURE:** `briefs/final-architecture-programme.md` — five
+lanes, a conflict matrix, a run order, and a stop rule per lane. **After it there is no
+architectural work left**, front or back; what remains is a live database, a staging deploy and
+real people.
 
-| | Work order | What it is |
+The lanes, and the individual prompts they replace:
+
+| Lane | Work | Was |
 |---|---|---|
-| 1 | **§29** the four nav buckets (D1) | the last piece of the shape. **Reuse the feed — do not write a second card renderer** |
-| 2 | **§30** one voice — move `proactive.js`'s 30 message tables into `ai/voice.js` (D30) | backend; will not collide with §29 |
-| 3 | **§16** the curiosity stopping rule | **required before the thread may ask questions** (D35) |
-| 4 | **§28** world-model reconciliation | **READ-ONLY** — `briefs/world-model-reconciliation.md` |
-| 5 | **§31** one home — `app.js` absorbs `member-view.js` (D24) | **LAST.** Ends with a file deleted |
+| **A** | the four nav buckets, plus thread routes for Focus/High/Low (D1) | §29 |
+| **B** | one voice — `proactive.js`'s 30 message tables move into `ai/voice.js` (D30) | §30 |
+| **C** | the curiosity stopping rule — **a dependency, not a refinement** (D35) | §16 |
+| **D** | world-model reconciliation — **READ-ONLY**, runs at any point | §28 |
+| **E** | one home — `app.js` absorbs `member-view.js` (D24). **LAST**, ends with a file deleted | §31 |
 
 **Done:** §19 safeguarding screen · §20 answerability screen · §21 the primitive decides ·
 §22 one polarity vocabulary · §23 what was shown to whom · §24 the leader attribution guard ·
