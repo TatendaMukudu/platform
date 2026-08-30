@@ -9140,7 +9140,7 @@ function _turnAbout(about) {
   return (h || b) ? { headline: h, body: b } : null;
 }
 
-async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null } = {}) {
+async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null, conversation = null } = {}) {
   // Every stage below used to fail silently into the deterministic path. The symptom of a
   // composer that never runs is not an error — it is a reply that reads like a template,
   // which is indistinguishable from a composer that ran and wrote something dull. Each exit
@@ -9228,8 +9228,7 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     // valuable one it has.
     let need = null;
     try {
-      const candidates = Object.values(mine).flatMap(i => diagnose.frontierFor(i));
-      need = diagnose.nextNeed(null, candidates);
+      need = diagnose.nextConversationNeed(Object.values(mine), conversation || {}, now);
     } catch (_) {}
     const contextText = composer.buildContext({
       name: _firstName(code, userId), role: u.role || 'member',
@@ -9258,6 +9257,7 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
       _metric(code, 'composer_refused');
       return null;                       // degrade to the deterministic path — never ship it
     }
+    if (need && conversation) diagnose.recordConversationQuestion(conversation, need.candidate, now);
     _metric(code, 'composer_used');
     return { answer: written, grounded: beliefs.length + evidence.length > 0 };
   } catch (e) {
@@ -9339,7 +9339,7 @@ function _inquiryById(code, subjectRef, inquiryId) {
   return null;
 }
 
-async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = [] } = {}) {
+async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = [], conversationId = null } = {}) {
   if (!IQ_COMPOSER || !ai.enabled() || !_llmBudgetOk(code)) {
     if (IQ_COMPOSER) console.log(`[intake] skipped — ${!ai.enabled() ? 'no model configured' : 'org over LLM budget'}`);
     return null;
@@ -9408,6 +9408,8 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
     // Group by the concept each proposal names, so one utterance can touch several inquiries.
     const now = Date.now();
     const subjectRef = `member:${userId}`;
+    const conversation = (assistantConversations[_wsKey(code, userId)] || []).find(c => c && c.id === conversationId) || null;
+    const createdIds = conversation && Array.isArray(conversation.intakeInquiryIds) ? conversation.intakeInquiryIds : [];
     const byConcept = {};
     for (const p of accepted) {
       const c = String(p.domainConcept || p.concept || 'general').toLowerCase();
@@ -9433,13 +9435,13 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
     // Where each surviving concept's evidence actually lands, and under which key.
     const routeFor = (concept) => {
       const claim = claims.get(concept) || {};
-      const r = diagnose.resolveIdentity({
+      const proposed = diagnose.resolveIdentity({
         concept,
         relationship: claim.relationship,
         targetId: claim.targetInquiryId || claim.targetConceptId,
         reason: claim.reason,
       }, _frontier);
-      return r;
+      return diagnose.enforceConversationRoute({ concept, route: proposed, frontier: _frontier, createdIds });
     };
 
     // What the model could not tell from what was said. Each unknown belongs to the inquiry it
@@ -9455,6 +9457,10 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
     const touched = [];
     for (const [concept, props] of Object.entries(grouped)) {
       const route = routeFor(concept);
+      if (route.action === 'skip') {
+        console.log(`[intake] ${concept} -> held (${route.reason})`);
+        continue;
+      }
       // Evidence that merely relates to an open question does not open a line of its own.
       if (route.action === 'link') {
         const t = _inquiryById(code, subjectRef, route.targetId);
@@ -9490,6 +9496,10 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
           console.log(`[intake] ${concept} -> refines ${route.targetId} (${route.reason})`);
         } else {
           console.log(`[intake] ${concept} -> new (${route.reason})`);
+          if (conversation && !createdIds.includes(inq.inquiryId)) {
+            createdIds.push(inq.inquiryId);
+            conversation.intakeInquiryIds = createdIds.slice(0, diagnose.CONVERSATION_NEW_INQUIRY_CAP);
+          }
         }
         diagnose.addAlias(inq, concept, { at: new Date(now).toISOString(), relationship: route.action === 'refine' ? 'REFINES' : 'NEW', targetId: route.targetId || null, concept, reason: route.reason });
       }
@@ -12442,6 +12452,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // repeated, which is machine chatter presented as though the person had written it.
   const _convSeed = (opts.about && opts.about.headline) ? String(opts.about.headline) : text;
   const _conv = _resolveConversation(_convKey, opts.conversationId, _convSeed, Date.now(), opts.about || null);
+  diagnose.noteConversationResponse(_conv, text);
   const priorMessages = (_conv.messages || []).slice(-8).map(m => ({ role: m.role, text: m.text }));
 
   // ── DUTY OF CARE (first, deterministic) ──────────────────────────────────────
@@ -12725,7 +12736,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // "save this as X"), where the deterministic confirmation IS the right answer.
   if (IQ_COMPOSER && String(text || '').trim() && !(cls.command && cls.command.payload)) {
     composedReply = await _composeTurn(code, userId, cls.questionText || text, {
-      priorMessages, workCtx, actions: proposals, about: _turnAbout(opts.about),
+      priorMessages, workCtx, actions: proposals, about: _turnAbout(opts.about), conversation: _conv,
     });
   }
   if (composedReply) parts.push(composedReply.answer);
@@ -12811,7 +12822,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // THE EARS, last and unawaited. Understanding the turn must never delay answering it — this
   // improves the NEXT reply, not this one. A crisis turn exits far above and never reaches here.
   if (opts.subjectMemberId == null) {
-    Promise.resolve().then(() => _intakeTurn(code, userId, text, { turnId: turn.turnId, priorMessages })).catch(() => {});
+    Promise.resolve().then(() => _intakeTurn(code, userId, text, { turnId: turn.turnId, priorMessages, conversationId: _conv.id })).catch(() => {});
   }
   return { turn, response, saved, capturePrompt, conversationId: _conv.id, interpretation: { turnId: interp.turnId, originalInputRef: rawRef, candidateIntents: interp.candidateIntents,
     candidateClaims: interp.candidateClaims, suggestedPrivacy: interp.suggestedPrivacy, proposedActions: interp.proposedActions,

@@ -778,6 +778,71 @@ function nextNeed(inquiry, candidates = []) {
     distinguishes: Array.isArray(top.resolves) ? top.resolves : (top.resolves ? [top.resolves] : []) };
 }
 
+/* D35 — conversation curiosity is deliberately quiet. Three questions is enough room for a
+   useful exchange without letting one thread become a form; seven days prevents a reopened
+   thread from immediately repeating itself. These limits govern conversation only — autonomous
+   organisational inquiries have their own policy. */
+const CONVERSATION_QUESTION_CAP = 3;
+const QUESTION_COOLDOWN_MS = 7 * 86400000;
+const CONVERSATION_NEW_INQUIRY_CAP = 2;
+const _questionKey = q => _norm(typeof q === 'string' ? q : (q && q.question) || '');
+
+function nextConversationNeed(inquiries = [], conversation = {}, now = Date.now()) {
+  const state = conversation.curiosity || {};
+  const asked = Array.isArray(state.asked) ? state.asked : [];
+  if (asked.length >= CONVERSATION_QUESTION_CAP) return null;
+  const declined = new Set(state.declined || []), disengaged = new Set(state.disengaged || []);
+  const candidates = (Array.isArray(inquiries) ? inquiries : []).flatMap(frontierFor).filter(c => {
+    const key = _questionKey(c);
+    if (!key || declined.has(key) || disengaged.has(key)) return false;
+    const prior = [...asked].reverse().find(a => a && a.key === key);
+    return !prior || now - Number(prior.at || 0) >= QUESTION_COOLDOWN_MS;
+  });
+  return nextNeed(null, candidates);
+}
+
+function recordConversationQuestion(conversation = {}, candidate, now = Date.now()) {
+  const key = _questionKey(candidate);
+  if (!key) return false;
+  const state = conversation.curiosity || (conversation.curiosity = {});
+  const asked = state.asked || (state.asked = []);
+  if (asked.length >= CONVERSATION_QUESTION_CAP) return false;
+  asked.push({ key, inquiryId: candidate.inquiryId || null, at: now });
+  return true;
+}
+
+function noteConversationResponse(conversation = {}, text = '') {
+  const state = conversation.curiosity;
+  const last = state && Array.isArray(state.asked) && state.asked[state.asked.length - 1];
+  if (!last || last.responded) return null;
+  last.responded = true;
+  const words = String(text || '').trim();
+  const target = /\b(no|nope|rather not|don't want|do not want|leave it|stop asking|not discussing)\b/i.test(words)
+    ? 'declined' : (words.length < 8 ? 'disengaged' : null);
+  if (target) {
+    const list = state[target] || (state[target] = []);
+    if (!list.includes(last.key)) list.push(last.key);
+  }
+  return target;
+}
+
+/* A model may propose NEW; the kernel owns whether NEW is permitted. A concept already named
+   by the frontier always attaches, and after two genuinely new inquiries in one conversation
+   the quieter outcome wins: attach to an existing line when possible, otherwise do nothing. */
+function enforceConversationRoute({ concept, route, frontier = [], createdIds = [] } = {}) {
+  const r = route || { action: 'skip' };
+  if (r.action !== 'create') return r;
+  const match = (frontier || []).find(f => [_norm(f.concept), _norm(f.label), ...(f.aliases || []).map(_norm)].includes(_norm(concept)));
+  if (match) return { action: 'apply', relationship: 'SAME_AS', targetId: match.inquiryId, reason: 'existing conversation inquiry already covers this concept' };
+  if ((createdIds || []).length >= CONVERSATION_NEW_INQUIRY_CAP) {
+    const nearest = (frontier || [])[0];
+    return nearest
+      ? { action: 'apply', relationship: 'SAME_AS', targetId: nearest.inquiryId, reason: 'conversation inquiry cap reached — attached to the open frontier' }
+      : { action: 'skip', relationship: 'NEW', targetId: null, reason: 'conversation inquiry cap reached' };
+  }
+  return r;
+}
+
 /* ── 6. THE EXTRACTION PROMPT ────────────────────────────────────────────────
    What the model is asked for at intake. Note what it is NOT asked for: a conclusion, or a
    confidence number. Both are computed here from the shape of the evidence. */
@@ -1118,6 +1183,8 @@ module.exports = {
   LEVELS, LEVEL_RANK, MODEL_MAY_PROPOSE, INTAKE_PROMPT, boundFrontier,
   groundProposals, deriveConfidence, newInquiry, newHypothesis, applyProposals, frontierFor,
   diagnosticYield, rankQuestions, nextNeed, consolidate,
+  CONVERSATION_QUESTION_CAP, QUESTION_COOLDOWN_MS, CONVERSATION_NEW_INQUIRY_CAP,
+  nextConversationNeed, recordConversationQuestion, noteConversationResponse, enforceConversationRoute,
   RELATIONSHIPS, resolveIdentity, addAlias,
   // Origin + correction: what evidence is based on, and what happens when it turns out to be wrong.
   ORIGIN_KINDS, SIGNAL_STATUSES, UNKNOWN_ORIGIN_CAP, REFUTATION_MARGIN, CONTEST_MARGIN,
