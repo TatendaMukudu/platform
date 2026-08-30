@@ -33,6 +33,17 @@ else
   bad "cannot fetch origin — fix connectivity before starting, not after"
 fi
 
+# 2b ── Can we PUSH? Fetch proves only READ access. This gap was flagged early and left open,
+#       and it then cost two completed lanes of work: an agent finished them, committed, and
+#       discovered at push time that its credentials were read-only. A dry run authenticates
+#       against the remote without creating anything.
+if git push --dry-run origin HEAD:refs/heads/codex/connectivity-check >/dev/null 2>&1; then
+  ok "push authenticated (dry run) — work committed here can actually leave this machine"
+else
+  bad "CANNOT PUSH — fetch works but push auth fails. Fix credentials BEFORE writing code."
+  say "" "everything you commit will be stranded in this workspace and lost when it is reclaimed"
+fi
+
 # 3 ── The branch. The single most expensive mistake available here.
 CURRENT="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
 if [ "$CURRENT" = "$DEV_BRANCH" ]; then

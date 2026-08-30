@@ -293,8 +293,16 @@ Use this instead of #1 when the PR claims to have fixed something important.
 >
 > **The stopping rule, deterministic:**
 >
-> - A question may only be asked when it is attached to an inquiry with a live `missingSignals`
->   entry. No free-floating questions.
+> - **Scoped to the CONVERSATION path only** — the assistant turn and the object thread. A question
+>   raised there may only be asked when attached to an inquiry with a live `missingSignals` entry.
+>
+>   **`_pendingInquiries` / `GET /api/inquiry/pending` is OUT OF SCOPE and must not change.** It
+>   derives *organisational* uncertainties — a record going stale, an org-state gap — and already
+>   carries its own stopping rule: a value gate, a health guard, "never ask what we could answer
+>   ourselves", a dismissal cooldown and `maxAsks: 8`. `inquiry-http-smoke` positively asserts that
+>   behaviour and those assertions are correct. An earlier wording of this rule said "no
+>   free-floating questions" without qualification, which read as a demand to break them; that was
+>   a defect in this prompt, not in the code.
 > - The same unknown is not re-asked within a cooling window.
 > - An unknown a person did not engage with is marked and not re-asked. Declined means declined.
 > - A hard per-conversation cap, so a bad turn cannot produce an interrogation.

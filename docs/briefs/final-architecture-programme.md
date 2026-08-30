@@ -116,6 +116,18 @@ a dependency:**
 Execute §16 as written. It gates the step after this programme — the thread asking the next best
 question — so it must land before any curiosity ships.
 
+> **SCOPE, corrected after a first attempt stopped here — correctly.** §16 governs the
+> **conversation path only**: the assistant turn and the object thread. Everything in it is about
+> that path — *"every interaction may open a new first-class inquiry"*, *"a hard per-conversation
+> cap"*, *"twenty routine interactions on one subject"*.
+>
+> **`_pendingInquiries` / `GET /api/inquiry/pending` is OUT OF SCOPE and must not change.** It
+> derives *organisational* uncertainties and already carries its own stopping rule — a value gate,
+> a health guard, "never ask what we could answer ourselves", a dismissal cooldown and
+> `maxAsks: 8`. `inquiry-http-smoke` positively asserts that behaviour and **those assertions are
+> correct**. The earlier unqualified "no free-floating questions" read as a demand to break them;
+> that was a defect in the prompt, not in the code.
+
 ---
 
 ## LANE D · WORLD-MODEL RECONCILIATION *(READ-ONLY)*
