@@ -78,7 +78,7 @@ const KNOWN_ORPHANS = new Set([
 ]);
 
 const server = R('server.js');
-const FRONT_FILES = ['js/app.js', 'js/member-view.js', 'js/auth.js', 'js/chat.js', 'js/data.js',
+const FRONT_FILES = ['js/app.js', 'js/auth.js', 'js/chat.js', 'js/data.js',
   'js/ui.js', 'js/tree.js', 'js/attachments.js', 'js/scenarios.js', 'js/charts.js', 'index.html'];
 const front = FRONT_FILES.map(R).join('');
 

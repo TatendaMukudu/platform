@@ -151,7 +151,7 @@ const server = app.listen(0, async () => {
     ok('20. no new Studio-named architecture is introduced (unified assistant, MyWorkspace)',
        !/\/api\/studio|studioTurns|StudioAssistant/.test(block) && /assistant\/turn/.test(runtimeSrc));
     ok('20b. the frontend routes ONE composer through the unified runtime (no separate Me/Plans/Notes chat)',
-       /\/api\/assistant\/turn/.test(fs.readFileSync(path.join(__dirname, '..', 'js', 'member-view.js'), 'utf8')));
+       /\/api\/assistant\/turn/.test(fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8')));
 
     // ── Auth ───────────────────────────────────────────────────────────────────
     ok('E1. the assistant turn requires auth (401)', (await call('/api/assistant/turn', null, { method: 'POST', body: { text: 'x' } })).status === 401);

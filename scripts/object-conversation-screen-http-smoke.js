@@ -76,7 +76,7 @@ const server = S.app.listen(0, async () => {
       && !storedAfter.includes('new timetable is making attendance harder')
       && !storedAfter.includes('What would change my mind'));
 
-    const ui = fs.readFileSync(path.join(__dirname, '..', 'js', 'member-view.js'), 'utf8');
+    const ui = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
     ok('OC4 the screen has exactly the four object headings and the one two-item overflow',
       ['The claim', 'Why I think that', 'What I still don’t know', 'What would change my mind'].every(h => ui.includes(`>${h}<`))
       && (ui.match(/MemberApp\.inquiryOverflow\('/g) || []).length === 2

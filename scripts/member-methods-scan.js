@@ -7,7 +7,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const src = fs.readFileSync(path.join(__dirname, '..', 'js', 'member-view.js'), 'utf8');
+const src = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
 
 let pass = 0, fail = 0;
 const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n); } };

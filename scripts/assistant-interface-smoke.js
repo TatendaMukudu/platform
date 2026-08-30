@@ -45,7 +45,7 @@ const tokBoss = issueToken(boss, CODE, 'admin');
 let pass = 0, fail = 0;
 const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++; console.log('  ✗', n); } };
 const read = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
-const mv = read('js/member-view.js'), ui = read('js/ui.js'), html = read('index.html'), css = read('css/member.css');
+const mv = read('js/app.js'), ui = read('js/ui.js'), html = read('index.html'), css = read('css/member.css');
 
 const server = app.listen(0, async () => {
   const baseUrl = `http://127.0.0.1:${server.address().port}`;

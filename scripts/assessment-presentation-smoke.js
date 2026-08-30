@@ -119,7 +119,7 @@ const server = app.listen(0, async () => {
     // ── 6 / 7. Frontend neutralization (static source guards) ──────────────────
     const read = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
     const win = (src, marker, n = 260) => { const i = src.indexOf(marker); return i >= 0 ? src.slice(i, i + n) : ''; };
-    const ui = read('js/ui.js'), mv = read('js/member-view.js'), sc = read('js/scenarios.js');
+    const ui = read('js/ui.js'), mv = read('js/app.js'), sc = read('js/scenarios.js');
     ok('6. ui.scoreLabel no longer derives a qualitative verdict from a raw score',
        !/Excellent|Good|Average|Needs Support/.test(win(ui, 'function scoreLabel')) && /NEUTRALIZED/.test(win(ui, 'function scoreLabel')));
     ok('6b. scenarios.getScoreLabel no longer derives a verdict from a raw score',

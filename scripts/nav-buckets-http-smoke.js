@@ -34,7 +34,7 @@ const server = app.listen(0, async () => {
     userAiProfiles[`${CODE}:member`].focuses[1].text = 'Recomposed current focus';
     const second = await get('/api/objects/focus/focus-high/thread?scope=self');
     ok('A4 every object thread recomposes its opening and stores no projection', first.status === 200 && second.body.opening.claim.includes('Recomposed current focus') && first.body.opening.claim !== second.body.opening.claim && assistantConversations[`${CODE}:member`].length === 0);
-    const member = fs.readFileSync(require.resolve('../js/member-view.js'), 'utf8');
+    const member = fs.readFileSync(require.resolve('../js/app.js'), 'utf8');
     ok('A5 the four routes share one card renderer and carry no count badges', /const card = item =>/.test(member) && (member.match(/const card = item =>/g) || []).length === 1 && ['Inquiries','Focuses','Highs','Lows'].every(x => member.includes(`label: '${x}'`)) && !/badge/i.test(member.slice(member.indexOf('_NAV:'), member.indexOf('navToggle()'))));
   } catch (e) { console.error(e); fail++; }
   server.close(() => { console.log(`\nnav-buckets-http-smoke: ${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); });

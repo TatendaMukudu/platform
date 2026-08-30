@@ -522,7 +522,7 @@ const inq = (o = {}) => ({
     // Without a way to declare valence, every contribution defaults to `unsure`, no inquiry
     // ever gains a polarity, and the team surface can never show a High or a Low at all.
     // The capture path is therefore load-bearing, not a nicety.
-    const mv = fs.readFileSync(path.join(__dirname, '..', 'js', 'member-view.js'), 'utf8');
+    const mv = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
     const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
     const mcss = fs.readFileSync(path.join(__dirname, '..', 'css', 'member.css'), 'utf8');
     ok('13 · the member surface has a slot for their own group noticings',
