@@ -23,6 +23,7 @@ const behaviour = read('ai/behaviour.js');
 const proactive = read('ai/proactive.js');
 const polarityOwner = read('ai/intelligence-feed.js');
 const server    = read('server.js');
+const voice     = read('ai/voice.js');
 
 // The server + ai COMPUTATION layer, excluding the behaviour layer itself.
 const aiFiles = fs.readdirSync(path.join(root, 'ai')).filter(f => f.endsWith('.js') && f !== 'behaviour.js').map(f => 'ai/' + f);
@@ -77,6 +78,15 @@ ok('server composes the opening only via behaviour.opening', /behaviour\.opening
 //     (`_attInsights`), not recomputed from the detectors.
 ok('me/context consumes the one pipeline (noticed derived from _proactiveInsights)',
    /_att\s*=\s*_proactiveInsights/.test(server) && /noticed = _attInsights\.map/.test(server));
+
+// 8 · D30: deterministic person-facing pattern and assessment prose has one owner.
+ok('voice.js is the single owner of person-facing pattern prose',
+   /const PATTERN_MESSAGES\s*=/.test(voice) && /const PATTERN_EXPLORE\s*=/.test(voice)
+   && /const STRUCTURE_LABEL\s*=/.test(voice) && /const RATIO_LABEL\s*=/.test(voice)
+   && aiFiles.filter(f => f !== 'ai/voice.js').every(f => {
+     const src = read(f);
+     return !/const (PATTERN_MESSAGES|MESSAGES|PATTERN_EXPLORE|EXPLORE|STRUCTURE_LABEL|RATIO_LABEL)\s*=\s*[{[]/.test(src);
+   }));
 
 console.log(`\ngovernance-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -32,13 +32,7 @@ const PRIMITIVE = {
   RELATIONAL: 'relational', CAPABILITY: 'capability', LOAD: 'load', RESOURCE: 'resource',
 };
 
-const STRUCTURE_LABEL = {
-  withdrawal: 'Pulling back',
-  data_gap:   'Gone quiet',
-  isolation:  'Becoming isolated',
-  overload:   'Overload risk',
-  plateau:    'Plateau',
-};
+const STRUCTURE_LABEL = require('./voice').STRUCTURE_LABEL;
 
 /* Canonical empirical identities — the measured dimensions and observed structures
    already owned by the kernel. This is the single machine-readable vocabulary used

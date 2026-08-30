@@ -25,6 +25,8 @@
        inferred; normalizePreferences() drops anything off the allow-list.
    ============================================================ */
 
+const voice = require('./voice');
+
 // Ranking — severity first, then how confident the kernel is. Lower = surfaced first.
 
 /* ── Polarity — the Attention Engine's core idea ─────────────────────────────
@@ -50,13 +52,7 @@ const PATTERN_POLARITY = {
    Non-alarmist for risks, reinforcing for wins. Never diagnose, predict, or assume
    a cause; always an invitation, phrased as a question. These let the assistant
    BEGIN a conversation from a verified artifact instead of waiting to be asked. */
-const EXPLORE = {
-  risk:        { self: 'Would you like to explore what changed — or think about who could support you?', leader: 'Want help preparing a supportive check-in?' },
-  progress:    { self: 'What do you think helped create this? Worth protecting what’s working.',          leader: 'Worth recognising — want help finding the right words?' },
-  milestone:   { self: 'Worth pausing on — want to note what made it possible, so you can keep it going?', leader: 'A good moment to acknowledge — want to prepare a note?' },
-  opportunity: { self: 'Want to explore building on this?',                                                leader: '' },
-  neutral:     { self: 'Want to take a look together?',                                                    leader: '' },
-};
+const EXPLORE = voice.PATTERN_EXPLORE;
 
 /* ── Per-pattern DETERMINISTIC message structures ────────────────────────────
    audience 'self'   — the person, about their OWN week. May be specific; it's
@@ -68,104 +64,7 @@ const EXPLORE = {
                        imply a private disclosure, the leader form stays generic
                        and leans on the care flag.
    Each returns { headline, body, suggestion }. No AI, ever. */
-const MESSAGES = {
-  baseline_shift: {
-    self:   { headline: 'Something shifted from your usual',
-              body: 'A few things are running differently from your own normal lately. Not good or bad — just different. Worth a moment to notice.',
-              suggestion: 'Take a minute to reflect on what changed this week.' },
-    leader: { headline: 'Unusual for them',
-              body: "Something is running differently from this person's own normal lately. A curious, no-assumptions check-in may help.",
-              suggestion: 'Consider a gentle 1:1 — lead with curiosity, not conclusions.' },
-  },
-  momentum_drop: {
-    self:   { headline: 'Your momentum has dipped',
-              body: 'Your recent check-ins are running lower than they were. That happens. If something is weighing on you, this is a good place to name it.',
-              suggestion: 'Log how you’re really doing — no pressure to fix anything.' },
-    leader: { headline: 'Momentum dropping',
-              body: 'Their recent momentum looks softer than before. A personal check-in — listening first — is usually the right first step.',
-              suggestion: 'Consider reaching out for a supportive check-in.' },
-  },
-  quiet_improvement: {
-    self:   { headline: 'You’ve been quietly climbing',
-              body: 'Things have been trending up for you lately, without much fanfare. Worth acknowledging to yourself.',
-              suggestion: 'Note what’s been working — so you can keep doing it.' },
-    leader: { headline: 'Quiet improvement',
-              body: 'They’ve been improving quietly, with little recognition. A specific, genuine acknowledgement tends to make gains hold.',
-              suggestion: 'Consider recognising the progress specifically.' },
-  },
-  recovering: {
-    self:   { headline: 'You’re climbing back',
-              body: 'You were in a rougher patch and you’ve been climbing back toward your normal. That took something — good to see.',
-              suggestion: 'Acknowledge the turnaround to yourself — naming it helps it hold.' },
-    leader: { headline: 'Climbing back',
-              body: 'They’ve climbed out of a dip toward their own normal. Naming the turnaround out loud helps it stick.',
-              suggestion: 'Consider acknowledging the turnaround.' },
-  },
-  repeated_concern: {
-    self:   { headline: 'A theme keeps coming up',
-              body: 'The same concern has surfaced a few times now. Recurring things are worth a single, focused look rather than many small ones.',
-              suggestion: 'Pick one small focus for the recurring theme.' },
-    leader: { headline: 'Repeated concern',
-              body: 'A theme has recurred for them more than once — not a one-off. Naming it together and agreeing one small shared focus can help.',
-              suggestion: 'Consider a conversation to name the recurring theme together.' },
-  },
-  member_team_divergence: {
-    self:   { headline: 'You’re on a different track from the group',
-              body: 'Your trajectory is moving differently from your team’s lately. Neither is wrong — but it can be worth understanding why.',
-              suggestion: 'Reflect on what’s pulling you a different way right now.' },
-    leader: { headline: 'Pulling away from the team',
-              body: 'Their trajectory is diverging from the group’s. A 1:1 to understand what’s pulling them a different way — to integrate, not push — can help.',
-              suggestion: 'Consider a 1:1 to understand the divergence.' },
-  },
-  invisible_load: {
-    self:   { headline: 'You may be carrying a lot for others',
-              body: 'You’ve been supporting others a lot lately. Make sure you’re not carrying more than is sustainable.',
-              suggestion: 'Check what you can hand off or set down this week.' },
-    leader: { headline: 'Carrying invisible load',
-              body: 'They may be carrying a lot for others while under strain themselves. Offering to redistribute, or simply acknowledging the load, can help.',
-              suggestion: 'Consider checking whether some load can be redistributed.' },
-  },
-  withdrawal: {
-    self:   { headline: 'You’ve been pulling back',
-              body: 'Your participation has eased off from your own normal. If something changed, this is a good place to say so.',
-              suggestion: 'Share what changed — even a line helps IntelliQ support you.' },
-    leader: { headline: 'Pulling back',
-              body: 'Their participation is easing from their own normal. Reaching out — asking what changed and listening first — is a good first step.',
-              suggestion: 'Consider reaching out to ask how they’re doing.' },
-  },
-  data_gap: {
-    self:   { headline: 'It’s been quiet',
-              body: 'You were checking in regularly, then it went quiet. No pressure — whenever you’re ready, IntelliQ is here.',
-              suggestion: 'A quick check-in whenever it suits you.' },
-    leader: { headline: 'Gone quiet',
-              body: 'They were regular, then went quiet. A simple, no-assumptions “thinking of you, how are things?” is usually enough.',
-              suggestion: 'Consider a light, no-assumptions reconnect.' },
-  },
-  isolation: {
-    self:   { headline: 'Your connections have thinned',
-              body: 'Your connection signals have been thinning lately. A shared task or a peer catch-up can help re-anchor things.',
-              suggestion: 'Reach out to one person this week.' },
-    leader: { headline: 'Becoming isolated',
-              body: 'Their connection signals are thinning. A shared task or a peer check-in can help reconnect them.',
-              suggestion: 'Consider helping them reconnect — a shared task or peer check-in.' },
-  },
-  overload: {
-    self:   { headline: 'You may be overloaded',
-              body: 'Demand looks high while wellbeing has dipped. Before pushing further, it’s worth easing something.',
-              suggestion: 'Defer or drop one thing this week.' },
-    leader: { headline: 'Overload risk',
-              body: 'Demand appears high while wellbeing is down. Removing or deferring something before pushing further can help.',
-              suggestion: 'Consider easing their load before adding to it.' },
-  },
-  plateau: {
-    self:   { headline: 'Things have plateaued',
-              body: 'Steady effort, but growth has flattened. A change of stimulus — a new challenge or approach — can restart it.',
-              suggestion: 'Try one new challenge or approach.' },
-    leader: { headline: 'Plateau',
-              body: 'Growth has flattened despite steady effort. A new challenge or a change of approach can help restart it.',
-              suggestion: 'Consider changing the stimulus — a new challenge or approach.' },
-  },
-};
+const MESSAGES = voice.PATTERN_MESSAGES;
 
 /* Attention items (from _composeToday) are already fully phrased server-side and
    are self-audience only. They project straight through with their own text. */
@@ -177,12 +76,7 @@ const ATTENTION_HEADLINE = {
 };
 
 /* A generic, honest fallback — never leaks, never a number. */
-function _fallback(audience, patternType) {
-  const label = patternType || 'a pattern';
-  return audience === 'leader'
-    ? { headline: 'Worth a moment', body: `IntelliQ noticed something (${label}) that may be worth a supportive check-in.`, suggestion: 'Consider a supportive check-in.' }
-    : { headline: 'Worth a moment', body: 'IntelliQ noticed something in your week that may be worth a moment.', suggestion: 'Take a moment to reflect.' };
-}
+const _fallback = voice.patternFallback;
 
 /* Small, dependency-free stable hash → deterministic insight ids (so dedupe and
    suppression are stable across renders without persisting a counter). */

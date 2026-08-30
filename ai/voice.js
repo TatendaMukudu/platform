@@ -181,8 +181,241 @@ function explainObject(obj = {}) {
   };
 }
 
+
+/* Pattern and assessment prose have one deterministic owner (D30). */
+const PATTERN_EXPLORE = {
+  risk:        { self: 'Would you like to explore what changed — or think about who could support you?', leader: 'Want help preparing a supportive check-in?' },
+  progress:    { self: 'What do you think helped create this? Worth protecting what’s working.',          leader: 'Worth recognising — want help finding the right words?' },
+  milestone:   { self: 'Worth pausing on — want to note what made it possible, so you can keep it going?', leader: 'A good moment to acknowledge — want to prepare a note?' },
+  opportunity: { self: 'Want to explore building on this?',                                                leader: '' },
+  neutral:     { self: 'Want to take a look together?',                                                    leader: '' },
+};
+
+const PATTERN_MESSAGES = {
+  baseline_shift: {
+    self:   { headline: 'Something shifted from your usual',
+              body: 'A few things are running differently from your own normal lately. Not good or bad — just different. Worth a moment to notice.',
+              suggestion: 'Take a minute to reflect on what changed this week.' },
+    leader: { headline: 'Unusual for them',
+              body: "Something is running differently from this person's own normal lately. A curious, no-assumptions check-in may help.",
+              suggestion: 'Consider a gentle 1:1 — lead with curiosity, not conclusions.' },
+  },
+  momentum_drop: {
+    self:   { headline: 'Your momentum has dipped',
+              body: 'Your recent check-ins are running lower than they were. That happens. If something is weighing on you, this is a good place to name it.',
+              suggestion: 'Log how you’re really doing — no pressure to fix anything.' },
+    leader: { headline: 'Momentum dropping',
+              body: 'Their recent momentum looks softer than before. A personal check-in — listening first — is usually the right first step.',
+              suggestion: 'Consider reaching out for a supportive check-in.' },
+  },
+  quiet_improvement: {
+    self:   { headline: 'You’ve been quietly climbing',
+              body: 'Things have been trending up for you lately, without much fanfare. Worth acknowledging to yourself.',
+              suggestion: 'Note what’s been working — so you can keep doing it.' },
+    leader: { headline: 'Quiet improvement',
+              body: 'They’ve been improving quietly, with little recognition. A specific, genuine acknowledgement tends to make gains hold.',
+              suggestion: 'Consider recognising the progress specifically.' },
+  },
+  recovering: {
+    self:   { headline: 'You’re climbing back',
+              body: 'You were in a rougher patch and you’ve been climbing back toward your normal. That took something — good to see.',
+              suggestion: 'Acknowledge the turnaround to yourself — naming it helps it hold.' },
+    leader: { headline: 'Climbing back',
+              body: 'They’ve climbed out of a dip toward their own normal. Naming the turnaround out loud helps it stick.',
+              suggestion: 'Consider acknowledging the turnaround.' },
+  },
+  repeated_concern: {
+    self:   { headline: 'A theme keeps coming up',
+              body: 'The same concern has surfaced a few times now. Recurring things are worth a single, focused look rather than many small ones.',
+              suggestion: 'Pick one small focus for the recurring theme.' },
+    leader: { headline: 'Repeated concern',
+              body: 'A theme has recurred for them more than once — not a one-off. Naming it together and agreeing one small shared focus can help.',
+              suggestion: 'Consider a conversation to name the recurring theme together.' },
+  },
+  member_team_divergence: {
+    self:   { headline: 'You’re on a different track from the group',
+              body: 'Your trajectory is moving differently from your team’s lately. Neither is wrong — but it can be worth understanding why.',
+              suggestion: 'Reflect on what’s pulling you a different way right now.' },
+    leader: { headline: 'Pulling away from the team',
+              body: 'Their trajectory is diverging from the group’s. A 1:1 to understand what’s pulling them a different way — to integrate, not push — can help.',
+              suggestion: 'Consider a 1:1 to understand the divergence.' },
+  },
+  invisible_load: {
+    self:   { headline: 'You may be carrying a lot for others',
+              body: 'You’ve been supporting others a lot lately. Make sure you’re not carrying more than is sustainable.',
+              suggestion: 'Check what you can hand off or set down this week.' },
+    leader: { headline: 'Carrying invisible load',
+              body: 'They may be carrying a lot for others while under strain themselves. Offering to redistribute, or simply acknowledging the load, can help.',
+              suggestion: 'Consider checking whether some load can be redistributed.' },
+  },
+  withdrawal: {
+    self:   { headline: 'You’ve been pulling back',
+              body: 'Your participation has eased off from your own normal. If something changed, this is a good place to say so.',
+              suggestion: 'Share what changed — even a line helps IntelliQ support you.' },
+    leader: { headline: 'Pulling back',
+              body: 'Their participation is easing from their own normal. Reaching out — asking what changed and listening first — is a good first step.',
+              suggestion: 'Consider reaching out to ask how they’re doing.' },
+  },
+  data_gap: {
+    self:   { headline: 'It’s been quiet',
+              body: 'You were checking in regularly, then it went quiet. No pressure — whenever you’re ready, IntelliQ is here.',
+              suggestion: 'A quick check-in whenever it suits you.' },
+    leader: { headline: 'Gone quiet',
+              body: 'They were regular, then went quiet. A simple, no-assumptions “thinking of you, how are things?” is usually enough.',
+              suggestion: 'Consider a light, no-assumptions reconnect.' },
+  },
+  isolation: {
+    self:   { headline: 'Your connections have thinned',
+              body: 'Your connection signals have been thinning lately. A shared task or a peer catch-up can help re-anchor things.',
+              suggestion: 'Reach out to one person this week.' },
+    leader: { headline: 'Becoming isolated',
+              body: 'Their connection signals are thinning. A shared task or a peer check-in can help reconnect them.',
+              suggestion: 'Consider helping them reconnect — a shared task or peer check-in.' },
+  },
+  overload: {
+    self:   { headline: 'You may be overloaded',
+              body: 'Demand looks high while wellbeing has dipped. Before pushing further, it’s worth easing something.',
+              suggestion: 'Defer or drop one thing this week.' },
+    leader: { headline: 'Overload risk',
+              body: 'Demand appears high while wellbeing is down. Removing or deferring something before pushing further can help.',
+              suggestion: 'Consider easing their load before adding to it.' },
+  },
+  plateau: {
+    self:   { headline: 'Things have plateaued',
+              body: 'Steady effort, but growth has flattened. A change of stimulus — a new challenge or approach — can restart it.',
+              suggestion: 'Try one new challenge or approach.' },
+    leader: { headline: 'Plateau',
+              body: 'Growth has flattened despite steady effort. A new challenge or a change of approach can help restart it.',
+              suggestion: 'Consider changing the stimulus — a new challenge or approach.' },
+  },
+};
+
+function patternFallback(audience, patternType) {
+  const label = patternType || 'a pattern';
+  return audience === 'leader'
+    ? { headline: 'Worth a moment', body: `IntelliQ noticed something (${label}) that may be worth a supportive check-in.`, suggestion: 'Consider a supportive check-in.' }
+    : { headline: 'Worth a moment', body: 'IntelliQ noticed something in your week that may be worth a moment.', suggestion: 'Take a moment to reflect.' };
+}
+
+const STRUCTURE_LABEL = Object.freeze({ withdrawal: 'Pulling back', data_gap: 'Gone quiet', isolation: 'Becoming isolated', overload: 'Overload risk', plateau: 'Plateau' });
+
+const norm = s => String(s == null ? '' : s).trim();
+
+/* Generic, non-individual comments that carry no member-specific signal. */
+const GENERIC_FEEDBACK = [
+  /^good( detail| job| work| stuff)?[.! ]*$/i, /^great( job| work| stuff)?[.! ]*$/i,
+  /^nice( one| work)?[.! ]*$/i, /^well done[.! ]*$/i, /^keep it up[.! ]*$/i,
+  /^good detail\s*[—-]\s*keep it up[.! ]*$/i, /^solid[.! ]*$/i, /^ok(ay)?[.! ]*$/i,
+  /^thanks?[.! ]*$/i, /^noted[.! ]*$/i,
+];
+
+/* Is this feedback a placeholder — empty, generic, or duplicated across other assessments
+   (a sample value repeated verbatim, so not individual to this member)? */
+function isPlaceholderFeedback(text, otherFeedbackTexts = []) {
+  const t = norm(text);
+  if (!t) return true;
+  if (GENERIC_FEEDBACK.some(re => re.test(t))) return true;
+  const dupes = (otherFeedbackTexts || []).map(norm).filter(x => x && x.toLowerCase() === t.toLowerCase());
+  if (dupes.length >= 1) return true;              // the same comment appears elsewhere → sample/non-individual
+  return false;
+}
+
+const RATIO_LABEL = [
+  [0.85, 'Strong', 'The recorded evidence meets this expectation well.'],
+  [0.6, 'Meeting the expectation', 'The recorded evidence is in line with what was asked.'],
+  [0.4, 'Developing', 'There is a start here, but not yet enough evidence that it is happening reliably.'],
+  [0, 'Needs attention', 'The recorded evidence is below what this expects.'],
+];
+
+/* ── project — the member's view. Inputs are already-confirmed/derived facts:
+   { title, status, requiredCount, answeredCount, partialCount, feedback,
+     otherFeedbackTexts, score, scoreMax } ── */
+function project({ title = 'Assessment', status = 'assigned', requiredCount = 0, answeredCount = 0,
+  partialCount = 0, feedback = '', otherFeedbackTexts = [], score = null, scoreMax = null } = {}) {
+
+  const humanFeedback = !isPlaceholderFeedback(feedback, otherFeedbackTexts) ? norm(feedback) : '';
+  const feedbackKind = humanFeedback ? 'human' : (norm(feedback) ? 'generic' : 'none');
+  const remaining = Math.max(0, requiredCount - answeredCount);
+  const strengths = [], attentionAreas = [], nextActions = [], limitations = [];
+  let statusLabel, summary;
+  let optionalScore = { show: false, value: score, max: scoreMax };
+
+  if (status === 'returned') {
+    // A reviewed result. Lead with meaning; the score supports, it does not headline.
+    const ratio = (Number.isFinite(score) && Number.isFinite(scoreMax) && scoreMax > 0) ? score / scoreMax : null;
+    if (ratio != null) {
+      const [, label, meaning] = RATIO_LABEL.find(([t]) => ratio >= t);
+      statusLabel = label;
+      summary = meaning;
+      optionalScore = { show: true, value: score, max: scoreMax };   // the number helps interpret a reviewed result
+      if (ratio >= 0.6) strengths.push('The submitted work is meeting the expectation for this rubric.');
+      if (ratio < 0.6) attentionAreas.push('There is not yet enough evidence that this is happening reliably.');
+    } else {
+      statusLabel = 'Reviewed';
+      summary = 'Your submission has been reviewed.';
+    }
+    if (humanFeedback) { strengths.length = 0; nextActions.push('Read your leader\'s note below and reply if you have a question.'); }
+    else if (feedbackKind === 'generic') limitations.push('The note attached is a general comment, not specific feedback on your work.');
+    if (ratio != null && ratio < 0.6) nextActions.push('Give one recent, concrete example — or ask your leader what “good” looks like here.');
+  } else if (status === 'submitted') {
+    statusLabel = 'Submitted — awaiting review';
+    summary = `You've completed ${title}. It's with your leader for review.`;
+    nextActions.push('Nothing needed right now — you\'ll see the result here once it\'s reviewed.');
+  } else if (answeredCount > 0 || partialCount > 0) {
+    statusLabel = 'In progress';
+    summary = `You've covered ${answeredCount} of ${requiredCount} part${requiredCount === 1 ? '' : 's'} so far.`;
+    if (remaining > 0) nextActions.push(`Continue the conversation to cover the ${remaining} remaining part${remaining === 1 ? '' : 's'}.`);
+    if (partialCount > 0) { attentionAreas.push(`${partialCount} answer${partialCount === 1 ? '' : 's'} ${partialCount === 1 ? 'was' : 'were'} a bit tentative and could be firmed up.`); limitations.push('Some responses are recorded but not yet firm.'); }
+  } else {
+    statusLabel = 'Not started';
+    summary = `${title} is ready when you are. IntelliQ will ask a few short questions rather than hand you a blank form.`;
+    nextActions.push('Start the conversation — it only asks for what it doesn\'t already know.');
+  }
+
+  const evidenceBasisSummary = requiredCount
+    ? `Based on ${answeredCount} of ${requiredCount} recorded response${requiredCount === 1 ? '' : 's'}${humanFeedback ? ' and your leader\'s note' : ''}.`
+    : 'Based on your recorded responses.';
+  if (requiredCount && answeredCount < requiredCount && status !== 'returned') limitations.push(`${remaining} part${remaining === 1 ? '' : 's'} not yet covered.`);
+
+  return {
+    title, statusLabel, summary,
+    strengths, attentionAreas, nextActions,
+    limitations: [...new Set(limitations)],
+    evidenceBasisSummary,
+    optionalScore,
+    feedbackKind,                                  // 'human' | 'generic' | 'none' — the UI shows human feedback ONLY when 'human'
+    humanFeedback,                                 // '' unless a real, individual comment
+    complete: status === 'returned' || status === 'submitted',
+  };
+}
+
+/* ── answerAboutAssessment — the assistant, carrying the LEADER'S context down the web,
+   answers a member's question about the work they've been set. The context is the brief
+   the leader discussed when creating it (assignment/template description + guidance) — so
+   the assistant is genuinely informed at the child end, not guessing. Deterministic: it
+   conveys the leader's own words, framed; when there's no context, it says so honestly and
+   offers to ask the leader rather than inventing an expectation. ── */
+function answerAboutAssessment({ question = '', brief = '', guidance = '', fields = [], leaderName = 'your leader' } = {}) {
+  const q = norm(question);
+  const brf = norm(brief), gd = norm(guidance);
+  const who = norm(leaderName) || 'your leader';
+  const hasContext = !!(brf || gd);
+  const fieldList = (fields || []).map(f => f && f.label).filter(Boolean);
+  if (!hasContext) {
+    return { hasContext: false, routeToLeader: true,
+      answer: `${who} didn't leave extra notes on this one. What it's asking for: ${fieldList.length ? fieldList.join(', ') : 'your response'}. Want me to check with them for more detail?` };
+  }
+  const wantsHow = /\bhow\b|approach|format|structure|example|look like/.test(q);
+  const parts = [`Here's what ${who} is looking for: ${brf || gd}`];
+  if (wantsHow && gd && gd !== brf) parts.push(gd);
+  return { hasContext: true, routeToLeader: false, answer: parts.join(' ') };
+}
+
+
 module.exports = {
   greeting, leaderOpening, memberOpening,
   explainObject, provenance, confidencePlain,
+  PATTERN_EXPLORE, PATTERN_MESSAGES, patternFallback, STRUCTURE_LABEL,
+  projectAssessment: project, isPlaceholderFeedback, answerAboutAssessment,
   _pick, _num,
 };
