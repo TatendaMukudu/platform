@@ -641,6 +641,9 @@ const NAV_ROUTES = {
   notes:           () => { if (typeof MemberApp !== 'undefined') MemberApp._renderNotesPage(); },
   'my-data':       () => renderMyData(),
   inquiry:         () => { if (typeof MemberApp !== 'undefined') MemberApp._renderInquiryPage(); },
+  focus:           () => { if (typeof MemberApp !== 'undefined') MemberApp._renderBucketPage('focus'); },
+  high:            () => { if (typeof MemberApp !== 'undefined') MemberApp._renderBucketPage('high'); },
+  low:             () => { if (typeof MemberApp !== 'undefined') MemberApp._renderBucketPage('low'); },
   inbox:           () => { if (typeof MemberApp !== 'undefined') MemberApp._renderInbox(); },
   stats:           () => { if (typeof MemberApp !== 'undefined') MemberApp._renderStats(); },
   // Leader Workspace — scoped to the node leader's subtree
@@ -683,7 +686,7 @@ function navigate(dest){
   // 4. Activate the canonical surface + one-authority nav/title/active state.
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
-  const pg = document.getElementById('page-'+page);
+  const pg = document.getElementById('page-'+page) || (['focus', 'high', 'low'].includes(page) ? document.getElementById('page-inquiry') : null);
   if(pg) pg.classList.add('active');
   document.querySelectorAll(`.nav-item[data-page="${page}"]`).forEach(n=>n.classList.add('active'));
   // Close the mobile sidebar drawer on navigation (and clear its outside-click handler).
@@ -709,6 +712,9 @@ const PAGE_TITLES = {
   notes:        'Notes',
   'my-data':    'My data & privacy',
   inquiry:      'Inquiries',
+  focus:        'Focuses',
+  high:         'Highs',
+  low:          'Lows',
   inbox:        'Updates',
   stats:        'Progress',
   // Leader Workspace — node leader scoped tools

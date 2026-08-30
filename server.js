@@ -28,6 +28,7 @@ const orgGraph   = require('./ai/org-graph');
 const orgAnswer  = require('./ai/org-answer');
 const orgRouting = require('./ai/org-routing');
 const teamState  = require('./ai/team-state');
+const priorityOffice = require('./ai/priority-office');
 const audience   = require('./ai/audience');
 const conversation   = require('./ai/conversation');
 const assessmentView = require('./ai/assessment-view');
@@ -13574,6 +13575,82 @@ app.get('/api/group/:nodeId/state', requireAuth, (req, res) => {
   _auditFindingEmission(code, userId, [state.high, state.low].filter(Boolean), [], 'group state');
   _audit(code, { actor: userId, action: 'team_state_view', subjectIds: [], basis: 'group_state' });
   res.json({ ok: true, ...state });
+});
+
+/* GET /api/objects — the one four-bucket read, parameterised by grain rather than role.
+   It projects existing objects only; it detects and persists nothing. */
+function _objectBucket(code, userId, scope = 'self') {
+  const out = [];
+  const add = (kind, raw, extra = {}) => {
+    if (!raw) return;
+    const id = String(raw.inquiryId || raw.focusId || raw.id || raw.dedupeKey || '');
+    if (!id) return;
+    const explained = raw.explained || voice.explainObject({
+      kind, label: raw.title || raw.text || raw.headline || raw.about || 'Current understanding',
+      claim: raw.body || raw.hypothesis || raw.text || raw.claim || '',
+      band: raw.band || (raw.confidence || {}).band, because: (raw.confidence || {}).because || [],
+      stillUnknown: raw.stillUnknown || [], falsifiers: raw.falsifiers || [],
+      contested: raw.contested === true, banded: scope !== 'self', seed: id,
+    });
+    const priority = raw.priority || raw.severity || (raw.confidence || {}).band || 'low';
+    out.push({ id, kind, priority, score: priorityOffice._score(priorityOffice.normalizeItem({ ...raw, kind, priority, id })),
+      parked: !!raw.parkedAt, parkedBecause: raw.parkedBecause || null, explained, about: `${kind}:${id}`, scope, raw });
+  };
+
+  if (scope === 'self') {
+    const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+    for (const i of Object.values(mine)) {
+      if (!i || !(i.signals || []).length) continue;
+      const lead = (i.hypotheses || []).find(h => h && h.id === i.leadingHypothesisId);
+      add('inquiry', { ...i, hypothesis: lead && lead.statement,
+        stillUnknown: (i.missingSignals || []).map(m => m && (m.question || m)).filter(Boolean) });
+    }
+    const plan = _proactiveInsights(code, userId, { audience: 'self' });
+    for (const [kind, group] of Object.entries(plan.groups || {})) {
+      if (kind === 'high' || kind === 'low') for (const item of group.insights || []) add(kind, item);
+    }
+    const memory = userAiProfiles[`${code}:${userId}`] || {};
+    for (const focus of memory.focuses || []) add('focus', focus);
+  } else if (scope.startsWith('group:')) {
+    const nodeId = scope.slice(6);
+    const subject = _groupSubjectRef(code, nodeId);
+    if (!subject.ok || !_mayReadGroup(code, nodeId, userId)) return null;
+    const state = teamState.buildTeamState({
+      node: { nodeId, name: subject.node.name, memberCount: _nodeMembers(code, nodeId).length },
+      inquiries: _groupInquiryProjections(code, nodeId), findings: _groupPatternFindings(code, nodeId),
+      focuses: _teamFocuses(code, nodeId), now: Date.now(),
+    });
+    add('high', state.high); add('low', state.low); add('inquiry', state.question);
+    for (const focus of state.focuses || []) add('focus', focus);
+  } else return null;
+
+  return out.sort((a, b) => (a.parked - b.parked) || (b.score - a.score) || a.id.localeCompare(b.id));
+}
+
+app.get('/api/objects', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const kind = String(req.query.kind || '');
+  if (!['inquiry', 'focus', 'high', 'low'].includes(kind)) return res.status(400).json({ error: 'unknown kind' });
+  const scope = String(req.query.scope || 'self');
+  const all = _objectBucket(code, userId, scope);
+  if (!all) return res.status(403).json({ error: 'scope unavailable' });
+  res.json({ ok: true, kind, scope, objects: all.filter(item => item.kind === kind).map(({ raw, ...item }) => item) });
+});
+
+/* Every object opens as a thread. The opening is recomposed from the current object on every
+   read and is never appended to assistantConversations (L-OC1). */
+app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const kind = String(req.params.kind || '');
+  const scope = String(req.query.scope || 'self');
+  if (!['inquiry', 'focus', 'high', 'low'].includes(kind)) return res.status(404).json({ error: 'not found' });
+  const object = (_objectBucket(code, userId, scope) || []).find(x => x.kind === kind && x.id === String(req.params.id));
+  if (!object) return res.status(404).json({ error: 'not found' });
+  const conversation = (assistantConversations[_wsKey(code, userId)] || [])
+    .filter(c => c && c.about === object.about).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0] || null;
+  res.json({ ok: true, about: object.about, opening: object.explained,
+    conversation: conversation ? { id: conversation.id, updatedAt: conversation.updatedAt } : null,
+    messages: conversation ? (conversation.messages || []).map(m => ({ role: m.role, text: m.text, at: m.at })) : [] });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════

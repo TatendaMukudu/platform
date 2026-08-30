@@ -2722,7 +2722,9 @@ const MemberApp = {
   _NAV: [
     { id: 'home',    label: 'Chat',      icon: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' },
     { id: 'inquiry', label: 'Inquiries', icon: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01' },
-    { id: 'work',    label: 'Work',      icon: 'M20 7H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2' },
+    { id: 'focus',   label: 'Focuses',   icon: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18M12 8v4l3 2' },
+    { id: 'high',    label: 'Highs',     icon: 'M5 15l5-5 4 4 5-7' },
+    { id: 'low',     label: 'Lows',      icon: 'M5 9l5 5 4-4 5 7' },
     { id: 'notes',   label: 'Library',   icon: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z' },
   ],
 
@@ -2776,60 +2778,42 @@ const MemberApp = {
   /* The Inquiries page — the same working picture the home surface shows, given room to
      breathe and grouped by how settled each one is. State, not type: what is still moving,
      what has landed, and what has gone quiet without resolving. */
-  async _renderInquiryPage() {
+  async _renderBucketPage(kind = 'inquiry') {
     const box = document.getElementById('iq-inquiries-page');
     if (!box) return;
     const esc = s => this._escape(String(s == null ? '' : s));
     box.innerHTML = `<div style="color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
-    let j; try { j = await fetch('/api/inquiry', { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
-    const list = (j && j.inquiries) || [];
+    let j; try { j = await fetch(`/api/objects?kind=${encodeURIComponent(kind)}&scope=self`, { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
+    const list = (j && j.objects) || [];
     if (!list.length) {
-      box.innerHTML = `<div class="iq-empty-title">Nothing being worked out yet</div>
-        <div class="iq-empty-sub">Talk something through and IntelliQ starts building a picture of it here — including what it still does not know.</div>`;
+      box.innerHTML = `<div class="iq-empty-title">Nothing here right now</div>`;
       return;
     }
-    const GROUPS = [
-      { key: 'live',    label: 'Still working it out', has: i => ['exploring', 'probable'].includes(i.status) },
-      { key: 'settled', label: 'Landed',               has: i => i.status === 'supported' || i.status === 'resolved' },
-      { key: 'dispute', label: 'Contested',            has: i => i.status === 'disputed' },
-    ];
-    box.innerHTML = GROUPS.map(g => {
-      const items = list.filter(g.has);
-      if (!items.length) return '';
-      return `<div class="iq-att-section"><div class="iq-att-label">${esc(g.label)}</div>${items.map(i => {
-        const conf = i.confidence || {}; const topic = i.topic || {};
-        return `<div class="iq-inq" role="button" tabindex="0" onclick="MemberApp.openInquiryThread('${esc(i.inquiryId)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();MemberApp.openInquiryThread('${esc(i.inquiryId)}')}">
-          <div class="iq-inq-head"><span class="iq-inq-topic">${esc(topic.label || topic.canonicalConcept || 'Working it out')}</span>
-            <span class="iq-inq-band iq-band-${esc(conf.band || 'tentative')}">${esc(conf.band || 'tentative')}</span></div>
-          ${i.hypothesis ? `<div class="iq-inq-hyp">${esc(i.hypothesis)}</div>` : ''}
-          <div class="iq-inq-why">${esc((conf.because || []).join(' · '))}${i.signals ? ` · ${i.signals} signal${i.signals === 1 ? '' : 's'}` : ''}</div>
-          ${(i.stillUnknown || []).length ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Still unknown</span> ${esc(i.stillUnknown[0])}</div>` : ''}
-          ${(i.alternatives || []).length ? `<div class="iq-inq-alt">Could also be: ${esc(i.alternatives.slice(0, 2).map(a => typeof a === 'string' ? a : `${a.statement} (${a.band})`).join('; '))}</div>` : ''}
-          ${(i.timeline || []).length ? `<details class="iq-inq-hist"><summary>How this changed</summary>${
-            i.timeline.map(e => `<div class="iq-inq-histrow"><span class="iq-inq-histwhen">${esc(this._chatWhen(e.at))}</span> ${esc(e.summary)}</div>`).join('')
-          }</details>` : ''}
-        </div>`; }).join('')}</div>`;
-    }).join('') + `<div class="iq-inq-note">${esc(j.note || '')}</div>`;
+    const card = item => { const x = item.explained || {}; return `<div class="iq-inq" role="button" tabindex="0" onclick="MemberApp.openObjectThread('${esc(item.kind)}','${esc(item.id)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();MemberApp.openObjectThread('${esc(item.kind)}','${esc(item.id)}')}"><div class="iq-inq-head"><span class="iq-inq-topic">${esc(x.headline || 'Current understanding')}</span></div>${x.claim ? `<div class="iq-inq-hyp">${esc(x.claim)}</div>` : ''}${x.provenance ? `<div class="iq-inq-why">${esc(x.provenance)}</div>` : ''}${item.parkedBecause ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Set aside</span> ${esc(item.parkedBecause)}</div>` : ''}</div>`; };
+    const live = list.filter(i => !i.parked); const parked = list.filter(i => i.parked);
+    box.innerHTML = `<div class="iq-att-section">${live.map(card).join('')}</div>${parked.length ? `<div class="iq-att-section"><div class="iq-att-label">Set aside</div>${parked.map(card).join('')}</div>` : ''}`;
   },
+
+  _renderInquiryPage() { return this._renderBucketPage('inquiry'); },
 
   /* L-OC1 — the opening comes from GET /api/inquiry/:id/thread on every open. It is not a
      synthetic assistant message and is never added to the conversation array. */
-  async openInquiryThread(inquiryId) {
+  async openObjectThread(kind, objectId) {
     const box = document.getElementById('iq-inquiries-page');
     if (!box) return;
     const esc = s => this._escape(String(s == null ? '' : s));
     box.innerHTML = `<div style="color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
     try {
-      const response = await fetch(`/api/inquiry/${encodeURIComponent(inquiryId)}/thread`, { headers: this._authHeaders() });
+      const response = await fetch(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/thread?scope=self`, { headers: this._authHeaders() });
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error('not found');
       const x = data.opening || {};
-      this._inquiryThread = { inquiryId, about: data.about, conversationId: data.conversation && data.conversation.id };
+      this._inquiryThread = { kind, objectId, about: data.about, conversationId: data.conversation && data.conversation.id };
       const lines = value => (Array.isArray(value) ? value : []).map(line => `<div class="linq-block-l">${esc(line)}</div>`).join('') || `<div class="linq-block-l">Nothing recorded yet.</div>`;
       const turns = (data.messages || []).map(m => `<div class="iq-msg iq-msg-${m.role === 'user' ? 'user' : 'iq'}">${esc(m.text)}</div>`).join('');
       box.innerHTML = `
         <div class="iq-object-thread">
-          <button class="iq-thread-back" type="button" onclick="MemberApp._renderInquiryPage()">Back to Inquiries</button>
+          <button class="iq-thread-back" type="button" onclick="MemberApp._renderBucketPage('${esc(kind)}')">Back</button>
           <div class="iq-thread-overflow">
             <button class="iq-thread-overflow-toggle" type="button" aria-label="More options" onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden">More</button>
             <div class="iq-thread-overflow-menu" hidden>
@@ -2848,6 +2832,8 @@ const MemberApp = {
       box.innerHTML = `<div class="iq-empty-sub">This inquiry could not be opened right now.</div>`;
     }
   },
+
+  openInquiryThread(inquiryId) { return this.openObjectThread('inquiry', inquiryId); },
 
   inquiryOverflow(action) {
     const input = document.getElementById('iq-object-input');
@@ -2869,7 +2855,7 @@ const MemberApp = {
       const data = await response.json();
       if (!data.ok) throw new Error('turn failed');
       thread.conversationId = data.conversationId;
-      await this.openInquiryThread(thread.inquiryId);
+      await this.openObjectThread(thread.kind, thread.objectId);
     } catch (_) { input.disabled = false; }
   },
 
