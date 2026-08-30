@@ -1323,6 +1323,29 @@ function _getMemory(orgCode, userId) {
   return userAiProfiles[key];
 }
 
+function _focusFromGoal(code, userId, goal, opts = {}) {
+  const mem = _getMemory(code, userId);
+  const title = String(goal || '').trim();
+  if (!title) return null;
+  const existing = (mem.focuses || []).find(f => f.kind === 'goal' && f.text === title && f.status === 'active');
+  if (existing) return existing;
+  const focus = { id: opts.id || `foc_${generateId()}`, text: title, kind: 'goal', type: opts.type || 'goal',
+    participation: opts.participation || 'self', shape: opts.shape || 'parallel', participants: opts.participants || [userId],
+    invitedBy: opts.invitedBy || null, acceptedAt: opts.acceptedAt || new Date().toISOString(),
+    status: 'active', outcome: null, createdAt: opts.createdAt || new Date().toISOString() };
+  mem.focuses.unshift(focus); return focus;
+}
+function _migrateLegacyMemberGoals() {
+  for (const [key, rec] of Object.entries(memberGoals)) {
+    if (!rec || Array.isArray(rec) || typeof rec !== 'object') continue;
+    const split = key.indexOf(':'); if (split < 1) continue;
+    const code = key.slice(0, split), userId = key.slice(split + 1);
+    if (rec.goal) _focusFromGoal(code, userId, rec.goal, { id: 'profile_main_goal', createdAt: rec.setAt });
+    if (rec.longTermGoals) _focusFromGoal(code, userId, rec.longTermGoals, { id: 'profile_long_term_goal', createdAt: rec.setAt });
+    delete rec.goal; delete rec.longTermGoals;
+  }
+}
+
 /* Update memory after a check-in insight or scenario score.
    source: 'checkin' | 'weekly' | 'scenario'
    data: { watchOutFor?, themes?[], development?[], suggestedNextAction? } */
@@ -16505,7 +16528,8 @@ app.post('/api/member/goals', requireAuth, (req, res) => {
   const key = memberId
     ? userKey(orgCode, memberId)
     : memberKey(orgCode, memberName);
-  memberGoals[key] = { goal: goal || '', identity: identity || '', memberName, setAt: new Date().toISOString() };
+  memberGoals[key] = { ...(memberGoals[key] || {}), identity: identity || '', memberName, setAt: new Date().toISOString() };
+  if (goal) _focusFromGoal(orgCode, memberId, goal, { participation: 'self', shape: 'parallel' });
   scheduleSave();
   res.json({ ok: true });
 });
@@ -17162,6 +17186,9 @@ function normalizeMemberGoals(goalData) {
   if (Array.isArray(goalData)) return goalData;
   if (typeof goalData === 'object') {
     const goals = [];
+    if (Array.isArray(goalData.focuses)) for (const focus of goalData.focuses) if (focus.kind === 'goal') goals.push({
+      id: focus.id, title: focus.text, status: focus.status, source: 'focus', participation: focus.participation, shape: focus.shape,
+    });
     if (goalData.goal || goalData.mainGoals) {
       goals.push({
         id: 'profile_main_goal',
@@ -17203,7 +17230,7 @@ function normalizeMemberGoals(goalData) {
 function _memberGoalsFor(code, u) {
   if (!u) return null;
   const direct = memberGoals[userKey(code, u.id)] || (u.name ? memberGoals[memberKey(code, u.name)] : null);
-  if (direct) return direct;
+  if (direct) return { ...direct, focuses: _getMemory(code, u.id).focuses };
   const nm = (u.name || '').toLowerCase().trim();
   if (nm) {
     for (const g of Object.values(memberGoals)) {
@@ -18446,6 +18473,7 @@ function _loadAllStores(data) {
   Object.assign(weeklyAssessments,data.weeklyAssessments|| {});
   Object.assign(orgInterventions, data.orgInterventions || {});
   Object.assign(userAiProfiles,   data.userAiProfiles   || {});
+  _migrateLegacyMemberGoals();
   Object.assign(advisorThreads,   data.advisorThreads   || {});
   Object.assign(userConsents,     data.userConsents     || {});
   Object.assign(connectedSources, data.connectedSources || {});
@@ -18567,7 +18595,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: legacy convergence
   _ingestAdapterEvidence, _canonicalContext, _backfillCanonical, _canonicaliseCheckin, memberCheckins, assessmentAssignments,
   // exported for the truth layer: the member-advisor migration (canonical + kernel + post-kernel)
-  _advisorKernelReasoning, advisorThreads, orgGroups, orgValues, orgGoals,
+  _advisorKernelReasoning, advisorThreads, orgGroups, orgValues, orgGoals, memberGoals,
   // exported for the truth layer: the daily check-in migration (canonical-only intelligence)
   _checkinKernelState, _canonicalMoodSeries, _memberMoodSeries, _isSourceEvidence, _checkinInterventionState, orgInterventions,
   // exported for the truth layer: check-in hardening (frozen signal, reconciliation, classification audit)
