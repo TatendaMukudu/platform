@@ -99,12 +99,22 @@ let _persistenceReady = {
 /* ── Process-level crash guards ───────────────────────────────────────────────
    A single unhandled async error should never take the whole server down and
    sign everyone out. Log loudly; keep serving. (DB/boot failures still exit via
-   db.js — these guards are for in-flight request bugs.) */
+   db.js — these guards are for in-flight request bugs.)
+
+   A HARNESS IS NOT A SERVER. Every suite requires this file, so these guards were installed in
+   the test process too: a suite that threw logged its stack, swallowed the error and exited 0,
+   and scripts/test.js — which judges purely by exit code — recorded it as a pass. A crashed
+   suite read as a green one. Marking the exit code when this file was required rather than run
+   keeps the server's "log loudly, keep serving" behaviour exactly as it is, while making a
+   harness fail the way it should. */
+const _isServerProcess = () => require.main === module;
 process.on('unhandledRejection', (reason) => {
   console.error('[unhandledRejection]', reason && reason.stack ? reason.stack : reason);
+  if (!_isServerProcess()) process.exitCode = 1;
 });
 process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err && err.stack ? err.stack : err);
+  if (!_isServerProcess()) process.exitCode = 1;
 });
 
 function _handleShutdownSignal(signal) {
@@ -1335,11 +1345,21 @@ function _focusFromGoal(code, userId, goal, opts = {}) {
     status: 'active', outcome: null, createdAt: opts.createdAt || new Date().toISOString() };
   mem.focuses.unshift(focus); _beginFocusAction(code, focus, opts.invitedBy || userId, { subjectId: userId }); return focus;
 }
+/* memberGoals is keyed `code:userId` OR `code:name` — memberKey and userKey build the same
+   shape and the older route wrote the name form, so the tail cannot be trusted to be an id.
+   Migrating a name as though it were an id writes the Focus under a profile key nothing reads
+   (every reader goes through _getMemory(code, user.id)), and the delete below would then destroy
+   the only readable copy. So: resolve to a real user, and when that is not possible LEAVE THE
+   RECORD ALONE. The legacy reader still works, which is the safe direction to fail in — an
+   unmigrated goal is a tidiness problem, a deleted one is somebody's goal gone. */
 function _migrateLegacyMemberGoals() {
   for (const [key, rec] of Object.entries(memberGoals)) {
     if (!rec || Array.isArray(rec) || typeof rec !== 'object') continue;
+    if (!rec.goal && !rec.longTermGoals) continue;
     const split = key.indexOf(':'); if (split < 1) continue;
-    const code = key.slice(0, split), userId = key.slice(split + 1);
+    const code = key.slice(0, split), tail = key.slice(split + 1);
+    const userId = (orgUsers[code] || {})[tail] ? tail : _resolveUserIdByName(code, tail || rec.memberName);
+    if (!userId) continue;                              // unresolvable — keep what is readable
     if (rec.goal) _focusFromGoal(code, userId, rec.goal, { id: 'profile_main_goal', createdAt: rec.setAt });
     if (rec.longTermGoals) _focusFromGoal(code, userId, rec.longTermGoals, { id: 'profile_long_term_goal', createdAt: rec.setAt });
     delete rec.goal; delete rec.longTermGoals;

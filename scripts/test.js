@@ -38,6 +38,7 @@ step('syntax — node --check all sources', () => {
 
 // 2 ── suites: each exits non-zero on failure ───────────────────────────────
 const SUITES = [
+  'harness-integrity-smoke.js', // the arbiter judges by exit code, so a suite that CRASHES must not read as one that passed
   'baseline-smoke.js',
   'intelligence-smoke.js',
   'activity-outcome-smoke.js', // LAW M2: action volume is participation, never an outcome by default; genuine results remain outcomes

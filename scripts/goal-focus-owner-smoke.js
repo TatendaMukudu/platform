@@ -14,6 +14,25 @@ ok('F51.2 the stored memberGoals profile no longer carries a goal copy',
 const snapshot = JSON.parse(JSON.stringify(S._persistedStores())); delete S.userAiProfiles[`${C}:${U}`]; delete S.memberGoals?.[`${C}:${U}`]; S._loadAllStores(snapshot);
 ok('F51.3 save and reload preserves one canonical goal-shaped Focus',
   S.userAiProfiles[`${C}:${U}`].focuses.filter(f => f.kind === 'goal' && f.text === 'Improve receiving').length === 1);
+/* memberKey(code, name) and userKey(code, id) build the SAME `code:tail` shape, so the tail of a
+   legacy key cannot be assumed to be a user id — the older route wrote the name form. Treating a
+   name as an id files the Focus under a profile key nothing reads, and the delete that follows
+   then destroys the only readable copy. These three pin the whole failure. */
+const N = 'name-keyed';
+S._loadAllStores({ orgMeta: { [N]: {} },
+  orgUsers: { [N]: { u2: { id: 'u2', name: 'Grace Hopper', role: 'member', status: 'active' } } },
+  memberGoals: {
+    [`${N}:grace hopper`]: { goal: 'Finish the compiler', memberName: 'Grace Hopper', setAt: '2026-01-01T00:00:00.000Z' },
+    [`${N}:nobody at all`]: { goal: 'Orphaned goal', memberName: 'Nobody At All', setAt: '2026-01-01T00:00:00.000Z' },
+  } });
+const focusesAt = k => ((S.userAiProfiles[k] || {}).focuses || []).map(f => f.text);
+ok('F51.5 a NAME-keyed legacy goal migrates to the profile its owner actually reads',
+  focusesAt(`${N}:u2`).includes('Finish the compiler'));
+ok('F51.6 …and leaves no orphan profile under the name key',
+  !focusesAt(`${N}:grace hopper`).includes('Finish the compiler'));
+ok('F51.7 a goal naming nobody is left readable rather than deleted in place',
+  (S.memberGoals[`${N}:nobody at all`] || {}).goal === 'Orphaned goal');
+
 const server = S.app.listen(0, async () => {
   const base = `http://127.0.0.1:${server.address().port}`, H = { Authorization: `Bearer ${S.issueToken(U, C, 'member')}`, 'Content-Type': 'application/json' };
   try {
