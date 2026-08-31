@@ -116,8 +116,17 @@ The lanes, and the individual prompts they replace:
 | ~~**B**~~ | ~~one voice~~ | **DONE** — `bb37a31`. **All 65 strings moved byte-identical** (verified by diff); `governance-smoke` now asserts `ai/voice.js` is the sole owner |
 | ~~**C**~~ | ~~the curiosity stopping rule (D35)~~ | **DONE** — `e07e60a` + `11e7a39`. Kernel in `ai/diagnose.js`, all five assertions bite. **Review found the six `server.js` call sites entirely untested** — every one could be deleted with the suite green; `curiosity-stopping-wired-http-smoke` now turns red on each. `/api/inquiry/pending` untouched, as the corrected scope requires |
 | ~~**D**~~ | ~~world-model reconciliation~~ | **DONE** — `6689216`. **~80% already existed**; gate C, adjudicated as D50–D54 |
-| **F** | the five consolidations (D50–D54) — **unblocked** | new |
-| **E** | one home — `app.js` absorbs `member-view.js` (D24). **LAST**, ends with a file deleted | §31 |
+| ~~**F**~~ | ~~the five consolidations (D50–D54)~~ | **DONE** — `aa8bca9` `c4b46f6` `43858b5` `b30b893` `d739810` `1b68160`, reviewed in `b6132de` + `f4e4208`. Two defects found and fixed: **D54 leaked its compatibility view into the persisted shape** (a read dirtied the store; a reload split leadership into two drifting copies) and **D51 destroyed name-keyed personal goals** on every boot. **D53 is a shape, not a shipped capability** — nothing mints a relationship-claim ref, and `F53.7` fails the moment something does, because erasure only removes `member:<id>` |
+| ~~**E**~~ | ~~one home — `app.js` absorbs `member-view.js` (D24)~~ | **DONE** — `13b6642`. **A pure move**: 3548 lines out, 3548 in, the only difference in the whole diff being the filename in one header comment. `js/member-view.js` is deleted and its script tag with it |
+
+**The architecture programme is complete.** What remains is not code: a live database, a
+staging deploy, and real people using it.
+
+**One finding outlived the programme.** `scripts/test.js` judges every suite by exit code, and
+`server.js`'s process-level crash guards were installed in the test process too — so a suite
+that threw logged its stack, swallowed the error and exited 0, and the arbiter recorded a pass.
+Nothing was actually crashing, but every HTTP suite sat behind that hole. Closed in `f4e4208`
+and pinned by `harness-integrity-smoke`.
 
 **Done:** §19 safeguarding screen · §20 answerability screen · §21 the primitive decides ·
 §22 one polarity vocabulary · §23 what was shown to whom · §24 the leader attribution guard ·
