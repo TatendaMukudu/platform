@@ -11,6 +11,7 @@ const diagnose = require('../ai/diagnose');
 const forum = require('../ai/forum');
 const teamState = require('../ai/team-state');
 const contribution = require('../ai/contribution');
+const inquiry = require('../ai/inquiry');
 const S = require('../server');
 
 let pass = 0;
@@ -224,6 +225,62 @@ async function main() {
     relationReads.every(r => r.status === 200
       && !JSON.stringify(r.body).includes('RELATIONSHIP_PRIVATE_SENTENCE')
       && !JSON.stringify(r.body).includes('inq_relationship_private')));
+
+  // ATTACK 10: operational ownership is not epistemic authority over an empirical claim.
+  const leaderOpinion = inquiry.adjudicateAnswer({ answer: 'Yes, attendance has improved.',
+    isOwner: true, isLeader: true, claimType: 'attendance' });
+  ok('DP-10 leader opinion does not become empirical truth',
+    leaderOpinion.authority !== 'authoritative' && leaderOpinion.confidence !== 'high'
+    && leaderOpinion.proposal?.corroborationNeeded === true);
+
+  // ATTACK 11: contribution changes audience, not what text is stored.
+  const privateContribution = contribution.toGroupProposal({ evidenceRef: 'private_answer_ref',
+    contributorId: 'captain', concept: 'role_clarity', label: 'Role clarity',
+    sourceSpan: 'PRIVATE_SHARED_ANSWER_SENTENCE', text: 'PRIVATE_SHARED_ANSWER_SENTENCE',
+    originRef: 'captain_private_answer', originKind: 'direct_observation', status: 'contributed' });
+  ok('DP-11 a private answer contributes concept and reference without respondent or sentence disclosure',
+    privateContribution.id === 'private_answer_ref' && privateContribution.text === 'Role clarity'
+    && privateContribution.sourceSpan === null && privateContribution.verbatim === false
+    && !JSON.stringify(privateContribution).includes('PRIVATE_SHARED_ANSWER_SENTENCE'));
+
+  // ATTACK 12: correction and withdrawal retire support while retaining the provenance record.
+  let lifecycleInquiry = diagnose.newInquiry({ subjectRef: 'group:first', topic: 'timing', label: 'Timing', now: 1 });
+  const originalProposal = contribution.toGroupProposal({ evidenceRef: 'life_original', contributorId: 'captain',
+    concept: 'timing', label: 'Timing', originRef: 'life_origin', originKind: 'direct_observation', status: 'contributed' }, { now: 2 });
+  lifecycleInquiry = diagnose.applyProposals(lifecycleInquiry, [originalProposal], { now: 2 });
+  const correctedProposal = { ...originalProposal, id: 'life_corrected', corrects: 'life_original',
+    correctionReason: 'source corrected their account', originRef: 'life_origin' };
+  lifecycleInquiry = diagnose.applyProposals(lifecycleInquiry, [correctedProposal], { now: 3 });
+  const withdrawal = contribution.withdrawalProposal({ evidenceRef: 'life_corrected', contributorId: 'captain',
+    concept: 'timing', originRef: 'life_origin' }, { now: 4 });
+  lifecycleInquiry = diagnose.applyProposals(lifecycleInquiry, [withdrawal], { now: 4 });
+  const oldSignal = lifecycleInquiry.signals.find(s => s.ref === 'life_original');
+  const replacementSignal = lifecycleInquiry.signals.find(s => s.ref === 'life_corrected');
+  ok('DP-12 correction and withdrawal preserve provenance and history while retiring support',
+    oldSignal?.supersededBy === 'life_corrected' && replacementSignal
+    && !diagnose.isActive(oldSignal) && !diagnose.isActive(replacementSignal)
+    && lifecycleInquiry.signals.some(s => s.originRef === 'life_origin')
+    && lifecycleInquiry.signals.filter(s => s.originRef === 'life_origin').every(s => !diagnose.isActive(s)));
+
+  // ATTACK 13: both the named cohort and its complement must clear the fixed floor.
+  ok('DP-13 High and Low projection obeys the two-sided cohort floor',
+    teamState.cohortFloor(5, 10).ok === true
+    && teamState.cohortFloor(5, 6).ok === false
+    && teamState.cohortFloor(1, 10).ok === false);
+
+  // ATTACK 14: later output is computed from active support, never stale rationale.
+  const activeAfterCorrection = lifecycleInquiry.signals.filter(diagnose.isActive);
+  ok('DP-14 corrected rationale does not survive as active support in later output',
+    activeAfterCorrection.every(s => s.ref !== 'life_original' && s.ref !== 'life_corrected')
+    && lifecycleInquiry.timeline.some(e => /correct|supersed|withdraw/i.test(e.summary || e.kind || '')));
+
+  // ATTACK 15: subject erasure finds endpoint-bearing relationship subjects as well as member subjects.
+  S._eraseSubjectInquiries(code, 'captain');
+  const remainingSubjects = Object.keys(S.inquiryStates[code] || {});
+  ok('DP-15 erasure removes every Inquiry subject that names the person, including relationships',
+    !remainingSubjects.includes('member:captain')
+    && !remainingSubjects.some(ref => ref.startsWith('relationship-claim:') && ref.includes('captain'))
+    && remainingSubjects.includes('group:first'));
 
   await new Promise(resolve => server.close(resolve));
   console.log(`\ndummy-pilot-smoke: ${pass} passed, ${fail} failed`);
