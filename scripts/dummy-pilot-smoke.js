@@ -55,6 +55,9 @@ function buildObjects(org) {
   const privateInquiry = diagnose.newInquiry({
     subjectRef: 'member:captain', topic: 'personal_load', label: 'Personal load', now,
   });
+  privateInquiry.inquiryId = 'inq_private_captain';
+  privateInquiry.signals.push({ id: 'private_inquiry_signal', kind: 'observation', status: 'active',
+    visibility: 'private', originRef: 'captain_private_inquiry', sourceSpan: 'PRIVATE_INQUIRY_SENTENCE' });
   const sharedInquiry = diagnose.newInquiry({
     subjectRef: 'group:first', topic: 'role_clarity', label: 'Role clarity', now,
   });
@@ -62,7 +65,7 @@ function buildObjects(org) {
 
   const personalFocus = {
     focusId: 'focus_personal', text: 'Prepare calmly for the next session', status: 'active',
-    visibility: 'private', ownerId: 'captain', participants: ['captain'], createdAt: now,
+    visibility: 'private', ownerId: 'captain', participants: ['captain'], createdAt: now + 1,
   };
   const sharedFocus = teamState.newFocus({
     focusId: 'focus_shared', nodeId: 'first', text: 'Clarify roles before the next session',
@@ -122,12 +125,20 @@ async function main() {
     && fixture.objects.evidence.echoes.every(e => e.originRef === 'captain_direct'));
 
   const code = fixture.code;
+  const relationshipInquiry = diagnose.newInquiry({
+    subjectRef: 'relationship-claim:captain~mid2#communication', topic: 'communication',
+    label: 'Communication relationship', now: Date.UTC(2026, 7, 2),
+  });
+  relationshipInquiry.inquiryId = 'inq_relationship_private';
+  relationshipInquiry.signals.push({ id: 'rel_private_signal', kind: 'observation', status: 'active',
+    visibility: 'private', sourceSpan: 'RELATIONSHIP_PRIVATE_SENTENCE', originRef: 'captain_private' });
   S._loadAllStores({
     orgMeta: { [code]: { orgName: 'Dummy Pilot', orgMode: 'sports' } },
     orgUsers: { [code]: fixture.users }, orgNodes: { [code]: fixture.nodes },
     inquiryStates: { [code]: {
       'member:captain': { personal_load: fixture.objects.privateInquiry },
       'group:first': { role_clarity: fixture.objects.sharedInquiry },
+      'relationship-claim:captain~mid2#communication': { communication: relationshipInquiry },
     } },
     forumThreads: { [code]: { [fixture.objects.sharedInquiry.inquiryId]: fixture.objects.forumThread } },
     teamFocuses: { [code]: { first: [fixture.objects.sharedFocus] } },
@@ -176,6 +187,43 @@ async function main() {
   const coachPayload = JSON.stringify(forumResponses[3].body);
   ok('DP-4 a leader cannot infer an author from a Forum summary or citation',
     !coachPayload.includes('captain') && !coachPayload.includes('citation') && !coachPayload.includes('summary'));
+
+  // ATTACK 5: classifications are labels only and never enter vertical scope.
+  const savedClasses = first.classifications;
+  first.classifications = {};
+  const beforeClassification = JSON.stringify(S.getVisibleUserIds(code, 'captain').sort());
+  S._setClassifications(code, 'first', 'captain', ['captain', 'midfielder', 'sophomore']);
+  S._setClassifications(code, 'second', 'otherCaptain', ['captain']);
+  const afterClassification = JSON.stringify(S.getVisibleUserIds(code, 'captain').sort());
+  ok('DP-5 classification membership widens no person visibility',
+    beforeClassification === afterClassification && !JSON.parse(afterClassification).includes('otherCaptain'));
+  first.classifications = savedClasses;
+
+  // ATTACK 6: one person projected through three cohort labels is still one voice and one origin.
+  const triple = ['captain', 'midfielder', 'sophomore'].map(tag => ({ status: 'contributed',
+    contributorId: 'captain', originRef: 'captain_direct', evidenceRef: `class_${tag}` }));
+  const tripleDecision = contribution.shouldOpenGroupInquiry(triple);
+  ok('DP-6 the triple-classified captain counts as one contributor and one origin',
+    tripleDecision.open === false && tripleDecision.contributors === 1 && tripleDecision.independentOrigins === 1);
+
+  // ATTACK 7: a shared Focus projection never joins the participants' private state.
+  const groupState = await call('captain', '/api/group/first/state');
+  ok('DP-7 a shared Focus exposes no unrelated private participant data',
+    groupState.status === 200 && groupState.body.focus?.focusId === 'focus_shared'
+    && !JSON.stringify(groupState.body).includes('focus_personal')
+    && !JSON.stringify(groupState.body).includes('Prepare calmly'));
+
+  // ATTACK 8: the personal Inquiry route is bound to the authenticated person, not participants.
+  const otherInquiry = await call('mid2', '/api/inquiry?subjectId=captain');
+  ok('DP-8 a participant cannot reach another person private Inquiry',
+    otherInquiry.status === 200 && !JSON.stringify(otherInquiry.body).includes('inq_private_captain'));
+
+  // ATTACK 9: neither endpoint of a relationship may turn the self route into a private-evidence join.
+  const relationReads = await Promise.all(['captain', 'mid2'].map(id => call(id, '/api/inquiry')));
+  ok('DP-9 a relationship Inquiry leaks no private evidence between its endpoints',
+    relationReads.every(r => r.status === 200
+      && !JSON.stringify(r.body).includes('RELATIONSHIP_PRIVATE_SENTENCE')
+      && !JSON.stringify(r.body).includes('inq_relationship_private')));
 
   await new Promise(resolve => server.close(resolve));
   console.log(`\ndummy-pilot-smoke: ${pass} passed, ${fail} failed`);
