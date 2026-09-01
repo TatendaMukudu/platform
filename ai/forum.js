@@ -77,19 +77,35 @@ function editMessage(message, text, { now = Date.now() } = {}) {
 
 /* What a reader may see. Removed messages keep their place as a tombstone rather than vanishing.
    Note what is NOT here: nothing about evidence, candidates, confidence or origins. A Forum read
-   cannot leak epistemic provenance because it never holds any. */
-function visibleThread(thread, { limit = 200 } = {}) {
+   cannot leak epistemic provenance because it never holds any.
+
+   D-A2 · ANONYMOUS TO HUMANS, KNOWN TO THE KERNEL. `authorId` never leaves this function. Every
+   reader — leaders included, because candour with the people above you is the entire reason
+   Forum is worth having — sees unattributed speech. The viewer sees their OWN messages flagged,
+   so they can find and correct what they said.
+
+   Anonymity here is a RENDERING property. The stored message keeps its author, so independent
+   origins are still counted, echoes still refuse to corroborate, corrections are still
+   attributable and a withdrawal still knows what it withdraws. Removing authorship rather than
+   hiding it would let one person post five times and manufacture a consensus.
+
+   `viewerId` is required for ownership. Absent it, nothing is anyone's — the projection fails
+   closed rather than falling back to attribution. */
+function visibleThread(thread, { limit = 200, viewerId = null } = {}) {
+  const viewer = viewerId ? String(viewerId) : null;
   const msgs = ((thread && thread.messages) || []).slice(-limit).map(m => ({
     messageId: m.messageId,
-    authorId: m.status === 'removed' ? null : m.authorId,
+    // Never the author. Not for a leader, not for an admin, not when the message is removed.
+    authorId: null,
+    mine: m.status !== 'removed' && !!viewer && m.authorId === viewer,
     text: m.status === 'removed' ? null : m.text,
     at: m.at,
     editedAt: m.editedAt,
     replyTo: m.replyTo,
     status: m.status,
-    // That a statement was offered as the author's own account is part of the conversation —
-    // it says "I stand behind this", which other people can reasonably see. It carries no
-    // weight and no reference to what the evidence became.
+    // That a statement was offered as its author's own account is part of the conversation —
+    // it says "somebody stands behind this", which other people can reasonably see. It carries
+    // no weight, no identity and no reference to what the evidence became.
     contributed: !!m.contributedAs,
   }));
   return { inquiryId: (thread || {}).inquiryId, nodeId: (thread || {}).nodeId, messages: msgs };

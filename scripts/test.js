@@ -211,6 +211,9 @@ const SUITES = [
   'answerability-screen-smoke.js',  // every person can inspect only their own subject view, content-free access trail, real audiences and exact safeguarding exception
   'voice-composer-smoke.js',        // D30/D34 — the composer: four blocks, provenance banded by default, no prediction, no kernel word, survives the language guard
   'thread-binding-http-smoke.js',   // object-as-conversation G1 — a thread knows what it is about; the binding is a label on your own thread, never a claim of access, and an unparseable scope filters to nothing
+  'relationship-ref-smoke.js', // D-A3: endpoint-bearing relationship subjects - symmetric canonicalisation, declared direction, erasure discovery, fail closed
+  'forum-anonymity-smoke.js', // D-A2: anonymous to every human including leaders; the kernel keeps protected authorship so origins, echo, correction and withdrawal still work
+  'classification-scope-smoke.js', // D-A1: a role is a label on membership, never a place in the hierarchy - grants no visibility, no authority, and three labels are still one origin
   'group-model-owner-smoke.js', // D54: legacy loads and routes converge on orgNodes, the sole group model
   'objective-owner-smoke.js', // D50: org-context objectives are canonical; orgGoals is a non-persisted superseding view
   'subject-ref-smoke.js', // Lane F: typed member/group/organisation/relationship subjects; unknown kinds fail closed

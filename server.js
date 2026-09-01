@@ -1192,6 +1192,59 @@ function _groupView(node) {
   return node;
 }
 function _groups(code) { return Object.values(orgNodes[code] || {}).map(_groupView).filter(Boolean); }
+
+/* ── D-A1 · CLASSIFICATIONS ──────────────────────────────────────────────────
+   Midfielder, captain, sophomore, accountant. A person may hold several at once while sitting in
+   exactly one place in the hierarchy, so a classification is a label ON AN EXISTING MEMBERSHIP —
+   `node.classifications = { userId: [tag] }` — and not a node of its own.
+
+   That choice is the whole safety property. A node's memberIds feed visibleScope -> canSee ->
+   _orgAdmissibleEvidence, so a "Captains" node would hand its members' evidence to whoever led
+   it and make the captain a leader. This field is never read by any scope computation, and
+   `ai/org-graph.js` — which owns scope — does not mention it (asserted, comments stripped).
+
+   These are DECLARED organisational facts. An inferred description of somebody ("avoids
+   confrontation") is a claim with provenance, contradiction and falsifiers, which is an Inquiry;
+   it must never be written here, where it would become a permanent label nobody can revise.
+
+   One human wearing three labels remains ONE evidence origin. Nothing here touches origin
+   counting, which has always been by originRef rather than by membership. */
+const _tag = (v) => String(v == null ? '' : v).trim().toLowerCase().slice(0, 60);
+
+function _setClassifications(code, nodeId, userId, tags) {
+  const node = (orgNodes[code] || {})[nodeId];
+  if (!node || !userId) return [];
+  const clean = [...new Set((Array.isArray(tags) ? tags : [tags]).map(_tag).filter(Boolean))].sort().slice(0, 20);
+  const map = node.classifications || (node.classifications = {});
+  if (clean.length) map[String(userId)] = clean; else delete map[String(userId)];
+  scheduleSave();
+  return clean;
+}
+
+/* Everything this person is classified as, across every node they belong to. */
+function _classificationsOf(code, userId) {
+  if (!userId) return [];
+  const out = new Set();
+  for (const node of Object.values(orgNodes[code] || {})) {
+    for (const t of ((node.classifications || {})[String(userId)] || [])) out.add(t);
+  }
+  return [...out].sort();
+}
+
+/* The cohort. Optionally narrowed to one node, so "the captains" does not silently mean every
+   captain in the organisation when the caller meant this squad's. */
+function _membersWithClassification(code, tag, { nodeId = null } = {}) {
+  const want = _tag(tag);
+  if (!want) return [];
+  const out = new Set();
+  for (const node of Object.values(orgNodes[code] || {})) {
+    if (nodeId && node.nodeId !== nodeId) continue;
+    for (const [uid, tags] of Object.entries(node.classifications || {})) {
+      if ((tags || []).includes(want)) out.add(uid);
+    }
+  }
+  return [...out].sort();
+}
 /* What goes over the wire keeps the legacy shape a front end already reads. This is the only
    place the projections become data, and it is a copy — the stored node is untouched. */
 function _groupWire(node) { return node ? { ...node, id: node.id, leadIds: node.leadIds } : null; }
@@ -2106,7 +2159,7 @@ function _removePerson(code, userId, deleteData) {
     delete pushSubs[uKey];                  // web-push endpoints
 
     // The working diagnostic picture, which holds spans quoted from what they said.
-    if (inquiryStates[code]) delete inquiryStates[code][`member:${userId}`];
+    _eraseSubjectInquiries(code, userId);
 
     // Library items + folders they own (private notes, saved chats, artifacts).
     if (Array.isArray(libraryItems[code]))
@@ -9401,6 +9454,20 @@ function _resolveSubjectRef(code, ref) {
   // is established by the inquiry record itself at the D53 boundary.
   return parsed;
 }
+/* D-A3 · THE ERASURE SWEEP. Erasure used to delete `member:<id>` and nothing else, which was
+   correct only while a person could be the subject of exactly one kind of thing. A relationship
+   claim names two people, so a claim about someone would have outlived their erasure — the other
+   endpoint being present is not a reason to keep it. Because the endpoints are IN the reference,
+   this is a sweep over keys rather than a store that has to be kept in step by hand. */
+function _eraseSubjectInquiries(code, userId) {
+  const byOrg = inquiryStates[code];
+  if (!byOrg || !userId) return 0;
+  let removed = 0;
+  for (const ref of Object.keys(byOrg)) {
+    if (ref === `member:${userId}` || subjectRef.mentions(ref, userId)) { delete byOrg[ref]; removed++; }
+  }
+  return removed;
+}
 function _inquiryFor(code, subjectRef, concept, label, domain, now) {
   const subject = _resolveSubjectRef(code, subjectRef);
   if (!subject) return null;
@@ -9409,7 +9476,11 @@ function _inquiryFor(code, subjectRef, concept, label, domain, now) {
   const key = String(concept || 'general').toLowerCase();
   if (!bySubject[key]) {
     bySubject[key] = diagnose.newInquiry({ id: 'inq_' + generateId(), subjectRef, concept: key, label, domain, now });
-    if (subject.kind === 'relationship-claim') bySubject[key].relationshipClaim = { claimId: subject.id };
+    // D-A3: the endpoints are carried on the inquiry because they are carried in the ref. Nothing
+    // here is a relationship STORE — it is the subject describing itself, which is what lets
+    // _eraseSubjectInquiries find every claim naming a person without an index to keep in step.
+    if (subject.kind === 'relationship-claim') bySubject[key].relationshipClaim = {
+      claimId: subject.id, endpoints: [...subject.endpoints], directed: subject.directed, concept: subject.concept };
   }
   return bySubject[key];
 }
@@ -13886,7 +13957,9 @@ app.get('/api/group/:nodeId/forum/:inquiryId', requireAuth, (req, res) => {
   if (!forum.mayRead(access)) return res.status(403).json({ error: 'not part of this group' });
   res.json({
     ok: true,
-    ...forum.visibleThread(t.thread || forum.newThread({ inquiryId: t.inquiry.inquiryId, nodeId })),
+    // D-A2: the reader is passed so they can see which messages are their own. Nobody else's
+    // authorship crosses this boundary, including for a leader.
+    ...forum.visibleThread(t.thread || forum.newThread({ inquiryId: t.inquiry.inquiryId, nodeId }), { viewerId: userId }),
     note: 'Discussion. Nothing said here counts as evidence unless its author deliberately offers it as their account.',
   });
 });
@@ -18663,7 +18736,9 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: universal evidence intake
   _ingestArtifact, _deleteImport, _sanitizeBriefingForLeader, _stripLeaderNumbers, _deriveOrgUncertainties,
   _getOrgState, _buildOrgStateInputs, orgStateConfig, orgContextRecords, _confirmOrgContext,
-  _resolveSubjectRef, _inquiryFor,
+  _resolveSubjectRef, _inquiryFor, _eraseSubjectInquiries,
+  // exported for the truth layer: classifications are labels on membership, never hierarchy
+  _setClassifications, _classificationsOf, _membersWithClassification, _isLeader,
   _teamReadiness, roleBindings, _bindRole, activeQuestions, _activeQuestionFrom, _writeResolutionEvidence,
   // exported for the truth layer: organisational memory (Phase A) — the derived-state timeline
   orgStateHistory, _recordOrgSnapshot,

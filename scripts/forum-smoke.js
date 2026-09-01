@@ -93,7 +93,15 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
   {
     const view = await GET(CODE, 'pB', `/api/group/u18/forum/${INQ}`);
     ok('1 · a node member can read the forum', view.status === 200 && view.body.messages.length === 1);
-    ok('7 · …with the author attributed', view.body.messages[0].authorId === 'pA');
+    // D-A2: attribution used to be asserted here. The founder has ruled the other way for pilot,
+    // so what must now hold is the opposite — and the stronger half of it is that the KERNEL
+    // still knows, which is what keeps origin counting and correction working.
+    ok('7 · …with the author hidden from another member', view.body.messages[0].authorId == null
+      && view.body.messages[0].mine === false);
+    ok('7b · …while the kernel keeps protected authorship',
+      forumThreads[CODE][INQ].messages[0].authorId === 'pA');
+    const own = await GET(CODE, 'pA', `/api/group/u18/forum/${INQ}`);
+    ok('7c · …and the author can still find their own words', own.body.messages[0].mine === true);
     ok('8 · …and the message persisted', view.body.messages[0].text.includes('winger is jumping'));
     const lead = await GET(CODE, 'coach', `/api/group/u18/forum/${INQ}`);
     ok('2 · a node leader can read it', lead.status === 200 && lead.body.messages.length === 1);
@@ -186,8 +194,15 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
       G().signals.filter(x => d.isActive(x)).length === before.signals + 1);
     ok('· …and confidence is whatever the kernel says, computed by it alone',
       after.confidence === d.deriveConfidence(G().signals.filter(x => x.kind !== 'interpretation' && d.isActive(x)), { now: G().lastUpdatedAt }).score);
-    ok('· Forum resolved nothing: no vote, no consensus, no winner',
-      !/vote|consensus|agree_count|majority/i.test(require('fs').readFileSync(require('path').join(__dirname, '../ai/forum.js'), 'utf8')));
+    /* Comments are stripped before the check. The point is that no voting MECHANISM exists in the
+       code; prose explaining why one must not exist is the opposite of a violation, and a word
+       blacklist that reads comments fails on the documentation that proves it right. */
+    {
+      const src = require('fs').readFileSync(require('path').join(__dirname, '../ai/forum.js'), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/.*$/gm, '$1');
+      ok('· Forum resolved nothing: no vote, no consensus, no winner',
+        !/vote|consensus|agree_count|majority/i.test(src));
+    }
   }
 
   // ── STEP 8. Repetition ─────────────────────────────────────────────────────────────────────
@@ -263,8 +278,13 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
     const cont = await POST(CODE, 'pB', `/api/group/u18/forum/${INQ}/${m2.body.messageId}/contribute`, {});
     ok('22 · …and cannot contribute after losing authorisation', cont.status === 403);
     const view = await GET(CODE, 'pA', `/api/group/u18/forum/${INQ}`);
+    /* D-A2: this used to read authorId off the API view. Under anonymity that field is null for
+       everyone, so the assertion would have passed without testing anything. It now reads the
+       KERNEL record, which is both the honest test and the stronger one — losing membership must
+       not rewrite what a person said, and the system must still know they said it. */
     ok('· their historical speech is not silently rewritten',
-      view.body.messages.some(x => x.authorId === 'pB' && x.status === 'visible'));
+      view.body.messages.some(x => x.status === 'visible')
+      && forumThreads[CODE][INQ].messages.some(x => x.authorId === 'pB' && x.status === 'visible'));
     ok('23 · …and their contributed evidence survives membership removal',
       JSON.parse(epistemic()).contributors.includes('pB') &&
       JSON.parse(epistemic()).signals === beforeLeave.signals);
@@ -319,9 +339,11 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
     const beforeErase = JSON.parse(epistemic());
     _removePerson(CODE, 'pC', true);
     const view = await GET(CODE, 'pA', `/api/group/u18/forum/${INQ}`);
+    /* D-A2: the view's authorId is null for everyone now, so checking it here would prove
+       nothing. Erasure has to be verified where authorship actually lives. */
     ok('24 · erasure removes their words and their authorship from the thread',
-      !view.body.messages.some(m => m.authorId === 'pC') &&
-      !JSON.stringify(view.body).includes('Same as pA said'));
+      !JSON.stringify(view.body).includes('Same as pA said') &&
+      !forumThreads[CODE][INQ].messages.some(m => m.authorId === 'pC' && m.status !== 'removed'));
     ok('24 · …leaving tombstones rather than holes', view.body.messages.some(m => m.status === 'removed'));
     ok('24 · …while what they contributed stays governed by the evidence lifecycle',
       JSON.parse(epistemic()).signals === beforeErase.signals);

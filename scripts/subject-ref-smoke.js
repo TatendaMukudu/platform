@@ -10,9 +10,14 @@ const C = 'subject-ref';
 S._loadAllStores({ orgMeta: { [C]: {} }, orgUsers: { [C]: { m: { id: 'm', role: 'member', status: 'active' } } },
   orgNodes: { [C]: { g: { nodeId: 'g', memberIds: ['m'], leaderIds: [] } } } });
 
-for (const ref of ['member:m', 'group:g', `organisation:${C}`, 'relationship-claim:r1']) {
+/* D-A3 tightened the relationship grammar: an opaque id no longer parses, because a subject that
+   does not name its endpoints is one erasure cannot find. The valid form is built, not spelled. */
+const REL = refs.relationshipRef(['m', 'n'], { concept: 'communication' });
+for (const ref of ['member:m', 'group:g', `organisation:${C}`, REL]) {
   ok(`SR ${ref} parses as a typed subject`, refs.parse(ref)?.ref === ref);
 }
+ok('SR an opaque relationship id no longer parses — endpoints are part of the contract',
+  refs.parse('relationship-claim:r1') === null);
 ok('SR unknown subject kinds fail closed in the parser', refs.parse('actor:m') === null);
 ok('SR the production resolver validates member, group and organisation identities',
   S._resolveSubjectRef(C, 'member:m')?.kind === 'member' && S._resolveSubjectRef(C, 'group:g')?.kind === 'group'
