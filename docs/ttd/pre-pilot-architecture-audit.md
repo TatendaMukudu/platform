@@ -11,6 +11,10 @@ brief and the repository disagree, the code is the finding and the brief is the 
 
 # NOT READY TO FREEZE — three P0 gaps, all smaller than the brief assumes
 
+> **UPDATE, `ae16a27`.** All three P0s below are now **CLOSED**, RED-first, with 40 assertions
+> and no new stores. The founder adjudicated D-A1/D-A2/D-A3; §21 records what was built. **The
+> freeze verdict now turns solely on the adversarial dummy pilot (§23), which has not yet run.**
+
 The brief's central hypothesis is **half right**. The vertical Web is mature. The horizontal
 dimension is not missing an *engine* — the truth-maintenance machinery is already subject-agnostic
 and already carries lateral evidence correctly. What is missing is narrower and more specific:
@@ -362,9 +366,49 @@ organisation-level High/Low · IntelliQ as a Forum participant (§18 of the brie
 
 ## 21 · IMPLEMENTATION PERFORMED
 
-**None.** This pass is Stages 1–6. Two of the three P0 items are stop-and-present under the brief's
-own Stage 6 rule (they change Web semantics and privacy law); the third depends on a decision the
-code cannot supply. Implementing before adjudication would be choosing silently, which §31 forbids.
+**All three P0s, RED-first, at `ae16a27`.** 40 new assertions; no new stores, engines or truth
+layers. Details in that commit message. Summary:
+
+| P0 | Shape | Key guarantee |
+|---|---|---|
+| **D-A1** | `node.classifications = { userId: [tag] }` | `ai/org-graph.js`, which owns scope, contains no reference to it (K9, comments stripped). Three labels remain one origin (K10) |
+| **D-A2** | `visibleThread(..., { viewerId })` | `authorId` never leaves the function for anyone; the stored message keeps it, so origins, echo, correction and withdrawal still work |
+| **D-A3** | `relationship-claim:<a>~<b>#<concept>` | Undirected endpoints sorted so A↔B is one subject; direction declared, never positional; `_eraseSubjectInquiries` sweeps every subject naming a person |
+
+**Four existing assertions had to move to the new laws.** Two were about to become **vacuous** —
+they read `authorId` off the API view, which is now null for everyone, so they would have passed
+without testing anything. Both moved to the kernel store, where authorship actually lives. One
+(`subject-ref-smoke`) asserted the old opaque-id grammar and now pins the new one plus the old form
+explicitly failing. One was a false positive: the "no vote, no consensus" check greps `forum.js` for
+those words and tripped on a *comment explaining why consensus cannot be manufactured*; it now
+strips comments and tests code rather than prose.
+
+### The P1, specified for the immediate post-P0 pass — NOT implemented
+
+Deferred by founder instruction. It is not required to make the dummy pilot truthful: the pilot
+tests privacy, origin counting and scope, none of which depend on citation strength, and the numeric
+cage already prevents fabricated figures reaching a reader.
+
+**P1-a · carry the belief id and band to the composer.** `server.js:9166` currently does
+`.map(a => ({ text: a.claim }))`. Change to `{ text: a.claim, ref: a.beliefId, band: a.confidence }`
+and render in `composer.buildContext` as `- [ref] text (band)`. **Smallest useful step; do this
+first.**
+
+**P1-b · make expression basis consistent.** Inquiry band already reaches the model inside prose
+(`server.js:9214`); agenda band does not. P1-a closes the gap by construction.
+
+**P1-c · make `usedRefs` mean something.** Today it is the model's own assertion, filtered to valid
+ids. Either verify each cited row's content appears in the sentence range that cites it, or rename
+the field to `claimedRefs` and stop implying more than it delivers. **Renaming is the honest cheap
+option and should be preferred unless verification is genuinely wanted.**
+
+**P1-d · separate citation rendering from provenance.** Today one dataset per reader, safe by call
+order rather than by construction. The fix is a `citationFor(ref, reader)` projection, so the same
+governed reference renders as *"your check-ins from these dates"* to its owner and *"multiple
+independent contributions"* to a leader.
+
+**P1-e · genericity.** `composer.js:45` names football in a prompt example about polysemy. Replace
+with a domain-neutral illustration.
 
 ---
 
@@ -379,7 +423,9 @@ integrity).
 
 ## 23 · DUMMY PILOT
 
-**Not run.** It is Stage 9 and depends on P0-1 and P0-2, both unadjudicated: a synthetic organisation
+**Not run — and it is now the ONLY thing between here and a freeze verdict.** The two blockers that
+made it impossible are gone: a person can hold several classifications, and a shared Forum is
+anonymous. It is Stage 9 and depends on P0-1 and P0-2, both unadjudicated: a synthetic organisation
 with "one person with multiple roles" and "a shared anonymous Forum" cannot be built against a system
 that has neither. Building it against today's architecture would test the wrong system and produce
 false confidence. **This is the single largest remaining piece of work and should follow the two
