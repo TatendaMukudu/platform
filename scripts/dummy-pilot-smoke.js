@@ -10,6 +10,8 @@ process.env.IQ_DETERMINISTIC_ONLY = '1';
 const diagnose = require('../ai/diagnose');
 const forum = require('../ai/forum');
 const teamState = require('../ai/team-state');
+const contribution = require('../ai/contribution');
+const S = require('../server');
 
 let pass = 0;
 let fail = 0;
@@ -97,26 +99,87 @@ function buildObjects(org) {
   return { privateInquiry, sharedInquiry, personalFocus, sharedFocus, groupHigh, groupLow, forumThread, evidence };
 }
 
-const fixture = buildOrganisation();
-fixture.objects = buildObjects(fixture);
-const first = fixture.nodes.first;
-ok('DP-0 builds one eight-person organisation with one triple-classified captain and separate shared label',
-  Object.keys(fixture.users).length === 8
-  && first.memberIds.length === 6
-  && first.classifications.captain.length === 3
-  && first.memberIds.filter(id => id === 'captain').length === 1
-  && fixture.nodes.second.classifications.otherCaptain.includes('captain')
-  && !first.memberIds.includes('otherCaptain'));
-ok('DP-00 builds every required private, shared, corrected, conflicting, and echoed pilot object',
-  fixture.objects.privateInquiry.subjectRef === 'member:captain'
-  && fixture.objects.sharedInquiry.subjectRef === 'group:first'
-  && fixture.objects.personalFocus.visibility === 'private'
-  && fixture.objects.sharedFocus.origin.inquiryId === fixture.objects.sharedInquiry.inquiryId
-  && fixture.objects.groupHigh.kind === 'high' && fixture.objects.groupLow.kind === 'low'
-  && fixture.objects.forumThread.messages.length === 1
-  && fixture.objects.evidence.privateAccount.visibility === 'private'
-  && fixture.objects.evidence.corrected.corrects === fixture.objects.evidence.publicAccount.id
-  && fixture.objects.evidence.echoes.every(e => e.originRef === 'captain_direct'));
+async function main() {
+  const fixture = buildOrganisation();
+  fixture.objects = buildObjects(fixture);
+  const first = fixture.nodes.first;
+  ok('DP-0 builds one eight-person organisation with one triple-classified captain and separate shared label',
+    Object.keys(fixture.users).length === 8
+    && first.memberIds.length === 6
+    && first.classifications.captain.length === 3
+    && first.memberIds.filter(id => id === 'captain').length === 1
+    && fixture.nodes.second.classifications.otherCaptain.includes('captain')
+    && !first.memberIds.includes('otherCaptain'));
+  ok('DP-00 builds every required private, shared, corrected, conflicting, and echoed pilot object',
+    fixture.objects.privateInquiry.subjectRef === 'member:captain'
+    && fixture.objects.sharedInquiry.subjectRef === 'group:first'
+    && fixture.objects.personalFocus.visibility === 'private'
+    && fixture.objects.sharedFocus.origin.inquiryId === fixture.objects.sharedInquiry.inquiryId
+    && fixture.objects.groupHigh.kind === 'high' && fixture.objects.groupLow.kind === 'low'
+    && fixture.objects.forumThread.messages.length === 1
+    && fixture.objects.evidence.privateAccount.visibility === 'private'
+    && fixture.objects.evidence.corrected.corrects === fixture.objects.evidence.publicAccount.id
+    && fixture.objects.evidence.echoes.every(e => e.originRef === 'captain_direct'));
 
-console.log(`\ndummy-pilot-smoke: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+  const code = fixture.code;
+  S._loadAllStores({
+    orgMeta: { [code]: { orgName: 'Dummy Pilot', orgMode: 'sports' } },
+    orgUsers: { [code]: fixture.users }, orgNodes: { [code]: fixture.nodes },
+    inquiryStates: { [code]: {
+      'member:captain': { personal_load: fixture.objects.privateInquiry },
+      'group:first': { role_clarity: fixture.objects.sharedInquiry },
+    } },
+    forumThreads: { [code]: { [fixture.objects.sharedInquiry.inquiryId]: fixture.objects.forumThread } },
+    teamFocuses: { [code]: { first: [fixture.objects.sharedFocus] } },
+    userAiProfiles: { [`${code}:captain`]: { focuses: [fixture.objects.personalFocus] } },
+  });
+  const server = S.app.listen(0);
+  await new Promise(resolve => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const headers = id => ({ Authorization: `Bearer ${S.issueToken(id, code, fixture.users[id].role)}`,
+    'Content-Type': 'application/json' });
+  const call = async (id, path, method = 'GET', body) => {
+    const response = await fetch(base + path, { method, headers: headers(id),
+      body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: response.status, body: await response.json().catch(() => ({})) };
+  };
+  const inquiryId = fixture.objects.sharedInquiry.inquiryId;
+  const forumPath = `/api/group/first/forum/${inquiryId}`;
+
+  // ATTACK 1: speech remains epistemically inert, even at volume from one author.
+  const beforeSignals = fixture.objects.sharedInquiry.signals.length;
+  const postResponses = [];
+  for (let i = 0; i < 5; i++) postResponses.push(await call('captain', forumPath, 'POST', { text: `Repeated view ${i}` }));
+  ok('DP-1 one user posting five times cannot manufacture anonymous consensus',
+    postResponses.every(r => r.status === 200 && r.body.epistemicEffect === 'none')
+    && fixture.objects.sharedInquiry.signals.length === beforeSignals);
+
+  // ATTACK 2: once deliberately contributed, declared echoes preserve the prime origin.
+  const threadAfterPosts = await call('captain', forumPath);
+  const ids = threadAfterPosts.body.messages.slice(-5).map(m => m.messageId);
+  const original = await call('captain', `${forumPath}/${ids[0]}/contribute`, 'POST', {});
+  const mid2Post = await call('mid2', forumPath, 'POST', { text: 'I heard the same account.' });
+  const mid3Post = await call('mid3', forumPath, 'POST', { text: 'That is what I was told too.' });
+  const echoA = await call('mid2', `${forumPath}/${mid2Post.body.messageId}/contribute`, 'POST', { echoes: ids[0] });
+  const echoB = await call('mid3', `${forumPath}/${mid3Post.body.messageId}/contribute`, 'POST', { echoes: ids[0] });
+  ok('DP-2 forum echoes preserve one origin and trigger the ECHO verdict',
+    original.status === 200 && echoA.body.origin === 'reported' && echoB.body.origin === 'reported'
+    && echoB.body.decision?.rule === 'ECHO' && echoB.body.decision?.independentOrigins === 1);
+
+  // ATTACKS 3-4: inspect complete JSON, not a hand-picked identity field.
+  const forumResponses = [];
+  for (const id of ['captain', 'mid2', 'mid3', 'coach']) forumResponses.push(await call(id, forumPath));
+  const payload = JSON.stringify(forumResponses);
+  ok('DP-3 anonymous authorship is absent from every complete Forum API payload',
+    forumResponses.every(r => r.status === 200)
+    && !payload.includes('"authorId":"captain"') && !payload.includes('captain@dummy.test'));
+  const coachPayload = JSON.stringify(forumResponses[3].body);
+  ok('DP-4 a leader cannot infer an author from a Forum summary or citation',
+    !coachPayload.includes('captain') && !coachPayload.includes('citation') && !coachPayload.includes('summary'));
+
+  await new Promise(resolve => server.close(resolve));
+  console.log(`\ndummy-pilot-smoke: ${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+}
+
+main().catch(error => { console.error(error); process.exit(1); });
