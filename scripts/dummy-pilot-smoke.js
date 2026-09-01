@@ -282,6 +282,48 @@ async function main() {
     && !remainingSubjects.some(ref => ref.startsWith('relationship-claim:') && ref.includes('captain'))
     && remainingSubjects.includes('group:first'));
 
+  // POSITIVE 16: privacy must still leave a useful, governed group read.
+  const coachState = await call('coach', '/api/group/first/state');
+  ok('DP-16 the leader receives a governed group-level conclusion they are entitled to',
+    coachState.status === 200 && coachState.body.carriesPrivateContent === false
+    && typeof coachState.body.statement === 'string' && coachState.body.statement.length > 20
+    && coachState.body.focus?.focusId === 'focus_shared');
+
+  // POSITIVE 17: the owner can ground an answer in their own private canonical record.
+  S._captureKnowledge(code, 'captain', 'My recovery plan is deliberate.', { visibility: 'private' });
+  const ownAnswer = await call('captain', '/api/workspace/ask', 'POST', { question: 'What changed recently?' });
+  ok('DP-17 the member gets a grounded answer about their own record',
+    ownAnswer.status === 200 && /recovery plan is deliberate/i.test(JSON.stringify(ownAnswer.body))
+    && (ownAnswer.body.cites || ownAnswer.body.citations || ownAnswer.body.basis || []).length !== 0);
+
+  // POSITIVE 18: another member with no record receives explicit insufficiency, never a guess.
+  const unknownAnswer = await call('mid2', '/api/workspace/ask', 'POST', { question: 'What changed recently?' });
+  ok('DP-18 insufficient evidence produces an honest unknown rather than a guess',
+    unknownAnswer.status === 200 && /nothing new|don.t have|not enough|no clear read/i.test(JSON.stringify(unknownAnswer.body)));
+
+  // POSITIVE 19: disagreement and ignorance are different deterministic states.
+  const disagreement = teamState.statementFor({ question: { contested: true, about: 'role clarity', question: 'Which account holds?' } });
+  const ignorance = teamState.statementFor({ question: { contested: false, about: 'role clarity', question: 'What changed?' } });
+  ok('DP-19 the kernel distinguishes disagreement from ignorance',
+    disagreement !== ignorance && /describing .* differently/i.test(disagreement)
+    && /nothing we hold answers/i.test(ignorance));
+
+  // MULTI-PERIOD VALUE LOOP: existing understanding focuses attention, evidence is tested,
+  // an outcome is observed later, and correction revises the active belief without erasing history.
+  const period1 = Date.UTC(2026, 7, 1);
+  const period2 = Date.UTC(2026, 7, 8);
+  const period3 = Date.UTC(2026, 7, 15);
+  const completedFocus = teamState.recordFocusOutcome({ ...fixture.objects.sharedFocus }, {
+    result: 'better', note: 'Roles were clearer after the trial.', by: 'coach', now: period3,
+  });
+  ok('DP-20 the multi-period value loop reaches outcome and belief revision without deleting history',
+    period1 < period2 && period2 < period3
+    && fixture.objects.privateInquiry.signals.length > 0
+    && fixture.objects.sharedFocus.createdAt === period1
+    && completedFocus.outcome?.result === 'better' && completedFocus.outcome.at === period3
+    && lifecycleInquiry.timeline.length > 0 && lifecycleInquiry.signals.length >= 3
+    && lifecycleInquiry.signals.filter(diagnose.isActive).length === 0);
+
   await new Promise(resolve => server.close(resolve));
   console.log(`\ndummy-pilot-smoke: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
