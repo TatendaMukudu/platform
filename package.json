@@ -11,7 +11,7 @@
     "smoke:advisor": "node scripts/advisor-smoke.js",
     "smoke:frontend": "node scripts/frontend-smoke.js",
     "smoke:llm": "node scripts/llm-smoke.js",
-    "demo:club": "node scripts/club-stress.js"
+    "demo:seed": "node -e \"require('./scripts/seed-alma').buildAlmaStore().then(r=>console.log(JSON.stringify(r.summary,null,2)))\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.3",

@@ -97,12 +97,15 @@ const clear = () => { for (const store of Object.values(_persistedStores())) for
 
     /* ── BB10: the number itself. A cold start that reads everything twice is not visible in
        any test that only checks correctness, which is why this went unnoticed for a month. ── */
-    const { buildClubStore } = require('../scripts/seed-club.js');
-    const { store } = await buildClubStore();
+    // The 21.5 MB club that made this bug expensive has been deleted; the demo is now 31 KB.
+    // What remains worth asserting is the RATIO, not a number — a boot that reads the store
+    // twice costs twice, whatever the store happens to weigh this month.
+    const { buildAlmaStore } = require('../scripts/seed-alma.js');
+    const { store } = await buildAlmaStore();
     const mb = Object.values(store).reduce((n, v) => n + Buffer.byteLength(JSON.stringify(v), 'utf8'), 0) / 1048576;
-    console.log(`       the seeded club serialises to ${mb.toFixed(1)} MB — that is what one avoided blob read is worth`);
-    ok('BB10 the store is big enough that reading it twice per boot matters (this is a scale check, not a limit)',
-      mb > 1);
+    console.log(`       the demo organisation serialises to ${(mb * 1024).toFixed(0)} KB (the seed it replaced was 21,500 KB)`);
+    ok('BB10 the demo seed is small enough that a cold start is cheap — the old one was 700x this and was read twice per boot',
+      mb > 0 && mb < 1);
 
   } catch (e) { fail++; console.error('  FAIL suite threw:', e && e.stack); }
 

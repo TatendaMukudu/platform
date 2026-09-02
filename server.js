@@ -1599,6 +1599,54 @@ function _buildMemoryBlock(orgCode, userId) {
   return '\n\n' + lines.join('\n');
 }
 
+/* ── PURGE AN ORGANISATION ────────────────────────────────────────────────────────────────
+   Deleting a seed from the repository does not delete it from the database. Trafford United
+   was 21.5 MB of the founder's 5 GB monthly transfer allowance and would have sat in Postgres
+   being loaded on every cold start forever, however thoroughly the builder was removed from
+   git. So the purge is a runtime operation on the store, not a change to the source.
+
+   It uses EXACTLY the partitioning rule the persistence layer uses — a key belongs to an org
+   if it IS the org code or is prefixed with it — because a purge that disagreed with
+   _durableUnits about what an org owns would leave orphans that no longer classify, land them
+   in the ":_" catch-all, and make them permanent AND expensive. One rule, read twice.
+
+   Order matters: every store is swept in one pass, orgMeta included, so that by the time
+   _durableUnits next runs there are no keys left to misclassify. Once the keys are gone the
+   units are gone, and _performSave's existing deletion path removes the rows from Postgres —
+   the machinery for that already exists and is already tested; nothing new writes to the DB.
+
+   Returns what it removed rather than a boolean, because "purged" and "purged nothing" look
+   identical from the outside and only one of them means the data is gone. */
+function _purgeOrg(code) {
+  const org = String(code || '').toLowerCase();
+  const owns = (key) => key === org || key.startsWith(org + ':');
+  const removed = {};
+  let keys = 0;
+  for (const [name, store] of Object.entries(_persistedStores())) {
+    if (!store || typeof store !== 'object') continue;
+    const hit = Object.keys(store).filter(owns);
+    if (!hit.length) continue;
+    for (const k of hit) delete store[k];
+    removed[name] = hit.length;
+    keys += hit.length;
+  }
+  // Some stores are keyed by something other than an org — a session by its token, the email
+  // index by the address — so the sweep above cannot see them by name. They have to be swept by
+  // VALUE instead. Left behind, a token authenticates into an organisation that no longer
+  // exists, and an address still resolves to a user who is gone. _rebuildEmailIndex cannot fix
+  // the second one: it only ever adds, so a stale entry survives every rebuild.
+  for (const [name, store] of [['activeSessions', activeSessions], ['inviteTokens', inviteTokens],
+                               ['pendingInvites', pendingInvites], ['emailIndex', emailIndex]]) {
+    if (!store) continue;
+    const hit = Object.entries(store).filter(([, v]) => v && String(v.orgCode || '').toLowerCase() === org).map(([k]) => k);
+    for (const k of hit) delete store[k];
+    if (hit.length) { removed[name] = (removed[name] || 0) + hit.length; keys += hit.length; }
+  }
+  _rebuildEmailIndex();
+  scheduleSave();
+  return { org, keys, stores: removed };
+}
+
 // Rebuild emailIndex from orgUsers (called after _loadAllStores at startup)
 function _rebuildEmailIndex() {
   for (const [orgCode, users] of Object.entries(orgUsers)) {
@@ -6480,39 +6528,29 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-/* ── POST /api/admin/seed-demo-club — install the full demo club for a click-through.
-   Builds "Trafford United FC" (fictional, ~226 people, ~1yr of data) and installs it
-   as its OWN org so you can log in and see every layer react at scale. Superadmin-
-   gated. Re-running replaces the club org's data (idempotent), never touches others. */
-app.post('/api/admin/seed-demo-club', requirePermission('manage_settings'), async (req, res) => {
+/* ── POST /api/admin/seed-alma — install the demo organisation for a click-through.
+
+   One seed replaced three. The old ones taught a vocabulary the product no longer speaks
+   (notes, assessments, daily check-ins) and the largest was 21.5 MB, which every cold start
+   loaded out of Postgres — that is how a one-person pilot reached 86% of a 5 GB monthly
+   transfer allowance. This one is 31 KB and builds only objects that still exist.
+
+   Superadmin-gated. Re-running replaces the demo org's data and never touches another org. */
+app.post('/api/admin/seed-alma', requirePermission('manage_settings'), async (req, res) => {
   try {
-    const { buildClubStore, CLUB_CODE } = require('./scripts/seed-club.js');
-    const { store, summary } = await buildClubStore();
-    // Each slice is keyed by the club's org code (except emailIndex, rebuilt below),
-    // so assigning replaces just the club org and leaves every other org intact.
-    Object.assign(orgMeta, store.orgMeta);
-    Object.assign(orgUsers, store.orgUsers);
-    Object.assign(orgNodes, store.orgNodes);
-    Object.assign(orgValues, store.orgValues);
-    Object.assign(orgGoals, store.orgGoals);
-    Object.assign(orgMetrics, store.orgMetrics);
-    Object.assign(userPermissions, store.userPermissions);
-    Object.assign(memberGoals, store.memberGoals);
-    Object.assign(memberCheckins, store.memberCheckins);
-    Object.assign(orgSignals, store.orgSignals);
-    Object.assign(assessmentTemplates, store.assessmentTemplates);
-    Object.assign(assessmentAssignments, store.assessmentAssignments);
-    Object.assign(orgTutorials, store.orgTutorials);
-    Object.assign(orgInterventions, store.orgInterventions);
-    Object.assign(studioThreads, store.studioThreads);
-    _migrateLegacyGroups(store.orgGroups);
+    const { buildAlmaStore, ALMA_CODE } = require('./scripts/seed-alma.js');
+    const { store, summary } = await buildAlmaStore();
+    _purgeOrg(ALMA_CODE);                        // replace, never merge onto a previous seed
+    _loadAllStores(store);
     _rebuildEmailIndex();
+    _backfillUserNodeIds();
     scheduleSave();
-    console.log(`[seed-demo-club] installed ${summary.orgName} (${summary.users} users, ${summary.checkins} check-ins)`);
-    res.json({ ok: true, summary, note: `Log in with ${summary.login.director} (or ${summary.login.firstTeamCoach}), password ${summary.login.password}, org code "${CLUB_CODE}".` });
+    console.log(`[seed-alma] installed ${summary.orgName} (${summary.users} people, ${summary.inquiries} inquiries)`);
+    res.json({ ok: true, summary,
+      note: `Log in with ${summary.login.headCoach} (head coach) or ${summary.login.player} (player), password ${summary.login.password}, org code "${ALMA_CODE}".` });
   } catch (e) {
-    console.error('[seed-demo-club] failed:', e.message);
-    res.status(500).json({ error: 'Could not seed the demo club: ' + e.message });
+    console.error('[seed-alma] failed:', e.message);
+    res.status(500).json({ error: 'Could not seed the demo organisation: ' + e.message });
   }
 });
 
@@ -14472,6 +14510,75 @@ app.post('/api/safeguarding/flags/:id/resolve', requireAuth, (req, res) => {
   scheduleSave();
   res.json({ ok: true, flag: f });
 });
+/* DELETE /api/admin/org/:code — remove an organisation and everything it owns, permanently.
+
+   PLATFORM OWNER ONLY (x-platform-key). Not an org superadmin: the blast radius is an entire
+   organisation's records, and the person who should be able to do that is the person who runs
+   the platform, not the person who runs the org. It is also the only destructive operation in
+   the product that no consent flow governs, which is another reason to keep the key on it.
+
+   The confirmation is the org's own code in the body — not a yes/no. A yes/no confirms that
+   you pressed a button; typing the name confirms you know WHICH organisation you are deleting,
+   and that is the mistake actually worth preventing.
+
+   The response says what was removed, per store. "Deleted" and "deleted nothing" look
+   identical otherwise, and after this call there is no way to check by hand. */
+app.delete('/api/admin/org/:code', (req, res) => {
+  if (!_isPlatformAdmin(req)) return res.status(403).json({ error: 'platform key required' });
+  const code = String(req.params.code || '').toLowerCase();
+  if (!code) return res.status(400).json({ error: 'org code required' });
+  if (String((req.body && req.body.confirm) || '') !== code) {
+    return res.status(400).json({ error: `to confirm, send { "confirm": "${code}" }` });
+  }
+  const existed = !!orgMeta[code];
+  const before = Object.values(_durableUnits()).reduce((n, v) => n + Buffer.byteLength(JSON.stringify(v), 'utf8'), 0);
+  const result = _purgeOrg(code);
+  const after = Object.values(_durableUnits()).reduce((n, v) => n + Buffer.byteLength(JSON.stringify(v), 'utf8'), 0);
+  console.log(`[purge] ${code}: ${result.keys} key(s) across ${Object.keys(result.stores).length} store(s), ${(Math.max(0, before - after) / 1048576).toFixed(2)} MB freed`);
+  res.json({ ok: true, existed, ...result,
+    freedBytes: Math.max(0, before - after),
+    freedMB: +(Math.max(0, before - after) / 1048576).toFixed(2),
+    remainingMB: +(after / 1048576).toFixed(2),
+    note: existed ? 'Removed from memory; the rows leave Postgres on the next save.'
+                  : 'No organisation with that code was present — nothing was removed.' });
+});
+
+/* GET /api/admin/footprint — what this instance costs to load, in plain words.
+
+   The founder's question after the database emailed them at 86% of its allowance: "is there a
+   way to check so we don't get any render complaints". /api/admin/persistence answers the
+   engineering question (did writes cost what changed); this answers the OPERATIONAL one — how
+   big is the thing, what is making it big, and how much does one cold start move.
+
+   It reports SIZES, never contents. An org superadmin sees only their own org's figure; the
+   platform owner sees the breakdown, because "which org is driving the bill" is a question
+   only they can act on and it names other organisations to answer it. */
+app.get('/api/admin/footprint', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const platform = _isPlatformAdmin(req);
+  if (!platform && orgUsers[code]?.[userId]?.role !== 'superadmin') return res.status(403).json({ error: 'superadmin only' });
+  const units = _durableUnits();
+  const byOrg = {}; let total = 0;
+  for (const [key, value] of Object.entries(units)) {
+    const bytes = Buffer.byteLength(JSON.stringify(value), 'utf8');
+    total += bytes;
+    const org = key.split(':')[2] || '_';
+    byOrg[org] = (byOrg[org] || 0) + bytes;
+  }
+  const mb = b => +(b / 1048576).toFixed(2);
+  const mine = mb(byOrg[code] || 0);
+  if (!platform) {
+    return res.json({ ok: true, scope: 'org', orgMB: mine,
+      note: `Your organisation holds ${mine} MB. A cold start loads the whole instance once.` });
+  }
+  const orgs = Object.entries(byOrg).map(([org, bytes]) => ({ org, mb: mb(bytes) })).sort((a, b) => b.mb - a.mb);
+  const biggest = Object.entries(units).map(([key, v]) => ({ key, mb: mb(Buffer.byteLength(JSON.stringify(v), 'utf8')) }))
+    .sort((a, b) => b.mb - a.mb).slice(0, 8);
+  res.json({ ok: true, scope: 'platform', totalMB: mb(total), orgs, biggestUnits: biggest,
+    perColdStartMB: mb(total),
+    note: `A cold start loads ${mb(total)} MB. Render's free tier spins down when idle and cold-starts on the next request, and every deploy restarts too — multiply by how many starts a month you expect. Delete an unused organisation with DELETE /api/admin/org/:code.` });
+});
+
 /* GET /api/admin/errors — recent (redacted) errors. An org superadmin sees only their OWN
    org's errors; the platform owner (x-platform-key) sees all. Pilot observability, no leak. */
 app.get('/api/admin/errors', requireAuth, (req, res) => {
@@ -18883,7 +18990,7 @@ const PORT = process.env.PORT || 3000;
 module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired,
   _webIntelligence, _invalidateOrgProjections, _orgGraphFingerprint, getVisibleUserIds,
   // exported for the truth layer: the persistence boundary
-  _durableUnits, _applyUnits, _pruneExpiredSessions, _persistedStores, scheduleSave,
+  _durableUnits, _applyUnits, _pruneExpiredSessions, _persistedStores, scheduleSave, _purgeOrg,
   _flushPersistence, _flushAndClose, _gracefulShutdown,
   _reconstruct, _unclassified, _saveStats, PERSISTENCE_MODE, _unitRevs,
   _persistenceReadiness,
@@ -19008,47 +19115,24 @@ if (require.main === module) (async () => {
     // 5a. One home — sweep any legacy notes into the Library (idempotent; adds only the missing mirrors).
     try { _migrateLegacyNotesToLibrary(); } catch (e) { console.warn('[library] note migration skipped:', e && e.message); }
 
-    // 5a2. Optional demo seed on boot — for hosts with no shell (e.g. Render free
-    //      tier). Set SEED_DEMO=1 to add the demo squad; idempotent (skips if the
-    //      demo org already exists) and additive (never wipes other orgs).
-    // Optional demo seeds on boot (no shell needed). SEED_DEMO → athletic squad,
-    // SEED_COMPANY → business team. '1' is idempotent; 'force' re-seeds.
-    const _seedOnBoot = async (flag, build, code, creds) => {
-      const v = process.env[flag];
-      if (v !== '1' && v !== 'force') return;
+    // 5a2. Optional demo seed on boot, for a host with no shell (Render's free tier). SEED_ALMA=1
+    //      seeds once and skips if the org is already there; 'force' re-seeds. Additive: it
+    //      never touches another organisation.
+    if (process.env.SEED_ALMA === '1' || process.env.SEED_ALMA === 'force') {
       try {
-        const seed = require('./scripts/seed');
-        if (v === 'force' || !orgMeta[code]) {
-          const demo = await seed[build]();
-          _loadAllStores(demo);          // additive merge into the in-memory stores
+        const { buildAlmaStore, ALMA_CODE } = require('./scripts/seed-alma');
+        if (process.env.SEED_ALMA === 'force' || !orgMeta[ALMA_CODE]) {
+          const { store, summary } = await buildAlmaStore();
+          if (process.env.SEED_ALMA === 'force') _purgeOrg(ALMA_CODE);
+          _loadAllStores(store);
           _rebuildEmailIndex();
+          _backfillUserNodeIds();
           scheduleSave();
-          const n = Object.keys(demo.orgUsers[code] || {}).length;
-          console.log(`[seed] ${flag}=${v} — ready (${n} users in ${code}). ${creds}`);
+          console.log(`[seed] SEED_ALMA — ${summary.orgName} ready (${summary.users} people). Log in: ${summary.login.headCoach} / ${summary.login.player} — password ${summary.login.password}.`);
         } else {
-          console.log(`[seed] ${flag}=1 but ${code} already present — skipping (use ${flag}=force to re-seed).`);
+          console.log(`[seed] SEED_ALMA=1 but ${ALMA_CODE} is already present — skipping (use SEED_ALMA=force to re-seed).`);
         }
-      } catch (e) { console.warn(`[seed] ${flag} boot seed failed (non-fatal):`, e.message); }
-    };
-    await _seedOnBoot('SEED_DEMO',    'buildDemoStore',        require('./scripts/seed').DEMO_CODE,    'Log in: coach@demo.club / maya@demo.club — password demo1234.');
-    await _seedOnBoot('SEED_COMPANY', 'buildCompanyDemoStore', require('./scripts/seed').COMPANY_CODE, 'Log in: manager@atlas.demo / marcus@atlas.demo — password demo1234.');
-
-    // SEED_CLUB → the full-scale demo club (Trafford United, ~226 people, ~1yr).
-    // '1' seeds once and skips if already present; 'force' re-seeds. Same idempotent,
-    // additive contract as the others, but its builder returns { store, summary }.
-    if (process.env.SEED_CLUB === '1' || process.env.SEED_CLUB === 'force') {
-      try {
-        const { buildClubStore, CLUB_CODE } = require('./scripts/seed-club');
-        if (process.env.SEED_CLUB === 'force' || !orgMeta[CLUB_CODE]) {
-          const { store, summary } = await buildClubStore();
-          _loadAllStores(store);        // additive merge into the in-memory stores
-          _rebuildEmailIndex();
-          scheduleSave();
-          console.log(`[seed] SEED_CLUB — ${summary.orgName} ready (${summary.users} users, org "${CLUB_CODE}"). Log in (password demo1234): director@trafford.fc · coach@trafford.fc · player@trafford.fc`);
-        } else {
-          console.log(`[seed] SEED_CLUB=1 but ${CLUB_CODE} already present — skipping (SEED_CLUB=force to re-seed).`);
-        }
-      } catch (e) { console.warn('[seed] SEED_CLUB boot seed failed (non-fatal):', e.message); }
+      } catch (e) { console.warn('[seed] SEED_ALMA boot seed failed (non-fatal):', e.message); }
     }
 
     // 5b. Derive user.assignedNodeIds / user.leadershipNodeIds from orgNodes

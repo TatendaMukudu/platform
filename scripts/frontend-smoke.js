@@ -11,7 +11,7 @@ process.env.NODE_ENV    = 'test';
 
 const { chromium } = require('playwright-core');
 const { app, _loadAllStores, _rebuildEmailIndex, issueToken } = require('../server.js');
-const seed = require('../scripts/seed');
+const seed = require('../scripts/seed-alma');
 
 // Resolve the pre-installed Chromium binary (pinned build dir may vary).
 const fs = require('fs'), path = require('path');
@@ -39,10 +39,10 @@ const ok = (n, c) => { if (c) { pass++; console.log('  ✓', n); } else { fail++
   const CHROME = findChrome();
   if (!CHROME) { console.log('  ⚠ Chromium not found under /opt/pw-browsers — skipping frontend smoke.'); process.exit(0); }
 
-  const demo = await seed.buildDemoStore();
+  const { store: demo } = await seed.buildAlmaStore();
   _loadAllStores(demo);
   _rebuildEmailIndex();
-  const CODE    = seed.DEMO_CODE;
+  const CODE    = seed.ALMA_CODE;
   const users   = demo.orgUsers[CODE];
   const coach   = Object.values(users).find(u => u.role === 'superadmin');
   const member  = Object.values(users).find(u => u.role === 'member');

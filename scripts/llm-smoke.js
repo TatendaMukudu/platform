@@ -13,10 +13,10 @@
 process.env.DB_OPTIONAL = process.env.DB_OPTIONAL || '1';
 
 const ai   = require('../ai/gateway');
-const seed = require('../scripts/seed');
+const seed = require('../scripts/seed-alma');
 
-// Demo-shaped prompts — the kind of content the seeded orgs (Demo Athletic Club,
-// Atlas Robotics) actually produce. One per tier so both paths are exercised.
+// Demo-shaped prompts — the kind of content the seeded organisation (a college men's soccer
+// programme) actually produces. One per tier so both paths are exercised.
 const TRIALS = [
   { tier: 'micro', label: 'Check-in acknowledgement (fast tier)',
     system: 'You are a supportive coach. Reply in ONE warm, genuine sentence. No emojis.',
@@ -30,17 +30,15 @@ const TRIALS = [
 ];
 
 (async () => {
-  // Confirm the demo builders load (proves this runs against real seed content).
-  let demoUsers = 0, companyUsers = 0;
+  // Confirm the demo builder loads (proves this runs against real seed content).
+  let demoUsers = 0;
   try {
-    const d = await seed.buildDemoStore();
-    const c = await seed.buildCompanyDemoStore();
-    demoUsers    = Object.keys(d.orgUsers[seed.DEMO_CODE]    || {}).length;
-    companyUsers = Object.keys(c.orgUsers[seed.COMPANY_CODE] || {}).length;
+    const d = await seed.buildAlmaStore();
+    demoUsers = Object.keys(d.store.orgUsers[seed.ALMA_CODE] || {}).length;
   } catch (e) { console.warn('[llm-smoke] demo seed load failed (non-fatal):', e.message); }
 
   console.log('\n── LLM smoke ─────────────────────────────────────────────');
-  console.log(`demo seed: ${demoUsers} athletes + ${companyUsers} staff loaded`);
+  console.log(`demo seed: ${demoUsers} people loaded`);
   console.log(`provider: ${process.env.ANTHROPIC_API_KEY ? 'Claude' : ''}${process.env.OPENAI_API_KEY ? ' OpenAI' : ''}`.trim() || 'none');
   console.log(`models: reason=${ai.MODELS.reason}  micro=${ai.MODELS.micro}`);
 
