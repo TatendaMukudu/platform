@@ -4595,22 +4595,20 @@ const IQComposer = {
 
   removeAttachment(id, i) { this._state[id].attachments.splice(i, 1); this._renderChips(id); },
 
+  /* Delegates to the one owner (js/voice.js). This used to be a second copy of the same
+     logic with no permission handling and start() inside an empty catch — a declined
+     microphone left the button saying "Listening…" forever. */
   toggleVoice(id) {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const V = window.IQVoice;
     const stateEl = document.getElementById(`iqc-state-${id}`);
     const micBtn  = document.getElementById(`iqc-mic-${id}`);
-    const st = this._state[id];
-    if (!SR) { if (stateEl) stateEl.textContent = 'Voice not supported — type instead.'; return; }
-    if (st._rec) { try { st._rec.stop(); } catch (_) {} st._rec = null; return; }
-    const ta = document.getElementById(id);
-    const base = ta ? ta.value : '';
-    const rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
-    rec.onresult = (e) => { let t = ''; for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript; if (ta) ta.value = (base + ' ' + t).trim(); };
-    rec.onend = () => { if (micBtn) micBtn.textContent = 'Voice'; if (stateEl) stateEl.textContent = ''; st._rec = null; };
-    try { rec.start(); } catch (_) {}
-    st._rec = rec;
-    if (micBtn) micBtn.textContent = '⏹ Stop';
-    if (stateEl) stateEl.textContent = 'Listening…';
+    if (!V || !V.isSupported()) { if (stateEl) stateEl.textContent = 'Voice not supported — type instead.'; return; }
+    V.toggle(id, {
+      onState: (name, message) => {
+        if (stateEl) stateEl.textContent = message || '';
+        if (micBtn) micBtn.textContent = name === 'listening' ? 'Stop' : 'Voice';
+      },
+    });
   },
 
   // Returns attachments and clears them (call on submit).
@@ -10785,6 +10783,10 @@ const MemberApp = {
             placeholder="Ask, capture a thought, or drop in notes, minutes, stats…"
             oninput="MemberApp._wsGrow(this)"
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.wsSend()}"></textarea>
+          <button class="iq-mic" id="iq-mic" type="button" aria-label="Speak instead of typing"
+            title="Speak instead of typing" aria-pressed="false" onclick="MemberApp.wsVoice()">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/></svg>
+          </button>
           <button class="iq-send" id="iq-send" type="button" aria-label="Send" title="Send" onclick="MemberApp.wsSend()">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M5 13l7-7 7 7"/></svg>
           </button>
@@ -10795,6 +10797,10 @@ const MemberApp = {
              most trust-building second in the product, and the answer is deterministic —
              ai/audience.js resolves it rather than a paragraph promising it. -->
         <div class="iq-composer-hint">Private by default · <button type="button" class="iq-hint-link" onclick="navigate('my-data')">Who can see what I say here?</button> · Enter to send</div>
+        <!-- Recording state is announced, not merely coloured: a person must never have to
+             wonder whether IntelliQ is listening, and a colour change says nothing to a screen
+             reader or to anyone who cannot see it. -->
+        <div class="iq-voice-state" id="iq-voice-state" role="status" aria-live="assertive"></div>
         </div>
       </div>
       <div id="iq-brief" aria-live="polite"></div>
@@ -11008,21 +11014,46 @@ const MemberApp = {
     box.innerHTML = `
       <div class="iq-att-section">
         <div class="iq-att-label">What I'm working out</div>
-        ${list.slice(0, 6).map(i => {
-          // Defensive: one malformed record must never blank the whole surface.
+        ${list.slice(0, 6).map((i, n) => {
+          // Defensive: one malformed record must never blank the whole surface. The server
+          // sends `present` — the human reading — alongside the canonical fields; if an older
+          // build has not got it, fall back to the raw shape rather than showing nothing.
+          const p = (i && i.present) || null;
           const topic = (i && i.topic) || {}; const conf = (i && i.confidence) || {};
-          const band = conf.band || 'tentative';
+          const sum = (p && p.summary) || {
+            title: topic.label || topic.canonicalConcept || 'Working it out',
+            standing: conf.band || 'tentative', band: conf.band || 'tentative',
+            thinking: i.hypothesis || null,
+            openQuestion: (i.stillUnknown || [])[0] || null,
+            moreUnknowns: Math.max(0, (i.stillUnknown || []).length - 1),
+          };
+          const det = (p && p.detail) || { because: (conf.because || []), stillUnknown: (i.stillUnknown || []),
+            alternatives: (i.alternatives || []).map(a => typeof a === 'string' ? { statement: a } : { statement: a.statement }),
+            falsifiers: (i.falsifiers || []), evidenceCount: i.signals || 0, independentOrigins: i.origins || 0, contested: false };
+          const id = 'inq-d-' + n;
+          const list2 = (arr) => (arr || []).map(x => `<li>${esc(typeof x === 'string' ? x : (x.statement || ''))}${(x && x.standing) ? ` <span class="iq-inq-sub">${esc(x.standing)}</span>` : ''}</li>`).join('');
           return `
-          <div class="iq-inq">
+          <article class="iq-inq" aria-labelledby="${id}-t">
             <div class="iq-inq-head">
-              <span class="iq-inq-topic">${esc(topic.label || topic.canonicalConcept || 'Working it out')}</span>
-              <span class="iq-inq-band iq-band-${esc(band)}">${esc(band)}</span>
+              <h3 class="iq-inq-topic" id="${id}-t">${esc(sum.title)}</h3>
+              <span class="iq-inq-band iq-band-${esc(sum.band)}">${esc(sum.standing)}</span>
             </div>
-            ${i.hypothesis ? `<div class="iq-inq-hyp">${esc(i.hypothesis)}</div>` : ''}
-            <div class="iq-inq-why">${esc((conf.because || []).join(' · '))}</div>
-            ${(i.stillUnknown || []).length ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Still unknown</span> ${esc(i.stillUnknown[0])}</div>` : ''}
-            ${(i.alternatives || []).length ? `<div class="iq-inq-alt">Could also be: ${esc(i.alternatives.slice(0, 2).map(a => typeof a === 'string' ? a : `${a.statement} (${a.band})`).join('; '))}</div>` : ''}
-          </div>`; }).join('')}
+            ${sum.thinking ? `<p class="iq-inq-hyp">${esc(sum.thinking)}</p>` : ''}
+            ${sum.openQuestion ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Still working out</span> ${esc(sum.openQuestion)}${sum.moreUnknowns ? ` <span class="iq-inq-sub">+${sum.moreUnknowns} more</span>` : ''}</div>` : ''}
+            <div class="iq-inq-actions">
+              <button type="button" class="iq-inq-more" aria-expanded="false" aria-controls="${id}"
+                      onclick="MemberApp._toggleInquiryDetail('${id}', this)">Why I think this</button>
+              <button type="button" class="iq-inq-ask"
+                      onclick="MemberApp._askAboutInquiry(${this._escape(JSON.stringify(JSON.stringify({ headline: sum.title, body: sum.thinking || '' })))})">Ask IntelliQ about this</button>
+            </div>
+            <div class="iq-inq-detail" id="${id}" hidden>
+              ${det.because.length ? `<div class="iq-inq-d"><span class="iq-inq-dlabel">Why</span><ul>${list2(det.because)}</ul></div>` : ''}
+              ${det.stillUnknown.length ? `<div class="iq-inq-d"><span class="iq-inq-dlabel">Still working out</span><ul>${list2(det.stillUnknown)}</ul></div>` : ''}
+              ${det.alternatives.length ? `<div class="iq-inq-d"><span class="iq-inq-dlabel">Could also be</span><ul>${list2(det.alternatives)}</ul></div>` : ''}
+              ${det.falsifiers.length ? `<div class="iq-inq-d"><span class="iq-inq-dlabel">What would change my mind</span><ul>${list2(det.falsifiers)}</ul></div>` : ''}
+              <div class="iq-inq-prov">${esc(this._provenanceLine(det))}</div>
+            </div>
+          </article>`; }).join('')}
         <div class="iq-inq-note">${esc(j.note || '')}</div>
       </div>`;
   },
@@ -11030,6 +11061,66 @@ const MemberApp = {
   /* [REMOVED] _loadOpening — a second "Good morning, <name>" card that duplicated the page
      header's own greeting, and (once the conversation led the page) rendered a greeting BELOW
      the chat. The Attention surface below already carries what it was pointing at. */
+
+  /* Progressive disclosure. The detail is in the DOM from the start so a screen reader can
+     reach it through aria-controls; `hidden` is toggled rather than display, so the button's
+     aria-expanded and the element's visibility can never disagree. */
+  _toggleInquiryDetail(id, btn) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const open = el.hasAttribute('hidden');
+    if (open) el.removeAttribute('hidden'); else el.setAttribute('hidden', '');
+    if (btn) { btn.setAttribute('aria-expanded', open ? 'true' : 'false'); btn.textContent = open ? 'Hide' : 'Why I think this'; }
+  },
+
+  /* Provenance in one plain sentence rather than four counted fields. "4 things you've told me,
+     from 2 separate occasions" is the same information as evidenceCount/independentOrigins and
+     is the difference between a record and a reason. */
+  _provenanceLine(d) {
+    const n = d.evidenceCount || 0, o = d.independentOrigins || 0, c = d.corrected || 0;
+    if (!n) return 'Nothing recorded under this yet.';
+    const bits = [`${n} thing${n === 1 ? '' : 's'} you've told me`];
+    if (o > 1) bits.push(`from ${o} separate occasions`);
+    else if (o === 1) bits.push('all from one telling');
+    if (c) bits.push(`${c} since corrected`);
+    if (d.contested) bits.push('and accounts disagree');
+    return bits.join(', ') + '.';
+  },
+
+  /* Open the assistant ALREADY POINTED AT this object, through the existing `about` binding —
+     no new route, no floating chatbot with no context. */
+  _askAboutInquiry(aboutJson) {
+    let about = null;
+    try { about = JSON.parse(aboutJson); } catch (_) {}
+    try { navigate('workspace'); } catch (_) {}
+    const i = document.getElementById('iq-composer-input');
+    if (i) { this._composerAbout = about; i.focus(); }
+  },
+
+  /* VOICE ON THE COMPOSER. One user gesture in, transcript into the same textarea, and from
+     there the ordinary wsSend() path — the same turn, the same governance. Voice reaches
+     nothing typing does not. */
+  wsVoice() {
+    const V = window.IQVoice;
+    const state = document.getElementById('iq-voice-state');
+    const btn = document.getElementById('iq-mic');
+    if (!V || !V.isSupported()) {
+      if (state) state.textContent = 'Voice input is not available in this browser — typing works as normal.';
+      return;
+    }
+    V.toggle('iq-composer-input', {
+      onState: (name, message) => {
+        if (state) state.textContent = message || '';
+        if (btn) {
+          btn.setAttribute('aria-pressed', name === 'listening' ? 'true' : 'false');
+          btn.classList.toggle('is-listening', name === 'listening');
+          btn.setAttribute('aria-label', name === 'listening' ? 'Stop speaking' : 'Speak instead of typing');
+        }
+      },
+      // The transcript is a DRAFT: it grows the box like typing would and is never auto-sent.
+      onInput: () => { const i = document.getElementById('iq-composer-input'); if (i) this._wsGrow(i); },
+    });
+  },
 
   /* Auto-grow the composer up to a calm maximum; keeps the hero compact. */
   _wsGrow(el) { if (!el) return; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 180) + 'px'; },

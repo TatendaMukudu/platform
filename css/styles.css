@@ -2732,3 +2732,37 @@ details.intel-collapse[open] > summary::after { transform: rotate(90deg); }
 .lib-dctl select{font-size:.82rem;padding:.3rem .4rem;border-radius:7px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-primary)}
 @media (max-width:640px){.lib-body{flex-direction:column}.lib-side{width:auto;flex-direction:row;flex-wrap:wrap;overflow-x:auto}
   .lib-main{border-left:0;border-top:1px solid var(--border);padding-left:0;padding-top:.6rem}}
+
+/* ── VOICE + PROGRESSIVE DISCLOSURE (2026-09) ─────────────────────────────────
+   Mobile-first: every interactive target below clears 44px, which is the size a thumb
+   actually hits rather than the size a cursor does. */
+.iq-mic{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;
+  border:0;background:transparent;color:var(--muted,#6b7280);border-radius:999px;cursor:pointer}
+.iq-mic:hover{color:var(--text,#111827)}
+.iq-mic:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+/* Listening is announced in text as well; this is the glance-level confirmation, never the
+   only one, because colour alone says nothing to a screen reader. */
+.iq-mic.is-listening{color:#b91c1c;background:rgba(185,28,28,.10)}
+@media (prefers-reduced-motion:no-preference){
+  .iq-mic.is-listening{animation:iq-mic-pulse 1.6s ease-in-out infinite}
+}
+@keyframes iq-mic-pulse{0%,100%{box-shadow:0 0 0 0 rgba(185,28,28,.30)}50%{box-shadow:0 0 0 6px rgba(185,28,28,0)}}
+.iq-voice-state{font-size:.78rem;color:var(--muted,#6b7280);margin-top:.35rem;min-height:1rem;line-height:1.4}
+
+.iq-inq-actions{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.6rem}
+.iq-inq-more,.iq-inq-ask{min-height:44px;padding:.4rem .8rem;border-radius:999px;cursor:pointer;
+  font-size:.82rem;border:1px solid var(--line,#e5e7eb);background:transparent;color:var(--text,#111827)}
+.iq-inq-ask{border-color:transparent;color:var(--muted,#6b7280)}
+.iq-inq-more:focus-visible,.iq-inq-ask:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.iq-inq-detail{margin-top:.7rem;padding-top:.7rem;border-top:1px solid var(--line,#e5e7eb)}
+.iq-inq-d{margin-bottom:.6rem}
+.iq-inq-dlabel{display:block;font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--muted,#6b7280);margin-bottom:.2rem}
+.iq-inq-d ul{margin:0;padding-left:1.1rem}
+.iq-inq-d li{margin:.15rem 0;line-height:1.5}
+.iq-inq-sub{color:var(--muted,#6b7280);font-size:.78rem}
+.iq-inq-prov{font-size:.78rem;color:var(--muted,#6b7280);margin-top:.5rem}
+/* Long inquiry text and long organisation names must wrap rather than push the page sideways. */
+.iq-inq-topic,.iq-inq-hyp,.iq-inq-gap{overflow-wrap:anywhere}
+.iq-inq-head{display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap}
+.iq-inq-topic{font-size:1.02rem;font-weight:600;margin:0;line-height:1.35}

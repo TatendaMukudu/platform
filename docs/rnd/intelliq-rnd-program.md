@@ -563,6 +563,131 @@ explicitly rather than drifting in.
 
 ---
 
+## 8b · FAMILY H — THE SEPTEMBER 2026 FOUNDER EXPLORATION (40 directions)
+
+**Added with the UI/voice assignment, September 2026.** That assignment implemented **UI and voice
+only**. Everything the founder explored alongside it is recorded here, under the wall in §0.
+
+> **NO ITEM BELOW WAS TREATED AS IMPLEMENTATION AUTHORITY.** Nothing in this family was built,
+> prototyped, spiked or partially wired. Several are already covered by families A–G; where they
+> are, the existing entry governs and the row below is a pointer, not a second programme.
+
+### Already covered — pointers, not new programmes
+
+| Founder item | Governed by |
+|---|---|
+| R&D 1 dynamic world model / ontology | Family A, and **already adjudicated**: `ttd/world-model-reconciliation-findings.md` found ~80% existed; D50–D54 settled ownership |
+| R&D 2 person/organisation shared capabilities | Family A. `ai/subject-ref.js` is already the shared identity contract; an Entity superclass was examined and **rejected** in the pre-pilot audit §4 |
+| R&D 3, 4, 6, 27 recursive Web, graph-not-tree, multi-Web, Web-of-Webs | Family B (topology) |
+| R&D 5 portable human identity | Family B. **D29 already records the decision direction**: one identity, several memberships, POST-PILOT |
+| R&D 7, 8 organisational truth, authority vs empirical truth | **Not research — production law.** P0-D is implemented and asserted by `authority-truth-smoke`. Listed only so nobody re-opens it |
+| R&D 11 curiosity | Family D. **Partly production**: D35's stopping rule shipped in Lane C |
+| R&D 23 Forum as collective intelligence | **Largely production**: Forum is anchored to shared objects, echoes refuse to corroborate, and D-A2 made it anonymous. Only `@IntelliQ` invocation remains research |
+| R&D 24, 25, 26, 28, 29 privacy-preserving group intelligence, audience-relative reasoning, non-interference, visibility/reasoning/portability, competitive knowledge | Family C, and `rnd/audience-relative-reasoning-investigation.md`. **Non-interference is production** — `non-interference-smoke` |
+| R&D 32 cold start | **Adjudicated as D22**: cold start IS the inquiry engine |
+| R&D 34 external systems as sensors | Family E. **Verify each vendor API actually exists before any design work** — this has already produced one round of imagined integrations |
+
+### Genuinely open, and genuinely not started
+
+**H-1 · Behaviour and characteristic value is contextual (R&D 9, 18).** *"Under what conditions does
+this characteristic appear to help this organisation achieve something it values?"* The pre-pilot
+audit **rejected durable characteristic records** — a behaviour is a claim with provenance and
+falsifiers, which is an Inquiry. The open research is whether contextual value can be expressed
+without ever producing a permanent label on a person. **Constraint: an organisation declaring a
+value does not make a behaviour cause it.**
+
+**H-2 · Inquiry maturity as distinct from confidence (R&D 12).** Spark → Emerging → Investigating →
+Grounded → Tested → Learned. **Do not ratify those names.** Production currently has `band`
+(confidence) and `status` (exploring/probable/supported/disputed/resolved). The UI assignment
+translated both **without collapsing them**, which was deliberate: if maturity is a real third axis,
+inventing it in a template would have pre-empted this research.
+
+**H-3 · Richer Focus (R&D 13).** Origin, reason, participants, actions, interventions, evidence,
+outcomes, history. D51/D52 already made a Goal a Focus and put Focus on the Action loop. What
+remains is depth, not ownership.
+
+**H-4 · Multi-layer memory and admission/decay (R&D 14, 15, 21, 22).** Hot/Warm/Cold/Superseded/
+Contested/Expired/Protected/Pinned. Memory is not a chat transcript. **Temporal truth is the sharp
+edge**: old evidence must not permanently define a person, and supersession already exists to build
+on.
+
+**H-5 · Personal agent learning and co-authored memory (R&D 16, 17).** ABOUT / PREFERENCES / SKILLS /
+FOCUS / BOUNDARIES / REFLECTIONS / RELATIONSHIPS, and a UI that lets a person say *"wrong",
+"outdated", "don't use this", "remember this"*. **Prefer external structured learning to per-user
+fine-tuning** — the latter makes correction and erasure nearly impossible, which collides with
+laws that already exist.
+
+**H-6 · Intervention → outcome learning, and organisational methods (R&D 19, 20).** Problem →
+hypothesis → intervention → outcome → updated belief. The nine-route loop is built and deliberately
+dark (**D31**). The research is what may be inferred from outcomes **without inferring causality
+casually**.
+
+**H-7 · Complex systems techniques (R&D 10).** Bayesian inference, state estimation, causal
+inference, dynamical systems, control theory, information theory, active inference, graph reasoning.
+**Note for the founder, plainly: none of this is quantum computing, and calling it that in front of
+a technical buyer would cost credibility that is hard to win back.**
+
+**H-8 · Learning artifacts and network learning (R&D 30, 31).** Portable findings and methods that
+travel without their raw private evidence. Depends on H-4 and Family C.
+
+**H-9 · Connectivity through interaction (R&D 35).** IntelliQ as a network formed around inquiries
+and outcomes rather than around a feed. **Explicit constraint recorded: do not optimise for
+addictive engagement.**
+
+**H-10 · Domain skills / research packs (R&D 33).** Reusable investigation knowledge per domain —
+questions, hypotheses, methods. **Not diagnoses.** Closest to being useful of anything in this
+family, because it needs no new architecture.
+
+**H-11 · Long-term graphics and interaction (R&D 39).** Organisational graph visualisation,
+relationship maps, world-model views, longitudinal graphs, interactive intervention models.
+**The UI assignment deliberately built none of this** — only what existing production objects
+justified. A graph renderer with no user question is spectacle.
+
+**H-12 · The moat (R&D 40).** Trust, distribution, longitudinal memory, world models, evidence,
+provenance, inquiry history, outcome history, personal and organisational learning. **The LLM is
+not the moat** — it is the replaceable part, and the architecture already treats it that way.
+
+### Market and readiness research — separate from architecture
+
+**H-13 · EDUCATION READINESS (R&D 36).** A distinct programme, not a feature. Security, minors,
+safeguarding, consent, student records, retention, encryption, access control, incident response,
+auditability, and jurisdiction-specific law.
+
+> **Recorded so it cannot be assumed away: SPORT PILOT READINESS IS NOT SCHOOL READINESS.**
+> A safeguarding queue and a two-sided cohort floor are not a lawful basis for processing minors'
+> records in any jurisdiction. Nothing about the September pilot should be read as clearing this.
+
+**H-14 · Zimbabwe and United States expansion (R&D 37).** Alma → broader athletics → possible
+conference; Falcon → Whitestone → other schools. **These are warm doors, not sales.** Recorded as
+research paths so that no plan silently treats them as pipeline.
+
+**H-15 · Security maturity (R&D 38).** Three separate questions that keep being merged: pilot
+security, education/minor readiness, enterprise maturity. **Do not invent required certifications
+or licences without evidence that a specific buyer requires them.**
+
+### Operational backlog — not research, not yet work
+
+**H-16 · Render runtime memory.** Preserved deliberately as an **open question**:
+
+- the instance has a **512 MB** limit
+- the dashboard did not expose useful memory telemetry
+- a future investigation should inspect `process.memoryUsage()` directly
+- persistence instrumentation already exists and should be measured
+- **runtime RAM and persistence serialisation are separate questions** and have been conflated
+- **a memory leak has NOT been proven**
+
+> It is not fixed. It is not broken. It is **unmeasured**, and it needs a dedicated operational
+> investigation rather than a guess in either direction. The UI and voice work added no server-side
+> allocation: the presentation layer is a pure per-request projection and voice runs entirely in the
+> browser with no audio retained anywhere.
+
+**H-17 · Deployment credentials.** Render shows an active GitHub deployment credential for
+`TatendaMukudu`, and a classic PAT named "intelliQ deploy" exists and is expiring. **No production
+change was requested or made.** No credential was read, written, rotated or placed in source. Noted
+only so a future session does not re-investigate a non-problem.
+
+---
+
 ## 9 · WHAT THIS REGISTER DOES NOT CONTAIN
 
 Deliberately absent, because they are **queued work** and belong in

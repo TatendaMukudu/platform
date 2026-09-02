@@ -26,6 +26,7 @@ const readiness  = require('./ai/readiness');
 const orgMemory  = require('./ai/org-memory');
 const orgGraph   = require('./ai/org-graph');
 const subjectRef = require('./ai/subject-ref');
+const present    = require('./ai/present');
 const orgAnswer  = require('./ai/org-answer');
 const orgRouting = require('./ai/org-routing');
 const teamState  = require('./ai/team-state');
@@ -14132,6 +14133,10 @@ app.get('/api/inquiry', requireAuth, (req, res) => {
       lastUpdatedAt: i.lastUpdatedAt,
     };
   }).sort((a, b) => (b.confidence.score - a.confidence.score));
+  // The human reading, alongside — never instead of — the canonical fields above. A surface
+  // that wants the key still has it; one that wants English no longer has to invent it, which
+  // is how `football.attendance_timing` and the bare word `probable` reached a phone.
+  for (const i of inquiries) i.present = present.inquiryCard(i);
   res.json({ ok: true, inquiries, note: 'A working picture built from conversation. Nothing here is recorded as fact until you confirm it.' });
 });
 
