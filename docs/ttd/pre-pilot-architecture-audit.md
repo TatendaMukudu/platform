@@ -497,6 +497,30 @@ enforces that.
 
 ## 25 · FREEZE VERDICT
 
+# PILOT ARCHITECTURE COMPLETE — FREEZE
+
+**Final, at `bf816bf`.** The three P0s are closed and mutation-verified. The adversarial dummy
+pilot ran: 22 assertions over an eight-person synthetic organisation with a triple-classified
+captain, private and shared objects, an anonymous Forum, corrected and echoed evidence, across
+three synthetic periods. **It found no architecture defect.** Five privacy attacks were
+independently mutation-tested by review and every one turns red on the real production line.
+
+**One coverage gap, and it is a test gap rather than an architecture gap.** DP-13 exercises the
+cohort rule but not its application in the projection; removing the floor from `fitForSurface`
+leaves the pilot green, while `team-state-smoke`, `finding-change-notice-http-smoke` and
+`seed-surface-smoke` catch it. The law is enforced and proven — just not by the pilot. Completing
+DP-13 through the real leader surface is **P1 test coverage**, recorded in the suite itself, and
+is not a reason to hold the freeze.
+
+**ARCHITECTURE IS NOW FROZEN.** What follows is the live database, staging, observability,
+latency, bug-fixing and real people. The P1 list in §21 is the queue for after the pilot, not
+before it — with the exception of DP-13, which may be completed at any time because it adds only
+a test.
+
+---
+
+### Superseded verdict (Stages 1–6, `7d06746`)
+
 # NOT READY TO FREEZE
 
 Three P0 blockers, listed in §20. All three are smaller than the brief assumes and none requires a
