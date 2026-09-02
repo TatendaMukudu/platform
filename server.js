@@ -12353,7 +12353,11 @@ function _assistantProposals(code, userId, interp, context, text, workCtx) {
   const cap = interp.intents.find(i => captureIntents.includes(i.type));
   if (cap) {
     out.push({ id: 'prop_' + generateId(), actionType: 'capture', capability: 'workspace',
-      label: `Save as ${primary.purpose}${primary.visibility === 'only_me' ? ' (private)' : ''}`,
+      // "Save as note" was the last of the legacy vocabulary on a person's screen — the product
+      // has inquiries and focuses now, and a note is neither. The label says what the action
+      // ACTUALLY does rather than renaming it to something it is not: this keeps what you said
+      // so IntelliQ can use it, which is true whatever the purpose field is called underneath.
+      label: `Keep this${primary.visibility === 'only_me' ? ' — private to you' : ''}`,
       payload: { text: null /* filled from raw at confirm */, scope: primary.scope, purpose: primary.purpose, visibility: primary.visibility, aiUsage: primary.aiUsage },
       visibility: primary.visibility, why: primary.reason, requiredApproval: true,
       policyResult: { effect: 'allow', reason: 'personal capture — owner-scoped' }, evidenceBasis: [] });
@@ -14641,7 +14645,7 @@ app.post('/api/assistant/turn/:turnId/correct', requireAuth, (req, res) => {
   const before = prop ? JSON.parse(JSON.stringify({ purpose: prop.payload?.purpose, visibility: prop.visibility })) : null;
   const applied = [];
   if (prop) {
-    if (/just a note|not a plan/i.test(correction)) { prop.payload.purpose = 'note'; prop.label = 'Save as note (private)'; applied.push('purpose→note'); }
+    if (/just a note|not a plan/i.test(correction)) { prop.payload.purpose = 'note'; prop.label = 'Keep this — private to you'; applied.push('purpose→note'); }
     if (/keep (all of )?this private|keep it private|only me|private/i.test(correction)) { prop.payload.visibility = 'only_me'; prop.visibility = 'only_me'; applied.push('visibility→only_me'); }
     if (/belongs to work|this is work/i.test(correction)) { prop.payload.scope = 'personal_shared'; applied.push('scope→work (visibility unchanged — still needs explicit confirm to share)'); }
     if (/do not remind|don'?t remind|no reminder/i.test(correction)) { turn._proposals = (turn._proposals || []).filter(p => p.actionType !== 'checkin_proposal'); applied.push('dropped check-in proposal'); }

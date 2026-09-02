@@ -10801,7 +10801,12 @@ const MemberApp = {
              "can my coach see this?" and getting a real answer instead of a privacy policy is the
              most trust-building second in the product, and the answer is deterministic —
              ai/audience.js resolves it rather than a paragraph promising it. -->
-        <div class="iq-composer-hint">Private by default · <button type="button" class="iq-hint-link" onclick="navigate('my-data')">Who can see what I say here?</button> · Enter to send</div>
+        <div class="iq-composer-hint">
+          <button type="button" class="iq-vis" id="iq-vis" aria-pressed="false"
+            title="Choose who this is for before you say it"
+            onclick="MemberApp.toggleVisibility()">Private</button>
+          <button type="button" class="iq-hint-link" onclick="navigate('my-data')">Who can see what I say here?</button>
+        </div>
         <!-- Recording state is announced, not merely coloured: a person must never have to
              wonder whether IntelliQ is listening, and a colour change says nothing to a screen
              reader or to anyone who cannot see it. -->
@@ -11240,6 +11245,19 @@ const MemberApp = {
       if (state) state.textContent = message || '';
       if (btn) { btn.setAttribute('aria-pressed', name === 'listening' ? 'true' : 'false'); btn.classList.toggle('is-listening', name === 'listening'); }
     } });
+  },
+
+  /* WHO THIS IS FOR, decided before it is said. The choice lives next to the composer so it is
+     visible while a person types, rather than arriving as a confirmation card after the words
+     are already out. Private is the default and stays the default — the toggle can only ever be
+     an explicit act, never a state something else left behind. */
+  toggleVisibility() {
+    this._wsShare = !this._wsShare;
+    const b = document.getElementById('iq-vis');
+    if (!b) return;
+    b.textContent = this._wsShare ? 'Shared with the team' : 'Private';
+    b.setAttribute('aria-pressed', this._wsShare ? 'true' : 'false');
+    b.classList.toggle('is-shared', this._wsShare);
   },
 
   _lowerFirst(s) { const t = String(s || '').trim(); return t ? t[0].toLowerCase() + t.slice(1) : t; },
@@ -11837,6 +11855,10 @@ const MemberApp = {
       ${r.privacyNotice ? `<div class="iq-privacy">${esc(r.privacyNotice)}</div>` : ''}
       ${clarifyHtml}
       ${savedHtml}
+      <div class="iq-make-row">
+        <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus')">Work on this</button>
+        <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('inquiry')">Look into this</button>
+      </div>
       ${primary ? `<div class="iq-proposals"><div class="card-label">Suggestions — nothing happens until you confirm</div>${primary}
         ${more ? `<details class="iq-more"><summary>More options</summary>${more}</details>` : ''}</div>` : ''}
     </div>`;
