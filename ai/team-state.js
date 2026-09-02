@@ -375,9 +375,19 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
         kind: polarity === POLARITY.WORKING_WELL ? 'high' : 'low',
         // Even a withheld leader-subject finding cannot disclose the small count that caused
         // withholding; the gate is useful, its identifying arithmetic is not.
-        blocked: leaderSubject
-          ? fit.blocked.map(b => ({ gate: b.gate, reason: 'not enough safely attributable support to disclose' }))
-          : fit.blocked,
+        //
+        // THE COHORT GATE IS BANDED FOR EVERY SUBJECT, not only leader subjects. Its reason
+        // reads "1 of 6 left uncounted — naming 5 names the rest", which states k and n about
+        // THE MEMBERS. The floor refused the claim precisely because k-of-n is unsafe at this
+        // size; saying k and n in the refusal hands back exactly what was refused, and to a
+        // leader who knows their own six-person squad it is close to naming the one who did
+        // not speak. The other gates carry no such arithmetic — "rests on one independent
+        // origin" describes the evidence, not the people — so they stay as they are.
+        // Found by the adversarial dummy pilot (DP-13c).
+        blocked: fit.blocked.map(b =>
+          (leaderSubject || b.gate === 'cohort')
+            ? { gate: b.gate, reason: 'not enough safely attributable support to disclose' }
+            : b),
       });
       continue;
     }

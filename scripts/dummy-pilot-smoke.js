@@ -262,28 +262,55 @@ async function main() {
     && lifecycleInquiry.signals.some(s => s.originRef === 'life_origin')
     && lifecycleInquiry.signals.filter(s => s.originRef === 'life_origin').every(s => !diagnose.isActive(s)));
 
-  /* ATTACK 13 — RELABELLED AFTER REVIEW, AND THE GAP RECORDED RATHER THAN PAPERED OVER.
-     This exercises the cohort RULE, not its APPLICATION, and it is weaker than its original
-     name implied. Two things are true and both matter:
+  /* ATTACK 13. The rule being correct and the PROJECTION applying it are different claims, and
+     only the second protects anybody. `audience-disclosure-smoke` (f1) already proves the rule,
+     including this exact six-person case, so testing it again here would be duplicate coverage
+     wearing a pilot label. This drives the real leader surface instead, with a finding fit in
+     every respect except the floor: five of the six First Team members, complement of one.
 
-       · `audience-disclosure-smoke` (f1) already proves this rule more thoroughly, including
-         the exact six-person case — so as written this is duplicate coverage.
-       · Replacing `fitForSurface`'s floor check with `{ ok: true }` — that is, the PROJECTION
-         no longer applying the rule at all — leaves this suite and `audience-disclosure-smoke`
-         entirely green. `team-state-smoke`, `finding-change-notice-http-smoke` and
-         `seed-surface-smoke` are what catch it. The system is protected; this pilot is not
-         what protects it.
+     Getting there is fiddly and worth writing down, because two earlier attempts at this
+     assertion passed VACUOUSLY — nothing was disclosed because nothing was projected:
+       · polarity is derived by `teamState.valenceOf` over group CANDIDATES, so an inquiry with
+         a polarity field set directly is skipped as neutral before the floor is consulted;
+       · `_groupInquiryProjections` drops any inquiry with no signals, and counts contributors
+         and origins off the ACTIVE signals rather than off anything declared.
+     Both therefore have to be real. DP-13d exists to prove the finding actually reached the
+     cohort gate — without it every assertion here could pass because nothing ever arrived. */
+  {
+    const g = S.inquiryStates[code]['group:first'].role_clarity;
+    // The fixture built this with `topic:` where newInquiry takes `concept:`, so canonicalConcept
+    // is empty and no candidate can match it. Set it to what a real inquiry would carry.
+    g.topic.canonicalConcept = 'role_clarity';
+    g.confidence = { score: 0.8, band: 'supported', because: ['five independent origins'] };
+    g.status = 'open';
+    g.hypotheses = [{ id: 'h_floor', statement: 'Role clarity drops in transition', status: 'open',
+      confidence: { score: 0.8, band: 'supported' } }];
+    g.leadingHypothesisId = 'h_floor';
+    // Five people, five separate occasions: enough to be believed, too many to be said safely.
+    const speakers = ['captain', 'mid2', 'mid3', 'forward1', 'forward2'];
+    g.signals = speakers.map((who, i) => ({ id: `floor_s${i}`, kind: 'observation', status: 'active',
+      originRef: `floor_origin_${i}`, contributedBy: who, at: Date.UTC(2026, 7, 1) }));
+    S.groupCandidates[code] = (S.groupCandidates[code] || []).concat(speakers.map((who, i) => ({
+      candidateId: `floor_c${i}`, nodeId: 'first', concept: 'role_clarity', contributorId: who,
+      originRef: `floor_origin_${i}`, status: 'contributed', valence: 'worth_attention',
+    })));
 
-     Driving the real leader surface with a fit-but-for-the-floor finding needs group
-     CANDIDATES, because polarity is derived from `teamState.valenceOf` over contributions and
-     an inquiry without one is skipped as neutral before the floor is ever consulted. A fixture
-     that sets the fields directly never reaches the gate — which is exactly the failure this
-     suite exists to catch, so it is not worth committing a version that looks stronger than it
-     is. Recorded as the pilot's one known coverage gap. */
-  ok('DP-13 the two-sided cohort rule refuses both a small cohort and a small complement',
-    teamState.cohortFloor(5, 10).ok === true
-    && teamState.cohortFloor(5, 6).ok === false
-    && teamState.cohortFloor(1, 10).ok === false);
+    const leaderState = await call('coach', '/api/group/first/state');
+    const body = leaderState.body || {};
+    const withheld = Array.isArray(body.withheld) ? body.withheld : [];
+    const roleWithheld = withheld.find(w => /role/i.test(String(w.about || '')));
+
+    ok('DP-13 a group finding that fails the two-sided floor is NOT disclosed to the leader',
+      leaderState.status === 200
+      && !/drops in transition/i.test(JSON.stringify([body.high || null, body.low || null])));
+    ok('DP-13b the leader IS told something was withheld, so a floor reads as a refusal rather than as nothing',
+      !!roleWithheld);
+    ok('DP-13c the withholding notice discloses neither the claim nor the count that caused it',
+      !!roleWithheld && !/drops in transition/i.test(JSON.stringify(roleWithheld))
+      && !/\b[1-9]\b/.test(JSON.stringify(roleWithheld.blocked || [])));
+    ok('DP-13d the COHORT gate is what stopped it — proof the finding reached the floor at all',
+      !!roleWithheld && (roleWithheld.blocked || []).some(b => b.gate === 'cohort'));
+  }
 
   // ATTACK 14: later output is computed from active support, never stale rationale.
   const activeAfterCorrection = lifecycleInquiry.signals.filter(diagnose.isActive);
