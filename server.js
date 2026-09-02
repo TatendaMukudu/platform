@@ -13916,8 +13916,15 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
     .filter(c => c && c.about === object.about).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0] || null;
   // `present` carries the rival explanation and the human title; `explained` carries the
   // composed prose. The thread needs both, and neither should be rebuilt on the client.
+  // A FORUM EXISTS where the thread is not just you and IntelliQ. Today that is a group
+  // inquiry, which is the only shape with a real forum route behind it — so the control is
+  // offered exactly where it works, and nowhere else. A focus with invitees is the founder's
+  // next case and needs a forum scope the server does not have yet; it is deliberately not
+  // faked here.
+  const _nodeId = scope.startsWith('group:') ? scope.slice(6) : null;
+  const _forum = !!(_nodeId && kind === 'inquiry');
   res.json({ ok: true, about: object.about, opening: object.explained, present: object.present,
-    shared: object.shared === true || (Array.isArray(object.participants) && object.participants.length > 1),
+    shared: _forum, nodeId: _nodeId,
     conversation: conversation ? { id: conversation.id, updatedAt: conversation.updatedAt } : null,
     messages: conversation ? (conversation.messages || []).map(m => ({ role: m.role, text: m.text, at: m.at })) : [] });
 });

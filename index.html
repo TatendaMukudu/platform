@@ -1001,14 +1001,17 @@
         <!-- Things you said that MIGHT concern a group you're in. Private to you: nobody else can
              see them, they count toward nothing, and they only become the group's material if you
              deliberately offer one. Rendered by MemberApp._renderGroupNoticings(). -->
-        <div id="me-group"></div>
+        <div id="me-group" hidden></div>
 
-        <!-- Reasoning-first sections (chat is not the interface — reasoning is). -->
-        <div id="me-noticed"></div>
-        <div id="me-questions"></div>
-        <div id="me-prepared"></div>
-        <!-- Notes, clumped into Me (no separate tab). -->
-        <div id="me-notes"></div>
+        <!-- HOME IS ONE THING (founder decision, September 2026). These five blocks are what
+             made the first screen a feed: noticings, questions, prepared items and notes all
+             competing above the fold. They are kept in the DOM but never mounted on Home, so no
+             render path throws; each one's content now lives in its own bucket, where a person
+             goes when they want it rather than being handed all of it at once. -->
+        <div id="me-noticed" hidden></div>
+        <div id="me-questions" hidden></div>
+        <div id="me-prepared" hidden></div>
+        <div id="me-notes" hidden></div>
 
         <!-- legacy home containers kept (hidden) so older render paths never throw -->
         <div id="home-stat-row" style="display:none"></div>

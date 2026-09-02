@@ -10767,10 +10767,10 @@ const MemberApp = {
       <div class="iq-chatbox">
         <div class="iq-subject" id="iq-subject"></div>
         <div class="iq-workctx" id="iq-workctx"></div>
-        <div class="tdy-chathead iq-chathead">
-          <button class="tdy-headbtn" type="button" onclick="MemberApp.wsNewChat()" title="Start a new conversation">＋ New</button>
-          <button class="tdy-headbtn" type="button" onclick="MemberApp.wsHistoryOpen()" title="Your past conversations">History</button>
-        </div>
+        <!-- "+ New" and "History" left Home in September 2026. Neither answered a question a
+             person actually arrives with, and two controls above the fold on a first screen that
+             is meant to hold ONE thing is two too many. History moved into the menu; a new
+             conversation starts by typing, which is what people did anyway. -->
         <div id="iq-history" class="tdy-history" style="display:none"></div>
         <div class="iq-conversation" id="iq-conversation" aria-live="polite"></div>
         <div class="iq-composer-wrap">
@@ -10938,6 +10938,8 @@ const MemberApp = {
     const copy = this._bucketCopy[kind] || this._bucketCopy.inquiry;
 
     // The page shell's heading is static markup, so it is corrected here on every render.
+    const shell = document.querySelector('#page-inquiry .page-header');
+    if (shell) shell.removeAttribute('hidden');
     const h = document.querySelector('#page-inquiry .page-header-title');
     const hs = document.querySelector('#page-inquiry .page-header-sub');
     if (h) h.textContent = copy.title;
@@ -10977,24 +10979,35 @@ const MemberApp = {
   /* THE ONE QUESTION ON HOME. The kernel already ranks every open unknown by what answering
      would be worth against what it costs to answer; this shows the winner and nothing else.
      If there is no question, home says so plainly rather than filling the space. */
+  /* HOME IS ONE OBJECT. Not a question in a box — the actual highest-priority thing IntelliQ
+     holds, of ANY kind (D13, D48): an inquiry, a focus, a high or a low, ranked by one ranking.
+     It is the same card the buckets render, so home and the buckets can never drift apart, and
+     tapping it opens the same thread. If there is nothing yet, home says so in one line rather
+     than showing an empty frame. */
   async _loadTopQuestion() {
     const box = document.getElementById('iq-brief');
     if (!box) return;
     const esc = s => this._escape(String(s == null ? '' : s));
-    let j; try { j = await fetch('/api/objects?kind=inquiry&scope=self', { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
-    const live = ((j && j.objects) || []).filter(o => !o.parked).sort((a, b) => (b.score || 0) - (a.score || 0));
-    const top = live[0];
-    const q = top && ((top.present && top.present.summary && top.present.summary.openQuestion)
-      || (top.explained && top.explained.stillUnknown && top.explained.stillUnknown[0]));
-    if (!top || !q) { box.innerHTML = ''; return; }
-    box.innerHTML = `
-      <button type="button" class="iq-top-q" onclick="MemberApp.openObjectThread('${esc(top.kind)}','${esc(top.id)}')">
-        <span class="iq-top-q-text">${esc(q)}</span>
-      </button>`;
+    const kinds = ['inquiry', 'focus', 'low', 'high'];
+    let all = [];
+    try {
+      const results = await Promise.all(kinds.map(k =>
+        fetch(`/api/objects?kind=${k}&scope=self`, { headers: this._authHeaders() })
+          .then(r => r.json()).catch(() => null)));
+      for (const j of results) if (j && j.objects) all = all.concat(j.objects.filter(o => !o.parked));
+    } catch (_) { all = []; }
+    all.sort((a, b) => (b.score || 0) - (a.score || 0));
+    const top = all[0];
+    if (!top) {
+      box.innerHTML = `<p class="iq-home-empty">Nothing yet. Tell me what is going on and I will start working it out.</p>`;
+      return;
+    }
+    box.innerHTML = `<div class="iq-home-one">${this._objectCard(top, top.kind)}</div>`;
   },
 
   /* Create an inquiry or a focus. No new capability and no new form: it prefills the ONE
-     composer so creation goes through the same governed turn everything else does. */
+     composer, so creation goes through the same governed turn as everything else — and a focus
+     you start by talking is a focus that already has its context. */
   _startObject(kind) {
     const starters = { inquiry: 'Something I want to work out: ', focus: 'I want to work on ' };
     try { navigate('workspace'); } catch (_) {}
@@ -11053,6 +11066,10 @@ const MemberApp = {
     if (!box) return;
     const esc = s => this._escape(String(s == null ? '' : s));
     box.innerHTML = `<div style="color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
+    // The page shell's own heading belongs to the BUCKET, not to one object. Leaving it above a
+    // thread stacked two titles and two subtitles on top of the thing you tapped.
+    const shell = document.querySelector('#page-inquiry .page-header');
+    if (shell) shell.setAttribute('hidden', '');
     try {
       const response = await fetch(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/thread?scope=self`, { headers: this._authHeaders() });
       const data = await response.json();
@@ -11089,13 +11106,18 @@ const MemberApp = {
 
       box.innerHTML = `
         <div class="iq-object-thread">
+          <div class="iqt-bar">
+            <button class="iqt-back" type="button" onclick="MemberApp._renderBucketPage('${esc(kind)}')">
+              <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+              ${esc((this._bucketCopy[kind] || {}).title || 'Back')}
+            </button>
+          </div>
           <div class="iqt-head">
-            <button class="iq-thread-back" type="button" onclick="MemberApp._renderBucketPage('${esc(kind)}')" aria-label="Back">Back</button>
             <div class="iqt-head-mid">
               <h1 class="iqt-title">${esc(title)}</h1>
               ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}">${esc(sum.standing)}</span>` : ''}
             </div>
-            ${data.shared ? `<span class="iqt-forum" title="Others invited to this can discuss it here">Forum</span>` : ''}
+            ${data.shared ? `<button type="button" class="iqt-forum" onclick="MemberApp.openForum('${esc(data.nodeId || '')}','${esc(objectId)}')">Forum</button>` : ''}
             <div class="iq-thread-overflow">
               <button class="iq-thread-overflow-toggle" type="button" aria-label="More options" aria-expanded="false"
                 onclick="const m=this.nextElementSibling;m.hidden=!m.hidden;this.setAttribute('aria-expanded',String(!m.hidden))">More</button>
@@ -11127,6 +11149,79 @@ const MemberApp = {
     } catch (_) {
       box.innerHTML = `<div class="iq-empty-sub">This could not be opened right now.</div>`;
     }
+  },
+
+  /* THE FORUM. Where a thread is not just you and IntelliQ, this is the room. Contributions
+     are ANONYMOUS to every human reader including leaders (D-A2) — the kernel keeps authorship
+     so origins, echo refusal and correction still work, but nobody in here sees a name. Your own
+     messages are marked so you can find what you said.
+
+     Nothing said here is evidence. Saying something and OFFERING it as your account are two
+     different acts, and only the second goes anywhere near the kernel. */
+  async openForum(nodeId, inquiryId) {
+    const box = document.getElementById('iq-inquiries-page');
+    if (!box || !nodeId) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    this._forumCtx = { nodeId, inquiryId };
+    box.innerHTML = `<div style="color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
+    let j; try {
+      j = await fetch(`/api/group/${encodeURIComponent(nodeId)}/forum/${encodeURIComponent(inquiryId)}`, { headers: this._authHeaders() }).then(r => r.json());
+    } catch (_) { j = null; }
+    if (!j || !j.ok) { box.innerHTML = `<div class="iq-empty-sub">This discussion could not be opened right now.</div>`; return; }
+    const msgs = (j.messages || []).filter(m => m.status !== 'removed' || true);
+    box.innerHTML = `
+      <div class="iq-object-thread">
+        <div class="iqt-bar">
+          <button class="iqt-back" type="button" onclick="MemberApp.openObjectThread('inquiry','${esc(inquiryId)}')">
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+            Back
+          </button>
+        </div>
+        <h1 class="iqt-title">Forum</h1>
+        <p class="iqt-p">Everyone here is anonymous, including to coaches. Nothing said here counts as evidence unless you deliberately offer it as your own account.</p>
+        <div class="iqt-turns">${msgs.length
+          ? msgs.map(m => m.status === 'removed'
+              ? `<div class="iq-msg iq-msg-gone">Withdrawn</div>`
+              : `<div class="iq-msg iq-msg-${m.mine ? 'user' : 'iq'}">${m.mine ? `<span class="iqf-you">You</span> ` : ''}${esc(m.text)}</div>`).join('')
+          : `<p class="iqt-p">Nobody has said anything yet.</p>`}</div>
+        <div class="iqt-composer">
+          <textarea id="iq-forum-input" rows="1" placeholder="Say something…"
+            oninput="MemberApp._wsGrow(this)"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.forumSend()}"></textarea>
+          <button type="button" class="iq-mic" id="iqf-mic" aria-label="Speak instead of typing" aria-pressed="false" onclick="MemberApp._forumVoice()">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/></svg>
+          </button>
+          <button type="button" class="iq-send" onclick="MemberApp.forumSend()" aria-label="Send">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M5 13l7-7 7 7"/></svg>
+          </button>
+        </div>
+        <div class="iq-voice-state" id="iqf-voice-state" role="status" aria-live="assertive"></div>
+      </div>`;
+  },
+
+  async forumSend() {
+    const input = document.getElementById('iq-forum-input');
+    const ctx = this._forumCtx;
+    const text = String(input && input.value || '').trim();
+    if (!text || !ctx) return;
+    input.value = '';
+    try {
+      await fetch(`/api/group/${encodeURIComponent(ctx.nodeId)}/forum/${encodeURIComponent(ctx.inquiryId)}`, {
+        method: 'POST', headers: this._authHeaders(), body: JSON.stringify({ text }),
+      });
+    } catch (_) {}
+    this.openForum(ctx.nodeId, ctx.inquiryId);
+  },
+
+  _forumVoice() {
+    const V = window.IQVoice;
+    const state = document.getElementById('iqf-voice-state');
+    const btn = document.getElementById('iqf-mic');
+    if (!V || !V.isSupported()) { if (state) state.textContent = 'Voice input is not available in this browser — typing works as normal.'; return; }
+    V.toggle('iq-forum-input', { onState: (name, message) => {
+      if (state) state.textContent = message || '';
+      if (btn) { btn.setAttribute('aria-pressed', name === 'listening' ? 'true' : 'false'); btn.classList.toggle('is-listening', name === 'listening'); }
+    } });
   },
 
   _lowerFirst(s) { const t = String(s || '').trim(); return t ? t[0].toLowerCase() + t.slice(1) : t; },
