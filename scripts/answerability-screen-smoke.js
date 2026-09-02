@@ -21,7 +21,11 @@ function check(name, condition) {
 
 const nav = app.slice(app.indexOf('const NAV_ROUTES'), app.indexOf('function navigate'));
 const topbar = app.slice(app.indexOf('function renderTopbar'), app.indexOf('async function _addSafeguardingNav'));
-const screen = app.slice(app.indexOf('async function renderMyData'), app.indexOf('/* ── ALERT COMPOSE FLOW'));
+/* The slice started at renderMyData, but the record RENDERER (_answerabilityRecords) is defined
+   above it — so the assertion meant to stop a raw JSON dump could not see the function doing the
+   dumping. Verified by mutation: reinstating the <pre> left this suite green. It now starts at
+   the helper. */
+const screen = app.slice(app.indexOf('const _CONFIDENCE_WORDS'), app.indexOf('/* ── ALERT COMPOSE FLOW'));
 const orphanSet = reachability.slice(reachability.indexOf('const KNOWN_ORPHANS'), reachability.indexOf('const server'));
 /* D21 moved the sentence to its ONE home, ai/safeguarding.SAFETY_EXCEPTION, and serves it on
    GET /api/safeguarding/config. This assertion therefore got STRONGER, not looser: it used to
@@ -42,10 +46,25 @@ check('A2 every authenticated person gets the account-menu entry without a manag
   && !/PERSONAL[\s\S]{0,80}Auth\.canDo/.test(topbar));
 check('A3 the screen can request only the authenticated caller, never a supplied subject',
   screen.includes("fetch('/api/me/data', { headers: Auth._headers() })") && !/subjectId|userId|\/api\/report\/person|leader-facing/.test(screen));
-check('A4 the screen names all three answerability sections',
-  ['What we hold', 'Who has looked', 'Who I speak to'].every(label => screen.includes(label)));
-check('A5 the subject-view reads and own notes come directly from the one response',
-  ['held.reads', 'held.myNotes'].every(field => screen.includes(field)));
+/* The headings changed when this screen was rewritten for people rather than for me: "What we
+   hold" became "What IntelliQ thinks about you". What must not change is that all three
+   questions are still answered, so this pins the SECTIONS BY THEIR SUBSTANCE rather than by
+   their wording — a rename is a product decision, a missing section is a regression. */
+check('A4 the screen still answers all three questions: what is held, who looked, who I speak to',
+  /What IntelliQ thinks about you|What we hold/.test(screen)
+  && screen.includes('Who has looked') && screen.includes('Who I speak to')
+  && screen.includes('held.reads') && screen.includes('accessTrail') && screen.includes('audienceData'));
+
+/* A5 used to require `held.myNotes`, a section retired with the notes concept. Its real point
+   was that this screen reads from ONE authenticated response and derives nothing of its own —
+   and to that I have added the failure the founder actually hit: it rendered
+   JSON.stringify(item, null, 2) in a <pre>, so the one screen whose job is to make a person
+   feel safe was the least readable in the product. A page you cannot read is not transparency,
+   it is the appearance of it. */
+check('A5 the reads come from the one response, and no raw record is dumped on the person',
+  screen.includes('held.reads')
+  && !/JSON\.stringify\(item/.test(screen)
+  && !/<pre/.test(screen));
 /* The "it knows me" surface. /api/self/patterns and /api/self/:habitId/feedback were both built
    and both orphaned — a private model of how somebody works, that the person could not see and
    could not refuse. Rendering the kernel's PATTERN KEY would be a leak of internal vocabulary,

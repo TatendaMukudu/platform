@@ -2309,12 +2309,51 @@ async function showAdvanceNotices() {
    render nothing rather than a remembered version, because a stale safety promise is worse than
    an absent one. */
 
+/* THE PRIVACY PAGE IS THE WORST PLACE TO SHOW SOMEBODY A DATABASE.
+
+   This rendered `JSON.stringify(item, null, 2)` inside a <pre>: beliefId, kind, status,
+   canContest, braces and all. The one screen whose entire job is to make a person feel safe was
+   the least comprehensible in the product, and a page you cannot read is not transparency — it
+   is the appearance of it.
+
+   What a person actually wants to know here is three things: what does it think about me, how
+   sure is it, and can I argue with it. So that is what this renders, and nothing else. */
+const _CONFIDENCE_WORDS = { clear: 'Fairly sure', strong: 'Well supported', supported: 'Well supported',
+  probable: 'Likely', emerging: 'Taking shape', tentative: 'Early thinking', weak: 'Early thinking' };
+
 function _answerabilityRecords(items, emptyText) {
   if (!Array.isArray(items) || !items.length) return `<p style="color:var(--text-muted);margin:0">${_escHtml(emptyText)}</p>`;
   return items.map(item => {
-    const detail = JSON.stringify(item, null, 2) || 'No details available';
-    return `<pre style="white-space:pre-wrap;overflow-wrap:anywhere;background:var(--surface-2);padding:0.75rem;border-radius:8px;margin:0 0 0.6rem">${_escHtml(detail)}</pre>`;
-  }).join('');
+    const claim = String((item && (item.claim || item.text || item.summary)) || '').trim();
+    if (!claim) return '';
+    const band = String((item && item.confidence) || '').toLowerCase();
+    const standing = _CONFIDENCE_WORDS[band] || '';
+    const change = String((item && (item.whatWouldChangeIt || item.wouldChangeMyMind)) || '').trim();
+    const canContest = item && item.canContest !== false;
+    return `<div class="iq-hold">
+      <p class="iq-hold-claim">${_escHtml(claim)}</p>
+      ${standing ? `<span class="iq-hold-band">${_escHtml(standing)}</span>` : ''}
+      ${change ? `<p class="iq-hold-change">This would change if ${_escHtml(change)}.</p>` : ''}
+      ${canContest ? `<p class="iq-hold-contest">You can tell IntelliQ this is wrong at any time, and it will say so on the record.</p>` : ''}
+    </div>`;
+  }).filter(Boolean).join('') || `<p style="color:var(--text-muted);margin:0">${_escHtml(emptyText)}</p>`;
+}
+
+/* The access trail said "5g2qc8cb2l05 · agenda_view", which tells a person nothing except that
+   something happened to them. The event names are internal; these are their English. An unknown
+   one is described rather than printed raw — a name we do not have is better admitted than
+   shown as a token. */
+const _ACCESS_WORDS = {
+  agenda_view: 'looked at your agenda',
+  finding_view: 'was shown a finding about you',
+  briefing_view: 'read a briefing that included you',
+  evidence_read: 'read something you recorded',
+  export: 'exported your data',
+  team_state: 'looked at the team picture you are part of',
+};
+function _accessWords(action) {
+  const a = String(action || '').toLowerCase();
+  return _ACCESS_WORDS[a] || 'accessed something of yours';
 }
 
 async function renderMyData() {
@@ -2373,15 +2412,23 @@ async function renderMyData() {
     } catch (_) { /* the record still renders without it */ }
 
     const trail = Array.isArray(held.accessTrail) ? held.accessTrail : [];
-    const trailRows = trail.length ? trail.map(entry => `<div style="padding:0.7rem 0;border-bottom:1px solid var(--border)">
-      <strong>${_escHtml(entry.actor || 'System')}</strong> · ${_escHtml(entry.action || 'access')}
-      <div style="font-size:0.75rem;color:var(--text-muted)">${_escHtml(entry.at ? new Date(entry.at).toLocaleString() : 'Time unavailable')} · ${_escHtml(entry.basis || 'No basis recorded')}</div>
-    </div>`).join('') : '<p style="color:var(--text-muted);margin:0">No access has been recorded yet.</p>';
+    // "5g2qc8cb2l05 · agenda_view" told a person nothing except that something happened to them.
+    // A raw user id is not an answer to "who looked at my data" — where a name is not available
+    // this says so plainly rather than printing the token.
+    const _who = a => {
+      const v = String(a || '').trim();
+      if (!v || v === 'system') return 'IntelliQ itself';
+      return /^[a-z0-9]{8,}$/i.test(v) && !/\s/.test(v) ? 'Someone with access to your group' : v;
+    };
+    const trailRows = trail.length ? trail.map(entry => `<div class="iq-hold">
+      <p class="iq-hold-claim">${_escHtml(_who(entry.actor))} ${_escHtml(_accessWords(entry.action))}</p>
+      <p class="iq-hold-change">${_escHtml(entry.at ? new Date(entry.at).toLocaleString() : 'Time not recorded')}${entry.basis ? ` · ${_escHtml(entry.basis)}` : ''}</p>
+    </div>`).join('') : '<p style="color:var(--text-muted);margin:0">Nobody has looked at anything of yours yet.</p>';
 
     container.innerHTML = `<section class="card" style="margin-bottom:1rem"><div class="card-body">
-      <h2 style="margin-top:0">What we hold</h2>
-      <h3>Reads about me</h3>${_answerabilityRecords(held.reads, 'No reads are currently held about you.')}
-      <h3>My notes</h3>${_answerabilityRecords(held.myNotes, 'You have not added any notes.')}
+      <h2 style="margin-top:0">What IntelliQ thinks about you</h2>
+      <p style="color:var(--text-secondary)">Everything it currently believes, how sure it is, and what would change its mind. Nothing here is settled and none of it is a score.</p>
+      ${_answerabilityRecords(held.reads, 'IntelliQ has not formed a read about you yet.')}
       <button class="btn btn-outline btn-sm" id="download-my-data">Download my data</button>
       <div id="download-my-data-error" role="alert" style="display:none;color:var(--danger);font-size:0.75rem;margin-top:0.4rem"></div>
     </div></section>
@@ -11003,7 +11050,7 @@ const MemberApp = {
     try { navigate('workspace'); } catch (_) {}
     this._wsShare = share === true;
     const b = document.getElementById('iq-vis');
-    if (b) { b.textContent = this._wsShare ? 'Shared with the team' : 'Private'; b.classList.toggle('is-shared', this._wsShare); }
+    if (b) { b.textContent = this._wsShare ? 'Public' : 'Private'; b.classList.toggle('is-shared', this._wsShare); }
     const i = document.getElementById('iq-composer-input');
     if (i) { i.value = 'I want to work on '; this._wsGrow(i); i.focus(); }
   },
@@ -11217,7 +11264,7 @@ const MemberApp = {
     this._wsShare = !this._wsShare;
     const b = document.getElementById('iq-vis');
     if (!b) return;
-    b.textContent = this._wsShare ? 'Shared with the team' : 'Private';
+    b.textContent = this._wsShare ? 'Public' : 'Private';
     b.setAttribute('aria-pressed', this._wsShare ? 'true' : 'false');
     b.classList.toggle('is-shared', this._wsShare);
   },
@@ -11331,21 +11378,36 @@ const MemberApp = {
     input.focus();
   },
 
+  /* Sending from a thread. This failed silently for a whole afternoon: every exit was a bare
+     `return` or an empty catch, so a person tapped send and NOTHING happened — no message, no
+     error, no clue. The round trip is proven fine server-side, so whatever stops it is here, and
+     a failure a person cannot see is a failure nobody can report. Every path now says something. */
   async inquirySend() {
     const input = document.getElementById('iq-object-input');
+    const state = document.getElementById('iqt-voice-state');
+    const say = m => { if (state) state.textContent = m; };
     const thread = this._inquiryThread;
     const text = String(input && input.value || '').trim();
-    if (!text || !thread) return;
+    if (!input) { say('Could not find the box to send from.'); return; }
+    if (!text) { say('Write or say something first.'); return; }
+    if (!thread) { say('This thread lost its place — go back and open it again.'); return; }
     input.disabled = true;
+    say('Sending…');
     try {
       const response = await fetch('/api/assistant/turn', { method: 'POST', headers: this._authHeaders(), body: JSON.stringify({
         text, conversationId: thread.conversationId || undefined, about: thread.about,
       }) });
-      const data = await response.json();
-      if (!data.ok) throw new Error('turn failed');
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data || !data.ok) {
+        throw new Error((data && data.error) || `server said ${response.status}`);
+      }
       thread.conversationId = data.conversationId;
+      say('');
       await this.openObjectThread(thread.kind, thread.objectId);
-    } catch (_) { input.disabled = false; }
+    } catch (e) {
+      input.disabled = false;
+      say(`That did not send — ${(e && e.message) || 'unknown problem'}. Your words are still here.`);
+    }
   },
 
   /* WHAT I'M WORKING OUT — the inquiries the ears have built from conversation. This is the
@@ -11831,14 +11893,19 @@ const MemberApp = {
         if (!c || !c.text || said.includes(String(c.text).slice(0, 40))) return '';
         return `<div class="iq-grounded"><span class="iq-tag">grounded</span> ${esc(c.text)}</div>`;
       })()}
-      ${r.privacyNotice ? `<div class="iq-privacy">${esc(r.privacyNotice)}</div>` : ''}
+      ${/* The per-reply privacy notice repeated, on every single turn, what the toggle beside
+            the composer now states continuously. Once is reassurance; every time is noise. */ ''}
       ${clarifyHtml}
       ${savedHtml}
       <div class="iq-make-row">
         <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus')">Make this a focus</button>
       </div>
-      ${primary ? `<div class="iq-proposals"><div class="card-label">Suggestions — nothing happens until you confirm</div>${primary}
-        ${more ? `<details class="iq-more"><summary>More options</summary>${more}</details>` : ''}</div>` : ''}
+      ${/* SUGGESTIONS REMOVED, September 2026. The composer's Public/Private toggle asks who
+            something is for BEFORE it is said. A card asking the same question afterwards is
+            the same decision twice, and the second one arrives when a person has already moved
+            on. Consequential proposals (submitting work, drafting a calendar hold) still exist
+            in r.moreActions and will get their own surface; what is gone is the "keep this"
+            card, which only ever restated the toggle. */ ''}
     </div>`;
   },
 

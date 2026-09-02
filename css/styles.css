@@ -2953,3 +2953,15 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
   color:var(--text-secondary);background:transparent;border:1px solid var(--border)}
 .iq-make-chip:hover{color:var(--text-primary);border-color:var(--border-light)}
 .iq-make-chip:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+
+/* The privacy page, made readable. Same card language as everywhere else — this screen was the
+   one place still showing a person raw records, which is the opposite of what it is for. */
+.iq-hold{padding:1rem 1.1rem;margin:0 0 .7rem;border-radius:14px;
+  background:color-mix(in srgb, currentColor 3%, transparent);
+  border:1px solid color-mix(in srgb, currentColor 9%, transparent)}
+.iq-hold-claim{font-size:1rem;line-height:1.5;margin:0;color:var(--text-primary);overflow-wrap:anywhere}
+.iq-hold-band{display:inline-block;margin-top:.5rem;font-size:.66rem;letter-spacing:.09em;
+  text-transform:uppercase;padding:.2rem .55rem;border-radius:999px;color:var(--text-secondary);
+  border:1px solid color-mix(in srgb, currentColor 22%, transparent)}
+.iq-hold-change{font-size:.85rem;line-height:1.55;color:var(--text-secondary);margin:.55rem 0 0}
+.iq-hold-contest{font-size:.8rem;line-height:1.5;color:var(--text-muted);margin:.4rem 0 0}
