@@ -262,8 +262,25 @@ async function main() {
     && lifecycleInquiry.signals.some(s => s.originRef === 'life_origin')
     && lifecycleInquiry.signals.filter(s => s.originRef === 'life_origin').every(s => !diagnose.isActive(s)));
 
-  // ATTACK 13: both the named cohort and its complement must clear the fixed floor.
-  ok('DP-13 High and Low projection obeys the two-sided cohort floor',
+  /* ATTACK 13 — RELABELLED AFTER REVIEW, AND THE GAP RECORDED RATHER THAN PAPERED OVER.
+     This exercises the cohort RULE, not its APPLICATION, and it is weaker than its original
+     name implied. Two things are true and both matter:
+
+       · `audience-disclosure-smoke` (f1) already proves this rule more thoroughly, including
+         the exact six-person case — so as written this is duplicate coverage.
+       · Replacing `fitForSurface`'s floor check with `{ ok: true }` — that is, the PROJECTION
+         no longer applying the rule at all — leaves this suite and `audience-disclosure-smoke`
+         entirely green. `team-state-smoke`, `finding-change-notice-http-smoke` and
+         `seed-surface-smoke` are what catch it. The system is protected; this pilot is not
+         what protects it.
+
+     Driving the real leader surface with a fit-but-for-the-floor finding needs group
+     CANDIDATES, because polarity is derived from `teamState.valenceOf` over contributions and
+     an inquiry without one is skipped as neutral before the floor is ever consulted. A fixture
+     that sets the fields directly never reaches the gate — which is exactly the failure this
+     suite exists to catch, so it is not worth committing a version that looks stronger than it
+     is. Recorded as the pilot's one known coverage gap. */
+  ok('DP-13 the two-sided cohort rule refuses both a small cohort and a small complement',
     teamState.cohortFloor(5, 10).ok === true
     && teamState.cohortFloor(5, 6).ok === false
     && teamState.cohortFloor(1, 10).ok === false);
