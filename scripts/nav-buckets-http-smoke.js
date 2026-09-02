@@ -35,7 +35,21 @@ const server = app.listen(0, async () => {
     const second = await get('/api/objects/focus/focus-high/thread?scope=self');
     ok('A4 every object thread recomposes its opening and stores no projection', first.status === 200 && second.body.opening.claim.includes('Recomposed current focus') && first.body.opening.claim !== second.body.opening.claim && assistantConversations[`${CODE}:member`].length === 0);
     const member = fs.readFileSync(require.resolve('../js/app.js'), 'utf8');
-    ok('A5 the four routes share one card renderer and carry no count badges', /const card = item =>/.test(member) && (member.match(/const card = item =>/g) || []).length === 1 && ['Inquiries','Focuses','Highs','Lows'].every(x => member.includes(`label: '${x}'`)) && !/badge/i.test(member.slice(member.indexOf('_NAV:'), member.indexOf('navToggle()'))));
+    /* The card renderer moved from an inline `const card = item =>` to a named method when the
+       bucket page gained per-kind copy, so the pattern is updated to the new idiom. The LAW is
+       unchanged and still the point: ONE renderer for four buckets. Two is how the polarity
+       vocabulary came to exist five times, and how two different inquiry cards came to exist
+       on this very surface. */
+    /* STRUCTURAL, not by name. Counting a named method let a second renderer called something
+       else walk straight past — verified by mutation. What cannot be faked is the card's own
+       markup: any second renderer has to emit the card class too, so counting that counts
+       renderers however they are spelled. */
+    const emitters = (member.match(/class="iq-inq"/g) || []).length;
+    ok('A5 the four routes share one card renderer and carry no count badges',
+      emitters === 1
+      && (member.match(/this\._objectCard\(/g) || []).length >= 1
+      && ['Inquiries','Focuses','Highs','Lows'].every(x => member.includes(`label: '${x}'`))
+      && !/badge/i.test(member.slice(member.indexOf('_NAV:'), member.indexOf('navToggle()'))));
   } catch (e) { console.error(e); fail++; }
   server.close(() => { console.log(`\nnav-buckets-http-smoke: ${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0); });
 });

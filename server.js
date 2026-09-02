@@ -13843,15 +13843,24 @@ function _objectBucket(code, userId, scope = 'self') {
     const id = String(raw.inquiryId || raw.focusId || raw.id || raw.dedupeKey || '');
     if (!id) return;
     const explained = raw.explained || voice.explainObject({
-      kind, label: raw.title || raw.text || raw.headline || raw.about || 'Current understanding',
+      // An INQUIRY carries its name in `topic`, not in any of the fields below, so every
+      // inquiry fell through to the literal fallback and every card on the bucket page read
+      // "Current understanding." present.humanTopic also strips the canonical key.
+      kind, label: raw.title || raw.text || raw.headline || raw.about
+        || (raw.topic ? present.humanTopic(raw.topic) : '') || 'Current understanding',
       claim: raw.body || raw.hypothesis || raw.text || raw.claim || '',
       band: raw.band || (raw.confidence || {}).band, because: (raw.confidence || {}).because || [],
       stillUnknown: raw.stillUnknown || [], falsifiers: raw.falsifiers || [],
       contested: raw.contested === true, banded: scope !== 'self', seed: id,
     });
     const priority = raw.priority || raw.severity || (raw.confidence || {}).band || 'low';
+    // The human reading, so every surface renders from ONE shape instead of each inventing
+    // its own from the raw object — which is how two different inquiry cards came to exist.
+    const card = present.inquiryCard({ ...raw, hypothesis: raw.hypothesis || raw.body || raw.text || null,
+      stillUnknown: raw.stillUnknown || [], topic: raw.topic || { label: explained.headline || '' } });
     out.push({ id, kind, priority, score: priorityOffice._score(priorityOffice.normalizeItem({ ...raw, kind, priority, id })),
-      parked: !!raw.parkedAt, parkedBecause: raw.parkedBecause || null, explained, about: `${kind}:${id}`, scope, raw });
+      parked: !!raw.parkedAt, parkedBecause: raw.parkedBecause || null, explained, present: card,
+      about: `${kind}:${id}`, scope, raw });
   };
 
   if (scope === 'self') {

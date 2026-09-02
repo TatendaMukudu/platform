@@ -2766,3 +2766,34 @@ details.intel-collapse[open] > summary::after { transform: rotate(90deg); }
 .iq-inq-topic,.iq-inq-hyp,.iq-inq-gap{overflow-wrap:anywhere}
 .iq-inq-head{display:flex;gap:.5rem;align-items:baseline;flex-wrap:wrap}
 .iq-inq-topic{font-size:1.02rem;font-weight:600;margin:0;line-height:1.35}
+
+/* ── iOS: STOP THE PAGE MOVING (2026-09) ─────────────────────────────────────
+   Safari on iPhone ZOOMS THE WHOLE PAGE when a text field smaller than 16px takes focus, and
+   it does not zoom back out afterwards. That is why the screen "moves" and has to be pinched:
+   nothing is animating, the viewport itself was rescaled by tapping the composer. Sixteen
+   pixels is the threshold, so every field a thumb can focus is held at or above it.
+   `text-size-adjust` stops Safari re-flowing text on rotation for the same reason. */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+input[type="text"],input[type="email"],input[type="password"],input[type="search"],
+input[type="number"],input[type="tel"],input[type="url"],input:not([type]),
+textarea,select,.iq-composer-input,.form-input{font-size:16px}
+/* Nothing may be wider than the screen: one overflowing element makes the whole page pan
+   sideways, which reads as the layout drifting. */
+html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
+
+.iq-make{display:inline-block;margin:0 0 .9rem;padding:.55rem 1rem;min-height:44px;border-radius:999px;
+  border:1px solid var(--line,#e5e7eb);background:transparent;color:var(--text,#111827);cursor:pointer;font-size:.9rem}
+.iq-make:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.iq-more-objects{display:block;width:100%;margin:.6rem 0 0;padding:.7rem;min-height:44px;border-radius:12px;
+  border:1px dashed var(--line,#e5e7eb);background:transparent;color:var(--muted,#6b7280);cursor:pointer;font-size:.86rem}
+.iq-inq-forum{margin-left:auto;font-size:.7rem;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--muted,#6b7280);border:1px solid var(--line,#e5e7eb);border-radius:999px;padding:.1rem .5rem}
+
+/* ── HOME IS ONE QUESTION ────────────────────────────────────────────────────
+   Founder decision, September 2026. Greeting, the single highest-priority thing IntelliQ wants
+   to know, the logo, the bar. The question is a button because it opens the thread it came
+   from — reading it and answering it are the same gesture. */
+.iq-top-q{display:block;width:100%;text-align:left;margin:0 0 1.2rem;padding:1.1rem 1.2rem;
+  border:1px solid var(--line,#e5e7eb);border-radius:16px;background:transparent;cursor:pointer}
+.iq-top-q:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.iq-top-q-text{font-size:1.12rem;line-height:1.45;color:var(--text,#111827);overflow-wrap:anywhere}

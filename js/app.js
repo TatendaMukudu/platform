@@ -10803,12 +10803,13 @@ const MemberApp = {
         <div class="iq-voice-state" id="iq-voice-state" role="status" aria-live="assertive"></div>
         </div>
       </div>
-      <div id="iq-brief" aria-live="polite"></div>
-      <div class="iq-attention" id="iq-attention" aria-live="polite"></div>
-      <div id="iq-inquiries" aria-live="polite"></div>`;
-    this._loadBrief();
-    this._loadInquiries();
-    this._loadAttention();
+      <div id="iq-brief" aria-live="polite"></div>`;
+    // HOME IS ONE QUESTION. Founder decision, September 2026: greeting, the single
+    // highest-priority thing IntelliQ wants to know, the logo, and the bar. Nothing else may
+    // ever appear here. Everything the old home crowded in — the attention feed, the inquiry
+    // list, the brief — lives in its own bucket now, six at a time, priority first. Spamming
+    // the first screen is how a person learns to skim it.
+    this._loadTopQuestion();
     this._renderSubjectChip();
   },
 
@@ -10916,20 +10917,120 @@ const MemberApp = {
   /* The Inquiries page — the same working picture the home surface shows, given room to
      breathe and grouped by how settled each one is. State, not type: what is still moving,
      what has landed, and what has gone quiet without resolving. */
+  /* Every bucket rendered here shares ONE page shell, so the heading has to be set per kind —
+     it was hard-coded to "Inquiries" in index.html, which is why the Focuses page announced
+     itself as Inquiries and then said "Nothing here right now" about the wrong thing. */
+  _bucketCopy: {
+    inquiry: { title: 'Inquiries', sub: 'What IntelliQ is working out — including what it still does not know',
+               empty: 'Nothing being worked out yet. Say something in the bar below and I will start.', make: 'Ask a question' },
+    focus:   { title: 'Focuses', sub: 'What you have deliberately chosen to work on',
+               empty: 'You are not working on anything yet. Start a focus when you want to change something.', make: 'Start a focus' },
+    high:    { title: 'Highs', sub: 'What is going well',
+               empty: 'Nothing has stood out as going well yet.', make: null },
+    low:     { title: 'Lows', sub: 'What needs attention',
+               empty: 'Nothing needs attention right now.', make: null },
+  },
+
   async _renderBucketPage(kind = 'inquiry') {
     const box = document.getElementById('iq-inquiries-page');
     if (!box) return;
     const esc = s => this._escape(String(s == null ? '' : s));
+    const copy = this._bucketCopy[kind] || this._bucketCopy.inquiry;
+
+    // The page shell's heading is static markup, so it is corrected here on every render.
+    const h = document.querySelector('#page-inquiry .page-header-title');
+    const hs = document.querySelector('#page-inquiry .page-header-sub');
+    if (h) h.textContent = copy.title;
+    if (hs) hs.textContent = copy.sub;
+
     box.innerHTML = `<div style="color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
     let j; try { j = await fetch(`/api/objects?kind=${encodeURIComponent(kind)}&scope=self`, { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
     const list = (j && j.objects) || [];
+
+    const make = copy.make
+      ? `<button type="button" class="iq-make" onclick="MemberApp._startObject('${esc(kind)}')">${esc(copy.make)}</button>`
+      : '';
     if (!list.length) {
-      box.innerHTML = `<div class="iq-empty-title">Nothing here right now</div>`;
+      box.innerHTML = `<div class="iq-empty-title">${esc(copy.empty)}</div>${make}`;
       return;
     }
-    const card = item => { const x = item.explained || {}; return `<div class="iq-inq" role="button" tabindex="0" onclick="MemberApp.openObjectThread('${esc(item.kind)}','${esc(item.id)}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();MemberApp.openObjectThread('${esc(item.kind)}','${esc(item.id)}')}"><div class="iq-inq-head"><span class="iq-inq-topic">${esc(x.headline || 'Current understanding')}</span></div>${x.claim ? `<div class="iq-inq-hyp">${esc(x.claim)}</div>` : ''}${x.provenance ? `<div class="iq-inq-why">${esc(x.provenance)}</div>` : ''}${item.parkedBecause ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Set aside</span> ${esc(item.parkedBecause)}</div>` : ''}</div>`; };
+
     const live = list.filter(i => !i.parked); const parked = list.filter(i => i.parked);
-    box.innerHTML = `<div class="iq-att-section">${live.map(card).join('')}</div>${parked.length ? `<div class="iq-att-section"><div class="iq-att-label">Set aside</div>${parked.map(card).join('')}</div>` : ''}`;
+    // Highest priority first — the founder's rule, and the reason a person can trust the top
+    // of the list rather than having to read all of it.
+    live.sort((a, b) => (b.score || 0) - (a.score || 0));
+    const SHOWN = 6;
+    const shown = this._bucketExpanded === kind ? live : live.slice(0, SHOWN);
+    const more = live.length - shown.length;
+
+    box.innerHTML =
+      `${make}` +
+      `<div class="iq-att-section">${shown.map(i => this._objectCard(i, kind)).join('')}</div>` +
+      (more > 0
+        ? `<button type="button" class="iq-more-objects" onclick="MemberApp._expandBucket('${esc(kind)}')">Read ${more} more</button>`
+        : '') +
+      (parked.length ? `<div class="iq-att-section"><div class="iq-att-label">Set aside</div>${parked.map(i => this._objectCard(i, kind)).join('')}</div>` : '');
+  },
+
+  _expandBucket(kind) { this._bucketExpanded = kind; this._renderBucketPage(kind); },
+
+  /* THE ONE QUESTION ON HOME. The kernel already ranks every open unknown by what answering
+     would be worth against what it costs to answer; this shows the winner and nothing else.
+     If there is no question, home says so plainly rather than filling the space. */
+  async _loadTopQuestion() {
+    const box = document.getElementById('iq-brief');
+    if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    let j; try { j = await fetch('/api/objects?kind=inquiry&scope=self', { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
+    const live = ((j && j.objects) || []).filter(o => !o.parked).sort((a, b) => (b.score || 0) - (a.score || 0));
+    const top = live[0];
+    const q = top && ((top.present && top.present.summary && top.present.summary.openQuestion)
+      || (top.explained && top.explained.stillUnknown && top.explained.stillUnknown[0]));
+    if (!top || !q) { box.innerHTML = ''; return; }
+    box.innerHTML = `
+      <button type="button" class="iq-top-q" onclick="MemberApp.openObjectThread('${esc(top.kind)}','${esc(top.id)}')">
+        <span class="iq-top-q-text">${esc(q)}</span>
+      </button>`;
+  },
+
+  /* Create an inquiry or a focus. No new capability and no new form: it prefills the ONE
+     composer so creation goes through the same governed turn everything else does. */
+  _startObject(kind) {
+    const starters = { inquiry: 'Something I want to work out: ', focus: 'I want to work on ' };
+    try { navigate('workspace'); } catch (_) {}
+    const i = document.getElementById('iq-composer-input');
+    if (i) { i.value = starters[kind] || ''; this._wsGrow(i); i.focus(); }
+  },
+
+  /* THE ONE CARD. Every bucket renders through this — a second renderer is how the polarity
+     vocabulary came to exist five times, and how two different inquiry cards came to exist here.
+     What is on it was chosen deliberately: the question, what IntelliQ thinks, how it knows, and
+     the one thing it is still working out. Everything else is inside the thread. */
+  _objectCard(item, kind) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const p = (item && item.present) || {};
+    const sum = p.summary || {};
+    const det = p.detail || {};
+    const x = item.explained || {};
+    const title = sum.title || x.headline || 'Working it out';
+    const claim = sum.thinking || x.claim || '';
+    const open = () => `MemberApp.openObjectThread('${esc(item.kind)}','${esc(item.id)}')`;
+    // A thread others were invited into carries a forum. A private one does not, and the icon
+    // is how a person tells the difference at a glance.
+    const shared = item.shared === true || (Array.isArray(item.participants) && item.participants.length > 1);
+    return `
+      <article class="iq-inq" role="button" tabindex="0" onclick="${open()}"
+        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${open()}}">
+        <div class="iq-inq-head">
+          <span class="iq-inq-topic">${esc(title)}</span>
+          ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}">${esc(sum.standing)}</span>` : ''}
+          ${shared ? `<span class="iq-inq-forum" title="Others can discuss this">Forum</span>` : ''}
+        </div>
+        ${claim ? `<p class="iq-inq-hyp">${esc(claim)}</p>` : ''}
+        ${x.provenance ? `<div class="iq-inq-why">${esc(x.provenance)}</div>` : ''}
+        ${sum.openQuestion ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Still working out</span> ${esc(sum.openQuestion)}</div>` : ''}
+        ${item.parkedBecause ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Set aside</span> ${esc(item.parkedBecause)}</div>` : ''}
+      </article>`;
   },
 
   _renderInquiryPage() { return this._renderBucketPage('inquiry'); },
@@ -11002,61 +11103,11 @@ const MemberApp = {
      computed from the shape of the evidence (never asserted by the model), and each one shows
      what is still unknown. Showing the gaps is the point — a system that only displays what it
      believes, and hides what it does not know, is the one you cannot trust. */
-  async _loadInquiries() {
-    const box = document.getElementById('iq-inquiries');
-    if (!box) return;
-    let j;
-    try { j = await fetch('/api/inquiry', { headers: this._authHeaders() }).then(r => r.json()); }
-    catch (_) { box.innerHTML = ''; return; }
-    const list = (j && j.inquiries) || [];
-    if (!list.length) { box.innerHTML = ''; return; }
-    const esc = s => this._escape(String(s == null ? '' : s));
-    box.innerHTML = `
-      <div class="iq-att-section">
-        <div class="iq-att-label">What I'm working out</div>
-        ${list.slice(0, 6).map((i, n) => {
-          // Defensive: one malformed record must never blank the whole surface. The server
-          // sends `present` — the human reading — alongside the canonical fields; if an older
-          // build has not got it, fall back to the raw shape rather than showing nothing.
-          const p = (i && i.present) || null;
-          const topic = (i && i.topic) || {}; const conf = (i && i.confidence) || {};
-          const sum = (p && p.summary) || {
-            title: topic.label || topic.canonicalConcept || 'Working it out',
-            standing: conf.band || 'tentative', band: conf.band || 'tentative',
-            thinking: i.hypothesis || null,
-            openQuestion: (i.stillUnknown || [])[0] || null,
-            moreUnknowns: Math.max(0, (i.stillUnknown || []).length - 1),
-          };
-          const det = (p && p.detail) || { because: (conf.because || []), stillUnknown: (i.stillUnknown || []),
-            alternatives: (i.alternatives || []).map(a => typeof a === 'string' ? { statement: a } : { statement: a.statement }),
-            falsifiers: (i.falsifiers || []), evidenceCount: i.signals || 0, independentOrigins: i.origins || 0, contested: false };
-          const id = 'inq-d-' + n;
-          const list2 = (arr) => (arr || []).map(x => `<li>${esc(typeof x === 'string' ? x : (x.statement || ''))}${(x && x.standing) ? ` <span class="iq-inq-sub">${esc(x.standing)}</span>` : ''}</li>`).join('');
-          return `
-          <article class="iq-inq" aria-labelledby="${id}-t">
-            <div class="iq-inq-head">
-              <h3 class="iq-inq-topic" id="${id}-t">${esc(sum.title)}</h3>
-              <span class="iq-inq-band iq-band-${esc(sum.band)}">${esc(sum.standing)}</span>
-            </div>
-            ${sum.thinking ? `<p class="iq-inq-hyp">${esc(sum.thinking)}</p>` : ''}
-            ${sum.openQuestion ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Still working out</span> ${esc(sum.openQuestion)}${sum.moreUnknowns ? ` <span class="iq-inq-sub">+${sum.moreUnknowns} more</span>` : ''}</div>` : ''}
-            <div class="iq-inq-actions">
-              <button type="button" class="iq-inq-more" aria-expanded="false" aria-controls="${id}"
-                      onclick="MemberApp._toggleInquiryDetail('${id}', this)">Why I think this</button>
-              <button type="button" class="iq-inq-ask"
-                      onclick="MemberApp._askAboutInquiry(${this._escape(JSON.stringify(JSON.stringify({ headline: sum.title, body: sum.thinking || '' })))})">Ask IntelliQ about this</button>
-            </div>
-            <div class="iq-inq-detail" id="${id}" hidden>
-              ${det.because.length ? `<div class="iq-inq-d"><span class="iq-inq-dlabel">Why</span><ul>${list2(det.because)}</ul></div>` : ''}
-              ${det.stillUnknown.length ? `<div class="iq-inq-d"><span class="iq-inq-dlabel">Still working out</span><ul>${list2(det.stillUnknown)}</ul></div>` : ''}
-              ${det.alternatives.length ? `<div class="iq-inq-d"><span class="iq-inq-dlabel">Could also be</span><ul>${list2(det.alternatives)}</ul></div>` : ''}
-              ${det.falsifiers.length ? `<div class="iq-inq-d"><span class="iq-inq-dlabel">What would change my mind</span><ul>${list2(det.falsifiers)}</ul></div>` : ''}
-              <div class="iq-inq-prov">${esc(this._provenanceLine(det))}</div>
-            </div>
-          </article>`; }).join('')}
-        <div class="iq-inq-note">${esc(j.note || '')}</div>
-      </div>`;
-  },
+  /* [REMOVED] _loadInquiries — home's second inquiry list, and the second card renderer in
+     this file. Home is now ONE question (founder decision, September 2026); the list it drew
+     lives on the Inquiries bucket page, six at a time, highest priority first. Two renderers
+     for one card is how this surface came to show `football.attendance_timing` on one screen
+     and "Current understanding." on another. */
 
   /* [REMOVED] _loadOpening — a second "Good morning, <name>" card that duplicated the page
      header's own greeting, and (once the conversation led the page) rendered a greeting BELOW
