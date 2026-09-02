@@ -6415,8 +6415,21 @@ app.delete('/api/tutorials/:id', requireAuth, (req, res) => {
    needed: runs from the browser against whatever key the host has configured.
    With no key, reports that the kernel is on its deterministic fallbacks. */
 /* ── GET /api/health — public status. Booleans only, never secrets. Lets anyone
-   confirm at a glance whether the AI keys are wired (visit it in a browser). */
+   confirm at a glance whether the AI keys are wired (visit it in a browser).
+
+   It also reports the COMPOSER switches, because a reply that reads like a template is
+   indistinguishable, from a phone, from a composer that ran and wrote something dull. The
+   symptom of the composer being off is not an error message; it is a slightly worse answer.
+   Three separate switches can each silence it on their own — IQ_COMPOSER unset, no key,
+   deterministic-only mode — and until now the only place that said which one was the host's
+   stdout, which the person holding the phone cannot read. Switches only: no org data, no
+   counts, no refusal text (a grounding violation quotes what the model invented, which can
+   name a person). The per-org tally lives behind auth on /api/admin/metrics. */
 app.get('/api/health', (req, res) => {
+  const composerOff = !IQ_COMPOSER ? 'IQ_COMPOSER is not set to 1 on this host'
+    : ai.deterministicOnly() ? 'deterministic-only mode is on — no model is called'
+    : !ai.enabled() ? 'no language-model key is configured'
+    : null;
   res.json({
     ok: true,
     ai: {
@@ -6429,6 +6442,13 @@ app.get('/api/health', (req, res) => {
     reasoning: ai.enabled()
       ? 'connected — replies are grounded and reasoned'
       : 'no key — running on deterministic fallbacks (set ANTHROPIC_API_KEY)',
+    composer: {
+      on: IQ_COMPOSER,
+      deterministicOnly: ai.deterministicOnly(),
+      writes: composerOff
+        ? `off — ${composerOff}; every reply is written by the deterministic templates`
+        : 'on — the model writes the reply and the deterministic core grounds it',
+    },
     time: new Date().toISOString(),
   });
 });
@@ -9313,6 +9333,10 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
   // now says which stage stopped it, for the same reason the intake pass does.
   if (!IQ_COMPOSER || !ai.enabled() || !_llmBudgetOk(code)) {
     if (IQ_COMPOSER) console.log(`[composer] skipped — ${!ai.enabled() ? 'no model configured' : 'org over LLM budget'}`);
+    // Counted, not just logged. "Never ran" and "ran and was refused" produce the identical
+    // reply on the phone and want opposite fixes — one is configuration, the other is the
+    // grounding cage doing its job. A tally that cannot tell them apart is not a diagnosis.
+    _metric(code, IQ_COMPOSER ? 'composer_skipped' : 'composer_off');
     return null;
   }
   try {
@@ -9409,6 +9433,7 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     const written = reasoningRegister.polish(reply);
     if (!written || written.length < 2) {
       console.log('[composer] model returned nothing usable');
+      _metric(code, 'composer_empty');
       return null;
     }
 

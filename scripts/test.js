@@ -212,6 +212,7 @@ const SUITES = [
   'voice-composer-smoke.js',        // D30/D34 — the composer: four blocks, provenance banded by default, no prediction, no kernel word, survives the language guard
   'thread-binding-http-smoke.js',   // object-as-conversation G1 — a thread knows what it is about; the binding is a label on your own thread, never a claim of access, and an unparseable scope filters to nothing
   'client-headers-smoke.js', // a JSON POST without a Content-Type is a POST the server never reads - it broke every send in the app at once
+  'composer-visibility-smoke.js', // a composer that is off looks exactly like a composer that is dull - four silent exits, one deterministic reply
   'css-token-smoke.js', // a colour that falls back is a colour nobody chose: every token used must be defined, and no light-theme hex sits in a fallback
   'asset-version-smoke.js', // shipped code must reach the BROWSER: one cache stamp, and it changes when the assets do
   'present-smoke.js', // the presentation layer: canonical keys never reach a reader, four bands translate one to one, first screen carries one open question
