@@ -541,9 +541,27 @@ function _gracefulShutdown(signal = 'manual') {
    it. Split rows existing at all means the split representation is the live
    one, and it is complete by construction — _durableUnits covers every
    persisted key, which persistence-smoke pins. */
+/* THE LEGACY BLOB IS READ LAZILY. It used to be loaded on EVERY boot in every mode, and in
+   split mode `_reconstruct` then deleted every key it had just populated and replaced them
+   with the split rows — so the whole platform came down the wire to be thrown away.
+
+   That is not a rounding error. The seeded club serialises to 21 MB, so each cold start pulled
+   ~42 MB (the blob, then the split rows) across the public internet, and Neon bills that as
+   network transfer. Render's free tier spins down after a quarter of an hour idle and cold-
+   starts on the next request, and every deploy restarts too — a hundred or so starts in a
+   month is ordinary, and a hundred starts was 4.3 GB of a 5 GB allowance.
+
+   `storeData` may now be a FUNCTION. In split mode it is called only when there are no split
+   rows — the genuine first boot after the migration, where the blob really is the only thing
+   that exists. Every other boot never touches it. The ordering is the whole fix: ask the cheap
+   authoritative question first, and pay for the expensive fallback only when the answer is no. */
 async function _reconstruct(storeData) {
-  _loadAllStores(storeData || {});
+  const _blob = async () => {
+    try { return (typeof storeData === 'function' ? await storeData() : storeData) || {}; }
+    catch (e) { console.error('[db] Legacy blob load failed:', e.message); return {}; }
+  };
   if (PERSISTENCE_MODE === 'main') {
+    _loadAllStores(await _blob());
     _persistenceReady = { ready: true, error: null };
     return { mode: 'main', units: 0 };
   }
@@ -556,6 +574,10 @@ async function _reconstruct(storeData) {
     const revisions = loaded.revisions || {};
     const n = Object.keys(rows).length;
     if (n) {
+      // The blob was never read on this path, so there is nothing to clear — but the stores may
+      // carry state from a previous _reconstruct in the same process (the tests do exactly
+      // that), and split rows REPLACE rather than merge: merging would resurrect an org deleted
+      // after the migration, because `main` still remembers it.
       for (const store of Object.values(_persistedStores())) {
         for (const k of Object.keys(store)) delete store[k];
       }
@@ -570,9 +592,10 @@ async function _reconstruct(storeData) {
       console.log(`[db] Split persistence: ${n} durable unit(s) loaded (authoritative)`);
       return { mode: 'split', units: n, authoritative: 'split' };
     }
-    // First boot after the migration. `main` is left exactly as it is — it
-    // becomes the pre-migration restore point, and PERSISTENCE_MODE=main is
-    // the way back to it.
+    // First boot after the migration, and the ONLY path that pays for the blob. `main` is left
+    // exactly as it is — it becomes the pre-migration restore point, and PERSISTENCE_MODE=main
+    // is the way back to it.
+    _loadAllStores(await _blob());
     console.log('[db] No split rows yet — migrating from the legacy blob on first save.');
     _persistenceReady = { ready: true, error: null };
     scheduleSave();
@@ -580,6 +603,10 @@ async function _reconstruct(storeData) {
   } catch (e) {
     _unitRevs.clear();
     _saveHashes.clear();
+    // The split rows could not be read. This is the one failure where the blob earns its cost:
+    // serving stale-but-real data beats serving nothing. Durable mutations stay refused below,
+    // so nothing written in this state can overwrite the authoritative rows.
+    _loadAllStores(await _blob());
     _persistenceReady = { ready: false, error: `authoritative split load failed: ${e.message}` };
     console.error('[db] Split load failed; durable mutations are unavailable:', e.message);
     return { mode: PERSISTENCE_MODE, units: 0, authoritative: 'unavailable', error: e.message };
@@ -9344,7 +9371,16 @@ function _historyMessage(m = {}) {
 }
 
 const SOURCE_CAP = 6;
-function _sourceList(items = []) {
+function _sourceList(items = [], said = '') {
+  // A SOURCE MAY NOT BE THE ANSWER. The deterministic path pushes groundedClaims[0].text into
+  // the reply itself, so citing it produced "You marked 2 things private" as the source for a
+  // reply that said exactly that — a system quoting itself as its own authority, which is worse
+  // than citing nothing. The same guard already existed for the `grounded` tag; it belongs here.
+  const spoken = String(said || '').toLowerCase().replace(/\s+/g, ' ');
+  const echoes = (t) => {
+    const d = String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    return d.length > 24 && spoken.includes(d.slice(0, 60));
+  };
   const out = []; const seen = new Set();
   for (const it of items) {
     if (!it) continue;
@@ -9352,8 +9388,9 @@ function _sourceList(items = []) {
     if (!label) continue;
     const key = `${it.kind}|${label.toLowerCase()}`;
     if (seen.has(key)) continue;
-    seen.add(key);
     const detail = String(it.detail || '').trim().replace(/\s+/g, ' ').slice(0, 180);
+    if (echoes(detail)) continue;
+    seen.add(key);
     out.push({ kind: String(it.kind || 'record'), label, detail, at: it.at || null });
     if (out.length >= SOURCE_CAP) break;
   }
@@ -9496,7 +9533,7 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
         ...evidence.map(e => ({ kind: 'record', label: e.source || 'Something you told me', detail: e.text })),
         ...beliefs.map(b => ({ kind: 'belief', label: 'What I am working out', detail: b.text })),
         ...assignedWork.map(w => ({ kind: 'work', label: w.title, detail: w.status ? `Your work — ${w.status}` : 'Your work' })),
-      ]) };
+      ], written) };
   } catch (e) {
     // A swallowed exception here is the worst of the lot: a rejected model ID, an auth failure or
     // a rate limit all look exactly like "the composer had nothing to say", and every reply in
@@ -13116,8 +13153,9 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     // are decoration, and the composed path is the one that most needs to be checkable.
     sources: composedReply ? (composedReply.sources || []) : _sourceList([
       ...((qa && qa.citations) || []).map(c => ({ kind: 'record', label: c.label || c.ref || 'Your record', detail: c.excerpt || c.text || '', at: c.date || c.at || null })),
+      ...((qa && qa.webSources) || []).map(w => ({ kind: 'web', label: w.title || w.source, detail: w.snippet || '', url: w.url })),
       ...(hasInsight ? groundedClaims.slice(0, 3).map(c => ({ kind: 'belief', label: 'What I am working out', detail: c.text })) : []),
-    ]),
+    ], responseText),
     // A preview of operating-context records to CONFIRM (never persisted here).
     orgContextProposal,
     // Ambiguity: which open question is the user answering (never guessed).
@@ -18929,23 +18967,26 @@ if (require.main === module) (async () => {
     // 1. Connect to Postgres + create schema
     await db.init();
 
-    // 2. Load persisted data
-    let storeData = await db.loadMain();
-
-    // 3. One-time migration: if Postgres is empty and store.json still exists,
-    //    copy it into Postgres so no existing data is lost on first deploy.
-    if (Object.keys(storeData).length === 0 && fs.existsSync(STORE_FILE)) {
-      console.log('[db] Postgres is empty — migrating from store.json...');
-      try {
-        const jsonData = JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'));
-        await db.saveMain(jsonData);
-        storeData = jsonData;
-        console.log('[db] Migration complete — store.json data is now in Postgres.');
-        console.log('[db] You can delete data/store.json — it will no longer be used.');
-      } catch (e) {
-        console.warn('[db] Migration skipped (store.json unreadable):', e.message);
+    // 2/3. The legacy blob, and the one-time store.json migration behind it, as a FUNCTION.
+    //      Neither runs unless _reconstruct actually needs them — which, once split rows exist,
+    //      is never. Reading 21 MB on every cold start to delete it a moment later is what put
+    //      the database at 86% of its monthly network allowance.
+    const loadLegacyBlob = async () => {
+      let storeData = await db.loadMain();
+      if (Object.keys(storeData).length === 0 && fs.existsSync(STORE_FILE)) {
+        console.log('[db] Postgres is empty — migrating from store.json...');
+        try {
+          const jsonData = JSON.parse(fs.readFileSync(STORE_FILE, 'utf8'));
+          await db.saveMain(jsonData);
+          storeData = jsonData;
+          console.log('[db] Migration complete — store.json data is now in Postgres.');
+          console.log('[db] You can delete data/store.json — it will no longer be used.');
+        } catch (e) {
+          console.warn('[db] Migration skipped (store.json unreadable):', e.message);
+        }
       }
-    }
+      return storeData;
+    };
 
     // 4. Populate in-memory stores.
     //
@@ -18956,7 +18997,7 @@ if (require.main === module) (async () => {
     //    remembers it. Split rows existing at all means the split representation
     //    is the live one, and it is complete by construction (_durableUnits
     //    covers every persisted key, which persistence-smoke pins).
-    await _reconstruct(storeData);
+    await _reconstruct(loadLegacyBlob);
     console.log(`[db] Persistence mode: ${PERSISTENCE_MODE}`);
 
     // 5. Repair emailIndex — no longer persisted at all; it is derived from

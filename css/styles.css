@@ -3,6 +3,20 @@
    Universal Performance Intelligence System
    ============================================================ */
 
+/* HIDDEN MEANS HIDDEN.
+
+   The browser's own [hidden]{display:none} lives in the UA stylesheet and loses to ANY class
+   selector that sets display. `.iq-srcs{display:flex}` therefore silently beat it, and every
+   source list rendered fully expanded under every reply — the founder saw a wall of records
+   under a two-line answer and asked, correctly, to compress it. It was never meant to be open.
+
+   The insidious part is the same one as the CSS variable fallbacks: nothing errors. The element
+   carries the attribute, the JS toggles it, aria-expanded says the right thing, and the box is
+   on screen the entire time. So the rule is stated once, globally, rather than remembered per
+   component — this file already has five places that toggle `hidden` and any of them could have
+   been next. */
+[hidden] { display: none !important; }
+
 :root {
   --bg-base:      #0a0c14;
   --bg-surface:   #111420;

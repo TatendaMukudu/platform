@@ -213,6 +213,7 @@ const SUITES = [
   'thread-binding-http-smoke.js',   // object-as-conversation G1 — a thread knows what it is about; the binding is a label on your own thread, never a claim of access, and an unparseable scope filters to nothing
   'client-headers-smoke.js', // a JSON POST without a Content-Type is a POST the server never reads - it broke every send in the app at once
   'composer-visibility-smoke.js', // a composer that is off looks exactly like a composer that is dull - four silent exits, one deterministic reply
+  'boot-bandwidth-smoke.js', // what a cold start COSTS - the legacy blob was read on every boot in every mode and thrown away, at 21MB a time
   'message-history-smoke.js', // a conversation you cannot come back to is not a conversation - history, sources on every message, and a rating that lands on the reply and nowhere near the belief
   'css-token-smoke.js', // a colour that falls back is a colour nobody chose: every token used must be defined, and no light-theme hex sits in a fallback
   'asset-version-smoke.js', // shipped code must reach the BROWSER: one cache stamp, and it changes when the assets do
