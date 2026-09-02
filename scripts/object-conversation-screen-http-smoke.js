@@ -77,8 +77,17 @@ const server = S.app.listen(0, async () => {
       && !storedAfter.includes('What would change my mind'));
 
     const ui = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
-    ok('OC4 the screen has exactly the four object headings and the one two-item overflow',
-      ['The claim', 'Why I think that', 'What I still don’t know', 'What would change my mind'].every(h => ui.includes(`>${h}<`))
+    /* The four HEADINGS were removed by founder decision (September 2026) — labelled boxes read
+       as a form being filled in about you. What must survive is the four pieces of INFORMATION,
+       now composed as prose: what IntelliQ thinks, how it knows, what else it could be, and
+       what would change its mind. This asserts the information and the overflow, not the
+       layout, so the screen may be redesigned again without silently losing a field. */
+    ok('OC4 the thread still carries all four pieces of information, and the two-item overflow',
+      /iqt-lede/.test(ui) && /iqt-prov/.test(ui) && /iqt-rival/.test(ui) && /iqt-falsify/.test(ui)
+      && /iqt-ask/.test(ui)
+      && ui.includes('sum.thinking') && ui.includes('x.provenance')
+      && ui.includes('det.alternatives') && ui.includes('det.falsifiers')
+      && ui.includes('sum.openQuestion')
       && (ui.match(/MemberApp\.inquiryOverflow\('/g) || []).length === 2
       && ui.includes('>Mark answered<') && ui.includes('>Set aside<'));
   } catch (error) {

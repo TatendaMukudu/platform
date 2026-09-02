@@ -11037,6 +11037,17 @@ const MemberApp = {
 
   /* L-OC1 — the opening comes from GET /api/inquiry/:id/thread on every open. It is not a
      synthetic assistant message and is never added to the conversation array. */
+  /* THE THREAD. An object opened as a conversation, not as a record.
+
+     What a person sees was chosen rather than dumped: the thing IntelliQ thinks, how it knows,
+     what else it could be, and the one thing it is still working out — as PROSE, in that order,
+     because that is the order a person actually asks those questions in. The old version put
+     the same information behind four headings ("The claim", "Why I think that") and it read
+     like a form being filled in about you.
+
+     Returning to a thread you have already spoken in does NOT replay the opening. You pick the
+     conversation back up, with one quiet link if you want to re-read what it thinks. Being told
+     the same paragraph every time is how a product teaches you to scroll past it. */
   async openObjectThread(kind, objectId) {
     const box = document.getElementById('iq-inquiries-page');
     if (!box) return;
@@ -11047,29 +11058,128 @@ const MemberApp = {
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error('not found');
       const x = data.opening || {};
+      const p = data.present || {}; const sum = p.summary || {}; const det = p.detail || {};
       this._inquiryThread = { kind, objectId, about: data.about, conversationId: data.conversation && data.conversation.id };
-      const lines = value => (Array.isArray(value) ? value : []).map(line => `<div class="linq-block-l">${esc(line)}</div>`).join('') || `<div class="linq-block-l">Nothing recorded yet.</div>`;
-      const turns = (data.messages || []).map(m => `<div class="iq-msg iq-msg-${m.role === 'user' ? 'user' : 'iq'}">${esc(m.text)}</div>`).join('');
+
+      const turns = (data.messages || []);
+      const returning = turns.length > 0;
+      const title = sum.title || x.headline || 'Working it out';
+
+      // The rival explanation, in a sentence rather than a bulleted list. One rival is honest;
+      // three is a system hedging.
+      const rival = (det.alternatives || [])[0];
+      const rivalLine = rival && rival.statement
+        ? `<p class="iqt-p iqt-rival">It could also be that ${esc(this._lowerFirst(rival.statement))}${rival.standing ? ` — though that is only ${esc(String(rival.standing).toLowerCase())} so far` : ''}.</p>`
+        : '';
+
+      const opening = `
+        <div class="iqt-opening">
+          <p class="iqt-lede">${esc(sum.thinking || x.claim || 'I do not have a read on this yet.')}</p>
+          ${x.provenance ? `<p class="iqt-p iqt-prov">${esc(x.provenance)}</p>` : ''}
+          ${rivalLine}
+          ${(det.falsifiers || [])[0] ? `<p class="iqt-p iqt-falsify">What would change my mind: ${esc(det.falsifiers[0])}</p>` : ''}
+          ${sum.openQuestion ? `<p class="iqt-ask">${esc(sum.openQuestion)}</p>` : ''}
+        </div>`;
+
+      const body = returning
+        ? `<div class="iqt-turns" id="iq-object-turns">${turns.map(m => this._threadTurn(m)).join('')}</div>
+           <button type="button" class="iqt-reread" onclick="MemberApp._rereadOpening()">See what I think so far</button>
+           <div class="iqt-opening-hidden" id="iqt-opening" hidden>${opening}</div>`
+        : `${opening}<div class="iqt-turns" id="iq-object-turns"></div>`;
+
       box.innerHTML = `
         <div class="iq-object-thread">
-          <button class="iq-thread-back" type="button" onclick="MemberApp._renderBucketPage('${esc(kind)}')">Back</button>
-          <div class="iq-thread-overflow">
-            <button class="iq-thread-overflow-toggle" type="button" aria-label="More options" onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden">More</button>
-            <div class="iq-thread-overflow-menu" hidden>
-              <button type="button" onclick="MemberApp.inquiryOverflow('answered')">Mark answered</button>
-              <button type="button" onclick="MemberApp.inquiryOverflow('aside')">Set aside</button>
+          <div class="iqt-head">
+            <button class="iq-thread-back" type="button" onclick="MemberApp._renderBucketPage('${esc(kind)}')" aria-label="Back">Back</button>
+            <div class="iqt-head-mid">
+              <h1 class="iqt-title">${esc(title)}</h1>
+              ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}">${esc(sum.standing)}</span>` : ''}
+            </div>
+            ${data.shared ? `<span class="iqt-forum" title="Others invited to this can discuss it here">Forum</span>` : ''}
+            <div class="iq-thread-overflow">
+              <button class="iq-thread-overflow-toggle" type="button" aria-label="More options" aria-expanded="false"
+                onclick="const m=this.nextElementSibling;m.hidden=!m.hidden;this.setAttribute('aria-expanded',String(!m.hidden))">More</button>
+              <div class="iq-thread-overflow-menu" hidden>
+                <button type="button" onclick="MemberApp.inquiryOverflow('answered')">Mark answered</button>
+                <button type="button" onclick="MemberApp.inquiryOverflow('aside')">Set aside</button>
+              </div>
             </div>
           </div>
-          <section class="linq-block"><h2 class="linq-block-t">The claim</h2><div class="linq-q">${esc(x.headline || '')}</div><div class="linq-claim">${esc(x.claim || '')}</div></section>
-          <section class="linq-block"><h2 class="linq-block-t">Why I think that</h2>${lines([x.whyIThinkThat || x.provenance].filter(Boolean))}</section>
-          <section class="linq-block"><h2 class="linq-block-t">What I still don’t know</h2>${lines(x.stillUnknown)}</section>
-          <section class="linq-block"><h2 class="linq-block-t">What would change my mind</h2>${lines(x.wouldChangeMyMind)}</section>
-          <div class="iq-object-turns" id="iq-object-turns">${turns}</div>
-          <div class="iq-object-composer"><textarea id="iq-object-input" rows="2" placeholder="Add what you know…"></textarea><button type="button" onclick="MemberApp.inquirySend()">Send</button></div>
+          ${body}
+          <div class="iqt-composer">
+            <label class="iqt-attach" title="Attach a file" aria-label="Attach a file">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5 12.5 21a4 4 0 0 1-5.66-5.66l8.49-8.48a2.5 2.5 0 0 1 3.54 3.54l-8.49 8.48a1 1 0 0 1-1.41-1.41l7.78-7.78"/></svg>
+              <input type="file" id="iqt-attach-input" style="display:none" onchange="MemberApp.wsAttach(this)">
+            </label>
+            <textarea id="iq-object-input" rows="1" placeholder="Say what you know, or ask…"
+              oninput="MemberApp._wsGrow(this)"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.inquirySend()}"></textarea>
+            <button type="button" class="iq-mic" id="iqt-mic" aria-label="Speak instead of typing" aria-pressed="false"
+              onclick="MemberApp._threadVoice()">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/></svg>
+            </button>
+            <button type="button" class="iq-send" onclick="MemberApp.inquirySend()" aria-label="Send">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M5 13l7-7 7 7"/></svg>
+            </button>
+          </div>
+          <div class="iq-voice-state" id="iqt-voice-state" role="status" aria-live="assertive"></div>
         </div>`;
     } catch (_) {
-      box.innerHTML = `<div class="iq-empty-sub">This inquiry could not be opened right now.</div>`;
+      box.innerHTML = `<div class="iq-empty-sub">This could not be opened right now.</div>`;
     }
+  },
+
+  _lowerFirst(s) { const t = String(s || '').trim(); return t ? t[0].toLowerCase() + t.slice(1) : t; },
+
+  /* One turn. IntelliQ's own messages carry a speaker button — read aloud on request, never
+     automatically, because nobody wants their record announced on a touchline. */
+  _threadTurn(m) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const mine = m.role === 'user';
+    const text = String(m.text || '');
+    return `<div class="iq-msg iq-msg-${mine ? 'user' : 'iq'}">${esc(text)}${
+      mine ? '' : `<button type="button" class="iqt-speak" aria-label="Read this aloud"
+        onclick="MemberApp._speak(${this._escape(JSON.stringify(JSON.stringify(text)))})">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>
+      </button>` }</div>`;
+  },
+
+  _rereadOpening() {
+    const el = document.getElementById('iqt-opening');
+    const btn = document.querySelector('.iqt-reread');
+    if (!el) return;
+    const show = el.hasAttribute('hidden');
+    if (show) el.removeAttribute('hidden'); else el.setAttribute('hidden', '');
+    if (btn) btn.textContent = show ? 'Hide' : 'See what I think so far';
+  },
+
+  /* Read aloud, on request only. Browser speech synthesis — no vendor, no upload, no audio
+     leaving the device. If the browser cannot do it, the button simply does nothing rather
+     than promising something that will not happen. */
+  _speak(textJson) {
+    let text = ''; try { text = JSON.parse(textJson); } catch (_) { return; }
+    const synth = window.speechSynthesis;
+    if (!synth || !window.SpeechSynthesisUtterance || !text) return;
+    try {
+      synth.cancel();                       // one voice at a time; tapping again stops the last
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.0; u.lang = document.documentElement.lang || 'en-GB';
+      synth.speak(u);
+    } catch (_) {}
+  },
+
+  _threadVoice() {
+    const V = window.IQVoice;
+    const state = document.getElementById('iqt-voice-state');
+    const btn = document.getElementById('iqt-mic');
+    if (!V || !V.isSupported()) { if (state) state.textContent = 'Voice input is not available in this browser — typing works as normal.'; return; }
+    V.toggle('iq-object-input', {
+      onState: (name, message) => {
+        if (state) state.textContent = message || '';
+        if (btn) { btn.setAttribute('aria-pressed', name === 'listening' ? 'true' : 'false'); btn.classList.toggle('is-listening', name === 'listening'); }
+      },
+      onInput: () => { const i = document.getElementById('iq-object-input'); if (i) this._wsGrow(i); },
+    });
   },
 
   openInquiryThread(inquiryId) { return this.openObjectThread('inquiry', inquiryId); },

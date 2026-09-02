@@ -13914,7 +13914,10 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
   if (!object) return res.status(404).json({ error: 'not found' });
   const conversation = (assistantConversations[_wsKey(code, userId)] || [])
     .filter(c => c && c.about === object.about).sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0] || null;
-  res.json({ ok: true, about: object.about, opening: object.explained,
+  // `present` carries the rival explanation and the human title; `explained` carries the
+  // composed prose. The thread needs both, and neither should be rebuilt on the client.
+  res.json({ ok: true, about: object.about, opening: object.explained, present: object.present,
+    shared: object.shared === true || (Array.isArray(object.participants) && object.participants.length > 1),
     conversation: conversation ? { id: conversation.id, updatedAt: conversation.updatedAt } : null,
     messages: conversation ? (conversation.messages || []).map(m => ({ role: m.role, text: m.text, at: m.at })) : [] });
 });
