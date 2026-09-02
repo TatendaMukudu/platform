@@ -10778,40 +10778,13 @@ const MemberApp = {
              conversation starts by typing, which is what people did anyway. -->
         <div id="iq-history" class="tdy-history" style="display:none"></div>
         <div class="iq-conversation" id="iq-conversation" aria-live="polite"></div>
-        <div class="iq-composer-wrap">
-        <div class="iq-composer" id="iq-composer">
-          <label class="iq-attach" title="Add a document IntelliQ can use (meeting minutes, stats, a policy…)" aria-label="Add knowledge" style="cursor:pointer;display:flex;align-items:center;padding:0 0.3rem;color:var(--text-muted)">
-            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5 12.5 21a4 4 0 0 1-5.66-5.66l8.49-8.48a2.5 2.5 0 0 1 3.54 3.54l-8.49 8.48a1 1 0 0 1-1.41-1.41l7.78-7.78"/></svg>
-            <input type="file" id="iq-attach-input" style="display:none" accept=".txt,.md,.markdown,.csv,.json,.pdf,.doc,.docx" onchange="MemberApp.wsAttach(this)">
-          </label>
-          <textarea id="iq-composer-input" class="iq-composer-input" rows="1" aria-label="Ask IntelliQ — capture a thought or make a plan"
-            placeholder="Ask, capture a thought, or drop in notes, minutes, stats…"
-            oninput="MemberApp._wsGrow(this)"
-            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.wsSend()}"></textarea>
-          <button class="iq-mic" id="iq-mic" type="button" aria-label="Speak instead of typing"
-            title="Speak instead of typing" aria-pressed="false" onclick="MemberApp.wsVoice()">
-            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/></svg>
-          </button>
-          <button class="iq-send" id="iq-send" type="button" aria-label="Send" title="Send" onclick="MemberApp.wsSend()">
-            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M5 13l7-7 7 7"/></svg>
-          </button>
-        </div>
-        <!-- THE TRUST MOMENT (object-as-conversation §6d). "Private by default" was already
-             true and already said; what was missing was somewhere to CHECK it. A person asking
-             "can my coach see this?" and getting a real answer instead of a privacy policy is the
-             most trust-building second in the product, and the answer is deterministic —
-             ai/audience.js resolves it rather than a paragraph promising it. -->
-        <div class="iq-composer-hint">
+        ${this._composerHTML({ id: 'iq-composer-input',
+          placeholder: 'Ask, capture a thought, or drop in notes, minutes, stats…',
+          send: 'MemberApp.wsSend()', mic: 'iq-mic', state: 'iq-voice-state', hint: `<div class="iq-composer-hint">
           <button type="button" class="iq-vis" id="iq-vis" aria-pressed="false"
-            title="Choose who this is for before you say it"
-            onclick="MemberApp.toggleVisibility()">Private</button>
+            title="Choose who this is for before you say it" onclick="MemberApp.toggleVisibility()">Private</button>
           <button type="button" class="iq-hint-link" onclick="navigate('my-data')">Who can see what I say here?</button>
-        </div>
-        <!-- Recording state is announced, not merely coloured: a person must never have to
-             wonder whether IntelliQ is listening, and a colour change says nothing to a screen
-             reader or to anyone who cannot see it. -->
-        <div class="iq-voice-state" id="iq-voice-state" role="status" aria-live="assertive"></div>
-        </div>
+        </div>` })}
       </div>
       <div id="iq-brief" aria-live="polite"></div>`;
     // HOME IS ONE QUESTION. Founder decision, September 2026: greeting, the single
@@ -10931,10 +10904,14 @@ const MemberApp = {
      it was hard-coded to "Inquiries" in index.html, which is why the Focuses page announced
      itself as Inquiries and then said "Nothing here right now" about the wrong thing. */
   _bucketCopy: {
+    // A person does not create an inquiry. An inquiry is what IntelliQ works out from what is
+    // said — offering a button for it invites somebody to do the kernel's job by hand, and a
+    // hand-typed question has none of the evidence that makes an inquiry worth anything.
     inquiry: { title: 'Inquiries', sub: 'What IntelliQ is working out — including what it still does not know',
-               empty: 'Nothing being worked out yet. Say something in the bar below and I will start.', make: 'Ask a question' },
+               empty: 'Nothing being worked out yet. Talk to IntelliQ and it will start.', make: null },
     focus:   { title: 'Focuses', sub: 'What you have deliberately chosen to work on',
                empty: 'You are not working on anything yet. Start a focus when you want to change something.', make: 'Start a focus' },
+    // ^ the ONE thing a person creates.
     high:    { title: 'Highs', sub: 'What is going well',
                empty: 'Nothing has stood out as going well yet.', make: null },
     low:     { title: 'Lows', sub: 'What needs attention',
@@ -11018,11 +10995,31 @@ const MemberApp = {
   /* Create an inquiry or a focus. No new capability and no new form: it prefills the ONE
      composer, so creation goes through the same governed turn as everything else — and a focus
      you start by talking is a focus that already has its context. */
-  _startObject(kind) {
-    const starters = { inquiry: 'Something I want to work out: ', focus: 'I want to work on ' };
+  /* Starting a focus is a sentence, not a form: the composer is prefilled and the person
+     finishes it in their own words, which is also how the focus gets its context. Who it is for
+     is chosen here, before it exists, rather than being a property discovered afterwards. */
+  _startObject(kind, share) {
+    if (kind === 'focus' && share === undefined) return this._askFocusAudience();
     try { navigate('workspace'); } catch (_) {}
+    this._wsShare = share === true;
+    const b = document.getElementById('iq-vis');
+    if (b) { b.textContent = this._wsShare ? 'Shared with the team' : 'Private'; b.classList.toggle('is-shared', this._wsShare); }
     const i = document.getElementById('iq-composer-input');
-    if (i) { i.value = starters[kind] || ''; this._wsGrow(i); i.focus(); }
+    if (i) { i.value = 'I want to work on '; this._wsGrow(i); i.focus(); }
+  },
+
+  _askFocusAudience() {
+    const box = document.getElementById('iq-inquiries-page') || document.getElementById('iq-brief');
+    if (!box) return this._startObject('focus', false);
+    const el = document.createElement('div');
+    el.className = 'iq-audience-ask';
+    el.innerHTML = `
+      <p class="iqt-p">Who is this focus for?</p>
+      <div class="iq-make-row">
+        <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus',false)">Just me</button>
+        <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus',true)">Me and others — they can discuss it</button>
+      </div>`;
+    box.prepend(el);
   },
 
   /* THE ONE CARD. Every bucket renders through this — a second renderer is how the polarity
@@ -11151,23 +11148,8 @@ const MemberApp = {
 
           </div>
           ${body}
-          <div class="iqt-composer">
-            <label class="iqt-attach" title="Attach a file" aria-label="Attach a file">
-              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5 12.5 21a4 4 0 0 1-5.66-5.66l8.49-8.48a2.5 2.5 0 0 1 3.54 3.54l-8.49 8.48a1 1 0 0 1-1.41-1.41l7.78-7.78"/></svg>
-              <input type="file" id="iqt-attach-input" style="display:none" onchange="MemberApp.wsAttach(this)">
-            </label>
-            <textarea id="iq-object-input" rows="1" placeholder="Say what you know, or ask…"
-              oninput="MemberApp._wsGrow(this)"
-              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.inquirySend()}"></textarea>
-            <button type="button" class="iq-mic" id="iqt-mic" aria-label="Speak instead of typing" aria-pressed="false"
-              onclick="MemberApp._threadVoice()">
-              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/></svg>
-            </button>
-            <button type="button" class="iq-send" onclick="MemberApp.inquirySend()" aria-label="Send">
-              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M5 13l7-7 7 7"/></svg>
-            </button>
-          </div>
-          <div class="iq-voice-state" id="iqt-voice-state" role="status" aria-live="assertive"></div>
+          ${this._composerHTML({ id: 'iq-object-input', placeholder: 'Say what you know, or ask…',
+            send: 'MemberApp.inquirySend()', mic: 'iqt-mic', state: 'iqt-voice-state' })}
         </div>`;
     } catch (_) {
       box.innerHTML = `<div class="iq-empty-sub">This could not be opened right now.</div>`;
@@ -11207,18 +11189,8 @@ const MemberApp = {
               ? `<div class="iq-msg iq-msg-gone">Withdrawn</div>`
               : `<div class="iq-msg iq-msg-${m.mine ? 'user' : 'iq'}">${m.mine ? `<span class="iqf-you">You</span> ` : ''}${esc(m.text)}</div>`).join('')
           : `<p class="iqt-p">Nobody has said anything yet.</p>`}</div>
-        <div class="iqt-composer">
-          <textarea id="iq-forum-input" rows="1" placeholder="Say something…"
-            oninput="MemberApp._wsGrow(this)"
-            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.forumSend()}"></textarea>
-          <button type="button" class="iq-mic" id="iqf-mic" aria-label="Speak instead of typing" aria-pressed="false" onclick="MemberApp._forumVoice()">
-            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/></svg>
-          </button>
-          <button type="button" class="iq-send" onclick="MemberApp.forumSend()" aria-label="Send">
-            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M5 13l7-7 7 7"/></svg>
-          </button>
-        </div>
-        <div class="iq-voice-state" id="iqf-voice-state" role="status" aria-live="assertive"></div>
+        ${this._composerHTML({ id: 'iq-forum-input', placeholder: 'Say something…',
+          send: 'MemberApp.forumSend()', mic: 'iqf-mic', state: 'iqf-voice-state', attach: false })}
       </div>`;
   },
 
@@ -11236,16 +11208,6 @@ const MemberApp = {
     this.openForum(ctx.nodeId, ctx.inquiryId);
   },
 
-  _forumVoice() {
-    const V = window.IQVoice;
-    const state = document.getElementById('iqf-voice-state');
-    const btn = document.getElementById('iqf-mic');
-    if (!V || !V.isSupported()) { if (state) state.textContent = 'Voice input is not available in this browser — typing works as normal.'; return; }
-    V.toggle('iq-forum-input', { onState: (name, message) => {
-      if (state) state.textContent = message || '';
-      if (btn) { btn.setAttribute('aria-pressed', name === 'listening' ? 'true' : 'false'); btn.classList.toggle('is-listening', name === 'listening'); }
-    } });
-  },
 
   /* WHO THIS IS FOR, decided before it is said. The choice lives next to the composer so it is
      visible while a person types, rather than arriving as a confirmation card after the words
@@ -11258,6 +11220,57 @@ const MemberApp = {
     b.textContent = this._wsShare ? 'Shared with the team' : 'Private';
     b.setAttribute('aria-pressed', this._wsShare ? 'true' : 'false');
     b.classList.toggle('is-shared', this._wsShare);
+  },
+
+  /* ONE COMPOSER. Founder: "make sure all chats look the same as the composer one — I don't
+     want the inquiry one looking different. Uniformity. Typography the same."
+
+     It is also why the thread would not send: the thread had its own markup and its own classes
+     (.iqt-composer), so it inherited none of the composer's behaviour and diverged from it
+     visually at the same time. One function, three surfaces — Home, an object thread, and a
+     forum — so they cannot drift again. */
+  _composerHTML({ id, placeholder, send, mic, state, attach = true, hint = '' } = {}) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    return `
+      <div class="iq-composer-wrap">
+        <div class="iq-composer">
+          ${attach ? `<label class="iq-attach" title="Add a document IntelliQ can use" aria-label="Add a document" style="cursor:pointer;display:flex;align-items:center;padding:0 0.3rem;color:var(--text-muted)">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5 12.5 21a4 4 0 0 1-5.66-5.66l8.49-8.48a2.5 2.5 0 0 1 3.54 3.54l-8.49 8.48a1 1 0 0 1-1.41-1.41l7.78-7.78"/></svg>
+            <input type="file" id="${esc(id)}-file" style="display:none" accept=".txt,.md,.markdown,.csv,.json,.pdf,.doc,.docx" onchange="MemberApp.wsAttach(this)">
+          </label>` : ''}
+          <textarea id="${esc(id)}" class="iq-composer-input" rows="1" aria-label="${esc(placeholder)}"
+            placeholder="${esc(placeholder)}"
+            oninput="MemberApp._wsGrow(this)"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();${send}}"></textarea>
+          <button class="iq-mic" id="${esc(mic)}" type="button" aria-label="Speak instead of typing"
+            title="Speak instead of typing" aria-pressed="false" onclick="MemberApp._micFor('${esc(id)}','${esc(mic)}','${esc(state)}')">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/></svg>
+          </button>
+          <button class="iq-send" type="button" aria-label="Send" title="Send" onclick="${send}">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M5 13l7-7 7 7"/></svg>
+          </button>
+        </div>
+        ${hint}
+        <div class="iq-voice-state" id="${esc(state)}" role="status" aria-live="assertive"></div>
+      </div>`;
+  },
+
+  /* One microphone handler for every composer, so voice behaves identically wherever it is. */
+  _micFor(inputId, micId, stateId) {
+    const V = window.IQVoice;
+    const state = document.getElementById(stateId);
+    const btn = document.getElementById(micId);
+    if (!V || !V.isSupported()) { if (state) state.textContent = 'Voice input is not available in this browser — typing works as normal.'; return; }
+    V.toggle(inputId, {
+      onState: (name, message) => {
+        if (state) state.textContent = message || '';
+        if (btn) {
+          btn.setAttribute('aria-pressed', name === 'listening' ? 'true' : 'false');
+          btn.classList.toggle('is-listening', name === 'listening');
+        }
+      },
+      onInput: () => { const i = document.getElementById(inputId); if (i) this._wsGrow(i); },
+    });
   },
 
   _lowerFirst(s) { const t = String(s || '').trim(); return t ? t[0].toLowerCase() + t.slice(1) : t; },
@@ -11299,19 +11312,6 @@ const MemberApp = {
     } catch (_) {}
   },
 
-  _threadVoice() {
-    const V = window.IQVoice;
-    const state = document.getElementById('iqt-voice-state');
-    const btn = document.getElementById('iqt-mic');
-    if (!V || !V.isSupported()) { if (state) state.textContent = 'Voice input is not available in this browser — typing works as normal.'; return; }
-    V.toggle('iq-object-input', {
-      onState: (name, message) => {
-        if (state) state.textContent = message || '';
-        if (btn) { btn.setAttribute('aria-pressed', name === 'listening' ? 'true' : 'false'); btn.classList.toggle('is-listening', name === 'listening'); }
-      },
-      onInput: () => { const i = document.getElementById('iq-object-input'); if (i) this._wsGrow(i); },
-    });
-  },
 
   openInquiryThread(inquiryId) { return this.openObjectThread('inquiry', inquiryId); },
 
@@ -11401,27 +11401,6 @@ const MemberApp = {
   /* VOICE ON THE COMPOSER. One user gesture in, transcript into the same textarea, and from
      there the ordinary wsSend() path — the same turn, the same governance. Voice reaches
      nothing typing does not. */
-  wsVoice() {
-    const V = window.IQVoice;
-    const state = document.getElementById('iq-voice-state');
-    const btn = document.getElementById('iq-mic');
-    if (!V || !V.isSupported()) {
-      if (state) state.textContent = 'Voice input is not available in this browser — typing works as normal.';
-      return;
-    }
-    V.toggle('iq-composer-input', {
-      onState: (name, message) => {
-        if (state) state.textContent = message || '';
-        if (btn) {
-          btn.setAttribute('aria-pressed', name === 'listening' ? 'true' : 'false');
-          btn.classList.toggle('is-listening', name === 'listening');
-          btn.setAttribute('aria-label', name === 'listening' ? 'Stop speaking' : 'Speak instead of typing');
-        }
-      },
-      // The transcript is a DRAFT: it grows the box like typing would and is never auto-sent.
-      onInput: () => { const i = document.getElementById('iq-composer-input'); if (i) this._wsGrow(i); },
-    });
-  },
 
   /* Auto-grow the composer up to a calm maximum; keeps the hero compact. */
   _wsGrow(el) { if (!el) return; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 180) + 'px'; },
@@ -11856,8 +11835,7 @@ const MemberApp = {
       ${clarifyHtml}
       ${savedHtml}
       <div class="iq-make-row">
-        <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus')">Work on this</button>
-        <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('inquiry')">Look into this</button>
+        <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus')">Make this a focus</button>
       </div>
       ${primary ? `<div class="iq-proposals"><div class="card-label">Suggestions — nothing happens until you confirm</div>${primary}
         ${more ? `<details class="iq-more"><summary>More options</summary>${more}</details>` : ''}</div>` : ''}
