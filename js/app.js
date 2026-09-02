@@ -1108,7 +1108,12 @@ function _checkCoachDailyCheckin() {
   document.getElementById('ccc-title').textContent  = `${tod.charAt(0).toUpperCase() + tod.slice(1)} check-in`;
   document.getElementById('ccc-prompt').textContent = prompts[role] || prompts['coach'];
 
-  setTimeout(() => openModal('coach-checkin-modal'), 600);
+  // RETIRED, September 2026. The daily check-in opened itself on every visit with the same
+  // prompt, so it stopped being a question and became a toll gate on the way into the product.
+  // Home already asks the single highest-value thing IntelliQ actually wants to know, chosen by
+  // the kernel from what it does not yet understand — a real question beats a standing one.
+  // The modal and its submit path are left intact so nothing referencing them throws, and so a
+  // deliberate check-in can be re-opened later if it earns its place.
 }
 
 async function submitCoachCheckin() {
@@ -11062,7 +11067,13 @@ const MemberApp = {
      conversation back up, with one quiet link if you want to re-read what it thinks. Being told
      the same paragraph every time is how a product teaches you to scroll past it. */
   async openObjectThread(kind, objectId) {
-    const box = document.getElementById('iq-inquiries-page');
+    // The thread renders into the bucket page's container, which does not exist on Home — so
+    // tapping the card on Home silently did nothing. Navigate there first, then render.
+    let box = document.getElementById('iq-inquiries-page');
+    if (!box || !box.offsetParent) {
+      try { navigate('inquiry'); } catch (_) {}
+      box = document.getElementById('iq-inquiries-page');
+    }
     if (!box) return;
     const esc = s => this._escape(String(s == null ? '' : s));
     box.innerHTML = `<div style="color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
@@ -11098,11 +11109,25 @@ const MemberApp = {
           ${sum.openQuestion ? `<p class="iqt-ask">${esc(sum.openQuestion)}</p>` : ''}
         </div>`;
 
-      const body = returning
-        ? `<div class="iqt-turns" id="iq-object-turns">${turns.map(m => this._threadTurn(m)).join('')}</div>
-           <button type="button" class="iqt-reread" onclick="MemberApp._rereadOpening()">See what I think so far</button>
-           <div class="iqt-opening-hidden" id="iqt-opening" hidden>${opening}</div>`
-        : `${opening}<div class="iqt-turns" id="iq-object-turns"></div>`;
+      // CHAT STYLE. The opening is IntelliQ's first message in the conversation, not a document
+      // above one — the same bubble shape the composer uses, so an object and a chat are visibly
+      // the same kind of thing. Founder direction: "when you click into an inquiry it's like
+      // entering a chat between you and IntelliQ."
+      const openingBubble = `<div class="iq-msg iq-msg-iq iqt-open-msg">${opening}
+        <button type="button" class="iqt-speak" aria-label="Read this aloud"
+          onclick="MemberApp._speak(${this._escape(JSON.stringify(JSON.stringify(
+            [sum.thinking || x.claim || '', sum.openQuestion || ''].filter(Boolean).join(' '))))})">
+          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>
+        </button></div>`;
+      // Closing and contesting are the two things a person can DO to a belief, so they sit with
+      // the belief rather than inside an overflow menu nobody opens.
+      const verdicts = `
+        <div class="iqt-verdicts">
+          <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('answered')">That's settled</button>
+          <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('contest')">I disagree</button>
+          <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('aside')">Not now</button>
+        </div>`;
+      const body = `<div class="iqt-turns" id="iq-object-turns">${openingBubble}${turns.map(m => this._threadTurn(m)).join('')}</div>${verdicts}`;
 
       box.innerHTML = `
         <div class="iq-object-thread">
@@ -11118,14 +11143,7 @@ const MemberApp = {
               ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}">${esc(sum.standing)}</span>` : ''}
             </div>
             ${data.shared ? `<button type="button" class="iqt-forum" onclick="MemberApp.openForum('${esc(data.nodeId || '')}','${esc(objectId)}')">Forum</button>` : ''}
-            <div class="iq-thread-overflow">
-              <button class="iq-thread-overflow-toggle" type="button" aria-label="More options" aria-expanded="false"
-                onclick="const m=this.nextElementSibling;m.hidden=!m.hidden;this.setAttribute('aria-expanded',String(!m.hidden))">More</button>
-              <div class="iq-thread-overflow-menu" hidden>
-                <button type="button" onclick="MemberApp.inquiryOverflow('answered')">Mark answered</button>
-                <button type="button" onclick="MemberApp.inquiryOverflow('aside')">Set aside</button>
-              </div>
-            </div>
+
           </div>
           ${body}
           <div class="iqt-composer">
@@ -11279,10 +11297,19 @@ const MemberApp = {
 
   openInquiryThread(inquiryId) { return this.openObjectThread('inquiry', inquiryId); },
 
+  /* The three things a person can do to a belief. Each prefills the composer rather than firing
+     a silent state change: a verdict is something you SAY, so it goes through the same governed
+     turn as everything else and the kernel decides what it means. */
   inquiryOverflow(action) {
     const input = document.getElementById('iq-object-input');
     if (!input) return;
-    input.value = action === 'answered' ? 'I consider this answered: ' : 'Set this inquiry aside.';
+    const starters = {
+      answered: 'I think this is settled now, because ',
+      contest: 'I do not think that is right. What I would say is ',
+      aside: 'Let us leave this for now.',
+    };
+    input.value = starters[action] || '';
+    this._wsGrow(input);
     input.focus();
   },
 
@@ -11797,7 +11824,16 @@ const MemberApp = {
     }
     return `<div class="iq-response">
       <p class="iq-response-text">${esc(r.responseText)}</p>
-      ${(r.groundedClaims || []).length ? `<div class="iq-grounded">${(r.groundedClaims || []).slice(0, 1).map(c => `<span class="iq-tag">grounded</span> ${esc(c.text)}`).join('')}</div>` : ''}
+      ${(() => {
+        // The deterministic path pushes groundedClaims[0].text into the reply itself, so this
+        // block was repeating the sentence directly underneath it with a GROUNDED tag on it —
+        // the same words twice, which reads as a system talking to itself. Only show it when it
+        // is genuinely adding something the reply did not already say.
+        const c = (r.groundedClaims || [])[0];
+        const said = String(r.responseText || '');
+        if (!c || !c.text || said.includes(String(c.text).slice(0, 40))) return '';
+        return `<div class="iq-grounded"><span class="iq-tag">grounded</span> ${esc(c.text)}</div>`;
+      })()}
       ${r.privacyNotice ? `<div class="iq-privacy">${esc(r.privacyNotice)}</div>` : ''}
       ${clarifyHtml}
       ${savedHtml}

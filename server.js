@@ -12992,7 +12992,9 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     else if (hasAnswer) parts.push(qa.answer);
     else if (sensitive) parts.push("Thank you for telling me — that sounds like a lot to be carrying. It stays private with me, and I'm here.");
     else if (hasInsight) parts.push(groundedClaims[0].text);
-    if (checkinProp) parts.push("If it'd help, I can log this as today's check-in — nothing is saved until you confirm.");
+    // The check-in was retired in September 2026 — it asked the same question every day, which
+    // is a toll gate rather than curiosity. Nothing offers to log one any more.
+
     if (otherProps.length) parts.push(`I can ${otherProps.map(p => p.label.toLowerCase()).join(', or ')} — say the word and I'll do it. Nothing happens until you confirm.`);
     if (!hasInsight && !hasAction && !hasAnswer && !sensitive) parts.push('Noted. Tell me what you\'d like me to do with this, or ask me anything.');
   }
@@ -13921,10 +13923,22 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
   // offered exactly where it works, and nowhere else. A focus with invitees is the founder's
   // next case and needs a forum scope the server does not have yet; it is deliberately not
   // faked here.
+  // FOUNDER RULE: any thread with two or more people in it has a forum — inquiry, high, low or
+  // focus. A group object always qualifies (the node is the people); a personal focus qualifies
+  // once somebody else has been invited into it. A thread that is just you and IntelliQ has
+  // nobody to talk to and gets no forum.
   const _nodeId = scope.startsWith('group:') ? scope.slice(6) : null;
-  const _forum = !!(_nodeId && kind === 'inquiry');
+  //
+  // WHAT IS ACTUALLY WIRED: the forum route is `/api/group/:nodeId/forum/:inquiryId`, so a forum
+  // is REACHABLE only for a group thread. A personal focus with people invited satisfies the
+  // founder's rule but has no route behind it, and rendering the control there would give a
+  // button that 404s. So `forumAvailable` says where it works, `shared` says where the rule says
+  // it should — and the gap between them is the server work still to do, stated rather than
+  // papered over with a button that fails.
+  const _invited = Array.isArray(object.raw && object.raw.participants) && object.raw.participants.length > 1;
+  const _forum = !!_nodeId;
   res.json({ ok: true, about: object.about, opening: object.explained, present: object.present,
-    shared: _forum, nodeId: _nodeId,
+    shared: _forum, forumAvailable: _forum, sharedByRule: (!!_nodeId || _invited), nodeId: _nodeId,
     conversation: conversation ? { id: conversation.id, updatedAt: conversation.updatedAt } : null,
     messages: conversation ? (conversation.messages || []).map(m => ({ role: m.role, text: m.text, at: m.at })) : [] });
 });

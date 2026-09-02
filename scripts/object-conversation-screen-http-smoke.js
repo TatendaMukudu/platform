@@ -88,8 +88,16 @@ const server = S.app.listen(0, async () => {
       && ui.includes('sum.thinking') && ui.includes('x.provenance')
       && ui.includes('det.alternatives') && ui.includes('det.falsifiers')
       && ui.includes('sum.openQuestion')
-      && (ui.match(/MemberApp\.inquiryOverflow\('/g) || []).length === 2
-      && ui.includes('>Mark answered<') && ui.includes('>Set aside<'));
+      // The two-item overflow became a THREE-item verdict row when the thread went chat-style:
+      // a person can now settle a belief, DISAGREE with it, or park it. The capability grew, so
+      // the assertion grew with it. Each verdict prefills the composer rather than firing a
+      // silent state change — a verdict is something you say, and the kernel decides what it
+      // means, which is why 'contest' must be reachable and must not become a button that
+      // quietly rewrites the record.
+      && (ui.match(/MemberApp\.inquiryOverflow\('/g) || []).length === 3
+      && /inquiryOverflow\('answered'\)/.test(ui)
+      && /inquiryOverflow\('contest'\)/.test(ui)
+      && /inquiryOverflow\('aside'\)/.test(ui));
   } catch (error) {
     fail++; console.log('  FAIL suite threw:', error && error.message);
   } finally {
