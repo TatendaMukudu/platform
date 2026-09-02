@@ -9326,6 +9326,40 @@ function _turnAbout(about) {
   return (h || b) ? { headline: h, body: b } : null;
 }
 
+/* THE SOURCE LIST — one shape, both reply paths.
+
+   A source is a POINTER to something the reader can already see, never a new disclosure: a
+   label they would recognise and a short line of what it said. It is capped and deduped
+   because a chip row that runs to twenty is not provenance, it is wallpaper — nobody reads it
+   and it stops meaning anything. Detail is trimmed rather than summarised: a summary of a
+   source is a second claim, and this is meant to be the thing itself. */
+/* ONE message shape for every read of history — the object thread, the inquiry thread, and the
+   conversation route. Three hand-written maps had already drifted apart (one carried
+   provenance, two did not), which is how a message could show its sources live and lose them
+   on reopen depending only on which screen you came back through. */
+function _historyMessage(m = {}) {
+  return { id: m.id || null, role: m.role, text: m.text, at: m.at,
+    reasoning: !!m.reasoning, register: m.register || null, provenance: m.provenance || [],
+    sources: m.sources || [], rating: m.rating || null };
+}
+
+const SOURCE_CAP = 6;
+function _sourceList(items = []) {
+  const out = []; const seen = new Set();
+  for (const it of items) {
+    if (!it) continue;
+    const label = String(it.label || '').trim().slice(0, 80);
+    if (!label) continue;
+    const key = `${it.kind}|${label.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const detail = String(it.detail || '').trim().replace(/\s+/g, ' ').slice(0, 180);
+    out.push({ kind: String(it.kind || 'record'), label, detail, at: it.at || null });
+    if (out.length >= SOURCE_CAP) break;
+  }
+  return out;
+}
+
 async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null, conversation = null } = {}) {
   // Every stage below used to fail silently into the deterministic path. The symptom of a
   // composer that never runs is not an error — it is a reply that reads like a template,
@@ -9450,7 +9484,19 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     }
     if (need && conversation) diagnose.recordConversationQuestion(conversation, need.candidate, now);
     _metric(code, 'composer_used');
-    return { answer: written, grounded: beliefs.length + evidence.length > 0 };
+    // WHAT IT READ. Until now a composed reply arrived with nothing behind it: the deterministic
+    // path carried qa.citations, and the moment the model took over, the citations went to zero
+    // — the better the answer, the less you could see where it came from. That is backwards.
+    // These are the four retrieval channels above, unchanged and already scoped to this reader
+    // (their own agenda, their own records, their own assigned work, the org's named people), so
+    // showing them back to that same reader discloses nothing they were not just told. It is a
+    // display of the basis, not a second read.
+    return { answer: written, grounded: beliefs.length + evidence.length > 0,
+      sources: _sourceList([
+        ...evidence.map(e => ({ kind: 'record', label: e.source || 'Something you told me', detail: e.text })),
+        ...beliefs.map(b => ({ kind: 'belief', label: 'What I am working out', detail: b.text })),
+        ...assignedWork.map(w => ({ kind: 'work', label: w.title, detail: w.status ? `Your work — ${w.status}` : 'Your work' })),
+      ]) };
   } catch (e) {
     // A swallowed exception here is the worst of the lot: a rejected model ID, an auth failure or
     // a rate limit all look exactly like "the composer had nothing to say", and every reply in
@@ -13063,6 +13109,15 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     // Bounded assigned-work context extension (authorised, released-fields-only) — NOT a second runtime contract.
     assignedWork: workCtx ? { items: workCtx.items.map(it => ({ id: it.id, title: it.title, status: it.status, needsRevision: it.needsRevision, releasedScore: it.releasedScore, hasReleasedFeedback: !!it.releasedFeedback })), basisIds: workCtx.basisIds, limitations: workCtx.limitations, ambiguous: workAmbiguous } : null,
     bounded: composed.ok, cites: composed.output.cites,
+    // SOURCES — where this answer came from, in the shape the chip row renders. The composed
+    // path reports what it retrieved; the deterministic path reports the citations the
+    // question-answering path already produced. Both paths cite or neither does: a reply whose
+    // provenance depends on which engine happened to write it teaches people that the chips
+    // are decoration, and the composed path is the one that most needs to be checkable.
+    sources: composedReply ? (composedReply.sources || []) : _sourceList([
+      ...((qa && qa.citations) || []).map(c => ({ kind: 'record', label: c.label || c.ref || 'Your record', detail: c.excerpt || c.text || '', at: c.date || c.at || null })),
+      ...(hasInsight ? groundedClaims.slice(0, 3).map(c => ({ kind: 'belief', label: 'What I am working out', detail: c.text })) : []),
+    ]),
     // A preview of operating-context records to CONFIRM (never persisted here).
     orgContextProposal,
     // Ambiguity: which open question is the user answering (never guessed).
@@ -13089,9 +13144,14 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // Append this exchange to the private, self-only conversation history (durable — survives the
   // bounded-turn cap). Provenance rides along so history can show the two registers too.
   const _nowIso = new Date().toISOString();
-  _conv.messages.push({ role: 'user', text: String(text || '').slice(0, 4000), at: _nowIso });
-  _conv.messages.push({ role: 'assistant', text: response.responseText, at: _nowIso,
-    reasoning: !!(qa && qa.reasoning), register: (qa && qa.register) || null, provenance: (qa && qa.provenance) || [] });
+  _conv.messages.push({ role: 'user', text: String(text || '').slice(0, 4000), at: _nowIso, id: 'm_' + generateId() });
+  // The sources ride WITH the message into history. Storing them only on the live response
+  // meant the chips existed for as long as the bubble was on screen and vanished the moment
+  // you came back to the thread — which is the half of provenance that actually matters, since
+  // the reason you reopen a thread is to check something.
+  _conv.messages.push({ role: 'assistant', text: response.responseText, at: _nowIso, id: 'm_' + generateId(),
+    reasoning: !!(qa && qa.reasoning), register: (qa && qa.register) || null, provenance: (qa && qa.provenance) || [],
+    sources: response.sources || [] });
   if (_conv.messages.length > CONV_MSG_CAP) _conv.messages.splice(0, _conv.messages.length - CONV_MSG_CAP);
   _conv.updatedAt = _nowIso;
   scheduleSave();
@@ -13100,7 +13160,11 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   if (opts.subjectMemberId == null) {
     Promise.resolve().then(() => _intakeTurn(code, userId, text, { turnId: turn.turnId, priorMessages, conversationId: _conv.id })).catch(() => {});
   }
-  return { turn, response, saved, capturePrompt, conversationId: _conv.id, interpretation: { turnId: interp.turnId, originalInputRef: rawRef, candidateIntents: interp.candidateIntents,
+  // The id of the assistant message just written, so the action row can rate THIS reply rather
+  // than "the last one in the conversation" — which is the same thing right now and stops being
+  // the same thing the moment two turns land close together.
+  const _saidId = (_conv.messages[_conv.messages.length - 1] || {}).id || null;
+  return { turn, response, saved, capturePrompt, conversationId: _conv.id, messageId: _saidId, at: _nowIso, interpretation: { turnId: interp.turnId, originalInputRef: rawRef, candidateIntents: interp.candidateIntents,
     candidateClaims: interp.candidateClaims, suggestedPrivacy: interp.suggestedPrivacy, proposedActions: interp.proposedActions,
     confidence: interp.confidence, ambiguities: interp.ambiguities, limitations: interp.limitations }, context: { basisIds: context.basisIds, purpose: context.purpose, visibilityEligibility: context.visibilityEligibility, confidence: context.confidence, limitations: context.limitations } };
 }
@@ -13122,7 +13186,7 @@ app.post('/api/assistant/turn', requireAuth, async (req, res) => {
   try {
     const r = await _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId, conversationId: req.body?.conversationId, about: req.body?.about });
     _metric(code, 'turn');
-    res.json({ ok: true, turnId: r.turn.turnId, conversationId: r.conversationId || null, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response, saved: r.saved || null, capturePrompt: r.capturePrompt || null });
+    res.json({ ok: true, turnId: r.turn.turnId, conversationId: r.conversationId || null, messageId: r.messageId || null, at: r.at || null, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response, saved: r.saved || null, capturePrompt: r.capturePrompt || null });
   } catch (e) {
     // Fail closed with valid JSON — never a non-JSON 500, never a leak in an error body.
     console.warn('[assistant/turn] failed:', e && e.message);
@@ -13160,7 +13224,44 @@ app.get('/api/assistant/conversations/:id', requireAuth, (req, res) => {
   const conv = (assistantConversations[_wsKey(code, userId)] || []).find(c => c.id === req.params.id);
   if (!conv) return res.status(404).json({ error: 'not found' });
   res.json({ ok: true, conversation: { id: conv.id, title: conv.title, about: conv.about || null, createdAt: conv.createdAt, updatedAt: conv.updatedAt },
-    messages: (conv.messages || []).map(m => ({ role: m.role, text: m.text, at: m.at, reasoning: !!m.reasoning, register: m.register || null, provenance: m.provenance || [] })) });
+    messages: (conv.messages || []).map(_historyMessage) });
+});
+
+/* POST /api/assistant/reply-feedback — "this reply was useful / this reply was not".
+
+   Scoped deliberately narrow. It rates ONE THING IntelliQ SAID, and nothing else: not the
+   person, not the belief the reply was about, not the evidence underneath it. That boundary is
+   the whole design. A thumbs-down that flowed into confidence would let a reader downvote a
+   finding they did not like into disappearing, which is the failure mode this entire system
+   exists to prevent — so the rating lands on the message and touches nothing the kernel reads.
+
+   It is stored, not applied. What it is FOR is phrasing: enough of these say which registers
+   land and which do not. Nothing about it is retroactive and nothing about it is a score on a
+   person (D14b). A person can change or clear their own rating, because a first reaction to a
+   reply and a considered one are different things and only the second is worth keeping. */
+app.post('/api/assistant/reply-feedback', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  const rating = b.rating === 'up' || b.rating === 'down' ? b.rating : null;   // null clears it
+  if (b.rating != null && !rating) return res.status(400).json({ error: 'rating must be up, down or null' });
+  const conv = (assistantConversations[_wsKey(code, userId)] || []).find(c => c.id === String(b.conversationId || ''));
+  if (!conv) return res.status(404).json({ error: 'conversation not found' });
+  // Addressed by message id, falling back to the timestamp for messages written before ids
+  // existed. Only an assistant message can be rated: rating your own words is meaningless, and
+  // allowing it would put a judgement on a person's account of themselves.
+  const msgs = (conv.messages || []).filter(m => m && m.role === 'assistant');
+  const msg = b.messageId ? msgs.find(m => m.id === String(b.messageId))
+            : b.at ? msgs.find(m => m.at === String(b.at))
+            : msgs[msgs.length - 1];
+  if (!msg) return res.status(404).json({ error: 'message not found' });
+  if (rating) msg.rating = rating; else delete msg.rating;
+  msg.ratedAt = new Date().toISOString();
+  _metric(code, rating ? `reply_${rating}` : 'reply_rating_cleared');
+  scheduleSave();
+  res.json({ ok: true, rating: msg.rating || null,
+    note: rating === 'down'
+      ? 'Noted — this helps me phrase things better. It does not change what I believe or what is recorded.'
+      : 'Noted. It helps with how I put things, and changes nothing that is recorded.' });
 });
 
 /* DELETE /api/assistant/conversations/:id — the user erases their own thread (self-only). */
@@ -13969,7 +14070,7 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
   res.json({ ok: true, about: object.about, opening: object.explained, present: object.present,
     shared: _forum, forumAvailable: _forum, sharedByRule: (!!_nodeId || _invited), nodeId: _nodeId,
     conversation: conversation ? { id: conversation.id, updatedAt: conversation.updatedAt } : null,
-    messages: conversation ? (conversation.messages || []).map(m => ({ role: m.role, text: m.text, at: m.at })) : [] });
+    messages: conversation ? (conversation.messages || []).map(_historyMessage) : [] });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -14237,10 +14338,7 @@ app.get('/api/inquiry/:id/thread', requireAuth, (req, res) => {
   res.json({
     ok: true, about, opening,
     conversation: conversation ? { id: conversation.id, updatedAt: conversation.updatedAt } : null,
-    messages: conversation ? (conversation.messages || []).map(m => ({
-      role: m.role, text: m.text, at: m.at, reasoning: !!m.reasoning,
-      register: m.register || null, provenance: m.provenance || [],
-    })) : [],
+    messages: conversation ? (conversation.messages || []).map(_historyMessage) : [],
   });
 });
 

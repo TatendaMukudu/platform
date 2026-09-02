@@ -10851,6 +10851,46 @@ const MemberApp = {
     // the first screen is how a person learns to skim it.
     this._loadTopQuestion();
     this._renderSubjectChip();
+    this._restoreChat();
+  },
+
+  /* ── HOME REMEMBERS THE CONVERSATION ───────────────────────────────────────────────────
+     `_chatConvId` lived in a JS variable and nowhere else, so every page load — a reload, a
+     restored Safari tab, coming back the next morning — started a conversation IntelliQ had
+     no memory of, while the real one sat on the server with all of it in. The founder read
+     that, correctly, as "it didn't remember what I'd said to it".
+
+     The id is the only thing kept locally, and it is a pointer, not content: the messages are
+     fetched from the server under the session, so nothing said here is readable out of the
+     browser after a sign-out, and clearing it is enough to forget. Per-account, so two people
+     on one device never land in each other's thread. */
+  _chatKey() { return `iq.chat.${(Auth && Auth.user && (Auth.user.id || Auth.user.email)) || 'anon'}`; },
+  _rememberChat(id) {
+    this._chatConvId = id || null;
+    try { if (id) localStorage.setItem(this._chatKey(), id); else localStorage.removeItem(this._chatKey()); } catch (_) {}
+  },
+  async _restoreChat() {
+    const box = document.getElementById('iq-conversation');
+    if (!box || box.children.length) return;
+    let id = this._chatConvId;
+    if (!id) { try { id = localStorage.getItem(this._chatKey()); } catch (_) {} }
+    if (!id) return;
+    try {
+      const r = await fetch(`/api/assistant/conversations/${encodeURIComponent(id)}`, { headers: this._authHeaders() });
+      if (!r.ok) { this._rememberChat(null); return; }      // deleted or another account's — forget it
+      const j = await r.json();
+      const msgs = (j && j.messages) || [];
+      if (!msgs.length) return;
+      this._rememberChat(id);
+      const esc = s => this._escape(String(s == null ? '' : s));
+      // Where the conversation was picked up, said once and quietly. Coming back to a wall of
+      // your own words with no marker is disorienting; saying it on every message is noise.
+      box.innerHTML = `<div class="iq-resumed">Picking up where you left off</div>` + msgs.map(m => m.role === 'user'
+        ? `<div class="iq-msg iq-msg-user">${esc(m.text)}</div>`
+        : `<div class="iq-msg iq-msg-iq">${esc(m.text)}${this._sourcesHTML(m.sources)}${
+            this._msgActions(m.text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources, conversationId: id })}</div>`).join('');
+      box.scrollTop = box.scrollHeight;
+    } catch (_) { /* a restore that fails leaves an empty thread, never an error card */ }
   },
 
   /* The node-aware BRIEF — the same "What I'm seeing" block the leader gets, at MEMBER level:
@@ -11182,12 +11222,17 @@ const MemberApp = {
       // above one — the same bubble shape the composer uses, so an object and a chat are visibly
       // the same kind of thing. Founder direction: "when you click into an inquiry it's like
       // entering a chat between you and IntelliQ."
+      // The opening's sources are the object's own basis — what the belief is standing on.
+      // Composed on every read (L-OC1) like the rest of the opening, never stored.
+      const openSources = [];
+      if (det.evidenceCount) openSources.push({ kind: 'record', label: `${det.evidenceCount} thing${det.evidenceCount === 1 ? '' : 's'} you told me`,
+        detail: this._provenanceLine(det) });
+      (det.because || []).slice(0, 3).forEach(b => openSources.push({ kind: 'belief', label: 'Why I think this', detail: b }));
+      (det.alternatives || []).slice(0, 2).forEach(a => a && a.statement && openSources.push({ kind: 'belief', label: 'A rival reading', detail: a.statement }));
+      const openText = [sum.thinking || x.claim || '', sum.openQuestion || ''].filter(Boolean).join(' ');
       const openingBubble = `<div class="iq-msg iq-msg-iq iqt-open-msg">${opening}
-        <button type="button" class="iqt-speak" aria-label="Read this aloud"
-          onclick="MemberApp._speak(${this._escape(JSON.stringify(JSON.stringify(
-            [sum.thinking || x.claim || '', sum.openQuestion || ''].filter(Boolean).join(' '))))})">
-          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>
-        </button></div>`;
+        ${this._sourcesHTML(openSources)}
+        ${this._msgActions(openText, { sources: openSources })}</div>`;
       // Closing and contesting are the two things a person can DO to a belief, so they sit with
       // the belief rather than inside an overflow menu nobody opens.
       const verdicts = `
@@ -11348,11 +11393,120 @@ const MemberApp = {
     const esc = s => this._escape(String(s == null ? '' : s));
     const mine = m.role === 'user';
     const text = String(m.text || '');
-    return `<div class="iq-msg iq-msg-${mine ? 'user' : 'iq'}">${esc(text)}${
-      mine ? '' : `<button type="button" class="iqt-speak" aria-label="Read this aloud"
-        onclick="MemberApp._speak(${this._escape(JSON.stringify(JSON.stringify(text)))})">
-        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>
-      </button>` }</div>`;
+    if (mine) return `<div class="iq-msg iq-msg-user">${esc(text)}</div>`;
+    return `<div class="iq-msg iq-msg-iq">${esc(text)}
+      ${this._sourcesHTML(m.sources)}
+      ${this._msgActions(text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources })}</div>`;
+  },
+
+  /* ── WHAT INTELLIQ SAID, AND WHAT YOU CAN DO WITH IT ───────────────────────────────────
+     One row under every message IntelliQ writes, in one place, used by Home, by an object
+     thread and by the opening. Four things, in the order people reach for them:
+
+       copy    · the answer is often the thing you wanted to send to somebody else
+       useful / not useful · about the REPLY, never about the person and never about the
+                 belief — a thumbs-down here changes phrasing, and is structurally incapable of
+                 changing confidence, because it lands on the message and the kernel does not
+                 read messages
+       listen  · already existed and stays exactly where it was
+       sources · what this answer was built from, collapsed until asked for
+
+     The row is deliberately quiet — small, low-contrast, no colour on the rating (D14b: no
+     red/amber/green anywhere a judgement could be read off a face). It appears on assistant
+     messages only. */
+  _msgActions(text, { messageId = null, at = null, rating = null, sources = null, conversationId = null } = {}) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const j = v => this._escape(JSON.stringify(JSON.stringify(v == null ? '' : v)));
+    const has = Array.isArray(sources) && sources.length;
+    const rid = 'act_' + Math.random().toString(36).slice(2, 9);
+    const on = w => rating === w ? ' is-on' : '';
+    return `<div class="iq-msg-acts" id="${rid}" data-mid="${esc(messageId || '')}" data-at="${esc(at || '')}" data-conv="${esc(conversationId || '')}">
+      <button type="button" class="iq-act" aria-label="Copy this message" title="Copy"
+        onclick="MemberApp._copyMsg(this, ${j(text)})">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+      </button>
+      <button type="button" class="iq-act${on('up')}" aria-label="This reply was useful" title="Useful"
+        onclick="MemberApp._rateMsg(this,'up')">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1z"/><path d="M7 10l4.2-7.1a1.7 1.7 0 0 1 3.1 1.2L13.2 9h5.3a2 2 0 0 1 1.95 2.45l-1.4 6A2 2 0 0 1 17.1 19H7"/></svg>
+      </button>
+      <button type="button" class="iq-act${on('down')}" aria-label="This reply was not useful" title="Not useful"
+        onclick="MemberApp._rateMsg(this,'down')">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1z"/><path d="M17 14l-4.2 7.1a1.7 1.7 0 0 1-3.1-1.2L10.8 15H5.5a2 2 0 0 1-1.95-2.45l1.4-6A2 2 0 0 1 6.9 5H17"/></svg>
+      </button>
+      <button type="button" class="iq-act" aria-label="Read this aloud" title="Read aloud"
+        onclick="MemberApp._speak(${j(text)})">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>
+      </button>
+      ${has ? `<button type="button" class="iq-act iq-act-src" aria-expanded="false"
+        onclick="MemberApp._toggleSources(this)">${sources.length} source${sources.length === 1 ? '' : 's'}</button>` : ''}
+      <span class="iq-act-said" role="status" aria-live="polite"></span>
+    </div>`;
+  },
+
+  /* The sources themselves, collapsed. A source is a POINTER, not a summary: the label a
+     person would recognise plus the line it actually said. Rendering it as a claim in its own
+     right would put a second, unattributed assertion under every answer. */
+  _sourcesHTML(sources) {
+    if (!Array.isArray(sources) || !sources.length) return '';
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const word = { record: 'From your records', belief: 'Working picture', work: 'Your work', web: 'From the web' };
+    return `<div class="iq-srcs" hidden>
+      ${sources.map(s => `<div class="iq-src">
+        <div class="iq-src-top"><span class="iq-src-kind">${esc(word[s.kind] || 'Source')}</span><span class="iq-src-label">${esc(s.label)}</span></div>
+        ${s.detail ? `<div class="iq-src-detail">${esc(s.detail)}</div>` : ''}
+      </div>`).join('')}
+    </div>`;
+  },
+
+  _toggleSources(btn) {
+    const box = btn && btn.closest('.iq-msg') && btn.closest('.iq-msg').querySelector('.iq-srcs');
+    if (!box) return;
+    const show = box.hasAttribute('hidden');
+    if (show) box.removeAttribute('hidden'); else box.setAttribute('hidden', '');
+    btn.setAttribute('aria-expanded', show ? 'true' : 'false');
+  },
+
+  /* Copy. navigator.clipboard needs a secure context and can be refused; the fallback is a
+     hidden textarea rather than a promise that silently does nothing. Either way the row SAYS
+     what happened — a copy button that gives no feedback is one people press three times. */
+  async _copyMsg(btn, textJson) {
+    let text = ''; try { text = JSON.parse(textJson); } catch (_) { return; }
+    const row = btn.closest('.iq-msg-acts');
+    const said = row && row.querySelector('.iq-act-said');
+    const tell = m => { if (said) { said.textContent = m; setTimeout(() => { if (said) said.textContent = ''; }, 1800); } };
+    try {
+      if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); tell('Copied'); return; }
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      const done = document.execCommand && document.execCommand('copy');
+      document.body.removeChild(ta);
+      tell(done ? 'Copied' : 'Could not copy');
+    } catch (_) { tell('Could not copy'); }
+  },
+
+  /* Rating a REPLY. Pressing the same one again clears it — a rating you cannot take back is a
+     rating people stop giving. Optimistic in the UI, and honest in the words: it says what this
+     does and, more importantly, what it does not do. */
+  async _rateMsg(btn, want) {
+    const row = btn.closest('.iq-msg-acts');
+    if (!row) return;
+    const said = row.querySelector('.iq-act-said');
+    const already = btn.classList.contains('is-on');
+    const rating = already ? null : want;
+    row.querySelectorAll('.iq-act.is-on').forEach(b => b.classList.remove('is-on'));
+    if (rating) btn.classList.add('is-on');
+    const conversationId = row.getAttribute('data-conv')
+      || (this._inquiryThread && this._inquiryThread.conversationId) || this._chatConvId || '';
+    if (!conversationId) { if (said) said.textContent = 'Noted here.'; return; }
+    try {
+      const r = await fetch('/api/assistant/reply-feedback', { method: 'POST', headers: this._authHeaders(),
+        body: JSON.stringify({ conversationId, messageId: row.getAttribute('data-mid') || undefined,
+          at: row.getAttribute('data-at') || undefined, rating }) });
+      const j = await r.json().catch(() => null);
+      if (said) said.textContent = (j && j.ok) ? (rating ? (j.note || 'Noted.') : 'Cleared.') : 'Could not save that.';
+    } catch (_) { if (said) said.textContent = 'Could not save that.'; }
+    setTimeout(() => { if (said) said.textContent = ''; }, 4000);
   },
 
   _rereadOpening() {
@@ -11726,7 +11880,7 @@ const MemberApp = {
      Members now get real multi-turn memory + a history drawer, reusing the shared
      /api/assistant/conversations endpoints and the .tdy-* voice styling. */
   wsNewChat() {
-    this._chatConvId = null;
+    this._rememberChat(null);
     const c = document.getElementById('iq-conversation'); if (c) c.innerHTML = '';
     this.wsHistoryClose();
     const i = document.getElementById('iq-composer-input'); if (i) i.focus();
@@ -11764,8 +11918,14 @@ const MemberApp = {
     try {
       const j = await (await fetch('/api/assistant/conversations/' + encodeURIComponent(id), { headers: this._authHeaders() })).json();
       if (!j || !j.ok) throw new Error('load failed');
-      this._chatConvId = j.conversation.id;
-      thread.innerHTML = (j.messages || []).map(m => `<div class="iq-msg iq-msg-${m.role === 'user' ? 'user' : 'iq'}">${esc(m.text)}</div>`).join('');
+      this._rememberChat(j.conversation.id);
+      // Opening a conversation from history renders it the same way Home renders the live one —
+      // sources and the action row included. A message that loses its provenance the moment it
+      // becomes history is provenance you can only see when you least need it.
+      thread.innerHTML = (j.messages || []).map(m => m.role === 'user'
+        ? `<div class="iq-msg iq-msg-user">${esc(m.text)}</div>`
+        : `<div class="iq-msg iq-msg-iq">${esc(m.text)}${this._sourcesHTML(m.sources)}${
+            this._msgActions(m.text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources, conversationId: j.conversation.id })}</div>`).join('');
       thread.scrollTop = thread.scrollHeight;
     } catch (e) { thread.innerHTML = `<div class="iq-msg iq-msg-iq">Couldn't open that conversation.</div>`; }
   },
@@ -11851,7 +12011,7 @@ const MemberApp = {
       if (r.status === 401) return { ok: false, reason: 'auth' };
       const j = await r.json();
       if (!j || !j.ok) return { ok: false, reason: 'server' };
-      if (threaded && j.conversationId) this._chatConvId = j.conversationId;
+      if (threaded && j.conversationId) this._rememberChat(j.conversationId);
       this._lastTurnId = j.turnId;
       if (targetEl) targetEl.innerHTML = this._renderAssistant(j);
       return { ok: true, j };
@@ -11901,8 +12061,14 @@ const MemberApp = {
     if (r.clarify && (r.clarify.candidates || []).length) {
       clarifyHtml = `<div class="iq-privacy" style="border-left:2px solid var(--accent)">${esc(r.clarify.message)}<div style="margin-top:0.3rem;display:flex;flex-direction:column;gap:0.25rem">${r.clarify.candidates.map(c => `<button class="btn btn-outline btn-sm" style="text-align:left" onclick="MemberApp.wsSetActiveQuestion('${esc(c.uncertaintyId)}')">${esc(c.question)}</button>`).join('')}</div></div>`;
     }
+    // The live bubble and the same message re-read from history must look identical — otherwise
+    // people learn that coming back to a thread loses something, which is exactly what they
+    // then stop doing. Same sources, same action row, same order.
+    const srcs = r.sources || [];
     return `<div class="iq-response">
       <p class="iq-response-text">${esc(r.responseText)}</p>
+      ${this._sourcesHTML(srcs)}
+      ${this._msgActions(r.responseText, { messageId: j.messageId || null, at: j.at || null, sources: srcs, conversationId: j.conversationId || this._chatConvId || null })}
       ${(() => {
         // The deterministic path pushes groundedClaims[0].text into the reply itself, so this
         // block was repeating the sentence directly underneath it with a GROUNDED tag on it —
