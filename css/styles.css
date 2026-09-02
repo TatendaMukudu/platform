@@ -2965,3 +2965,5 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
   border:1px solid color-mix(in srgb, currentColor 22%, transparent)}
 .iq-hold-change{font-size:.85rem;line-height:1.55;color:var(--text-secondary);margin:.55rem 0 0}
 .iq-hold-contest{font-size:.8rem;line-height:1.5;color:var(--text-muted);margin:.4rem 0 0}
+
+.iq-make-ask{align-self:center;font-size:.85rem;color:var(--text-secondary);margin-right:.2rem}

@@ -8221,8 +8221,18 @@ const MemberApp = {
   _completed: false,
 
   /* ── Auth headers ───────────────────────────────────────── */
+  /* Every request in this file goes through here, and it was missing Content-Type. Express
+     therefore never parsed the body of a JSON POST, so `req.body.text` arrived empty and the
+     server answered "text required" — which is exactly what the founder saw when sending from a
+     thread. Home worked only because it happened to set the header itself.
+
+     33 fetches use this helper. Adding it here fixes every JSON POST at once rather than
+     patching them one at a time and missing some; a GET is unaffected by a Content-Type it does
+     not use. */
   _authHeaders() {
-    return Auth.token ? { Authorization: `Bearer ${Auth.token}` } : {};
+    const h = { 'Content-Type': 'application/json' };
+    if (Auth.token) h.Authorization = `Bearer ${Auth.token}`;
+    return h;
   },
 
   /* ── localStorage keys (userId-scoped) ──────────────────── */
@@ -10984,7 +10994,7 @@ const MemberApp = {
     const list = (j && j.objects) || [];
 
     const make = copy.make
-      ? `<button type="button" class="iq-make" onclick="MemberApp._startObject('${esc(kind)}')">${esc(copy.make)}</button>`
+      ? `<button type="button" class="iq-make" onclick="MemberApp._startObject('${esc(kind)}',undefined,this)">${esc(copy.make)}</button>`
       : '';
     if (!list.length) {
       box.innerHTML = `<div class="iq-empty-title">${esc(copy.empty)}</div>${make}`;
@@ -11045,8 +11055,8 @@ const MemberApp = {
   /* Starting a focus is a sentence, not a form: the composer is prefilled and the person
      finishes it in their own words, which is also how the focus gets its context. Who it is for
      is chosen here, before it exists, rather than being a property discovered afterwards. */
-  _startObject(kind, share) {
-    if (kind === 'focus' && share === undefined) return this._askFocusAudience();
+  _startObject(kind, share, el) {
+    if (kind === 'focus' && share === undefined) return this._askFocusAudience(el);
     try { navigate('workspace'); } catch (_) {}
     this._wsShare = share === true;
     const b = document.getElementById('iq-vis');
@@ -11055,18 +11065,28 @@ const MemberApp = {
     if (i) { i.value = 'I want to work on '; this._wsGrow(i); i.focus(); }
   },
 
-  _askFocusAudience() {
-    const box = document.getElementById('iq-inquiries-page') || document.getElementById('iq-brief');
-    if (!box) return this._startObject('focus', false);
-    const el = document.createElement('div');
-    el.className = 'iq-audience-ask';
-    el.innerHTML = `
-      <p class="iqt-p">Who is this focus for?</p>
-      <div class="iq-make-row">
-        <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus',false)">Just me</button>
-        <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus',true)">Me and others — they can discuss it</button>
-      </div>`;
-    box.prepend(el);
+  /* The audience question appears WHERE THE BUTTON WAS. It used to be prepended to
+     #iq-inquiries-page, which exists in the DOM on every screen but is only visible on the
+     bucket page — so tapping "Make this a focus" on Home put the question inside a hidden
+     element and nothing happened at all. Same class of bug as the untappable card: assuming a
+     container is visible because it exists. */
+  _askFocusAudience(el) {
+    // Two call sites, two shapes: a chip inside .iq-make-row after a reply, and a standalone
+    // button at the top of the Focuses page. Replace whichever is there, in place.
+    const row = el && el.closest && el.closest('.iq-make-row');
+    const ask = `
+      <span class="iq-make-ask">Who is this focus for?</span>
+      <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus',false)">Just me</button>
+      <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus',true)">Me and others</button>`;
+    if (row) { row.innerHTML = ask; return; }
+    if (el && el.parentNode) {
+      const wrap = document.createElement('div');
+      wrap.className = 'iq-make-row';
+      wrap.innerHTML = ask;
+      el.parentNode.replaceChild(wrap, el);
+      return;
+    }
+    return this._startObject('focus', false);
   },
 
   /* THE ONE CARD. Every bucket renders through this — a second renderer is how the polarity
@@ -11898,7 +11918,7 @@ const MemberApp = {
       ${clarifyHtml}
       ${savedHtml}
       <div class="iq-make-row">
-        <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus')">Make this a focus</button>
+        <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus',undefined,this)">Make this a focus</button>
       </div>
       ${/* SUGGESTIONS REMOVED, September 2026. The composer's Public/Private toggle asks who
             something is for BEFORE it is said. A card asking the same question afterwards is
