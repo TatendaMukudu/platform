@@ -2967,6 +2967,28 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqt-raise-by{color:var(--text-primary);font-weight:600}
 .iqt-raise-kind{margin-left:.4rem;opacity:.75}
 
+/* Outside reading. Deliberately NOT a message bubble and deliberately not the assistant's
+   voice: a person must never have to work out which paragraph on a screen is IntelliQ's read on
+   them and which is something it found on the internet. Its own frame, its own heading, its
+   sources on the face of it rather than folded away. */
+.iqt-reading{margin:.85rem 0 1rem;padding:.85rem;border:1px solid var(--border);border-radius:12px;
+  background:transparent}
+.iqt-reading:empty{display:none;margin:0;padding:0;border:0}
+.iqt-reading-head{font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-secondary);margin:0 0 .45rem}
+.iqt-reading-text{font-size:.92rem;line-height:1.55;color:var(--text-primary);margin:0 0 .6rem}
+.iqt-reading-srcs{display:flex;flex-direction:column;gap:.3rem;margin:0 0 .55rem}
+.iqt-reading-src{display:flex;align-items:baseline;gap:.45rem;text-decoration:none;
+  font-size:.82rem;color:var(--text-secondary)}
+.iqt-reading-src:hover .iqt-reading-t{text-decoration:underline;color:var(--text-primary)}
+.iqt-reading-n{flex:0 0 auto;min-width:1.15rem;height:1.15rem;border-radius:50%;
+  border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;
+  font-size:.68rem;color:var(--text-secondary)}
+.iqt-reading-t{flex:1 1 auto}
+.iqt-reading-at{flex:0 0 auto;opacity:.7;font-size:.75rem}
+.iqt-reading-note,.iqt-reading-q{font-size:.76rem;color:var(--text-secondary);line-height:1.45;
+  margin:.35rem 0 0}
+
 /* Waiting on you — a leader's queue. Deliberately plain: it is a list of people who asked. */
 .iq-waiting-card{margin:0 0 .6rem;padding:.85rem}
 .iq-waiting-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin:0 0 .35rem}

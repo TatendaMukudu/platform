@@ -11519,7 +11519,7 @@ const MemberApp = {
       // renders so a slow answer never holds up the thread itself. It appears only on a belief
       // that has earned the question; on everything else this container stays empty.
       const body = `<div class="iqt-turns" id="iq-object-turns">${openingBubble}${turns.map(m => this._threadTurn(m)).join('')}</div>`
-        + `<div class="iqt-call" id="iqt-call"></div>${verdicts}`;
+        + `<div class="iqt-call" id="iqt-call"></div><div class="iqt-reading" id="iqt-reading"></div>${verdicts}`;
 
       box.innerHTML = `
         <div class="iq-object-thread">
@@ -11542,6 +11542,7 @@ const MemberApp = {
             send: 'MemberApp.inquirySend()', mic: 'iqt-mic', state: 'iqt-voice-state' })}
         </div>`;
       this._renderCallRow(objectId);
+      this._renderReading(kind, objectId);
     } catch (_) {
       box.innerHTML = `<div class="iq-empty-sub">This could not be opened right now.</div>`;
     }
@@ -11618,6 +11619,50 @@ const MemberApp = {
       </div>
       <div class="iqt-call-note" id="iqt-call-note"></div>
       ${ladder}`;
+  },
+
+  /* ── WHAT THE OUTSIDE WORLD SAYS ──────────────────────────────────────────────────────────
+     Founder: "it's not the AI making it up. It's cited info and the user can use and or not
+     use the advice."
+
+     Two things follow, and the second is the one that is easy to lose.
+
+     It is CITED, so it is shown with its sources attached and never without them. The server
+     refuses to return an uncited answer at all, and this surface would have nothing to render
+     if it did — the sources are not a footnote on the advice, they are the reason it is on the
+     screen.
+
+     And it is ADVICE, so it is visibly not part of what IntelliQ thinks. It sits below the
+     belief, under its own heading, in its own frame, and it says where it came from. A person
+     must never have to work out which paragraph on a screen is the system's read on them and
+     which is a search result — so nothing here shares the voice, the bubble or the placement of
+     anything the kernel produced.
+
+     The query is built from the TOPIC, never from anything the person wrote, and the surface
+     says so plainly rather than leaving somebody to wonder what was sent. */
+  async _renderReading(kind, objectId) {
+    const box = document.getElementById('iqt-reading');
+    if (!box) return;
+    let j = null;
+    try {
+      j = await fetch(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/reading?scope=self`,
+        { headers: this._authHeaders() }).then(r => r.json());
+    } catch (_) { return; }
+    if (!j || !j.ok) { box.innerHTML = ''; return; }
+    const esc = s => this._escape(String(s == null ? '' : s));
+    box.innerHTML = `
+      <div class="iqt-reading-head">Worth reading</div>
+      <p class="iqt-reading-text">${esc(j.text)}</p>
+      <div class="iqt-reading-srcs">
+        ${(j.citations || []).map((c, i) => `
+          <a class="iqt-reading-src" href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">
+            <span class="iqt-reading-n">${i + 1}</span>
+            <span class="iqt-reading-t">${esc(c.title)}</span>
+            ${c.at ? `<span class="iqt-reading-at">${esc(c.at)}</span>` : ''}
+          </a>`).join('')}
+      </div>
+      <div class="iqt-reading-note">${esc(j.note)}</div>
+      <div class="iqt-reading-q">Searched for "${esc(j.query)}" — ${esc(j.queryNote || 'built from the topic, not from anything you wrote.')}</div>`;
   },
 
   async raiseBelief(inquiryId) {

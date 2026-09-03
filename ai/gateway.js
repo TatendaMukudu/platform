@@ -401,5 +401,51 @@ async function transcribe(buffer, { filename = 'audio.webm', mimetype = 'audio/w
   return String(j.text || '').trim();
 }
 
+/* ── WEB SEARCH ────────────────────────────────────────────────────────────
+   The one capability in this gateway that sends a string to a THIRD party rather than to a
+   model, which is a different kind of egress and is treated as one.
+
+   Anthropic's server-side web_search tool runs the search on their infrastructure, so no new
+   vendor, key or account is involved — but the query still reaches a search index, and that is
+   the fact worth being straight about rather than the plumbing. What protects the person is not
+   this function: it is that ai/websearch.js has no parameter through which their words could
+   arrive. This end only refuses to send anything it did not build itself.
+
+   Web search needs a current model; the reasoning tier is the one that qualifies. And the
+   deterministic-only backstop applies here exactly as it does to `complete` — in that mode
+   nothing leaves the box, search included. */
+const WEB_SEARCH_TOOL = Object.freeze({ type: 'web_search_20260209', name: 'web_search' });
+
+function canSearchWeb() {
+  return HAVE_CLAUDE && !deterministicOnly();
+}
+
+async function searchWeb({ query, system, maxUses = 3, maxTokens = 900, org, taskType = 'web_search' } = {}) {
+  if (deterministicOnly()) throw new Error('web search disabled (deterministic-only mode)');
+  if (!HAVE_CLAUDE) throw new Error('web search unavailable (no Claude key)');
+  const q = String(query || '').trim();
+  if (!q) throw new Error('web search needs a composed query');
+  if (!_consumeBudget(org)) {
+    const err = new Error('LLM budget exhausted');
+    err.code = 'LLM_BUDGET_EXHAUSTED';
+    throw err;
+  }
+  const resp = await client.messages.create({
+    model: MODELS.reason,
+    max_tokens: maxTokens,
+    ...(system ? { system } : {}),
+    // The searched-for string is the WHOLE user turn. Nothing else about the person, the org or
+    // the conversation is in this request — there is nothing else to put in it.
+    tools: [{ ...WEB_SEARCH_TOOL, max_uses: maxUses }],
+    messages: [{ role: 'user', content: q }],
+  });
+  _recordUsage({ org, taskType, tier: 'reason',
+    promptTokens: resp?.usage?.input_tokens, completionTokens: resp?.usage?.output_tokens });
+  // Handed back whole. Reading it is ai/websearch.js's job, and keeping that here would put the
+  // citation gate on the same side of the boundary as the thing it is meant to gate.
+  return resp?.content || [];
+}
+
 module.exports = { complete, completeJSON, parseJSON, MODELS, client, enabled, canTranscribe, transcribe, canUnderstand, understand, deterministicOnly, setDeterministicOnly,
-  budgetAvailable, usageFor, _consumeBudget, _resetGatewayState };
+  budgetAvailable, usageFor, _consumeBudget, _resetGatewayState,
+  canSearchWeb, searchWeb, WEB_SEARCH_TOOL };

@@ -60,6 +60,7 @@ const diagnose          = require('./ai/diagnose');
 const contribution      = require('./ai/contribution');
 const forum             = require('./ai/forum');
 const escalation        = require('./ai/escalation');
+const websearch         = require('./ai/websearch');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
 const errorlog = require('./ai/errorlog');
@@ -14641,6 +14642,69 @@ app.patch('/api/group/:nodeId/forum/:inquiryId/:messageId', requireAuth, (req, r
     // Said plainly, because the two lifecycles being separate is the point.
     evidenceUnchanged: !!had,
     note: had ? 'Your statement is still recorded as evidence. Withdraw it separately if you no longer stand behind it.' : undefined });
+});
+
+/* ── CITED ADVICE FROM OUTSIDE ────────────────────────────────────────────────────────────
+   Founder: "Yes wire web source answers as well. That helps with suggestions because it's not
+   the AI making it up. It's cited info and the user can use and or not use the advice."
+
+   GET /api/objects/:kind/:id/reading — what the outside world says about the TOPIC of a belief.
+
+   The query is built by ai/websearch.js out of the concept and the domain, and that module has
+   no parameter for raw text, so nothing anybody wrote can travel. This route then re-checks the
+   query it is about to send against the same builder before sending it: if the two disagree,
+   something upstream is wrong and the answer is to send nothing rather than to sanitise.
+
+   And nothing that comes back is written anywhere. No inquiry is touched, no signal is created,
+   no confidence moves. It is reading, offered with its sources, and the person can close it. */
+app.get('/api/objects/:kind/:id/reading', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const kind = String(req.params.kind || '');
+  if (!['inquiry', 'high', 'low', 'focus'].includes(kind)) return res.status(404).json({ error: 'not found' });
+
+  const object = (_objectBucket(code, userId, String(req.query.scope || 'self')) || [])
+    .find(x => x && x.kind === kind && String(x.id) === String(req.params.id));
+  if (!object) return res.status(404).json({ error: 'not found' });
+
+  const topic = (object.raw && object.raw.topic) || {};
+  const built = websearch.deriveQuery({
+    canonicalConcept: topic.canonicalConcept || '',
+    domain: topic.domain || (orgMeta[code] || {}).orgMode || '',
+    intent: 'practice',
+  });
+  if (!built.ok) {
+    return res.json({ ok: false, available: false, reason: built.reason,
+      note: 'There is nothing here to search on that is not something you wrote yourself.' });
+  }
+  if (!ai.canSearchWeb()) {
+    return res.json({ ok: false, available: false, query: built.query,
+      reason: ai.deterministicOnly() ? 'this deployment does not send anything outside' : 'web search is not configured',
+      note: 'No outside reading here. Everything on this screen came from inside IntelliQ.' });
+  }
+  // THE EGRESS ASSERTION. Not a filter — a refusal. A query this route did not build is a
+  // query with an unknown provenance, and the only safe thing to do with one is not send it.
+  if (!websearch.isComposed(built.query, {
+    canonicalConcept: topic.canonicalConcept || '',
+    domain: topic.domain || (orgMeta[code] || {}).orgMode || '', intent: 'practice' })) {
+    return res.status(500).json({ error: 'refusing to send a query this server did not compose' });
+  }
+
+  try {
+    const content = await ai.searchWeb({
+      query: built.query, org: code, taskType: 'reading',
+      system: 'Answer in three sentences at most, in plain language, about the topic in general. '
+        + 'You are writing for somebody in a sports or education organisation who wants to know what is generally understood about this. '
+        + 'Do not address anybody personally, do not give instructions, and do not speculate beyond what the sources say.',
+    });
+    const answer = websearch.answerFrom(content);
+    if (!answer.ok) return res.json({ ok: false, available: true, query: built.query, reason: answer.reason });
+    _audit(code, { actor: userId, action: 'web_reading', subjectIds: [userId], basis: built.query });
+    return res.json({ ok: true, available: true, query: built.query, queryNote: built.note,
+      text: answer.text, citations: answer.citations, kind: 'advice', note: answer.note });
+  } catch (e) {
+    return res.json({ ok: false, available: true, query: built.query,
+      reason: 'the search did not come back just now' });
+  }
 });
 
 /* ── A ROOM THAT IS NOT A NODE ────────────────────────────────────────────────────────────
