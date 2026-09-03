@@ -3082,6 +3082,62 @@ function getVisibleUserIds(orgCode, requestingUserId) {
   return [requestingUserId];
 }
 
+/* ── CONTACTS — who you can ADDRESS, which is not who you can READ ABOUT ──────────────────
+   Founder: "I feel like you should be able to invite specific players if you want, not just
+   make public to the entire group... think iMessage, and who a user can see in their org kinda
+   like contacts."
+
+   getVisibleUserIds answers a different question — whose EVIDENCE may I see — and under it a
+   plain member sees only themselves. That is correct and stays correct. But it also means a
+   player has no way to name a teammate, which makes "invite these three people" impossible for
+   everybody except a leader.
+
+   So this is a SECOND, narrower scope and the separation is the whole safety of it:
+
+     ADDRESSABLE  — a name, a role, and the group you share. Enough to pick somebody out of a
+                    list. Nothing about them, nothing they have said, no state, no numbers.
+     READABLE     — getVisibleUserIds, untouched. Being able to type someone's name into an
+                    invite has never implied being able to read their record, and merging the
+                    two would turn a contact picker into a disclosure.
+
+   The set is the people you are actually alongside: everyone in a group you are in, and its
+   leaders. You already know who is on your team — you train with them — so this discloses
+   nothing new, and it is bounded by the tree rather than by the whole organisation. */
+function _contactsFor(code, userId) {
+  const users = orgUsers[code] || {};
+  const me = users[userId];
+  if (!me) return [];
+  const nodes = orgNodes[code] || {};
+  const ids = new Set();
+  const nodeOf = new Map();
+
+  for (const node of Object.values(nodes)) {
+    const members = Array.isArray(node.memberIds) ? node.memberIds : [];
+    const leaders = Array.isArray(node.leaderIds) ? node.leaderIds : [];
+    if (!members.includes(userId) && !leaders.includes(userId)) continue;
+    for (const id of [...members, ...leaders]) {
+      if (id === userId) continue;
+      ids.add(id);
+      if (!nodeOf.has(id)) nodeOf.set(id, node.name || '');
+    }
+  }
+  // Anyone already readable is addressable too — a leader who can see a person's record can
+  // obviously write their name. The reverse is never true, which is the point.
+  try { for (const id of getVisibleUserIds(code, userId)) if (id !== userId) ids.add(id); } catch (_) {}
+
+  return [...ids]
+    .map(id => users[id])
+    .filter(u => u && u.status !== 'removed')
+    .map(u => ({ id: u.id, name: u.name || '', role: u.role || 'member', with: nodeOf.get(u.id) || '' }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/* GET /api/contacts — the people you can address. Names and roles only, by construction. */
+app.get('/api/contacts', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  res.json({ ok: true, contacts: _contactsFor(code, userId) });
+});
+
 /* ── GET /api/workspace/visible-members ──────────────────────────────────
  *
  *  Returns the subset of org users the requesting user is allowed to see.
@@ -5272,6 +5328,14 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
   const text = String((req.body || {}).text || '').trim().slice(0, 300);
   if (!text) return res.status(400).json({ error: 'Say what you want to work on.' });
   const shared = (req.body || {}).share === true;
+  /* WHO IT IS WITH. "Public or private" only has two settings, and the founder's case is the
+     third one everybody actually wants: these three people, not the whole squad and not just
+     me. Names are checked against the ADDRESSABLE set — a person can only invite somebody they
+     are genuinely alongside, so an invite cannot be used to discover that a name exists. */
+  const wanted = Array.isArray((req.body || {}).participants) ? (req.body || {}).participants : [];
+  const addressable = new Set(_contactsFor(code, userId).map(c => c.id));
+  const participants = [...new Set(wanted.map(String).filter(id => addressable.has(id)))];
+  const rejected = wanted.length - participants.length;
   const mem = _getMemory(code, userId);
   mem.focuses = mem.focuses || [];
   // Same text, still open? Return it rather than making a second one. A list with the same
@@ -5283,7 +5347,10 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
   }
   const focus = {
     id: 'foc_' + generateId(), text, type: 'self_set', status: 'active', outcome: null,
-    visibility: shared ? 'shared' : 'private',
+    // Inviting somebody by name IS sharing it with them; there is no such thing as a private
+    // focus that other people are in. The visibility field says who else can see it at all.
+    visibility: participants.length ? 'invited' : (shared ? 'shared' : 'private'),
+    participants: participants.length ? [userId, ...participants] : [userId],
     createdAt: new Date().toISOString(),
   };
   mem.focuses.unshift(focus);
@@ -5291,9 +5358,13 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
   mem.lastUpdated = new Date().toISOString();
   _audit(code, { actor: userId, action: 'focus_created', subjectIds: [userId], basis: focus.visibility });
   scheduleSave();
-  res.json({ ok: true, focus: { id: focus.id, text: focus.text, visibility: focus.visibility },
-    note: shared ? 'Set. Anyone who leads a group you are in can see this one.'
-                 : 'Set, and private — only you can see it. You can share it later; nobody else can.' });
+  const named = participants.map(id => (orgUsers[code][id] || {}).name).filter(Boolean);
+  res.json({ ok: true,
+    focus: { id: focus.id, text: focus.text, visibility: focus.visibility, participants: focus.participants },
+    note: participants.length
+      ? `Set, with ${named.join(', ')}. Only the people in it can see it.${rejected ? ' Some names could not be added.' : ''}`
+      : shared ? 'Set. Anyone who leads a group you are in can see this one.'
+               : 'Set, and private — only you can see it. You can share it later; nobody else can.' });
 });
 
 /* POST /api/me/focus/:id/visibility — widen or narrow it afterwards, owner only. */
@@ -13492,6 +13563,79 @@ const _inNode      = (code, nodeId, userId) => _nodeMembers(code, nodeId).includ
 const _leadsNode   = (code, nodeId, userId) => _nodeLeaders(code, nodeId).includes(userId);
 const _groupCands  = (code) => (groupCandidates[code] = groupCandidates[code] || []);
 
+/* ── SQUAD MEMBERSHIP ─────────────────────────────────────────────────────────────────────
+   Founder: "bolt on that take someone off my squad or invite someone onto my squad", and
+   separately: "only the admin can delete email address."
+
+   Those are two different acts and the whole safety of this rests on not confusing them:
+
+     ROSTER      — this person is no longer on my squad. They keep their account, their
+                   conversations, their focuses, everything they have ever said. They are
+                   simply not in this node any more. Reversible by adding them back.
+     ACCOUNT     — this person is gone from the organisation and their data may be erased.
+                   Irreversible, and it stays with the account owner. Untouched here.
+
+   A leader owns the first and has never owned the second. Conflating them is how "tidy up my
+   squad list" becomes "delete a person", which is exactly the mistake worth designing out
+   rather than warning about.
+
+   Scope is the node itself, not the subtree: leading the First Team does not make somebody a
+   leader of every group beneath it, and a permission that silently widens down a hierarchy is
+   one nobody can reason about from the screen they are looking at. */
+function _rosterChange(code, nodeId, actorId, targetId, action) {
+  const node = (orgNodes[code] || {})[nodeId];
+  if (!node) return { ok: false, status: 404, error: 'no such group' };
+  if (!_leadsNode(code, nodeId, actorId)) {
+    return { ok: false, status: 403, error: 'Only a leader of this group can change who is in it.' };
+  }
+  const target = (orgUsers[code] || {})[targetId];
+  if (!target || target.status === 'removed') return { ok: false, status: 404, error: 'no such person in this organisation' };
+
+  node.memberIds = Array.isArray(node.memberIds) ? node.memberIds : [];
+  const present = node.memberIds.includes(targetId);
+
+  if (action === 'add') {
+    if (!present) node.memberIds.push(targetId);
+    target.assignedNodeIds = Array.isArray(target.assignedNodeIds) ? target.assignedNodeIds : [];
+    if (!target.assignedNodeIds.includes(nodeId)) target.assignedNodeIds.push(nodeId);
+  } else {
+    // A leader may not remove ANOTHER leader of the same group from it. Two people who both
+    // run something have to settle that between them; a race to remove each other is not a
+    // thing the product should be able to referee.
+    if (_leadsNode(code, nodeId, targetId) && targetId !== actorId) {
+      return { ok: false, status: 403, error: 'That person also leads this group. An admin has to make that change.' };
+    }
+    node.memberIds = node.memberIds.filter(id => id !== targetId);
+    if (Array.isArray(target.assignedNodeIds)) target.assignedNodeIds = target.assignedNodeIds.filter(id => id !== nodeId);
+  }
+  node.updatedAt = new Date().toISOString();
+  _invalidateOrgProjections(code);
+  _audit(code, { actor: actorId, action: action === 'add' ? 'roster_add' : 'roster_remove',
+    subjectIds: [targetId], basis: `group:${nodeId}` });
+  scheduleSave();
+  return { ok: true, nodeId, userId: targetId, inGroup: action === 'add',
+    members: node.memberIds.length,
+    note: action === 'add'
+      ? `${target.name || 'They'} is on ${node.name || 'this group'} now.`
+      : `${target.name || 'They'} is off ${node.name || 'this group'}. Their account and everything in it is untouched — only this group changed.` };
+}
+
+/* POST /api/group/:nodeId/roster — { userId } — put somebody on this squad. */
+app.post('/api/group/:nodeId/roster', requireAuth, (req, res) => {
+  const { orgCode: code, userId: actor } = req.iqSession;
+  const r = _rosterChange(code, String(req.params.nodeId), actor, String((req.body || {}).userId || ''), 'add');
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  res.json(r);
+});
+
+/* DELETE /api/group/:nodeId/roster/:userId — take somebody off this squad. NOT a deletion. */
+app.delete('/api/group/:nodeId/roster/:userId', requireAuth, (req, res) => {
+  const { orgCode: code, userId: actor } = req.iqSession;
+  const r = _rosterChange(code, String(req.params.nodeId), actor, String(req.params.userId), 'remove');
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  res.json(r);
+});
+
 /* A member's evidence noticed as possibly concerning a group. Called from intake; it records a
    private noticing and nothing else. No group state changes here, and nothing becomes visible
    to anybody — that needs a deliberate act, which is the next function down. */
@@ -14158,8 +14302,45 @@ function _objectBucket(code, userId, scope = 'self') {
     for (const [kind, group] of Object.entries(plan.groups || {})) {
       if (kind === 'high' || kind === 'low') for (const item of group.insights || []) add(kind, item);
     }
+    /* FOCUSES YOU CAN SEE, from all three places one can come from. This read used to be the
+       first line only, so a coach could set a focus for the squad and NOBODY on the squad ever
+       saw it — the founder reported exactly that. A focus set FOR a group is a focus for the
+       people in it; that is what setting it means.
+
+       Deduplicated by id because a focus you were invited into and also lead would otherwise
+       arrive twice, and a list that repeats itself is a list people stop reading. */
+    const seenFocus = new Set();
+    const addFocus = (f, extra) => {
+      if (!f || !f.id && !f.focusId) return;
+      const fid = f.id || f.focusId;
+      if (seenFocus.has(fid)) return;
+      seenFocus.add(fid);
+      add('focus', { ...f, id: fid, ...extra });
+    };
+
+    // (a) Mine — the ones I set for myself.
     const memory = userAiProfiles[`${code}:${userId}`] || {};
-    for (const focus of memory.focuses || []) add('focus', focus);
+    for (const focus of memory.focuses || []) addFocus(focus);
+
+    // (b) Ones somebody invited me into by name.
+    for (const [key, mem] of Object.entries(userAiProfiles)) {
+      if (!key.startsWith(`${code}:`) || key === `${code}:${userId}`) continue;
+      for (const f of (mem && mem.focuses) || []) {
+        if (Array.isArray(f.participants) && f.participants.includes(userId)) {
+          addFocus(f, { invited: true, participants: f.participants });
+        }
+      }
+    }
+
+    // (c) The squad's. A group focus belongs to everyone in the group, leaders included.
+    for (const node of Object.values(orgNodes[code] || {})) {
+      const inIt = (node.memberIds || []).includes(userId) || (node.leaderIds || []).includes(userId);
+      if (!inIt) continue;
+      for (const f of _teamFocuses(code, node.nodeId) || []) {
+        addFocus(f, { id: f.focusId, text: f.text, group: node.name || '', nodeId: node.nodeId,
+          participants: [...(node.memberIds || []), ...(node.leaderIds || [])] });
+      }
+    }
   } else if (scope.startsWith('group:')) {
     const nodeId = scope.slice(6);
     const subject = _groupSubjectRef(code, nodeId);

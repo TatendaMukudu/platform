@@ -918,3 +918,16 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 @media (hover:none){
   .iq-chip,.iq-att-item,.aw-ask,.iq-send{min-height:40px}
 }
+
+/* THE ATTACH CONTROL. A file input styled display:none inside a wrapping label does not open
+   the picker on iOS Safari — the label has nothing focusable to forward the tap to. So the
+   input stays in the layout at zero opacity and the label points at it by id, which is the
+   form the browser actually honours. The founder reported it plainly: "I can't attach files". */
+.iq-attach{cursor:pointer;display:flex;align-items:center;padding:0 .3rem;color:var(--text-muted);
+  min-width:36px;min-height:36px;justify-content:center;position:relative}
+.iq-attach:hover{color:var(--text-secondary)}
+.iq-attach-input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+
+/* The bar is the last thing on the page and stays at the bottom of the viewport, clear of the
+   home indicator. */
+.iq-composer-wrap{padding-bottom:calc(.35rem + env(safe-area-inset-bottom))}

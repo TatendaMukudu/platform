@@ -10875,15 +10875,22 @@ const MemberApp = {
              conversation starts by typing, which is what people did anyway. -->
         <div id="iq-history" class="tdy-history" style="display:none"></div>
         <div class="iq-conversation" id="iq-conversation" aria-live="polite"></div>
-        ${this._composerHTML({ id: 'iq-composer-input',
-          placeholder: 'Ask, capture a thought, or drop in notes, minutes, stats…',
-          send: 'MemberApp.wsSend()', mic: 'iq-mic', state: 'iq-voice-state', hint: `<div class="iq-composer-hint">
-          <button type="button" class="iq-vis" id="iq-vis" aria-pressed="false"
-            title="Choose who this is for before you say it" onclick="MemberApp.toggleVisibility()">Private</button>
-          <button type="button" class="iq-hint-link" onclick="navigate('my-data')">Who can see what I say here?</button>
-        </div>` })}
       </div>
-      <div id="iq-brief" aria-live="polite"></div>`;
+      <div id="iq-brief" aria-live="polite"></div>
+      ${/* THE BAR IS THE LAST THING ON THE PAGE. It used to sit inside the chat box, which put
+            it ABOVE the card — so the one control a person always needs was in the middle of
+            the screen with content underneath it. Founder: "that composer can sit at the very
+            bottom of the page". It is sticky, so it stays at the bottom of the viewport
+            whatever is above it, which is where a thumb already is. */ ''}
+      ${this._composerHTML({ id: 'iq-composer-input',
+        // Short, because on a phone the long one truncated to "Ask, capture a thought, or drop"
+        // and then stopped — an instruction cut off halfway is worse than no instruction.
+        placeholder: 'Type anything…',
+        send: 'MemberApp.wsSend()', mic: 'iq-mic', state: 'iq-voice-state', hint: `<div class="iq-composer-hint">
+        <button type="button" class="iq-vis" id="iq-vis" aria-pressed="false"
+          title="Choose who this is for before you say it" onclick="MemberApp.toggleVisibility()">Private</button>
+        <button type="button" class="iq-hint-link" onclick="navigate('my-data')">Who can see what I say here?</button>
+      </div>` })}`;
     // HOME IS ONE QUESTION. Founder decision, September 2026: greeting, the single
     // highest-priority thing IntelliQ wants to know, the logo, and the bar. Nothing else may
     // ever appear here. Everything the old home crowded in — the attention feed, the inquiry
@@ -11212,11 +11219,14 @@ const MemberApp = {
           placeholder="In your own words…">${esc(seed)}</textarea>
         <div class="iq-focus-row">
           <button type="button" class="iq-make-chip is-on" id="${id}-priv"
-            onclick="MemberApp._focusVis('${id}',false)">Private</button>
+            onclick="MemberApp._focusVis('${id}','private')">Just me</button>
+          <button type="button" class="iq-make-chip" id="${id}-with"
+            onclick="MemberApp._focusVis('${id}','with')">With people</button>
           <button type="button" class="iq-make-chip" id="${id}-pub"
-            onclick="MemberApp._focusVis('${id}',true)">Public</button>
-          <span class="iq-focus-who" id="${id}-who">Only you can see this.</span>
+            onclick="MemberApp._focusVis('${id}','shared')">My whole squad</button>
         </div>
+        <div class="iq-focus-people" id="${id}-people" hidden></div>
+        <div class="iq-focus-who" id="${id}-who">Only you can see this.</div>
         <div class="iq-focus-row">
           <button type="button" class="iq-make-chip" onclick="MemberApp._createFocus('${id}')">Make it a focus</button>
           <button type="button" class="iq-make-chip" onclick="MemberApp._cancelFocus('${id}')">Not now</button>
@@ -11233,25 +11243,61 @@ const MemberApp = {
     } else {
       return;
     }
-    this._focusShare = this._focusShare || {};
-    this._focusShare[id] = false;
+    this._focusMode = this._focusMode || {};
+    this._focusMode[id] = 'private';
     const t = document.getElementById(id + '-t');
     if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
   },
 
-  _focusVis(id, share) {
-    this._focusShare = this._focusShare || {};
-    this._focusShare[id] = !!share;
-    const priv = document.getElementById(id + '-priv');
-    const pub  = document.getElementById(id + '-pub');
-    const who  = document.getElementById(id + '-who');
-    if (priv) priv.classList.toggle('is-on', !share);
-    if (pub)  pub.classList.toggle('is-on', !!share);
-    // What it MEANS, not what it is called. "Public" tells you nothing about who that is.
-    if (who) who.textContent = share
-      ? 'Anyone who leads a group you are in can see this.'
+  /* THREE settings, not two. Founder: "you should be able to invite specific players if you
+     want, not just make public to the entire group... think iMessage." Public and private are
+     the two a system finds easy; the one people actually reach for is "these people". */
+  _focusVis(id, mode) {
+    this._focusMode = this._focusMode || {};
+    this._focusMode[id] = mode;
+    const set = (suffix, on) => { const el = document.getElementById(id + suffix); if (el) el.classList.toggle('is-on', on); };
+    set('-priv', mode === 'private');
+    set('-with', mode === 'with');
+    set('-pub',  mode === 'shared');
+    const who = document.getElementById(id + '-who');
+    const people = document.getElementById(id + '-people');
+    // What it MEANS, not what it is called. "Public" tells a person nothing about who that is.
+    if (who) who.textContent = mode === 'shared' ? 'Anyone who leads a group you are in can see this.'
+      : mode === 'with' ? 'Only the people you pick can see this.'
       : 'Only you can see this.';
+    if (!people) return;
+    if (mode !== 'with') { people.hidden = true; return; }
+    people.hidden = false;
+    if (people.dataset.loaded) return;
+    people.dataset.loaded = '1';
+    this._loadContacts(id, people);
   },
+
+  /* The people you can address — a name, a role and the group you share, and nothing else.
+     Deliberately NOT the set whose records you can read: being able to type somebody's name
+     into an invite has never implied being able to see anything about them. */
+  async _loadContacts(id, box) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    box.innerHTML = `<div class="iq-focus-who">Loading…</div>`;
+    try {
+      const j = await fetch('/api/contacts', { headers: this._authHeaders() }).then(r => r.json());
+      const list = (j && j.contacts) || [];
+      if (!list.length) {
+        box.innerHTML = `<div class="iq-focus-who">There is nobody in a group with you yet.</div>`;
+        return;
+      }
+      box.innerHTML = list.map(c => `
+        <button type="button" class="iq-contact" data-uid="${esc(c.id)}"
+          onclick="MemberApp._toggleContact(this)">
+          <span class="iq-contact-name">${esc(c.name)}</span>
+          ${c.with ? `<span class="iq-contact-with">${esc(c.with)}</span>` : ''}
+        </button>`).join('');
+    } catch (_) {
+      box.innerHTML = `<div class="iq-focus-who">Could not load your contacts just now.</div>`;
+    }
+  },
+
+  _toggleContact(btn) { btn.classList.toggle('is-on'); },
 
   _cancelFocus(id) {
     const f = document.getElementById(id);
@@ -11265,11 +11311,13 @@ const MemberApp = {
     const tell = m => { if (said) said.textContent = m; };
     const text = String((t && t.value) || '').trim();
     if (!text) { tell('Say what you want to work on first.'); if (t) t.focus(); return; }
-    const share = !!(this._focusShare || {})[id];
+    const mode = (this._focusMode || {})[id] || 'private';
+    const picked = [...document.querySelectorAll(`#${id}-people .iq-contact.is-on`)].map(b => b.dataset.uid);
+    if (mode === 'with' && !picked.length) { tell('Pick who this is with, or choose "Just me".'); return; }
     tell('Making it…');
     try {
       const r = await fetch('/api/me/focus', { method: 'POST', headers: this._authHeaders(),
-        body: JSON.stringify({ text, share }) });
+        body: JSON.stringify({ text, share: mode === 'shared', participants: mode === 'with' ? picked : [] }) });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || `server said ${r.status}`);
       const esc = s => this._escape(String(s == null ? '' : s));
@@ -11294,8 +11342,14 @@ const MemberApp = {
     const sum = p.summary || {};
     const det = p.detail || {};
     const x = item.explained || {};
-    const title = sum.title || x.headline || 'Working it out';
-    const claim = sum.thinking || x.claim || '';
+    // A title is a NAME, not a sentence: the voice layer sentence-cases every label, which put a
+    // full stop on the end of "Passing principles." and then printed the same words again
+    // underneath as the claim. A focus's title and its claim ARE the same words — it is one
+    // line somebody wrote — so the body is dropped when it only repeats the heading.
+    const title = String(sum.title || x.headline || 'Working it out').replace(/\s*\.\s*$/, '');
+    const rawClaim = String(sum.thinking || x.claim || '');
+    const same = rawClaim.replace(/\s*\.\s*$/, '').trim().toLowerCase() === title.trim().toLowerCase();
+    const claim = same ? '' : rawClaim;
     const open = () => `MemberApp.openObjectThread('${esc(item.kind)}','${esc(item.id)}')`;
     // A thread others were invited into carries a forum. A private one does not, and the icon
     // is how a person tells the difference at a glance.
@@ -11501,9 +11555,9 @@ const MemberApp = {
     return `
       <div class="iq-composer-wrap">
         <div class="iq-composer">
-          ${attach ? `<label class="iq-attach" title="Add a document IntelliQ can use" aria-label="Add a document" style="cursor:pointer;display:flex;align-items:center;padding:0 0.3rem;color:var(--text-muted)">
+          ${attach ? `<label class="iq-attach" for="${esc(id)}-file" title="Add a document IntelliQ can use" aria-label="Add a document">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5 12.5 21a4 4 0 0 1-5.66-5.66l8.49-8.48a2.5 2.5 0 0 1 3.54 3.54l-8.49 8.48a1 1 0 0 1-1.41-1.41l7.78-7.78"/></svg>
-            <input type="file" id="${esc(id)}-file" style="display:none" accept=".txt,.md,.markdown,.csv,.json,.pdf,.doc,.docx" onchange="MemberApp.wsAttach(this)">
+            <input type="file" class="iq-attach-input" id="${esc(id)}-file" accept=".txt,.md,.markdown,.csv,.json,.pdf,.doc,.docx" onchange="MemberApp.wsAttach(this)">
           </label>` : ''}
           <textarea id="${esc(id)}" class="iq-composer-input" rows="1" aria-label="${esc(placeholder)}"
             placeholder="${esc(placeholder)}"

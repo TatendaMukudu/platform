@@ -3025,3 +3025,13 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iq-focus-said{font-size:.74rem;color:var(--text-secondary);min-height:1em}
 .iq-make-chip.is-on{color:var(--text-primary);border-color:var(--accent)}
 .iq-focus-made{font-size:.85rem;line-height:1.55;display:flex;flex-direction:column;gap:.35rem;align-items:flex-start}
+
+/* Picking who a focus is with. A list of names, tappable, nothing else on them — this is a
+   contact picker, not a profile view, and it should not look like one. */
+.iq-focus-people{display:flex;flex-wrap:wrap;gap:.35rem;margin:.2rem 0}
+.iq-contact{display:inline-flex;flex-direction:column;align-items:flex-start;gap:.05rem;
+  padding:.35rem .65rem;border-radius:999px;cursor:pointer;font-size:.8rem;
+  color:var(--text-secondary);background:transparent;border:1px solid var(--border)}
+.iq-contact:hover{color:var(--text-primary)}
+.iq-contact.is-on{color:var(--text-primary);border-color:var(--accent);background:var(--accent-soft)}
+.iq-contact-with{font-size:.66rem;color:var(--text-muted)}

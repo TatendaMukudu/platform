@@ -64,7 +64,16 @@ for (let i = 0; i < source.length; i++) {
 }
 console.log(`audited scope references: ${inventory.length}`);
 for (const row of inventory) console.log(`server.js:${row.line} ${row.source}`);
-ok('W4 inventory names every current scope reference', inventory.length === 62 && inventory.every(r => Number.isInteger(r.line) && r.source));
+/* 62 -> 65, September 2026. Three call sites were added deliberately and each is named here,
+   because the whole value of this number is that it cannot move by accident:
+
+     _rosterChange x2 (_leadsNode) — a leader may change the roster of a node THEY lead, and may
+       not remove a co-leader of it. Scoped to the node, never the subtree: leading the First
+       Team does not make somebody a leader of everything beneath it.
+     _contactsFor x1 (getVisibleUserIds) — the ADDRESSABLE set folds in the readable one, because
+       a leader who can already see a person's record can obviously write their name. The
+       reverse does not hold and must never be made to: contacts are names, not records. */
+ok('W4 inventory names every current scope reference', inventory.length === 65 && inventory.every(r => Number.isInteger(r.line) && r.source));
 
 console.log('\nMigration law: BRIDGE never; GATE governance AND Web; ENUMERATE/FILTER migrate later; WEB re-test only.');
 console.log(`\n=== scope-parity-smoke: ${pass} passed, ${fail} failed ===\n`);
