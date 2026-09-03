@@ -46,12 +46,24 @@ ok('OA3 …and everybody lands on Home', /navigate\('home'\);/.test(appjs));
 ok('OA4 there is one base nav, shared by every account',
   /_NAV:\s*\[/.test(appjs) && /_NAV_EXTRA:\s*\[/.test(appjs));
 const base = appjs.slice(appjs.indexOf('_NAV: ['), appjs.indexOf('],', appjs.indexOf('_NAV: [')));
-ok('OA5 the base nav carries the six things everyone has, and no role condition anywhere in it',
-  ['home', 'inquiry', 'focus', 'high', 'low', 'notes'].every(id => base.includes(`id: '${id}'`)) &&
+ok('OA5 the base nav carries what everyone has, and no role condition anywhere in it',
+  ['home', 'inquiry', 'focus', 'high', 'low', 'notes', 'people'].every(id => base.includes(`id: '${id}'`)) &&
   !/when:/.test(base) && !/isAdmin|isLeader|isSuperAdmin|role/.test(base));
 const extra = appjs.slice(appjs.indexOf('_NAV_EXTRA: ['), appjs.indexOf('],', appjs.indexOf('_NAV_EXTRA: [')));
-ok('OA6 the org tree is added for someone who actually LEADS a node — a fact about the tree, not a title',
-  /id: 'people'/.test(extra) && /Auth\.isLeaderNode\(\)/.test(extra));
+/* THE TREE IS FOR EVERYBODY. Founder, revising this a day later: "everyone can get an org tree,
+   just members can't change the tree." Knowing where you sit and who else is here is not a
+   privilege — a player who cannot see the shape of their own club is being asked to trust a
+   structure they are not allowed to look at.
+
+   So this assertion inverts: the tree must be in the BASE nav (OA5 above), and what stays
+   gated is CHANGING it. Seeing and editing are two different things and the whole safety of
+   widening the first is that it does not touch the second. */
+ok('OA6 every edit control on the tree still hangs off manage_tree, which a member does not have',
+  (() => {
+    const tree = fs.readFileSync(path.join(__dirname, '..', 'js', 'tree.js'), 'utf8');
+    const edits = (tree.match(/openAddNode|openEditNode|deleteNode/g) || []).length;
+    return edits > 0 && /Auth\.canDo\('manage_tree'\)/.test(tree);
+  })());
 ok('OA7 settings is added for the account owner, which is where billing will go',
   /id: 'settings'/.test(extra) && /Auth\.isSuperAdmin\(\)/.test(extra));
 

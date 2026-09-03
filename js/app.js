@@ -10958,6 +10958,17 @@ const MemberApp = {
     { id: 'high',    label: 'Highs',     icon: 'M5 15l5-5 4 4 5-7' },
     { id: 'low',     label: 'Lows',      icon: 'M5 9l5 5 4-4 5 7' },
     { id: 'notes',   label: 'Library',   icon: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z' },
+    /* EVERYONE SEES THE TREE. Founder: "I think everyone can get an org tree, just members can't
+       change the tree." Right — knowing where you sit and who else is here is not a privilege,
+       it is the thing that makes an organisation legible to the person inside it. A player who
+       cannot see the shape of their own club is being asked to trust a structure they are not
+       allowed to look at.
+
+       Changing it is a different act and stays gated: every edit control in js/tree.js already
+       hangs off Auth.canDo('manage_tree'), and the mutation routes are behind the same
+       permission server-side. So this widens what is VISIBLE and nothing about what is
+       possible — the two halves that must never be confused. */
+    { id: 'people',  label: 'Org tree',  icon: 'M12 3v6M12 15v6M5 12h14M7 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6M17 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6M12 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6' },
   ],
 
   /* WHAT A ROLE ADDS, never what it replaces. Everyone above sees the same six things; these
@@ -10968,8 +10979,6 @@ const MemberApp = {
      for anyone who actually leads a node, which is a fact about the tree rather than a title.
      Settings (and billing, when there is billing) belong to whoever owns the account. */
   _NAV_EXTRA: [
-    { id: 'people',   label: 'Org tree', when: () => Auth.isLeaderNode() || Auth.isAdmin(),
-      icon: 'M12 3v6M12 15v6M5 12h14M7 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6M17 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6M12 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6' },
     { id: 'settings', label: 'Settings', when: () => Auth.isSuperAdmin(),
       icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' },
   ],
@@ -11412,7 +11421,11 @@ const MemberApp = {
           <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('contest')">I disagree</button>
           <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('aside')">Not now</button>
         </div>`;
-      const body = `<div class="iqt-turns" id="iq-object-turns">${openingBubble}${turns.map(m => this._threadTurn(m)).join('')}</div>${verdicts}`;
+      // The call sits WITH the belief, above the verdicts, and is filled in after the thread
+      // renders so a slow answer never holds up the thread itself. It appears only on a belief
+      // that has earned the question; on everything else this container stays empty.
+      const body = `<div class="iqt-turns" id="iq-object-turns">${openingBubble}${turns.map(m => this._threadTurn(m)).join('')}</div>`
+        + `<div class="iqt-call" id="iqt-call"></div>${verdicts}`;
 
       box.innerHTML = `
         <div class="iq-object-thread">
@@ -11434,8 +11447,71 @@ const MemberApp = {
           ${this._composerHTML({ id: 'iq-object-input', placeholder: 'Say what you know, or ask…',
             send: 'MemberApp.inquirySend()', mic: 'iqt-mic', state: 'iqt-voice-state' })}
         </div>`;
+      this._renderCallRow(objectId);
     } catch (_) {
       box.innerHTML = `<div class="iq-empty-sub">This could not be opened right now.</div>`;
+    }
+  },
+
+  /* ── THE CALL: IS THIS WORKING WELL, OR WORTH ATTENTION? ──────────────────────────────────
+     Highs and Lows had been structurally dead since the daily check-in was retired — six of the
+     seven detectors read the mood series that question produced — and the app went on reporting
+     "you're in a steady place" to people it could not see at all.
+
+     What replaces it is not another detector. NOBODY BUT THE PERSON CALLS IT: not the model,
+     not a keyword list over their wording, not a leader. The machine counts the evidence, checks
+     the origins are independent, and refuses when it is thin; a human says which way it points.
+     That is exactly how the team surface already works, and it is the only reason to trust
+     either of them.
+
+     So this row appears on a belief that has ALREADY EARNED the question — two independent
+     origins, rated emerging or better, not contested — and nowhere else. The old question fired
+     on a clock. This one fires on evidence, and it asks once. */
+  async _renderCallRow(objectId) {
+    const row = document.getElementById('iqt-call');
+    if (!row) return;
+    let mine = null;
+    try {
+      const j = await fetch('/api/me/calls', { headers: this._authHeaders() }).then(r => r.json());
+      mine = (j && j.calls || []).find(c => c && c.inquiryId === objectId) || null;
+    } catch (_) { return; }
+    if (!mine) { row.innerHTML = ''; return; }
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const on = v => mine.called === v ? ' iqt-call-on' : '';
+    const id = esc(objectId);
+    row.innerHTML = `
+      <div class="iqt-call-q">${esc(mine.question)}</div>
+      <div class="iqt-call-btns">
+        <button type="button" class="iqt-verdict${on('working_well')}"
+          onclick="MemberApp.callBelief('${id}','working_well')">Working well</button>
+        <button type="button" class="iqt-verdict${on('worth_attention')}"
+          onclick="MemberApp.callBelief('${id}','worth_attention')">Worth attention</button>
+        ${mine.called ? `<button type="button" class="iqt-verdict"
+          onclick="MemberApp.callBelief('${id}',null)">Take it back</button>` : ''}
+      </div>
+      <div class="iqt-call-note" id="iqt-call-note"></div>`;
+  },
+
+  /* A call is a call, not a conclusion — it can be changed and it can be withdrawn, and the
+     answer says plainly where the belief went. When the gates refuse it, the refusal is shown
+     rather than swallowed: being told WHY something is not filed is the honest version of a
+     button that appears to do nothing. */
+  async callBelief(inquiryId, valence) {
+    const note = document.getElementById('iqt-call-note');
+    try {
+      const r = await fetch('/api/me/call', {
+        method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inquiryId, valence: valence || null }),
+      });
+      const j = await r.json();
+      if (note) note.textContent = (j && j.note) || '';
+      await this._renderCallRow(inquiryId);
+      // Re-read the note: _renderCallRow replaces the container, so the answer has to be put
+      // back after it rather than before.
+      const after = document.getElementById('iqt-call-note');
+      if (after) after.textContent = (j && j.note) || '';
+    } catch (_) {
+      if (note) note.textContent = 'That could not be saved just now.';
     }
   },
 

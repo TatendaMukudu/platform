@@ -123,6 +123,69 @@ function valenceOf(contributions = []) {
   };
 }
 
+/* ── PERSONAL VALENCE — the same shape as the team path, minus the cohort ────────────────────
+   A team belief becomes a High or a Low by passing four gates, in order: somebody CALLED it
+   working-well or worth-attention; it rests on at least two independent origins; it clears the
+   two-sided cohort floor; and the kernel rates it emerging or better and undisputed.
+
+   For a belief about one person there is no cohort — it is them — so gate three does not
+   apply. Every other gate does, and gate one is the one that matters: NOBODY BUT THE PERSON
+   CALLS IT. Not the model, not a keyword list over the wording, not a leader. The machine
+   counts, checks independence, and refuses when the evidence is thin; a human says which way
+   it points. That is the property that makes the team version trustworthy and it is the only
+   reason to build the personal one the same way.
+
+   A call is not a conclusion. It can be changed, and changing it moves the belief between
+   buckets rather than editing anything that happened.
+
+   Returns the same shape as valenceOf, so one reader serves both. */
+function personalValence(inquiry = {}, { call = null, now = Date.now() } = {}) {
+  const band = _s((inquiry.confidence || {}).band || 'tentative', 32);
+  const origins = _num(inquiry.independentOrigins);
+  const blocked = [];
+
+  // GATE 1 — somebody called it, and that somebody is its subject.
+  const said = call && (call.valence === 'working_well' || call.valence === 'worth_attention') ? call.valence : null;
+  if (!said) blocked.push({ gate: 'uncalled', reason: 'nobody has called this one way or the other yet' });
+
+  // GATE 2 — two independent origins. Repetition is not corroboration, here as everywhere.
+  if (origins < MIN_ORIGINS) {
+    blocked.push({ gate: 'origins',
+      reason: `rests on ${origins || 'no'} independent origin${origins === 1 ? '' : 's'} — saying it twice is still once` });
+  }
+
+  // GATE 4 — the kernel's own standing. A call cannot promote a belief the evidence does not
+  // support: somebody deciding a thing is going well does not make it established.
+  if ((BAND_RANK[band] ?? 0) < BAND_RANK.emerging) {
+    blocked.push({ gate: 'standing', reason: `the kernel rates this ${band}; too early to file either way` });
+  }
+  if (inquiry.status === 'disputed' || inquiry.contested === true) {
+    blocked.push({ gate: 'standing', reason: 'accounts disagree about this, and a disagreement is the finding' });
+  }
+
+  if (blocked.length) {
+    return { polarity: POLARITY.NEUTRAL, contested: inquiry.contested === true, ok: false, blocked,
+      reason: blocked[0].reason };
+  }
+  return {
+    polarity: said === 'working_well' ? POLARITY.WORKING_WELL : POLARITY.WORTH_ATTENTION,
+    contested: false, ok: true, blocked: [],
+    calledAt: _num(call.at) || now,
+    reason: `you called this ${said === 'working_well' ? 'working well' : 'worth attention'}`,
+  };
+}
+
+/* Is this belief ready to be ASKED about? The question is only worth putting to somebody once
+   the evidence would actually support an answer — asking before that teaches people the
+   question is noise, which is precisely what the daily check-in did. */
+function readyForCall(inquiry = {}) {
+  const band = _s((inquiry.confidence || {}).band || 'tentative', 32);
+  return (BAND_RANK[band] ?? 0) >= BAND_RANK.emerging
+    && _num(inquiry.independentOrigins) >= MIN_ORIGINS
+    && inquiry.status !== 'disputed'
+    && inquiry.contested !== true;
+}
+
 /* ── 2. THE TWO-SIDED COHORT FLOOR ───────────────────────────────────────────
    May a count of k people out of a cohort of n be disclosed at all?
 
@@ -486,6 +549,6 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
 
 module.exports = {
   VALENCES, POLARITY, MIN_COHORT, MIN_ORIGINS, FOCUS_STATUSES, OUTCOME_RESULTS,
-  valenceOf, cohortFloor, fitForSurface, openQuestion, newFocus, recordFocusOutcome, normalizeFocus,
+  valenceOf, personalValence, readyForCall, cohortFloor, fitForSurface, openQuestion, newFocus, recordFocusOutcome, normalizeFocus,
   statementFor, buildTeamState,
 };

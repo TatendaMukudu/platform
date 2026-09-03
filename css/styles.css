@@ -2943,6 +2943,18 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqt-verdict:hover{color:var(--text-primary);border-color:var(--border-light)}
 .iqt-verdict:focus-visible{outline:2px solid currentColor;outline-offset:2px}
 
+/* The call. It reads as a question somebody is being asked, not as a control panel, so the
+   question carries the weight and the two answers sit under it as equals — neither is the
+   default and neither is styled as the agreeable one. The chosen answer is marked, because a
+   call you cannot see you already made is a call you make again. */
+.iqt-call{margin:0 0 1rem}
+.iqt-call:empty{display:none}
+.iqt-call-q{font-size:.95rem;color:var(--text-primary);margin:0 0 .55rem}
+.iqt-call-btns{display:flex;flex-wrap:wrap;gap:.45rem}
+.iqt-call-on{color:var(--text-primary);border-color:var(--text-primary)}
+.iqt-call-note{font-size:.8rem;color:var(--text-secondary);margin:.5rem 0 0}
+.iqt-call-note:empty{display:none}
+
 /* IntelliQ's opening is a message in the conversation, so it takes the assistant bubble. */
 .iqt-open-msg{position:relative}
 .iqt-open-msg .iqt-lede{font-size:1.1rem;line-height:1.5;color:var(--text-primary);margin:0 0 .8rem}

@@ -4848,6 +4848,91 @@ function _streakMilestones(code, subjectId, now) {
   return [proactive.milestoneFinding({ key: 'checkin_streak', subjectId, days, best: isBest })];
 }
 
+/* ── WHAT IS GOING WELL, AND WHAT IS NOT ──────────────────────────────────────────────────
+   Four findings, none of which needs a machine to decide how somebody is doing.
+
+     called_strength / called_friction — a belief its subject called, that also cleared the
+       kernel's own gates. The person says which way it points; the kernel says whether there is
+       enough behind it to say anything at all. Neither alone is enough.
+     contested_belief — accounts disagree. That is a FACT about the evidence, not a valence, so
+       it needs nobody's call. It is a Low because a disagreement about somebody is a thing to
+       go and resolve, not a thing to average.
+     focus_landed / focus_stalled — the person recorded an outcome, or a review date passed with
+       none. Both are facts about a commitment somebody made themselves.
+
+   This replaces detectors that read a mood series produced by a question asked every day
+   whether or not there was anything to answer. The founder's objection to that was exactly
+   right: it output the same thing. These fire on evidence, so when there is nothing, they say
+   nothing — and the empty state is honest rather than reassuring. */
+function _beliefStateFindings(code, userId, now) {
+  const out = [];
+  const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+  const calls = (_getMemory(code, userId).valenceCalls) || {};
+
+  for (const inq of Object.values(mine)) {
+    if (!inq || !(inq.signals || []).length) continue;
+    const active = (inq.signals || []).filter(s => s && s.kind !== 'interpretation' && diagnose.isActive(s));
+    const contested = inq.status === 'disputed' || active.some(s => s.dissents);
+    const shaped = { ...inq, contested,
+      independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size };
+    const label = present.humanTopic(inq.topic || {});
+    if (!label) continue;
+
+    if (contested) {
+      out.push({ patternType: 'contested_belief', polarity: 'risk', subjectId: userId,
+        severity: 'medium', priority: 'high', confidence: 'clear',
+        render: { self: {
+          headline: `Accounts differ on ${label.toLowerCase()}`,
+          body: 'More than one account of this is on record and they do not agree. That disagreement is the finding — worth sorting out rather than averaging.',
+          suggestion: 'Open it and say which matches your experience.' } } });
+      continue;                                   // a contested belief is not also a high or a low
+    }
+
+    const v = teamState.personalValence(shaped, { call: calls[inq.inquiryId] || null, now });
+    if (!v.ok) continue;
+    const good = v.polarity === 'strength';
+    out.push({ patternType: good ? 'called_strength' : 'called_friction',
+      polarity: good ? 'progress' : 'risk', subjectId: userId,
+      severity: good ? 'low' : 'medium', priority: good ? 'low' : 'medium',
+      confidence: (shaped.confidence || {}).band === 'supported' ? 'clear' : 'emerging',
+      render: { self: {
+        headline: good ? `${label} is working` : `${label} needs attention`,
+        body: `You called this one, and it rests on ${shaped.independentOrigins} separate occasions rather than one telling.`,
+        suggestion: good ? null : 'Open it and decide what you want to do about it.' } } });
+  }
+
+  // Focuses — facts about a commitment the person made, so no call is needed for either.
+  const focuses = (_getMemory(code, userId).focuses) || [];
+  for (const f of focuses) {
+    if (!f || !f.text) continue;
+    if (f.outcome && f.outcome.result && f.outcome.result !== 'unclear') {
+      const helped = f.outcome.result === 'helped' || f.outcome.result === 'improved';
+      out.push({ patternType: helped ? 'focus_landed' : 'focus_missed',
+        polarity: helped ? 'progress' : 'risk', subjectId: userId,
+        severity: 'low', priority: 'low', confidence: 'clear',
+        // NO VERBATIM CONTENT. proactive.audienceSafe refuses an insight that quotes anything,
+        // for either audience, and it is right to: an insight is a projection, not a place for
+        // raw text to travel in. The focus is one tap away in its own bucket.
+        render: { self: {
+          headline: helped ? 'Something you set out to do worked' : 'One of your focuses did not land',
+          body: 'You recorded how one of your focuses went — which is the part almost nobody does, and the only reason the system can tell whether anything helped.',
+          suggestion: null } } });
+      continue;
+    }
+    const review = Number(f.reviewAt) || 0;
+    if (f.status === 'active' && review && review < now) {
+      const days = Math.round((now - review) / 86400000);
+      out.push({ patternType: 'focus_stalled', polarity: 'risk', subjectId: userId,
+        severity: 'low', priority: 'medium', confidence: 'clear',
+        render: { self: {
+          headline: 'A focus is past its review date',
+          body: `One of your focuses was due a look ${days} day${days === 1 ? '' : 's'} ago and nothing has been recorded yet.`,
+          suggestion: 'Say how it went, even if the answer is that it is hard to tell.' } } });
+    }
+  }
+  return out;
+}
+
 /* Deterministic OPPORTUNITY projection — SELF-audience only, framed as a question,
    never a verdict or a prediction. Derived from an existing kernel finding (quiet,
    sustained improvement = capacity to stretch). No new reasoning. */
@@ -4901,6 +4986,8 @@ function _proactiveInsights(code, viewerId, opts = {}) {
   if (audience === 'self') {
     // Opportunities are ordinary Highs under D4; projection still governs their detail.
     _selfOpportunities(m, viewerId).forEach(f => add(f, 'self'));
+    // Highs and lows from BELIEFS and COMMITMENTS, which is where they actually live now.
+    try { _beliefStateFindings(code, viewerId, now).forEach(f => add(f, 'self')); } catch (_) {}
     // Deterministic attention items (own scope only).
     let att = []; try { att = _composeToday(code, viewerId) || []; } catch (_) {}
     att.forEach(a => add(a, 'self'));
@@ -14572,6 +14659,80 @@ app.post('/api/group/:nodeId/forum/:inquiryId/:messageId/contribute', requireAut
     admitted: !!out.opened, decision: out.decision || null });
 });
 
+/* ── HIGHS AND LOWS, THE HONEST WAY ───────────────────────────────────────────────────────
+   Founder's diagnosis of the old check-in, which is the correct one: "my beef with the
+   check-ins is they were outputting the same thing." A question asked every day regardless of
+   whether there is anything to answer teaches people the question is noise. Six of the seven
+   old pattern detectors read the mood series that question produced, so retiring it left Highs
+   and Lows structurally dead while the app reported "you're in a steady place".
+
+   This asks ONCE, and only about a belief that has already earned it — two independent origins,
+   rated emerging or better, not contested. That is the whole difference: the old question fired
+   on a clock, this one fires on evidence.
+
+   GET  /api/me/calls   — beliefs ready for a call, and what has already been called.
+   POST /api/me/call    — "this is working well" / "this is worth attention", or take it back. */
+app.get('/api/me/calls', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+  const calls = _getMemory(code, userId).valenceCalls || {};
+  const out = [];
+  for (const inq of Object.values(mine)) {
+    if (!inq || !(inq.signals || []).length) continue;
+    const active = (inq.signals || []).filter(s => s && s.kind !== 'interpretation' && diagnose.isActive(s));
+    const shaped = { ...inq,
+      independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size,
+      contested: inq.status === 'disputed' || active.some(s => s.dissents) };
+    if (!teamState.readyForCall(shaped)) continue;
+    const call = calls[inq.inquiryId] || null;
+    out.push({
+      inquiryId: inq.inquiryId,
+      label: present.humanTopic(inq.topic || {}),
+      claim: (inq.hypotheses || []).find(h => h && h.id === inq.leadingHypothesisId)?.statement || '',
+      band: (inq.confidence || {}).band || 'tentative',
+      independentOrigins: shaped.independentOrigins,
+      called: call ? call.valence : null,
+      // The question, in the person's own frame. Never "are you doing well" — that is a
+      // judgement on them. Always about the THING that has come into focus.
+      question: 'Is this working well, or worth attention?',
+    });
+  }
+  res.json({ ok: true, calls: out });
+});
+
+app.post('/api/me/call', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  const id = String(b.inquiryId || '');
+  const want = b.valence === 'working_well' || b.valence === 'worth_attention' ? b.valence : null;
+  if (b.valence != null && !want) return res.status(400).json({ error: 'valence must be working_well, worth_attention, or null' });
+
+  const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+  const inq = Object.values(mine).find(i => i && i.inquiryId === id);
+  if (!inq) return res.status(404).json({ error: 'no such belief of yours' });
+
+  const mem = _getMemory(code, userId);
+  mem.valenceCalls = mem.valenceCalls || {};
+  if (want) mem.valenceCalls[id] = { valence: want, at: Date.now() };
+  else delete mem.valenceCalls[id];
+  mem.lastUpdated = new Date().toISOString();
+
+  const active = (inq.signals || []).filter(s => s && s.kind !== 'interpretation' && diagnose.isActive(s));
+  const shaped = { ...inq,
+    independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size,
+    contested: inq.status === 'disputed' || active.some(s => s.dissents) };
+  const v = teamState.personalValence(shaped, { call: mem.valenceCalls[id] || null });
+
+  _audit(code, { actor: userId, action: 'valence_call', subjectIds: [userId], basis: want || 'cleared' });
+  scheduleSave();
+  res.json({ ok: true, inquiryId: id, called: want, bucket: v.ok ? (v.polarity === 'strength' ? 'high' : 'low') : null,
+    note: !want ? 'Cleared. It goes back to being something you are working out.'
+      : v.ok ? (v.polarity === 'strength'
+          ? 'Filed under what is going well. You can change that any time.'
+          : 'Filed under what needs attention. You can change that any time.')
+        : `Noted, but it stays where it is for now — ${v.reason}.` });
+});
+
 /* GET /api/library — items visible to me: my own (any visibility) + anyone's SHARED. Filter
    by ?folderId= (mine only) and ?scope=mine|shared|all. */
 /* GET /api/inquiry — what the ears have built about YOU, and only you. This is the working
@@ -19289,7 +19450,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // a routed share lands in
   orgMeta, libraryItems, _professionals,
   // exported for the truth layer: proves the role ladder never invents a title
-  _subjectRoleContext, _domainDirective, _memberGoalsFor, _getMemory,
+  _subjectRoleContext, _domainDirective, _memberGoalsFor, _getMemory, _beliefStateFindings, _contactsFor,
   // exported for the truth layer: the canonical evidence boundary + identity lifecycle
   _ingestGeneric, _recordEvidence, _reresolveUnmatched, _promoteEvidence, evidenceLog, rawEvidence, orgSignals, orgUsers,
   _resolveEvidence, _evictWorkingSet, _eraseEvidence, _eraseSubjectEvidence,
