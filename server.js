@@ -14521,10 +14521,16 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
   // button that 404s. So `forumAvailable` says where it works, `shared` says where the rule says
   // it should — and the gap between them is the server work still to do, stated rather than
   // papered over with a button that fails.
-  const _invited = Array.isArray(object.raw && object.raw.participants) && object.raw.participants.length > 1;
-  const _forum = !!_nodeId;
+  // THE GAP IS CLOSED. `forumAvailable` used to be true only for a node room, and this comment
+  // used to record a focus with invitees as work still to do. /api/forum/:kind/:objectId is now
+  // that work, so the rule and what is reachable finally say the same thing — which is the only
+  // acceptable end state for a flag whose whole purpose was to admit they differed.
+  const _invited = kind === 'focus'
+    && Array.isArray(object.raw && object.raw.participants) && object.raw.participants.length > 1;
+  const _forum = !!_nodeId || _invited;
   res.json({ ok: true, about: object.about, opening: object.explained, present: object.present,
-    shared: _forum, forumAvailable: _forum, sharedByRule: (!!_nodeId || _invited), nodeId: _nodeId,
+    shared: _forum, forumAvailable: _forum, sharedByRule: _forum, nodeId: _nodeId,
+    forumKind: _nodeId ? 'group' : (_invited ? 'focus' : null),
     conversation: conversation ? { id: conversation.id, updatedAt: conversation.updatedAt } : null,
     messages: conversation ? (conversation.messages || []).map(_historyMessage) : [] });
 });
@@ -14635,6 +14641,111 @@ app.patch('/api/group/:nodeId/forum/:inquiryId/:messageId', requireAuth, (req, r
     // Said plainly, because the two lifecycles being separate is the point.
     evidenceUnchanged: !!had,
     note: had ? 'Your statement is still recorded as evidence. Withdraw it separately if you no longer stand behind it.' : undefined });
+});
+
+/* ── A ROOM THAT IS NOT A NODE ────────────────────────────────────────────────────────────
+   Founder: "Any thread with 2+ people can have a discussion and that valuable information we
+   would be missing out on."
+
+   Until now a forum existed only where the room was a NODE — the group inquiry path above. A
+   focus with people invited into it satisfied the founder's rule and had no route behind it,
+   which the thread endpoint has been reporting honestly (`sharedByRule` true, `forumAvailable`
+   false) rather than offering a button that 404s. This closes that gap.
+
+   TWO MEMBERSHIP RULES, WHICH IS WHY THERE ARE TWO HELPERS RATHER THAN ONE CLEVER ONE:
+
+     A NODE ROOM     — whoever is on the roster right now. Membership moves when the roster
+                       moves, and somebody taken off the squad stops being in the room.
+     A FOCUS ROOM    — the people named on it. Membership is the invitation, and it does not
+                       change because a roster did.
+
+   Collapsing those into a single "members" list would make one of them silently wrong the
+   first time a roster changed. Everything downstream — the anonymity rule, the evidence
+   boundary, the cap — is shared, because those are properties of a forum rather than of a room.
+
+   The epistemic boundary is UNCHANGED and unchangeable here: this path touches forumThreads and
+   nothing else. Ten people agreeing in a focus room moves no confidence anywhere. */
+function _forumRoom(code, userId, kind, objectId) {
+  if (kind !== 'focus') {
+    // Group inquiries have their own route above, whose room is the node. Saying so is better
+    // than quietly accepting the kind and looking in the wrong place for it.
+    return { ok: false, status: 404, error: 'no forum of that kind here' };
+  }
+  const obj = (_objectBucket(code, userId, 'self') || [])
+    .find(o => o && o.kind === 'focus' && String(o.id) === String(objectId));
+  if (!obj) return { ok: false, status: 404, error: 'not found' };
+  const raw = obj.raw || {};
+  const members = Array.isArray(raw.participants) ? raw.participants.filter(Boolean) : [];
+  // A focus with nobody else on it is you and IntelliQ, which is a conversation and already has
+  // one. The founder's rule is 2+ PEOPLE, and one person is not two.
+  if (members.length < 2) {
+    return { ok: false, status: 400, error: 'this one is just you — there is nobody to discuss it with' };
+  }
+  if (!members.includes(userId)) return { ok: false, status: 403, error: 'not part of this' };
+  return { ok: true, key: `focus:${objectId}`, members, subjectRef: raw.nodeId ? `group:${raw.nodeId}` : `member:${userId}` };
+}
+
+/* Membership is the access. `inNode` is the field ai/forum.js already reads, and reusing it
+   rather than inventing a second predicate is what keeps one policy instead of two. */
+const _roomAccess = (room, userId) => ({ inNode: room.members.includes(userId), leadsNode: false });
+
+function _roomThread(code, room, { create = false } = {}) {
+  const threads = (forumThreads[code] = forumThreads[code] || {});
+  if (!threads[room.key] && create) {
+    threads[room.key] = forum.newThread({ inquiryId: room.key, nodeId: '', subjectRef: room.subjectRef });
+  }
+  return threads[room.key] || null;
+}
+
+/* GET /api/forum/:kind/:objectId — read a room that is not a node. */
+app.get('/api/forum/:kind/:objectId', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const room = _forumRoom(code, userId, String(req.params.kind), String(req.params.objectId));
+  if (!room.ok) return res.status(room.status).json({ error: room.error });
+  if (!forum.mayRead(_roomAccess(room, userId))) return res.status(403).json({ error: 'not part of this' });
+  const thread = _roomThread(code, room) || forum.newThread({ inquiryId: room.key, subjectRef: room.subjectRef });
+  res.json({
+    ok: true, people: room.members.length,
+    ...forum.visibleThread(thread, { viewerId: userId }),
+    note: 'Discussion. Nothing said here counts as evidence unless its author deliberately offers it as their account.',
+  });
+});
+
+/* POST /api/forum/:kind/:objectId — say something. { text, replyTo? } */
+app.post('/api/forum/:kind/:objectId', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const room = _forumRoom(code, userId, String(req.params.kind), String(req.params.objectId));
+  if (!room.ok) return res.status(room.status).json({ error: room.error });
+  if (!forum.mayPost(_roomAccess(room, userId))) return res.status(403).json({ error: 'not part of this' });
+  const text = String((req.body || {}).text || '').trim();
+  if (!text) return res.status(400).json({ error: 'text required' });
+
+  const thread = _roomThread(code, room, { create: true });
+  const msg = forum.newMessage({ id: 'fm_' + generateId(), authorId: userId, text,
+    replyTo: (req.body || {}).replyTo || null });
+  thread.messages.push(msg);
+  if (thread.messages.length > forum.THREAD_CAP) thread.messages.splice(0, thread.messages.length - forum.THREAD_CAP);
+  scheduleSave();
+  res.json({ ok: true, messageId: msg.messageId, epistemicEffect: 'none' });
+});
+
+/* PATCH /api/forum/:kind/:objectId/:messageId — edit or withdraw MY OWN speech. */
+app.patch('/api/forum/:kind/:objectId/:messageId', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const room = _forumRoom(code, userId, String(req.params.kind), String(req.params.objectId));
+  if (!room.ok) return res.status(room.status).json({ error: room.error });
+  const thread = _roomThread(code, room);
+  if (!thread) return res.status(404).json({ error: 'no discussion yet' });
+  const i = thread.messages.findIndex(m => m.messageId === String(req.params.messageId));
+  if (i === -1) return res.status(404).json({ error: 'message not found' });
+  if (!forum.mayEdit({ actorId: userId, message: thread.messages[i] })) {
+    return res.status(403).json({ error: 'only the author may change their own message' });
+  }
+  thread.messages[i] = (req.body || {}).remove === true
+    ? forum.removeMessage(thread.messages[i])
+    : forum.editMessage(thread.messages[i], (req.body || {}).text);
+  scheduleSave();
+  res.json({ ok: true, messageId: req.params.messageId });
 });
 
 /* POST /api/group/:nodeId/forum/:inquiryId/:messageId/contribute — offer MY OWN statement as my

@@ -11534,7 +11534,7 @@ const MemberApp = {
               <h1 class="iqt-title">${esc(title)}</h1>
               ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}">${esc(sum.standing)}</span>` : ''}
             </div>
-            ${data.shared ? `<button type="button" class="iqt-forum" onclick="MemberApp.openForum('${esc(data.nodeId || '')}','${esc(objectId)}')">Forum</button>` : ''}
+            ${data.forumAvailable ? `<button type="button" class="iqt-forum" onclick="MemberApp.openForum('${esc(data.nodeId || '')}','${esc(objectId)}','${esc(data.forumKind || 'group')}','${esc(kind)}')">Forum</button>` : ''}
 
           </div>
           ${body}
@@ -11673,27 +11673,39 @@ const MemberApp = {
 
      Nothing said here is evidence. Saying something and OFFERING it as your account are two
      different acts, and only the second goes anywhere near the kernel. */
-  async openForum(nodeId, inquiryId) {
+  /* TWO ROOMS, ONE SCREEN. A node room is the roster; a focus room is the people named on it.
+     The two have different membership rules and so different routes, but a person opening a
+     discussion should never have to know which kind they are in — so the difference lives in
+     one line here and nowhere else in the client. */
+  _forumURL(ctx) {
+    return ctx.room === 'focus'
+      ? `/api/forum/focus/${encodeURIComponent(ctx.objectId)}`
+      : `/api/group/${encodeURIComponent(ctx.nodeId)}/forum/${encodeURIComponent(ctx.objectId)}`;
+  },
+
+  async openForum(nodeId, objectId, room = 'group', backKind = 'inquiry') {
     const box = document.getElementById('iq-inquiries-page');
-    if (!box || !nodeId) return;
+    if (!box) return;
+    if (room !== 'focus' && !nodeId) return;
     const esc = s => this._escape(String(s == null ? '' : s));
-    this._forumCtx = { nodeId, inquiryId };
+    this._forumCtx = { nodeId, objectId, room, backKind };
     box.innerHTML = `<div style="color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
     let j; try {
-      j = await fetch(`/api/group/${encodeURIComponent(nodeId)}/forum/${encodeURIComponent(inquiryId)}`, { headers: this._authHeaders() }).then(r => r.json());
+      j = await fetch(this._forumURL(this._forumCtx), { headers: this._authHeaders() }).then(r => r.json());
     } catch (_) { j = null; }
     if (!j || !j.ok) { box.innerHTML = `<div class="iq-empty-sub">This discussion could not be opened right now.</div>`; return; }
     const msgs = (j.messages || []).filter(m => m.status !== 'removed' || true);
     box.innerHTML = `
       <div class="iq-object-thread">
         <div class="iqt-bar">
-          <button class="iqt-back" type="button" onclick="MemberApp.openObjectThread('inquiry','${esc(inquiryId)}')">
+          <button class="iqt-back" type="button" onclick="MemberApp.openObjectThread('${esc(backKind)}','${esc(objectId)}')">
             <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
             Back
           </button>
         </div>
         <h1 class="iqt-title">Forum</h1>
         <p class="iqt-p">Everyone here is anonymous, including to coaches. Nothing said here counts as evidence unless you deliberately offer it as your own account.</p>
+        ${j.people && j.people <= 3 ? `<p class="iqt-p iqt-small-room">There are only ${j.people} people in here, so names being hidden will not stop anyone working out who said what. Say it as though they will.</p>` : ''}
         <div class="iqt-turns">${msgs.length
           ? msgs.map(m => m.status === 'removed'
               ? `<div class="iq-msg iq-msg-gone">Withdrawn</div>`
@@ -11711,11 +11723,11 @@ const MemberApp = {
     if (!text || !ctx) return;
     input.value = '';
     try {
-      await fetch(`/api/group/${encodeURIComponent(ctx.nodeId)}/forum/${encodeURIComponent(ctx.inquiryId)}`, {
+      await fetch(this._forumURL(ctx), {
         method: 'POST', headers: this._authHeaders(), body: JSON.stringify({ text }),
       });
     } catch (_) {}
-    this.openForum(ctx.nodeId, ctx.inquiryId);
+    this.openForum(ctx.nodeId, ctx.objectId, ctx.room, ctx.backKind);
   },
 
 
