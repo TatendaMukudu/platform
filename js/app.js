@@ -3208,6 +3208,39 @@ async function runLlmSelfTest() {
   }
 }
 
+/* Remove an organisation, permanently. Two things are required and neither is a yes/no: the
+   platform key, and the org's own code typed out. A yes/no confirms that you pressed a button;
+   typing the name confirms you know WHICH organisation you are deleting, which is the mistake
+   actually worth preventing. */
+async function purgeOrg() {
+  const btn  = document.getElementById('purge-btn');
+  const out  = document.getElementById('purge-result');
+  const key  = (document.getElementById('purge-key')  || {}).value || '';
+  const code = ((document.getElementById('purge-code') || {}).value || '').trim().toLowerCase();
+  if (!out) return;
+  const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  if (!key)  { out.innerHTML = '<div style="color:var(--danger)">The platform key is required.</div>'; return; }
+  if (!code) { out.innerHTML = '<div style="color:var(--danger)">Type the org code to confirm which one.</div>'; return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Removing…'; }
+  try {
+    const r = await fetch(`/api/admin/org/${encodeURIComponent(code)}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'x-platform-key': key },
+      body: JSON.stringify({ confirm: code }),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || `server said ${r.status}`);
+    out.innerHTML = d.existed
+      ? `<div style="line-height:1.7">Removed <strong>${esc(code)}</strong> — ${esc(d.keys)} record(s), <strong>${esc(d.freedMB)} MB</strong> freed. A cold start now loads ${esc(d.remainingMB)} MB.<div style="color:var(--text-secondary);margin-top:0.4rem">${esc(d.note)}</div></div>`
+      : `<div style="color:var(--text-secondary)">No organisation with that code was here — nothing was removed.</div>`;
+    const c = document.getElementById('purge-code'); if (c) c.value = '';
+  } catch (e) {
+    out.innerHTML = `<div style="color:var(--danger)">Could not remove it: ${esc(e.message)}</div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Remove it'; }
+  }
+}
+
 /* What this instance costs to load. The founder's question after the database emailed them at
    86% of its monthly allowance: "is there a way to check so we don't get any render
    complaints". A cold start reads the whole store, and the host restarts more often than

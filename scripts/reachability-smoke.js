@@ -33,7 +33,6 @@ const BACKEND_ONLY = new Map(Object.entries({
   '/api/admin/errors': 'operator tooling',
   '/api/admin/metrics': 'operator tooling',
   '/api/admin/persistence': 'operator tooling',
-  '/api/admin/org/:code': 'operator tooling — deliberately NOT a button: deleting an entire organisation is platform-key work done on purpose, not a click available beside the demo seed',
   '/api/admin/llm-mode': 'operator tooling',
   '/api/admin/backfill-canonical': 'one-off migration',
   '/api/admin/checkin-classification-audit': 'one-off audit',

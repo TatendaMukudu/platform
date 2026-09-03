@@ -106,5 +106,64 @@ try {
 
 } catch (e) { fail++; console.error('  FAIL suite threw:', e && e.stack); }
 
-console.log(`\norg-purge-smoke: ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+/* ── THE ROUTE. _purgeOrg is the dangerous part; the route is what stands in front of it, and
+   until now nothing tested that. Two gates, and both have to hold: the platform key, and the
+   org's own code typed back. A yes/no confirms that somebody pressed a button; typing the name
+   confirms they know WHICH organisation is about to stop existing. ── */
+(async () => {
+  process.env.IQ_PLATFORM_KEY = 'test-platform-key';
+  const { app, issueToken, orgMeta: meta } = S;
+  S._loadAllStores({
+    orgMeta: { doomed: { orgName: 'Doomed' }, safe: { orgName: 'Safe' } },
+    orgUsers: {
+      doomed: { d1: { id: 'd1', name: 'D', orgCode: 'doomed', role: 'superadmin', status: 'active' } },
+      safe:   { s1: { id: 's1', name: 'S', orgCode: 'safe',   role: 'superadmin', status: 'active' } },
+    },
+  });
+  S._rebuildEmailIndex();
+
+  const server = app.listen(0);
+  await new Promise(r => server.once('listening', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const del = (code, { key, confirm } = {}) => fetch(`${base}/api/admin/org/${code}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', ...(key ? { 'x-platform-key': key } : {}) },
+    body: JSON.stringify(confirm === undefined ? {} : { confirm }),
+  }).then(async r => ({ status: r.status, j: await r.json().catch(() => null) }));
+
+  try {
+    const noKey = await del('doomed', { confirm: 'doomed' });
+    ok('OP12 without the platform key it is refused — an org superadmin cannot delete an organisation from the app',
+      noKey.status === 403 && !!meta.doomed);
+
+    const orgAdmin = await fetch(`${base}/api/admin/org/doomed`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${issueToken('d1', 'doomed', 'superadmin')}` },
+      body: JSON.stringify({ confirm: 'doomed' }),
+    });
+    ok('OP13 …not even with a superadmin session for that very org — the blast radius belongs to whoever runs the platform',
+      orgAdmin.status === 403 && !!meta.doomed);
+
+    const noConfirm = await del('doomed', { key: 'test-platform-key' });
+    ok('OP14 the key alone is not enough — the org code has to be typed back, so a mis-click cannot delete the wrong one',
+      noConfirm.status === 400 && !!meta.doomed);
+
+    const wrongConfirm = await del('doomed', { key: 'test-platform-key', confirm: 'safe' });
+    ok('OP15 …and confirming with a DIFFERENT org code is refused rather than obeyed',
+      wrongConfirm.status === 400 && !!meta.doomed && !!meta.safe);
+
+    const done = await del('doomed', { key: 'test-platform-key', confirm: 'doomed' });
+    ok('OP16 with both, it goes — and reports what it removed and what the instance now costs to load',
+      done.status === 200 && done.j && done.j.ok === true && done.j.existed === true &&
+      typeof done.j.freedMB === 'number' && typeof done.j.remainingMB === 'number' && !meta.doomed);
+    ok('OP17 …and the other organisation is still here', !!meta.safe);
+
+    const absent = await del('never-existed', { key: 'test-platform-key', confirm: 'never-existed' });
+    ok('OP18 deleting something that was never there says so, rather than reporting a success that removed nothing',
+      absent.status === 200 && absent.j.existed === false);
+  } catch (e) { fail++; console.error('  FAIL route checks threw:', e && e.stack); }
+
+  server.close();
+  console.log(`\norg-purge-smoke: ${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+})();

@@ -14567,15 +14567,18 @@ app.get('/api/admin/footprint', requireAuth, (req, res) => {
   }
   const mb = b => +(b / 1048576).toFixed(2);
   const mine = mb(byOrg[code] || 0);
+  // Whether a platform key EXISTS, never the key. Without one the purge below cannot be used
+  // by anybody, and "the button does nothing" is a worse answer than "no key is configured".
+  const keyed = !!process.env.IQ_PLATFORM_KEY;
   if (!platform) {
-    return res.json({ ok: true, scope: 'org', orgMB: mine,
+    return res.json({ ok: true, scope: 'org', orgMB: mine, platformKeyConfigured: keyed,
       note: `Your organisation holds ${mine} MB. A cold start loads the whole instance once.` });
   }
   const orgs = Object.entries(byOrg).map(([org, bytes]) => ({ org, mb: mb(bytes) })).sort((a, b) => b.mb - a.mb);
   const biggest = Object.entries(units).map(([key, v]) => ({ key, mb: mb(Buffer.byteLength(JSON.stringify(v), 'utf8')) }))
     .sort((a, b) => b.mb - a.mb).slice(0, 8);
   res.json({ ok: true, scope: 'platform', totalMB: mb(total), orgs, biggestUnits: biggest,
-    perColdStartMB: mb(total),
+    perColdStartMB: mb(total), platformKeyConfigured: keyed,
     note: `A cold start loads ${mb(total)} MB. Render's free tier spins down when idle and cold-starts on the next request, and every deploy restarts too — multiply by how many starts a month you expect. Delete an unused organisation with DELETE /api/admin/org/:code.` });
 });
 

@@ -46,8 +46,8 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260902m"/>
-<link rel="stylesheet" href="css/member.css?v=20260902m"/>
+<link rel="stylesheet" href="css/styles.css?v=20260903a"/>
+<link rel="stylesheet" href="css/member.css?v=20260903a"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -659,6 +659,23 @@
                 </div>
                 <button class="btn btn-outline btn-sm" id="footprint-btn" onclick="showFootprint()">Check the size</button>
                 <div id="footprint-result" style="margin-top:0.8rem;font-size:0.82rem"></div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header"><div class="card-title">Remove an organisation</div></div>
+              <div class="card-body">
+                <details>
+                  <summary style="cursor:pointer;font-size:0.85rem;color:var(--text-secondary)">Permanent. Open only if that is what you mean to do.</summary>
+                  <div style="font-size:0.82rem;color:var(--text-secondary);margin:0.7rem 0;line-height:1.5">
+                    Deletes an organisation and everything it owns &mdash; its people, its evidence, its inquiries, its conversations &mdash; from memory and from the database. There is no undo. Deleting a seed from the code does not do this; only this does.
+                  </div>
+                  <input type="password" id="purge-key" class="input" placeholder="Platform key" autocomplete="off"
+                    style="width:100%;margin-bottom:0.5rem">
+                  <input type="text" id="purge-code" class="input" placeholder="Type the org code to confirm" autocomplete="off"
+                    style="width:100%;margin-bottom:0.6rem">
+                  <button class="btn btn-outline btn-sm" id="purge-btn" onclick="purgeOrg()">Remove it</button>
+                  <div id="purge-result" style="margin-top:0.8rem;font-size:0.82rem"></div>
+                </details>
               </div>
             </div>
             <div class="card">
@@ -1865,8 +1882,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260902m"></script>
-<script src="js/auth.js?v=20260902m"></script>
+<script src="js/data.js?v=20260903a"></script>
+<script src="js/auth.js?v=20260903a"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1934,14 +1951,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260902m"></script>
-<script src="js/ui.js?v=20260902m"></script>
-<script src="js/attachments.js?v=20260902m"></script>
-<script src="js/scenarios.js?v=20260902m"></script>
-<script src="js/chat.js?v=20260902m"></script>
-<script src="js/tree.js?v=20260902m"></script>
-<script src="js/voice.js?v=20260902m"></script>
-<script src="js/app.js?v=20260902m"></script>
+<script src="js/charts.js?v=20260903a"></script>
+<script src="js/ui.js?v=20260903a"></script>
+<script src="js/attachments.js?v=20260903a"></script>
+<script src="js/scenarios.js?v=20260903a"></script>
+<script src="js/chat.js?v=20260903a"></script>
+<script src="js/tree.js?v=20260903a"></script>
+<script src="js/voice.js?v=20260903a"></script>
+<script src="js/app.js?v=20260903a"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->
