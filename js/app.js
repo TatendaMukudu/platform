@@ -670,7 +670,6 @@ const NAV_ROUTES = {
   settings:        () => renderSettings(),
   // Legacy dashboards (still real destinations for admin/super)
   dashboard:       () => renderDashboard(),
-  members:         () => renderMembers(),
 };
 function navigate(dest){
   // 1/2. normalise + resolve alias + validate → fail SAFE to Home (never blank, never a retired identity).
@@ -1311,7 +1310,6 @@ async function _confirmRemovePerson(userId) {
 
     // Refresh whichever page is visible
     const page = AppState.currentPage;
-    if (page === 'members')  renderMembers();
     if (page === 'people')   renderPeople();
     if (page === 'dashboard') renderDashboard();
 
@@ -1844,47 +1842,11 @@ function renderDashboard(){
 }
 
 /* ── MEMBERS PAGE ────────────────────────────────────────── */
-let memberSearch = '', memberGroup = 'All';
+/* [REMOVED] memberSearch/memberGroup — state for the retired Organisation page. */
 
-function renderMembers(){
-  // ── Empty state guard ─────────────────────────────────────
-  if (AppState.orgDataLoaded && AppState.members.length === 0) {
-    const tabsEl = document.getElementById('members-group-tabs');
-    if (tabsEl) tabsEl.innerHTML = '';
-    const grid = document.getElementById('members-grid');
-    if (grid) grid.innerHTML = `
-      <div style="grid-column:1/-1;text-align:center;padding:3rem 1rem">
-        <div style="font-size:2rem;margin-bottom:0.5rem"></div>
-        <div style="font-weight:600;margin-bottom:0.3rem">No members yet</div>
-        <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:1rem">Add people via People → Onboard</div>
-        <button class="btn btn-accent btn-sm" onclick="navigate('people');switchPeopleTab('onboard')">+ Add Member</button>
-      </div>`;
-    return;
-  }
+/* [REMOVED] renderMembers — the Organisation page went with it. */
 
-  // Use org-defined metrics for column headers if available
-  const orgMetrics = AppState.orgMetrics || [];
-  const groups = AppState.getGroups();
-
-  // Group filter tabs
-  const groupTabs = document.getElementById('members-group-tabs');
-  groupTabs.innerHTML = groups.map(g =>
-    `<button class="tab-btn ${g===memberGroup?'active':''}" onclick="filterMembers('${g}')">${g}</button>`
-  ).join('');
-
-  const filtered = AppState.getFilteredMembers(memberGroup, memberSearch);
-  document.getElementById('members-count').textContent = `${filtered.length} members`;
-
-  const grid = document.getElementById('members-grid');
-  grid.innerHTML = filtered.length
-    ? filtered.map(m => memberCardHTML(m, orgMetrics)).join('')
-    : `<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon"></div><p>No members match your search.</p></div>`;
-}
-
-function filterMembers(group){
-  memberGroup = group;
-  renderMembers();
-}
+/* [REMOVED] filterMembers — it existed only to re-render the Organisation page. */
 
 /* ── ANALYTICS PAGE ──────────────────────────────────────── */
 function renderAnalytics(){
