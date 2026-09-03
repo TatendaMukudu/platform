@@ -175,8 +175,6 @@ const ScenarioEngine = {
     }
 
     // Nudge IQ score
-    member.iqScore = Math.round(member.iqScore * 0.85 + score.overall * 0.15);
-    member.iqGrade = member.iqScore >= 80 ? 'A' : member.iqScore >= 60 ? 'B' : 'C';
     AppState.stats = buildEmptyOrgStats(AppState.members.length);
 
     const dims = [
@@ -354,7 +352,6 @@ const ScenarioEngine = {
     const member = AppState.getMember(this.memberId);
     if (!member) return;
     member.alerts        = (member.alerts || 0) + 1;
-    member.wellnessScore = Math.max(5, (member.wellnessScore || 50) - 15);
     AppState.alerts.unshift({
       type:     'danger',
       title:    'Mandated Reporter Alert',

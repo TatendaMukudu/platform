@@ -46,8 +46,8 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260903o"/>
-<link rel="stylesheet" href="css/member.css?v=20260903o"/>
+<link rel="stylesheet" href="css/styles.css?v=20260903p"/>
+<link rel="stylesheet" href="css/member.css?v=20260903p"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -258,87 +258,6 @@
       <!-- ════════════════════════════
            DASHBOARD PAGE
            ════════════════════════════ -->
-      <section class="page active" id="page-dashboard">
-        <div class="section-header">
-          <div>
-            <div class="section-title">Organization Overview</div>
-            <div class="section-sub">Real-time performance intelligence across your entire organization</div>
-          </div>
-          <div style="display:flex;gap:0.5rem">
-            <button class="btn btn-outline btn-sm" onclick="navigate('reports')">Full Report</button>
-            <button class="btn btn-accent btn-sm" onclick="navigate('people');switchPeopleTab('onboard')">+ Add Member</button>
-          </div>
-        </div>
-
-        <!-- Stat cards -->
-        <div class="stats-grid" id="dash-stats"></div>
-
-        <!-- Charts row 1 -->
-        <div class="grid-2" style="margin-bottom:1rem">
-          <div class="card">
-            <div class="card-header">
-              <div class="card-title">Performance Trend</div>
-              <select class="btn btn-outline btn-sm" style="padding:0.25rem 0.6rem;font-size:0.75rem">
-                <option>Last 12 months</option>
-                <option>Last 6 months</option>
-              </select>
-            </div>
-            <div class="card-body">
-              <div class="chart-wrap"><canvas id="chart-perf-history"></canvas></div>
-            </div>
-          </div>
-          <div class="card">
-            <div class="card-header"><div class="card-title">Group / Team Performance</div></div>
-            <div class="card-body">
-              <div class="chart-wrap"><canvas id="chart-group-avg"></canvas></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Charts row 2 -->
-        <div class="grid-2" style="margin-bottom:1rem">
-          <div class="card">
-            <div class="card-header"><div class="card-title">Wellness Distribution</div></div>
-            <div class="card-body" style="display:flex;justify-content:center">
-              <div style="max-width:260px;width:100%">
-                <canvas id="chart-wellness"></canvas>
-              </div>
-            </div>
-          </div>
-          <div class="card">
-            <div class="card-header"><div class="card-title">IntelliQ vs Performance</div></div>
-            <div class="card-body">
-              <div class="chart-wrap"><canvas id="chart-scatter"></canvas></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Bottom row: top5 + alerts -->
-        <div class="grid-2">
-          <div class="card">
-            <div class="card-header">
-              <div class="card-title">Top Performers</div>
-            </div>
-            <div class="card-body" style="padding:0">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Name</th><th>Role</th><th>IQ</th><th>Performance</th><th>Grade</th>
-                  </tr>
-                </thead>
-                <tbody id="dash-top5"></tbody>
-              </table>
-            </div>
-          </div>
-          <div class="card">
-            <div class="card-header">
-              <div class="card-title">Recent Alerts</div>
-              <button class="btn btn-outline btn-sm" onclick="navigate('alerts')">View All</button>
-            </div>
-            <div id="dash-alerts"></div>
-          </div>
-        </div>
-      </section>
 
       <!-- ════════════════════════════
            MEMBERS PAGE
@@ -352,74 +271,10 @@
       <!-- ════════════════════════════
            ANALYTICS PAGE
            ════════════════════════════ -->
-      <section class="page" id="page-analytics">
-        <div class="section-header">
-          <div>
-            <div class="section-title">Analytics & Insights</div>
-            <div class="section-sub">Deep intelligence across all metrics and groups</div>
-          </div>
-          <button class="btn btn-outline btn-sm" onclick="exportReport()">Export</button>
-        </div>
-
-        <div class="grid-2" style="margin-bottom:1rem">
-          <div class="card">
-            <div class="card-header"><div class="card-title">Average Metric Scores (Org-wide)</div></div>
-            <div class="card-body">
-              <div class="chart-wrap"><canvas id="chart-metric-avgs"></canvas></div>
-            </div>
-          </div>
-          <div class="card">
-            <div class="card-header"><div class="card-title">Top 5 vs Bottom 5 Performers</div></div>
-            <div class="card-body">
-              <div class="chart-wrap"><canvas id="chart-top-bot"></canvas></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="grid-2" style="margin-bottom:1rem">
-          <div class="card">
-            <div class="card-header"><div class="card-title">IntelliQ Score Distribution</div></div>
-            <div class="card-body">
-              <div class="chart-wrap"><canvas id="chart-iq-dist"></canvas></div>
-            </div>
-          </div>
-          <div class="card">
-            <div class="card-header"><div class="card-title">Group Performance Trends (6 Months)</div></div>
-            <div class="card-body">
-              <div class="chart-wrap"><canvas id="chart-group-trend"></canvas></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title">At-Risk Members</div>
-            <span style="font-size:0.75rem;color:var(--text-secondary)">Members requiring immediate attention</span>
-          </div>
-          <div class="card-body" style="padding:0">
-            <table class="data-table">
-              <thead>
-                <tr><th>Name</th><th>Group</th><th>Wellness</th><th>Performance</th><th>Alerts</th><th></th></tr>
-              </thead>
-              <tbody id="analytics-risk-table"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
 
       <!-- ════════════════════════════
            SCENARIOS PAGE
            ════════════════════════════ -->
-      <section class="page" id="page-scenarios">
-        <div class="section-header">
-          <div>
-            <div class="section-title">AI Assessments</div>
-            <div class="section-sub">Write a brief — the AI designs the assessment, you approve it, then it runs with the member</div>
-          </div>
-          <div id="scenarios-grade-badge"></div>
-        </div>
-        <div id="scenarios-content"></div>
-      </section>
 
       <!-- ── Member Timeline Modal ──────────────────────────────────────────── -->
       <div id="member-timeline-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1000;overflow-y:auto;padding:2rem 1rem">
@@ -498,67 +353,10 @@
       <!-- ════════════════════════════
            ALERTS PAGE
            ════════════════════════════ -->
-      <section class="page" id="page-alerts">
-        <div class="section-header">
-          <div>
-            <div class="section-title">Alerts & Notifications</div>
-            <div class="section-sub"><span id="alerts-unread-count">0</span> unread alerts</div>
-          </div>
-          <button class="btn btn-outline btn-sm" onclick="markAllRead()">Mark All Read</button>
-        </div>
-
-        <div class="card">
-          <div id="alerts-list"></div>
-        </div>
-      </section>
 
       <!-- ════════════════════════════
            REPORTS PAGE
            ════════════════════════════ -->
-      <section class="page" id="page-reports">
-        <div class="section-header">
-          <div>
-            <div class="section-title">Reports & Stat Sheets</div>
-            <div class="section-sub">Official performance documentation for your organization</div>
-          </div>
-          <button class="btn btn-accent btn-sm" onclick="exportReport()">Export PDF</button>
-        </div>
-
-        <!-- Report header card -->
-        <div class="card" style="margin-bottom:1rem">
-          <div class="card-body">
-            <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:1rem">
-              <div>
-                <div style="font-size:1.2rem;font-weight:700;margin-bottom:4px" id="report-org">—</div>
-                <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px">
-                  <span id="report-mode">—</span> &nbsp;·&nbsp; <span id="report-grade"></span>
-                </div>
-                <div style="font-size:0.78rem;color:var(--text-muted)">Generated: <span id="report-date">—</span></div>
-              </div>
-              <div style="display:grid;grid-template-columns:repeat(4,auto);gap:1.5rem;text-align:center">
-                <div><div style="font-size:1.4rem;font-weight:800" id="report-total">—</div><div style="font-size:0.72rem;color:var(--text-secondary)">Members</div></div>
-                <div><div style="font-size:1.4rem;font-weight:800;color:var(--accent)" id="report-avg-iq">—</div><div style="font-size:0.72rem;color:var(--text-secondary)">Avg IQ</div></div>
-                <div><div style="font-size:1.4rem;font-weight:800;color:var(--success)" id="report-avg-perf">—</div><div style="font-size:0.72rem;color:var(--text-secondary)">Avg Perf</div></div>
-                <div><div style="font-size:1.4rem;font-weight:800;color:var(--danger)" id="report-at-risk">—</div><div style="font-size:0.72rem;color:var(--text-secondary)">At Risk</div></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Stat Sheet -->
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title">Full Stat Sheet</div>
-            <span style="font-size:0.75rem;color:var(--text-secondary)">Click any row to view full profile</span>
-          </div>
-          <div style="overflow-x:auto">
-            <table class="data-table">
-              <thead id="stat-sheet-thead"></thead>
-              <tbody id="stat-sheet-tbody"></tbody>
-            </table>
-          </div>
-        </div>
-      </section>
 
       <!-- ════════════════════════════
            SETTINGS PAGE
@@ -851,30 +649,8 @@
       </section>
 
       <!-- ── ORGANISATION PAGE (renamed from My Team) ────── -->
-      <section class="page" id="page-organisation">
-        <div class="section-header">
-          <div>
-            <div class="section-title">Organisation</div>
-            <div class="section-sub" id="myteam-count">—</div>
-          </div>
-          <div>
-            <input class="search-input" id="myteam-search" placeholder="Search name or email…"
-                   oninput="filterMyTeam(this.value)" style="min-width:200px">
-          </div>
-        </div>
-        <div id="myteam-content"></div>
-      </section>
 
       <!-- ── ASSIGNMENTS PAGE ──────────────────────────────── -->
-      <section class="page" id="page-assignments">
-        <div class="section-header">
-          <div>
-            <div class="section-title">Assignments</div>
-            <div class="section-sub">Assign assessments to your visible members</div>
-          </div>
-        </div>
-        <div id="assignments-content"></div>
-      </section>
 
       <!-- Intelligence / Group Health pages retired: both folded into the one
            privacy-safe Team briefing (leader-home). Their routes alias to it. -->
@@ -988,7 +764,7 @@
 
       <!-- ── HOME PAGE ─────────────────────────────────────── -->
       <!-- ── "ME" CONTEXT (Individual Experience) — proactive, reasoning-first ── -->
-      <section class="page" id="page-home">
+      <section class="page active" id="page-home">
         <div class="page-header">
           <div class="page-header-greeting" id="home-greeting">Good morning</div>
           <div class="page-header-title"    id="home-name">—</div>
@@ -1838,8 +1614,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260903o"></script>
-<script src="js/auth.js?v=20260903o"></script>
+<script src="js/data.js?v=20260903p"></script>
+<script src="js/auth.js?v=20260903p"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1907,14 +1683,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260903o"></script>
-<script src="js/ui.js?v=20260903o"></script>
-<script src="js/attachments.js?v=20260903o"></script>
-<script src="js/scenarios.js?v=20260903o"></script>
-<script src="js/chat.js?v=20260903o"></script>
-<script src="js/tree.js?v=20260903o"></script>
-<script src="js/voice.js?v=20260903o"></script>
-<script src="js/app.js?v=20260903o"></script>
+<script src="js/charts.js?v=20260903p"></script>
+<script src="js/ui.js?v=20260903p"></script>
+<script src="js/attachments.js?v=20260903p"></script>
+<script src="js/scenarios.js?v=20260903p"></script>
+<script src="js/chat.js?v=20260903p"></script>
+<script src="js/tree.js?v=20260903p"></script>
+<script src="js/voice.js?v=20260903p"></script>
+<script src="js/app.js?v=20260903p"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->

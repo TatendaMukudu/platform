@@ -32,9 +32,6 @@ const VERDICT_STYLE = {
   concern:             { color: 'var(--danger)',     text: 'Needs attention' },
 };
 function verdictStyle(verdict){ return VERDICT_STYLE[verdict] || VERDICT_STYLE.unknown; }
-function alertDotColor(type){
-  return type==='danger'?'red' : type==='warning'?'yellow' : 'green';
-}
 
 /* ── SVG RING ────────────────────────────────────────────── */
 function iqRingHTML(score, color='#4f8ef7', size=120){
@@ -81,33 +78,11 @@ function progressHTML(val, color){
 /* [REMOVED] memberCardHTML — the only caller was the Organisation page, retired September 2026. */
 
 /* ── ALERT ROW ───────────────────────────────────────────── */
-function alertItemHTML(a, idx){
-  const dotClass = alertDotColor(a.type);
-  return `
-    <div class="alert-item ${a.unread?'unread':''}" onclick="markAlertRead(${idx})">
-      <div class="alert-dot-wrap"><span class="status-dot ${dotClass}"></span></div>
-      <div style="flex:1">
-        <div class="alert-title">${a.title}</div>
-        <div class="alert-detail">${a.detail}</div>
-      </div>
-      <div class="alert-time">${a.time}</div>
-    </div>`;
-}
+
 
 
 /* ── WELLNESS METER ──────────────────────────────────────── */
-function wellnessMeterHTML(score){
-  if (score === null || score === undefined) {
-    return `<span style="font-size:0.78rem;color:var(--text-muted)">No wellness data yet</span>`;
-  }
-  return `
-    <div class="wellness-bar">
-      <div class="marker" style="left:${score}%"></div>
-    </div>
-    <div style="display:flex;justify-content:space-between;font-size:0.68rem;color:var(--text-muted);margin-top:2px">
-      <span>Critical</span><span>Low</span><span>Moderate</span><span>Good</span><span>Excellent</span>
-    </div>`;
-}
+
 
 /* ── DEVELOPMENT PLAN ────────────────────────────────────── */
 function devPlanHTML(plan){
@@ -167,14 +142,6 @@ function generateRecommendation(member, metrics){
       `${member.name} demonstrates exceptional strength in <strong>${highest[0]}</strong> (${highest[1]}). Leverage this in leadership and peer mentoring roles.`,
     ];
 
-    if (member.wellnessScore != null) {
-      recs.push(`Wellness score of ${member.wellnessScore} requires attention. Recommend a structured wellbeing check-in programme.`);
-    }
-    if (member.iqScore != null) {
-      // NEUTRALIZED: no client-side verdict/threshold from the raw score — state it factually
-      // and defer interpretation to the server assessment presentation state.
-      recs.push(`IntelliQ score of ${member.iqScore} recorded from scenario practice. Open the assessment breakdown for the server-supplied interpretation and next steps.`);
-    }
 
     return recs;
   } catch(e) {

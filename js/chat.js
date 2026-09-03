@@ -150,7 +150,6 @@ const ChatEngine = {
     if (!member) return;
 
     member.alerts      = (member.alerts || 0) + 1;
-    member.wellnessScore = Math.max(5, (member.wellnessScore || 50) - 15);
 
     AppState.alerts.unshift({
       type:     'danger',

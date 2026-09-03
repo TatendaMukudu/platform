@@ -34,6 +34,7 @@ const BACKEND_ONLY = new Map(Object.entries({
   '/api/admin/metrics': 'operator tooling',
   '/api/admin/persistence': 'operator tooling',
   '/api/groups/create': 'the Groups UI was retired in September 2026 (the tree is the one structure). The routes and their stores stay for orgs that already have groups, and group-model-owner-smoke + cross-org-isolation-http-smoke still exercise this one; removing the subsystem is its own piece of work, not a side effect of hiding a tab.',
+  '/api/platform/assign-scenario': 'assessments and scenarios were taken OUT of the pilot in September 2026 (founder decision) and their eight pages were cut, which removed this route\'s only caller. The subsystem itself stays and stays tested — endpoint-smoke, workspace-assessment-smoke and assessment-consumption-smoke all still exercise it — because taking a surface out of a pilot is not the same act as deleting a capability, and conflating the two is how a decision about one week becomes a decision about the product.',
   '/api/admin/llm-mode': 'operator tooling',
   '/api/admin/backfill-canonical': 'one-off migration',
   '/api/admin/checkin-classification-audit': 'one-off audit',

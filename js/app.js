@@ -657,19 +657,11 @@ const NAV_ROUTES = {
   'operate': () => renderOperate(),
   'leader-groups': () => renderLeaderGroups(),
   'data-sources':  () => renderDataSources(),
-  assignments:     () => renderAssignments(),
   // Management — org-wide
   'org-health':    () => renderOrgHealth(),
-  analytics:       () => renderAnalytics(),
-  scenarios:       () => renderScenarios(),
-  organisation:    () => renderMyTeam(),
   people:          () => renderPeople(),
   safeguarding:   () => renderSafeguardingQueue(),
-  alerts:          () => renderAlerts(),
-  reports:         () => renderReports(),
   settings:        () => renderSettings(),
-  // Legacy dashboards (still real destinations for admin/super)
-  dashboard:       () => renderDashboard(),
 };
 function navigate(dest){
   // 1/2. normalise + resolve alias + validate → fail SAFE to Home (never blank, never a retired identity).
@@ -1311,7 +1303,6 @@ async function _confirmRemovePerson(userId) {
     // Refresh whichever page is visible
     const page = AppState.currentPage;
     if (page === 'people')   renderPeople();
-    if (page === 'dashboard') renderDashboard();
 
   } catch(e) {
     showToast(e.message || 'Could not remove person', 'warning');
@@ -1685,161 +1676,10 @@ function _detachSidebarClose() {
 }
 
 /* ── Onboarding empty-state HTML (reused across pages) ───────────────── */
-function _emptyStateHTML(_mode) {
-  // Generic — no mode-specific terms
-  return `
-    <div style="text-align:center;padding:3rem 1rem;max-width:480px;margin:0 auto">
-      <div style="font-size:2.5rem;margin-bottom:1rem"></div>
-      <div style="font-size:1.05rem;font-weight:700;color:var(--text-primary);margin-bottom:0.5rem">No members yet</div>
-      <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1.5rem;line-height:1.6">
-        Add people to your organisation to start using IntelliQ — manually, by spreadsheet, invite, or join link.
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:0.6rem;justify-content:center">
-        <button class="btn btn-accent btn-sm" onclick="navigate('people');setTimeout(()=>switchPeopleTab('onboard'),100)">+ Add Member</button>
-        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>{switchPeopleTab('onboard');_openOnboardSection('import')},100)">Import</button>
-        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>{switchPeopleTab('onboard');_openOnboardSection('invite')},100)">Invite</button>
-        <button class="btn btn-outline btn-sm" onclick="navigate('people');setTimeout(()=>{switchPeopleTab('onboard');_openOnboardSection('link')},100)">Join Link</button>
-      </div>
-    </div>`;
-}
+
 
 /* ── DASHBOARD ───────────────────────────────────────────── */
-function renderDashboard(){
-  const s     = AppState.stats;
-  const color = ORG_MODES[AppState.mode]?.color || 'var(--accent)';
 
-  // ── Empty state guard ─────────────────────────────────────
-  if (AppState.orgDataLoaded && AppState.members.length === 0) {
-    const statsGrid = document.getElementById('dash-stats');
-    if (statsGrid) statsGrid.innerHTML = `
-      <div style="grid-column:1/-1;text-align:center;padding:3rem 1rem">
-        <div style="font-size:2.5rem;margin-bottom:0.75rem"></div>
-        <div style="font-size:1.1rem;font-weight:700;margin-bottom:0.4rem">Your platform is set up</div>
-        <div style="font-size:0.85rem;color:var(--text-secondary);max-width:360px;margin:0 auto 1.2rem">
-          Start by adding people to your organisation. Use <strong>People → Onboard</strong> to add them individually or by invite.
-        </div>
-        <button class="btn btn-accent" onclick="navigate('people');switchPeopleTab('onboard')">+ Add First Person</button>
-      </div>`;
-    return;
-  }
-
-  // ── Three-question summary panel ──────────────────────────
-  const atRisk    = AppState.members.filter(m => m.wellnessScore !== null && m.wellnessScore < 50).length;
-  const improving = AppState.members.filter(m => m.trend === 'up').length;
-  const topByIQ   = [...AppState.members].filter(m=>m.iqScore).sort((a,b)=>b.iqScore-a.iqScore)[0];
-  const unreadAlerts = AppState.getUnreadAlertCount?.() || 0;
-
-  const statsGrid = document.getElementById('dash-stats');
-  statsGrid.innerHTML = `
-    <!-- Question 1: What is happening? -->
-    <div class="stat-card" style="border-left:3px solid ${color}">
-      <div class="stat-label" style="margin-bottom:0.5rem">What is happening?</div>
-      <div style="font-size:1.8rem;font-weight:800;margin-bottom:0.25rem">${s.totalMembers}</div>
-      <div style="font-size:0.8rem;color:var(--text-secondary)">people in your org</div>
-      <div style="font-size:0.78rem;margin-top:0.5rem;color:var(--text-muted)">
-        ${s.avgIQ !== null ? `Avg IQ: <strong>${s.avgIQ}</strong> &nbsp;·&nbsp;` : ''}
-        ${s.avgWellness !== null ? `Avg Wellness: <strong>${s.avgWellness}</strong>` : 'No assessment data yet'}
-      </div>
-    </div>
-
-    <!-- Question 2: Who needs attention? -->
-    <div class="stat-card" style="border-left:3px solid ${atRisk > 0 ? 'var(--danger)' : 'var(--success)'}">
-      <div class="stat-label" style="margin-bottom:0.5rem">Who needs attention?</div>
-      <div style="font-size:1.8rem;font-weight:800;margin-bottom:0.25rem;color:${atRisk>0?'var(--danger)':'var(--success)'}">${atRisk}</div>
-      <div style="font-size:0.8rem;color:var(--text-secondary)">at-risk members</div>
-      <div style="font-size:0.78rem;margin-top:0.5rem;color:var(--text-muted)">
-        ${improving} improving &nbsp;·&nbsp; ${unreadAlerts} unread alerts
-      </div>
-    </div>
-
-    <!-- Question 3: What should I do? -->
-    <div class="stat-card" style="border-left:3px solid var(--accent)">
-      <div class="stat-label" style="margin-bottom:0.5rem">What should I do?</div>
-      ${atRisk > 0
-        ? `<div style="font-size:0.88rem;font-weight:600;margin-bottom:0.25rem">Check on ${atRisk} at-risk ${atRisk===1?'member':'members'}</div>
-           <div style="font-size:0.78rem;color:var(--text-muted)">Wellness below threshold — schedule a check-in</div>
-           <button class="btn btn-outline btn-sm" style="margin-top:0.5rem;font-size:0.75rem" onclick="navigate('leader-home')">Open the Team briefing →</button>`
-        : improving > 0
-          ? `<div style="font-size:0.88rem;font-weight:600;margin-bottom:0.25rem">Recognise ${improving} improving ${improving===1?'member':'members'}</div>
-             <div style="font-size:0.78rem;color:var(--text-muted)">Positive momentum — reinforce it</div>`
-          : `<div style="font-size:0.88rem;font-weight:600;margin-bottom:0.25rem">Run your first assessments</div>
-             <div style="font-size:0.78rem;color:var(--text-muted)">No data yet — assign scenarios to get started</div>
-             <button class="btn btn-outline btn-sm" style="margin-top:0.5rem;font-size:0.75rem" onclick="navigate('scenarios')">Assessments →</button>`
-      }
-    </div>`;
-
-
-  // Performance history chart
-  setTimeout(() => {
-    createLineChart('chart-perf-history', MONTHS, [
-      {
-        label: 'Avg Performance',
-        data: AppState.perfHistory,
-        borderColor: color,
-        backgroundColor: color+'22',
-        fill: true, tension: 0.4, borderWidth: 2, pointRadius: 3,
-      },
-      {
-        label: 'IntelliQ Trend',
-        data: AppState.perfHistory.map(v => Math.round(v * 0.97 + Math.random()*4-2)),
-        borderColor: '#7c5af5',
-        backgroundColor: 'transparent',
-        tension: 0.4, borderWidth: 2, pointRadius: 0, borderDash: [5,5],
-      },
-    ]);
-
-    // Group avg bar chart
-    const groups = AppState.getGroups().filter(g=>g!=='All');
-    const groupAvgs = groups.map(g => {
-      const ms = AppState.members.filter(m=>m.group===g);
-      return Math.round(ms.reduce((s,m)=>s+m.overall,0)/ms.length);
-    });
-    createBarChart('chart-group-avg', groups, [{
-      label: 'Avg Performance',
-      data: groupAvgs,
-      backgroundColor: groups.map((_,i)=>COLORS[i]+'99'),
-      borderColor: groups.map((_,i)=>COLORS[i]),
-      borderWidth: 1, borderRadius: 4,
-    }], { legend: false });
-
-    // Wellness distribution doughnut
-    const excellent = AppState.members.filter(m=>m.wellnessScore>=80).length;
-    const good      = AppState.members.filter(m=>m.wellnessScore>=60 && m.wellnessScore<80).length;
-    const moderate  = AppState.members.filter(m=>m.wellnessScore>=40 && m.wellnessScore<60).length;
-    const critical  = AppState.members.filter(m=>m.wellnessScore<40).length;
-    createDoughnutChart('chart-wellness', ['Excellent','Good','Moderate','Critical'],
-      [excellent, good, moderate, critical],
-      ['#4ff77a','#4f8ef7','#f7b24f','#f74f4f']);
-
-    // IQ vs Performance scatter
-    createScatterChart('chart-scatter', AppState.members);
-  }, 50);
-
-  // Recent alerts
-  const alertsContainer = document.getElementById('dash-alerts');
-  alertsContainer.innerHTML = AppState.alerts.slice(0,6).map((a,i)=>alertItemHTML(a,i)).join('');
-
-  // Top 5 performers
-  const top5 = [...AppState.members].sort((a,b)=>b.overall-a.overall).slice(0,5);
-  document.getElementById('dash-top5').innerHTML = top5.map(m => `
-    <tr onclick="showProfile('${m.id}')">
-      <td>
-        <div style="display:flex;align-items:center;gap:8px">
-          <div class="user-avatar" style="width:28px;height:28px;font-size:0.7rem;background:${m.color}">${m.initials}</div>
-          ${m.name}
-        </div>
-      </td>
-      <td>${m.role}</td>
-      <td><span style="color:${scoreColor(m.iqScore)};font-weight:600">${m.iqScore ?? '—'}</span></td>
-      <td>
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="flex:1">${progressHTML(m.overall, scoreColor(m.overall))}</div>
-          <span style="font-size:0.8rem;font-weight:600;width:28px;text-align:right">${m.overall ?? '—'}</span>
-        </div>
-      </td>
-      <td>${gradeBadgeHTML(m.iqGrade)}</td>
-    </tr>`).join('');
-}
 
 /* ── MEMBERS PAGE ────────────────────────────────────────── */
 /* [REMOVED] memberSearch/memberGroup — state for the retired Organisation page. */
@@ -1849,87 +1689,7 @@ function renderDashboard(){
 /* [REMOVED] filterMembers — it existed only to re-render the Organisation page. */
 
 /* ── ANALYTICS PAGE ──────────────────────────────────────── */
-function renderAnalytics(){
-  const mode    = AppState.mode;
-  const color   = ORG_MODES[mode]?.color || 'var(--accent)';
-  // Use org-defined metrics; fallback to any scores keys found on members
-  const metrics = (AppState.orgMetrics || []).map(m => m.name || m) ||
-    Object.keys(AppState.members[0]?.scores || {});
 
-  // ── Empty state guard ─────────────────────────────────────
-  if (AppState.orgDataLoaded && AppState.members.length === 0) {
-    const riskEl = document.getElementById('analytics-risk-table');
-    if (riskEl) riskEl.innerHTML = `<tr><td colspan="99">${_emptyStateHTML(mode)}</td></tr>`;
-    return;
-  }
-
-  // Only members with real score data
-  const scoredMembers = AppState.members.filter(m => m.overall !== null);
-
-  setTimeout(() => {
-    // Metric averages bar — only use members with actual scores
-    const metricAvgs = metrics.map(m => {
-      const vals = scoredMembers.map(mem => mem.scores[m]).filter(v => v !== null && v !== undefined);
-      return vals.length ? Math.round(vals.reduce((a,b)=>a+b,0)/vals.length) : 0;
-    });
-    createHorizBarChart('chart-metric-avgs', metrics, metricAvgs, color);
-
-    // Top vs Bottom performers — only real data
-    const top = [...scoredMembers].sort((a,b)=>b.overall-a.overall).slice(0,5);
-    const bot = [...scoredMembers].sort((a,b)=>a.overall-b.overall).slice(0,5);
-    createBarChart('chart-top-bot', [...top.map(m=>m.name.split(' ')[0]), ...bot.map(m=>m.name.split(' ')[0])],
-      [{
-        label: 'Performance',
-        data: [...top.map(m=>m.overall), ...bot.map(m=>m.overall)],
-        backgroundColor: [...top.map(()=>color+'99'), ...bot.map(()=>'#f74f4f99')],
-        borderColor: [...top.map(()=>color), ...bot.map(()=>'#f74f4f')],
-        borderWidth: 1, borderRadius: 4,
-      }], { legend: false });
-
-    // IQ distribution — only members with real IQ scores
-    const buckets = [0,0,0,0,0]; // 0-19,20-39,40-59,60-79,80-100
-    scoredMembers.filter(m => m.iqScore !== null).forEach(m => {
-      const b = Math.min(4, Math.floor(m.iqScore/20));
-      buckets[b]++;
-    });
-    createBarChart('chart-iq-dist', ['0-19','20-39','40-59','60-79','80-100'],
-      [{ label:'Members', data:buckets, backgroundColor:'#7c5af599', borderColor:'#7c5af5', borderWidth:1, borderRadius:4 }],
-      { legend:false });
-
-    // Trend over 6 months per group
-    const groups = AppState.getGroups().filter(g=>g!=='All');
-    const last6 = MONTHS.slice(-6);
-    const datasets = groups.slice(0,4).map((g,i) => ({
-      label: g,
-      data: Array.from({length:6}, () => rnd(55,92)),
-      borderColor: COLORS[i],
-      backgroundColor: 'transparent',
-      tension: 0.4, borderWidth: 2, pointRadius: 2,
-    }));
-    createLineChart('chart-group-trend', last6, datasets, { yMin:40 });
-  }, 50);
-
-  // At-risk table — only from members with real data
-  const atRisk = AppState.members.filter(m =>
-    (m.wellnessScore !== null && m.wellnessScore < 50) ||
-    (m.overall !== null && m.overall < 55) ||
-    m.alerts > 1
-  ).sort((a,b) => (a.wellnessScore ?? 100) - (b.wellnessScore ?? 100)).slice(0,8);
-  document.getElementById('analytics-risk-table').innerHTML = atRisk.map(m=>`
-    <tr onclick="showProfile('${m.id}')">
-      <td>
-        <div style="display:flex;align-items:center;gap:8px">
-          <div class="user-avatar" style="width:28px;height:28px;font-size:0.7rem;background:${m.color}">${m.initials}</div>
-          ${m.name}
-        </div>
-      </td>
-      <td>${m.group}</td>
-      <td><span style="color:${scoreColor(m.wellnessScore)};font-weight:600">${m.wellnessScore ?? '—'}</span></td>
-      <td><span style="color:${scoreColor(m.overall)};font-weight:600">${m.overall ?? '—'}</span></td>
-      <td>${m.alerts > 0 ? `<span style="color:var(--danger)">${m.alerts} active</span>` : '—'}</td>
-      <td><button class="btn btn-sm btn-accent" onclick="event.stopPropagation();showProfile('${m.id}')">View Profile</button></td>
-    </tr>`).join('');
-}
 
 /* ── INTELLIQ PAGE ───────────────────────────────────────── */
 
@@ -2048,79 +1808,15 @@ function _renderMemberTimeline(data, el) {
 }
 
 /* ── ALERTS PAGE ─────────────────────────────────────────── */
-function renderAlerts(){
-  // Run a health check each time the page is opened so it's always fresh
-  AppState.runHealthCheck();
 
-  const alerts  = AppState.alerts;
-  const container = document.getElementById('alerts-list');
-  document.getElementById('alerts-unread-count').textContent = AppState.getUnreadAlertCount();
 
-  if (!alerts.length) {
-    container.innerHTML = `<div class="empty-state"><div class="empty-icon"></div><p>No alerts — org looks healthy.</p></div>`;
-    return;
-  }
 
-  // Group: proactive (IntelliQ-generated) vs manual
-  const proactive = alerts.filter(a => a.proactive);
-  const manual    = alerts.filter(a => !a.proactive);
 
-  const sectionHTML = (title, icon, items) => {
-    if (!items.length) return '';
-    return `
-      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin:1rem 0 0.6rem">${icon} ${title} (${items.length})</div>
-      ${items.map((a, i) => {
-        const idx = alerts.indexOf(a);
-        return alertActionItemHTML(a, idx);
-      }).join('')}`;
-  };
 
-  container.innerHTML =
-    sectionHTML('IntelliQ Early Warnings', '', proactive) +
-    sectionHTML('Manual Flags & Notifications', '', manual);
-}
-
-function alertActionItemHTML(a, idx) {
-  const typeColors = { danger:'#f74f4f', warning:'#f7b24f', success:'#4ff77a', info:'#4f8ef7' };
-  const color = typeColors[a.type] || '#4f8ef7';
-  const unreadDot = a.unread ? `<span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block;flex-shrink:0;margin-top:4px"></span>` : `<span style="width:8px;height:8px;display:inline-block;flex-shrink:0"></span>`;
-  const proactiveBadge = a.proactive ? `<span style="font-size:0.65rem;background:rgba(124,90,245,0.15);color:var(--accent);border:1px solid rgba(124,90,245,0.3);border-radius:4px;padding:2px 6px;margin-left:6px">IntelliQ</span>` : '';
-  const respondedBadge = a.responded ? `<span style="font-size:0.65rem;background:rgba(79,247,122,0.15);color:var(--success);border:1px solid rgba(79,247,122,0.3);border-radius:4px;padding:2px 6px;margin-left:6px">Responded</span>` : '';
-
-  const actionBtn = a.memberId && !a.responded
-    ? `<button class="btn btn-accent btn-sm" style="flex-shrink:0"
-        onclick="openAlertCompose(${idx})">Respond →</button>`
-    : a.member
-    ? `<button class="btn btn-outline btn-sm" style="flex-shrink:0;font-size:0.73rem"
-        onclick="showProfile('${a.member.id}')">View Profile</button>`
-    : '';
-
-  return `
-    <div style="display:flex;gap:0.7rem;align-items:flex-start;padding:0.9rem 0;border-bottom:1px solid var(--border)"
-         onclick="markAlertRead(${idx})">
-      ${unreadDot}
-      <div style="flex:1;min-width:0">
-        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin-bottom:0.25rem">
-          <span style="font-size:0.85rem;font-weight:600;color:${color}">${a.title}</span>
-          ${proactiveBadge}${respondedBadge}
-        </div>
-        <div style="font-size:0.8rem;color:var(--text-secondary);line-height:1.5;margin-bottom:0.35rem">${a.detail}</div>
-        <div style="font-size:0.7rem;color:var(--text-muted)">${a.time}</div>
-      </div>
-      ${actionBtn}
-    </div>`;
-}
-
-function markAlertRead(idx){
-  if(AppState.alerts[idx]) AppState.alerts[idx].unread = false;
-  updateAlertBadge();
-  if (AppState.currentPage === 'alerts') renderAlerts();
-}
 
 function markAllRead(){
   AppState.alerts.forEach(a=>a.unread=false);
   updateAlertBadge();
-  renderAlerts();
   showToast('All alerts marked as read','success');
 }
 
@@ -2468,40 +2164,7 @@ let _alertComposeIdx    = null;
 let _alertAttachment    = null;
 let _alertDifficulty    = 'Medium';
 
-function openAlertCompose(alertIdx) {
-  const a = AppState.alerts[alertIdx];
-  if (!a) return;
 
-  _alertComposeIdx = alertIdx;
-  _alertAttachment = null;
-  _alertDifficulty = 'Medium';
-
-  // Header
-  document.getElementById('acm-title').textContent = `Respond: ${a.title}`;
-  document.getElementById('acm-sub').textContent   = a.member ? a.member.name : '';
-
-  // Context banner
-  document.getElementById('acm-context-banner').textContent = a.detail;
-
-  // Member selector — pre-select flagged member
-  const memberSel = document.getElementById('acm-member');
-  memberSel.innerHTML = AppState.members
-    .sort((x,y) => x.name.localeCompare(y.name))
-    .map(m => `<option value="${m.id}" ${m.id === a.memberId ? 'selected' : ''}>${m.name}</option>`)
-    .join('');
-
-  // Pre-fill brief from suggested
-  document.getElementById('acm-brief').value = a.suggestedBrief || '';
-
-  // Reset panels
-  document.getElementById('acm-draft-panel').style.display   = 'none';
-  document.getElementById('acm-attachment-preview').innerHTML = '';
-  document.getElementById('acm-embed-preview').innerHTML      = '';
-  document.getElementById('acm-embed-url').value              = '';
-
-  selectAlertDifficulty('Medium');
-  openModal('alert-compose-modal');
-}
 
 function selectAlertDifficulty(diff) {
   _alertDifficulty = diff;
@@ -2652,53 +2315,7 @@ function approveAlertDraft() {
 }
 
 /* ── REPORTS PAGE ────────────────────────────────────────── */
-function renderReports(){
-  const mode    = AppState.mode;
-  const color   = ORG_MODES[mode]?.color || 'var(--accent)';
-  const metrics = (AppState.orgMetrics || []).map(m => m.name || m);
 
-  // ── Empty state guard ─────────────────────────────────────
-  if (AppState.orgDataLoaded && AppState.members.length === 0) {
-    const tableEl = document.getElementById('stat-sheet-tbody');
-    if (tableEl) tableEl.innerHTML = `<tr><td colspan="99">${_emptyStateHTML(mode)}</td></tr>`;
-    return;
-  }
-
-  // Summary stat sheet
-  const s = AppState.stats;
-  document.getElementById('report-org').textContent = AppState.orgName;
-  document.getElementById('report-mode').textContent = ORG_MODES[mode].label;
-  document.getElementById('report-grade').innerHTML = gradeBadgeHTML(AppState.grade);
-  document.getElementById('report-date').textContent = new Date().toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'});
-  document.getElementById('report-total').textContent = s.totalMembers;
-  document.getElementById('report-avg-iq').textContent = s.avgIQ;
-  document.getElementById('report-avg-perf').textContent = s.avgOverall;
-  document.getElementById('report-at-risk').textContent = s.atRisk;
-
-  // Member stat sheet table
-  const sorted = [...AppState.members].sort((a,b)=>b.overall-a.overall);
-  document.getElementById('stat-sheet-thead').innerHTML = `
-    <tr>
-      <th>Rank</th><th>Name</th><th>Group</th>
-      ${metrics.map(m=>`<th>${m}</th>`).join('')}
-      <th>IntelliQ</th><th>Overall</th><th>Grade</th>
-    </tr>`;
-  document.getElementById('stat-sheet-tbody').innerHTML = sorted.map((m,i)=>`
-    <tr onclick="showProfile('${m.id}')">
-      <td><span style="font-weight:700;color:var(--text-muted)">${i+1}</span></td>
-      <td>
-        <div style="display:flex;align-items:center;gap:6px">
-          <div class="user-avatar" style="width:24px;height:24px;font-size:0.65rem;background:${m.color}">${m.initials}</div>
-          ${m.name}
-        </div>
-      </td>
-      <td style="color:var(--text-secondary)">${m.group}</td>
-      ${metrics.map(k=>`<td><span style="color:${scoreColor(m.scores[k])};font-weight:600">${m.scores[k] ?? '—'}</span></td>`).join('')}
-      <td><span style="color:${scoreColor(m.iqScore)};font-weight:600">${m.iqScore ?? '—'}</span></td>
-      <td><span style="font-weight:700;color:${scoreColor(m.overall)}">${m.overall ?? '—'}</span></td>
-      <td>${gradeBadgeHTML(m.iqGrade)}</td>
-    </tr>`).join('');
-}
 
 /* ── PEOPLE PAGE ─────────────────────────────────────────── */
 async function renderPeople() {
@@ -4208,9 +3825,7 @@ function _showProfileInner(id, m){
   document.getElementById('pm-joined').textContent  = m.joinDate ? `Joined ${m.joinDate}` : '';
   document.getElementById('pm-active').textContent  = m.lastActive ? `Active: ${m.lastActive}` : 'Not active yet';
   document.getElementById('pm-streak').textContent  = m.streak ? `${m.streak}-day streak` : '';
-  document.getElementById('pm-iq-ring').innerHTML   = iqRingHTML(m.iqScore, scoreColor(m.iqScore), 100);
   document.getElementById('pm-overall').textContent = m.overall ?? '—';
-  document.getElementById('pm-wellness').innerHTML  = wellnessMeterHTML(m.wellnessScore);
   document.getElementById('pm-notes').textContent   = m.notes;
   document.getElementById('pm-dev-plan').innerHTML  = devPlanHTML(m.devPlan);
 
@@ -4698,168 +4313,18 @@ function renderAllPages(){
 }
 
 /* ── EXPORT REPORT ───────────────────────────────────────── */
-function exportReport(){
-  showToast('Generating PDF report... (demo mode)','info');
-  setTimeout(()=>showToast('Report ready for download','success'), 2000);
-}
+
 
 /* ── ADD MEMBER MODAL ────────────────────────────────────── */
 // showAddMember / submitAddMember removed in Sprint 2.5.
 // All person creation goes through People → Onboard → _submitAddPerson().
 
 /* ── SCENARIOS PAGE ──────────────────────────────────────── */
-function renderScenarios() {
-  const color     = ORG_MODES[AppState.mode].color;
-  const scenarios = AppState.scenarios;
 
-  const gradeBadgeEl = document.getElementById('scenarios-grade-badge');
-  if (gradeBadgeEl) gradeBadgeEl.innerHTML = gradeBadgeHTML(AppState.grade);
-
-  const container = document.getElementById('scenarios-content');
-  if (!container) return;
-
-  // Use org's own metrics as domain suggestions — fall back to generic set
-  const metricNames = (AppState.metrics || []).map(m => typeof m === 'string' ? m : m.name).filter(Boolean);
-  const domainOptions = metricNames.length
-    ? metricNames.slice(0, 6)
-    : ['Decision Making', 'Situational Awareness', 'Communication', 'Leadership', 'Ethics', 'Pressure Response'];
-
-  const scenarioCards = scenarios.length ? scenarios.map(s => {
-    const completions = AppState.members.reduce((n, m) =>
-      n + ((m.scenarioResults || []).filter(r => r.scenarioId === s.id).length), 0);
-    return `
-      <div class="scenario-card">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:0.5rem">
-          <div>
-            <div class="scenario-card-title">${s.title}</div>
-            <div style="display:flex;gap:0.4rem;margin-top:0.3rem;flex-wrap:wrap">
-              <span class="domain-badge" style="background:${color}22;color:${color};border-color:${color}44">${s.domain}</span>
-              <span class="domain-badge">${s.difficulty}</span>
-              ${s.avgScore ? `<span class="domain-badge" style="color:var(--success);border-color:rgba(79,247,122,0.3)">Avg ${s.avgScore}</span>` : ''}
-            </div>
-          </div>
-          <div style="font-size:0.7rem;color:var(--text-muted);text-align:right;flex-shrink:0">
-            ${completions} run${completions !== 1 ? 's' : ''}<br>
-            <span style="font-size:0.65rem">${s.createdAt}</span>
-          </div>
-        </div>
-        <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.8rem;line-height:1.5">${s.brief}</div>
-        <div style="display:flex;align-items:center;justify-content:space-between">
-          <div style="font-size:0.72rem;color:var(--text-muted)">Created by ${s.createdBy}</div>
-          <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap">
-            <select class="form-input" id="sc-launch-member-${s.id}" style="font-size:0.75rem;padding:4px 8px;height:auto">
-              <option value="">— Member —</option>
-              ${[...AppState.members].sort((a,b)=>a.name.localeCompare(b.name))
-                .map(m=>`<option value="${m.id}">${m.name}</option>`).join('')}
-            </select>
-            <button class="btn btn-accent btn-sm" onclick="launchScenario('${s.id}')">▶ Run Here</button>
-            <button class="btn btn-outline btn-sm" onclick="assignToMemberApp('${s.id}')" title="Send to member's app">Assign</button>
-          </div>
-        </div>
-      </div>`;
-  }).join('') : `
-    <div style="padding:2.5rem 1rem;text-align:center;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius)">
-      <div style="font-size:2.5rem;margin-bottom:0.8rem"></div>
-      <div style="font-size:0.95rem;font-weight:600;color:var(--text-primary);margin-bottom:0.4rem">No assessments yet</div>
-      <div style="font-size:0.82rem;color:var(--text-secondary)">Write a brief above — the AI designs it, you approve it, then it runs with the member.</div>
-    </div>`;
-
-  container.innerHTML = `
-    <!-- BRIEF INPUT -->
-    <div style="background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);padding:1.2rem;margin-bottom:1rem">
-      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.9rem">Create an Assessment</div>
-
-      <div style="margin-bottom:0.8rem">
-        <label class="form-label">What's going on with this person?</label>
-        <textarea id="sc-brief" class="form-input" rows="3" style="resize:vertical"
-          placeholder="Describe what you've observed — their behaviour, recent performance, attitude, and anything that concerns or impresses you. Be specific."></textarea>
-      </div>
-
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:0.9rem">
-        <div>
-          <label class="form-label">Depth</label>
-          <div style="display:flex;gap:0.4rem;margin-top:2px">
-            ${['Basic','Standard','Advanced'].map(d => `
-              <button class="domain-badge sc-diff-btn" data-diff="${d}"
-                style="cursor:pointer;padding:5px 10px;font-size:0.73rem"
-                onclick="selectDifficulty('${d}')">${d}</button>`).join('')}
-          </div>
-        </div>
-        <div>
-          <label class="form-label">Select Member</label>
-          <select id="sc-member" class="form-input">
-            <option value="">— Select member —</option>
-            ${[...AppState.members].sort((a,b)=>a.name.localeCompare(b.name))
-              .map(m=>`<option value="${m.id}">${m.name} · ${m.role}</option>`).join('')}
-          </select>
-        </div>
-      </div>
-
-      <div style="display:flex;justify-content:flex-end">
-        <button class="btn btn-accent" id="sc-draft-btn" onclick="draftScenario()">
-          Draft Assessment with AI →
-        </button>
-      </div>
-    </div>
-
-    <!-- DRAFT REVIEW PANEL (hidden until AI drafts) -->
-    <div id="sc-draft-panel" style="display:none;background:var(--surface-1);border:1px solid var(--accent);border-radius:var(--radius);padding:1.2rem;margin-bottom:1rem">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-        <div>
-          <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent)">AI Draft — Review &amp; Approve</div>
-          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">Edit anything before it goes to the member. They will never see your brief or coach notes.</div>
-        </div>
-        <button class="btn btn-outline btn-sm" onclick="draftScenario()">↺ Regenerate</button>
-
-      </div>
-
-      <div style="margin-bottom:0.9rem">
-        <label class="form-label">Scenario Title</label>
-        <input type="text" id="sc-draft-title" class="form-input" />
-      </div>
-
-      <div style="margin-bottom:0.9rem">
-        <label class="form-label">Opening Situation <span style="font-weight:400;text-transform:none;color:var(--text-muted)">(what the member will see first)</span></label>
-        <textarea id="sc-draft-opening" class="form-input" rows="4" style="resize:vertical"></textarea>
-      </div>
-
-      <div style="margin-bottom:0.9rem">
-        <label class="form-label">Probe Questions <span style="font-weight:400;text-transform:none;color:var(--text-muted)">(AI will use these as follow-up framework)</span></label>
-        <div id="sc-draft-probes-list"></div>
-      </div>
-
-      <div style="background:rgba(124,90,245,0.08);border:1px solid rgba(124,90,245,0.25);border-radius:8px;padding:0.9rem;margin-bottom:1rem">
-        <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent);margin-bottom:0.4rem">Leader Note — Private</div>
-        <div id="sc-draft-coachnote" style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6"></div>
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:0.5rem">
-        <button class="btn btn-outline" onclick="document.getElementById('sc-draft-panel').style.display='none'">Cancel</button>
-        <button class="btn btn-accent" onclick="approveDraft()">Approve &amp; Launch</button>
-      </div>
-    </div>
-
-    <!-- SCENARIO LIST -->
-    <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.8rem">
-      ${scenarios.length} Assessment${scenarios.length !== 1 ? 's' : ''} Created
-    </div>
-    <div class="scenario-grid">${scenarioCards}</div>`;
-
-  selectDifficulty('Medium');
-}
 
 let _scenarioDifficulty = 'Medium';
 
-function selectDifficulty(diff) {
-  _scenarioDifficulty = diff;
-  document.querySelectorAll('.sc-diff-btn').forEach(btn => {
-    const active = btn.dataset.diff === diff;
-    const color  = ORG_MODES[AppState.mode].color;
-    btn.style.background  = active ? `${color}22` : '';
-    btn.style.color       = active ? color : '';
-    btn.style.borderColor = active ? `${color}44` : '';
-  });
-}
+
 
 /* ── Member-select helper ────────────────────────────────────────────────────
    Reads the value from any member <select>, then finds the matching AppState
@@ -4898,141 +4363,13 @@ function getSelectedMemberFromSelect(selectId) {
   return found;
 }
 
-async function draftScenario() {
-  const brief  = (document.getElementById('sc-brief')?.value || '').trim();
-  const member = getSelectedMemberFromSelect('sc-member');
 
-  if (!brief)   { showToast('Write a brief first', 'warning'); return; }
-  if (!member)  { showToast('Select a member', 'warning'); return; }
 
-  const memberId = member.id;
 
-  const btn = document.getElementById('sc-draft-btn');
-  if (btn) { btn.textContent = 'Drafting…'; btn.disabled = true; }
 
-  try {
-    const res = await fetch('/api/draft-scenario', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        brief,
-        orgMode:    AppState.mode,
-        orgName:    AppState.orgName,
-        memberName: member?.name?.split(' ')[0] || 'the member',
-        difficulty: _scenarioDifficulty,
-      }),
-    });
 
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const { draft } = await res.json();
 
-    // Populate draft review panel
-    document.getElementById('sc-draft-title').value   = draft.title   || '';
-    document.getElementById('sc-draft-opening').value = draft.opening || '';
-    document.getElementById('sc-draft-coachnote').textContent = draft.coachNote || '';
 
-    const probesList = document.getElementById('sc-draft-probes-list');
-    probesList.innerHTML = (draft.probes || []).map((p, i) => `
-      <div style="display:flex;gap:0.5rem;margin-bottom:0.4rem;align-items:flex-start">
-        <span style="font-size:0.72rem;color:var(--text-muted);padding-top:8px;flex-shrink:0">${i+1}.</span>
-        <input type="text" class="form-input sc-probe-input" value="${p.replace(/"/g,'&quot;')}" style="flex:1;font-size:0.82rem" />
-      </div>`).join('');
-
-    document.getElementById('sc-draft-panel').style.display = 'block';
-    document.getElementById('sc-draft-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
-  } catch (err) {
-    console.warn('Draft API unavailable:', err.message);
-    // Fallback: populate with a basic structure so the flow still works
-    const domain = document.getElementById('sc-domain')?.value || 'General';
-    document.getElementById('sc-draft-title').value   = `${domain} Scenario`;
-    document.getElementById('sc-draft-opening').value = `Based on your brief: ${brief}\n\n[AI unavailable — edit this opening manually before launching]`;
-    document.getElementById('sc-draft-coachnote').textContent = 'AI service unavailable. You can still edit and launch this scenario manually.';
-    document.getElementById('sc-draft-probes-list').innerHTML = `
-      <div style="display:flex;gap:0.5rem;margin-bottom:0.4rem">
-        <span style="font-size:0.72rem;color:var(--text-muted);padding-top:8px">1.</span>
-        <input type="text" class="form-input sc-probe-input" value="Why did you make that decision?" style="flex:1;font-size:0.82rem" />
-      </div>`;
-    document.getElementById('sc-draft-panel').style.display = 'block';
-  } finally {
-    if (btn) { btn.textContent = 'Draft Scenario with AI →'; btn.disabled = false; }
-  }
-}
-
-function approveDraft() {
-  const title    = (document.getElementById('sc-draft-title')?.value || '').trim();
-  const opening  = (document.getElementById('sc-draft-opening')?.value || '').trim();
-  const brief    = (document.getElementById('sc-brief')?.value || '').trim();
-  const domain   = document.getElementById('sc-domain')?.value || 'General';
-  const _member  = getSelectedMemberFromSelect('sc-member');
-  const memberId = _member?.id || null;
-
-  const probeInputs = document.querySelectorAll('.sc-probe-input');
-  const probes = [...probeInputs].map(i => i.value.trim()).filter(Boolean);
-
-  if (!title)    { showToast('Scenario needs a title', 'warning'); return; }
-  if (!opening)  { showToast('Opening situation is empty', 'warning'); return; }
-  if (!memberId) { showToast('Select a member', 'warning'); return; }
-
-  const scenario = {
-    id:          `sc_${Date.now()}`,
-    title,
-    brief,
-    domain,
-    context:     brief,
-    opening,
-    probes,
-    difficulty:  _scenarioDifficulty,
-    createdBy:   AppState.adminName,
-    createdAt:   new Date().toLocaleDateString('en-GB'),
-    completions: 0,
-    avgScore:    null,
-  };
-
-  AppState.scenarios.push(scenario);
-  document.getElementById('sc-draft-panel').style.display = 'none';
-  showToast(`Scenario approved — launching for ${AppState.getMember(memberId)?.name}`, 'success');
-  ScenarioEngine.start(scenario, memberId);
-  renderScenarios();
-}
-
-function launchScenario(scenarioId) {
-  const scenario = AppState.scenarios.find(s => s.id === scenarioId);
-  if (!scenario) return;
-
-  const member = getSelectedMemberFromSelect(`sc-launch-member-${scenarioId}`);
-  if (!member) { showToast('Select a member to launch with', 'warning'); return; }
-  ScenarioEngine.start(scenario, member.id);
-}
-
-async function assignToMemberApp(scenarioId) {
-  const scenario = AppState.scenarios.find(s => s.id === scenarioId);
-  if (!scenario) return;
-
-  const member = getSelectedMemberFromSelect(`sc-launch-member-${scenarioId}`);
-  if (!member) { showToast('Select a member first', 'warning'); return; }
-  const orgCode = AppState.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g,'-');
-
-  try {
-    const res = await fetch('/api/platform/assign-scenario', {
-      method:  'POST',
-      headers: Auth._headers(),   // auth token required by Phase 3 endpoint
-      body: JSON.stringify({
-        orgCode,
-        memberName: member.name,
-        memberId:   member.userId || member.authId || null,
-        scenario,
-        // assignedByNodeId / assignedByNodeName can be passed here in
-        // Phase 5 when assignments are made from the My Team panel.
-        // For now they are null — assigner identity comes from the session.
-      }),
-    });
-    if (!res.ok) throw new Error();
-    showToast(`Assigned to ${member.name.split(' ')[0]}'s app `, 'success');
-  } catch(e) {
-    showToast('Could not assign — server may be offline', 'warning');
-  }
-}
 
 /* ═══════════════════════════════════════════════════════════
    PHASE 5 — LEADER LAYER
@@ -5045,179 +4382,16 @@ let _myTeamMembers = [];   // cached from last fetch
 let _myTeamSearch  = '';
 
 // ── My Team ────────────────────────────────────────────────
-async function renderMyTeam() {
-  const el      = document.getElementById('myteam-content');
-  const countEl = document.getElementById('myteam-count');
-  if (!el) return;
 
-  el.innerHTML = `<div style="padding:1.5rem;text-align:center;color:var(--text-muted)">Loading team…</div>`;
 
-  try {
-    const data     = await Auth.loadVisibleMembers();
-    _myTeamMembers = data.members || [];
-    if (countEl) countEl.textContent = `${_myTeamMembers.length} visible member${_myTeamMembers.length !== 1 ? 's' : ''}`;
-    _renderMyTeamList();
-  } catch(e) {
-    el.innerHTML = `<div class="empty-state"><div class="empty-icon"></div><p>Could not load team — try refreshing.</p></div>`;
-  }
-}
 
-function filterMyTeam(search) {
-  _myTeamSearch = (search || '').toLowerCase();
-  _renderMyTeamList();
-}
 
-function _renderMyTeamList() {
-  const el = document.getElementById('myteam-content');
-  if (!el) return;
 
-  // A leader sees check-in RECENCY (are they engaging?), never a member's mood.
-  // Mood is private evidence; the leader's roster answers "who's active", and the
-  // briefing surfaces who needs attention — direction + care, never a number/emoji.
-  const _recency = (ck) => {
-    if (!ck || !ck.ts && !ck.date) return { dot: 'var(--text-muted)', word: 'No check-in' };
-    const t = ck.ts ? new Date(ck.ts).getTime() : Date.parse(ck.date);
-    const days = Number.isFinite(t) ? (Date.now() - t) / 86400000 : Infinity;
-    if (days <= 7)  return { dot: 'var(--success)', word: 'Active this week' };
-    if (days <= 30) return { dot: 'var(--warning)', word: 'Active this month' };
-    return { dot: 'var(--text-muted)', word: 'Quiet lately' };
-  };
-  const filtered   = _myTeamSearch
-    ? _myTeamMembers.filter(m =>
-        m.name.toLowerCase().includes(_myTeamSearch) ||
-        (m.email || '').toLowerCase().includes(_myTeamSearch))
-    : _myTeamMembers;
-
-  if (!filtered.length) {
-    el.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon"></div>
-        <p>${_myTeamMembers.length === 0
-          ? 'No members visible yet. Ask an administrator to assign people to your area of responsibility.'
-          : 'No members match your search.'}</p>
-      </div>`;
-    return;
-  }
-
-  el.innerHTML = `
-    <div class="leader-member-list">
-      ${filtered.map(m => {
-        const initials   = (m.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
-        const roleLabel  = Auth.ROLE_LABELS?.[m.role] || m.role || 'Member';
-        const rec        = _recency(m.latestCheckin);
-        const ckDate     = m.latestCheckin?.date || null;
-        const isPending  = !m.passwordSet;
-        const needsSetup = !m.profileComplete && !isPending;
-        const nodeCount  = (m.nodeIds || []).length;
-
-        return `
-          <div class="leader-member-row">
-            <div class="lm-avatar">${initials}</div>
-            <div class="lm-info">
-              <div class="lm-name">
-                ${m.name}
-                ${isPending  ? `<span class="lm-badge lm-badge--pending">PENDING</span>` : ''}
-                ${needsSetup ? `<span class="lm-badge lm-badge--setup">SETUP</span>` : ''}
-              </div>
-              <div class="lm-meta">${roleLabel}${m.email ? ' · ' + m.email : ''}</div>
-              ${nodeCount ? `<div class="lm-nodes">${nodeCount} node${nodeCount !== 1 ? 's' : ''}</div>` : ''}
-            </div>
-            <div class="lm-checkin">
-              <div class="lm-mood" title="${rec.word}"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${rec.dot}"></span></div>
-              <div class="lm-checkin-date">${ckDate || 'No check-in'}</div>
-            </div>
-          </div>`;
-      }).join('')}
-    </div>`;
-}
 
 // ── Assignments ────────────────────────────────────────────
-async function renderAssignments() {
-  const el = document.getElementById('assignments-content');
-  if (!el) return;
 
-  // AppState.members is already scoped to visible members for non-admins
-  // (Phase 2 — loadRealOrgData uses /visible-members for non-edit_members users)
-  const members   = AppState.members || [];
-  const scenarios = AppState.scenarios || [];
 
-  if (!members.length) {
-    el.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon"></div>
-        <p>No visible members to assign to yet. You'll be able to assign once members are added to your area.</p>
-      </div>`;
-    return;
-  }
 
-  if (!scenarios.length) {
-    el.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon"></div>
-        <p>No assessments created yet.
-          <a href="#" onclick="navigate('scenarios');return false" style="color:var(--accent)">
-            Go to Assessments</a> to create one first.</p>
-      </div>`;
-    return;
-  }
-
-  const memberOptions = [...members]
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map(m => `<option value="${m.id}">${m.name}</option>`)
-    .join('');
-
-  el.innerHTML = `
-    <div style="margin-bottom:1.2rem;font-size:0.82rem;color:var(--text-secondary)">
-      Assigning to <strong>${members.length}</strong> visible member${members.length !== 1 ? 's' : ''}.
-      Your name is recorded as the assigner on every assignment.
-    </div>
-    <div class="assignments-list">
-      ${scenarios.map(s => `
-        <div class="assignment-row card" style="margin-bottom:0.6rem">
-          <div class="assignment-scenario-info">
-            <div class="assignment-scenario-title">${s.title || 'Untitled'}</div>
-            <div class="assignment-scenario-meta">${s.domain || '—'} · ${s.difficulty || '—'}</div>
-          </div>
-          <div class="assignment-actions">
-            <select id="assign-sel-${s.id}" class="form-input assignment-select">
-              <option value="">— Select member —</option>
-              ${memberOptions}
-            </select>
-            <button class="btn btn-accent btn-sm" onclick="assignFromLeaderLayer('${s.id}')">Assign →</button>
-          </div>
-        </div>`).join('')}
-    </div>`;
-}
-
-async function assignFromLeaderLayer(scenarioId) {
-  const scenario = (AppState.scenarios || []).find(s => s.id === scenarioId);
-  if (!scenario) return;
-
-  const member  = getSelectedMemberFromSelect(`assign-sel-${scenarioId}`);
-  if (!member)  { showToast('Select a member first', 'warning'); return; }
-
-  const orgCode = AppState.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g, '-');
-
-  try {
-    const res = await fetch('/api/platform/assign-scenario', {
-      method:  'POST',
-      headers: Auth._headers(),
-      body: JSON.stringify({
-        orgCode,
-        memberName: member.name,
-        memberId:   member.userId || member.authId || null,
-        scenario,
-        // assignedByNodeId / assignedByNodeName omitted here — identity comes from session
-      }),
-    });
-    if (!res.ok) throw new Error();
-    showToast(`Assigned "${scenario.title}" to ${member.name.split(' ')[0]} `, 'success');
-    const selEl = document.getElementById(`assign-sel-${scenarioId}`);
-    if (selEl) selEl.value = '';  // reset selector after success
-  } catch(e) {
-    showToast('Could not assign — check your connection', 'warning');
-  }
-}
 
 
 /* ── ORGANISATION HEALTH ─────────────────────────────────── *
