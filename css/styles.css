@@ -3012,10 +3012,6 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iq-src-label{color:var(--text-secondary)}
 .iq-src-detail{color:var(--text-muted);margin-top:.15rem}
 
-/* Where a returning conversation was picked up. Said once, at the top, then it gets out of
-   the way. */
-.iq-resumed{font-size:.72rem;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);
-  text-align:center;margin:.2rem 0 .6rem}
 
 /* ── MAKING A FOCUS. The form sits inside a message bubble, so it stays quiet: it is the
    person writing a commitment down, not a modal demanding attention. */

@@ -166,18 +166,25 @@ const server = app.listen(0, async () => {
     // The CALL, not the definition. The first version matched `async _restoreChat(` too, so
     // deleting the one line that actually invokes it left this green — the same call-site
     // blindness that let a whole vocabulary exist five times without being wired to anything.
-    ok('H18 Home restores its conversation on load rather than starting blank every reload',
-      /async\s+_restoreChat\s*\(/.test(appjs) && /this\._restoreChat\s*\(\s*\)/.test(appjs));
-    const homeSlice = appjs.slice(appjs.indexOf('_renderHome() {'), appjs.indexOf('_chatKey()'));
-    ok('H18b …and it is called from Home itself, not from somewhere Home may never reach',
-      /this\._restoreChat\s*\(\s*\)/.test(homeSlice));
-    ok('H19 …and the id is persisted, not held in a variable that dies with the page',
-      /localStorage\.setItem\(this\._chatKey\(\)/.test(appjs));
-    ok('H20 …per account, so two people on one device never land in each other\'s thread',
-      /_chatKey\s*\(\s*\)\s*\{[^}]*Auth/.test(appjs));
-    // `=` and not `==`: the first version of this counted `this._chatConvId === id` as a write
-    // and reported a hole that was not there. A guard that miscounts is worse than no guard —
-    // it sends you looking for a bug in code that is correct.
+    // FOUNDER DECISION, September 2026, reversing what I built the day before: "I don't want
+    // that 'picking up where you left off'. If I close the app, the Home Screen must show up. I
+    // can always continue my chat on the recent in nav." Home is where you ARRIVE. A
+    // half-finished conversation is picked up ON PURPOSE, from Recents — not dropped back into.
+    //
+    // So the assertion inverts. What must NOT happen is the conversation id outliving the
+    // session in browser storage: that is what made Home reopen into yesterday, and it is one
+    // less thing left on the device pointing at what somebody said.
+    ok('H18 Home does NOT persist the conversation across app restarts — nothing about the chat reaches localStorage',
+      !/localStorage[^\n]*chat/i.test(appjs) && !/_chatKey/.test(appjs));
+    ok('H19 …but navigating away and back within a session does not split the conversation you are in',
+      /async\s+_restoreChat\s*\(/.test(appjs) && /this\._restoreChat\s*\(\s*\)/.test(appjs) &&
+      /const id = this\._chatConvId;/.test(appjs));
+    const restore = appjs.slice(appjs.indexOf('async _restoreChat() {'), appjs.indexOf('async _restoreChat() {') + 900);
+    ok('H20 …and a fresh open has nothing in memory to restore, so Home is Home',
+      /if \(!id\) return;/.test(restore) && !/localStorage/.test(restore));
+    ok('H20b the conversation is still reachable — Recents in the nav lists it and opens it',
+      /_navRecents\s*\(/.test(appjs) && /navOpenChat\s*\(/.test(appjs) &&
+      /\/api\/assistant\/conversations/.test(appjs));
     const writes = (appjs.match(/this\._chatConvId\s*=(?!=)/g) || []).length;
     ok('H21 every write of the conversation id goes through the one helper — a second assignment is a second place to forget to persist',
       writes === 1 && /_rememberChat\(/.test(appjs));

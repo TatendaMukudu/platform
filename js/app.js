@@ -10891,38 +10891,42 @@ const MemberApp = {
     this._restoreChat();
   },
 
-  /* ── HOME REMEMBERS THE CONVERSATION ───────────────────────────────────────────────────
-     `_chatConvId` lived in a JS variable and nowhere else, so every page load — a reload, a
-     restored Safari tab, coming back the next morning — started a conversation IntelliQ had
-     no memory of, while the real one sat on the server with all of it in. The founder read
-     that, correctly, as "it didn't remember what I'd said to it".
+  /* ── HOME IS HOME ─────────────────────────────────────────────────────────────────────
+     Founder, after this started restoring across app restarts: "I don't want that 'picking up
+     where you left off'. If I close the app, or if the app restarts because I haven't used it
+     in a while, the Home Screen must show up. I can always continue my chat on the recent in
+     nav."
 
-     The id is the only thing kept locally, and it is a pointer, not content: the messages are
-     fetched from the server under the session, so nothing said here is readable out of the
-     browser after a sign-out, and clearing it is enough to forget. Per-account, so two people
-     on one device never land in each other's thread. */
-  _chatKey() { return `iq.chat.${(Auth && Auth.user && (Auth.user.id || Auth.user.email)) || 'anon'}`; },
-  _rememberChat(id) {
-    this._chatConvId = id || null;
-    try { if (id) localStorage.setItem(this._chatKey(), id); else localStorage.removeItem(this._chatKey()); } catch (_) {}
-  },
+     That is a sharper model than the one I built. Home is where you ARRIVE — an empty box you
+     can say anything into. A conversation you were half-way through is not a thing to be
+     dropped back into by default; it is a thing to pick up on purpose, from Recents, if you
+     still want it. Everything is on the server either way, so starting clean loses nothing.
+
+     So the id lives in MEMORY ONLY, exactly as it originally did, and the fix that was actually
+     needed turns out to be the narrower one: navigating to Inquiries and back must not split
+     the conversation you are in the middle of. Closing the app should end it.
+
+     Nothing goes to localStorage. A conversation id sitting in browser storage outlives the
+     session it belonged to — which is the behaviour being removed here — and it is one less
+     thing left on the device pointing at what somebody said. */
+  _rememberChat(id) { this._chatConvId = id || null; },
+
+  /* Re-render the conversation THIS SESSION is in, if there is one. Called on every Home
+     render; on a fresh app open there is nothing in memory and it does nothing, which is the
+     entire point. */
   async _restoreChat() {
     const box = document.getElementById('iq-conversation');
     if (!box || box.children.length) return;
-    let id = this._chatConvId;
-    if (!id) { try { id = localStorage.getItem(this._chatKey()); } catch (_) {} }
-    if (!id) return;
+    const id = this._chatConvId;
+    if (!id) return;                       // fresh open — Home is Home
     try {
       const r = await fetch(`/api/assistant/conversations/${encodeURIComponent(id)}`, { headers: this._authHeaders() });
       if (!r.ok) { this._rememberChat(null); return; }      // deleted or another account's — forget it
       const j = await r.json();
       const msgs = (j && j.messages) || [];
       if (!msgs.length) return;
-      this._rememberChat(id);
       const esc = s => this._escape(String(s == null ? '' : s));
-      // Where the conversation was picked up, said once and quietly. Coming back to a wall of
-      // your own words with no marker is disorienting; saying it on every message is noise.
-      box.innerHTML = `<div class="iq-resumed">Picking up where you left off</div>` + msgs.map(m => m.role === 'user'
+      box.innerHTML = msgs.map(m => m.role === 'user'
         ? `<div class="iq-msg iq-msg-user">${esc(m.text)}</div>`
         : `<div class="iq-msg iq-msg-iq">${esc(m.text)}${this._sourcesHTML(m.sources)}${
             this._msgActions(m.text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources, conversationId: id })}</div>`).join('');
