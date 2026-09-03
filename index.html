@@ -46,8 +46,8 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260903b"/>
-<link rel="stylesheet" href="css/member.css?v=20260903b"/>
+<link rel="stylesheet" href="css/styles.css?v=20260903d"/>
+<link rel="stylesheet" href="css/member.css?v=20260903d"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -464,7 +464,6 @@
         <div class="tabs" style="margin-bottom:1rem">
           <button class="tab-btn active" data-tab="tree" onclick="switchPeopleTab('tree')">Org Tree</button>
           <button class="tab-btn" data-tab="onboard" onclick="switchPeopleTab('onboard')">＋ Onboard</button>
-          <button class="tab-btn" data-tab="groups" onclick="switchPeopleTab('groups')">Groups</button>
         </div>
 
         <!-- Org tree tab -->
@@ -479,13 +478,10 @@
           <div id="onboard-hub-content"></div>
         </div>
 
-        <!-- Groups tab -->
-        <div id="people-tab-groups" style="display:none">
-          <div style="display:flex;justify-content:flex-end;margin-bottom:0.8rem">
-            <button class="btn btn-accent btn-sm" onclick="openCreateGroup()">+ New Group</button>
-          </div>
-          <div id="groups-list"></div>
-        </div>
+        <!-- GROUPS RETIRED, September 2026. Founder: "Groups is legacy software." The org
+             TREE is the one structure — a person's place in it is what scopes everything, and a
+             second, parallel way to put people in sets was a second answer to the same question.
+             The routes behind it are untouched for now; nothing navigates here any more. -->
       </section>
 
       <!-- Every authenticated person can inspect their own answerability record. -->
@@ -1669,36 +1665,7 @@
 <!-- ════════════════════════════════════════════════════════
      CREATE GROUP MODAL
      ════════════════════════════════════════════════════════ -->
-<div class="modal-overlay" id="create-group-modal">
-  <div class="modal" style="max-width:520px;width:100%">
-    <div class="modal-header">
-      <div><div class="modal-title">Create Group</div><div class="modal-sub">Sub-team within your org</div></div>
-      <button class="modal-close" onclick="closeAllModals()">×</button>
-    </div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label class="form-label">Group name</label>
-        <input type="text" class="form-input" id="cg-name" placeholder="e.g. Leadership, Engineering, Cohort A…"/>
-      </div>
-      <div class="form-group" style="margin-top:0.7rem">
-        <label class="form-label">Description <span style="font-weight:400;color:var(--text-muted)">(optional)</span></label>
-        <input type="text" class="form-input" id="cg-desc" placeholder="What this group is for…"/>
-      </div>
-      <div class="form-group" style="margin-top:0.7rem">
-        <label class="form-label">Members <span style="font-weight:400;color:var(--text-muted)">(select all that apply)</span></label>
-        <div id="cg-members-list" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:0.5rem;margin-top:0.3rem"></div>
-      </div>
-      <div class="form-group" style="margin-top:0.7rem">
-        <label class="form-label">Group leads</label>
-        <div id="cg-leads-list" style="max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:0.5rem;margin-top:0.3rem"></div>
-      </div>
-      <div style="display:flex;justify-content:flex-end;gap:0.5rem;margin-top:1rem">
-        <button class="btn btn-outline" onclick="closeAllModals()">Cancel</button>
-        <button class="btn btn-accent" onclick="submitCreateGroup()">Create Group</button>
-      </div>
-    </div>
-  </div>
-</div>
+<!-- The Create Group modal was removed with the Groups tab, September 2026. -->
 
 <!-- ════════════════════════════════════════════════════════
      GROUP DETAIL MODAL — feed of shared notes + messages
@@ -1882,8 +1849,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260903b"></script>
-<script src="js/auth.js?v=20260903b"></script>
+<script src="js/data.js?v=20260903d"></script>
+<script src="js/auth.js?v=20260903d"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1951,14 +1918,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260903b"></script>
-<script src="js/ui.js?v=20260903b"></script>
-<script src="js/attachments.js?v=20260903b"></script>
-<script src="js/scenarios.js?v=20260903b"></script>
-<script src="js/chat.js?v=20260903b"></script>
-<script src="js/tree.js?v=20260903b"></script>
-<script src="js/voice.js?v=20260903b"></script>
-<script src="js/app.js?v=20260903b"></script>
+<script src="js/charts.js?v=20260903d"></script>
+<script src="js/ui.js?v=20260903d"></script>
+<script src="js/attachments.js?v=20260903d"></script>
+<script src="js/scenarios.js?v=20260903d"></script>
+<script src="js/chat.js?v=20260903d"></script>
+<script src="js/tree.js?v=20260903d"></script>
+<script src="js/voice.js?v=20260903d"></script>
+<script src="js/app.js?v=20260903d"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->

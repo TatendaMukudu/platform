@@ -5251,6 +5251,65 @@ app.post('/api/me/prepared/act', requireAuth, (req, res) => {
   res.json({ ok: true, focuses: (mem.focuses || []).filter(f => f.status === 'active').map(f => ({ id: f.id, text: f.text })) });
 });
 
+/* POST /api/me/focus — THE ONE THING A PERSON CREATES.
+
+   "Make this a focus" did not make a focus. It navigated to the composer and typed "I want to
+   work on " into the box — a prompt-starter wearing the label of an action. Three separate
+   reports of "it won't create the focus" were all correct, and the thing they were reporting
+   was that the button had never done anything at all. Worse, the composer had started SAYING
+   it would: "I can set this up as a focus for you, kept private until you decide otherwise."
+
+   VISIBILITY IS REAL HERE, not a label. _memberGoalsFor hands a leader every personal focus a
+   member has, unconditionally — so before this, "private to you" was false the moment anyone
+   above you opened your profile. A focus is now private by DEFAULT and a leader sees only the
+   ones its owner chose to share. Widening is the owner's act, always, and never retroactive.
+
+   The text is the person's own words, not a summary of IntelliQ's reply. A focus is a
+   commitment someone makes; writing it for them and asking them to accept it is a different
+   thing wearing the same word. */
+app.post('/api/me/focus', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const text = String((req.body || {}).text || '').trim().slice(0, 300);
+  if (!text) return res.status(400).json({ error: 'Say what you want to work on.' });
+  const shared = (req.body || {}).share === true;
+  const mem = _getMemory(code, userId);
+  mem.focuses = mem.focuses || [];
+  // Same text, still open? Return it rather than making a second one. A list with the same
+  // commitment on it twice is a list people stop trusting.
+  const existing = mem.focuses.find(f => f && f.status === 'active' && f.text === text);
+  if (existing) {
+    return res.json({ ok: true, focus: { id: existing.id, text: existing.text, visibility: existing.visibility || 'private' },
+      already: true, note: 'You already have this one open.' });
+  }
+  const focus = {
+    id: 'foc_' + generateId(), text, type: 'self_set', status: 'active', outcome: null,
+    visibility: shared ? 'shared' : 'private',
+    createdAt: new Date().toISOString(),
+  };
+  mem.focuses.unshift(focus);
+  _beginFocusAction(code, focus, userId, { subjectId: userId });
+  mem.lastUpdated = new Date().toISOString();
+  _audit(code, { actor: userId, action: 'focus_created', subjectIds: [userId], basis: focus.visibility });
+  scheduleSave();
+  res.json({ ok: true, focus: { id: focus.id, text: focus.text, visibility: focus.visibility },
+    note: shared ? 'Set. Anyone who leads a group you are in can see this one.'
+                 : 'Set, and private — only you can see it. You can share it later; nobody else can.' });
+});
+
+/* POST /api/me/focus/:id/visibility — widen or narrow it afterwards, owner only. */
+app.post('/api/me/focus/:id/visibility', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const mem = _getMemory(code, userId);
+  const focus = (mem.focuses || []).find(f => f && f.id === String(req.params.id));
+  if (!focus) return res.status(404).json({ error: 'not found' });
+  const want = (req.body || {}).visibility === 'shared' ? 'shared' : 'private';
+  focus.visibility = want;
+  _audit(code, { actor: userId, action: 'focus_visibility', subjectIds: [userId], basis: want });
+  scheduleSave();
+  res.json({ ok: true, visibility: want,
+    note: want === 'shared' ? 'Shared — leaders of your groups can see it now.' : 'Private again — only you.' });
+});
+
 /* POST /api/me/focus/outcome — close the loop: report how an approved focus went.
    Observe outcome → LEARN. Resolves the focus and teaches the Confidence Engine
    (helped → useful; didn't → dismiss) for the pattern type that suggested it.
@@ -17691,7 +17750,18 @@ function normalizeMemberGoals(goalData) {
 function _memberGoalsFor(code, u) {
   if (!u) return null;
   const direct = memberGoals[userKey(code, u.id)] || (u.name ? memberGoals[memberKey(code, u.name)] : null);
-  if (direct) return { ...direct, focuses: _getMemory(code, u.id).focuses };
+  // WHAT A LEADER MAY SEE. This handed over every focus a member had ever set, including the
+  // ones the product told them were private.
+  //
+  // The line is not "old vs new", it is what the focus IS. A focus with kind 'goal' is an AIM —
+  // set through the goals flow, in the org's context, often invited by someone else; it is the
+  // anchor a leader reasons against and it was always meant to be seen. A focus somebody wrote
+  // for themselves is personal work, and is private unless they say otherwise.
+  //
+  // My first cut of this filtered on visibility alone and removed the aims too, which took the
+  // reference frame out from under the whole advisor. Correct rule, wrong predicate.
+  if (direct) return { ...direct, focuses: (_getMemory(code, u.id).focuses || [])
+    .filter(f => f && (f.kind === 'goal' || f.visibility === 'shared')) };
   const nm = (u.name || '').toLowerCase().trim();
   if (nm) {
     for (const g of Object.values(memberGoals)) {
@@ -19038,7 +19108,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // a routed share lands in
   orgMeta, libraryItems, _professionals,
   // exported for the truth layer: proves the role ladder never invents a title
-  _subjectRoleContext, _domainDirective,
+  _subjectRoleContext, _domainDirective, _memberGoalsFor, _getMemory,
   // exported for the truth layer: the canonical evidence boundary + identity lifecycle
   _ingestGeneric, _recordEvidence, _reresolveUnmatched, _promoteEvidence, evidenceLog, rawEvidence, orgSignals, orgUsers,
   _resolveEvidence, _evictWorkingSet, _eraseEvidence, _eraseSubjectEvidence,

@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `a7de4a8`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `0bbc01e`. **Branch:** `claude/platform-work-summary-nmb0cm`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
 ---
@@ -305,3 +305,36 @@ Recorded, never silently edited. **Six of these are corrections to my own earlie
 | D-P1 · D-P2 | peer aggregates | **deferred** — comparison Web is SCALE |
 
 One item needs founder **awareness**, not a decision: the 3(a2) lateral leak (§4 row 3).
+
+---
+
+## 8 · September 2026 — the delivery pass
+
+Six defects landed in a row that the suite could not see, and they are one shape: **the code
+was correct and the person holding the phone was not getting it.** Recorded because the class
+matters more than the instances.
+
+| What was wrong | Why no test caught it | Guard now |
+|---|---|---|
+| Every asset stamped `?v=20260729a`; four sprints of UI never reached the browser | the suite proved the code, not that anyone ran it | `asset-version-smoke` |
+| 41 rules used CSS variables that do not exist, falling back to light-theme hex on a dark page | `var(--nope, #111827)` is valid CSS, not an error | `css-token-smoke` |
+| `_authHeaders()` sent no `Content-Type`, so Express parsed no JSON body — every send in the app | it presented as a button bug | `client-headers-smoke` |
+| The composer had four silent exits; a template reply is indistinguishable from a dull one | nothing counted the exits | `composer-visibility-smoke` |
+| Home kept its conversation id in a variable, so every reload started with no memory | no server-side symptom at all | `message-history-smoke` |
+| Boot read the whole store twice and discarded half of it, at 86% of a 5 GB transfer allowance | the suite proved writes were cheap and could not see reads | `boot-bandwidth-smoke` |
+| "Make this a focus" prefilled the composer and created nothing, through three reports | nothing asserted a focus existed afterwards | `focus-creation-smoke` |
+
+Two of those carried a privacy defect underneath:
+
+- **Personal focuses were readable by any leader**, including the ones the interface called
+  private. A focus is now private unless its owner shares it; an AIM (`kind: 'goal'`) still
+  reaches a leader, because it was declared in the org's context and it is the frame they
+  support against.
+- **Sources were live-only.** A composed reply cited nothing at all — the better the answer,
+  the less checkable it was. Sources now ride with the message into history.
+
+Also retired: the three demo seeds (one was 21.5 MB of a vocabulary the product no longer
+speaks) for a single 32 KB college-soccer programme; the Groups tab, superseded by the tree.
+`DELETE /api/admin/org/:code` removes an organisation from the database, because deleting a
+seed from the repository never did.
+

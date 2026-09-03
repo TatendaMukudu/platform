@@ -3556,14 +3556,16 @@ async function deleteGoal(goalId) {
 
 /* ── PEOPLE PAGE TABS ────────────────────────────────────── */
 function switchPeopleTab(tab) {
-  ['tree','onboard','groups'].forEach(t => {
+  // 'groups' retired September 2026 — the tree is the one structure. A tab name arriving from
+  // anywhere stale falls back to the tree rather than showing an empty panel.
+  if (tab === 'groups') tab = 'tree';
+  ['tree','onboard'].forEach(t => {
     const el = document.getElementById(`people-tab-${t}`);
     if (el) el.style.display = t === tab ? 'block' : 'none';
   });
   document.querySelectorAll('#page-people .tab-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
-  if (tab === 'groups')  renderGroups();
   if (tab === 'tree')    renderPeople();
   if (tab === 'onboard') renderOnboardHub();
 }
@@ -4023,53 +4025,13 @@ async function renderGroups() {
   }
 }
 
-async function openCreateGroup() {
-  // Populate member/lead lists from org tree
-  const orgCode = Auth.currentUser?.orgCode || AppState.orgCode;
-  const treeRes  = await fetch(`/api/auth/org-tree?orgCode=${encodeURIComponent(orgCode)}`, { headers: Auth._headers() }).catch(() => null);
-  const treeData = treeRes?.ok ? await treeRes.json() : { flat: [] };
-  const allUsers = (treeData.flat || []).filter(u => u.id !== Auth.currentUser?.id);
+/* [REMOVED] openCreateGroup — groups were retired in September 2026 (founder: "Groups is
+   legacy software"). The org tree is the one structure: a person's place in it scopes
+   everything, and a second, parallel way to put people in sets was a second answer to the
+   same question. Removed rather than left unreferenced — a function nothing calls is a
+   feature nobody can tell is gone. */
 
-  const makeList = (containerId, preselected = []) => {
-    const el = document.getElementById(containerId);
-    if (!el) return;
-    el.innerHTML = allUsers.map(u => `
-      <label style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem 0.2rem;cursor:pointer;font-size:0.82rem">
-        <input type="checkbox" value="${u.id}" ${preselected.includes(u.id) ? 'checked' : ''}/>
-        <div class="user-avatar" style="width:22px;height:22px;font-size:0.6rem;background:${COLORS[allUsers.indexOf(u)%COLORS.length]};flex-shrink:0">${u.name.slice(0,2).toUpperCase()}</div>
-        ${u.name} <span style="color:var(--text-muted);font-size:0.72rem">${u.role}</span>
-      </label>`).join('');
-  };
-
-  document.getElementById('cg-name').value = '';
-  document.getElementById('cg-desc').value = '';
-  makeList('cg-members-list');
-  makeList('cg-leads-list');
-  openModal('create-group-modal');
-}
-
-async function submitCreateGroup() {
-  const name    = (document.getElementById('cg-name')?.value || '').trim();
-  const desc    = (document.getElementById('cg-desc')?.value || '').trim();
-  if (!name) { showToast('Give the group a name', 'warning'); return; }
-
-  const memberIds = [...document.querySelectorAll('#cg-members-list input:checked')].map(cb => cb.value);
-  const leadIds   = [...document.querySelectorAll('#cg-leads-list input:checked')].map(cb => cb.value);
-  const orgCode   = Auth.currentUser?.orgCode || AppState.orgCode;
-
-  try {
-    const res = await fetch('/api/groups/create', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', ...Auth._headers() },
-      body: JSON.stringify({ orgCode, name, description: desc, memberIds, leadIds }),
-    });
-    if (!res.ok) throw new Error();
-    closeAllModals();
-    showToast(`Group "${name}" created`, 'success');
-    renderGroups();
-  } catch(e) {
-    showToast('Could not create group', 'warning');
-  }
-}
+/* [REMOVED] submitCreateGroup — went with the Groups tab and its modal. */
 
 async function deleteGroup(gid) {
   const orgCode = Auth.currentUser?.orgCode || AppState.orgCode;
@@ -11170,38 +11132,125 @@ const MemberApp = {
   /* Starting a focus is a sentence, not a form: the composer is prefilled and the person
      finishes it in their own words, which is also how the focus gets its context. Who it is for
      is chosen here, before it exists, rather than being a property discovered afterwards. */
+  /* ── MAKING A FOCUS ────────────────────────────────────────────────────────────────────
+     This used to navigate to the composer and type "I want to work on " into the box. It made
+     nothing. Three reports of "it won't create the focus" were all describing a button that had
+     never created anything — and by then the composer had started promising it would.
+
+     Now it opens in place, prefilled with THE PERSON'S OWN WORDS from the exchange it sits
+     under, and creates a real one. Their words rather than a summary of IntelliQ's reply,
+     because a focus is a commitment somebody makes: writing it for them and asking them to
+     accept it is a different act wearing the same name. It is editable before it is made,
+     which is the whole point of showing it. */
   _startObject(kind, share, el) {
-    if (kind === 'focus' && share === undefined) return this._askFocusAudience(el);
-    try { navigate('workspace'); } catch (_) {}
-    this._wsShare = share === true;
-    const b = document.getElementById('iq-vis');
-    if (b) { b.textContent = this._wsShare ? 'Public' : 'Private'; b.classList.toggle('is-shared', this._wsShare); }
-    const i = document.getElementById('iq-composer-input');
-    if (i) { i.value = 'I want to work on '; this._wsGrow(i); i.focus(); }
+    if (kind !== 'focus') return;
+    const seed = this._focusSeedFrom(el);
+    this._openFocusForm(el, seed);
   },
 
-  /* The audience question appears WHERE THE BUTTON WAS. It used to be prepended to
-     #iq-inquiries-page, which exists in the DOM on every screen but is only visible on the
-     bucket page — so tapping "Make this a focus" on Home put the question inside a hidden
-     element and nothing happened at all. Same class of bug as the untappable card: assuming a
-     container is visible because it exists. */
-  _askFocusAudience(el) {
-    // Two call sites, two shapes: a chip inside .iq-make-row after a reply, and a standalone
-    // button at the top of the Focuses page. Replace whichever is there, in place.
+  /* The person's own last message in this exchange. Falls back to nothing rather than to
+     IntelliQ's paragraph — an empty box a person fills in is honest; a box filled with the
+     assistant's prose and labelled as their commitment is not. */
+  _focusSeedFrom(el) {
+    try {
+      const msg = el && el.closest && el.closest('.iq-msg');
+      let node = msg ? msg.previousElementSibling : null;
+      while (node) {
+        if (node.classList && node.classList.contains('iq-msg-user')) {
+          return String(node.textContent || '').trim().slice(0, 200);
+        }
+        node = node.previousElementSibling;
+      }
+      const mine = document.querySelectorAll('.iq-msg-user');
+      if (mine.length) return String(mine[mine.length - 1].textContent || '').trim().slice(0, 200);
+    } catch (_) {}
+    return '';
+  },
+
+  /* The form appears WHERE THE BUTTON WAS. It used to be prepended to #iq-inquiries-page,
+     which exists in the DOM on every screen but is only visible on the bucket page — so
+     tapping this on Home put it inside a hidden element and nothing happened. Same class of
+     bug as the untappable card: assuming a container is visible because it exists. */
+  _openFocusForm(el, seed) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const id = 'ff_' + Math.random().toString(36).slice(2, 9);
+    const form = `
+      <div class="iq-focus-form" id="${id}">
+        <label class="iq-focus-label" for="${id}-t">What do you want to work on?</label>
+        <textarea id="${id}-t" class="iq-focus-input" rows="2"
+          placeholder="In your own words…">${esc(seed)}</textarea>
+        <div class="iq-focus-row">
+          <button type="button" class="iq-make-chip is-on" id="${id}-priv"
+            onclick="MemberApp._focusVis('${id}',false)">Private</button>
+          <button type="button" class="iq-make-chip" id="${id}-pub"
+            onclick="MemberApp._focusVis('${id}',true)">Public</button>
+          <span class="iq-focus-who" id="${id}-who">Only you can see this.</span>
+        </div>
+        <div class="iq-focus-row">
+          <button type="button" class="iq-make-chip" onclick="MemberApp._createFocus('${id}')">Make it a focus</button>
+          <button type="button" class="iq-make-chip" onclick="MemberApp._cancelFocus('${id}')">Not now</button>
+        </div>
+        <div class="iq-focus-said" id="${id}-said" role="status" aria-live="polite"></div>
+      </div>`;
     const row = el && el.closest && el.closest('.iq-make-row');
-    const ask = `
-      <span class="iq-make-ask">Who is this focus for?</span>
-      <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus',false)">Just me</button>
-      <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus',true)">Me and others</button>`;
-    if (row) { row.innerHTML = ask; return; }
-    if (el && el.parentNode) {
+    if (row) { row.innerHTML = form; }
+    else if (el && el.parentNode) {
       const wrap = document.createElement('div');
       wrap.className = 'iq-make-row';
-      wrap.innerHTML = ask;
+      wrap.innerHTML = form;
       el.parentNode.replaceChild(wrap, el);
+    } else {
       return;
     }
-    return this._startObject('focus', false);
+    this._focusShare = this._focusShare || {};
+    this._focusShare[id] = false;
+    const t = document.getElementById(id + '-t');
+    if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
+  },
+
+  _focusVis(id, share) {
+    this._focusShare = this._focusShare || {};
+    this._focusShare[id] = !!share;
+    const priv = document.getElementById(id + '-priv');
+    const pub  = document.getElementById(id + '-pub');
+    const who  = document.getElementById(id + '-who');
+    if (priv) priv.classList.toggle('is-on', !share);
+    if (pub)  pub.classList.toggle('is-on', !!share);
+    // What it MEANS, not what it is called. "Public" tells you nothing about who that is.
+    if (who) who.textContent = share
+      ? 'Anyone who leads a group you are in can see this.'
+      : 'Only you can see this.';
+  },
+
+  _cancelFocus(id) {
+    const f = document.getElementById(id);
+    const row = f && f.closest('.iq-make-row');
+    if (row) row.innerHTML = `<button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus',undefined,this)">Make this a focus</button>`;
+  },
+
+  async _createFocus(id) {
+    const t = document.getElementById(id + '-t');
+    const said = document.getElementById(id + '-said');
+    const tell = m => { if (said) said.textContent = m; };
+    const text = String((t && t.value) || '').trim();
+    if (!text) { tell('Say what you want to work on first.'); if (t) t.focus(); return; }
+    const share = !!(this._focusShare || {})[id];
+    tell('Making it…');
+    try {
+      const r = await fetch('/api/me/focus', { method: 'POST', headers: this._authHeaders(),
+        body: JSON.stringify({ text, share }) });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || `server said ${r.status}`);
+      const esc = s => this._escape(String(s == null ? '' : s));
+      const f = document.getElementById(id);
+      if (f) f.outerHTML = `<div class="iq-focus-made">
+        <strong>${esc(j.already ? 'Already open' : 'Focus set')}</strong> — ${esc(j.focus.text)}
+        <div class="iq-focus-who">${esc(j.note || '')}</div>
+        <button type="button" class="iq-make-chip" onclick="navigate('focus')">See your focuses</button>
+      </div>`;
+    } catch (e) {
+      tell(`That did not save — ${(e && e.message) || 'unknown problem'}. Your words are still here.`);
+    }
   },
 
   /* THE ONE CARD. Every bucket renders through this — a second renderer is how the polarity

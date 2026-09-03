@@ -33,6 +33,7 @@ const BACKEND_ONLY = new Map(Object.entries({
   '/api/admin/errors': 'operator tooling',
   '/api/admin/metrics': 'operator tooling',
   '/api/admin/persistence': 'operator tooling',
+  '/api/groups/create': 'the Groups UI was retired in September 2026 (the tree is the one structure). The routes and their stores stay for orgs that already have groups, and group-model-owner-smoke + cross-org-isolation-http-smoke still exercise this one; removing the subsystem is its own piece of work, not a side effect of hiding a tab.',
   '/api/admin/llm-mode': 'operator tooling',
   '/api/admin/backfill-canonical': 'one-off migration',
   '/api/admin/checkin-classification-audit': 'one-off audit',
