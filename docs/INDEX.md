@@ -338,3 +338,57 @@ speaks) for a single 32 KB college-soccer programme; the Groups tab, superseded 
 `DELETE /api/admin/org/:code` removes an organisation from the database, because deleting a
 seed from the repository never did.
 
+Then a seventh, of the same shape and worse: **Highs and Lows had been structurally dead since
+the daily check-in was retired** — six of the seven detectors read the mood series that question
+produced — so the app reported *"Nothing needs your attention right now, you're in a steady
+place"* to a person it could not see at all. Zero highs and zero lows across 28 seeded players
+who had real evidence in the system. Guard: `highs-lows-smoke`.
+
+## 9 · The person decides, the machine holds the gates
+
+What replaced the check-in is worth stating as a rule, because four features now share it and
+the next one should too.
+
+**Nobody but the person calls it.** Not the model, not a keyword list over their wording, not a
+leader. The machine counts the evidence, checks the origins are independent, and refuses when it
+is thin; a human says which way it points. A call is not evidence: call a single-origin belief
+anything you like and it stays where it is, with the refusal shown rather than swallowed. This
+is how the team surface already worked, and it is the only reason to trust either of them.
+
+| Feature | The person's act | What the machine holds | Guard |
+|---|---|---|---|
+| Highs and Lows | calling it working-well or worth-attention | origins, band, contested — a call cannot promote thin evidence | `highs-lows-smoke` |
+| The ladder | raising it to their leaders | who the ladder is, that a pass says why, that a pass raises priority | `escalation-smoke` |
+| Forum | offering a statement as your account | speech never becomes evidence by being agreed with | `forum-reach-smoke` |
+| Outside reading | reading it, or not | the query is composed from owned vocabulary; an uncited answer is refused | `web-sources-smoke` |
+
+Two of those were founder decisions taken explicitly rather than chosen in code, because both
+changed a privacy law:
+
+- **A raise is the subject's act.** Automatic routing on the call was offered and rejected. A
+  private read on yourself arriving in front of five people the instant you tap is not what
+  anybody expects the first time, and consent that surprises somebody was never consent.
+- **A pass raises priority.** Ordinary software reads a dismissal as "show this less". A thing
+  five people each handed on is a thing nobody owns — a fact about the organisation, not about
+  the person — so it climbs. Five vantages are also five independent origins, which is why
+  routing is not overhead on the way to evidence; routing *is* the evidence-gathering.
+
+### The vacuity pattern, still the most common failure in this suite
+
+Every suite above was mutation-tested, and the recurring finding was not in the product. It was
+assertions that passed because they were standing on nothing:
+
+- a fixture with **zero admitted signals**, so a gate could be deleted with no effect;
+- `inquiryStates[C] = {}`, so "talking changes nothing the system believes" compared an empty
+  object with an empty object;
+- a snapshot taken **mid-suite**, after an earlier call had already applied an idempotent
+  corruption, so before and after matched;
+- a regex that matched the **topic** rather than a leak (`/tight/` against
+  `soccer.hamstring_tightness`), failing on correct code;
+- two gates that are **the same condition** along the only reachable path, so deleting either
+  changed no answer any request could produce.
+
+The last one is not a defect and the others were mine. All five are now written where the next
+person will look for them, because a green suite that cannot go red is worse than no suite: it
+is a claim that something is protected when nothing is.
+
