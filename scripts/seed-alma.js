@@ -168,7 +168,11 @@ async function buildAlmaStore() {
   const unitOf = { Goalkeeper: keepers, Defender: backline, Midfielder: midfield, Forward: frontline };
 
   // ── Staff. A Division III programme runs on a small staff. ────────────────
-  const headCoachP = person();
+  // FIXED, MEMORABLE LOGINS for the two accounts anybody demoing this will actually sign into.
+  // Everyone else keeps a generated address. A demo you have to look up the credentials for is
+  // a demo you do not give — and the founder's use for this is handing it to somebody standing
+  // next to them.
+  const headCoachP = { ...person(), email: 'coach@alma.edu' };
   const headCoach = mkUser(headCoachP, 'superadmin', { levelId: 1, title: 'Head Coach' });
   const assistantP = person();
   const assistant = mkUser(assistantP, 'leader', { levelId: 2, title: 'Assistant Coach', supervisorId: headCoach });
@@ -242,6 +246,12 @@ async function buildAlmaStore() {
   // days (so it can reach a real band), one with a single telling (so it visibly cannot).
   const wellEvidenced = players[12];
   const thinlyEvidenced = players[4];
+  // The player account a demo signs into. Its address is fixed for the same reason the coach's
+  // is; the person behind it is still one of the generated roster, with the real evidence.
+  orgUsers[CODE][wellEvidenced.uid].email = 'player@alma.edu';
+  delete emailIndex[wellEvidenced.email];
+  emailIndex['player@alma.edu'] = { orgCode: CODE, userId: wellEvidenced.uid };
+  wellEvidenced.email = 'player@alma.edu';
 
   const refsA = [
     { ref: signal(wellEvidenced.uid, wellEvidenced.uid, dAgo(41), say[1].text, { sensitivity: 'sensitive' }), text: say[1].text },

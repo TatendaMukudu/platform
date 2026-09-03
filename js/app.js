@@ -1422,20 +1422,23 @@ function launchApp(){
     renderSidebar();
     renderTopbar();
     renderAllPages();
-    // Routing:
-    //   member                → Home (personal)
-    //   non-member + isLeaderNode → Leader Dashboard (scoped workspace)
-    //   non-member, no leadership  → Overview Dashboard (admin/super)
-    const isMember  = Auth.currentUser?.role === 'member';
-    const isLeader  = Auth.isLeaderNode();
-    if (isMember && typeof MemberApp !== 'undefined') {
+    /* ── ONE APP, FOR EVERYBODY ────────────────────────────────────────────────────────
+       Founder, September 2026: "All accounts should be the same. Only thing is leaders
+       should have access to see their org tree, and super admin have access to billing once
+       we start billing."
+
+       Until now a member got MemberApp and everyone else got a separate dashboard — a
+       different landing page, a different nav, a different idea of what the product is. Two
+       products, and only one of them was being designed. Every fix to the member surface for
+       the last month simply did not exist for a coach.
+
+       So the shell is now the same for everyone and the DIFFERENCES ARE ADDITIVE: a person who
+       leads a node also gets the org tree; a superadmin also gets the org's settings, and
+       billing when there is billing. Nobody gets a different version of the same thing. */
+    if (typeof MemberApp !== 'undefined') {
       try { MemberApp.init(); } catch(e) { console.warn('[ROUTE] MemberApp.init failed:', e.message); }
     }
-    // ONE assistant page for everyone: a member lands on their own "Me" assistant, and
-    // leaders + admins/supers land on the leader assistant home (Today). No dashboard
-    // landing — the drawer is gone and everything flows from here.
-    const defaultPage = isMember ? 'home' : 'leader-home';
-    navigate(defaultPage);
+    navigate('home');
     // A quiet proactive cue on the gear — how many governed questions the system wants to
     // put to this reader (leaders/insights only; members get a clean no-op). Fully guarded.
     if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
@@ -10988,6 +10991,30 @@ const MemberApp = {
     { id: 'notes',   label: 'Library',   icon: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z' },
   ],
 
+  /* WHAT A ROLE ADDS, never what it replaces. Everyone above sees the same six things; these
+     are appended for the people who can act on them.
+
+     Leading is not a rank — it is a job with a roster attached, and the tree is the tool for
+     that job: who is here, who reports to whom, adding somebody, removing somebody. It appears
+     for anyone who actually leads a node, which is a fact about the tree rather than a title.
+     Settings (and billing, when there is billing) belong to whoever owns the account. */
+  _NAV_EXTRA: [
+    { id: 'people',   label: 'Org tree', when: () => Auth.isLeaderNode() || Auth.isAdmin(),
+      icon: 'M12 3v6M12 15v6M5 12h14M7 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6M17 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6M12 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6' },
+    { id: 'settings', label: 'Settings', when: () => Auth.isSuperAdmin(),
+      icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' },
+  ],
+
+  /* The nav a given person sees: the six, plus whatever their job adds. A `when` that throws —
+     an older cached session with no `leads` field, say — is read as "no", because showing a
+     control somebody cannot use is worse than not showing it. */
+  _navFor() {
+    const extra = this._NAV_EXTRA.filter(n => {
+      try { return n.when(); } catch (_) { return false; }
+    });
+    return this._NAV.concat(extra);
+  },
+
   navToggle() {
     const open = document.getElementById('iq-nav');
     if (open) { this.navClose(); return; }
@@ -11000,7 +11027,7 @@ const MemberApp = {
       <div class="iq-nav-scrim" onclick="MemberApp.navClose()"></div>
       <nav class="iq-nav-panel" role="navigation" aria-label="Sections">
         <div class="iq-nav-brand">IntelliQ</div>
-        ${this._NAV.map(n => `
+        ${this._navFor().map(n => `
           <button class="iq-nav-item${n.id === active ? ' is-active' : ''}" onclick="MemberApp.navGo('${n.id}')">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="${n.icon}"/></svg>
             <span>${esc(n.label)}</span>
