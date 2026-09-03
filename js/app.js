@@ -11082,8 +11082,15 @@ const MemberApp = {
     const make = copy.make
       ? `<button type="button" class="iq-make" onclick="MemberApp._startObject('${esc(kind)}',undefined,this)">${esc(copy.make)}</button>`
       : '';
+    // WHAT IS WAITING ON YOU sits at the top of Lows, because that is what it is: something
+    // needing attention, with the difference that a person put it there deliberately and is
+    // waiting on an answer. It renders only when there is something, and it renders whether or
+    // not the bucket below it is empty — a leader with nothing of their own and four raises
+    // waiting would otherwise be told "Nothing needs attention right now".
+    const waiting = kind === 'low' ? `<div id="iq-waiting"></div>` : '';
     if (!list.length) {
-      box.innerHTML = `<div class="iq-empty-title">${esc(copy.empty)}</div>${make}`;
+      box.innerHTML = `${waiting}<div class="iq-empty-title">${esc(copy.empty)}</div>${make}`;
+      if (kind === 'low') this._renderWaiting();
       return;
     }
 
@@ -11096,12 +11103,99 @@ const MemberApp = {
     const more = live.length - shown.length;
 
     box.innerHTML =
-      `${make}` +
+      `${waiting}${make}` +
       `<div class="iq-att-section">${shown.map(i => this._objectCard(i, kind)).join('')}</div>` +
       (more > 0
         ? `<button type="button" class="iq-more-objects" onclick="MemberApp._expandBucket('${esc(kind)}')">Read ${more} more</button>`
         : '') +
       (parked.length ? `<div class="iq-att-section"><div class="iq-att-label">Set aside</div>${parked.map(i => this._objectCard(i, kind)).join('')}</div>` : '');
+    if (kind === 'low') this._renderWaiting();
+  },
+
+  /* ── WAITING ON YOU ───────────────────────────────────────────────────────────────────────
+     Somebody raised a belief about themselves and it has reached you. Two answers, and the
+     asymmetry between them is deliberate:
+
+       TAKE IT ON  — one tap. Owning something should be the easy act.
+       PASS IT ON  — needs a reason, always, because a pass with no reason is a dismissal
+                     wearing a routing label, and because passing raises the priority on
+                     somebody else's page. Making that free is how a queue becomes a shrug.
+
+     And when passing, the leader says which they are doing: giving their READ on it, which is
+     an account in their name and becomes evidence alongside anyone else who has looked; or
+     HANDING IT ON because it is not theirs, which records nothing about the person. Nothing
+     here guesses that from the wording. Reading meaning out of somebody's phrasing is the
+     mistake this codebase has already made once. */
+  async _renderWaiting() {
+    const box = document.getElementById('iq-waiting');
+    if (!box) return;
+    let list = [];
+    try {
+      const j = await fetch('/api/leader/raises', { headers: this._authHeaders() }).then(r => r.json());
+      list = (j && j.raises) || [];
+    } catch (_) { return; }
+    if (!list.length) { box.innerHTML = ''; return; }
+    const esc = s => this._escape(String(s == null ? '' : s));
+    box.innerHTML = `
+      <div class="iq-att-label">Waiting on you</div>
+      ${list.map(r => `
+        <article class="card iq-waiting-card" id="wr-${esc(r.raiseId)}">
+          <div class="iq-waiting-head">
+            <span class="iq-waiting-who">${esc(r.from)}</span>
+            <span class="iq-inq-band iq-band-${r.priority === 'urgent' ? 'supported' : 'emerging'}">${esc(r.priority)}</span>
+          </div>
+          <div class="iq-waiting-what">${esc(r.label)} — ${esc(r.called)}.</div>
+          ${r.passedBefore ? `<div class="iq-waiting-passed">${r.passedBefore} ${r.passedBefore === 1 ? 'person has' : 'people have'} passed this on before you.</div>` : ''}
+          <div class="iq-waiting-q">${esc(r.question)}</div>
+          <div class="iq-waiting-btns">
+            <button type="button" class="iqt-verdict" onclick="MemberApp.takeRaise('${esc(r.raiseId)}')">Take it on</button>
+            <button type="button" class="iqt-verdict" onclick="MemberApp._passForm('${esc(r.raiseId)}')">Pass it on</button>
+          </div>
+          <div class="iq-waiting-form" id="wf-${esc(r.raiseId)}"></div>
+        </article>`).join('')}`;
+  },
+
+  _passForm(raiseId) {
+    const box = document.getElementById(`wf-${raiseId}`);
+    if (!box) return;
+    if (box.innerHTML) { box.innerHTML = ''; return; }
+    const id = this._escape(raiseId);
+    box.innerHTML = `
+      <textarea class="iq-waiting-reason" id="wr-txt-${id}" rows="2"
+        placeholder="Why are you passing it on?"></textarea>
+      <div class="iq-waiting-kinds">
+        <label><input type="radio" name="wk-${id}" value="read" checked/> This is my read on it</label>
+        <label><input type="radio" name="wk-${id}" value="handoff"/> Not mine — passing it along</label>
+      </div>
+      <button type="button" class="iqt-verdict" onclick="MemberApp.passRaise('${id}')">Send it on</button>
+      <div class="iqt-call-note" id="wr-note-${id}"></div>`;
+  },
+
+  async passRaise(raiseId) {
+    const txt = document.getElementById(`wr-txt-${raiseId}`);
+    const note = document.getElementById(`wr-note-${raiseId}`);
+    const reason = txt ? String(txt.value || '').trim() : '';
+    if (!reason) { if (note) note.textContent = 'Say why first — that reason is the only thing this is worth to them.'; return; }
+    const picked = document.querySelector(`input[name="wk-${raiseId}"]:checked`);
+    const kind = picked ? picked.value : 'handoff';
+    try {
+      const j = await fetch(`/api/leader/raise/${encodeURIComponent(raiseId)}/pass`, {
+        method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason, kind }),
+      }).then(r => r.json());
+      if (j && j.error) { if (note) note.textContent = j.error; return; }
+      await this._renderWaiting();
+    } catch (_) { if (note) note.textContent = 'That could not be sent just now.'; }
+  },
+
+  async takeRaise(raiseId) {
+    try {
+      await fetch(`/api/leader/raise/${encodeURIComponent(raiseId)}/take`, {
+        method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      await this._renderWaiting();
+    } catch (_) {}
   },
 
   _expandBucket(kind) { this._bucketExpanded = kind; this._renderBucketPage(kind); },
@@ -11479,6 +11573,39 @@ const MemberApp = {
     const esc = s => this._escape(String(s == null ? '' : s));
     const on = v => mine.called === v ? ' iqt-call-on' : '';
     const id = esc(objectId);
+
+    /* THE LADDER, and it only appears once you have called it (L-ES1).
+
+       The founder chose this explicitly over routing on the call itself: a private read on
+       yourself arriving in front of five people the instant you tap is not what anybody expects
+       the first time, and consent that surprises somebody was never consent. So raising it is a
+       separate, deliberate act, and the button says exactly where it goes and what happens if
+       nobody takes it — including the part most software hides, which is that being passed
+       along makes it MORE prominent rather than less. */
+    let raise = null;
+    try {
+      const rj = await fetch('/api/me/raises', { headers: this._authHeaders() }).then(r => r.json());
+      raise = ((rj && rj.raises) || []).find(r => r.inquiryId === objectId && r.status !== 'withdrawn') || null;
+    } catch (_) {}
+
+    const ladder = !mine.called ? '' : raise ? `
+      <div class="iqt-raise">
+        <div class="iqt-raise-line">${esc(raise.line)}</div>
+        ${(raise.said || []).map(s => `
+          <div class="iqt-raise-said">
+            <span class="iqt-raise-by">${esc(s.by)}</span>
+            <span class="iqt-raise-kind">${s.kind === 'read' ? 'their read' : 'passed it on'}</span>
+            <div>${esc(s.text)}</div>
+          </div>`).join('')}
+        ${raise.status === 'open' || raise.status === 'exhausted'
+          ? `<button type="button" class="iqt-verdict" onclick="MemberApp.withdrawRaise('${esc(raise.raiseId)}','${id}')">Take it back</button>`
+          : ''}
+      </div>` : `
+      <div class="iqt-raise">
+        <button type="button" class="iqt-verdict" onclick="MemberApp.raiseBelief('${id}')">Raise this with the people who lead me</button>
+        <div class="iqt-raise-hint">They see the belief and that you called it — never what you said. If one passes it on it goes to the next person, and it moves up your list rather than quietly down it.</div>
+      </div>`;
+
     row.innerHTML = `
       <div class="iqt-call-q">${esc(mine.question)}</div>
       <div class="iqt-call-btns">
@@ -11489,7 +11616,31 @@ const MemberApp = {
         ${mine.called ? `<button type="button" class="iqt-verdict"
           onclick="MemberApp.callBelief('${id}',null)">Take it back</button>` : ''}
       </div>
-      <div class="iqt-call-note" id="iqt-call-note"></div>`;
+      <div class="iqt-call-note" id="iqt-call-note"></div>
+      ${ladder}`;
+  },
+
+  async raiseBelief(inquiryId) {
+    const note = document.getElementById('iqt-call-note');
+    try {
+      const j = await fetch('/api/me/raise', {
+        method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inquiryId }),
+      }).then(r => r.json());
+      await this._renderCallRow(inquiryId);
+      const after = document.getElementById('iqt-call-note');
+      if (after) after.textContent = (j && (j.note || j.error)) || '';
+    } catch (_) { if (note) note.textContent = 'That could not be sent just now.'; }
+  },
+
+  async withdrawRaise(raiseId, inquiryId) {
+    try {
+      await fetch(`/api/me/raise/${encodeURIComponent(raiseId)}/withdraw`, {
+        method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      await this._renderCallRow(inquiryId);
+    } catch (_) {}
   },
 
   /* A call is a call, not a conclusion — it can be changed and it can be withdrawn, and the

@@ -59,6 +59,7 @@ const composer          = require('./ai/composer');
 const diagnose          = require('./ai/diagnose');
 const contribution      = require('./ai/contribution');
 const forum             = require('./ai/forum');
+const escalation        = require('./ai/escalation');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
 const errorlog = require('./ai/errorlog');
@@ -207,7 +208,7 @@ function _persistedStores() {
     orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed, orgContextRecords,
     reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
     conversationSessions, assistantConversations, libraryFolders, libraryItems, safeguardingFlags,
-    inquiryStates, groupCandidates, forumThreads, teamFocuses,
+    inquiryStates, groupCandidates, forumThreads, teamFocuses, raises,
   };
 }
 
@@ -4929,6 +4930,42 @@ function _beliefStateFindings(code, userId, now) {
           body: `One of your focuses was due a look ${days} day${days === 1 ? '' : 's'} ago and nothing has been recorded yet.`,
           suggestion: 'Say how it went, even if the answer is that it is hard to tell.' } } });
     }
+  }
+
+  /* THE BOTTLENECK, ON THE PERSON'S OWN PAGE (L-ES3).
+
+     Founder: "each time a leader pushes it away the bigger the priority becomes because it'll
+     be a bottleneck on the user's page." So a raise that keeps being handed on climbs — the
+     priority comes straight from ai/escalation.priorityOf, which is the same number the leader
+     saw when they passed it. Nothing here re-decides it.
+
+     A raise somebody TOOK falls out of this entirely: it has an owner, so it is no longer the
+     person's thing to carry, and leaving it near the top would be the system counting a solved
+     problem as an open one. */
+  for (const r of Object.values(_raises(code))) {
+    if (!r || r.subjectId !== userId) continue;
+    if (r.status !== 'open' && r.status !== 'exhausted') continue;
+    const passes = escalation.passCount(r);
+    if (!passes && r.status === 'open') continue;      // nobody has passed it yet; nothing to report
+    const priority = escalation.priorityOf(r);
+    const line = escalation.statusLine(r, id => _nameOf(code, id));
+    const seen = escalation.originCount(r);
+    out.push({
+      patternType: r.status === 'exhausted' ? 'raise_exhausted' : 'raise_passed_on',
+      polarity: 'risk', subjectId: userId,
+      severity: priority === 'urgent' ? 'high' : 'medium', priority, confidence: 'clear',
+      render: { self: {
+        headline: r.status === 'exhausted'
+          ? 'Nobody has taken this on'
+          : 'This is still waiting on somebody',
+        // The status line names who is holding it, which the person is entitled to know about
+        // a thing they raised themselves. What it never carries is a word of what they said.
+        body: seen
+          ? `${line} ${seen} ${seen === 1 ? 'person has' : 'people have'} given their own read on it, so it is better evidenced than when you raised it.`
+          : line,
+        suggestion: r.status === 'exhausted'
+          ? 'Nothing more will happen on its own. Worth deciding whether to take it somewhere else.'
+          : null } } });
   }
   return out;
 }
@@ -14835,6 +14872,231 @@ app.get('/api/inquiry/:id/thread', requireAuth, (req, res) => {
   });
 });
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE LADDER — raising a High or a Low to the people who lead you
+
+   Founder: "if a high or low person has to go through a leader and the owner... they will all
+   have different perspectives with different evidence, such as a weight room coach's evidence
+   for you doing well will be different to a head coach. And each time a leader pushes it away
+   the bigger the priority becomes because it'll be a bottleneck on the user's page."
+
+   The reasoning is in ai/escalation.js, which is pure. This half owns the three things that
+   need org data: WHO the ladder is, WHERE a leader's read goes when they give one, and the
+   priority that comes back down onto the person's page.
+
+   L-ES1 IS A FOUNDER DECISION, taken explicitly rather than inferred: THE PERSON RAISES IT.
+   Calling something working-well or worth-attention files it privately, and it stays private.
+   Sending it to five leaders is a second, deliberate tap. Automatic routing on the call was
+   offered and rejected — a private read on yourself arriving in front of five people the
+   instant you tap it is not what a player expects the first time, and consent that surprises
+   somebody was never consent.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* code → { raiseId → raise }. Org-partitioned at the top level, so _durableUnits and _purgeOrg
+   both handle it with no special casing. */
+const raises = {};
+const _raises = (code) => (raises[code] = raises[code] || {});
+
+/* WHO YOUR LEADERS ARE, nearest first, ending at whoever runs the organisation.
+
+   Breadth-first from the groups the person is actually in, then up through the parents, then
+   the owner. Nearest first because the strength coach who sees you four mornings a week should
+   get the chance before the head of the club — and because the founder's whole point is that
+   those two see different things, in that order. */
+function _ladderFor(code, userId) {
+  const nodes = orgNodes[code] || {};
+  const users = orgUsers[code] || {};
+  const out = [];
+  const seen = new Set([userId]);
+  const add = (leaderId, node, because) => {
+    if (!leaderId || seen.has(leaderId)) return;
+    const u = users[leaderId];
+    if (!u || u.status === 'removed') return;
+    seen.add(leaderId);
+    out.push({ leaderId, nodeId: node ? node.nodeId : '', nodeName: node ? (node.name || '') : '', because });
+  };
+
+  const start = Object.values(nodes).filter(n => n && (n.memberIds || []).includes(userId));
+  const queue = [...start];
+  const visited = new Set(start.map(n => n.nodeId));
+  while (queue.length) {
+    const node = queue.shift();
+    for (const id of (node.leaderIds || [])) add(id, node, `leads ${node.name || 'your group'}`);
+    const parent = node.parentId && nodes[node.parentId];
+    if (parent && !visited.has(parent.nodeId)) { visited.add(parent.nodeId); queue.push(parent); }
+  }
+  // The owner is the last rung and never the first. Somebody who runs the whole organisation is
+  // the wrong first person to ask about your warm-up, and putting them first is how a ladder
+  // becomes a complaints box.
+  for (const u of Object.values(users)) {
+    if (u && (u.role === 'admin' || u.role === 'superadmin')) add(u.id, null, 'runs the organisation');
+  }
+  return out;
+}
+
+const _nameOf = (code, id) => ((orgUsers[code] || {})[id] || {}).name || 'someone';
+
+/* A leader's READ becomes evidence about the person; a leader's HANDOFF never does (L-ES4).
+
+   This is the forum boundary, unchanged: speech is not evidence until its author deliberately
+   makes it so. What differs here is that the leader was ASKED — the person raised it at them —
+   so an answer offered as their read is a deliberate, attributed account in a way that ambient
+   discussion is not. It still proves nothing on its own: it goes through applyProposals with
+   its own author as its origin and the kernel decides what, if anything, it is worth. */
+function _admitLeaderRead(code, subjectId, inquiryId, read, now = Date.now()) {
+  const bySubject = (inquiryStates[code] || {})[`member:${subjectId}`] || {};
+  const key = Object.keys(bySubject).find(k => bySubject[k] && bySubject[k].inquiryId === inquiryId);
+  if (!key) return { admitted: false, reason: 'no such belief' };
+  const proposal = {
+    id: 'lr_' + generateId(),
+    level: 'observation', directness: 'direct', authority: 'third_party', source: 'other',
+    specificity: 0.6, statement: read.text,
+    originKind: read.originKind, originRef: read.originRef, turnId: `raise_${read.originRef}_${now}`,
+  };
+  bySubject[key] = diagnose.applyProposals(bySubject[key], [proposal], { now, evidenceRefOf: p => p.originRef });
+  return { admitted: true, origins: escalation.originCount };
+}
+
+/* POST /api/me/raise — { inquiryId }. The person's act, and only for something they called. */
+app.post('/api/me/raise', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const inquiryId = String((req.body || {}).inquiryId || '');
+  const calls = _getMemory(code, userId).valenceCalls || {};
+  const call = calls[inquiryId];
+  // You raise a thing you have already called. Raising something you have not called would be
+  // asking five people to look at a belief you have not yet taken a position on yourself.
+  if (!call) return res.status(400).json({ error: 'call it working well or worth attention first — that is what you would be raising' });
+
+  const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+  const inq = Object.values(mine).find(i => i && i.inquiryId === inquiryId);
+  if (!inq) return res.status(404).json({ error: 'no such belief of yours' });
+
+  const open = Object.values(_raises(code)).find(r =>
+    r && r.subjectId === userId && r.inquiryId === inquiryId && (r.status === 'open' || r.status === 'held'));
+  if (open) return res.status(409).json({ error: 'this one is already with somebody', raiseId: open.raiseId });
+
+  const ladder = _ladderFor(code, userId);
+  if (!ladder.length) {
+    return res.status(400).json({ error: 'there is nobody above you to raise this to',
+      note: 'You are not in a group with a leader yet, so there is no one for this to go to.' });
+  }
+  const raise = escalation.newRaise({
+    raiseId: 'rs_' + generateId(), inquiryId, subjectId: userId, valence: call.valence,
+    label: present.humanTopic(inq.topic || {}) || '', ladder, now: Date.now(),
+  });
+  _raises(code)[raise.raiseId] = raise;
+  _audit(code, { actor: userId, action: 'raise_opened', subjectIds: [userId], basis: call.valence });
+  scheduleSave();
+  res.json({ ok: true, raiseId: raise.raiseId,
+    waitingOn: _nameOf(code, (escalation.holder(raise) || {}).leaderId),
+    of: ladder.length,
+    status: escalation.statusLine(raise, id => _nameOf(code, id)),
+    note: `Raised. ${_nameOf(code, ladder[0].leaderId)} sees it first; if they pass it on it goes to the next person, and it moves up your list rather than down.` });
+});
+
+/* GET /api/me/raises — where my own raises have got to. */
+app.get('/api/me/raises', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const out = Object.values(_raises(code))
+    .filter(r => r && r.subjectId === userId)
+    .sort((a, b) => (b.lastMovedAt || 0) - (a.lastMovedAt || 0))
+    .map(r => ({
+      raiseId: r.raiseId, inquiryId: r.inquiryId, label: r.label, valence: r.valence,
+      status: r.status, priority: escalation.priorityOf(r),
+      passes: escalation.passCount(r), of: (r.stops || []).length,
+      waitingOn: _nameOf(code, (escalation.holder(r) || {}).leaderId),
+      line: escalation.statusLine(r, id => _nameOf(code, id)),
+      // What each leader actually said, attributed. The person asked them; hiding the answer
+      // behind an anonymity that exists to protect PEERS in a forum would be the wrong law
+      // borrowed from the wrong place.
+      said: (r.stops || []).filter(s => s.reason).map(s => ({
+        by: _nameOf(code, s.leaderId), kind: s.passKind, text: s.reason, state: s.state })),
+    }));
+  res.json({ ok: true, raises: out });
+});
+
+/* POST /api/me/raise/:raiseId/withdraw — take it back. */
+app.post('/api/me/raise/:raiseId/withdraw', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const r = _raises(code)[String(req.params.raiseId)];
+  if (!r) return res.status(404).json({ error: 'not found' });
+  const out = escalation.withdraw(r, { by: userId, now: Date.now() });
+  if (!out.ok) return res.status(403).json({ error: out.error });
+  _raises(code)[r.raiseId] = out.raise;
+  scheduleSave();
+  res.json({ ok: true, note: out.note });
+});
+
+/* GET /api/leader/raises — what is waiting on ME. */
+app.get('/api/leader/raises', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const out = [];
+  for (const r of Object.values(_raises(code))) {
+    if (!r || !escalation.mayAct(r, userId)) continue;
+    out.push({
+      raiseId: r.raiseId, label: r.label, valence: r.valence,
+      // The person is NAMED here, and has to be: a read on somebody you cannot identify is not
+      // a read. They chose to send it to you, which is what makes that fair.
+      from: _nameOf(code, r.subjectId), subjectId: r.subjectId,
+      priority: escalation.priorityOf(r),
+      passedBefore: escalation.passCount(r),
+      // No verbatim of anything the person said. A leader gets the belief's name and the fact
+      // they called it, which is what they need to answer.
+      called: r.valence === 'working_well' ? 'they say this is working well' : 'they say this needs attention',
+      question: 'From where you sit, what do you see?',
+    });
+  }
+  out.sort((a, b) => b.passedBefore - a.passedBefore);
+  res.json({ ok: true, raises: out });
+});
+
+/* POST /api/leader/raise/:raiseId/pass — { reason, kind: 'read'|'handoff' }.
+
+   L-ES2: the reason is required. L-ES3: this RAISES the priority on the person's page. L-ES4:
+   only kind 'read' becomes evidence, and the leader says which they are doing. */
+app.post('/api/leader/raise/:raiseId/pass', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const r = _raises(code)[String(req.params.raiseId)];
+  if (!r) return res.status(404).json({ error: 'not found' });
+  const b = req.body || {};
+  const now = Date.now();
+  const out = escalation.pass(r, { by: userId, reason: b.reason, kind: b.kind, now });
+  if (!out.ok) return res.status(escalation.mayAct(r, userId) ? 400 : 403).json({ error: out.error });
+  _raises(code)[r.raiseId] = out.raise;
+
+  let admitted = null;
+  if (b.kind === 'read') {
+    const mine = escalation.readsOf(out.raise).filter(x => x.originRef === `leader:${userId}`);
+    if (mine.length) admitted = _admitLeaderRead(code, r.subjectId, r.inquiryId, mine[mine.length - 1], now);
+  }
+  _audit(code, { actor: userId, action: 'raise_passed', subjectIds: [r.subjectId], basis: b.kind === 'read' ? 'read' : 'handoff' });
+  scheduleSave();
+  res.json({ ok: true, note: out.note,
+    priority: escalation.priorityOf(out.raise),
+    recorded: !!(admitted && admitted.admitted),
+    evidenceNote: b.kind === 'read'
+      ? 'Recorded as your account of it, in your name, alongside anyone else who has looked.'
+      : 'Not recorded as evidence — you passed it on rather than gave a read on it.' });
+});
+
+/* POST /api/leader/raise/:raiseId/take — { note? }. */
+app.post('/api/leader/raise/:raiseId/take', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const r = _raises(code)[String(req.params.raiseId)];
+  if (!r) return res.status(404).json({ error: 'not found' });
+  const now = Date.now();
+  const out = escalation.take(r, { by: userId, note: (req.body || {}).note, now });
+  if (!out.ok) return res.status(403).json({ error: out.error });
+  _raises(code)[r.raiseId] = out.raise;
+
+  let admitted = null;
+  const mine = escalation.readsOf(out.raise).filter(x => x.originRef === `leader:${userId}`);
+  if (mine.length) admitted = _admitLeaderRead(code, r.subjectId, r.inquiryId, mine[mine.length - 1], now);
+  _audit(code, { actor: userId, action: 'raise_taken', subjectIds: [r.subjectId], basis: 'taken' });
+  scheduleSave();
+  res.json({ ok: true, note: out.note, recorded: !!(admitted && admitted.admitted) });
+});
+
 app.get('/api/library', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const scope = ['mine', 'shared', 'all'].includes(req.query.scope) ? req.query.scope : 'all';
@@ -19393,6 +19655,7 @@ function _loadAllStores(data) {
   Object.assign(groupCandidates, data.groupCandidates || {});
   Object.assign(forumThreads,   data.forumThreads   || {});
   Object.assign(teamFocuses,    data.teamFocuses    || {});
+  Object.assign(raises,         data.raises         || {});
   _rebuildEvidenceIndex();
   for (const code of Object.keys(evidenceLog)) {
     if ((evidenceLog[code] || []).length > EVIDENCE_LOG_CAP) _scheduleEvidenceEviction(code);
@@ -19444,6 +19707,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: the group contribution boundary
   groupCandidates, orgNodes, _groupSubjectRef, _noteGroupCandidates, _admitGroupContributions,
   _inNode, _leadsNode, forumThreads, _forumThread,
+  raises, _raises, _ladderFor, _admitLeaderRead,
   teamFocuses, _teamFocuses, _groupInquiryProjections, _groupPatternFindings, _mayReadGroup, _teamStateAnswer, _leadInquiry,
   reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library

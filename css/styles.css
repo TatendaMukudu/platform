@@ -2955,6 +2955,33 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqt-call-note{font-size:.8rem;color:var(--text-secondary);margin:.5rem 0 0}
 .iqt-call-note:empty{display:none}
 
+/* The ladder. Raising something is a smaller act than calling it, so it reads smaller — and
+   what each leader said is set as quoted speech, attributed, because those are their words
+   about you and the person is entitled to see whose. */
+.iqt-raise{margin:.85rem 0 0;padding:.7rem 0 0;border-top:1px solid var(--border)}
+.iqt-raise:empty{display:none}
+.iqt-raise-line{font-size:.85rem;color:var(--text-primary);margin:0 0 .5rem}
+.iqt-raise-hint{font-size:.78rem;color:var(--text-secondary);margin:.45rem 0 0;line-height:1.45}
+.iqt-raise-said{font-size:.82rem;color:var(--text-secondary);margin:.5rem 0;padding-left:.7rem;
+  border-left:2px solid var(--border)}
+.iqt-raise-by{color:var(--text-primary);font-weight:600}
+.iqt-raise-kind{margin-left:.4rem;opacity:.75}
+
+/* Waiting on you — a leader's queue. Deliberately plain: it is a list of people who asked. */
+.iq-waiting-card{margin:0 0 .6rem;padding:.85rem}
+.iq-waiting-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin:0 0 .35rem}
+.iq-waiting-who{font-weight:600;color:var(--text-primary)}
+.iq-waiting-what{font-size:.9rem;color:var(--text-primary);margin:0 0 .35rem}
+.iq-waiting-passed{font-size:.8rem;color:var(--text-secondary);margin:0 0 .35rem}
+.iq-waiting-q{font-size:.85rem;color:var(--text-secondary);margin:0 0 .6rem}
+.iq-waiting-btns{display:flex;flex-wrap:wrap;gap:.45rem}
+.iq-waiting-form:empty{display:none}
+.iq-waiting-reason{width:100%;margin:.6rem 0 .4rem;padding:.5rem .6rem;border-radius:8px;
+  border:1px solid var(--border);background:transparent;color:var(--text-primary);font:inherit;font-size:.85rem}
+.iq-waiting-kinds{display:flex;flex-direction:column;gap:.25rem;margin:0 0 .5rem;
+  font-size:.82rem;color:var(--text-secondary)}
+.iq-waiting-kinds label{display:flex;align-items:center;gap:.4rem;cursor:pointer}
+
 /* IntelliQ's opening is a message in the conversation, so it takes the assistant bubble. */
 .iqt-open-msg{position:relative}
 .iqt-open-msg .iqt-lede{font-size:1.1rem;line-height:1.5;color:var(--text-primary);margin:0 0 .8rem}
