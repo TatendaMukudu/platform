@@ -349,10 +349,18 @@ async function _performSave(failLoud) {
       // nothing downstream can quietly start depending on them.
       if (PERSISTENCE_MODE === 'main') {
         try {
-          await db.saveMain(_persistedStores());
+          const blob = _persistedStores();
+          // COUNTED. bytesWritten existed to answer "do writes cost what changed", and it only
+          // ever counted split units — so an instance in main or dual mode reported ZERO bytes
+          // written while shipping the entire platform on every single save. The one mode where
+          // the number mattered most was the one mode it could not see.
+          const size = Buffer.byteLength(JSON.stringify(blob), 'utf8');
+          await db.saveMain(blob);
+          _saveStats.bytesWritten += size;
+          _saveStats.mainBlobWrites = (_saveStats.mainBlobWrites || 0) + 1;
           _lastSaveError = null;
           _saveRetries = 0;
-          _lastSave = { units: 1, bytes: 0, ms: Date.now() - t0, mode: 'main' };
+          _lastSave = { units: 1, bytes: size, ms: Date.now() - t0, mode: 'main' };
         } catch (e) {
           console.error('[db] Save failed:', e.message);
           _lastSaveError = e; _saveDirty = false;
@@ -424,7 +432,15 @@ async function _performSave(failLoud) {
         // 'dual' keeps the legacy blob current so a rollback to 'main' loses
         // nothing. It costs the full upload every cycle — that is the price of
         // the rollback, and the reason it is not the default.
-        if (PERSISTENCE_MODE === 'dual') await db.saveMain(_persistedStores());
+        if (PERSISTENCE_MODE === 'dual') {
+          const blob = _persistedStores();
+          const size = Buffer.byteLength(JSON.stringify(blob), 'utf8');
+          await db.saveMain(blob);
+          // Dual mode pays the FULL upload every cycle on top of the split write. That is the
+          // documented price of keeping a rollback point — but it was being paid invisibly.
+          _saveStats.bytesWritten += size;
+          _saveStats.mainBlobWrites = (_saveStats.mainBlobWrites || 0) + 1;
+        }
         // Baseline advances ONLY after the write commits. A failed save must stay
         // dirty and retry, never be remembered as persisted.
         for (const [k, h] of Object.entries(hashes)) {
@@ -14577,8 +14593,22 @@ app.get('/api/admin/footprint', requireAuth, (req, res) => {
   const orgs = Object.entries(byOrg).map(([org, bytes]) => ({ org, mb: mb(bytes) })).sort((a, b) => b.mb - a.mb);
   const biggest = Object.entries(units).map(([key, v]) => ({ key, mb: mb(Buffer.byteLength(JSON.stringify(v), 'utf8')) }))
     .sort((a, b) => b.mb - a.mb).slice(0, 8);
+  // WHAT HAS ACTUALLY LEFT THE PROCESS. A size tells you what one cold start costs; this tells
+  // you what the writes have cost since boot, which is the other half of the bill and the half
+  // that scales with use rather than with restarts.
+  const writes = {
+    mode: PERSISTENCE_MODE,
+    saveCycles: _saveStats.cycles,
+    quietCycles: _saveStats.noopCycles,
+    writtenMB: mb(_saveStats.bytesWritten),
+    fullBlobWrites: _saveStats.mainBlobWrites || 0,
+    since: _saveStats.startedAt,
+  };
+  const warning = PERSISTENCE_MODE !== 'split'
+    ? `PERSISTENCE_MODE is "${PERSISTENCE_MODE}", so every save uploads the WHOLE instance (${mb(total)} MB), not just what changed. On a busy day that is the entire bill. Set PERSISTENCE_MODE=split unless you are deliberately keeping a rollback point.`
+    : null;
   res.json({ ok: true, scope: 'platform', totalMB: mb(total), orgs, biggestUnits: biggest,
-    perColdStartMB: mb(total), platformKeyConfigured: keyed,
+    perColdStartMB: mb(total), platformKeyConfigured: keyed, writes, warning,
     note: `A cold start loads ${mb(total)} MB. Render's free tier spins down when idle and cold-starts on the next request, and every deploy restarts too — multiply by how many starts a month you expect. Delete an unused organisation with DELETE /api/admin/org/:code.` });
 });
 

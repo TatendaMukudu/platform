@@ -111,6 +111,19 @@ const clear = () => { for (const store of Object.values(_persistedStores())) for
 
   db.loadStores = realLoadStores;
   db.loadMain = realLoadMain;
+  /* ── BB11-BB12: the WRITE counter must see the legacy blob. It only ever counted split
+     units, so an instance in main or dual mode reported zero bytes written while uploading the
+     entire platform on every save — the one mode where the number mattered was the one mode it
+     was blind to, and "0 MB written" is a very convincing way to look healthy. ── */
+  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
+  const mainBranch = src.slice(src.indexOf("if (PERSISTENCE_MODE === 'main') {", src.indexOf('async function _performSave')),
+                               src.indexOf('_saveStats.cycles++'));
+  ok('BB11 the legacy-blob write is counted in bytesWritten, like every other write',
+    /_saveStats\.bytesWritten \+=/.test(mainBranch));
+  const dualBranch = src.slice(src.indexOf("if (PERSISTENCE_MODE === 'dual')"), src.indexOf("if (PERSISTENCE_MODE === 'dual')") + 700);
+  ok('BB12 …and so is the one dual mode pays on top of the split write',
+    /_saveStats\.bytesWritten \+=/.test(dualBranch));
+
   console.log(`\nboot-bandwidth-smoke: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

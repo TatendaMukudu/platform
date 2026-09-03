@@ -3259,9 +3259,22 @@ async function showFootprint() {
       out.innerHTML = `<div style="line-height:1.7">Your organisation holds <strong>${esc(d.orgMB)} MB</strong>.</div>`;
     } else {
       const rows = (d.orgs || []).map(o => `<div>${esc(o.org)} — <strong>${esc(o.mb)} MB</strong></div>`).join('');
+      const w = d.writes || {};
+      // Two numbers, because there are two bills: what a RESTART costs (the size) and what USE
+      // costs (the writes). Reporting only the first is how a instance in the wrong persistence
+      // mode looks perfectly healthy.
+      const writes = `<div style="margin-top:0.7rem;padding-top:0.6rem;border-top:1px solid var(--border)">
+        Writes since this instance started: <strong>${esc(w.writtenMB)} MB</strong>
+        over ${esc(w.saveCycles)} save cycle(s)${w.fullBlobWrites ? `, ${esc(w.fullBlobWrites)} of them a full upload` : ''}.
+        <div style="color:var(--text-muted);margin-top:0.2rem">Persistence mode: ${esc(w.mode)}</div>
+      </div>`;
+      const warn = d.warning
+        ? `<div style="margin-top:0.7rem;padding:0.5rem 0.6rem;border-left:2px solid var(--warning);color:var(--text-primary)">${esc(d.warning)}</div>`
+        : '';
       out.innerHTML = `<div style="line-height:1.7">
         A cold start loads <strong>${esc(d.totalMB)} MB</strong>.
         <div style="margin-top:0.5rem">${rows}</div>
+        ${writes}${warn}
         <div style="margin-top:0.6rem;color:var(--text-secondary)">${esc(d.note)}</div>
       </div>`;
     }
