@@ -11487,7 +11487,15 @@ const MemberApp = {
     const pend = document.getElementById('iq-pending');
     if (pend) {
       pend.removeAttribute('id');
-      if (r && r.ok) { pend.innerHTML = this._renderAssistant(r.j); }
+      if (r && r.ok) {
+        pend.innerHTML = this._renderAssistant(r.j);
+        // WHICH WAY DID THAT POINT? Asked once, only when what they just said actually became
+        // evidence about them, and only ever of the person it is about. This tap is the ONLY
+        // thing that gives a signal a direction — nothing anywhere reads it out of their
+        // wording — so if it is not offered here, the machine simply has less to go on, which
+        // is the correct trade.
+        if (r.j && r.j.askDirection && r.j.turnId) this._askDirection(pend, r.j.turnId);
+      }
       else {
         // Never a blank bubble or a raw error — say what happened + offer a retry (text preserved).
         pend.classList.add('iq-msg-error');
@@ -11500,6 +11508,39 @@ const MemberApp = {
     if (thread) thread.scrollTop = thread.scrollHeight;
     this._wsSending = false;
     if (sendBtn) { sendBtn.disabled = false; sendBtn.classList.remove('is-loading'); }
+  },
+
+  /* One question, three answers, and it disappears once answered. Deliberately NOT phrased as
+     "how are you feeling" — that is the daily check-in, and it asked whether or not there was
+     anything to answer until people learned it was noise. This asks about the THING they just
+     said, at the moment they said it, and only when it landed as evidence. */
+  _askDirection(afterEl, turnId) {
+    if (!afterEl || !afterEl.parentNode) return;
+    const id = this._escape(String(turnId));
+    const row = document.createElement('div');
+    row.className = 'iq-dir';
+    row.id = `iq-dir-${id}`;
+    row.innerHTML = `
+      <span class="iq-dir-q">Is that better or worse than before?</span>
+      <span class="iq-dir-btns">
+        <button type="button" class="iqt-verdict" onclick="MemberApp.setDirection('${id}','improvement')">Better</button>
+        <button type="button" class="iqt-verdict" onclick="MemberApp.setDirection('${id}','decline')">Worse</button>
+        <button type="button" class="iqt-verdict" onclick="MemberApp.setDirection('${id}','neutral')">Neither</button>
+      </span>`;
+    afterEl.parentNode.insertBefore(row, afterEl.nextSibling);
+  },
+
+  async setDirection(turnId, direction) {
+    const row = document.getElementById(`iq-dir-${turnId}`);
+    try {
+      const j = await fetch('/api/me/direction', {
+        method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ turnId, direction }),
+      }).then(r => r.json());
+      if (row) row.innerHTML = `<span class="iq-dir-done">${this._escape((j && j.note) || 'Noted.')}</span>`;
+    } catch (_) {
+      if (row) row.innerHTML = `<span class="iq-dir-done">That could not be saved just now.</span>`;
+    }
   },
 
   /* Retry a failed turn WITHOUT losing the message — removes the error bubble and re-sends. */

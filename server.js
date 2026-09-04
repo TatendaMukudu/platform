@@ -13553,7 +13553,15 @@ app.post('/api/assistant/turn', requireAuth, async (req, res) => {
   try {
     const r = await _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId, conversationId: req.body?.conversationId, about: req.body?.about });
     _metric(code, 'turn');
-    res.json({ ok: true, turnId: r.turn.turnId, conversationId: r.conversationId || null, messageId: r.messageId || null, at: r.at || null, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response, saved: r.saved || null, capturePrompt: r.capturePrompt || null });
+    /* DID THIS TURN PRODUCE EVIDENCE ABOUT ME? If so the person is asked, once, which way what
+       they just said points. That tap is the ONLY thing that gives a signal a direction — the
+       machine never reads it out of their wording — so the surface has to know when to offer
+       it. Only ever about themselves: a leader-support turn is about somebody else, and their
+       direction is not a leader's to declare. */
+    const directable = !req.body?.subjectMemberId
+      ? _signalsFromTurn(code, userId, r.turn.turnId).length : 0;
+    res.json({ ok: true, turnId: r.turn.turnId, conversationId: r.conversationId || null, messageId: r.messageId || null, at: r.at || null, lens: r.turn.lens, interpretation: r.interpretation, context: r.context, response: r.response, saved: r.saved || null, capturePrompt: r.capturePrompt || null,
+      evidenced: directable, askDirection: directable > 0 });
   } catch (e) {
     // Fail closed with valid JSON — never a non-JSON 500, never a leak in an error body.
     console.warn('[assistant/turn] failed:', e && e.message);
@@ -15087,6 +15095,71 @@ app.get('/api/inquiry/:id/thread', requireAuth, (req, res) => {
     conversation: conversation ? { id: conversation.id, updatedAt: conversation.updatedAt } : null,
     messages: conversation ? (conversation.messages || []).map(_historyMessage) : [],
   });
+});
+
+/* ── WHICH WAY DID THAT POINT? ────────────────────────────────────────────────────────────
+   Founder: "anything said, anything documented in input data that indicates an improvement is
+   high or depreciation a low. Anything said that adds to evidence constituting high or low."
+
+   That is the goal, and there are two ways to build it. Reading the words and classifying them
+   is the ~40-stem lexicon this codebase already removed for turning "struggling with my first
+   touch" into a negative token and destroying the information before anything could reason over
+   it. The other way — chosen by the founder when both were put to them — is that THE PERSON
+   TAGS IT AS THEY SAY IT. One tap on the thing they just told you: better, worse, or neither.
+
+   It is keyed on the TURN rather than on a message or an inquiry, because a turn is what a
+   person experiences as "the thing I just said". One sentence can produce evidence on three
+   different beliefs, and asking three times about one sentence is how the daily check-in taught
+   everybody to ignore the question.
+
+   Their own evidence only, and no inference anywhere in the path. */
+function _signalsFromTurn(code, userId, turnId) {
+  const out = [];
+  const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+  for (const inq of Object.values(mine)) {
+    for (const sig of (inq && inq.signals) || []) {
+      if (sig && sig.turnId === turnId && sig.kind !== 'interpretation' && sig.status === 'active') {
+        out.push({ inq, sig });
+      }
+    }
+  }
+  return out;
+}
+
+/* POST /api/me/direction — { turnId, direction: 'improvement'|'decline'|'neutral' } */
+app.post('/api/me/direction', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  const turnId = String(b.turnId || '');
+  const direction = diagnose.DIRECTIONS.includes(b.direction) ? b.direction : null;
+  if (!turnId) return res.status(400).json({ error: 'turnId required' });
+  // An unrecognised value is refused rather than coerced. Guessing here would be the classifier
+  // arriving through the one door built to keep it out.
+  if (!direction) return res.status(400).json({ error: 'direction must be improvement, decline or neutral' });
+
+  const hits = _signalsFromTurn(code, userId, turnId);
+  if (!hits.length) return res.status(404).json({ error: 'nothing from that turn is on record as evidence' });
+  for (const { sig } of hits) sig.direction = direction;
+
+  // What it changed, said back, so a tap is never a thing that appears to do nothing.
+  const affected = [];
+  const seen = new Set();
+  for (const { inq } of hits) {
+    if (seen.has(inq.inquiryId)) continue;
+    seen.add(inq.inquiryId);
+    const v = teamState.combinedValence(inq, { call: (_getMemory(code, userId).valenceCalls || {})[inq.inquiryId] || null });
+    affected.push({ inquiryId: inq.inquiryId, label: present.humanTopic(inq.topic || {}),
+      bucket: v.ok ? (v.polarity === 'strength' ? 'high' : 'low') : null, reason: v.reason });
+  }
+  _audit(code, { actor: userId, action: 'direction_declared', subjectIds: [userId], basis: direction });
+  scheduleSave();
+  const filed = affected.filter(a => a.bucket);
+  res.json({ ok: true, tagged: hits.length, affected,
+    note: direction === 'neutral'
+      ? 'Noted as neither.'
+      : filed.length
+        ? 'Thanks — that is what lets the system tell a good week from a bad one without guessing at your words.'
+        : 'Noted. Not enough yet for this to point anywhere on its own.' });
 });
 
 /* ═══════════════════════════════════════════════════════════════════════════

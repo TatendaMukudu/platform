@@ -3096,3 +3096,13 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iq-contact:hover{color:var(--text-primary)}
 .iq-contact.is-on{color:var(--text-primary);border-color:var(--accent);background:var(--accent-soft)}
 .iq-contact-with{font-size:.66rem;color:var(--text-muted)}
+
+/* WHICH WAY DID THAT POINT. One question under a turn that produced evidence, asked once and
+   gone once answered. It is not the daily check-in wearing a smaller hat: that asked every day
+   whether or not there was anything to answer, and taught people the question was noise. This
+   fires on evidence and asks about the thing just said, never about the person. */
+.iq-dir{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem;margin:.15rem 0 .6rem;
+  padding:0 .1rem;font-size:.82rem;color:var(--text-secondary)}
+.iq-dir-btns{display:flex;flex-wrap:wrap;gap:.35rem}
+.iq-dir .iqt-verdict{min-height:32px;padding:.25rem .7rem;font-size:.78rem}
+.iq-dir-done{color:var(--text-secondary);font-size:.8rem}

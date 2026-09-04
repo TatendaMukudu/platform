@@ -168,5 +168,27 @@ delete raw.independentOrigins;
 ok('EP12 the origin count is computed from the evidence rather than trusted from a caller — the field being absent is not the same as there being no origins',
   t.originsOf(raw) === 3 && t.combinedValence(raw, { call: null }).ok === true);
 
+/* ── EP13: THE TAP HAS TO EXIST AND HAS TO REACH THE PHONE. Everything above is a law with no
+   way to satisfy it unless a person can actually declare a direction, and the route existing is
+   not the question being asked — which is the defect shape this project has shipped five times
+   now. ── */
+const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'app.js'), 'utf8');
+ok('EP13 the question is ASKED — a turn that produced evidence about you offers the tap, rather than a renderer nothing calls',
+  /this\._askDirection\(pend, r\.j\.turnId\)/.test(src) && /fetch\('\/api\/me\/direction'/.test(src));
+ok('EP13b …all three answers are tappable, including the one that says neither — without it the only way to answer is to claim a direction',
+  /'improvement'\)/.test(src) && /'decline'\)/.test(src) && /'neutral'\)/.test(src));
+// Scoped to the row itself. Scanning the whole file matched this suite's own explanation of
+// what the row is NOT, and separately found the retired daily check-in's prompt still sitting
+// in _setupCheckinPrompt — a real finding, and not one this assertion is about.
+const dirRow = src.slice(src.indexOf('_askDirection(afterEl, turnId) {'), src.indexOf('async setDirection('));
+ok('EP13c …and it asks about the THING just said, not about the person — "how are you feeling" is the check-in that was retired for asking regardless of whether there was anything to answer',
+  /better or worse than before/i.test(dirRow) && !/how are you|feeling|your day/i.test(dirRow));
+
+const srv = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
+ok('EP13d …it is only ever offered about YOURSELF — a leader-support turn is about somebody else, and their direction is not a leader\'s to declare',
+  /!req\.body\?\.subjectMemberId/.test(srv));
+ok('EP13e …and an unrecognised direction is REFUSED at the route rather than coerced into one of the three, because coercing is guessing',
+  /direction must be improvement, decline or neutral/.test(srv));
+
 console.log(`\nevidence-polarity-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
