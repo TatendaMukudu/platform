@@ -60,6 +60,8 @@ const diagnose          = require('./ai/diagnose');
 const contribution      = require('./ai/contribution');
 const forum             = require('./ai/forum');
 const escalation        = require('./ai/escalation');
+const material          = require('./ai/material');
+const chart             = require('./ai/chart');
 const websearch         = require('./ai/websearch');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
@@ -210,6 +212,7 @@ function _persistedStores() {
     reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
     conversationSessions, assistantConversations, libraryFolders, libraryItems, safeguardingFlags,
     inquiryStates, groupCandidates, forumThreads, teamFocuses, raises,
+    materials, materialEngage,
   };
 }
 
@@ -9946,6 +9949,13 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
       name: _firstName(code, userId), role: u.role || 'member',
       domain: _domainDirective(code) ? String(org.orgName || '') + (org.orgMode ? ` (${org.orgMode})` : '') : (org.orgName || ''),
       question, about, beliefs, evidence, assignedWork, priorMessages, need, professionals,
+      /* WHAT WAS ATTACHED TO THE THING THEY ARE LOOKING AT.
+
+         Resolved through the READER'S OWN view of the object (_materialContext → _allObjectsFor),
+         so a person is only ever handed material from something they were already cleared to
+         open. The alternative — looking the material up by id from the client's `about` — would
+         make the client's claim about what it is reading into the access decision. */
+      material: _materialContext(code, userId, about),
       actions: (actions || []).map(a => ({ label: a.label })),
     });
 
@@ -14632,6 +14642,33 @@ function _objectBucket(code, userId, scope = 'self') {
   return out.sort((a, b) => (a.parked - b.parked) || (b.score - a.score) || a.id.localeCompare(b.id));
 }
 
+/* scope=all, EXTRACTED — because more than one surface needs it and a second copy of a privacy
+   merge is how two surfaces come to disagree about who may see what. Material and charts both
+   resolve their object through this, so a thing attached to a focus is readable by exactly the
+   people the focus is readable by, with no second audience model to keep in step. */
+function _allObjectsFor(code, userId) {
+  const whose = (o) => {
+    const raw = o && o.raw ? o.raw : {};
+    const nodeId = raw.nodeId || raw.groupId || null;
+    if (!nodeId) return { whose: 'you', whoseNodeId: null };
+    const node = (orgNodes[code] || {})[nodeId];
+    return { whose: (node && node.name) || raw.group || 'your group', whoseNodeId: nodeId };
+  };
+  const seen = new Set();
+  const all = (_objectBucket(code, userId, 'self') || []).map(o => ({ ...o, ...whose(o) }));
+  all.forEach(o => seen.add(`${o.kind}:${o.id}`));
+  for (const node of Object.values(orgNodes[code] || {})) {
+    if (!node || !_mayReadGroup(code, node.nodeId, userId)) continue;
+    for (const o of (_objectBucket(code, userId, `group:${node.nodeId}`) || [])) {
+      const key = `${o.kind}:${o.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      all.push({ ...o, whose: node.name || 'your group', whoseNodeId: node.nodeId });
+    }
+  }
+  return all;
+}
+
 app.get('/api/objects', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const kind = String(req.query.kind || '');
@@ -14663,33 +14700,7 @@ app.get('/api/objects', requireAuth, (req, res) => {
      are found by `conversation.about === object.about` — so writing a label into it would have
      broken every object thread in the app. It is `whose`, and it is computed from the node the
      object carries. */
-  const _whose = (o) => {
-    const raw = o && o.raw ? o.raw : {};
-    const nodeId = raw.nodeId || raw.groupId || null;
-    if (!nodeId) return { whose: 'you', whoseNodeId: null };
-    const node = (orgNodes[code] || {})[nodeId];
-    return { whose: (node && node.name) || raw.group || 'your group', whoseNodeId: nodeId };
-  };
-
-  let all;
-  if (scope === 'all') {
-    const seen = new Set();
-    all = (_objectBucket(code, userId, 'self') || []).map(o => ({ ...o, ..._whose(o) }));
-    all.forEach(o => seen.add(`${o.kind}:${o.id}`));
-    for (const node of Object.values(orgNodes[code] || {})) {
-      if (!node || !_mayReadGroup(code, node.nodeId, userId)) continue;
-      for (const o of (_objectBucket(code, userId, `group:${node.nodeId}`) || [])) {
-        // Already reached them through their own bucket. A list that repeats itself is a list
-        // people stop reading.
-        const key = `${o.kind}:${o.id}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        all.push({ ...o, whose: node.name || 'your group', whoseNodeId: node.nodeId });
-      }
-    }
-  } else {
-    all = _objectBucket(code, userId, scope);
-  }
+  const all = scope === 'all' ? _allObjectsFor(code, userId) : _objectBucket(code, userId, scope);
   if (!all) return res.status(403).json({ error: 'scope unavailable' });
   const objects = all.filter(item => item.kind === kind).map(({ raw, ...item }) => item);
   // ONE RANKING over both, so the top of the list is the top of the list.
@@ -15403,6 +15414,33 @@ function _ladderFor(code, userId) {
 
 const _nameOf = (code, id) => ((orgUsers[code] || {})[id] || {}).name || 'someone';
 
+/* THE MATERIAL BEHIND A CONVERSATION.
+
+   Founder: "The conversation must primarily flow from the context that was supplied in that
+   focus." This is the whole of that sentence in code — given what a turn is ABOUT, hand the
+   composer the attached material, resolved through the reader's own view so the access decision
+   is never taken from what the client says it is looking at.
+
+   Returns null when there is nothing attached, which is the ordinary case and must stay cheap. */
+function _materialContext(code, userId, about) {
+  try {
+    const ref = _aboutRef(about);
+    if (!ref) return null;
+    const [kind, ...rest] = ref.split(':');
+    const id = rest.join(':');
+    const all = Object.values(_materials(code))
+      .filter(m => m.attachTo.kind === kind && String(m.attachTo.id) === id);
+    if (!all.length) return null;
+    const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
+    if (!obj) return null;   // attached to something this reader cannot open
+    // The most recent one. A thread about a focus with three decks on it is a different problem
+    // and would need the person to say which; silently concatenating them would produce an
+    // answer that mixes two briefings and names neither.
+    const m = all.sort((a, b) => b.createdAt - a.createdAt)[0];
+    return material.contextFor(m, {});
+  } catch (_) { return null; }
+}
+
 /* A leader's READ becomes evidence about the person; a leader's HANDOFF never does (L-ES4).
 
    This is the forum boundary, unchanged: speech is not evidence until its author deliberately
@@ -15516,6 +15554,460 @@ app.post('/api/me/disagree', requireAuth, (req, res) => {
   res.json({ ok: true, inquiryId, contested: true,
     note: 'Recorded, in your words, next to theirs. Accounts differing is the finding — it does not get averaged away, and it moves up rather than down.' });
 });
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════
+   MATERIAL — WHAT SOMEBODY ATTACHED, AND WHETHER IT LANDED
+
+   Founder, September 2026, on what would make this worth having: "If a coach for example can
+   attach a PowerPoint for scouting and ask IntelliQ to recreate it for another game and players
+   interact with that. Then we've achieved a massive goal." And what should come back: "Read it
+   and work from it! ... 'wasn't well understood by 80% of players and they are struggling with
+   A,B,C'." And where the conversation should come from: "The conversation must primarily flow
+   from the context that was supplied in that focus."
+
+   THE AUDIENCE IS NOT A NEW MODEL. Material is attached to an OBJECT, and it is readable by
+   exactly the people that object is readable by — resolved through _allObjectsFor, the same
+   merge the buckets use, with the same _mayReadGroup gate inside it. A second permission model
+   for attachments is how a file ends up visible to a room the focus was never shared with.
+
+   PARSING STAYS ON THE CLIENT, deliberately. AttachmentHandler already extracts text from pptx,
+   docx, xlsx, pdf and csv in the browser; sending the extracted TEXT rather than the file means
+   the server never holds the original, which is the smaller thing to be responsible for. What
+   arrives is text, and it is treated as text somebody typed.
+   ══════════════════════════════════════════════════════════════════════════════════════════ */
+
+const materials      = {};  // code → materialId → { materialId, byId, title, filename, kind, sections[], attachTo, createdAt }
+const materialEngage = {};  // code → materialId → [ { personId, sectionId, state, at, ref } ]
+
+const _materials = code => (materials[code] || (materials[code] = {}));
+const _engageOf  = (code, id) => {
+  const byOrg = materialEngage[code] || (materialEngage[code] = {});
+  return byOrg[id] || (byOrg[id] = []);
+};
+
+/* Resolve a material AND the object it hangs on, through the reader's own view. Returns the
+   object too, because every question about a material ("may I read it", "may I see the report",
+   "who is the cohort") is answered by the object rather than by the file. */
+function _materialFor(code, userId, materialId) {
+  const m = _materials(code)[String(materialId)];
+  if (!m) return { ok: false, status: 404, error: 'not found' };
+  const obj = _allObjectsFor(code, userId)
+    .find(o => o.kind === m.attachTo.kind && String(o.id) === String(m.attachTo.id));
+  // A material whose object the reader cannot see is a material that does not exist for them.
+  // 404 rather than 403: a 403 confirms the thing is there, which is a leak on its own.
+  if (!obj) return { ok: false, status: 404, error: 'not found' };
+  return { ok: true, material: m, object: obj };
+}
+
+/* WHO THE COHORT IS. The people the object is shared with — the node for a squad object, the
+   named participants for a focus somebody was invited into. This is the denominator for the
+   understanding report, and getting it from the object rather than from "everyone who replied"
+   is what makes "nobody has looked at slide 7" sayable at all. */
+function _materialCohort(code, obj) {
+  const raw = (obj && obj.raw) || {};
+  const nodeId = raw.nodeId || raw.groupId || null;
+  if (nodeId) {
+    const node = (orgNodes[code] || {})[nodeId] || {};
+    return { members: (node.memberIds || []).filter(Boolean), nodeId, name: node.name || 'the group' };
+  }
+  return { members: (raw.participants || []).filter(Boolean), nodeId: null, name: 'the people in it' };
+}
+
+/* Attaching is a LEADER'S ACT on something they lead, or anybody's act on their own object.
+   A player may attach to their own focus; only somebody who leads the node may attach to a
+   squad's, because material on a squad object reaches everybody in that squad. */
+function _mayAttach(code, userId, obj) {
+  const raw = (obj && obj.raw) || {};
+  const nodeId = raw.nodeId || raw.groupId || null;
+  if (nodeId) return _leadsNode(code, nodeId, userId);
+  return true;   // their own object, reached through their own bucket
+}
+
+/* POST /api/materials — attach material to an object.
+   { attachTo: { kind, id }, title, filename, kind, text } */
+app.post('/api/materials', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  const at = b.attachTo || {};
+  const kind = String(at.kind || '');
+  if (!['focus', 'inquiry', 'high', 'low'].includes(kind)) return res.status(400).json({ error: 'attach it to a focus, inquiry, high or low' });
+  const text = String(b.text || '');
+  if (!text.trim()) return res.status(400).json({ error: 'nothing readable came out of that file' });
+  if (text.length > material.TEXT_CAP) return res.status(413).json({ error: `that file is larger than IntelliQ will hold (${material.TEXT_CAP} characters of text)` });
+
+  const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === String(at.id));
+  if (!obj) return res.status(404).json({ error: 'no such thing to attach it to' });
+  if (!_mayAttach(code, userId, obj)) {
+    return res.status(403).json({ error: 'you do not lead this group, and material attached here reaches everybody in it' });
+  }
+
+  const sections = material.segment(text, { kind: String(b.kind || 'text') });
+  if (!sections.length) return res.status(400).json({ error: 'nothing readable came out of that file' });
+
+  const id = 'mat_' + generateId();
+  _materials(code)[id] = {
+    materialId: id, byId: userId, orgCode: code,
+    title: String(b.title || b.filename || 'Attached material').trim().slice(0, 200),
+    filename: String(b.filename || '').trim().slice(0, 200),
+    kind: material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text',
+    sections,
+    attachTo: { kind, id: String(at.id) },
+    createdAt: Date.now(),
+  };
+  _audit(code, { actor: userId, action: 'material_attached', subjectIds: [], basis: `${kind}:${at.id} (${sections.length} parts)` });
+  scheduleSave();
+  res.json({ ok: true, materialId: id, parts: sections.length,
+    sections: sections.map(s => ({ id: s.id, ordinal: s.ordinal, heading: s.heading })),
+    note: `Attached, in ${sections.length} ${sections.length === 1 ? 'part' : 'parts'}. IntelliQ will answer from it, and you will see which parts landed.` });
+});
+
+/* GET /api/objects/:kind/:id/materials — what is attached here. */
+app.get('/api/objects/:kind/:id/materials', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const kind = String(req.params.kind || ''), id = String(req.params.id || '');
+  const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
+  if (!obj) return res.status(404).json({ error: 'not found' });
+  const list = Object.values(_materials(code))
+    .filter(m => m.attachTo.kind === kind && String(m.attachTo.id) === id)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map(m => ({ materialId: m.materialId, title: m.title, filename: m.filename, kind: m.kind,
+      parts: (m.sections || []).length, by: _nameOf(code, m.byId), byId: m.byId, createdAt: m.createdAt }));
+  res.json({ ok: true, materials: list });
+});
+
+/* GET /api/materials/:id — read it. The parts, in the author's order, in their words. */
+app.get('/api/materials/:id', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const r = _materialFor(code, userId, req.params.id);
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  const m = r.material;
+  const mine = _engageOf(code, m.materialId).filter(e => e.personId === userId);
+  const stateOf = sid => (mine.filter(e => e.sectionId === sid).sort((a, b) => b.at - a.at)[0] || {}).state || null;
+  res.json({ ok: true,
+    material: { materialId: m.materialId, title: m.title, filename: m.filename, kind: m.kind,
+      by: _nameOf(code, m.byId), createdAt: m.createdAt, attachTo: m.attachTo },
+    sections: (m.sections || []).map(s => ({ id: s.id, ordinal: s.ordinal, heading: s.heading, text: s.text,
+      // WHERE YOU SAID YOU WERE, so somebody can change their mind rather than declare twice.
+      you: stateOf(s.id) })),
+    note: 'Say where you are with each part. Nothing here is read for how confident you sounded — you say it, or it is not said.' });
+});
+
+/* POST /api/materials/:id/engaged — { sectionId, state: 'got_it'|'not_yet', because? }
+
+   L-MT2: DECLARED, NEVER INFERRED. An unrecognised state is refused rather than coerced, for the
+   same reason /api/me/direction refuses one — guessing here is the classifier arriving through
+   the one door in this product built to keep it out. */
+app.post('/api/materials/:id/engaged', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const r = _materialFor(code, userId, req.params.id);
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  const b = req.body || {};
+  const sectionId = String(b.sectionId || '');
+  const state = String(b.state || '');
+  if (!material.ENGAGEMENT.includes(state)) {
+    return res.status(400).json({ error: "say 'got_it' or 'not_yet' — IntelliQ will not work out which one you meant" });
+  }
+  const sec = (r.material.sections || []).find(s => String(s.id) === sectionId);
+  if (!sec) return res.status(404).json({ error: 'no such part of this' });
+
+  const now = Date.now();
+  /* THE REF NAMES NOBODY, and this was a real leak before a suite caught it.
+
+     The first version was `eng:<userId>:<materialId>:<sectionId>:<time>`. Provenance refs travel
+     to the client — they are what makes a chart point traceable — so every bar in the coach's
+     picture carried the ids of the players in it, and the anonymity the whole surface is built on
+     was undone by the identifier. A ref only has to be UNIQUE for counting to work. It does not
+     have to say whose it is, and it must not. */
+  const ref = `eng:${r.material.materialId}:${sectionId}:${generateId()}`;
+  _engageOf(code, r.material.materialId).push({ personId: userId, sectionId, state, at: now, ref });
+
+  /* SAYING YOU DID NOT GET IT IS EVIDENCE ABOUT THE MATERIAL, NOT ABOUT YOU.
+
+     It lands on an inquiry about the OBJECT the material hangs on, with the person as their own
+     origin — so a coach reading it sees "this part did not land", never "this player is slow".
+     Direction is neutral: not getting something yet is not a decline, exactly as an improvement
+     area was not one at onboarding. And the person's own words are theirs to add or not. */
+  let filed = null;
+  if (state === 'not_yet' && String(b.because || '').trim()) {
+    const concept = `material.${r.material.materialId}.${sectionId}`;
+    const inq = _inquiryFor(code, `member:${userId}`, concept,
+      `Where they are with "${sec.heading}"`, (orgMeta[code] || {}).orgMode || '', now);
+    if (inq) {
+      const bySubject = inquiryStates[code][`member:${userId}`];
+      const k = Object.keys(bySubject).find(x => bySubject[x].inquiryId === inq.inquiryId);
+      bySubject[k] = diagnose.applyProposals(inq, [{
+        id: 'eng_' + generateId(),
+        level: 'observation', directness: 'direct', authority: 'self_report', source: 'self',
+        specificity: 0.6, statement: String(b.because).trim().slice(0, 600),
+        originKind: 'self_report', originRef: `self:${userId}`, turnId: `eng_${userId}_${now}`,
+      }], { now, evidenceRefOf: p => `${p.originRef}#${p.id}` });
+      filed = inq.inquiryId;
+    }
+  }
+
+  scheduleSave();
+  res.json({ ok: true, sectionId, state, inquiryId: filed,
+    note: state === 'not_yet'
+      ? 'Recorded against the material, not against you. What comes back to whoever attached it is that this part did not land, and how many people said so — never who.'
+      : 'Recorded. You can change this any time.' });
+});
+
+/* GET /api/materials/:id/understanding — the report, for whoever attached it or leads the group.
+
+   AGGREGATE AND NAMELESS, and cohort-floored. This is the founder's "wasn't well understood by
+   80% of players and they are struggling with A,B,C" — where A, B and C are the author's own
+   headings, never topics anything invented. */
+app.get('/api/materials/:id/understanding', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const r = _materialFor(code, userId, req.params.id);
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  const m = r.material;
+  const cohort = _materialCohort(code, r.object);
+  const isReporter = m.byId === userId || (cohort.nodeId && _leadsNode(code, cohort.nodeId, userId));
+  if (!isReporter) return res.status(403).json({ error: 'this report is for whoever attached it' });
+
+  const engagements = _engageOf(code, m.materialId);
+  const people = new Set(engagements.map(e => e.personId)).size;
+  const n = cohort.members.length;
+  // The two-sided floor, from the production rule. A report on four people is a roster with the
+  // names taken off, and anybody in the room can put them back.
+  const floor = teamState.cohortFloor(people, n);
+  const u = material.understanding(m, engagements, { members: n, floor });
+
+  /* ONE COHORT SHAPE, NOT TWO. The first version spread `u` after its own `cohort` field, and the
+     kernel's {k,n} silently overwrote the {said,of,group} the client was written against — an
+     assertion caught it, but nothing would have errored and the number shown would simply have
+     been missing. A response that carries two fields of the same name is a response with one. */
+  /* `ok` is whether the REQUEST worked; `reported` is whether there is a report. Conflating them
+     — returning ok:false for a cohort too small — makes every client treat a lawful refusal as an
+     error and render nothing, which is the one outcome a refusal must not produce. The chart
+     route already draws this line the same way. */
+  res.json({ ok: true, reported: u.ok, materialId: m.materialId, title: m.title,
+    reason: u.reason,
+    // The refs are the server's provenance, checked before anything is drawn. They are not sent:
+    // an identifier travelling to a client is one more thing that has to be proven anonymous.
+    parts: (u.parts || []).map(({ gotRefs, notRefs, ...p }) => p),
+    struggling: (u.struggling || []).map(({ gotRefs, notRefs, ...p }) => p),
+    untouched: u.untouched,
+    cohort: { said: people, of: n, group: cohort.name },
+    note: material.landedNote(u),
+    limitations: [
+      'Counts people, never names them.',
+      'Somebody who has said nothing is counted as quiet, never as not understanding.',
+      'What people declared, not what IntelliQ decided they meant.',
+    ] });
+});
+
+/* POST /api/materials/:id/recompose — { intent }
+
+   Founder: "ask IntelliQ to recreate it for another game."
+
+   THE GOVERNANCE IS THE FEATURE. Recomposing a scouting brief for a different opponent is
+   exactly where a model will helpfully invent a formation, a name or a number — so the material's
+   own parts are the dataset, and renderArtifact.governArtifact refuses any figure that is not in
+   them. A composed draft that invents one is never shown; the plain version drawn straight from
+   the parts is shown instead, and the caller is told which happened.
+
+   It is a DRAFT. Nothing is attached, nothing is sent, nobody is notified — whoever asked for it
+   decides whether it becomes anything. */
+app.post('/api/materials/:id/recompose', requireAuth, async (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const r = _materialFor(code, userId, req.params.id);
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  const m = r.material;
+  // Recomposing is the author's act or a leader's. A reader of the material may read it and ask
+  // about it; producing a new version of somebody else's briefing is a different thing.
+  const cohort = _materialCohort(code, r.object);
+  if (!(m.byId === userId || (cohort.nodeId && _leadsNode(code, cohort.nodeId, userId)))) {
+    return res.status(403).json({ error: 'this is somebody else\'s material — you can read it and ask about it' });
+  }
+  const intent = String((req.body || {}).intent || '').trim().slice(0, 500);
+  if (!intent) return res.status(400).json({ error: 'say what you want it recreated for' });
+
+  // THE PARTS ARE THE DATASET. Every figure in the draft must appear in them.
+  const dataset = {
+    title: m.title,
+    rows: (m.sections || []).map(s => ({ id: s.id, label: s.heading, detail: s.text })),
+  };
+  const meta = { title: dataset.title, rowCount: dataset.rows.length };
+  const plain = () => renderArtifact.deterministicSummary(dataset, 'summary');
+
+  if (!ai.enabled() || !_llmBudgetOk(code)) {
+    return res.json({ ok: true, enabled: ai.enabled(), draft: plain(), dataset: meta, confirmationRequired: true,
+      note: 'A plain version drawn straight from the parts you attached. Nothing has been sent or attached.' });
+  }
+  try {
+    const composed = await ai.completeJSON({
+      tier: 'reason', system: renderArtifact.SYSTEM_PROMPT,
+      user: renderArtifact.buildDatasetMessage({ intent, format: 'summary', dataset }),
+      maxTokens: 900, temperature: 0.4, schema: ['body'],
+      org: code, taskType: 'material_recompose',
+    });
+    if (!composed) return res.json({ ok: true, enabled: true, draft: plain(), dataset: meta, confirmationRequired: true,
+      note: 'Fell back to a plain version this pass.' });
+    const gov = renderArtifact.governArtifact({ composed, dataset, format: 'summary' });
+    if (!gov.ok) {
+      return res.json({ ok: true, enabled: true, draft: plain(), dataset: meta, flagged: gov.violations, confirmationRequired: true,
+        note: 'The composed version used a figure that is not in the material you attached, so I fell back to the plain version rather than show it.' });
+    }
+    res.json({ ok: true, enabled: true, draft: gov.artifact, dataset: meta, confirmationRequired: true,
+      note: 'A draft, from your material only. Nothing has been sent or attached.' });
+  } catch (e) {
+    console.warn('[material/recompose] failed:', e && e.message);
+    res.json({ ok: true, enabled: true, draft: plain(), dataset: meta, confirmationRequired: true,
+      note: 'Fell back to a plain version this pass.' });
+  }
+});
+
+/* ═══ GRAPHS ═══════════════════════════════════════════════════════════════════════════════
+
+   Founder: "I want graphs to be a spontaneous thing created in a focus, high, low, inquiry when
+   discussing with the assistant kinda like what ChatGPT does." And: the numbers come from "the
+   server, always."
+
+   So there is no client-side arithmetic anywhere below this line. The server builds the series
+   from the record, ai/chart.js decides whether it may be drawn, and the client renders exactly
+   what it is handed. A chart that fails governance returns a REASON and no chart — a
+   half-drawn one is worse than none, because a reader takes what is drawn for the whole.
+   ══════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* HOW A BELIEF FIRMED UP. Replays the inquiry's own signals in date order and asks the
+   PRODUCTION kernel what it made of the evidence at each point. Nothing is re-derived: a chart
+   that computed its own band would eventually disagree with the sentence printed beside it. */
+function _firmingChart(inq, { title }) {
+  const live = (inq.signals || [])
+    .filter(s => s && s.kind !== 'interpretation' && (!s.status || s.status === 'active') && Number.isFinite(s.at))
+    .sort((a, b) => a.at - b.at);
+  if (!live.length) return null;
+
+  const occasions = [];
+  const seenOrigins = new Map();   // originRef → the ref of the signal that first carried it
+  for (let i = 0; i < live.length; i++) {
+    const s = live[i];
+    const originRef = s.originRef ? String(s.originRef) : '';
+    // An occasion is recorded when a NEW independent origin first speaks. A fifth message from
+    // somebody already counted moves nothing, which is the law this chart exists to show.
+    if (!originRef || seenOrigins.has(originRef)) continue;
+    seenOrigins.set(originRef, String(s.ref));
+    const upTo = live.slice(0, i + 1);
+    const conf = diagnose.deriveConfidence(upTo, { now: s.at });
+    occasions.push({
+      at: s.at,
+      // The refs ARE the count — one per independent origin that had spoken by this moment.
+      refs: [...seenOrigins.values()],
+      band: conf.band,
+      label: `${seenOrigins.size} ${seenOrigins.size === 1 ? 'origin' : 'origins'}`,
+    });
+  }
+  if (!occasions.length) return null;
+  return chart.buildFirming({
+    title: title || 'How this firmed up',
+    occasions,
+    threshold: teamState.MIN_ORIGINS,
+  });
+}
+
+/* WHAT HAPPENED, IN ORDER. For a focus: set, material attached, reviewed, closed. Dates only. */
+function _timelineChart(code, userId, obj) {
+  const raw = obj.raw || {};
+  const events = [];
+  const created = Date.parse(raw.createdAt || '') || null;
+  if (created) events.push({ at: created, label: 'Set', marker: 'start', refs: [`focus:${obj.id}:created`] });
+  const cohort = _materialCohort(code, obj);
+  for (const m of Object.values(_materials(code))) {
+    if (m.attachTo.kind !== obj.kind || String(m.attachTo.id) !== String(obj.id)) continue;
+    events.push({ at: m.createdAt, label: `Attached: ${m.title}`, marker: 'material', refs: [`material:${m.materialId}`] });
+    /* HOW MANY PEOPLE ENGAGED IS AN AGGREGATE, AND AN AGGREGATE IS THE LEADER'S READ.
+
+       A suite forced this open. Every player in the squad would otherwise have seen a dot for
+       every teammate who said where they were — a count of their squad's engagement, drawn from
+       nothing they were shown, and in a small squad a short list of who was in the room that day.
+       The founder's line is that a coach sees aggregate stats and a player sees what they share,
+       so the dots are the leader's, and the dates the focus itself carries are everybody's. */
+    const isReporter = m.byId === userId || (cohort.nodeId && _leadsNode(code, cohort.nodeId, userId));
+    if (!isReporter) continue;
+    // ONE POINT PER PERSON, not one per click. Somebody who marks six slides is one person
+    // engaging, and six dots would read as six times the interest.
+    const first = new Map();
+    for (const e of _engageOf(code, m.materialId)) {
+      if (!first.has(e.personId) || e.at < first.get(e.personId).at) first.set(e.personId, e);
+    }
+    for (const e of first.values()) {
+      events.push({ at: e.at, label: 'Somebody said where they were with it', marker: 'engaged', refs: [e.ref] });
+    }
+  }
+  if (raw.reviewAt) events.push({ at: raw.reviewAt, label: 'Review', marker: 'review', refs: [`focus:${obj.id}:review`] });
+  const closed = Date.parse((raw.outcome && raw.outcome.at) || '') || null;
+  if (closed) events.push({ at: closed, label: `Closed: ${(raw.outcome || {}).result || 'done'}`, marker: 'end', refs: [`focus:${obj.id}:outcome`] });
+  if (!events.length) return null;
+  return chart.buildTimeline({ title: `${(obj.present && obj.present.summary && obj.present.summary.title) || 'This focus'} — what happened`, events });
+}
+
+/* HOW IT LANDED ACROSS A GROUP — the bars are the author's own parts. */
+function _spreadChart(code, userId, obj) {
+  const mats = Object.values(_materials(code))
+    .filter(m => m.attachTo.kind === obj.kind && String(m.attachTo.id) === String(obj.id))
+    .sort((a, b) => b.createdAt - a.createdAt);
+  if (!mats.length) return null;
+  const m = mats[0];
+  const cohort = _materialCohort(code, obj);
+  if (!(m.byId === userId || (cohort.nodeId && _leadsNode(code, cohort.nodeId, userId)))) return null;
+  const engagements = _engageOf(code, m.materialId);
+  const people = new Set(engagements.map(e => e.personId)).size;
+  const floor = teamState.cohortFloor(people, cohort.members.length);
+  const u = material.understanding(m, engagements, { members: cohort.members.length, floor });
+  return chart.buildSpread({
+    title: `${m.title} — how many said they had it`,
+    categories: (u.parts || []).map(p => ({ key: p.sectionId, label: p.heading, refs: p.gotRefs, notRefs: p.notRefs })),
+    cohort: { k: people, n: cohort.members.length },
+    floor,
+    limitations: ['The parts are the ones whoever attached this wrote. Nothing here named a topic.'],
+  });
+}
+
+/* GET /api/objects/:kind/:id/chart — the picture for this object, or the reason there is none. */
+app.get('/api/objects/:kind/:id/chart', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const kind = String(req.params.kind || ''), id = String(req.params.id || '');
+  if (!['inquiry', 'focus', 'high', 'low'].includes(kind)) return res.status(404).json({ error: 'not found' });
+  const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
+  if (!obj) return res.status(404).json({ error: 'not found' });
+
+  const want = String(req.query.kind || '');
+  const built = _chartFor(code, userId, obj, want);
+  if (!built) return res.json({ ok: true, chart: null, note: 'Nothing on the record to draw yet.' });
+  // BASIS — the refs this viewer's chart is allowed to be built from, gathered from the same
+  // object they were cleared to read. A point citing anything else is refused as firmly as an
+  // invented one, because a chart drawn from something outside the basis is a chart of data the
+  // viewer was never shown.
+  const governed = chart.governChart(built.spec, { basis: built.basis });
+  if (!governed.ok) {
+    return res.json({ ok: true, chart: null, note: chart.refusalNote(governed.violations),
+      violations: governed.violations.map(v => v.kind) });
+  }
+  res.json({ ok: true, chart: governed.chart });
+});
+
+/* Which picture this object supports, and the refs it may be drawn from. Returns null when there
+   is nothing honest to draw — never a placeholder. */
+function _chartFor(code, userId, obj, want = '') {
+  const raw = obj.raw || {};
+  const title = (obj.present && obj.present.summary && obj.present.summary.title) || '';
+
+  if ((!want || want === 'spread')) {
+    const spec = _spreadChart(code, userId, obj);
+    if (spec) return { spec, basis: spec.series.flatMap(s => s.points.flatMap(p => p.refs)) };
+  }
+  if ((!want || want === 'firming') && raw.signals) {
+    const spec = _firmingChart(raw, { title: title ? `${title} — how this firmed up` : '' });
+    if (spec) return { spec, basis: spec.series.flatMap(s => s.points.flatMap(p => p.refs)) };
+  }
+  if ((!want || want === 'timeline') && obj.kind === 'focus') {
+    const spec = _timelineChart(code, userId, obj);
+    if (spec) return { spec, basis: spec.series[0].points.flatMap(p => p.refs) };
+  }
+  return null;
+}
 
 /* POST /api/me/raise — { inquiryId }. The person's act, and only for something they called. */
 app.post('/api/me/raise', requireAuth, (req, res) => {
@@ -20216,6 +20708,8 @@ function _loadAllStores(data) {
   Object.assign(forumThreads,   data.forumThreads   || {});
   Object.assign(teamFocuses,    data.teamFocuses    || {});
   Object.assign(raises,         data.raises         || {});
+  Object.assign(materials,      data.materials      || {});
+  Object.assign(materialEngage, data.materialEngage || {});
   _rebuildEvidenceIndex();
   for (const code of Object.keys(evidenceLog)) {
     if ((evidenceLog[code] || []).length > EVIDENCE_LOG_CAP) _scheduleEvidenceEviction(code);
@@ -20268,6 +20762,8 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   groupCandidates, orgNodes, _groupSubjectRef, _noteGroupCandidates, _admitGroupContributions,
   _inNode, _leadsNode, forumThreads, _forumThread,
   raises, _raises, _ladderFor, _admitLeaderRead,
+  // exported for the truth layer: attached material, whether it landed, and the graphs
+  materials, materialEngage, _materials, _engageOf, _materialCohort, _allObjectsFor, _chartFor, _materialContext,
   teamFocuses, _teamFocuses, _groupInquiryProjections, _groupPatternFindings, _mayReadGroup, _teamStateAnswer, _leadInquiry,
   reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library

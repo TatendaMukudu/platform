@@ -79,7 +79,28 @@ for (const row of inventory) console.log(`server.js:${row.line} ${row.source}`);
        ON A SQUAD THEY LEAD. Deliberately NOT a permission check: a broad org-wide permission
        would let somebody write about a player they have never met, and leading the node is the
        thing that actually licenses the account. Scoped to the node, exactly as the roster is. */
-ok('W4 inventory names every current scope reference', inventory.length === 66 && inventory.every(r => Number.isInteger(r.line) && r.source));
+/* 66 -> 71, September 2026. Attached material and the graphs drawn from it. FIVE call sites, all
+   _leadsNode, and every one of them answers the same question: material attached to a squad
+   object reaches everybody in that squad, so who may put it there and who may see the AGGREGATE
+   picture of how it landed are both scoped to leading that node.
+
+   Deliberately _leadsNode and not a permission, for the reason /api/leader/observation gives: an
+   org-wide permission would let somebody act on a squad they have never met. Leading the node is
+   the thing that licenses it.
+
+     _mayAttach x1 — attaching to a SQUAD object is a leader's act. Attaching to your own object
+       is anybody's, and that branch takes no scope call at all.
+     /api/materials/:id/understanding x1 — the report of how it landed is for whoever attached it
+       or whoever leads the group. A player reading it would be reading their squad.
+     /api/materials/:id/recompose x1 — recreating somebody else's briefing is not the same as
+       reading it and asking about it, which any member of the audience may do.
+     _spreadChart x1 — the same rule as the report, applied to the picture of it. A chart is the
+       report with the argument removed, so it cannot be the looser surface.
+     _timelineChart x1 — a suite forced this one open. Every player would otherwise have seen a
+       dot for each teammate who engaged: a count of their squad drawn from nothing they were
+       shown, and in a small squad a list of who was in the room. The dots are the leader's; the
+       dates the focus itself carries are everybody's. */
+ok('W4 inventory names every current scope reference', inventory.length === 71 && inventory.every(r => Number.isInteger(r.line) && r.source));
 
 console.log('\nMigration law: BRIDGE never; GATE governance AND Web; ENUMERATE/FILTER migrate later; WEB re-test only.');
 console.log(`\n=== scope-parity-smoke: ${pass} passed, ${fail} failed ===\n`);

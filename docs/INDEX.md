@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `0bbc01e`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `771432c`. **Branch:** `claude/platform-work-summary-nmb0cm`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
 ---
@@ -363,6 +363,26 @@ is how the team surface already worked, and it is the only reason to trust eithe
 | The ladder | raising it to their leaders | who the ladder is, that a pass says why, that a pass raises priority | `escalation-smoke` |
 | Forum | offering a statement as your account | speech never becomes evidence by being agreed with | `forum-reach-smoke` |
 | Outside reading | reading it, or not | the query is composed from owned vocabulary; an uncited answer is refused | `web-sources-smoke` |
+| Onboarding | answering, once, about themselves | one person is one origin and no answer carries a direction — a first-day account is the BEFORE, never a movement | `onboarding-evidence-smoke` |
+| Attached material | saying, per part, whether they have it | the parts are the AUTHOR's sections; silence is reported as silence, never as confusion; the report counts people and names none | `material-smoke`, `material-reach-http-smoke` |
+| Graphs | nothing — a graph is a read | every point names its evidence and a count must EQUAL it; units are count/band/date only; a group chart below the cohort floor is refused with a reason | `chart-governance-smoke` |
+
+### The two modules added for the last of these
+
+`ai/material.js` — material somebody attached, and whether it landed. The design problem is the
+founder's own sentence: *"wasn't well understood by 80% of players and they are struggling with
+A,B,C."* A, B and C have to come from somewhere, and the tempting answer is a classifier reading
+the deck and naming the topics. This codebase already removed one classifier for destroying
+information; a topic-namer would be worse, because it would INVENT the categories a coach then
+acts on. So **the parts are the author's own sections** — slides, headings, paragraph breaks —
+addressed by a stable ordinal id, and nothing ever names a topic that is not already in the file.
+
+`ai/chart.js` — a graph is a view of the record, not a new source of numbers. A chart is the most
+persuasive object a product can show: a line going up reads as a fact before anybody has looked at
+the axis. Two laws carry it. **A count must equal its own evidence** — refs beside a number are
+not provenance unless something checks the number IS the refs. And **nothing is scored**: the unit
+whitelist is `count`, `band`, `date`, because a chart is precisely how the removed scoring system
+would come back, in the one format nobody argues with.
 
 Two of those were founder decisions taken explicitly rather than chosen in code, because both
 changed a privacy law:

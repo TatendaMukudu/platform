@@ -10816,7 +10816,10 @@ const MemberApp = {
       // renders so a slow answer never holds up the thread itself. It appears only on a belief
       // that has earned the question; on everything else this container stays empty.
       const body = `<div class="iqt-turns" id="iq-object-turns">${openingBubble}${turns.map(m => this._threadTurn(m)).join('')}</div>`
-        + `<div class="iqt-call" id="iqt-call"></div><div class="iqt-reading" id="iqt-reading"></div>${verdicts}`;
+        + `<div class="iqt-call" id="iqt-call"></div>`
+        + `<div class="iqt-chart" id="iqt-chart"></div>`
+        + `<div class="iqt-mat" id="iqt-mat"></div>`
+        + `<div class="iqt-reading" id="iqt-reading"></div>${verdicts}`;
 
       box.innerHTML = `
         <div class="iq-object-thread">
@@ -10839,6 +10842,8 @@ const MemberApp = {
             send: 'MemberApp.inquirySend()', mic: 'iqt-mic', state: 'iqt-voice-state' })}
         </div>`;
       this._renderCallRow(objectId);
+      this._renderChart(kind, objectId);
+      this._renderMaterial(kind, objectId);
       this._renderReading(kind, objectId);
     } catch (_) {
       box.innerHTML = `<div class="iq-empty-sub">This could not be opened right now.</div>`;
@@ -10960,6 +10965,272 @@ const MemberApp = {
       </div>
       <div class="iqt-reading-note">${esc(j.note)}</div>
       <div class="iqt-reading-q">Searched for "${esc(j.query)}" — ${esc(j.queryNote || 'built from the topic, not from anything you wrote.')}</div>`;
+  },
+
+  /* ── A GRAPH, WHEN THE RECORD SUPPORTS ONE ───────────────────────────────────────────────
+     Founder: "I want graphs to be a spontaneous thing created in a focus, high, low, inquiry when
+     discussing with the assistant." And: the numbers come from "the server, always."
+
+     SO THERE IS NO ARITHMETIC HERE. Every value, every count, every band position and the
+     threshold line all arrive computed and governed. What this function does is map numbers to
+     pixels, which is layout — the moment it starts deriving a figure, the server has stopped
+     being the source of truth and two answers to the same question exist.
+
+     Inline SVG rather than the charting library: the values are already decided, the palette has
+     to come from the theme tokens, and a chart that renders with no third-party script is one
+     fewer thing between the record and the reader. */
+  async _renderChart(kind, objectId) {
+    const box = document.getElementById('iqt-chart');
+    if (!box) return;
+    let j = null;
+    try {
+      j = await fetch(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/chart`,
+        { headers: this._authHeaders() }).then(r => r.json());
+    } catch (_) { return; }
+    if (!j || !j.ok) { box.innerHTML = ''; return; }
+    if (!j.chart) {
+      // A REFUSAL IS SHOWN, NOT SWALLOWED. "Not enough people for a picture that stays anonymous"
+      // is a fact about the squad worth knowing; an empty space says nothing and reads as a bug.
+      box.innerHTML = j.note ? `<div class="iqt-chart-none">${this._escape(j.note)}</div>` : '';
+      return;
+    }
+    box.innerHTML = this._chartHTML(j.chart);
+  },
+
+  _chartHTML(c) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const W = 320, H = 132, PADL = 30, PADR = 10, PADT = 12, PADB = 24;
+    const parts = [`<div class="iqt-chart-head">${esc(c.title)}</div>`];
+
+    if (c.kind === 'spread') {
+      // TWO SERIES, DRAWN AS TWO. A part where three people said they were stuck and a part
+      // nobody opened are both a short "said they had it" bar, and showing only that one would
+      // make them look the same — the exact conflation the record refuses to make in words.
+      const got = (c.series.find(s => s.key === 'got') || c.series[0] || {}).points || [];
+      const not = (c.series.find(s => s.key === 'not_yet') || {}).points || [];
+      const notOf = k => (not.find(p => p.key === k) || {}).value || 0;
+      const max = Math.max(1, ...got.map(p => p.value + notOf(p.key)));
+      parts.push(`<div class="iqt-bars">${got.map(p => `
+        <div class="iqt-bar-row">
+          <span class="iqt-bar-lab" title="${esc(p.label)}">${esc(p.label)}</span>
+          <span class="iqt-bar-track">
+            <span class="iqt-bar-fill" style="width:${(p.value / max) * 100}%"></span>
+            <span class="iqt-bar-fill iqt-bar-not" style="width:${(notOf(p.key) / max) * 100}%"></span>
+          </span>
+          <span class="iqt-bar-val">${esc(p.value)} had it / ${esc(notOf(p.key))} not yet</span>
+        </div>`).join('')}</div>`);
+    } else {
+      const all = (c.series || []).flatMap(s => s.points || []);
+      const xs = all.map(p => p.at).filter(v => Number.isFinite(v));
+      const x0 = Math.min(...xs), x1 = Math.max(...xs);
+      const px = v => PADL + (x1 === x0 ? (W - PADL - PADR) / 2 : ((v - x0) / (x1 - x0)) * (W - PADL - PADR));
+      const svg = [];
+      for (const s of (c.series || [])) {
+        const pts = s.points || [];
+        if (!pts.length) continue;
+        const vs = pts.map(p => p.value);
+        const top = s.unit === 'band' ? (c.series.find(x => x.key === 'band')?.ticks || []).length - 1
+          : Math.max(1, ...vs, c.threshold ? c.threshold.value : 0);
+        const py = v => H - PADB - (top <= 0 ? 0 : (v / top) * (H - PADT - PADB));
+        const d = pts.map((p, i) => `${i ? 'L' : 'M'}${px(p.at).toFixed(1)},${py(p.value).toFixed(1)}`).join(' ');
+        svg.push(`<path class="iqt-line iqt-line-${esc(s.key)}" d="${d}"/>`);
+        svg.push(pts.map(p => `<circle class="iqt-dot iqt-dot-${esc(s.key)}" cx="${px(p.at).toFixed(1)}" cy="${py(p.value).toFixed(1)}" r="3"><title>${esc(p.label)}</title></circle>`).join(''));
+        if (c.threshold && s.unit === c.threshold.unit) {
+          const ty = py(c.threshold.value).toFixed(1);
+          svg.push(`<line class="iqt-thresh" x1="${PADL}" y1="${ty}" x2="${W - PADR}" y2="${ty}"/>`);
+          svg.push(`<text class="iqt-thresh-t" x="${PADL}" y="${Number(ty) - 4}">${esc(c.threshold.value)} — enough to be called</text>`);
+        }
+      }
+      parts.push(`<svg class="iqt-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.title)}">${svg.join('')}</svg>`);
+      const first = all.length ? new Date(x0).toLocaleDateString() : '';
+      const last = all.length ? new Date(x1).toLocaleDateString() : '';
+      parts.push(`<div class="iqt-chart-axis"><span>${esc(first)}</span><span>${esc(last)}</span></div>`);
+    }
+    // L-CH5 — a picture with no stated limits is read as complete.
+    parts.push(`<ul class="iqt-chart-lim">${(c.limitations || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>`);
+    return parts.join('');
+  },
+
+  /* ── MATERIAL SOMEBODY ATTACHED ──────────────────────────────────────────────────────────
+     Founder: "If a coach for example can attach a PowerPoint for scouting and ask IntelliQ to
+     recreate it for another game and players interact with that."
+
+     The file is parsed in the browser by AttachmentHandler — which already reads pptx, docx,
+     xlsx, pdf and csv — and only the TEXT is sent. The server never holds the original, which is
+     the smaller thing to be responsible for. */
+  async _renderMaterial(kind, objectId) {
+    const box = document.getElementById('iqt-mat');
+    if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    let j = null;
+    try {
+      j = await fetch(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/materials`,
+        { headers: this._authHeaders() }).then(r => r.json());
+    } catch (_) { return; }
+    const list = (j && j.materials) || [];
+    const attach = `<button type="button" class="iqt-mat-add" onclick="MemberApp.attachMaterial('${esc(kind)}','${esc(objectId)}')">Attach material</button>
+      <input type="file" id="iqt-mat-file" class="iq-hidden-file" accept="${esc((window.AttachmentHandler && AttachmentHandler.ACCEPT_ATTR) || '')}">`;
+    if (!list.length) {
+      box.innerHTML = `<div class="iqt-mat-empty">Nothing attached yet. Attach a deck, a document or a spreadsheet and IntelliQ will answer from it.</div>${attach}`;
+      return;
+    }
+    box.innerHTML = `
+      <div class="iqt-mat-head">Attached</div>
+      ${list.map(m => `
+        <div class="iqt-mat-row">
+          <button type="button" class="iqt-mat-open" onclick="MemberApp.openMaterial('${esc(m.materialId)}')">
+            <span class="iqt-mat-t">${esc(m.title)}</span>
+            <span class="iqt-mat-sub">${esc(m.parts)} ${m.parts === 1 ? 'part' : 'parts'} — ${esc(m.by)}</span>
+          </button>
+        </div>`).join('')}
+      <div class="iqt-mat-state" id="iqt-mat-state"></div>${attach}`;
+  },
+
+  attachMaterial(kind, objectId) {
+    const input = document.getElementById('iqt-mat-file');
+    const state = document.getElementById('iqt-mat-state');
+    if (!input) return;
+    input.onchange = async () => {
+      const file = input.files && input.files[0];
+      input.value = '';
+      if (!file) return;
+      const say = t => { if (state) state.textContent = t; else showToast(t, 'info'); };
+      if (typeof AttachmentHandler === 'undefined') return say('The uploader is not available right now.');
+      say('Reading it…');
+      try {
+        const parsed = await AttachmentHandler.process(file);
+        // An image or a PDF arrives as bytes with no text. IntelliQ cannot work from words it
+        // does not have, and saying so is better than attaching something it will then answer
+        // about from nothing.
+        const text = parsed.content || '';
+        if (!text.trim()) return say('No text came out of that one, so there would be nothing for IntelliQ to read. A deck, a document, a spreadsheet or a text file works.');
+        const r = await fetch('/api/materials', {
+          method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attachTo: { kind, id: objectId }, title: file.name, filename: file.name, kind: parsed.kind, text }),
+        }).then(x => x.json());
+        if (!r.ok) return say(r.error || 'That could not be attached.');
+        say(r.note || 'Attached.');
+        this._renderMaterial(kind, objectId);
+      } catch (e) { say(e && e.message ? e.message : 'That file could not be read.'); }
+    };
+    input.click();
+  },
+
+  async openMaterial(materialId) {
+    const box = document.getElementById('iq-member-body') || document.getElementById('iqt-mat');
+    const esc = s => this._escape(String(s == null ? '' : s));
+    let j = null;
+    try {
+      j = await fetch(`/api/materials/${encodeURIComponent(materialId)}`, { headers: this._authHeaders() }).then(r => r.json());
+    } catch (_) { return; }
+    if (!j || !j.ok) return;
+    const m = j.material;
+    this._matCtx = { materialId, kind: m.attachTo.kind, objectId: m.attachTo.id };
+    box.innerHTML = `
+      <div class="iq-object-thread">
+        <div class="iqt-bar">
+          <button class="iqt-back" type="button" onclick="MemberApp.openObjectThread('${esc(m.attachTo.kind)}','${esc(m.attachTo.id)}')">
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+            Back
+          </button>
+        </div>
+        <div class="iqt-head"><div class="iqt-head-mid"><h1 class="iqt-title">${esc(m.title)}</h1></div></div>
+        <div class="iqt-mat-by">Attached by ${esc(m.by)}</div>
+        <div class="iqt-mat-note">${esc(j.note)}</div>
+        ${(j.sections || []).map(s => `
+          <div class="iqt-sec" id="sec-${esc(s.id)}">
+            <div class="iqt-sec-h">${esc(s.heading)}</div>
+            <div class="iqt-sec-t">${esc(s.text)}</div>
+            <div class="iqt-sec-acts">
+              <button type="button" class="iqt-sec-b ${s.you === 'got_it' ? 'on' : ''}" onclick="MemberApp.markSection('${esc(s.id)}','got_it')">I have this</button>
+              <button type="button" class="iqt-sec-b ${s.you === 'not_yet' ? 'on' : ''}" onclick="MemberApp.markSection('${esc(s.id)}','not_yet')">Not yet</button>
+              <span class="iqt-sec-state" id="sec-state-${esc(s.id)}"></span>
+            </div>
+            <div class="iqt-sec-why" id="sec-why-${esc(s.id)}"></div>
+          </div>`).join('')}
+        <div class="iqt-mat-report" id="iqt-mat-report"></div>
+      </div>`;
+    this._renderMaterialReport(materialId);
+  },
+
+  /* DECLARED, NEVER INFERRED. "Not yet" opens a box for their own words, and the box is optional
+     — the declaration is the fact; the words are the account, and asking for the account is not
+     the same as requiring one. */
+  async markSection(sectionId, state) {
+    const ctx = this._matCtx || {};
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const why = document.getElementById(`sec-why-${sectionId}`);
+    const because = (document.getElementById(`sec-why-t-${sectionId}`) || {}).value || '';
+    try {
+      const j = await fetch(`/api/materials/${encodeURIComponent(ctx.materialId)}/engaged`, {
+        method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sectionId, state, because }),
+      }).then(r => r.json());
+      const st = document.getElementById(`sec-state-${sectionId}`);
+      if (st) st.textContent = j.ok ? (j.note || '') : (j.error || '');
+      const row = document.getElementById(`sec-${sectionId}`);
+      if (row) row.querySelectorAll('.iqt-sec-b').forEach((b, i) => b.classList.toggle('on', (i === 0) === (state === 'got_it')));
+      if (state === 'not_yet' && why && !because) {
+        why.innerHTML = `
+          <div class="iq-field"><textarea id="sec-why-t-${esc(sectionId)}" class="iq-field-input" rows="2"
+            placeholder="What is not landing? Optional — your words, sent as they are."></textarea></div>
+          <button type="button" class="iqt-sec-send" onclick="MemberApp.markSection('${esc(sectionId)}','not_yet')">Send that too</button>`;
+      } else if (why && because) { why.innerHTML = ''; }
+      this._renderMaterialReport(ctx.materialId);
+    } catch (_) {}
+  },
+
+  /* THE REPORT, for whoever attached it. A 403 here is the ordinary case for a player, so it
+     renders nothing rather than an error — being told you are not the audience for a thing you
+     never asked for is noise. */
+  async _renderMaterialReport(materialId) {
+    const box = document.getElementById('iqt-mat-report');
+    if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    let j = null;
+    try {
+      const r = await fetch(`/api/materials/${encodeURIComponent(materialId)}/understanding`, { headers: this._authHeaders() });
+      if (r.status === 403) { box.innerHTML = ''; return; }
+      j = await r.json();
+    } catch (_) { return; }
+    if (!j || !j.ok) { box.innerHTML = ''; return; }
+    box.innerHTML = `
+      <div class="iqt-mat-head">How it landed</div>
+      <p class="iqt-mat-note">${esc(j.note)}</p>
+      ${j.ok === false ? '' : `
+        <div class="iqt-bars">${(j.parts || []).map(p => `
+          <div class="iqt-bar-row">
+            <span class="iqt-bar-lab" title="${esc(p.heading)}">${esc(p.heading)}</span>
+            <span class="iqt-bar-track">
+              <span class="iqt-bar-fill" style="width:${j.cohort.of ? (p.gotIt / j.cohort.of) * 100 : 0}%"></span>
+              <span class="iqt-bar-fill iqt-bar-not" style="width:${j.cohort.of ? (p.notYet / j.cohort.of) * 100 : 0}%"></span>
+            </span>
+            <span class="iqt-bar-val">${esc(p.gotIt)} / ${esc(p.notYet)}</span>
+          </div>`).join('')}</div>`}
+      <ul class="iqt-chart-lim">${(j.limitations || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>
+      <div class="iq-field"><textarea id="iqt-recompose" class="iq-field-input" rows="2"
+        placeholder="Recreate this for something else — say what for."></textarea></div>
+      <button type="button" class="iqt-sec-send" onclick="MemberApp.recomposeMaterial('${esc(materialId)}')">Recreate it</button>
+      <div class="iqt-recomposed" id="iqt-recomposed"></div>`;
+  },
+
+  async recomposeMaterial(materialId) {
+    const out = document.getElementById('iqt-recomposed');
+    const intent = (document.getElementById('iqt-recompose') || {}).value || '';
+    const esc = s => this._escape(String(s == null ? '' : s));
+    if (!intent.trim()) { if (out) out.textContent = 'Say what you want it recreated for.'; return; }
+    if (out) out.textContent = 'Working from your material…';
+    try {
+      const j = await fetch(`/api/materials/${encodeURIComponent(materialId)}/recompose`, {
+        method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ intent }),
+      }).then(r => r.json());
+      if (!j || !j.ok || !j.draft) { if (out) out.textContent = (j && j.error) || 'That could not be done just now.'; return; }
+      if (out) out.innerHTML = `
+        <div class="iqt-recomposed-t">${esc(j.draft.title)}</div>
+        <pre class="iqt-recomposed-b">${esc(j.draft.body)}</pre>
+        <div class="iqt-mat-note">${esc(j.note)}</div>`;
+    } catch (_) { if (out) out.textContent = 'That could not be done just now.'; }
   },
 
   async raiseBelief(inquiryId) {

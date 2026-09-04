@@ -90,6 +90,7 @@ function buildContext({
   professionals = [],  // [{ name, title, remit }] who in this org handles what
   priorMessages = [],  // [{ role, text }]
   actions = [],        // [{ label }]       confirmable proposals available this turn
+  material = null,     // { title, filename, text, sectionIds, partial } attached to THIS object
 } = {}) {
   const L = [];
   L.push('CONTEXT');
@@ -104,6 +105,27 @@ function buildContext({
     if (about.headline) L.push(`  ${_clip(about.headline, 200)}`);
     if (about.body) L.push(`  ${_clip(about.body, 300)}`);
     L.push('  Start there. Open with what it means for them and one question that moves it forward.');
+    L.push('');
+  }
+
+  /* MATERIAL SOMEBODY ATTACHED TO THIS THING.
+
+     Founder: "Read it and work from it!" and "the conversation must primarily flow from the
+     context that was supplied in that focus."
+
+     It goes ABOVE the conversation and above the beliefs, because that is what "primarily" means
+     — when a coach has attached the scouting deck, an answer that draws on everything except the
+     deck is the wrong answer however well grounded it is elsewhere.
+
+     The parts carry their ids so the model can say WHICH part it is answering from. An answer
+     that names its slide is one the reader can check, and checkable is the whole product. */
+  if (material && material.text) {
+    L.push('MATERIAL ATTACHED TO THIS, BY SOMEBODY IN THIS ORGANISATION — WORK FROM THIS FIRST:');
+    L.push(`  ${_clip(material.title || material.filename || 'Attached material', 200)}`);
+    L.push('  The parts below are numbered as their author wrote them. When you answer from one, say which.');
+    L.push(_clip(material.text, 12000));
+    if (material.partial) L.push('  (Only part of this is shown here. Do not claim to have read all of it.)');
+    L.push('  Answer from these words. Do not add tactics, names, drills or numbers that are not in them.');
     L.push('');
   }
 

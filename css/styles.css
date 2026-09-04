@@ -2989,6 +2989,78 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqt-reading-note,.iqt-reading-q{font-size:.76rem;color:var(--text-secondary);line-height:1.45;
   margin:.35rem 0 0}
 
+/* ── A GRAPH ────────────────────────────────────────────────────────────────────────────────
+   Every number in here arrived from the server. The stylesheet's job is to make a decided thing
+   legible, and the restraint is deliberate: a chart is the most persuasive object a product can
+   show, so it is drawn quietly, on the same surface as everything else, with its limits printed
+   underneath rather than tucked behind a control. */
+.iqt-chart{margin:.85rem 0 0}
+.iqt-chart:empty{display:none}
+.iqt-chart-head{font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-secondary);margin:0 0 .5rem}
+.iqt-chart-none{font-size:.8rem;color:var(--text-secondary);line-height:1.5;
+  border:1px solid var(--border);border-radius:12px;padding:.75rem;background:transparent}
+.iqt-svg{width:100%;height:auto;display:block;overflow:visible}
+.iqt-line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.iqt-line-band{stroke:var(--accent3);stroke-dasharray:4 3}
+.iqt-dot{fill:var(--accent);stroke:var(--bg-base);stroke-width:1.5}
+.iqt-dot-band{fill:var(--accent3)}
+.iqt-thresh{stroke:var(--text-muted);stroke-width:1;stroke-dasharray:3 3}
+.iqt-thresh-t{fill:var(--text-muted);font-size:8px}
+.iqt-chart-axis{display:flex;justify-content:space-between;font-size:.68rem;
+  color:var(--text-muted);margin:.15rem .1rem 0}
+.iqt-chart-lim{margin:.5rem 0 0;padding:0 0 0 1rem;list-style:disc}
+.iqt-chart-lim li{font-size:.72rem;color:var(--text-muted);line-height:1.5}
+
+/* Bars: how many people, never who. */
+.iqt-bars{display:flex;flex-direction:column;gap:.4rem}
+.iqt-bar-row{display:grid;grid-template-columns:minmax(0,9rem) 1fr auto;align-items:center;gap:.5rem}
+.iqt-bar-lab{font-size:.76rem;color:var(--text-secondary);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.iqt-bar-track{display:flex;height:.6rem;border-radius:999px;background:var(--bg-hover);overflow:hidden}
+.iqt-bar-fill{background:var(--accent);height:100%}
+.iqt-bar-not{background:var(--warning)}
+.iqt-bar-val{font-size:.72rem;color:var(--text-muted);font-variant-numeric:tabular-nums}
+
+/* ── ATTACHED MATERIAL ──────────────────────────────────────────────────────────────────── */
+.iqt-mat{margin:.85rem 0 0}
+.iqt-mat:empty{display:none}
+.iqt-mat-head{font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-secondary);margin:.85rem 0 .45rem}
+.iqt-mat-empty,.iqt-mat-note,.iqt-mat-by{font-size:.78rem;color:var(--text-secondary);line-height:1.5;margin:.25rem 0}
+.iqt-mat-row{margin:0 0 .4rem}
+.iqt-mat-open{display:block;width:100%;text-align:left;background:var(--bg-card);
+  border:1px solid var(--border);border-radius:12px;padding:.7rem .85rem;cursor:pointer}
+.iqt-mat-open:hover{background:var(--bg-hover)}
+.iqt-mat-t{display:block;font-size:.86rem;color:var(--text-primary)}
+.iqt-mat-sub{display:block;font-size:.72rem;color:var(--text-muted);margin-top:.15rem}
+.iqt-mat-add{margin-top:.5rem;background:transparent;border:1px solid var(--border);
+  border-radius:999px;padding:.4rem .85rem;font-size:.78rem;color:var(--text-secondary);cursor:pointer}
+.iqt-mat-add:hover{border-color:var(--accent);color:var(--text-primary)}
+.iq-hidden-file{display:none}
+.iqt-mat-state{font-size:.76rem;color:var(--text-secondary);margin:.4rem 0 0;line-height:1.45}
+
+/* One part of the material — the author's own section, and where you say you are with it. */
+.iqt-sec{border:1px solid var(--border);border-radius:12px;padding:.85rem;margin:0 0 .6rem}
+.iqt-sec-h{font-size:.86rem;color:var(--text-primary);margin:0 0 .35rem}
+.iqt-sec-t{font-size:.8rem;color:var(--text-secondary);line-height:1.55;white-space:pre-wrap}
+.iqt-sec-acts{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem;margin:.6rem 0 0}
+.iqt-sec-b{background:transparent;border:1px solid var(--border);border-radius:999px;
+  padding:.35rem .8rem;font-size:.76rem;color:var(--text-secondary);cursor:pointer}
+.iqt-sec-b:hover{border-color:var(--accent);color:var(--text-primary)}
+.iqt-sec-b.on{border-color:var(--accent);background:var(--accent-soft);color:var(--text-primary)}
+.iqt-sec-state{font-size:.72rem;color:var(--text-muted);line-height:1.45;flex:1 1 100%}
+.iqt-sec-why{margin:.5rem 0 0}
+.iqt-sec-send{margin-top:.4rem;background:transparent;border:1px solid var(--border);
+  border-radius:999px;padding:.35rem .8rem;font-size:.76rem;color:var(--text-secondary);cursor:pointer}
+.iqt-sec-send:hover{border-color:var(--accent);color:var(--text-primary)}
+.iqt-mat-report{margin:1rem 0 0}
+.iqt-recomposed{margin:.6rem 0 0}
+.iqt-recomposed-t{font-size:.86rem;color:var(--text-primary);margin:0 0 .3rem}
+.iqt-recomposed-b{font-size:.8rem;color:var(--text-secondary);line-height:1.55;
+  white-space:pre-wrap;word-break:break-word;background:var(--bg-card);border:1px solid var(--border);
+  border-radius:12px;padding:.75rem;margin:0}
+
 /* Waiting on you — a leader's queue. Deliberately plain: it is a list of people who asked. */
 .iq-waiting-card{margin:0 0 .6rem;padding:.85rem}
 .iq-waiting-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin:0 0 .35rem}
