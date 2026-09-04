@@ -100,7 +100,25 @@ for (const row of inventory) console.log(`server.js:${row.line} ${row.source}`);
        dot for each teammate who engaged: a count of their squad drawn from nothing they were
        shown, and in a small squad a list of who was in the room. The dots are the leader's; the
        dates the focus itself carries are everybody's. */
-ok('W4 inventory names every current scope reference', inventory.length === 71 && inventory.every(r => Number.isInteger(r.line) && r.source));
+/* 71 -> 69, September 2026. TWO REMOVED, on a founder decision, and a number going DOWN is the
+   rarer and more interesting direction for this ledger.
+
+   "Why can't a squad see how many of their peers engaged?" The report of how material landed, and
+   the chart of it, were gated on leading the group. That was a SECOND RULE DOING THE COHORT
+   FLOOR'S JOB BADLY: the floor — five either side, so no reader can put the names back — is what
+   makes a count of people safe to show, and a role check stacked on top of it protects nothing
+   further while withholding from a squad a nameless fact about that squad.
+
+     /api/materials/:id/understanding -1 — reading how it landed is now everybody's.
+     _spreadChart -1 — and so is the picture of it, because a chart cannot be the tighter surface
+       than the report it draws.
+
+   The two that REMAIN on material are authorship, not readership: _mayAttach (putting material in
+   front of a squad) and /api/materials/:id/recompose (recreating somebody else's briefing).
+   _timelineChart keeps its call but now reads the cohort floor rather than the role, and the
+   per-person dots it drew were replaced by a single count for everybody — one dated dot per
+   person carried WHEN each answered, which in a squad is often enough to say who. */
+ok('W4 inventory names every current scope reference', inventory.length === 69 && inventory.every(r => Number.isInteger(r.line) && r.source));
 
 console.log('\nMigration law: BRIDGE never; GATE governance AND Web; ENUMERATE/FILTER migrate later; WEB re-test only.');
 console.log(`\n=== scope-parity-smoke: ${pass} passed, ${fail} failed ===\n`);

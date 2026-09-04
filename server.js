@@ -15752,20 +15752,34 @@ app.post('/api/materials/:id/engaged', requireAuth, (req, res) => {
       : 'Recorded. You can change this any time.' });
 });
 
-/* GET /api/materials/:id/understanding — the report, for whoever attached it or leads the group.
+/* GET /api/materials/:id/understanding — the report, for everybody the material is.
 
    AGGREGATE AND NAMELESS, and cohort-floored. This is the founder's "wasn't well understood by
    80% of players and they are struggling with A,B,C" — where A, B and C are the author's own
-   headings, never topics anything invented. */
+   headings, never topics anything invented.
+
+   FOUNDER DECISION, September 2026, overruling the first version: "Why can't a squad see how many
+   of their peers engaged?"
+
+   The first version gated this on leading the group. That was wrong, and the reason it was wrong
+   is worth writing down because it is a mistake this codebase could make again in ten places.
+
+   THE COHORT FLOOR IS THE PRIVACY INSTRUMENT. It is what makes a count of people safe to show:
+   five either side, so no reader can put the names back. A role check ON TOP of a floor is a
+   SECOND rule doing the first one's job badly — it protects nothing the floor was not already
+   protecting, and it withholds from the squad a fact about the squad. "Six of us have said where
+   we are and the pressing traps are what most of us have not got" is a true, nameless statement
+   about a group, and the people in that group are the last ones who should have to ask a coach
+   for it.
+
+   WHAT STAYS WITH THE LEADER is authorship, not readership: attaching material to a squad object,
+   and recreating somebody else's briefing. Those are acts. This is a read. */
 app.get('/api/materials/:id/understanding', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const r = _materialFor(code, userId, req.params.id);
   if (!r.ok) return res.status(r.status).json({ error: r.error });
   const m = r.material;
   const cohort = _materialCohort(code, r.object);
-  const isReporter = m.byId === userId || (cohort.nodeId && _leadsNode(code, cohort.nodeId, userId));
-  if (!isReporter) return res.status(403).json({ error: 'this report is for whoever attached it' });
-
   const engagements = _engageOf(code, m.materialId);
   const people = new Set(engagements.map(e => e.personId)).size;
   const n = cohort.members.length;
@@ -15784,6 +15798,11 @@ app.get('/api/materials/:id/understanding', requireAuth, (req, res) => {
      route already draws this line the same way. */
   res.json({ ok: true, reported: u.ok, materialId: m.materialId, title: m.title,
     reason: u.reason,
+    /* WHAT THIS READER MAY DO, decided by the server. Reading how it landed is everybody's now;
+       recreating somebody else's briefing is not. The client must not work that out for itself —
+       a control shown to somebody who will get a 403 is the hollow-button shape this codebase has
+       already been caught by three times. */
+    mayRecompose: m.byId === userId || (cohort.nodeId && _leadsNode(code, cohort.nodeId, userId)),
     // The refs are the server's provenance, checked before anything is drawn. They are not sent:
     // an identifier travelling to a client is one more thing that has to be proven anonymous.
     parts: (u.parts || []).map(({ gotRefs, notRefs, ...p }) => p),
@@ -15917,23 +15936,30 @@ function _timelineChart(code, userId, obj) {
   for (const m of Object.values(_materials(code))) {
     if (m.attachTo.kind !== obj.kind || String(m.attachTo.id) !== String(obj.id)) continue;
     events.push({ at: m.createdAt, label: `Attached: ${m.title}`, marker: 'material', refs: [`material:${m.materialId}`] });
-    /* HOW MANY PEOPLE ENGAGED IS AN AGGREGATE, AND AN AGGREGATE IS THE LEADER'S READ.
+    /* HOW MANY PEOPLE ENGAGED — ONE MARKER, NOT A DOT EACH, AND THE WHOLE GROUP SEES IT.
 
-       A suite forced this open. Every player in the squad would otherwise have seen a dot for
-       every teammate who said where they were — a count of their squad's engagement, drawn from
-       nothing they were shown, and in a small squad a short list of who was in the room that day.
-       The founder's line is that a coach sees aggregate stats and a player sees what they share,
-       so the dots are the leader's, and the dates the focus itself carries are everybody's. */
-    const isReporter = m.byId === userId || (cohort.nodeId && _leadsNode(code, cohort.nodeId, userId));
-    if (!isReporter) continue;
-    // ONE POINT PER PERSON, not one per click. Somebody who marks six slides is one person
-    // engaging, and six dots would read as six times the interest.
-    const first = new Map();
-    for (const e of _engageOf(code, m.materialId)) {
-      if (!first.has(e.personId) || e.at < first.get(e.personId).at) first.set(e.personId, e);
-    }
-    for (const e of first.values()) {
-      events.push({ at: e.at, label: 'Somebody said where they were with it', marker: 'engaged', refs: [e.ref] });
+       Founder, overruling the first version: "Why can't a squad see how many of their peers
+       engaged?" They can. The cohort floor below is what makes that safe, and a role check on top
+       of a floor is a second rule doing the first one's job badly.
+
+       But the SHAPE was wrong for anybody, leader included. One dated dot per person is a weaker
+       answer to "how many" than a number is, and it carries a channel the number does not: WHEN
+       each person answered. In a squad, when somebody replied is often enough to say who. So the
+       timing goes and the count stays — strictly more of what was asked for, strictly less of
+       what was not. */
+    const people = new Set(_engageOf(code, m.materialId).map(e => e.personId));
+    const floor = teamState.cohortFloor(people.size, cohort.members.length);
+    if (floor.ok) {
+      // ONE VOICE PER PERSON. Somebody who marks six slides is one person engaging.
+      const first = new Map();
+      for (const e of _engageOf(code, m.materialId)) {
+        if (!first.has(e.personId) || e.at < first.get(e.personId).at) first.set(e.personId, e);
+      }
+      // Placed where the group had FINISHED answering, not where whoever went first did.
+      const at = Math.max(...[...first.values()].map(e => e.at));
+      events.push({ at, marker: 'engaged',
+        label: `${people.size} of ${cohort.members.length} have said where they are with it`,
+        refs: [...first.values()].map(e => e.ref) });
     }
   }
   if (raw.reviewAt) events.push({ at: raw.reviewAt, label: 'Review', marker: 'review', refs: [`focus:${obj.id}:review`] });
@@ -15951,7 +15977,9 @@ function _spreadChart(code, userId, obj) {
   if (!mats.length) return null;
   const m = mats[0];
   const cohort = _materialCohort(code, obj);
-  if (!(m.byId === userId || (cohort.nodeId && _leadsNode(code, cohort.nodeId, userId)))) return null;
+  /* EVERYBODY THE MATERIAL IS FOR SEES THIS. Founder decision — the floor is the privacy
+     instrument, and a role check on top of it withholds from a squad a nameless fact about that
+     squad. Reading is everybody's; attaching and recreating stay with the leader. */
   const engagements = _engageOf(code, m.materialId);
   const people = new Set(engagements.map(e => e.personId)).size;
   const floor = teamState.cohortFloor(people, cohort.members.length);

@@ -445,7 +445,7 @@ function _orgObRender() {
       <textarea id="org-ob-desc" class="org-ob-textarea" rows="5"
         placeholder="e.g. We are a professional development programme for emerging leaders in the financial sector. Our members are high-potential employees at mid-career stage. We want to accelerate their growth, build accountability habits, and prepare them for senior roles within two years."
       >${_escHtml(_orgOb.description)}</textarea>
-      <div id="org-ob-desc-error" style="color:var(--danger);font-size:0.8rem;margin-top:0.4rem;display:none"></div>
+      <div id="org-ob-desc-error" style="color:var(--danger);font-size:var(--fs);margin-top:0.4rem;display:none"></div>
       <button class="org-ob-btn-primary" onclick="_orgObRequestSuggestions()">Generate AI Suggestions &rarr;</button>
       <p class="org-ob-skip-note">Already know what you want? <a href="#" onclick="_orgObSkipToReview();return false;">Skip AI suggestions</a></p>`;
 
@@ -477,7 +477,7 @@ function _orgObRender() {
       ${_orgObSection('behaviours', 'Expected Behaviours',  s.behaviours,  'tag',      'e.g. Show up prepared')}
       ${_orgObSection('metrics',    'Health Metrics',       s.metrics,     'tag',      'e.g. Engagement Score')}
 
-      <div id="org-ob-save-error" style="color:var(--danger);font-size:0.8rem;margin-bottom:0.6rem;display:none"></div>
+      <div id="org-ob-save-error" style="color:var(--danger);font-size:var(--fs);margin-bottom:0.6rem;display:none"></div>
       <button class="org-ob-btn-primary" id="org-ob-approve-btn" onclick="_orgObSubmit()">Approve &amp; Continue &rarr;</button>`;
 
   } else if (_orgOb.phase === 'saving') {
@@ -1270,14 +1270,14 @@ function openRemovePersonModal(userId) {
   _showInlineModal(`
     <div class="card-title" style="margin-bottom:0.8rem">Remove person</div>
     <div style="display:flex;align-items:center;gap:0.8rem;padding:0.8rem;background:var(--surface-2);border-radius:8px;margin-bottom:1rem">
-      <div style="width:36px;height:36px;border-radius:50%;background:${member.color};display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;color:#fff;flex-shrink:0">${member.initials}</div>
+      <div style="width:36px;height:36px;border-radius:50%;background:${member.color};display:flex;align-items:center;justify-content:center;font-size:var(--fs-sm);font-weight:700;color:#fff;flex-shrink:0">${member.initials}</div>
       <div>
-        <div style="font-weight:600;font-size:0.9rem">${member.name}</div>
-        <div style="font-size:0.75rem;color:var(--text-muted)">${member.email || 'No email on record'}</div>
+        <div style="font-weight:600;font-size:var(--fs-lg)">${member.name}</div>
+        <div style="font-size:var(--fs-sm);color:var(--text-muted)">${member.email || 'No email on record'}</div>
       </div>
     </div>
 
-    <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:1rem;line-height:1.6">
+    <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:1rem;line-height:1.6">
       <strong>What happens when you remove this person:</strong>
       <ul style="margin:0.4rem 0 0 1.2rem;padding:0">
         <li>They will immediately lose access to this organisation.</li>
@@ -1287,16 +1287,16 @@ function openRemovePersonModal(userId) {
     </div>
 
     <div style="margin-bottom:1rem">
-      <label style="font-size:0.78rem;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-muted);display:block;margin-bottom:0.4rem">Data handling</label>
+      <label style="font-size:var(--fs);font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text-muted);display:block;margin-bottom:0.4rem">Data handling</label>
       <label style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.6rem 0.7rem;border:1px solid var(--border);border-radius:6px;cursor:pointer;margin-bottom:0.4rem">
         <input type="radio" name="rm-data-opt" value="preserve" checked style="margin-top:2px;flex-shrink:0"/>
-        <span><strong style="font-size:0.82rem">Preserve historical data</strong><br>
-          <span style="font-size:0.75rem;color:var(--text-muted)">Check-ins, assessments, goals and results are kept for records.</span></span>
+        <span><strong style="font-size:var(--fs)">Preserve historical data</strong><br>
+          <span style="font-size:var(--fs-sm);color:var(--text-muted)">Check-ins, assessments, goals and results are kept for records.</span></span>
       </label>
       <label style="display:flex;align-items:flex-start;gap:0.5rem;padding:0.6rem 0.7rem;border:1px solid rgba(247,79,79,0.3);border-radius:6px;cursor:pointer">
         <input type="radio" name="rm-data-opt" value="delete" style="margin-top:2px;flex-shrink:0"/>
-        <span><strong style="font-size:0.82rem;color:var(--danger)">Delete all data</strong><br>
-          <span style="font-size:0.75rem;color:var(--text-muted)">Permanently removes all check-ins, assessments, goals and results. Cannot be undone.</span></span>
+        <span><strong style="font-size:var(--fs);color:var(--danger)">Delete all data</strong><br>
+          <span style="font-size:var(--fs-sm);color:var(--text-muted)">Permanently removes all check-ins, assessments, goals and results. Cannot be undone.</span></span>
       </label>
     </div>
 
@@ -1375,8 +1375,8 @@ async function regenerateMemberInvite(userId, email) {
     const safeLink = link.replace(/'/g, "\\'");
     _showInlineModal(`
       <div class="card-title" style="margin-bottom:0.8rem">New invite link generated</div>
-      <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.5rem">Share this link — it expires in 14 days.</div>
-      <div style="font-family:monospace;font-size:0.75rem;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:0.6rem;word-break:break-all;margin-bottom:0.8rem;color:var(--accent)">${link}</div>
+      <div style="font-size:var(--fs);color:var(--text-muted);margin-bottom:0.5rem">Share this link — it expires in 14 days.</div>
+      <div style="font-family:monospace;font-size:var(--fs-sm);background:var(--surface-2);border:1px solid var(--border);border-radius:6px;padding:0.6rem;word-break:break-all;margin-bottom:0.8rem;color:var(--accent)">${link}</div>
       <div style="display:flex;gap:0.5rem;justify-content:flex-end">
         <button class="btn btn-outline btn-sm" onclick="_closeInlineModal()">Close</button>
         <button class="btn btn-accent btn-sm"
@@ -1409,10 +1409,10 @@ function _showSessionExpired() {
   if (existing) return;
   const banner = document.createElement('div');
   banner.id = 'session-expired-banner';
-  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#f74f4f;color:#fff;text-align:center;padding:0.75rem 1rem;font-size:0.88rem;display:flex;align-items:center;justify-content:center;gap:1rem';
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#f74f4f;color:#fff;text-align:center;padding:0.75rem 1rem;font-size:var(--fs-md);display:flex;align-items:center;justify-content:center;gap:1rem';
   banner.innerHTML = `
     <span>⏱ Your session has expired.</span>
-    <button onclick="Auth.logout()" style="background:#fff;color:#f74f4f;border:none;border-radius:4px;padding:4px 14px;font-size:0.85rem;cursor:pointer;font-weight:700">Log In Again</button>
+    <button onclick="Auth.logout()" style="background:#fff;color:#f74f4f;border:none;border-radius:4px;padding:4px 14px;font-size:var(--fs-md);cursor:pointer;font-weight:700">Log In Again</button>
   `;
   document.body.prepend(banner);
 }
@@ -1753,7 +1753,7 @@ async function viewMemberTimeline(memberName, memberId) {
     _renderMemberTimeline(data, document.getElementById('member-timeline-body') || content);
   } catch(e) {
     const body = document.getElementById('member-timeline-body') || content;
-    body.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Could not load timeline — ${e.message}</div>`;
+    body.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs)">Could not load timeline — ${e.message}</div>`;
   }
 }
 
@@ -1796,7 +1796,7 @@ async function _renderLeaderSupport(memberId, memberName) {
 function _renderMemberTimeline(data, el) {
   const { timeline = [] } = data;
   if (!timeline.length) {
-    el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem;text-align:center;padding:2rem">No activity recorded yet.</div>`;
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs);text-align:center;padding:2rem">No activity recorded yet.</div>`;
     return;
   }
 
@@ -1809,13 +1809,13 @@ function _renderMemberTimeline(data, el) {
     html += `
       <div style="display:flex;gap:0.8rem;padding-bottom:${isLast ? '0' : '1.2rem'}">
         <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:60px">
-          <div style="font-size:0.72rem;font-weight:700;color:var(--accent);text-align:center;white-space:nowrap">${month.label.replace(' ', '\n')}</div>
+          <div style="font-size:var(--fs-sm);font-weight:700;color:var(--accent);text-align:center;white-space:nowrap">${month.label.replace(' ', '\n')}</div>
           ${!isLast ? `<div style="width:2px;flex:1;background:var(--border);margin-top:4px"></div>` : ''}
         </div>
         <div style="flex:1">
-          ${month.narrative ? `<div style="font-size:0.82rem;color:var(--text-primary);font-style:italic;margin-bottom:0.4rem;line-height:1.55">"${month.narrative}"</div>` : ''}
-          ${month.moodAvg   ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.3rem">Energy: ${iqMoodWord(month.moodAvg)}</div>` : ''}
-          <div style="font-size:0.75rem;line-height:1.7">
+          ${month.narrative ? `<div style="font-size:var(--fs);color:var(--text-primary);font-style:italic;margin-bottom:0.4rem;line-height:1.55">"${month.narrative}"</div>` : ''}
+          ${month.moodAvg   ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:0.3rem">Energy: ${iqMoodWord(month.moodAvg)}</div>` : ''}
+          <div style="font-size:var(--fs-sm);line-height:1.7">
             ${month.events.filter(e => !['checkin'].includes(e.type) || e.data.text).slice(0, 5).map(e => {
               const icon  = typeIcon[e.type]  || '•';
               const color = typeColor[e.type] || 'var(--text-muted)';
@@ -1899,17 +1899,17 @@ async function renderSafeguardingQueue() {
         <div class="card-body">
           <div style="display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;flex-wrap:wrap">
             <div><strong>${_escHtml(flag.subjectName || flag.subjectId || 'Unknown member')}</strong>
-              <div style="font-size:0.75rem;color:var(--text-muted)">${_escHtml(when)}</div></div>
+              <div style="font-size:var(--fs-sm);color:var(--text-muted)">${_escHtml(when)}</div></div>
             <div><span class="badge">${_escHtml(flag.severity || 'unspecified')}</span>
               <span class="badge">${_escHtml(flag.category || 'uncategorised')}</span></div>
           </div>
           <blockquote style="margin:1rem 0;padding:0.8rem 1rem;border-left:3px solid var(--accent);background:var(--surface-2);white-space:pre-wrap">${_escHtml(flag.excerpt || '')}</blockquote>
-          <div style="font-size:0.78rem;color:var(--text-secondary)"><strong>Support resources</strong>${resourceList}</div>
-          ${open ? `<div style="margin-top:1rem"><label style="display:block;font-size:0.78rem;margin-bottom:0.35rem">Resolution note (optional)</label>
+          <div style="font-size:var(--fs);color:var(--text-secondary)"><strong>Support resources</strong>${resourceList}</div>
+          ${open ? `<div style="margin-top:1rem"><label style="display:block;font-size:var(--fs);margin-bottom:0.35rem">Resolution note (optional)</label>
             <textarea class="form-input safeguarding-resolution-note" maxlength="500" rows="3" style="width:100%"></textarea>
             <button class="btn btn-accent btn-sm safeguarding-resolve" data-flag-id="${_escHtml(flag.id || '')}" style="margin-top:0.5rem">Resolve</button>
-            <div class="safeguarding-resolve-error" role="alert" style="display:none;color:var(--danger);font-size:0.75rem;margin-top:0.4rem"></div></div>`
-            : `<div style="margin-top:1rem;font-size:0.78rem;color:var(--text-muted)">Resolved${flag.resolvedAt ? ` ${_escHtml(new Date(flag.resolvedAt).toLocaleString())}` : ''}${flag.resolutionNote ? ` — ${_escHtml(flag.resolutionNote)}` : ''}</div>`}
+            <div class="safeguarding-resolve-error" role="alert" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin-top:0.4rem"></div></div>`
+            : `<div style="margin-top:1rem;font-size:var(--fs);color:var(--text-muted)">Resolved${flag.resolvedAt ? ` ${_escHtml(new Date(flag.resolvedAt).toLocaleString())}` : ''}${flag.resolutionNote ? ` — ${_escHtml(flag.resolutionNote)}` : ''}</div>`}
         </div>
       </article>`;
     }).join('');
@@ -1964,7 +1964,7 @@ async function showAdvanceNotices() {
       <p style="color:var(--text-secondary)">What you say to IntelliQ is private. There is one exception, and you should know it now rather than find it out later.</p>
       ${pending.map(n => `<p style="padding:0.9rem 1rem;border-left:3px solid var(--accent);background:var(--surface-2)">${_escHtml(n.text)}</p>`).join('')}
       <button class="btn btn-accent" id="advance-notice-ack" style="margin-top:0.75rem">I understand</button>
-      <div id="advance-notice-error" role="alert" style="display:none;color:var(--danger);font-size:0.75rem;margin-top:0.5rem"></div>
+      <div id="advance-notice-error" role="alert" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin-top:0.5rem"></div>
     </div></div>`;
     document.body.appendChild(panel);
 
@@ -2086,7 +2086,7 @@ async function renderMyData() {
         const live = learned.filter(h => h && h.status !== 'dormant');
         const learnedRows = live.length ? live.map(h => `<div style="padding:0.6rem 0;border-bottom:1px solid var(--border)">
           ${_escHtml(h.label ? `${_selfPatternText(h.pattern)} — ${h.label}` : _selfPatternText(h.pattern))}
-          <div style="font-size:0.75rem;color:var(--text-muted)">Seen on ${h.seenOnDays} separate day${h.seenOnDays === 1 ? '' : 's'} · ${_escHtml(h.confidence || 'tentative')}</div>
+          <div style="font-size:var(--fs-sm);color:var(--text-muted)">Seen on ${h.seenOnDays} separate day${h.seenOnDays === 1 ? '' : 's'} · ${_escHtml(h.confidence || 'tentative')}</div>
         </div>`).join('') : '<p style="color:var(--text-muted);margin:0">Nothing yet — I learn this from how you actually use IntelliQ, not from a questionnaire.</p>';
         const proposalRows = proposals.map(p => `<div class="card" style="margin:0.6rem 0"><div class="card-body">
           <p style="margin:0 0 0.6rem">${_escHtml(p.text)}</p>
@@ -2122,7 +2122,7 @@ async function renderMyData() {
       <p style="color:var(--text-secondary)">Everything it currently believes, how sure it is, and what would change its mind. Nothing here is settled and none of it is a score.</p>
       ${_answerabilityRecords(held.reads, 'IntelliQ has not formed a read about you yet.')}
       <button class="btn btn-outline btn-sm" id="download-my-data">Download my data</button>
-      <div id="download-my-data-error" role="alert" style="display:none;color:var(--danger);font-size:0.75rem;margin-top:0.4rem"></div>
+      <div id="download-my-data-error" role="alert" style="display:none;color:var(--danger);font-size:var(--fs-sm);margin-top:0.4rem"></div>
     </div></section>
     <section class="card" style="margin-bottom:1rem"><div class="card-body">
       <h2 style="margin-top:0">Who has looked</h2>
@@ -2211,19 +2211,19 @@ function selectAlertDifficulty(diff) {
 async function handleAlertFileSelect(file) {
   if (!file) return;
   const preview = document.getElementById('acm-attachment-preview');
-  preview.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Processing ${file.name}…</div>`;
+  preview.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Processing ${file.name}…</div>`;
   try {
     _alertAttachment = await AttachmentHandler.process(file);
     preview.innerHTML = `
-      <div style="display:flex;align-items:center;gap:0.6rem;padding:0.6rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:0.8rem">
+      <div style="display:flex;align-items:center;gap:0.6rem;padding:0.6rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:var(--fs)">
         <span>${AttachmentHandler.ICONS[_alertAttachment.kind] || ''}</span>
         <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_alertAttachment.name}</span>
-        <span style="color:var(--success);font-size:0.72rem">Ready</span>
-        <button onclick="_alertAttachment=null;document.getElementById('acm-attachment-preview').innerHTML=''" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:0.9rem"></button>
+        <span style="color:var(--success);font-size:var(--fs-sm)">Ready</span>
+        <button onclick="_alertAttachment=null;document.getElementById('acm-attachment-preview').innerHTML=''" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:var(--fs-lg)"></button>
       </div>
       ${_alertAttachment.kind === 'image' ? `<img src="${_alertAttachment.preview}" style="max-height:120px;border-radius:6px;margin-top:0.4rem"/>` : ''}`;
   } catch(e) {
-    preview.innerHTML = `<div style="font-size:0.8rem;color:var(--danger)">${e.message}</div>`;
+    preview.innerHTML = `<div style="font-size:var(--fs);color:var(--danger)">${e.message}</div>`;
   }
 }
 
@@ -2242,7 +2242,7 @@ function attachAlertEmbed() {
   _alertAttachment = embed;
   document.getElementById('acm-embed-preview').innerHTML = `
     <div style="margin-top:0.4rem">${embed.embedHTML}</div>
-    <div style="font-size:0.72rem;color:var(--success);margin-top:4px">Will be shown to member during scenario</div>`;
+    <div style="font-size:var(--fs-sm);color:var(--success);margin-top:4px">Will be shown to member during scenario</div>`;
 }
 
 async function draftAlertScenario() {
@@ -2282,8 +2282,8 @@ async function draftAlertScenario() {
     document.getElementById('acm-draft-coachnote').textContent = draft.coachNote || '';
     document.getElementById('acm-draft-probes').innerHTML = (draft.probes || []).map((p, i) => `
       <div style="display:flex;gap:0.5rem;margin-bottom:0.4rem;align-items:flex-start">
-        <span style="font-size:0.72rem;color:var(--text-muted);padding-top:8px;flex-shrink:0">${i+1}.</span>
-        <input type="text" class="form-input acm-probe-input" value="${p.replace(/"/g,'&quot;')}" style="flex:1;font-size:0.82rem"/>
+        <span style="font-size:var(--fs-sm);color:var(--text-muted);padding-top:8px;flex-shrink:0">${i+1}.</span>
+        <input type="text" class="form-input acm-probe-input" value="${p.replace(/"/g,'&quot;')}" style="flex:1;font-size:var(--fs)"/>
       </div>`).join('');
 
     document.getElementById('acm-draft-panel').style.display = 'block';
@@ -2296,8 +2296,8 @@ async function draftAlertScenario() {
     document.getElementById('acm-draft-coachnote').textContent = 'AI service offline. Edit the scenario manually.';
     document.getElementById('acm-draft-probes').innerHTML = `
       <div style="display:flex;gap:0.5rem;margin-bottom:0.4rem">
-        <span style="font-size:0.72rem;color:var(--text-muted);padding-top:8px">1.</span>
-        <input type="text" class="form-input acm-probe-input" value="Walk me through your thinking on this." style="flex:1;font-size:0.82rem"/>
+        <span style="font-size:var(--fs-sm);color:var(--text-muted);padding-top:8px">1.</span>
+        <input type="text" class="form-input acm-probe-input" value="Walk me through your thinking on this." style="flex:1;font-size:var(--fs)"/>
       </div>`;
     document.getElementById('acm-draft-panel').style.display = 'block';
     document.getElementById('acm-actions').style.display     = 'none';
@@ -2355,15 +2355,15 @@ async function renderPeople() {
 
   const container = document.getElementById('org-tree-container');
   if (!container) return;
-  container.innerHTML = `<div style="padding:1rem;color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
+  container.innerHTML = `<div style="padding:1rem;color:var(--text-muted);font-size:var(--fs-md)">Loading…</div>`;
 
   try {
     await OrgTree.load();
     OrgTree.render('org-tree-container');
   } catch(e) {
     container.innerHTML = `
-      <div style="padding:1.5rem;text-align:center;color:var(--text-muted);font-size:0.85rem">
-        <div style="font-size:1.2rem;margin-bottom:0.5rem"></div>
+      <div style="padding:1.5rem;text-align:center;color:var(--text-muted);font-size:var(--fs-md)">
+        <div style="font-size:var(--fs-2xl);margin-bottom:0.5rem"></div>
         Could not load tree. <a href="#" onclick="renderPeople()" style="color:var(--accent)">Try again</a>
       </div>`;
   }
@@ -2383,8 +2383,8 @@ function renderSettings(){
   const features = PLATFORM_GRADES[grade]?.features || [];
   document.getElementById('settings-features').innerHTML = features.map(f=>`
     <div style="display:flex;align-items:center;gap:8px;padding:0.5rem 0;border-bottom:1px solid var(--border)">
-      <span style="color:var(--success);font-size:0.9rem"></span>
-      <span style="font-size:0.85rem">${f}</span>
+      <span style="color:var(--success);font-size:var(--fs-lg)"></span>
+      <span style="font-size:var(--fs-md)">${f}</span>
     </div>`).join('');
 
   // Load values into textarea
@@ -2409,14 +2409,14 @@ async function loadPolicies() {
     box.innerHTML = list.map(p => {
       const c = _POLICY_COLOR[p.effect] || '#9aa';
       const cond = p.conditions ? Object.entries(p.conditions).map(([k,v]) => `${esc(k)}: ${esc(Array.isArray(v)?v.join('/'):v)}`).join(', ') : '';
-      return `<div style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0;border-bottom:1px solid var(--border);font-size:0.8rem;${p.enabled===false?'opacity:0.45':''}">
-        <span class="pill" style="background:${c}22;color:${c};font-size:0.66rem;padding:1px 7px;border-radius:10px;white-space:nowrap">${esc(_POLICY_LABEL[p.effect]||p.effect)}</span>
-        <span style="flex:1;min-width:0"><b>${esc(p.capability)}${p.verb&&p.verb!=='*'?'.'+esc(p.verb):''}</b> <span style="color:var(--text-muted)">${esc(p.stage||'')}${cond?' · '+cond:''}</span>${p.note?`<div style="font-size:0.72rem;color:var(--text-muted)">${esc(p.note)}</div>`:''}</span>
-        <button class="btn-ghost btn-sm" style="font-size:0.72rem" onclick="togglePolicy('${p.id}')">${p.enabled===false?'enable':'disable'}</button>
-        ${p.builtin?'':`<button class="btn-ghost btn-sm" style="font-size:0.72rem;color:var(--danger)" onclick="deletePolicy('${p.id}')">×</button>`}
+      return `<div style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0;border-bottom:1px solid var(--border);font-size:var(--fs);${p.enabled===false?'opacity:0.45':''}">
+        <span class="pill" style="background:${c}22;color:${c};font-size:var(--fs-2xs);padding:1px 7px;border-radius:10px;white-space:nowrap">${esc(_POLICY_LABEL[p.effect]||p.effect)}</span>
+        <span style="flex:1;min-width:0"><b>${esc(p.capability)}${p.verb&&p.verb!=='*'?'.'+esc(p.verb):''}</b> <span style="color:var(--text-muted)">${esc(p.stage||'')}${cond?' · '+cond:''}</span>${p.note?`<div style="font-size:var(--fs-sm);color:var(--text-muted)">${esc(p.note)}</div>`:''}</span>
+        <button class="btn-ghost btn-sm" style="font-size:var(--fs-sm)" onclick="togglePolicy('${p.id}')">${p.enabled===false?'enable':'disable'}</button>
+        ${p.builtin?'':`<button class="btn-ghost btn-sm" style="font-size:var(--fs-sm);color:var(--danger)" onclick="deletePolicy('${p.id}')">×</button>`}
       </div>`;
     }).join('') + `
-      <details style="margin-top:0.6rem"><summary style="cursor:pointer;font-size:0.82rem;color:var(--accent)">＋ Add a rule</summary>
+      <details style="margin-top:0.6rem"><summary style="cursor:pointer;font-size:var(--fs);color:var(--accent)">＋ Add a rule</summary>
         <div style="display:flex;flex-direction:column;gap:0.35rem;margin-top:0.5rem">
           <select class="form-input" id="pol-effect"><option value="allow">may (allow)</option><option value="require_approval">needs approval</option><option value="deny">may never (deny)</option><option value="escalate">must escalate</option></select>
           <input class="form-input" id="pol-cap" placeholder="capability — e.g. email, calendar, * ">
@@ -2453,7 +2453,7 @@ async function loadMappings() {
     if (!r.ok) { box.innerHTML = ''; return; }
     const d = await r.json();
     const list = d.mappings || [];
-    if (!list.length) { box.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">No connector mappings yet. When you connect a source, IntelliQ proposes one here for your review.</div>`; return; }
+    if (!list.length) { box.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">No connector mappings yet. When you connect a source, IntelliQ proposes one here for your review.</div>`; return; }
     // Group by provider; newest version first.
     const byProv = {};
     list.forEach(m => (byProv[m.provider] = byProv[m.provider] || []).push(m));
@@ -2463,18 +2463,18 @@ async function loadMappings() {
       return `<div style="border:1px solid var(--border);border-radius:8px;padding:0.6rem 0.7rem;margin-bottom:0.5rem">
         <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.4rem">
           <strong>${esc(prov)}</strong>
-          ${hasSuperseded ? `<button class="btn-ghost" style="margin-left:auto;font-size:0.72rem;color:var(--accent)" onclick="mappingAction('${esc(prov)}','rollback')">Roll back</button>` : ''}
+          ${hasSuperseded ? `<button class="btn-ghost" style="margin-left:auto;font-size:var(--fs-sm);color:var(--accent)" onclick="mappingAction('${esc(prov)}','rollback')">Roll back</button>` : ''}
         </div>
         ${versions.map(m => {
           const c = _MAP_BADGE[m.status] || '#9aa';
           const acts = [];
-          if (m.status === 'proposed' || m.status === 'draft') { acts.push(`<button class="btn btn-accent btn-sm" onclick="mappingReview('${m.id}')">Review</button>`); acts.push(`<button class="btn btn-outline btn-sm" onclick="mappingAction('${m.id}','approve')">Approve</button>`); acts.push(`<button class="btn-ghost" style="color:var(--danger);font-size:0.74rem" onclick="mappingAction('${m.id}','reject')">Reject</button>`); }
+          if (m.status === 'proposed' || m.status === 'draft') { acts.push(`<button class="btn btn-accent btn-sm" onclick="mappingReview('${m.id}')">Review</button>`); acts.push(`<button class="btn btn-outline btn-sm" onclick="mappingAction('${m.id}','approve')">Approve</button>`); acts.push(`<button class="btn-ghost" style="color:var(--danger);font-size:var(--fs-sm)" onclick="mappingAction('${m.id}','reject')">Reject</button>`); }
           if (m.status === 'approved') { acts.push(`<button class="btn btn-accent btn-sm" onclick="mappingAction('${m.id}','activate')">Activate</button>`); acts.push(`<button class="btn btn-outline btn-sm" onclick="mappingReview('${m.id}')">Preview</button>`); }
-          if (m.status === 'active') { acts.push(`<button class="btn btn-outline btn-sm" onclick="mappingReprocess('${esc(prov)}')">Reprocess held</button>`); acts.push(`<button class="btn-ghost" style="font-size:0.74rem" onclick="mappingAction('${m.id}','retire')">Retire</button>`); }
-          return `<div style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0;font-size:0.8rem;flex-wrap:wrap">
+          if (m.status === 'active') { acts.push(`<button class="btn btn-outline btn-sm" onclick="mappingReprocess('${esc(prov)}')">Reprocess held</button>`); acts.push(`<button class="btn-ghost" style="font-size:var(--fs-sm)" onclick="mappingAction('${m.id}','retire')">Retire</button>`); }
+          return `<div style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0;font-size:var(--fs);flex-wrap:wrap">
             <span style="font-family:monospace">v${m.version}</span>
-            <span class="pill" style="background:${c}22;color:${c};font-size:0.68rem;padding:1px 7px;border-radius:10px">${esc(m.status)}${m.rejected ? ' · rejected' : ''}</span>
-            <span style="color:var(--text-muted);font-size:0.72rem">${(m.fields||[]).length} field${(m.fields||[]).length===1?'':'s'}${m.approvedBy ? ' · approved' : ''}</span>
+            <span class="pill" style="background:${c}22;color:${c};font-size:var(--fs-xs);padding:1px 7px;border-radius:10px">${esc(m.status)}${m.rejected ? ' · rejected' : ''}</span>
+            <span style="color:var(--text-muted);font-size:var(--fs-sm)">${(m.fields||[]).length} field${(m.fields||[]).length===1?'':'s'}${m.approvedBy ? ' · approved' : ''}</span>
             <span style="margin-left:auto;display:flex;gap:0.3rem;flex-wrap:wrap">${acts.join('')}</span>
           </div>
           <div id="map-review-${m.id}" style="display:none"></div>`;
@@ -2490,21 +2490,21 @@ async function mappingReview(id) {
   if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
   const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   panel.style.display = 'block';
-  panel.innerHTML = `<div style="color:var(--text-muted);font-size:0.78rem;padding:0.3rem 0">Loading preview…</div>`;
+  panel.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs);padding:0.3rem 0">Loading preview…</div>`;
   try {
     const r = await fetch(`/api/mappings/${id}/preview`, { method: 'POST', headers: { 'Content-Type':'application/json', ...Auth._headers() }, body: '{}' });
     const d = await r.json();
     const samples = d.preview?.samples || [];
     const drift = d.drift || {};
     const driftMsg = drift.drifted
-      ? `<div style="color:var(--danger);font-size:0.76rem;margin:0.3rem 0">Schema changed: ${[...(drift.missing||[]).map(f=>`field "${esc(f)}" missing`), ...(drift.typeChanged||[]).map(t=>`"${esc(t.field)}" no longer numeric`), ...(drift.identityMissing?['identity field missing']:[])].join('; ')}. Ingestion is paused until re-reviewed.</div>`
-      : `<div style="color:var(--success);font-size:0.76rem;margin:0.3rem 0">Schema matches — no drift.</div>`;
+      ? `<div style="color:var(--danger);font-size:var(--fs-sm);margin:0.3rem 0">Schema changed: ${[...(drift.missing||[]).map(f=>`field "${esc(f)}" missing`), ...(drift.typeChanged||[]).map(t=>`"${esc(t.field)}" no longer numeric`), ...(drift.identityMissing?['identity field missing']:[])].join('; ')}. Ingestion is paused until re-reviewed.</div>`
+      : `<div style="color:var(--success);font-size:var(--fs-sm);margin:0.3rem 0">Schema matches — no drift.</div>`;
     panel.innerHTML = driftMsg + samples.slice(0,3).map(s => `
-      <div style="border-top:1px solid var(--border);padding:0.4rem 0;font-size:0.74rem">
+      <div style="border-top:1px solid var(--border);padding:0.4rem 0;font-size:var(--fs-sm)">
         <div style="color:var(--text-muted)">in: <code>${esc(JSON.stringify(s.input)).slice(0,200)}</code></div>
-        <div>out: ${(s.output||[]).map(o => `<span class="pill" style="background:rgba(79,142,247,0.14);font-size:0.7rem;padding:1px 6px;border-radius:8px;margin-right:3px">${esc(o.label)} = ${esc(o.value)}${o.unit?(' '+esc(o.unit)):''}</span>`).join('') || '<span style="color:var(--text-muted)">— nothing extracted —</span>'}</div>
+        <div>out: ${(s.output||[]).map(o => `<span class="pill" style="background:rgba(79,142,247,0.14);font-size:var(--fs-xs);padding:1px 6px;border-radius:8px;margin-right:3px">${esc(o.label)} = ${esc(o.value)}${o.unit?(' '+esc(o.unit)):''}</span>`).join('') || '<span style="color:var(--text-muted)">— nothing extracted —</span>'}</div>
       </div>`).join('');
-  } catch (e) { panel.innerHTML = `<div style="color:var(--danger);font-size:0.78rem">Couldn't load preview.</div>`; }
+  } catch (e) { panel.innerHTML = `<div style="color:var(--danger);font-size:var(--fs)">Couldn't load preview.</div>`; }
 }
 async function mappingAction(idOrProv, action) {
   const status = document.getElementById('mappings-status');
@@ -2547,8 +2547,8 @@ async function loadDomainCatalog() {
       const s = p.sample || {};
       return `<button class="btn ${on ? 'btn-accent' : 'btn-outline'} btn-sm" style="text-align:left;justify-content:flex-start" onclick="setDomain('${p.id}')">
         <span style="font-weight:600">${esc(p.label)}</span>
-        <span style="font-size:0.72rem;color:${on ? 'inherit' : 'var(--text-muted)'};margin-left:0.5rem">${esc(s.person)} · ${esc(s.group)} · ${esc(s.event)}</span>
-        ${on ? '<span style="margin-left:auto;font-size:0.72rem">current</span>' : ''}
+        <span style="font-size:var(--fs-sm);color:${on ? 'inherit' : 'var(--text-muted)'};margin-left:0.5rem">${esc(s.person)} · ${esc(s.group)} · ${esc(s.event)}</span>
+        ${on ? '<span style="margin-left:auto;font-size:var(--fs-sm)">current</span>' : ''}
       </button>`;
     }).join('');
   } catch (e) { box.innerHTML = ''; }
@@ -2579,7 +2579,7 @@ async function loadOAuthCatalog() {
     if (rd) rd.innerHTML = `Redirect URL to register: <code style="user-select:all">${esc(d.redirectUri)}</code>`;
     box.innerHTML = (d.catalog || []).map(p => `<div style="border:1px solid var(--border);border-radius:8px;padding:0.55rem 0.7rem;margin-bottom:0.4rem">
       <div style="display:flex;align-items:center;gap:0.5rem">
-        <div style="flex:1"><strong>${esc(p.label)}</strong> ${p.configured ? '<span class="pill" style="background:rgba(14,207,176,0.15);color:#0ecfb0;font-size:0.68rem">Set up</span>' : `<span style="font-size:0.72rem;color:var(--text-muted)">via ${esc(p.docs)}</span>`}</div>
+        <div style="flex:1"><strong>${esc(p.label)}</strong> ${p.configured ? '<span class="pill" style="background:rgba(14,207,176,0.15);color:#0ecfb0;font-size:var(--fs-xs)">Set up</span>' : `<span style="font-size:var(--fs-sm);color:var(--text-muted)">via ${esc(p.docs)}</span>`}</div>
         ${p.configured
           ? `<button class="btn btn-accent btn-sm" onclick="oauthConnect('${p.key}')">Connect</button>`
           : `<button class="btn btn-outline btn-sm" onclick="document.getElementById('oauth-setup-${p.key}').style.display=document.getElementById('oauth-setup-${p.key}').style.display==='none'?'block':'none'">Set up</button>`}
@@ -2633,7 +2633,7 @@ async function loadConnections() {
     if (!r.ok) { box.innerHTML = ''; return; }
     const d = await r.json();
     const list = d.connections || [];
-    if (!list.length) { box.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">No connections yet.</div>`; return; }
+    if (!list.length) { box.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">No connections yet.</div>`; return; }
     const ago = t => { if (!t) return 'never'; const s = (Date.now() - new Date(t).getTime())/1000; if (s<60) return 'just now'; if (s<3600) return Math.round(s/60)+'m ago'; if (s<86400) return Math.round(s/3600)+'h ago'; return Math.round(s/86400)+'d ago'; };
     const soon = t => { if (!t) return '—'; const s = (new Date(t).getTime() - Date.now())/1000; if (s<=0) return 'now'; if (s<3600) return 'in '+Math.round(s/60)+'m'; return 'in '+Math.round(s/3600)+'h'; };
     box.innerHTML = list.map(c => {
@@ -2642,11 +2642,11 @@ async function loadConnections() {
       <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
         <span style="width:8px;height:8px;border-radius:50%;background:${hc};flex:none"></span>
         <strong>${esc(c.name)}</strong>
-        <span class="pill" style="background:${hc}22;color:${hc};font-size:0.68rem;padding:1px 7px;border-radius:10px">${esc(c.health || 'unknown')}</span>
-        <span style="margin-left:auto;font-size:0.72rem;color:var(--text-muted)">every ${c.scheduleHours}h</span>
+        <span class="pill" style="background:${hc}22;color:${hc};font-size:var(--fs-xs);padding:1px 7px;border-radius:10px">${esc(c.health || 'unknown')}</span>
+        <span style="margin-left:auto;font-size:var(--fs-sm);color:var(--text-muted)">every ${c.scheduleHours}h</span>
       </div>
-      <div style="font-size:0.74rem;color:var(--text-secondary);margin-top:3px">${esc(c.healthReason || c.lastStatus || '')}</div>
-      <div style="font-size:0.72rem;color:var(--text-muted);margin-top:3px;display:flex;gap:0.9rem;flex-wrap:wrap">
+      <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:3px">${esc(c.healthReason || c.lastStatus || '')}</div>
+      <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:3px;display:flex;gap:0.9rem;flex-wrap:wrap">
         <span>last ok: <b>${ago(c.lastCompletedSync)}</b></span>
         <span>next: <b>${c.paused ? 'paused' : soon(c.nextAttemptAt) === '—' ? 'scheduled' : soon(c.nextAttemptAt)}</b></span>
         <span>added: <b>${c.lastCount||0}</b></span>
@@ -2656,10 +2656,10 @@ async function loadConnections() {
         <button class="btn btn-outline btn-sm" onclick="runConnection('${c.id}')">Sync now</button>
         ${c.paused
           ? `<button class="btn btn-accent btn-sm" onclick="connControl('${c.id}','resume')">Resume</button>`
-          : `<button class="btn-ghost btn-sm" style="font-size:0.76rem" onclick="connControl('${c.id}','pause')">Pause</button>`}
-        <button class="btn-ghost btn-sm" style="font-size:0.76rem" onclick="connRuns('${c.id}')">History</button>
-        ${c.failures ? `<button class="btn-ghost btn-sm" style="font-size:0.76rem;color:var(--danger)" onclick="connReplay('${c.id}')">Replay failed</button>` : ''}
-        <button class="btn-ghost btn-sm" title="Reset cursor" style="font-size:0.76rem;color:var(--text-muted)" onclick="connControl('${c.id}','cursor/reset')">Reset cursor</button>
+          : `<button class="btn-ghost btn-sm" style="font-size:var(--fs-sm)" onclick="connControl('${c.id}','pause')">Pause</button>`}
+        <button class="btn-ghost btn-sm" style="font-size:var(--fs-sm)" onclick="connRuns('${c.id}')">History</button>
+        ${c.failures ? `<button class="btn-ghost btn-sm" style="font-size:var(--fs-sm);color:var(--danger)" onclick="connReplay('${c.id}')">Replay failed</button>` : ''}
+        <button class="btn-ghost btn-sm" title="Reset cursor" style="font-size:var(--fs-sm);color:var(--text-muted)" onclick="connControl('${c.id}','cursor/reset')">Reset cursor</button>
         <button class="btn-ghost" title="Remove" onclick="deleteConnection('${c.id}')" style="color:var(--text-muted);margin-left:auto">×</button>
       </div>
       <div id="conn-runs-${c.id}" style="display:none;margin-top:0.5rem"></div>
@@ -2682,15 +2682,15 @@ async function connRuns(id) {
   if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
   panel.style.display = 'block';
   const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  panel.innerHTML = `<div style="color:var(--text-muted);font-size:0.76rem">Loading run history…</div>`;
+  panel.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-sm)">Loading run history…</div>`;
   try {
     const d = await (await fetch(`/api/connections/${id}/runs`, { headers: Auth._headers() })).json();
     const runs = d.runs || [];
-    if (!runs.length) { panel.innerHTML = `<div style="color:var(--text-muted);font-size:0.76rem">No runs yet.</div>`; return; }
+    if (!runs.length) { panel.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-sm)">No runs yet.</div>`; return; }
     panel.innerHTML = runs.slice(0, 8).map(r => {
       const m = r.metrics || {};
       const c = r.status === 'completed' ? '#0ecfb0' : r.status === 'failed' ? '#f74f4f' : r.status === 'paused' ? '#f7a84f' : '#9aa';
-      return `<div style="border-top:1px solid var(--border);padding:0.35rem 0;font-size:0.73rem;display:flex;gap:0.6rem;flex-wrap:wrap">
+      return `<div style="border-top:1px solid var(--border);padding:0.35rem 0;font-size:var(--fs-sm);display:flex;gap:0.6rem;flex-wrap:wrap">
         <span class="pill" style="background:${c}22;color:${c};padding:0 6px;border-radius:8px">${esc(r.status)}</span>
         <span style="color:var(--text-muted)">${esc(r.trigger)}</span>
         <span>fetched ${m.fetched||0} · promoted ${m.promoted||0} · held ${m.held||0} · dup ${m.duplicates||0}${m.deletions?` · del ${m.deletions}`:''}</span>
@@ -2698,7 +2698,7 @@ async function connRuns(id) {
         <span style="margin-left:auto;color:var(--text-muted)">${r.latencyMs!=null?r.latencyMs+'ms':''}</span>
       </div>`;
     }).join('');
-  } catch (e) { panel.innerHTML = `<div style="color:var(--danger);font-size:0.76rem">Couldn't load runs.</div>`; }
+  } catch (e) { panel.innerHTML = `<div style="color:var(--danger);font-size:var(--fs-sm)">Couldn't load runs.</div>`; }
 }
 async function connReplay(id) {
   const status = document.getElementById('connections-status');
@@ -2765,7 +2765,7 @@ async function loadIngestToken(regen) {
     const esc = _escAdvisor;
     const base = location.origin;
     if (!d.token) {
-      box.innerHTML = `<div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:0.6rem">No token yet — generate one to start connecting apps.</div>
+      box.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted);margin-bottom:0.6rem">No token yet — generate one to start connecting apps.</div>
         <button class="btn btn-accent btn-sm" onclick="loadIngestToken(true)">Generate token</button>`;
     } else {
       const example = `curl -X POST ${base}/api/ingest \\
@@ -2773,18 +2773,18 @@ async function loadIngestToken(regen) {
   -H "Content-Type: application/json" \\
   -d '{"records":[{"email":"person@org.com","label":"Soreness","value":7,"date":"2026-07-20"}]}'`;
       box.innerHTML = `
-        <div style="font-size:0.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Endpoint</div>
-        <div style="font-family:monospace;font-size:0.8rem;margin-bottom:0.5rem;word-break:break-all">${esc(base)}/api/ingest</div>
-        <div style="font-size:0.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Token (keep secret)</div>
-        <div style="font-family:monospace;font-size:0.78rem;margin-bottom:0.5rem;word-break:break-all;background:rgba(127,127,127,0.08);padding:0.4rem 0.5rem;border-radius:6px">${esc(d.token)}</div>
-        <div style="font-size:0.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Example</div>
-        <pre style="font-size:0.72rem;white-space:pre-wrap;word-break:break-all;background:rgba(127,127,127,0.08);padding:0.5rem;border-radius:6px;margin:0.3rem 0 0.6rem">${esc(example)}</pre>
-        <div style="font-size:0.74rem;color:var(--text-muted);margin-bottom:0.5rem">Send numbers keyed to a member's email (or name). Records are matched to your people; anything non-numeric is ignored — numbers only.</div>
+        <div style="font-size:var(--fs-sm);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Endpoint</div>
+        <div style="font-family:monospace;font-size:var(--fs);margin-bottom:0.5rem;word-break:break-all">${esc(base)}/api/ingest</div>
+        <div style="font-size:var(--fs-sm);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Token (keep secret)</div>
+        <div style="font-family:monospace;font-size:var(--fs);margin-bottom:0.5rem;word-break:break-all;background:rgba(127,127,127,0.08);padding:0.4rem 0.5rem;border-radius:6px">${esc(d.token)}</div>
+        <div style="font-size:var(--fs-sm);color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Example</div>
+        <pre style="font-size:var(--fs-sm);white-space:pre-wrap;word-break:break-all;background:rgba(127,127,127,0.08);padding:0.5rem;border-radius:6px;margin:0.3rem 0 0.6rem">${esc(example)}</pre>
+        <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:0.5rem">Send numbers keyed to a member's email (or name). Records are matched to your people; anything non-numeric is ignored — numbers only.</div>
         <button class="btn btn-outline btn-sm" onclick="loadIngestToken(true)">Regenerate token</button>`;
     }
     if (btn) btn.style.display = 'none';
   } catch (e) {
-    box.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">Couldn't load connection details.</div>`;
+    box.innerHTML = `<div style="color:var(--danger);font-size:var(--fs)">Couldn't load connection details.</div>`;
     if (btn) { btn.disabled = false; btn.textContent = 'Show connection details'; }
   }
 }
@@ -2804,12 +2804,12 @@ async function runLlmSelfTest() {
     const prov = [s.providers?.claude ? 'Claude' : null, s.providers?.openai ? 'OpenAI' : null].filter(Boolean).join(' + ') || 'none';
     let html = `<div style="padding:0.5rem 0.7rem;border:1px solid var(--border);border-radius:8px;margin-bottom:0.6rem">
       <div><strong>Status:</strong> ${s.enabled ? '<span style="color:var(--success)">connected</span>' : '<span style="color:var(--danger)">no key</span>'}</div>
-      <div style="font-size:0.78rem;color:var(--text-muted);margin-top:2px">Providers: ${esc(prov)} · reason: ${esc(s.models?.reason || '—')} · micro: ${esc(s.models?.micro || '—')}</div>
+      <div style="font-size:var(--fs);color:var(--text-muted);margin-top:2px">Providers: ${esc(prov)} · reason: ${esc(s.models?.reason || '—')} · micro: ${esc(s.models?.micro || '—')}</div>
     </div>`;
     if (d.note) html += `<div style="color:var(--text-secondary)">${esc(d.note)}</div>`;
     (d.results || []).forEach(res => {
       html += `<div style="padding:0.6rem 0.7rem;border:1px solid var(--border);border-radius:8px;margin-bottom:0.5rem">
-        <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">${esc(res.label)} · ${esc(res.model)} · ${res.ms}ms</div>
+        <div style="font-size:var(--fs-sm);font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted)">${esc(res.label)} · ${esc(res.model)} · ${res.ms}ms</div>
         <div style="margin-top:0.4rem;line-height:1.5;color:${res.ok ? 'var(--text-primary)' : 'var(--danger)'}">${esc(res.ok ? res.output : res.error)}</div>
       </div>`;
     });
@@ -2915,7 +2915,7 @@ async function seedDemoOrg() {
     const lg = s.login || {};
     out.innerHTML = `<div style="padding:0.6rem 0.7rem;border:1px solid var(--success);border-radius:8px;background:rgba(14,207,176,0.06)">
       <div style="color:var(--success);font-weight:600;margin-bottom:0.4rem">Loaded ${esc(s.orgName || 'the demo organisation')} — ${s.players || ''} players, ${s.staff || ''} staff, ${s.inquiries || ''} open lines of inquiry.</div>
-      <div style="font-size:0.82rem;line-height:1.7">Sign out, then log in (password <strong>${esc(lg.password || 'demo1234')}</strong>):<br>
+      <div style="font-size:var(--fs);line-height:1.7">Sign out, then log in (password <strong>${esc(lg.password || 'demo1234')}</strong>):<br>
         Head coach — <strong>${esc(lg.headCoach || '')}</strong><br>
         Player — <strong>${esc(lg.player || '')}</strong>
       </div>
@@ -2943,7 +2943,7 @@ function switchSettingsTab(tab) {
 async function renderMetricsSettings() {
   const el = document.getElementById('settings-metrics-list');
   if (!el) return;
-  el.innerHTML = '<div style="color:var(--text-muted);font-size:0.82rem">Loading…</div>';
+  el.innerHTML = '<div style="color:var(--text-muted);font-size:var(--fs)">Loading…</div>';
   try {
     const res  = await fetch('/api/metrics', { headers: Auth._headers() });
     const data = await res.json();
@@ -2951,21 +2951,21 @@ async function renderMetricsSettings() {
     if (!AppState.orgMetrics.length) {
       el.innerHTML = `
         <div style="text-align:center;padding:1.5rem;color:var(--text-muted)">
-          <div style="font-size:1.5rem;margin-bottom:0.4rem"></div>
+          <div style="font-size:var(--fs-4xl);margin-bottom:0.4rem"></div>
           No metrics defined yet. Add your first metric or use AI Suggest.
         </div>`;
       return;
     }
     el.innerHTML = AppState.orgMetrics.map((m, i) => `
       <div style="display:flex;align-items:center;gap:0.5rem;padding:0.55rem 0;border-bottom:1px solid var(--border)">
-        <span style="font-size:0.8rem;color:var(--text-muted);width:20px;text-align:right">${i+1}</span>
-        <span style="flex:1;font-size:0.88rem;font-weight:500">${m.name}</span>
-        <span style="font-size:0.72rem;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:1px 6px">${m.source || 'org'}</span>
+        <span style="font-size:var(--fs);color:var(--text-muted);width:20px;text-align:right">${i+1}</span>
+        <span style="flex:1;font-size:var(--fs-md);font-weight:500">${m.name}</span>
+        <span style="font-size:var(--fs-sm);color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:1px 6px">${m.source || 'org'}</span>
         ${Auth.canDo('manage_metrics') ? `
-          <button onclick="deleteMetric('${m.metricId}')" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:0.85rem;padding:2px 4px" title="Delete"></button>` : ''}
+          <button onclick="deleteMetric('${m.metricId}')" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:var(--fs-md);padding:2px 4px" title="Delete"></button>` : ''}
       </div>`).join('');
   } catch(e) {
-    el.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">Failed to load metrics.</div>`;
+    el.innerHTML = `<div style="color:var(--danger);font-size:var(--fs)">Failed to load metrics.</div>`;
   }
 }
 
@@ -2984,7 +2984,7 @@ function renderAddMetric() {
           <button class="btn btn-accent btn-sm" onclick="_submitAddMetric()">Add</button>
           <button class="btn btn-outline btn-sm" onclick="document.getElementById('settings-metric-form').innerHTML=''">Cancel</button>
         </div>
-        <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.4rem">Be specific. "Accountability" is better than "Good attitude".</div>
+        <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.4rem">Be specific. "Accountability" is better than "Good attitude".</div>
       </div>
     </div>`;
   setTimeout(() => document.getElementById('new-metric-name')?.focus(), 50);
@@ -3020,7 +3020,7 @@ async function deleteMetric(metricId) {
 async function renderMetricSuggest() {
   const formEl = document.getElementById('settings-metric-form');
   if (!formEl) return;
-  formEl.innerHTML = `<div style="padding:1rem;color:var(--text-muted);font-size:0.82rem">Asking IntelliQ to suggest metrics…</div>`;
+  formEl.innerHTML = `<div style="padding:1rem;color:var(--text-muted);font-size:var(--fs)">Asking IntelliQ to suggest metrics…</div>`;
   try {
     const res  = await fetch('/api/metrics/suggest', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({}) });
     const data = await res.json();
@@ -3030,11 +3030,11 @@ async function renderMetricSuggest() {
       <div class="card">
         <div class="card-header"><div class="card-title">AI Metric Suggestions</div></div>
         <div class="card-body">
-          <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.8rem">Select the ones that fit your org — you can always add more later.</div>
+          <div style="font-size:var(--fs);color:var(--text-muted);margin-bottom:0.8rem">Select the ones that fit your org — you can always add more later.</div>
           ${suggestions.map((s,i)=>`
             <label style="display:flex;align-items:center;gap:0.5rem;padding:0.4rem;border-radius:6px;cursor:pointer;border:1px solid var(--border);margin-bottom:0.3rem">
               <input type="checkbox" value="${s}" checked />
-              <span style="font-size:0.85rem">${s}</span>
+              <span style="font-size:var(--fs-md)">${s}</span>
             </label>`).join('')}
           <div style="display:flex;gap:0.5rem;margin-top:0.8rem">
             <button class="btn btn-accent btn-sm" onclick="_addSuggestedMetrics()">Add Selected</button>
@@ -3043,7 +3043,7 @@ async function renderMetricSuggest() {
         </div>
       </div>`;
   } catch(e) {
-    formEl.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">AI suggestion failed: ${e.message}</div>`;
+    formEl.innerHTML = `<div style="color:var(--danger);font-size:var(--fs)">AI suggestion failed: ${e.message}</div>`;
   }
 }
 
@@ -3101,7 +3101,7 @@ async function saveOrgValues() {
 async function renderGoalsSettings() {
   const el = document.getElementById('settings-goals-list');
   if (!el) return;
-  el.innerHTML = '<div style="color:var(--text-muted);font-size:0.82rem">Loading…</div>';
+  el.innerHTML = '<div style="color:var(--text-muted);font-size:var(--fs)">Loading…</div>';
   try {
     const res  = await fetch('/api/goals', { headers: Auth._headers() });
     const data = await res.json();
@@ -3112,12 +3112,12 @@ async function renderGoalsSettings() {
     }
     el.innerHTML = goals.map(g => `
       <div style="display:flex;align-items:center;gap:0.6rem;padding:0.6rem 0;border-bottom:1px solid var(--border)">
-        <span style="font-size:0.88rem;flex:1">${g.text}</span>
-        <span style="font-size:0.72rem;color:var(--text-muted)">${g.status || 'active'}</span>
+        <span style="font-size:var(--fs-md);flex:1">${g.text}</span>
+        <span style="font-size:var(--fs-sm);color:var(--text-muted)">${g.status || 'active'}</span>
         ${Auth.canDo('manage_goals') ? `<button onclick="deleteGoal('${g.goalId}')" style="background:none;border:none;cursor:pointer;color:var(--text-muted)"></button>` : ''}
       </div>`).join('');
   } catch(e) {
-    el.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">Failed to load goals.</div>`;
+    el.innerHTML = `<div style="color:var(--danger);font-size:var(--fs)">Failed to load goals.</div>`;
   }
 }
 
@@ -3215,9 +3215,9 @@ function _onboardCard(id, icon, label, sub, color) {
   return `
     <div onclick="_openOnboardSection('${id}')" style="cursor:pointer;background:var(--surface-1);border:1px solid var(--border);border-radius:10px;padding:1.1rem;display:flex;flex-direction:column;align-items:flex-start;gap:0.4rem;transition:border-color 0.15s"
       onmouseover="this.style.borderColor='${color}'" onmouseout="this.style.borderColor='var(--border)'">
-      <span style="font-size:1.4rem">${icon}</span>
-      <div style="font-size:0.88rem;font-weight:700;color:var(--text-primary)">${label}</div>
-      <div style="font-size:0.75rem;color:var(--text-secondary)">${sub}</div>
+      <span style="font-size:var(--fs-3xl)">${icon}</span>
+      <div style="font-size:var(--fs-md);font-weight:700;color:var(--text-primary)">${label}</div>
+      <div style="font-size:var(--fs-sm);color:var(--text-secondary)">${sub}</div>
     </div>`;
 }
 
@@ -3250,11 +3250,11 @@ function _openOnboardSection(section) {
               </select>
             </div>` : ''}
           </div>
-          <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.8rem">
+          <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:0.8rem">
             An invite link will be generated after adding. Share it with the person so they can set their own password.
           </div>
           <button class="btn btn-accent btn-sm" onclick="_submitAddPerson()">Send Invite</button>
-          <span id="ob-add-result" style="margin-left:0.7rem;font-size:0.8rem"></span>
+          <span id="ob-add-result" style="margin-left:0.7rem;font-size:var(--fs)"></span>
         </div>
       </div>`;
 
@@ -3263,7 +3263,7 @@ function _openOnboardSection(section) {
       <div class="card" style="margin-bottom:0">
         <div class="card-header"><div class="card-title">Import Spreadsheet</div></div>
         <div class="card-body">
-          <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.8rem;line-height:1.6">
+          <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.8rem;line-height:1.6">
             Upload a <strong>CSV</strong> or <strong>XLSX</strong> file. Required columns: <code>name</code>, <code>email</code>. Optional: <code>role</code>, <code>group</code>/<code>department</code>.
           </div>
           <div style="margin-bottom:0.8rem">
@@ -3271,7 +3271,7 @@ function _openOnboardSection(section) {
           </div>
           <div id="ob-import-preview" style="margin-bottom:0.8rem"></div>
           <button class="btn btn-accent btn-sm" id="ob-import-btn" onclick="_submitImport()" style="display:none">Import All</button>
-          <span id="ob-import-result" style="margin-left:0.7rem;font-size:0.8rem"></span>
+          <span id="ob-import-result" style="margin-left:0.7rem;font-size:var(--fs)"></span>
         </div>
       </div>`;
 
@@ -3280,7 +3280,7 @@ function _openOnboardSection(section) {
       <div class="card" style="margin-bottom:0">
         <div class="card-header"><div class="card-title">Invite by Email</div></div>
         <div class="card-body">
-          <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+          <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
             Enter email addresses, one per line. Each gets a unique invite link to copy and share. (Email delivery is not yet active — you copy and send the link yourself.)
           </div>
           <textarea id="ob-invite-emails" class="form-input" rows="4"
@@ -3292,7 +3292,7 @@ function _openOnboardSection(section) {
             </div>
           </div>
           <button class="btn btn-accent btn-sm" onclick="_submitEmailInvites()">Generate Invite Links</button>
-          <div id="ob-invite-result" style="margin-top:0.8rem;font-size:0.8rem"></div>
+          <div id="ob-invite-result" style="margin-top:0.8rem;font-size:var(--fs)"></div>
         </div>
       </div>`;
 
@@ -3391,10 +3391,10 @@ async function _submitAddPerson() {
     if (resEl) resEl.innerHTML = `
       <div style="color:var(--success);margin-bottom:0.4rem">Account created for ${fullName}.</div>
       ${inviteLink
-        ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.3rem">Share this link so they can set their password:</div>
-           <div style="font-family:monospace;font-size:0.72rem;color:var(--accent);word-break:break-all;margin-bottom:0.3rem">${inviteLink}</div>
-           <button onclick="navigator.clipboard.writeText('${safeLink}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.72rem">Copy Invite Link</button>`
-        : `<div style="font-size:0.78rem;color:var(--text-muted)">They can log in with their email once a password is set.</div>`
+        ? `<div style="font-size:var(--fs);color:var(--text-muted);margin-bottom:0.3rem">Share this link so they can set their password:</div>
+           <div style="font-family:monospace;font-size:var(--fs-sm);color:var(--accent);word-break:break-all;margin-bottom:0.3rem">${inviteLink}</div>
+           <button onclick="navigator.clipboard.writeText('${safeLink}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:var(--fs-sm)">Copy Invite Link</button>`
+        : `<div style="font-size:var(--fs);color:var(--text-muted)">They can log in with their email once a password is set.</div>`
       }`;
     _addMemberToAppState({ ...data.user });
     // Clear fields
@@ -3412,24 +3412,24 @@ async function _previewImportFile() {
   const el    = document.getElementById('ob-import-preview');
   const btn   = document.getElementById('ob-import-btn');
   if (!file || !el) return;
-  el.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem">Parsing…</div>';
+  el.innerHTML = '<div style="color:var(--text-muted);font-size:var(--fs)">Parsing…</div>';
 
   try {
     const text = await file.text();
     _importRows = _parseCSV(text);
-    if (!_importRows.length) { el.innerHTML = '<div style="color:var(--warning);font-size:0.8rem">No rows found. Check file format.</div>'; return; }
+    if (!_importRows.length) { el.innerHTML = '<div style="color:var(--warning);font-size:var(--fs)">No rows found. Check file format.</div>'; return; }
 
     el.innerHTML = `
-      <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.4rem">${_importRows.length} row(s) found — preview:</div>
+      <div style="font-size:var(--fs);color:var(--text-muted);margin-bottom:0.4rem">${_importRows.length} row(s) found — preview:</div>
       <div style="overflow-x:auto;max-height:180px;border:1px solid var(--border);border-radius:6px">
-        <table style="width:100%;border-collapse:collapse;font-size:0.75rem">
+        <table style="width:100%;border-collapse:collapse;font-size:var(--fs-sm)">
           <thead><tr style="background:var(--surface-2)">${Object.keys(_importRows[0]).map(k=>`<th style="padding:4px 8px;text-align:left;border-bottom:1px solid var(--border)">${k}</th>`).join('')}</tr></thead>
           <tbody>${_importRows.slice(0,5).map(r=>`<tr>${Object.values(r).map(v=>`<td style="padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-secondary)">${v||''}</td>`).join('')}</tr>`).join('')}</tbody>
         </table>
       </div>`;
     if (btn) btn.style.display = 'inline-block';
   } catch(e) {
-    el.innerHTML = `<div style="color:var(--danger);font-size:0.8rem">Could not parse file: ${e.message}</div>`;
+    el.innerHTML = `<div style="color:var(--danger);font-size:var(--fs)">Could not parse file: ${e.message}</div>`;
   }
 }
 
@@ -3486,15 +3486,15 @@ async function _submitEmailInvites() {
   }
   if (resEl) {
     resEl.innerHTML = results.length
-      ? `<div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.5rem">
+      ? `<div style="font-size:var(--fs);color:var(--text-muted);margin-bottom:0.5rem">
            Email delivery is not yet active. Share these links directly with each person.
          </div>` +
         results.map(r => {
           const safeUrl = r.url.replace(/'/g, "\\'");
-          return `<div style="margin-bottom:0.5rem;padding:0.5rem 0.7rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:0.78rem">
+          return `<div style="margin-bottom:0.5rem;padding:0.5rem 0.7rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:var(--fs)">
             <div style="font-weight:600;margin-bottom:0.2rem">Invite created for <span style="color:var(--accent)">${r.email}</span></div>
-            <div style="font-family:monospace;font-size:0.72rem;color:var(--text-secondary);word-break:break-all;margin-bottom:0.3rem">${r.url}</div>
-            <button onclick="navigator.clipboard.writeText('${safeUrl}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:0.72rem">Copy Link</button>
+            <div style="font-family:monospace;font-size:var(--fs-sm);color:var(--text-secondary);word-break:break-all;margin-bottom:0.3rem">${r.url}</div>
+            <button onclick="navigator.clipboard.writeText('${safeUrl}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:var(--fs-sm)">Copy Link</button>
           </div>`;
         }).join('')
       : '<span style="color:var(--danger)">Could not generate links.</span>';
@@ -3517,7 +3517,7 @@ async function _createJoinLink() {
     if (!data.ok) throw new Error(data.error);
     const fullUrl = `${window.location.origin}${data.url}`;
     if (resEl) resEl.innerHTML = `
-      <div style="padding:0.6rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:0.8rem">
+      <div style="padding:0.6rem 0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:var(--fs)">
         <div style="font-weight:700;color:var(--text-primary);margin-bottom:0.3rem">${label || 'Join Link'} created</div>
         <div style="font-family:monospace;color:var(--accent);word-break:break-all;margin-bottom:0.4rem">${fullUrl}</div>
         <button onclick="navigator.clipboard.writeText('${fullUrl}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm">Copy Link</button>
@@ -3536,12 +3536,12 @@ async function _loadJoinLinks() {
     const res  = await authFetch(`/api/auth/join-links?orgCode=${encodeURIComponent(AppState.orgCode)}`);
     const data = await res.json();
     const links = data.links || [];
-    if (!links.length) { el.innerHTML = '<div style="font-size:0.78rem;color:var(--text-muted)">No active join links.</div>'; return; }
-    el.innerHTML = `<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">Active Links</div>` +
+    if (!links.length) { el.innerHTML = '<div style="font-size:var(--fs);color:var(--text-muted)">No active join links.</div>'; return; }
+    el.innerHTML = `<div style="font-size:var(--fs-sm);font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">Active Links</div>` +
       links.map(l => {
         const expires = new Date(l.expiresAt).toLocaleDateString('en-GB');
         const fullUrl = `${window.location.origin}/?invite=${l.token}`;
-        return `<div style="padding:0.5rem 0.7rem;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;margin-bottom:0.4rem;font-size:0.78rem">
+        return `<div style="padding:0.5rem 0.7rem;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;margin-bottom:0.4rem;font-size:var(--fs)">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap">
             <div>
               <span style="font-weight:600">${l.label || l.role}</span>
@@ -3563,15 +3563,15 @@ function _renderOnboardRecent() {
   const members = AppState.members.slice().reverse().slice(0, 8);
   if (!members.length) { el.innerHTML = ''; return; }
   el.innerHTML = `
-    <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">People in This Org (${AppState.members.length})</div>
+    <div style="font-size:var(--fs-sm);font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text-muted);margin-bottom:0.5rem">People in This Org (${AppState.members.length})</div>
     <div style="display:flex;flex-wrap:wrap;gap:0.4rem">
       ${members.map(m => `
-        <div style="padding:0.35rem 0.7rem;background:var(--surface-1);border:1px solid var(--border);border-radius:20px;font-size:0.78rem;display:flex;align-items:center;gap:0.4rem">
-          <div style="width:20px;height:20px;border-radius:50%;background:${m.color}22;color:${m.color};font-size:0.62rem;display:flex;align-items:center;justify-content:center;font-weight:700">${m.initials}</div>
+        <div style="padding:0.35rem 0.7rem;background:var(--surface-1);border:1px solid var(--border);border-radius:20px;font-size:var(--fs);display:flex;align-items:center;gap:0.4rem">
+          <div style="width:20px;height:20px;border-radius:50%;background:${m.color}22;color:${m.color};font-size:var(--fs-2xs);display:flex;align-items:center;justify-content:center;font-weight:700">${m.initials}</div>
           <span>${m.name}</span>
-          <span style="color:var(--text-muted);font-size:0.7rem">${m.role}</span>
+          <span style="color:var(--text-muted);font-size:var(--fs-xs)">${m.role}</span>
         </div>`).join('')}
-      ${AppState.members.length > 8 ? `<div style="padding:0.35rem 0.7rem;color:var(--text-muted);font-size:0.78rem">+${AppState.members.length - 8} more</div>` : ''}
+      ${AppState.members.length > 8 ? `<div style="padding:0.35rem 0.7rem;color:var(--text-muted);font-size:var(--fs)">+${AppState.members.length - 8} more</div>` : ''}
     </div>`;
 }
 
@@ -3584,7 +3584,7 @@ async function renderGroups() {
   if (!orgCode) return;
   const container = document.getElementById('groups-list');
   if (!container) return;
-  container.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem;padding:1rem">Loading…</div>`;
+  container.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs);padding:1rem">Loading…</div>`;
 
   try {
     const res  = await fetch(`/api/groups?orgCode=${encodeURIComponent(orgCode)}`);
@@ -3594,9 +3594,9 @@ async function renderGroups() {
     if (!_platformGroups.length) {
       container.innerHTML = `
         <div style="text-align:center;padding:2.5rem 1rem;background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius)">
-          <div style="font-size:2rem;margin-bottom:0.6rem"></div>
-          <div style="font-size:0.9rem;font-weight:600;margin-bottom:0.3rem">No groups yet</div>
-          <div style="font-size:0.82rem;color:var(--text-secondary)">Create sub-groups within your org. People can be in multiple groups.</div>
+          <div style="font-size:var(--fs-6xl);margin-bottom:0.6rem"></div>
+          <div style="font-size:var(--fs-lg);font-weight:600;margin-bottom:0.3rem">No groups yet</div>
+          <div style="font-size:var(--fs);color:var(--text-secondary)">Create sub-groups within your org. People can be in multiple groups.</div>
         </div>`;
       return;
     }
@@ -3616,8 +3616,8 @@ async function renderGroups() {
         <div style="background:var(--surface-1);border:1px solid var(--border);border-radius:var(--radius);padding:1rem;margin-bottom:0.7rem">
           <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:0.5rem">
             <div>
-              <div style="font-size:0.95rem;font-weight:700">${g.name}</div>
-              ${g.description ? `<div style="font-size:0.8rem;color:var(--text-secondary);margin-top:2px">${g.description}</div>` : ''}
+              <div style="font-size:var(--fs-lg);font-weight:700">${g.name}</div>
+              ${g.description ? `<div style="font-size:var(--fs);color:var(--text-secondary);margin-top:2px">${g.description}</div>` : ''}
             </div>
             <div style="display:flex;gap:0.4rem">
               <button class="btn btn-outline btn-sm" onclick="openGroupDetail('${g.id}')">View Feed</button>
@@ -3626,15 +3626,15 @@ async function renderGroups() {
             </div>
           </div>
           <div style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center">
-            <span style="font-size:0.7rem;color:var(--text-muted)">${g.memberIds?.length || 0} members</span>
-            ${leads.length ? `<span style="font-size:0.72rem;padding:2px 8px;background:${color}22;color:${color};border-radius:20px;border:1px solid ${color}44">Lead: ${leads.join(', ')}</span>` : ''}
-            ${members.map(n => `<span style="font-size:0.72rem;padding:2px 8px;background:var(--surface-2);border:1px solid var(--border);border-radius:20px;color:var(--text-secondary)">${n}</span>`).join('')}
-            ${g.memberIds?.length > 5 ? `<span style="font-size:0.72rem;color:var(--text-muted)">+${g.memberIds.length-5} more</span>` : ''}
+            <span style="font-size:var(--fs-xs);color:var(--text-muted)">${g.memberIds?.length || 0} members</span>
+            ${leads.length ? `<span style="font-size:var(--fs-sm);padding:2px 8px;background:${color}22;color:${color};border-radius:20px;border:1px solid ${color}44">Lead: ${leads.join(', ')}</span>` : ''}
+            ${members.map(n => `<span style="font-size:var(--fs-sm);padding:2px 8px;background:var(--surface-2);border:1px solid var(--border);border-radius:20px;color:var(--text-secondary)">${n}</span>`).join('')}
+            ${g.memberIds?.length > 5 ? `<span style="font-size:var(--fs-sm);color:var(--text-muted)">+${g.memberIds.length-5} more</span>` : ''}
           </div>
         </div>`;
     }).join('');
   } catch(e) {
-    if (container) container.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">Could not load groups.</div>`;
+    if (container) container.innerHTML = `<div style="color:var(--danger);font-size:var(--fs)">Could not load groups.</div>`;
   }
 }
 
@@ -3755,7 +3755,7 @@ async function runGroupCopilot() {
 async function loadGroupFeed(gid) {
   const feedEl  = document.getElementById('gd-feed');
   if (!feedEl) return;
-  feedEl.innerHTML = `<div style="padding:1rem;text-align:center;color:var(--text-muted);font-size:0.82rem">Loading…</div>`;
+  feedEl.innerHTML = `<div style="padding:1rem;text-align:center;color:var(--text-muted);font-size:var(--fs)">Loading…</div>`;
 
   const orgCode = Auth.currentUser?.orgCode || AppState.orgCode;
   const me      = Auth.currentUser?.id;
@@ -3770,7 +3770,7 @@ async function loadGroupFeed(gid) {
     ].sort((a,b) => b.createdAt.localeCompare(a.createdAt));
 
     if (!allItems.length) {
-      feedEl.innerHTML = `<div style="text-align:center;padding:1.5rem;color:var(--text-muted);font-size:0.82rem">No shared notes or messages yet.<br>Members post from the IntelliQ app.</div>`;
+      feedEl.innerHTML = `<div style="text-align:center;padding:1.5rem;color:var(--text-muted);font-size:var(--fs)">No shared notes or messages yet.<br>Members post from the IntelliQ app.</div>`;
       return;
     }
 
@@ -3785,15 +3785,15 @@ async function loadGroupFeed(gid) {
         <div style="padding:0.8rem 0;border-bottom:1px solid var(--border)">
           <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.4rem">
             <span>${icon}</span>
-            <span style="font-size:0.82rem;font-weight:600">${author}</span>
-            <span style="font-size:0.68rem;padding:2px 7px;background:var(--surface-2);border-radius:20px;border:1px solid var(--border);color:var(--text-muted)">${typeLabel}</span>
-            <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto">${time}</span>
+            <span style="font-size:var(--fs);font-weight:600">${author}</span>
+            <span style="font-size:var(--fs-xs);padding:2px 7px;background:var(--surface-2);border-radius:20px;border:1px solid var(--border);color:var(--text-muted)">${typeLabel}</span>
+            <span style="font-size:var(--fs-xs);color:var(--text-muted);margin-left:auto">${time}</span>
           </div>
-          <div style="font-size:0.83rem;color:var(--text-secondary);line-height:1.55">${item.content}</div>
+          <div style="font-size:var(--fs);color:var(--text-secondary);line-height:1.55">${item.content}</div>
         </div>`;
     }).join('');
   } catch(e) {
-    feedEl.innerHTML = `<div style="color:var(--danger);font-size:0.82rem">Could not load feed.</div>`;
+    feedEl.innerHTML = `<div style="color:var(--danger);font-size:var(--fs)">Could not load feed.</div>`;
   }
 }
 
@@ -3836,7 +3836,7 @@ function showProfile(id){
     console.error('[showProfile] render error for', id, err);
     // Open the modal with a warning rather than crashing the whole app
     const recsEl = document.getElementById('pm-recs');
-    if (recsEl) recsEl.innerHTML = `<div style="padding:0.6rem;background:rgba(247,79,79,0.08);border:1px solid rgba(247,79,79,0.25);border-radius:6px;font-size:0.8rem;color:var(--danger)">Some profile data could not be displayed. This member may not have completed assessments yet.</div>`;
+    if (recsEl) recsEl.innerHTML = `<div style="padding:0.6rem;background:rgba(247,79,79,0.08);border:1px solid rgba(247,79,79,0.25);border-radius:6px;font-size:var(--fs);color:var(--danger)">Some profile data could not be displayed. This member may not have completed assessments yet.</div>`;
     openModal('profile-modal');
   }
 }
@@ -3864,8 +3864,8 @@ function _showProfileInner(id, m){
   document.getElementById('pm-scores').innerHTML = metrics.map(k=>`
     <div style="margin-bottom:0.7rem">
       <div style="display:flex;justify-content:space-between;margin-bottom:3px">
-        <span style="font-size:0.8rem">${k}</span>
-        <span style="font-size:0.8rem;font-weight:600;color:${scoreColor(m.scores[k])}">${m.scores[k] ?? '—'}</span>
+        <span style="font-size:var(--fs)">${k}</span>
+        <span style="font-size:var(--fs);font-weight:600;color:${scoreColor(m.scores[k])}">${m.scores[k] ?? '—'}</span>
       </div>
       ${progressHTML(m.scores[k], scoreColor(m.scores[k]))}
     </div>`).join('');
@@ -3873,7 +3873,7 @@ function _showProfileInner(id, m){
   // AI recommendations
   const recs = generateRecommendation(m, metrics);
   document.getElementById('pm-recs').innerHTML = recs.map(r=>`
-    <div style="padding:0.5rem 0;border-bottom:1px solid var(--border);font-size:0.83rem;line-height:1.55;color:var(--text-secondary)">
+    <div style="padding:0.5rem 0;border-bottom:1px solid var(--border);font-size:var(--fs);line-height:1.55;color:var(--text-secondary)">
       → ${r}
     </div>`).join('');
 
@@ -3883,10 +3883,10 @@ function _showProfileInner(id, m){
     const chats = (m.chatHistory || []).filter(h => h.role === 'user').slice(-4).reverse();
     chatEl.innerHTML = chats.length
       ? chats.map(h => `
-          <div style="padding:0.5rem 0;border-bottom:1px solid var(--border);font-size:0.8rem;color:var(--text-secondary)">
-            <span style="color:var(--text-muted);font-size:0.68rem">${h.date} · Member said: </span>${h.text.slice(0, 120)}${h.text.length > 120 ? '…' : ''}
+          <div style="padding:0.5rem 0;border-bottom:1px solid var(--border);font-size:var(--fs);color:var(--text-secondary)">
+            <span style="color:var(--text-muted);font-size:var(--fs-xs)">${h.date} · Member said: </span>${h.text.slice(0, 120)}${h.text.length > 120 ? '…' : ''}
           </div>`).join('')
-      : `<div style="font-size:0.8rem;color:var(--text-muted)">No check-ins recorded yet.</div>`;
+      : `<div style="font-size:var(--fs);color:var(--text-muted)">No check-ins recorded yet.</div>`;
   }
 
   // Coach input tab
@@ -3898,9 +3898,9 @@ function _showProfileInner(id, m){
   const _history = Array.isArray(m.history) ? m.history : [];
   document.getElementById('pm-history-vals').innerHTML = _history.length
     ? _history.map((v,i)=>`
-        <div style="text-align:center;font-size:0.68rem;color:var(--text-muted)">${MONTHS[i]||i+1}<br>
+        <div style="text-align:center;font-size:var(--fs-xs);color:var(--text-muted)">${MONTHS[i]||i+1}<br>
           <span style="color:${scoreColor(v)};font-weight:600">${v}</span></div>`).join('')
-    : `<div style="font-size:0.78rem;color:var(--text-muted);padding:0.4rem 0">No history yet.</div>`;
+    : `<div style="font-size:var(--fs);color:var(--text-muted);padding:0.4rem 0">No history yet.</div>`;
 
   // Member-support tab (Cut E) — the "Ask IntelliQ" entry routes into the ONE composer; the panel
   // shows the read-only legacy advisor archive for this member.
@@ -4103,13 +4103,13 @@ const _SIGNAL_LABELS = {
 async function loadMemberData(memberId){
   const el = document.getElementById('pm-data-content');
   if (!el) return;
-  el.innerHTML = `<div style="padding:1rem;color:var(--text-muted);font-size:0.82rem">Loading…</div>`;
+  el.innerHTML = `<div style="padding:1rem;color:var(--text-muted);font-size:var(--fs)">Loading…</div>`;
   try {
     const res = await fetch(`/api/signals?subjectType=member&subjectId=${encodeURIComponent(memberId)}`, { headers: Auth._headers() });
     const d = await res.json();
     const sigs = (d.signals || []).sort((a, b) => new Date(b.ts) - new Date(a.ts));
     if (!sigs.length) {
-      el.innerHTML = `<div style="padding:1.2rem;color:var(--text-muted);font-size:0.82rem;text-align:center">Nothing collected yet. Upload a sheet, log an observation, or the member checks in — it all lands here for the AI to use.</div>`;
+      el.innerHTML = `<div style="padding:1.2rem;color:var(--text-muted);font-size:var(--fs);text-align:center">Nothing collected yet. Upload a sheet, log an observation, or the member checks in — it all lands here for the AI to use.</div>`;
       return;
     }
     const groups = {};
@@ -4123,7 +4123,7 @@ async function loadMemberData(memberId){
         ${groups[src].slice(0, 25).map(_memberDataRow).join('')}
       </div>`).join('');
   } catch (e) {
-    el.innerHTML = `<div style="padding:1rem;color:var(--danger);font-size:0.82rem">Could not load data.</div>`;
+    el.innerHTML = `<div style="padding:1rem;color:var(--danger);font-size:var(--fs)">Could not load data.</div>`;
   }
 }
 
@@ -4159,14 +4159,14 @@ function openLogSignal() {
   const m = AppState.getMember(mid);
   _showInlineModal(`
     <div style="font-weight:700;margin-bottom:0.2rem">Log data for ${_escAdvisor(m?.name || 'member')}</div>
-    <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.8rem">Anything you log feeds IntelliQ's understanding — a film note (by voice), a metric, an observation, a public stat.</div>
+    <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:0.8rem">Anything you log feeds IntelliQ's understanding — a film note (by voice), a metric, an observation, a public stat.</div>
     <div style="display:flex;gap:0.4rem;margin-bottom:0.8rem">
       <button class="btn btn-sm btn-accent"  id="sig-t-observation" onclick="_setLogType('observation')">Observation</button>
       <button class="btn btn-sm btn-outline" id="sig-t-metric"      onclick="_setLogType('metric')">Metric</button>
       <button class="btn btn-sm btn-outline" id="sig-t-voice"       onclick="_setLogType('voice')">Voice</button>
     </div>
     <div id="sig-fields"></div>
-    <div id="sig-result" style="font-size:0.8rem;margin-top:0.5rem"></div>
+    <div id="sig-result" style="font-size:var(--fs);margin-top:0.5rem"></div>
     <div style="display:flex;gap:0.5rem;margin-top:0.9rem">
       <button class="btn btn-accent btn-sm" onclick="submitLogSignal()">Save</button>
       <button class="btn btn-outline btn-sm" onclick="_stopDictation();_closeInlineModal()">Cancel</button>
@@ -4187,13 +4187,13 @@ function _setLogType(t) {
     f.innerHTML = `
       <input class="search-input" id="sig-label" placeholder="What (e.g. Squat 1RM, 40-yd dash)" style="width:100%;margin-bottom:0.5rem">
       <input class="search-input" id="sig-num" type="number" step="any" placeholder="Value" style="width:100%">
-      <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.74rem;color:var(--text-muted);margin-top:0.5rem">
+      <label style="display:flex;align-items:center;gap:0.4rem;font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.5rem">
         <input type="checkbox" id="sig-public"> Public stat — the AI may cite this openly</label>`;
   } else if (t === 'voice') {
     f.innerHTML = `
       <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:0.4rem">
         <button class="btn btn-outline btn-sm" id="sig-mic" onclick="_toggleDictation()">Start dictation</button>
-        <span id="sig-mic-state" style="font-size:0.72rem;color:var(--text-muted)"></span>
+        <span id="sig-mic-state" style="font-size:var(--fs-sm);color:var(--text-muted)"></span>
       </div>
       <textarea class="form-input" id="sig-text" rows="4" placeholder="Speak or type a film / voice note…" style="width:100%"></textarea>`;
   } else {
@@ -4507,7 +4507,7 @@ async function renderOrgHealth() {
           ${_healthBar('Active last 30 days', active30d, members.length, 'var(--accent)')}
           ${_healthBar('Account set up',      members.length - pending, members.length, '#4f8ef7')}
           ${neverCk ? `
-            <div style="font-size:0.78rem;color:var(--warning);margin-top:0.3rem">
+            <div style="font-size:var(--fs);color:var(--warning);margin-top:0.3rem">
               ${neverCk} member${neverCk !== 1 ? 's' : ''} ${neverCk !== 1 ? 'have' : 'has'} never checked in.
             </div>` : ''}
         </div>
@@ -4517,27 +4517,27 @@ async function renderOrgHealth() {
       ${ins.notEnoughData ? `
         <div class="card" style="margin-bottom:1rem">
           <div class="card-label" style="margin-bottom:0.4rem">Wellbeing</div>
-          <div style="font-size:0.82rem;color:var(--text-muted)">Not enough check-ins yet for a meaningful wellbeing picture.</div>
+          <div style="font-size:var(--fs);color:var(--text-muted)">Not enough check-ins yet for a meaningful wellbeing picture.</div>
         </div>` : `
         <div class="card" style="margin-bottom:1rem">
           <div class="card-label" style="margin-bottom:0.6rem">Wellbeing snapshot (anonymous)</div>
           <div style="display:flex;gap:1.2rem;flex-wrap:wrap">
             <div>
-              <div style="font-size:1.4rem;font-weight:800;color:${moodColor(moodVal)}">${moodWord(moodVal)}</div>
-              <div style="font-size:0.72rem;color:var(--text-muted)">Team energy</div>
+              <div style="font-size:var(--fs-3xl);font-weight:800;color:${moodColor(moodVal)}">${moodWord(moodVal)}</div>
+              <div style="font-size:var(--fs-sm);color:var(--text-muted)">Team energy</div>
             </div>
             <div>
-              <div style="font-size:1.4rem;font-weight:800">${ins.activeThisWeek}</div>
-              <div style="font-size:0.72rem;color:var(--text-muted)">Checked in this week</div>
+              <div style="font-size:var(--fs-3xl);font-weight:800">${ins.activeThisWeek}</div>
+              <div style="font-size:var(--fs-sm);color:var(--text-muted)">Checked in this week</div>
             </div>
             <div>
-              <div style="font-size:1.4rem;font-weight:800;color:${ins.needsAttention?.length ? 'var(--danger)' : 'var(--success)'}">
+              <div style="font-size:var(--fs-3xl);font-weight:800;color:${ins.needsAttention?.length ? 'var(--danger)' : 'var(--success)'}">
                 ${ins.needsAttention?.length ?? 0}
               </div>
-              <div style="font-size:0.72rem;color:var(--text-muted)">Needs attention</div>
+              <div style="font-size:var(--fs-sm);color:var(--text-muted)">Needs attention</div>
             </div>
           </div>
-          <div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.6rem">
+          <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.6rem">
             Individual names not shown here. Leaders can review specific cases in their workspace.
           </div>
         </div>`}
@@ -4546,7 +4546,7 @@ async function renderOrgHealth() {
       ${ins.recommendedAction ? `
         <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.04)">
           <div class="card-label" style="color:var(--accent);margin-bottom:0.3rem">Suggested action</div>
-          <div style="font-size:0.85rem;color:var(--text-primary);line-height:1.6">${ins.recommendedAction}</div>
+          <div style="font-size:var(--fs-md);color:var(--text-primary);line-height:1.6">${ins.recommendedAction}</div>
         </div>` : ''}`;
 
   } catch(e) {
@@ -4559,7 +4559,7 @@ function _healthBar(label, value, total, color) {
   const pct = total > 0 ? Math.round((value / total) * 100) : 0;
   return `
     <div>
-      <div style="display:flex;justify-content:space-between;font-size:0.78rem;margin-bottom:3px">
+      <div style="display:flex;justify-content:space-between;font-size:var(--fs);margin-bottom:3px">
         <span style="color:var(--text-secondary)">${label}</span>
         <span style="color:var(--text-primary);font-weight:600">${value} / ${total} (${pct}%)</span>
       </div>
@@ -4729,7 +4729,7 @@ async function renderTeamReadiness() {
       : 'IntelliQ doesn’t yet have a confirmed objective or upcoming event to assess readiness against.';
     el.innerHTML = `
       <div class="card" style="text-align:center;padding:2rem">
-        <div style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:0.9rem">${_escAdvisor(msg)}</div>
+        <div style="font-size:var(--fs-lg);color:var(--text-secondary);margin-bottom:0.9rem">${_escAdvisor(msg)}</div>
         <button class="btn btn-accent btn-sm" onclick="navigate('operating-context')">Add operating context →</button>
       </div>`;
     return;
@@ -4738,25 +4738,25 @@ async function renderTeamReadiness() {
   const st = _RD_STATE[d.readiness.status] || _RD_STATE.insufficient_information;
   const areaCard = (a) => {
     const s = _RD_STATE[a.state] || _RD_STATE.insufficient_information;
-    const lim = (a.limitations || []).map(l => `<div style="font-size:0.72rem;color:var(--text-muted)">Limitation: ${_escAdvisor(l)}</div>`).join('');
+    const lim = (a.limitations || []).map(l => `<div style="font-size:var(--fs-sm);color:var(--text-muted)">Limitation: ${_escAdvisor(l)}</div>`).join('');
     return `<div class="ds-recent-row" style="align-items:flex-start">
       <div class="ds-recent-main" style="flex-direction:column;align-items:flex-start;gap:2px">
-        <div style="display:flex;align-items:center;gap:0.5rem"><span style="width:8px;height:8px;border-radius:50%;background:${s.color};display:inline-block"></span><strong style="font-size:0.82rem">${_escAdvisor(a.label)}</strong> <span style="font-size:0.7rem;color:${s.color}">${s.label}</span></div>
-        <div style="font-size:0.8rem;color:var(--text-secondary)">${_escAdvisor(a.statement)}</div>${lim}
+        <div style="display:flex;align-items:center;gap:0.5rem"><span style="width:8px;height:8px;border-radius:50%;background:${s.color};display:inline-block"></span><strong style="font-size:var(--fs)">${_escAdvisor(a.label)}</strong> <span style="font-size:var(--fs-xs);color:${s.color}">${s.label}</span></div>
+        <div style="font-size:var(--fs);color:var(--text-secondary)">${_escAdvisor(a.statement)}</div>${lim}
       </div></div>`;
   };
   const q = (x) => {
     const who = x.targetType === 'person' ? 'a specific person'
       : x.targetType === 'role' ? `the ${_escAdvisor((x.roleRef || '').replace(/_/g, ' '))} role` : x.targetType;
     const bindBtn = (x.targetType === 'role' && x.roleRef)
-      ? `<button class="btn-ghost btn-sm" style="font-size:0.72rem" onclick="trBindPrompt('${_escAdvisor(x.roleRef)}')">Bind ${_escAdvisor(x.roleRef.replace(/_/g, ' '))} to a person</button>` : '';
-    const answerBtn = x.uncertaintyId ? `<button class="btn btn-outline btn-sm" style="font-size:0.72rem;margin-top:0.4rem" onclick="trAnswer('${_escAdvisor(x.uncertaintyId)}')">Answer this →</button>` : '';
+      ? `<button class="btn-ghost btn-sm" style="font-size:var(--fs-sm)" onclick="trBindPrompt('${_escAdvisor(x.roleRef)}')">Bind ${_escAdvisor(x.roleRef.replace(/_/g, ' '))} to a person</button>` : '';
+    const answerBtn = x.uncertaintyId ? `<button class="btn btn-outline btn-sm" style="font-size:var(--fs-sm);margin-top:0.4rem" onclick="trAnswer('${_escAdvisor(x.uncertaintyId)}')">Answer this →</button>` : '';
     return `<div class="card" style="margin-bottom:0.5rem;${x.blocking ? 'border-left:3px solid var(--danger)' : ''}">
-      <div style="font-size:0.86rem;font-weight:600">${_escAdvisor(x.question)}${x.blocking ? ' <span style="font-size:0.68rem;color:var(--danger)">blocking</span>' : ''}</div>
-      <div style="font-size:0.76rem;color:var(--text-secondary);margin-top:2px">${_escAdvisor(x.reason)} · ask ${who}</div>
+      <div style="font-size:var(--fs-md);font-weight:600">${_escAdvisor(x.question)}${x.blocking ? ' <span style="font-size:var(--fs-xs);color:var(--danger)">blocking</span>' : ''}</div>
+      <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:2px">${_escAdvisor(x.reason)} · ask ${who}</div>
       <div style="display:flex;gap:0.5rem">${answerBtn}${bindBtn}</div></div>`;
   };
-  const changes = (d.recentContextChanges || []).map(c => `<li style="font-size:0.78rem;color:var(--text-secondary)">${_escAdvisor(c.statement)}</li>`).join('');
+  const changes = (d.recentContextChanges || []).map(c => `<li style="font-size:var(--fs);color:var(--text-secondary)">${_escAdvisor(c.statement)}</li>`).join('');
 
   el.innerHTML = `
     <div class="card" style="margin-bottom:1rem">
@@ -4769,26 +4769,26 @@ async function renderTeamReadiness() {
     </div>` + `
     <div class="card" style="margin-bottom:1rem">
       <div class="card-label" style="margin-bottom:0.3rem">What are we preparing for?</div>
-      <div style="font-size:1rem;font-weight:700">${_escAdvisor(d.focus.title || d.focus.type || 'Current focus')}</div>
-      <div style="font-size:0.78rem;color:var(--text-muted)">${d.focus.at ? new Date(d.focus.at).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''} · chosen as the ${_escAdvisor(d.focus.orderingRule || 'current focus')}${d.focus.otherActive ? ` (+${d.focus.otherActive} more active)` : ''}</div>
+      <div style="font-size:var(--fs-xl);font-weight:700">${_escAdvisor(d.focus.title || d.focus.type || 'Current focus')}</div>
+      <div style="font-size:var(--fs);color:var(--text-muted)">${d.focus.at ? new Date(d.focus.at).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''} · chosen as the ${_escAdvisor(d.focus.orderingRule || 'current focus')}${d.focus.otherActive ? ` (+${d.focus.otherActive} more active)` : ''}</div>
     </div>
 
     <div class="card" style="margin-bottom:1rem">
       <div class="card-label" style="margin-bottom:0.3rem">What appears ready?</div>
       <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.4rem"><span style="width:10px;height:10px;border-radius:50%;background:${st.color};display:inline-block"></span><strong style="color:${st.color}">${st.label}</strong></div>
-      <div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.6rem">${_escAdvisor(d.readiness.summary)}</div>
-      ${(d.readiness.supportedAreas || []).map(areaCard).join('') || '<div style="font-size:0.8rem;color:var(--text-muted)">Nothing is confirmed ready yet.</div>'}
+      <div style="font-size:var(--fs-md);color:var(--text-secondary);margin-bottom:0.6rem">${_escAdvisor(d.readiness.summary)}</div>
+      ${(d.readiness.supportedAreas || []).map(areaCard).join('') || '<div style="font-size:var(--fs);color:var(--text-muted)">Nothing is confirmed ready yet.</div>'}
     </div>
 
     ${(d.readiness.constrainedAreas || []).length ? `<div class="card" style="margin-bottom:1rem">
       <div class="card-label" style="margin-bottom:0.3rem">What could prevent readiness?</div>
       ${d.readiness.constrainedAreas.map(areaCard).join('')}
-      ${(d.readiness.limitations || []).length ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.5rem">Why readiness is limited: ${d.readiness.limitations.map(_escAdvisor).join('; ')}</div>` : ''}
+      ${(d.readiness.limitations || []).length ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.5rem">Why readiness is limited: ${d.readiness.limitations.map(_escAdvisor).join('; ')}</div>` : ''}
     </div>` : ''}
 
     <div class="card" style="margin-bottom:1rem">
       <div class="card-label" style="margin-bottom:0.5rem">What should happen next?</div>
-      ${(d.nextQuestions || []).length ? d.nextQuestions.map(q).join('') : '<div style="font-size:0.8rem;color:var(--text-muted)">No questions need routing right now.</div>'}
+      ${(d.nextQuestions || []).length ? d.nextQuestions.map(q).join('') : '<div style="font-size:var(--fs);color:var(--text-muted)">No questions need routing right now.</div>'}
     </div>
 
     ${changes ? `<div class="card">
@@ -4812,13 +4812,13 @@ async function trLoadRouting() {
   const inbox = d.inbox || [], conflicts = d.conflicts || [], roll = d.rollup;
   if (!inbox.length && !conflicts.length && !(roll && roll.total)) return;
   const uTone = { immediate: 'var(--danger)', high: 'var(--danger)', medium: 'var(--warning)', normal: 'var(--text-muted)', low: 'var(--text-muted)' };
-  const row = (x) => `<div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:0.8rem;padding:0.15rem 0">
-    <span>${_escAdvisor(x.label)}${x.conflict ? ' <span style="font-size:0.66rem;color:var(--warning)">shared ownership</span>' : ''}</span>
-    <span style="color:${uTone[x.urgency] || 'var(--text-muted)'};font-size:0.72rem">${_escAdvisor(x.urgency)}</span></div>`;
+  const row = (x) => `<div style="display:flex;justify-content:space-between;gap:0.5rem;font-size:var(--fs);padding:0.15rem 0">
+    <span>${_escAdvisor(x.label)}${x.conflict ? ' <span style="font-size:var(--fs-2xs);color:var(--warning)">shared ownership</span>' : ''}</span>
+    <span style="color:${uTone[x.urgency] || 'var(--text-muted)'};font-size:var(--fs-sm)">${_escAdvisor(x.urgency)}</span></div>`;
   box.innerHTML = `
     ${conflicts.length ? `<div class="card" style="margin-top:1rem;border-left:3px solid var(--warning)">
       <div class="card-label" style="margin-bottom:0.3rem">Needs an owner decision</div>
-      ${conflicts.map(c => `<div style="font-size:0.8rem;margin-bottom:0.3rem">${_escAdvisor(c.label)} — <span style="color:var(--text-secondary)">${_escAdvisor(c.reason)}</span></div>`).join('')}
+      ${conflicts.map(c => `<div style="font-size:var(--fs);margin-bottom:0.3rem">${_escAdvisor(c.label)} — <span style="color:var(--text-secondary)">${_escAdvisor(c.reason)}</span></div>`).join('')}
     </div>` : ''}
     ${inbox.length ? `<div class="card" style="margin-top:1rem">
       <div class="card-label" style="margin-bottom:0.3rem">Routed to you (${inbox.length})</div>
@@ -4826,7 +4826,7 @@ async function trLoadRouting() {
     </div>` : ''}
     ${roll && roll.total ? `<div class="card" style="margin-top:1rem">
       <div class="card-label" style="margin-bottom:0.3rem">Across your area</div>
-      <div style="font-size:0.8rem;color:var(--text-secondary)">${roll.total} unresolved item${roll.total === 1 ? '' : 's'} in your area${roll.unassigned ? `, ${roll.unassigned} with no owner yet` : ''}.</div>
+      <div style="font-size:var(--fs);color:var(--text-secondary)">${roll.total} unresolved item${roll.total === 1 ? '' : 's'} in your area${roll.unassigned ? `, ${roll.unassigned} with no owner yet` : ''}.</div>
     </div>` : ''}`;
 }
 
@@ -4853,14 +4853,14 @@ async function trAsk() {
   const out = document.getElementById('tr-ask-out');
   const q = input && input.value.trim();
   if (!q || !out) return;
-  out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Checking your area…</div>`;
+  out.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Checking your area…</div>`;
   try {
     const r = await fetch('/api/org/ask', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ question: q }) });
     const d = await r.json();
-    const route = d.routeTo ? `<div style="font-size:0.74rem;color:var(--text-muted);margin-top:0.3rem">Best person to ask: <strong>${_escAdvisor(d.routeTo.to)}</strong></div>` : '';
-    const lims = (d.limitations || []).length ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.2rem">${d.limitations.map(_escAdvisor).join(' · ')}</div>` : '';
-    out.innerHTML = `<div style="font-size:0.86rem;color:var(--text-primary)">${_escAdvisor(d.answer || 'No answer available.')}</div>${route}${lims}`;
-  } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't answer that right now.</div>`; }
+    const route = d.routeTo ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.3rem">Best person to ask: <strong>${_escAdvisor(d.routeTo.to)}</strong></div>` : '';
+    const lims = (d.limitations || []).length ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.2rem">${d.limitations.map(_escAdvisor).join(' · ')}</div>` : '';
+    out.innerHTML = `<div style="font-size:var(--fs-md);color:var(--text-primary)">${_escAdvisor(d.answer || 'No answer available.')}</div>${route}${lims}`;
+  } catch (e) { out.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Couldn't answer that right now.</div>`; }
 }
 
 async function trBindPrompt(roleRef) {
@@ -4909,24 +4909,24 @@ async function omExplain(fingerprint, btn) {
   if (!panel) return;
   if (panel.dataset.open === '1') { panel.style.display = 'none'; panel.dataset.open = '0'; if (btn) btn.textContent = 'Why did this change?'; return; }
   panel.style.display = 'block'; panel.dataset.open = '1'; if (btn) btn.textContent = 'Hide explanation';
-  panel.innerHTML = `<div style="font-size:0.76rem;color:var(--text-muted)">Explaining…</div>`;
+  panel.innerHTML = `<div style="font-size:var(--fs-sm);color:var(--text-muted)">Explaining…</div>`;
   let x;
   try { const r = await fetch('/api/org-memory/moments/' + encodeURIComponent(fingerprint) + '/explain', { headers: Auth._headers() }); const j = await r.json(); x = j && j.explanation; }
-  catch (_) { panel.innerHTML = `<div style="font-size:0.76rem;color:var(--text-muted)">Couldn't load the explanation.</div>`; return; }
-  if (!x) { panel.innerHTML = `<div style="font-size:0.76rem;color:var(--text-muted)">No explanation is available for this moment.</div>`; return; }
-  const trig = x.trigger ? `<div style="font-size:0.78rem"><strong>What happened:</strong> ${_escAdvisor(x.trigger)}.</div>` : '';
-  const rules = x.rulesChanged ? `<div style="font-size:0.76rem;color:var(--text-muted);margin-top:0.2rem">IntelliQ's interpretation rules changed at this point, so it isn't directly comparable to earlier moments.</div>` : '';
+  catch (_) { panel.innerHTML = `<div style="font-size:var(--fs-sm);color:var(--text-muted)">Couldn't load the explanation.</div>`; return; }
+  if (!x) { panel.innerHTML = `<div style="font-size:var(--fs-sm);color:var(--text-muted)">No explanation is available for this moment.</div>`; return; }
+  const trig = x.trigger ? `<div style="font-size:var(--fs)"><strong>What happened:</strong> ${_escAdvisor(x.trigger)}.</div>` : '';
+  const rules = x.rulesChanged ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.2rem">IntelliQ's interpretation rules changed at this point, so it isn't directly comparable to earlier moments.</div>` : '';
   const trans = (x.transitions || []).map(t => {
     const dir = _MEM_DIR[t.direction] || _MEM_DIR.changed;
     const cause = _MEM_CAUSE[t.cause] || t.cause;
     const rem = t.removalReason ? ` — ${_escAdvisor(_MEM_REMOVAL[t.removalReason] || t.removalReason)}` : '';
-    return `<li style="font-size:0.78rem;color:var(--text-secondary)"><span style="color:${dir.color}">${dir.glyph}</span> ${_escAdvisor(t.claim)} <span style="color:var(--text-muted)">(${_escAdvisor(cause)}${rem})</span></li>`;
+    return `<li style="font-size:var(--fs);color:var(--text-secondary)"><span style="color:${dir.color}">${dir.glyph}</span> ${_escAdvisor(t.claim)} <span style="color:var(--text-muted)">(${_escAdvisor(cause)}${rem})</span></li>`;
   }).join('');
-  const lims = (x.limitations || []).map(l => `<li style="font-size:0.72rem;color:var(--text-muted)">${_escAdvisor(l)}</li>`).join('');
+  const lims = (x.limitations || []).map(l => `<li style="font-size:var(--fs-sm);color:var(--text-muted)">${_escAdvisor(l)}</li>`).join('');
   panel.innerHTML = `
     ${trig}${rules}
-    ${trans ? `<div style="font-size:0.72rem;color:var(--text-muted);margin:0.35rem 0 0.1rem">Changes</div><ul style="margin:0 0 0 1rem;padding:0">${trans}</ul>` : ''}
-    ${lims ? `<div style="font-size:0.72rem;color:var(--text-muted);margin:0.35rem 0 0.1rem">Limitations</div><ul style="margin:0 0 0 1rem;padding:0">${lims}</ul>` : ''}`;
+    ${trans ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin:0.35rem 0 0.1rem">Changes</div><ul style="margin:0 0 0 1rem;padding:0">${trans}</ul>` : ''}
+    ${lims ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin:0.35rem 0 0.1rem">Limitations</div><ul style="margin:0 0 0 1rem;padding:0">${lims}</ul>` : ''}`;
 }
 async function renderOrgMemory() {
   const el = document.getElementById('org-memory-content');
@@ -4939,20 +4939,20 @@ async function renderOrgMemory() {
   if (!d || !d.entries || !d.entries.length) {
     el.innerHTML = `
       <div class="card" style="text-align:center;padding:2rem">
-        <div style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:0.9rem">Your organisation's memory begins the moment you confirm operating context or resolve a question. There's nothing recorded yet.</div>
+        <div style="font-size:var(--fs-lg);color:var(--text-secondary);margin-bottom:0.9rem">Your organisation's memory begins the moment you confirm operating context or resolve a question. There's nothing recorded yet.</div>
         <button class="btn btn-accent btn-sm" onclick="navigate('operating-context')">Add operating context →</button>
       </div>`;
     return;
   }
 
   const s = d.summary || {};
-  const stat = (n, label) => `<div style="text-align:center"><div style="font-size:1.15rem;font-weight:700">${n}</div><div style="font-size:0.68rem;color:var(--text-muted)">${label}</div></div>`;
+  const stat = (n, label) => `<div style="text-align:center"><div style="font-size:var(--fs-2xl);font-weight:700">${n}</div><div style="font-size:var(--fs-xs);color:var(--text-muted)">${label}</div></div>`;
   const fmt = t => t ? new Date(t).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
 
-  const changeLine = (l) => `<li style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:2px">${_escAdvisor(l)}</li>`;
+  const changeLine = (l) => `<li style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:2px">${_escAdvisor(l)}</li>`;
   const transitionChip = (t) => {
     const dir = _MEM_DIR[t.direction] || _MEM_DIR.changed;
-    return `<span style="display:inline-flex;align-items:center;gap:3px;font-size:0.7rem;color:${dir.color};border:1px solid ${dir.color};border-radius:10px;padding:1px 7px;margin:2px 3px 0 0"><span>${dir.glyph}</span>${_escAdvisor(String(t.claimType || '').replace(/_/g, ' '))}</span>`;
+    return `<span style="display:inline-flex;align-items:center;gap:3px;font-size:var(--fs-xs);color:${dir.color};border:1px solid ${dir.color};border-radius:10px;padding:1px 7px;margin:2px 3px 0 0"><span>${dir.glyph}</span>${_escAdvisor(String(t.claimType || '').replace(/_/g, ' '))}</span>`;
   };
   // A semantics-change moment is visually + verbally DISTINCT from a gain/slip: it is a
   // neutral note that IntelliQ's interpretation rules changed, never an org outcome.
@@ -4960,10 +4960,10 @@ async function renderOrgMemory() {
     const snap = e.snapshot || {};
     return `<div class="card" style="margin-bottom:0.75rem;border-left:3px solid var(--text-muted);opacity:0.92">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem">
-        <strong style="font-size:0.82rem;color:var(--text-muted)">IntelliQ's interpretation rules changed</strong>
-        <span style="font-size:0.72rem;color:var(--text-muted)">${fmt(snap.at)}</span>
+        <strong style="font-size:var(--fs);color:var(--text-muted)">IntelliQ's interpretation rules changed</strong>
+        <span style="font-size:var(--fs-sm);color:var(--text-muted)">${fmt(snap.at)}</span>
       </div>
-      <div style="font-size:0.78rem;color:var(--text-secondary);margin-top:0.25rem">Moments before this point are not directly comparable to those after it. This is a change in how IntelliQ interprets information — not a change in the organisation.</div>
+      <div style="font-size:var(--fs);color:var(--text-secondary);margin-top:0.25rem">Moments before this point are not directly comparable to those after it. This is a change in how IntelliQ interprets information — not a change in the organisation.</div>
     </div>`;
   };
   const moment = (e) => {
@@ -4977,17 +4977,17 @@ async function renderOrgMemory() {
     const canExplain = snap.fingerprint && !ch.baseline;
     return `<div class="card" style="margin-bottom:0.75rem">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem">
-        <strong style="font-size:0.82rem">${_escAdvisor(focusTitle)}</strong>
-        <span style="font-size:0.72rem;color:var(--text-muted)">${fmt(snap.at)}</span>
+        <strong style="font-size:var(--fs)">${_escAdvisor(focusTitle)}</strong>
+        <span style="font-size:var(--fs-sm);color:var(--text-muted)">${fmt(snap.at)}</span>
       </div>
       <div style="display:flex;align-items:center;gap:0.4rem;margin:0.3rem 0">
         <span style="width:8px;height:8px;border-radius:50%;background:${rst.color};display:inline-block"></span>
-        <span style="font-size:0.74rem;color:${rst.color}">${rst.label}</span>
-        ${ch.baseline ? '<span style="font-size:0.68rem;color:var(--text-muted)">· timeline begins here</span>' : ''}
+        <span style="font-size:var(--fs-sm);color:${rst.color}">${rst.label}</span>
+        ${ch.baseline ? '<span style="font-size:var(--fs-xs);color:var(--text-muted)">· timeline begins here</span>' : ''}
       </div>
       ${lines ? `<ul style="margin:0.25rem 0 0.25rem 1rem;padding:0">${lines}</ul>` : ''}
       ${chips ? `<div style="margin-top:0.25rem">${chips}</div>` : ''}
-      ${canExplain ? `<button class="btn-ghost btn-sm" style="font-size:0.72rem;margin-top:0.4rem" onclick="omExplain('${_escAdvisor(snap.fingerprint)}', this)">Why did this change?</button>
+      ${canExplain ? `<button class="btn-ghost btn-sm" style="font-size:var(--fs-sm);margin-top:0.4rem" onclick="omExplain('${_escAdvisor(snap.fingerprint)}', this)">Why did this change?</button>
       <div id="om-exp-${_escAdvisor(snap.fingerprint)}" data-open="0" style="display:none;margin-top:0.4rem;padding:0.5rem;border-left:2px solid var(--border);background:var(--surface-alt,rgba(127,127,127,0.06))"></div>` : ''}
     </div>`;
   };
@@ -5024,11 +5024,11 @@ async function renderObservations() {
   catch (_) { el.innerHTML = `<div class="empty-state"><p>Couldn't load observations right now. <button class="btn btn-outline btn-sm" onclick="renderObservations()">Try again</button></p></div>`; return; }
 
   const note = `<div class="card" style="margin-bottom:1rem;background:var(--surface-alt,rgba(127,127,127,0.06))">
-    <div style="font-size:0.8rem;color:var(--text-secondary)">These are descriptions of repeated history — <strong>not recommendations, predictions, or proof of cause</strong>. They describe what recurred, never why, and never rank anything as good or bad.</div></div>`;
+    <div style="font-size:var(--fs);color:var(--text-secondary)">These are descriptions of repeated history — <strong>not recommendations, predictions, or proof of cause</strong>. They describe what recurred, never why, and never rank anything as good or bad.</div></div>`;
 
   if (!d || !d.observations || !d.observations.length) {
     el.innerHTML = note + `<div class="card" style="text-align:center;padding:2rem">
-      <div style="font-size:0.9rem;color:var(--text-secondary)">Nothing has recurred often enough yet to describe. As your organisation's history grows, repeated patterns will appear here.</div></div>`;
+      <div style="font-size:var(--fs-lg);color:var(--text-secondary)">Nothing has recurred often enough yet to describe. As your organisation's history grows, repeated patterns will appear here.</div></div>`;
     return;
   }
 
@@ -5036,20 +5036,20 @@ async function renderObservations() {
   const card = (o) => {
     const type = _OBS_TYPE_LABEL[o.type] || 'Observation';
     const range = o.firstObservedAt && o.lastObservedAt ? `${fmt(o.firstObservedAt)} – ${fmt(o.lastObservedAt)}` : '';
-    const contra = (o.contradictions || []).map(c => `<li style="font-size:0.74rem;color:var(--text-secondary)">${_escAdvisor(c)}</li>`).join('');
-    const lims = (o.limitations || []).map(l => `<li style="font-size:0.72rem;color:var(--text-muted)">${_escAdvisor(l)}</li>`).join('');
+    const contra = (o.contradictions || []).map(c => `<li style="font-size:var(--fs-sm);color:var(--text-secondary)">${_escAdvisor(c)}</li>`).join('');
+    const lims = (o.limitations || []).map(l => `<li style="font-size:var(--fs-sm);color:var(--text-muted)">${_escAdvisor(l)}</li>`).join('');
     return `<div class="card" style="margin-bottom:0.75rem">
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem">
-        <span style="font-size:0.66rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted)">${_escAdvisor(type)}</span>
-        <span style="font-size:0.72rem;color:var(--text-muted)">${range}</span>
+        <span style="font-size:var(--fs-2xs);text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted)">${_escAdvisor(type)}</span>
+        <span style="font-size:var(--fs-sm);color:var(--text-muted)">${range}</span>
       </div>
-      <div style="font-size:0.88rem;color:var(--text-primary);margin:0.3rem 0">${_escAdvisor(o.summary)}</div>
-      <div style="font-size:0.72rem;color:var(--text-muted)">${o.occurrenceCount} occurrence${o.occurrenceCount === 1 ? '' : 's'}${o.distinctEvents ? ` · ${o.distinctEvents} event${o.distinctEvents === 1 ? '' : 's'}` : ''}</div>
-      ${contra ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.4rem">Also in the history</div><ul style="margin:0.1rem 0 0 1rem;padding:0">${contra}</ul>` : ''}
-      ${lims ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.3rem">Limitations</div><ul style="margin:0.1rem 0 0 1rem;padding:0">${lims}</ul>` : ''}
+      <div style="font-size:var(--fs-md);color:var(--text-primary);margin:0.3rem 0">${_escAdvisor(o.summary)}</div>
+      <div style="font-size:var(--fs-sm);color:var(--text-muted)">${o.occurrenceCount} occurrence${o.occurrenceCount === 1 ? '' : 's'}${o.distinctEvents ? ` · ${o.distinctEvents} event${o.distinctEvents === 1 ? '' : 's'}` : ''}</div>
+      ${contra ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.4rem">Also in the history</div><ul style="margin:0.1rem 0 0 1rem;padding:0">${contra}</ul>` : ''}
+      ${lims ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.3rem">Limitations</div><ul style="margin:0.1rem 0 0 1rem;padding:0">${lims}</ul>` : ''}
       <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
-        <button class="btn-ghost btn-sm" style="font-size:0.72rem" onclick="navigate('org-memory')">View history</button>
-        <button class="btn-ghost btn-sm" style="font-size:0.72rem" onclick="obsDismiss('${_escAdvisor(o.fingerprint)}', this)">Dismiss</button>
+        <button class="btn-ghost btn-sm" style="font-size:var(--fs-sm)" onclick="navigate('org-memory')">View history</button>
+        <button class="btn-ghost btn-sm" style="font-size:var(--fs-sm)" onclick="obsDismiss('${_escAdvisor(o.fingerprint)}', this)">Dismiss</button>
       </div>
     </div>`;
   };
@@ -5088,7 +5088,7 @@ async function renderPlaybook() {
   } catch (_) { el.innerHTML = `<div class="empty-state"><p>Couldn't load the playbook right now. <button class="btn btn-outline btn-sm" onclick="renderPlaybook()">Try again</button></p></div>`; return; }
 
   const fmt = t => t ? new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
-  const confChip = (label) => `<span style="font-size:0.66rem;font-family:inherit;padding:.15rem .5rem;border-radius:20px;border:1px solid ${_CONF_TONE[label] || 'var(--text-muted)'};color:${_CONF_TONE[label] || 'var(--text-muted)'}">${_escAdvisor(label)}</span>`;
+  const confChip = (label) => `<span style="font-size:var(--fs-2xs);font-family:inherit;padding:.15rem .5rem;border-radius:20px;border:1px solid ${_CONF_TONE[label] || 'var(--text-muted)'};color:${_CONF_TONE[label] || 'var(--text-muted)'}">${_escAdvisor(label)}</span>`;
   const counter = (ce) => `<span style="color:var(--success)">${ce.supporting} for</span> · <span style="color:${ce.contradicting ? 'var(--danger)' : 'var(--text-muted)'}">${ce.contradicting} against</span>`;
 
   // Confirmed practices (what the team has agreed), each re-checked against current history.
@@ -5099,46 +5099,46 @@ async function renderPlaybook() {
     const contested = rev.status !== 'holding';
     return `<div class="card" style="margin-bottom:0.6rem;border-left:3px solid ${tone}">
       <div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:baseline">
-        <span style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted)">Confirmed ${fmt(e.confirmedAt)}</span>
-        <span style="font-size:0.66rem;padding:.15rem .5rem;border-radius:20px;border:1px solid ${tone};color:${tone}">${_escAdvisor(rev.label)}</span>
+        <span style="font-size:var(--fs-2xs);text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted)">Confirmed ${fmt(e.confirmedAt)}</span>
+        <span style="font-size:var(--fs-2xs);padding:.15rem .5rem;border-radius:20px;border:1px solid ${tone};color:${tone}">${_escAdvisor(rev.label)}</span>
       </div>
-      <div style="font-size:0.9rem;margin:0.3rem 0">${_escAdvisor(e.statement)}</div>
-      <div style="font-size:0.72rem;color:var(--text-muted)">Evidence at confirmation: ${counter(e.counterEvidence)}</div>
-      ${contested ? `<div style="font-size:0.74rem;color:var(--text-secondary);margin-top:0.4rem">${_escAdvisor(rev.reason || '')}</div>` : ''}
+      <div style="font-size:var(--fs-lg);margin:0.3rem 0">${_escAdvisor(e.statement)}</div>
+      <div style="font-size:var(--fs-sm);color:var(--text-muted)">Evidence at confirmation: ${counter(e.counterEvidence)}</div>
+      ${contested ? `<div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:0.4rem">${_escAdvisor(rev.reason || '')}</div>` : ''}
       <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
-        <button class="btn-ghost btn-sm" style="font-size:0.72rem;color:${contested ? 'var(--danger)' : 'var(--text-muted)'}" onclick="pbRetire('${_escAdvisor(e.fingerprint)}', this)">Retire this practice</button>
+        <button class="btn-ghost btn-sm" style="font-size:var(--fs-sm);color:${contested ? 'var(--danger)' : 'var(--text-muted)'}" onclick="pbRetire('${_escAdvisor(e.fingerprint)}', this)">Retire this practice</button>
       </div>
     </div>`;
   };
 
   // Proposed practices (for review) — counter-evidence + limitations shown before any action.
   const candCard = (c) => {
-    const sigs = (c.counterEvidence.signals || []).map(s => `<li style="font-size:0.74rem;color:var(--text-secondary)">${_escAdvisor(s)}</li>`).join('');
-    const lims = (c.limitations || []).map(l => `<li style="font-size:0.72rem;color:var(--text-muted)">${_escAdvisor(l)}</li>`).join('');
+    const sigs = (c.counterEvidence.signals || []).map(s => `<li style="font-size:var(--fs-sm);color:var(--text-secondary)">${_escAdvisor(s)}</li>`).join('');
+    const lims = (c.limitations || []).map(l => `<li style="font-size:var(--fs-sm);color:var(--text-muted)">${_escAdvisor(l)}</li>`).join('');
     return `<div class="card" style="margin-bottom:0.6rem">
       <div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:baseline">
-        <span style="font-size:0.62rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted)">Proposed pattern</span>
+        <span style="font-size:var(--fs-2xs);text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted)">Proposed pattern</span>
         ${confChip(c.confidenceLabel)}
       </div>
-      <div style="font-size:0.9rem;margin:0.3rem 0">${_escAdvisor(c.statement)}</div>
-      <div style="font-size:0.74rem;color:var(--text-muted)">Weighed: ${counter(c.counterEvidence)}${c.distinctEvents ? ` · across ${c.distinctEvents} event${c.distinctEvents === 1 ? '' : 's'}` : ''}</div>
-      ${sigs ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.4rem">What argues against it</div><ul style="margin:0.1rem 0 0 1rem;padding:0">${sigs}</ul>` : ''}
-      ${lims ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.3rem">Limitations</div><ul style="margin:0.1rem 0 0 1rem;padding:0">${lims}</ul>` : ''}
+      <div style="font-size:var(--fs-lg);margin:0.3rem 0">${_escAdvisor(c.statement)}</div>
+      <div style="font-size:var(--fs-sm);color:var(--text-muted)">Weighed: ${counter(c.counterEvidence)}${c.distinctEvents ? ` · across ${c.distinctEvents} event${c.distinctEvents === 1 ? '' : 's'}` : ''}</div>
+      ${sigs ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.4rem">What argues against it</div><ul style="margin:0.1rem 0 0 1rem;padding:0">${sigs}</ul>` : ''}
+      ${lims ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.3rem">Limitations</div><ul style="margin:0.1rem 0 0 1rem;padding:0">${lims}</ul>` : ''}
       <div style="display:flex;gap:0.5rem;margin-top:0.6rem">
-        <button class="btn btn-accent btn-sm" style="font-size:0.74rem" onclick="pbConfirm('${_escAdvisor(c.fingerprint)}', this)">Recognise as how we operate</button>
-        <button class="btn-ghost btn-sm" style="font-size:0.74rem" onclick="pbDismiss('${_escAdvisor(c.fingerprint)}', this)">Set aside</button>
+        <button class="btn btn-accent btn-sm" style="font-size:var(--fs-sm)" onclick="pbConfirm('${_escAdvisor(c.fingerprint)}', this)">Recognise as how we operate</button>
+        <button class="btn-ghost btn-sm" style="font-size:var(--fs-sm)" onclick="pbDismiss('${_escAdvisor(c.fingerprint)}', this)">Set aside</button>
       </div>
     </div>`;
   };
 
   el.innerHTML = `
     <div class="card" style="margin-bottom:1rem;background:var(--surface-alt,rgba(127,127,127,0.06))">
-      <div style="font-size:0.8rem;color:var(--text-secondary)">A pattern only becomes part of your playbook when <strong>you confirm it</strong>. IntelliQ surfaces what recurred and what argues against it — it never decides, recommends, or claims cause.</div>
+      <div style="font-size:var(--fs);color:var(--text-secondary)">A pattern only becomes part of your playbook when <strong>you confirm it</strong>. IntelliQ surfaces what recurred and what argues against it — it never decides, recommends, or claims cause.</div>
     </div>
     <div class="card-label" style="margin:0 0 0.5rem">Your playbook — agreed practices</div>
-    ${confirmed.length ? confirmed.map(entryCard).join('') : '<div class="card" style="padding:1.2rem;color:var(--text-muted);font-size:0.85rem">Nothing confirmed yet. Confirmed practices will appear here.</div>'}
+    ${confirmed.length ? confirmed.map(entryCard).join('') : '<div class="card" style="padding:1.2rem;color:var(--text-muted);font-size:var(--fs-md)">Nothing confirmed yet. Confirmed practices will appear here.</div>'}
     <div class="card-label" style="margin:1.4rem 0 0.5rem">Proposed for review</div>
-    ${proposed.length ? proposed.map(candCard).join('') : '<div class="card" style="padding:1.2rem;color:var(--text-muted);font-size:0.85rem">No patterns are strong enough to propose yet. As history builds, proposals will appear here for you to review.</div>'}`;
+    ${proposed.length ? proposed.map(candCard).join('') : '<div class="card" style="padding:1.2rem;color:var(--text-muted);font-size:var(--fs-md)">No patterns are strong enough to propose yet. As history builds, proposals will appear here for you to review.</div>'}`;
 }
 
 /* Confirm a proposed practice into the playbook — the ONLY path to team knowledge. */
@@ -5187,7 +5187,7 @@ async function renderOperatingContext() {
   el.innerHTML = `
     <div class="card" style="margin-bottom:1rem">
       <div class="card-label" style="margin-bottom:0.5rem">Describe how your team operates</div>
-      <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.6rem">
+      <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.6rem">
         For example: “We play Saturday at 3pm. The head coach owns the game plan, and it must be ready 24 hours before kickoff.”
         IntelliQ turns this into events, ownership, and preparation it can reason about — you confirm before anything is saved.
       </div>
@@ -5199,7 +5199,7 @@ async function renderOperatingContext() {
 
     <div class="card">
       <div class="card-label" style="margin-bottom:0.6rem">What IntelliQ understands about your operation</div>
-      <div id="oc-records"><div style="color:var(--text-muted);font-size:0.82rem">Loading…</div></div>
+      <div id="oc-records"><div style="color:var(--text-muted);font-size:var(--fs)">Loading…</div></div>
     </div>`;
   _ocLoadRecords();
 }
@@ -5211,7 +5211,7 @@ async function _ocLoadRecords() {
     const r = await fetch('/api/org-context', { headers: Auth._headers() });
     const d = r.ok ? await r.json() : { records: [] };
     const list = d.records || [];
-    if (!list.length) { el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Nothing yet. Describe an event or a responsibility above — even one is enough for IntelliQ to spot when preparation is missing.</div>`; return; }
+    if (!list.length) { el.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs)">Nothing yet. Describe an event or a responsibility above — even one is enough for IntelliQ to spot when preparation is missing.</div>`; return; }
     const label = r => {
       const f = r.fields || {};
       if (r.type === 'event') return `${_escAdvisor(f.title || f.type || 'Event')}${f.startAt ? ' · ' + new Date(f.startAt).toLocaleString('en-GB', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : ''}`;
@@ -5226,35 +5226,35 @@ async function _ocLoadRecords() {
         <div class="ds-recent-main"><span class="ds-recent-snip">${label(r)}</span></div>
         <div class="ds-recent-meta">${r.authority === 'organisation' ? 'Organisation record' : 'Unverified'} · <a href="#" onclick="ocRetire('${r.id}', event)" style="color:var(--danger)">remove</a></div>
       </div>`).join('');
-  } catch (_) { el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Could not load.</div>`; }
+  } catch (_) { el.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs)">Could not load.</div>`; }
 }
 
 async function ocPreview(btn) {
   const text = (document.getElementById('oc-text')?.value || '').trim();
   const box = document.getElementById('oc-preview');
-  if (!text) { if (box) box.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Describe something first.</div>`; return; }
+  if (!text) { if (box) box.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Describe something first.</div>`; return; }
   if (btn) btn.disabled = true;
   try {
     const r = await fetch('/api/org-context/preview', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ text }) });
     const d = await r.json();
-    if (d.blocked) { if (box) box.innerHTML = `<div style="font-size:0.82rem;color:var(--danger)">${_escAdvisor(d.message || 'That can’t become an operating rule.')}</div>`; return; }
-    if (!d.proposals || !d.proposals.length) { if (box) box.innerHTML = `<div style="font-size:0.82rem;color:var(--text-muted)">I couldn’t spot an event, owner, or requirement in that. Try naming a day/time, who owns something, or what must be ready beforehand.</div>`; return; }
+    if (d.blocked) { if (box) box.innerHTML = `<div style="font-size:var(--fs);color:var(--danger)">${_escAdvisor(d.message || 'That can’t become an operating rule.')}</div>`; return; }
+    if (!d.proposals || !d.proposals.length) { if (box) box.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">I couldn’t spot an event, owner, or requirement in that. Try naming a day/time, who owns something, or what must be ready beforehand.</div>`; return; }
     _ocProposals = d.proposals;
     const lines = (d.preview?.lines || []).map(l => `<li>${_escAdvisor(l)}</li>`).join('');
-    const effects = (d.preview?.effects || []).map(e => `<div style="font-size:0.76rem;color:var(--text-secondary)">• ${_escAdvisor(e)}</div>`).join('');
-    const warns = (d.warnings || []).map(w => `<div style="font-size:0.74rem;color:var(--warning)">${_escAdvisor(w.message)}</div>`).join('');
+    const effects = (d.preview?.effects || []).map(e => `<div style="font-size:var(--fs-sm);color:var(--text-secondary)">• ${_escAdvisor(e)}</div>`).join('');
+    const warns = (d.warnings || []).map(w => `<div style="font-size:var(--fs-sm);color:var(--warning)">${_escAdvisor(w.message)}</div>`).join('');
     if (box) box.innerHTML = `
       <div class="card" style="background:var(--surface-2);border-color:var(--accent)">
         <div class="card-label" style="margin-bottom:0.4rem">Save these operating rules?</div>
-        <ul style="margin:0 0 0.5rem 1rem;font-size:0.84rem">${lines}</ul>
+        <ul style="margin:0 0 0.5rem 1rem;font-size:var(--fs-md)">${lines}</ul>
         ${effects}${warns}
-        <div style="font-size:0.72rem;color:var(--text-muted);margin:0.4rem 0">Authority: ${d.preview?.authority === 'organisation' ? 'organisation operating record' : 'shared — not yet verified'}</div>
+        <div style="font-size:var(--fs-sm);color:var(--text-muted);margin:0.4rem 0">Authority: ${d.preview?.authority === 'organisation' ? 'organisation operating record' : 'shared — not yet verified'}</div>
         <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
           <button class="btn btn-accent btn-sm" onclick="ocConfirm(this)">Confirm</button>
           <button class="btn-ghost btn-sm" onclick="document.getElementById('oc-preview').innerHTML=''">Cancel</button>
         </div>
       </div>`;
-  } catch (e) { if (box) box.innerHTML = `<div style="font-size:0.82rem;color:var(--danger)">Could not preview.</div>`; }
+  } catch (e) { if (box) box.innerHTML = `<div style="font-size:var(--fs);color:var(--danger)">Could not preview.</div>`; }
   finally { if (btn) btn.disabled = false; }
 }
 
@@ -5265,10 +5265,10 @@ async function ocConfirm(btn) {
     const r = await fetch('/api/org-context/confirm', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ records: _ocProposals, source: 'conversation' }) });
     const d = await r.json();
     const box = document.getElementById('oc-preview');
-    if (!d.ok || !(d.created || []).length) { if (box) box.innerHTML = `<div style="font-size:0.82rem;color:var(--danger)">Couldn’t save${(d.rejected || []).length ? ' — ' + _escAdvisor((d.rejected[0].errors || [{}])[0].message || 'validation failed') : ''}.</div>`; return; }
+    if (!d.ok || !(d.created || []).length) { if (box) box.innerHTML = `<div style="font-size:var(--fs);color:var(--danger)">Couldn’t save${(d.rejected || []).length ? ' — ' + _escAdvisor((d.rejected[0].errors || [{}])[0].message || 'validation failed') : ''}.</div>`; return; }
     _ocProposals = null;
-    const eff = (d.effects || []).map(e => `<div style="font-size:0.76rem;color:var(--text-secondary)">• ${_escAdvisor(e)}</div>`).join('');
-    if (box) box.innerHTML = `<div style="font-size:0.84rem;color:var(--success)">Saved ${d.created.length} record${d.created.length !== 1 ? 's' : ''}. What IntelliQ can now do:</div>${eff}`;
+    const eff = (d.effects || []).map(e => `<div style="font-size:var(--fs-sm);color:var(--text-secondary)">• ${_escAdvisor(e)}</div>`).join('');
+    if (box) box.innerHTML = `<div style="font-size:var(--fs-md);color:var(--success)">Saved ${d.created.length} record${d.created.length !== 1 ? 's' : ''}. What IntelliQ can now do:</div>${eff}`;
     const ta = document.getElementById('oc-text'); if (ta) ta.value = '';
     _ocLoadRecords();
   } catch (e) { showToast('Could not save', 'error'); }
@@ -5316,7 +5316,7 @@ async function renderDataSources() {
   el.innerHTML = `
     <div class="card" style="margin-bottom:1rem">
       <div class="card-label" style="margin-bottom:0.5rem">Teach IntelliQ something</div>
-      <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.7rem">
+      <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem">
         Paste notes, policies, tactics, meeting minutes — anything true and useful. IntelliQ turns it into
         evidence it can cite when you ask a question. It never guesses; it only answers from what it's been given.
       </div>
@@ -5343,24 +5343,24 @@ async function renderDataSources() {
             accept=".txt,.md,.markdown,.csv,.json,.pdf,.doc,.docx"
             onchange="uploadKnowledgeFile(this)">
         </label>
-        <span style="font-size:0.72rem;color:var(--text-muted)">txt · md · csv · json · pdf · docx — uploads use the visibility selected above.</span>
+        <span style="font-size:var(--fs-sm);color:var(--text-muted)">txt · md · csv · json · pdf · docx — uploads use the visibility selected above.</span>
       </div>
-      <div id="kn-result" style="font-size:0.8rem;margin-top:0.6rem"></div>
+      <div id="kn-result" style="font-size:var(--fs);margin-top:0.6rem"></div>
     </div>
 
     <div class="card" style="margin-bottom:1rem">
-      <div class="card-label" style="margin-bottom:0.6rem">Connect a source <span style="font-weight:400;color:var(--text-muted);font-size:0.72rem">(coming soon)</span></div>
+      <div class="card-label" style="margin-bottom:0.6rem">Connect a source <span style="font-weight:400;color:var(--text-muted);font-size:var(--fs-sm)">(coming soon)</span></div>
       <div class="ds-connect-grid">
         ${connectCard('', 'Microsoft Teams', 'Meeting notes & shared docs.')}
         ${connectCard('', 'Google Workspace', 'Docs, sheets & calendar.')}
         ${connectCard('', 'Notion / Confluence', 'Your team wiki & handbooks.')}
       </div>
-      <div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.6rem">Connectors will land in <strong>this same knowledge base</strong> — one governed door, with your admin's consent.</div>
+      <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.6rem">Connectors will land in <strong>this same knowledge base</strong> — one governed door, with your admin's consent.</div>
     </div>
 
     <div class="card">
       <div class="card-label" style="margin-bottom:0.6rem">What IntelliQ can use</div>
-      <div id="kn-coverage"><div style="color:var(--text-muted);font-size:0.82rem">Loading…</div></div>
+      <div id="kn-coverage"><div style="color:var(--text-muted);font-size:var(--fs)">Loading…</div></div>
     </div>`;
 
   _loadKnowledgeCoverage();
@@ -5376,9 +5376,9 @@ async function _loadKnowledgeCoverage() {
     const r = await fetch('/api/evidence/imports', { headers: Auth._headers() });
     const d = r.ok ? await r.json() : { imports: [] };
     const list = d.imports || [];
-    if (!list.length) { el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Nothing yet. Paste some text or upload a file above — then ask the assistant about it.</div>`; return; }
+    if (!list.length) { el.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs)">Nothing yet. Paste some text or upload a file above — then ask the assistant about it.</div>`; return; }
     el.innerHTML = `
-      <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.6rem">${d.totalUnits} item${d.totalUnits !== 1 ? 's' : ''} across ${list.length} source${list.length !== 1 ? 's' : ''} — the assistant can cite any of these.</div>
+      <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:0.6rem">${d.totalUnits} item${d.totalUnits !== 1 ? 's' : ''} across ${list.length} source${list.length !== 1 ? 's' : ''} — the assistant can cite any of these.</div>
       ${list.map(g => {
         const cats = Object.keys(g.categories || {}).sort((a, b) => g.categories[b] - g.categories[a]).slice(0, 3).join(' · ');
         const when = g.importTime ? new Date(g.importTime).toLocaleDateString() : '';
@@ -5394,7 +5394,7 @@ async function _loadKnowledgeCoverage() {
           </div>
         </div>`; }).join('')}`;
   } catch (_) {
-    el.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Could not load.</div>`;
+    el.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs)">Could not load.</div>`;
   }
 }
 
@@ -5507,7 +5507,7 @@ function renderOperate() {
   const el = document.getElementById('operate-content');
   if (!el) return;
   const card = (title, desc, dest) => `<button class="operate-card" style="display:flex;width:100%;text-align:left;gap:0.8rem;align-items:center;padding:1rem;margin-bottom:0.7rem;border:1px solid var(--line,rgba(127,127,127,0.16));border-radius:12px;background:var(--surface,rgba(127,127,127,0.03));cursor:pointer" onclick="navigate('${dest}')">
-    <span style="flex:1"><span style="display:block;font-weight:600;font-size:0.95rem;color:var(--text-primary)">${title}</span><span style="display:block;font-size:0.8rem;color:var(--text-muted);margin-top:2px">${desc}</span></span>
+    <span style="flex:1"><span style="display:block;font-weight:600;font-size:var(--fs-lg);color:var(--text-primary)">${title}</span><span style="display:block;font-size:var(--fs);color:var(--text-muted);margin-top:2px">${desc}</span></span>
     <span style="color:var(--text-muted)">→</span></button>`;
   el.innerHTML =
     card('How we work', 'The events, ownership, and preparation IntelliQ reasons from. Set it up or update it.', 'operating-context') +
@@ -5671,7 +5671,7 @@ function todayPacketRow(i) {
   return `<div class="tdy-belief">
     <div class="tdy-metarow">${chip}${conf}</div>
     <div class="tdy-claim">${head}</div>
-    ${bodyTxt ? `<div class="tdy-why" style="display:block;margin-top:.4rem"><span class="lbl">${esc(tag)}</span><div style="font-size:.85rem;color:var(--text-secondary);line-height:1.5">${esc(bodyTxt)}</div></div>` : ''}
+    ${bodyTxt ? `<div class="tdy-why" style="display:block;margin-top:.4rem"><span class="lbl">${esc(tag)}</span><div style="font-size:var(--fs-md);color:var(--text-secondary);line-height:1.5">${esc(bodyTxt)}</div></div>` : ''}
     ${i.suggestion && i.suggestion.text ? `<div class="tdy-proposal">${esc(i.suggestion.text)}</div>` : ''}
   </div>`;
 }
@@ -5707,7 +5707,7 @@ function todayVoiceRow(a, prop) {
   return `<div id="voice-${sid}" class="tdy-belief">
     <div class="tdy-metarow">${confChip}${relChip}</div>
     <div class="tdy-claim">${esc(a.claim)}</div>
-    ${a.timing ? `<div class="tdy-timing"><span style="font-size:0.6rem">◆</span>${esc(a.timing)}</div>` : ''}
+    ${a.timing ? `<div class="tdy-timing"><span style="font-size:var(--fs-3xs)">◆</span>${esc(a.timing)}</div>` : ''}
     ${prop ? `<div class="tdy-proposal">${esc(prop.text)}</div>` : ''}
     <div class="tdy-actions">
       <button class="btn btn-accent btn-sm" onclick="todayReasonRespond('${esc(a.beliefId)}','acted',this)">${act}</button>
@@ -6054,10 +6054,10 @@ async function todayLoadFeed() {
   if (rd && rd.focus) {
     const st = _RD_STATE[rd.readiness && rd.readiness.status] || _RD_STATE.insufficient_information;
     sections.push(`<div class="card" style="margin-bottom:0.8rem">
-      <div style="font-size:0.66rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted)">Preparing for</div>
+      <div style="font-size:var(--fs-2xs);text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted)">Preparing for</div>
       <div style="display:flex;justify-content:space-between;align-items:baseline;gap:0.5rem;margin-top:0.2rem">
-        <strong style="font-size:1rem">${esc(rd.focus.title || rd.focus.type || 'Current focus')}</strong>
-        <span style="font-size:0.74rem;color:${st.color}">${st.label}</span>
+        <strong style="font-size:var(--fs-xl)">${esc(rd.focus.title || rd.focus.type || 'Current focus')}</strong>
+        <span style="font-size:var(--fs-sm);color:${st.color}">${st.label}</span>
       </div></div>`);
   }
 
@@ -6067,8 +6067,8 @@ async function todayLoadFeed() {
     sections.push(`<div class="card" style="margin-bottom:0.8rem">
       <div class="card-label" style="margin-bottom:0.4rem">Needs an answer</div>
       ${qs.map(x => `<div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:center;padding:0.3rem 0;border-bottom:1px solid var(--line-soft,rgba(127,127,127,0.08))">
-        <span style="font-size:0.84rem">${esc(x.question)}${x.blocking ? ' <span style="font-size:0.66rem;color:var(--danger)">blocking</span>' : ''}</span>
-        ${x.uncertaintyId ? `<button class="btn btn-outline btn-sm" style="font-size:0.72rem;white-space:nowrap" onclick="trAnswer('${esc(x.uncertaintyId)}')">Answer</button>` : ''}
+        <span style="font-size:var(--fs-md)">${esc(x.question)}${x.blocking ? ' <span style="font-size:var(--fs-2xs);color:var(--danger)">blocking</span>' : ''}</span>
+        ${x.uncertaintyId ? `<button class="btn btn-outline btn-sm" style="font-size:var(--fs-sm);white-space:nowrap" onclick="trAnswer('${esc(x.uncertaintyId)}')">Answer</button>` : ''}
       </div>`).join('')}</div>`);
   }
 
@@ -6079,11 +6079,11 @@ async function todayLoadFeed() {
     sections.push(`<div class="card" style="margin-bottom:0.8rem">
       <div class="card-label" style="margin-bottom:0.4rem">Flagged to you</div>
       ${conflicts.map(c => `<div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:center;padding:0.3rem 0">
-        <span style="font-size:0.84rem">${esc(c.label)} <span style="font-size:0.66rem;color:var(--warning)">needs an owner</span></span>
-        <button class="btn-outline btn-sm" style="font-size:0.72rem;white-space:nowrap" onclick="navigate('team-readiness')">Assign</button></div>`).join('')}
+        <span style="font-size:var(--fs-md)">${esc(c.label)} <span style="font-size:var(--fs-2xs);color:var(--warning)">needs an owner</span></span>
+        <button class="btn-outline btn-sm" style="font-size:var(--fs-sm);white-space:nowrap" onclick="navigate('team-readiness')">Assign</button></div>`).join('')}
       ${inbox.slice(0, 5).map(x => `<div style="display:flex;justify-content:space-between;gap:0.5rem;align-items:center;padding:0.3rem 0">
-        <span style="font-size:0.84rem">${esc(x.label)}</span>
-        <button class="btn-ghost btn-sm" style="font-size:0.72rem;white-space:nowrap" onclick="navigate('team-readiness')">Open</button></div>`).join('')}</div>`);
+        <span style="font-size:var(--fs-md)">${esc(x.label)}</span>
+        <button class="btn-ghost btn-sm" style="font-size:var(--fs-sm);white-space:nowrap" onclick="navigate('team-readiness')">Open</button></div>`).join('')}</div>`);
   }
 
   // Worth reviewing — proposed playbook practices, decided RIGHT HERE. No page to open:
@@ -6095,17 +6095,17 @@ async function todayLoadFeed() {
       const fp = esc(c.fingerprint);
       const against = (c.counterEvidence && (c.counterEvidence.signals || [])[0]) || '';
       return `<div id="today-pat-${fp}" style="padding:0.55rem 0;border-bottom:1px solid var(--line-soft,rgba(127,127,127,0.08))">
-        <div style="font-size:0.84rem;color:var(--text-primary)">${esc(c.statement)}</div>
-        ${against ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.15rem">Worth weighing: ${esc(against)}</div>` : ''}
+        <div style="font-size:var(--fs-md);color:var(--text-primary)">${esc(c.statement)}</div>
+        ${against ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.15rem">Worth weighing: ${esc(against)}</div>` : ''}
         <div style="display:flex;gap:0.5rem;margin-top:0.45rem">
-          <button class="btn btn-accent btn-sm" style="font-size:0.72rem" onclick="todayPattern('${fp}', true, this)">This is how we operate</button>
-          <button class="btn-ghost btn-sm" style="font-size:0.72rem;color:var(--text-muted)" onclick="todayPattern('${fp}', false, this)">Not really</button>
+          <button class="btn btn-accent btn-sm" style="font-size:var(--fs-sm)" onclick="todayPattern('${fp}', true, this)">This is how we operate</button>
+          <button class="btn-ghost btn-sm" style="font-size:var(--fs-sm);color:var(--text-muted)" onclick="todayPattern('${fp}', false, this)">Not really</button>
         </div>
       </div>`;
     };
     sections.push(`<div class="card" style="margin-bottom:0.8rem">
       <div class="card-label" style="margin-bottom:0.4rem">Worth confirming</div>
-      <div style="font-size:0.74rem;color:var(--text-muted);margin-bottom:0.3rem">A pattern that keeps recurring. It only joins your playbook if you say so.</div>
+      <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:0.3rem">A pattern that keeps recurring. It only joins your playbook if you say so.</div>
       ${cands.slice(0, 3).map(patternRow).join('')}</div>`);
   }
 
@@ -6114,8 +6114,8 @@ async function todayLoadFeed() {
   if (ch && !ch.nothingChanged && (ch.summary || []).length) {
     sections.push(`<div class="card" style="margin-bottom:0.8rem">
       <div class="card-label" style="margin-bottom:0.4rem">Since last time</div>
-      <ul style="margin:0 0 0.3rem 1rem;padding:0">${(ch.summary || []).slice(0, 3).map(s => `<li style="font-size:0.8rem;color:var(--text-secondary)">${esc(s)}</li>`).join('')}</ul>
-      <button class="btn-ghost btn-sm" style="font-size:0.72rem" onclick="navigate('org-memory')">View history →</button></div>`);
+      <ul style="margin:0 0 0.3rem 1rem;padding:0">${(ch.summary || []).slice(0, 3).map(s => `<li style="font-size:var(--fs);color:var(--text-secondary)">${esc(s)}</li>`).join('')}</ul>
+      <button class="btn-ghost btn-sm" style="font-size:var(--fs-sm)" onclick="navigate('org-memory')">View history →</button></div>`);
   }
 
   if (sections.length) { box.innerHTML = sections.join(''); return; }
@@ -6125,10 +6125,10 @@ async function todayLoadFeed() {
   // outstanding yet.) The voice line above already says "I'm watching"; this is "…and
   // here's how to give me something to reason about."
   const step = (label, desc, onclick) => `<button style="display:flex;width:100%;text-align:left;gap:0.7rem;align-items:flex-start;padding:0.7rem 0.4rem;border:0;border-top:1px solid var(--line-soft,rgba(127,127,127,0.1));background:transparent;cursor:pointer" onclick="${onclick}">
-    <span style="flex:1"><span style="display:block;font-size:0.9rem;font-weight:600;color:var(--text-primary)">${label}</span><span style="display:block;font-size:0.78rem;color:var(--text-muted);margin-top:2px">${desc}</span></span></button>`;
+    <span style="flex:1"><span style="display:block;font-size:var(--fs-lg);font-weight:600;color:var(--text-primary)">${label}</span><span style="display:block;font-size:var(--fs);color:var(--text-muted);margin-top:2px">${desc}</span></span></button>`;
   box.innerHTML = `
     <div class="card" style="padding:1.2rem 1.3rem">
-      <div style="font-size:0.92rem;color:var(--text-secondary);line-height:1.5;margin-bottom:0.6rem">To reason well about your team I need a little to go on. Point me at any of these and I'll take it from there:</div>
+      <div style="font-size:var(--fs-lg);color:var(--text-secondary);line-height:1.5;margin-bottom:0.6rem">To reason well about your team I need a little to go on. Point me at any of these and I'll take it from there:</div>
       ${step('Tell me how your team works', 'Your events, who owns what, what prep matters — the ground I reason from.', 'todayContextStart()')}
       ${step('Set an assessment or check-in', 'Give your people work; it comes back as a grounded conversation, not a blank form.', "navigate('assessments')")}
       ${step('Just ask me something', 'Type anything in the box above — I answer from what I already know about your area.', "document.getElementById('today-ask') && document.getElementById('today-ask').focus()")}
@@ -6147,8 +6147,8 @@ function todayContextStart() {
   if (!box) return;
   box.innerHTML = `
     <div class="card" style="border-left:3px solid var(--accent)">
-      <div style="font-size:0.9rem;color:var(--text-primary);line-height:1.5;margin-bottom:0.6rem">Tell me one thing about how your team works — an event, who owns what, or what prep matters. Plain words are fine, like <em>"We play matches every Saturday at 3pm and Sam runs training on Tuesdays."</em></div>
-      <textarea id="today-ctx-in" class="form-input" rows="2" placeholder="Describe one thing…" style="width:100%;font-size:0.9rem;margin:0"></textarea>
+      <div style="font-size:var(--fs-lg);color:var(--text-primary);line-height:1.5;margin-bottom:0.6rem">Tell me one thing about how your team works — an event, who owns what, or what prep matters. Plain words are fine, like <em>"We play matches every Saturday at 3pm and Sam runs training on Tuesdays."</em></div>
+      <textarea id="today-ctx-in" class="form-input" rows="2" placeholder="Describe one thing…" style="width:100%;font-size:var(--fs-lg);margin:0"></textarea>
       <div id="today-ctx-out" style="margin-top:0.5rem"></div>
       <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
         <button class="btn btn-accent btn-sm" onclick="todayContextPreview()">Tell me</button>
@@ -6164,27 +6164,27 @@ async function todayContextPreview() {
   const out = document.getElementById('today-ctx-out');
   const text = inp && inp.value.trim();
   if (!text || !out) return;
-  out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Reading that…</div>`;
+  out.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Reading that…</div>`;
   try {
     const r = await fetch('/api/org-context/preview', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ text }) });
     const d = await r.json();
-    if (d.blocked) { out.innerHTML = `<div style="font-size:0.82rem;color:var(--warning,#c90)">${_escAdvisor(d.message || "That looks like private information — it can't become an operating rule.")}</div>`; return; }
+    if (d.blocked) { out.innerHTML = `<div style="font-size:var(--fs);color:var(--warning,#c90)">${_escAdvisor(d.message || "That looks like private information — it can't become an operating rule.")}</div>`; return; }
     const proposals = d.proposals || [];
-    if (!proposals.length) { out.innerHTML = `<div style="font-size:0.82rem;color:var(--text-muted)">I couldn't pull anything structured from that. Try naming an event, an owner, or a prep step.</div>`; return; }
+    if (!proposals.length) { out.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">I couldn't pull anything structured from that. Try naming an event, an owner, or a prep step.</div>`; return; }
     _todayCtxProposals = proposals;
     const lines = (d.preview && d.preview.lines) || proposals.map(p => p.type);
     const effects = (d.preview && d.preview.effects) || [];
     out.innerHTML = `
       <div style="padding:0.5rem 0.7rem;border-left:2px solid var(--accent);background:var(--surface-alt,rgba(127,127,127,0.05));border-radius:6px">
-        <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.2rem">Here's what I understood</div>
-        <ul style="margin:0 0 0 1rem;padding:0">${lines.map(l => `<li style="font-size:0.84rem;color:var(--text-primary)">${_escAdvisor(l)}</li>`).join('')}</ul>
-        ${effects.length ? `<div style="font-size:0.74rem;color:var(--text-muted);margin-top:0.35rem">${effects.map(_escAdvisor).join(' ')}</div>` : ''}
+        <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:0.2rem">Here's what I understood</div>
+        <ul style="margin:0 0 0 1rem;padding:0">${lines.map(l => `<li style="font-size:var(--fs-md);color:var(--text-primary)">${_escAdvisor(l)}</li>`).join('')}</ul>
+        ${effects.length ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.35rem">${effects.map(_escAdvisor).join(' ')}</div>` : ''}
       </div>
       <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
         <button class="btn btn-accent btn-sm" onclick="todayContextConfirm()">Yes, save that</button>
         <button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="todayContextStart()">Not quite</button>
       </div>`;
-  } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't read that right now.</div>`; }
+  } catch (e) { out.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Couldn't read that right now.</div>`; }
 }
 
 /* Confirm → the governed write. Then invite the next thing (loop) or finish. */
@@ -6196,12 +6196,12 @@ async function todayContextConfirm() {
     const d = await r.json();
     if (!d.ok || !(d.created || []).length) throw new Error('none saved');
     _todayCtxProposals = null;
-    out.innerHTML = `<div style="font-size:0.85rem;color:var(--text-primary)">Got it — saved, and I'll reason from it now.</div>
+    out.innerHTML = `<div style="font-size:var(--fs-md);color:var(--text-primary)">Got it — saved, and I'll reason from it now.</div>
       <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
         <button class="btn btn-accent btn-sm" onclick="todayContextStart()">Tell me something else</button>
         <button class="btn-ghost btn-sm" style="color:var(--text-muted)" onclick="todayLoadFeed()">Done for now</button>
       </div>`;
-  } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't save that right now.</div>`; }
+  } catch (e) { out.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Couldn't save that right now.</div>`; }
 }
 
 /* Decide a proposed pattern IN THE FLOW — confirm folds it into the playbook, "not really"
@@ -6218,7 +6218,7 @@ async function todayPattern(fingerprint, confirm, btn) {
     const j = await r.json();
     if (!j.ok) throw new Error('failed');
     if (row) {
-      row.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.2rem 0">${confirm ? 'Added to your playbook.' : 'Set aside — it can come back if it keeps recurring.'}</div>`;
+      row.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted);padding:0.2rem 0">${confirm ? 'Added to your playbook.' : 'Set aside — it can come back if it keeps recurring.'}</div>`;
     }
   } catch (e) {
     if (btns) btns.forEach(b => { b.disabled = false; });
@@ -6562,7 +6562,7 @@ async function _renderTeamWatch() {
       const factors = (r.factors || []).filter(Boolean);
       return `<div class="intel-watch-row" data-mid="${esc(r.memberId || '')}">
       <span class="intel-watch-dot" style="background:${color}"></span>
-      <div style="flex:1"><strong>${esc(r.name)}</strong> — ${esc(r.why)}${r.careFlag ? ' <span title="private context informs this" style="opacity:0.6;font-size:0.72rem">· private context</span>' : ''}
+      <div style="flex:1"><strong>${esc(r.name)}</strong> — ${esc(r.why)}${r.careFlag ? ' <span title="private context informs this" style="opacity:0.6;font-size:var(--fs-sm)">· private context</span>' : ''}
         <div class="intel-watch-action">${esc(r.action)}</div>
         ${factors.length ? `<div class="intel-watch-why">What's working: ${factors.map(f => esc(f)).join(', ')}</div>` : ''}
         <div style="display:flex;gap:0.35rem;flex-wrap:wrap;margin-top:4px">
@@ -6883,7 +6883,7 @@ function leaderObserve(userId, name) {
       <div class="composer-actions">
         <button class="btn-primary" onclick="submitObserve('${userId}')">Send</button>
         <button class="btn btn-outline btn-sm" onclick="document.getElementById('observe-modal')?.remove()">Cancel</button>
-        <span id="obs-status" style="font-size:0.78rem;color:var(--text-muted)"></span>
+        <span id="obs-status" style="font-size:var(--fs);color:var(--text-muted)"></span>
       </div>
     </div>`;
   el.addEventListener('click', e => { if (e.target === el) el.remove(); });
@@ -7058,7 +7058,7 @@ function renderCoachInputTab(memberId) {
                 <span class="score-pill" style="color:${scoreColor(v)};border-color:${scoreColor(v)}40">${k.split(' ')[0]}: ${v}</span>`).join('')}
             </div>` : ''}
         </div>`).join('')
-    : `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.5rem 0">No leadership inputs recorded yet.</div>`;
+    : `<div style="font-size:var(--fs);color:var(--text-muted);padding:0.5rem 0">No leadership inputs recorded yet.</div>`;
 
   // External data table
   const extData = (m.externalData || []);
@@ -7075,7 +7075,7 @@ function renderCoachInputTab(memberId) {
             </tr>`).join('')}
         </tbody>
       </table>`
-    : `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.5rem 0">No external data added yet.</div>`;
+    : `<div style="font-size:var(--fs);color:var(--text-muted);padding:0.5rem 0">No external data added yet.</div>`;
 
   // Scenario results
   const scenRes = (m.scenarioResults || []);
@@ -7084,14 +7084,14 @@ function renderCoachInputTab(memberId) {
         const { label, color } = ScenarioEngine.getScoreLabel(r.score);
         return `<div class="scenario-result-row">
           <div style="flex:1">
-            <div style="font-weight:600;font-size:0.83rem">${r.scenarioTitle}</div>
-            <div style="font-size:0.72rem;color:var(--text-muted)">${r.domain} · ${r.date}</div>
+            <div style="font-weight:600;font-size:var(--fs)">${r.scenarioTitle}</div>
+            <div style="font-size:var(--fs-sm);color:var(--text-muted)">${r.domain} · ${r.date}</div>
           </div>
-          <span style="color:${color};font-weight:700;font-size:0.9rem">${r.score}</span>
+          <span style="color:${color};font-weight:700;font-size:var(--fs-lg)">${r.score}</span>
           <span class="domain-badge" style="color:${color};border-color:${color}44;background:${color}11">${label}</span>
         </div>`;
       }).join('')
-    : `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.5rem 0">No scenarios completed yet. Assign one from the Scenarios page.</div>`;
+    : `<div style="font-size:var(--fs);color:var(--text-muted);padding:0.5rem 0">No scenarios completed yet. Assign one from the Scenarios page.</div>`;
 
   return `
     <!-- ─ NEW INPUT ─ -->
@@ -7107,7 +7107,7 @@ function renderCoachInputTab(memberId) {
                 <label>${metric}</label>
                 <input type="number" min="0" max="100" placeholder="${m.scores[metric]}"
                   id="ci-score-${metric.replace(/\s+/g,'_')}"
-                  style="width:100%;padding:0.45rem 0.7rem;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:0.82rem"/>
+                  style="width:100%;padding:0.45rem 0.7rem;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary);font-size:var(--fs)"/>
               </div>`).join('')}
           </div>
         </div>
@@ -7143,7 +7143,7 @@ function renderCoachInputTab(memberId) {
       <div class="section-divider">External Test & Assessment Data</div>
       <div style="margin-top:0.6rem;margin-bottom:0.8rem">${extHTML}</div>
       <details style="margin-top:0.5rem">
-        <summary style="font-size:0.8rem;color:var(--accent);cursor:pointer;user-select:none">+ Add External Test / Assessment</summary>
+        <summary style="font-size:var(--fs);color:var(--accent);cursor:pointer;user-select:none">+ Add External Test / Assessment</summary>
         <div class="coach-form" style="margin-top:0.8rem;padding:0.9rem;background:var(--bg-surface);border-radius:var(--radius-sm);border:1px solid var(--border)">
           <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:0.6rem">
             <div>
@@ -7312,26 +7312,26 @@ function _showGlobalError(message, err) {
     'padding:2rem','text-align:center','gap:1rem',
   ].join(';');
   panel.innerHTML = `
-    <div style="font-size:2.5rem"></div>
-    <div style="font-weight:700;font-size:1.15rem;color:#111">Something went wrong loading IntelliQ.</div>
-    <div style="color:#666;font-size:0.85rem;max-width:340px;line-height:1.5">${message || 'An unexpected error occurred. Please refresh or log out and try again.'}</div>
+    <div style="font-size:var(--fs-7xl)"></div>
+    <div style="font-weight:700;font-size:var(--fs-2xl);color:#111">Something went wrong loading IntelliQ.</div>
+    <div style="color:#666;font-size:var(--fs-md);max-width:340px;line-height:1.5">${message || 'An unexpected error occurred. Please refresh or log out and try again.'}</div>
     <div style="display:flex;gap:0.75rem;flex-wrap:wrap;justify-content:center;margin-top:0.4rem">
       <button onclick="location.reload()"
-        style="padding:0.6rem 1.6rem;border-radius:8px;background:#0066ff;color:#fff;border:none;cursor:pointer;font-size:0.9rem;font-weight:600">
+        style="padding:0.6rem 1.6rem;border-radius:8px;background:#0066ff;color:#fff;border:none;cursor:pointer;font-size:var(--fs-lg);font-weight:600">
         Retry
       </button>
       <button onclick="(()=>{try{Auth.logout();}catch(e){}location.reload();})()"
-        style="padding:0.6rem 1.4rem;border-radius:8px;background:#f3f4f6;color:#333;border:none;cursor:pointer;font-size:0.9rem">
+        style="padding:0.6rem 1.4rem;border-radius:8px;background:#f3f4f6;color:#333;border:none;cursor:pointer;font-size:var(--fs-lg)">
         Log out
       </button>
       <button id="iq-err-copy-btn"
-        style="padding:0.6rem 1.2rem;border-radius:8px;background:#f3f4f6;color:#555;border:none;cursor:pointer;font-size:0.82rem">
+        style="padding:0.6rem 1.2rem;border-radius:8px;background:#f3f4f6;color:#555;border:none;cursor:pointer;font-size:var(--fs)">
         Copy error details
       </button>
     </div>
     <details style="margin-top:0.5rem;max-width:420px;text-align:left">
-      <summary style="font-size:0.75rem;color:#aaa;cursor:pointer">Error details</summary>
-      <pre id="iq-err-detail" style="font-size:0.7rem;color:#999;white-space:pre-wrap;margin-top:0.4rem;overflow:auto;max-height:120px">${detail}</pre>
+      <summary style="font-size:var(--fs-sm);color:#aaa;cursor:pointer">Error details</summary>
+      <pre id="iq-err-detail" style="font-size:var(--fs-xs);color:#999;white-space:pre-wrap;margin-top:0.4rem;overflow:auto;max-height:120px">${detail}</pre>
     </details>`;
   target.appendChild(panel);
 
@@ -7623,7 +7623,7 @@ const MemberApp = {
   /* ── PENDING SCENARIOS ──────────────────────────────────── */
   async loadPending() {
     const pendingEl = document.getElementById('home-pending');
-    if (pendingEl) pendingEl.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);padding:0.5rem 0">Loading…</div>`;
+    if (pendingEl) pendingEl.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted);padding:0.5rem 0">Loading…</div>`;
     try {
       // Use userId for lookup — server resolves memberName from orgUsers
       const res  = await fetch(
@@ -7693,10 +7693,10 @@ const MemberApp = {
           replayEl.innerHTML = `
             <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06);margin-top:0.8rem">
               <div style="display:flex;align-items:flex-start;gap:0.7rem">
-                <div style="width:28px;height:28px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.72rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
+                <div style="width:28px;height:28px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:var(--fs-sm);font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
                 <div>
-                  <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.4rem">IntelliQ said</div>
-                  <div style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6">${this._escape(todayCheckin.aiResponse)}</div>
+                  <div style="font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.4rem">IntelliQ said</div>
+                  <div style="font-size:var(--fs-md);color:var(--text-secondary);line-height:1.6">${this._escape(todayCheckin.aiResponse)}</div>
                 </div>
               </div>
             </div>`;
@@ -7913,14 +7913,14 @@ const MemberApp = {
     const list = notes.slice(0, 6).map(n => {
       const time = n.createdAt ? new Date(n.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
       return `<div class="card me-row" style="display:block;padding:0.7rem 0.9rem;margin-bottom:0.5rem">
-        <div class="me-row-text" style="font-size:0.84rem">${esc(n.content)}</div>
-        <div style="font-size:0.7rem;color:var(--text-muted);margin-top:3px">${esc(n.type)}${time ? ' · ' + time : ''}</div>
+        <div class="me-row-text" style="font-size:var(--fs-md)">${esc(n.content)}</div>
+        <div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:3px">${esc(n.type)}${time ? ' · ' + time : ''}</div>
       </div>`;
     }).join('');
     el.innerHTML = `
       <div class="me-section-label" style="display:flex;align-items:center;justify-content:space-between">
         <span>Notes</span>
-        <button class="btn-ghost" style="font-size:0.72rem" onclick="MemberApp._meNoteToggle()">＋ Note</button>
+        <button class="btn-ghost" style="font-size:var(--fs-sm)" onclick="MemberApp._meNoteToggle()">＋ Note</button>
       </div>
       <div id="me-note-add" style="display:none;margin-bottom:0.6rem">
         <textarea class="note-input" id="me-note-input" placeholder="A note to keep — only you and IntelliQ see it." style="min-height:56px;margin-bottom:0.4rem"></textarea>
@@ -7930,10 +7930,10 @@ const MemberApp = {
         </div>
       </div>
       ${notes.length
-        ? list + (notes.length > 6 ? `<button class="btn-ghost" style="font-size:0.74rem" onclick="navigate('notes')">See all ${notes.length}</button>` : '')
-        : `<div style="font-size:0.82rem;color:var(--text-muted)">No notes yet — keep a thought and IntelliQ remembers it.</div>`}
+        ? list + (notes.length > 6 ? `<button class="btn-ghost" style="font-size:var(--fs-sm)" onclick="navigate('notes')">See all ${notes.length}</button>` : '')
+        : `<div style="font-size:var(--fs);color:var(--text-muted)">No notes yet — keep a thought and IntelliQ remembers it.</div>`}
       <div style="margin-top:0.7rem;border-top:1px solid var(--border);padding-top:0.6rem">
-        <button class="btn-ghost" style="font-size:0.74rem" onclick="navigate('data-sources')">Manage what IntelliQ can use →</button>
+        <button class="btn-ghost" style="font-size:var(--fs-sm)" onclick="navigate('data-sources')">Manage what IntelliQ can use →</button>
       </div>`;
   },
 
@@ -8084,12 +8084,12 @@ const MemberApp = {
     el.innerHTML = `
       <div class="card" style="cursor:pointer;border-color:rgba(79,247,122,0.35);margin-bottom:0.8rem" onclick="MemberApp.startWeekly()">
         <div style="display:flex;align-items:center;gap:0.6rem">
-          <span style="font-size:1.3rem"></span>
+          <span style="font-size:var(--fs-3xl)"></span>
           <div style="flex:1">
-            <div style="font-size:0.85rem;font-weight:600">Weekly reflection ready</div>
-            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">2 minutes — IntelliQ synthesises everyone's input</div>
+            <div style="font-size:var(--fs-md);font-weight:600">Weekly reflection ready</div>
+            <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:2px">2 minutes — IntelliQ synthesises everyone's input</div>
           </div>
-          <span style="color:var(--success);font-weight:700;font-size:0.8rem">NEW</span>
+          <span style="color:var(--success);font-weight:700;font-size:var(--fs)">NEW</span>
         </div>
       </div>`;
   },
@@ -8104,8 +8104,8 @@ const MemberApp = {
     if (this.checkins.length < MIN_FOR_TREND) {
       return `
         <div class="empty-card" style="margin-bottom:0.8rem;padding:0.9rem">
-          <div class="empty-icon" style="font-size:1.2rem;margin-bottom:0.3rem"></div>
-          <div style="font-size:0.78rem">Complete a few check-ins so IntelliQ can identify patterns.</div>
+          <div class="empty-icon" style="font-size:var(--fs-2xl);margin-bottom:0.3rem"></div>
+          <div style="font-size:var(--fs)">Complete a few check-ins so IntelliQ can identify patterns.</div>
         </div>`;
     }
 
@@ -8188,7 +8188,7 @@ const MemberApp = {
           ${[1,2,3,4,5,6,7,8,9,10].map(n => `
             <button class="weekly-rating-btn" data-val="${n}"
               onclick="MemberApp._selectWeeklyRating(${n})"
-              style="width:38px;height:38px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-secondary);font-size:0.82rem;font-weight:600;cursor:pointer;font-family:inherit"
+              style="width:38px;height:38px;border-radius:8px;border:1px solid var(--border);background:var(--surface-2);color:var(--text-secondary);font-size:var(--fs);font-weight:600;cursor:pointer;font-family:inherit"
             >${n}</button>`).join('')}
         </div>
       </div>`;
@@ -8427,7 +8427,7 @@ const MemberApp = {
     } else if (att.embedHTML) {
       html = `<div class="scenario-media">${att.embedHTML}</div>`;
     } else if (att.claudeMsg) {
-      html = `<div class="scenario-media" style="padding:0.7rem 0.9rem;background:var(--surface-2);border-radius:8px;font-size:0.8rem;color:var(--text-muted)">${att.summary || att.name}</div>`;
+      html = `<div class="scenario-media" style="padding:0.7rem 0.9rem;background:var(--surface-2);border-radius:8px;font-size:var(--fs);color:var(--text-muted)">${att.summary || att.name}</div>`;
     }
     if (html) { const d = document.createElement('div'); d.innerHTML = html; msgs.appendChild(d.firstElementChild); }
   },
@@ -8557,8 +8557,8 @@ const MemberApp = {
       <div class="results-header-title">Scenario Complete</div>
       <div class="results-header-sub">Here's how you did, ${this._escape(this._name)}</div>
       <div class="score-ring-large">${this._svgRing(score.overall, color, 120)}</div>
-      <div data-assessment-verdict style="font-size:1rem;font-weight:700;margin-bottom:0.3rem;color:${color}">${this._escape(label)}</div>
-      <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:1.5rem">Overall IntelliQ Score${score.overall != null ? ` · ${score.overall}/100` : ''}</div>
+      <div data-assessment-verdict style="font-size:var(--fs-xl);font-weight:700;margin-bottom:0.3rem;color:${color}">${this._escape(label)}</div>
+      <div style="font-size:var(--fs);color:var(--text-muted);margin-bottom:1.5rem">Overall IntelliQ Score${score.overall != null ? ` · ${score.overall}/100` : ''}</div>
       ${score.summary ? `<div class="results-summary"><div class="card-label" style="margin-bottom:0.4rem">Assessment</div><p>${this._escape(score.summary)}</p></div>` : ''}
       <div class="dim-grid">
         ${dims.map(d => `
@@ -8754,11 +8754,11 @@ const MemberApp = {
       html += `
         <div class="card" style="margin-bottom:0.8rem">
           <div class="card-label" style="margin-bottom:0.5rem">Your Focus</div>
-          <div style="font-size:0.87rem;color:var(--text-primary);font-weight:600;line-height:1.5">
+          <div style="font-size:var(--fs-md);color:var(--text-primary);font-weight:600;line-height:1.5">
             ${this._escape(this.goals.goal)}
           </div>
           ${this.goals.identity ? `
-          <div style="font-size:0.78rem;color:var(--text-secondary);line-height:1.5;margin-top:0.35rem">
+          <div style="font-size:var(--fs);color:var(--text-secondary);line-height:1.5;margin-top:0.35rem">
             Becoming: ${this._escape(this.goals.identity)}
           </div>` : ''}
         </div>`;
@@ -8782,19 +8782,19 @@ const MemberApp = {
           <div class="card-label" style="margin-bottom:0.6rem">Check-In History</div>
           ${recent.map(c => `
             <div style="display:flex;align-items:center;gap:0.6rem;padding:0.45rem 0;border-bottom:1px solid var(--border)">
-              <span style="font-size:1rem;flex-shrink:0">${moodIcons[c.mood] || '—'}</span>
+              <span style="font-size:var(--fs-xl);flex-shrink:0">${moodIcons[c.mood] || '—'}</span>
               <div style="flex:1;min-width:0">
-                <div style="font-size:0.78rem;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                <div style="font-size:var(--fs);color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
                   ${this._escape((c.text || '').slice(0, 65))}${(c.text || '').length > 65 ? '…' : ''}
                 </div>
-                <div style="font-size:0.68rem;color:var(--text-muted)">${c.date}</div>
+                <div style="font-size:var(--fs-xs);color:var(--text-muted)">${c.date}</div>
               </div>
-              <span style="font-size:0.72rem;color:${moodColors[c.mood] || 'var(--text-muted)'};flex-shrink:0">
+              <span style="font-size:var(--fs-sm);color:${moodColors[c.mood] || 'var(--text-muted)'};flex-shrink:0">
                 ${c.moodLabel || ''}
               </span>
             </div>`).join('')}
           ${this.checkins.length < 3 ? `
-            <div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.5rem;text-align:center;padding:0.3rem 0">
+            <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.5rem;text-align:center;padding:0.3rem 0">
               Complete a few check-ins so IntelliQ can identify patterns.
             </div>` : ''}
         </div>`;
@@ -8822,8 +8822,8 @@ const MemberApp = {
       html += `
         <div class="card" style="text-align:center;margin-bottom:0.8rem">
           <div style="margin:0 auto 0.8rem;width:100px">${this._svgRing(avgScore, color, 100)}</div>
-          <div style="font-size:0.9rem;font-weight:700;color:${color}">${label}</div>
-          <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">
+          <div style="font-size:var(--fs-lg);font-weight:700;color:${color}">${label}</div>
+          <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:4px">
             Avg across ${this.results.length} assessment${this.results.length !== 1 ? 's' : ''}
           </div>
         </div>
@@ -9048,18 +9048,18 @@ const MemberApp = {
       if ((d.working || []).length) {
         h += `<div class="card-label" style="color:#0ecfb0;margin-top:0.2rem">Repeat these</div>`;
         h += d.working.map(i => `<div class="me-row" style="display:block;padding:0.5rem 0;border-bottom:1px solid var(--border)">
-          <div><strong>${esc(i.title)}</strong>${i.avgScore != null ? ` <span style="font-size:0.72rem;color:var(--text-muted)">· avg ${i.avgScore}</span>` : ''}</div>
-          <div class="me-row-text" style="font-size:0.82rem;color:var(--text-secondary);margin-top:2px">${esc(i.why)}</div>
+          <div><strong>${esc(i.title)}</strong>${i.avgScore != null ? ` <span style="font-size:var(--fs-sm);color:var(--text-muted)">· avg ${i.avgScore}</span>` : ''}</div>
+          <div class="me-row-text" style="font-size:var(--fs);color:var(--text-secondary);margin-top:2px">${esc(i.why)}</div>
         </div>`).join('');
       }
       if ((d.revisit || []).length) {
         h += `<div class="card-label" style="color:#f7b24f;margin-top:0.7rem">Worth revisiting</div>`;
         h += d.revisit.map(i => `<div class="me-row" style="display:block;padding:0.5rem 0;border-bottom:1px solid var(--border)">
-          <div><strong>${esc(i.title)}</strong>${i.avgScore != null ? ` <span style="font-size:0.72rem;color:var(--text-muted)">· avg ${i.avgScore}</span>` : ''}</div>
-          <div class="me-row-text" style="font-size:0.82rem;color:var(--text-secondary);margin-top:2px">${esc(i.why)}</div>
+          <div><strong>${esc(i.title)}</strong>${i.avgScore != null ? ` <span style="font-size:var(--fs-sm);color:var(--text-muted)">· avg ${i.avgScore}</span>` : ''}</div>
+          <div class="me-row-text" style="font-size:var(--fs);color:var(--text-secondary);margin-top:2px">${esc(i.why)}</div>
         </div>`).join('');
       }
-      if (d.note) h += `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.5rem">${esc(d.note)}</div>`;
+      if (d.note) h += `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.5rem">${esc(d.note)}</div>`;
       box.innerHTML = h;
     } catch (e) {
       box.innerHTML = `<span style="color:var(--text-muted)">Couldn't load outcomes right now.</span>`;
@@ -9085,7 +9085,7 @@ const MemberApp = {
     const assigned = d.assigned || [];
     html += `<details class="card collapse-card" open><summary class="card-label">Assigned to you${assigned.length ? ` <span class="collapse-count">${assigned.length}</span>` : ''}</summary>`;
     if (!assigned.length) {
-      html += `<div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">Nothing assigned right now.</div>`;
+      html += `<div style="color:var(--text-muted);font-size:var(--fs-md);padding:0.3rem 0">Nothing assigned right now.</div>`;
     } else {
       // Member cards are driven by the server-derived PROJECTION (ai/assessment-view):
       // a plain-language reading, supporting signals, a concrete next step, and — only
@@ -9102,20 +9102,20 @@ const MemberApp = {
         const cta = complete
           ? `<button class="btn-outline btn-sm" onclick="MemberApp.askAboutWork('${a.id}', ${JSON.stringify(a.title)})">Ask IntelliQ about this</button>`
           : `<button class="btn-primary btn-sm" onclick="MemberApp._convoStart('${a.id}', this)">${p.statusLabel === 'Not started' ? 'Start with IntelliQ' : 'Continue conversation'}</button>
-             <button class="btn-ghost btn-sm" style="font-size:0.74rem" onclick="MemberApp._assessAsk('${a.id}')">What are they looking for?</button>`;
+             <button class="btn-ghost btn-sm" style="font-size:var(--fs-sm)" onclick="MemberApp._assessAsk('${a.id}')">What are they looking for?</button>`;
         return `<div class="aw-item">
           <div class="aw-head">
             <div class="aw-title">${esc(a.title)} <span class="aw-kind">${kind(a.kind)}</span></div>
             <span class="aw-badge aw-badge--${complete ? 'returned' : (p.statusLabel === 'In progress' ? 'submitted' : 'todo')}">${esc(p.statusLabel || a.status)}</span>
           </div>
           <div class="aw-body">
-            ${p.summary ? `<p class="aw-summary" style="font-size:0.86rem;color:var(--text-secondary);margin:0 0 0.4rem">${esc(p.summary)}</p>` : ''}
-            ${strength ? `<div style="font-size:0.8rem;margin:0.15rem 0"><span style="color:var(--success);font-weight:600">Strength · </span>${esc(strength)}</div>` : ''}
-            ${attention ? `<div style="font-size:0.8rem;margin:0.15rem 0"><span style="color:var(--warning);font-weight:600">Worth a look · </span>${esc(attention)}</div>` : ''}
-            ${nextStep ? `<div style="font-size:0.82rem;margin:0.3rem 0;color:var(--text-primary)"><strong>Next:</strong> ${esc(nextStep)}</div>` : ''}
+            ${p.summary ? `<p class="aw-summary" style="font-size:var(--fs-md);color:var(--text-secondary);margin:0 0 0.4rem">${esc(p.summary)}</p>` : ''}
+            ${strength ? `<div style="font-size:var(--fs);margin:0.15rem 0"><span style="color:var(--success);font-weight:600">Strength · </span>${esc(strength)}</div>` : ''}
+            ${attention ? `<div style="font-size:var(--fs);margin:0.15rem 0"><span style="color:var(--warning);font-weight:600">Worth a look · </span>${esc(attention)}</div>` : ''}
+            ${nextStep ? `<div style="font-size:var(--fs);margin:0.3rem 0;color:var(--text-primary)"><strong>Next:</strong> ${esc(nextStep)}</div>` : ''}
             ${human ? `<div class="aw-feedback"><div class="aw-feedback-by">From ${esc(a.assignerName)}</div><p>${esc(human)}</p></div>` : ''}
-            ${p.optionalScore && p.optionalScore.show ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.3rem">Score underneath: ${p.optionalScore.value} / ${p.optionalScore.max}</div>` : ''}
-            ${lims.length ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.3rem">${lims.map(esc).join(' · ')}</div>` : ''}
+            ${p.optionalScore && p.optionalScore.show ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.3rem">Score underneath: ${p.optionalScore.value} / ${p.optionalScore.max}</div>` : ''}
+            ${lims.length ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.3rem">${lims.map(esc).join(' · ')}</div>` : ''}
             <div class="aw-actions" style="margin-top:0.5rem;display:flex;gap:0.5rem;flex-wrap:wrap">${cta}</div>
             <div id="askbox-${a.id}" style="display:none;margin-top:0.5rem"></div>
             <div id="convo-${a.id}" class="convo-panel" style="display:none;margin-top:0.6rem"></div>
@@ -9134,13 +9134,13 @@ const MemberApp = {
         </div>
         <div id="assess-create" style="display:none;margin-top:0.7rem">
           <div style="padding:0.6rem 0.7rem;border:1px dashed var(--accent);border-radius:8px;margin-bottom:0.7rem;background:rgba(124,90,245,0.05)">
-            <div style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.5rem">Think it through with IntelliQ. It reasons over your team's history — strengths, what people have struggled with, who's stretched — and will push back if an idea doesn't fit the data. When you agree on something, it drops it into the form below.</div>
+            <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.5rem">Think it through with IntelliQ. It reasons over your team's history — strengths, what people have struggled with, who's stretched — and will push back if an idea doesn't fit the data. When you agree on something, it drops it into the form below.</div>
             <div id="assess-plan-out" style="max-height:280px;overflow:auto;margin-bottom:0.5rem"></div>
             <div style="display:flex;gap:0.4rem">
               <input class="form-input" id="assess-goal" placeholder="What are you trying to set up? Or challenge my thinking…" style="flex:1;margin:0" onkeydown="if(event.key==='Enter')MemberApp._assessPlan(this.nextElementSibling)">
               <button class="btn-primary btn-sm" onclick="MemberApp._assessPlan(this)">Send</button>
             </div>
-            <span id="assess-draft-status" style="font-size:0.74rem;color:var(--text-muted)"></span>
+            <span id="assess-draft-status" style="font-size:var(--fs-sm);color:var(--text-muted)"></span>
           </div>
           <input class="form-input" id="assess-title" placeholder="Title" style="margin-bottom:0.5rem">
           <select class="form-input" id="assess-kind" style="margin-bottom:0.5rem">
@@ -9176,8 +9176,8 @@ const MemberApp = {
           const archived = t.stage === 'archived';
           return `<div class="me-row" style="display:flex;align-items:center;gap:0.5rem;padding:0.55rem 0;border-bottom:1px solid var(--border);${archived ? 'opacity:0.65' : ''}">
             <div style="flex:1;min-width:0">
-              <div><strong>${esc(t.title)}</strong> <span style="font-size:0.72rem;color:var(--text-muted)">· ${kind(t.kind)}</span> ${evidenceBadge(t)} ${stageTag(t)}</div>
-              <div style="font-size:0.72rem;color:var(--text-muted);margin-top:2px">${meta.join(' · ')}</div>
+              <div><strong>${esc(t.title)}</strong> <span style="font-size:var(--fs-sm);color:var(--text-muted)">· ${kind(t.kind)}</span> ${evidenceBadge(t)} ${stageTag(t)}</div>
+              <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:2px">${meta.join(' · ')}</div>
             </div>
             ${archived ? '' : `<button class="btn-ghost" onclick="MemberApp._assessOpenAssign('${t.id}')">Assign</button>`}
             <select class="assess-stage" title="Playbook stage" onchange="MemberApp._assessSetStage('${t.id}', this.value)">
@@ -9190,8 +9190,8 @@ const MemberApp = {
         const live = tpls.filter(t => t.stage !== 'archived');
         const archived = tpls.filter(t => t.stage === 'archived');
         html += `<details class="card collapse-card" open><summary class="card-label">Your playbook — assign, and curate what works <span class="collapse-count">${live.length}</span></summary>` +
-          (live.length ? live.map(row).join('') : `<div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">Nothing active yet.</div>`) +
-          (archived.length ? `<details style="margin-top:0.5rem"><summary style="cursor:pointer;font-size:0.78rem;color:var(--text-muted)">Archived (${archived.length})</summary>${archived.map(row).join('')}</details>` : '') +
+          (live.length ? live.map(row).join('') : `<div style="color:var(--text-muted);font-size:var(--fs-md);padding:0.3rem 0">Nothing active yet.</div>`) +
+          (archived.length ? `<details style="margin-top:0.5rem"><summary style="cursor:pointer;font-size:var(--fs);color:var(--text-muted)">Archived (${archived.length})</summary>${archived.map(row).join('')}</details>` : '') +
           `<div id="assess-assign-panel" style="display:none;margin-top:0.7rem"></div></details>`;
       }
 
@@ -9199,13 +9199,13 @@ const MemberApp = {
       const toReview = (d.issued || []).filter(a => a.status === 'submitted');
       const reviewed = (d.issued || []).filter(a => a.status !== 'submitted');
       html += `<details class="card collapse-card"${toReview.length ? ' open' : ''}><summary class="card-label">To review${toReview.length ? ` <span class="collapse-count">${toReview.length}</span>` : ''}</summary>`;
-      if (!toReview.length) html += `<div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">Nothing waiting.</div>`;
+      if (!toReview.length) html += `<div style="color:var(--text-muted);font-size:var(--fs-md);padding:0.3rem 0">Nothing waiting.</div>`;
       else html += toReview.map(a => `<div class="me-row" style="display:block;padding:0.7rem 0;border-bottom:1px solid var(--border)">
         <div><strong>${esc(a.assigneeName)}</strong> — ${esc(a.title)}</div>
-        ${Object.entries(a.response || {}).map(([k, v]) => `<div style="margin-top:0.4rem"><div class="card-label" style="margin-bottom:1px">${esc(k)}</div><div class="me-row-text" style="font-size:0.84rem">${esc(v)}</div></div>`).join('')}
-        ${a.note ? `<div class="me-row-text" style="font-size:0.84rem;margin-top:0.3rem">${esc(a.note)}</div>` : ''}
-        <button class="btn-ghost" style="font-size:0.74rem;margin-top:0.4rem" onclick="MemberApp._assessSummarize('${a.id}', this)">IntelliQ: suggest a score &amp; summary</button>
-        <div id="assess-sum-${a.id}" style="font-size:0.8rem;color:var(--text-secondary);margin-top:0.3rem"></div>
+        ${Object.entries(a.response || {}).map(([k, v]) => `<div style="margin-top:0.4rem"><div class="card-label" style="margin-bottom:1px">${esc(k)}</div><div class="me-row-text" style="font-size:var(--fs-md)">${esc(v)}</div></div>`).join('')}
+        ${a.note ? `<div class="me-row-text" style="font-size:var(--fs-md);margin-top:0.3rem">${esc(a.note)}</div>` : ''}
+        <button class="btn-ghost" style="font-size:var(--fs-sm);margin-top:0.4rem" onclick="MemberApp._assessSummarize('${a.id}', this)">IntelliQ: suggest a score &amp; summary</button>
+        <div id="assess-sum-${a.id}" style="font-size:var(--fs);color:var(--text-secondary);margin-top:0.3rem"></div>
         <div style="margin-top:0.5rem;display:flex;gap:0.4rem;align-items:center">
           <input class="form-input" data-return-fb="${a.id}" placeholder="Feedback" style="flex:1;margin:0">
           <input class="form-input" data-return-score="${a.id}" placeholder="Score" type="number" min="0" max="100" style="width:80px;margin:0">
@@ -9215,9 +9215,9 @@ const MemberApp = {
       if (returnedList.length) {
         html += `<div class="card-label" style="margin-top:0.8rem">Returned — open to see their answers</div>`;
         html += returnedList.map(a => `<details class="me-row" style="display:block;padding:0.5rem 0;border-bottom:1px solid var(--border)">
-          <summary style="cursor:pointer;font-size:0.86rem"><strong>${esc(a.assigneeName)}</strong> — ${esc(a.title)}${a.score != null ? ` <span style="color:var(--text-muted)">· ${a.score}/100</span>` : ''}</summary>
-          ${Object.entries(a.response || {}).map(([k, v]) => `<div style="margin-top:0.4rem"><div class="card-label" style="margin-bottom:1px">${esc(k)}</div><div class="me-row-text" style="font-size:0.84rem">${esc(v)}</div></div>`).join('') || '<div style="font-size:0.8rem;color:var(--text-muted);margin-top:0.3rem">No written answers.</div>'}
-          ${a.feedback ? `<div class="me-row-text" style="font-size:0.82rem;margin-top:0.4rem"><strong>Your feedback:</strong> ${esc(a.feedback)}</div>` : ''}
+          <summary style="cursor:pointer;font-size:var(--fs-md)"><strong>${esc(a.assigneeName)}</strong> — ${esc(a.title)}${a.score != null ? ` <span style="color:var(--text-muted)">· ${a.score}/100</span>` : ''}</summary>
+          ${Object.entries(a.response || {}).map(([k, v]) => `<div style="margin-top:0.4rem"><div class="card-label" style="margin-bottom:1px">${esc(k)}</div><div class="me-row-text" style="font-size:var(--fs-md)">${esc(v)}</div></div>`).join('') || '<div style="font-size:var(--fs);color:var(--text-muted);margin-top:0.3rem">No written answers.</div>'}
+          ${a.feedback ? `<div class="me-row-text" style="font-size:var(--fs);margin-top:0.4rem"><strong>Your feedback:</strong> ${esc(a.feedback)}</div>` : ''}
         </details>`).join('');
       }
       html += `</details>`;
@@ -9225,7 +9225,7 @@ const MemberApp = {
       // ── What's working / worth revisiting — the assessment-learning loop ──
       html += `<details class="card collapse-card" id="assess-learning-card">
         <summary class="card-label">What's working — from real outcomes</summary>
-        <div id="assess-learning" style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">Checking which assessments line up with people improving…</div>
+        <div id="assess-learning" style="color:var(--text-muted);font-size:var(--fs-md);padding:0.3rem 0">Checking which assessments line up with people improving…</div>
       </details>`;
     }
 
@@ -9238,12 +9238,12 @@ const MemberApp = {
       <textarea class="note-input" id="tutorial-body" placeholder="The steps someone can refer back to." style="min-height:70px;margin-bottom:0.5rem"></textarea>
       <input class="form-input" id="tutorial-url" placeholder="Link (optional)" style="margin-bottom:0.5rem">
       <button class="btn-primary" onclick="MemberApp._tutorialPin(this)">Pin it</button></div>`;
-    if (!tuts.length) html += `<div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0;margin-top:0.4rem">No how-to's pinned yet.</div>`;
+    if (!tuts.length) html += `<div style="color:var(--text-muted);font-size:var(--fs-md);padding:0.3rem 0;margin-top:0.4rem">No how-to's pinned yet.</div>`;
     else html += tuts.map(t => `<details class="me-row" style="display:block;padding:0.6rem 0;border-bottom:1px solid var(--border)">
-      <summary style="cursor:pointer;font-weight:600">${esc(t.title)} <span style="font-size:0.72rem;color:var(--text-muted);font-weight:400">· ${kind(t.kind)}</span></summary>
-      ${t.body ? `<div class="me-row-text" style="font-size:0.85rem;margin-top:0.4rem;white-space:pre-wrap">${esc(t.body)}</div>` : ''}
-      ${t.url ? `<div style="margin-top:0.3rem"><a href="${esc(t.url)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:0.82rem">Open link ↗</a></div>` : ''}
-      ${d.canCreate ? `<button class="btn-ghost" onclick="MemberApp._tutorialDelete('${t.id}')" style="font-size:0.72rem;color:var(--text-muted);margin-top:0.3rem">Remove</button>` : ''}
+      <summary style="cursor:pointer;font-weight:600">${esc(t.title)} <span style="font-size:var(--fs-sm);color:var(--text-muted);font-weight:400">· ${kind(t.kind)}</span></summary>
+      ${t.body ? `<div class="me-row-text" style="font-size:var(--fs-md);margin-top:0.4rem;white-space:pre-wrap">${esc(t.body)}</div>` : ''}
+      ${t.url ? `<div style="margin-top:0.3rem"><a href="${esc(t.url)}" target="_blank" rel="noopener" style="color:var(--accent);font-size:var(--fs)">Open link ↗</a></div>` : ''}
+      ${d.canCreate ? `<button class="btn-ghost" onclick="MemberApp._tutorialDelete('${t.id}')" style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.3rem">Remove</button>` : ''}
     </details>`).join('');
     html += `</details>`;
     return html;
@@ -9313,7 +9313,7 @@ const MemberApp = {
       if (d.plan && d.plan.title) {
         this._planDraft = d.plan;
         html += `<div style="border:1px dashed var(--accent);border-radius:8px;padding:0.5rem 0.6rem;margin:0.3rem 0">
-          <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.3rem">Proposed: <strong>${esc(d.plan.title)}</strong></div>
+          <div style="font-size:var(--fs);color:var(--text-muted);margin-bottom:0.3rem">Proposed: <strong>${esc(d.plan.title)}</strong></div>
           <button class="btn-primary btn-sm" onclick="MemberApp._assessUsePlan()">Use this plan</button>
         </div>`;
       }
@@ -9356,14 +9356,14 @@ const MemberApp = {
     const panel = document.getElementById('assess-assign-panel');
     if (!panel) return;
     panel.style.display = 'block';
-    panel.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">Loading people…</div>`;
+    panel.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs)">Loading people…</div>`;
     try {
       const res = await fetch('/api/workspace/visible-members', { headers: this._authHeaders() });
       const d = await res.json();
       const people = (d.members || []).filter(m => m.userId !== this._userId);
-      if (!people.length) { panel.innerHTML = `<div style="color:var(--text-muted);font-size:0.82rem">No one in your range to assign to.</div>`; return; }
+      if (!people.length) { panel.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs)">No one in your range to assign to.</div>`; return; }
       panel.innerHTML = `<div class="card-label">Assign to</div>
-        <div style="max-height:180px;overflow:auto;margin-bottom:0.5rem">${people.map(p => `<label style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0;font-size:0.85rem"><input type="checkbox" value="${p.userId}" class="assess-assignee"> ${this._escape(p.name)}</label>`).join('')}</div>
+        <div style="max-height:180px;overflow:auto;margin-bottom:0.5rem">${people.map(p => `<label style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0;font-size:var(--fs-md)"><input type="checkbox" value="${p.userId}" class="assess-assignee"> ${this._escape(p.name)}</label>`).join('')}</div>
         <button class="btn-primary" onclick="MemberApp._assessDoAssign('${templateId}', this)">Assign</button>`;
     } catch (e) { panel.innerHTML = `<div style="color:var(--text-muted)">Could not load people.</div>`; }
   },
@@ -9389,20 +9389,20 @@ const MemberApp = {
     if (!panel) return;
     if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
     panel.style.display = 'block';
-    panel.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Starting…</div>`;
+    panel.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Starting…</div>`;
     try {
       const r = await fetch('/api/conversation/start', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ purpose: 'assessment', targetId: id }) });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'start_failed');
       this._convoRender(id, d);
-    } catch (e) { panel.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't start right now. <button class="btn-ghost btn-sm" onclick="MemberApp._convoStart('${id}')">Try again</button></div>`; }
+    } catch (e) { panel.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Couldn't start right now. <button class="btn-ghost btn-sm" onclick="MemberApp._convoStart('${id}')">Try again</button></div>`; }
   },
   _convoRender(id, d) {
     const panel = document.getElementById('convo-' + id);
     if (!panel) return;
     const esc = t => this._escape(t || '');
     if (d.complete || !d.question) {
-      panel.innerHTML = `<div style="font-size:0.82rem;color:var(--success)">All done — thanks. Your leader will review it.</div>`;
+      panel.innerHTML = `<div style="font-size:var(--fs);color:var(--success)">All done — thanks. Your leader will review it.</div>`;
       setTimeout(() => this._renderAssessments(), 900);
       return;
     }
@@ -9410,16 +9410,16 @@ const MemberApp = {
     panel.dataset.claim = d.question.claimRef || '';
     const known = d.alreadyKnown || [];
     panel.innerHTML = `
-      ${d.orientation ? `<div style="font-size:0.76rem;color:var(--text-muted);margin-bottom:0.4rem">${esc(d.orientation)}</div>` : ''}
-      ${known.length ? `<details style="margin-bottom:0.4rem"><summary style="font-size:0.74rem;color:var(--text-muted);cursor:pointer">I already know ${known.length} of these — why?</summary><ul style="margin:0.3rem 0 0 1rem;padding:0">${known.map(k => `<li style="font-size:0.74rem;color:var(--text-muted);margin-bottom:2px"><strong>${esc(k.label)}:</strong> ${esc(k.reason)}</li>`).join('')}</ul></details>` : ''}
-      <div style="font-size:0.86rem;font-weight:600;margin-bottom:0.4rem">${esc(d.question.text)}</div>
+      ${d.orientation ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:0.4rem">${esc(d.orientation)}</div>` : ''}
+      ${known.length ? `<details style="margin-bottom:0.4rem"><summary style="font-size:var(--fs-sm);color:var(--text-muted);cursor:pointer">I already know ${known.length} of these — why?</summary><ul style="margin:0.3rem 0 0 1rem;padding:0">${known.map(k => `<li style="font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:2px"><strong>${esc(k.label)}:</strong> ${esc(k.reason)}</li>`).join('')}</ul></details>` : ''}
+      <div style="font-size:var(--fs-md);font-weight:600;margin-bottom:0.4rem">${esc(d.question.text)}</div>
       <textarea id="convo-input-${id}" class="note-input" rows="3" placeholder="Answer in your own words…"></textarea>
       <div style="display:flex;gap:0.4rem;margin-top:0.4rem;flex-wrap:wrap">
         <button class="btn-primary btn-sm" onclick="MemberApp._convoAnswer('${id}')">Send</button>
         <button class="btn-ghost btn-sm" onclick="MemberApp._convoAnswer('${id}', true)">Not applicable</button>
         <button class="btn-ghost btn-sm" style="margin-left:auto;color:var(--text-muted)" onclick="MemberApp._convoAbandon('${id}')">Close</button>
       </div>
-      <div id="convo-msg-${id}" style="font-size:0.76rem;color:var(--text-muted);margin-top:0.3rem"></div>`;
+      <div id="convo-msg-${id}" style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.3rem"></div>`;
   },
   async _convoAnswer(id, notApplicable) {
     const panel = document.getElementById('convo-' + id);
@@ -9443,9 +9443,9 @@ const MemberApp = {
     if (!panel || !preview) return;
     const esc = t => this._escape(t || '');
     panel.innerHTML = `
-      <div style="font-size:0.76rem;color:var(--text-muted);margin-bottom:0.3rem">Here's exactly what I'll record — nothing is saved until you confirm:</div>
-      <div style="font-size:0.84rem;padding:0.5rem 0.6rem;border-left:2px solid var(--accent);background:var(--surface-alt,rgba(127,127,127,0.06));border-radius:6px">${esc(preview.willRecord)}</div>
-      <div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.3rem">${esc(preview.expectedEffect || '')}${preview.corroborationNeeded ? ' It\'ll be kept as tentative.' : ''}</div>
+      <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:0.3rem">Here's exactly what I'll record — nothing is saved until you confirm:</div>
+      <div style="font-size:var(--fs-md);padding:0.5rem 0.6rem;border-left:2px solid var(--accent);background:var(--surface-alt,rgba(127,127,127,0.06));border-radius:6px">${esc(preview.willRecord)}</div>
+      <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.3rem">${esc(preview.expectedEffect || '')}${preview.corroborationNeeded ? ' It\'ll be kept as tentative.' : ''}</div>
       <div style="display:flex;gap:0.4rem;margin-top:0.5rem">
         <button class="btn-primary btn-sm" onclick="MemberApp._convoConfirm('${id}', '${esc(preview.proposalFingerprint)}')">Confirm &amp; record</button>
         <button class="btn-ghost btn-sm" onclick="MemberApp._convoResume('${id}')">Edit answer</button>
@@ -9455,13 +9455,13 @@ const MemberApp = {
     const panel = document.getElementById('convo-' + id);
     const sid = panel && panel.dataset.session;
     if (!sid) return;
-    panel.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Recording…</div>`;
+    panel.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Recording…</div>`;
     try {
       const r = await fetch(`/api/conversation/${encodeURIComponent(sid)}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalFingerprint: fp }) });
       const d = await r.json();
       if (!d.ok) throw new Error(d.error || 'confirm_failed');
       this._convoRender(id, { ...d, sessionId: sid });
-    } catch (e) { panel.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't record — <button class="btn-ghost btn-sm" onclick="MemberApp._convoResume('${id}')">try again</button></div>`; }
+    } catch (e) { panel.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Couldn't record — <button class="btn-ghost btn-sm" onclick="MemberApp._convoResume('${id}')">try again</button></div>`; }
   },
   async _convoResume(id) {
     const panel = document.getElementById('convo-' + id);
@@ -9486,13 +9486,13 @@ const MemberApp = {
     const input = document.getElementById('ws-ask'), out = document.getElementById('ws-ask-out');
     const q = input && input.value.trim();
     if (!q || !out) return;
-    out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Thinking…</div>`;
+    out.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Thinking…</div>`;
     try {
       const r = await fetch('/api/org/ask', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ question: q }) });
       const d = await r.json();
-      const route = d.routeTo ? `<div style="font-size:0.72rem;color:var(--text-muted);margin-top:0.2rem">Best person to ask: <strong>${this._escape(d.routeTo.to)}</strong></div>` : '';
-      out.innerHTML = `<div style="font-size:0.84rem;padding:0.5rem 0.6rem;border-left:2px solid var(--accent);border-radius:6px;background:var(--surface-alt,rgba(127,127,127,0.05))">${this._escape(d.answer || 'No answer available.')}</div>${route}`;
-    } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't answer right now.</div>`; }
+      const route = d.routeTo ? `<div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.2rem">Best person to ask: <strong>${this._escape(d.routeTo.to)}</strong></div>` : '';
+      out.innerHTML = `<div style="font-size:var(--fs-md);padding:0.5rem 0.6rem;border-left:2px solid var(--accent);border-radius:6px;background:var(--surface-alt,rgba(127,127,127,0.05))">${this._escape(d.answer || 'No answer available.')}</div>${route}`;
+    } catch (e) { out.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Couldn't answer right now.</div>`; }
   },
   /* "What are they looking for?" — the assistant answers from the LEADER'S brief that was
      discussed when the assessment was created and carried down the web to this member. */
@@ -9513,12 +9513,12 @@ const MemberApp = {
     const input = document.getElementById('ask-' + id), out = document.getElementById('ask-out-' + id);
     const q = input && input.value.trim();
     if (!q || !out) return;
-    out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Checking with what your leader told me…</div>`;
+    out.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Checking with what your leader told me…</div>`;
     try {
       const r = await fetch('/api/assessments/' + encodeURIComponent(id) + '/ask', { method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ question: q }) });
       const d = await r.json();
-      out.innerHTML = `<div style="font-size:0.84rem;padding:0.5rem 0.6rem;border-left:2px solid var(--accent);border-radius:6px;background:var(--surface-alt,rgba(127,127,127,0.05))">${this._escape(d.answer || '')}</div>`;
-    } catch (e) { out.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted)">Couldn't answer right now.</div>`; }
+      out.innerHTML = `<div style="font-size:var(--fs-md);padding:0.5rem 0.6rem;border-left:2px solid var(--accent);border-radius:6px;background:var(--surface-alt,rgba(127,127,127,0.05))">${this._escape(d.answer || '')}</div>`;
+    } catch (e) { out.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Couldn't answer right now.</div>`; }
   },
 
   async _assessSubmit(id, btn) {
@@ -9575,9 +9575,9 @@ const MemberApp = {
       let extra = '';
       if ((d.strengths || []).length) extra += `<div><strong>Strengths:</strong> ${esc(d.strengths.join(', '))}</div>`;
       if ((d.development || []).length) extra += `<div><strong>To develop:</strong> ${esc(d.development.join(', '))}</div>`;
-      if (box) box.innerHTML = `<div style="padding:0.4rem 0.5rem;border-left:2px solid var(--accent)">${esc(d.summary)}${d.score != null ? ` <em>(suggested ${d.score}/100)</em>` : ''}${extra}</div><div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px">Suggested — edit the feedback and score before returning.</div>`;
+      if (box) box.innerHTML = `<div style="padding:0.4rem 0.5rem;border-left:2px solid var(--accent)">${esc(d.summary)}${d.score != null ? ` <em>(suggested ${d.score}/100)</em>` : ''}${extra}</div><div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:2px">Suggested — edit the feedback and score before returning.</div>`;
     } catch (e) {
-      if (box) box.innerHTML = `<div style="color:var(--text-muted);font-size:0.78rem">Couldn't summarise${' '}${'—'} you can still write your own.</div>`;
+      if (box) box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs)">Couldn't summarise${' '}${'—'} you can still write your own.</div>`;
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = 'IntelliQ: suggest a score & summary'; }
     }
@@ -9622,11 +9622,11 @@ const MemberApp = {
       res = await fetch('/api/me/sources', { headers: this._authHeaders() });
       d = await res.json();
     } catch (e) {
-      root.innerHTML = `<div class="card"><div style="color:var(--text-muted);font-size:0.85rem">Couldn't reach the server. <button class="btn-ghost" onclick="MemberApp._renderApps()">Try again</button></div></div>`;
+      root.innerHTML = `<div class="card"><div style="color:var(--text-muted);font-size:var(--fs-md)">Couldn't reach the server. <button class="btn-ghost" onclick="MemberApp._renderApps()">Try again</button></div></div>`;
       return;
     }
     if (!res.ok || !d || !d.ok) {
-      root.innerHTML = `<div class="card"><div style="color:var(--text-muted);font-size:0.85rem">Couldn't load your apps${res && res.status === 401 ? ' — your session may have expired. Log in again.' : '.'} <button class="btn-ghost" onclick="MemberApp._renderApps()">Try again</button></div></div>`;
+      root.innerHTML = `<div class="card"><div style="color:var(--text-muted);font-size:var(--fs-md)">Couldn't load your apps${res && res.status === 401 ? ' — your session may have expired. Log in again.' : '.'} <button class="btn-ghost" onclick="MemberApp._renderApps()">Try again</button></div></div>`;
       return;
     }
     {
@@ -9671,7 +9671,7 @@ const MemberApp = {
       sources.forEach(s => { (cats[s.category || 'Other'] = cats[s.category || 'Other'] || []).push(s); });
       let html = '';
       if (!sources.length) {
-        html += `<div class="card"><div class="card-label">Your apps</div><div style="color:var(--text-muted);font-size:0.84rem;padding:0.3rem 0">No apps available to connect yet. <button class="btn-ghost" onclick="MemberApp._renderApps()">Refresh</button></div></div>`;
+        html += `<div class="card"><div class="card-label">Your apps</div><div style="color:var(--text-muted);font-size:var(--fs-md);padding:0.3rem 0">No apps available to connect yet. <button class="btn-ghost" onclick="MemberApp._renderApps()">Refresh</button></div></div>`;
       }
       Object.keys(cats).forEach(cat => {
         html += `<div class="app-group"><div class="app-group-label">${esc(cat)}</div>${cats[cat].map(row).join('')}</div>`;
@@ -9679,7 +9679,7 @@ const MemberApp = {
       html += `
         <div class="card" style="margin-top:0.2rem">
           <div class="card-label">How this works — three layers, three permissions you control</div>
-          <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6">
+          <div style="font-size:var(--fs);color:var(--text-secondary);line-height:1.6">
             <strong>Insight</strong> reads <strong>only numbers</strong> — how busy your days are, activity
             levels. It never includes your messages, titles, or locations.<br><br>
             <strong>Assistant</strong>, if you allow it, reads fuller detail (times, titles, locations) so it
@@ -9720,18 +9720,18 @@ const MemberApp = {
     if (!box) return;
     if (box.style.display === 'block') { box.style.display = 'none'; return; }
     box.style.display = 'block';
-    box.innerHTML = `<div style="color:var(--text-muted);font-size:0.74rem">Loading…</div>`;
+    box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-sm)">Loading…</div>`;
     try {
       const r = await fetch('/api/me/contributions', { headers: this._authHeaders() });
       const d = await r.json();
       const rows = d.contributions || [];
-      if (!rows.length) { box.innerHTML = `<div style="color:var(--text-muted);font-size:0.74rem">Nothing has crossed yet — numbers appear here the moment they do.</div>`; return; }
+      if (!rows.length) { box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-sm)">Nothing has crossed yet — numbers appear here the moment they do.</div>`; return; }
       box.innerHTML = rows.slice(0, 20).map(x => {
         const when = x.ts ? new Date(x.ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
-        return `<div style="font-size:0.74rem;color:var(--text-secondary);padding:2px 0">${this._escape(x.label || x.connector || 'number')}: <strong>${this._escape(String(x.valueNum))}</strong>${when ? ' · ' + when : ''}</div>`;
-      }).join('') + `<div style="font-size:0.68rem;color:var(--text-muted);margin-top:3px">Numbers only — never any content.</div>`;
+        return `<div style="font-size:var(--fs-sm);color:var(--text-secondary);padding:2px 0">${this._escape(x.label || x.connector || 'number')}: <strong>${this._escape(String(x.valueNum))}</strong>${when ? ' · ' + when : ''}</div>`;
+      }).join('') + `<div style="font-size:var(--fs-xs);color:var(--text-muted);margin-top:3px">Numbers only — never any content.</div>`;
     } catch (e) {
-      box.innerHTML = `<div style="color:var(--danger);font-size:0.74rem">Couldn't load.</div>`;
+      box.innerHTML = `<div style="color:var(--danger);font-size:var(--fs-sm)">Couldn't load.</div>`;
     }
   },
 
@@ -9913,7 +9913,7 @@ const MemberApp = {
   async _loadNotes() {
     const el = document.getElementById('notes-list');
     if (!el) return;
-    el.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);padding:1rem 0">Loading…</div>`;
+    el.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted);padding:1rem 0">Loading…</div>`;
     try {
       const res = await fetch(
         `/api/notes?orgCode=${encodeURIComponent(this._orgCode)}&requesterId=${encodeURIComponent(this._userId)}`,
@@ -9924,7 +9924,7 @@ const MemberApp = {
       this._cachedNotes = data.notes || [];
       this._renderNotesList();
     } catch(e) {
-      el.innerHTML = `<div style="font-size:0.8rem;color:var(--danger)">Could not load notes.</div>`;
+      el.innerHTML = `<div style="font-size:var(--fs);color:var(--danger)">Could not load notes.</div>`;
     }
   },
 
@@ -9958,15 +9958,15 @@ const MemberApp = {
         <div class="card" style="margin-bottom:0.6rem;padding:1rem;border-radius:12px;background:var(--surface-1);border-color:${borderColor}">
           <div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.5rem">
             <span>${icon}</span>
-            <span style="font-size:0.72rem;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:0.5px">${n.type}</span>
+            <span style="font-size:var(--fs-sm);font-weight:700;color:${color};text-transform:uppercase;letter-spacing:0.5px">${n.type}</span>
             ${tagBadge}
-            <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto">${time}</span>
+            <span style="font-size:var(--fs-xs);color:var(--text-muted);margin-left:auto">${time}</span>
           </div>
-          <div style="font-size:0.83rem;color:var(--text-primary);line-height:1.55;margin-bottom:${n.aiResponse?'0.6rem':'0'}">${this._escape(n.content)}</div>
+          <div style="font-size:var(--fs);color:var(--text-primary);line-height:1.55;margin-bottom:${n.aiResponse?'0.6rem':'0'}">${this._escape(n.content)}</div>
           ${n.aiResponse && isMine ? `
             <div style="display:flex;gap:0.5rem;align-items:flex-start;padding-top:0.5rem;border-top:1px solid var(--border)">
-              <span style="font-size:0.68rem;font-weight:700;color:var(--accent);white-space:nowrap">IQ:</span>
-              <span style="font-size:0.78rem;color:var(--text-secondary);line-height:1.5">${this._escape(n.aiResponse)}</span>
+              <span style="font-size:var(--fs-xs);font-weight:700;color:var(--accent);white-space:nowrap">IQ:</span>
+              <span style="font-size:var(--fs);color:var(--text-secondary);line-height:1.5">${this._escape(n.aiResponse)}</span>
             </div>` : ''}
         </div>`;
     }).join('');
@@ -10003,7 +10003,7 @@ const MemberApp = {
   async _loadMessages() {
     const el = document.getElementById('messages-list');
     if (!el) return;
-    el.innerHTML = `<div style="font-size:0.8rem;color:var(--text-muted);padding:1rem 0">Loading…</div>`;
+    el.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted);padding:1rem 0">Loading…</div>`;
     try {
       const res = await fetch(
         `/api/messages?orgCode=${encodeURIComponent(this._orgCode)}&requesterId=${encodeURIComponent(this._userId)}`,
@@ -10029,15 +10029,15 @@ const MemberApp = {
         return `
           <div class="card" style="margin-bottom:0.6rem;${isMine?'border-color:rgba(124,90,245,0.2)':''}">
             <div style="display:flex;align-items:center;gap:0.4rem;margin-bottom:0.4rem;flex-wrap:wrap">
-              <span style="font-size:0.82rem;font-weight:600">${label}</span>
-              <span style="font-size:0.7rem;color:var(--text-muted)">→ ${target}</span>
-              <span style="font-size:0.7rem;color:var(--text-muted);margin-left:auto">${time}</span>
+              <span style="font-size:var(--fs);font-weight:600">${label}</span>
+              <span style="font-size:var(--fs-xs);color:var(--text-muted)">→ ${target}</span>
+              <span style="font-size:var(--fs-xs);color:var(--text-muted);margin-left:auto">${time}</span>
             </div>
-            <div style="font-size:0.83rem;color:var(--text-secondary);line-height:1.55">${this._escape(m.content)}</div>
+            <div style="font-size:var(--fs);color:var(--text-secondary);line-height:1.55">${this._escape(m.content)}</div>
           </div>`;
       }).join('');
     } catch(e) {
-      el.innerHTML = `<div style="font-size:0.8rem;color:var(--danger)">Could not load messages.</div>`;
+      el.innerHTML = `<div style="font-size:var(--fs);color:var(--danger)">Could not load messages.</div>`;
     }
   },
 
@@ -10349,7 +10349,7 @@ const MemberApp = {
     if (h) h.textContent = copy.title;
     if (hs) hs.textContent = copy.sub;
 
-    box.innerHTML = `<div style="color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
+    box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-md)">Loading…</div>`;
     // SELF AND TEAM, one list, ranked together — the client asked only for scope=self, so every
     // team object was computed and unreachable, and a coach opened this and saw nothing.
     let j; try { j = await fetch(`/api/objects?kind=${encodeURIComponent(kind)}&scope=all`, { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
@@ -10756,7 +10756,7 @@ const MemberApp = {
     }
     if (!box) return;
     const esc = s => this._escape(String(s == null ? '' : s));
-    box.innerHTML = `<div style="color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
+    box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-md)">Loading…</div>`;
     // The page shell's own heading belongs to the BUCKET, not to one object. Leaving it above a
     // thread stacked two titles and two subtitles on top of the thing you tapped.
     const shell = document.querySelector('#page-inquiry .page-header');
@@ -11180,24 +11180,29 @@ const MemberApp = {
     } catch (_) {}
   },
 
-  /* THE REPORT, for whoever attached it. A 403 here is the ordinary case for a player, so it
-     renders nothing rather than an error — being told you are not the audience for a thing you
-     never asked for is noise. */
+  /* HOW IT LANDED — FOR EVERYBODY IT WAS FOR, not only whoever attached it.
+
+     Founder decision: "Why can't a squad see how many of their peers engaged?" The cohort floor
+     is what makes a count of people safe to show, and a role check on top of it was a second rule
+     doing the first one's job badly — withholding from a squad a nameless fact about that squad.
+
+     `ok` is whether the request worked and `reported` is whether there is a report, so a lawful
+     refusal renders its REASON. An empty panel would say "nothing happened", which is a different
+     and false claim from "too few people for this to stay anonymous". */
   async _renderMaterialReport(materialId) {
     const box = document.getElementById('iqt-mat-report');
     if (!box) return;
     const esc = s => this._escape(String(s == null ? '' : s));
     let j = null;
     try {
-      const r = await fetch(`/api/materials/${encodeURIComponent(materialId)}/understanding`, { headers: this._authHeaders() });
-      if (r.status === 403) { box.innerHTML = ''; return; }
-      j = await r.json();
+      j = await fetch(`/api/materials/${encodeURIComponent(materialId)}/understanding`,
+        { headers: this._authHeaders() }).then(r => r.json());
     } catch (_) { return; }
     if (!j || !j.ok) { box.innerHTML = ''; return; }
     box.innerHTML = `
       <div class="iqt-mat-head">How it landed</div>
       <p class="iqt-mat-note">${esc(j.note)}</p>
-      ${j.ok === false ? '' : `
+      ${j.reported === false ? '' : `
         <div class="iqt-bars">${(j.parts || []).map(p => `
           <div class="iqt-bar-row">
             <span class="iqt-bar-lab" title="${esc(p.heading)}">${esc(p.heading)}</span>
@@ -11208,10 +11213,11 @@ const MemberApp = {
             <span class="iqt-bar-val">${esc(p.gotIt)} / ${esc(p.notYet)}</span>
           </div>`).join('')}</div>`}
       <ul class="iqt-chart-lim">${(j.limitations || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>
-      <div class="iq-field"><textarea id="iqt-recompose" class="iq-field-input" rows="2"
-        placeholder="Recreate this for something else — say what for."></textarea></div>
-      <button type="button" class="iqt-sec-send" onclick="MemberApp.recomposeMaterial('${esc(materialId)}')">Recreate it</button>
-      <div class="iqt-recomposed" id="iqt-recomposed"></div>`;
+      ${j.mayRecompose ? `
+        <div class="iq-field"><textarea id="iqt-recompose" class="iq-field-input" rows="2"
+          placeholder="Recreate this for something else — say what for."></textarea></div>
+        <button type="button" class="iqt-sec-send" onclick="MemberApp.recomposeMaterial('${esc(materialId)}')">Recreate it</button>
+        <div class="iqt-recomposed" id="iqt-recomposed"></div>` : ''}`;
   },
 
   async recomposeMaterial(materialId) {
@@ -11302,7 +11308,7 @@ const MemberApp = {
     if (room !== 'focus' && !nodeId) return;
     const esc = s => this._escape(String(s == null ? '' : s));
     this._forumCtx = { nodeId, objectId, room, backKind };
-    box.innerHTML = `<div style="color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
+    box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-md)">Loading…</div>`;
     let j; try {
       j = await fetch(this._forumURL(this._forumCtx), { headers: this._authHeaders() }).then(r => r.json());
     } catch (_) { j = null; }
@@ -12156,10 +12162,10 @@ const MemberApp = {
       const how = s.authority === 'organisation' ? 'as authoritative organisation evidence'
                 : s.authority === 'shared_unverified' ? 'shared with the team (your account — not yet verified)'
                 : 'privately, just for you';
-      savedHtml = `<div class="iq-saved" style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-secondary);border-left:2px solid var(--success);padding-left:0.6rem">
+      savedHtml = `<div class="iq-saved" style="margin-top:0.5rem;font-size:var(--fs);color:var(--text-secondary);border-left:2px solid var(--success);padding-left:0.6rem">
         Saved ${esc(how)} · source “${esc(s.source)}”. I can cite it now.</div>`;
     } else if (j.capturePrompt) {
-      savedHtml = `<div class="iq-saved" style="margin-top:0.5rem;font-size:0.82rem;color:var(--text-secondary)">${esc(j.capturePrompt.message)}</div>`;
+      savedHtml = `<div class="iq-saved" style="margin-top:0.5rem;font-size:var(--fs);color:var(--text-secondary)">${esc(j.capturePrompt.message)}</div>`;
     }
     // Ambiguity: the assistant asks WHICH open question the user is answering.
     let clarifyHtml = '';
@@ -12212,7 +12218,7 @@ const MemberApp = {
     return `<div class="iq-proposal" data-proposal="${esc(p.id)}" style="border-left:3px solid var(--accent)">
       <div class="iq-proposal-top"><span class="iq-proposal-label">Record this answer?</span> <span class="iq-badge iq-badge-share">${esc(pv.visibility || 'organisation shared')}</span></div>
       <div class="iq-proposal-why" style="font-style:italic">“${esc(pv.willRecord)}”</div>
-      <div style="font-size:0.74rem;color:var(--text-secondary);margin-top:2px">In answer to: ${esc(pv.question)} · will be treated as <strong>${esc(trust)}</strong>.</div>
+      <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:2px">In answer to: ${esc(pv.question)} · will be treated as <strong>${esc(trust)}</strong>.</div>
       <div class="iq-proposal-actions">
         <button class="btn-primary btn-sm" onclick="MemberApp.confirmProposal('${esc(turnId)}','${esc(p.id)}')">Confirm</button>
         <button class="btn btn-outline btn-sm" onclick="document.getElementById('iq-composer-input').focus()">Edit (answer again)</button>

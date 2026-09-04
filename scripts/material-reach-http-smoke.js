@@ -181,9 +181,25 @@ const server = app.listen(0, async () => {
       !Object.values(users).some(u => u.role === 'member' && JSON.stringify(rep.j).includes(u.name)));
     ok('MR16b …and it says on the report that it counts people and never names them',
       (rep.j.limitations || []).some(l => /never names them/i.test(l)));
-    ok('MR17 a PLAYER cannot read the report — it is for whoever attached it',
-      (await get(`/api/materials/${MID}/understanding`, T.p1)).status === 403);
-    ok('MR17b …and neither can a coach who leads a different squad',
+    /* MR17 — FOUNDER DECISION, OVERRULING THE FIRST VERSION: "Why can't a squad see how many of
+       their peers engaged?"
+
+       The first version gated this on leading the group, and that was a second rule doing the
+       cohort floor's job badly. The floor is what makes a count of people safe — five either
+       side, so nobody can put the names back — and a role check on top of it protects nothing
+       extra while withholding from a squad a nameless fact about that squad. What stays with the
+       leader is AUTHORSHIP: attaching, and recreating somebody else's briefing. This is a read. */
+    const playerRep = await get(`/api/materials/${MID}/understanding`, T.p1);
+    ok('MR17 A PLAYER READS THE SAME REPORT — the cohort floor is the privacy instrument, and a role check on top of it withholds from a squad a nameless fact about that squad',
+      playerRep.status === 200 && playerRep.j.reported === true);
+    ok('MR17b …byte for byte the same counts the coach gets, so there is no second, quieter version of the truth for the people it is about',
+      JSON.stringify(playerRep.j.parts) === JSON.stringify(rep.j.parts) &&
+      playerRep.j.cohort.said === rep.j.cohort.said);
+    ok('MR17c …with no names or ids in the player\'s copy either',
+      !SQUAD.some(id => new RegExp(`\\b${id}\\b`).test(JSON.stringify(playerRep.j))));
+    ok('MR17d …but RECREATING the briefing stays the author\'s, and the server says so rather than the client guessing — a control shown to somebody who will get a 403 is a hollow button',
+      playerRep.j.mayRecompose === false && rep.j.mayRecompose === true);
+    ok('MR17e …and somebody outside the squad still gets nothing, because the audience is still the object\'s',
       (await get(`/api/materials/${MID}/understanding`, otherT)).status === 404);
 
     /* ── MR18: THE FLOOR BITES ON A SMALL SQUAD. The gate, exercised rather than assumed. ── */
@@ -235,13 +251,28 @@ const server = app.listen(0, async () => {
        in the room. Aggregates are the leader's read; the dates the focus itself carries are
        everybody's. */
     const playerCh = await get('/api/objects/focus/tf1/chart', T.p1);
-    ok('MR21 a PLAYER gets no aggregate picture of their squad — not the spread, and not a dot for every teammate who engaged either',
-      playerCh.status === 200 &&
-      (playerCh.j.chart === null || playerCh.j.chart.kind !== 'spread') &&
-      !JSON.stringify(playerCh.j).includes('said where they were with it'));
-    ok('MR21b …while the coach\'s own timeline still carries them, which is what proves the line above is a gate and not an absence',
-      JSON.stringify((await get('/api/objects/focus/tf1/chart?kind=timeline', coachT)).j)
-        .includes('said where they were with it'));
+    ok('MR21 A PLAYER GETS THE SAME PICTURE — the squad sees how their own squad is doing with it',
+      playerCh.status === 200 && playerCh.j.chart && playerCh.j.chart.kind === 'spread');
+    ok('MR21b …identical to the coach\'s, because two versions of one truth is how a surface starts lying to somebody',
+      JSON.stringify(playerCh.j.chart.series) === JSON.stringify(ch.j.chart.series));
+    /* MR21c — THE SHAPE THAT CHANGED FOR EVERYONE, leader included. The timeline first drew ONE
+       DATED DOT PER PERSON. That is a weaker answer to "how many" than a number, and it carries a
+       channel the number does not: WHEN each person answered, which in a squad is often enough to
+       say who. The timing went and the count stayed. */
+    const tl = await get('/api/objects/focus/tf1/chart?kind=timeline', T.p1);
+    const tlJSON = JSON.stringify(tl.j);
+    ok('MR21c the timeline says HOW MANY have answered, as one marker — not a dated dot per person, whose timings would say who in a squad this size',
+      /6 of 12 have said where they are with it/.test(tlJSON));
+    ok('MR21d …once, not six times, so the picture cannot be read as six separate occasions',
+      (tlJSON.match(/have said where they are with it/g) || []).length === 1);
+    ok('MR21e …and the coach\'s timeline is the same one, because a shape that leaks is not made safe by who is looking at it',
+      /6 of 12 have said where they are with it/.test(
+        JSON.stringify((await get('/api/objects/focus/tf1/chart?kind=timeline', coachT)).j)));
+    /* MR21f — THE FLOOR IS STILL THE GATE. Opening the read to the squad only holds because the
+       thing protecting people was never the role check. */
+    const smallTl = await get('/api/objects/focus/tf2/chart?kind=timeline', otherT);
+    ok('MR21f a one-person squad gets NO engagement marker at all — the floor is doing the protecting, which is the whole reason the role check could go',
+      !/have said where they are with it/.test(JSON.stringify(smallTl.j)));
     const smallCh = await get('/api/objects/focus/tf2/chart', otherT);
     ok('MR22 the chart on the small squad is REFUSED WITH A REASON rather than drawn from one person',
       smallCh.j.chart === null && /stays anonymous/i.test(smallCh.j.note || ''));
@@ -329,8 +360,12 @@ const server = app.listen(0, async () => {
       /AttachmentHandler\.process\(file\)/.test(src));
     ok('MR24b …a player can open a part and say where they are with it',
       /MemberApp\.markSection\('/.test(src) && /materials\/\$\{encodeURIComponent\(ctx\.materialId\)\}\/engaged/.test(src));
-    ok('MR24c …the coach\'s report and the recreate control are both reachable',
+    ok('MR24c …the report and the recreate control are both reachable',
       /_renderMaterialReport\(/.test(src) && /\/understanding/.test(src) && /recomposeMaterial\(/.test(src));
+    ok('MR24g …the report renders a lawful REFUSAL rather than an empty panel, because a blank space says "nothing happened" and that is a different, false claim',
+      /j\.reported === false \? '' :/.test(src) && !/r\.status === 403/.test(src));
+    ok('MR24h …and the recreate control is shown only where the SERVER says it may be used',
+      /\$\{j\.mayRecompose \? `/.test(src));
     /* MR24d-f — SHARPENED AFTER THREE MUTATIONS BIT NOTHING. Each of these first matched the
        function's own DEFINITION, so deleting the call that invokes it left them green: the
        renderer existed, was never run, and the suite said the feature was reachable. Existence is

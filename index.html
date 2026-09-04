@@ -46,8 +46,8 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260904f"/>
-<link rel="stylesheet" href="css/member.css?v=20260904f"/>
+<link rel="stylesheet" href="css/styles.css?v=20260904h"/>
+<link rel="stylesheet" href="css/member.css?v=20260904h"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -87,9 +87,9 @@
         <input class="form-control" type="password" id="login-password" placeholder="Your password" autocomplete="current-password"
           onkeydown="if(event.key==='Enter')handleLogin()"/>
       </div>
-      <div id="login-error" style="color:#f74f4f;font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
+      <div id="login-error" style="color:#f74f4f;font-size:var(--fs);margin-bottom:0.8rem;display:none"></div>
       <button class="btn-primary" onclick="handleLogin()">Sign In →</button>
-      <div style="text-align:center;margin-top:1rem;font-size:0.82rem;color:var(--text-secondary)">
+      <div style="text-align:center;margin-top:1rem;font-size:var(--fs);color:var(--text-secondary)">
         New organisation? <a href="#" onclick="showLoginPanel('setup')" style="color:var(--accent)">Set up here →</a>
       </div>
     </div>
@@ -118,9 +118,9 @@
         <input class="form-control" type="password" id="reg-password" placeholder="At least 8 characters" autocomplete="new-password"
           onkeydown="if(event.key==='Enter')handleInviteRegister()"/>
       </div>
-      <div id="reg-error" style="color:#f74f4f;font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
+      <div id="reg-error" style="color:#f74f4f;font-size:var(--fs);margin-bottom:0.8rem;display:none"></div>
       <button class="btn-primary" onclick="handleInviteRegister()">Create Account →</button>
-      <div style="text-align:center;margin-top:1rem;font-size:0.82rem;color:var(--text-secondary)">
+      <div style="text-align:center;margin-top:1rem;font-size:var(--fs);color:var(--text-secondary)">
         Already have an account? <a href="#" onclick="showLoginPanel('login')" style="color:var(--accent)">Sign in →</a>
       </div>
     </div>
@@ -156,7 +156,7 @@
         <label>TELL US ABOUT YOUR ORGANISATION <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted)">— IntelliQ reads this to adapt to you</span></label>
         <textarea class="form-control" id="setup-org-description" rows="3" style="resize:vertical"
           placeholder="e.g. We're a professional development programme for emerging leaders in the financial sector. Our members are high-potential individuals at mid-career stage. We want to accelerate their growth, build accountability habits, and prepare them for senior roles within two years. Success looks like measurable growth in decision-making and consistent engagement."></textarea>
-        <div style="font-size:0.74rem;color:var(--text-muted);margin-top:0.4rem">Be honest and specific — the more you tell it, the better IntelliQ adapts.</div>
+        <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.4rem">Be honest and specific — the more you tell it, the better IntelliQ adapts.</div>
       </div>
       <div class="form-group">
         <label>PLATFORM GRADE</label>
@@ -166,9 +166,9 @@
           <option value="C">C-Grade — Simple Monitoring + Basic Evaluation</option>
         </select>
       </div>
-      <div id="setup-error" style="color:#f74f4f;font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
+      <div id="setup-error" style="color:#f74f4f;font-size:var(--fs);margin-bottom:0.8rem;display:none"></div>
       <button class="btn-primary" onclick="handleSetup()">Create Organisation →</button>
-      <div style="text-align:center;margin-top:1rem;font-size:0.82rem;color:var(--text-secondary)">
+      <div style="text-align:center;margin-top:1rem;font-size:var(--fs);color:var(--text-secondary)">
         Already have an org? <a href="#" onclick="showLoginPanel('login')" style="color:var(--accent)">Sign in →</a>
       </div>
     </div>
@@ -206,7 +206,7 @@
           <div class="user-role">Administrator</div>
         </div>
         <button onclick="Auth.logout()" title="Sign out"
-          style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1rem;padding:4px;flex-shrink:0">⏻</button>
+          style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:var(--fs-xl);padding:4px;flex-shrink:0">⏻</button>
       </div>
     </div>
   </aside>
@@ -225,7 +225,7 @@
         <div class="icon-btn" id="notif-btn" data-tip="Notifications" style="cursor:pointer">
           <span class="tb-ic-bell"></span> <div class="badge"></div>
         </div>
-        <div style="font-size:0.8rem;color:var(--text-secondary);padding:0 0.5rem" id="topbar-org">Org</div>
+        <div style="font-size:var(--fs);color:var(--text-secondary);padding:0 0.5rem" id="topbar-org">Org</div>
         <!-- User account widget — sign out, name, email, role -->
         <div class="topbar-user-widget" id="topbar-user-widget">
           <button class="topbar-avatar-btn" id="topbar-avatar-btn"
@@ -282,7 +282,7 @@
           <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem">
             <div>
               <div class="card-title" id="timeline-modal-title">Member Timeline</div>
-              <div style="font-size:0.75rem;color:var(--text-secondary)" id="timeline-modal-sub">Loading…</div>
+              <div style="font-size:var(--fs-sm);color:var(--text-secondary)" id="timeline-modal-sub">Loading…</div>
             </div>
             <button class="btn btn-ghost btn-sm" onclick="document.getElementById('member-timeline-modal').style.display='none'">Close</button>
           </div>
@@ -382,19 +382,19 @@
               <div class="card-header"><div class="card-title">Organisation Details</div></div>
               <div class="card-body">
                 <div style="margin-bottom:0.8rem">
-                  <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px">ORG NAME</div>
+                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">ORG NAME</div>
                   <div style="font-weight:600" id="settings-org-name">—</div>
                 </div>
                 <div style="margin-bottom:0.8rem">
-                  <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px">TYPE / CONTEXT</div>
+                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">TYPE / CONTEXT</div>
                   <div style="font-weight:600" id="settings-mode">—</div>
                 </div>
                 <div style="margin-bottom:0.8rem">
-                  <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px">PLATFORM GRADE</div>
+                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">PLATFORM GRADE</div>
                   <div id="settings-grade"></div>
                 </div>
                 <div>
-                  <div style="font-size:0.72rem;color:var(--text-secondary);margin-bottom:2px">ADMINISTRATOR</div>
+                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">ADMINISTRATOR</div>
                   <div style="font-weight:600" id="settings-admin">—</div>
                 </div>
               </div>
@@ -406,50 +406,50 @@
             <div class="card">
               <div class="card-header"><div class="card-title">Display language</div></div>
               <div class="card-body">
-                <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
                   IntelliQ's intelligence is universal — the same kernel for a club, a school, or a business. This only changes the <strong>words</strong> it shows your people. Pick the set that fits, and IntelliQ will say "player / team / match", "student / class / lesson", or "team member / department / meeting" throughout.
                 </div>
                 <div id="domain-catalog" style="display:flex;flex-direction:column;gap:0.4rem"></div>
-                <div id="domain-status" style="font-size:0.8rem;margin-top:0.5rem"></div>
+                <div id="domain-status" style="font-size:var(--fs);margin-top:0.5rem"></div>
               </div>
             </div>
             <div class="card">
               <div class="card-header"><div class="card-title">AI / Kernel Intelligence</div></div>
               <div class="card-body">
-                <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.7rem">
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem">
                   Test whether the language model is connected and see how it reasons on demo-style prompts.
                   With no key, the kernel runs on its deterministic fallbacks.
                 </div>
                 <button class="btn btn-accent btn-sm" id="llm-selftest-btn" onclick="runLlmSelfTest()">Run LLM self-test</button>
-                <div id="llm-selftest-result" style="margin-top:0.8rem;font-size:0.82rem"></div>
+                <div id="llm-selftest-result" style="margin-top:0.8rem;font-size:var(--fs)"></div>
               </div>
             </div>
             <div class="card">
               <div class="card-header"><div class="card-title">Load the demo organisation</div></div>
               <div class="card-body">
-                <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
                   Installs a demo organisation &mdash; a college men's soccer programme, 28 players and 3 staff, with a few real open questions and the evidence behind them &mdash; as its own org. Everyone in it is fictional. It never touches your other data. After it loads, sign out and log in with the details shown.
                 </div>
                 <button class="btn btn-accent btn-sm" id="seed-demo-btn" onclick="seedDemoOrg()">Load demo organisation</button>
-                <div id="seed-demo-result" style="margin-top:0.8rem;font-size:0.82rem"></div>
+                <div id="seed-demo-result" style="margin-top:0.8rem;font-size:var(--fs)"></div>
               </div>
             </div>
             <div class="card">
               <div class="card-header"><div class="card-title">What this instance costs to load</div></div>
               <div class="card-body">
-                <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
                   A cold start loads the whole instance out of the database, and the host spins down when idle &mdash; so the size here, multiplied by how many times a month it restarts, is roughly the network transfer bill. Check it before it checks you.
                 </div>
                 <button class="btn btn-outline btn-sm" id="footprint-btn" onclick="showFootprint()">Check the size</button>
-                <div id="footprint-result" style="margin-top:0.8rem;font-size:0.82rem"></div>
+                <div id="footprint-result" style="margin-top:0.8rem;font-size:var(--fs)"></div>
               </div>
             </div>
             <div class="card">
               <div class="card-header"><div class="card-title">Remove an organisation</div></div>
               <div class="card-body">
                 <details>
-                  <summary style="cursor:pointer;font-size:0.85rem;color:var(--text-secondary)">Permanent. Open only if that is what you mean to do.</summary>
-                  <div style="font-size:0.82rem;color:var(--text-secondary);margin:0.7rem 0;line-height:1.5">
+                  <summary style="cursor:pointer;font-size:var(--fs-md);color:var(--text-secondary)">Permanent. Open only if that is what you mean to do.</summary>
+                  <div style="font-size:var(--fs);color:var(--text-secondary);margin:0.7rem 0;line-height:1.5">
                     Deletes an organisation and everything it owns &mdash; its people, its evidence, its inquiries, its conversations &mdash; from memory and from the database. There is no undo. Deleting a seed from the code does not do this; only this does.
                   </div>
                   <input type="password" id="purge-key" class="input" placeholder="Platform key" autocomplete="off"
@@ -457,14 +457,14 @@
                   <input type="text" id="purge-code" class="input" placeholder="Type the org code to confirm" autocomplete="off"
                     style="width:100%;margin-bottom:0.6rem">
                   <button class="btn btn-outline btn-sm" id="purge-btn" onclick="purgeOrg()">Remove it</button>
-                  <div id="purge-result" style="margin-top:0.8rem;font-size:0.82rem"></div>
+                  <div id="purge-result" style="margin-top:0.8rem;font-size:var(--fs)"></div>
                 </details>
               </div>
             </div>
             <div class="card">
               <div class="card-header"><div class="card-title">Connect any app (API)</div></div>
               <div class="card-body">
-                <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
                   One pipe for any tool your org uses — in-house systems, Google Apps scripts, a CRM, or a no-code automation. Send numbers (a score, a count, a rating) and IntelliQ reasons over them. The more you feed in, the sharper it gets.
                 </div>
                 <div id="ingest-token-box"></div>
@@ -474,60 +474,60 @@
             <div class="card">
               <div class="card-header"><div class="card-title">Connect anything (auto-sync)</div></div>
               <div class="card-body">
-                <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
                   Point IntelliQ at any system that has a data URL — a GPS provider, a wearable API, a Google Sheet published as JSON, an in-house endpoint. It polls on your schedule and deciphers whatever comes back into signals, matching each record to the right person by name or email. No integration to build.
                 </div>
                 <div id="connections-list" style="margin-bottom:0.7rem"></div>
                 <details id="connection-add">
-                  <summary style="cursor:pointer;font-size:0.84rem;color:var(--accent);margin-bottom:0.5rem">＋ Add a connection</summary>
+                  <summary style="cursor:pointer;font-size:var(--fs-md);color:var(--accent);margin-bottom:0.5rem">＋ Add a connection</summary>
                   <div style="display:flex;flex-direction:column;gap:0.4rem;margin-top:0.5rem">
                     <input class="form-input" id="conn-name" placeholder="Name — e.g. GPS vendor, Wearables API">
                     <input class="form-input" id="conn-url" placeholder="Data URL (https://…) returning JSON">
                     <input class="form-input" id="conn-auth" placeholder="Auth header value (optional) — e.g. Bearer abc123">
                     <div style="display:flex;gap:0.4rem;align-items:center">
-                      <span style="font-size:0.8rem;color:var(--text-muted)">Sync every</span>
+                      <span style="font-size:var(--fs);color:var(--text-muted)">Sync every</span>
                       <input class="form-input" id="conn-hours" type="number" min="1" max="168" value="24" style="width:80px">
-                      <span style="font-size:0.8rem;color:var(--text-muted)">hours</span>
+                      <span style="font-size:var(--fs);color:var(--text-muted)">hours</span>
                     </div>
                     <input class="form-input" id="conn-path" placeholder="JSON path to the records (optional) — e.g. data.rows">
                     <button class="btn btn-accent btn-sm" id="conn-add-btn" onclick="addConnection()">Add &amp; test</button>
                   </div>
                 </details>
-                <div id="connections-status" style="font-size:0.8rem;margin-top:0.5rem"></div>
+                <div id="connections-status" style="font-size:var(--fs);margin-top:0.5rem"></div>
               </div>
             </div>
             <div class="card">
               <div class="card-header"><div class="card-title">Connect an app (Strava, Google, Teams, Hudl…)</div></div>
               <div class="card-body">
-                <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.5rem;line-height:1.5">
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.5rem;line-height:1.5">
                   These apps connect by login (OAuth). One-time setup per app: register it in the provider's developer console, set the redirect URL below, and paste the client ID and secret they give you. Then anyone can connect with a tap and their data flows in automatically.
                 </div>
-                <div id="oauth-redirect" style="font-size:0.76rem;color:var(--text-muted);margin-bottom:0.6rem"></div>
+                <div id="oauth-redirect" style="font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:0.6rem"></div>
                 <div id="oauth-catalog"></div>
-                <div id="oauth-status" style="font-size:0.8rem;margin-top:0.5rem"></div>
+                <div id="oauth-status" style="font-size:var(--fs);margin-top:0.5rem"></div>
               </div>
             </div>
             <div class="card">
               <div class="card-header"><div class="card-title">What IntelliQ may do (policies)</div></div>
               <div class="card-body">
-                <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
                   Your organisation's constitution — the rules IntelliQ follows before it takes any action. It always asks "am I <em>allowed</em> to?", not just "can I?". Reading and drafting are free; anything outward or destructive is gated here.
                 </div>
-                <div id="policies-status" style="font-size:0.8rem;margin-bottom:0.6rem"></div>
+                <div id="policies-status" style="font-size:var(--fs);margin-bottom:0.6rem"></div>
                 <div id="policies-list"></div>
                 <div style="display:flex;gap:0.4rem;margin-top:0.6rem;flex-wrap:wrap">
                   <button class="btn btn-outline btn-sm" onclick="loadPolicies()">Refresh</button>
-                  <button class="btn-ghost btn-sm" style="font-size:0.78rem;color:var(--text-muted)" onclick="resetPolicies()">Restore defaults</button>
+                  <button class="btn-ghost btn-sm" style="font-size:var(--fs);color:var(--text-muted)" onclick="resetPolicies()">Restore defaults</button>
                 </div>
               </div>
             </div>
             <div class="card">
               <div class="card-header"><div class="card-title">Data mappings (interpretation boundary)</div></div>
               <div class="card-body">
-                <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
                   Connector data is never guessed into your record. IntelliQ proposes what each source's fields mean; you review and approve a versioned mapping, and only then does that data become part of your organisation's truth. Data is safely held until you approve.
                 </div>
-                <div id="mappings-status" style="font-size:0.8rem;margin-bottom:0.6rem"></div>
+                <div id="mappings-status" style="font-size:var(--fs);margin-bottom:0.6rem"></div>
                 <div id="mappings-list"></div>
                 <button class="btn btn-outline btn-sm" onclick="loadMappings()">Refresh mappings</button>
               </div>
@@ -535,7 +535,7 @@
             <div class="card">
               <div class="card-header"><div class="card-title">AI &amp; Your Values</div></div>
               <div class="card-body">
-                <div style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6">
+                <div style="font-size:var(--fs);color:var(--text-secondary);line-height:1.6">
                   Your AI reasons from <strong>your organisation's values</strong> — the ones set here.
                   The Advisor, Group Copilot, briefings and check-in responses all take on that perspective,
                   without ever quoting or lecturing. Edit them in the <strong>Values</strong> tab.
@@ -552,7 +552,7 @@
             <div class="card-header">
               <div>
                 <div class="card-title">Performance Metrics</div>
-                <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">Define what you measure. These apply across all members and feed into AI analysis.</div>
+                <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:2px">Define what you measure. These apply across all members and feed into AI analysis.</div>
               </div>
               <div style="display:flex;gap:0.5rem">
                 <button class="btn btn-outline btn-sm" onclick="renderMetricSuggest()">AI Suggest</button>
@@ -560,7 +560,7 @@
               </div>
             </div>
             <div class="card-body" id="settings-metrics-list">
-              <div style="color:var(--text-muted);font-size:0.82rem">Loading…</div>
+              <div style="color:var(--text-muted);font-size:var(--fs)">Loading…</div>
             </div>
           </div>
           <div id="settings-metric-form" style="margin-top:1rem"></div>
@@ -572,15 +572,15 @@
             <div class="card-header">
               <div>
                 <div class="card-title">Org Values</div>
-                <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">Core principles that IntelliQ uses to contextualise all AI analysis.</div>
+                <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:2px">Core principles that IntelliQ uses to contextualise all AI analysis.</div>
               </div>
               <button class="btn btn-accent btn-sm" onclick="saveOrgValues()">Save Values</button>
             </div>
             <div class="card-body">
-              <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.8rem">One value per line. Be specific — "Honesty" is better than "Good".</div>
+              <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.8rem">One value per line. Be specific — "Honesty" is better than "Good".</div>
               <textarea id="settings-values-input" class="form-control" rows="8"
                 placeholder="Honesty&#10;Accountability&#10;Resilience&#10;Teamwork&#10;Growth mindset"></textarea>
-              <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.5rem" id="settings-values-status"></div>
+              <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.5rem" id="settings-values-status"></div>
             </div>
           </div>
         </div>
@@ -591,12 +591,12 @@
             <div class="card-header">
               <div>
                 <div class="card-title">Org Goals</div>
-                <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px">High-level goals for your organisation. IntelliQ tracks progress against these.</div>
+                <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:2px">High-level goals for your organisation. IntelliQ tracks progress against these.</div>
               </div>
               <button class="btn btn-accent btn-sm" onclick="renderAddGoal()">+ Add Goal</button>
             </div>
             <div class="card-body" id="settings-goals-list">
-              <div style="color:var(--text-muted);font-size:0.82rem">Loading…</div>
+              <div style="color:var(--text-muted);font-size:var(--fs)">Loading…</div>
             </div>
           </div>
           <div id="settings-goal-form" style="margin-top:1rem"></div>
@@ -613,7 +613,7 @@
                     <div style="display:flex;align-items:center;justify-content:space-between">
                       <div>
                         <div style="font-weight:600;margin-bottom:2px">A-Grade Platform</div>
-                        <div style="font-size:0.75rem;color:var(--text-secondary)">Full IntelliQ + AI + Real-time</div>
+                        <div style="font-size:var(--fs-sm);color:var(--text-secondary)">Full IntelliQ + AI + Real-time</div>
                       </div>
                       <span class="grade-badge grade-A">● A</span>
                     </div>
@@ -624,7 +624,7 @@
                     <div style="display:flex;align-items:center;justify-content:space-between">
                       <div>
                         <div style="font-weight:600;margin-bottom:2px">B-Grade Platform</div>
-                        <div style="font-size:0.75rem;color:var(--text-secondary)">Performance + Basic IntelliQ</div>
+                        <div style="font-size:var(--fs-sm);color:var(--text-secondary)">Performance + Basic IntelliQ</div>
                       </div>
                       <span class="grade-badge grade-B">● B</span>
                     </div>
@@ -635,7 +635,7 @@
                     <div style="display:flex;align-items:center;justify-content:space-between">
                       <div>
                         <div style="font-weight:600;margin-bottom:2px">C-Grade Platform</div>
-                        <div style="font-size:0.75rem;color:var(--text-secondary)">Simple monitoring only</div>
+                        <div style="font-size:var(--fs-sm);color:var(--text-secondary)">Simple monitoring only</div>
                       </div>
                       <span class="grade-badge grade-C">● C</span>
                     </div>
@@ -838,9 +838,9 @@
         </div>
         <div id="checkin-done" style="display:none;padding:0">
           <div class="card" style="border-color:rgba(79,247,122,0.3);text-align:center;padding:1.4rem 1rem">
-            <div style="font-size:2rem;margin-bottom:0.4rem"></div>
-            <div style="font-weight:700;font-size:0.9rem">Check-in done for today</div>
-            <div style="font-size:0.78rem;color:var(--text-muted);margin-top:4px">Come back tomorrow</div>
+            <div style="font-size:var(--fs-6xl);margin-bottom:0.4rem"></div>
+            <div style="font-weight:700;font-size:var(--fs-lg)">Check-in done for today</div>
+            <div style="font-size:var(--fs);color:var(--text-muted);margin-top:4px">Come back tomorrow</div>
           </div>
           <div id="checkin-ai-replay" style="display:none"></div>
         </div>
@@ -864,10 +864,10 @@
           <div id="checkin-ai-response" style="display:none;margin-top:1rem">
             <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06)">
               <div style="display:flex;align-items:flex-start;gap:0.7rem">
-                <div style="width:28px;height:28px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.72rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
+                <div style="width:28px;height:28px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:var(--fs-sm);font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
                 <div>
-                  <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.4rem">IntelliQ</div>
-                  <div id="checkin-ai-text" style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6"></div>
+                  <div style="font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.4rem">IntelliQ</div>
+                  <div id="checkin-ai-text" style="font-size:var(--fs-md);color:var(--text-secondary);line-height:1.6"></div>
                 </div>
               </div>
             </div>
@@ -901,7 +901,7 @@
           <div class="composer-actions">
             <button class="btn-primary" id="notes-submit-btn" onclick="MemberApp.submitNote()">Add</button>
             <button class="btn btn-outline btn-sm" type="button" onclick="MemberApp.toggleNoteOptions()">Options</button>
-            <span id="notes-status" style="font-size:0.78rem;color:var(--text-muted)"></span>
+            <span id="notes-status" style="font-size:var(--fs);color:var(--text-muted)"></span>
           </div>
           <!-- Extras stay out of the way until asked for — clean by default. -->
           <div id="note-options" style="display:none;margin-top:0.9rem">
@@ -921,10 +921,10 @@
               <button class="note-type-btn"        data-type="shared"    onclick="MemberApp.selectNoteType('shared')">Shared</button>
               <button class="note-type-btn"        data-type="anonymous" onclick="MemberApp.selectNoteType('anonymous')">Anonymous</button>
             </div>
-            <div id="note-type-desc" style="font-size:0.74rem;color:var(--text-muted);margin-top:0.4rem">Only you and IntelliQ see this.</div>
+            <div id="note-type-desc" style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.4rem">Only you and IntelliQ see this.</div>
             <div id="note-group-row" style="display:none;margin-top:0.6rem">
               <div class="note-opt-label">Post to group</div>
-              <select class="form-input" id="note-group-id" style="font-size:0.82rem">
+              <select class="form-input" id="note-group-id" style="font-size:var(--fs)">
                 <option value="">— Select group —</option>
               </select>
             </div>
@@ -933,10 +933,10 @@
         <div id="note-ai-response" style="display:none;margin-bottom:0.8rem">
           <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06)">
             <div style="display:flex;gap:0.7rem;align-items:flex-start">
-              <div style="width:26px;height:26px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.68rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
+              <div style="width:26px;height:26px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:var(--fs-xs);font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
               <div>
-                <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.3rem">IntelliQ</div>
-                <div id="note-ai-text" style="font-size:0.83rem;color:var(--text-secondary);line-height:1.6"></div>
+                <div style="font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.3rem">IntelliQ</div>
+                <div id="note-ai-text" style="font-size:var(--fs);color:var(--text-secondary);line-height:1.6"></div>
               </div>
             </div>
           </div>
@@ -964,7 +964,7 @@
         <div id="inbox-group-notice" style="display:none;margin-bottom:0.8rem">
           <div class="empty-card" style="padding:0.8rem 1rem;flex-direction:row;gap:0.6rem;text-align:left">
             <span class="ui-icon-slot" data-icon="people" style="color:var(--text-muted);display:inline-flex;flex-shrink:0"></span>
-            <div style="font-size:0.78rem;color:var(--text-muted);line-height:1.5">You're not in any groups yet. You'll see group messages once you've been added to one.</div>
+            <div style="font-size:var(--fs);color:var(--text-muted);line-height:1.5">You're not in any groups yet. You'll see group messages once you've been added to one.</div>
           </div>
         </div>
         <div class="card" style="margin-bottom:0.8rem">
@@ -972,18 +972,18 @@
           <textarea class="form-input" id="msg-content" rows="2" style="resize:none;margin-bottom:0.6rem"
             placeholder="Write your message…"></textarea>
           <div style="margin-bottom:0.6rem">
-            <div style="font-size:0.72rem;color:var(--text-muted);margin-bottom:0.3rem">Send to</div>
-            <select class="form-input" id="msg-to-type" style="font-size:0.82rem;margin-bottom:0.4rem" onchange="MemberApp.updateMsgRecipient()">
+            <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-bottom:0.3rem">Send to</div>
+            <select class="form-input" id="msg-to-type" style="font-size:var(--fs);margin-bottom:0.4rem" onchange="MemberApp.updateMsgRecipient()">
               <option value="group">A group</option>
               <option value="org">Whole organisation</option>
             </select>
-            <select class="form-input" id="msg-to-group" style="font-size:0.82rem">
+            <select class="form-input" id="msg-to-group" style="font-size:var(--fs)">
               <option value="">— Select group —</option>
             </select>
           </div>
           <div style="display:flex;gap:0.4rem">
-            <button class="btn-primary" style="flex:1;padding:0.6rem;font-size:0.83rem" onclick="MemberApp.sendMessage(false)">Send (Known)</button>
-            <button style="flex:1;padding:0.6rem;font-size:0.83rem;border-radius:10px;border:1px solid rgba(124,90,245,0.4);background:rgba(124,90,245,0.1);color:var(--accent);cursor:pointer;font-weight:600" onclick="MemberApp.sendMessage(true)">Anonymous</button>
+            <button class="btn-primary" style="flex:1;padding:0.6rem;font-size:var(--fs)" onclick="MemberApp.sendMessage(false)">Send (Known)</button>
+            <button style="flex:1;padding:0.6rem;font-size:var(--fs);border-radius:10px;border:1px solid rgba(124,90,245,0.4);background:rgba(124,90,245,0.1);color:var(--accent);cursor:pointer;font-weight:600" onclick="MemberApp.sendMessage(true)">Anonymous</button>
           </div>
         </div>
         <div id="messages-list"></div>
@@ -1024,7 +1024,7 @@
             <button class="btn btn-outline btn-sm" onclick="toggleLeaderAddMember()">Cancel</button>
           </div>
           <div class="ldr-add-hint">New members join under you and get an invite to set their password.</div>
-          <div id="ldr-add-result" style="font-size:0.8rem;margin-top:0.4rem"></div>
+          <div id="ldr-add-result" style="font-size:var(--fs);margin-top:0.4rem"></div>
         </div>
         <div id="ldr-people-content"></div>
       </section>
@@ -1051,7 +1051,7 @@
       </div>
     </div>
     <div id="notif-panel-content" style="padding:0.5rem 0">
-      <div style="padding:1rem;text-align:center;color:var(--text-muted);font-size:0.82rem">
+      <div style="padding:1rem;text-align:center;color:var(--text-muted);font-size:var(--fs)">
         Open the app and alerts will appear here.
       </div>
     </div>
@@ -1066,10 +1066,10 @@
   <div class="modal" style="max-width:720px">
     <div class="modal-header">
       <div style="display:flex;align-items:center;gap:12px">
-        <div class="user-avatar" id="pm-avatar" style="width:40px;height:40px;font-size:0.9rem;border-radius:50%">A</div>
+        <div class="user-avatar" id="pm-avatar" style="width:40px;height:40px;font-size:var(--fs-lg);border-radius:50%">A</div>
         <div>
           <div class="modal-title" id="pm-name">Name</div>
-          <div style="font-size:0.78rem;color:var(--text-secondary)" id="pm-role">Role</div>
+          <div style="font-size:var(--fs);color:var(--text-secondary)" id="pm-role">Role</div>
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:0.6rem">
@@ -1084,7 +1084,7 @@
       <div id="pm-summary" class="pm-summary" style="margin-bottom:1.2rem"></div>
 
       <!-- Meta row -->
-      <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.2rem;font-size:0.75rem;color:var(--text-secondary)">
+      <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1.2rem;font-size:var(--fs-sm);color:var(--text-secondary)">
         <span id="pm-joined">—</span>
         <span id="pm-active">—</span>
         <span id="pm-streak">—</span>
@@ -1094,15 +1094,15 @@
       <div style="display:flex;gap:1.5rem;margin-bottom:1.4rem;flex-wrap:wrap">
         <div style="display:flex;flex-direction:column;align-items:center;gap:0.4rem">
           <div id="pm-iq-ring"></div>
-          <div style="font-size:0.72rem;color:var(--text-secondary)">IntelliQ Score</div>
+          <div style="font-size:var(--fs-sm);color:var(--text-secondary)">IntelliQ Score</div>
         </div>
         <div style="flex:1;min-width:200px">
           <div style="margin-bottom:0.8rem">
-            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:3px">OVERALL PERFORMANCE</div>
-            <div style="font-size:2.2rem;font-weight:800" id="pm-overall">—</div>
+            <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:3px">OVERALL PERFORMANCE</div>
+            <div style="font-size:var(--fs-6xl);font-weight:800" id="pm-overall">—</div>
           </div>
           <div>
-            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:3px">WELLNESS</div>
+            <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:3px">WELLNESS</div>
             <div id="pm-wellness"></div>
           </div>
         </div>
@@ -1127,7 +1127,7 @@
 
         <div class="tab-panel" data-panel="data">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.6rem">
-            <div style="font-size:0.8rem;color:var(--text-secondary)">Everything collected about this person — the AI reasons from all of it.</div>
+            <div style="font-size:var(--fs);color:var(--text-secondary)">Everything collected about this person — the AI reasons from all of it.</div>
             <button class="btn btn-outline btn-sm" style="flex-shrink:0" onclick="openLogSignal()">＋ Log data</button>
           </div>
           <div id="pm-data-content"></div>
@@ -1143,8 +1143,8 @@
         </div>
 
         <div class="tab-panel" data-panel="devplan">
-          <div style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:0.8rem">Personal development tasks for this individual</div>
-          <div id="pm-notes" style="font-size:0.83rem;color:var(--text-secondary);background:var(--surface-2);border-radius:8px;padding:0.7rem 0.9rem;margin-bottom:0.9rem;line-height:1.55;border-left:3px solid var(--accent)"></div>
+          <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.8rem">Personal development tasks for this individual</div>
+          <div id="pm-notes" style="font-size:var(--fs);color:var(--text-secondary);background:var(--surface-2);border-radius:8px;padding:0.7rem 0.9rem;margin-bottom:0.9rem;line-height:1.55;border-left:3px solid var(--accent)"></div>
           <div id="pm-dev-plan"></div>
           <button class="btn btn-outline btn-sm" style="margin-top:0.8rem" onclick="showToast('New task added','success')">+ Add Task</button>
         </div>
@@ -1159,7 +1159,7 @@
             <div id="pm-recs"></div>
           </div>
           <div style="margin-top:1rem">
-            <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Recent AI Check-ins</div>
+            <div style="font-size:var(--fs-sm);font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Recent AI Check-ins</div>
             <div id="pm-chat-history"></div>
           </div>
           <div style="margin-top:0.8rem">
@@ -1169,7 +1169,7 @@
 
         <div class="tab-panel" data-panel="advisor">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:0.6rem;margin-bottom:0.75rem">
-            <div style="font-size:0.8rem;color:var(--text-secondary)">
+            <div style="font-size:var(--fs);color:var(--text-secondary)">
               Ask IntelliQ how to support, develop, or lead this person — in the one IntelliQ composer,
               with this member set as context. Answers use only what you're authorised to see; private
               disclosures are never included.
@@ -1180,7 +1180,7 @@
           <div id="pm-similar" class="pm-similar"></div>
           <button class="btn btn-accent" id="pm-ask-iq" style="margin:0.4rem 0 0.9rem">Ask IntelliQ about this member</button>
           <div style="margin-top:0.6rem">
-            <div style="font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Past IntelliQ support notes (archive)</div>
+            <div style="font-size:var(--fs-sm);font-weight:600;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Past IntelliQ support notes (archive)</div>
             <div id="pm-advisor-history"></div>
           </div>
         </div>
@@ -1215,14 +1215,14 @@
     <div class="modal-header">
       <div>
         <div class="modal-title" id="acm-title">Respond to Alert</div>
-        <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:2px" id="acm-sub"></div>
+        <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:2px" id="acm-sub"></div>
       </div>
       <button class="icon-btn" onclick="closeAllModals()">×</button>
     </div>
     <div style="padding:1.2rem;overflow-y:auto;max-height:75vh">
 
       <!-- Alert context banner -->
-      <div id="acm-context-banner" style="background:rgba(247,178,79,0.1);border:1px solid rgba(247,178,79,0.3);border-radius:8px;padding:0.9rem 1rem;margin-bottom:1.1rem;font-size:0.82rem;color:var(--text-secondary);line-height:1.6"></div>
+      <div id="acm-context-banner" style="background:rgba(247,178,79,0.1);border:1px solid rgba(247,178,79,0.3);border-radius:8px;padding:0.9rem 1rem;margin-bottom:1.1rem;font-size:var(--fs);color:var(--text-secondary);line-height:1.6"></div>
 
       <!-- Member + difficulty -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:0.9rem">
@@ -1235,7 +1235,7 @@
           <div style="display:flex;gap:0.4rem;margin-top:2px">
             ${['Easy','Medium','Hard'].map(d => `
               <button class="domain-badge acm-diff-btn" data-diff="${d}"
-                style="cursor:pointer;padding:5px 10px;font-size:0.73rem"
+                style="cursor:pointer;padding:5px 10px;font-size:var(--fs-sm)"
                 onclick="selectAlertDifficulty('${d}')">${d}</button>`).join('')}
           </div>
         </div>
@@ -1256,9 +1256,9 @@
           ondragover="event.preventDefault();this.classList.add('drag-over')"
           ondragleave="this.classList.remove('drag-over')"
           ondrop="handleAlertDrop(event)">
-          <div style="font-size:1.4rem;margin-bottom:0.3rem"></div>
-          <div style="font-size:0.82rem;color:var(--text-secondary)">Drop file or click to upload</div>
-          <div style="font-size:0.72rem;color:var(--text-muted);margin-top:3px">Images, PDF, Word, Excel, PowerPoint, CSV, Text</div>
+          <div style="font-size:var(--fs-3xl);margin-bottom:0.3rem"></div>
+          <div style="font-size:var(--fs);color:var(--text-secondary)">Drop file or click to upload</div>
+          <div style="font-size:var(--fs-sm);color:var(--text-muted);margin-top:3px">Images, PDF, Word, Excel, PowerPoint, CSV, Text</div>
         </div>
         <input type="file" id="acm-file-input" style="display:none"
           accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv"
@@ -1279,7 +1279,7 @@
       <!-- Draft review panel (hidden until AI responds) -->
       <div id="acm-draft-panel" style="display:none;background:var(--surface-1);border:1px solid var(--accent);border-radius:var(--radius);padding:1.1rem;margin-bottom:1rem">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.9rem">
-          <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent)">AI Draft — Review &amp; Approve</div>
+          <div style="font-size:var(--fs-sm);font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--accent)">AI Draft — Review &amp; Approve</div>
           <button class="btn btn-outline btn-sm" onclick="draftAlertScenario()">↺ Regenerate</button>
         </div>
         <div style="margin-bottom:0.7rem">
@@ -1295,8 +1295,8 @@
           <div id="acm-draft-probes"></div>
         </div>
         <div style="background:rgba(124,90,245,0.08);border:1px solid rgba(124,90,245,0.25);border-radius:8px;padding:0.8rem;margin-bottom:0.9rem">
-          <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;color:var(--accent);margin-bottom:0.3rem">Leader Note — Private</div>
-          <div id="acm-draft-coachnote" style="font-size:0.82rem;color:var(--text-secondary);line-height:1.6"></div>
+          <div style="font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;color:var(--accent);margin-bottom:0.3rem">Leader Note — Private</div>
+          <div id="acm-draft-coachnote" style="font-size:var(--fs);color:var(--text-secondary);line-height:1.6"></div>
         </div>
         <div style="display:flex;justify-content:flex-end">
           <button class="btn btn-accent" onclick="approveAlertDraft()">Approve &amp; Launch</button>
@@ -1322,7 +1322,7 @@
         <div class="ai-avatar">IQ</div>
         <div>
           <div class="modal-title" id="chat-modal-title">IntelliQ AI</div>
-          <div style="font-size:0.72rem;color:var(--text-secondary)">Reflection Assistant · Confidential</div>
+          <div style="font-size:var(--fs-sm);color:var(--text-secondary)">Reflection Assistant · Confidential</div>
         </div>
       </div>
       <button class="icon-btn" onclick="closeAllModals()">×</button>
@@ -1354,33 +1354,33 @@
     <div class="modal-body">
 
       <!-- Summary -->
-      <div id="org-intel-summary" style="font-size:0.88rem;color:var(--text-secondary);line-height:1.6;padding:0.8rem 1rem;background:rgba(124,90,245,0.06);border:1px solid rgba(124,90,245,0.2);border-radius:8px;margin-bottom:1.2rem"></div>
+      <div id="org-intel-summary" style="font-size:var(--fs-md);color:var(--text-secondary);line-height:1.6;padding:0.8rem 1rem;background:rgba(124,90,245,0.06);border:1px solid rgba(124,90,245,0.2);border-radius:8px;margin-bottom:1.2rem"></div>
 
       <!-- Traits -->
       <div style="margin-bottom:1rem">
-        <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Key Traits IntelliQ will monitor</div>
+        <div style="font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Key Traits IntelliQ will monitor</div>
         <div id="org-intel-traits" style="display:flex;flex-wrap:wrap;gap:0.4rem"></div>
       </div>
 
       <!-- Goals -->
       <div style="margin-bottom:1rem">
-        <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Org Goals detected</div>
+        <div style="font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Org Goals detected</div>
         <div id="org-intel-goals"></div>
       </div>
 
       <!-- Environment -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.7rem;margin-bottom:1.2rem">
         <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:0.8rem">
-          <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:0.3rem">Environment</div>
-          <div id="org-intel-env" style="font-size:0.8rem;color:var(--text-secondary);line-height:1.5"></div>
+          <div style="font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:0.3rem">Environment</div>
+          <div id="org-intel-env" style="font-size:var(--fs);color:var(--text-secondary);line-height:1.5"></div>
         </div>
         <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:0.8rem">
-          <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:0.3rem">Success looks like</div>
-          <div id="org-intel-success" style="font-size:0.8rem;color:var(--text-secondary);line-height:1.5"></div>
+          <div style="font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:0.3rem">Success looks like</div>
+          <div id="org-intel-success" style="font-size:var(--fs);color:var(--text-secondary);line-height:1.5"></div>
         </div>
       </div>
 
-      <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:1.2rem">IntelliQ will use this to personalise every assessment, check-in, and alert. You can update your org description in Settings at any time.</div>
+      <div style="font-size:var(--fs);color:var(--text-muted);margin-bottom:1.2rem">IntelliQ will use this to personalise every assessment, check-in, and alert. You can update your org description in Settings at any time.</div>
 
       <button class="btn btn-accent" style="width:100%" onclick="closeOrgIntelModal()">Got it — let's go →</button>
     </div>
@@ -1402,7 +1402,7 @@
     </div>
     <div class="modal-body">
       <div id="ccc-form">
-        <div style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6;margin-bottom:1rem" id="ccc-prompt">
+        <div style="font-size:var(--fs-md);color:var(--text-secondary);line-height:1.6;margin-bottom:1rem" id="ccc-prompt">
           How did last session go? Any players you're watching? Anything on your mind?
         </div>
         <textarea id="ccc-text" class="form-input" rows="4" style="resize:none"
@@ -1415,10 +1415,10 @@
       <!-- AI Response -->
       <div id="ccc-response" style="display:none">
         <div style="display:flex;align-items:flex-start;gap:0.7rem;padding:0.9rem;background:rgba(124,90,245,0.06);border:1px solid rgba(124,90,245,0.2);border-radius:8px;margin-bottom:1rem">
-          <div style="width:30px;height:30px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.75rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
+          <div style="width:30px;height:30px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:var(--fs-sm);font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
           <div>
-            <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.5rem">IntelliQ</div>
-            <div id="ccc-ai-text" style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6"></div>
+            <div style="font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.5rem">IntelliQ</div>
+            <div id="ccc-ai-text" style="font-size:var(--fs-md);color:var(--text-secondary);line-height:1.6"></div>
           </div>
         </div>
         <button class="btn btn-accent" style="width:100%" onclick="closeAllModals()">Got it — open platform</button>
@@ -1462,7 +1462,7 @@
 
       <!-- Compose message to group -->
       <div style="margin-bottom:1rem;padding:0.8rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px">
-        <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Send to Group</div>
+        <div style="font-size:var(--fs-sm);font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Send to Group</div>
         <textarea id="gd-compose" class="form-input" rows="2" style="resize:none;margin-bottom:0.5rem"
           placeholder="Write a message to this group…"></textarea>
         <div style="display:flex;justify-content:flex-end;gap:0.4rem">
@@ -1472,9 +1472,9 @@
       </div>
 
       <!-- Feed: shared notes + messages -->
-      <div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Group Feed</div>
+      <div style="font-size:var(--fs-sm);font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:0.6rem">Group Feed</div>
       <div id="gd-feed">
-        <div style="text-align:center;padding:1.5rem;color:var(--text-muted);font-size:0.82rem">Loading…</div>
+        <div style="text-align:center;padding:1.5rem;color:var(--text-muted);font-size:var(--fs)">Loading…</div>
       </div>
     </div>
   </div>
@@ -1498,7 +1498,7 @@
   </div>
   <div class="join-card">
     <div class="join-card-title">Welcome, <span id="sp-name">—</span></div>
-    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:1.2rem;line-height:1.6">
+    <p style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:1.2rem;line-height:1.6">
       You've been added to this organisation. Set your own password to secure your account.
     </p>
     <div class="form-group">
@@ -1509,10 +1509,10 @@
       <label class="form-label">Confirm password</label>
       <input class="form-input" type="password" id="sp-confirm" placeholder="Repeat it"/>
     </div>
-    <div id="sp-error" style="color:var(--danger);font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
+    <div id="sp-error" style="color:var(--danger);font-size:var(--fs);margin-bottom:0.8rem;display:none"></div>
     <button class="btn-join" onclick="MemberApp.submitSetPassword()">Set Password &amp; Continue →</button>
     <div class="screen-escape-link" style="text-align:center;margin-top:1rem">
-      <a href="#" onclick="Auth.logout();return false" style="font-size:0.78rem;color:var(--text-muted)">← Sign out / switch account</a>
+      <a href="#" onclick="Auth.logout();return false" style="font-size:var(--fs);color:var(--text-muted)">← Sign out / switch account</a>
     </div>
   </div>
 </div>
@@ -1526,7 +1526,7 @@
   </div>
   <div class="join-card">
     <div class="join-card-title">Set your goal</div>
-    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:1.2rem;line-height:1.6">
+    <p style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:1.2rem;line-height:1.6">
       IntelliQ will use this to personalise every check-in and help you track real progress.
     </p>
     <div class="form-group">
@@ -1539,13 +1539,13 @@
       <textarea class="form-input" id="goals-identity" rows="3" style="resize:none"
         placeholder="e.g. Someone who stays calm, takes feedback well, prepares thoroughly…"></textarea>
     </div>
-    <div id="goals-error" style="color:var(--danger);font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
+    <div id="goals-error" style="color:var(--danger);font-size:var(--fs);margin-bottom:0.8rem;display:none"></div>
     <button class="btn-join" id="goals-submit-btn" onclick="MemberApp.submitGoals()">Save &amp; Continue →</button>
     <div style="text-align:center;margin-top:0.8rem">
-      <a href="#" onclick="MemberApp.skipGoals();return false;" style="font-size:0.78rem;color:var(--text-muted)">Skip for now</a>
+      <a href="#" onclick="MemberApp.skipGoals();return false;" style="font-size:var(--fs);color:var(--text-muted)">Skip for now</a>
     </div>
     <div class="screen-escape-link" style="text-align:center;margin-top:0.6rem">
-      <a href="#" onclick="Auth.logout();return false" style="font-size:0.78rem;color:var(--text-muted)">← Sign out / switch account</a>
+      <a href="#" onclick="Auth.logout();return false" style="font-size:var(--fs);color:var(--text-muted)">← Sign out / switch account</a>
     </div>
   </div>
 </div>
@@ -1561,20 +1561,20 @@
   </div>
   <div id="weekly-scroll-body" style="flex:1;overflow-y:auto;padding:1rem">
     <div class="card" style="margin-bottom:0.8rem">
-      <div style="font-size:0.78rem;color:var(--text-secondary);line-height:1.6;margin-bottom:1rem" id="weekly-intro">
+      <div style="font-size:var(--fs);color:var(--text-secondary);line-height:1.6;margin-bottom:1rem" id="weekly-intro">
         Take 2 minutes. Be honest — nobody sees this except IntelliQ. The more real you are, the more useful the feedback.
       </div>
       <div id="weekly-fields"></div>
-      <div id="weekly-error" style="color:var(--danger);font-size:0.8rem;margin-bottom:0.8rem;display:none"></div>
+      <div id="weekly-error" style="color:var(--danger);font-size:var(--fs);margin-bottom:0.8rem;display:none"></div>
       <button class="btn-primary" id="weekly-submit-btn" onclick="MemberApp.submitWeekly()">Submit Weekly Reflection →</button>
     </div>
     <div id="weekly-ai-response" style="display:none">
       <div class="card" style="border-color:rgba(124,90,245,0.3);background:rgba(124,90,245,0.06)">
         <div style="display:flex;align-items:flex-start;gap:0.7rem">
-          <div style="width:28px;height:28px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:0.72rem;font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
+          <div style="width:28px;height:28px;border-radius:50%;background:rgba(124,90,245,0.2);display:flex;align-items:center;justify-content:center;font-size:var(--fs-sm);font-weight:700;color:var(--accent);flex-shrink:0">IQ</div>
           <div>
-            <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.4rem">IntelliQ</div>
-            <div id="weekly-ai-text" style="font-size:0.85rem;color:var(--text-secondary);line-height:1.6"></div>
+            <div style="font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);margin-bottom:0.4rem">IntelliQ</div>
+            <div id="weekly-ai-text" style="font-size:var(--fs-md);color:var(--text-secondary);line-height:1.6"></div>
           </div>
         </div>
       </div>
@@ -1614,8 +1614,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260904f"></script>
-<script src="js/auth.js?v=20260904f"></script>
+<script src="js/data.js?v=20260904h"></script>
+<script src="js/auth.js?v=20260904h"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1634,7 +1634,7 @@
     </div>
     <div style="text-align:center;padding-bottom:1rem">
       <a href="#" onclick="Auth.logout();return false"
-         style="font-size:0.75rem;color:var(--text-muted);text-decoration:none">
+         style="font-size:var(--fs-sm);color:var(--text-muted);text-decoration:none">
         ← Sign out / switch account
       </a>
     </div>
@@ -1675,7 +1675,7 @@
 
     <div style="text-align:center;margin-top:0.6rem">
       <a href="#" onclick="Auth.logout();return false"
-         style="font-size:0.75rem;color:var(--text-muted);text-decoration:none">
+         style="font-size:var(--fs-sm);color:var(--text-muted);text-decoration:none">
         ← Sign out / switch account
       </a>
     </div>
@@ -1683,14 +1683,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260904f"></script>
-<script src="js/ui.js?v=20260904f"></script>
-<script src="js/attachments.js?v=20260904f"></script>
-<script src="js/scenarios.js?v=20260904f"></script>
-<script src="js/chat.js?v=20260904f"></script>
-<script src="js/tree.js?v=20260904f"></script>
-<script src="js/voice.js?v=20260904f"></script>
-<script src="js/app.js?v=20260904f"></script>
+<script src="js/charts.js?v=20260904h"></script>
+<script src="js/ui.js?v=20260904h"></script>
+<script src="js/attachments.js?v=20260904h"></script>
+<script src="js/scenarios.js?v=20260904h"></script>
+<script src="js/chat.js?v=20260904h"></script>
+<script src="js/tree.js?v=20260904h"></script>
+<script src="js/voice.js?v=20260904h"></script>
+<script src="js/app.js?v=20260904h"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->
