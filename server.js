@@ -2379,6 +2379,11 @@ app.post('/api/auth/complete-profile', requireAuth, (req, res) => {
     longTermGoals    = '',
     strengths        = '',
     improvementAreas = '',
+    // THE BASELINE. Every law in this product is self-relative — it reflects a person against
+    // their own normal and never against a score or against each other. Without this the kernel
+    // has no normal to be relative to, and spends a month building one it could have been handed
+    // on day one.
+    baseline         = '',
     selectedValues   = [],
     personalMetrics  = [],
     freeText         = '',
@@ -2396,6 +2401,11 @@ app.post('/api/auth/complete-profile', requireAuth, (req, res) => {
   if (!String(mainGoals || '').trim()) return res.status(400).json({ error: 'A main goal is required.' });
   if (_mv.length < 1)                  return res.status(400).json({ error: 'At least one value is required.' });
 
+  // Was this the first time through? Decided BEFORE profileComplete is set, because it is what
+  // decides whether the answers become evidence. Re-running the form must not file a second
+  // account of the same day.
+  const firstTime = user.profileComplete !== true;
+
   // Store profile data in memberGoals — extends existing structure
   const key = userKey(code, userId);
   memberGoals[key] = {
@@ -2406,6 +2416,7 @@ app.post('/api/auth/complete-profile', requireAuth, (req, res) => {
     longTermGoals,
     strengths,
     improvementAreas,
+    baseline,
     selectedValues:   Array.isArray(selectedValues)  ? selectedValues  : [],
     personalMetrics:  Array.isArray(personalMetrics) ? personalMetrics : [],
     freeText,
@@ -2421,11 +2432,103 @@ app.post('/api/auth/complete-profile', requireAuth, (req, res) => {
     listedAs = _upsertProfessional(code, userId, professionalTitle, professionalRemit);
   }
 
+  /* ── ONBOARDING IS EVIDENCE, NOT A FORM ─────────────────────────────────────────────────────
+     What a person says about themselves on day one is the first thing anybody knows about them,
+     and until now it was stored as seven profile fields that no law could read. The kernel began
+     every account from nothing and spent a month rebuilding what had already been typed.
+
+     Four rules hold it honest, and each one is load-bearing:
+
+     ONE PERSON IS ONE ORIGIN. Every answer carries `self:<userId>`, so filling in five boxes is
+     five signals and one origin — the same rule that stops a player talking a belief into a Low
+     by repetition, and the reason onboarding ALONE can never produce a High or a Low (the gate is
+     two independent origins). This gives the kernel a starting point, never a verdict.
+
+     NO DIRECTION, EVER. Direction says which way something is MOVING, and that needs two points
+     in time. Onboarding is the first point — it is the BEFORE. So every signal here is `neutral`,
+     which means "no direction offered" and not "nothing is happening". Note what is NOT done:
+     "What would you like to improve?" is not filed as a decline, and "What are your strengths?"
+     is not filed as an improvement. An area somebody wants to get better at is not a thing
+     getting worse, and reading the question as a direction would be the classifier arriving
+     through the one door in this product built to keep it out.
+
+     ONE CONCEPT PER QUESTION, named for the question rather than for the topic. We have no
+     classifier and must not invent one, so the record says who said what about which question and
+     leaves the words to speak for themselves.
+
+     SHORT ANSWERS ARE NOT ACCOUNTS. "n/a" and "ok" are how people get past a required field. They
+     are dropped rather than recorded, because a record full of them is a record people stop
+     reading.
+
+     The MAIN GOAL is treated differently: it is not an account of the person, it is a thing they
+     want to do — so it becomes a real focus, which is the object built for exactly that. */
+  const ONBOARDING_ACCOUNTS = [
+    { field: baseline,         concept: 'self_account.baseline',    label: 'What it looks like when they are not at their best' },
+    { field: strengths,        concept: 'self_account.strengths',   label: 'What they say they bring' },
+    { field: improvementAreas, concept: 'self_account.improvement', label: 'Where they want to get better' },
+    { field: longTermGoals,    concept: 'self_account.long_term',   label: 'Where they are trying to get to' },
+    { field: freeText,         concept: 'self_account.context',     label: 'What else they wanted known' },
+  ];
+  const MIN_ACCOUNT = 12;
+  const evidenced = [];
+  let openedFocus = null;
+
+  if (firstTime) {
+    const now = Date.now();
+    const domain = (orgMeta[code] || {}).orgMode || '';
+    for (const a of ONBOARDING_ACCOUNTS) {
+      const said = String(a.field || '').trim().slice(0, 600);
+      if (said.length < MIN_ACCOUNT) continue;
+      const inq = _inquiryFor(code, `member:${userId}`, a.concept, a.label, domain, now);
+      if (!inq) continue;
+      const bySubject = inquiryStates[code][`member:${userId}`];
+      const k = Object.keys(bySubject).find(x => bySubject[x].inquiryId === inq.inquiryId);
+      bySubject[k] = diagnose.applyProposals(inq, [{
+        id: 'onb_' + generateId(),
+        level: 'observation', directness: 'direct', authority: 'self_report', source: 'self',
+        specificity: 0.5, statement: said,
+        originKind: 'self_report', originRef: `self:${userId}`,
+        // One turn for the whole form. Five answers given in one sitting are one occasion, and
+        // confidence is built to tell one telling from two.
+        turnId: `onboarding_${userId}`,
+      }], { now, evidenceRefOf: p => `${p.originRef}#${p.id}` });
+      evidenced.push(inq.inquiryId);
+    }
+
+    const goalText = String(mainGoals || '').trim().slice(0, 300);
+    if (goalText) {
+      const mem = _getMemory(code, userId);
+      mem.focuses = mem.focuses || [];
+      const dup = mem.focuses.find(f => f && f.status === 'active' && f.text === goalText);
+      if (dup) { openedFocus = { id: dup.id, text: dup.text }; }
+      else {
+        /* No target and no review date, deliberately. The form did not ask for either, and a
+           focus is allowed to have neither (some things have no clean finish line). What is
+           refused is the server inventing them — focus_stalled fires off the review date, and a
+           stall notice about a day nobody chose is worse than no notice. */
+        const focus = {
+          id: 'foc_' + generateId(), text: goalText, type: 'self_set', status: 'active', outcome: null,
+          visibility: 'private', participants: [userId],
+          origin: 'onboarding',
+          createdAt: new Date().toISOString(),
+        };
+        mem.focuses.unshift(focus);
+        _beginFocusAction(code, focus, userId, { subjectId: userId });
+        mem.lastUpdated = new Date().toISOString();
+        _audit(code, { actor: userId, action: 'focus_created', subjectIds: [userId], basis: 'onboarding' });
+        openedFocus = { id: focus.id, text: focus.text };
+      }
+    }
+  }
+
   // Mark profile complete on the user record
   user.profileComplete = true;
   scheduleSave();
 
-  res.json({ ok: true, user: { ...user, passwordHash: undefined }, listedAs });
+  res.json({ ok: true, user: { ...user, passwordHash: undefined }, listedAs,
+    // What was actually done with the answers, so the client can say so rather than the person
+    // having to discover it. Counts and ids only — never the words back.
+    evidenced: evidenced.length, inquiryIds: evidenced, focus: openedFocus });
 });
 
 /* ── Complete organisation profile (SuperAdmin Layer 1 onboarding) ─────── *

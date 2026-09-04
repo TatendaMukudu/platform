@@ -53,6 +53,23 @@ const OB_STEPS = [
     placeholder: 'e.g. Managing nerves before high-stakes moments, staying consistent when things get difficult, asking for help sooner…',
   },
   {
+    /* THE BASELINE QUESTION, and the most important one here.
+
+       Every law in this product is self-relative: it reflects a person against THEIR OWN normal
+       and never against a score or against each other. Without this, the kernel has no normal to
+       be relative to and spends a month building one it could have been handed on day one. It is
+       also what lets invisible_load and baseline_shift fire at all.
+
+       Asked ONCE, about a pattern somebody recognises in themselves — which is what makes it
+       different from the daily check-in that asked how you felt today whether or not there was
+       anything to answer. */
+    key:         'baseline',
+    question:    'When you are not at your best, what does that usually look like?',
+    hint:        'Not a bad day — the pattern you notice in yourself. This is what lets IntelliQ compare you to you, rather than to anybody else.',
+    type:        'textarea',
+    placeholder: 'e.g. I go quiet, I stop asking questions, I train hard but switch off in the gaps…',
+  },
+  {
     key:         'selectedValues',
     question:    'Which organisation values matter most to you?',
     hint:        'Select the values you feel most connected to right now.',
@@ -84,6 +101,7 @@ const _ob = {
     longTermGoals:    '',
     strengths:        '',
     improvementAreas: '',
+    baseline:         '',
     selectedValues:   [],
     personalMetrics:  [],
     freeText:         '',
@@ -287,7 +305,11 @@ async function _obSubmitProfile() {
   const hasGoal   = String(a.mainGoals || '').trim().length > 0;
   const hasValues = Array.isArray(a.selectedValues) && a.selectedValues.filter(Boolean).length >= 1;
   if (!hasGoal || !hasValues) {
-    _ob.step = !hasGoal ? 0 : 4; // mainGoals / selectedValues
+    // Found by key, never by a number. This was `4` and the baseline step moved selectedValues to
+    // 5 — a hard-coded index sends somebody back to the wrong question the moment a step is added,
+    // which is a bug that reads as the form being broken rather than as an off-by-one.
+    const _at = k => Math.max(0, OB_STEPS.findIndex(s => s.key === k));
+    _ob.step = _at(!hasGoal ? 'mainGoals' : 'selectedValues');
     _obRenderStep();
     showToast(!hasGoal ? 'Please set your main goal to continue.' : 'Please choose at least one value to continue.', 'warning');
     return;
@@ -314,7 +336,12 @@ async function _obSubmitProfile() {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Could not save profile');
-    // Server confirmed — client already up to date
+    // Server confirmed — client already up to date.
+    // WHAT HAPPENED TO WHAT THEY TYPED. The founder's rule for telling people how this works is
+    // "once at sign-up, then on the screen" — so the one moment where somebody has just handed
+    // over an account of themselves is the moment to say it was kept as evidence and that their
+    // goal is now a real focus, rather than leaving them to find out.
+    _ob.landed = { evidenced: data.evidenced || 0, focus: data.focus || null };
   } catch(e) {
     // API call failed (most commonly: server restarted → 401 → token gone).
     // Client is already correct (profileComplete: true set above).
@@ -341,7 +368,11 @@ async function _obSubmitProfile() {
 
 /* ── Route after personal onboarding completes ───────────────────────────── */
 function _obAfterComplete() {
-  showToast('Welcome! Your profile is set up.', 'success');
+  const l = _ob.landed || {};
+  const parts = [];
+  if (l.focus) parts.push('your main goal is open as a focus');
+  if (l.evidenced) parts.push(`what you said about yourself is on your record as ${l.evidenced === 1 ? 'a starting point' : 'starting points'} to compare you against`);
+  showToast(parts.length ? `Welcome. Nothing is scored — ${parts.join(', and ')}.` : 'Welcome! Your profile is set up.', 'success');
   // Everyone enters the unified workspace. Members land on Home; others on Dashboard.
   launchApp();
   loadRealOrgData();
