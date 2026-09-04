@@ -10335,8 +10335,8 @@ const MemberApp = {
     if (box.innerHTML) { box.innerHTML = ''; return; }
     const id = this._escape(raiseId);
     box.innerHTML = `
-      <textarea class="iq-waiting-reason" id="wr-txt-${id}" rows="2"
-        placeholder="Why are you passing it on?"></textarea>
+      <div class="iq-field"><textarea class="iq-field-input" id="wr-txt-${id}" rows="2"
+        placeholder="Why are you passing it on?"></textarea></div>
       <div class="iq-waiting-kinds">
         <label><input type="radio" name="wk-${id}" value="read" checked/> This is my read on it</label>
         <label><input type="radio" name="wk-${id}" value="handoff"/> Not mine — passing it along</label>
@@ -10454,8 +10454,20 @@ const MemberApp = {
     const form = `
       <div class="iq-focus-form" id="${id}">
         <label class="iq-focus-label" for="${id}-t">What do you want to work on?</label>
-        <textarea id="${id}-t" class="iq-focus-input" rows="2"
-          placeholder="In your own words…">${esc(seed)}</textarea>
+        <div class="iq-field"><textarea id="${id}-t" class="iq-field-input" rows="2"
+          placeholder="In your own words…">${esc(seed)}</textarea></div>
+
+        <!-- A FOCUS IS SOMETHING YOU WORK TOWARDS (founder, September 2026). One line of text
+             made "did what you tried help?" a feeling rather than a check. A target says what
+             would tell you it worked; a date says when to look. Both are asked, neither blocks:
+             some things genuinely have no clean finish line, and refusing to let somebody start
+             one until they invent a metric is how a tool teaches people to lie to it. -->
+        <label class="iq-focus-label" for="${id}-g">What would tell you it worked?</label>
+        <div class="iq-field"><textarea id="${id}-g" class="iq-field-input" rows="1"
+          placeholder="How you'd know — optional"></textarea></div>
+        <label class="iq-focus-label" for="${id}-d">When should we look at it?</label>
+        <input type="date" id="${id}-d" class="iq-field-date">
+
         <div class="iq-focus-row">
           <button type="button" class="iq-make-chip is-on" id="${id}-priv"
             onclick="MemberApp._focusVis('${id}','private')">Just me</button>
@@ -10555,8 +10567,11 @@ const MemberApp = {
     if (mode === 'with' && !picked.length) { tell('Pick who this is with, or choose "Just me".'); return; }
     tell('Making it…');
     try {
+      const target = String((document.getElementById(id + '-g') || {}).value || '').trim();
+      const reviewOn = String((document.getElementById(id + '-d') || {}).value || '').trim();
       const r = await fetch('/api/me/focus', { method: 'POST', headers: this._authHeaders(),
-        body: JSON.stringify({ text, share: mode === 'shared', participants: mode === 'with' ? picked : [] }) });
+        body: JSON.stringify({ text, target, reviewOn,
+          share: mode === 'shared', participants: mode === 'with' ? picked : [] }) });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || `server said ${r.status}`);
       const esc = s => this._escape(String(s == null ? '' : s));
@@ -11385,7 +11400,7 @@ const MemberApp = {
     pane.innerHTML = `
       <div class="iq-cardthread-msgs" data-msgs="${esc(dedupeKey)}" aria-live="polite"></div>
       <div class="iq-cardthread-input">
-        <textarea class="iq-cardthread-ta" data-ta="${esc(dedupeKey)}" rows="1" placeholder="Say what's actually going on…"
+        <textarea class="iq-field-input iq-cardthread-ta" data-ta="${esc(dedupeKey)}" rows="1" placeholder="Say what's actually going on…"
           oninput="MemberApp._wsGrow(this)"
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.cardSend(${JSON.stringify(esc(dedupeKey)).replace(/"/g, '&quot;')})}"></textarea>
         <button class="iq-cardthread-send" type="button" aria-label="Send" onclick="MemberApp.cardSend(${JSON.stringify(esc(dedupeKey)).replace(/"/g, '&quot;')})">

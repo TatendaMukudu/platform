@@ -5490,12 +5490,30 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
     return res.json({ ok: true, focus: { id: existing.id, text: existing.text, visibility: existing.visibility || 'private' },
       already: true, note: 'You already have this one open.' });
   }
+  /* A FOCUS IS SOMETHING YOU WORK TOWARDS (founder, September 2026). The target says what would
+     tell you it worked; the review date says when to look. Neither is required — some things
+     have no clean finish line, and refusing to let somebody start until they invent a metric is
+     how a tool teaches people to make one up. But when they ARE given, "did what you tried
+     help?" stops being a feeling and becomes a check, and focus_stalled already fires off the
+     review date. */
+  const target = String((req.body || {}).target || '').trim().slice(0, 300);
+  const reviewOn = String((req.body || {}).reviewOn || '').trim().slice(0, 40);
+  const reviewAt = (() => {
+    if (!reviewOn) return null;
+    const t = Date.parse(reviewOn);
+    // An unparseable date is dropped rather than guessed at. A review date nobody set is
+    // honest; one the server invented would fire a stall notice about a day nobody chose.
+    return Number.isFinite(t) ? t : null;
+  })();
+
   const focus = {
     id: 'foc_' + generateId(), text, type: 'self_set', status: 'active', outcome: null,
     // Inviting somebody by name IS sharing it with them; there is no such thing as a private
     // focus that other people are in. The visibility field says who else can see it at all.
     visibility: participants.length ? 'invited' : (shared ? 'shared' : 'private'),
     participants: participants.length ? [userId, ...participants] : [userId],
+    ...(target ? { target } : {}),
+    ...(reviewAt ? { reviewAt } : {}),
     createdAt: new Date().toISOString(),
   };
   mem.focuses.unshift(focus);
@@ -5505,7 +5523,8 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
   scheduleSave();
   const named = participants.map(id => (orgUsers[code][id] || {}).name).filter(Boolean);
   res.json({ ok: true,
-    focus: { id: focus.id, text: focus.text, visibility: focus.visibility, participants: focus.participants },
+    focus: { id: focus.id, text: focus.text, visibility: focus.visibility, participants: focus.participants,
+      target: focus.target || null, reviewAt: focus.reviewAt || null },
     note: participants.length
       ? `Set, with ${named.join(', ')}. Only the people in it can see it.${rejected ? ' Some names could not be added.' : ''}`
       : shared ? 'Set. Anyone who leads a group you are in can see this one.'
