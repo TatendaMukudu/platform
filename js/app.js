@@ -3876,7 +3876,24 @@ function _showProfileInner(id, m){
   // Member-support tab (Cut E) — the "Ask IntelliQ" entry routes into the ONE composer; the panel
   // shows the read-only legacy advisor archive for this member.
   const _askIq = document.getElementById('pm-ask-iq');
-  if (_askIq) { const m = AppState.getMember(id); _askIq.onclick = () => MemberApp.askAboutMember(id, m && m.name); }
+  if (_askIq) {
+    const m = AppState.getMember(id);
+    _askIq.onclick = () => MemberApp.askAboutMember(id, m && m.name);
+    /* RECORD WHAT YOU SAW. Founder decision: a coach may write an observation directly, and the
+       player sees it. It sits beside "Ask IntelliQ" because they are the two things a leader
+       does with a person in front of them — ask about them, or say what they saw. The form says
+       out loud that the player will see it and can answer, because a leader who does not know
+       that will write something different from one who does. */
+    if (!document.getElementById('pm-observe') && _askIq.parentNode) {
+      const wrap = document.createElement('div');
+      wrap.id = 'pm-observe';
+      wrap.className = 'pm-observe';
+      wrap.innerHTML = `
+        <button type="button" class="iqt-verdict" onclick="MemberApp.openObservation('${MemberApp._escape(id)}')">Record what you saw</button>
+        <div class="pm-observe-form" id="pm-observe-form"></div>`;
+      _askIq.parentNode.insertBefore(wrap, _askIq.nextSibling);
+    }
+  }
   loadAdvisorThreads(id);
   loadBehavioralProfile(id);
   loadMemberData(id);
@@ -8906,6 +8923,58 @@ const MemberApp = {
   /* LEADER-SUPPORT entry point (Cut E). From an authorised member profile, route INTO the one
      IntelliQ composer with an EXPLICIT member subject (revalidated server-side every turn). Shows a
      visible member chip with a clear "exit" control — the context is never silently active. */
+  /* A coach's own account of somebody they lead. Attributed, visible to that person, and
+     evidence like any other — one coach is one origin however many times they say it, and the
+     direction is DECLARED here rather than read out of what they wrote. */
+  openObservation(subjectId) {
+    const box = document.getElementById('pm-observe-form');
+    if (!box) return;
+    if (box.innerHTML) { box.innerHTML = ''; return; }
+    const id = this._escape(subjectId);
+    box.innerHTML = `
+      <label class="iq-focus-label" for="pm-ob-about">What is it about?</label>
+      <div class="iq-field"><textarea class="iq-field-input" id="pm-ob-about" rows="1"
+        placeholder="A word or two — pressing, recovery, timekeeping"></textarea></div>
+      <label class="iq-focus-label" for="pm-ob-text">What did you see?</label>
+      <div class="iq-field"><textarea class="iq-field-input" id="pm-ob-text" rows="2"
+        placeholder="In your own words"></textarea></div>
+      <div class="iqt-call-q">Is that better or worse than before?</div>
+      <div class="iqt-call-btns">
+        <button type="button" class="iqt-verdict" id="pm-ob-up" onclick="MemberApp._obDir('improvement')">Better</button>
+        <button type="button" class="iqt-verdict" id="pm-ob-down" onclick="MemberApp._obDir('decline')">Worse</button>
+        <button type="button" class="iqt-verdict is-on" id="pm-ob-neutral" onclick="MemberApp._obDir('neutral')">Neither</button>
+      </div>
+      <div class="iq-focus-who">They will see this, in your name, and can say if they saw it differently.</div>
+      <div class="iqt-call-btns">
+        <button type="button" class="iqt-verdict" onclick="MemberApp.sendObservation('${id}')">Record it</button>
+      </div>
+      <div class="iqt-call-note" id="pm-ob-note"></div>`;
+    this._obDirection = 'neutral';
+  },
+
+  _obDir(d) {
+    this._obDirection = d;
+    ['improvement', 'decline', 'neutral'].forEach(k => {
+      const el = document.getElementById(`pm-ob-${k === 'improvement' ? 'up' : k === 'decline' ? 'down' : 'neutral'}`);
+      if (el) el.classList.toggle('is-on', k === d);
+    });
+  },
+
+  async sendObservation(subjectId) {
+    const note = document.getElementById('pm-ob-note');
+    const text = String((document.getElementById('pm-ob-text') || {}).value || '').trim();
+    const about = String((document.getElementById('pm-ob-about') || {}).value || '').trim();
+    if (!text) { if (note) note.textContent = 'Say what you saw first.'; return; }
+    try {
+      const j = await fetch('/api/leader/observation', {
+        method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subjectId, about, text, direction: this._obDirection || 'neutral' }),
+      }).then(r => r.json());
+      const box = document.getElementById('pm-observe-form');
+      if (box) box.innerHTML = `<div class="iqt-call-note">${this._escape((j && (j.note || j.error)) || 'Recorded.')}</div>`;
+    } catch (_) { if (note) note.textContent = 'That could not be saved just now.'; }
+  },
+
   askAboutMember(memberId, name) {
     this._wsSubjectMemberId = memberId || null;
     this._wsSubjectName = name || null;
@@ -10252,7 +10321,9 @@ const MemberApp = {
     if (hs) hs.textContent = copy.sub;
 
     box.innerHTML = `<div style="color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
-    let j; try { j = await fetch(`/api/objects?kind=${encodeURIComponent(kind)}&scope=self`, { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
+    // SELF AND TEAM, one list, ranked together — the client asked only for scope=self, so every
+    // team object was computed and unreachable, and a coach opened this and saw nothing.
+    let j; try { j = await fetch(`/api/objects?kind=${encodeURIComponent(kind)}&scope=all`, { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
     const list = (j && j.objects) || [];
 
     const make = copy.make
@@ -10337,8 +10408,8 @@ const MemberApp = {
     if (box.innerHTML) { box.innerHTML = ''; return; }
     const id = this._escape(raiseId);
     box.innerHTML = `
-      <textarea class="iq-waiting-reason" id="wr-txt-${id}" rows="2"
-        placeholder="Why are you passing it on?"></textarea>
+      <div class="iq-field"><textarea class="iq-field-input" id="wr-txt-${id}" rows="2"
+        placeholder="Why are you passing it on?"></textarea></div>
       <div class="iq-waiting-kinds">
         <label><input type="radio" name="wk-${id}" value="read" checked/> This is my read on it</label>
         <label><input type="radio" name="wk-${id}" value="handoff"/> Not mine — passing it along</label>
@@ -10392,7 +10463,7 @@ const MemberApp = {
     let all = [];
     try {
       const results = await Promise.all(kinds.map(k =>
-        fetch(`/api/objects?kind=${k}&scope=self`, { headers: this._authHeaders() })
+        fetch(`/api/objects?kind=${k}&scope=all`, { headers: this._authHeaders() })
           .then(r => r.json()).catch(() => null)));
       for (const j of results) if (j && j.objects) all = all.concat(j.objects.filter(o => !o.parked));
     } catch (_) { all = []; }
@@ -10456,8 +10527,20 @@ const MemberApp = {
     const form = `
       <div class="iq-focus-form" id="${id}">
         <label class="iq-focus-label" for="${id}-t">What do you want to work on?</label>
-        <textarea id="${id}-t" class="iq-focus-input" rows="2"
-          placeholder="In your own words…">${esc(seed)}</textarea>
+        <div class="iq-field"><textarea id="${id}-t" class="iq-field-input" rows="2"
+          placeholder="In your own words…">${esc(seed)}</textarea></div>
+
+        <!-- A FOCUS IS SOMETHING YOU WORK TOWARDS (founder, September 2026). One line of text
+             made "did what you tried help?" a feeling rather than a check. A target says what
+             would tell you it worked; a date says when to look. Both are asked, neither blocks:
+             some things genuinely have no clean finish line, and refusing to let somebody start
+             one until they invent a metric is how a tool teaches people to lie to it. -->
+        <label class="iq-focus-label" for="${id}-g">What would tell you it worked?</label>
+        <div class="iq-field"><textarea id="${id}-g" class="iq-field-input" rows="1"
+          placeholder="How you'd know — optional"></textarea></div>
+        <label class="iq-focus-label" for="${id}-d">When should we look at it?</label>
+        <input type="date" id="${id}-d" class="iq-field-date">
+
         <div class="iq-focus-row">
           <button type="button" class="iq-make-chip is-on" id="${id}-priv"
             onclick="MemberApp._focusVis('${id}','private')">Just me</button>
@@ -10557,8 +10640,11 @@ const MemberApp = {
     if (mode === 'with' && !picked.length) { tell('Pick who this is with, or choose "Just me".'); return; }
     tell('Making it…');
     try {
+      const target = String((document.getElementById(id + '-g') || {}).value || '').trim();
+      const reviewOn = String((document.getElementById(id + '-d') || {}).value || '').trim();
       const r = await fetch('/api/me/focus', { method: 'POST', headers: this._authHeaders(),
-        body: JSON.stringify({ text, share: mode === 'shared', participants: mode === 'with' ? picked : [] }) });
+        body: JSON.stringify({ text, target, reviewOn,
+          share: mode === 'shared', participants: mode === 'with' ? picked : [] }) });
       const j = await r.json().catch(() => null);
       if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || `server said ${r.status}`);
       const esc = s => this._escape(String(s == null ? '' : s));
@@ -10603,6 +10689,12 @@ const MemberApp = {
           ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}">${esc(sum.standing)}</span>` : ''}
           ${shared ? `<span class="iq-inq-forum" title="Others can discuss this">Forum</span>` : ''}
         </div>
+        ${item.whose && item.whose !== 'you'
+          // WHOSE IS THIS. One list holds a person's own and their squad's, ranked together, so
+          // the card has to say which without a heading to sit under. Quiet on purpose: it is a
+          // label, not a category — the ranking is what decides the order. NOT `about`, which is
+          // the thread-binding key and would break every object thread if written over.
+          ? `<div class="iq-inq-about">${esc(item.whose)}</div>` : ''}
         ${claim ? `<p class="iq-inq-hyp">${esc(claim)}</p>` : ''}
         ${x.provenance ? `<div class="iq-inq-why">${esc(x.provenance)}</div>` : ''}
         ${sum.openQuestion ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Still working out</span> ${esc(sum.openQuestion)}</div>` : ''}
@@ -11170,17 +11262,58 @@ const MemberApp = {
   /* The three things a person can do to a belief. Each prefills the composer rather than firing
      a silent state change: a verdict is something you SAY, so it goes through the same governed
      turn as everything else and the kernel decides what it means. */
+  /* "I disagree" USED TO PREFILL A SENTENCE AND NOTHING ELSE.
+
+     It typed "I do not think that is right. What I would say is " into the composer and left
+     the person to finish it, and whatever they wrote went through the ordinary turn — so the
+     belief was never contested, nothing climbed, and the button looked exactly like a control
+     that had worked. Same shape as "Make this a focus", which prefilled the composer and made
+     no focus, reported three times before anybody found it.
+
+     Disagreeing is now its own act: their account, on the same belief, as a contradicting
+     signal. That is what makes it CONTESTED — and contested is a finding that moves up rather
+     than a tie somebody breaks. */
   inquiryOverflow(action) {
+    if (action === 'contest') return this._openDisagree();
     const input = document.getElementById('iq-object-input');
     if (!input) return;
     const starters = {
       answered: 'I think this is settled now, because ',
-      contest: 'I do not think that is right. What I would say is ',
       aside: 'Let us leave this for now.',
     };
     input.value = starters[action] || '';
     this._wsGrow(input);
     input.focus();
+  },
+
+  _openDisagree() {
+    const box = document.getElementById('iqt-call');
+    const ctx = this._inquiryThread || {};
+    if (!box || !ctx.objectId) return;
+    box.innerHTML = `
+      <div class="iqt-call-q">How did you see it?</div>
+      <div class="iq-field"><textarea class="iq-field-input" id="iqt-dis" rows="2"
+        placeholder="In your own words — this goes on the record next to theirs"></textarea></div>
+      <div class="iqt-call-btns">
+        <button type="button" class="iqt-verdict" onclick="MemberApp.sendDisagree('${this._escape(ctx.objectId)}')">Record it</button>
+      </div>
+      <div class="iqt-call-note" id="iqt-dis-note"></div>`;
+    const t = document.getElementById('iqt-dis'); if (t) t.focus();
+  },
+
+  async sendDisagree(inquiryId) {
+    const note = document.getElementById('iqt-dis-note');
+    const ta = document.getElementById('iqt-dis');
+    const because = String((ta && ta.value) || '').trim();
+    if (!because) { if (note) note.textContent = 'Say how you saw it — a disagreement with no account tells the record nothing.'; return; }
+    try {
+      const j = await fetch('/api/me/disagree', {
+        method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inquiryId, because }),
+      }).then(r => r.json());
+      const box = document.getElementById('iqt-call');
+      if (box) box.innerHTML = `<div class="iqt-call-note">${this._escape((j && (j.note || j.error)) || 'Recorded.')}</div>`;
+    } catch (_) { if (note) note.textContent = 'That could not be saved just now.'; }
   },
 
   /* Sending from a thread. This failed silently for a whole afternoon: every exit was a bare
@@ -11387,7 +11520,7 @@ const MemberApp = {
     pane.innerHTML = `
       <div class="iq-cardthread-msgs" data-msgs="${esc(dedupeKey)}" aria-live="polite"></div>
       <div class="iq-cardthread-input">
-        <textarea class="iq-cardthread-ta" data-ta="${esc(dedupeKey)}" rows="1" placeholder="Say what's actually going on…"
+        <textarea class="iq-field-input iq-cardthread-ta" data-ta="${esc(dedupeKey)}" rows="1" placeholder="Say what's actually going on…"
           oninput="MemberApp._wsGrow(this)"
           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();MemberApp.cardSend(${JSON.stringify(esc(dedupeKey)).replace(/"/g, '&quot;')})}"></textarea>
         <button class="iq-cardthread-send" type="button" aria-label="Send" onclick="MemberApp.cardSend(${JSON.stringify(esc(dedupeKey)).replace(/"/g, '&quot;')})">

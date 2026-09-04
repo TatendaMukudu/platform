@@ -5565,12 +5565,30 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
     return res.json({ ok: true, focus: { id: existing.id, text: existing.text, visibility: existing.visibility || 'private' },
       already: true, note: 'You already have this one open.' });
   }
+  /* A FOCUS IS SOMETHING YOU WORK TOWARDS (founder, September 2026). The target says what would
+     tell you it worked; the review date says when to look. Neither is required — some things
+     have no clean finish line, and refusing to let somebody start until they invent a metric is
+     how a tool teaches people to make one up. But when they ARE given, "did what you tried
+     help?" stops being a feeling and becomes a check, and focus_stalled already fires off the
+     review date. */
+  const target = String((req.body || {}).target || '').trim().slice(0, 300);
+  const reviewOn = String((req.body || {}).reviewOn || '').trim().slice(0, 40);
+  const reviewAt = (() => {
+    if (!reviewOn) return null;
+    const t = Date.parse(reviewOn);
+    // An unparseable date is dropped rather than guessed at. A review date nobody set is
+    // honest; one the server invented would fire a stall notice about a day nobody chose.
+    return Number.isFinite(t) ? t : null;
+  })();
+
   const focus = {
     id: 'foc_' + generateId(), text, type: 'self_set', status: 'active', outcome: null,
     // Inviting somebody by name IS sharing it with them; there is no such thing as a private
     // focus that other people are in. The visibility field says who else can see it at all.
     visibility: participants.length ? 'invited' : (shared ? 'shared' : 'private'),
     participants: participants.length ? [userId, ...participants] : [userId],
+    ...(target ? { target } : {}),
+    ...(reviewAt ? { reviewAt } : {}),
     createdAt: new Date().toISOString(),
   };
   mem.focuses.unshift(focus);
@@ -5580,7 +5598,8 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
   scheduleSave();
   const named = participants.map(id => (orgUsers[code][id] || {}).name).filter(Boolean);
   res.json({ ok: true,
-    focus: { id: focus.id, text: focus.text, visibility: focus.visibility, participants: focus.participants },
+    focus: { id: focus.id, text: focus.text, visibility: focus.visibility, participants: focus.participants,
+      target: focus.target || null, reviewAt: focus.reviewAt || null },
     note: participants.length
       ? `Set, with ${named.join(', ')}. Only the people in it can see it.${rejected ? ' Some names could not be added.' : ''}`
       : shared ? 'Set. Anyone who leads a group you are in can see this one.'
@@ -14603,9 +14622,64 @@ app.get('/api/objects', requireAuth, (req, res) => {
   const kind = String(req.query.kind || '');
   if (!['inquiry', 'focus', 'high', 'low'].includes(kind)) return res.status(400).json({ error: 'unknown kind' });
   const scope = String(req.query.scope || 'self');
-  const all = _objectBucket(code, userId, scope);
+
+  /* scope=all — YOURS AND YOUR SQUAD'S, IN ONE LIST.
+
+     Founder decision, September 2026: "the most high priority thing be it a focus, high, low,
+     inquiry should show on home first... which all output SELF AND TEAM info", and when asked
+     how the two should sit together — one list, each card labelled, because the most important
+     thing should be at the top whoever it is about. Two sections would let the squad's most
+     urgent item sit below the person's least urgent one.
+
+     Before this the client only ever asked for scope=self, so a coach opened Highs and saw
+     nothing: every team object existed, was computed, and was unreachable.
+
+     EVERY GROUP IS READ THROUGH THE SAME GATE IT ALWAYS WAS. _objectBucket refuses a group the
+     person may not read (_mayReadGroup), and this loop simply skips those rather than reaching
+     around them — so the merged list can never contain something a per-scope read would have
+     withheld. `about` says whose each one is, which is what lets the card be labelled without
+     the client guessing from the shape of an id. */
+  /* WHOSE IS IT — derived from the OBJECT, not from which bucket it arrived in.
+
+     A probe caught both halves of getting this wrong. A squad focus already reaches a member
+     through their OWN bucket (`_objectBucket` reads team focuses at self scope, which is the fix
+     for "the coach set it and no player saw it"), so labelling by source marked it "you" for
+     everybody. And the field this first used, `about`, is the THREAD-BINDING KEY — conversations
+     are found by `conversation.about === object.about` — so writing a label into it would have
+     broken every object thread in the app. It is `whose`, and it is computed from the node the
+     object carries. */
+  const _whose = (o) => {
+    const raw = o && o.raw ? o.raw : {};
+    const nodeId = raw.nodeId || raw.groupId || null;
+    if (!nodeId) return { whose: 'you', whoseNodeId: null };
+    const node = (orgNodes[code] || {})[nodeId];
+    return { whose: (node && node.name) || raw.group || 'your group', whoseNodeId: nodeId };
+  };
+
+  let all;
+  if (scope === 'all') {
+    const seen = new Set();
+    all = (_objectBucket(code, userId, 'self') || []).map(o => ({ ...o, ..._whose(o) }));
+    all.forEach(o => seen.add(`${o.kind}:${o.id}`));
+    for (const node of Object.values(orgNodes[code] || {})) {
+      if (!node || !_mayReadGroup(code, node.nodeId, userId)) continue;
+      for (const o of (_objectBucket(code, userId, `group:${node.nodeId}`) || [])) {
+        // Already reached them through their own bucket. A list that repeats itself is a list
+        // people stop reading.
+        const key = `${o.kind}:${o.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        all.push({ ...o, whose: node.name || 'your group', whoseNodeId: node.nodeId });
+      }
+    }
+  } else {
+    all = _objectBucket(code, userId, scope);
+  }
   if (!all) return res.status(403).json({ error: 'scope unavailable' });
-  res.json({ ok: true, kind, scope, objects: all.filter(item => item.kind === kind).map(({ raw, ...item }) => item) });
+  const objects = all.filter(item => item.kind === kind).map(({ raw, ...item }) => item);
+  // ONE RANKING over both, so the top of the list is the top of the list.
+  objects.sort((a, b) => (b.score || 0) - (a.score || 0));
+  res.json({ ok: true, kind, scope, objects });
 });
 
 /* Every object opens as a thread. The opening is recomposed from the current object on every
@@ -15334,6 +15408,99 @@ function _admitLeaderRead(code, subjectId, inquiryId, read, now = Date.now()) {
   bySubject[key] = diagnose.applyProposals(bySubject[key], [proposal], { now, evidenceRefOf: p => p.originRef });
   return { admitted: true, origins: escalation.originCount };
 }
+
+/* ── A COACH'S OWN OBSERVATION, AND THE PLAYER'S RIGHT TO DISAGREE ────────────────────────
+   Founder decision, September 2026, taken over two alternatives:
+
+     "Yes — attributed, and the player sees it."
+
+   A coach may record what they saw, directly, without waiting for a player to raise something.
+   Coaches expect to be able to do this and the ladder alone was too narrow: a read only entered
+   when a player asked a question. What was refused is the version where the player cannot see it
+   — a private staff record is the secret file this architecture has declined everywhere else,
+   and transparency is the only thing that stops an attributed observation becoming one.
+
+   IT IS EVIDENCE LIKE ANY OTHER. Third-party authority, the leader as its own origin, through
+   applyProposals — so one coach saying a thing five times is still one origin, and the kernel
+   bands it rather than the coach asserting a standing for it.
+
+   AND THE PLAYER CAN PUSH BACK. Their disagreement is not a complaint filed somewhere; it is a
+   contradicting account on the same belief, which makes the belief CONTESTED — and contested
+   climbs, exactly as when a player disagrees with the evidence about themselves. Two people
+   watched the same thing and read it differently, and that gap is the finding. */
+/* The gate is LEADING THIS PERSON, checked below — not an org-wide permission. A coach who runs
+   a squad may record what they saw about somebody on it; holding a broad permission is neither
+   necessary nor sufficient, and using one here would let somebody with org-wide reach write
+   about a player they have never met. */
+app.post('/api/leader/observation', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  const subjectId = String(b.subjectId || '');
+  const text = String(b.text || '').trim().slice(0, 600);
+  const about = String(b.about || '').trim().slice(0, 120);
+  if (!subjectId || !text) return res.status(400).json({ error: 'subjectId and text required' });
+  if (subjectId === userId) return res.status(400).json({ error: 'record this about yourself in your own space' });
+
+  // A leader may observe somebody they actually lead. Not the whole organisation, and not a
+  // squad they merely belong to — leading is scoped to the node, as it is for the roster.
+  const leads = Object.values(orgNodes[code] || {}).some(n =>
+    n && _leadsNode(code, n.nodeId, userId) && (n.memberIds || []).includes(subjectId));
+  if (!leads) return res.status(403).json({ error: 'you do not lead this person' });
+
+  const now = Date.now();
+  const concept = (about || 'general').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'general';
+  const inq = _inquiryFor(code, `member:${subjectId}`, concept, about || 'Something a coach saw',
+    (orgMeta[code] || {}).orgMode || '', now);
+  if (!inq) return res.status(404).json({ error: 'no such person' });
+
+  const key = Object.keys(inquiryStates[code][`member:${subjectId}`])
+    .find(k => inquiryStates[code][`member:${subjectId}`][k].inquiryId === inq.inquiryId);
+  inquiryStates[code][`member:${subjectId}`][key] = diagnose.applyProposals(inq, [{
+    id: 'obs_' + generateId(),
+    level: 'observation', directness: 'direct', authority: 'third_party', source: 'other',
+    specificity: 0.6, statement: text,
+    // The leader is the origin. Five observations from one coach are one origin, which is the
+    // same rule that stops a player talking their own belief into a Low by repetition.
+    originKind: 'leader_report', originRef: `leader:${userId}`, turnId: `obs_${userId}_${now}`,
+    // Direction is DECLARED or absent. A coach saying "he was sharp today" is not read for
+    // sentiment any more than a player's words are.
+    direction: diagnose.DIRECTIONS.includes(b.direction) ? b.direction : 'neutral',
+  }], { now, evidenceRefOf: p => `${p.originRef}#${p.id}` });
+
+  _audit(code, { actor: userId, action: 'leader_observation', subjectIds: [subjectId], basis: concept });
+  scheduleSave();
+  res.json({ ok: true, inquiryId: inq.inquiryId,
+    note: `Recorded in your name. ${(orgUsers[code][subjectId] || {}).name || 'They'} can see it and can say if they saw it differently.` });
+});
+
+/* POST /api/me/disagree — { inquiryId, because }. The player's answer to one. */
+app.post('/api/me/disagree', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  const inquiryId = String(b.inquiryId || '');
+  const because = String(b.because || '').trim().slice(0, 600);
+  if (!because) return res.status(400).json({ error: 'say how you saw it — a disagreement with no account is not one' });
+
+  const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+  const key = Object.keys(mine).find(k => mine[k] && mine[k].inquiryId === inquiryId);
+  if (!key) return res.status(404).json({ error: 'no such belief of yours' });
+
+  const now = Date.now();
+  mine[key] = diagnose.applyProposals(mine[key], [{
+    id: 'dis_' + generateId(),
+    level: 'observation', directness: 'direct', authority: 'self_report', source: 'self',
+    specificity: 0.7, statement: because,
+    originKind: 'self_report', originRef: `self:${userId}`, turnId: `dis_${userId}_${now}`,
+    // THIS is what makes the belief contested. Not a flag somebody sets — a contradicting
+    // account on the record, which is what a disagreement actually is.
+    contradicts: true,
+  }], { now, evidenceRefOf: p => `${p.originRef}#${p.id}` });
+
+  _audit(code, { actor: userId, action: 'disagreed', subjectIds: [userId], basis: inquiryId });
+  scheduleSave();
+  res.json({ ok: true, inquiryId, contested: true,
+    note: 'Recorded, in your words, next to theirs. Accounts differing is the finding — it does not get averaged away, and it moves up rather than down.' });
+});
 
 /* POST /api/me/raise — { inquiryId }. The person's act, and only for something they called. */
 app.post('/api/me/raise', requireAuth, (req, res) => {

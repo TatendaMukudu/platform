@@ -3078,9 +3078,28 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
    person writing a commitment down, not a modal demanding attention. */
 .iq-focus-form{display:flex;flex-direction:column;gap:.5rem;width:100%}
 .iq-focus-label{font-size:.74rem;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted)}
-.iq-focus-input{width:100%;min-height:52px;resize:none;font:inherit;font-size:16px;line-height:1.45;
-  padding:.55rem .7rem;border-radius:12px;border:1px solid var(--border);background:transparent;color:inherit}
-.iq-focus-input:focus{outline:none;border-color:var(--accent)}
+/* ONE FIELD, EVERYWHERE. The founder, looking at two screens: "the focus page doesn't have the
+   composer, it has a white blob with 'in your own words' — a little more unison."
+
+   They were diagnosing correctly. The composer sits on --bg-surface with --radius-lg and a focus
+   glow; this field had a transparent background and a hand-picked 12px radius, so the same act —
+   typing something IntelliQ will hold — looked like two different products depending on which
+   screen you were on. `.iq-field` is now that shell, and anything that takes typed input wears
+   it, so the next input surface somebody adds inherits the look instead of inventing one.
+
+   .iq-focus-input is kept as an alias so nothing that still references it loses its styling. */
+.iq-field{display:flex;align-items:flex-end;gap:.5rem;background:var(--bg-surface);
+  border:1px solid var(--border);border-radius:var(--radius-lg);padding:.55rem .9rem;
+  transition:border-color .18s ease,box-shadow .18s ease}
+.iq-field:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
+.iq-field-input,.iq-focus-input{flex:1 1 0%;min-width:0;background:transparent;border:none;
+  outline:none;resize:none;color:var(--text-primary);font-size:16px;line-height:1.5;
+  padding:.35rem 0;max-height:180px;min-height:24px}
+.iq-field-input::placeholder,.iq-focus-input::placeholder{color:var(--text-muted)}
+.iq-field-date{background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--radius-lg);padding:.55rem .9rem;color:var(--text-primary);
+  font:inherit;font-size:16px;width:100%;max-width:220px}
+.iq-field-date:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
 .iq-focus-row{display:flex;align-items:center;gap:.4rem;flex-wrap:wrap}
 .iq-focus-who{font-size:.74rem;color:var(--text-muted)}
 .iq-focus-said{font-size:.74rem;color:var(--text-secondary);min-height:1em}
@@ -3106,3 +3125,14 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iq-dir-btns{display:flex;flex-wrap:wrap;gap:.35rem}
 .iq-dir .iqt-verdict{min-height:32px;padding:.25rem .7rem;font-size:.78rem}
 .iq-dir-done{color:var(--text-secondary);font-size:.8rem}
+
+/* Whose object is this. Self and squad share one ranked list, so a card carries its own label
+   rather than sitting under a heading — a heading would force the squad's most urgent item
+   below the person's least urgent one, which is the ordering the single list exists to avoid. */
+.iq-inq-about{font-size:.72rem;color:var(--text-muted);margin:.15rem 0 0}
+
+/* A coach's own account, beside "Ask IntelliQ" — the two things a leader does with a person in
+   front of them: ask about them, or say what they saw. */
+.pm-observe{margin:.6rem 0 0}
+.pm-observe-form:empty{display:none}
+.pm-observe-form{display:flex;flex-direction:column;gap:.45rem;margin:.6rem 0 0}

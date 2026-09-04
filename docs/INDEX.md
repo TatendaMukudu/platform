@@ -236,6 +236,7 @@ never silently edited.
 |---|---|
 | `rnd/intelliq-rnd-program.md` | **NON-AUTHORITATIVE** — 31 programmes; nothing here may be cited as a reason to build |
 | `rnd/audience-relative-reasoning-investigation.md` | **RESEARCH** — verdict STRONG DIRECTION; its bounded fix is queued work, its generalisation is not |
+| `PILOT-SPEC.md` | **DECIDED** — the September 2026 top-to-bottom sweep: what a coach can see, what counts as public evidence, focus shape, attachments as the assessment replacement, graph rules. Every item was put to the founder and answered |
 | `rnd/whose-read-holds-up.md` | **R&D NOTE** — which leaders' reads later hold up, counted from ladder data. Blocked on a behavioural decision, not on engineering |
 
 `docs/rnd/` is **not** an implementation queue. Promotion out of it is one-way and requires a named
