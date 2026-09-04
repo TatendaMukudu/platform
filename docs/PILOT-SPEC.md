@@ -163,6 +163,40 @@ current product draws anything.
 
 ---
 
+## 7b · Accounts, observations and onboarding
+
+**The founder is superadmin; the coach is a coach with leadership of their node.**
+
+Decided after a finding: `PUT /api/auth/update-user` lets a superadmin SET any user's password to
+a value they choose, then sign in as them and read every private conversation. It is org-scoped
+and permission-gated, so it is not a vulnerability in the ordinary sense — but in this product it
+is a silent bypass of the one promise the whole design rests on. If the head coach held that
+role, "your coach cannot read what you wrote" would be false in a way no player could discover.
+
+**And the path is being closed regardless of who holds the role.** An admin may trigger a
+password RESET; nobody may set a password to a value they know. Account recovery survives,
+impersonation does not. **Not built.**
+
+**A coach may record an observation about a player directly** — attributed, and the player can
+see it. Transparency is what stops it becoming a secret file, which is the one shape this
+architecture has refused everywhere else. **And the player can push back: disagreement is a
+finding**, contested and climbing, exactly as when a player disagrees with the evidence about
+themselves. **Not built** — a leader's account enters only through the ladder today.
+
+**Players are told once at sign-up, then on the screen** — a permanent quiet marker showing the
+current state, which is roughly what the "Private" chip already does.
+
+**Onboarding: a baseline at the start, then the kernel asks when it finds a gap.** The founder's
+framing — "isn't that the app?" — is correct, and the machinery exists: `diagnose.nextNeed`,
+`frontierFor`, `rankQuestions` and `diagnosticYield` already compute what is not yet known.
+Onboarding is not a separate subsystem; it is the first conversation plus a small baseline.
+
+THE TEST FOR AN ONBOARDING QUESTION: does its answer become EVIDENCE — with an origin, a
+direction and a date — or does it become a profile field? A profile field is a form. Evidence is
+the product working.
+
+---
+
 ## 8 · Still open
 
 Not yet put to the founder, and needed before the pilot is called ready:
