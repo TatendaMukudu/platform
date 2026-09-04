@@ -123,17 +123,124 @@ function valenceOf(contributions = []) {
   };
 }
 
-/* ── PERSONAL VALENCE — the same shape as the team path, minus the cohort ────────────────────
-   A team belief becomes a High or a Low by passing four gates, in order: somebody CALLED it
-   working-well or worth-attention; it rests on at least two independent origins; it clears the
-   two-sided cohort floor; and the kernel rates it emerging or better and undisputed.
+/* ── WHICH WAY THE EVIDENCE POINTS ───────────────────────────────────────────────────────────
+   Founder, September 2026, on the first version of this: "I'm confused as to why the system
+   cannot decide between a high and a low... what's the point in having them if our system can't
+   differentiate. It's dangerous if a person decides what their baseline is. That's like someone
+   sick saying they're fine."
 
-   For a belief about one person there is no cohort — it is them — so gate three does not
-   apply. Every other gate does, and gate one is the one that matters: NOBODY BUT THE PERSON
-   CALLS IT. Not the model, not a keyword list over the wording, not a leader. The machine
-   counts, checks independence, and refuses when the evidence is thin; a human says which way
-   it points. That is the property that makes the team version trustworthy and it is the only
-   reason to build the personal one the same way.
+   That is correct and the first version was wrong. It made a person's own call the ONLY thing
+   that could file a High or a Low, which quietly made their say-so the baseline — and the case
+   it fails is the one that matters most: somebody struggling who says they are fine files
+   nothing at all, and the system goes quiet exactly when it should not.
+
+   The mistake was over-correcting from the daily check-in. Seven pattern detectors already
+   existed to decide this (momentum_drop, quiet_improvement, recovering, repeated_concern,
+   member_team_divergence, invisible_load, baseline_shift) and they were starved, not wrong: six
+   read a mood series that was retired with the check-in. The answer was to feed them, not to
+   hand their job to a tap.
+
+   So THE EVIDENCE DECIDES, and it decides from direction that was DECLARED rather than read out
+   of anybody's wording:
+
+     - the author tags what they said as better, worse or neither, at the moment they say it —
+       the same act group contributors already perform (valenceOf, above);
+     - documented data carries its own direction: an assessment score that moved, a focus
+       outcome that was recorded;
+     - and the kernel's own structure carries direction: a belief weakening, becoming contested,
+       origins drying up.
+
+   ORIGINS VOTE, NOT SIGNALS (L-OR1, applied to direction). Five messages from one person tagged
+   `decline` are ONE origin saying decline. Without that rule the loudest person in a room sets
+   the polarity, and somebody could talk their own belief into a Low by repetition — which is
+   the same failure the independence rule exists to prevent everywhere else.
+
+   AND ORIGINS THAT DISAGREE ABOUT DIRECTION ARE CONTESTED, not averaged. Two people who watched
+   the same thing and read it opposite ways have produced a finding, and the finding is the
+   disagreement. */
+/* How many independent origins this belief actually rests on.
+
+   Computed from the signals when the caller has not already counted them. The count used to be
+   a field the CALLER had to set, and every route that forgot silently read zero — which is the
+   same shape as the seed that wrote a nested `origin: {kind, ref}` the kernel never reads and
+   made three separate players look like one source. A number this important should not depend
+   on remembering to pass it. */
+function originsOf(inquiry = {}) {
+  const declared = _num(inquiry.independentOrigins);
+  if (declared) return declared;
+  const refs = new Set();
+  for (const sig of _arr(inquiry.signals)) {
+    if (!sig || sig.kind === 'interpretation' || sig.status !== 'active') continue;
+    const ref = _s(sig.originRef || '', 120);
+    if (ref) refs.add(ref);
+  }
+  return refs.size;
+}
+
+function evidenceValence(inquiry = {}, { now = Date.now() } = {}) {
+  const band = _s((inquiry.confidence || {}).band || 'tentative', 32);
+  const signals = _arr(inquiry.signals)
+    .filter(s => s && s.kind !== 'interpretation' && s.status === 'active' && !s.dissents);
+
+  /* One vote per origin, and the most recent one it cast. A person who said "worse" in
+     September and "better" in November has changed their mind, not voted twice. An origin that
+     never declared a direction abstains rather than counting as neutral evidence. */
+  const byOrigin = new Map();
+  for (const sig of signals) {
+    const dir = _s(sig.direction || 'neutral', 16);
+    if (dir !== 'improvement' && dir !== 'decline') continue;
+    const key = _s(sig.originRef || sig.ref || '', 120);
+    if (!key) continue;
+    const prev = byOrigin.get(key);
+    if (!prev || _num(sig.at) >= _num(prev.at)) byOrigin.set(key, { dir, at: _num(sig.at) });
+  }
+
+  const up = [...byOrigin.values()].filter(v => v.dir === 'improvement').length;
+  const down = [...byOrigin.values()].filter(v => v.dir === 'decline').length;
+  const directed = up + down;
+  const blocked = [];
+
+  if (!directed) {
+    blocked.push({ gate: 'undirected',
+      reason: 'nothing on this has been marked as better or worse, so it does not point anywhere yet' });
+  } else if (directed < MIN_ORIGINS) {
+    blocked.push({ gate: 'origins',
+      reason: `only ${directed} independent origin${directed === 1 ? ' has' : 's have'} said which way this is going — saying it twice is still once` });
+  }
+  if ((BAND_RANK[band] ?? 0) < BAND_RANK.emerging) {
+    blocked.push({ gate: 'standing', reason: `the kernel rates this ${band}; too early to file either way` });
+  }
+  if (inquiry.status === 'disputed' || inquiry.contested === true) {
+    blocked.push({ gate: 'standing', reason: 'accounts disagree about this, and a disagreement is the finding' });
+  }
+
+  if (blocked.length) {
+    return { polarity: POLARITY.NEUTRAL, contested: inquiry.contested === true, ok: false, blocked,
+      up, down, origins: directed, reason: blocked[0].reason };
+  }
+  if (up && down) {
+    return {
+      polarity: POLARITY.NEUTRAL, contested: true, ok: false, up, down, origins: directed,
+      blocked: [{ gate: 'contested', reason: `${up} said this is getting better and ${down} said worse` }],
+      reason: `accounts differ on which way this is going — ${up} better, ${down} worse`,
+    };
+  }
+  return {
+    polarity: up ? POLARITY.WORKING_WELL : POLARITY.WORTH_ATTENTION,
+    contested: false, ok: true, blocked: [], up, down, origins: directed, at: now,
+    reason: `${directed} independent ${directed === 1 ? 'account' : 'accounts'} say this is getting ${up ? 'better' : 'worse'}`,
+  };
+}
+
+/* ── PERSONAL VALENCE — what the PERSON says, which is no longer what files it ────────────────
+   Kept, and deliberately demoted. This is now a second account rather than the decision: it is
+   read alongside the evidence by combinedValence below, and it can never move a belief out of a
+   Low. A person cannot mark themselves fine — that was the founder's ruling and it is the
+   direct answer to the sick-person case.
+
+   It still matters. Where the evidence has no direction at all, the person's own read is the
+   best thing available and is allowed to file. Where the evidence does have one, their view is
+   recorded against it, and a disagreement makes the belief louder rather than quieter.
 
    A call is not a conclusion. It can be changed, and changing it moves the belief between
    buckets rather than editing anything that happened.
@@ -141,7 +248,7 @@ function valenceOf(contributions = []) {
    Returns the same shape as valenceOf, so one reader serves both. */
 function personalValence(inquiry = {}, { call = null, now = Date.now() } = {}) {
   const band = _s((inquiry.confidence || {}).band || 'tentative', 32);
-  const origins = _num(inquiry.independentOrigins);
+  const origins = originsOf(inquiry);
   const blocked = [];
 
   // GATE 1 — somebody called it, and that somebody is its subject.
@@ -178,10 +285,100 @@ function personalValence(inquiry = {}, { call = null, now = Date.now() } = {}) {
 /* Is this belief ready to be ASKED about? The question is only worth putting to somebody once
    the evidence would actually support an answer — asking before that teaches people the
    question is noise, which is precisely what the daily check-in did. */
+/* ── WHAT ACTUALLY GETS FILED ────────────────────────────────────────────────────────────────
+   Two accounts of the same belief — what the evidence says, and what the person says — and this
+   is the rule for putting them together. Three founder rulings, taken explicitly:
+
+     1. THE EVIDENCE STANDS. It files the High or the Low on its own; no tap is required and
+        none is waited for.
+
+     2. A PERSON CANNOT CLEAR A LOW. Not by disagreeing, not by calling it working-well, not
+        ever. A Low is cleared when the evidence changes or when a leader takes it on through
+        the ladder. "It's dangerous if a person decides what their baseline is."
+
+     3. DISAGREEMENT MAKES IT LOUDER. A player saying they are fine while the evidence says
+        otherwise is MORE worth somebody's time, not less — so the belief becomes contested and
+        climbs, exactly as a contested belief does everywhere else in this system.
+
+   And the case that keeps the person's voice real: where the evidence has NO direction, their
+   own call is the best account available and is allowed to file on its own, under the same
+   gates the first version used. The machine having nothing to say is not a reason to ignore
+   the person who does. */
+function combinedValence(inquiry = {}, { call = null, now = Date.now() } = {}) {
+  const ev = evidenceValence(inquiry, { now });
+  const said = call && (call.valence === 'working_well' || call.valence === 'worth_attention')
+    ? call.valence : null;
+  const saidPolarity = said === 'working_well' ? POLARITY.WORKING_WELL
+    : said === 'worth_attention' ? POLARITY.WORTH_ATTENTION : null;
+
+  // The evidence has a direction. It decides, and the person's view is read against it.
+  if (ev.ok) {
+    const disagrees = !!saidPolarity && saidPolarity !== ev.polarity;
+    return {
+      polarity: ev.polarity,
+      ok: true,
+      by: 'evidence',
+      // The counts travel with the verdict. Without them a caller can render "the evidence says
+      // worse" and has no way to say how many accounts that is, which is the only thing that
+      // makes the claim checkable by the person reading it.
+      up: ev.up, down: ev.down, origins: ev.origins,
+      contested: disagrees,
+      disagreement: disagrees,
+      // RULE 3. The bump is returned rather than applied, because how loud a thing gets is the
+      // priority office's job and this module does not rank anything.
+      louder: disagrees,
+      called: said,
+      blocked: [],
+      reason: disagrees
+        ? `${ev.reason}, and you read it the other way — worth working out which of you is seeing something the other is not`
+        : ev.reason,
+    };
+  }
+
+  // The evidence disagrees WITH ITSELF about direction. That is a finding on its own and no
+  // call resolves it, including one that happens to pick a side.
+  if (ev.contested) {
+    return { polarity: POLARITY.NEUTRAL, ok: false, by: 'evidence', contested: true,
+      up: ev.up, down: ev.down, origins: ev.origins,
+      disagreement: true, louder: true, called: said, blocked: ev.blocked, reason: ev.reason };
+  }
+
+  // The evidence says nothing about direction. The person's own account is what there is.
+  if (saidPolarity) {
+    const personal = personalValence(inquiry, { call, now });
+    if (personal.ok) {
+      return { polarity: personal.polarity, ok: true, by: 'person', contested: false,
+        up: ev.up, down: ev.down, origins: ev.origins,
+        disagreement: false, louder: false, called: said, blocked: [],
+        reason: `you called this one, and nothing else on it points either way yet` };
+    }
+    return { ...personal, by: 'person', up: ev.up, down: ev.down, origins: ev.origins,
+      disagreement: false, louder: false, called: said };
+  }
+
+  return { polarity: POLARITY.NEUTRAL, ok: false, by: 'nobody', contested: false,
+    up: ev.up, down: ev.down, origins: ev.origins,
+    disagreement: false, louder: false, called: null, blocked: ev.blocked, reason: ev.reason };
+}
+
+/* Can this person's call move this belief OUT of where the evidence put it? Ruling 2: no.
+   Exposed as its own predicate so the answer is in one place and a route cannot quietly get it
+   wrong by reimplementing the check. */
+function mayClear(inquiry = {}, { now = Date.now() } = {}) {
+  const ev = evidenceValence(inquiry, { now });
+  if (ev.ok && ev.polarity === POLARITY.WORTH_ATTENTION) {
+    return { ok: false, reason: 'the evidence still says this needs attention, so it stays. You can say you see it differently, and that is recorded.' };
+  }
+  if (ev.contested) {
+    return { ok: false, reason: 'accounts differ on which way this is going, and that disagreement is the thing to resolve.' };
+  }
+  return { ok: true };
+}
+
 function readyForCall(inquiry = {}) {
   const band = _s((inquiry.confidence || {}).band || 'tentative', 32);
   return (BAND_RANK[band] ?? 0) >= BAND_RANK.emerging
-    && _num(inquiry.independentOrigins) >= MIN_ORIGINS
+    && originsOf(inquiry) >= MIN_ORIGINS
     && inquiry.status !== 'disputed'
     && inquiry.contested !== true;
 }
@@ -549,6 +746,6 @@ function buildTeamState({ node = {}, inquiries = [], findings = [], focuses = []
 
 module.exports = {
   VALENCES, POLARITY, MIN_COHORT, MIN_ORIGINS, FOCUS_STATUSES, OUTCOME_RESULTS,
-  valenceOf, personalValence, readyForCall, cohortFloor, fitForSurface, openQuestion, newFocus, recordFocusOutcome, normalizeFocus,
+  valenceOf, personalValence, evidenceValence, combinedValence, mayClear, readyForCall, originsOf, cohortFloor, fitForSurface, openQuestion, newFocus, recordFocusOutcome, normalizeFocus,
   statementFor, buildTeamState,
 };

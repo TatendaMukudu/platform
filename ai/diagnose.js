@@ -495,6 +495,8 @@ function supersede(signal, { by = null, at = Date.now(), reason = '', status = '
   };
 }
 
+const DIRECTIONS = Object.freeze(['improvement', 'decline', 'neutral']);
+
 function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefOf } = {}) {
   const next = JSON.parse(JSON.stringify(inquiry));
   // A proposal points at governed evidence. Until the caller supplies a real ref (the evidence
@@ -521,6 +523,19 @@ function applyProposals(inquiry, accepted = [], { now = Date.now(), evidenceRefO
         // three paraphrases of one sentence weigh as three occasions.
         turnId: p.turnId || null,
         at: now, dissents: !!p.contradicts,
+        /* WHICH WAY THIS POINTS, and where that came from.
+
+           Declared, never inferred. A signal is `improvement`, `decline` or `neutral` because
+           its author said so at the moment they offered it, or because it arrived from
+           documented data that has a direction of its own (an assessment score that moved, a
+           focus outcome that was recorded). It is NEVER read out of the wording.
+
+           That distinction is the whole reason this field exists rather than a classifier. A
+           ~40-stem lexicon deciding what "struggling with my first touch" meant was tried in
+           this codebase and removed: it destroyed the information before anything could reason
+           over it. Absent means neutral, which is treated as "no direction offered" and not as
+           "nothing is happening". */
+        direction: DIRECTIONS.includes(p.direction) ? p.direction : 'neutral',
         // Which hypothesis this bears on, and which way. The model may say; if it does not,
         // the signal still counts toward the inquiry but weighs on nothing in particular.
         supports: p.supports ? String(p.supports) : null,
@@ -1180,7 +1195,7 @@ function boundFrontier(inquiries = [], { cap = 6, valueOf = null, now = Date.now
 }
 
 module.exports = {
-  LEVELS, LEVEL_RANK, MODEL_MAY_PROPOSE, INTAKE_PROMPT, boundFrontier,
+  LEVELS, LEVEL_RANK, MODEL_MAY_PROPOSE, INTAKE_PROMPT, boundFrontier, DIRECTIONS,
   groundProposals, deriveConfidence, newInquiry, newHypothesis, applyProposals, frontierFor,
   diagnosticYield, rankQuestions, nextNeed, consolidate,
   CONVERSATION_QUESTION_CAP, QUESTION_COOLDOWN_MS, CONVERSATION_NEW_INQUIRY_CAP,

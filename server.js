@@ -4890,17 +4890,37 @@ function _beliefStateFindings(code, userId, now) {
       continue;                                   // a contested belief is not also a high or a low
     }
 
-    const v = teamState.personalValence(shaped, { call: calls[inq.inquiryId] || null, now });
+    /* THE EVIDENCE DECIDES. The person's call is read alongside it and cannot overrule it —
+       founder ruling, after the first version made their say-so the baseline: "it's dangerous
+       if a person decides what their baseline is. That's like someone sick saying they're
+       fine." Where the evidence points nowhere, their call still files it on its own. */
+    const v = teamState.combinedValence(shaped, { call: calls[inq.inquiryId] || null, now });
     if (!v.ok) continue;
     const good = v.polarity === 'strength';
+
+    /* A DISAGREEMENT CLIMBS. Somebody saying they are fine while the evidence says otherwise is
+       more worth a look, not less, so it takes the priority a contested belief takes rather
+       than the one its polarity would have given it. */
+    const priority = v.louder ? 'high' : (good ? 'low' : 'medium');
+    const severity = v.louder ? 'high' : (good ? 'low' : 'medium');
+
+    // How this was decided, in the person's own terms and without a number standing for them.
+    const basis = v.by === 'evidence'
+      ? `${v.origins} separate ${v.origins === 1 ? 'account' : 'accounts'} point${v.origins === 1 ? 's' : ''} the same way`
+      : 'you called this one, and nothing else on it points either way yet';
+
     out.push({ patternType: good ? 'called_strength' : 'called_friction',
       polarity: good ? 'progress' : 'risk', subjectId: userId,
-      severity: good ? 'low' : 'medium', priority: good ? 'low' : 'medium',
+      severity, priority,
       confidence: (shaped.confidence || {}).band === 'supported' ? 'clear' : 'emerging',
       render: { self: {
-        headline: good ? `${label} is working` : `${label} needs attention`,
-        body: `You called this one, and it rests on ${shaped.independentOrigins} separate occasions rather than one telling.`,
-        suggestion: good ? null : 'Open it and decide what you want to do about it.' } } });
+        headline: v.louder
+          ? `${label} — you and the record see this differently`
+          : (good ? `${label} is working` : `${label} needs attention`),
+        body: v.louder
+          ? `${basis}, and you read it the other way. That gap is worth a look on its own — one of you is seeing something the other is not.`
+          : `${basis}.`,
+        suggestion: good && !v.louder ? null : 'Open it and decide what you want to do about it.' } } });
   }
 
   // Focuses — facts about a commitment the person made, so no call is needed for either.
@@ -14923,22 +14943,44 @@ app.post('/api/me/call', requireAuth, (req, res) => {
   const inq = Object.values(mine).find(i => i && i.inquiryId === id);
   if (!inq) return res.status(404).json({ error: 'no such belief of yours' });
 
+  const active = (inq.signals || []).filter(s => s && s.kind !== 'interpretation' && diagnose.isActive(s));
+  const shaped = { ...inq,
+    independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size,
+    contested: inq.status === 'disputed' || active.some(s => s.dissents) };
+
+  /* RULING 2, ENFORCED HERE AS WELL AS EXPRESSED IN THE KERNEL. Taking your call back cannot be
+     a way to clear a Low the evidence raised — that is the whole of "it's dangerous if a person
+     decides what their baseline is". The call itself is always recordable; what is refused is
+     the idea that withdrawing it makes the finding go away. */
+  if (!want) {
+    const clearable = teamState.mayClear(shaped);
+    if (!clearable.ok) {
+      const mem0 = _getMemory(code, userId);
+      if (mem0.valenceCalls) delete mem0.valenceCalls[id];
+      mem0.lastUpdated = new Date().toISOString();
+      scheduleSave();
+      return res.json({ ok: true, inquiryId: id, called: null, bucket: 'low', cleared: false,
+        note: clearable.reason });
+    }
+  }
+
   const mem = _getMemory(code, userId);
   mem.valenceCalls = mem.valenceCalls || {};
   if (want) mem.valenceCalls[id] = { valence: want, at: Date.now() };
   else delete mem.valenceCalls[id];
   mem.lastUpdated = new Date().toISOString();
 
-  const active = (inq.signals || []).filter(s => s && s.kind !== 'interpretation' && diagnose.isActive(s));
-  const shaped = { ...inq,
-    independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size,
-    contested: inq.status === 'disputed' || active.some(s => s.dissents) };
-  const v = teamState.personalValence(shaped, { call: mem.valenceCalls[id] || null });
+  const v = teamState.combinedValence(shaped, { call: mem.valenceCalls[id] || null });
 
   _audit(code, { actor: userId, action: 'valence_call', subjectIds: [userId], basis: want || 'cleared' });
   scheduleSave();
   res.json({ ok: true, inquiryId: id, called: want, bucket: v.ok ? (v.polarity === 'strength' ? 'high' : 'low') : null,
+    by: v.by, disagreement: v.disagreement === true,
     note: !want ? 'Cleared. It goes back to being something you are working out.'
+      : v.disagreement
+        // Never phrased as a correction of them. Two accounts differ; that is the finding, and
+        // it is theirs to look at rather than a verdict handed down.
+        ? 'Noted, and recorded. The record still reads this the other way, so it stays where it is and moves up — that gap is worth a look.'
       : v.ok ? (v.polarity === 'strength'
           ? 'Filed under what is going well. You can change that any time.'
           : 'Filed under what needs attention. You can change that any time.')
