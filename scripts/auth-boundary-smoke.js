@@ -181,6 +181,34 @@ const server = app.listen(0, async () => {
       /fetch\('\/api\/coach-debrief',\s*\{\s*\n?\s*method:\s*'POST',\s*\n?\s*headers:\s*Auth\._headers\(\)/.test(front) &&
       /register-org'[\s\S]{0,80}headers: Auth\._headers\(\)/.test(front));
 
+    /* ── AB10: NOBODY SETS SOMEBODY ELSE'S PASSWORD. The reason the founder holds superadmin
+       rather than the head coach — and the reason that reason should not have to be remembered.
+
+       PUT /api/auth/update-user used to hash whatever `updates.password` contained, so anyone
+       with superadmin or edit_members could set a player's password, sign in as them, and read
+       every private conversation they had ever had. Permission-gated, org-scoped, and a complete
+       bypass of the one promise the product rests on. Account recovery survives as a RESET the
+       person completes themselves. ── */
+    S.orgUsers[A].adm = { id: 'adm', name: 'The Owner', email: 'adm@x.io', role: 'superadmin', orgCode: A, status: 'active' };
+    const tokAdmin = issueToken('adm', A, 'superadmin');
+    const hadHash = S.orgUsers[A].ua.passwordHash;
+
+    const setIt = await call('/api/auth/update-user', tokAdmin, 'PUT',
+      { userId: 'ua', updates: { password: 'i-chose-this' } });
+    ok('AB10 a SUPERADMIN CANNOT SET SOMEBODY ELSE\'S PASSWORD — the one path by which any human could have read another person\'s private record',
+      setIt.status === 403 && /choose their own/i.test((setIt.j || {}).error || ''));
+    ok('AB10b …and the refused write changed nothing, so it is not a partial one',
+      S.orgUsers[A].ua.passwordHash === hadHash && S.orgUsers[A].ua.passwordSet !== false);
+
+    const reset = await call('/api/auth/update-user', tokAdmin, 'PUT',
+      { userId: 'ua', updates: { resetPassword: true } });
+    ok('AB10c …but they CAN send a reset, so a locked-out player is still recoverable — the rule removes impersonation, not support',
+      reset.status === 200 && S.orgUsers[A].ua.passwordSet === false && !S.orgUsers[A].ua.passwordHash);
+
+    const stale = await call('/api/contacts', tokA, 'GET');
+    ok('AB10d …and a reset ENDS EVERY SESSION that account had open — a reset that leaves an old session alive is a password change the previous holder never notices',
+      stale.status === 401);
+
   } catch (e) { fail++; console.error('  FAIL suite threw:', e && e.stack); }
 
   server.close();

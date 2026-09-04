@@ -2162,7 +2162,40 @@ app.put('/api/auth/update-user', requireAuth, async (req, res) => {
       users[userId].email = newEmail;
     }
   }
-  if (updates.password) users[userId].passwordHash = await bcrypt.hash(updates.password, SALT_ROUNDS);
+  /* AN ADMIN MAY RESET A PASSWORD. AN ADMIN MAY NEVER SET ONE THEY KNOW.
+
+     This line used to accept `updates.password` and hash it — so anybody holding superadmin or
+     edit_members could set a player's password to a value of their choosing, sign in as that
+     player, and read every private conversation they had ever had. Org-scoped and
+     permission-gated, so not a vulnerability in the ordinary sense. But in THIS product it was a
+     silent bypass of the one promise the whole design rests on, and it is the reason the founder
+     holds superadmin rather than the head coach: "your coach cannot read what you wrote" has to
+     be true, not merely intended, and a promise nobody can discover is broken is the worst kind.
+
+     What replaces it keeps account recovery and removes impersonation. `resetPassword: true`
+     clears the credential and marks the account as never-set, which puts it back on the
+     first-login path where the PERSON chooses the new one through /api/auth/set-password. Every
+     existing session for that account is dropped at the same time, so a reset also ends any
+     session already open on a lost device.
+
+     The admin never learns a password and never holds one. */
+  if (updates.password) {
+    return res.status(403).json({
+      error: 'Passwords cannot be set for somebody else. Send a reset instead — they choose their own.',
+    });
+  }
+  if (updates.resetPassword === true) {
+    delete users[userId].passwordHash;
+    users[userId].passwordSet = false;
+    // End every session this account has open. A reset that leaves an old session alive is not
+    // a reset; it is a password change the previous holder did not notice.
+    let dropped = 0;
+    for (const [tok, sess] of Object.entries(activeSessions)) {
+      if (sess && sess.orgCode === code && sess.userId === userId) { delete activeSessions[tok]; dropped++; }
+    }
+    _audit(code, { actor: req.iqSession.userId, action: 'password_reset', subjectIds: [userId],
+      basis: `sessions ended: ${dropped}` });
+  }
   scheduleSave();
   res.json({ ok: true, user: { ...users[userId], passwordHash: undefined } });
 });
