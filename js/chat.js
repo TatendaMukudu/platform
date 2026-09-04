@@ -107,7 +107,7 @@ const ChatEngine = {
     try {
       const res = await fetch('/api/chat', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: Auth._headers(),
         body:    JSON.stringify(body),
       });
 

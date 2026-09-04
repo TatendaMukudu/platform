@@ -1,6 +1,5 @@
 require('dotenv').config();
 const express   = require('express');
-const Anthropic  = require('@anthropic-ai/sdk');
 const path      = require('path');
 const bcrypt    = require('bcryptjs');
 const fs        = require('fs');   // kept for store.json → Postgres one-time migration
@@ -90,7 +89,17 @@ const reasoning  = require('./lib/reasoning');   // the three reasoning boundari
 const capAdapters = require('./lib/adapters');   // capability → canonical evidence adapters (legacy convergence)
 
 const app    = express();
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+/* NO PROVIDER CLIENT LIVES HERE.
+
+   server.js used to construct its own Anthropic client and call it directly from twelve routes.
+   Each of those calls was outside every protection the gateway exists to apply: no
+   deterministic-only enforcement, so a no-egress deployment still talked to a provider; no
+   per-organisation budget, so one route could spend without limit; no token telemetry, so the
+   spend was invisible; no model-availability fallback and no sampling-rejection handling, so a
+   configuration change degraded to a 500 rather than to a working answer.
+
+   Every model exit now goes through ai/gateway.js. scripts/provider-boundary-smoke.js fails if
+   this file ever grows another one. */
 let _shuttingDown = false;
 let _httpServer = null;
 let _shutdownPromise = null;
@@ -973,14 +982,19 @@ TONE:
 }
 
 /* ─── CHAT / SCENARIO ENDPOINT ──────────────────────────────────────────── */
-app.post('/api/chat', async (req, res) => {
+/* SECURITY: WHO YOU ARE COMES FROM THE SESSION.
+
+   This route was unauthenticated and read `orgCode`, `userId` and `memberName` straight out of
+   the body — so an anonymous caller could name any organisation and receive its values, its
+   metrics and its profile inside a model prompt, and could name any user and have that person's
+   memory block assembled for them. It was also a free model call on somebody else's budget.
+
+   The identifying fields are now derived, and the body's versions are ignored rather than
+   validated: there is no legitimate reason for a caller to tell the server who they are, and
+   accepting the field at all leaves the next person to wonder whether it is checked. */
+app.post('/api/chat', requireAuth, async (req, res) => {
   const {
     messages,
-    orgMode,
-    orgName,
-    orgCode,
-    userId,             // optional: member's server userId for memory lookup
-    memberName,
     scenarioContext,    // reflection mode: completed scenario summary
     promptType,         // 'reflection' (default) | 'scenario'
     scenarioRunContext, // scenario mode: { title, context, difficulty, opening, probes, image }
@@ -990,8 +1004,18 @@ app.post('/api/chat', async (req, res) => {
     return res.status(400).json({ error: 'messages array required' });
   }
 
-  // Load org-specific values, metrics, and profile for prompt enrichment
-  const code    = (orgCode || '').toLowerCase();
+  /* Defensive, and not redundantly so. requireAuth guarantees a session, but this handler is
+     `async` — and Express 4 does not catch a rejected promise, so a throw here does not become a
+     500, it becomes a request that NEVER RESPONDS. Discovered by mutation: removing requireAuth
+     turned every anonymous call into a socket held open forever, which is a worse failure than
+     the one being tested for. A missing session now answers, rather than hanging. */
+  if (!req.iqSession) return res.status(401).json({ error: 'Authentication required.' });
+  const code   = String(req.iqSession.orgCode || '').toLowerCase();
+  const userId = req.iqSession.userId;
+  const me     = (orgUsers[code] || {})[userId] || {};
+  const memberName = me.name || '';
+  const orgName = (orgMeta[code] || {}).orgName || (orgStore[code] || {}).orgName || 'your organisation';
+  const orgMode = (orgMeta[code] || {}).orgMode || (orgStore[code] || {}).orgMode || '';
   const values  = orgValues[code]  || [];
   const metrics = (orgMetrics[code] || []).map(m => m.name || m);
   const orgProfile = orgMeta[code] || {};
@@ -1042,14 +1066,15 @@ app.post('/api/chat', async (req, res) => {
       return { role: m.role, content: m.content };
     });
 
-    const response = await client.messages.create({
+    const response = await ai.complete({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 500,
+      maxTokens: 500,
       system:     [systemPrompt, _domainDirective(code, { userId })].filter(Boolean).join('\n\n'),
       messages:   apiMessages,
+      org: req.iqSession && req.iqSession.orgCode, taskType: 'chat',
     });
 
-    const raw = response.content[0]?.text || '';
+    const raw = response || '';
 
     // Extract structured score block if present
     const scoreMatch = raw.match(/\[\[SCORE:(\{[\s\S]*?\})\]\]/);
@@ -1122,14 +1147,15 @@ RULES:
     : `Coach brief: ${brief}`;
 
   try {
-    const response = await client.messages.create({
+    const response = await ai.complete({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 700,
+      maxTokens: 700,
       system:     [systemPrompt, _domainDirective(code)].filter(Boolean).join('\n\n'),
       messages:   [{ role: 'user', content: userContent }],
+      org: req.iqSession && req.iqSession.orgCode, taskType: 'draft_scenario',
     });
 
-    const raw = response.content[0]?.text || '';
+    const raw = response || '';
     const jsonStr = raw.replace(/```json\n?|\n?```/g, '').trim();
 
     let draft;
@@ -1145,9 +1171,23 @@ RULES:
 });
 
 /* ─── COACH DEBRIEF ENDPOINT ────────────────────────────────────────────── */
-app.post('/api/coach-debrief', async (req, res) => {
-  const { conversation, scores, memberName, scenarioTitle, orgMode, orgName, coachRole } = req.body;
+/* SECURITY: authenticated, and only for somebody who actually leads people.
+
+   This was unauthenticated and produced a private leader-facing analysis of a NAMED person from
+   a caller-supplied conversation — an anonymous model call that wrote about somebody by name and
+   set a safeguarding `escalate` flag outside the safeguarding pipeline. The conversation is
+   supplied by the caller rather than read from the record, so it was never an exfiltration
+   route; what it was is a free model call that manufactures leader-facing text about a named
+   individual, which is worse in a different way.
+
+   Retained rather than retired, at the founder's direction, and brought under the same rules as
+   everything else: a session, a leader scope, the gateway, and the org from the session. */
+app.post('/api/coach-debrief', requirePermission('view_member_detail'), async (req, res) => {
+  const { conversation, scores, memberName, scenarioTitle, coachRole } = req.body;
   if (!conversation || !scores) return res.status(400).json({ error: 'conversation and scores required' });
+  const _code = String(req.iqSession.orgCode || '').toLowerCase();
+  const orgName = (orgMeta[_code] || {}).orgName || 'an organisation';
+  const orgMode = (orgMeta[_code] || {}).orgMode || '';
 
   const systemPrompt = `You are an expert performance analyst for IntelliQ, used by ${orgName || 'an organisation'}.
 
@@ -1173,17 +1213,18 @@ Be honest. Be specific. Reference what ${memberName} actually said. Do not give 
     .join('\n');
 
   try {
-    const response = await client.messages.create({
+    const response = await ai.complete({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 600,
+      maxTokens: 600,
       system:     [systemPrompt, packs.domainDirective(packs.resolveDomain(orgMode))].filter(Boolean).join('\n\n'),
       messages:   [{
         role:    'user',
         content: `SCORES: Ethical Reasoning ${scores.ethical_reasoning}, Stakeholder Awareness ${scores.stakeholder_awareness}, Pressure Response ${scores.pressure_response}, Self Awareness ${scores.self_awareness}, Overall ${scores.overall}\n\nCONVERSATION:\n${conversationText}`,
       }],
+      org: req.iqSession && req.iqSession.orgCode, taskType: 'coach_debrief',
     });
 
-    const raw     = response.content[0]?.text || '';
+    const raw     = response || '';
     const jsonStr = raw.replace(/```json\n?|\n?```/g, '').trim();
 
     let debrief;
@@ -2571,14 +2612,15 @@ Return exactly this JSON shape:
 }`;
 
   try {
-    const response = await client.messages.create({
+    const response = await ai.complete({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 800,
+      maxTokens: 800,
       system:     systemPrompt,
       messages:   [{ role: 'user', content: userPrompt }],
+      org: req.iqSession && req.iqSession.orgCode, taskType: 'org_setup_suggest',
     });
 
-    const raw = response.content?.[0]?.text || '{}';
+    const raw = response || '{}';
     let parsed;
     try {
       // Strip any accidental markdown fences
@@ -7988,7 +8030,20 @@ app.post('/api/webhooks/:code/:connId', (req, res) => {
   const challenge = req.body?.challenge || req.query?.challenge;
   if (challenge && (req.body?.type === 'url_verification' || req.query?.challenge)) return res.json({ challenge });
 
-  // Signature verification (HMAC-SHA256 over the raw body with the connection secret).
+  /* Signature verification (HMAC-SHA256 over the raw body with the connection secret).
+
+     FAILS CLOSED. This used to verify only `if (conn.webhookSecret)` — so a connection created
+     without one accepted ANY unsigned payload from anyone who could name the org code and the
+     connection id, and the absence of a secret was silently the absence of authentication. An
+     unconfigured connection is now refused rather than trusted; the fix is to configure the
+     secret, and the error says so without ever echoing what the secret is.
+
+     There is deliberately NO test-mode bypass. An escape hatch for the suite is an escape hatch,
+     and the suite can simply configure a secret and sign — which is also the only version of
+     this path worth proving. */
+  if (!conn.webhookSecret) {
+    return res.status(401).json({ error: 'this connection has no webhook secret configured, so nothing can be verified' });
+  }
   if (conn.webhookSecret) {
     const sigHeader = String(req.headers['x-iq-signature'] || req.headers['x-signature'] || '');
     const expected = 'sha256=' + crypto.createHmac('sha256', conn.webhookSecret).update(req.rawBody || Buffer.from(JSON.stringify(req.body || {}))).digest('hex');
@@ -16203,17 +16258,18 @@ app.post('/api/metrics/suggest', requirePermission('manage_metrics'), async (req
   const desc   = req.body.description || meta.orgDescription || meta.orgName || '';
   const values = orgValues[code] || [];
   try {
-    const response = await client.messages.create({
+    const response = await ai.complete({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 400,
+      maxTokens: 400,
       system:     'You are a performance measurement expert. Output valid JSON only.',
       messages:   [{
         role:    'user',
         content: `Suggest 5-8 performance metrics for an organisation described as: "${desc}"${values.length ? '. Their values are: ' + values.join(', ') : ''}.
 Output JSON array of strings: ["Metric Name 1", "Metric Name 2", ...]. Be specific to the organisation. No generic HR metrics.`,
       }],
+      org: req.iqSession && req.iqSession.orgCode, taskType: 'metrics_suggest',
     });
-    const raw  = response.content[0]?.text || '[]';
+    const raw  = response || '[]';
     const json = raw.replace(/```json\n?|\n?```/g, '').trim();
     const suggestions = JSON.parse(json);
     res.json({ ok: true, suggestions });
@@ -16570,12 +16626,13 @@ app.post('/api/notes', requireAuth, async (req, res) => {
     };
     const userMsg = goals?.goal ? `Their goal: "${goals.goal}"\n\nNote: ${content}` : `Note: ${content}`;
     try {
-      const response = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001', max_tokens: 100,
+      const response = await ai.complete({
+        model: 'claude-haiku-4-5-20251001', maxTokens: 100,
         system: [prompts[type] || prompts.private, _worldviewDirective(note.orgCode), _domainDirective(note.orgCode, { userId: authorId }), _memberValuesDirective(note.orgCode, authorId)].filter(Boolean).join('\n\n'),
         messages: [{ role: 'user', content: userMsg }],
+        org: req.iqSession && req.iqSession.orgCode, taskType: 'note_reply',
       });
-      note.aiResponse = response.content[0]?.text?.trim() || null;
+      note.aiResponse = (response || '').trim() || null;
     } catch(e) { /* non-critical */ }
   }
 
@@ -16627,11 +16684,18 @@ function _sanitizeNote(note, requesterId) {
 }
 
 /* ── Delete own note ─────────────────────────────────────────────────────── */
-app.delete('/api/notes/:noteId', (req, res) => {
-  const { requesterId } = req.body;
+/* SECURITY: the actor is the SESSION, never the body. This route was unauthenticated and
+   compared the note's author against a `requesterId` the caller supplied — so deleting somebody
+   else's note needed only their author id, which travels in every note payload, and there was
+   no organisation check at all, making it a cross-tenant delete. Same shape as the IDOR already
+   fixed on /api/groups/:groupId/feed; this one was missed by that sweep. */
+app.delete('/api/notes/:noteId', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
   const note = orgNotes[req.params.noteId];
-  if (!note) return res.status(404).json({ error: 'Note not found' });
-  if (note.authorId !== requesterId) return res.status(403).json({ error: 'Not your note' });
+  // Absent and belonging-to-another-org answer identically, so a 404 cannot be used to confirm
+  // that a note id exists somewhere else.
+  if (!note || (note.orgCode && note.orgCode !== code)) return res.status(404).json({ error: 'Note not found' });
+  if (note.authorId !== userId) return res.status(403).json({ error: 'Not your note' });
   delete orgNotes[req.params.noteId];
   scheduleSave();
   res.json({ ok: true });
@@ -17247,11 +17311,21 @@ app.get('/api/messages', requireAuth, (req, res) => {
 });
 
 /* ── Mark message read ───────────────────────────────────────────────────── */
-app.post('/api/messages/:msgId/read', (req, res) => {
-  const { requesterId } = req.body;
+/* SECURITY: the reader is the SESSION, never the body. This was unauthenticated and pushed a
+   caller-supplied `requesterId` straight into readBy, so anyone could write any id into any
+   message's read receipts — including for a message in another organisation. */
+app.post('/api/messages/:msgId/read', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
   const m = orgMessages[req.params.msgId];
-  if (!m) return res.status(404).json({ error: 'Not found' });
-  if (!m.readBy.includes(requesterId)) m.readBy.push(requesterId);
+  if (!m || (m.orgCode && m.orgCode !== code)) return res.status(404).json({ error: 'Not found' });
+  // Only somebody the message was actually for may mark it read. A read receipt is a claim
+  // about a person, and a claim nobody checked is worth nothing to the person reading it.
+  const forMe = m.toId === userId || (Array.isArray(m.toIds) && m.toIds.includes(userId))
+    || m.fromId === userId || m._realFromId === userId
+    || (Array.isArray(m.recipients) && m.recipients.includes(userId));
+  if (!forMe) return res.status(403).json({ error: 'not yours to read' });
+  m.readBy = Array.isArray(m.readBy) ? m.readBy : [];
+  if (!m.readBy.includes(userId)) m.readBy.push(userId);
   scheduleSave();
   res.json({ ok: true });
 });
@@ -17427,12 +17501,23 @@ function userKey(orgCode, userId) {
 }
 
 /* ── Platform registers org ─────────────────────────────────────────────── */
-app.post('/api/platform/register-org', (req, res) => {
-  const { orgCode, orgName, orgMode } = req.body;
-  if (!orgCode) return res.status(400).json({ error: 'orgCode required' });
-  orgStore[orgCode.toLowerCase().trim()] = { orgName, orgMode };
+/* SECURITY: the organisation is the SESSION'S, never the body's. This was unauthenticated and
+   OVERWROTE orgStore[orgCode] with whatever name and mode the caller sent — so any anonymous
+   request could rename any organisation or change its mode, and the client fired it on every
+   single app launch with no credential attached. */
+app.post('/api/platform/register-org', requireAuth, (req, res) => {
+  const code = String(req.iqSession.orgCode || '').toLowerCase().trim();
+  if (!code) return res.status(400).json({ error: 'no organisation on this session' });
+  const { orgName, orgMode } = req.body || {};
+  // Registering is a MERGE into your own org, not a replacement of an arbitrary one. A blank
+  // field must never blank a name that is already there.
+  const prev = orgStore[code] || {};
+  orgStore[code] = {
+    orgName: String(orgName || prev.orgName || '').slice(0, 200),
+    orgMode: String(orgMode || prev.orgMode || '').slice(0, 60),
+  };
   scheduleSave();
-  res.json({ ok: true });
+  res.json({ ok: true, orgCode: code });
 });
 
 /* ── Update org mode ────────────────────────────────────────────────────── */
@@ -17610,28 +17695,29 @@ app.post('/api/platform/assign-scenario', requireAuth, (req, res) => {
 });
 
 /* ── Member joins org — issues token if userId is valid ─────────────────── */
-app.post('/api/member/join', (req, res) => {
-  const { orgCode, memberName, userId } = req.body;
-  if (!orgCode || !memberName) return res.status(400).json({ error: 'orgCode and memberName required' });
-  const code = orgCode.toLowerCase().trim();
-  const org  = orgStore[code];
+/* RETIRED — /api/member/join.
 
-  // Issue a token if the userId is a real user in this org
-  let token = null;
-  if (userId && orgUsers[code]?.[userId]) {
-    const user = orgUsers[code][userId];
-    token = issueToken(userId, code, user.role);
-  }
+   This route minted a VALID SESSION TOKEN, carrying the target user's own role, in exchange for
+   nothing but an organisation code and a user id:
 
-  res.json({
-    ok:         true,
-    orgName:    org?.orgName  || orgCode,
-    orgMode:    org?.orgMode  || '',
-    memberName: memberName.trim(),
-    orgCode:    code,
-    token,
-  });
-});
+       if (userId && orgUsers[code]?.[userId]) token = issueToken(userId, code, user.role);
+
+   No password. No invitation. No expiring proof of anything. Both inputs are public-shaped —
+   an org code is in the URL a coach shares, and user ids travel in every roster response — so
+   possession of two identifiers was possession of the account. It is the only route in the
+   codebase that could hand out a session without a credential, and it is retired rather than
+   patched because its entire purpose was the thing that was wrong with it.
+
+   NOTHING IS LOST. It was already recorded in KNOWN_ORPHANS — no client has called it in this
+   repo's history — and the capability it was meant to serve, a member joining an organisation,
+   is the invite and onboarding flow (/api/auth/*), which requires a real credential and is
+   untouched.
+
+   Deliberately NOT "fixed" by making ids harder to guess. Obscurity is not authentication, and
+   a route that mints sessions from identifiers is unsafe at any id length.
+
+   Regression: scripts/auth-boundary-smoke.js proves a valid org code plus a valid user id are
+   not enough, and that the route is gone rather than quietly reachable. */
 
 /* ── Member gets pending scenarios ─────────────────────────────────────── *
  *
@@ -17852,7 +17938,13 @@ app.get('/api/platform/org-results', requireAuth, (req, res) => {
 /* ═══════════════════════════════════════════════════════════════════════════
    ORG INTELLIGENCE — FREEFORM DESCRIPTION → AI TRAIT EXTRACTION
    ═══════════════════════════════════════════════════════════════════════════ */
-app.post('/api/org/describe', async (req, res) => {
+/* SECURITY: authenticated. This was an anonymous model call — no session, no budget, no
+   no-egress check — so anybody who found the path could spend the organisation's API credit at
+   will. It reads no organisation state (the description arrives in the body), so it was a
+   credit-drain and provider-boundary problem rather than a disclosure one.
+
+   Onboarding is unaffected: an admin has a session by the time they describe their org. */
+app.post('/api/org/describe', requireAuth, async (req, res) => {
   const { description, orgName } = req.body;
   if (!description) return res.status(400).json({ error: 'description required' });
 
@@ -17880,13 +17972,14 @@ RULES:
 - Be grounded in what they actually wrote — do not invent things they didn't mention`;
 
   try {
-    const response = await client.messages.create({
+    const response = await ai.complete({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 500,
+      maxTokens: 500,
       system:     systemPrompt,
       messages:   [{ role: 'user', content: `Organisation: ${orgName}\n\nDescription: ${description}` }],
+      org: req.iqSession && req.iqSession.orgCode, taskType: 'org_describe',
     });
-    const raw     = response.content[0]?.text || '';
+    const raw     = response || '';
     const jsonStr = raw.replace(/```json\n?|\n?```/g, '').trim();
     let traits;
     try { traits = JSON.parse(jsonStr); }
@@ -18126,14 +18219,15 @@ OUTPUT — valid JSON only, no markdown fencing, no extra text:
     ].filter(Boolean).join('\n');
 
     try {
-      const response = await client.messages.create({
+      const response = await ai.complete({
         model:      'claude-haiku-4-5-20251001',
-        max_tokens: 600,
+        maxTokens: 600,
         system:     [systemPrompt, _worldviewDirective(code), _domainDirective(code, { userId }), _memberValuesDirective(code, userId)].filter(Boolean).join('\n\n'),
         messages:   [{ role: 'user', content: userContent }],
+        org: req.iqSession && req.iqSession.orgCode, taskType: 'checkin_insight',
       });
 
-      const raw     = (response.content[0]?.text || '').trim();
+      const raw     = (response || '').trim();
       const jsonStr = raw.replace(/^```(?:json)?\n?/,'').replace(/\n?```$/,'').trim();
 
       let insight;
@@ -18187,13 +18281,14 @@ OUTPUT — valid JSON only, no markdown fencing, no extra text:
   userContent += `Check-in: ${text}`;
 
   try {
-    const response = await client.messages.create({
+    const response = await ai.complete({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 150,
+      maxTokens: 150,
       system:     [systemPrompt, _worldviewDirective(code), _domainDirective(code, { userId })].filter(Boolean).join('\n\n'),
       messages:   [{ role: 'user', content: userContent }],
+      org: req.iqSession && req.iqSession.orgCode, taskType: 'checkin_reply',
     });
-    const aiResponse = response.content[0]?.text?.trim() || '';
+    const aiResponse = (response || '').trim();
     checkin.aiResponse = aiResponse;
     scheduleSave();
     return res.json({ ok: true, insight: null, aiResponse });
@@ -18298,12 +18393,13 @@ app.post('/api/weekly/submit', requireAuth, async (req, res) => {
 
   let aiResponse = null;
   try {
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001', max_tokens: 150,
+    const response = await ai.complete({
+      model: 'claude-haiku-4-5-20251001', maxTokens: 150,
       system: [finalRolePrompts[roleKey], _worldviewDirective(code), _domainDirective(code, { userId }), _memberValuesDirective(code, userId)].filter(Boolean).join('\n\n'),
       messages: [{ role: 'user', content: userMsg }],
+      org: req.iqSession && req.iqSession.orgCode, taskType: 'weekly_submit',
     });
-    aiResponse = response.content[0]?.text?.trim() || null;
+    aiResponse = (response || '').trim() || null;
   } catch(e) { /* non-critical */ }
 
   // Update memory for members: use weekly reflection text as theme source
@@ -18397,12 +18493,13 @@ Be specific and grounded — only say what the data actually supports. Do not in
   ).join('\n\n');
 
   try {
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001', max_tokens: 600,
+    const response = await ai.complete({
+      model: 'claude-haiku-4-5-20251001', maxTokens: 600,
       system: [systemPrompt, _domainDirective(orgCode)].filter(Boolean).join('\n\n'),
       messages: [{ role: 'user', content: `Week: ${w}\nOrg: ${orgName}\n\n${inputsText}` }],
+      org: req.iqSession && req.iqSession.orgCode, taskType: 'weekly_synthesis',
     });
-    const raw = response.content[0]?.text || '';
+    const raw = response || '';
     const jsonStr = raw.replace(/```json\n?|\n?```/g, '').trim();
     let synthesis;
     try { synthesis = JSON.parse(jsonStr); }
@@ -19121,12 +19218,13 @@ async function _buildMemberTimeline(code, userId, memberName) {
         return null;
       }).filter(Boolean).join(' | ');
       try {
-        const r = await client.messages.create({
-          model: 'claude-haiku-4-5-20251001', max_tokens: 80,
+        const r = await ai.complete({
+          model: 'claude-haiku-4-5-20251001', maxTokens: 80,
           system: [`Write ONE sentence (max 20 words) summarising what this data shows about a member during this month. Past tense. Specific. No fluff.`, _domainDirective(code, { userId })].filter(Boolean).join('\n\n'),
           messages: [{ role: 'user', content: `${memberName} — ${label}: ${brief}` }],
+          org: req.iqSession && req.iqSession.orgCode, taskType: 'weekly_narrative',
         });
-        narrative = r.content[0]?.text?.trim() || null;
+        narrative = (r || '').trim() || null;
       } catch(e) { /* non-critical */ }
     }
 
@@ -20037,7 +20135,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
-  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, inquiryStates, _migrateLegacyNotesToLibrary, orgNotes, safeguardingFlags, _llmBudgetOk, _captureError, checkinProposals,
+  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, inquiryStates, _migrateLegacyNotesToLibrary, orgNotes, orgMessages, orgStore, safeguardingFlags, _llmBudgetOk, _captureError, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
   // exported for the truth layer: grounded retrieval over canonical evidence
