@@ -3130,3 +3130,9 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
    rather than sitting under a heading — a heading would force the squad's most urgent item
    below the person's least urgent one, which is the ordering the single list exists to avoid. */
 .iq-inq-about{font-size:.72rem;color:var(--text-muted);margin:.15rem 0 0}
+
+/* A coach's own account, beside "Ask IntelliQ" — the two things a leader does with a person in
+   front of them: ask about them, or say what they saw. */
+.pm-observe{margin:.6rem 0 0}
+.pm-observe-form:empty{display:none}
+.pm-observe-form{display:flex;flex-direction:column;gap:.45rem;margin:.6rem 0 0}

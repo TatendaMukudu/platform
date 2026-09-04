@@ -15321,6 +15321,99 @@ function _admitLeaderRead(code, subjectId, inquiryId, read, now = Date.now()) {
   return { admitted: true, origins: escalation.originCount };
 }
 
+/* ── A COACH'S OWN OBSERVATION, AND THE PLAYER'S RIGHT TO DISAGREE ────────────────────────
+   Founder decision, September 2026, taken over two alternatives:
+
+     "Yes — attributed, and the player sees it."
+
+   A coach may record what they saw, directly, without waiting for a player to raise something.
+   Coaches expect to be able to do this and the ladder alone was too narrow: a read only entered
+   when a player asked a question. What was refused is the version where the player cannot see it
+   — a private staff record is the secret file this architecture has declined everywhere else,
+   and transparency is the only thing that stops an attributed observation becoming one.
+
+   IT IS EVIDENCE LIKE ANY OTHER. Third-party authority, the leader as its own origin, through
+   applyProposals — so one coach saying a thing five times is still one origin, and the kernel
+   bands it rather than the coach asserting a standing for it.
+
+   AND THE PLAYER CAN PUSH BACK. Their disagreement is not a complaint filed somewhere; it is a
+   contradicting account on the same belief, which makes the belief CONTESTED — and contested
+   climbs, exactly as when a player disagrees with the evidence about themselves. Two people
+   watched the same thing and read it differently, and that gap is the finding. */
+/* The gate is LEADING THIS PERSON, checked below — not an org-wide permission. A coach who runs
+   a squad may record what they saw about somebody on it; holding a broad permission is neither
+   necessary nor sufficient, and using one here would let somebody with org-wide reach write
+   about a player they have never met. */
+app.post('/api/leader/observation', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  const subjectId = String(b.subjectId || '');
+  const text = String(b.text || '').trim().slice(0, 600);
+  const about = String(b.about || '').trim().slice(0, 120);
+  if (!subjectId || !text) return res.status(400).json({ error: 'subjectId and text required' });
+  if (subjectId === userId) return res.status(400).json({ error: 'record this about yourself in your own space' });
+
+  // A leader may observe somebody they actually lead. Not the whole organisation, and not a
+  // squad they merely belong to — leading is scoped to the node, as it is for the roster.
+  const leads = Object.values(orgNodes[code] || {}).some(n =>
+    n && _leadsNode(code, n.nodeId, userId) && (n.memberIds || []).includes(subjectId));
+  if (!leads) return res.status(403).json({ error: 'you do not lead this person' });
+
+  const now = Date.now();
+  const concept = (about || 'general').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'general';
+  const inq = _inquiryFor(code, `member:${subjectId}`, concept, about || 'Something a coach saw',
+    (orgMeta[code] || {}).orgMode || '', now);
+  if (!inq) return res.status(404).json({ error: 'no such person' });
+
+  const key = Object.keys(inquiryStates[code][`member:${subjectId}`])
+    .find(k => inquiryStates[code][`member:${subjectId}`][k].inquiryId === inq.inquiryId);
+  inquiryStates[code][`member:${subjectId}`][key] = diagnose.applyProposals(inq, [{
+    id: 'obs_' + generateId(),
+    level: 'observation', directness: 'direct', authority: 'third_party', source: 'other',
+    specificity: 0.6, statement: text,
+    // The leader is the origin. Five observations from one coach are one origin, which is the
+    // same rule that stops a player talking their own belief into a Low by repetition.
+    originKind: 'leader_report', originRef: `leader:${userId}`, turnId: `obs_${userId}_${now}`,
+    // Direction is DECLARED or absent. A coach saying "he was sharp today" is not read for
+    // sentiment any more than a player's words are.
+    direction: diagnose.DIRECTIONS.includes(b.direction) ? b.direction : 'neutral',
+  }], { now, evidenceRefOf: p => `${p.originRef}#${p.id}` });
+
+  _audit(code, { actor: userId, action: 'leader_observation', subjectIds: [subjectId], basis: concept });
+  scheduleSave();
+  res.json({ ok: true, inquiryId: inq.inquiryId,
+    note: `Recorded in your name. ${(orgUsers[code][subjectId] || {}).name || 'They'} can see it and can say if they saw it differently.` });
+});
+
+/* POST /api/me/disagree — { inquiryId, because }. The player's answer to one. */
+app.post('/api/me/disagree', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  const inquiryId = String(b.inquiryId || '');
+  const because = String(b.because || '').trim().slice(0, 600);
+  if (!because) return res.status(400).json({ error: 'say how you saw it — a disagreement with no account is not one' });
+
+  const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+  const key = Object.keys(mine).find(k => mine[k] && mine[k].inquiryId === inquiryId);
+  if (!key) return res.status(404).json({ error: 'no such belief of yours' });
+
+  const now = Date.now();
+  mine[key] = diagnose.applyProposals(mine[key], [{
+    id: 'dis_' + generateId(),
+    level: 'observation', directness: 'direct', authority: 'self_report', source: 'self',
+    specificity: 0.7, statement: because,
+    originKind: 'self_report', originRef: `self:${userId}`, turnId: `dis_${userId}_${now}`,
+    // THIS is what makes the belief contested. Not a flag somebody sets — a contradicting
+    // account on the record, which is what a disagreement actually is.
+    contradicts: true,
+  }], { now, evidenceRefOf: p => `${p.originRef}#${p.id}` });
+
+  _audit(code, { actor: userId, action: 'disagreed', subjectIds: [userId], basis: inquiryId });
+  scheduleSave();
+  res.json({ ok: true, inquiryId, contested: true,
+    note: 'Recorded, in your words, next to theirs. Accounts differing is the finding — it does not get averaged away, and it moves up rather than down.' });
+});
+
 /* POST /api/me/raise — { inquiryId }. The person's act, and only for something they called. */
 app.post('/api/me/raise', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;

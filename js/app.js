@@ -3874,7 +3874,24 @@ function _showProfileInner(id, m){
   // Member-support tab (Cut E) — the "Ask IntelliQ" entry routes into the ONE composer; the panel
   // shows the read-only legacy advisor archive for this member.
   const _askIq = document.getElementById('pm-ask-iq');
-  if (_askIq) { const m = AppState.getMember(id); _askIq.onclick = () => MemberApp.askAboutMember(id, m && m.name); }
+  if (_askIq) {
+    const m = AppState.getMember(id);
+    _askIq.onclick = () => MemberApp.askAboutMember(id, m && m.name);
+    /* RECORD WHAT YOU SAW. Founder decision: a coach may write an observation directly, and the
+       player sees it. It sits beside "Ask IntelliQ" because they are the two things a leader
+       does with a person in front of them — ask about them, or say what they saw. The form says
+       out loud that the player will see it and can answer, because a leader who does not know
+       that will write something different from one who does. */
+    if (!document.getElementById('pm-observe') && _askIq.parentNode) {
+      const wrap = document.createElement('div');
+      wrap.id = 'pm-observe';
+      wrap.className = 'pm-observe';
+      wrap.innerHTML = `
+        <button type="button" class="iqt-verdict" onclick="MemberApp.openObservation('${MemberApp._escape(id)}')">Record what you saw</button>
+        <div class="pm-observe-form" id="pm-observe-form"></div>`;
+      _askIq.parentNode.insertBefore(wrap, _askIq.nextSibling);
+    }
+  }
   loadAdvisorThreads(id);
   loadBehavioralProfile(id);
   loadMemberData(id);
@@ -8904,6 +8921,58 @@ const MemberApp = {
   /* LEADER-SUPPORT entry point (Cut E). From an authorised member profile, route INTO the one
      IntelliQ composer with an EXPLICIT member subject (revalidated server-side every turn). Shows a
      visible member chip with a clear "exit" control — the context is never silently active. */
+  /* A coach's own account of somebody they lead. Attributed, visible to that person, and
+     evidence like any other — one coach is one origin however many times they say it, and the
+     direction is DECLARED here rather than read out of what they wrote. */
+  openObservation(subjectId) {
+    const box = document.getElementById('pm-observe-form');
+    if (!box) return;
+    if (box.innerHTML) { box.innerHTML = ''; return; }
+    const id = this._escape(subjectId);
+    box.innerHTML = `
+      <label class="iq-focus-label" for="pm-ob-about">What is it about?</label>
+      <div class="iq-field"><textarea class="iq-field-input" id="pm-ob-about" rows="1"
+        placeholder="A word or two — pressing, recovery, timekeeping"></textarea></div>
+      <label class="iq-focus-label" for="pm-ob-text">What did you see?</label>
+      <div class="iq-field"><textarea class="iq-field-input" id="pm-ob-text" rows="2"
+        placeholder="In your own words"></textarea></div>
+      <div class="iqt-call-q">Is that better or worse than before?</div>
+      <div class="iqt-call-btns">
+        <button type="button" class="iqt-verdict" id="pm-ob-up" onclick="MemberApp._obDir('improvement')">Better</button>
+        <button type="button" class="iqt-verdict" id="pm-ob-down" onclick="MemberApp._obDir('decline')">Worse</button>
+        <button type="button" class="iqt-verdict is-on" id="pm-ob-neutral" onclick="MemberApp._obDir('neutral')">Neither</button>
+      </div>
+      <div class="iq-focus-who">They will see this, in your name, and can say if they saw it differently.</div>
+      <div class="iqt-call-btns">
+        <button type="button" class="iqt-verdict" onclick="MemberApp.sendObservation('${id}')">Record it</button>
+      </div>
+      <div class="iqt-call-note" id="pm-ob-note"></div>`;
+    this._obDirection = 'neutral';
+  },
+
+  _obDir(d) {
+    this._obDirection = d;
+    ['improvement', 'decline', 'neutral'].forEach(k => {
+      const el = document.getElementById(`pm-ob-${k === 'improvement' ? 'up' : k === 'decline' ? 'down' : 'neutral'}`);
+      if (el) el.classList.toggle('is-on', k === d);
+    });
+  },
+
+  async sendObservation(subjectId) {
+    const note = document.getElementById('pm-ob-note');
+    const text = String((document.getElementById('pm-ob-text') || {}).value || '').trim();
+    const about = String((document.getElementById('pm-ob-about') || {}).value || '').trim();
+    if (!text) { if (note) note.textContent = 'Say what you saw first.'; return; }
+    try {
+      const j = await fetch('/api/leader/observation', {
+        method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ subjectId, about, text, direction: this._obDirection || 'neutral' }),
+      }).then(r => r.json());
+      const box = document.getElementById('pm-observe-form');
+      if (box) box.innerHTML = `<div class="iqt-call-note">${this._escape((j && (j.note || j.error)) || 'Recorded.')}</div>`;
+    } catch (_) { if (note) note.textContent = 'That could not be saved just now.'; }
+  },
+
   askAboutMember(memberId, name) {
     this._wsSubjectMemberId = memberId || null;
     this._wsSubjectName = name || null;
@@ -11191,17 +11260,58 @@ const MemberApp = {
   /* The three things a person can do to a belief. Each prefills the composer rather than firing
      a silent state change: a verdict is something you SAY, so it goes through the same governed
      turn as everything else and the kernel decides what it means. */
+  /* "I disagree" USED TO PREFILL A SENTENCE AND NOTHING ELSE.
+
+     It typed "I do not think that is right. What I would say is " into the composer and left
+     the person to finish it, and whatever they wrote went through the ordinary turn — so the
+     belief was never contested, nothing climbed, and the button looked exactly like a control
+     that had worked. Same shape as "Make this a focus", which prefilled the composer and made
+     no focus, reported three times before anybody found it.
+
+     Disagreeing is now its own act: their account, on the same belief, as a contradicting
+     signal. That is what makes it CONTESTED — and contested is a finding that moves up rather
+     than a tie somebody breaks. */
   inquiryOverflow(action) {
+    if (action === 'contest') return this._openDisagree();
     const input = document.getElementById('iq-object-input');
     if (!input) return;
     const starters = {
       answered: 'I think this is settled now, because ',
-      contest: 'I do not think that is right. What I would say is ',
       aside: 'Let us leave this for now.',
     };
     input.value = starters[action] || '';
     this._wsGrow(input);
     input.focus();
+  },
+
+  _openDisagree() {
+    const box = document.getElementById('iqt-call');
+    const ctx = this._inquiryThread || {};
+    if (!box || !ctx.objectId) return;
+    box.innerHTML = `
+      <div class="iqt-call-q">How did you see it?</div>
+      <div class="iq-field"><textarea class="iq-field-input" id="iqt-dis" rows="2"
+        placeholder="In your own words — this goes on the record next to theirs"></textarea></div>
+      <div class="iqt-call-btns">
+        <button type="button" class="iqt-verdict" onclick="MemberApp.sendDisagree('${this._escape(ctx.objectId)}')">Record it</button>
+      </div>
+      <div class="iqt-call-note" id="iqt-dis-note"></div>`;
+    const t = document.getElementById('iqt-dis'); if (t) t.focus();
+  },
+
+  async sendDisagree(inquiryId) {
+    const note = document.getElementById('iqt-dis-note');
+    const ta = document.getElementById('iqt-dis');
+    const because = String((ta && ta.value) || '').trim();
+    if (!because) { if (note) note.textContent = 'Say how you saw it — a disagreement with no account tells the record nothing.'; return; }
+    try {
+      const j = await fetch('/api/me/disagree', {
+        method: 'POST', headers: { ...this._authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ inquiryId, because }),
+      }).then(r => r.json());
+      const box = document.getElementById('iqt-call');
+      if (box) box.innerHTML = `<div class="iqt-call-note">${this._escape((j && (j.note || j.error)) || 'Recorded.')}</div>`;
+    } catch (_) { if (note) note.textContent = 'That could not be saved just now.'; }
   },
 
   /* Sending from a thread. This failed silently for a whole afternoon: every exit was a bare

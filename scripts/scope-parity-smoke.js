@@ -73,7 +73,13 @@ for (const row of inventory) console.log(`server.js:${row.line} ${row.source}`);
      _contactsFor x1 (getVisibleUserIds) — the ADDRESSABLE set folds in the readable one, because
        a leader who can already see a person's record can obviously write their name. The
        reverse does not hold and must never be made to: contacts are names, not records. */
-ok('W4 inventory names every current scope reference', inventory.length === 65 && inventory.every(r => Number.isInteger(r.line) && r.source));
+/* 65 -> 66, September 2026. One more, named for the same reason:
+
+     /api/leader/observation x1 (_leadsNode) — a coach may record what they saw about somebody
+       ON A SQUAD THEY LEAD. Deliberately NOT a permission check: a broad org-wide permission
+       would let somebody write about a player they have never met, and leading the node is the
+       thing that actually licenses the account. Scoped to the node, exactly as the roster is. */
+ok('W4 inventory names every current scope reference', inventory.length === 66 && inventory.every(r => Number.isInteger(r.line) && r.source));
 
 console.log('\nMigration law: BRIDGE never; GATE governance AND Web; ENUMERATE/FILTER migrate later; WEB re-test only.');
 console.log(`\n=== scope-parity-smoke: ${pass} passed, ${fail} failed ===\n`);
