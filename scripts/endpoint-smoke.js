@@ -11,7 +11,7 @@
 process.env.DB_OPTIONAL = '1';
 process.env.NODE_ENV    = 'test';
 
-const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired, orgMappings, _recordCheckin, _extractMetricsFromText, _importTeamTable } = require('../server.js');
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeExpired, orgMappings, _recordCheckin, _extractMetricsFromText, _importTeamTable, orgConnections } = require('../server.js');
 
 const CODE = 'testco';
 const iso  = new Date().toISOString();
@@ -553,12 +553,35 @@ const server = app.listen(0, async () => {
     ok('an admin can reset the cursor (audited)', (await call(`/api/connections/${cid}/cursor/reset`, tokCoach, { method: 'POST' })).status === 200);
     ok('a plain member cannot view the dead-letter queue (403)', (await call('/api/failures', tokB)).status === 403);
     ok('the dead-letter queue is admin-visible + org-scoped', (await call('/api/failures', tokCoach)).status === 200);
-    // Webhooks: challenge echo, dedupe, and same-path processing (no secret set → open).
+    /* Webhooks. This block used to say "no secret set → open" and prove ingestion through a
+       connection that verified nothing — the test documenting the hole as intended behaviour.
+       An unconfigured connection now FAILS CLOSED, so the suite configures a secret and signs,
+       which is the only version of this path worth proving. */
     const whChallenge = await call(`/api/webhooks/${CODE}/${cid}`, null, { method: 'POST', body: { type: 'url_verification', challenge: 'echo123' } });
     ok('a webhook verification challenge is echoed back', whChallenge.j?.challenge === 'echo123');
-    const wh1 = await call(`/api/webhooks/${CODE}/${cid}`, null, { method: 'POST', headers: { 'X-Delivery-Id': 'dlv1' }, body: { records: [{ email: 'b@t.co', x: 1 }] } });
-    const wh2 = await call(`/api/webhooks/${CODE}/${cid}`, null, { method: 'POST', headers: { 'X-Delivery-Id': 'dlv1' }, body: { records: [{ email: 'b@t.co', x: 1 }] } });
-    ok('a duplicate webhook delivery id is ignored (idempotent)', wh1.j?.received === true && wh2.j?.duplicate === true);
+
+    ok('a connection with NO webhook secret refuses every delivery — the absence of a secret is the absence of authentication, not permission to skip it',
+      (await call(`/api/webhooks/${CODE}/${cid}`, null, { method: 'POST', headers: { 'X-Delivery-Id': 'nosig' }, body: { records: [] } })).status === 401);
+
+    const WH_SECRET = 'whsec_test_only_not_a_real_secret';
+    const whConn = (orgConnections[CODE] || []).find(c => c.id === cid);
+    if (whConn) whConn.webhookSecret = WH_SECRET;
+    const sign = body => 'sha256=' + require('crypto').createHmac('sha256', WH_SECRET)
+      .update(Buffer.from(JSON.stringify(body))).digest('hex');
+    const whBody = { records: [{ email: 'b@t.co', x: 1 }] };
+
+    ok('a signed delivery is accepted',
+      (await call(`/api/webhooks/${CODE}/${cid}`, null, { method: 'POST',
+        headers: { 'X-Delivery-Id': 'dlv1', 'X-IQ-Signature': sign(whBody) }, body: whBody })).j?.received === true);
+    ok('a duplicate webhook delivery id is ignored (idempotent)',
+      (await call(`/api/webhooks/${CODE}/${cid}`, null, { method: 'POST',
+        headers: { 'X-Delivery-Id': 'dlv1', 'X-IQ-Signature': sign(whBody) }, body: whBody })).j?.duplicate === true);
+    ok('a delivery with a WRONG signature is refused',
+      (await call(`/api/webhooks/${CODE}/${cid}`, null, { method: 'POST',
+        headers: { 'X-Delivery-Id': 'dlv2', 'X-IQ-Signature': 'sha256=' + '0'.repeat(64) }, body: whBody })).status === 401);
+    ok('a delivery with NO signature is refused once a secret exists',
+      (await call(`/api/webhooks/${CODE}/${cid}`, null, { method: 'POST',
+        headers: { 'X-Delivery-Id': 'dlv3' }, body: whBody })).status === 401);
     ok('an unknown webhook connection is rejected', (await call(`/api/webhooks/${CODE}/conn_nope`, null, { method: 'POST', body: {} })).status === 404);
 
     ok('a plain member cannot delete a connection (403)',

@@ -117,12 +117,9 @@ const ScenarioEngine = {
     try {
       const res = await fetch('/api/chat', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: Auth._headers(),
         body: JSON.stringify({
           messages,
-          orgMode:    AppState.mode,
-          orgName:    AppState.orgName,
-          memberName: member?.name?.split(' ')[0] || 'Member',
           promptType: 'scenario',
           scenarioRunContext: {
             title:      this.scenario.title,
@@ -250,7 +247,7 @@ const ScenarioEngine = {
     try {
       const res = await fetch('/api/coach-debrief', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: Auth._headers(),
         body: JSON.stringify({
           conversation:   this.history,
           scores:         score,

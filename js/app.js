@@ -1438,10 +1438,12 @@ function launchApp(){
   // Use real orgCode from Auth session, fall back to derived
   const orgCode = Auth.currentUser?.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g,'-');
   AppState.orgCode = orgCode;
+  // AUTHENTICATED, and the org comes from the session — this fired on every launch with no
+  // credential and overwrote orgStore for whatever code it was handed.
   fetch('/api/platform/register-org', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ orgCode, orgName: AppState.orgName, orgMode: AppState.mode }),
+    headers: Auth._headers(),
+    body: JSON.stringify({ orgName: AppState.orgName, orgMode: AppState.mode }),
   }).catch(() => {});
 
   console.log('[ROUTE] launchApp — done');
@@ -8451,14 +8453,14 @@ const MemberApp = {
 
   async _callAPI(messages) {
     try {
+      // AUTHENTICATED. /api/chat now derives the org, the user and their name from the
+      // session, so those three are no longer sent — a caller telling the server who it is was
+      // the vulnerability, and leaving the fields in place would invite somebody to trust them.
       const res = await fetch('/api/chat', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: Auth._headers(),
         body:    JSON.stringify({
           messages,
-          orgMode:    this._orgMode,
-          orgName:    this._orgName,
-          memberName: this._name,
           promptType: 'scenario',
           scenarioRunContext: {
             title:      this._scenario.title,
