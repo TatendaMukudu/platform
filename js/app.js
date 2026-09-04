@@ -10250,7 +10250,9 @@ const MemberApp = {
     if (hs) hs.textContent = copy.sub;
 
     box.innerHTML = `<div style="color:var(--text-muted);font-size:0.85rem">Loading…</div>`;
-    let j; try { j = await fetch(`/api/objects?kind=${encodeURIComponent(kind)}&scope=self`, { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
+    // SELF AND TEAM, one list, ranked together — the client asked only for scope=self, so every
+    // team object was computed and unreachable, and a coach opened this and saw nothing.
+    let j; try { j = await fetch(`/api/objects?kind=${encodeURIComponent(kind)}&scope=all`, { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
     const list = (j && j.objects) || [];
 
     const make = copy.make
@@ -10390,7 +10392,7 @@ const MemberApp = {
     let all = [];
     try {
       const results = await Promise.all(kinds.map(k =>
-        fetch(`/api/objects?kind=${k}&scope=self`, { headers: this._authHeaders() })
+        fetch(`/api/objects?kind=${k}&scope=all`, { headers: this._authHeaders() })
           .then(r => r.json()).catch(() => null)));
       for (const j of results) if (j && j.objects) all = all.concat(j.objects.filter(o => !o.parked));
     } catch (_) { all = []; }
@@ -10616,6 +10618,12 @@ const MemberApp = {
           ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}">${esc(sum.standing)}</span>` : ''}
           ${shared ? `<span class="iq-inq-forum" title="Others can discuss this">Forum</span>` : ''}
         </div>
+        ${item.whose && item.whose !== 'you'
+          // WHOSE IS THIS. One list holds a person's own and their squad's, ranked together, so
+          // the card has to say which without a heading to sit under. Quiet on purpose: it is a
+          // label, not a category — the ranking is what decides the order. NOT `about`, which is
+          // the thread-binding key and would break every object thread if written over.
+          ? `<div class="iq-inq-about">${esc(item.whose)}</div>` : ''}
         ${claim ? `<p class="iq-inq-hyp">${esc(claim)}</p>` : ''}
         ${x.provenance ? `<div class="iq-inq-why">${esc(x.provenance)}</div>` : ''}
         ${sum.openQuestion ? `<div class="iq-inq-gap"><span class="iq-inq-gaplabel">Still working out</span> ${esc(sum.openQuestion)}</div>` : ''}

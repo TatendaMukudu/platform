@@ -3125,3 +3125,8 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iq-dir-btns{display:flex;flex-wrap:wrap;gap:.35rem}
 .iq-dir .iqt-verdict{min-height:32px;padding:.25rem .7rem;font-size:.78rem}
 .iq-dir-done{color:var(--text-secondary);font-size:.8rem}
+
+/* Whose object is this. Self and squad share one ranked list, so a card carries its own label
+   rather than sitting under a heading — a heading would force the squad's most urgent item
+   below the person's least urgent one, which is the ordering the single list exists to avoid. */
+.iq-inq-about{font-size:.72rem;color:var(--text-muted);margin:.15rem 0 0}

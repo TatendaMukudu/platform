@@ -14534,9 +14534,64 @@ app.get('/api/objects', requireAuth, (req, res) => {
   const kind = String(req.query.kind || '');
   if (!['inquiry', 'focus', 'high', 'low'].includes(kind)) return res.status(400).json({ error: 'unknown kind' });
   const scope = String(req.query.scope || 'self');
-  const all = _objectBucket(code, userId, scope);
+
+  /* scope=all — YOURS AND YOUR SQUAD'S, IN ONE LIST.
+
+     Founder decision, September 2026: "the most high priority thing be it a focus, high, low,
+     inquiry should show on home first... which all output SELF AND TEAM info", and when asked
+     how the two should sit together — one list, each card labelled, because the most important
+     thing should be at the top whoever it is about. Two sections would let the squad's most
+     urgent item sit below the person's least urgent one.
+
+     Before this the client only ever asked for scope=self, so a coach opened Highs and saw
+     nothing: every team object existed, was computed, and was unreachable.
+
+     EVERY GROUP IS READ THROUGH THE SAME GATE IT ALWAYS WAS. _objectBucket refuses a group the
+     person may not read (_mayReadGroup), and this loop simply skips those rather than reaching
+     around them — so the merged list can never contain something a per-scope read would have
+     withheld. `about` says whose each one is, which is what lets the card be labelled without
+     the client guessing from the shape of an id. */
+  /* WHOSE IS IT — derived from the OBJECT, not from which bucket it arrived in.
+
+     A probe caught both halves of getting this wrong. A squad focus already reaches a member
+     through their OWN bucket (`_objectBucket` reads team focuses at self scope, which is the fix
+     for "the coach set it and no player saw it"), so labelling by source marked it "you" for
+     everybody. And the field this first used, `about`, is the THREAD-BINDING KEY — conversations
+     are found by `conversation.about === object.about` — so writing a label into it would have
+     broken every object thread in the app. It is `whose`, and it is computed from the node the
+     object carries. */
+  const _whose = (o) => {
+    const raw = o && o.raw ? o.raw : {};
+    const nodeId = raw.nodeId || raw.groupId || null;
+    if (!nodeId) return { whose: 'you', whoseNodeId: null };
+    const node = (orgNodes[code] || {})[nodeId];
+    return { whose: (node && node.name) || raw.group || 'your group', whoseNodeId: nodeId };
+  };
+
+  let all;
+  if (scope === 'all') {
+    const seen = new Set();
+    all = (_objectBucket(code, userId, 'self') || []).map(o => ({ ...o, ..._whose(o) }));
+    all.forEach(o => seen.add(`${o.kind}:${o.id}`));
+    for (const node of Object.values(orgNodes[code] || {})) {
+      if (!node || !_mayReadGroup(code, node.nodeId, userId)) continue;
+      for (const o of (_objectBucket(code, userId, `group:${node.nodeId}`) || [])) {
+        // Already reached them through their own bucket. A list that repeats itself is a list
+        // people stop reading.
+        const key = `${o.kind}:${o.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        all.push({ ...o, whose: node.name || 'your group', whoseNodeId: node.nodeId });
+      }
+    }
+  } else {
+    all = _objectBucket(code, userId, scope);
+  }
   if (!all) return res.status(403).json({ error: 'scope unavailable' });
-  res.json({ ok: true, kind, scope, objects: all.filter(item => item.kind === kind).map(({ raw, ...item }) => item) });
+  const objects = all.filter(item => item.kind === kind).map(({ raw, ...item }) => item);
+  // ONE RANKING over both, so the top of the list is the top of the list.
+  objects.sort((a, b) => (b.score || 0) - (a.score || 0));
+  res.json({ ok: true, kind, scope, objects });
 });
 
 /* Every object opens as a thread. The opening is recomposed from the current object on every
