@@ -3844,7 +3844,7 @@ app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
     if (ai.enabled()) {
       try {
         const system = [`${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ helping a leader be PROACTIVE — drafting a short, forward-looking plan the whole team engages with to get ahead of a theme (a shared development area, a busy period coming up, or a process that needs reworking). No names, no emojis. Return JSON only: {"title": string(<=60), "description": string(1-2 sentences), "fields": array of 1-3 {"label","hint"}, "message": string(a warm 1-2 sentence note to the team), "rationale": string(one sentence to the LEADER on why acting now helps)}.`, _domainDirective(code)].filter(Boolean).join('\n\n');
-        out = await ai.completeJSON({ tier: 'reason', system, user: `Theme to plan around: ${theme || '(general week-ahead readiness)'}.`, maxTokens: 500, schema: ['title', 'message'] });
+        out = await ai.completeJSON({ org: code, taskType: 'intelligence_prepare', tier: 'reason', system, user: `Theme to plan around: ${theme || '(general week-ahead readiness)'}.`, maxTokens: 500, schema: ['title', 'message'] });
       } catch (_) { out = null; }
     }
     const d = (out && out.title) ? out : fallback;
@@ -3877,7 +3877,7 @@ app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
     if (ai.enabled()) {
       try {
         const system = [`${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ helping a leader SCALE a success pattern across their team. Given a strength that's working for someone who's improving, draft a short, positive reflection everyone can do to build that same strength. No names of the source person in the message, no emojis. Return JSON only: {"title": string(<=60), "description": string(1-2 sentences), "fields": array of 1-3 {"label","hint"}, "message": string(a warm 1-2 sentence note to the team), "rationale": string(one sentence to the LEADER)}.`, _domainDirective(code)].filter(Boolean).join('\n\n');
-        out = await ai.completeJSON({ tier: 'reason', system, user: `Strength to spread: ${factor || '(general good habits)'}.`, maxTokens: 500, schema: ['title', 'message'] });
+        out = await ai.completeJSON({ org: code, taskType: 'intelligence_prepare', tier: 'reason', system, user: `Strength to spread: ${factor || '(general good habits)'}.`, maxTokens: 500, schema: ['title', 'message'] });
       } catch (_) { out = null; }
     }
     const d = (out && out.title) ? out : fallback;
@@ -3913,7 +3913,7 @@ app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
     try {
       const system = [`${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ preparing a SUPPORTIVE intervention a leader can send to one of their people. It must feel caring, never like surveillance, and must NOT reveal any private detail or that the person was "flagged". Return JSON only: {"title": string(<=60), "description": string(1-2 sentences of gentle instructions), "fields": array of 1-3 {"label","hint"}, "message": string(a warm 1-2 sentence note to the person), "rationale": string(one sentence to the LEADER on why this helps)}. No emojis.`, _domainDirective(code, { userId: memberId })].filter(Boolean).join('\n\n');
       const ctx = item ? `Pattern (privacy-safe): ${item.whyNow}. Suggested direction: ${item.recommendedAction}.` : 'No strong pattern; keep it light and general.';
-      out = await ai.completeJSON({ tier: 'reason', system, user: `Person's first name: ${first}. Intent: ${kind}. ${ctx}`, maxTokens: 500, schema: ['title', 'message'] });
+      out = await ai.completeJSON({ org: code, taskType: 'intelligence_prepare', tier: 'reason', system, user: `Person's first name: ${first}. Intent: ${kind}. ${ctx}`, maxTokens: 500, schema: ['title', 'message'] });
     } catch (_) { out = null; }
   }
   const d = (out && out.title) ? out : fallback;
@@ -4238,7 +4238,7 @@ app.get('/api/workspace/briefing', requireAuth, async (req, res) => {
 
   let narrative = null;
   try {
-    narrative = await ai.complete({
+    narrative = await ai.complete({ org: code, taskType: 'workspace_briefing',
       tier: 'reason', maxTokens: 220,
       system: [`You are IntelliQ, briefing a group's leader. In 2-4 sentences say what the week looks like and the ONE or TWO things to prioritise. Aggregate only — do not name individuals (the leader sees the named list separately). Directional, practical, warm. No scores.`, _worldviewDirective(code), _domainDirective(code)].filter(Boolean).join('\n\n'),
       user: brief,
@@ -5393,7 +5393,7 @@ app.get('/api/me/record', requireAuth, async (req, res) => {
         understanding,
       });
       reflection = await Promise.race([
-        ai.complete({ tier: 'reason', system: [system, _domainDirective(code, { userId })].filter(Boolean).join('\n\n'), user, maxTokens: 220 }),
+        ai.complete({ org: code, taskType: 'record_reflection', tier: 'reason', system: [system, _domainDirective(code, { userId })].filter(Boolean).join('\n\n'), user, maxTokens: 220 }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('ai-timeout')), AI_BRIEF_MS)),
       ]);
       // Belt-and-suspenders: strip any private span that could have slipped in.
@@ -6295,7 +6295,7 @@ app.post('/api/assessments/draft', requireAuth, async (req, res) => {
   if (ai.enabled()) {
     try {
       const system = ['You design clear, motivating assessments and reviews for ANY kind of organisation or work. Given a goal, return JSON only: {"title": string (<=80 chars), "kind": one of ["spreadsheet","film","play","skill","general"], "description": string (2-4 sentences of instructions, warm and specific, no emojis), "fields": array of 3-6 {"label": string, "hint": string} the person fills in}. Make it feel like a thoughtful mentor designed it, not a form.', _domainDirective(code)].filter(Boolean).join('\n\n');
-      out = await ai.completeJSON({ tier: 'reason', system, user: `Goal: ${goal}`, maxTokens: 600, schema: ['title', 'fields'] });
+      out = await ai.completeJSON({ org: code, taskType: 'assessment_draft', tier: 'reason', system, user: `Goal: ${goal}`, maxTokens: 600, schema: ['title', 'fields'] });
     } catch (_) { out = null; }
   }
   const d = out && Array.isArray(out.fields) && out.fields.length ? out : fallback;
@@ -6398,7 +6398,7 @@ app.post('/api/assessments/plan', requireAuth, async (req, res) => {
  "sequence": array of 3-6 short ordered steps}
 Play to individual strengths, target real weak areas, and adapt to the specific people. No emojis.`, _domainDirective(code)].filter(Boolean).join('\n\n');
       const user = `Goal: ${goal}\n\nContext about the people (privacy-safe):\n${JSON.stringify(ctx).slice(0, 6000)}`;
-      out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 1100, schema: ['insight', 'plan'] });
+      out = await ai.completeJSON({ org: code, taskType: 'assessment_plan', tier: 'reason', system, user, maxTokens: 1100, schema: ['insight', 'plan'] });
     } catch (_) { out = null; }
   }
   const r = (out && out.plan && Array.isArray(out.plan.fields)) ? out : fallback;
@@ -6451,7 +6451,7 @@ app.post('/api/assessments/plan/chat', requireAuth, async (req, res) => {
         ...history.filter(h => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string').map(h => ({ role: h.role, content: h.content.slice(0, 1500) })),
         { role: 'user', content: `${message}\n\n[Team context — privacy-safe]: ${JSON.stringify(ctx).slice(0, 5000)}` },
       ];
-      out = await ai.completeJSON({ tier: 'reason', messages, system, maxTokens: 900, schema: ['reply'] });
+      out = await ai.completeJSON({ org: code, taskType: 'assessment_plan_chat', tier: 'reason', messages, system, maxTokens: 900, schema: ['reply'] });
     } catch (_) { out = null; }
   }
   const plan = (out && out.plan && out.plan.title) ? {
@@ -6926,7 +6926,7 @@ app.post('/api/assessments/:id/summarize', requireAuth, async (req, res) => {
     try {
       const system = [`You help a leader review someone's assignment. You are given HOW THE LEADER WANTED IT DONE and the person's actual responses. Judge the responses AGAINST the leader's stated method/expectation — not a generic standard. Be fair and specific. Return JSON only: {"summary": string (2-3 sentences the leader could send), "score": integer 0-100 (your honest reasoning score against the leader's expectation) or null if there isn't enough to score, "strengths": array of up to 3 short phrases, "development": array of up to 3 short phrases}. No emojis.`, _domainDirective(code, { userId: a.assigneeId })].filter(Boolean).join('\n\n');
       const user = `Assignment: "${a.title}".\nHow the leader wanted it done: ${a.guidance || a.description || '(not specified — judge on general quality and effort)'}\n\nThe person's responses:\n${answers.slice(0, 4000)}`;
-      out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 600, schema: ['summary'] });
+      out = await ai.completeJSON({ org: code, taskType: 'assessment_summarise', tier: 'reason', system, user, maxTokens: 600, schema: ['summary'] });
     } catch (_) { out = null; }
   }
   const d = out || fallback;
@@ -7074,7 +7074,7 @@ app.post('/api/admin/llm-selftest', requirePermission('manage_settings'), async 
   for (const t of trials) {
     const started = Date.now();
     try {
-      const out = await ai.complete({ tier: t.tier, system: t.system, user: t.user, maxTokens: 160 });
+      const out = await ai.complete({ org: req.iqSession.orgCode, taskType: 'llm_selftest', tier: t.tier, system: t.system, user: t.user, maxTokens: 160 });
       results.push({ label: t.label, tier: t.tier, model: ai.MODELS[t.tier], ms: Date.now() - started, ok: true, output: out });
     } catch (e) {
       results.push({ label: t.label, tier: t.tier, model: ai.MODELS[t.tier], ms: Date.now() - started, ok: false, error: e.message });
@@ -16704,7 +16704,7 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
     if (ai.enabled()) {
       try {
         const system = ['You design short, motivating SELF-assessments. Return JSON only: {"title": string (<=80 chars), "description": string (2-3 warm, specific sentences, no emojis), "fields": array of 3-5 {"label": string, "hint": string}}. It is for the person themselves, so address them directly. No scores, no judgement.', _domainDirective(code)].filter(Boolean).join('\n\n');
-        const out = await ai.completeJSON({ tier: 'reason', system, user: `Self-assessment topic: ${topic || 'general personal development'}`, maxTokens: 500, schema: ['title', 'fields'] });
+        const out = await ai.completeJSON({ org: code, taskType: 'turn_confirm', tier: 'reason', system, user: `Self-assessment topic: ${topic || 'general personal development'}`, maxTokens: 500, schema: ['title', 'fields'] });
         if (out && Array.isArray(out.fields) && out.fields.length) {
           draft.title = String(out.title || draft.title).slice(0, 160);
           draft.description = String(out.description || draft.description).slice(0, 2000);
@@ -17375,7 +17375,7 @@ app.get('/api/groups/:groupId/copilot', requireAuth, async (req, res) => {
 
   let out = null;
   try {
-    out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 500, schema: ['actions'] });
+    out = await ai.completeJSON({ org: code, taskType: 'group_copilot', tier: 'reason', system, user, maxTokens: 500, schema: ['actions'] });
   } catch (err) {
     console.warn('[group-copilot] AI error:', err.message);
   }
@@ -17606,7 +17606,7 @@ app.post('/api/notes/:noteId/ask', requireAuth, async (req, res) => {
   const g = noteGov.groundedAnswer(note, question);
   let answer = g.answer, enriched = false;
   if (ai.enabled()) {
-    const p = ai.complete({
+    const p = ai.complete({ org: code, taskType: 'note_ask',
       tier: 'reason', maxTokens: 180,
       system: [
         'Answer the question USING ONLY the note below. If the note does not address it, say so plainly.',
@@ -18324,11 +18324,26 @@ function userKey(orgCode, userId) {
 }
 
 /* ── Platform registers org ─────────────────────────────────────────────── */
-/* SECURITY: the organisation is the SESSION'S, never the body's. This was unauthenticated and
-   OVERWROTE orgStore[orgCode] with whatever name and mode the caller sent — so any anonymous
-   request could rename any organisation or change its mode, and the client fired it on every
-   single app launch with no credential attached. */
-app.post('/api/platform/register-org', requireAuth, (req, res) => {
+/* SECURITY, IN TWO ROUNDS. The first closed cross-organisation writes: this was unauthenticated
+   and overwrote orgStore[orgCode] with whatever name and mode the caller sent, so any anonymous
+   request could rename any organisation.
+
+   THE SECOND ROUND IS THIS ONE, and the first fix is exactly what hid it. Taking the organisation
+   from the session stopped org A writing to org B — and left every ORDINARY MEMBER of org A able
+   to rename their own organisation and change its mode, because authentication had been mistaken
+   for authority. Those are two questions ("who are you" and "may you do this"), and answering
+   only the first is how a route ends up looking fixed.
+
+   Changing an organisation's name or mode IS a settings change, so it is gated like every other
+   settings change: `manage_settings`, which by role default is the superadmin's alone.
+
+   THE CLIENT NO LONGER FIRES THIS ON LAUNCH. It used to POST on every single app start, echoing
+   back a name and mode the client had itself derived from the server — a mutation on every page
+   load that could only introduce drift, and the reason a write endpoint was reachable by anyone
+   who opened the app. orgStore is a legacy mirror read only as a fallback behind orgMeta, so
+   nothing needed that call. Organisation setup goes through the wizard, which is superadmin-only
+   and untouched. */
+app.post('/api/platform/register-org', requirePermission('manage_settings'), (req, res) => {
   const code = String(req.iqSession.orgCode || '').toLowerCase().trim();
   if (!code) return res.status(400).json({ error: 'no organisation on this session' });
   const { orgName, orgMode } = req.body || {};
@@ -18339,36 +18354,95 @@ app.post('/api/platform/register-org', requireAuth, (req, res) => {
     orgName: String(orgName || prev.orgName || '').slice(0, 200),
     orgMode: String(orgMode || prev.orgMode || '').slice(0, 60),
   };
+  _audit(code, { actor: req.iqSession.userId, action: 'org_registered', subjectIds: [], basis: orgStore[code].orgMode || 'name' });
   scheduleSave();
   res.json({ ok: true, orgCode: code });
 });
 
 /* ── Update org mode ────────────────────────────────────────────────────── */
-app.post('/api/platform/update-org-mode', requireAuth, (req, res) => {
-  const { orgCode, orgMode } = req.body;
-  if (!orgCode || !orgMode) return res.status(400).json({ error: 'orgCode and orgMode required' });
-  const code = orgCode.toLowerCase().trim();
-  if (orgMeta[code]) { orgMeta[code].orgMode = orgMode; scheduleSave(); }
-  if (orgStore[code]) { orgStore[code].orgMode = orgMode; scheduleSave(); }
-  res.json({ ok: true });
+/* SECURITY: took the organisation from the BODY and checked nothing at all beyond having a
+   session, so any member of any organisation could change any other organisation's mode — and
+   the mode drives the domain pack, which decides the vocabulary and the reasoning parameters for
+   everybody in it. Session for identity, `manage_settings` for authority. */
+app.post('/api/platform/update-org-mode', requirePermission('manage_settings'), (req, res) => {
+  const code = String(req.iqSession.orgCode || '').toLowerCase().trim();
+  const orgMode = String((req.body || {}).orgMode || '').trim().slice(0, 60);
+  if (!code) return res.status(400).json({ error: 'no organisation on this session' });
+  if (!orgMode) return res.status(400).json({ error: 'orgMode required' });
+  // A body orgCode naming somebody ELSE is refused rather than quietly ignored. Silently
+  // applying the change to the caller's own org would tell an attacker nothing and tell an
+  // honest caller nothing either.
+  const asked = String((req.body || {}).orgCode || '').toLowerCase().trim();
+  if (asked && asked !== code) return res.status(403).json({ error: 'you can only change your own organisation' });
+  if (orgMeta[code]) orgMeta[code].orgMode = orgMode;
+  if (orgStore[code]) orgStore[code].orgMode = orgMode;
+  _audit(code, { actor: req.iqSession.userId, action: 'org_mode_changed', subjectIds: [], basis: orgMode });
+  scheduleSave();
+  res.json({ ok: true, orgCode: code, orgMode });
 });
 
 /* ── Bulk import users (CSV/XLSX parsed client-side) ─────────────────── */
-app.post('/api/auth/bulk-import', requireAuth, async (req, res) => {
+/* SECURITY — THE WORST OF THE THREE, because this one MINTS ACCOUNTS.
+
+   It took the organisation from the BODY and required nothing but a session, so an ordinary
+   member of organisation A could post organisation B's code and create an ADMIN there. Two
+   separate failures in one route: the tenant was the caller's to choose, and authority over the
+   operation was never asked about at all.
+
+   Three rules now, and each answers a different question:
+
+     WHERE   the organisation is the session's. A body orgCode naming another org is refused
+             rather than ignored, so an honest caller learns their payload was wrong and a
+             dishonest one learns nothing about whether that org exists.
+     WHETHER `edit_members` — the permission that already governs creating and changing people.
+             Not a new gate invented for this route; the one the rest of the roster uses.
+     HOW HIGH the role ceiling from /api/auth/invite: you may not create somebody above your own
+             level. Without it, an admin (who has edit_members and cannot mint a superadmin
+             invite) could mint one here — the ceiling has to live wherever accounts are made,
+             not only where invites are. */
+app.post('/api/auth/bulk-import', requirePermission('edit_members'), async (req, res) => {
   const { orgCode, users: importRows } = req.body;
-  if (!orgCode || !Array.isArray(importRows)) return res.status(400).json({ error: 'orgCode and users[] required' });
-  const code    = orgCode.toLowerCase().trim();
-  const creator = req.user;
+  if (!Array.isArray(importRows)) return res.status(400).json({ error: 'users[] required' });
+  const code = String(req.iqSession.orgCode || '').toLowerCase().trim();
+  const asked = String(orgCode || '').toLowerCase().trim();
+  if (asked && asked !== code) return res.status(403).json({ error: 'you can only import into your own organisation' });
+  const creator = orgUsers[code]?.[req.iqSession.userId];
+  if (!creator) return res.status(401).json({ error: 'User not found.' });
 
   if (!orgUsers[code]) return res.status(404).json({ error: 'Org not found' });
+
+  /* THE CEILING. Same ladder /api/auth/invite uses, and deliberately the same numbers rather
+     than a second table that could drift away from it. */
+  const ROLE_LEVEL = { superadmin: 1, admin: 2, coach: 3, member: 4 };
+  const creatorLevel = ROLE_LEVEL[creator.role] || 4;
 
   const created = [], skipped = [], failed = [];
 
   for (const row of importRows) {
     const name  = (row.name  || '').trim();
     const email = (row.email || '').trim().toLowerCase();
-    const role  = (['admin','coach','member'].includes(row.role?.toLowerCase()) ? row.role.toLowerCase() : 'member');
+    /* THE ROLE THE ROW ASKED FOR, kept separate from the role it gets.
+
+       A suite caught this: an explicit `superadmin` row fell outside the accepted list and was
+       silently coerced to `member`. Safe, in that no superadmin was minted — and wrong, because
+       the importer asked for one thing and got another with no word said, which is how somebody
+       ends up believing an account has powers it does not have.
+
+       So a NAMED role above the ceiling is refused and says so. An UNRECOGNISED one (a typo, a
+       blank, a spreadsheet column that means something else) keeps the long-standing coercion to
+       member, because that is a malformed cell rather than a request. */
+    const asked = String(row.role || '').trim().toLowerCase();
+    const role  = (['admin','coach','member'].includes(asked) ? asked : 'member');
     const group = (row.group || row.department || '').trim();
+
+    // Refused per ROW rather than failing the whole import: a spreadsheet with one over-reaching
+    // line should import the rest and say which line it would not take, or somebody edits the
+    // file blind. A superadmin is exempt, as they are for invites.
+    const askedLevel = ROLE_LEVEL[asked];
+    if (creator.role !== 'superadmin' && askedLevel && askedLevel < creatorLevel) {
+      failed.push({ row: name || email, reason: `You cannot create a ${asked} — that is above your own level` });
+      continue;
+    }
 
     if (!name) { failed.push({ row, reason: 'Missing name' }); continue; }
     if (!email) { failed.push({ row, reason: 'Missing email' }); continue; }
@@ -20764,7 +20838,7 @@ app.post('/api/signals/import', requireAuth, async (req, res) => {
 
   let parsed = null;
   try {
-    parsed = await ai.completeJSON({ tier: 'reason', system: `${_IMPORT_SYSTEM}\n\n${privacy.GATE_DIRECTIVE}`, messages, maxTokens: 1100, schema: ['members'] });
+    parsed = await ai.completeJSON({ org: code, taskType: 'signals_import', tier: 'reason', system: `${_IMPORT_SYSTEM}\n\n${privacy.GATE_DIRECTIVE}`, messages, maxTokens: 1100, schema: ['members'] });
   } catch (err) {
     console.warn('[signals/import] AI error:', err.message);
     return res.status(502).json({ error: 'Import analysis failed. Try again.' });

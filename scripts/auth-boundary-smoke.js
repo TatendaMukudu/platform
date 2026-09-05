@@ -28,7 +28,7 @@ process.env.DB_OPTIONAL = '1';
 process.env.NODE_ENV    = 'test';
 
 const S = require('../server.js');
-const { app, _loadAllStores, _rebuildEmailIndex, issueToken, orgNotes, orgMessages, orgStore } = S;
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken, orgNotes, orgMessages, orgStore, orgMeta } = S;
 
 /* HERMETIC BY CONSTRUCTION. Deterministic-only is on for the whole suite, so no assertion here
    can reach a provider even if a route is wide open. That is not a convenience: a mutation that
@@ -48,6 +48,9 @@ _loadAllStores({
   orgUsers: {
     [A]: {
       ua: { id: 'ua', name: 'A Member', email: 'a@x.io', role: 'member', orgCode: A, status: 'active' },
+      // The authorised counterpart, so every refusal above can be shown to be a gate rather
+      // than a route nobody can reach.
+      sa: { id: 'sa', name: 'A Owner', email: 'sa@x.io', role: 'superadmin', orgCode: A, status: 'active' },
       ca: { id: 'ca', name: 'A Coach',  email: 'ca@x.io', role: 'coach',  orgCode: A, status: 'active' },
       // A SECOND MEMBER OF THE SAME ORG, and the fixture depends on it. Forging from org B is
       // refused by the tenancy check before the identity check is ever reached, so a mutation
@@ -126,13 +129,40 @@ const server = app.listen(0, async () => {
     ok('AB3c a TEAMMATE who was not the recipient cannot mark the message read — a read receipt nobody checked is a claim about a person that is worth nothing',
       nosyTeammate.status === 403 && !(orgMessages['msg_a'].readBy || []).includes('ua2'));
 
-    /* ── AB4: CROSS-ORG. A real session in A must not reach B by naming it. ── */
-    const rename = await call('/api/platform/register-org', tokA, 'POST', { orgCode: B, orgName: 'HACKED', orgMode: 'x' });
-    ok('AB4 a member of org A cannot rename org B by naming it in the body — the organisation comes from the session and the body\'s orgCode is ignored',
-      rename.status === 200 && orgStore[B].orgName === 'Club B');
-    ok('AB4b …and their own org is what actually changed, so the route still works',
-      orgStore[A].orgName === 'HACKED');
+    /* ── AB4: THIS TEST WAS WRONG, AND THE FIX THAT CAME BEFORE IT IS WHY.
+
+       The first round of hardening took the organisation from the session instead of the body,
+       which stopped org A writing to org B. This assertion then pinned the result — and pinned
+       the remaining half of the bug with it: `orgStore[A].orgName === 'HACKED'` recorded, as
+       EXPECTED BEHAVIOUR, that an ordinary member had just renamed their own organisation.
+
+       Authentication had been mistaken for authority. "Who are you" and "may you do this" are two
+       questions, and a test written against a fix that answered only the first will faithfully
+       defend the half that was still open. Renaming an organisation or changing its mode is a
+       settings change and is gated like one. ── */
+    const renameOther = await call('/api/platform/register-org', tokA, 'POST', { orgCode: B, orgName: 'HACKED', orgMode: 'x' });
+    ok('AB4 a member of org A cannot rename org B — the organisation comes from the session, never the body',
+      renameOther.status === 403 && orgStore[B].orgName === 'Club B');
+    ok('AB4b …AND CANNOT RENAME THEIR OWN EITHER, which is what the previous version of this assertion recorded as correct: being in an organisation is not authority over its settings',
+      orgStore[A].orgName === 'Club A');
+    const modeByMember = await call('/api/platform/update-org-mode', tokA, 'POST', { orgCode: B, orgMode: 'wrecked' });
+    ok('AB4c a member cannot change another organisation\'s mode — it drives the domain pack, so it sets the vocabulary and reasoning parameters for everybody in it',
+      modeByMember.status === 403 && (orgMeta[B] || {}).orgMode !== 'wrecked');
+    const modeOwn = await call('/api/platform/update-org-mode', tokA, 'POST', { orgMode: 'wrecked' });
+    ok('AB4d …nor their own',
+      modeOwn.status === 403 && (orgMeta[A] || {}).orgMode !== 'wrecked');
+
+    /* AB4e — AND THE AUTHORISED PATH STILL WORKS, which is what makes the four refusals above a
+       gate rather than a route somebody switched off. */
+    const suTok = issueToken('sa', A, 'superadmin');
+    const renameOwn = await call('/api/platform/register-org', suTok, 'POST', { orgName: 'Club A Renamed', orgMode: 'sports' });
+    ok('AB4e somebody who may manage settings CAN rename their own organisation',
+      renameOwn.status === 200 && orgStore[A].orgName === 'Club A Renamed');
+    const suMode = await call('/api/platform/update-org-mode', suTok, 'POST', { orgMode: 'education' });
+    ok('AB4f …and change its mode',
+      suMode.status === 200 && orgMeta[A].orgMode === 'education');
     orgStore[A].orgName = 'Club A';
+    orgMeta[A].orgMode = 'sports';
 
     /* ── AB5: the legitimate owner still works. A security fix that breaks the feature is a
        different kind of failure, not a success. ── */
@@ -177,9 +207,14 @@ const server = app.listen(0, async () => {
     const chatCalls = (front.match(/fetch\('\/api\/chat'[\s\S]{0,120}?headers:\s*([^,\n]+)/g) || []);
     ok(`AB9 every /api/chat caller sends authentication (${chatCalls.length} found)`,
       chatCalls.length === 3 && chatCalls.every(c => /Auth\._headers\(\)/.test(c)));
-    ok('AB9b …and so do the debrief and register-org callers',
-      /fetch\('\/api\/coach-debrief',\s*\{\s*\n?\s*method:\s*'POST',\s*\n?\s*headers:\s*Auth\._headers\(\)/.test(front) &&
-      /register-org'[\s\S]{0,80}headers: Auth\._headers\(\)/.test(front));
+    ok('AB9b …and so does the debrief caller',
+      /fetch\('\/api\/coach-debrief',\s*\{\s*\n?\s*method:\s*'POST',\s*\n?\s*headers:\s*Auth\._headers\(\)/.test(front));
+    /* AB9c — THE LAUNCH-TIME MUTATION IS GONE. register-org used to be POSTed on every app start,
+       echoing back a name and mode the client had just derived from the server. That is why a
+       write endpoint had to be reachable by every member who opened the app, and it could only
+       introduce drift. Gating it without removing the call would have broken every launch. */
+    ok('AB9c and nothing POSTs register-org on launch any more — a mutation on every page load is what made this route everybody\'s',
+      !/fetch\('\/api\/platform\/register-org'/.test(front));
 
     /* ── AB10: NOBODY SETS SOMEBODY ELSE'S PASSWORD. The reason the founder holds superadmin
        rather than the head coach — and the reason that reason should not have to be remembered.

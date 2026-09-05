@@ -1469,14 +1469,16 @@ function launchApp(){
   // Use real orgCode from Auth session, fall back to derived
   const orgCode = Auth.currentUser?.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g,'-');
   AppState.orgCode = orgCode;
-  // AUTHENTICATED, and the org comes from the session — this fired on every launch with no
-  // credential and overwrote orgStore for whatever code it was handed.
-  fetch('/api/platform/register-org', {
-    method: 'POST',
-    headers: Auth._headers(),
-    body: JSON.stringify({ orgName: AppState.orgName, orgMode: AppState.mode }),
-  }).catch(() => {});
+  /* THE LAUNCH-TIME WRITE IS GONE.
 
+     This POSTed to /api/platform/register-org on every single app start, sending back a name and
+     mode the client had itself derived from the server moments earlier — a mutation on every page
+     load that could only introduce drift, and the reason a write endpoint had to be reachable by
+     every member who opened the app.
+
+     Registering is now a settings change gated on `manage_settings`, which is where it belonged;
+     orgStore is a legacy mirror read only as a fallback behind orgMeta, so nothing depended on
+     this call keeping it warm. */
   console.log('[ROUTE] launchApp — done');
 }
 

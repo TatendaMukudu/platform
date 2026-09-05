@@ -58,16 +58,44 @@ let _runtimeNoLLM = false;
 function deterministicOnly() { return ENV_NO_LLM || _runtimeNoLLM; }
 function setDeterministicOnly(on) { if (!ENV_NO_LLM) _runtimeNoLLM = !!on; return deterministicOnly(); }
 
-/* Admission belongs at the provider boundary: omitted attribution falls into
-   one conservative shared bucket, so a new caller can reduce availability but
-   can never create an unmetered provider call. */
+/* Admission belongs at the provider boundary.
+
+   THE SHARED BUCKET WAS THE HOLE, not the safety net it was written as. An omitted `org` fell
+   into one bucket named `unattributed` that EVERY organisation drew on — so the per-org budget,
+   whose entire purpose is that one org cannot starve the others, simply did not apply to those
+   call sites. Fourteen of thirty-five were in it. "A new caller can reduce availability but never
+   create an unmetered call" is true and beside the point: reducing availability for everybody
+   else is the failure mode the budget exists to prevent.
+
+   So attribution is now REQUIRED and its absence is refused, not defaulted. A caller that cannot
+   name an organisation must say so deliberately by passing PLATFORM_ORG, which bills to its own
+   bucket and is a visible, greppable token rather than a silent omission. Debt cannot hide behind
+   a fallback that looks like a value. */
+const PLATFORM_ORG = '__platform__';
 const _budget = new Map();
 const _usage = new Map();
 let _limits = {
   hourly: parseInt(process.env.IQ_LLM_ORG_HOURLY, 10) > 0 ? parseInt(process.env.IQ_LLM_ORG_HOURLY, 10) : 240,
   daily: parseInt(process.env.IQ_LLM_ORG_DAILY, 10) > 0 ? parseInt(process.env.IQ_LLM_ORG_DAILY, 10) : 2000,
 };
-function _org(v) { return String(v || 'unattributed').trim().toLowerCase() || 'unattributed'; }
+/* Normalise an organisation id for the budget and telemetry keys. Callers reach this only after
+   _requireOrg has accepted the value, so there is no fallback here to hide an omission. */
+function _org(v) { return String(v == null ? '' : v).trim().toLowerCase(); }
+
+/* THE ADMISSION RULE. Missing attribution cannot silently return: it throws, with a code a caller
+   can act on and a message that names the fix. Thrown rather than logged because a warning is
+   something a busy deploy scrolls past, and the whole failure mode here was invisibility. */
+function _requireOrg(org, taskType) {
+  const id = _org(org);
+  if (!id) {
+    const err = new Error(
+      `model call has no organisation attribution (taskType: ${taskType || 'unspecified'}). ` +
+      'Pass the caller\'s orgCode, or gateway.PLATFORM_ORG if it genuinely belongs to no organisation.');
+    err.code = 'LLM_UNATTRIBUTED';
+    throw err;
+  }
+  return id;
+}
 function _window(key, ms, now) {
   const prior = _budget.get(key);
   if (prior && now - prior.startedAt < ms) return prior;
@@ -180,6 +208,9 @@ async function complete({
   // No-egress backstop: refuse to call any model in deterministic-only mode, even if a
   // key is present and a caller forgot to check enabled(). Nothing leaves the box.
   if (deterministicOnly()) throw new Error('LLM disabled (deterministic-only mode)');
+  // ATTRIBUTION BEFORE BUDGET, because an unattributed call cannot be budgeted. Refused here
+  // rather than absorbed into a shared bucket every organisation would then be sharing.
+  _requireOrg(org, taskType);
   if (!_consumeBudget(org)) {
     const err = new Error('LLM budget exhausted');
     err.code = 'LLM_BUDGET_EXHAUSTED';
@@ -329,8 +360,20 @@ function canUnderstand(kind) {
   if (kind === 'image' || kind === 'text') return HAVE_CLAUDE || HAVE_OPENAI;
   return HAVE_CLAUDE || HAVE_OPENAI;
 }
-async function understand({ system, prompt, media, maxTokens = 700 }) {
+async function understand({ system, prompt, media, maxTokens = 700, org, taskType = 'understand' }) {
   if (deterministicOnly()) throw new Error('LLM disabled (deterministic-only mode)');
+  /* THIS PATH HAD NO BUDGET AT ALL — not even the shared bucket the reported finding was about.
+     It reaches the provider directly, so an unmetered caller here was worse than an unattributed
+     one: not merely drawing on everybody's allowance, but drawing on none. There is no caller in
+     the tree today, which is exactly why it was never noticed; the rule is applied so the FIRST
+     one cannot arrive unmetered. */
+  _requireOrg(org, taskType);
+  if (!_consumeBudget(org)) {
+    const err = new Error('LLM budget exhausted');
+    err.code = 'LLM_BUDGET_EXHAUSTED';
+    throw err;
+  }
+  _recordUsage({ org, taskType, tier: 'reason' });
   const text = prompt || 'Describe this and pull out what matters.';
 
   // Preferred path: Claude (handles image, native PDF, and inline text).
@@ -387,9 +430,19 @@ async function understand({ system, prompt, media, maxTokens = 700 }) {
 const OPENAI_TRANSCRIBE_URL   = process.env.OPENAI_TRANSCRIBE_URL || 'https://api.openai.com/v1/audio/transcriptions';
 const OPENAI_TRANSCRIBE_MODEL = process.env.OPENAI_TRANSCRIBE_MODEL || 'whisper-1';
 function canTranscribe() { return !deterministicOnly() && HAVE_OPENAI; }
-async function transcribe(buffer, { filename = 'audio.webm', mimetype = 'audio/webm' } = {}) {
+async function transcribe(buffer, { filename = 'audio.webm', mimetype = 'audio/webm', org, taskType = 'transcribe' } = {}) {
   if (deterministicOnly()) throw new Error('LLM disabled (deterministic-only mode)');
+  /* ATTRIBUTION BEFORE AVAILABILITY. A missing org is a fault in the CALL and a missing key is a
+     fault in the DEPLOYMENT, and reporting the second first means a caller that forgot to
+     attribute only finds out on the machine where transcription happens to be configured. */
+  _requireOrg(org, taskType);
   if (!HAVE_OPENAI) throw new Error('transcription-unavailable');
+  if (!_consumeBudget(org)) {
+    const err = new Error('LLM budget exhausted');
+    err.code = 'LLM_BUDGET_EXHAUSTED';
+    throw err;
+  }
+  _recordUsage({ org, taskType, tier: 'micro' });
   const fd = new FormData();
   fd.append('file', new Blob([buffer], { type: mimetype }), filename);
   fd.append('model', OPENAI_TRANSCRIBE_MODEL);
@@ -425,6 +478,8 @@ async function searchWeb({ query, system, maxUses = 3, maxTokens = 900, org, tas
   if (!HAVE_CLAUDE) throw new Error('web search unavailable (no Claude key)');
   const q = String(query || '').trim();
   if (!q) throw new Error('web search needs a composed query');
+  // A query reaching a search index is egress like any other, and is attributed like any other.
+  _requireOrg(org, taskType);
   if (!_consumeBudget(org)) {
     const err = new Error('LLM budget exhausted');
     err.code = 'LLM_BUDGET_EXHAUSTED';
@@ -446,6 +501,6 @@ async function searchWeb({ query, system, maxUses = 3, maxTokens = 900, org, tas
   return resp?.content || [];
 }
 
-module.exports = { complete, completeJSON, parseJSON, MODELS, client, enabled, canTranscribe, transcribe, canUnderstand, understand, deterministicOnly, setDeterministicOnly,
+module.exports = { complete, completeJSON, parseJSON, MODELS, client, enabled, PLATFORM_ORG, _requireOrg, canTranscribe, transcribe, canUnderstand, understand, deterministicOnly, setDeterministicOnly,
   budgetAvailable, usageFor, _consumeBudget, _resetGatewayState,
   canSearchWeb, searchWeb, WEB_SEARCH_TOOL };
