@@ -688,6 +688,43 @@ only so a future session does not re-investigate a non-problem.
 
 ---
 
+**H-18 · Incremental code reorganisation — PARKED (founder request, 2026-09-05).**
+
+**Question.** When would extracting smaller modules from `server.js` and `js/app.js`
+reduce maintenance risk enough to justify the work?
+
+**Why parked.** The founder explicitly deferred this work to protect pilot preparation time.
+This entry authorises documentation only: no rewrite, extraction, new framework or implementation
+spike. File size alone does not prove poor runtime performance or prevent a pilot. The concern is
+maintainability: duplicated logic, inconsistent boundary enforcement, difficult reviews and changes
+that unintentionally affect unrelated features.
+
+**Existing fixes remain active work.** Deferring reorganisation does not defer confirmed security
+defects, saving failures, audience correctness or the approved conversational Focus improvements.
+Those must be fixed in the existing architecture and must not be reclassified as research.
+
+**Possible approach if explicitly promoted.** Inventory existing owners and dependencies first.
+Consider small, behaviour-preserving extractions around authentication, permissions, tenant scope
+and model attribution; then feature modules for conversations, Focuses, notes, organisation
+management and integrations; then frontend views and shared components. Reuse the existing kernel
+and stores. Avoid duplicate implementations, a big-bang rewrite, or an unrelated persistence migration.
+Each bounded extraction would need regression coverage, independent review and a green full suite.
+
+**Evidence that would justify revisiting.** Repeated defects caused by duplicated boundaries,
+frequent merge conflicts, changes repeatedly touching unrelated features, or measured review and
+debugging delays. Revisit after pilot learning and only with explicit founder approval; this is not
+an automatic post-pilot build commitment.
+
+**Separate operational question.** Runtime RAM, database access, persistence write amplification and
+multi-instance operation require measurements of their own (see H-16). Moving functions between
+files does not solve those scaling questions.
+
+**Estimate caveat.** The conversational estimate of two to four focused days for a limited first pass
+or one to two weeks for a broader reorganisation was an unmeasured planning range, not a delivery
+promise. Any future proposal must size the actual extraction scope and verification effort first.
+
+---
+
 ## 9 · WHAT THIS REGISTER DOES NOT CONTAIN
 
 Deliberately absent, because they are **queued work** and belong in
