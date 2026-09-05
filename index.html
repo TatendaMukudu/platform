@@ -46,8 +46,8 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260904k"/>
-<link rel="stylesheet" href="css/member.css?v=20260904k"/>
+<link rel="stylesheet" href="css/styles.css?v=20260905h"/>
+<link rel="stylesheet" href="css/member.css?v=20260905h"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -225,7 +225,7 @@
         <div class="icon-btn" id="notif-btn" data-tip="Notifications" style="cursor:pointer">
           <span class="tb-ic-bell"></span> <div class="badge"></div>
         </div>
-        <div style="font-size:var(--fs);color:var(--text-secondary);padding:0 0.5rem" id="topbar-org">Org</div>
+        <div class="topbar-org" style="font-size:var(--fs);color:var(--text-secondary);padding:0 0.5rem" id="topbar-org">Org</div>
         <!-- User account widget — sign out, name, email, role -->
         <div class="topbar-user-widget" id="topbar-user-widget">
           <button class="topbar-avatar-btn" id="topbar-avatar-btn"
@@ -893,7 +893,14 @@
           <div class="page-header-title">Notes</div>
           <div class="page-header-sub">Your library — everything you've saved to remember, in one place</div>
         </div>
-        <div class="card iq-composer" style="margin-bottom:1rem">
+        <!-- STACKED, NOT A CHAT ROW. This card wore `iq-composer`, which is `display:flex;
+             align-items:flex-end` and exists for the chat's single row of input + mic + send.
+             Applied to a card holding a label, a textarea, a tools strip and an actions row, it
+             laid all four out SIDE BY SIDE — at 390px the input collapsed to about 160px and
+             wrapped one word per line. Verified in a browser at iPhone width before and after.
+             `iq-composer-stack` keeps the same surface, border, radius and focus ring and lays
+             them out as a column: full-width input, compact toolbar beneath. -->
+        <div class="card iq-composer iq-composer-stack" style="margin-bottom:1rem">
           <div class="card-label">Quick add</div>
           <textarea class="note-input" id="note-content"
             placeholder="Anything you want to remember — a goal, a reflection, a thought. IntelliQ keeps it for you."></textarea>
@@ -1614,8 +1621,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260904k"></script>
-<script src="js/auth.js?v=20260904k"></script>
+<script src="js/data.js?v=20260905h"></script>
+<script src="js/auth.js?v=20260905h"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1683,14 +1690,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260904k"></script>
-<script src="js/ui.js?v=20260904k"></script>
-<script src="js/attachments.js?v=20260904k"></script>
-<script src="js/scenarios.js?v=20260904k"></script>
-<script src="js/chat.js?v=20260904k"></script>
-<script src="js/tree.js?v=20260904k"></script>
-<script src="js/voice.js?v=20260904k"></script>
-<script src="js/app.js?v=20260904k"></script>
+<script src="js/charts.js?v=20260905h"></script>
+<script src="js/ui.js?v=20260905h"></script>
+<script src="js/attachments.js?v=20260905h"></script>
+<script src="js/scenarios.js?v=20260905h"></script>
+<script src="js/chat.js?v=20260905h"></script>
+<script src="js/tree.js?v=20260905h"></script>
+<script src="js/voice.js?v=20260905h"></script>
+<script src="js/app.js?v=20260905h"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->

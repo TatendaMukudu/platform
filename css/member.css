@@ -747,6 +747,22 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
    out of reach. It sticks while the conversation is on screen and releases at the next box. */
 .iq-composer-wrap{display:flex;flex-direction:column;gap:0.4rem;position:sticky;bottom:0;z-index:2;background:var(--bg-base);padding-bottom:0.35rem}
 .iq-composer{display:flex;align-items:flex-end;gap:0.5rem;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:0.55rem 0.6rem 0.55rem 0.9rem;transition:border-color .18s ease,box-shadow .18s ease}
+/* THE STACKED VARIANT. Same shell — surface, border, radius, focus ring — laid out as a column
+   for anywhere that is a composer CARD rather than a chat row: a full-width input with a compact
+   toolbar underneath it. The Notes card was using the row version and collapsing its own input to
+   about 160px on a phone. */
+.iq-composer-stack{display:block;padding:0.85rem}
+.iq-composer-stack .note-input{display:block;width:100%;box-sizing:border-box;min-height:5.5rem;resize:vertical}
+.iq-composer-stack .card-label{display:block;margin:0 0 0.45rem}
+/* The toolbar: one compact row that WRAPS rather than squeezing what is beside it, with the
+   primary action first so the thumb reaches it before the secondary ones. */
+.iq-composer-stack .composer-actions{display:flex;flex-wrap:wrap;align-items:center;gap:0.4rem;margin-top:0.6rem}
+/* `.btn-primary` is width:100% by default — correct for a form's submit, wrong inside a toolbar,
+   where it pushed every secondary control onto its own line beneath it. In a row of actions the
+   primary sizes to its label and simply leads. */
+.iq-composer-stack .composer-actions .btn-primary{width:auto;padding:0.55rem 1.2rem;font-size:var(--fs-md)}
+.iq-composer-stack #note-composer-tools{margin:0.5rem 0 0}
+.iq-composer-stack #note-composer-tools .iq-compose-row{display:flex;flex-wrap:wrap;gap:0.4rem}
 .iq-composer:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
 .iq-composer-input{flex:1 1 0%;min-width:0;background:transparent;border:none;outline:none;resize:none;color:var(--text-primary);font-size:16px;line-height:1.5;padding:0.35rem 0;max-height:180px;min-height:24px}
 .iq-composer-input::placeholder{color:var(--text-muted)}
