@@ -20,6 +20,9 @@ jobs:
       # deterministic behaviour with the model OFF, and CI must never carry a live key.
     steps:
       - uses: actions/checkout@v4
+        with:
+          # docs-status-smoke verifies ancestry and age against the index commit.
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4
