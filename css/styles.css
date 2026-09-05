@@ -26,6 +26,11 @@
   --border-light: #2e3859;
 
   --accent:       #4f8ef7;
+  /* THE SAME BLUE, DARKENED ONLY WHERE WHITE TEXT SITS ON IT. White on #4f8ef7 is 3.21:1, so
+     every filled primary button was below the readable line. The accent itself is unchanged —
+     borders, rings, lines and icons keep the brand colour — and this variant exists purely for
+     filled surfaces that carry label text. White on it is 4.88:1. */
+  --accent-strong: #2f6fd0;
   --accent-glow:  rgba(79,142,247,0.18);
   --accent2:      #7c5af5;
   --accent3:      #0ecfb0;
@@ -34,9 +39,18 @@
   --warning:      #f7a84f;
   --success:      #4ff77a;
 
-  --text-primary:   #e8ecf8;
-  --text-secondary: #8b96b8;
-  --text-muted:     #4e5878;
+  /* THE TEXT RAMP, MEASURED RATHER THAN EYEballed.
+
+     --text-muted was #4e5878: 2.78:1 against the page and 2.16:1 on a hovered card — well under
+     the 4.5:1 anybody can read comfortably, and it was carrying real content (empty states,
+     provenance lines, the "who can see this" link), not just decoration. Measured in a browser at
+     phone width; the numbers below are the worst case of the four surfaces it appears on.
+
+     The three steps stay clearly distinct so primary, secondary and muted still rank visually —
+     lifting muted alone would have collapsed it into secondary and lost the hierarchy. */
+  --text-primary:   #e8ecf8;   /* 15.9:1 on the page */
+  --text-secondary: #a8b2d0;   /*  8.6:1 on the page, 5.9:1 on a hovered card */
+  --text-muted:     #8089b3;   /*  5.7:1 on the page, 4.5:1 on a hovered card */
 
   /* Aliases that rules across this file already referenced but nothing ever defined, so every
      one of them was silently taking its fallback — a colour from a design system that is not
@@ -216,18 +230,44 @@ img { max-width: 100%; }
 .org-tile:hover { border-color: var(--accent); background: var(--accent-glow); }
 .org-tile.active { border-color: var(--accent); background: var(--accent-glow); color: var(--accent); }
 
+/* ── THE ACTION RAMP: PRIMARY, SECONDARY, DISABLED ────────────────────────────────────────
+   Three ranks that must be tellable apart at a glance on a phone. They were not: the primary
+   filled button was a blue-to-PURPLE gradient (the founder's brief is a blue accent, and the
+   Notes "Add" button was rendering violet), its white label sat at 3.21:1 on the lighter end of
+   that gradient, and there was no shared disabled treatment at all — so a button mid-request
+   looked exactly like one waiting to be pressed. */
 .btn-primary {
   width: 100%;
   padding: 0.8rem;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  /* Solid, and the darker end of the same blue: white on it is 4.88:1 rather than 3.21:1. */
+  background: var(--accent-strong);
   border-radius: var(--radius-sm);
   font-weight: 600;
   font-size: var(--fs-lg);
   color: #fff;
-  transition: opacity 0.2s, transform 0.15s;
+  transition: background 0.2s, opacity 0.2s, transform 0.15s;
 }
-.btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+.btn-primary:hover { background: var(--accent); transform: translateY(-1px); }
 .btn-primary:active { transform: translateY(0); }
+.btn-accent { background: var(--accent-strong); }
+
+/* SECONDARY reads as an outline: the same blue, carried by the border and the label rather than
+   a fill, so it never competes with the primary for the eye. */
+.btn-outline { border-color: var(--border-light); color: var(--text-primary); }
+.btn-outline:hover { border-color: var(--accent); }
+
+/* DISABLED is one treatment everywhere. Dimmed AND desaturated AND not-allowed, because opacity
+   alone on a coloured fill still reads as "pressable, just further away". */
+.btn-primary:disabled, .btn-accent:disabled, .btn:disabled,
+.btn-outline:disabled, .btn-ghost:disabled, button:disabled {
+  opacity: 0.45;
+  filter: saturate(0.35);
+  cursor: not-allowed;
+  transform: none;
+}
+.btn-primary:disabled:hover, .btn-accent:disabled:hover, button:disabled:hover {
+  background: var(--accent-strong); transform: none;
+}
 
 /* ── APP SHELL ──────────────────────────────────────────── */
 #app {
@@ -1835,10 +1875,13 @@ img { max-width: 100%; }
   align-items: center;
 }
 .topbar-avatar-btn {
-  width: 32px;
-  height: 32px;
+  /* 44px is the platform tap target; this was 32 and sat beside two other small controls in a
+     crowded bar. The fill is the darker accent for the same reason the buttons are: white
+     initials on #4f8ef7 are 3.21:1, and initials are text. */
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-strong);
   color: #fff;
   border: none;
   cursor: pointer;
@@ -3100,6 +3143,69 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqt-recomposed-b{font-size:var(--fs);color:var(--text-secondary);line-height:1.55;
   white-space:pre-wrap;word-break:break-word;background:var(--bg-card);border:1px solid var(--border);
   border-radius:12px;padding:.75rem;margin:0}
+
+/* ── TAP TARGETS ON A PHONE ────────────────────────────────────────────────────────────────
+   Measured in a browser at 390px: the small controls were 12-29px tall against a platform
+   guidance of 44. That is the difference between a control that works and one a person taps
+   twice. Padding is used rather than height so nothing changes shape on a desktop, and the
+   minimum only applies where a thumb is the input device.
+
+   `min-height` with inline-flex centring, so a 22px chip becomes a 44px target without its label
+   moving or its border growing. */
+@media (max-width: 640px) {
+  .btn, .btn-sm, .btn-outline, .btn-ghost, .btn-primary, .btn-accent,
+  .iq-make-chip, .note-tag-btn, .iq-fp-more, .iqt-sec-b, .iqt-mat-add, .iqt-sec-send,
+  .iqc-btn, .iq-privacy-chip, .iq-composer-privacy,
+  .composer-actions button, .iq-proposal-actions button, #note-composer-tools button {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* A text link is not a button and should not grow a box, but it still has to be tappable —
+     the padding gives it the height without a border appearing around it. */
+  .iq-hint-link, a.iq-hint-link { display: inline-block; padding: .8rem 0; min-height: 44px; box-sizing: border-box; }
+}
+
+/* ── MOBILE HEADER: SAY THE PAGE'S NAME ONCE ───────────────────────────────────────────────
+   The top bar names the page and the page then named itself again directly underneath — "Notes"
+   twice, in a band about 200px tall on a phone, before any content. The in-page title is hidden
+   at phone width where the bar already carries it, and its SUBTITLE is kept, because that line
+   says something the bar does not.
+
+   Home is the exception and stays: its page title is the person's name, not the page's, so it is
+   not a repeat of anything. */
+@media (max-width: 640px) {
+  .page-header-title:not(#home-name) { display: none; }
+  .page-header { margin-bottom: .6rem; }
+  /* The organisation's name is the least load-bearing thing in a crowded bar — the avatar and the
+     menu already say whose account this is, and the name reappears in settings. */
+  .topbar-org, #topbar-org-name { display: none; }
+}
+
+/* ── FOUR STATES, FOUR LOOKS ──────────────────────────────────────────────────────────────
+   Loading, failed, empty and populated are different facts about the world, and a screenshot
+   proved they were rendering as the same one: with the objects request aborted, Home was
+   pixel-identical to Home with no data. Failure gets a border and a way back; emptiness is quiet
+   and says what is on the record rather than what the person has not done. */
+.iq-home-loading, .iq-state-loading{font-size:var(--fs);color:var(--text-muted);padding:1rem 0;text-align:center}
+.iq-home-empty{font-size:var(--fs-md);color:var(--text-muted);text-align:center;line-height:1.6;padding:1rem 0}
+.iq-home-failed, .iq-state-failed{border:1px solid var(--border-light);border-left:3px solid var(--warning);
+  border-radius:var(--radius);padding:.85rem;margin:.5rem 0;background:var(--bg-card)}
+.iq-home-failed p, .iq-state-failed p{margin:0 0 .6rem;font-size:var(--fs);color:var(--text-secondary);line-height:1.5}
+
+/* ── THE FOCUS PROPOSAL, IN THE CONVERSATION ───────────────────────────────────────────────
+   Compact on purpose: one line of their own words, one action, and everything else behind a
+   disclosure. A proposal that fills the screen stops being a suggestion. */
+.iq-focusprop .iq-field{margin:.5rem 0 0}
+.iq-fp-more{background:none;border:0;padding:.35rem 0;font-size:var(--fs-sm);color:var(--accent);
+  cursor:pointer;text-decoration:underline;text-underline-offset:2px;min-height:44px}
+.iq-fp-extra{margin:.25rem 0 0}
+.iq-fp-said{font-size:var(--fs-sm);color:var(--text-muted);margin:.4rem 0 0;line-height:1.45}
+.iq-fp-text{font-size:var(--fs-md);color:var(--text-primary);margin:.4rem 0 .2rem;line-height:1.5}
+.iq-fp-meta{font-size:var(--fs-sm);color:var(--text-muted);line-height:1.5;margin:.15rem 0}
+.iq-focusdone{border-left:3px solid var(--success)}
+.iq-fp-signin{margin:.6rem 0 0;padding-top:.6rem;border-top:1px solid var(--border)}
 
 /* Waiting on you — a leader's queue. Deliberately plain: it is a list of people who asked. */
 .iq-waiting-card{margin:0 0 .6rem;padding:.85rem}

@@ -9917,18 +9917,35 @@ const MemberApp = {
   async _loadNotes() {
     const el = document.getElementById('notes-list');
     if (!el) return;
-    el.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted);padding:1rem 0">Loading…</div>`;
+    el.innerHTML = `<div class="iq-state-loading" role="status">Loading your notes…</div>`;
+    /* A FAILURE IS NOT AN EMPTY LIBRARY. Both branches below used to end at _renderNotesList()
+       with an empty cache, so a dead session and a 500 both rendered "No notes yet. Write your
+       first one above." — telling somebody their notes do not exist because the request for them
+       did not come back. */
     try {
       const res = await fetch(
         `/api/notes?orgCode=${encodeURIComponent(this._orgCode)}&requesterId=${encodeURIComponent(this._userId)}`,
         { headers: this._authHeaders() }
       );
-      if (res.status === 401) { this._cachedNotes = []; this._renderNotesList(); return; }
-      const data = res.ok ? await res.json() : { notes: [] };
+      if (res.status === 401) {
+        el.innerHTML = `<div class="iq-state-failed" role="alert">
+          <p>You have been signed out, so your notes could not be loaded. They are still there.</p>
+          <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._loadNotes()">Try again</button></div>`;
+        return;
+      }
+      if (!res.ok) {
+        el.innerHTML = `<div class="iq-state-failed" role="alert">
+          <p>Your notes could not be loaded just now (the server said ${res.status}). Nothing has been lost.</p>
+          <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._loadNotes()">Try again</button></div>`;
+        return;
+      }
+      const data = await res.json();
       this._cachedNotes = data.notes || [];
       this._renderNotesList();
     } catch(e) {
-      el.innerHTML = `<div style="font-size:var(--fs);color:var(--danger)">Could not load notes.</div>`;
+      el.innerHTML = `<div class="iq-state-failed" role="alert">
+        <p>Your notes could not be loaded — this looks like a connection problem, not an empty library.</p>
+        <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._loadNotes()">Try again</button></div>`;
     }
   },
 
@@ -9940,12 +9957,14 @@ const MemberApp = {
       ? this._cachedNotes
       : this._cachedNotes.filter(n => n.tag === filter);
 
+    // A statement about what is stored, and a true one about where the box is: on this screen the
+    // composer genuinely is above the list.
     if (!this._cachedNotes.length) {
-      el.innerHTML = `<div class="empty-card"><div class="empty-icon"></div><div>No notes yet. Write your first one above.</div></div>`;
+      el.innerHTML = `<div class="empty-card"><div>Your notes are empty. The box above is where they start.</div></div>`;
       return;
     }
     if (!notes.length) {
-      el.innerHTML = `<div class="empty-card"><div class="empty-icon"></div><div>No ${filter} notes yet.</div></div>`;
+      el.innerHTML = `<div class="empty-card"><div>Nothing here is tagged ${this._escape(filter)}. Your other notes are still there — clear the filter to see them.</div></div>`;
       return;
     }
 
@@ -10488,22 +10507,68 @@ const MemberApp = {
      It is the same card the buckets render, so home and the buckets can never drift apart, and
      tapping it opens the same thread. If there is nothing yet, home says so in one line rather
      than showing an empty frame. */
+  /* FOUR STATES, NOT TWO — and the missing distinction was a real defect a screenshot proved.
+
+     This used to `.catch(() => null)` every request and then ask one question: is there a top
+     item? A FAILED LOAD and an EMPTY RECORD produced byte-identical screens, so a person whose
+     network dropped was told, in the product's own voice, that there was nothing to look at.
+     Verified in a browser before and after: with /api/objects aborted, this page was previously
+     pixel-identical to the same page with no data.
+
+     The four are now distinct because they mean different things and want different responses:
+       LOADING    say so, briefly
+       FAILED     say the records could not be READ, and offer to try again
+       EMPTY      say what is on the record, which is nothing yet — a statement about the
+                  RECORD, never a judgment about the person. "Nothing yet" plus an instruction
+                  to talk more reads as a verdict on how interesting they have been.
+       POPULATED  the card */
   async _loadTopQuestion() {
     const box = document.getElementById('iq-brief');
     if (!box) return;
-    const esc = s => this._escape(String(s == null ? '' : s));
     const kinds = ['inquiry', 'focus', 'low', 'high'];
+    box.innerHTML = `<p class="iq-home-loading" role="status">Looking at your record…</p>`;
+
     let all = [];
-    try {
-      const results = await Promise.all(kinds.map(k =>
-        fetch(`/api/objects?kind=${k}&scope=all`, { headers: this._authHeaders() })
-          .then(r => r.json()).catch(() => null)));
-      for (const j of results) if (j && j.objects) all = all.concat(j.objects.filter(o => !o.parked));
-    } catch (_) { all = []; }
+    let failures = 0;
+    const results = await Promise.all(kinds.map(k =>
+      fetch(`/api/objects?kind=${k}&scope=all`, { headers: this._authHeaders() })
+        .then(r => (r.ok ? r.json() : null))
+        .catch(() => null)));
+    for (const j of results) {
+      // A null is a request that did not come back, NOT a kind with nothing in it. The
+      // difference is the whole point of this function.
+      if (!j || !Array.isArray(j.objects)) { failures++; continue; }
+      all = all.concat(j.objects.filter(o => !o.parked));
+    }
+
+    if (failures === kinds.length) {
+      box.innerHTML = `<div class="iq-home-failed" role="alert">
+        <p>Your record could not be loaded just now. This is a connection problem, not an empty record —
+        nothing has been lost.</p>
+        <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._loadTopQuestion()">Try again</button>
+      </div>`;
+      return;
+    }
+
     all.sort((a, b) => (b.score || 0) - (a.score || 0));
     const top = all[0];
     if (!top) {
-      box.innerHTML = `<p class="iq-home-empty">Nothing yet. Tell me what is going on and I will start working it out.</p>`;
+      /* THE CONTRADICTION THIS BLOCK USED TO PRODUCE. #iq-brief sits directly BENEATH
+         #iq-conversation, so somebody mid-exchange read their own conversation and then, under
+         it, "Nothing yet" — the product denying what was on the screen a centimetre above.
+
+         Two fixes, and both are needed. It now NAMES what it describes: this block shows the
+         findings drawn from the record (inquiries, focuses, highs, lows), which is a different
+         thing from the conversation and was never labelled as one. And when a conversation is
+         actually on screen, the empty line is dropped entirely — at that moment it tells the
+         person nothing they cannot see and contradicts what they can. */
+      const talking = !!(document.getElementById('iq-conversation') || {}).childElementCount;
+      if (talking && !failures) { box.innerHTML = ''; return; }
+      // A STATEMENT ABOUT THE RECORD. Partial failure is admitted rather than presented as
+      // emptiness — some of this could not be read, and saying so costs nothing.
+      box.innerHTML = `<p class="iq-home-empty">${failures
+        ? 'Part of your record could not be loaded, so what is shown here may be incomplete.'
+        : 'No findings on your record yet. This is where they will appear as IntelliQ works things out.'}</p>`;
       return;
     }
     box.innerHTML = `<div class="iq-home-one">${this._objectCard(top, top.kind)}</div>`;
