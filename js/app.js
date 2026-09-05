@@ -10579,8 +10579,13 @@ const MemberApp = {
             onclick="MemberApp._focusVis('${id}','private')">Just me</button>
           <button type="button" class="iq-make-chip" id="${id}-with"
             onclick="MemberApp._focusVis('${id}','with')">With people</button>
+          <!-- "My whole squad" described an audience the backend does not have. The shared
+               setting is read by _memberGoalsFor, which is a LEADER'S view of a member, and squad
+               peers never see it. The label now says what actually happens; nothing was widened to
+               make it true, and sharing WITH the squad is what "With people" is for, where the
+               names are chosen and membership is enforced. -->
           <button type="button" class="iq-make-chip" id="${id}-pub"
-            onclick="MemberApp._focusVis('${id}','shared')">My whole squad</button>
+            onclick="MemberApp._focusVis('${id}','shared')">Whoever leads me</button>
         </div>
         <div class="iq-focus-people" id="${id}-people" hidden></div>
         <div class="iq-focus-who" id="${id}-who">Only you can see this.</div>
@@ -10619,7 +10624,7 @@ const MemberApp = {
     const who = document.getElementById(id + '-who');
     const people = document.getElementById(id + '-people');
     // What it MEANS, not what it is called. "Public" tells a person nothing about who that is.
-    if (who) who.textContent = mode === 'shared' ? 'Anyone who leads a group you are in can see this.'
+    if (who) who.textContent = mode === 'shared' ? 'Whoever leads a group you are in can see this. Your squad cannot.'
       : mode === 'with' ? 'Only the people you pick can see this.'
       : 'Only you can see this.';
     if (!people) return;
@@ -10675,11 +10680,16 @@ const MemberApp = {
     try {
       const target = String((document.getElementById(id + '-g') || {}).value || '').trim();
       const reviewOn = String((document.getElementById(id + '-d') || {}).value || '').trim();
-      const r = await fetch('/api/me/focus', { method: 'POST', headers: this._authHeaders(),
-        body: JSON.stringify({ text, target, reviewOn,
-          share: mode === 'shared', participants: mode === 'with' ? picked : [] }) });
+      const body = { text, target, reviewOn,
+        share: mode === 'shared', participants: mode === 'with' ? picked : [] };
+      const r = await fetch('/api/me/focus', { method: 'POST', headers: this._authHeaders(), body: JSON.stringify(body) });
+      /* A DEAD SESSION MUST NOT COST SOMEBODY THEIR WORDS. This path printed "Authentication
+         required" over a filled-in form and left the person to retype it. The draft is kept
+         under the account that wrote it and offered back only to that account. */
+      if (r.status === 401) { this._focusDraftStash(body); tell('You have been signed out, so this could not be saved yet. Your words are kept for your account — sign in again and you can pick it back up.'); return; }
       const j = await r.json().catch(() => null);
       if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || `server said ${r.status}`);
+      this._focusDraftClear();
       const esc = s => this._escape(String(s == null ? '' : s));
       const f = document.getElementById(id);
       if (f) f.outerHTML = `<div class="iq-focus-made">
@@ -12142,6 +12152,7 @@ const MemberApp = {
       ? '<span class="iq-badge iq-badge-private">Private</span>'
       : '<span class="iq-badge iq-badge-share">Confirm to share</span>';
     const card = (p) => {
+      if (p.actionType === 'focus_proposal')   return this._renderFocusProposal(j, p);
       if (p.actionType === 'checkin_proposal') return this._renderCheckinProposal(j.turnId, p);
       if (p.actionType === 'checkin_log')      return this._renderCheckinLog(j.turnId, p);
       if (p.actionType === 'submit_work')      return this._renderSubmitWork(j.turnId, p);
@@ -12243,6 +12254,234 @@ const MemberApp = {
   },
 
   // Personalized check-in: what it relates to, when, whether the topic is referenced, expiry.
+  /* ── A FOCUS, PROPOSED IN THE CONVERSATION ───────────────────────────────────────────────
+     Founder direction: a focus should feel like a conversation we deliberately keep working on.
+
+     COMPACT AND EDITABLE. One line — their own sentence, handed back for them to change — and one
+     clear action. The target and the review date are NOT on the card: they are behind "Add a
+     target or a date", because asking somebody to invent a metric before they have agreed to the
+     thing is how a tool teaches people to make one up. Neither is ever required.
+
+     PRIVATE BY DEFAULT, said on the card rather than assumed. Widening is a separate act, on the
+     focus, afterwards.
+
+     The card carries the CONVERSATION it came from so the focus can remember where it started —
+     as a reference the server validates, never a copy of what was said. */
+  _renderFocusProposal(j, p) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const id = 'fp_' + String(p.id || Math.random().toString(36).slice(2, 9));
+    const suggested = String((p.payload && p.payload.text) || '');
+    // Remembered so the confirm handler can send the refs without re-reading the DOM, and so a
+    // conversation that has moved on does not change what this card points at.
+    this._focusProposals = this._focusProposals || {};
+    this._focusProposals[id] = {
+      conversationId: j.conversationId || this._chatConvId || null,
+      messageIds: [j.messageId].filter(Boolean),
+      turnId: j.turnId || null,
+    };
+    return `<div class="iq-proposal iq-focusprop" data-proposal="${esc(p.id)}" id="${esc(id)}">
+      <div class="iq-proposal-top">
+        <span class="iq-proposal-label">Would you like to keep working on this?</span>
+        <span class="iq-badge iq-badge-private">Private</span>
+      </div>
+      <div class="iq-field"><textarea id="${esc(id)}-t" class="iq-field-input" rows="2"
+        aria-label="What you want to keep working on">${esc(suggested)}</textarea></div>
+      <button type="button" class="iq-fp-more" id="${esc(id)}-more"
+        onclick="MemberApp._focusPropMore('${esc(id)}')">Add a target or a date</button>
+      <div class="iq-fp-extra" id="${esc(id)}-extra" hidden>
+        <label class="iq-focus-label" for="${esc(id)}-g">What would tell you it worked?</label>
+        <div class="iq-field"><textarea id="${esc(id)}-g" class="iq-field-input" rows="1"
+          placeholder="Optional"></textarea></div>
+        <label class="iq-focus-label" for="${esc(id)}-d">When should we look at it?</label>
+        <input type="date" id="${esc(id)}-d" class="iq-field-date">
+      </div>
+      <div class="iq-proposal-actions">
+        <button class="btn-primary btn-sm" id="${esc(id)}-go"
+          onclick="MemberApp.startFocusFromChat('${esc(id)}')">Start this focus</button>
+        <button class="btn-ghost btn-sm" onclick="MemberApp.dismissProposal('${esc(p.id)}')">Not now</button>
+      </div>
+      <div class="iq-fp-said" id="${esc(id)}-said" role="status" aria-live="polite"></div>
+    </div>`;
+  },
+
+  _focusPropMore(id) {
+    const extra = document.getElementById(id + '-extra');
+    const btn = document.getElementById(id + '-more');
+    if (!extra) return;
+    extra.hidden = !extra.hidden;
+    if (btn) btn.textContent = extra.hidden ? 'Add a target or a date' : 'Hide target and date';
+  },
+
+  /* CONFIRM — and STAY IN THE CONVERSATION.
+
+     The old flow said "Focus set" and pointed at the Focuses list, which ends the conversation at
+     the exact moment the person has just committed to continuing it. This replaces the card in
+     place with the focus attached, and asks the one question the server says is next.
+
+     THREE THINGS THIS HANDLES that the previous save did not:
+
+       DOUBLE TAP — the button disables on the first press. The server also dedupes on identical
+         open text, so a retry after a timeout finds the first call's work instead of leaving two.
+       A DEAD SESSION — a 401 here used to print "Authentication required" over a draft the person
+         then lost. The draft is kept under the account that wrote it and offered back after they
+         sign in as that same account, never another.
+       SUCCESS IS THE SERVER'S WORD — nothing reports "set" until the response says so. */
+  async startFocusFromChat(id) {
+    const t = document.getElementById(id + '-t');
+    const said = document.getElementById(id + '-said');
+    const go = document.getElementById(id + '-go');
+    const tell = m => { if (said) said.textContent = m; };
+    const text = String((t && t.value) || '').trim();
+    if (!text) { tell('Say what you want to keep working on.'); if (t) t.focus(); return; }
+    if (go && go.disabled) return;                    // a second tap while the first is in flight
+    if (go) { go.disabled = true; go.textContent = 'Starting…'; }
+    const src = (this._focusProposals || {})[id] || {};
+    const body = {
+      text,
+      target: String((document.getElementById(id + '-g') || {}).value || '').trim(),
+      reviewOn: String((document.getElementById(id + '-d') || {}).value || '').trim(),
+      sourceConversationId: src.conversationId || null,
+      sourceMessageIds: src.messageIds || [],
+    };
+    try {
+      const r = await fetch('/api/me/focus', { method: 'POST', headers: this._authHeaders(), body: JSON.stringify(body) });
+      if (r.status === 401) { this._focusDraftStash(body); this._renderFocusSignIn(id); return; }
+      const jj = await r.json().catch(() => null);
+      if (!r.ok || !jj || !jj.ok) throw new Error((jj && jj.error) || `server said ${r.status}`);
+      this._focusDraftClear();
+      this._renderFocusAttached(id, jj);
+    } catch (e) {
+      if (go) { go.disabled = false; go.textContent = 'Start this focus'; }
+      tell(`That did not save — ${(e && e.message) || 'unknown problem'}. Your words are still here.`);
+    }
+  },
+
+  /* THE FOCUS, ATTACHED, IN THE THREAD. Confirmed work stays where the conversation is. */
+  _renderFocusAttached(id, j) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const card = document.getElementById(id);
+    if (!card) return;
+    const f = j.focus || {};
+    card.classList.remove('iq-focusprop');
+    card.classList.add('iq-focusdone');
+    card.innerHTML = `
+      <div class="iq-proposal-top">
+        <span class="iq-proposal-label">${esc(j.already ? 'Already open' : 'Focus started')}</span>
+        <span class="iq-badge iq-badge-private">${esc(f.visibility === 'private' ? 'Private' : f.visibility || 'Private')}</span>
+      </div>
+      <div class="iq-fp-text">${esc(f.text)}</div>
+      ${f.target ? `<div class="iq-fp-meta">Working: ${esc(f.target)}</div>` : ''}
+      ${f.reviewAt ? `<div class="iq-fp-meta">Review: ${esc(new Date(f.reviewAt).toLocaleDateString())}</div>` : ''}
+      <div class="iq-fp-meta">${esc(j.note || '')}</div>
+      <div class="iq-proposal-actions">
+        <button class="btn btn-outline btn-sm" onclick="MemberApp.openObjectThread('focus','${esc(f.id)}')">Open it</button>
+      </div>`;
+    // ONE USEFUL QUESTION, from the server, so confirming continues the conversation rather than
+    // ending it. Appended as IntelliQ's own turn because that is what it is.
+    if (j.next) {
+      /* Placed AFTER the message this card lives in, rather than into a named container — the
+         assistant's replies are rendered into whichever element the turn was targeted at, and
+         there is no single chat log to append to. Working from the card's own position is the
+         only thing true on every screen this can appear on. */
+      const anchor = card.closest('.iq-msg') || card;
+      const ask = document.createElement('div');
+      ask.className = 'iq-msg iq-msg-iq';
+      ask.innerHTML = `<p class="iq-response-text">${esc(j.next)}</p>`;
+      if (anchor.parentNode) {
+        anchor.parentNode.insertBefore(ask, anchor.nextSibling);
+        ask.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }
+  },
+
+  /* ── A DEAD SESSION MUST NOT COST SOMEBODY THEIR WORDS ────────────────────────────────────
+     The screenshot showed "Authentication required" over a filled-in focus while the app looked
+     signed in — because it WAS signed in as far as the client knew. The token lives in
+     localStorage and the session lives on the server; a restart or an expiry ends one and not the
+     other, and nothing revalidates until a write fails.
+
+     The draft is stashed under the ACCOUNT THAT WROTE IT. If somebody else signs in on this
+     device, it is not theirs and is never offered to them — a private draft replayed under
+     another account would be the worst possible version of "helpfully restored". */
+  _focusDraftKey() {
+    const uid = (window.Auth && Auth.currentUser && Auth.currentUser.id) || '';
+    return uid ? `iq_focus_draft_${uid}` : '';
+  },
+  _focusDraftStash(body) {
+    try {
+      const k = this._focusDraftKey();
+      if (k) localStorage.setItem(k, JSON.stringify({ ...body, at: Date.now() }));
+    } catch (_) { /* storage unavailable — the words are still on screen */ }
+  },
+  _focusDraftClear() {
+    try { const k = this._focusDraftKey(); if (k) localStorage.removeItem(k); } catch (_) {}
+  },
+  _focusDraftTake() {
+    try {
+      const k = this._focusDraftKey();
+      if (!k) return null;
+      const raw = localStorage.getItem(k);
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      // A stale draft is worse than none — somebody returning a week later does not want last
+      // week's half-sentence submitted on their behalf.
+      if (!d || !d.text || (Date.now() - (d.at || 0)) > 7 * 86400000) { localStorage.removeItem(k); return null; }
+      return d;
+    } catch (_) { return null; }
+  },
+  _renderFocusSignIn(id) {
+    const card = document.getElementById(id);
+    if (!card) return;
+    const said = document.getElementById(id + '-said');
+    if (said) said.textContent = '';
+    const go = document.getElementById(id + '-go');
+    if (go) { go.disabled = false; go.textContent = 'Start this focus'; }
+    const box = document.createElement('div');
+    box.className = 'iq-fp-signin';
+    box.innerHTML = `
+      <div class="iq-fp-meta">You have been signed out, so this could not be saved yet. Your words are kept
+      on this device for your account only — sign in again and you can pick it straight back up.</div>
+      <div class="iq-proposal-actions">
+        <button class="btn-primary btn-sm" onclick="MemberApp._focusSignInNow()">Sign in and come back</button>
+      </div>`;
+    card.appendChild(box);
+  },
+  _focusSignInNow() {
+    // The generic expiry path already exists and knows how to get somebody back in. This adds
+    // nothing to it except the draft, which is already stashed against their id.
+    if (typeof _showSessionExpired === 'function') _showSessionExpired();
+    else if (typeof Auth !== 'undefined' && Auth.logout) Auth.logout();
+  },
+
+  /* Offered on return, never applied automatically. Restoring somebody's words is helpful;
+     submitting them without being asked is not. */
+  resumeFocusDraft() {
+    const d = this._focusDraftTake();
+    if (!d) return false;
+    // Appended wherever the member's screen currently is. A draft offered on a screen that does
+    // not exist is a draft nobody sees, so this returns false rather than pretending.
+    const holder = document.querySelector('.iq-msgs, .iq-thread, #iq-object-turns') || document.getElementById('iq-member-body');
+    if (!holder) return false;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const id = 'fp_resume';
+    this._focusProposals = this._focusProposals || {};
+    this._focusProposals[id] = { conversationId: d.sourceConversationId || null, messageIds: d.sourceMessageIds || [] };
+    const wrap = document.createElement('div');
+    wrap.className = 'iq-proposal iq-focusprop';
+    wrap.id = id;
+    wrap.innerHTML = `
+      <div class="iq-proposal-top"><span class="iq-proposal-label">You were starting this when you were signed out</span>
+        <span class="iq-badge iq-badge-private">Private</span></div>
+      <div class="iq-field"><textarea id="${id}-t" class="iq-field-input" rows="2">${esc(d.text)}</textarea></div>
+      <div class="iq-proposal-actions">
+        <button class="btn-primary btn-sm" id="${id}-go" onclick="MemberApp.startFocusFromChat('${id}')">Start this focus</button>
+        <button class="btn-ghost btn-sm" onclick="MemberApp._focusDraftClear(); document.getElementById('${id}').remove();">Discard</button>
+      </div>
+      <div class="iq-fp-said" id="${id}-said" role="status" aria-live="polite"></div>`;
+    holder.appendChild(wrap);
+    return true;
+  },
+
   _renderCheckinProposal(turnId, p) {
     const esc = s => this._escape(String(s == null ? '' : s));
     const when = p.why ? esc(p.why) : 'a follow-up';

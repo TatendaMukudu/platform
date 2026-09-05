@@ -5664,12 +5664,57 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
   const rejected = wanted.length - participants.length;
   const mem = _getMemory(code, userId);
   mem.focuses = mem.focuses || [];
-  // Same text, still open? Return it rather than making a second one. A list with the same
-  // commitment on it twice is a list people stop trusting.
+
+  /* ── WHERE THIS CAME FROM ────────────────────────────────────────────────────────────────
+     Founder direction: a focus should feel like a conversation we deliberately keep working on.
+     So a focus made from a conversation REMEMBERS that conversation — and remembers it as a
+     REFERENCE, never as a copy.
+
+     That distinction is the whole design. Copying the transcript onto the focus would put the
+     person's private words inside an object they can later share with a coach, and sharing the
+     focus would then hand over the conversation that produced it without anybody deciding to.
+     A ref cannot leak that way: reading it goes back through a route that checks ownership every
+     time, so widening the focus's audience widens nothing else.
+
+     VALIDATED HERE, NOT TRUSTED. The conversation must be one of THIS person's own, in THIS
+     organisation — assistantConversations is keyed by their workspace key, so a conversation id
+     belonging to somebody else simply is not in the list and the reference is dropped. Message
+     ids are kept only if they exist in that thread. A bad reference becomes NO reference rather
+     than a stored pointer to something nobody can read. */
+  const source = (() => {
+    const b = req.body || {};
+    const convId = String(b.sourceConversationId || '').slice(0, 80);
+    if (!convId) return null;
+    const conv = (assistantConversations[_wsKey(code, userId)] || []).find(c => c && c.id === convId);
+    if (!conv) return null;   // not theirs, or not in this org — no reference at all
+    const want = Array.isArray(b.sourceMessageIds) ? b.sourceMessageIds.map(String).slice(0, 20) : [];
+    const have = new Set((conv.messages || []).map(m => String(m.id || m.messageId || '')));
+    const messageIds = [...new Set(want.filter(id => have.has(id)))];
+    return { conversationId: conv.id, messageIds, at: Date.now() };
+  })();
+
+  /* SAME TEXT, STILL OPEN? Return it rather than making a second one — a list with the same
+     commitment on it twice is a list people stop trusting. This is also what makes a double tap
+     and a retry-after-timeout safe: the second call finds the first one's work and reports it,
+     instead of leaving two identical focuses behind.
+
+     It returns the FULL shape, not a reduced one. The reduced version meant a client rendering
+     the retry had no target, no review date and no source, so a successful retry looked like a
+     worse outcome than the call it was repeating. */
   const existing = mem.focuses.find(f => f && f.status === 'active' && f.text === text);
   if (existing) {
-    return res.json({ ok: true, focus: { id: existing.id, text: existing.text, visibility: existing.visibility || 'private' },
-      already: true, note: 'You already have this one open.' });
+    // A retry may be the first call that carried the source, so attach it if the original has
+    // none. Never overwrite one that is already there — that would re-point a focus at a
+    // different conversation on a stray retry.
+    if (source && !existing.source) { existing.source = source; scheduleSave(); }
+    return res.json({ ok: true, already: true,
+      focus: {
+        id: existing.id, text: existing.text, visibility: existing.visibility || 'private',
+        participants: existing.participants || [userId],
+        target: existing.target || null, reviewAt: existing.reviewAt || null,
+        source: existing.source ? { conversationId: existing.source.conversationId, messageIds: existing.source.messageIds } : null,
+      },
+      note: 'You already have this one open.' });
   }
   /* A FOCUS IS SOMETHING YOU WORK TOWARDS (founder, September 2026). The target says what would
      tell you it worked; the review date says when to look. Neither is required — some things
@@ -5695,6 +5740,7 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
     participants: participants.length ? [userId, ...participants] : [userId],
     ...(target ? { target } : {}),
     ...(reviewAt ? { reviewAt } : {}),
+    ...(source ? { source } : {}),
     createdAt: new Date().toISOString(),
   };
   mem.focuses.unshift(focus);
@@ -5705,11 +5751,57 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
   const named = participants.map(id => (orgUsers[code][id] || {}).name).filter(Boolean);
   res.json({ ok: true,
     focus: { id: focus.id, text: focus.text, visibility: focus.visibility, participants: focus.participants,
-      target: focus.target || null, reviewAt: focus.reviewAt || null },
+      target: focus.target || null, reviewAt: focus.reviewAt || null,
+      source: source ? { conversationId: source.conversationId, messageIds: source.messageIds } : null },
+    /* THE AUDIENCE SENTENCE SAYS WHAT ACTUALLY HAPPENS.
+
+       `shared` is read by _memberGoalsFor, which is a LEADER'S view of a member. Squad peers
+       never see it, so the control that offered "My whole squad" was describing an audience the
+       backend does not have. The wording here was already right and the label was wrong; both
+       now say the same thing, and nothing was widened to make a label true. */
     note: participants.length
       ? `Set, with ${named.join(', ')}. Only the people in it can see it.${rejected ? ' Some names could not be added.' : ''}`
-      : shared ? 'Set. Anyone who leads a group you are in can see this one.'
-               : 'Set, and private — only you can see it. You can share it later; nobody else can.' });
+      : shared ? 'Set. Whoever leads a group you are in can see this one. Your squad cannot.'
+               : 'Set, and private — only you can see it. You can share it later; nobody else can.',
+    /* ONE USEFUL QUESTION, so confirming a focus continues the conversation instead of ending it.
+       Deterministic and drawn from what the focus itself is missing, which is why it can be asked
+       with the writing engine off: no target yet is a different next question from no date. */
+    next: !target
+      ? 'What would tell you this was working?'
+      : !reviewAt ? 'When should we look at it?'
+                  : 'What is the first thing you will try?' });
+});
+
+/* GET /api/me/focus/:id/source — the conversation a focus came from. OWNER ONLY.
+
+   This is the route that makes references safe. A focus can be shared with a coach or invited
+   people; its SOURCE never travels with it, because reading the source is a separate request that
+   checks ownership every single time rather than a field that rode along inside the object.
+
+   So "share this focus" and "share the conversation that produced it" stay two different acts,
+   and only one of them is on offer. Participants and leaders reading the focus get 404 here —
+   not 403, which would confirm there is a conversation behind it. */
+app.get('/api/me/focus/:id/source', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const focus = (_getMemory(code, userId).focuses || []).find(f => f && f.id === String(req.params.id));
+  // Not theirs → not found. _getMemory is keyed by this session's own org and user, so a focus
+  // belonging to somebody else is not in this list at all.
+  if (!focus || !focus.source) return res.status(404).json({ error: 'not found' });
+  const conv = (assistantConversations[_wsKey(code, userId)] || []).find(c => c && c.id === focus.source.conversationId);
+  // The conversation may since have been deleted — the person's own history is theirs to erase,
+  // and a focus outliving it is expected rather than an error.
+  if (!conv) return res.json({ ok: true, available: false, focusId: focus.id,
+    note: 'The conversation this came from is no longer here. The focus stands on its own.' });
+  const want = new Set(focus.source.messageIds || []);
+  const all = conv.messages || [];
+  const picked = all.filter(m => want.has(String(m.id || m.messageId || '')));
+  res.json({ ok: true, available: true, focusId: focus.id,
+    conversation: { id: conv.id, title: conv.title, updatedAt: conv.updatedAt },
+    // The referenced messages, read live from the person's own history. Nothing here was stored
+    // on the focus — if they edit or delete the thread, this changes with it.
+    messages: (picked.length ? picked : all.slice(-4)).map(_historyMessage),
+    exact: picked.length > 0,
+    note: 'Only you can see this. Sharing the focus does not share this conversation.' });
 });
 
 /* POST /api/me/focus/:id/visibility — widen or narrow it afterwards, owner only. */
@@ -13018,6 +13110,36 @@ function _assistantProposals(code, userId, interp, context, text, workCtx) {
       payload: { text: null /* filled from raw at confirm */, scope: primary.scope, purpose: primary.purpose, visibility: primary.visibility, aiUsage: primary.aiUsage },
       visibility: primary.visibility, why: primary.reason, requiredApproval: true,
       policyResult: { effect: 'allow', reason: 'personal capture — owner-scoped' }, evidenceBasis: [] });
+  }
+
+  /* ── A FOCUS, OFFERED WHERE THE PERSON IS ALREADY DESCRIBING ONE ─────────────────────────
+     Founder direction: a focus should feel like a conversation we deliberately keep working on.
+
+     Offered on the intents that ALREADY mean "something I want to do about this" — `plan` and
+     `commitment`, both produced by the existing bounded classification, not by a new detector
+     written for this feature. Nothing here reads the person's wording for enthusiasm or decides
+     what they "really" meant.
+
+     THE SUGGESTED TEXT IS THEIR OWN SENTENCE, handed back for them to edit. That is the one thing
+     this must not get creative about: a commitment somebody is about to make is not a thing to
+     paraphrase at them and then store under their name. The card is editable precisely so the
+     wording ends up theirs either way.
+
+     It is a PROPOSAL. Nothing is saved until they confirm — same contract as every other card. */
+  const focusIntent = interp.intents.find(i => i.type === 'plan' || i.type === 'commitment');
+  if (focusIntent) {
+    const said = String(text || '').trim().slice(0, 300);
+    if (said.length >= 12) {
+      out.push({ id: 'prop_' + generateId(), actionType: 'focus_proposal', capability: 'workspace',
+        label: 'Make this something you keep working on',
+        // Private is the default and is stated on the card rather than assumed. Widening is a
+        // separate, deliberate act.
+        payload: { text: said, visibility: 'private' },
+        visibility: 'only_me',
+        why: 'A focus keeps this in front of you and lets IntelliQ ask how it is going. Nothing is saved until you start it.',
+        requiredApproval: true,
+        policyResult: { effect: 'allow', reason: 'personal focus — owner-scoped' }, evidenceBasis: [] });
+    }
   }
   // REACH THE RIGHT PERSON. The assistant was already telling people to go and speak to someone;
   // this offers to carry it, which is the difference between advice and a resource. The member
