@@ -82,19 +82,27 @@ ok('US6d …and the genuinely empty library is a statement about what is stored'
 ok('US6e …and a filter matching nothing says the OTHER notes are still there, so a filter never reads as data loss',
   /Nothing here is tagged \$\{this\._escape\(filter\)\}\. Your other notes are still there/.test(app));
 
-/* ── US7: THE NOTES COMPOSER. It wore `iq-composer` — `display:flex; align-items:flex-end`, built
-   for the chat's single row — so a card holding a label, a textarea, a tools strip and an actions
-   row laid all four SIDE BY SIDE. At 390px the input collapsed to about 160px and wrapped one
-   word per line. Measured in a browser before and after. ── */
-ok('US7 the notes composer is the STACKED variant, not the chat row',
-  /class="card iq-composer iq-composer-stack"/.test(html));
-ok('US7b …which lays out as a column with a full-width input',
-  /\.iq-composer-stack\{display:block/.test(member) &&
-  /\.iq-composer-stack \.note-input\{display:block;width:100%/.test(member));
-ok('US7c …and a toolbar that WRAPS beneath rather than squeezing what is beside it',
-  /\.iq-composer-stack \.composer-actions\{display:flex;flex-wrap:wrap/.test(member));
-ok('US7d …with the primary action sized to its label, not stretched across the row so every secondary control falls below it',
-  /\.iq-composer-stack \.composer-actions \.btn-primary\{width:auto/.test(member));
+/* ── US7: THE COMPOSER THAT MADE COPIES, AND ITS LAYOUT, ARE BOTH GONE. ──
+
+   This used to guard the Notes composer's layout: it wore `iq-composer` — `display:flex;
+   align-items:flex-end`, built for the chat's single row — so a card holding a label, a
+   textarea, a tools strip and an actions row laid all four SIDE BY SIDE, and at 390px the input
+   collapsed to about 160px and wrapped one word per line.
+
+   The surface it guarded no longer exists. Founder: "won't conversations, focuses save on their
+   own?" They do, so the Library stopped saving and started indexing, and the box that made
+   copies went with it. An assertion whose subject has been deleted is not deleted here — it is
+   REPOINTED at what replaced it, because the two things worth knowing now are that the copy-maker
+   is really gone from the markup and that its layout rules did not stay behind as CSS nothing can
+   reach. Dead style is how a deleted surface comes back by accident. ── */
+ok('US7 the composer that made copies is gone from the Library — the page indexes your live work now rather than storing a second version of it',
+  !/id="note-content"/.test(html) && !/MemberApp\.submitNote\(\)/.test(html));
+ok('US7b …and the layout rules that existed only for that composer went with it, rather than staying behind as CSS nothing can reach',
+  !/\.iq-composer-stack/.test(member) && !/iq-composer-stack/.test(html));
+ok('US7c …while the chat row those rules were carved out of is untouched, which is what proves the removal was surgical rather than broad',
+  /\.iq-composer\{display:flex;align-items:flex-end/.test(member) && /"iq-composer"/.test(app) && /iq-composer-input/.test(app));
+ok('US7d the Library page that replaced it has the four states a list needs, starting with a loading one',
+  /Opening your library…/.test(app) && /iq-state-failed/.test(app));
 
 /* ── US8: CONTRAST AND THE ACTION RAMP. The numbers are measured by mobile-inspect; what is
    guarded here is that the values do not quietly go back. ── */

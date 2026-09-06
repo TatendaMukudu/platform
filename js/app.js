@@ -8896,12 +8896,147 @@ const MemberApp = {
     await this._loadMessages();
   },
 
-  // _renderNotesPage: called when the user navigates to the Notes page.
+  /* ══════════════════════════════════════════════════════════════════════
+     THE LIBRARY — FOLDERS THAT POINT AT YOUR WORK.
+
+     Founder: "make library like chat gpt? In which you can open and name folders store focuses,
+     highs and lows of your choice there? So that it's easier to come back and navigate your work
+     if you are looking for something specific?"
+
+     What was here before was a box that made copies: type a note, or snapshot a conversation
+     into a flattened transcript stored beside the live one. The founder's own observation killed
+     it — "won't conversations, focuses save on their own?" They do. So the Library stops saving
+     and starts INDEXING, and every rule below follows from that one word.
+
+     Nothing on this page is fetched twice or held: the shelf is read fresh, labels come from the
+     server which read them from the live objects, and a row that is not in the response is not
+     on the page. There is deliberately no client-side cache of what was filed — a cache would be
+     a copy, and a copy is the thing this page exists to stop being.
+     ══════════════════════════════════════════════════════════════════════ */
+
+  // _renderNotesPage: called when the user navigates to the Library page.
   async _renderNotesPage() {
-    await this._loadMyGroups();
-    this._populateNoteGroupSelector();
-    if (typeof IQComposer !== 'undefined') IQComposer.mountAll();
-    await this._loadNotes();
+    await this._renderShelf();
+  },
+
+  _shelfFolder: null,   // which folder is open; null means everything
+
+  async _renderShelf() {
+    const list = document.getElementById('shelf-list');
+    const folders = document.getElementById('shelf-folders');
+    if (!list) return;
+    list.innerHTML = `<div class="iq-state-loading" role="status">Opening your library…</div>`;
+    let d = null;
+    try {
+      const res = await fetch('/api/library/shelf', { headers: this._authHeaders() });
+      /* A FAILURE IS NOT AN EMPTY LIBRARY. This page has made exactly this mistake before: both
+         the signed-out branch and the server-error branch fell through to the empty state, so a
+         dead session told somebody their work did not exist. Four states, and three of them are
+         not "you have nothing". */
+      if (res.status === 401) {
+        list.innerHTML = `<div class="iq-state-failed" role="alert">
+          <p>You have been signed out, so your library could not be opened. Everything in it is still there.</p>
+          <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._renderShelf()">Try again</button></div>`;
+        return;
+      }
+      if (!res.ok) {
+        list.innerHTML = `<div class="iq-state-failed" role="alert">
+          <p>Your library could not be opened just now (the server said ${res.status}). Nothing has been lost.</p>
+          <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._renderShelf()">Try again</button></div>`;
+        return;
+      }
+      d = await res.json();
+    } catch (_) {
+      list.innerHTML = `<div class="iq-state-failed" role="alert">
+        <p>Your library could not be opened — this looks like a connection problem, not an empty shelf.</p>
+        <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._renderShelf()">Try again</button></div>`;
+      return;
+    }
+
+    const all = d.items || [];
+    const open = this._shelfFolder;
+    if (folders) {
+      const chips = (d.folders || []).map(f => `
+        <button type="button" class="shelf-chip${open === f.id ? ' active' : ''}" onclick="MemberApp.openShelfFolder('${this._escape(f.id)}')">
+          ${this._escape(f.name)} <span class="shelf-count">${f.count}</span>
+        </button>`).join('');
+      folders.innerHTML = chips
+        ? `<button type="button" class="shelf-chip${open ? '' : ' active'}" onclick="MemberApp.openShelfFolder(null)">Everything <span class="shelf-count">${all.length}</span></button>${chips}`
+        : '';
+    }
+    const hint = document.getElementById('shelf-hint');
+    if (hint) hint.textContent = d.note || '';
+
+    const items = open ? all.filter(i => i.folderId === open) : all;
+    if (!items.length) {
+      /* The empty state has to be true about WHY it is empty, and there are two reasons. An open
+         folder with nothing in it is not the same as a library nobody has used, and telling
+         somebody "nothing here yet" when they have filed twenty things elsewhere reads as loss. */
+      list.innerHTML = all.length
+        ? `<div class="empty-card"><div>Nothing is in this folder yet. Your other ${all.length} ${all.length === 1 ? 'item' : 'items'} are still there — choose Everything to see them.</div></div>`
+        : `<div class="empty-card"><div>Your library is empty. Open a focus, a high, a low or a conversation and choose Keep to put it here — it stays live, and this only remembers where it is.</div></div>`;
+      return;
+    }
+
+    const KIND = { focus: 'Focus', high: 'High', low: 'Low', inquiry: 'Inquiry', conversation: 'Conversation', material: 'Material' };
+    list.innerHTML = items.map(i => `
+      <div class="shelf-row">
+        <button type="button" class="shelf-open" onclick="MemberApp.openFromShelf('${this._escape(i.kind)}','${this._escape(i.refId)}')">
+          <span class="shelf-kind">${this._escape(KIND[i.kind] || i.kind)}</span>
+          <span class="shelf-label">${this._escape(i.label)}</span>
+          ${i.whose ? `<span class="shelf-whose">${this._escape(i.whose)}</span>` : ''}
+          ${i.sub ? `<span class="shelf-sub">${this._escape(i.sub)}</span>` : ''}
+        </button>
+        <button type="button" class="shelf-x" title="Take off the shelf" onclick="MemberApp.unfileFromShelf('${this._escape(i.id)}')">Remove</button>
+      </div>`).join('');
+  },
+
+  openShelfFolder(id) { this._shelfFolder = id || null; this._renderShelf(); },
+
+  async newShelfFolder() {
+    const name = prompt('Name this folder');
+    if (!name || !name.trim()) return;
+    try {
+      const r = await fetch('/api/library/folders', { method: 'POST', headers: this._authHeaders(),
+        body: JSON.stringify({ name: name.trim() }) });
+      if (!r.ok) throw new Error(String(r.status));
+      await this._renderShelf();
+    } catch (_) { this.showToast('That folder could not be made. Nothing has changed.', 'warning'); }
+  },
+
+  /* KEEP THIS — the control that fills the shelf up, called from an object card.
+
+     The word is "Keep", not "Save". Save is what the old Library did and what everybody expects
+     it to mean: a copy, frozen, yours. This takes no copy and grants nobody anything, so the
+     toast says so in the same breath rather than leaving somebody to assume the usual thing. */
+  async fileToShelf(kind, id, folderId) {
+    try {
+      const r = await fetch('/api/library/shelf', { method: 'POST', headers: this._authHeaders(),
+        body: JSON.stringify({ kind, id, folderId: folderId || null }) });
+      const j = await r.json().catch(() => null);
+      if (!r.ok) throw new Error((j && j.error) || String(r.status));
+      this.showToast(j && j.moved ? 'Moved in your library' : 'Kept in your library — this points at it, it is not a copy', 'success');
+      if (document.getElementById('shelf-list')) await this._renderShelf();
+    } catch (_) { this.showToast('That could not be kept just now.', 'warning'); }
+  },
+
+  async unfileFromShelf(entryId) {
+    try {
+      const r = await fetch('/api/library/shelf/' + encodeURIComponent(entryId), { method: 'DELETE', headers: this._authHeaders() });
+      if (!r.ok) throw new Error(String(r.status));
+      this.showToast('Taken off your shelf. Nothing was deleted.', 'success');
+      await this._renderShelf();
+    } catch (_) { this.showToast('That could not be removed just now.', 'warning'); }
+  },
+
+  /* Opening a row goes to the thing itself, on the page that owns it — never to a copy rendered
+     here. `about` is the same address the object threads bind by, so this lands exactly where a
+     card on Home would. */
+  openFromShelf(kind, refId) {
+    // A conversation is resumed where conversations live; everything else has an object thread,
+    // and openObjectThread is the same door every other surface in the app uses to reach it.
+    if (kind === 'conversation') { this.navigate('home'); return; }
+    this.openObjectThread(kind === 'material' ? 'focus' : kind, refId);
   },
 
   /* ══════════════════════════════════════════════════════════════════════
@@ -11063,6 +11198,13 @@ const MemberApp = {
                had just told you — the one place a person is most likely to want to. -->
           <button type="button" class="iqt-verdict is-do"
             onclick="MemberApp.focusOnThis('${esc(kind)}','${esc(objectId)}',this)">Work on this</button>
+          <!-- KEEP, NOT SAVE. Save is what the old Library meant and what everybody reads it as:
+               a copy, frozen, yours. This puts a reference on your shelf so you can find this
+               again; the belief stays exactly where it is, still changing, still governed by
+               whoever it belongs to. Filing it says nothing about it — not agreement, not a
+               direction, and the kernel never hears about it (L-SH3). -->
+          <button type="button" class="iqt-verdict"
+            onclick="MemberApp.fileToShelf('${esc(kind)}','${esc(objectId)}')">Keep</button>
           <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('answered')">That's settled</button>
           <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('contest')">I disagree</button>
           <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('aside')">Not now</button>

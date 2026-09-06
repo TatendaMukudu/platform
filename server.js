@@ -61,6 +61,7 @@ const forum             = require('./ai/forum');
 const escalation        = require('./ai/escalation');
 const material          = require('./ai/material');
 const chart             = require('./ai/chart');
+const shelf             = require('./ai/shelf');
 const websearch         = require('./ai/websearch');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
@@ -219,7 +220,7 @@ function _persistedStores() {
     proactivePrefs, insightSuppression, answerFeedback,
     orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed, orgContextRecords,
     reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
-    conversationSessions, assistantConversations, libraryFolders, libraryItems, safeguardingFlags,
+    conversationSessions, assistantConversations, libraryFolders, libraryItems, shelfFilings, safeguardingFlags,
     inquiryStates, groupCandidates, forumThreads, teamFocuses, raises,
     materials, materialEngage,
   };
@@ -2337,6 +2338,10 @@ function _removePerson(code, userId, deleteData) {
       libraryItems[code] = libraryItems[code].filter(i => i && i.ownerId !== userId);
     if (Array.isArray(libraryFolders[code]))
       libraryFolders[code] = libraryFolders[code].filter(f => f && f.ownerId !== userId);
+    // Their shelf. Only ever references, so erasing it removes no evidence and orphans nothing —
+    // but it is still a record of what one person chose to keep track of, which is about them.
+    if (Array.isArray(shelfFilings[code]))
+      shelfFilings[code] = shelfFilings[code].filter(f => f && f.ownerId !== userId);
 
     /* Forum speech is personal data even though it was said in the open, so erasure removes the
        words and the authorship. The turn is left as a tombstone rather than spliced out: a
@@ -12939,6 +12944,12 @@ function _convTitle(t) { const s = String(t || '').trim().replace(/\s+/g, ' '); 
    are org-scoped with an owner + visibility so "make it public" actually reaches teammates. */
 const libraryFolders = {};  // code → [ { id, ownerId, name, createdAt } ]
 const libraryItems   = {};  // code → [ { id, ownerId, type, title, body, sourceRef, folderId, visibility, createdAt, updatedAt } ]
+/* THE SHELF. Where somebody put their own work so they can find it again — a REFERENCE and
+   nothing else (L-SH1). There is no title here, no text and no state: what a folder shows is
+   read live from the object every time it is opened, so a shelf can never be a stale second
+   copy of the thing it points at, and a label captured while you could see something can never
+   outlive your access to it. */
+const shelfFilings   = {};  // code → [ { id, ownerId, kind, refId, folderId, at } ]
 
 /* INQUIRY STATE — the working understanding built from conversation. NOT evidence and NOT the
    belief ledger: it is a picture that accumulates, from which a person may later confirm
@@ -14193,6 +14204,102 @@ app.delete('/api/library/folders/:id', requireAuth, (req, res) => {
   // Items in the deleted folder become unfiled (never deleted with the folder).
   for (const it of _libItems(code)) if (it.ownerId === userId && it.folderId === req.params.id) it.folderId = null;
   scheduleSave(); res.json({ ok: true, deleted: req.params.id });
+});
+
+/* ── LIBRARY: THE SHELF ──────────────────────────────────────────────────────────────────────
+
+   Founder: "make library like chat gpt ... open and name folders store focuses, highs and lows
+   of your choice there? So that it's easier to come back and navigate your work if you are
+   looking for something specific?"
+
+   A shelf entry is (kind, id) and nothing else. The three routes below add one, move or remove
+   one, and read the shelf back — and the reading is the whole design, because that is where the
+   access decision lives (L-SH2). A filing is never consulted about whether somebody may see
+   something; it is a bookmark, and bookmarks do not grant entry.
+
+   Nothing here touches the kernel. Filing a low is not agreement with it, is not evidence, has
+   no origin and no direction (L-SH3). A person who files something has said only that they want
+   to find it again, and this product does not read anything more into what people do. */
+
+/* THE GATE, AND IT IS NOT A NEW ONE. Each kind is resolved through the same check that governs
+   it everywhere else in the app: objects through the reader's own merged view, conversations
+   through the workspace key that is theirs by construction, material through _materialFor and
+   therefore through the object it hangs on. Returns the LIVE label or null, and null means only
+   "not for this reader, now" — the shelf is not told, and must not be able to tell, whether the
+   thing was deleted or simply went out of reach. */
+function _shelfLookup(code, userId) {
+  let objects = null;   // built once per read, not once per row
+  return (kind, refId) => {
+    if (kind === 'conversation') {
+      const conv = (assistantConversations[_wsKey(code, userId)] || []).find(c => c && c.id === refId);
+      if (!conv) return null;
+      return { label: conv.title || 'Conversation', sub: `${(conv.messages || []).length} messages`, whose: 'you' };
+    }
+    if (kind === 'material') {
+      const r = _materialFor(code, userId, refId);
+      if (!r.ok) return null;
+      return { label: r.material.title || r.material.filename || 'Attached material',
+        sub: `${(r.material.sections || []).length} parts`, whose: '' };
+    }
+    if (!objects) objects = _allObjectsFor(code, userId);
+    const o = objects.find(x => x.kind === kind && String(x.id) === String(refId));
+    if (!o) return null;
+    return { label: (o.explained && o.explained.headline) || (o.present && o.present.title) || '',
+      sub: (o.explained && o.explained.line) || '', whose: o.whose || '' };
+  };
+}
+
+const _shelfOf = code => shelfFilings[code] || (shelfFilings[code] = []);
+const _myShelf = (code, userId) => _shelfOf(code).filter(f => f && f.ownerId === userId);
+
+/* GET /api/library/shelf — folders and what is on them, resolved live. */
+app.get('/api/library/shelf', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const folders = _libFolders(code).filter(f => f.ownerId === userId);
+  const v = shelf.view(_myShelf(code, userId), folders, _shelfLookup(code, userId),
+    'folderId' in req.query ? { folderId: String(req.query.folderId || '') || null } : {});
+  res.json({ ok: true, ...v, kinds: shelf.KINDS });
+});
+
+/* POST /api/library/shelf — { kind, id, folderId? } file something, or move it.
+
+   THE THING MUST BE READABLE BY THE PERSON FILING IT, checked here rather than only on the way
+   out. Storing a reference to something they cannot open would be harmless to read — the gate
+   drops it — but it would let anybody turn this route into an existence oracle by watching which
+   ids are accepted. */
+app.post('/api/library/shelf', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  const ref = shelf.normalize({ kind: b.kind, refId: b.id != null ? b.id : b.refId });
+  if (!ref) return res.status(400).json({ error: `you can file ${shelf.KINDS.join(', ')}` });
+  if (!_shelfLookup(code, userId)(ref.kind, ref.refId)) return res.status(404).json({ error: 'not found' });
+
+  const folderId = b.folderId ? String(b.folderId) : null;
+  if (folderId && !_libFolders(code).some(f => f.id === folderId && f.ownerId === userId)) {
+    return res.status(400).json({ error: 'unknown folder' });
+  }
+  const mine = _myShelf(code, userId);
+  const r = shelf.file(mine, ref, { folderId, at: Date.now(), id: 'shf_' + generateId() });
+  if (!r.ok) return res.status(400).json({ error: r.reason });
+  // shelf.file mutates the filtered copy, so a NEW entry has to be added back to the org's list;
+  // a moved one is the same object and is already updated in place.
+  if (r.added) _shelfOf(code).push({ ...r.entry, ownerId: userId });
+  scheduleSave();
+  res.json({ ok: true, filed: { id: r.entry.id, kind: ref.kind, refId: ref.refId, folderId },
+    moved: r.moved,
+    note: 'Filed. This points at it — it is not a copy, and it does not change who can see it.' });
+});
+
+/* DELETE /api/library/shelf/:id — take it off the shelf. The thing itself is untouched: an
+   entry is a bookmark, and removing a bookmark has never deleted anything. */
+app.delete('/api/library/shelf/:id', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const id = String(req.params.id || '');
+  const before = _shelfOf(code).length;
+  shelfFilings[code] = _shelfOf(code).filter(f => !(f && f.id === id && f.ownerId === userId));
+  if (shelfFilings[code].length === before) return res.status(404).json({ error: 'not found' });
+  scheduleSave();
+  res.json({ ok: true, removed: id, note: 'Taken off your shelf. Nothing was deleted.' });
 });
 
 /* ── LIBRARY: ITEMS ──────────────────────────────────────────────────────── */
@@ -21320,6 +21427,7 @@ function _loadAllStores(data) {
   Object.assign(assistantConversations, data.assistantConversations || {});
   Object.assign(libraryFolders, data.libraryFolders || {});
   Object.assign(libraryItems,   data.libraryItems   || {});
+  Object.assign(shelfFilings,   data.shelfFilings   || {});
   Object.assign(inquiryStates,  data.inquiryStates  || {});
   Object.assign(safeguardingFlags, data.safeguardingFlags || {});
   Object.assign(groupCandidates, data.groupCandidates || {});
@@ -21421,7 +21529,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
-  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, inquiryStates, _migrateLegacyNotesToLibrary, orgNotes, orgMessages, orgStore, safeguardingFlags, _llmBudgetOk, _captureError, checkinProposals,
+  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, shelfFilings, _shelfLookup, inquiryStates, _migrateLegacyNotesToLibrary, orgNotes, orgMessages, orgStore, safeguardingFlags, _llmBudgetOk, _captureError, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
   // exported for the truth layer: grounded retrieval over canonical evidence

@@ -3387,3 +3387,34 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .pm-observe{margin:.6rem 0 0}
 .pm-observe-form:empty{display:none}
 .pm-observe-form{display:flex;flex-direction:column;gap:.45rem;margin:.6rem 0 0}
+
+/* ── THE LIBRARY SHELF ────────────────────────────────────────────────────────
+   Folders that point at your work. Deliberately plain: this is a place people
+   come to FIND one specific thing, so nothing here competes for attention with
+   the thing they are looking for. Tokens only — the css-token-smoke guard
+   refuses raw hex here, and a shelf that ignored the theme would be the one
+   page in the app that did. */
+.shelf-bar{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.75rem}
+.shelf-hint{font-size:var(--fs-xs);color:var(--text-muted);flex:1 1 14rem;min-width:0}
+.shelf-folders{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.9rem}
+.shelf-folders:empty{display:none}
+.shelf-chip{min-height:36px;padding:.35rem .8rem;border-radius:999px;cursor:pointer;
+  font-size:var(--fs-sm);background:var(--surface-1);border:1px solid var(--border);color:var(--text-secondary)}
+.shelf-chip.active{color:var(--text-primary);border-color:var(--border-light);background:var(--surface-2)}
+.shelf-chip:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.shelf-count{font-size:var(--fs-xs);color:var(--text-muted);margin-left:.25rem}
+.shelf-row{display:flex;align-items:stretch;gap:.5rem;margin-bottom:.5rem}
+/* The whole card is the target, because a row you have to hit a small link inside
+   is a row people mis-tap on a phone. */
+.shelf-open{flex:1 1 auto;min-width:0;text-align:left;cursor:pointer;padding:.75rem .9rem;
+  border-radius:12px;background:var(--surface-1);border:1px solid var(--border);
+  display:flex;flex-direction:column;gap:.15rem}
+.shelf-open:hover{border-color:var(--border-light)}
+.shelf-open:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.shelf-kind{font-size:var(--fs-xs);font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-muted)}
+.shelf-label{font-size:var(--fs);color:var(--text-primary);line-height:1.4}
+.shelf-whose,.shelf-sub{font-size:var(--fs-xs);color:var(--text-muted)}
+.shelf-x{align-self:stretch;padding:.4rem .7rem;border-radius:12px;cursor:pointer;
+  font-size:var(--fs-xs);background:transparent;border:1px solid var(--border);color:var(--text-muted)}
+.shelf-x:hover{color:var(--text-primary);border-color:var(--border-light)}
+.shelf-x:focus-visible{outline:2px solid currentColor;outline-offset:2px}

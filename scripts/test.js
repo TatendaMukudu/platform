@@ -252,6 +252,8 @@ const SUITES = [
   'chart-governance-smoke.js',     // a graph is a view of the record, not a new source of numbers - a count must equal its own evidence, the unit whitelist is count/band/date so a score cannot come back as a picture, and a group chart below the cohort floor is refused with a reason rather than drawn short
   'material-smoke.js',             // material somebody attached, and whether it landed - the parts are the AUTHOR'S sections so nothing ever names a topic it invented, understanding is declared and never inferred, and silence is reported as silence rather than as confusion
   'material-reach-http-smoke.js',  // a coach attaches a deck and finds out whether it landed, end to end - the material inherits the audience of the object it hangs on, the conversation flows from it, and the report counts people without naming them or their ids
+  'shelf-smoke.js',                // the Library stopped SAVING and started INDEXING - a folder holds a reference and never a copy, filing confers no access and says nothing about the thing filed, and a folder's count is of what the reader can actually see because "2 items, 1 shown" is the leak said out loud
+  'shelf-http-smoke.js',           // the same rules over the wire against two real squads - a player who leaves the squad loses the focus off their shelf, silently, and gets it back when they return, because a bookmark has never been a key
   'onboarding-evidence-smoke.js',  // what somebody says on day one becomes EVIDENCE, not seven profile strings no law could read - one person is one origin, no answer carries a direction (the first point in time cannot be a movement), and the main goal opens as a real focus
   'focus-shape-smoke.js',
   'focus-continuity-smoke.js',
