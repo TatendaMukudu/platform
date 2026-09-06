@@ -61,6 +61,7 @@ const forum             = require('./ai/forum');
 const escalation        = require('./ai/escalation');
 const material          = require('./ai/material');
 const chart             = require('./ai/chart');
+const shelf             = require('./ai/shelf');
 const websearch         = require('./ai/websearch');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
@@ -219,7 +220,7 @@ function _persistedStores() {
     proactivePrefs, insightSuppression, answerFeedback,
     orgStateHistory, orgObservations, orgPlaybook, orgPlaybookDismissed, orgContextRecords,
     reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
-    conversationSessions, assistantConversations, libraryFolders, libraryItems, safeguardingFlags,
+    conversationSessions, assistantConversations, libraryFolders, libraryItems, shelfFilings, safeguardingFlags,
     inquiryStates, groupCandidates, forumThreads, teamFocuses, raises,
     materials, materialEngage,
   };
@@ -2337,6 +2338,10 @@ function _removePerson(code, userId, deleteData) {
       libraryItems[code] = libraryItems[code].filter(i => i && i.ownerId !== userId);
     if (Array.isArray(libraryFolders[code]))
       libraryFolders[code] = libraryFolders[code].filter(f => f && f.ownerId !== userId);
+    // Their shelf. Only ever references, so erasing it removes no evidence and orphans nothing —
+    // but it is still a record of what one person chose to keep track of, which is about them.
+    if (Array.isArray(shelfFilings[code]))
+      shelfFilings[code] = shelfFilings[code].filter(f => f && f.ownerId !== userId);
 
     /* Forum speech is personal data even though it was said in the open, so erasure removes the
        words and the authorship. The turn is left as a tombstone rather than spliced out: a
@@ -3321,6 +3326,7 @@ app.get('/api/contacts', requireAuth, (req, res) => {
   res.json({ ok: true, contacts: _contactsFor(code, userId) });
 });
 
+
 /* ── GET /api/workspace/visible-members ──────────────────────────────────
  *
  *  Returns the subset of org users the requesting user is allowed to see.
@@ -3844,7 +3850,7 @@ app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
     if (ai.enabled()) {
       try {
         const system = [`${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ helping a leader be PROACTIVE — drafting a short, forward-looking plan the whole team engages with to get ahead of a theme (a shared development area, a busy period coming up, or a process that needs reworking). No names, no emojis. Return JSON only: {"title": string(<=60), "description": string(1-2 sentences), "fields": array of 1-3 {"label","hint"}, "message": string(a warm 1-2 sentence note to the team), "rationale": string(one sentence to the LEADER on why acting now helps)}.`, _domainDirective(code)].filter(Boolean).join('\n\n');
-        out = await ai.completeJSON({ tier: 'reason', system, user: `Theme to plan around: ${theme || '(general week-ahead readiness)'}.`, maxTokens: 500, schema: ['title', 'message'] });
+        out = await ai.completeJSON({ org: code, taskType: 'intelligence_prepare', tier: 'reason', system, user: `Theme to plan around: ${theme || '(general week-ahead readiness)'}.`, maxTokens: 500, schema: ['title', 'message'] });
       } catch (_) { out = null; }
     }
     const d = (out && out.title) ? out : fallback;
@@ -3877,7 +3883,7 @@ app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
     if (ai.enabled()) {
       try {
         const system = [`${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ helping a leader SCALE a success pattern across their team. Given a strength that's working for someone who's improving, draft a short, positive reflection everyone can do to build that same strength. No names of the source person in the message, no emojis. Return JSON only: {"title": string(<=60), "description": string(1-2 sentences), "fields": array of 1-3 {"label","hint"}, "message": string(a warm 1-2 sentence note to the team), "rationale": string(one sentence to the LEADER)}.`, _domainDirective(code)].filter(Boolean).join('\n\n');
-        out = await ai.completeJSON({ tier: 'reason', system, user: `Strength to spread: ${factor || '(general good habits)'}.`, maxTokens: 500, schema: ['title', 'message'] });
+        out = await ai.completeJSON({ org: code, taskType: 'intelligence_prepare', tier: 'reason', system, user: `Strength to spread: ${factor || '(general good habits)'}.`, maxTokens: 500, schema: ['title', 'message'] });
       } catch (_) { out = null; }
     }
     const d = (out && out.title) ? out : fallback;
@@ -3913,7 +3919,7 @@ app.post('/api/intelligence/prepare', requireAuth, async (req, res) => {
     try {
       const system = [`${privacy.GATE_DIRECTIVE}\n\nYou are IntelliQ preparing a SUPPORTIVE intervention a leader can send to one of their people. It must feel caring, never like surveillance, and must NOT reveal any private detail or that the person was "flagged". Return JSON only: {"title": string(<=60), "description": string(1-2 sentences of gentle instructions), "fields": array of 1-3 {"label","hint"}, "message": string(a warm 1-2 sentence note to the person), "rationale": string(one sentence to the LEADER on why this helps)}. No emojis.`, _domainDirective(code, { userId: memberId })].filter(Boolean).join('\n\n');
       const ctx = item ? `Pattern (privacy-safe): ${item.whyNow}. Suggested direction: ${item.recommendedAction}.` : 'No strong pattern; keep it light and general.';
-      out = await ai.completeJSON({ tier: 'reason', system, user: `Person's first name: ${first}. Intent: ${kind}. ${ctx}`, maxTokens: 500, schema: ['title', 'message'] });
+      out = await ai.completeJSON({ org: code, taskType: 'intelligence_prepare', tier: 'reason', system, user: `Person's first name: ${first}. Intent: ${kind}. ${ctx}`, maxTokens: 500, schema: ['title', 'message'] });
     } catch (_) { out = null; }
   }
   const d = (out && out.title) ? out : fallback;
@@ -4238,7 +4244,7 @@ app.get('/api/workspace/briefing', requireAuth, async (req, res) => {
 
   let narrative = null;
   try {
-    narrative = await ai.complete({
+    narrative = await ai.complete({ org: code, taskType: 'workspace_briefing',
       tier: 'reason', maxTokens: 220,
       system: [`You are IntelliQ, briefing a group's leader. In 2-4 sentences say what the week looks like and the ONE or TWO things to prioritise. Aggregate only — do not name individuals (the leader sees the named list separately). Directional, practical, warm. No scores.`, _worldviewDirective(code), _domainDirective(code)].filter(Boolean).join('\n\n'),
       user: brief,
@@ -5393,7 +5399,7 @@ app.get('/api/me/record', requireAuth, async (req, res) => {
         understanding,
       });
       reflection = await Promise.race([
-        ai.complete({ tier: 'reason', system: [system, _domainDirective(code, { userId })].filter(Boolean).join('\n\n'), user, maxTokens: 220 }),
+        ai.complete({ org: code, taskType: 'record_reflection', tier: 'reason', system: [system, _domainDirective(code, { userId })].filter(Boolean).join('\n\n'), user, maxTokens: 220 }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('ai-timeout')), AI_BRIEF_MS)),
       ]);
       // Belt-and-suspenders: strip any private span that could have slipped in.
@@ -5498,6 +5504,51 @@ app.get('/api/me/context', requireAuth, async (req, res) => {
   const focuses = (mem.focuses || []).filter(f => f.status === 'active')
     .map(f => ({ id: f.id, text: f.text }));
 
+  /* ── THE THING YOU AGREED TO TRY, ASKED ABOUT WHEN YOU COME BACK ─────────────────────────
+     Founder: "That is where memory becomes useful: remembering the agreed experiment, what
+     remains unresolved, and what would be worth asking next."
+
+     One focus, not a list. A person returning to five questions about five commitments answers
+     none of them; a person returning to "you wanted to try a captain-led reset — did you get a
+     chance?" answers that one. The oldest un-asked active focus, so nothing waits forever behind
+     whatever was set most recently.
+
+     THE QUESTION IS ABOUT THE EXPERIMENT, NOT THE PERSON. "Did you get a chance to use it?" can
+     be answered with "no, we did not play" and nothing about that answer is a failure. "How are
+     you getting on with it?" invites an account of themselves, which is a different and heavier
+     question to walk back into.
+
+     ASKED ONCE PER RETURN. `askedAt` is stamped when it goes out, so somebody who opens the app
+     four times in an afternoon is not asked four times — the record of having asked is what makes
+     a follow-up feel like memory rather than a reminder loop. It comes round again after a week,
+     because a commitment nobody has mentioned in a week is worth one more question. */
+  const REASK_AFTER = 7 * 86400000;
+  const _now = Date.now();
+  const pending = (mem.focuses || [])
+    .filter(f => f && f.status === 'active' && !f.outcome)
+    // Not the one they just made: a focus set in this session is not a thing to be asked about.
+    .filter(f => _now - (Date.parse(f.createdAt || '') || _now) > 12 * 3600000)
+    .filter(f => !f.askedAt || (_now - f.askedAt) > REASK_AFTER)
+    .sort((a, b) => (Date.parse(a.createdAt || '') || 0) - (Date.parse(b.createdAt || '') || 0));
+  let continuity = null;
+  if (pending.length) {
+    const f = pending[0];
+    f.askedAt = _now;
+    continuity = {
+      focusId: f.id,
+      // Their own words, quoted back. Nothing here paraphrases the commitment — the point of
+      // asking is that they recognise what they said.
+      text: f.text,
+      question: `You wanted to ${/^\s*(try|start|keep|stop|do|use|lead|run)\b/i.test(f.text) ? '' : 'work on '}${f.text.replace(/\.$/, '')}. Did you get a chance to?`,
+      target: f.target || null,
+      reviewAt: f.reviewAt || null,
+      // Where it came from, so "open the conversation this started in" is possible without the
+      // client having to hold anything between sessions.
+      source: f.source ? { conversationId: f.source.conversationId, messageIds: f.source.messageIds || [] } : null,
+      setAt: f.createdAt || null,
+    };
+  }
+
   // Recognition ABOUT them from others (leader or peer) — the draw-in: they open
   // the app and find someone acknowledged them. Positive/attributed by design.
   const recognitions = (orgSignals[code] || [])
@@ -5507,7 +5558,7 @@ app.get('/api/me/context', requireAuth, async (req, res) => {
 
   _auditFindingEmission(code, userId, _attInsights, [userId], 'personal context surface');
   res.json({
-    ok: true, name: me.name, greeting, opening, ask, returning, quietDays, newSince, noticed, questions, prepared, focuses, recognitions,
+    ok: true, name: me.name, greeting, opening, ask, returning, quietDays, newSince, noticed, questions, prepared, focuses, recognitions, continuity,
     understanding: agents.personModel.understanding(mem.model),
     trajectory: m?.memberTrajectory || null,
   });
@@ -5664,12 +5715,88 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
   const rejected = wanted.length - participants.length;
   const mem = _getMemory(code, userId);
   mem.focuses = mem.focuses || [];
-  // Same text, still open? Return it rather than making a second one. A list with the same
-  // commitment on it twice is a list people stop trusting.
+
+  /* ── WHERE THIS CAME FROM ────────────────────────────────────────────────────────────────
+     Founder direction: a focus should feel like a conversation we deliberately keep working on.
+     So a focus made from a conversation REMEMBERS that conversation — and remembers it as a
+     REFERENCE, never as a copy.
+
+     That distinction is the whole design. Copying the transcript onto the focus would put the
+     person's private words inside an object they can later share with a coach, and sharing the
+     focus would then hand over the conversation that produced it without anybody deciding to.
+     A ref cannot leak that way: reading it goes back through a route that checks ownership every
+     time, so widening the focus's audience widens nothing else.
+
+     VALIDATED HERE, NOT TRUSTED. The conversation must be one of THIS person's own, in THIS
+     organisation — assistantConversations is keyed by their workspace key, so a conversation id
+     belonging to somebody else simply is not in the list and the reference is dropped. Message
+     ids are kept only if they exist in that thread. A bad reference becomes NO reference rather
+     than a stored pointer to something nobody can read. */
+  const source = (() => {
+    const b = req.body || {};
+    const convId = String(b.sourceConversationId || '').slice(0, 80);
+    if (!convId) return null;
+    const conv = (assistantConversations[_wsKey(code, userId)] || []).find(c => c && c.id === convId);
+    if (!conv) return null;   // not theirs, or not in this org — no reference at all
+    const want = Array.isArray(b.sourceMessageIds) ? b.sourceMessageIds.map(String).slice(0, 20) : [];
+    const have = new Set((conv.messages || []).map(m => String(m.id || m.messageId || '')));
+    const messageIds = [...new Set(want.filter(id => have.has(id)))];
+    return { conversationId: conv.id, messageIds, at: Date.now() };
+  })();
+
+  /* ── WHAT THIS FOCUS IS ADDRESSING ───────────────────────────────────────────────────────
+     Founder decision, taken over two alternatives: LINKED BOTH WAYS.
+
+     A focus started from a High, a Low or an Inquiry remembers which belief it is about — and
+     when the person later says whether trying it helped, that answer becomes evidence ON that
+     belief. So the loop closes: IntelliQ works something out, you do something about it, and what
+     happened feeds back into what it believes.
+
+     WHY THIS NEEDED A DECISION rather than a default: it makes a person's OWN ACTION a way a
+     belief's standing can move, alongside other people's accounts of what happened. That is a
+     real addition to the epistemic model, and the founder took it deliberately.
+
+     WHAT IT DOES NOT DO is let the link itself change anything. Starting a focus is not evidence;
+     the belief is untouched until there is an ANSWER to report, and that answer arrives through
+     the ordinary signal path with the person as its own origin — one origin, no direction, banded
+     by the kernel like everything else. Somebody starting five focuses on one Low has said
+     nothing about it five times.
+
+     VALIDATED, NOT TRUSTED, exactly as the conversation reference is: the belief must be one this
+     person can actually open, resolved through their own view. A ref to somebody else's belief
+     becomes NO ref rather than a stored pointer at it. */
+  const addresses = (() => {
+    const b = req.body || {};
+    const kind = String(b.addressesKind || '').trim();
+    const id = String(b.addressesId || '').trim().slice(0, 80);
+    if (!['inquiry', 'high', 'low'].includes(kind) || !id) return null;
+    const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
+    if (!obj) return null;   // not theirs to see — no reference at all
+    return { kind, id, at: Date.now() };
+  })();
+
+  /* SAME TEXT, STILL OPEN? Return it rather than making a second one — a list with the same
+     commitment on it twice is a list people stop trusting. This is also what makes a double tap
+     and a retry-after-timeout safe: the second call finds the first one's work and reports it,
+     instead of leaving two identical focuses behind.
+
+     It returns the FULL shape, not a reduced one. The reduced version meant a client rendering
+     the retry had no target, no review date and no source, so a successful retry looked like a
+     worse outcome than the call it was repeating. */
   const existing = mem.focuses.find(f => f && f.status === 'active' && f.text === text);
   if (existing) {
-    return res.json({ ok: true, focus: { id: existing.id, text: existing.text, visibility: existing.visibility || 'private' },
-      already: true, note: 'You already have this one open.' });
+    // A retry may be the first call that carried the source, so attach it if the original has
+    // none. Never overwrite one that is already there — that would re-point a focus at a
+    // different conversation on a stray retry.
+    if (source && !existing.source) { existing.source = source; scheduleSave(); }
+    return res.json({ ok: true, already: true,
+      focus: {
+        id: existing.id, text: existing.text, visibility: existing.visibility || 'private',
+        participants: existing.participants || [userId],
+        target: existing.target || null, reviewAt: existing.reviewAt || null,
+        source: existing.source ? { conversationId: existing.source.conversationId, messageIds: existing.source.messageIds } : null,
+      },
+      note: 'You already have this one open.' });
   }
   /* A FOCUS IS SOMETHING YOU WORK TOWARDS (founder, September 2026). The target says what would
      tell you it worked; the review date says when to look. Neither is required — some things
@@ -5695,6 +5822,8 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
     participants: participants.length ? [userId, ...participants] : [userId],
     ...(target ? { target } : {}),
     ...(reviewAt ? { reviewAt } : {}),
+    ...(source ? { source } : {}),
+    ...(addresses ? { addresses } : {}),
     createdAt: new Date().toISOString(),
   };
   mem.focuses.unshift(focus);
@@ -5705,11 +5834,146 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
   const named = participants.map(id => (orgUsers[code][id] || {}).name).filter(Boolean);
   res.json({ ok: true,
     focus: { id: focus.id, text: focus.text, visibility: focus.visibility, participants: focus.participants,
-      target: focus.target || null, reviewAt: focus.reviewAt || null },
+      target: focus.target || null, reviewAt: focus.reviewAt || null,
+      source: source ? { conversationId: source.conversationId, messageIds: source.messageIds } : null,
+      addresses: addresses ? { kind: addresses.kind, id: addresses.id } : null },
+    /* THE AUDIENCE SENTENCE SAYS WHAT ACTUALLY HAPPENS.
+
+       `shared` is read by _memberGoalsFor, which is a LEADER'S view of a member. Squad peers
+       never see it, so the control that offered "My whole squad" was describing an audience the
+       backend does not have. The wording here was already right and the label was wrong; both
+       now say the same thing, and nothing was widened to make a label true. */
     note: participants.length
       ? `Set, with ${named.join(', ')}. Only the people in it can see it.${rejected ? ' Some names could not be added.' : ''}`
-      : shared ? 'Set. Anyone who leads a group you are in can see this one.'
-               : 'Set, and private — only you can see it. You can share it later; nobody else can.' });
+      : shared ? 'Set. Whoever leads a group you are in can see this one. Your squad cannot.'
+               : 'Set, and private — only you can see it. You can share it later; nobody else can.',
+    /* ONE USEFUL QUESTION, so confirming a focus continues the conversation instead of ending it.
+       Deterministic and drawn from what the focus itself is missing, which is why it can be asked
+       with the writing engine off: no target yet is a different next question from no date. */
+    next: !target
+      ? 'What would tell you this was working?'
+      : !reviewAt ? 'When should we look at it?'
+                  : 'What is the first thing you will try?' });
+});
+
+/* GET /api/me/focus/:id/source — the conversation a focus came from. OWNER ONLY.
+
+   This is the route that makes references safe. A focus can be shared with a coach or invited
+   people; its SOURCE never travels with it, because reading the source is a separate request that
+   checks ownership every single time rather than a field that rode along inside the object.
+
+   So "share this focus" and "share the conversation that produced it" stay two different acts,
+   and only one of them is on offer. Participants and leaders reading the focus get 404 here —
+   not 403, which would confirm there is a conversation behind it. */
+app.get('/api/me/focus/:id/source', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const focus = (_getMemory(code, userId).focuses || []).find(f => f && f.id === String(req.params.id));
+  // Not theirs → not found. _getMemory is keyed by this session's own org and user, so a focus
+  // belonging to somebody else is not in this list at all.
+  if (!focus || !focus.source) return res.status(404).json({ error: 'not found' });
+  const conv = (assistantConversations[_wsKey(code, userId)] || []).find(c => c && c.id === focus.source.conversationId);
+  // The conversation may since have been deleted — the person's own history is theirs to erase,
+  // and a focus outliving it is expected rather than an error.
+  if (!conv) return res.json({ ok: true, available: false, focusId: focus.id,
+    note: 'The conversation this came from is no longer here. The focus stands on its own.' });
+  const want = new Set(focus.source.messageIds || []);
+  const all = conv.messages || [];
+  const picked = all.filter(m => want.has(String(m.id || m.messageId || '')));
+  res.json({ ok: true, available: true, focusId: focus.id,
+    conversation: { id: conv.id, title: conv.title, updatedAt: conv.updatedAt },
+    // The referenced messages, read live from the person's own history. Nothing here was stored
+    // on the focus — if they edit or delete the thread, this changes with it.
+    messages: (picked.length ? picked : all.slice(-4)).map(_historyMessage),
+    exact: picked.length > 0,
+    note: 'Only you can see this. Sharing the focus does not share this conversation.' });
+});
+
+/* POST /api/me/focus/:id/tried — the answer to the returning question. { tried, because? }
+
+   Founder: the journey is conversation → confirmed focus → return → reflection. This is the
+   fourth step, and it is deliberately the SMALLEST possible thing a person can say.
+
+   THREE ANSWERS, AND "NOT YET" IS NOT A FAILURE. `yes`, `not_yet`, `no_chance` — because "we did
+   not play" and "I did not get round to it" and "I tried it" are three different facts and only
+   one of them is about the person. Collapsing them into done/not-done is how a tool starts
+   reading a fixture list as a character flaw.
+
+   DECLARED, NEVER INFERRED, like every other direction in this product. An unrecognised answer is
+   refused rather than coerced.
+
+   IT DOES NOT CLOSE THE FOCUS. Trying something once is not finishing it, and the outcome path
+   (did it help?) is a separate, later question that the review date already drives. */
+app.post('/api/me/focus/:id/tried', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const mem = _getMemory(code, userId);
+  const focus = (mem.focuses || []).find(f => f && f.id === String(req.params.id));
+  if (!focus) return res.status(404).json({ error: 'not found' });
+  const ANSWERS = ['yes', 'not_yet', 'no_chance'];
+  const tried = String((req.body || {}).tried || '');
+  if (!ANSWERS.includes(tried)) {
+    return res.status(400).json({ error: "say 'yes', 'not_yet' or 'no_chance' — IntelliQ will not work out which one you meant" });
+  }
+  const now = Date.now();
+  focus.attempts = focus.attempts || [];
+  focus.attempts.push({ tried, at: now, because: String((req.body || {}).because || '').trim().slice(0, 600) || null });
+  focus.askedAt = now;   // asked and answered; the follow-up clock restarts from here
+
+  /* THEIR OWN WORDS BECOME EVIDENCE, with themselves as the origin — but only when they gave
+     any. The declaration is the fact; the account is optional, and asking for one is not the
+     same as requiring one. Direction is neutral: having tried something is not an improvement,
+     and not having got to it is not a decline. */
+  let filed = null;
+  let fedBack = null;
+  const because = String((req.body || {}).because || '').trim();
+  if (because) {
+    const proposal = () => ({
+      id: 'try_' + generateId(),
+      level: 'observation', directness: 'direct', authority: 'self_report', source: 'self',
+      specificity: 0.6, statement: because.slice(0, 600),
+      originKind: 'self_report', originRef: `self:${userId}`, turnId: `try_${userId}_${now}`,
+    });
+    const fileOn = (inq) => {
+      if (!inq) return null;
+      const bySubject = inquiryStates[code][`member:${userId}`];
+      const k = Object.keys(bySubject).find(x => bySubject[x].inquiryId === inq.inquiryId);
+      bySubject[k] = diagnose.applyProposals(inq, [proposal()], { now, evidenceRefOf: p => `${p.originRef}#${p.id}` });
+      return inq.inquiryId;
+    };
+    filed = fileOn(_inquiryFor(code, `member:${userId}`, `focus.${focus.id}`,
+      `How "${String(focus.text).slice(0, 60)}" is going`, (orgMeta[code] || {}).orgMode || '', now));
+
+    /* ── THE LOOP CLOSING ────────────────────────────────────────────────────────────────────
+       Founder decision, LINKED BOTH WAYS: when a focus was started from a belief, what happened
+       when they tried it becomes evidence ON that belief. IntelliQ works something out, you do
+       something about it, and the result feeds back into what it believes.
+
+       ONE ORIGIN, NO DIRECTION, and both matter. The person is their own origin, so answering
+       three times is one origin, not three — a belief cannot be talked into moving by somebody
+       reporting on their own remedy repeatedly. And the direction is neutral, declared nowhere:
+       "it was calmer for ten minutes" is an account, and whether that means the Low is easing is
+       for the kernel and the person's own call to settle, not for this route to assert.
+
+       Re-resolved through the OWNER'S view every time rather than trusted from the stored ref, so
+       a belief that has since been erased or moved out of reach quietly stops being written to. */
+    if (focus.addresses && focus.addresses.id) {
+      const target = _allObjectsFor(code, userId)
+        .find(o => o.kind === focus.addresses.kind && String(o.id) === String(focus.addresses.id));
+      if (target && target.raw && target.raw.inquiryId) {
+        const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+        const belief = Object.values(mine).find(i => i && i.inquiryId === target.raw.inquiryId);
+        if (belief) fedBack = fileOn(belief);
+      }
+    }
+  }
+  mem.lastUpdated = new Date().toISOString();
+  scheduleSave();
+  res.json({ ok: true, focusId: focus.id, tried, inquiryId: filed, fedBackTo: fedBack,
+    addresses: focus.addresses ? { kind: focus.addresses.kind, id: focus.addresses.id } : null,
+    note: tried === 'yes' ? 'Noted. When you have a sense of whether it helped, that is the next thing worth saying.'
+      : tried === 'no_chance' ? 'Noted — no chance to try it is not the same as it not working. It stays open.'
+      : 'Noted. It stays open, and IntelliQ will ask again rather than assume.',
+    /* ONE QUESTION BACK, so answering continues the conversation rather than closing a task. */
+    next: tried === 'yes' ? 'What happened when you did?' : 'Is there anything in the way of it?' });
 });
 
 /* POST /api/me/focus/:id/visibility — widen or narrow it afterwards, owner only. */
@@ -6295,7 +6559,7 @@ app.post('/api/assessments/draft', requireAuth, async (req, res) => {
   if (ai.enabled()) {
     try {
       const system = ['You design clear, motivating assessments and reviews for ANY kind of organisation or work. Given a goal, return JSON only: {"title": string (<=80 chars), "kind": one of ["spreadsheet","film","play","skill","general"], "description": string (2-4 sentences of instructions, warm and specific, no emojis), "fields": array of 3-6 {"label": string, "hint": string} the person fills in}. Make it feel like a thoughtful mentor designed it, not a form.', _domainDirective(code)].filter(Boolean).join('\n\n');
-      out = await ai.completeJSON({ tier: 'reason', system, user: `Goal: ${goal}`, maxTokens: 600, schema: ['title', 'fields'] });
+      out = await ai.completeJSON({ org: code, taskType: 'assessment_draft', tier: 'reason', system, user: `Goal: ${goal}`, maxTokens: 600, schema: ['title', 'fields'] });
     } catch (_) { out = null; }
   }
   const d = out && Array.isArray(out.fields) && out.fields.length ? out : fallback;
@@ -6398,7 +6662,7 @@ app.post('/api/assessments/plan', requireAuth, async (req, res) => {
  "sequence": array of 3-6 short ordered steps}
 Play to individual strengths, target real weak areas, and adapt to the specific people. No emojis.`, _domainDirective(code)].filter(Boolean).join('\n\n');
       const user = `Goal: ${goal}\n\nContext about the people (privacy-safe):\n${JSON.stringify(ctx).slice(0, 6000)}`;
-      out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 1100, schema: ['insight', 'plan'] });
+      out = await ai.completeJSON({ org: code, taskType: 'assessment_plan', tier: 'reason', system, user, maxTokens: 1100, schema: ['insight', 'plan'] });
     } catch (_) { out = null; }
   }
   const r = (out && out.plan && Array.isArray(out.plan.fields)) ? out : fallback;
@@ -6451,7 +6715,7 @@ app.post('/api/assessments/plan/chat', requireAuth, async (req, res) => {
         ...history.filter(h => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string').map(h => ({ role: h.role, content: h.content.slice(0, 1500) })),
         { role: 'user', content: `${message}\n\n[Team context — privacy-safe]: ${JSON.stringify(ctx).slice(0, 5000)}` },
       ];
-      out = await ai.completeJSON({ tier: 'reason', messages, system, maxTokens: 900, schema: ['reply'] });
+      out = await ai.completeJSON({ org: code, taskType: 'assessment_plan_chat', tier: 'reason', messages, system, maxTokens: 900, schema: ['reply'] });
     } catch (_) { out = null; }
   }
   const plan = (out && out.plan && out.plan.title) ? {
@@ -6926,7 +7190,7 @@ app.post('/api/assessments/:id/summarize', requireAuth, async (req, res) => {
     try {
       const system = [`You help a leader review someone's assignment. You are given HOW THE LEADER WANTED IT DONE and the person's actual responses. Judge the responses AGAINST the leader's stated method/expectation — not a generic standard. Be fair and specific. Return JSON only: {"summary": string (2-3 sentences the leader could send), "score": integer 0-100 (your honest reasoning score against the leader's expectation) or null if there isn't enough to score, "strengths": array of up to 3 short phrases, "development": array of up to 3 short phrases}. No emojis.`, _domainDirective(code, { userId: a.assigneeId })].filter(Boolean).join('\n\n');
       const user = `Assignment: "${a.title}".\nHow the leader wanted it done: ${a.guidance || a.description || '(not specified — judge on general quality and effort)'}\n\nThe person's responses:\n${answers.slice(0, 4000)}`;
-      out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 600, schema: ['summary'] });
+      out = await ai.completeJSON({ org: code, taskType: 'assessment_summarise', tier: 'reason', system, user, maxTokens: 600, schema: ['summary'] });
     } catch (_) { out = null; }
   }
   const d = out || fallback;
@@ -7074,7 +7338,7 @@ app.post('/api/admin/llm-selftest', requirePermission('manage_settings'), async 
   for (const t of trials) {
     const started = Date.now();
     try {
-      const out = await ai.complete({ tier: t.tier, system: t.system, user: t.user, maxTokens: 160 });
+      const out = await ai.complete({ org: req.iqSession.orgCode, taskType: 'llm_selftest', tier: t.tier, system: t.system, user: t.user, maxTokens: 160 });
       results.push({ label: t.label, tier: t.tier, model: ai.MODELS[t.tier], ms: Date.now() - started, ok: true, output: out });
     } catch (e) {
       results.push({ label: t.label, tier: t.tier, model: ai.MODELS[t.tier], ms: Date.now() - started, ok: false, error: e.message });
@@ -12680,6 +12944,12 @@ function _convTitle(t) { const s = String(t || '').trim().replace(/\s+/g, ' '); 
    are org-scoped with an owner + visibility so "make it public" actually reaches teammates. */
 const libraryFolders = {};  // code → [ { id, ownerId, name, createdAt } ]
 const libraryItems   = {};  // code → [ { id, ownerId, type, title, body, sourceRef, folderId, visibility, createdAt, updatedAt } ]
+/* THE SHELF. Where somebody put their own work so they can find it again — a REFERENCE and
+   nothing else (L-SH1). There is no title here, no text and no state: what a folder shows is
+   read live from the object every time it is opened, so a shelf can never be a stale second
+   copy of the thing it points at, and a label captured while you could see something can never
+   outlive your access to it. */
+const shelfFilings   = {};  // code → [ { id, ownerId, kind, refId, folderId, at } ]
 
 /* INQUIRY STATE — the working understanding built from conversation. NOT evidence and NOT the
    belief ledger: it is a picture that accumulates, from which a person may later confirm
@@ -13018,6 +13288,36 @@ function _assistantProposals(code, userId, interp, context, text, workCtx) {
       payload: { text: null /* filled from raw at confirm */, scope: primary.scope, purpose: primary.purpose, visibility: primary.visibility, aiUsage: primary.aiUsage },
       visibility: primary.visibility, why: primary.reason, requiredApproval: true,
       policyResult: { effect: 'allow', reason: 'personal capture — owner-scoped' }, evidenceBasis: [] });
+  }
+
+  /* ── A FOCUS, OFFERED WHERE THE PERSON IS ALREADY DESCRIBING ONE ─────────────────────────
+     Founder direction: a focus should feel like a conversation we deliberately keep working on.
+
+     Offered on the intents that ALREADY mean "something I want to do about this" — `plan` and
+     `commitment`, both produced by the existing bounded classification, not by a new detector
+     written for this feature. Nothing here reads the person's wording for enthusiasm or decides
+     what they "really" meant.
+
+     THE SUGGESTED TEXT IS THEIR OWN SENTENCE, handed back for them to edit. That is the one thing
+     this must not get creative about: a commitment somebody is about to make is not a thing to
+     paraphrase at them and then store under their name. The card is editable precisely so the
+     wording ends up theirs either way.
+
+     It is a PROPOSAL. Nothing is saved until they confirm — same contract as every other card. */
+  const focusIntent = interp.intents.find(i => i.type === 'plan' || i.type === 'commitment');
+  if (focusIntent) {
+    const said = String(text || '').trim().slice(0, 300);
+    if (said.length >= 12) {
+      out.push({ id: 'prop_' + generateId(), actionType: 'focus_proposal', capability: 'workspace',
+        label: 'Make this something you keep working on',
+        // Private is the default and is stated on the card rather than assumed. Widening is a
+        // separate, deliberate act.
+        payload: { text: said, visibility: 'private' },
+        visibility: 'only_me',
+        why: 'A focus keeps this in front of you and lets IntelliQ ask how it is going. Nothing is saved until you start it.',
+        requiredApproval: true,
+        policyResult: { effect: 'allow', reason: 'personal focus — owner-scoped' }, evidenceBasis: [] });
+    }
   }
   // REACH THE RIGHT PERSON. The assistant was already telling people to go and speak to someone;
   // this offers to carry it, which is the difference between advice and a resource. The member
@@ -13904,6 +14204,102 @@ app.delete('/api/library/folders/:id', requireAuth, (req, res) => {
   // Items in the deleted folder become unfiled (never deleted with the folder).
   for (const it of _libItems(code)) if (it.ownerId === userId && it.folderId === req.params.id) it.folderId = null;
   scheduleSave(); res.json({ ok: true, deleted: req.params.id });
+});
+
+/* ── LIBRARY: THE SHELF ──────────────────────────────────────────────────────────────────────
+
+   Founder: "make library like chat gpt ... open and name folders store focuses, highs and lows
+   of your choice there? So that it's easier to come back and navigate your work if you are
+   looking for something specific?"
+
+   A shelf entry is (kind, id) and nothing else. The three routes below add one, move or remove
+   one, and read the shelf back — and the reading is the whole design, because that is where the
+   access decision lives (L-SH2). A filing is never consulted about whether somebody may see
+   something; it is a bookmark, and bookmarks do not grant entry.
+
+   Nothing here touches the kernel. Filing a low is not agreement with it, is not evidence, has
+   no origin and no direction (L-SH3). A person who files something has said only that they want
+   to find it again, and this product does not read anything more into what people do. */
+
+/* THE GATE, AND IT IS NOT A NEW ONE. Each kind is resolved through the same check that governs
+   it everywhere else in the app: objects through the reader's own merged view, conversations
+   through the workspace key that is theirs by construction, material through _materialFor and
+   therefore through the object it hangs on. Returns the LIVE label or null, and null means only
+   "not for this reader, now" — the shelf is not told, and must not be able to tell, whether the
+   thing was deleted or simply went out of reach. */
+function _shelfLookup(code, userId) {
+  let objects = null;   // built once per read, not once per row
+  return (kind, refId) => {
+    if (kind === 'conversation') {
+      const conv = (assistantConversations[_wsKey(code, userId)] || []).find(c => c && c.id === refId);
+      if (!conv) return null;
+      return { label: conv.title || 'Conversation', sub: `${(conv.messages || []).length} messages`, whose: 'you' };
+    }
+    if (kind === 'material') {
+      const r = _materialFor(code, userId, refId);
+      if (!r.ok) return null;
+      return { label: r.material.title || r.material.filename || 'Attached material',
+        sub: `${(r.material.sections || []).length} parts`, whose: '' };
+    }
+    if (!objects) objects = _allObjectsFor(code, userId);
+    const o = objects.find(x => x.kind === kind && String(x.id) === String(refId));
+    if (!o) return null;
+    return { label: (o.explained && o.explained.headline) || (o.present && o.present.title) || '',
+      sub: (o.explained && o.explained.line) || '', whose: o.whose || '' };
+  };
+}
+
+const _shelfOf = code => shelfFilings[code] || (shelfFilings[code] = []);
+const _myShelf = (code, userId) => _shelfOf(code).filter(f => f && f.ownerId === userId);
+
+/* GET /api/library/shelf — folders and what is on them, resolved live. */
+app.get('/api/library/shelf', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const folders = _libFolders(code).filter(f => f.ownerId === userId);
+  const v = shelf.view(_myShelf(code, userId), folders, _shelfLookup(code, userId),
+    'folderId' in req.query ? { folderId: String(req.query.folderId || '') || null } : {});
+  res.json({ ok: true, ...v, kinds: shelf.KINDS });
+});
+
+/* POST /api/library/shelf — { kind, id, folderId? } file something, or move it.
+
+   THE THING MUST BE READABLE BY THE PERSON FILING IT, checked here rather than only on the way
+   out. Storing a reference to something they cannot open would be harmless to read — the gate
+   drops it — but it would let anybody turn this route into an existence oracle by watching which
+   ids are accepted. */
+app.post('/api/library/shelf', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  const ref = shelf.normalize({ kind: b.kind, refId: b.id != null ? b.id : b.refId });
+  if (!ref) return res.status(400).json({ error: `you can file ${shelf.KINDS.join(', ')}` });
+  if (!_shelfLookup(code, userId)(ref.kind, ref.refId)) return res.status(404).json({ error: 'not found' });
+
+  const folderId = b.folderId ? String(b.folderId) : null;
+  if (folderId && !_libFolders(code).some(f => f.id === folderId && f.ownerId === userId)) {
+    return res.status(400).json({ error: 'unknown folder' });
+  }
+  const mine = _myShelf(code, userId);
+  const r = shelf.file(mine, ref, { folderId, at: Date.now(), id: 'shf_' + generateId() });
+  if (!r.ok) return res.status(400).json({ error: r.reason });
+  // shelf.file mutates the filtered copy, so a NEW entry has to be added back to the org's list;
+  // a moved one is the same object and is already updated in place.
+  if (r.added) _shelfOf(code).push({ ...r.entry, ownerId: userId });
+  scheduleSave();
+  res.json({ ok: true, filed: { id: r.entry.id, kind: ref.kind, refId: ref.refId, folderId },
+    moved: r.moved,
+    note: 'Filed. This points at it — it is not a copy, and it does not change who can see it.' });
+});
+
+/* DELETE /api/library/shelf/:id — take it off the shelf. The thing itself is untouched: an
+   entry is a bookmark, and removing a bookmark has never deleted anything. */
+app.delete('/api/library/shelf/:id', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const id = String(req.params.id || '');
+  const before = _shelfOf(code).length;
+  shelfFilings[code] = _shelfOf(code).filter(f => !(f && f.id === id && f.ownerId === userId));
+  if (shelfFilings[code].length === before) return res.status(404).json({ error: 'not found' });
+  scheduleSave();
+  res.json({ ok: true, removed: id, note: 'Taken off your shelf. Nothing was deleted.' });
 });
 
 /* ── LIBRARY: ITEMS ──────────────────────────────────────────────────────── */
@@ -15517,7 +15913,7 @@ function _materialContext(code, userId, about) {
     const [kind, ...rest] = ref.split(':');
     const id = rest.join(':');
     const all = Object.values(_materials(code))
-      .filter(m => m.attachTo.kind === kind && String(m.attachTo.id) === id);
+      .filter(m => _materialOn(m, kind, id));
     if (!all.length) return null;
     const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
     if (!obj) return null;   // attached to something this reader cannot open
@@ -15525,7 +15921,35 @@ function _materialContext(code, userId, about) {
     // and would need the person to say which; silently concatenating them would produce an
     // answer that mixes two briefings and names neither.
     const m = all.sort((a, b) => b.createdAt - a.createdAt)[0];
-    return material.contextFor(m, {});
+
+    /* WHICH PARTS, AND WHY THOSE.
+
+       The whole deck went in on every turn, up to the cap, every time. That is wasteful, but the
+       reason to fix it is not cost — it is that a twenty-slide briefing shouted at once buries the
+       one slide the person actually said they were stuck on.
+
+       THE FILTER IS DECLARED, NEVER INFERRED (L-MT2). The sections handed over are the ones THIS
+       READER marked `not_yet` with their own hands, through THIS object. Nothing here reads their
+       questions for confusion, scores relevance, or embeds a passage to find the closest match —
+       any of those would be the classifier this product removed, arriving through the one door
+       built to keep it out, and it would be choosing what a person is allowed to be told.
+
+       Declaring nothing means no narrowing: a coach who has never marked a slide, and a player on
+       their first read, get the document as before under the existing cap. Silence is not a
+       declaration that you understood everything (L-MT3), so it must not be treated as one. */
+    const declared = _engageOf(code, m.materialId)
+      .filter(e => e && e.personId === userId)
+      // Scoped to the object this turn is about. One deck can back a First Team focus and a
+      // Reserves focus; what you said in one is not a reading of the other.
+      .filter(e => !e.on || (e.on.kind === kind && String(e.on.id) === id))
+      .sort((a, b) => (a.at || 0) - (b.at || 0));
+    // L-MT4 — one voice per section, latest word wins, so changing your mind narrows or widens
+    // what comes back rather than stacking on top of what you said before.
+    const latest = new Map();
+    for (const e of declared) latest.set(String(e.sectionId), e.state);
+    const stuck = [...latest.entries()].filter(([, s]) => s === 'not_yet').map(([sid]) => sid);
+
+    return material.contextFor(m, { sectionIds: stuck.length ? stuck : null });
   } catch (_) { return null; }
 }
 
@@ -15664,10 +16088,35 @@ app.post('/api/me/disagree', requireAuth, (req, res) => {
    arrives is text, and it is treated as text somebody typed.
    ══════════════════════════════════════════════════════════════════════════════════════════ */
 
-const materials      = {};  // code → materialId → { materialId, byId, title, filename, kind, sections[], attachTo, createdAt }
+/* ── ONE DOCUMENT, MANY PLACES IT IS USED ────────────────────────────────────────────────────
+   Founder, brainstorming the tidiest shape: material was stored ONCE PER ATTACHMENT. `attachTo`
+   was singular, so the same scouting deck attached to two focuses was two full copies with two
+   ids, two understanding reports, and two sets of engagement that could never be read together.
+
+   It is now a first-class thing that lives once and is REFERENCED from wherever it is used —
+   keyed by a checksum of its own text, so attaching the same file again finds the record that is
+   already there instead of making a second one.
+
+   FOUNDER DECISION, taken over two alternatives: A DOCUMENT IS A REFERENCE FRAME, NEVER EVIDENCE
+   ABOUT ANYBODY. A scouting deck says "this is the plan" — a statement of intent, closer to an
+   aim than a finding. It grounds answers and it is quotable, and what becomes EVIDENCE is what
+   people do with it. That keeps every existing law intact and needs no classifier deciding what
+   a document means, which is the thing this codebase removed one for. */
+const materials      = {};  // code → materialId → { materialId, byId, title, filename, kind, sections[], refs[], checksum, createdAt }
 const materialEngage = {};  // code → materialId → [ { personId, sectionId, state, at, ref } ]
 
 const _materials = code => (materials[code] || (materials[code] = {}));
+
+/* The document's identity IS its text. Two uploads of the same deck are one document however
+   they were named, which is what makes "the same file attached twice" a reference rather than a
+   copy. Cheap and deterministic; this identifies a file, it does not defend against one. */
+function _materialChecksum(text) {
+  return require('crypto').createHash('sha256').update(String(text || '')).digest('hex').slice(0, 32);
+}
+/* Where a document is used. `attachTo` was singular and is kept as the FIRST ref so every
+   existing reader keeps working while the shape moves underneath them. */
+const _materialRefs = m => (Array.isArray(m && m.refs) ? m.refs : (m && m.attachTo ? [m.attachTo] : []));
+const _materialOn = (m, kind, id) => _materialRefs(m).some(r => r && r.kind === kind && String(r.id) === String(id));
 const _engageOf  = (code, id) => {
   const byOrg = materialEngage[code] || (materialEngage[code] = {});
   return byOrg[id] || (byOrg[id] = []);
@@ -15680,7 +16129,7 @@ function _materialFor(code, userId, materialId) {
   const m = _materials(code)[String(materialId)];
   if (!m) return { ok: false, status: 404, error: 'not found' };
   const obj = _allObjectsFor(code, userId)
-    .find(o => o.kind === m.attachTo.kind && String(o.id) === String(m.attachTo.id));
+    .find(o => _materialRefs(m).some(r => r.kind === o.kind && String(r.id) === String(o.id)));
   // A material whose object the reader cannot see is a material that does not exist for them.
   // 404 rather than 403: a 403 confirms the thing is there, which is a leak on its own.
   if (!obj) return { ok: false, status: 404, error: 'not found' };
@@ -15732,6 +16181,24 @@ app.post('/api/materials', requireAuth, (req, res) => {
   const sections = material.segment(text, { kind: String(b.kind || 'text') });
   if (!sections.length) return res.status(400).json({ error: 'nothing readable came out of that file' });
 
+  /* THE SAME DOCUMENT ATTACHED TWICE IS ONE DOCUMENT. Keyed by a checksum of its own text, so a
+     coach attaching last week's deck to this week's focus adds a REFERENCE rather than a second
+     copy — and the engagement already recorded against it stays with it instead of splitting
+     across two records nobody can read together. */
+  const checksum = _materialChecksum(text);
+  const already = Object.values(_materials(code)).find(m => m && m.checksum === checksum);
+  if (already) {
+    if (!_materialOn(already, kind, at.id)) {
+      already.refs = _materialRefs(already).concat([{ kind, id: String(at.id), at: Date.now(), by: userId }]);
+      _audit(code, { actor: userId, action: 'material_referenced', subjectIds: [], basis: `${kind}:${at.id}` });
+      scheduleSave();
+    }
+    return res.json({ ok: true, materialId: already.materialId, parts: (already.sections || []).length,
+      sections: (already.sections || []).map(s => ({ id: s.id, ordinal: s.ordinal, heading: s.heading })),
+      already: true,
+      note: `This is already in your library, so it is the same one — not a second copy. What people have already said about it stays with it.` });
+  }
+
   const id = 'mat_' + generateId();
   _materials(code)[id] = {
     materialId: id, byId: userId, orgCode: code,
@@ -15739,6 +16206,10 @@ app.post('/api/materials', requireAuth, (req, res) => {
     filename: String(b.filename || '').trim().slice(0, 200),
     kind: material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text',
     sections,
+    checksum,
+    // Where it is used. The first ref is what `attachTo` used to be, kept in that position so
+    // anything still reading the old field sees the same answer.
+    refs: [{ kind, id: String(at.id), at: Date.now(), by: userId }],
     attachTo: { kind, id: String(at.id) },
     createdAt: Date.now(),
   };
@@ -15756,7 +16227,7 @@ app.get('/api/objects/:kind/:id/materials', requireAuth, (req, res) => {
   const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
   if (!obj) return res.status(404).json({ error: 'not found' });
   const list = Object.values(_materials(code))
-    .filter(m => m.attachTo.kind === kind && String(m.attachTo.id) === id)
+    .filter(m => _materialOn(m, kind, id))
     .sort((a, b) => b.createdAt - a.createdAt)
     .map(m => ({ materialId: m.materialId, title: m.title, filename: m.filename, kind: m.kind,
       parts: (m.sections || []).length, by: _nameOf(code, m.byId), byId: m.byId, createdAt: m.createdAt }));
@@ -15806,8 +16277,21 @@ app.post('/api/materials/:id/engaged', requireAuth, (req, res) => {
      picture carried the ids of the players in it, and the anonymity the whole surface is built on
      was undone by the identifier. A ref only has to be UNIQUE for counting to work. It does not
      have to say whose it is, and it must not. */
-  const ref = `eng:${r.material.materialId}:${sectionId}:${generateId()}`;
-  _engageOf(code, r.material.materialId).push({ personId: userId, sectionId, state, at: now, ref });
+  /* THE REF NAMES THE DOCUMENT AND THE PART, so a claim built on this stays checkable after the
+     focus that produced it has closed — the section is still there to open. It names NOBODY: an
+     earlier version embedded the userId, and provenance refs travel to the client, so every bar
+     in a coach's chart carried the ids of the players in it. Unique for counting, anonymous by
+     construction. */
+  const ref = `material:${r.material.materialId}#${sectionId}:${generateId()}`;
+  /* AND IT RECORDS WHERE IT WAS SAID. A document now lives once and is referenced from wherever
+     it is used, so one deck can back a First Team focus AND a Reserves focus. Their audiences are
+     different, so their reports must be too — a suite caught this the moment deduplication
+     started working, by collapsing two squads into one document. Engagement is scoped to the
+     object it was made through; the document is shared, the reading of it is not. */
+  _engageOf(code, r.material.materialId).push({
+    personId: userId, sectionId, state, at: now, ref,
+    on: { kind: r.object.kind, id: String(r.object.id) },
+  });
 
   /* SAYING YOU DID NOT GET IT IS EVIDENCE ABOUT THE MATERIAL, NOT ABOUT YOU.
 
@@ -15868,7 +16352,11 @@ app.get('/api/materials/:id/understanding', requireAuth, (req, res) => {
   if (!r.ok) return res.status(r.status).json({ error: r.error });
   const m = r.material;
   const cohort = _materialCohort(code, r.object);
-  const engagements = _engageOf(code, m.materialId);
+  /* SCOPED TO THIS USE OF THE DOCUMENT. Older engagement carries no `on` (it predates a document
+     being usable in more than one place) and is counted here, because it can only have come from
+     the single place the document then had. */
+  const engagements = _engageOf(code, m.materialId)
+    .filter(e => !e.on || (e.on.kind === r.object.kind && String(e.on.id) === String(r.object.id)));
   const people = new Set(engagements.map(e => e.personId)).size;
   const n = cohort.members.length;
   // The two-sided floor, from the production rule. A report on four people is a roster with the
@@ -16022,7 +16510,7 @@ function _timelineChart(code, userId, obj) {
   if (created) events.push({ at: created, label: 'Set', marker: 'start', refs: [`focus:${obj.id}:created`] });
   const cohort = _materialCohort(code, obj);
   for (const m of Object.values(_materials(code))) {
-    if (m.attachTo.kind !== obj.kind || String(m.attachTo.id) !== String(obj.id)) continue;
+    if (!_materialOn(m, obj.kind, obj.id)) continue;
     events.push({ at: m.createdAt, label: `Attached: ${m.title}`, marker: 'material', refs: [`material:${m.materialId}`] });
     /* HOW MANY PEOPLE ENGAGED — ONE MARKER, NOT A DOT EACH, AND THE WHOLE GROUP SEES IT.
 
@@ -16035,12 +16523,14 @@ function _timelineChart(code, userId, obj) {
        each person answered. In a squad, when somebody replied is often enough to say who. So the
        timing goes and the count stays — strictly more of what was asked for, strictly less of
        what was not. */
-    const people = new Set(_engageOf(code, m.materialId).map(e => e.personId));
+    const scoped = _engageOf(code, m.materialId)
+      .filter(e => !e.on || (e.on.kind === obj.kind && String(e.on.id) === String(obj.id)));
+    const people = new Set(scoped.map(e => e.personId));
     const floor = teamState.cohortFloor(people.size, cohort.members.length);
     if (floor.ok) {
       // ONE VOICE PER PERSON. Somebody who marks six slides is one person engaging.
       const first = new Map();
-      for (const e of _engageOf(code, m.materialId)) {
+      for (const e of scoped) {
         if (!first.has(e.personId) || e.at < first.get(e.personId).at) first.set(e.personId, e);
       }
       // Placed where the group had FINISHED answering, not where whoever went first did.
@@ -16060,7 +16550,7 @@ function _timelineChart(code, userId, obj) {
 /* HOW IT LANDED ACROSS A GROUP — the bars are the author's own parts. */
 function _spreadChart(code, userId, obj) {
   const mats = Object.values(_materials(code))
-    .filter(m => m.attachTo.kind === obj.kind && String(m.attachTo.id) === String(obj.id))
+    .filter(m => _materialOn(m, obj.kind, obj.id))
     .sort((a, b) => b.createdAt - a.createdAt);
   if (!mats.length) return null;
   const m = mats[0];
@@ -16068,7 +16558,9 @@ function _spreadChart(code, userId, obj) {
   /* EVERYBODY THE MATERIAL IS FOR SEES THIS. Founder decision — the floor is the privacy
      instrument, and a role check on top of it withholds from a squad a nameless fact about that
      squad. Reading is everybody's; attaching and recreating stay with the leader. */
-  const engagements = _engageOf(code, m.materialId);
+  // Same scoping as the report: one document, many uses, one reading per use.
+  const engagements = _engageOf(code, m.materialId)
+    .filter(e => !e.on || (e.on.kind === obj.kind && String(e.on.id) === String(obj.id)));
   const people = new Set(engagements.map(e => e.personId)).size;
   const floor = teamState.cohortFloor(people, cohort.members.length);
   const u = material.understanding(m, engagements, { members: cohort.members.length, floor });
@@ -16704,7 +17196,7 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
     if (ai.enabled()) {
       try {
         const system = ['You design short, motivating SELF-assessments. Return JSON only: {"title": string (<=80 chars), "description": string (2-3 warm, specific sentences, no emojis), "fields": array of 3-5 {"label": string, "hint": string}}. It is for the person themselves, so address them directly. No scores, no judgement.', _domainDirective(code)].filter(Boolean).join('\n\n');
-        const out = await ai.completeJSON({ tier: 'reason', system, user: `Self-assessment topic: ${topic || 'general personal development'}`, maxTokens: 500, schema: ['title', 'fields'] });
+        const out = await ai.completeJSON({ org: code, taskType: 'turn_confirm', tier: 'reason', system, user: `Self-assessment topic: ${topic || 'general personal development'}`, maxTokens: 500, schema: ['title', 'fields'] });
         if (out && Array.isArray(out.fields) && out.fields.length) {
           draft.title = String(out.title || draft.title).slice(0, 160);
           draft.description = String(out.description || draft.description).slice(0, 2000);
@@ -17375,7 +17867,7 @@ app.get('/api/groups/:groupId/copilot', requireAuth, async (req, res) => {
 
   let out = null;
   try {
-    out = await ai.completeJSON({ tier: 'reason', system, user, maxTokens: 500, schema: ['actions'] });
+    out = await ai.completeJSON({ org: code, taskType: 'group_copilot', tier: 'reason', system, user, maxTokens: 500, schema: ['actions'] });
   } catch (err) {
     console.warn('[group-copilot] AI error:', err.message);
   }
@@ -17606,7 +18098,7 @@ app.post('/api/notes/:noteId/ask', requireAuth, async (req, res) => {
   const g = noteGov.groundedAnswer(note, question);
   let answer = g.answer, enriched = false;
   if (ai.enabled()) {
-    const p = ai.complete({
+    const p = ai.complete({ org: code, taskType: 'note_ask',
       tier: 'reason', maxTokens: 180,
       system: [
         'Answer the question USING ONLY the note below. If the note does not address it, say so plainly.',
@@ -18324,11 +18816,26 @@ function userKey(orgCode, userId) {
 }
 
 /* ── Platform registers org ─────────────────────────────────────────────── */
-/* SECURITY: the organisation is the SESSION'S, never the body's. This was unauthenticated and
-   OVERWROTE orgStore[orgCode] with whatever name and mode the caller sent — so any anonymous
-   request could rename any organisation or change its mode, and the client fired it on every
-   single app launch with no credential attached. */
-app.post('/api/platform/register-org', requireAuth, (req, res) => {
+/* SECURITY, IN TWO ROUNDS. The first closed cross-organisation writes: this was unauthenticated
+   and overwrote orgStore[orgCode] with whatever name and mode the caller sent, so any anonymous
+   request could rename any organisation.
+
+   THE SECOND ROUND IS THIS ONE, and the first fix is exactly what hid it. Taking the organisation
+   from the session stopped org A writing to org B — and left every ORDINARY MEMBER of org A able
+   to rename their own organisation and change its mode, because authentication had been mistaken
+   for authority. Those are two questions ("who are you" and "may you do this"), and answering
+   only the first is how a route ends up looking fixed.
+
+   Changing an organisation's name or mode IS a settings change, so it is gated like every other
+   settings change: `manage_settings`, which by role default is the superadmin's alone.
+
+   THE CLIENT NO LONGER FIRES THIS ON LAUNCH. It used to POST on every single app start, echoing
+   back a name and mode the client had itself derived from the server — a mutation on every page
+   load that could only introduce drift, and the reason a write endpoint was reachable by anyone
+   who opened the app. orgStore is a legacy mirror read only as a fallback behind orgMeta, so
+   nothing needed that call. Organisation setup goes through the wizard, which is superadmin-only
+   and untouched. */
+app.post('/api/platform/register-org', requirePermission('manage_settings'), (req, res) => {
   const code = String(req.iqSession.orgCode || '').toLowerCase().trim();
   if (!code) return res.status(400).json({ error: 'no organisation on this session' });
   const { orgName, orgMode } = req.body || {};
@@ -18339,36 +18846,95 @@ app.post('/api/platform/register-org', requireAuth, (req, res) => {
     orgName: String(orgName || prev.orgName || '').slice(0, 200),
     orgMode: String(orgMode || prev.orgMode || '').slice(0, 60),
   };
+  _audit(code, { actor: req.iqSession.userId, action: 'org_registered', subjectIds: [], basis: orgStore[code].orgMode || 'name' });
   scheduleSave();
   res.json({ ok: true, orgCode: code });
 });
 
 /* ── Update org mode ────────────────────────────────────────────────────── */
-app.post('/api/platform/update-org-mode', requireAuth, (req, res) => {
-  const { orgCode, orgMode } = req.body;
-  if (!orgCode || !orgMode) return res.status(400).json({ error: 'orgCode and orgMode required' });
-  const code = orgCode.toLowerCase().trim();
-  if (orgMeta[code]) { orgMeta[code].orgMode = orgMode; scheduleSave(); }
-  if (orgStore[code]) { orgStore[code].orgMode = orgMode; scheduleSave(); }
-  res.json({ ok: true });
+/* SECURITY: took the organisation from the BODY and checked nothing at all beyond having a
+   session, so any member of any organisation could change any other organisation's mode — and
+   the mode drives the domain pack, which decides the vocabulary and the reasoning parameters for
+   everybody in it. Session for identity, `manage_settings` for authority. */
+app.post('/api/platform/update-org-mode', requirePermission('manage_settings'), (req, res) => {
+  const code = String(req.iqSession.orgCode || '').toLowerCase().trim();
+  const orgMode = String((req.body || {}).orgMode || '').trim().slice(0, 60);
+  if (!code) return res.status(400).json({ error: 'no organisation on this session' });
+  if (!orgMode) return res.status(400).json({ error: 'orgMode required' });
+  // A body orgCode naming somebody ELSE is refused rather than quietly ignored. Silently
+  // applying the change to the caller's own org would tell an attacker nothing and tell an
+  // honest caller nothing either.
+  const asked = String((req.body || {}).orgCode || '').toLowerCase().trim();
+  if (asked && asked !== code) return res.status(403).json({ error: 'you can only change your own organisation' });
+  if (orgMeta[code]) orgMeta[code].orgMode = orgMode;
+  if (orgStore[code]) orgStore[code].orgMode = orgMode;
+  _audit(code, { actor: req.iqSession.userId, action: 'org_mode_changed', subjectIds: [], basis: orgMode });
+  scheduleSave();
+  res.json({ ok: true, orgCode: code, orgMode });
 });
 
 /* ── Bulk import users (CSV/XLSX parsed client-side) ─────────────────── */
-app.post('/api/auth/bulk-import', requireAuth, async (req, res) => {
+/* SECURITY — THE WORST OF THE THREE, because this one MINTS ACCOUNTS.
+
+   It took the organisation from the BODY and required nothing but a session, so an ordinary
+   member of organisation A could post organisation B's code and create an ADMIN there. Two
+   separate failures in one route: the tenant was the caller's to choose, and authority over the
+   operation was never asked about at all.
+
+   Three rules now, and each answers a different question:
+
+     WHERE   the organisation is the session's. A body orgCode naming another org is refused
+             rather than ignored, so an honest caller learns their payload was wrong and a
+             dishonest one learns nothing about whether that org exists.
+     WHETHER `edit_members` — the permission that already governs creating and changing people.
+             Not a new gate invented for this route; the one the rest of the roster uses.
+     HOW HIGH the role ceiling from /api/auth/invite: you may not create somebody above your own
+             level. Without it, an admin (who has edit_members and cannot mint a superadmin
+             invite) could mint one here — the ceiling has to live wherever accounts are made,
+             not only where invites are. */
+app.post('/api/auth/bulk-import', requirePermission('edit_members'), async (req, res) => {
   const { orgCode, users: importRows } = req.body;
-  if (!orgCode || !Array.isArray(importRows)) return res.status(400).json({ error: 'orgCode and users[] required' });
-  const code    = orgCode.toLowerCase().trim();
-  const creator = req.user;
+  if (!Array.isArray(importRows)) return res.status(400).json({ error: 'users[] required' });
+  const code = String(req.iqSession.orgCode || '').toLowerCase().trim();
+  const asked = String(orgCode || '').toLowerCase().trim();
+  if (asked && asked !== code) return res.status(403).json({ error: 'you can only import into your own organisation' });
+  const creator = orgUsers[code]?.[req.iqSession.userId];
+  if (!creator) return res.status(401).json({ error: 'User not found.' });
 
   if (!orgUsers[code]) return res.status(404).json({ error: 'Org not found' });
+
+  /* THE CEILING. Same ladder /api/auth/invite uses, and deliberately the same numbers rather
+     than a second table that could drift away from it. */
+  const ROLE_LEVEL = { superadmin: 1, admin: 2, coach: 3, member: 4 };
+  const creatorLevel = ROLE_LEVEL[creator.role] || 4;
 
   const created = [], skipped = [], failed = [];
 
   for (const row of importRows) {
     const name  = (row.name  || '').trim();
     const email = (row.email || '').trim().toLowerCase();
-    const role  = (['admin','coach','member'].includes(row.role?.toLowerCase()) ? row.role.toLowerCase() : 'member');
+    /* THE ROLE THE ROW ASKED FOR, kept separate from the role it gets.
+
+       A suite caught this: an explicit `superadmin` row fell outside the accepted list and was
+       silently coerced to `member`. Safe, in that no superadmin was minted — and wrong, because
+       the importer asked for one thing and got another with no word said, which is how somebody
+       ends up believing an account has powers it does not have.
+
+       So a NAMED role above the ceiling is refused and says so. An UNRECOGNISED one (a typo, a
+       blank, a spreadsheet column that means something else) keeps the long-standing coercion to
+       member, because that is a malformed cell rather than a request. */
+    const asked = String(row.role || '').trim().toLowerCase();
+    const role  = (['admin','coach','member'].includes(asked) ? asked : 'member');
     const group = (row.group || row.department || '').trim();
+
+    // Refused per ROW rather than failing the whole import: a spreadsheet with one over-reaching
+    // line should import the rest and say which line it would not take, or somebody edits the
+    // file blind. A superadmin is exempt, as they are for invites.
+    const askedLevel = ROLE_LEVEL[asked];
+    if (creator.role !== 'superadmin' && askedLevel && askedLevel < creatorLevel) {
+      failed.push({ row: name || email, reason: `You cannot create a ${asked} — that is above your own level` });
+      continue;
+    }
 
     if (!name) { failed.push({ row, reason: 'Missing name' }); continue; }
     if (!email) { failed.push({ row, reason: 'Missing email' }); continue; }
@@ -20764,7 +21330,7 @@ app.post('/api/signals/import', requireAuth, async (req, res) => {
 
   let parsed = null;
   try {
-    parsed = await ai.completeJSON({ tier: 'reason', system: `${_IMPORT_SYSTEM}\n\n${privacy.GATE_DIRECTIVE}`, messages, maxTokens: 1100, schema: ['members'] });
+    parsed = await ai.completeJSON({ org: code, taskType: 'signals_import', tier: 'reason', system: `${_IMPORT_SYSTEM}\n\n${privacy.GATE_DIRECTIVE}`, messages, maxTokens: 1100, schema: ['members'] });
   } catch (err) {
     console.warn('[signals/import] AI error:', err.message);
     return res.status(502).json({ error: 'Import analysis failed. Try again.' });
@@ -20861,6 +21427,7 @@ function _loadAllStores(data) {
   Object.assign(assistantConversations, data.assistantConversations || {});
   Object.assign(libraryFolders, data.libraryFolders || {});
   Object.assign(libraryItems,   data.libraryItems   || {});
+  Object.assign(shelfFilings,   data.shelfFilings   || {});
   Object.assign(inquiryStates,  data.inquiryStates  || {});
   Object.assign(safeguardingFlags, data.safeguardingFlags || {});
   Object.assign(groupCandidates, data.groupCandidates || {});
@@ -20962,7 +21529,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
-  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, inquiryStates, _migrateLegacyNotesToLibrary, orgNotes, orgMessages, orgStore, safeguardingFlags, _llmBudgetOk, _captureError, checkinProposals,
+  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, shelfFilings, _shelfLookup, inquiryStates, _migrateLegacyNotesToLibrary, orgNotes, orgMessages, orgStore, safeguardingFlags, _llmBudgetOk, _captureError, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
   // exported for the truth layer: grounded retrieval over canonical evidence

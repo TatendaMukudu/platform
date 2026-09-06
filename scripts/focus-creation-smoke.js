@@ -121,8 +121,19 @@ const server = app.listen(0, async () => {
     const starter = appjs.slice(appjs.indexOf('_startObject(kind, share, el) {'), appjs.indexOf('_focusSeedFrom(el) {'));
     ok('FC12 …and making a focus no longer just prefills the composer',
       starter.length > 20 && !/I want to work on/.test(starter));
-    ok('FC13 the audience choice says WHO, not just a word — "public" tells a person nothing about who that is',
-      /leads a group you are in can see/.test(appjs));
+    /* FC13 — NOW ASSERTED AGAINST THE SOURCE OF TRUTH, not a sentence written beside it.
+
+       This used to match a hard-coded string in the client. That string was one of two
+       descriptions of one access rule, and it drifted: the control said "My whole squad" while
+       the backend showed it to whoever LEADS that squad. The labels, the explanations and the
+       live head-count now come from /api/me/audiences, which builds them from the person's real
+       nodes — so the label cannot be left behind when the rule moves, because there is no longer
+       a second place to leave it. */
+    ok('FC13 the audience choice says WHO, from the route that owns the answer rather than a sentence typed next to it',
+      /fetch\('\/api\/me\/audiences'/.test(appjs) &&
+      /chosen\.explanation/.test(appjs) && /chosen\.reaches/.test(appjs));
+    ok('FC13b …and only the audiences a FOCUS actually enforces are offered — an option the read path does not honour is a worse version of the bug this replaced',
+      /const ENFORCED = \['self', 'node_leaders'\];/.test(appjs));
 
   } catch (e) { fail++; console.error('  FAIL suite threw:', e && e.stack); }
 

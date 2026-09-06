@@ -101,48 +101,72 @@ ok('PB5 a key IS configured for this suite, so every refusal below is the gate a
   ok('PB8 AN OVER-BUDGET ORGANISATION DOES NOT REACH THE PROVIDER — refused before the network, with a code a caller can act on',
     !!budgetErr && (budgetErr.code === 'LLM_BUDGET_EXHAUSTED' || /budget/i.test(budgetErr.message)));
 
-  /* ── 4. THE ROUTES THEMSELVES, AND THE COUNT THIS CHECK USED TO GET WRONG.
+  /* ── 4. ATTRIBUTION IS NOW REQUIRED, NOT DEFAULTED.
 
-     PB9 matched `await ai.complete(` and PB10 matched one exact literal string. Between them they
-     reported 16 gateway calls of which 12 named an organisation — and both numbers were wrong,
-     because the file holds THIRTY-FOUR model exits and the patterns missed `ai.completeJSON`,
-     calls not preceded by `await`, and every attribution written any other way.
+     The bill this check used to keep — "14 of 35 model exits are unattributed, and the number may
+     only shrink" — was an honest record of a hole and a bad guarantee. An unattributed call fell
+     into a bucket named `unattributed` that EVERY organisation drew on, so the per-org budget,
+     whose whole purpose is that one org cannot starve the others, did not apply to those sites at
+     all. A shrinking bill still leaves the failure live for as long as it takes to shrink.
 
-     That is worse than the hole it was hiding. A guard that reports 16 of 34 is not a lenient
-     guard, it is a guard that will never see the next one — and its own pull request said the
-     quiet part out loud: "a gate most calls go through is not a gate." The same sentence applies
-     to the check.
+     So the gateway refuses instead. A call with no organisation throws LLM_UNATTRIBUTED before it
+     can reach a provider or consume a budget, and a caller that genuinely belongs to no
+     organisation says so by passing PLATFORM_ORG — a visible token somebody can grep for, rather
+     than an omission that looks identical to a mistake.
 
-     WHY IT MATTERS. An unattributed call spends from a bucket named `unattributed`, shared by
-     every organisation on the deployment — so the per-org budget, whose entire purpose is that
-     one org cannot starve the others, does not apply to those call sites at all. The telemetry is
-     likewise unattributed.
+     Two things are checked, because the code rule and the source count fail differently: the
+     REFUSAL is behavioural, and the source scan is what catches a new call site written without
+     attribution before anybody runs it. ── */
+  let unattributed = null;
+  try { await ai.complete({ user: 'hello', taskType: 'no_org_test' }); }
+  catch (e) { unattributed = e; }
+  ok('PB9 A MODEL CALL WITH NO ORGANISATION IS REFUSED — missing attribution cannot silently return, because the bucket it used to fall into was shared by every organisation',
+    !!unattributed && unattributed.code === 'LLM_UNATTRIBUTED');
+  ok('PB9b …and the refusal names the fix rather than only the fault, so the next caller is not left guessing what to pass',
+    /PLATFORM_ORG/.test(unattributed.message) && /no_org_test/.test(unattributed.message));
 
-     Counted properly now, with the true numbers frozen as a BILL that must shrink. ── */
+  let blank = null;
+  try { await ai.complete({ user: 'hello', org: '   ', taskType: 'blank_org' }); }
+  catch (e) { blank = e; }
+  ok('PB9c …and whitespace is not attribution either — an empty string is the same omission with a value in front of it',
+    !!blank && blank.code === 'LLM_UNATTRIBUTED');
+
+  const platform = ai.PLATFORM_ORG;
+  ok('PB9d a caller that genuinely belongs to no organisation says so DELIBERATELY, with a token somebody can grep for',
+    typeof platform === 'string' && platform.length > 0);
+
+  /* THE OTHER PROVIDER DOORS. complete() was never the only way out: understand() and
+     transcribe() call the provider directly and had NO budget check at all — not the shared
+     bucket, no bucket. Neither has a caller in the tree today, which is precisely why nobody
+     noticed; the rule is applied so the FIRST one cannot arrive unmetered. */
+  for (const [name, fn] of [['understand', () => ai.understand({ prompt: 'x' })],
+                            ['transcribe', () => ai.transcribe(Buffer.from(''), {})],
+                            ['searchWeb',  () => ai.searchWeb({ query: 'x' })]]) {
+    let err = null;
+    try { await fn(); } catch (e) { err = e; }
+    ok(`PB9e ${name}() also refuses an unattributed call — complete() was never the only door out of this process`,
+      !!err && (err.code === 'LLM_UNATTRIBUTED' || /deterministic-only/.test(err.message)));
+  }
+
+  /* THE SOURCE SCAN. Counts by brace-matching each call's own argument object, so it sees
+     ai.completeJSON, calls without `await`, and attribution written any way at all — the previous
+     patterns missed all three and reported 16 of 35 when the file held 35. A guard that reports
+     less than half of what exists is not lenient, it is a guard that will never see the next one. */
   const calls = [...server.matchAll(/\bai\.(?:complete|completeJSON)\s*\(/g)];
-  const attributed = calls.filter(m => {
-    // The call's own argument object, by brace matching from the opening paren.
+  const missing = calls.filter(m => {
     let d = 0, end = m.index;
     for (let i = m.index + m[0].length - 1; i < server.length; i++) {
       if (server[i] === '(') d++;
       else if (server[i] === ')') { d--; if (d === 0) { end = i; break; } }
     }
-    return /\borg:\s*[^,}]/.test(server.slice(m.index, end + 1));
-  }).length;
-
-  ok(`PB9 every model exit is counted, not just the ones an old pattern happened to match (found ${calls.length})`,
-    calls.length >= 30);
-
-  /* THE BILL. 21 call sites still spend from the shared `unattributed` bucket. They are recorded
-     rather than hidden, and the number may only go DOWN — the check fails if it grows, which is
-     what stops the next unattributed call being added silently. */
-  const UNATTRIBUTED_DEBT = 14;
-  const unattributed = calls.length - attributed;
-  ok(`PB10 the unattributed debt does not GROW — ${unattributed} of ${calls.length} model exits still spend from the shared bucket every org draws on, which is the per-org budget not applying to them (bill: ${UNATTRIBUTED_DEBT})`,
-    unattributed <= UNATTRIBUTED_DEBT);
-  ok(`PB10b …and the majority ARE attributed, so the budget is a real instrument rather than a decoration (${attributed} of ${calls.length})`,
-    attributed >= 21);
-
+    return !/\borg:\s*[^,}\s]/.test(server.slice(m.index, end + 1));
+  });
+  if (missing.length) {
+    console.error('       unattributed call sites at lines:',
+      missing.map(m => server.slice(0, m.index).split('\n').length).join(', '));
+  }
+  ok(`PB10 EVERY model exit in server.js names the organisation it is spending on (${calls.length} calls, ${missing.length} unattributed)`,
+    calls.length >= 30 && missing.length === 0);
   console.log(`\nprovider-boundary-smoke: ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

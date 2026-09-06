@@ -20,6 +20,12 @@ jobs:
       # deterministic behaviour with the model OFF, and CI must never carry a live key.
     steps:
       - uses: actions/checkout@v4
+        with:
+          # docs-status-smoke checks that docs/INDEX.md names a commit that is a real ancestor
+          # of HEAD, and how far behind it is. checkout's default is a single commit, so that
+          # commit was not in the clone at all and the guard reported "not an ancestor" — true
+          # of the shallow clone, false of the repository. Same fix as #81 (codex).
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4

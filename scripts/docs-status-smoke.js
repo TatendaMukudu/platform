@@ -30,16 +30,33 @@ ok('docs/INDEX.md exists', !!index);
   const m = index && index.match(/\*\*Written against:\*\*\s*`([0-9a-f]{7,40})`/);
   ok('the index names the commit it was written against', !!m);
   if (m) {
-    let ancestor = false, age = null;
+    /* "NOT AN ANCESTOR" AND "NOT IN THIS CLONE" ARE DIFFERENT FACTS, and saying the first when
+       the second is true cost real time. CI checked out a single commit, so the index's SHA was
+       not present at all, and this reported the index as describing a branch nobody is on — a
+       statement about the checkout dressed up as a statement about the documentation.
+
+       It still FAILS either way. A guard that skips itself when it cannot check is a guard that
+       does nothing on the one machine that gates the merge, which is the whole defect this
+       codebase keeps finding in its own assertions. It just says which of the two it is. */
+    const shallow = fs.existsSync(path.join(ROOT, '.git', 'shallow'));
+    let ancestor = false, age = null, present = false;
     try {
+      execFileSync('git', ['cat-file', '-e', `${m[1]}^{commit}`], { cwd: ROOT, stdio: 'ignore' });
+      present = true;
       execFileSync('git', ['merge-base', '--is-ancestor', m[1], 'HEAD'], { cwd: ROOT, stdio: 'ignore' });
       ancestor = true;
       age = Number(execFileSync('git', ['rev-list', '--count', `${m[1]}..HEAD`], { cwd: ROOT }).toString().trim());
     } catch (_) {}
-    ok(`its commit ${m[1]} is an ancestor of HEAD`, ancestor);
+    const why = present ? '' : (shallow
+      ? ' — it is not in this clone, which is SHALLOW: the checkout needs full history (fetch-depth: 0), the index is not necessarily wrong'
+      : ' — it is not in this clone at all');
+    ok(`its commit ${m[1]} is an ancestor of HEAD${ancestor ? '' : why}`, ancestor);
     // Twenty is generous. The point is to catch an index describing a different month, not to
     // demand a rewrite every commit.
-    ok(`it is not badly stale (${age === null ? '?' : age} commits behind HEAD)`, age !== null && age <= 20);
+    ok(present
+      ? `it is not badly stale (${age === null ? '?' : age} commits behind HEAD)`
+      : 'how far behind HEAD the index is cannot be counted from this clone (see above)',
+      age !== null && age <= 20);
   }
 }
 

@@ -747,6 +747,11 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
    out of reach. It sticks while the conversation is on screen and releases at the next box. */
 .iq-composer-wrap{display:flex;flex-direction:column;gap:0.4rem;position:sticky;bottom:0;z-index:2;background:var(--bg-base);padding-bottom:0.35rem}
 .iq-composer{display:flex;align-items:flex-end;gap:0.5rem;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);padding:0.55rem 0.6rem 0.55rem 0.9rem;transition:border-color .18s ease,box-shadow .18s ease}
+/* THE STACKED VARIANT IS GONE, with the surface it existed for. It laid out the Library's note
+   composer as a column after the chat-row rules collapsed its input to about 160px on a phone.
+   The Library stopped making copies — a folder points at your live work now — so the composer
+   went, and the rules that existed only for it went with it rather than staying behind as CSS
+   nothing can reach. See scripts/ui-states-smoke.js US7. */
 .iq-composer:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow)}
 .iq-composer-input{flex:1 1 0%;min-width:0;background:transparent;border:none;outline:none;resize:none;color:var(--text-primary);font-size:16px;line-height:1.5;padding:0.35rem 0;max-height:180px;min-height:24px}
 .iq-composer-input::placeholder{color:var(--text-muted)}

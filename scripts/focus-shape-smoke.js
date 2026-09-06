@@ -91,9 +91,44 @@ const server = app.listen(0, async () => {
     const app_ = R('js/app.js');
     ok('FS7 the focus form uses the shared field rather than its own textarea',
       /class="iq-field"><textarea id="\$\{id\}-t" class="iq-field-input"/.test(app_));
+    /* FS7b — ASSERTS THE LAW, NOT THE SYNTAX. This used to pin the exact inline literal
+       `body: JSON.stringify({ text, target, reviewOn,` and went red the moment that object was
+       given a name so a 401 handler could stash it as a draft. The rule being protected is that
+       the target and the date are asked for and sent, and that survives the refactor; the exact
+       spelling of the call never was the rule. */
     ok('FS7b …and the target and date are asked for on it, and sent',
       /What would tell you it worked\?/.test(app_) && /reviewOn/.test(app_) &&
-      /body: JSON\.stringify\(\{ text, target, reviewOn,/.test(app_));
+      /const body = \{ text, target, reviewOn,/.test(app_) &&
+      /fetch\('\/api\/me\/focus', \{ method: 'POST', headers: this\._authHeaders\(\), body: JSON\.stringify\(body\) \}\)/.test(app_));
+    /* FS7c — THE SCREENSHOT. "Authentication required" printed over a filled-in focus while the
+       app looked signed in: the token lives in localStorage and the session lives on the server,
+       so a restart ends one and not the other and nothing revalidates until a write fails. The
+       words were then lost. A 401 now stashes the draft under the account that wrote it. */
+    /* FS7c — ANCHORED TO THIS FORM'S OWN HANDLER. The first version matched the bare pattern
+       `if (r.status === 401) { this._focusDraftStash(body);`, which the CHAT path also uses — so
+       deleting this one left the assertion green, satisfied by a different call site. Two places
+       save a focus and both must survive a dead session; each is now pinned where it lives. */
+    ok('FS7c a dead session does not cost somebody their words — the draft is kept, and kept for the account that wrote it',
+      /this\._focusDraftStash\(body\); tell\('You have been signed out/.test(app_) &&
+      /_focusDraftKey\(\) \{[\s\S]{0,240}iq_focus_draft_\$\{uid\}/.test(app_));
+    ok('FS7cc …and the draft is never replayed under another account, because the key is the writer\'s own id and a different signed-in person simply has no draft',
+      /const uid = \(window\.Auth && Auth\.currentUser && Auth\.currentUser\.id\) \|\| '';/.test(app_) &&
+      /return uid \? `iq_focus_draft_\$\{uid\}` : '';/.test(app_));
+    /* FS7d — THE LABEL IS GONE, AND SO IS THE PLACE IT LIVED.
+
+       "My whole squad" named an audience the focus does not enforce. My first fix reworded it,
+       which was right about this instance and wrong about the shape: a hand-written label is a
+       SECOND description of an access rule, and two descriptions of one rule drift. Every label,
+       explanation and head-count now comes from /api/me/audiences.
+
+       (The platform does have a real "The team" audience — node_members — and it is the one that
+       label was reaching for. It is deliberately not offered until the focus read path enforces
+       it; see the ENFORCED list in app.js.) */
+    ok('FS7d no audience label is written in the client at all — there is no second description left to drift',
+      !/>My whole squad</.test(app_) && !/>Whoever leads me</.test(app_) &&
+      !/Whoever leads a group you are in can see this/.test(app_));
+    ok('FS7e …the chips are built from the route, with the live head-count shown, because "12 people" says what no adjective does',
+      /fetch\('\/api\/me\/audiences'/.test(app_) && /iq-aud-n/.test(app_));
 
     /* ── FS8: THE ONE THAT MATTERS FOR THE FEEL. A new input surface must inherit the shell
        rather than invent one, or this drifts apart again the next time somebody adds a box. ── */

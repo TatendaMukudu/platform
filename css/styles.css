@@ -26,6 +26,11 @@
   --border-light: #2e3859;
 
   --accent:       #4f8ef7;
+  /* THE SAME BLUE, DARKENED ONLY WHERE WHITE TEXT SITS ON IT. White on #4f8ef7 is 3.21:1, so
+     every filled primary button was below the readable line. The accent itself is unchanged —
+     borders, rings, lines and icons keep the brand colour — and this variant exists purely for
+     filled surfaces that carry label text. White on it is 4.88:1. */
+  --accent-strong: #2f6fd0;
   --accent-glow:  rgba(79,142,247,0.18);
   --accent2:      #7c5af5;
   --accent3:      #0ecfb0;
@@ -34,9 +39,18 @@
   --warning:      #f7a84f;
   --success:      #4ff77a;
 
-  --text-primary:   #e8ecf8;
-  --text-secondary: #8b96b8;
-  --text-muted:     #4e5878;
+  /* THE TEXT RAMP, MEASURED RATHER THAN EYEballed.
+
+     --text-muted was #4e5878: 2.78:1 against the page and 2.16:1 on a hovered card — well under
+     the 4.5:1 anybody can read comfortably, and it was carrying real content (empty states,
+     provenance lines, the "who can see this" link), not just decoration. Measured in a browser at
+     phone width; the numbers below are the worst case of the four surfaces it appears on.
+
+     The three steps stay clearly distinct so primary, secondary and muted still rank visually —
+     lifting muted alone would have collapsed it into secondary and lost the hierarchy. */
+  --text-primary:   #e8ecf8;   /* 15.9:1 on the page */
+  --text-secondary: #a8b2d0;   /*  8.6:1 on the page, 5.9:1 on a hovered card */
+  --text-muted:     #8089b3;   /*  5.7:1 on the page, 4.5:1 on a hovered card */
 
   /* Aliases that rules across this file already referenced but nothing ever defined, so every
      one of them was silently taking its fallback — a colour from a design system that is not
@@ -216,18 +230,44 @@ img { max-width: 100%; }
 .org-tile:hover { border-color: var(--accent); background: var(--accent-glow); }
 .org-tile.active { border-color: var(--accent); background: var(--accent-glow); color: var(--accent); }
 
+/* ── THE ACTION RAMP: PRIMARY, SECONDARY, DISABLED ────────────────────────────────────────
+   Three ranks that must be tellable apart at a glance on a phone. They were not: the primary
+   filled button was a blue-to-PURPLE gradient (the founder's brief is a blue accent, and the
+   Notes "Add" button was rendering violet), its white label sat at 3.21:1 on the lighter end of
+   that gradient, and there was no shared disabled treatment at all — so a button mid-request
+   looked exactly like one waiting to be pressed. */
 .btn-primary {
   width: 100%;
   padding: 0.8rem;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  /* Solid, and the darker end of the same blue: white on it is 4.88:1 rather than 3.21:1. */
+  background: var(--accent-strong);
   border-radius: var(--radius-sm);
   font-weight: 600;
   font-size: var(--fs-lg);
   color: #fff;
-  transition: opacity 0.2s, transform 0.15s;
+  transition: background 0.2s, opacity 0.2s, transform 0.15s;
 }
-.btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
+.btn-primary:hover { background: var(--accent); transform: translateY(-1px); }
 .btn-primary:active { transform: translateY(0); }
+.btn-accent { background: var(--accent-strong); }
+
+/* SECONDARY reads as an outline: the same blue, carried by the border and the label rather than
+   a fill, so it never competes with the primary for the eye. */
+.btn-outline { border-color: var(--border-light); color: var(--text-primary); }
+.btn-outline:hover { border-color: var(--accent); }
+
+/* DISABLED is one treatment everywhere. Dimmed AND desaturated AND not-allowed, because opacity
+   alone on a coloured fill still reads as "pressable, just further away". */
+.btn-primary:disabled, .btn-accent:disabled, .btn:disabled,
+.btn-outline:disabled, .btn-ghost:disabled, button:disabled {
+  opacity: 0.45;
+  filter: saturate(0.35);
+  cursor: not-allowed;
+  transform: none;
+}
+.btn-primary:disabled:hover, .btn-accent:disabled:hover, button:disabled:hover {
+  background: var(--accent-strong); transform: none;
+}
 
 /* ── APP SHELL ──────────────────────────────────────────── */
 #app {
@@ -1835,10 +1875,13 @@ img { max-width: 100%; }
   align-items: center;
 }
 .topbar-avatar-btn {
-  width: 32px;
-  height: 32px;
+  /* 44px is the platform tap target; this was 32 and sat beside two other small controls in a
+     crowded bar. The fill is the darker accent for the same reason the buttons are: white
+     initials on #4f8ef7 are 3.21:1, and initials are text. */
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--accent-strong);
   color: #fff;
   border: none;
   cursor: pointer;
@@ -2809,12 +2852,35 @@ details.intel-collapse[open] > summary::after { transform: rotate(90deg); }
 .iq-mic:focus-visible{outline:2px solid currentColor;outline-offset:2px}
 /* Listening is announced in text as well; this is the glance-level confirmation, never the
    only one, because colour alone says nothing to a screen reader. */
-.iq-mic.is-listening{color:#b91c1c;background:rgba(185,28,28,.10)}
+/* ── LISTENING SHOULD BE UNMISTAKABLE ─────────────────────────────────────────────────────
+   Founder: "Make voice feel responsive. Visible listening state, editable transcription, short
+   replies and an easy stop button."
+
+   The logic was already right — tap to speak, nothing ambient, the transcript arriving live in a
+   box you can edit. What was missing was being able to TELL. A tinted icon and a line of grey
+   text is not enough on a touchline: somebody who cannot see at a glance whether a microphone is
+   open will either stop trusting it or stop using it.
+
+   So while listening: the button becomes a filled STOP, the composer itself gets a ring, and a
+   pulsing dot sits beside the state line. Three signals rather than one, because a phone in
+   sunlight loses colour before it loses shape. */
+.iq-mic.is-listening{color:#fff;background:#b91c1c;border-radius:50%}
 @media (prefers-reduced-motion:no-preference){
   .iq-mic.is-listening{animation:iq-mic-pulse 1.6s ease-in-out infinite}
 }
 @keyframes iq-mic-pulse{0%,100%{box-shadow:0 0 0 0 rgba(185,28,28,.30)}50%{box-shadow:0 0 0 6px rgba(185,28,28,0)}}
 .iq-voice-state{font-size:var(--fs);color:var(--text-secondary);margin-top:.35rem;min-height:1rem;line-height:1.4}
+/* The state line while listening: brighter, and with a live dot in front of it. */
+.iq-voice-state.is-live{color:var(--text-primary);display:flex;align-items:center;gap:.45rem;font-weight:600}
+.iq-voice-state.is-live::before{content:'';width:.55rem;height:.55rem;border-radius:50%;
+  background:#ef4444;flex:0 0 auto;animation:iq-live-dot 1.2s ease-in-out infinite}
+.iq-voice-state.is-err{color:var(--warning)}
+@keyframes iq-live-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.8)}}
+@media (prefers-reduced-motion: reduce){ .iq-voice-state.is-live::before{animation:none} }
+/* The whole composer rings while a microphone is open, so the signal is where the eye already is
+   rather than only on a 44px button. */
+.iq-composer.is-listening, .iqt-composer.is-listening,
+.iq-field.is-listening{border-color:#ef4444;box-shadow:0 0 0 3px rgba(239,68,68,.18)}
 
 .iq-inq-actions{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.6rem}
 .iq-inq-more,.iq-inq-ask{min-height:44px;padding:.4rem .8rem;border-radius:999px;cursor:pointer;
@@ -3101,6 +3167,79 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
   white-space:pre-wrap;word-break:break-word;background:var(--bg-card);border:1px solid var(--border);
   border-radius:12px;padding:.75rem;margin:0}
 
+/* ── TAP TARGETS ON A PHONE ────────────────────────────────────────────────────────────────
+   Measured in a browser at 390px: the small controls were 12-29px tall against a platform
+   guidance of 44. That is the difference between a control that works and one a person taps
+   twice. Padding is used rather than height so nothing changes shape on a desktop, and the
+   minimum only applies where a thumb is the input device.
+
+   `min-height` with inline-flex centring, so a 22px chip becomes a 44px target without its label
+   moving or its border growing. */
+@media (max-width: 640px) {
+  .btn, .btn-sm, .btn-outline, .btn-ghost, .btn-primary, .btn-accent,
+  .iq-make-chip, .note-tag-btn, .iq-fp-more, .iqt-sec-b, .iqt-mat-add, .iqt-sec-send,
+  .iqc-btn, .iq-privacy-chip, .iq-composer-privacy,
+  .composer-actions button, .iq-proposal-actions button, #note-composer-tools button {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* A text link is not a button and should not grow a box, but it still has to be tappable —
+     the padding gives it the height without a border appearing around it. */
+  .iq-hint-link, a.iq-hint-link { display: inline-block; padding: .8rem 0; min-height: 44px; box-sizing: border-box; }
+}
+
+/* ── MOBILE HEADER: SAY THE PAGE'S NAME ONCE ───────────────────────────────────────────────
+   The top bar names the page and the page then named itself again directly underneath — "Notes"
+   twice, in a band about 200px tall on a phone, before any content. The in-page title is hidden
+   at phone width where the bar already carries it, and its SUBTITLE is kept, because that line
+   says something the bar does not.
+
+   Home is the exception and stays: its page title is the person's name, not the page's, so it is
+   not a repeat of anything. */
+@media (max-width: 640px) {
+  .page-header-title:not(#home-name) { display: none; }
+  .page-header { margin-bottom: .6rem; }
+  /* The organisation's name is the least load-bearing thing in a crowded bar — the avatar and the
+     menu already say whose account this is, and the name reappears in settings. */
+  .topbar-org, #topbar-org-name { display: none; }
+}
+
+/* "Work on this" is the one verdict that DOES something rather than closing something, so it
+   leads the row. The other three are ways to put a belief down; this is the way to pick it up. */
+.iqt-verdict.is-do{border-color:var(--accent);color:var(--text-primary)}
+.iqt-verdict.is-do:hover{background:var(--accent-soft)}
+.iq-fp-audrow{display:flex;flex-wrap:wrap;gap:.4rem;margin:.5rem 0 0}
+.iq-aud-n{opacity:.7;font-variant-numeric:tabular-nums}
+.iq-make-chip.is-off{opacity:.45;cursor:not-allowed}
+/* Where a focus came from, on the focus. Quiet — it is provenance, not content. */
+.iq-fp-from{font-size:var(--fs-sm);color:var(--text-muted);margin:.25rem 0 0}
+
+/* ── FOUR STATES, FOUR LOOKS ──────────────────────────────────────────────────────────────
+   Loading, failed, empty and populated are different facts about the world, and a screenshot
+   proved they were rendering as the same one: with the objects request aborted, Home was
+   pixel-identical to Home with no data. Failure gets a border and a way back; emptiness is quiet
+   and says what is on the record rather than what the person has not done. */
+.iq-home-loading, .iq-state-loading{font-size:var(--fs);color:var(--text-muted);padding:1rem 0;text-align:center}
+.iq-home-empty{font-size:var(--fs-md);color:var(--text-muted);text-align:center;line-height:1.6;padding:1rem 0}
+.iq-home-failed, .iq-state-failed{border:1px solid var(--border-light);border-left:3px solid var(--warning);
+  border-radius:var(--radius);padding:.85rem;margin:.5rem 0;background:var(--bg-card)}
+.iq-home-failed p, .iq-state-failed p{margin:0 0 .6rem;font-size:var(--fs);color:var(--text-secondary);line-height:1.5}
+
+/* ── THE FOCUS PROPOSAL, IN THE CONVERSATION ───────────────────────────────────────────────
+   Compact on purpose: one line of their own words, one action, and everything else behind a
+   disclosure. A proposal that fills the screen stops being a suggestion. */
+.iq-focusprop .iq-field{margin:.5rem 0 0}
+.iq-fp-more{background:none;border:0;padding:.35rem 0;font-size:var(--fs-sm);color:var(--accent);
+  cursor:pointer;text-decoration:underline;text-underline-offset:2px;min-height:44px}
+.iq-fp-extra{margin:.25rem 0 0}
+.iq-fp-said{font-size:var(--fs-sm);color:var(--text-muted);margin:.4rem 0 0;line-height:1.45}
+.iq-fp-text{font-size:var(--fs-md);color:var(--text-primary);margin:.4rem 0 .2rem;line-height:1.5}
+.iq-fp-meta{font-size:var(--fs-sm);color:var(--text-muted);line-height:1.5;margin:.15rem 0}
+.iq-focusdone{border-left:3px solid var(--success)}
+.iq-fp-signin{margin:.6rem 0 0;padding-top:.6rem;border-top:1px solid var(--border)}
+
 /* Waiting on you — a leader's queue. Deliberately plain: it is a list of people who asked. */
 .iq-waiting-card{margin:0 0 .6rem;padding:.85rem}
 .iq-waiting-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin:0 0 .35rem}
@@ -3248,3 +3387,34 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .pm-observe{margin:.6rem 0 0}
 .pm-observe-form:empty{display:none}
 .pm-observe-form{display:flex;flex-direction:column;gap:.45rem;margin:.6rem 0 0}
+
+/* ── THE LIBRARY SHELF ────────────────────────────────────────────────────────
+   Folders that point at your work. Deliberately plain: this is a place people
+   come to FIND one specific thing, so nothing here competes for attention with
+   the thing they are looking for. Tokens only — the css-token-smoke guard
+   refuses raw hex here, and a shelf that ignored the theme would be the one
+   page in the app that did. */
+.shelf-bar{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.75rem}
+.shelf-hint{font-size:var(--fs-xs);color:var(--text-muted);flex:1 1 14rem;min-width:0}
+.shelf-folders{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.9rem}
+.shelf-folders:empty{display:none}
+.shelf-chip{min-height:36px;padding:.35rem .8rem;border-radius:999px;cursor:pointer;
+  font-size:var(--fs-sm);background:var(--surface-1);border:1px solid var(--border);color:var(--text-secondary)}
+.shelf-chip.active{color:var(--text-primary);border-color:var(--border-light);background:var(--surface-2)}
+.shelf-chip:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.shelf-count{font-size:var(--fs-xs);color:var(--text-muted);margin-left:.25rem}
+.shelf-row{display:flex;align-items:stretch;gap:.5rem;margin-bottom:.5rem}
+/* The whole card is the target, because a row you have to hit a small link inside
+   is a row people mis-tap on a phone. */
+.shelf-open{flex:1 1 auto;min-width:0;text-align:left;cursor:pointer;padding:.75rem .9rem;
+  border-radius:12px;background:var(--surface-1);border:1px solid var(--border);
+  display:flex;flex-direction:column;gap:.15rem}
+.shelf-open:hover{border-color:var(--border-light)}
+.shelf-open:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.shelf-kind{font-size:var(--fs-xs);font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-muted)}
+.shelf-label{font-size:var(--fs);color:var(--text-primary);line-height:1.4}
+.shelf-whose,.shelf-sub{font-size:var(--fs-xs);color:var(--text-muted)}
+.shelf-x{align-self:stretch;padding:.4rem .7rem;border-radius:12px;cursor:pointer;
+  font-size:var(--fs-xs);background:transparent;border:1px solid var(--border);color:var(--text-muted)}
+.shelf-x:hover{color:var(--text-primary);border-color:var(--border-light)}
+.shelf-x:focus-visible{outline:2px solid currentColor;outline-offset:2px}

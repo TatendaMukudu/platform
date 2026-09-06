@@ -353,6 +353,123 @@ const server = app.listen(0, async () => {
       /const gov = renderArtifact\.governArtifact\(\{ composed, dataset, format: 'summary' \}\);/.test(srv) &&
       /is not in the material you attached, so I fell back/.test(srv));
 
+    /* ── MR26-MR28: ONE DOCUMENT, MANY PLACES IT IS USED ────────────────────────────────────
+
+       Founder, on the tidiest way to hold material: it was stored ONCE PER ATTACHMENT. The same
+       deck attached to two focuses was two full copies with two ids, two reports, and two sets of
+       engagement nobody could read together.
+
+       It is now keyed by a checksum of its own text. And the moment that started working, this
+       suite went red in a way that found a hole in the design: one document used by two squads
+       would have mixed their cohorts. A document is shared; a READING of it is not. ── */
+    const sameAgain = await post('/api/materials', coachT, {
+      attachTo: { kind: 'focus', id: 'tf1' },
+      title: 'Saturday scouting (again)', filename: 'saturday-copy.pptx', kind: 'pptx', text: DECK,
+    });
+    ok('MR26 attaching the SAME document twice is one document, not a second copy — its identity is its text, not the name it was uploaded under',
+      sameAgain.status === 200 && sameAgain.j.already === true && sameAgain.j.materialId === MID);
+    ok('MR26b …and what people have already said about it stays with it, rather than splitting across two records',
+      /stays with it/i.test(sameAgain.j.note || ''));
+
+    /* USED IN A SECOND PLACE. Same document, different squad, different audience. */
+    const shared = await post('/api/materials', otherT, {
+      attachTo: { kind: 'focus', id: 'tf2' },
+      title: 'Same deck for the reserves', filename: 'saturday.pptx', kind: 'pptx', text: DECK,
+    });
+    ok('MR27 the same document can back a SECOND object without being stored again — one deck, two focuses, one record',
+      shared.status === 200 && shared.j.materialId === MID);
+    ok('MR27b …and it is listed on both, so a coach finds it where they used it',
+      ((await get('/api/objects/focus/tf1/materials', coachT)).j.materials || []).some(m => m.materialId === MID) &&
+      ((await get('/api/objects/focus/tf2/materials', otherT)).j.materials || []).some(m => m.materialId === MID));
+
+    /* MR28 — THE HOLE THE DEDUPLICATION EXPOSED. First Team has said plenty about this deck.
+       The Reserves have said nothing. Their report must not inherit First Team's answers. */
+    await post(`/api/materials/${MID}/engaged`, outT, { sectionId: 's1', state: 'not_yet' });
+    const reservesRep = await get(`/api/materials/${MID}/understanding`, otherT);
+    ok('MR28 A DOCUMENT IS SHARED; A READING OF IT IS NOT — the Reserves\' report counts only what the Reserves said, not First Team\'s six answers on the same deck',
+      reservesRep.j.cohort.said === 1 && reservesRep.j.cohort.of === 1);
+    const firstTeamRep = await get(`/api/materials/${MID}/understanding`, coachT);
+    ok('MR28b …and First Team\'s report is unchanged by a Reserves player answering on the same document',
+      firstTeamRep.j.cohort.said === 6 && firstTeamRep.j.cohort.of === 12);
+
+    /* MR29 — THE REF NAMES THE DOCUMENT AND THE PART, so a claim built on this stays checkable
+       after the focus that produced it has closed. And it still names nobody. */
+    const anyRef = (S.materialEngage[C][MID] || [])[0].ref;
+    ok('MR29 an engagement\'s ref names the DOCUMENT and the PART it is about, so it can still be opened after the focus that produced it has closed',
+      /^material:mat_[a-z0-9]+#s\d+:/.test(anyRef));
+    ok('MR29b …and still names nobody, because provenance refs travel to the client',
+      !SQUAD.some(id => new RegExp(`\\b${id}\\b`).test(anyRef)));
+
+    /* MR30 — THE CHART IS SCOPED TOO, and a mutation said this was unasserted. A chart is the
+       report with the argument removed, so it cannot be the looser surface: if the report counts
+       only this squad's reading of a shared document, the picture of it must as well. The
+       Reserves player answered 'not_yet' on s1 of the same deck; First Team's bars must not
+       have moved. */
+    const tf1Chart = await get('/api/objects/focus/tf1/chart', coachT);
+    const s1Not = (tf1Chart.j.chart.series.find(x => x.key === 'not_yet').points || [])
+      .find(pt => pt.key === 's1');
+    ok('MR30 the CHART is scoped to this squad\'s reading of the shared document too — a chart is the report with the argument removed, so it cannot be the looser surface',
+      s1Not && s1Not.value === 3);
+    /* MR30b — PRECISE, because my first version searched the chart JSON for the string "out" and
+       matched ordinary English. The refs deliberately name nobody, so the only exact way to ask
+       this is to take the OTHER squad's actual engagement ref and check it is absent. */
+    const outsiderRef = (S.materialEngage[C][MID] || []).find(e => e.personId === 'out').ref;
+    ok('MR30b …and the other squad\'s own engagement ref is nowhere in it',
+      !JSON.stringify(tf1Chart.j.chart).includes(outsiderRef));
+
+    /* ── MR31: WHAT GOES INTO THE TURN, AND WHO CHOSE IT. ───────────────────────────────────
+       The whole deck went in on every turn about the focus. The fix narrows it to the parts the
+       reader DECLARED they had not got — and the reason to assert this hard is not the byte count.
+       Whatever picks these sections decides what a person is allowed to be told, so it must be
+       their own hands and nothing else: no relevance score, no embedding, no reading of their
+       question for what they seem confused about. Declared, never inferred (L-MT2).
+
+       p1 said 'not_yet' on s1 back at MR11 and has said nothing about s2 or s3. */
+    const narrowed = S._materialContext(C, 'p1', 'focus:tf1');
+    ok('MR31 the turn is handed the part this reader SAID they had not got — declared by their own hand, never a guess at what they seem stuck on',
+      narrowed && narrowed.sectionIds.length === 1 && narrowed.sectionIds[0] === 's1' && /touchline/.test(narrowed.text));
+    ok('MR31b …and the parts they said nothing about are not in the text — a twenty-slide briefing shouted at once buries the one slide they asked about',
+      !/Rest defence/.test(narrowed.text) && !/near post flick/.test(narrowed.text));
+    /* MR31c — THE HONESTY BIT, and the one I nearly shipped broken. `partial` compared what was
+       included against the ALREADY-FILTERED set, so handing over one slide of three reported
+       partial:false and the composer would have been cleared to speak for the whole deck. It is
+       measured against the whole document or it means nothing. */
+    ok('MR31c …and it says on itself that this is PART of the document, measured against the whole and not against the selection',
+      narrowed.partial === true && narrowed.narrowed === true);
+    const narrowPrompt = composer.buildContext({ name: 'Player One', question: 'the traps', material: narrowed });
+    ok('MR31d …so the model is told these are the parts this person flagged, and told not to summarise the whole',
+      /parts this person said they had not got yet/i.test(narrowPrompt) && /do not summarise the whole/i.test(narrowPrompt));
+
+    /* MR31e — THE FALLBACK, which is what proves MR31 is a filter and not a permanent narrowing.
+       Silence is not a declaration that you understood everything (L-MT3), so somebody who has
+       declared nothing — a player on their first read, a coach who has never marked a slide —
+       gets the document as before. */
+    const wholeForP7 = S._materialContext(C, 'p7', 'focus:tf1');
+    ok('MR31e somebody who has declared nothing is handed the WHOLE document — silence is not a declaration that you understood everything, so it must not narrow anything',
+      wholeForP7 && wholeForP7.sectionIds.length === 3 && wholeForP7.narrowed === false && wholeForP7.partial === false);
+
+    /* MR31f — LATEST WORD WINS (L-MT4), so changing your mind changes what comes back rather than
+       stacking on top of what you said before. p1 adds s2, then takes s1 back. */
+    await post(`/api/materials/${MID}/engaged`, T.p1, { sectionId: 's2', state: 'not_yet' });
+    const two = S._materialContext(C, 'p1', 'focus:tf1');
+    ok('MR31f saying you have not got a second part brings that part in too',
+      two.sectionIds.join(',') === 's1,s2');
+    await post(`/api/materials/${MID}/engaged`, T.p1, { sectionId: 's1', state: 'got_it' });
+    const one = S._materialContext(C, 'p1', 'focus:tf1');
+    ok('MR31g …and saying you have now got the first one takes it back out — one voice per part, latest word wins, rather than an ever-growing pile of everything you ever struggled with',
+      one.sectionIds.join(',') === 's2');
+
+    /* MR31h — A DOCUMENT IS SHARED; A READING OF IT IS NOT, applied to the turn. The same law that
+       scopes the report scopes what goes into the conversation: what p1 said through the First
+       Team focus must not shape a turn about the Reserves focus, and vice versa. Written into the
+       store directly because no fixture user sits in both squads, which is the point — this asserts
+       the scope filter itself rather than a route that happens to exercise it. */
+    _engageOf(C, MID).push({ personId: 'p1', sectionId: 's3', state: 'not_yet', at: Date.now(),
+      ref: `material:${MID}#s3:scopetest`, on: { kind: 'focus', id: 'tf2' } });
+    const stillOne = S._materialContext(C, 'p1', 'focus:tf1');
+    ok('MR31h a declaration made through a DIFFERENT object does not narrow this one — the document is shared, the reading of it is not',
+      stillOne.sectionIds.join(',') === 's2');
+
     /* ── MR24: THE CALL SITES. A route with no caller is not a feature. ── */
     const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'app.js'), 'utf8');
     ok('MR24 the attach control exists and posts the extracted text — the parser has been in the browser all along and sent it nowhere',

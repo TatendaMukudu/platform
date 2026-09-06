@@ -731,7 +731,9 @@ const PAGE_TITLES = {
   assessments:  'MyWorkspace',
   apps:         'Apps',
   checkin:      'Check-In',
-  notes:        'Notes',
+  // Named for the nav item that opens it. The bar said Notes, the nav said Library and the
+  // page said both — one place with three names.
+  notes:        'Library',
   'my-data':    'My data & privacy',
   inquiry:      'Inquiries',
   focus:        'Focuses',
@@ -1469,14 +1471,16 @@ function launchApp(){
   // Use real orgCode from Auth session, fall back to derived
   const orgCode = Auth.currentUser?.orgCode || AppState.orgName.toLowerCase().replace(/\s+/g,'-');
   AppState.orgCode = orgCode;
-  // AUTHENTICATED, and the org comes from the session — this fired on every launch with no
-  // credential and overwrote orgStore for whatever code it was handed.
-  fetch('/api/platform/register-org', {
-    method: 'POST',
-    headers: Auth._headers(),
-    body: JSON.stringify({ orgName: AppState.orgName, orgMode: AppState.mode }),
-  }).catch(() => {});
+  /* THE LAUNCH-TIME WRITE IS GONE.
 
+     This POSTed to /api/platform/register-org on every single app start, sending back a name and
+     mode the client had itself derived from the server moments earlier — a mutation on every page
+     load that could only introduce drift, and the reason a write endpoint had to be reachable by
+     every member who opened the app.
+
+     Registering is now a settings change gated on `manage_settings`, which is where it belonged;
+     orgStore is a legacy mirror read only as a fallback behind orgMeta, so nothing depended on
+     this call keeping it warm. */
   console.log('[ROUTE] launchApp — done');
 }
 
@@ -8892,12 +8896,147 @@ const MemberApp = {
     await this._loadMessages();
   },
 
-  // _renderNotesPage: called when the user navigates to the Notes page.
+  /* ══════════════════════════════════════════════════════════════════════
+     THE LIBRARY — FOLDERS THAT POINT AT YOUR WORK.
+
+     Founder: "make library like chat gpt? In which you can open and name folders store focuses,
+     highs and lows of your choice there? So that it's easier to come back and navigate your work
+     if you are looking for something specific?"
+
+     What was here before was a box that made copies: type a note, or snapshot a conversation
+     into a flattened transcript stored beside the live one. The founder's own observation killed
+     it — "won't conversations, focuses save on their own?" They do. So the Library stops saving
+     and starts INDEXING, and every rule below follows from that one word.
+
+     Nothing on this page is fetched twice or held: the shelf is read fresh, labels come from the
+     server which read them from the live objects, and a row that is not in the response is not
+     on the page. There is deliberately no client-side cache of what was filed — a cache would be
+     a copy, and a copy is the thing this page exists to stop being.
+     ══════════════════════════════════════════════════════════════════════ */
+
+  // _renderNotesPage: called when the user navigates to the Library page.
   async _renderNotesPage() {
-    await this._loadMyGroups();
-    this._populateNoteGroupSelector();
-    if (typeof IQComposer !== 'undefined') IQComposer.mountAll();
-    await this._loadNotes();
+    await this._renderShelf();
+  },
+
+  _shelfFolder: null,   // which folder is open; null means everything
+
+  async _renderShelf() {
+    const list = document.getElementById('shelf-list');
+    const folders = document.getElementById('shelf-folders');
+    if (!list) return;
+    list.innerHTML = `<div class="iq-state-loading" role="status">Opening your library…</div>`;
+    let d = null;
+    try {
+      const res = await fetch('/api/library/shelf', { headers: this._authHeaders() });
+      /* A FAILURE IS NOT AN EMPTY LIBRARY. This page has made exactly this mistake before: both
+         the signed-out branch and the server-error branch fell through to the empty state, so a
+         dead session told somebody their work did not exist. Four states, and three of them are
+         not "you have nothing". */
+      if (res.status === 401) {
+        list.innerHTML = `<div class="iq-state-failed" role="alert">
+          <p>You have been signed out, so your library could not be opened. Everything in it is still there.</p>
+          <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._renderShelf()">Try again</button></div>`;
+        return;
+      }
+      if (!res.ok) {
+        list.innerHTML = `<div class="iq-state-failed" role="alert">
+          <p>Your library could not be opened just now (the server said ${res.status}). Nothing has been lost.</p>
+          <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._renderShelf()">Try again</button></div>`;
+        return;
+      }
+      d = await res.json();
+    } catch (_) {
+      list.innerHTML = `<div class="iq-state-failed" role="alert">
+        <p>Your library could not be opened — this looks like a connection problem, not an empty shelf.</p>
+        <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._renderShelf()">Try again</button></div>`;
+      return;
+    }
+
+    const all = d.items || [];
+    const open = this._shelfFolder;
+    if (folders) {
+      const chips = (d.folders || []).map(f => `
+        <button type="button" class="shelf-chip${open === f.id ? ' active' : ''}" onclick="MemberApp.openShelfFolder('${this._escape(f.id)}')">
+          ${this._escape(f.name)} <span class="shelf-count">${f.count}</span>
+        </button>`).join('');
+      folders.innerHTML = chips
+        ? `<button type="button" class="shelf-chip${open ? '' : ' active'}" onclick="MemberApp.openShelfFolder(null)">Everything <span class="shelf-count">${all.length}</span></button>${chips}`
+        : '';
+    }
+    const hint = document.getElementById('shelf-hint');
+    if (hint) hint.textContent = d.note || '';
+
+    const items = open ? all.filter(i => i.folderId === open) : all;
+    if (!items.length) {
+      /* The empty state has to be true about WHY it is empty, and there are two reasons. An open
+         folder with nothing in it is not the same as a library nobody has used, and telling
+         somebody "nothing here yet" when they have filed twenty things elsewhere reads as loss. */
+      list.innerHTML = all.length
+        ? `<div class="empty-card"><div>Nothing is in this folder yet. Your other ${all.length} ${all.length === 1 ? 'item' : 'items'} are still there — choose Everything to see them.</div></div>`
+        : `<div class="empty-card"><div>Your library is empty. Open a focus, a high, a low or a conversation and choose Keep to put it here — it stays live, and this only remembers where it is.</div></div>`;
+      return;
+    }
+
+    const KIND = { focus: 'Focus', high: 'High', low: 'Low', inquiry: 'Inquiry', conversation: 'Conversation', material: 'Material' };
+    list.innerHTML = items.map(i => `
+      <div class="shelf-row">
+        <button type="button" class="shelf-open" onclick="MemberApp.openFromShelf('${this._escape(i.kind)}','${this._escape(i.refId)}')">
+          <span class="shelf-kind">${this._escape(KIND[i.kind] || i.kind)}</span>
+          <span class="shelf-label">${this._escape(i.label)}</span>
+          ${i.whose ? `<span class="shelf-whose">${this._escape(i.whose)}</span>` : ''}
+          ${i.sub ? `<span class="shelf-sub">${this._escape(i.sub)}</span>` : ''}
+        </button>
+        <button type="button" class="shelf-x" title="Take off the shelf" onclick="MemberApp.unfileFromShelf('${this._escape(i.id)}')">Remove</button>
+      </div>`).join('');
+  },
+
+  openShelfFolder(id) { this._shelfFolder = id || null; this._renderShelf(); },
+
+  async newShelfFolder() {
+    const name = prompt('Name this folder');
+    if (!name || !name.trim()) return;
+    try {
+      const r = await fetch('/api/library/folders', { method: 'POST', headers: this._authHeaders(),
+        body: JSON.stringify({ name: name.trim() }) });
+      if (!r.ok) throw new Error(String(r.status));
+      await this._renderShelf();
+    } catch (_) { this.showToast('That folder could not be made. Nothing has changed.', 'warning'); }
+  },
+
+  /* KEEP THIS — the control that fills the shelf up, called from an object card.
+
+     The word is "Keep", not "Save". Save is what the old Library did and what everybody expects
+     it to mean: a copy, frozen, yours. This takes no copy and grants nobody anything, so the
+     toast says so in the same breath rather than leaving somebody to assume the usual thing. */
+  async fileToShelf(kind, id, folderId) {
+    try {
+      const r = await fetch('/api/library/shelf', { method: 'POST', headers: this._authHeaders(),
+        body: JSON.stringify({ kind, id, folderId: folderId || null }) });
+      const j = await r.json().catch(() => null);
+      if (!r.ok) throw new Error((j && j.error) || String(r.status));
+      this.showToast(j && j.moved ? 'Moved in your library' : 'Kept in your library — this points at it, it is not a copy', 'success');
+      if (document.getElementById('shelf-list')) await this._renderShelf();
+    } catch (_) { this.showToast('That could not be kept just now.', 'warning'); }
+  },
+
+  async unfileFromShelf(entryId) {
+    try {
+      const r = await fetch('/api/library/shelf/' + encodeURIComponent(entryId), { method: 'DELETE', headers: this._authHeaders() });
+      if (!r.ok) throw new Error(String(r.status));
+      this.showToast('Taken off your shelf. Nothing was deleted.', 'success');
+      await this._renderShelf();
+    } catch (_) { this.showToast('That could not be removed just now.', 'warning'); }
+  },
+
+  /* Opening a row goes to the thing itself, on the page that owns it — never to a copy rendered
+     here. `about` is the same address the object threads bind by, so this lands exactly where a
+     card on Home would. */
+  openFromShelf(kind, refId) {
+    // A conversation is resumed where conversations live; everything else has an object thread,
+    // and openObjectThread is the same door every other surface in the app uses to reach it.
+    if (kind === 'conversation') { this.navigate('home'); return; }
+    this.openObjectThread(kind === 'material' ? 'focus' : kind, refId);
   },
 
   /* ══════════════════════════════════════════════════════════════════════
@@ -9915,18 +10054,35 @@ const MemberApp = {
   async _loadNotes() {
     const el = document.getElementById('notes-list');
     if (!el) return;
-    el.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted);padding:1rem 0">Loading…</div>`;
+    el.innerHTML = `<div class="iq-state-loading" role="status">Loading your notes…</div>`;
+    /* A FAILURE IS NOT AN EMPTY LIBRARY. Both branches below used to end at _renderNotesList()
+       with an empty cache, so a dead session and a 500 both rendered "No notes yet. Write your
+       first one above." — telling somebody their notes do not exist because the request for them
+       did not come back. */
     try {
       const res = await fetch(
         `/api/notes?orgCode=${encodeURIComponent(this._orgCode)}&requesterId=${encodeURIComponent(this._userId)}`,
         { headers: this._authHeaders() }
       );
-      if (res.status === 401) { this._cachedNotes = []; this._renderNotesList(); return; }
-      const data = res.ok ? await res.json() : { notes: [] };
+      if (res.status === 401) {
+        el.innerHTML = `<div class="iq-state-failed" role="alert">
+          <p>You have been signed out, so your notes could not be loaded. They are still there.</p>
+          <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._loadNotes()">Try again</button></div>`;
+        return;
+      }
+      if (!res.ok) {
+        el.innerHTML = `<div class="iq-state-failed" role="alert">
+          <p>Your notes could not be loaded just now (the server said ${res.status}). Nothing has been lost.</p>
+          <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._loadNotes()">Try again</button></div>`;
+        return;
+      }
+      const data = await res.json();
       this._cachedNotes = data.notes || [];
       this._renderNotesList();
     } catch(e) {
-      el.innerHTML = `<div style="font-size:var(--fs);color:var(--danger)">Could not load notes.</div>`;
+      el.innerHTML = `<div class="iq-state-failed" role="alert">
+        <p>Your notes could not be loaded — this looks like a connection problem, not an empty library.</p>
+        <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._loadNotes()">Try again</button></div>`;
     }
   },
 
@@ -9938,12 +10094,14 @@ const MemberApp = {
       ? this._cachedNotes
       : this._cachedNotes.filter(n => n.tag === filter);
 
+    // A statement about what is stored, and a true one about where the box is: on this screen the
+    // composer genuinely is above the list.
     if (!this._cachedNotes.length) {
-      el.innerHTML = `<div class="empty-card"><div class="empty-icon"></div><div>No notes yet. Write your first one above.</div></div>`;
+      el.innerHTML = `<div class="empty-card"><div>Nothing saved to your library yet. The box above is where it starts.</div></div>`;
       return;
     }
     if (!notes.length) {
-      el.innerHTML = `<div class="empty-card"><div class="empty-icon"></div><div>No ${filter} notes yet.</div></div>`;
+      el.innerHTML = `<div class="empty-card"><div>Nothing here is tagged ${this._escape(filter)}. Your other notes are still there — clear the filter to see them.</div></div>`;
       return;
     }
 
@@ -10114,6 +10272,9 @@ const MemberApp = {
         <div id="iq-history" class="tdy-history" style="display:none"></div>
         <div class="iq-conversation" id="iq-conversation" aria-live="polite"></div>
       </div>
+      <!-- THE THING YOU AGREED TO TRY, asked when you come back. Placed INSIDE the conversation
+           area's flow rather than in a sidebar, because it is IntelliQ speaking, not a widget. -->
+      <div id="iq-continuity" aria-live="polite"></div>
       <div id="iq-brief" aria-live="polite"></div>
       ${/* THE BAR IS THE LAST THING ON THE PAGE. It used to sit inside the chat box, which put
             it ABOVE the card — so the one control a person always needs was in the middle of
@@ -10135,6 +10296,7 @@ const MemberApp = {
     // list, the brief — lives in its own bucket now, six at a time, priority first. Spamming
     // the first screen is how a person learns to skim it.
     this._loadTopQuestion();
+    this._loadContinuity();
     this._renderSubjectChip();
     this._restoreChat();
   },
@@ -10486,22 +10648,138 @@ const MemberApp = {
      It is the same card the buckets render, so home and the buckets can never drift apart, and
      tapping it opens the same thread. If there is nothing yet, home says so in one line rather
      than showing an empty frame. */
+  /* FOUR STATES, NOT TWO — and the missing distinction was a real defect a screenshot proved.
+
+     This used to `.catch(() => null)` every request and then ask one question: is there a top
+     item? A FAILED LOAD and an EMPTY RECORD produced byte-identical screens, so a person whose
+     network dropped was told, in the product's own voice, that there was nothing to look at.
+     Verified in a browser before and after: with /api/objects aborted, this page was previously
+     pixel-identical to the same page with no data.
+
+     The four are now distinct because they mean different things and want different responses:
+       LOADING    say so, briefly
+       FAILED     say the records could not be READ, and offer to try again
+       EMPTY      say what is on the record, which is nothing yet — a statement about the
+                  RECORD, never a judgment about the person. "Nothing yet" plus an instruction
+                  to talk more reads as a verdict on how interesting they have been.
+       POPULATED  the card */
+  /* ── "YOU WANTED TO TRY A CAPTAIN-LED RESET. DID YOU GET A CHANCE?" ──────────────────────
+     Founder: "That is where memory becomes useful: remembering the agreed experiment, what
+     remains unresolved, and what would be worth asking next."
+
+     Rendered as IntelliQ SPEAKING, not as a task widget with a checkbox. The difference matters:
+     a checkbox asks you to report compliance, a question asks you what happened. It quotes the
+     person's own words back rather than a paraphrase, because the whole point is that they
+     recognise what they said.
+
+     THREE ANSWERS, AND ONLY ONE OF THEM IS ABOUT THEM. "We did not play" and "I did not get round
+     to it" and "I tried it" are three different facts; a done/not-done control would read a
+     fixture list as a character flaw. */
+  async _loadContinuity() {
+    const box = document.getElementById('iq-continuity');
+    if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    let d = null;
+    try { d = await fetch('/api/me/context', { headers: this._authHeaders() }).then(r => (r.ok ? r.json() : null)); } catch (_) {}
+    const c = d && d.ok && d.continuity;
+    // No agreed experiment waiting is the ordinary case and says nothing at all. An empty
+    // "nothing to follow up" line would be one more thing to read past.
+    if (!c) { box.innerHTML = ''; return; }
+    box.innerHTML = `
+      <div class="iq-msg iq-msg-iq iq-continuity" data-focus="${esc(c.focusId)}">
+        <p class="iq-response-text">${esc(c.question)}</p>
+        <div class="iq-proposal-actions">
+          <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp.answerTried('${esc(c.focusId)}','yes')">I tried it</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp.answerTried('${esc(c.focusId)}','no_chance')">No chance yet</button>
+          <button type="button" class="btn-ghost btn-sm" onclick="MemberApp.answerTried('${esc(c.focusId)}','not_yet')">Not yet</button>
+        </div>
+        <div class="iq-fp-said" id="cont-said" role="status" aria-live="polite"></div>
+      </div>`;
+  },
+
+  /* The answer lands on the focus and comes back with ONE question, so this continues the
+     conversation instead of ticking something off. Their words are optional — the declaration is
+     the fact, and asking for an account is not the same as requiring one. */
+  async answerTried(focusId, tried) {
+    const box = document.getElementById('iq-continuity');
+    const said = document.getElementById('cont-said');
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const because = String((document.getElementById('cont-because') || {}).value || '').trim();
+    if (said) said.textContent = 'Noting that…';
+    try {
+      const r = await fetch(`/api/me/focus/${encodeURIComponent(focusId)}/tried`, {
+        method: 'POST', headers: this._authHeaders(), body: JSON.stringify({ tried, because }),
+      });
+      if (r.status === 401) { if (said) said.textContent = 'You have been signed out — sign in again and it will still be here.'; return; }
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || `server said ${r.status}`);
+      if (!box) return;
+      // The follow-up question, with a box for it. Answering is optional; the box appearing is
+      // the invitation, not a requirement.
+      box.innerHTML = `
+        <div class="iq-msg iq-msg-iq iq-continuity">
+          <p class="iq-response-text">${esc(j.note)}</p>
+          <p class="iq-response-text">${esc(j.next)}</p>
+          <div class="iq-field"><textarea id="cont-because" class="iq-field-input" rows="2"
+            placeholder="In your own words — optional"></textarea></div>
+          <div class="iq-proposal-actions">
+            <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp.answerTried('${esc(focusId)}','${esc(tried)}')">Send that</button>
+          </div>
+          <div class="iq-fp-said" id="cont-said" role="status" aria-live="polite"></div>
+        </div>`;
+      if (because && said) said.textContent = 'Kept.';
+    } catch (e) {
+      if (said) said.textContent = `That did not save — ${(e && e.message) || 'unknown problem'}.`;
+    }
+  },
+
   async _loadTopQuestion() {
     const box = document.getElementById('iq-brief');
     if (!box) return;
-    const esc = s => this._escape(String(s == null ? '' : s));
     const kinds = ['inquiry', 'focus', 'low', 'high'];
+    box.innerHTML = `<p class="iq-home-loading" role="status">Looking at your record…</p>`;
+
     let all = [];
-    try {
-      const results = await Promise.all(kinds.map(k =>
-        fetch(`/api/objects?kind=${k}&scope=all`, { headers: this._authHeaders() })
-          .then(r => r.json()).catch(() => null)));
-      for (const j of results) if (j && j.objects) all = all.concat(j.objects.filter(o => !o.parked));
-    } catch (_) { all = []; }
+    let failures = 0;
+    const results = await Promise.all(kinds.map(k =>
+      fetch(`/api/objects?kind=${k}&scope=all`, { headers: this._authHeaders() })
+        .then(r => (r.ok ? r.json() : null))
+        .catch(() => null)));
+    for (const j of results) {
+      // A null is a request that did not come back, NOT a kind with nothing in it. The
+      // difference is the whole point of this function.
+      if (!j || !Array.isArray(j.objects)) { failures++; continue; }
+      all = all.concat(j.objects.filter(o => !o.parked));
+    }
+
+    if (failures === kinds.length) {
+      box.innerHTML = `<div class="iq-home-failed" role="alert">
+        <p>Your record could not be loaded just now. This is a connection problem, not an empty record —
+        nothing has been lost.</p>
+        <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._loadTopQuestion()">Try again</button>
+      </div>`;
+      return;
+    }
+
     all.sort((a, b) => (b.score || 0) - (a.score || 0));
     const top = all[0];
     if (!top) {
-      box.innerHTML = `<p class="iq-home-empty">Nothing yet. Tell me what is going on and I will start working it out.</p>`;
+      /* THE CONTRADICTION THIS BLOCK USED TO PRODUCE. #iq-brief sits directly BENEATH
+         #iq-conversation, so somebody mid-exchange read their own conversation and then, under
+         it, "Nothing yet" — the product denying what was on the screen a centimetre above.
+
+         Two fixes, and both are needed. It now NAMES what it describes: this block shows the
+         findings drawn from the record (inquiries, focuses, highs, lows), which is a different
+         thing from the conversation and was never labelled as one. And when a conversation is
+         actually on screen, the empty line is dropped entirely — at that moment it tells the
+         person nothing they cannot see and contradicts what they can. */
+      const talking = !!(document.getElementById('iq-conversation') || {}).childElementCount;
+      if (talking && !failures) { box.innerHTML = ''; return; }
+      // A STATEMENT ABOUT THE RECORD. Partial failure is admitted rather than presented as
+      // emptiness — some of this could not be read, and saying so costs nothing.
+      box.innerHTML = `<p class="iq-home-empty">${failures
+        ? 'Part of your record could not be loaded, so what is shown here may be incomplete.'
+        : 'No findings saved yet. As you talk, what IntelliQ works out will appear here.'}</p>`;
       return;
     }
     box.innerHTML = `<div class="iq-home-one">${this._objectCard(top, top.kind)}</div>`;
@@ -10552,41 +10830,85 @@ const MemberApp = {
      which exists in the DOM on every screen but is only visible on the bucket page — so
      tapping this on Home put it inside a hidden element and nothing happened. Same class of
      bug as the untappable card: assuming a container is visible because it exists. */
+  /* ── START A FOCUS FROM A BELIEF ─────────────────────────────────────────────────────────
+     Founder: after diagnosing something in a High, Low or Inquiry, that is exactly where you
+     want to put a focus on it.
+
+     The SAME card as everywhere else — a third way to make a focus would be a third place for the
+     audience label to drift. What is different is that it carries the belief: the focus remembers
+     what it is addressing, and when the person later reports whether trying it helped, that answer
+     feeds back onto the belief. Founder decision, taken deliberately, because it makes a person's
+     own action a way a belief can move.
+
+     Seeded with the belief's own title rather than a generated sentence, because the person is
+     about to edit it and a paraphrase is one more thing to undo. */
+  focusOnThis(kind, objectId, el) {
+    const title = (document.querySelector('.iqt-title') || {}).textContent || '';
+    this._focusAddresses = this._focusAddresses || {};
+    const row = el && el.closest ? el.closest('.iqt-verdicts') : null;
+    const host = row || el;
+    if (!host) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'iq-make-row';
+    host.parentNode.insertBefore(wrap, host.nextSibling);
+    const marker = document.createElement('span');
+    wrap.appendChild(marker);
+    // _openFocusForm replaces the element it is handed, so it lands exactly here.
+    this._openFocusForm(marker, String(title).trim().slice(0, 200));
+    // The card just created is the last one rendered; tag it with what it addresses.
+    const card = wrap.querySelector('.iq-focusprop');
+    if (card) this._focusAddresses[card.id] = { kind, id: objectId };
+    if (card) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  },
+
+  /* ── THE COMPACT PROPOSAL, NOT A FORM ────────────────────────────────────────────────────
+     Founder, from the live app: "creating a Focus still introduces the full form", and "No
+     separate form should make them repeat the discussion."
+
+     The form asked four questions — what, what would tell you it worked, when to look, who can
+     see it — at the moment somebody had just said all of that out loud. It read as an interview
+     about a decision they had already made.
+
+     What replaces it is the SAME card the conversation offers: one line of their own words, one
+     action, everything else behind a disclosure. Deliberately the same component from both entry
+     points, because two ways to make a focus is how the audience label and the backend rule came
+     to disagree in the first place. */
   _openFocusForm(el, seed) {
     const esc = s => this._escape(String(s == null ? '' : s));
     const id = 'ff_' + Math.random().toString(36).slice(2, 9);
+    this._focusProposals = this._focusProposals || {};
+    this._focusProposals[id] = { conversationId: this._chatConvId || null, messageIds: [] };
     const form = `
-      <div class="iq-focus-form" id="${id}">
-        <label class="iq-focus-label" for="${id}-t">What do you want to work on?</label>
-        <div class="iq-field"><textarea id="${id}-t" class="iq-field-input" rows="2"
-          placeholder="In your own words…">${esc(seed)}</textarea></div>
-
-        <!-- A FOCUS IS SOMETHING YOU WORK TOWARDS (founder, September 2026). One line of text
-             made "did what you tried help?" a feeling rather than a check. A target says what
-             would tell you it worked; a date says when to look. Both are asked, neither blocks:
-             some things genuinely have no clean finish line, and refusing to let somebody start
-             one until they invent a metric is how a tool teaches people to lie to it. -->
-        <label class="iq-focus-label" for="${id}-g">What would tell you it worked?</label>
-        <div class="iq-field"><textarea id="${id}-g" class="iq-field-input" rows="1"
-          placeholder="How you'd know — optional"></textarea></div>
-        <label class="iq-focus-label" for="${id}-d">When should we look at it?</label>
-        <input type="date" id="${id}-d" class="iq-field-date">
-
-        <div class="iq-focus-row">
-          <button type="button" class="iq-make-chip is-on" id="${id}-priv"
-            onclick="MemberApp._focusVis('${id}','private')">Just me</button>
-          <button type="button" class="iq-make-chip" id="${id}-with"
-            onclick="MemberApp._focusVis('${id}','with')">With people</button>
-          <button type="button" class="iq-make-chip" id="${id}-pub"
-            onclick="MemberApp._focusVis('${id}','shared')">My whole squad</button>
+      <div class="iq-proposal iq-focusprop" id="${id}">
+        <div class="iq-proposal-top">
+          <span class="iq-proposal-label">Keep working on this?</span>
+          <span class="iq-badge iq-badge-private" id="${id}-badge">Only me</span>
         </div>
+        <div class="iq-field"><textarea id="${id}-t" class="iq-field-input" rows="2"
+          aria-label="What you want to keep working on"
+          placeholder="In your own words…">${esc(seed)}</textarea></div>
+        <button type="button" class="iq-fp-more" id="${id}-more"
+          onclick="MemberApp._focusPropMore('${id}')">Add a target or a date</button>
+        <div class="iq-fp-extra" id="${id}-extra" hidden>
+          <label class="iq-focus-label" for="${id}-g">What would tell you it worked?</label>
+          <div class="iq-field"><textarea id="${id}-g" class="iq-field-input" rows="1"
+            placeholder="Optional"></textarea></div>
+          <label class="iq-focus-label" for="${id}-d">When should we look at it?</label>
+          <input type="date" id="${id}-d" class="iq-field-date">
+        </div>
+        <!-- WHO SEES IT, NAMED. The options and their descriptions come from the server, which
+             computes them from the access rule itself — see /api/me/audiences. A label written
+             here would be a second description of that rule, which is exactly how "My whole
+             squad" came to mean "whoever leads you". -->
+        <div class="iq-fp-aud" id="${id}-aud"></div>
         <div class="iq-focus-people" id="${id}-people" hidden></div>
         <div class="iq-focus-who" id="${id}-who">Only you can see this.</div>
-        <div class="iq-focus-row">
-          <button type="button" class="iq-make-chip" onclick="MemberApp._createFocus('${id}')">Make it a focus</button>
-          <button type="button" class="iq-make-chip" onclick="MemberApp._cancelFocus('${id}')">Not now</button>
+        <div class="iq-proposal-actions">
+          <button type="button" class="btn-primary btn-sm" id="${id}-go"
+            onclick="MemberApp.startFocusFromChat('${id}')">Start this focus</button>
+          <button type="button" class="btn-ghost btn-sm" onclick="MemberApp._cancelFocus('${id}')">Not now</button>
         </div>
-        <div class="iq-focus-said" id="${id}-said" role="status" aria-live="polite"></div>
+        <div class="iq-fp-said" id="${id}-said" role="status" aria-live="polite"></div>
       </div>`;
     const row = el && el.closest && el.closest('.iq-make-row');
     if (row) { row.innerHTML = form; }
@@ -10600,33 +10922,88 @@ const MemberApp = {
     }
     this._focusMode = this._focusMode || {};
     this._focusMode[id] = 'private';
+    this._renderAudiences(id);
     const t = document.getElementById(id + '-t');
     if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
   },
 
-  /* THREE settings, not two. Founder: "you should be able to invite specific players if you
-     want, not just make public to the entire group... think iMessage." Public and private are
-     the two a system finds easy; the one people actually reach for is "these people". */
-  _focusVis(id, mode) {
-    this._focusMode = this._focusMode || {};
-    this._focusMode[id] = mode;
-    const set = (suffix, on) => { const el = document.getElementById(id + suffix); if (el) el.classList.toggle('is-on', on); };
-    set('-priv', mode === 'private');
-    set('-with', mode === 'with');
-    set('-pub',  mode === 'shared');
-    const who = document.getElementById(id + '-who');
-    const people = document.getElementById(id + '-people');
-    // What it MEANS, not what it is called. "Public" tells a person nothing about who that is.
-    if (who) who.textContent = mode === 'shared' ? 'Anyone who leads a group you are in can see this.'
-      : mode === 'with' ? 'Only the people you pick can see this.'
-      : 'Only you can see this.';
-    if (!people) return;
-    if (mode !== 'with') { people.hidden = true; return; }
-    people.hidden = false;
-    if (people.dataset.loaded) return;
-    people.dataset.loaded = '1';
-    this._loadContacts(id, people);
+  /* ── THE AUDIENCE OPTIONS, FROM THE ONE ROUTE THAT ALREADY OWNS THEM ─────────────────────
+     Founder, from the live app: "Make the audience unmistakable. Use actual group or participant
+     names."
+
+     `/api/me/audiences` already existed and is already tested (`audience-disclosure-smoke`). It
+     is built from the person's REAL nodes, labels each one from the node ("Coaching staff ·
+     First Team"), resolves the reach live rather than remembering it, and carries a note that
+     deliberately refuses the word "anonymous".
+
+     I wrote a second one before finding it, and Express served mine because it was registered
+     first — silently shadowing the tested route with an untested one. That is the same defect as
+     the label that drifted from the rule, committed one level up: two implementations of a
+     question that has one answer. Mine is deleted; this reads the real one.
+
+     `reaches` is the honest part and it is shown: "The team · First Team (12 people)" tells
+     somebody what "share it" means in a way no adjective does. */
+  async _renderAudiences(id) {
+    const box = document.getElementById(id + '-aud');
+    if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    let j = null;
+    try { j = await fetch('/api/me/audiences', { headers: this._authHeaders() }).then(r => r.json()); } catch (_) {}
+    const all = (j && j.audiences) || [];
+    /* ONLY THE AUDIENCES A FOCUS ACTUALLY ENFORCES.
+
+       `/api/me/audiences` describes every audience the PLATFORM has. A focus honours two of them:
+       `self`, and `node_leaders` via its shared flag, read through _memberGoalsFor. It also has
+       its own invited-participants list, which is enforced.
+
+       `node_members` — "The team" — is a real, resolvable, governed audience, and it is the one
+       "My whole squad" was reaching for. It is NOT offered here, because the focus read path does
+       not enforce it: offering it would store a ref nothing honours, which is a worse version of
+       the exact bug this change exists to fix. Wiring it through is a founder decision, because
+       it materially widens what a personal focus can reach — from the people who lead you to
+       everybody you play alongside.
+
+       `node_forum` is a different act on a different surface: a focus is a commitment somebody
+       keeps, not a deliberation. */
+    const ENFORCED = ['self', 'node_leaders'];
+    const list = all.filter(a => ENFORCED.includes(a.kind));
+    if (!list.length) { box.innerHTML = ''; return; }
+    this._audiences = this._audiences || {};
+    this._audiences[id] = list;
+    this._audienceNote = (j && j.note) || '';
+    box.innerHTML = `<div class="iq-fp-audrow">${list.map((a, i) => `
+      <button type="button" class="iq-make-chip${i === 0 ? ' is-on' : ''}" id="${esc(id)}-aud-${i}"
+        onclick="MemberApp._pickAudience('${esc(id)}',${i})">${esc(a.label)}${
+        Number.isFinite(a.reaches) && a.kind !== 'self' ? ` <span class="iq-aud-n">${esc(a.reaches)}</span>` : ''}</button>`).join('')}</div>`;
+    this._pickAudience(id, 0);
   },
+
+  _pickAudience(id, i) {
+    const list = (this._audiences || {})[id] || [];
+    const chosen = list[i];
+    if (!chosen) return;
+    this._focusMode = this._focusMode || {};
+    this._focusMode[id] = chosen;
+    list.forEach((a, n) => {
+      const b = document.getElementById(`${id}-aud-${n}`);
+      if (b) b.classList.toggle('is-on', n === i);
+    });
+    const badge = document.getElementById(id + '-badge');
+    if (badge) badge.textContent = chosen.label;
+    const who = document.getElementById(id + '-who');
+    if (who) {
+      // The module's own explanation, plus the live count. Neither is written here, because a
+      // sentence written here is the second description that drifts.
+      const reach = (Number.isFinite(chosen.reaches) && chosen.kind !== 'self')
+        ? ` Right now that is ${chosen.reaches} ${chosen.reaches === 1 ? 'person' : 'people'}.` : '';
+      who.textContent = `${chosen.explanation || ''}${reach}`;
+    }
+  },
+
+  /* `_focusVis` lived here. It toggled three hard-coded chips — Just me / With people / My whole
+     squad — and wrote a sentence describing each. That sentence was the second description of the
+     access rule that drifted away from it. The chips are now built from /api/me/audiences, which
+     derives them FROM the rule, so there is nothing left here to keep in step. */
 
   /* The people you can address — a name, a role and the group you share, and nothing else.
      Deliberately NOT the set whose records you can read: being able to type somebody's name
@@ -10673,11 +11050,16 @@ const MemberApp = {
     try {
       const target = String((document.getElementById(id + '-g') || {}).value || '').trim();
       const reviewOn = String((document.getElementById(id + '-d') || {}).value || '').trim();
-      const r = await fetch('/api/me/focus', { method: 'POST', headers: this._authHeaders(),
-        body: JSON.stringify({ text, target, reviewOn,
-          share: mode === 'shared', participants: mode === 'with' ? picked : [] }) });
+      const body = { text, target, reviewOn,
+        share: mode === 'shared', participants: mode === 'with' ? picked : [] };
+      const r = await fetch('/api/me/focus', { method: 'POST', headers: this._authHeaders(), body: JSON.stringify(body) });
+      /* A DEAD SESSION MUST NOT COST SOMEBODY THEIR WORDS. This path printed "Authentication
+         required" over a filled-in form and left the person to retype it. The draft is kept
+         under the account that wrote it and offered back only to that account. */
+      if (r.status === 401) { this._focusDraftStash(body); tell('You have been signed out, so this could not be saved yet. Your words are kept for your account — sign in again and you can pick it back up.'); return; }
       const j = await r.json().catch(() => null);
       if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || `server said ${r.status}`);
+      this._focusDraftClear();
       const esc = s => this._escape(String(s == null ? '' : s));
       const f = document.getElementById(id);
       if (f) f.outerHTML = `<div class="iq-focus-made">
@@ -10810,6 +11192,19 @@ const MemberApp = {
       // the belief rather than inside an overflow menu nobody opens.
       const verdicts = `
         <div class="iqt-verdicts">
+          <!-- THE ENTRY POINT THAT WAS MISSING. Founder: "you can start it in highs, lows and
+               inquiries after diagnosing and discovering something you should be putting a focus
+               on." A belief thread had three verdicts and no way to DO anything about what it
+               had just told you — the one place a person is most likely to want to. -->
+          <button type="button" class="iqt-verdict is-do"
+            onclick="MemberApp.focusOnThis('${esc(kind)}','${esc(objectId)}',this)">Work on this</button>
+          <!-- KEEP, NOT SAVE. Save is what the old Library meant and what everybody reads it as:
+               a copy, frozen, yours. This puts a reference on your shelf so you can find this
+               again; the belief stays exactly where it is, still changing, still governed by
+               whoever it belongs to. Filing it says nothing about it — not agreement, not a
+               direction, and the kernel never hears about it (L-SH3). -->
+          <button type="button" class="iqt-verdict"
+            onclick="MemberApp.fileToShelf('${esc(kind)}','${esc(objectId)}')">Keep</button>
           <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('answered')">That's settled</button>
           <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('contest')">I disagree</button>
           <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('aside')">Not now</button>
@@ -11406,10 +11801,26 @@ const MemberApp = {
     if (!V || !V.isSupported()) { if (state) state.textContent = 'Voice input is not available in this browser — typing works as normal.'; return; }
     V.toggle(inputId, {
       onState: (name, message) => {
-        if (state) state.textContent = message || '';
+        const live = name === 'listening';
+        if (state) {
+          state.textContent = message || '';
+          state.classList.toggle('is-live', live);
+          state.classList.toggle('is-err', name === 'error');
+        }
         if (btn) {
-          btn.setAttribute('aria-pressed', name === 'listening' ? 'true' : 'false');
-          btn.classList.toggle('is-listening', name === 'listening');
+          btn.setAttribute('aria-pressed', live ? 'true' : 'false');
+          btn.classList.toggle('is-listening', live);
+          /* THE BUTTON BECOMES A STOP, in shape and in name. A microphone icon that means
+             "start" and also means "stop" asks somebody to remember which state they are in —
+             on a touchline, holding a phone, mid-sentence. A filled square does not. */
+          btn.setAttribute('aria-label', live ? 'Stop listening' : 'Speak instead of typing');
+          btn.setAttribute('title', live ? 'Stop listening' : 'Speak instead of typing');
+          btn.innerHTML = live
+            ? '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>'
+            : '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/></svg>';
+          // The composer itself rings, so the signal is where the eye already is.
+          const shell = btn.closest('.iq-composer, .iqt-composer, .iq-field');
+          if (shell) shell.classList.toggle('is-listening', live);
         }
       },
       onInput: () => { const i = document.getElementById(inputId); if (i) this._wsGrow(i); },
@@ -12140,6 +12551,7 @@ const MemberApp = {
       ? '<span class="iq-badge iq-badge-private">Private</span>'
       : '<span class="iq-badge iq-badge-share">Confirm to share</span>';
     const card = (p) => {
+      if (p.actionType === 'focus_proposal')   return this._renderFocusProposal(j, p);
       if (p.actionType === 'checkin_proposal') return this._renderCheckinProposal(j.turnId, p);
       if (p.actionType === 'checkin_log')      return this._renderCheckinLog(j.turnId, p);
       if (p.actionType === 'submit_work')      return this._renderSubmitWork(j.turnId, p);
@@ -12241,6 +12653,248 @@ const MemberApp = {
   },
 
   // Personalized check-in: what it relates to, when, whether the topic is referenced, expiry.
+  /* ── A FOCUS, PROPOSED IN THE CONVERSATION ───────────────────────────────────────────────
+     Founder direction: a focus should feel like a conversation we deliberately keep working on.
+
+     COMPACT AND EDITABLE. One line — their own sentence, handed back for them to change — and one
+     clear action. The target and the review date are NOT on the card: they are behind "Add a
+     target or a date", because asking somebody to invent a metric before they have agreed to the
+     thing is how a tool teaches people to make one up. Neither is ever required.
+
+     PRIVATE BY DEFAULT, said on the card rather than assumed. Widening is a separate act, on the
+     focus, afterwards.
+
+     The card carries the CONVERSATION it came from so the focus can remember where it started —
+     as a reference the server validates, never a copy of what was said. */
+  _renderFocusProposal(j, p) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const id = 'fp_' + String(p.id || Math.random().toString(36).slice(2, 9));
+    const suggested = String((p.payload && p.payload.text) || '');
+    // Remembered so the confirm handler can send the refs without re-reading the DOM, and so a
+    // conversation that has moved on does not change what this card points at.
+    this._focusProposals = this._focusProposals || {};
+    this._focusProposals[id] = {
+      conversationId: j.conversationId || this._chatConvId || null,
+      messageIds: [j.messageId].filter(Boolean),
+      turnId: j.turnId || null,
+    };
+    return `<div class="iq-proposal iq-focusprop" data-proposal="${esc(p.id)}" id="${esc(id)}">
+      <div class="iq-proposal-top">
+        <span class="iq-proposal-label">Would you like to keep working on this?</span>
+        <span class="iq-badge iq-badge-private">Private</span>
+      </div>
+      <div class="iq-field"><textarea id="${esc(id)}-t" class="iq-field-input" rows="2"
+        aria-label="What you want to keep working on">${esc(suggested)}</textarea></div>
+      <button type="button" class="iq-fp-more" id="${esc(id)}-more"
+        onclick="MemberApp._focusPropMore('${esc(id)}')">Add a target or a date</button>
+      <div class="iq-fp-extra" id="${esc(id)}-extra" hidden>
+        <label class="iq-focus-label" for="${esc(id)}-g">What would tell you it worked?</label>
+        <div class="iq-field"><textarea id="${esc(id)}-g" class="iq-field-input" rows="1"
+          placeholder="Optional"></textarea></div>
+        <label class="iq-focus-label" for="${esc(id)}-d">When should we look at it?</label>
+        <input type="date" id="${esc(id)}-d" class="iq-field-date">
+      </div>
+      <div class="iq-proposal-actions">
+        <button class="btn-primary btn-sm" id="${esc(id)}-go"
+          onclick="MemberApp.startFocusFromChat('${esc(id)}')">Start this focus</button>
+        <button class="btn-ghost btn-sm" onclick="MemberApp.dismissProposal('${esc(p.id)}')">Not now</button>
+      </div>
+      <div class="iq-fp-said" id="${esc(id)}-said" role="status" aria-live="polite"></div>
+    </div>`;
+  },
+
+  _focusPropMore(id) {
+    const extra = document.getElementById(id + '-extra');
+    const btn = document.getElementById(id + '-more');
+    if (!extra) return;
+    extra.hidden = !extra.hidden;
+    if (btn) btn.textContent = extra.hidden ? 'Add a target or a date' : 'Hide target and date';
+  },
+
+  /* CONFIRM — and STAY IN THE CONVERSATION.
+
+     The old flow said "Focus set" and pointed at the Focuses list, which ends the conversation at
+     the exact moment the person has just committed to continuing it. This replaces the card in
+     place with the focus attached, and asks the one question the server says is next.
+
+     THREE THINGS THIS HANDLES that the previous save did not:
+
+       DOUBLE TAP — the button disables on the first press. The server also dedupes on identical
+         open text, so a retry after a timeout finds the first call's work instead of leaving two.
+       A DEAD SESSION — a 401 here used to print "Authentication required" over a draft the person
+         then lost. The draft is kept under the account that wrote it and offered back after they
+         sign in as that same account, never another.
+       SUCCESS IS THE SERVER'S WORD — nothing reports "set" until the response says so. */
+  async startFocusFromChat(id) {
+    const t = document.getElementById(id + '-t');
+    const said = document.getElementById(id + '-said');
+    const go = document.getElementById(id + '-go');
+    const tell = m => { if (said) said.textContent = m; };
+    const text = String((t && t.value) || '').trim();
+    if (!text) { tell('Say what you want to keep working on.'); if (t) t.focus(); return; }
+    if (go && go.disabled) return;                    // a second tap while the first is in flight
+    if (go) { go.disabled = true; go.textContent = 'Starting…'; }
+    const src = (this._focusProposals || {})[id] || {};
+    /* THE AUDIENCE THE PERSON CHOSE, sent as the server's own vocabulary. `private` is the
+       default and stays the default: a card that arrives with something else pre-selected is a
+       card that shares by accident. */
+    /* The chosen audience, mapped to what the focus route enforces. `self` is the default and
+       stays the default — a card that arrives with anything else selected shares by accident. */
+    const chosen = (this._focusMode || {})[id];
+    const kind = (chosen && chosen.kind) || 'self';
+    const picked = [...document.querySelectorAll(`#${id}-people .iq-contact.is-on`)].map(b => b.dataset.uid);
+    const body = {
+      text,
+      target: String((document.getElementById(id + '-g') || {}).value || '').trim(),
+      reviewOn: String((document.getElementById(id + '-d') || {}).value || '').trim(),
+      share: kind === 'node_leaders',
+      participants: picked,
+      sourceConversationId: src.conversationId || null,
+      sourceMessageIds: src.messageIds || [],
+      // What this focus is addressing, when it was started from a belief. Validated server-side
+      // against the person's own view; a ref they cannot open becomes no ref at all.
+      addressesKind: ((this._focusAddresses || {})[id] || {}).kind || null,
+      addressesId: ((this._focusAddresses || {})[id] || {}).id || null,
+    };
+    try {
+      const r = await fetch('/api/me/focus', { method: 'POST', headers: this._authHeaders(), body: JSON.stringify(body) });
+      if (r.status === 401) { this._focusDraftStash(body); this._renderFocusSignIn(id); return; }
+      const jj = await r.json().catch(() => null);
+      if (!r.ok || !jj || !jj.ok) throw new Error((jj && jj.error) || `server said ${r.status}`);
+      this._focusDraftClear();
+      this._renderFocusAttached(id, jj);
+    } catch (e) {
+      if (go) { go.disabled = false; go.textContent = 'Start this focus'; }
+      tell(`That did not save — ${(e && e.message) || 'unknown problem'}. Your words are still here.`);
+    }
+  },
+
+  /* THE FOCUS, ATTACHED, IN THE THREAD. Confirmed work stays where the conversation is. */
+  _renderFocusAttached(id, j) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const card = document.getElementById(id);
+    if (!card) return;
+    const f = j.focus || {};
+    card.classList.remove('iq-focusprop');
+    card.classList.add('iq-focusdone');
+    card.innerHTML = `
+      <div class="iq-proposal-top">
+        <span class="iq-proposal-label">${esc(j.already ? 'Already open' : 'Focus started')}</span>
+        <span class="iq-badge iq-badge-private">${esc(f.visibility === 'private' ? 'Private' : f.visibility || 'Private')}</span>
+      </div>
+      <div class="iq-fp-text">${esc(f.text)}</div>
+      ${f.target ? `<div class="iq-fp-meta">Working: ${esc(f.target)}</div>` : ''}
+      ${f.reviewAt ? `<div class="iq-fp-meta">Review: ${esc(new Date(f.reviewAt).toLocaleDateString())}</div>` : ''}
+      <div class="iq-fp-meta">${esc(j.note || '')}</div>
+      <div class="iq-proposal-actions">
+        <button class="btn btn-outline btn-sm" onclick="MemberApp.openObjectThread('focus','${esc(f.id)}')">Open it</button>
+      </div>`;
+    // ONE USEFUL QUESTION, from the server, so confirming continues the conversation rather than
+    // ending it. Appended as IntelliQ's own turn because that is what it is.
+    if (j.next) {
+      /* Placed AFTER the message this card lives in, rather than into a named container — the
+         assistant's replies are rendered into whichever element the turn was targeted at, and
+         there is no single chat log to append to. Working from the card's own position is the
+         only thing true on every screen this can appear on. */
+      const anchor = card.closest('.iq-msg') || card;
+      const ask = document.createElement('div');
+      ask.className = 'iq-msg iq-msg-iq';
+      ask.innerHTML = `<p class="iq-response-text">${esc(j.next)}</p>`;
+      if (anchor.parentNode) {
+        anchor.parentNode.insertBefore(ask, anchor.nextSibling);
+        ask.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }
+  },
+
+  /* ── A DEAD SESSION MUST NOT COST SOMEBODY THEIR WORDS ────────────────────────────────────
+     The screenshot showed "Authentication required" over a filled-in focus while the app looked
+     signed in — because it WAS signed in as far as the client knew. The token lives in
+     localStorage and the session lives on the server; a restart or an expiry ends one and not the
+     other, and nothing revalidates until a write fails.
+
+     The draft is stashed under the ACCOUNT THAT WROTE IT. If somebody else signs in on this
+     device, it is not theirs and is never offered to them — a private draft replayed under
+     another account would be the worst possible version of "helpfully restored". */
+  _focusDraftKey() {
+    const uid = (window.Auth && Auth.currentUser && Auth.currentUser.id) || '';
+    return uid ? `iq_focus_draft_${uid}` : '';
+  },
+  _focusDraftStash(body) {
+    try {
+      const k = this._focusDraftKey();
+      if (k) localStorage.setItem(k, JSON.stringify({ ...body, at: Date.now() }));
+    } catch (_) { /* storage unavailable — the words are still on screen */ }
+  },
+  _focusDraftClear() {
+    try { const k = this._focusDraftKey(); if (k) localStorage.removeItem(k); } catch (_) {}
+  },
+  _focusDraftTake() {
+    try {
+      const k = this._focusDraftKey();
+      if (!k) return null;
+      const raw = localStorage.getItem(k);
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      // A stale draft is worse than none — somebody returning a week later does not want last
+      // week's half-sentence submitted on their behalf.
+      if (!d || !d.text || (Date.now() - (d.at || 0)) > 7 * 86400000) { localStorage.removeItem(k); return null; }
+      return d;
+    } catch (_) { return null; }
+  },
+  _renderFocusSignIn(id) {
+    const card = document.getElementById(id);
+    if (!card) return;
+    const said = document.getElementById(id + '-said');
+    if (said) said.textContent = '';
+    const go = document.getElementById(id + '-go');
+    if (go) { go.disabled = false; go.textContent = 'Start this focus'; }
+    const box = document.createElement('div');
+    box.className = 'iq-fp-signin';
+    box.innerHTML = `
+      <div class="iq-fp-meta">You have been signed out, so this could not be saved yet. Your words are kept
+      on this device for your account only — sign in again and you can pick it straight back up.</div>
+      <div class="iq-proposal-actions">
+        <button class="btn-primary btn-sm" onclick="MemberApp._focusSignInNow()">Sign in and come back</button>
+      </div>`;
+    card.appendChild(box);
+  },
+  _focusSignInNow() {
+    // The generic expiry path already exists and knows how to get somebody back in. This adds
+    // nothing to it except the draft, which is already stashed against their id.
+    if (typeof _showSessionExpired === 'function') _showSessionExpired();
+    else if (typeof Auth !== 'undefined' && Auth.logout) Auth.logout();
+  },
+
+  /* Offered on return, never applied automatically. Restoring somebody's words is helpful;
+     submitting them without being asked is not. */
+  resumeFocusDraft() {
+    const d = this._focusDraftTake();
+    if (!d) return false;
+    // Appended wherever the member's screen currently is. A draft offered on a screen that does
+    // not exist is a draft nobody sees, so this returns false rather than pretending.
+    const holder = document.querySelector('.iq-msgs, .iq-thread, #iq-object-turns') || document.getElementById('iq-member-body');
+    if (!holder) return false;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const id = 'fp_resume';
+    this._focusProposals = this._focusProposals || {};
+    this._focusProposals[id] = { conversationId: d.sourceConversationId || null, messageIds: d.sourceMessageIds || [] };
+    const wrap = document.createElement('div');
+    wrap.className = 'iq-proposal iq-focusprop';
+    wrap.id = id;
+    wrap.innerHTML = `
+      <div class="iq-proposal-top"><span class="iq-proposal-label">You were starting this when you were signed out</span>
+        <span class="iq-badge iq-badge-private">Private</span></div>
+      <div class="iq-field"><textarea id="${id}-t" class="iq-field-input" rows="2">${esc(d.text)}</textarea></div>
+      <div class="iq-proposal-actions">
+        <button class="btn-primary btn-sm" id="${id}-go" onclick="MemberApp.startFocusFromChat('${id}')">Start this focus</button>
+        <button class="btn-ghost btn-sm" onclick="MemberApp._focusDraftClear(); document.getElementById('${id}').remove();">Discard</button>
+      </div>
+      <div class="iq-fp-said" id="${id}-said" role="status" aria-live="polite"></div>`;
+    holder.appendChild(wrap);
+    return true;
+  },
+
   _renderCheckinProposal(turnId, p) {
     const esc = s => this._escape(String(s == null ? '' : s));
     const when = p.why ? esc(p.why) : 'a follow-up';

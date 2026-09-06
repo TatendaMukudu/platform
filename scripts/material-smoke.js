@@ -77,6 +77,22 @@ const DECK = [
     small.partial === true && small.sectionIds.length < 3);
   ok('MS7b …and a full read says it is not partial, so the flag means something',
     ctx.partial === false);
+
+  /* MS7c-MS7e — PARTIAL IS MEASURED AGAINST THE DOCUMENT, NEVER AGAINST THE SELECTION. This was
+     wrong when sections were first selectable: `partial` compared what was included against the
+     already-filtered set, so asking for one slide of three answered "no, that is all of it". The
+     cap and the caller's choice both leave a reader with less than the document; they are
+     entitled to know either way, and the failure mode is a confident summary of a deck two
+     thirds of which was never shown. */
+  const picked = material.contextFor(m, { sectionIds: ['s2'] });
+  ok('MS7c a caller may ask for named parts, and gets those parts',
+    picked.sectionIds.join(',') === 's2' && /Rest defence/.test(picked.text) && !/touchline/.test(picked.text));
+  ok('MS7d …and one slide of three is PARTIAL even though every slide asked for fitted — measured against the document, not against the selection',
+    picked.partial === true);
+  ok('MS7e …and a narrowing is distinguishable from simply running out of room, because the two are different things to tell a reader',
+    picked.narrowed === true && small.narrowed === false && ctx.narrowed === false);
+  ok('MS7f asking for every part is still not a narrowing anybody needs warning about',
+    material.contextFor(m, { sectionIds: ['s1', 's2', 's3'] }).partial === false);
 }
 
 /* ── MS8-MS10: understanding is DECLARED. ── */
