@@ -87,6 +87,7 @@ const SUITES = [
   'proactive-smoke.js',            // the proactive surfacing layer: post-kernel ProactiveInsight projection, surfacing policy, audience safety, bounded preferences
   'web-intelligence-smoke.js',      // W-1: leader roster is neutral; briefing is useful, aggregate, governed Web intelligence
   'web-scope-w3-smoke.js',          // W-3: leaders gain direct-parent context without sibling/grandparent/person/private expansion
+  'authority-invariant-smoke.js',  // L-AU1 MEMBERSHIP DESCRIBES STRUCTURE; EXPLICIT LEADERSHIP GRANTS AUTHORITY. _isLeader rule 4 counted membership of a node with sub-nodes as leadership, so all 28 Alma players received LEADER_GRANTS and /api/workspace/visible-members handed each of them 28 teammates by name and email. The fixture is ALMA-SHAPED on purpose - the flat one in endpoint-smoke proved a topology the pilot does not have
   'scope-parity-smoke.js',          // W-4 measurement: names current governance/Web scope divergences without migrating them
   'gateway-budget-smoke.js',        // H1: provider-boundary budgets, per-org token telemetry, deterministic transcription capability
   'no-llm-floor-smoke.js',          // Lane A: twenty mutation-sensitive HTTP capabilities with every model exit disabled AND dummy credentials present, so the SWITCH is what is proven, not the absence of a key

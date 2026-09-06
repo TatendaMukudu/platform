@@ -3038,36 +3038,56 @@ const LEADER_GRANTS = {
   view_members:     true,
 };
 
-/* ── _isLeader — robust leadership detection across all three structures ──────
-   A user is a leader if ANY of these hold:
+/* ── _isLeader — leadership detection across the three ways it is ASSIGNED ────
+
+   L-AU1: MEMBERSHIP DESCRIBES STRUCTURE; EXPLICIT LEADERSHIP GRANTS AUTHORITY.
+
+   A user is a leader if ANY of these hold, and every one of them is something
+   somebody deliberately assigned:
      1. they lead >=1 org node   (orgNodes[].leaderIds / user.leadershipNodeIds)
      2. they supervise >=1 user  (legacy supervisorId tree)
      3. they lead >=1 group      (orgGroups[].leadIds)
-     4. they SIT IN A NODE THAT HAS SUB-NODES (hierarchy leadership) — i.e. their
-        node tier is above another. This makes the tree intuitive: a person in
-        "Coach" (which has child "Player") leads the Player branch automatically,
-        without anyone having to tick a separate "leader" box.
-   This is what fixes "I'm a leader but the app treats me as a member": node
-   leaderIds are only ever set by manually editing a node, so orgs built via
-   onboarding (which sets supervisorId) were never recognized as having leaders. */
+
+   THERE WAS A FOURTH RULE AND IT WAS A PILOT-BLOCKING DEFECT.
+
+   It read: "they SIT IN A NODE THAT HAS SUB-NODES (hierarchy leadership) — i.e.
+   their node tier is above another", implemented over getUserNodeIds, which
+   returns nodes you are a MEMBER of as well as ones you lead. It was written for
+   a tree where tiers are roles — "a person in Coach (which has child Player)
+   leads the Player branch automatically".
+
+   The pilot's tree is not shaped like that. Every Alma player is a member of
+   Varsity Squad, and Varsity Squad has four position groups beneath it. So all
+   28 players satisfied rule 4, `_effectivePermissions` handed each of them
+   LEADER_GRANTS, and `/api/workspace/visible-members` returned 28 teammates by
+   name with their email addresses and their latest check-in. Structure alone
+   promoted an entire roster.
+
+   The rule's stated justification — that orgs built through onboarding set
+   supervisorId and never leaderIds, so they had no recognised leaders — is
+   already served by RULE 2, which is the supervisorId rule and runs first. Rule 4
+   was not carrying that case; rule 2 was.
+
+   So rule 4 is gone rather than narrowed. Narrowed to "a node you LEAD that has
+   children" it would have been a strict subset of rule 1, which is a second
+   description of one rule, and every drift in this codebase has started as one.
+   What rule 4 did carry that rule 1 did not is the SCAN: rule 1 read only the
+   `leadershipNodeIds` cache, so somebody in a node's `leaderIds` with a stale
+   cache was invisible to it. Rule 1 now uses getUserLeaderNodeIds, which falls
+   back to scanning `leaderIds`, so that case is kept — by the rule that owns it.
+
+   scripts/authority-invariant-smoke.js pins all of this. */
 function _isLeader(orgCode, userId) {
   const user = orgUsers[orgCode]?.[userId];
   if (!user) return false;
-  if ((user.leadershipNodeIds || []).length) return true;
+  // Rule 1 — leads a node. Reads the cache, and falls back to scanning leaderIds,
+  // so a stale or unbuilt cache cannot silently demote a real leader.
+  if (getUserLeaderNodeIds(orgCode, userId).length) return true;
   const users = orgUsers[orgCode] || {};
+  // Rule 2 — supervises somebody. This is the rule that carries onboarding-built orgs.
   if (Object.values(users).some(u => u.id !== userId && u.supervisorId === userId)) return true;
+  // Rule 3 — leads a group.
   if (_groups(orgCode).some(g => (g.leadIds || []).includes(userId))) return true;
-  if (_leadsViaHierarchy(orgCode, userId)) return true;
-  return false;
-}
-
-/* A user leads via hierarchy if any node they belong to (member or leader) has
-   at least one sub-node beneath it — their tier sits above another. */
-function _leadsViaHierarchy(orgCode, userId) {
-  const nodes = orgNodes[orgCode] || {};
-  for (const nid of getUserNodeIds(orgCode, userId)) {
-    if ((nodes[nid]?.childNodeIds || []).length) return true;
-  }
   return false;
 }
 
@@ -3249,11 +3269,19 @@ function getVisibleUserIds(orgCode, requestingUserId) {
       getDescendantNodeIds(orgCode, nid).forEach(addPeople)
     );
 
-    // (a2) Hierarchy leadership — for any node this user belongs to, see the
-    // people in its DESCENDANT nodes (the tiers below), but not their own peers.
-    getUserNodeIds(orgCode, requestingUserId).forEach(nid =>
-      getDescendantNodeIds(orgCode, nid).forEach(d => { if (d !== nid) addPeople(d); })
-    );
+    /* (a2) IS GONE, and it was the disclosure half of the same defect (L-AU1).
+
+       It read the people in the DESCENDANT nodes of any node this user BELONGS
+       to. In the pilot's tree that is: a player is in Varsity Squad, Varsity
+       Squad has four position groups beneath it, so every player could see every
+       other player — name, email, account status and latest check-in.
+
+       Rewritten to read only nodes this user LEADS it would be a strict subset of
+       (a) directly above, which already walks each led node plus all of its
+       descendants. So it is deleted rather than narrowed: one rule, one place.
+
+       A legitimate leader loses nothing. The Alma coach leads Varsity Squad, and
+       (a) gives them the squad and every position group under it. */
 
     // (b) Legacy supervisor subtree (everyone who reports up to this user)
     getSupervisedSubtreeIds(orgCode, requestingUserId).forEach(id => visibleIds.add(id));
@@ -4112,9 +4140,14 @@ app.get('/api/workspace/my-tree', requireAuth, (req, res) => {
   const visible    = new Set(getVisibleUserIds(code, userId));
   visible.delete(userId);
 
-  // Root nodes to display: explicitly-led nodes + direct children of own nodes.
+  /* Root nodes to display: nodes this person explicitly LEADS, plus the direct
+     children of those. The second line read getUserNodeIds — nodes they are a
+     MEMBER of — which is the third instance of L-AU1: being in a squad made that
+     squad's position groups roots of a leader's tree view. Bounded by `visible`
+     either way, so it disclosed nothing once getVisibleUserIds was corrected, but
+     it is the same wrong idea and it does not get to stay. */
   const roots = new Set(getUserLeaderNodeIds(code, userId));
-  getUserNodeIds(code, userId).forEach(nid =>
+  getUserLeaderNodeIds(code, userId).forEach(nid =>
     (nodes[nid]?.childNodeIds || []).forEach(c => roots.add(c))
   );
 
@@ -21547,6 +21580,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _resolveSubjectRef, _inquiryFor, _eraseSubjectInquiries,
   // exported for the truth layer: classifications are labels on membership, never hierarchy
   _setClassifications, _classificationsOf, _membersWithClassification, _isLeader,
+  _effectivePermissions, _userHasPerm, getUserLeaderNodeIds, getUserNodeIds,
   _teamReadiness, roleBindings, _bindRole, activeQuestions, _activeQuestionFrom, _writeResolutionEvidence,
   // exported for the truth layer: organisational memory (Phase A) — the derived-state timeline
   orgStateHistory, _recordOrgSnapshot,

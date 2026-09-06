@@ -160,6 +160,74 @@ current product draws anything.
 - **Outside reading is composed, cited, and never becomes evidence.**
 - **Every model exit goes through one gateway**, under no-egress, budget and telemetry.
 - **Public routes take identity from the session**, never from the request body.
+- **L-AU1 — MEMBERSHIP DESCRIBES STRUCTURE; EXPLICIT LEADERSHIP GRANTS AUTHORITY.** Being in a
+  node never confers authority over anything, however that node sits in the tree. Authority is
+  acquired only by assignment: named in a node's `leaderIds`, named as somebody's supervisor, or
+  named as a group lead. Adding or removing child nodes cannot promote or demote anybody.
+
+---
+
+## 7c · L-AU1, and the pilot-blocking defect that produced it
+
+Found 6 September 2026, in the pilot's own org shape, and fixed the same day.
+
+`_isLeader` had a fourth rule: **you are a leader if you sit in a node that has sub-nodes.** It
+was written for a tree where tiers are roles — *"a person in Coach (which has child Player) leads
+the Player branch automatically"*. The Alma tree is not shaped like that. Every player is a
+member of Varsity Squad, and Varsity Squad has four position groups beneath it.
+
+So all 28 players satisfied it:
+
+```
+PLAYER  role=member  leadershipNodeIds=0
+  _isLeader      = true
+  permissions    = view_members, assign_scenarios, view_reports,
+                   view_team, review_checkins, view_insights
+  visible people = 29 of 31
+  GET  /api/workspace/visible-members  -> 200, 28 teammates by NAME,
+       with EMAIL ADDRESSES and each one's latest check-in
+  POST /api/intelligence/prepare {another player} -> 200
+```
+
+**This was disclosure, not only a permission flag.** A player received every teammate's name,
+email address, account status and latest check-in, and could have IntelliQ prepare a
+leader-style intervention about one of them.
+
+**Three instances of the same idea, not one.** All three read `getUserNodeIds` — nodes you are a
+MEMBER of — where explicit leadership was meant:
+
+| | Where | What it granted |
+|---|---|---|
+| authority | `_isLeader` rule 4 | `LEADER_GRANTS` to every member of a parent node |
+| disclosure | `getVisibleUserIds` branch (a2) | sight of everyone in that node's descendants |
+| surface | `/api/workspace/my-tree` roots | a squad you belong to rooted your leader tree |
+
+**Rule 4 was removed rather than narrowed.** Narrowed to "a node you LEAD that has children" it
+is a strict subset of rule 1, and two descriptions of one rule always drift. The one real thing
+rule 4 carried — a SCAN of `leaderIds` for somebody whose `leadershipNodeIds` cache was stale —
+now belongs to rule 1, which does the scan itself. Its stated justification, that orgs built
+through onboarding set `supervisorId` and never `leaderIds`, was already served by **rule 2**,
+which is the supervisorId rule and runs first. Rule 4 was never carrying that case.
+
+**Why nothing caught it.** `endpoint-smoke` asserts *"a plain member (oversees no one) is denied
+(403)"* and passes — its fixture is FLAT. A gate proven in a topology the pilot does not have
+proves nothing about the pilot. And `scope-parity-smoke` **expected** the defect: its
+`memberCoach` case listed the four people that branch (a2) disclosed as the correct answer. That
+is the second test in this repository found defending a bug, after one that asserted
+`orgStore[A].orgName === 'HACKED'` as proof a route still worked.
+
+**The regression fixture is Alma-shaped on purpose** — `scripts/authority-invariant-smoke.js`, 36
+assertions: a squad with four child nodes, 28 ordinary members, explicitly assigned coach and
+assistant. It proves ordinary members get nothing, explicit leaders keep everything, and
+**topology changes alone move neither**. Authorization and disclosure are audited as separate
+questions, because a route that answers 200 with an empty body and one that answers 200 with a
+roster are indistinguishable by status code.
+
+**Migration.** `scripts/authority-backfill.js` reports who the removed rule was promoting. It
+writes only where the record is catching up with an assignment that already exists, and lists
+everyone else as AMBIGUOUS without touching them — silently promoting somebody is the same class
+of mistake as the one being fixed. Against the demo seed: 3 unaffected, 0 needing catch-up, 28
+demoted, none of whom supervises anybody.
 
 ---
 

@@ -40,7 +40,26 @@ const expected = {
   rootLead: { governanceOnly: [], webOnly: [] },
   midLead: { governanceOnly: [], webOnly: ['rootLead'] },
   leafLead: { governanceOnly: [], webOnly: ['memberCoach','midLead'] },
-  memberCoach: { governanceOnly: ['leafLead','multiLead','multiMember','plainMember'], webOnly: ['midLead','rootLead'] },
+  /* memberCoach — A TEST THAT DEFENDED THE BUG, and the second one found in this repository.
+     (The first asserted `orgStore[A].orgName === 'HACKED'` as proof "the route still works".)
+
+     This expected memberCoach to see leafLead, multiLead, multiMember and plainMember through
+     governance. memberCoach LEADS NOTHING. They are an ordinary member of `mid`, and `mid`
+     happens to have two child nodes — so the four people they could see were the people in
+     those children, handed over by `getVisibleUserIds` branch (a2), which read the descendants
+     of any node the caller BELONGED to.
+
+     That is L-AU1's defect written down as the expected result. In the pilot's tree the same
+     branch gave every Alma player the whole roster by name and email.
+
+     The name of the fixture user says it out loud: a "member coach" is somebody whose title
+     suggests authority and whose ASSIGNMENT gives them none. Under L-AU1 they see themselves,
+     which is now identical to plainMember — and that identity is the point, because a role
+     string is not an assignment either.
+
+     `webOnly` is unchanged: the org-graph scope is a different mechanism answering a different
+     question, and this suite exists to keep the divergence between the two explicit. */
+  memberCoach: { governanceOnly: [], webOnly: ['midLead','rootLead'] },
   plainMember: { governanceOnly: [], webOnly: ['leafLead','memberCoach','midLead'] },
   super: { governanceOnly: sorted(Object.keys(users)), webOnly: [] },
 };
@@ -50,6 +69,23 @@ for (const [actor, want] of Object.entries(expected)) {
   const got = difference(actor);
   console.log(`${actor}: governance-only=[${got.governanceOnly}] web-only=[${got.webOnly}]`);
   ok(`W4-${actor} divergence is explicit`, JSON.stringify(got) === JSON.stringify(want));
+}
+
+/* ── L-AU1, PINNED. The expectations above are a table; this is the rule they encode, asserted
+   directly so that editing a row cannot quietly restore the defect the row used to describe. ── */
+{
+  const leadsNothing = ['memberCoach', 'plainMember', 'siblingMember', 'multiMember'];
+  ok('W4-L-AU1 nobody who leads a node sees anyone through governance merely for being IN a node with children',
+    leadsNothing.every(id => {
+      const v = srv.getVisibleUserIds(CODE, id);
+      return v.length === 1 && v[0] === id;
+    }));
+  ok('W4-L-AU1b …while every explicitly assigned leader still sees the node they were given',
+    srv.getVisibleUserIds(CODE, 'midLead').includes('memberCoach') &&
+    srv.getVisibleUserIds(CODE, 'leafLead').includes('plainMember') &&
+    srv.getVisibleUserIds(CODE, 'rootLead').includes('plainMember'));
+  ok('W4-L-AU1c …and membership of a node with children is not leadership, at the source',
+    srv._isLeader(CODE, 'memberCoach') === false && srv._isLeader(CODE, 'midLead') === true);
 }
 
 // This is an inventory, not a migration. It fails when a scope call site is
