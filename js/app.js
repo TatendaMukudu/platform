@@ -10417,6 +10417,26 @@ const MemberApp = {
      for anyone who actually leads a node, which is a fact about the tree rather than a title.
      Settings (and billing, when there is billing) belong to whoever owns the account. */
   _NAV_EXTRA: [
+    /* THE SQUAD, FOR THE PEOPLE WHO LEAD ONE — and this was unreachable.
+
+       `leader-home` renders the group at its own grain: the squad's High, its Low, the open
+       question, the focus, and the findings the cohort floor is WITHHOLDING, named so a leader
+       knows to go and ask. It is the most distinctive surface in the product.
+
+       It was in NAV_ROUTES and in no navigation. The only ways in were three legacy route
+       aliases and one dot in a briefing, so a coach signing in had no path to it at all — the
+       whole squad-grain read, including the refusal, sat behind a door with no handle. Found by
+       driving the seeded demo in a browser as the coach: Home rendered, the strip did not, and
+       `_renderTeamState` was returning at `if (!box) return` because the container it writes to
+       is not on Home.
+
+       IT IS NOT MOVED ONTO HOME, deliberately. Home is one question by founder decision and
+       nothing else may appear there. This gives the surface a door instead.
+
+       Shown to whoever actually leads a node — a fact about the tree rather than a title, the
+       same test the org tree uses. */
+    { id: 'leader-home', label: 'My squad', when: () => Auth.isLeaderNode(),
+      icon: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75' },
     { id: 'settings', label: 'Settings', when: () => Auth.isSuperAdmin(),
       icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' },
   ],

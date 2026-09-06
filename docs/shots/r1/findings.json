@@ -1,0 +1,12 @@
+[
+ {
+  "surface": "coach-home",
+  "severity": "js",
+  "what": "console: Failed to load resource: net::ERR_TUNNEL_CONNECTION_FAILED | console: Failed to load resource: net::ERR_TUNNEL_CONNECTION_FAILED | console: Failed to load resource: net::ERR_TUNNEL_CONNECTION_FAILED"
+ },
+ {
+  "surface": "coach-home",
+  "severity": "MISSING",
+  "what": "the server is withholding 1 finding(s) and Home says nothing about it — a leader shown nothing concludes nothing is there"
+ }
+]

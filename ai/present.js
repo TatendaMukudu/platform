@@ -90,7 +90,28 @@ function humanStatus(status) { return STATUS_TEXT[String(status || '').trim()] |
 function inquiryCard(inquiry = {}) {
   const i = inquiry && typeof inquiry === 'object' ? inquiry : {};
   const topic = i.topic || {};
-  const conf = i.confidence || {};
+  /* THE BAND, WHICHEVER SHAPE IT ARRIVES IN — and this was a real defect on the coach's Home
+     screen, seen in a browser before it was understood in the code.
+
+     A kernel inquiry carries `confidence: { band }`. A team-state projection — what
+     openQuestion returns for a squad's open question — carries a FLAT `band` and no
+     confidence object at all. This read only the nested one and fell back to 'tentative',
+     while ai/voice.explainObject read `raw.band || raw.confidence.band` and got the real
+     value. So one object was read two ways by two readers on the SAME CARD, and the card said:
+
+         Defending set pieces
+         EARLY THINKING
+         I'm confident about this one.
+
+     A badge and a sentence contradicting each other about how sure the system is, on the first
+     screen a coach sees, in a product whose entire claim is calibrated confidence. Neither
+     reader was wrong about its own field; they were reading different fields, and only one of
+     them had a default to hide behind.
+
+     Read the union, in one place, so there is nothing left to drift. */
+  const conf = i.confidence && typeof i.confidence === 'object' && i.confidence.band
+    ? i.confidence
+    : (i.band ? { ...(i.confidence || {}), band: i.band } : (i.confidence || {}));
   const unknowns = Array.isArray(i.stillUnknown) ? i.stillUnknown.filter(Boolean) : [];
   const alts = Array.isArray(i.alternatives) ? i.alternatives : [];
 
