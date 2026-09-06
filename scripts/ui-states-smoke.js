@@ -55,7 +55,7 @@ ok('US3b …and a non-ok response is a failure too, not an empty body',
   /_loadTopQuestion\(\) \{[\s\S]{0,1600}\.then\(r => \(r\.ok \? r\.json\(\) : null\)\)/.test(app));
 
 ok('US4 the empty state is a statement about the RECORD, not a judgment about the person',
-  /No findings on your record yet/.test(app) &&
+  /No findings saved yet/.test(app) &&
   !/Nothing yet\. Tell me what is going on/.test(app));
 ok('US4b …and a partial failure is admitted rather than presented as emptiness',
   /Part of your record could not be loaded/.test(app));
@@ -63,7 +63,7 @@ ok('US4b …and a partial failure is admitted rather than presented as emptiness
 /* ── US5: THE CONTRADICTION. #iq-brief sits directly beneath #iq-conversation, so an empty line
    there argued with the conversation printed a centimetre above it. ── */
 ok('US5 the block NAMES what it describes — findings from the record, which is not the conversation above it',
-  /No findings on your record yet\. This is where they will appear/.test(app));
+  /No findings saved yet\. As you talk, what IntelliQ works out will appear here\./.test(app));
 ok('US5b …and it says nothing at all while a conversation is on screen, rather than contradicting it',
   /const talking = !!\(document\.getElementById\('iq-conversation'\) \|\| \{\}\)\.childElementCount;/.test(app) &&
   /if \(talking && !failures\) \{ box\.innerHTML = ''; return; \}/.test(app));
@@ -77,7 +77,7 @@ ok('US6b …a server error is its own message, carrying the status',
 ok('US6c …a network failure names itself as one',
   /this looks like a connection problem, not an empty library/.test(app));
 ok('US6d …and the genuinely empty library is a statement about what is stored',
-  /Your notes are empty\. The box above is where they start\./.test(app) &&
+  /Nothing saved to your library yet\. The box above is where it starts\./.test(app) &&
   !/No notes yet\. Write your first one above\./.test(app));
 ok('US6e …and a filter matching nothing says the OTHER notes are still there, so a filter never reads as data loss',
   /Nothing here is tagged \$\{this\._escape\(filter\)\}\. Your other notes are still there/.test(app));

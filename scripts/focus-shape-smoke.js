@@ -114,12 +114,21 @@ const server = app.listen(0, async () => {
     ok('FS7cc …and the draft is never replayed under another account, because the key is the writer\'s own id and a different signed-in person simply has no draft',
       /const uid = \(window\.Auth && Auth\.currentUser && Auth\.currentUser\.id\) \|\| '';/.test(app_) &&
       /return uid \? `iq_focus_draft_\$\{uid\}` : '';/.test(app_));
-    /* FS7d — THE AUDIENCE LABEL. "My whole squad" named an audience the backend does not have:
-       the shared setting is read by _memberGoalsFor, a LEADER'S view of a member, and squad peers
-       never see it. The label was wrong, not the permission. */
-    ok('FS7d the audience control says what the backend actually does — nothing was widened to make a label true',
-      !/>My whole squad</.test(app_) && />Whoever leads me</.test(app_) &&
-      /Whoever leads a group you are in can see this\. Your squad cannot\./.test(app_));
+    /* FS7d — THE LABEL IS GONE, AND SO IS THE PLACE IT LIVED.
+
+       "My whole squad" named an audience the focus does not enforce. My first fix reworded it,
+       which was right about this instance and wrong about the shape: a hand-written label is a
+       SECOND description of an access rule, and two descriptions of one rule drift. Every label,
+       explanation and head-count now comes from /api/me/audiences.
+
+       (The platform does have a real "The team" audience — node_members — and it is the one that
+       label was reaching for. It is deliberately not offered until the focus read path enforces
+       it; see the ENFORCED list in app.js.) */
+    ok('FS7d no audience label is written in the client at all — there is no second description left to drift',
+      !/>My whole squad</.test(app_) && !/>Whoever leads me</.test(app_) &&
+      !/Whoever leads a group you are in can see this/.test(app_));
+    ok('FS7e …the chips are built from the route, with the live head-count shown, because "12 people" says what no adjective does',
+      /fetch\('\/api\/me\/audiences'/.test(app_) && /iq-aud-n/.test(app_));
 
     /* ── FS8: THE ONE THAT MATTERS FOR THE FEEL. A new input surface must inherit the shell
        rather than invent one, or this drifts apart again the next time somebody adds a box. ── */

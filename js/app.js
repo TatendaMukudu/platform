@@ -731,7 +731,9 @@ const PAGE_TITLES = {
   assessments:  'MyWorkspace',
   apps:         'Apps',
   checkin:      'Check-In',
-  notes:        'Notes',
+  // Named for the nav item that opens it. The bar said Notes, the nav said Library and the
+  // page said both — one place with three names.
+  notes:        'Library',
   'my-data':    'My data & privacy',
   inquiry:      'Inquiries',
   focus:        'Focuses',
@@ -9960,7 +9962,7 @@ const MemberApp = {
     // A statement about what is stored, and a true one about where the box is: on this screen the
     // composer genuinely is above the list.
     if (!this._cachedNotes.length) {
-      el.innerHTML = `<div class="empty-card"><div>Your notes are empty. The box above is where they start.</div></div>`;
+      el.innerHTML = `<div class="empty-card"><div>Nothing saved to your library yet. The box above is where it starts.</div></div>`;
       return;
     }
     if (!notes.length) {
@@ -10135,6 +10137,9 @@ const MemberApp = {
         <div id="iq-history" class="tdy-history" style="display:none"></div>
         <div class="iq-conversation" id="iq-conversation" aria-live="polite"></div>
       </div>
+      <!-- THE THING YOU AGREED TO TRY, asked when you come back. Placed INSIDE the conversation
+           area's flow rather than in a sidebar, because it is IntelliQ speaking, not a widget. -->
+      <div id="iq-continuity" aria-live="polite"></div>
       <div id="iq-brief" aria-live="polite"></div>
       ${/* THE BAR IS THE LAST THING ON THE PAGE. It used to sit inside the chat box, which put
             it ABOVE the card — so the one control a person always needs was in the middle of
@@ -10156,6 +10161,7 @@ const MemberApp = {
     // list, the brief — lives in its own bucket now, six at a time, priority first. Spamming
     // the first screen is how a person learns to skim it.
     this._loadTopQuestion();
+    this._loadContinuity();
     this._renderSubjectChip();
     this._restoreChat();
   },
@@ -10522,6 +10528,76 @@ const MemberApp = {
                   RECORD, never a judgment about the person. "Nothing yet" plus an instruction
                   to talk more reads as a verdict on how interesting they have been.
        POPULATED  the card */
+  /* ── "YOU WANTED TO TRY A CAPTAIN-LED RESET. DID YOU GET A CHANCE?" ──────────────────────
+     Founder: "That is where memory becomes useful: remembering the agreed experiment, what
+     remains unresolved, and what would be worth asking next."
+
+     Rendered as IntelliQ SPEAKING, not as a task widget with a checkbox. The difference matters:
+     a checkbox asks you to report compliance, a question asks you what happened. It quotes the
+     person's own words back rather than a paraphrase, because the whole point is that they
+     recognise what they said.
+
+     THREE ANSWERS, AND ONLY ONE OF THEM IS ABOUT THEM. "We did not play" and "I did not get round
+     to it" and "I tried it" are three different facts; a done/not-done control would read a
+     fixture list as a character flaw. */
+  async _loadContinuity() {
+    const box = document.getElementById('iq-continuity');
+    if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    let d = null;
+    try { d = await fetch('/api/me/context', { headers: this._authHeaders() }).then(r => (r.ok ? r.json() : null)); } catch (_) {}
+    const c = d && d.ok && d.continuity;
+    // No agreed experiment waiting is the ordinary case and says nothing at all. An empty
+    // "nothing to follow up" line would be one more thing to read past.
+    if (!c) { box.innerHTML = ''; return; }
+    box.innerHTML = `
+      <div class="iq-msg iq-msg-iq iq-continuity" data-focus="${esc(c.focusId)}">
+        <p class="iq-response-text">${esc(c.question)}</p>
+        <div class="iq-proposal-actions">
+          <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp.answerTried('${esc(c.focusId)}','yes')">I tried it</button>
+          <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp.answerTried('${esc(c.focusId)}','no_chance')">No chance yet</button>
+          <button type="button" class="btn-ghost btn-sm" onclick="MemberApp.answerTried('${esc(c.focusId)}','not_yet')">Not yet</button>
+        </div>
+        <div class="iq-fp-said" id="cont-said" role="status" aria-live="polite"></div>
+      </div>`;
+  },
+
+  /* The answer lands on the focus and comes back with ONE question, so this continues the
+     conversation instead of ticking something off. Their words are optional — the declaration is
+     the fact, and asking for an account is not the same as requiring one. */
+  async answerTried(focusId, tried) {
+    const box = document.getElementById('iq-continuity');
+    const said = document.getElementById('cont-said');
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const because = String((document.getElementById('cont-because') || {}).value || '').trim();
+    if (said) said.textContent = 'Noting that…';
+    try {
+      const r = await fetch(`/api/me/focus/${encodeURIComponent(focusId)}/tried`, {
+        method: 'POST', headers: this._authHeaders(), body: JSON.stringify({ tried, because }),
+      });
+      if (r.status === 401) { if (said) said.textContent = 'You have been signed out — sign in again and it will still be here.'; return; }
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j || !j.ok) throw new Error((j && j.error) || `server said ${r.status}`);
+      if (!box) return;
+      // The follow-up question, with a box for it. Answering is optional; the box appearing is
+      // the invitation, not a requirement.
+      box.innerHTML = `
+        <div class="iq-msg iq-msg-iq iq-continuity">
+          <p class="iq-response-text">${esc(j.note)}</p>
+          <p class="iq-response-text">${esc(j.next)}</p>
+          <div class="iq-field"><textarea id="cont-because" class="iq-field-input" rows="2"
+            placeholder="In your own words — optional"></textarea></div>
+          <div class="iq-proposal-actions">
+            <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp.answerTried('${esc(focusId)}','${esc(tried)}')">Send that</button>
+          </div>
+          <div class="iq-fp-said" id="cont-said" role="status" aria-live="polite"></div>
+        </div>`;
+      if (because && said) said.textContent = 'Kept.';
+    } catch (e) {
+      if (said) said.textContent = `That did not save — ${(e && e.message) || 'unknown problem'}.`;
+    }
+  },
+
   async _loadTopQuestion() {
     const box = document.getElementById('iq-brief');
     if (!box) return;
@@ -10568,7 +10644,7 @@ const MemberApp = {
       // emptiness — some of this could not be read, and saying so costs nothing.
       box.innerHTML = `<p class="iq-home-empty">${failures
         ? 'Part of your record could not be loaded, so what is shown here may be incomplete.'
-        : 'No findings on your record yet. This is where they will appear as IntelliQ works things out.'}</p>`;
+        : 'No findings saved yet. As you talk, what IntelliQ works out will appear here.'}</p>`;
       return;
     }
     box.innerHTML = `<div class="iq-home-one">${this._objectCard(top, top.kind)}</div>`;
@@ -10619,46 +10695,54 @@ const MemberApp = {
      which exists in the DOM on every screen but is only visible on the bucket page — so
      tapping this on Home put it inside a hidden element and nothing happened. Same class of
      bug as the untappable card: assuming a container is visible because it exists. */
+  /* ── THE COMPACT PROPOSAL, NOT A FORM ────────────────────────────────────────────────────
+     Founder, from the live app: "creating a Focus still introduces the full form", and "No
+     separate form should make them repeat the discussion."
+
+     The form asked four questions — what, what would tell you it worked, when to look, who can
+     see it — at the moment somebody had just said all of that out loud. It read as an interview
+     about a decision they had already made.
+
+     What replaces it is the SAME card the conversation offers: one line of their own words, one
+     action, everything else behind a disclosure. Deliberately the same component from both entry
+     points, because two ways to make a focus is how the audience label and the backend rule came
+     to disagree in the first place. */
   _openFocusForm(el, seed) {
     const esc = s => this._escape(String(s == null ? '' : s));
     const id = 'ff_' + Math.random().toString(36).slice(2, 9);
+    this._focusProposals = this._focusProposals || {};
+    this._focusProposals[id] = { conversationId: this._chatConvId || null, messageIds: [] };
     const form = `
-      <div class="iq-focus-form" id="${id}">
-        <label class="iq-focus-label" for="${id}-t">What do you want to work on?</label>
-        <div class="iq-field"><textarea id="${id}-t" class="iq-field-input" rows="2"
-          placeholder="In your own words…">${esc(seed)}</textarea></div>
-
-        <!-- A FOCUS IS SOMETHING YOU WORK TOWARDS (founder, September 2026). One line of text
-             made "did what you tried help?" a feeling rather than a check. A target says what
-             would tell you it worked; a date says when to look. Both are asked, neither blocks:
-             some things genuinely have no clean finish line, and refusing to let somebody start
-             one until they invent a metric is how a tool teaches people to lie to it. -->
-        <label class="iq-focus-label" for="${id}-g">What would tell you it worked?</label>
-        <div class="iq-field"><textarea id="${id}-g" class="iq-field-input" rows="1"
-          placeholder="How you'd know — optional"></textarea></div>
-        <label class="iq-focus-label" for="${id}-d">When should we look at it?</label>
-        <input type="date" id="${id}-d" class="iq-field-date">
-
-        <div class="iq-focus-row">
-          <button type="button" class="iq-make-chip is-on" id="${id}-priv"
-            onclick="MemberApp._focusVis('${id}','private')">Just me</button>
-          <button type="button" class="iq-make-chip" id="${id}-with"
-            onclick="MemberApp._focusVis('${id}','with')">With people</button>
-          <!-- "My whole squad" described an audience the backend does not have. The shared
-               setting is read by _memberGoalsFor, which is a LEADER'S view of a member, and squad
-               peers never see it. The label now says what actually happens; nothing was widened to
-               make it true, and sharing WITH the squad is what "With people" is for, where the
-               names are chosen and membership is enforced. -->
-          <button type="button" class="iq-make-chip" id="${id}-pub"
-            onclick="MemberApp._focusVis('${id}','shared')">Whoever leads me</button>
+      <div class="iq-proposal iq-focusprop" id="${id}">
+        <div class="iq-proposal-top">
+          <span class="iq-proposal-label">Keep working on this?</span>
+          <span class="iq-badge iq-badge-private" id="${id}-badge">Only me</span>
         </div>
+        <div class="iq-field"><textarea id="${id}-t" class="iq-field-input" rows="2"
+          aria-label="What you want to keep working on"
+          placeholder="In your own words…">${esc(seed)}</textarea></div>
+        <button type="button" class="iq-fp-more" id="${id}-more"
+          onclick="MemberApp._focusPropMore('${id}')">Add a target or a date</button>
+        <div class="iq-fp-extra" id="${id}-extra" hidden>
+          <label class="iq-focus-label" for="${id}-g">What would tell you it worked?</label>
+          <div class="iq-field"><textarea id="${id}-g" class="iq-field-input" rows="1"
+            placeholder="Optional"></textarea></div>
+          <label class="iq-focus-label" for="${id}-d">When should we look at it?</label>
+          <input type="date" id="${id}-d" class="iq-field-date">
+        </div>
+        <!-- WHO SEES IT, NAMED. The options and their descriptions come from the server, which
+             computes them from the access rule itself — see /api/me/audiences. A label written
+             here would be a second description of that rule, which is exactly how "My whole
+             squad" came to mean "whoever leads you". -->
+        <div class="iq-fp-aud" id="${id}-aud"></div>
         <div class="iq-focus-people" id="${id}-people" hidden></div>
         <div class="iq-focus-who" id="${id}-who">Only you can see this.</div>
-        <div class="iq-focus-row">
-          <button type="button" class="iq-make-chip" onclick="MemberApp._createFocus('${id}')">Make it a focus</button>
-          <button type="button" class="iq-make-chip" onclick="MemberApp._cancelFocus('${id}')">Not now</button>
+        <div class="iq-proposal-actions">
+          <button type="button" class="btn-primary btn-sm" id="${id}-go"
+            onclick="MemberApp.startFocusFromChat('${id}')">Start this focus</button>
+          <button type="button" class="btn-ghost btn-sm" onclick="MemberApp._cancelFocus('${id}')">Not now</button>
         </div>
-        <div class="iq-focus-said" id="${id}-said" role="status" aria-live="polite"></div>
+        <div class="iq-fp-said" id="${id}-said" role="status" aria-live="polite"></div>
       </div>`;
     const row = el && el.closest && el.closest('.iq-make-row');
     if (row) { row.innerHTML = form; }
@@ -10672,33 +10756,88 @@ const MemberApp = {
     }
     this._focusMode = this._focusMode || {};
     this._focusMode[id] = 'private';
+    this._renderAudiences(id);
     const t = document.getElementById(id + '-t');
     if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); }
   },
 
-  /* THREE settings, not two. Founder: "you should be able to invite specific players if you
-     want, not just make public to the entire group... think iMessage." Public and private are
-     the two a system finds easy; the one people actually reach for is "these people". */
-  _focusVis(id, mode) {
-    this._focusMode = this._focusMode || {};
-    this._focusMode[id] = mode;
-    const set = (suffix, on) => { const el = document.getElementById(id + suffix); if (el) el.classList.toggle('is-on', on); };
-    set('-priv', mode === 'private');
-    set('-with', mode === 'with');
-    set('-pub',  mode === 'shared');
-    const who = document.getElementById(id + '-who');
-    const people = document.getElementById(id + '-people');
-    // What it MEANS, not what it is called. "Public" tells a person nothing about who that is.
-    if (who) who.textContent = mode === 'shared' ? 'Whoever leads a group you are in can see this. Your squad cannot.'
-      : mode === 'with' ? 'Only the people you pick can see this.'
-      : 'Only you can see this.';
-    if (!people) return;
-    if (mode !== 'with') { people.hidden = true; return; }
-    people.hidden = false;
-    if (people.dataset.loaded) return;
-    people.dataset.loaded = '1';
-    this._loadContacts(id, people);
+  /* ── THE AUDIENCE OPTIONS, FROM THE ONE ROUTE THAT ALREADY OWNS THEM ─────────────────────
+     Founder, from the live app: "Make the audience unmistakable. Use actual group or participant
+     names."
+
+     `/api/me/audiences` already existed and is already tested (`audience-disclosure-smoke`). It
+     is built from the person's REAL nodes, labels each one from the node ("Coaching staff ·
+     First Team"), resolves the reach live rather than remembering it, and carries a note that
+     deliberately refuses the word "anonymous".
+
+     I wrote a second one before finding it, and Express served mine because it was registered
+     first — silently shadowing the tested route with an untested one. That is the same defect as
+     the label that drifted from the rule, committed one level up: two implementations of a
+     question that has one answer. Mine is deleted; this reads the real one.
+
+     `reaches` is the honest part and it is shown: "The team · First Team (12 people)" tells
+     somebody what "share it" means in a way no adjective does. */
+  async _renderAudiences(id) {
+    const box = document.getElementById(id + '-aud');
+    if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    let j = null;
+    try { j = await fetch('/api/me/audiences', { headers: this._authHeaders() }).then(r => r.json()); } catch (_) {}
+    const all = (j && j.audiences) || [];
+    /* ONLY THE AUDIENCES A FOCUS ACTUALLY ENFORCES.
+
+       `/api/me/audiences` describes every audience the PLATFORM has. A focus honours two of them:
+       `self`, and `node_leaders` via its shared flag, read through _memberGoalsFor. It also has
+       its own invited-participants list, which is enforced.
+
+       `node_members` — "The team" — is a real, resolvable, governed audience, and it is the one
+       "My whole squad" was reaching for. It is NOT offered here, because the focus read path does
+       not enforce it: offering it would store a ref nothing honours, which is a worse version of
+       the exact bug this change exists to fix. Wiring it through is a founder decision, because
+       it materially widens what a personal focus can reach — from the people who lead you to
+       everybody you play alongside.
+
+       `node_forum` is a different act on a different surface: a focus is a commitment somebody
+       keeps, not a deliberation. */
+    const ENFORCED = ['self', 'node_leaders'];
+    const list = all.filter(a => ENFORCED.includes(a.kind));
+    if (!list.length) { box.innerHTML = ''; return; }
+    this._audiences = this._audiences || {};
+    this._audiences[id] = list;
+    this._audienceNote = (j && j.note) || '';
+    box.innerHTML = `<div class="iq-fp-audrow">${list.map((a, i) => `
+      <button type="button" class="iq-make-chip${i === 0 ? ' is-on' : ''}" id="${esc(id)}-aud-${i}"
+        onclick="MemberApp._pickAudience('${esc(id)}',${i})">${esc(a.label)}${
+        Number.isFinite(a.reaches) && a.kind !== 'self' ? ` <span class="iq-aud-n">${esc(a.reaches)}</span>` : ''}</button>`).join('')}</div>`;
+    this._pickAudience(id, 0);
   },
+
+  _pickAudience(id, i) {
+    const list = (this._audiences || {})[id] || [];
+    const chosen = list[i];
+    if (!chosen) return;
+    this._focusMode = this._focusMode || {};
+    this._focusMode[id] = chosen;
+    list.forEach((a, n) => {
+      const b = document.getElementById(`${id}-aud-${n}`);
+      if (b) b.classList.toggle('is-on', n === i);
+    });
+    const badge = document.getElementById(id + '-badge');
+    if (badge) badge.textContent = chosen.label;
+    const who = document.getElementById(id + '-who');
+    if (who) {
+      // The module's own explanation, plus the live count. Neither is written here, because a
+      // sentence written here is the second description that drifts.
+      const reach = (Number.isFinite(chosen.reaches) && chosen.kind !== 'self')
+        ? ` Right now that is ${chosen.reaches} ${chosen.reaches === 1 ? 'person' : 'people'}.` : '';
+      who.textContent = `${chosen.explanation || ''}${reach}`;
+    }
+  },
+
+  /* `_focusVis` lived here. It toggled three hard-coded chips — Just me / With people / My whole
+     squad — and wrote a sentence describing each. That sentence was the second description of the
+     access rule that drifted away from it. The chips are now built from /api/me/audiences, which
+     derives them FROM the rule, so there is nothing left here to keep in step. */
 
   /* The people you can address — a name, a role and the group you share, and nothing else.
      Deliberately NOT the set whose records you can read: being able to type somebody's name
@@ -12401,10 +12540,20 @@ const MemberApp = {
     if (go && go.disabled) return;                    // a second tap while the first is in flight
     if (go) { go.disabled = true; go.textContent = 'Starting…'; }
     const src = (this._focusProposals || {})[id] || {};
+    /* THE AUDIENCE THE PERSON CHOSE, sent as the server's own vocabulary. `private` is the
+       default and stays the default: a card that arrives with something else pre-selected is a
+       card that shares by accident. */
+    /* The chosen audience, mapped to what the focus route enforces. `self` is the default and
+       stays the default — a card that arrives with anything else selected shares by accident. */
+    const chosen = (this._focusMode || {})[id];
+    const kind = (chosen && chosen.kind) || 'self';
+    const picked = [...document.querySelectorAll(`#${id}-people .iq-contact.is-on`)].map(b => b.dataset.uid);
     const body = {
       text,
       target: String((document.getElementById(id + '-g') || {}).value || '').trim(),
       reviewOn: String((document.getElementById(id + '-d') || {}).value || '').trim(),
+      share: kind === 'node_leaders',
+      participants: picked,
       sourceConversationId: src.conversationId || null,
       sourceMessageIds: src.messageIds || [],
     };

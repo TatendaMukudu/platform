@@ -3321,6 +3321,7 @@ app.get('/api/contacts', requireAuth, (req, res) => {
   res.json({ ok: true, contacts: _contactsFor(code, userId) });
 });
 
+
 /* ── GET /api/workspace/visible-members ──────────────────────────────────
  *
  *  Returns the subset of org users the requesting user is allowed to see.
@@ -5498,6 +5499,51 @@ app.get('/api/me/context', requireAuth, async (req, res) => {
   const focuses = (mem.focuses || []).filter(f => f.status === 'active')
     .map(f => ({ id: f.id, text: f.text }));
 
+  /* ── THE THING YOU AGREED TO TRY, ASKED ABOUT WHEN YOU COME BACK ─────────────────────────
+     Founder: "That is where memory becomes useful: remembering the agreed experiment, what
+     remains unresolved, and what would be worth asking next."
+
+     One focus, not a list. A person returning to five questions about five commitments answers
+     none of them; a person returning to "you wanted to try a captain-led reset — did you get a
+     chance?" answers that one. The oldest un-asked active focus, so nothing waits forever behind
+     whatever was set most recently.
+
+     THE QUESTION IS ABOUT THE EXPERIMENT, NOT THE PERSON. "Did you get a chance to use it?" can
+     be answered with "no, we did not play" and nothing about that answer is a failure. "How are
+     you getting on with it?" invites an account of themselves, which is a different and heavier
+     question to walk back into.
+
+     ASKED ONCE PER RETURN. `askedAt` is stamped when it goes out, so somebody who opens the app
+     four times in an afternoon is not asked four times — the record of having asked is what makes
+     a follow-up feel like memory rather than a reminder loop. It comes round again after a week,
+     because a commitment nobody has mentioned in a week is worth one more question. */
+  const REASK_AFTER = 7 * 86400000;
+  const _now = Date.now();
+  const pending = (mem.focuses || [])
+    .filter(f => f && f.status === 'active' && !f.outcome)
+    // Not the one they just made: a focus set in this session is not a thing to be asked about.
+    .filter(f => _now - (Date.parse(f.createdAt || '') || _now) > 12 * 3600000)
+    .filter(f => !f.askedAt || (_now - f.askedAt) > REASK_AFTER)
+    .sort((a, b) => (Date.parse(a.createdAt || '') || 0) - (Date.parse(b.createdAt || '') || 0));
+  let continuity = null;
+  if (pending.length) {
+    const f = pending[0];
+    f.askedAt = _now;
+    continuity = {
+      focusId: f.id,
+      // Their own words, quoted back. Nothing here paraphrases the commitment — the point of
+      // asking is that they recognise what they said.
+      text: f.text,
+      question: `You wanted to ${/^\s*(try|start|keep|stop|do|use|lead|run)\b/i.test(f.text) ? '' : 'work on '}${f.text.replace(/\.$/, '')}. Did you get a chance to?`,
+      target: f.target || null,
+      reviewAt: f.reviewAt || null,
+      // Where it came from, so "open the conversation this started in" is possible without the
+      // client having to hold anything between sessions.
+      source: f.source ? { conversationId: f.source.conversationId, messageIds: f.source.messageIds || [] } : null,
+      setAt: f.createdAt || null,
+    };
+  }
+
   // Recognition ABOUT them from others (leader or peer) — the draw-in: they open
   // the app and find someone acknowledged them. Positive/attributed by design.
   const recognitions = (orgSignals[code] || [])
@@ -5507,7 +5553,7 @@ app.get('/api/me/context', requireAuth, async (req, res) => {
 
   _auditFindingEmission(code, userId, _attInsights, [userId], 'personal context surface');
   res.json({
-    ok: true, name: me.name, greeting, opening, ask, returning, quietDays, newSince, noticed, questions, prepared, focuses, recognitions,
+    ok: true, name: me.name, greeting, opening, ask, returning, quietDays, newSince, noticed, questions, prepared, focuses, recognitions, continuity,
     understanding: agents.personModel.understanding(mem.model),
     trajectory: m?.memberTrajectory || null,
   });
@@ -5802,6 +5848,67 @@ app.get('/api/me/focus/:id/source', requireAuth, (req, res) => {
     messages: (picked.length ? picked : all.slice(-4)).map(_historyMessage),
     exact: picked.length > 0,
     note: 'Only you can see this. Sharing the focus does not share this conversation.' });
+});
+
+/* POST /api/me/focus/:id/tried — the answer to the returning question. { tried, because? }
+
+   Founder: the journey is conversation → confirmed focus → return → reflection. This is the
+   fourth step, and it is deliberately the SMALLEST possible thing a person can say.
+
+   THREE ANSWERS, AND "NOT YET" IS NOT A FAILURE. `yes`, `not_yet`, `no_chance` — because "we did
+   not play" and "I did not get round to it" and "I tried it" are three different facts and only
+   one of them is about the person. Collapsing them into done/not-done is how a tool starts
+   reading a fixture list as a character flaw.
+
+   DECLARED, NEVER INFERRED, like every other direction in this product. An unrecognised answer is
+   refused rather than coerced.
+
+   IT DOES NOT CLOSE THE FOCUS. Trying something once is not finishing it, and the outcome path
+   (did it help?) is a separate, later question that the review date already drives. */
+app.post('/api/me/focus/:id/tried', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const mem = _getMemory(code, userId);
+  const focus = (mem.focuses || []).find(f => f && f.id === String(req.params.id));
+  if (!focus) return res.status(404).json({ error: 'not found' });
+  const ANSWERS = ['yes', 'not_yet', 'no_chance'];
+  const tried = String((req.body || {}).tried || '');
+  if (!ANSWERS.includes(tried)) {
+    return res.status(400).json({ error: "say 'yes', 'not_yet' or 'no_chance' — IntelliQ will not work out which one you meant" });
+  }
+  const now = Date.now();
+  focus.attempts = focus.attempts || [];
+  focus.attempts.push({ tried, at: now, because: String((req.body || {}).because || '').trim().slice(0, 600) || null });
+  focus.askedAt = now;   // asked and answered; the follow-up clock restarts from here
+
+  /* THEIR OWN WORDS BECOME EVIDENCE, with themselves as the origin — but only when they gave
+     any. The declaration is the fact; the account is optional, and asking for one is not the
+     same as requiring one. Direction is neutral: having tried something is not an improvement,
+     and not having got to it is not a decline. */
+  let filed = null;
+  const because = String((req.body || {}).because || '').trim();
+  if (because) {
+    const inq = _inquiryFor(code, `member:${userId}`, `focus.${focus.id}`,
+      `How "${String(focus.text).slice(0, 60)}" is going`, (orgMeta[code] || {}).orgMode || '', now);
+    if (inq) {
+      const bySubject = inquiryStates[code][`member:${userId}`];
+      const k = Object.keys(bySubject).find(x => bySubject[x].inquiryId === inq.inquiryId);
+      bySubject[k] = diagnose.applyProposals(inq, [{
+        id: 'try_' + generateId(),
+        level: 'observation', directness: 'direct', authority: 'self_report', source: 'self',
+        specificity: 0.6, statement: because.slice(0, 600),
+        originKind: 'self_report', originRef: `self:${userId}`, turnId: `try_${userId}_${now}`,
+      }], { now, evidenceRefOf: p => `${p.originRef}#${p.id}` });
+      filed = inq.inquiryId;
+    }
+  }
+  mem.lastUpdated = new Date().toISOString();
+  scheduleSave();
+  res.json({ ok: true, focusId: focus.id, tried, inquiryId: filed,
+    note: tried === 'yes' ? 'Noted. When you have a sense of whether it helped, that is the next thing worth saying.'
+      : tried === 'no_chance' ? 'Noted — no chance to try it is not the same as it not working. It stays open.'
+      : 'Noted. It stays open, and IntelliQ will ask again rather than assume.',
+    /* ONE QUESTION BACK, so answering continues the conversation rather than closing a task. */
+    next: tried === 'yes' ? 'What happened when you did?' : 'Is there anything in the way of it?' });
 });
 
 /* POST /api/me/focus/:id/visibility — widen or narrow it afterwards, owner only. */

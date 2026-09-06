@@ -46,8 +46,8 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260905h"/>
-<link rel="stylesheet" href="css/member.css?v=20260905h"/>
+<link rel="stylesheet" href="css/styles.css?v=20260905k"/>
+<link rel="stylesheet" href="css/member.css?v=20260905k"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -890,8 +890,13 @@
 
       <section class="page" id="page-notes">
         <div class="page-header">
-          <div class="page-header-title">Notes</div>
-          <div class="page-header-sub">Your library — everything you've saved to remember, in one place</div>
+          <!-- ONE NAME. The nav item that opens this page is labelled "Library"; the page then
+               titled itself "Notes" and described itself as "your library" underneath. Three
+               words for one place, and a person who taps Library and lands on Notes has to work
+               out whether they went somewhere else. Library is the founder's word and the one on
+               the way in, so it is the one that stays. -->
+          <div class="page-header-title">Library</div>
+          <div class="page-header-sub">Everything you have saved to remember, in one place</div>
         </div>
         <!-- STACKED, NOT A CHAT ROW. This card wore `iq-composer`, which is `display:flex;
              align-items:flex-end` and exists for the chat's single row of input + mic + send.
@@ -1621,8 +1626,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260905h"></script>
-<script src="js/auth.js?v=20260905h"></script>
+<script src="js/data.js?v=20260905k"></script>
+<script src="js/auth.js?v=20260905k"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1690,14 +1695,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260905h"></script>
-<script src="js/ui.js?v=20260905h"></script>
-<script src="js/attachments.js?v=20260905h"></script>
-<script src="js/scenarios.js?v=20260905h"></script>
-<script src="js/chat.js?v=20260905h"></script>
-<script src="js/tree.js?v=20260905h"></script>
-<script src="js/voice.js?v=20260905h"></script>
-<script src="js/app.js?v=20260905h"></script>
+<script src="js/charts.js?v=20260905k"></script>
+<script src="js/ui.js?v=20260905k"></script>
+<script src="js/attachments.js?v=20260905k"></script>
+<script src="js/scenarios.js?v=20260905k"></script>
+<script src="js/chat.js?v=20260905k"></script>
+<script src="js/tree.js?v=20260905k"></script>
+<script src="js/voice.js?v=20260905k"></script>
+<script src="js/app.js?v=20260905k"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->
