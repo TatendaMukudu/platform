@@ -5739,6 +5739,37 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
     return { conversationId: conv.id, messageIds, at: Date.now() };
   })();
 
+  /* ── WHAT THIS FOCUS IS ADDRESSING ───────────────────────────────────────────────────────
+     Founder decision, taken over two alternatives: LINKED BOTH WAYS.
+
+     A focus started from a High, a Low or an Inquiry remembers which belief it is about — and
+     when the person later says whether trying it helped, that answer becomes evidence ON that
+     belief. So the loop closes: IntelliQ works something out, you do something about it, and what
+     happened feeds back into what it believes.
+
+     WHY THIS NEEDED A DECISION rather than a default: it makes a person's OWN ACTION a way a
+     belief's standing can move, alongside other people's accounts of what happened. That is a
+     real addition to the epistemic model, and the founder took it deliberately.
+
+     WHAT IT DOES NOT DO is let the link itself change anything. Starting a focus is not evidence;
+     the belief is untouched until there is an ANSWER to report, and that answer arrives through
+     the ordinary signal path with the person as its own origin — one origin, no direction, banded
+     by the kernel like everything else. Somebody starting five focuses on one Low has said
+     nothing about it five times.
+
+     VALIDATED, NOT TRUSTED, exactly as the conversation reference is: the belief must be one this
+     person can actually open, resolved through their own view. A ref to somebody else's belief
+     becomes NO ref rather than a stored pointer at it. */
+  const addresses = (() => {
+    const b = req.body || {};
+    const kind = String(b.addressesKind || '').trim();
+    const id = String(b.addressesId || '').trim().slice(0, 80);
+    if (!['inquiry', 'high', 'low'].includes(kind) || !id) return null;
+    const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
+    if (!obj) return null;   // not theirs to see — no reference at all
+    return { kind, id, at: Date.now() };
+  })();
+
   /* SAME TEXT, STILL OPEN? Return it rather than making a second one — a list with the same
      commitment on it twice is a list people stop trusting. This is also what makes a double tap
      and a retry-after-timeout safe: the second call finds the first one's work and reports it,
@@ -5787,6 +5818,7 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
     ...(target ? { target } : {}),
     ...(reviewAt ? { reviewAt } : {}),
     ...(source ? { source } : {}),
+    ...(addresses ? { addresses } : {}),
     createdAt: new Date().toISOString(),
   };
   mem.focuses.unshift(focus);
@@ -5798,7 +5830,8 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
   res.json({ ok: true,
     focus: { id: focus.id, text: focus.text, visibility: focus.visibility, participants: focus.participants,
       target: focus.target || null, reviewAt: focus.reviewAt || null,
-      source: source ? { conversationId: source.conversationId, messageIds: source.messageIds } : null },
+      source: source ? { conversationId: source.conversationId, messageIds: source.messageIds } : null,
+      addresses: addresses ? { kind: addresses.kind, id: addresses.id } : null },
     /* THE AUDIENCE SENTENCE SAYS WHAT ACTUALLY HAPPENS.
 
        `shared` is read by _memberGoalsFor, which is a LEADER'S view of a member. Squad peers
@@ -5885,25 +5918,52 @@ app.post('/api/me/focus/:id/tried', requireAuth, (req, res) => {
      same as requiring one. Direction is neutral: having tried something is not an improvement,
      and not having got to it is not a decline. */
   let filed = null;
+  let fedBack = null;
   const because = String((req.body || {}).because || '').trim();
   if (because) {
-    const inq = _inquiryFor(code, `member:${userId}`, `focus.${focus.id}`,
-      `How "${String(focus.text).slice(0, 60)}" is going`, (orgMeta[code] || {}).orgMode || '', now);
-    if (inq) {
+    const proposal = () => ({
+      id: 'try_' + generateId(),
+      level: 'observation', directness: 'direct', authority: 'self_report', source: 'self',
+      specificity: 0.6, statement: because.slice(0, 600),
+      originKind: 'self_report', originRef: `self:${userId}`, turnId: `try_${userId}_${now}`,
+    });
+    const fileOn = (inq) => {
+      if (!inq) return null;
       const bySubject = inquiryStates[code][`member:${userId}`];
       const k = Object.keys(bySubject).find(x => bySubject[x].inquiryId === inq.inquiryId);
-      bySubject[k] = diagnose.applyProposals(inq, [{
-        id: 'try_' + generateId(),
-        level: 'observation', directness: 'direct', authority: 'self_report', source: 'self',
-        specificity: 0.6, statement: because.slice(0, 600),
-        originKind: 'self_report', originRef: `self:${userId}`, turnId: `try_${userId}_${now}`,
-      }], { now, evidenceRefOf: p => `${p.originRef}#${p.id}` });
-      filed = inq.inquiryId;
+      bySubject[k] = diagnose.applyProposals(inq, [proposal()], { now, evidenceRefOf: p => `${p.originRef}#${p.id}` });
+      return inq.inquiryId;
+    };
+    filed = fileOn(_inquiryFor(code, `member:${userId}`, `focus.${focus.id}`,
+      `How "${String(focus.text).slice(0, 60)}" is going`, (orgMeta[code] || {}).orgMode || '', now));
+
+    /* ── THE LOOP CLOSING ────────────────────────────────────────────────────────────────────
+       Founder decision, LINKED BOTH WAYS: when a focus was started from a belief, what happened
+       when they tried it becomes evidence ON that belief. IntelliQ works something out, you do
+       something about it, and the result feeds back into what it believes.
+
+       ONE ORIGIN, NO DIRECTION, and both matter. The person is their own origin, so answering
+       three times is one origin, not three — a belief cannot be talked into moving by somebody
+       reporting on their own remedy repeatedly. And the direction is neutral, declared nowhere:
+       "it was calmer for ten minutes" is an account, and whether that means the Low is easing is
+       for the kernel and the person's own call to settle, not for this route to assert.
+
+       Re-resolved through the OWNER'S view every time rather than trusted from the stored ref, so
+       a belief that has since been erased or moved out of reach quietly stops being written to. */
+    if (focus.addresses && focus.addresses.id) {
+      const target = _allObjectsFor(code, userId)
+        .find(o => o.kind === focus.addresses.kind && String(o.id) === String(focus.addresses.id));
+      if (target && target.raw && target.raw.inquiryId) {
+        const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+        const belief = Object.values(mine).find(i => i && i.inquiryId === target.raw.inquiryId);
+        if (belief) fedBack = fileOn(belief);
+      }
     }
   }
   mem.lastUpdated = new Date().toISOString();
   scheduleSave();
-  res.json({ ok: true, focusId: focus.id, tried, inquiryId: filed,
+  res.json({ ok: true, focusId: focus.id, tried, inquiryId: filed, fedBackTo: fedBack,
+    addresses: focus.addresses ? { kind: focus.addresses.kind, id: focus.addresses.id } : null,
     note: tried === 'yes' ? 'Noted. When you have a sense of whether it helped, that is the next thing worth saying.'
       : tried === 'no_chance' ? 'Noted — no chance to try it is not the same as it not working. It stays open.'
       : 'Noted. It stays open, and IntelliQ will ask again rather than assume.',

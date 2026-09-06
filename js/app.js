@@ -10695,6 +10695,37 @@ const MemberApp = {
      which exists in the DOM on every screen but is only visible on the bucket page — so
      tapping this on Home put it inside a hidden element and nothing happened. Same class of
      bug as the untappable card: assuming a container is visible because it exists. */
+  /* ── START A FOCUS FROM A BELIEF ─────────────────────────────────────────────────────────
+     Founder: after diagnosing something in a High, Low or Inquiry, that is exactly where you
+     want to put a focus on it.
+
+     The SAME card as everywhere else — a third way to make a focus would be a third place for the
+     audience label to drift. What is different is that it carries the belief: the focus remembers
+     what it is addressing, and when the person later reports whether trying it helped, that answer
+     feeds back onto the belief. Founder decision, taken deliberately, because it makes a person's
+     own action a way a belief can move.
+
+     Seeded with the belief's own title rather than a generated sentence, because the person is
+     about to edit it and a paraphrase is one more thing to undo. */
+  focusOnThis(kind, objectId, el) {
+    const title = (document.querySelector('.iqt-title') || {}).textContent || '';
+    this._focusAddresses = this._focusAddresses || {};
+    const row = el && el.closest ? el.closest('.iqt-verdicts') : null;
+    const host = row || el;
+    if (!host) return;
+    const wrap = document.createElement('div');
+    wrap.className = 'iq-make-row';
+    host.parentNode.insertBefore(wrap, host.nextSibling);
+    const marker = document.createElement('span');
+    wrap.appendChild(marker);
+    // _openFocusForm replaces the element it is handed, so it lands exactly here.
+    this._openFocusForm(marker, String(title).trim().slice(0, 200));
+    // The card just created is the last one rendered; tag it with what it addresses.
+    const card = wrap.querySelector('.iq-focusprop');
+    if (card) this._focusAddresses[card.id] = { kind, id: objectId };
+    if (card) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  },
+
   /* ── THE COMPACT PROPOSAL, NOT A FORM ────────────────────────────────────────────────────
      Founder, from the live app: "creating a Focus still introduces the full form", and "No
      separate form should make them repeat the discussion."
@@ -11026,6 +11057,12 @@ const MemberApp = {
       // the belief rather than inside an overflow menu nobody opens.
       const verdicts = `
         <div class="iqt-verdicts">
+          <!-- THE ENTRY POINT THAT WAS MISSING. Founder: "you can start it in highs, lows and
+               inquiries after diagnosing and discovering something you should be putting a focus
+               on." A belief thread had three verdicts and no way to DO anything about what it
+               had just told you — the one place a person is most likely to want to. -->
+          <button type="button" class="iqt-verdict is-do"
+            onclick="MemberApp.focusOnThis('${esc(kind)}','${esc(objectId)}',this)">Work on this</button>
           <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('answered')">That's settled</button>
           <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('contest')">I disagree</button>
           <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('aside')">Not now</button>
@@ -11622,10 +11659,26 @@ const MemberApp = {
     if (!V || !V.isSupported()) { if (state) state.textContent = 'Voice input is not available in this browser — typing works as normal.'; return; }
     V.toggle(inputId, {
       onState: (name, message) => {
-        if (state) state.textContent = message || '';
+        const live = name === 'listening';
+        if (state) {
+          state.textContent = message || '';
+          state.classList.toggle('is-live', live);
+          state.classList.toggle('is-err', name === 'error');
+        }
         if (btn) {
-          btn.setAttribute('aria-pressed', name === 'listening' ? 'true' : 'false');
-          btn.classList.toggle('is-listening', name === 'listening');
+          btn.setAttribute('aria-pressed', live ? 'true' : 'false');
+          btn.classList.toggle('is-listening', live);
+          /* THE BUTTON BECOMES A STOP, in shape and in name. A microphone icon that means
+             "start" and also means "stop" asks somebody to remember which state they are in —
+             on a touchline, holding a phone, mid-sentence. A filled square does not. */
+          btn.setAttribute('aria-label', live ? 'Stop listening' : 'Speak instead of typing');
+          btn.setAttribute('title', live ? 'Stop listening' : 'Speak instead of typing');
+          btn.innerHTML = live
+            ? '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>'
+            : '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/></svg>';
+          // The composer itself rings, so the signal is where the eye already is.
+          const shell = btn.closest('.iq-composer, .iqt-composer, .iq-field');
+          if (shell) shell.classList.toggle('is-listening', live);
         }
       },
       onInput: () => { const i = document.getElementById(inputId); if (i) this._wsGrow(i); },
@@ -12556,6 +12609,10 @@ const MemberApp = {
       participants: picked,
       sourceConversationId: src.conversationId || null,
       sourceMessageIds: src.messageIds || [],
+      // What this focus is addressing, when it was started from a belief. Validated server-side
+      // against the person's own view; a ref they cannot open becomes no ref at all.
+      addressesKind: ((this._focusAddresses || {})[id] || {}).kind || null,
+      addressesId: ((this._focusAddresses || {})[id] || {}).id || null,
     };
     try {
       const r = await fetch('/api/me/focus', { method: 'POST', headers: this._authHeaders(), body: JSON.stringify(body) });

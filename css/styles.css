@@ -2852,12 +2852,35 @@ details.intel-collapse[open] > summary::after { transform: rotate(90deg); }
 .iq-mic:focus-visible{outline:2px solid currentColor;outline-offset:2px}
 /* Listening is announced in text as well; this is the glance-level confirmation, never the
    only one, because colour alone says nothing to a screen reader. */
-.iq-mic.is-listening{color:#b91c1c;background:rgba(185,28,28,.10)}
+/* ── LISTENING SHOULD BE UNMISTAKABLE ─────────────────────────────────────────────────────
+   Founder: "Make voice feel responsive. Visible listening state, editable transcription, short
+   replies and an easy stop button."
+
+   The logic was already right — tap to speak, nothing ambient, the transcript arriving live in a
+   box you can edit. What was missing was being able to TELL. A tinted icon and a line of grey
+   text is not enough on a touchline: somebody who cannot see at a glance whether a microphone is
+   open will either stop trusting it or stop using it.
+
+   So while listening: the button becomes a filled STOP, the composer itself gets a ring, and a
+   pulsing dot sits beside the state line. Three signals rather than one, because a phone in
+   sunlight loses colour before it loses shape. */
+.iq-mic.is-listening{color:#fff;background:#b91c1c;border-radius:50%}
 @media (prefers-reduced-motion:no-preference){
   .iq-mic.is-listening{animation:iq-mic-pulse 1.6s ease-in-out infinite}
 }
 @keyframes iq-mic-pulse{0%,100%{box-shadow:0 0 0 0 rgba(185,28,28,.30)}50%{box-shadow:0 0 0 6px rgba(185,28,28,0)}}
 .iq-voice-state{font-size:var(--fs);color:var(--text-secondary);margin-top:.35rem;min-height:1rem;line-height:1.4}
+/* The state line while listening: brighter, and with a live dot in front of it. */
+.iq-voice-state.is-live{color:var(--text-primary);display:flex;align-items:center;gap:.45rem;font-weight:600}
+.iq-voice-state.is-live::before{content:'';width:.55rem;height:.55rem;border-radius:50%;
+  background:#ef4444;flex:0 0 auto;animation:iq-live-dot 1.2s ease-in-out infinite}
+.iq-voice-state.is-err{color:var(--warning)}
+@keyframes iq-live-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.8)}}
+@media (prefers-reduced-motion: reduce){ .iq-voice-state.is-live::before{animation:none} }
+/* The whole composer rings while a microphone is open, so the signal is where the eye already is
+   rather than only on a 44px button. */
+.iq-composer.is-listening, .iqt-composer.is-listening,
+.iq-field.is-listening{border-color:#ef4444;box-shadow:0 0 0 3px rgba(239,68,68,.18)}
 
 .iq-inq-actions{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.6rem}
 .iq-inq-more,.iq-inq-ask{min-height:44px;padding:.4rem .8rem;border-radius:999px;cursor:pointer;
@@ -3182,6 +3205,16 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
      menu already say whose account this is, and the name reappears in settings. */
   .topbar-org, #topbar-org-name { display: none; }
 }
+
+/* "Work on this" is the one verdict that DOES something rather than closing something, so it
+   leads the row. The other three are ways to put a belief down; this is the way to pick it up. */
+.iqt-verdict.is-do{border-color:var(--accent);color:var(--text-primary)}
+.iqt-verdict.is-do:hover{background:var(--accent-soft)}
+.iq-fp-audrow{display:flex;flex-wrap:wrap;gap:.4rem;margin:.5rem 0 0}
+.iq-aud-n{opacity:.7;font-variant-numeric:tabular-nums}
+.iq-make-chip.is-off{opacity:.45;cursor:not-allowed}
+/* Where a focus came from, on the focus. Quiet — it is provenance, not content. */
+.iq-fp-from{font-size:var(--fs-sm);color:var(--text-muted);margin:.25rem 0 0}
 
 /* ── FOUR STATES, FOUR LOOKS ──────────────────────────────────────────────────────────────
    Loading, failed, empty and populated are different facts about the world, and a screenshot

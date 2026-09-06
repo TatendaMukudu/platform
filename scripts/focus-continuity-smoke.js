@@ -37,7 +37,7 @@ process.env.IQ_DETERMINISTIC_ONLY = '1';
 process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || 'sk-test-not-a-real-key';
 
 const S = require('../server.js');
-const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _getMemory, assistantConversations } = S;
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken, _getMemory, assistantConversations, inquiryStates } = S;
 // The workspace key is the same shape the server builds; not exported, and not worth exporting
 // for one test — but it must stay in step, which FC-fixture failures would show immediately.
 const _wsKey = (code, userId) => `${String(code || '').toLowerCase()}:${userId}`;
@@ -211,6 +211,88 @@ const server = app.listen(0, async () => {
     ok('FC14b …and when they erase their own history, the focus stands on its own rather than erroring — their record is theirs to delete',
       orphan.status === 200 && orphan.j.available === false && /no longer here/i.test(orphan.j.note || ''));
 
+    /* ── FC16-FC19: FOUR WAYS IN, AND THE LOOP CLOSING ──────────────────────────────────────
+
+       Founder: "you can create a focus in focuses and start chatting with the assistant as you
+       create the focus... or you can start it from home. Or you can start it in highs, lows and
+       inquiries after diagnosing and discovering something you should be putting a focus on."
+
+       And, taken as an explicit decision over two alternatives: LINKED BOTH WAYS. A focus started
+       from a belief remembers it, and what happened when they tried it feeds back ONTO that
+       belief. That makes a person's own action a way a belief can move, which is why it was a
+       decision rather than a default. ── */
+    const beliefs = (inquiryStates[C] = inquiryStates[C] || {});
+    const sub = (beliefs['member:me'] = beliefs['member:me'] || {});
+    {
+      const diagnose = require('../ai/diagnose.js');
+      let q = diagnose.newInquiry({ id: 'inq_quiet', subjectRef: 'member:me', concept: 'soccer.quiet',
+        label: 'People go quiet after conceding', domain: 'sports', now: Date.now() - 5 * 86400000 });
+      const sig = (o, n) => ({ id: `s_${o}_${n}`, level: 'observation', directness: 'direct',
+        authority: 'third_party', source: 'other', specificity: 0.7, statement: 'saw it',
+        originKind: 'leader_report', originRef: o, turnId: `t_${o}_${n}`, direction: 'decline' });
+      q = diagnose.applyProposals(q, [sig('leader:a', 1)], { now: Date.now() - 4 * 86400000, evidenceRefOf: x => `${x.originRef}#${x.id}` });
+      q = diagnose.applyProposals(q, [sig('leader:b', 1)], { now: Date.now() - 3 * 86400000, evidenceRefOf: x => `${x.originRef}#${x.id}` });
+      sub['soccer.quiet'] = q;
+    }
+
+    const fromBelief = await post('/api/me/focus', meT, {
+      text: 'Try a captain-led reset after we concede',
+      addressesKind: 'inquiry', addressesId: 'inq_quiet',
+    });
+    ok('FC16 a focus can be started FROM a belief, and remembers what it is addressing',
+      fromBelief.status === 200 && fromBelief.j.focus.addresses &&
+      fromBelief.j.focus.addresses.id === 'inq_quiet');
+    const BID = fromBelief.j.focus.id;
+
+    /* STARTING ONE SAYS NOTHING. The belief must be untouched until there is an answer — deciding
+       to try something is not evidence that anything is happening. */
+    const beliefSignalsBefore = (Object.values(sub).find(i => i.inquiryId === 'inq_quiet').signals || []).length;
+    ok('FC16b …but STARTING it changes the belief not at all — deciding to try something is not evidence about whether it is true',
+      beliefSignalsBefore === 2);
+
+    const forgedBelief = await post('/api/me/focus', meT, {
+      text: 'Something aimed at a belief that is not mine',
+      addressesKind: 'inquiry', addressesId: 'inq_not_mine',
+    });
+    ok('FC17 a belief they cannot open becomes NO reference — validated through their own view, exactly as the conversation ref is',
+      forgedBelief.j.focus.addresses === null);
+    const badKind = await post('/api/me/focus', meT, {
+      text: 'Aimed at a focus, which is not a belief', addressesKind: 'focus', addressesId: BID });
+    ok('FC17b …and only a High, a Low or an Inquiry can be addressed — a focus about a focus is not a thing',
+      badKind.j.focus.addresses === null);
+
+    /* THE LOOP CLOSES. */
+    const answered = await post(`/api/me/focus/${BID}/tried`, meT,
+      { tried: 'yes', because: 'we used it against Alma and it was calmer for ten minutes' });
+    ok('FC18 THE LOOP CLOSES — what happened when they tried it lands on the BELIEF, not only on the focus',
+      answered.status === 200 && answered.j.fedBackTo === 'inq_quiet');
+    const beliefAfter = Object.values(sub).find(i => i.inquiryId === 'inq_quiet');
+    /* FC18b — AND MY FIRST VERSION OF THIS WAS WRONG IN AN INSTRUCTIVE WAY. It looked for the
+       person's words on the signal. They are not there, and must not be: "evidence is referenced,
+       never copied" is one of this codebase's epistemic invariants, so applyProposals stores a
+       ref, an origin and a shape — never the sentence. The assertion now checks what actually
+       makes this evidence: a new signal, from this person as their own origin, that was not there
+       before. */
+    ok('FC18b …as ordinary evidence with the person as their own origin, and with NO words on it — evidence is referenced, never copied',
+      (beliefAfter.signals || []).length === beliefSignalsBefore + 1 &&
+      (beliefAfter.signals || []).some(x => x.originRef === 'self:me') &&
+      !/calmer for ten minutes/.test(JSON.stringify(beliefAfter)));
+    ok('FC18c …carrying NO direction, because whether "calmer for ten minutes" means the Low is easing is for the kernel and their own call to settle, not for this route to assert',
+      (beliefAfter.signals || []).filter(x => x.originRef === 'self:me').every(x => x.direction === 'neutral'));
+
+    /* ONE ORIGIN, HOWEVER OFTEN THEY ANSWER. A belief cannot be talked into moving by somebody
+       reporting on their own remedy repeatedly. */
+    await post(`/api/me/focus/${BID}/tried`, meT, { tried: 'yes', because: 'again, calmer' });
+    await post(`/api/me/focus/${BID}/tried`, meT, { tried: 'yes', because: 'and again' });
+    const many = Object.values(sub).find(i => i.inquiryId === 'inq_quiet');
+    const selfOrigins = new Set((many.signals || []).filter(x => x.originRef && /^self:/.test(x.originRef)).map(x => x.originRef));
+    ok('FC19 answering three times is ONE origin — a belief cannot be moved by somebody reporting on their own remedy repeatedly',
+      selfOrigins.size === 1);
+
+    const noWords = await post(`/api/me/focus/${BID}/tried`, meT, { tried: 'not_yet' });
+    ok('FC19b …and an answer with no words feeds nothing back, because there is no account to file',
+      noWords.j.fedBackTo === null);
+
     /* ── FC15: THE CALL SITES. A journey nothing invokes is not a journey. ── */
     const src_ = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'app.js'), 'utf8');
     ok('FC15 the proposal is rendered in the conversation, compact and editable, with a clear action',
@@ -237,6 +319,14 @@ const server = app.listen(0, async () => {
     const srv_ = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
     ok('FC15f …and the proposal comes from the EXISTING bounded intents, not a new detector written for this feature',
       /interp\.intents\.find\(i => i\.type === 'plan' \|\| i\.type === 'commitment'\)/.test(srv_));
+    /* FC20 — THE FOURTH WAY IN. A belief thread had three verdicts, all of them ways to put it
+       DOWN, and no way to act on what it had just told you. */
+    ok('FC20 a High, Low or Inquiry offers "Work on this" — the one place a person is most likely to want a focus, and the only entry point that was missing',
+      /MemberApp\.focusOnThis\('/.test(src_) && />Work on this</.test(src_));
+    ok('FC20b …opening the SAME card as everywhere else, because a third way to make a focus is a third place for the audience to drift',
+      /focusOnThis\(kind, objectId, el\) \{[\s\S]{0,900}this\._openFocusForm\(marker,/.test(src_));
+    ok('FC20c …and carrying what it addresses through to the save',
+      /addressesKind: \(\(this\._focusAddresses \|\| \{\}\)\[id\] \|\| \{\}\)\.kind/.test(src_));
 
   } catch (e) { fail++; console.error('  FAIL suite threw:', e && e.stack); }
 
