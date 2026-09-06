@@ -5069,6 +5069,10 @@ function _beliefStateFindings(code, userId, now) {
 
     if (contested) {
       out.push({ patternType: 'contested_belief', polarity: 'risk', subjectId: userId,
+        // WHICH BELIEF. Without this every finding of this type collapses into one card — see
+        // the note on dedupeKey in ai/proactive.js. A person with two contested beliefs was
+        // shown one and never told the other existed.
+        dedupeOn: inq.inquiryId,
         severity: 'medium', priority: 'high', confidence: 'clear',
         render: { self: {
           headline: `Accounts differ on ${label.toLowerCase()}`,
@@ -5098,6 +5102,9 @@ function _beliefStateFindings(code, userId, now) {
 
     out.push({ patternType: good ? 'called_strength' : 'called_friction',
       polarity: good ? 'progress' : 'risk', subjectId: userId,
+      // WHICH BELIEF, for the same reason: these all share one patternType, and two things
+      // going well are two things, not one said twice.
+      dedupeOn: inq.inquiryId,
       severity, priority,
       confidence: (shaped.confidence || {}).band === 'supported' ? 'clear' : 'emerging',
       render: { self: {

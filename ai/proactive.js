@@ -139,7 +139,21 @@ function toInsight(finding, opts = {}) {
   // good or bad. Derived from the finding's own severity so a milestone or an
   // opportunity can outrank a low risk.
   const priority = finding.priority || severity;
-  const dedupeKey = `${subjectId || 'self'}:${patternType}:${audience}`;
+  /* WHAT COUNTS AS THE SAME INSIGHT TWICE.
+
+     This was `subjectId:patternType:audience`, which is right for kernel PATTERNS — one
+     "declining engagement" per person is the whole point, and a second copy is noise.
+
+     It is wrong for findings about a specific BELIEF. Those all share one patternType
+     (`called_strength`, `called_friction`), so a person with three things genuinely going well
+     collapsed to one card and the other two vanished silently — behaviour.plan drops on this
+     key before its per-bucket limit is ever reached. Found by the demo seed: the Alma player
+     had two Highs on record, cleared every gate on both, and Highs showed one.
+
+     So a finding may name what makes it distinct. Nothing that omits `dedupeOn` changes
+     behaviour at all, which is why the patterns above are untouched. */
+  const dedupeOn = String(finding.dedupeOn == null ? '' : finding.dedupeOn).slice(0, 120);
+  const dedupeKey = `${subjectId || 'self'}:${patternType}:${dedupeOn ? dedupeOn + ':' : ''}${audience}`;
   const suggestionText = msg.suggestion;
 
   return {
