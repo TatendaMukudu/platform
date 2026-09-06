@@ -15806,7 +15806,7 @@ function _materialContext(code, userId, about) {
     const [kind, ...rest] = ref.split(':');
     const id = rest.join(':');
     const all = Object.values(_materials(code))
-      .filter(m => m.attachTo.kind === kind && String(m.attachTo.id) === id);
+      .filter(m => _materialOn(m, kind, id));
     if (!all.length) return null;
     const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
     if (!obj) return null;   // attached to something this reader cannot open
@@ -15953,10 +15953,35 @@ app.post('/api/me/disagree', requireAuth, (req, res) => {
    arrives is text, and it is treated as text somebody typed.
    ══════════════════════════════════════════════════════════════════════════════════════════ */
 
-const materials      = {};  // code → materialId → { materialId, byId, title, filename, kind, sections[], attachTo, createdAt }
+/* ── ONE DOCUMENT, MANY PLACES IT IS USED ────────────────────────────────────────────────────
+   Founder, brainstorming the tidiest shape: material was stored ONCE PER ATTACHMENT. `attachTo`
+   was singular, so the same scouting deck attached to two focuses was two full copies with two
+   ids, two understanding reports, and two sets of engagement that could never be read together.
+
+   It is now a first-class thing that lives once and is REFERENCED from wherever it is used —
+   keyed by a checksum of its own text, so attaching the same file again finds the record that is
+   already there instead of making a second one.
+
+   FOUNDER DECISION, taken over two alternatives: A DOCUMENT IS A REFERENCE FRAME, NEVER EVIDENCE
+   ABOUT ANYBODY. A scouting deck says "this is the plan" — a statement of intent, closer to an
+   aim than a finding. It grounds answers and it is quotable, and what becomes EVIDENCE is what
+   people do with it. That keeps every existing law intact and needs no classifier deciding what
+   a document means, which is the thing this codebase removed one for. */
+const materials      = {};  // code → materialId → { materialId, byId, title, filename, kind, sections[], refs[], checksum, createdAt }
 const materialEngage = {};  // code → materialId → [ { personId, sectionId, state, at, ref } ]
 
 const _materials = code => (materials[code] || (materials[code] = {}));
+
+/* The document's identity IS its text. Two uploads of the same deck are one document however
+   they were named, which is what makes "the same file attached twice" a reference rather than a
+   copy. Cheap and deterministic; this identifies a file, it does not defend against one. */
+function _materialChecksum(text) {
+  return require('crypto').createHash('sha256').update(String(text || '')).digest('hex').slice(0, 32);
+}
+/* Where a document is used. `attachTo` was singular and is kept as the FIRST ref so every
+   existing reader keeps working while the shape moves underneath them. */
+const _materialRefs = m => (Array.isArray(m && m.refs) ? m.refs : (m && m.attachTo ? [m.attachTo] : []));
+const _materialOn = (m, kind, id) => _materialRefs(m).some(r => r && r.kind === kind && String(r.id) === String(id));
 const _engageOf  = (code, id) => {
   const byOrg = materialEngage[code] || (materialEngage[code] = {});
   return byOrg[id] || (byOrg[id] = []);
@@ -15969,7 +15994,7 @@ function _materialFor(code, userId, materialId) {
   const m = _materials(code)[String(materialId)];
   if (!m) return { ok: false, status: 404, error: 'not found' };
   const obj = _allObjectsFor(code, userId)
-    .find(o => o.kind === m.attachTo.kind && String(o.id) === String(m.attachTo.id));
+    .find(o => _materialRefs(m).some(r => r.kind === o.kind && String(r.id) === String(o.id)));
   // A material whose object the reader cannot see is a material that does not exist for them.
   // 404 rather than 403: a 403 confirms the thing is there, which is a leak on its own.
   if (!obj) return { ok: false, status: 404, error: 'not found' };
@@ -16021,6 +16046,24 @@ app.post('/api/materials', requireAuth, (req, res) => {
   const sections = material.segment(text, { kind: String(b.kind || 'text') });
   if (!sections.length) return res.status(400).json({ error: 'nothing readable came out of that file' });
 
+  /* THE SAME DOCUMENT ATTACHED TWICE IS ONE DOCUMENT. Keyed by a checksum of its own text, so a
+     coach attaching last week's deck to this week's focus adds a REFERENCE rather than a second
+     copy — and the engagement already recorded against it stays with it instead of splitting
+     across two records nobody can read together. */
+  const checksum = _materialChecksum(text);
+  const already = Object.values(_materials(code)).find(m => m && m.checksum === checksum);
+  if (already) {
+    if (!_materialOn(already, kind, at.id)) {
+      already.refs = _materialRefs(already).concat([{ kind, id: String(at.id), at: Date.now(), by: userId }]);
+      _audit(code, { actor: userId, action: 'material_referenced', subjectIds: [], basis: `${kind}:${at.id}` });
+      scheduleSave();
+    }
+    return res.json({ ok: true, materialId: already.materialId, parts: (already.sections || []).length,
+      sections: (already.sections || []).map(s => ({ id: s.id, ordinal: s.ordinal, heading: s.heading })),
+      already: true,
+      note: `This is already in your library, so it is the same one — not a second copy. What people have already said about it stays with it.` });
+  }
+
   const id = 'mat_' + generateId();
   _materials(code)[id] = {
     materialId: id, byId: userId, orgCode: code,
@@ -16028,6 +16071,10 @@ app.post('/api/materials', requireAuth, (req, res) => {
     filename: String(b.filename || '').trim().slice(0, 200),
     kind: material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text',
     sections,
+    checksum,
+    // Where it is used. The first ref is what `attachTo` used to be, kept in that position so
+    // anything still reading the old field sees the same answer.
+    refs: [{ kind, id: String(at.id), at: Date.now(), by: userId }],
     attachTo: { kind, id: String(at.id) },
     createdAt: Date.now(),
   };
@@ -16045,7 +16092,7 @@ app.get('/api/objects/:kind/:id/materials', requireAuth, (req, res) => {
   const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
   if (!obj) return res.status(404).json({ error: 'not found' });
   const list = Object.values(_materials(code))
-    .filter(m => m.attachTo.kind === kind && String(m.attachTo.id) === id)
+    .filter(m => _materialOn(m, kind, id))
     .sort((a, b) => b.createdAt - a.createdAt)
     .map(m => ({ materialId: m.materialId, title: m.title, filename: m.filename, kind: m.kind,
       parts: (m.sections || []).length, by: _nameOf(code, m.byId), byId: m.byId, createdAt: m.createdAt }));
@@ -16095,8 +16142,21 @@ app.post('/api/materials/:id/engaged', requireAuth, (req, res) => {
      picture carried the ids of the players in it, and the anonymity the whole surface is built on
      was undone by the identifier. A ref only has to be UNIQUE for counting to work. It does not
      have to say whose it is, and it must not. */
-  const ref = `eng:${r.material.materialId}:${sectionId}:${generateId()}`;
-  _engageOf(code, r.material.materialId).push({ personId: userId, sectionId, state, at: now, ref });
+  /* THE REF NAMES THE DOCUMENT AND THE PART, so a claim built on this stays checkable after the
+     focus that produced it has closed — the section is still there to open. It names NOBODY: an
+     earlier version embedded the userId, and provenance refs travel to the client, so every bar
+     in a coach's chart carried the ids of the players in it. Unique for counting, anonymous by
+     construction. */
+  const ref = `material:${r.material.materialId}#${sectionId}:${generateId()}`;
+  /* AND IT RECORDS WHERE IT WAS SAID. A document now lives once and is referenced from wherever
+     it is used, so one deck can back a First Team focus AND a Reserves focus. Their audiences are
+     different, so their reports must be too — a suite caught this the moment deduplication
+     started working, by collapsing two squads into one document. Engagement is scoped to the
+     object it was made through; the document is shared, the reading of it is not. */
+  _engageOf(code, r.material.materialId).push({
+    personId: userId, sectionId, state, at: now, ref,
+    on: { kind: r.object.kind, id: String(r.object.id) },
+  });
 
   /* SAYING YOU DID NOT GET IT IS EVIDENCE ABOUT THE MATERIAL, NOT ABOUT YOU.
 
@@ -16157,7 +16217,11 @@ app.get('/api/materials/:id/understanding', requireAuth, (req, res) => {
   if (!r.ok) return res.status(r.status).json({ error: r.error });
   const m = r.material;
   const cohort = _materialCohort(code, r.object);
-  const engagements = _engageOf(code, m.materialId);
+  /* SCOPED TO THIS USE OF THE DOCUMENT. Older engagement carries no `on` (it predates a document
+     being usable in more than one place) and is counted here, because it can only have come from
+     the single place the document then had. */
+  const engagements = _engageOf(code, m.materialId)
+    .filter(e => !e.on || (e.on.kind === r.object.kind && String(e.on.id) === String(r.object.id)));
   const people = new Set(engagements.map(e => e.personId)).size;
   const n = cohort.members.length;
   // The two-sided floor, from the production rule. A report on four people is a roster with the
@@ -16311,7 +16375,7 @@ function _timelineChart(code, userId, obj) {
   if (created) events.push({ at: created, label: 'Set', marker: 'start', refs: [`focus:${obj.id}:created`] });
   const cohort = _materialCohort(code, obj);
   for (const m of Object.values(_materials(code))) {
-    if (m.attachTo.kind !== obj.kind || String(m.attachTo.id) !== String(obj.id)) continue;
+    if (!_materialOn(m, obj.kind, obj.id)) continue;
     events.push({ at: m.createdAt, label: `Attached: ${m.title}`, marker: 'material', refs: [`material:${m.materialId}`] });
     /* HOW MANY PEOPLE ENGAGED — ONE MARKER, NOT A DOT EACH, AND THE WHOLE GROUP SEES IT.
 
@@ -16324,12 +16388,14 @@ function _timelineChart(code, userId, obj) {
        each person answered. In a squad, when somebody replied is often enough to say who. So the
        timing goes and the count stays — strictly more of what was asked for, strictly less of
        what was not. */
-    const people = new Set(_engageOf(code, m.materialId).map(e => e.personId));
+    const scoped = _engageOf(code, m.materialId)
+      .filter(e => !e.on || (e.on.kind === obj.kind && String(e.on.id) === String(obj.id)));
+    const people = new Set(scoped.map(e => e.personId));
     const floor = teamState.cohortFloor(people.size, cohort.members.length);
     if (floor.ok) {
       // ONE VOICE PER PERSON. Somebody who marks six slides is one person engaging.
       const first = new Map();
-      for (const e of _engageOf(code, m.materialId)) {
+      for (const e of scoped) {
         if (!first.has(e.personId) || e.at < first.get(e.personId).at) first.set(e.personId, e);
       }
       // Placed where the group had FINISHED answering, not where whoever went first did.
@@ -16349,7 +16415,7 @@ function _timelineChart(code, userId, obj) {
 /* HOW IT LANDED ACROSS A GROUP — the bars are the author's own parts. */
 function _spreadChart(code, userId, obj) {
   const mats = Object.values(_materials(code))
-    .filter(m => m.attachTo.kind === obj.kind && String(m.attachTo.id) === String(obj.id))
+    .filter(m => _materialOn(m, obj.kind, obj.id))
     .sort((a, b) => b.createdAt - a.createdAt);
   if (!mats.length) return null;
   const m = mats[0];
@@ -16357,7 +16423,9 @@ function _spreadChart(code, userId, obj) {
   /* EVERYBODY THE MATERIAL IS FOR SEES THIS. Founder decision — the floor is the privacy
      instrument, and a role check on top of it withholds from a squad a nameless fact about that
      squad. Reading is everybody's; attaching and recreating stay with the leader. */
-  const engagements = _engageOf(code, m.materialId);
+  // Same scoping as the report: one document, many uses, one reading per use.
+  const engagements = _engageOf(code, m.materialId)
+    .filter(e => !e.on || (e.on.kind === obj.kind && String(e.on.id) === String(obj.id)));
   const people = new Set(engagements.map(e => e.personId)).size;
   const floor = teamState.cohortFloor(people, cohort.members.length);
   const u = material.understanding(m, engagements, { members: cohort.members.length, floor });

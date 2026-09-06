@@ -353,6 +353,70 @@ const server = app.listen(0, async () => {
       /const gov = renderArtifact\.governArtifact\(\{ composed, dataset, format: 'summary' \}\);/.test(srv) &&
       /is not in the material you attached, so I fell back/.test(srv));
 
+    /* ── MR26-MR28: ONE DOCUMENT, MANY PLACES IT IS USED ────────────────────────────────────
+
+       Founder, on the tidiest way to hold material: it was stored ONCE PER ATTACHMENT. The same
+       deck attached to two focuses was two full copies with two ids, two reports, and two sets of
+       engagement nobody could read together.
+
+       It is now keyed by a checksum of its own text. And the moment that started working, this
+       suite went red in a way that found a hole in the design: one document used by two squads
+       would have mixed their cohorts. A document is shared; a READING of it is not. ── */
+    const sameAgain = await post('/api/materials', coachT, {
+      attachTo: { kind: 'focus', id: 'tf1' },
+      title: 'Saturday scouting (again)', filename: 'saturday-copy.pptx', kind: 'pptx', text: DECK,
+    });
+    ok('MR26 attaching the SAME document twice is one document, not a second copy — its identity is its text, not the name it was uploaded under',
+      sameAgain.status === 200 && sameAgain.j.already === true && sameAgain.j.materialId === MID);
+    ok('MR26b …and what people have already said about it stays with it, rather than splitting across two records',
+      /stays with it/i.test(sameAgain.j.note || ''));
+
+    /* USED IN A SECOND PLACE. Same document, different squad, different audience. */
+    const shared = await post('/api/materials', otherT, {
+      attachTo: { kind: 'focus', id: 'tf2' },
+      title: 'Same deck for the reserves', filename: 'saturday.pptx', kind: 'pptx', text: DECK,
+    });
+    ok('MR27 the same document can back a SECOND object without being stored again — one deck, two focuses, one record',
+      shared.status === 200 && shared.j.materialId === MID);
+    ok('MR27b …and it is listed on both, so a coach finds it where they used it',
+      ((await get('/api/objects/focus/tf1/materials', coachT)).j.materials || []).some(m => m.materialId === MID) &&
+      ((await get('/api/objects/focus/tf2/materials', otherT)).j.materials || []).some(m => m.materialId === MID));
+
+    /* MR28 — THE HOLE THE DEDUPLICATION EXPOSED. First Team has said plenty about this deck.
+       The Reserves have said nothing. Their report must not inherit First Team's answers. */
+    await post(`/api/materials/${MID}/engaged`, outT, { sectionId: 's1', state: 'not_yet' });
+    const reservesRep = await get(`/api/materials/${MID}/understanding`, otherT);
+    ok('MR28 A DOCUMENT IS SHARED; A READING OF IT IS NOT — the Reserves\' report counts only what the Reserves said, not First Team\'s six answers on the same deck',
+      reservesRep.j.cohort.said === 1 && reservesRep.j.cohort.of === 1);
+    const firstTeamRep = await get(`/api/materials/${MID}/understanding`, coachT);
+    ok('MR28b …and First Team\'s report is unchanged by a Reserves player answering on the same document',
+      firstTeamRep.j.cohort.said === 6 && firstTeamRep.j.cohort.of === 12);
+
+    /* MR29 — THE REF NAMES THE DOCUMENT AND THE PART, so a claim built on this stays checkable
+       after the focus that produced it has closed. And it still names nobody. */
+    const anyRef = (S.materialEngage[C][MID] || [])[0].ref;
+    ok('MR29 an engagement\'s ref names the DOCUMENT and the PART it is about, so it can still be opened after the focus that produced it has closed',
+      /^material:mat_[a-z0-9]+#s\d+:/.test(anyRef));
+    ok('MR29b …and still names nobody, because provenance refs travel to the client',
+      !SQUAD.some(id => new RegExp(`\\b${id}\\b`).test(anyRef)));
+
+    /* MR30 — THE CHART IS SCOPED TOO, and a mutation said this was unasserted. A chart is the
+       report with the argument removed, so it cannot be the looser surface: if the report counts
+       only this squad's reading of a shared document, the picture of it must as well. The
+       Reserves player answered 'not_yet' on s1 of the same deck; First Team's bars must not
+       have moved. */
+    const tf1Chart = await get('/api/objects/focus/tf1/chart', coachT);
+    const s1Not = (tf1Chart.j.chart.series.find(x => x.key === 'not_yet').points || [])
+      .find(pt => pt.key === 's1');
+    ok('MR30 the CHART is scoped to this squad\'s reading of the shared document too — a chart is the report with the argument removed, so it cannot be the looser surface',
+      s1Not && s1Not.value === 3);
+    /* MR30b — PRECISE, because my first version searched the chart JSON for the string "out" and
+       matched ordinary English. The refs deliberately name nobody, so the only exact way to ask
+       this is to take the OTHER squad's actual engagement ref and check it is absent. */
+    const outsiderRef = (S.materialEngage[C][MID] || []).find(e => e.personId === 'out').ref;
+    ok('MR30b …and the other squad\'s own engagement ref is nowhere in it',
+      !JSON.stringify(tf1Chart.j.chart).includes(outsiderRef));
+
     /* ── MR24: THE CALL SITES. A route with no caller is not a feature. ── */
     const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'app.js'), 'utf8');
     ok('MR24 the attach control exists and posts the extracted text — the parser has been in the browser all along and sent it nowhere',
