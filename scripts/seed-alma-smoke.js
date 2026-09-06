@@ -35,6 +35,7 @@ process.env.NODE_ENV    = 'test';
 const fs = require('fs');
 const path = require('path');
 const diagnose = require('../ai/diagnose.js');
+const teamState = require('../ai/team-state.js');
 const { buildAlmaStore, ALMA_CODE } = require('../scripts/seed-alma.js');
 const S = require('../server.js');
 const { app, _loadAllStores, _rebuildEmailIndex, _backfillUserNodeIds, issueToken, orgUsers, orgNodes } = S;
@@ -153,6 +154,129 @@ const BUDGET_MB = 1;
     const team = await get(`/api/group/${varsity.nodeId}/state`, cTok);
     ok('SA18 the coach opens the squad and the team-grain surface answers — the seed reaches it through the real read, not a special case',
       team && team.ok === true);
+
+    /* ── SA20-SA30: THE BUCKETS ACTUALLY FILL, AND THEY FILL THROUGH THE GATES. ────────────
+
+       This is why the seed was rewritten. A probe of the previous one through this same read
+       path found Highs: 0 and Lows: 0 for every single person, and 27 of 28 players seeing
+       nothing at all — because every seeded signal carried direction 'neutral' and nobody had
+       ever called a belief, so both roads to a High or a Low were correctly closed.
+
+       Asserting "the seed has a High" would be worth nothing on its own: the seed could write
+       one. What is asserted here is that the PRODUCT produces them from declared evidence,
+       through /api/objects and /api/group/:id/state, and that the gates still refuse the
+       things they are supposed to refuse. */
+    const cTok2 = issueToken(coach.id, ALMA_CODE, 'superadmin');
+    const meU = Object.values(orgUsers[ALMA_CODE]).find(u => u.email === 'player@alma.edu');
+    const meTok = issueToken(meU.id, ALMA_CODE, 'member');
+    const bucket = async (tok, kind, scope) =>
+      ((await get(`/api/objects?kind=${kind}&scope=${scope}`, tok)).objects || []);
+
+    const myHighs = await bucket(meTok, 'high', 'self');
+    const myLows  = await bucket(meTok, 'low', 'self');
+    const myInqs  = await bucket(meTok, 'inquiry', 'self');
+    ok('SA20 A PLAYER OPENS HIGHS AND THERE IS SOMETHING IN IT — the bucket the previous seed left empty for all 28 people',
+      myHighs.length >= 1);
+    ok('SA21 …and Lows, and Inquiries, so all three surfaces have something true to show',
+      myLows.length >= 1 && myInqs.length >= 2);
+    /* SA21b-SA21c — THE TWO ROADS, ASSERTED SEPARATELY. There is more than one way a belief
+       reaches a bucket, and a check that only asks "is there a High" passes as long as ANY of
+       them works. Two mutations proved that on this very suite: undeclaring every direction
+       left it green because the CALLED beliefs still filed, and removing every call left it
+       green because the EVIDENCE-directed ones did. Each road is now named by the words the
+       card itself uses to explain which one decided it. */
+    const claimsOf = list => list.map(o => ((o.explained || {}).claim) || '').join(' || ');
+    ok('SA21b one of them was filed BY THE EVIDENCE — two independent accounts that each declared which way it was going',
+      /separate accounts? points? the same way/i.test(claimsOf([...myHighs, ...myLows])));
+    ok('SA21c …and another BY THE PERSON, where nothing on it points either way and their own call is what there is — a different claim, and the card says which',
+      /you called this one/i.test(claimsOf([...myHighs, ...myLows])));
+    /* SA21d — A DEFECT THIS SEED FOUND, and the reason it is asserted here rather than only in
+       the module that had it: insights were deduplicated on `subjectId:patternType:audience`,
+       and every belief-state High shares the patternType `called_strength`. So a person with
+       two things genuinely going well was shown ONE and never told the other existed — dropped
+       before the per-bucket limit was reached, silently, with both having cleared every gate.
+       Two Highs about two different beliefs are two findings. */
+    ok('SA21d two things going well are shown as two — findings about different beliefs are not collapsed into one card because they share a pattern type',
+      myHighs.length >= 2 && new Set(myHighs.map(o => o.explained.headline)).size === myHighs.length);
+    ok('SA22 …each rendered as a sentence a person could read, not a concept key',
+      [...myHighs, ...myLows].every(o => o.explained && typeof o.explained.headline === 'string' &&
+        o.explained.headline.length > 8 && !/^[a-z]+\./.test(o.explained.headline)));
+
+    /* SA23 — THE GATE, NOT THE SEED. Strip the declared directions and the calls out of the
+       store and the same read must return NOTHING to the same person. If Highs survive that,
+       they were written rather than earned, and every assertion above is decorative. */
+    const stripped = JSON.parse(JSON.stringify(store));
+    for (const bySubject of Object.values(stripped.inquiryStates[ALMA_CODE])) {
+      for (const inq of Object.values(bySubject)) {
+        for (const sig of (inq.signals || [])) { sig.direction = 'neutral'; sig.dissents = false; }
+        inq.status = 'open';
+      }
+    }
+    for (const mem of Object.values(stripped.userAiProfiles)) mem.valenceCalls = {};
+    _loadAllStores(stripped);
+    const afterStrip = [...await bucket(meTok, 'high', 'self'), ...await bucket(meTok, 'low', 'self')];
+    ok('SA23 UNDECLARE THE DIRECTIONS AND THE CALLS AND BOTH BUCKETS GO EMPTY — which is what proves the Highs and Lows above were produced by the gates rather than written by the seed',
+      afterStrip.length === 0);
+    _loadAllStores(store);   // put the real one back
+    ok('SA23b …and they come back when it is restored, so the strip tested the gates and not the harness',
+      (await bucket(meTok, 'high', 'self')).length >= 1);
+
+    /* SA24-SA26 — THE COACH'S SQUAD VIEW, which is the other half of what a demo has to show. */
+    const st = await get(`/api/group/${varsity.nodeId}/state`, cTok2);
+    const sq = st.state || st;
+    /* Read defensively: when a mutation empties one of these, the assertion must go RED rather
+       than throw, or it takes every check after it down with it and the run reports one failure
+       where there were several. */
+    const basisOf = x => (x && x.basis) || {};
+    ok('SA24 the coach opens the squad and there is a High and a Low, each carrying what it rests on',
+      !!sq.high && !!sq.low && basisOf(sq.high).contributors >= 5 && basisOf(sq.low).contributors >= 5);
+    ok('SA24b …counted against the whole squad, so a number on the page means something',
+      basisOf(sq.high).of === 28 && basisOf(sq.low).of === 28);
+    /* SA25 — THE REFUSAL IS THE PRODUCT. Three of twenty-eight contributed the set-piece
+       pattern: corroborated enough to open as a group inquiry, nowhere near enough to put in
+       front of a coach without pointing at the three who said it. A demo that only ever shows
+       the floor letting things through has not shown the floor. */
+    ok('SA25 something is WITHHELD from the coach by the cohort floor, and named rather than hidden — a leader shown nothing concludes nothing is there',
+      (sq.withheld || []).length >= 1 &&
+      (sq.withheld || []).some(w => (w.blocked || []).some(b => b.gate === 'cohort')));
+    ok('SA25b …naming the topic and never restating the finding it just refused to surface',
+      (sq.withheld || []).every(w => typeof w.about === 'string' && w.about.length > 0 && !w.claim));
+    ok('SA26 the squad has a focus that ran its course with an outcome recorded, and one still live — so the loop is visible from both ends',
+      (() => { const f = store.teamFocuses[ALMA_CODE][varsity.nodeId] || [];
+        return f.some(x => x.outcome && x.outcome.result) && f.some(x => x.status === 'active'); })());
+
+    /* SA27 — A CONTESTED BELIEF IS NEITHER A HIGH NOR A LOW ON THE EVIDENCE, and is surfaced
+       as the disagreement it is. This is the state a dashboard averages away. */
+    ok('SA27 a belief two accounts contradict each other about is surfaced as the disagreement, rather than resolved into a High or a Low',
+      myLows.some(o => /accounts differ/i.test((o.explained && o.explained.headline) || '')));
+
+    /* SA28-SA30 — HONESTY OF DISTRIBUTION. A demo where every surface is full teaches that the
+       product always has an answer, which is the opposite of what is being sold. */
+    const withSomething = Object.keys(store.inquiryStates[ALMA_CODE]).filter(k => k.startsWith('member:')).length;
+    ok('SA28 not everybody has something — several players said nothing all season and their app is honestly empty',
+      withSomething >= 15 && withSomething <= summary.players - 3);
+    const quiet = Object.values(orgUsers[ALMA_CODE]).find(u => u.role === 'member' &&
+      !store.inquiryStates[ALMA_CODE][`member:${u.id}`]);
+    const quietTok = quiet ? issueToken(quiet.id, ALMA_CODE, 'member') : null;
+    ok('SA29 …and one of them opens the app to genuinely empty personal buckets, which is a real state the demo must be able to show',
+      !!quietTok && (await bucket(quietTok, 'high', 'self')).length === 0 &&
+      (await bucket(quietTok, 'low', 'self')).length === 0);
+    ok('SA29b …while still seeing the squad\'s, because a quiet player is not a shut-out one',
+      !!quietTok && (await bucket(quietTok, 'low', 'all')).length >= 1);
+    /* SA30 — THE SEED CONTAINS BELIEFS THE PRODUCT REFUSES. Half of what makes a demo honest
+       is what it will not say. Several lines rest on a single telling, and the kernel rates
+       them below the standing a High or a Low needs — so they stay visibly open questions.
+       A seed where everything cleared the bar would demonstrate a product with no bar. */
+    const personal = Object.entries(store.inquiryStates[ALMA_CODE])
+      .filter(([k]) => k.startsWith('member:')).flatMap(([, m]) => Object.values(m));
+    const bands = personal.map(i => (i.confidence || {}).band).filter(Boolean);
+    ok('SA30 the beliefs do not all look equally certain — the kernel banded them across at least three levels from evidence of different weights',
+      new Set(bands).size >= 3);
+    ok('SA30b …and some sit BELOW the standing a High or a Low needs, so they stay open questions however they are worded — a demo where everything cleared the bar shows a product with no bar',
+      personal.some(i => !teamState.fitForSurface(
+        { ...i, independentOrigins: 99, contributors: 99, confidence: i.confidence },
+        { cohortSize: 100 }).ok));
+
   } catch (e) { fail++; console.error('  FAIL http checks threw:', e && e.stack); }
   server.close();
 
