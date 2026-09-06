@@ -15814,7 +15814,35 @@ function _materialContext(code, userId, about) {
     // and would need the person to say which; silently concatenating them would produce an
     // answer that mixes two briefings and names neither.
     const m = all.sort((a, b) => b.createdAt - a.createdAt)[0];
-    return material.contextFor(m, {});
+
+    /* WHICH PARTS, AND WHY THOSE.
+
+       The whole deck went in on every turn, up to the cap, every time. That is wasteful, but the
+       reason to fix it is not cost — it is that a twenty-slide briefing shouted at once buries the
+       one slide the person actually said they were stuck on.
+
+       THE FILTER IS DECLARED, NEVER INFERRED (L-MT2). The sections handed over are the ones THIS
+       READER marked `not_yet` with their own hands, through THIS object. Nothing here reads their
+       questions for confusion, scores relevance, or embeds a passage to find the closest match —
+       any of those would be the classifier this product removed, arriving through the one door
+       built to keep it out, and it would be choosing what a person is allowed to be told.
+
+       Declaring nothing means no narrowing: a coach who has never marked a slide, and a player on
+       their first read, get the document as before under the existing cap. Silence is not a
+       declaration that you understood everything (L-MT3), so it must not be treated as one. */
+    const declared = _engageOf(code, m.materialId)
+      .filter(e => e && e.personId === userId)
+      // Scoped to the object this turn is about. One deck can back a First Team focus and a
+      // Reserves focus; what you said in one is not a reading of the other.
+      .filter(e => !e.on || (e.on.kind === kind && String(e.on.id) === id))
+      .sort((a, b) => (a.at || 0) - (b.at || 0));
+    // L-MT4 — one voice per section, latest word wins, so changing your mind narrows or widens
+    // what comes back rather than stacking on top of what you said before.
+    const latest = new Map();
+    for (const e of declared) latest.set(String(e.sectionId), e.state);
+    const stuck = [...latest.entries()].filter(([, s]) => s === 'not_yet').map(([sid]) => sid);
+
+    return material.contextFor(m, { sectionIds: stuck.length ? stuck : null });
   } catch (_) { return null; }
 }
 

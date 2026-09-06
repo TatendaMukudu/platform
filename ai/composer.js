@@ -124,7 +124,14 @@ function buildContext({
     L.push(`  ${_clip(material.title || material.filename || 'Attached material', 200)}`);
     L.push('  The parts below are numbered as their author wrote them. When you answer from one, say which.');
     L.push(_clip(material.text, 12000));
-    if (material.partial) L.push('  (Only part of this is shown here. Do not claim to have read all of it.)');
+    /* The model must never speak for a document it was handed a slice of. Two different slices,
+       said differently, because a reader deserves to know which one happened: the parts they
+       themselves flagged, or simply as much as would fit. */
+    if (material.partial) {
+      L.push(material.narrowed
+        ? '  (These are the parts this person said they had not got yet. Only part of the document is shown here. Do not claim to have read all of it, and do not summarise the whole.)'
+        : '  (Only part of this is shown here. Do not claim to have read all of it.)');
+    }
     L.push('  Answer from these words. Do not add tactics, names, drills or numbers that are not in them.');
     L.push('');
   }

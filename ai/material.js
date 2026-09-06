@@ -127,7 +127,8 @@ function segment(text, { kind = 'text' } = {}) {
    paraphrase nobody approved. */
 function contextFor(material = {}, { sectionIds = null, cap = CONTEXT_CAP } = {}) {
   const want = sectionIds ? new Set(_arr(sectionIds).map(String)) : null;
-  const secs = _arr(material.sections).filter(s => s && (!want || want.has(String(s.id))));
+  const whole = _arr(material.sections).filter(Boolean);
+  const secs = whole.filter(s => !want || want.has(String(s.id)));
   const lines = [];
   let used = 0;
   const included = [];
@@ -142,9 +143,16 @@ function contextFor(material = {}, { sectionIds = null, cap = CONTEXT_CAP } = {}
     title: _s(material.title, 200),
     filename: _s(material.filename, 200),
     sectionIds: included,
-    // Said plainly so the caller can put it in front of a reader: an answer built from part of a
-    // deck should not be presented as if it read the whole thing.
-    partial: included.length < secs.length,
+    /* PARTIAL IS MEASURED AGAINST THE WHOLE DOCUMENT, NEVER AGAINST THE SELECTION.
+       This compared `included` to `secs` — the already-filtered set — so handing over three
+       slides of twenty reported partial:false, and the composer would then have been told it
+       was safe to speak for the whole deck. Two things narrow what is here: the cap, and a
+       caller's choice of sections. Both leave the reader with less than the document, and the
+       reader is entitled to know that either way. */
+    partial: included.length < whole.length,
+    // What the caller asked to leave out, distinct from what the cap cut off. A caller that
+    // narrowed deliberately can say so; one that simply ran out of room cannot claim it did.
+    narrowed: !!want,
     text: lines.join('\n\n'),
   };
 }

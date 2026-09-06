@@ -417,6 +417,59 @@ const server = app.listen(0, async () => {
     ok('MR30b …and the other squad\'s own engagement ref is nowhere in it',
       !JSON.stringify(tf1Chart.j.chart).includes(outsiderRef));
 
+    /* ── MR31: WHAT GOES INTO THE TURN, AND WHO CHOSE IT. ───────────────────────────────────
+       The whole deck went in on every turn about the focus. The fix narrows it to the parts the
+       reader DECLARED they had not got — and the reason to assert this hard is not the byte count.
+       Whatever picks these sections decides what a person is allowed to be told, so it must be
+       their own hands and nothing else: no relevance score, no embedding, no reading of their
+       question for what they seem confused about. Declared, never inferred (L-MT2).
+
+       p1 said 'not_yet' on s1 back at MR11 and has said nothing about s2 or s3. */
+    const narrowed = S._materialContext(C, 'p1', 'focus:tf1');
+    ok('MR31 the turn is handed the part this reader SAID they had not got — declared by their own hand, never a guess at what they seem stuck on',
+      narrowed && narrowed.sectionIds.length === 1 && narrowed.sectionIds[0] === 's1' && /touchline/.test(narrowed.text));
+    ok('MR31b …and the parts they said nothing about are not in the text — a twenty-slide briefing shouted at once buries the one slide they asked about',
+      !/Rest defence/.test(narrowed.text) && !/near post flick/.test(narrowed.text));
+    /* MR31c — THE HONESTY BIT, and the one I nearly shipped broken. `partial` compared what was
+       included against the ALREADY-FILTERED set, so handing over one slide of three reported
+       partial:false and the composer would have been cleared to speak for the whole deck. It is
+       measured against the whole document or it means nothing. */
+    ok('MR31c …and it says on itself that this is PART of the document, measured against the whole and not against the selection',
+      narrowed.partial === true && narrowed.narrowed === true);
+    const narrowPrompt = composer.buildContext({ name: 'Player One', question: 'the traps', material: narrowed });
+    ok('MR31d …so the model is told these are the parts this person flagged, and told not to summarise the whole',
+      /parts this person said they had not got yet/i.test(narrowPrompt) && /do not summarise the whole/i.test(narrowPrompt));
+
+    /* MR31e — THE FALLBACK, which is what proves MR31 is a filter and not a permanent narrowing.
+       Silence is not a declaration that you understood everything (L-MT3), so somebody who has
+       declared nothing — a player on their first read, a coach who has never marked a slide —
+       gets the document as before. */
+    const wholeForP7 = S._materialContext(C, 'p7', 'focus:tf1');
+    ok('MR31e somebody who has declared nothing is handed the WHOLE document — silence is not a declaration that you understood everything, so it must not narrow anything',
+      wholeForP7 && wholeForP7.sectionIds.length === 3 && wholeForP7.narrowed === false && wholeForP7.partial === false);
+
+    /* MR31f — LATEST WORD WINS (L-MT4), so changing your mind changes what comes back rather than
+       stacking on top of what you said before. p1 adds s2, then takes s1 back. */
+    await post(`/api/materials/${MID}/engaged`, T.p1, { sectionId: 's2', state: 'not_yet' });
+    const two = S._materialContext(C, 'p1', 'focus:tf1');
+    ok('MR31f saying you have not got a second part brings that part in too',
+      two.sectionIds.join(',') === 's1,s2');
+    await post(`/api/materials/${MID}/engaged`, T.p1, { sectionId: 's1', state: 'got_it' });
+    const one = S._materialContext(C, 'p1', 'focus:tf1');
+    ok('MR31g …and saying you have now got the first one takes it back out — one voice per part, latest word wins, rather than an ever-growing pile of everything you ever struggled with',
+      one.sectionIds.join(',') === 's2');
+
+    /* MR31h — A DOCUMENT IS SHARED; A READING OF IT IS NOT, applied to the turn. The same law that
+       scopes the report scopes what goes into the conversation: what p1 said through the First
+       Team focus must not shape a turn about the Reserves focus, and vice versa. Written into the
+       store directly because no fixture user sits in both squads, which is the point — this asserts
+       the scope filter itself rather than a route that happens to exercise it. */
+    _engageOf(C, MID).push({ personId: 'p1', sectionId: 's3', state: 'not_yet', at: Date.now(),
+      ref: `material:${MID}#s3:scopetest`, on: { kind: 'focus', id: 'tf2' } });
+    const stillOne = S._materialContext(C, 'p1', 'focus:tf1');
+    ok('MR31h a declaration made through a DIFFERENT object does not narrow this one — the document is shared, the reading of it is not',
+      stillOne.sectionIds.join(',') === 's2');
+
     /* ── MR24: THE CALL SITES. A route with no caller is not a feature. ── */
     const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'app.js'), 'utf8');
     ok('MR24 the attach control exists and posts the extracted text — the parser has been in the browser all along and sent it nowhere',
