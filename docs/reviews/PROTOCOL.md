@@ -126,6 +126,33 @@ rather than discovered.
 
 ---
 
+## 4b. If you cannot push
+
+Check first, before doing any work:
+
+```
+git push --dry-run origin HEAD:refs/heads/<agent>/connectivity-check
+```
+
+Two failures, two different meanings:
+
+| What you see | What it means |
+|---|---|
+| `could not read Username for 'https://github.com'` | **No credential at all.** Nothing was offered. Common for read-only repo connectors, which cannot be fixed with a token. |
+| `Invalid username or token` / `403` | **A credential was offered and refused.** Expired, revoked, wrong value, or a stale one baked into a cached container or left in the remote URL. See `docs/CODEX_PUSH_PATH.md`. |
+
+**Do not stop.** A review's deliverable is findings, and findings survive the container.
+AGENTS.md requires stopping when you cannot push, and that rule is written for implementation
+work whose only artifact is a commit — it does not apply here. Do the review and deliver the
+report in chat instead; someone with write access commits it, attributed to you.
+
+State at the top of your report, in one line, that you could not push and that nothing in it
+has been run through CI. Then everything else in this protocol still applies: mutation is
+still the standard of proof, and a fix you could not run is a **read** finding, not a fixed
+one.
+
+---
+
 ## 5. What you write down
 
 `docs/reviews/<agent>-r1.md`, with exactly these headings. The headings are fixed so the three
