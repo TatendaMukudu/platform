@@ -2,7 +2,7 @@
 
 **Read:** main @ 5683df3de63d8daa54d345ab39fa262db1908d2e
 **Lane:** Boundary and substrate, extended at the founder's request to the composer, Focus, Inquiry, Library, material, Forum, graph, and mobile call paths.
-**Ran:** `git push --dry-run origin HEAD:refs/heads/codex/connectivity-check`; `node scripts/composer-actions-smoke.js`; `node scripts/assistant-runtime-smoke.js`; `node scripts/assistant-interface-smoke.js`; `node scripts/object-conversation-screen-http-smoke.js`; `node scripts/focus-creation-smoke.js`; `node scripts/focus-continuity-smoke.js`; `node scripts/shelf-http-smoke.js`; `node scripts/material-reach-http-smoke.js`; `node scripts/forum-reach-smoke.js`; `node scripts/chart-governance-smoke.js`; `node scripts/scope-parity-smoke.js`; `node scripts/message-history-smoke.js`; `node scripts/asset-version-smoke.js`; `node scripts/mobile-inspect.js --check`; `npm test`.
+**Ran:** `git push --dry-run origin HEAD:refs/heads/codex/connectivity-check`; `node scripts/composer-actions-smoke.js`; `node scripts/assistant-runtime-smoke.js`; `node scripts/assistant-interface-smoke.js`; `node scripts/object-conversation-screen-http-smoke.js`; `node scripts/focus-creation-smoke.js`; `node scripts/focus-continuity-smoke.js`; `node scripts/shelf-http-smoke.js`; `node scripts/material-reach-http-smoke.js`; `node scripts/forum-reach-smoke.js`; `node scripts/chart-governance-smoke.js`; `node scripts/scope-parity-smoke.js`; `node scripts/message-history-smoke.js`; `node scripts/asset-version-smoke.js`; `node scripts/mobile-inspect.js --check`; `node /tmp/composer-browser-e2e.js`; `npm test`.
 
 ## Scope actually covered
 
@@ -27,6 +27,12 @@ truth layer.
   `node scripts/composer-actions-smoke.js` initially reported `FAIL CA16 object buttons are
   shortcuts into the assistant action path`. This made Focus, Inquiry, Forum, and Library
   operations separate packet/form workflows.
+- **Reproduced in Chromium at 390×844:** after **Work on this** produced a valid typed
+  `create_focus` proposal, `inquirySend()` immediately reopened the object thread. Proposal cards
+  are turn response state, not persisted conversation messages, so the reload discarded the
+  Confirm control. The model and kernel had done their jobs, but the person could not execute the
+  action. `node /tmp/composer-browser-e2e.js` timed out waiting for `.iq-proposal` while the
+  captured response contained `create_focus`.
 
 ## Code-reading concerns (not reproduced)
 
@@ -51,6 +57,9 @@ truth layer.
   is removed.
 - Routed object buttons through the same typed assistant path, explained the governed graph,
   and compacted the phone composer; CA16–CA18 bite when those production lines are reverted.
+- Kept the live object-thread response and rendered its primary/more action cards instead of
+  reopening and discarding them; CA16b bites if either the live renderer or `${primary}` card
+  insertion is removed, and the 390×844 browser flow now confirms the resulting Focus.
 
 ## Refused / escalated
 
@@ -79,6 +88,7 @@ truth layer.
 | Break attachment routing or give material an epistemic effect | CA13 / CA14 |
 | Remove duplicate-response or governed-group dispatch guards | CA15 / CA15b |
 | Restore legacy object-button handlers | CA16, FC20, OC4, SX11b |
+| Remove live object response rendering or `${primary}` action-card insertion | CA16b |
 | Remove graph explanation or enlarge the mobile composer | CA17 / CA18 |
 | Restore the previous scope-inventory count | W4 inventory |
 
@@ -94,11 +104,14 @@ production call sites rather than legacy definitions.
 
 ## What I could not verify
 
-- Chromium could not be installed: Playwright downloads were rejected with HTTP 403 and the
-  available Ubuntu package is only a Snap launcher. `node scripts/mobile-inspect.js --check`
-  therefore reported that `/opt/pw-browsers/chromium-1194/chrome-linux/chrome` does not exist.
-  I could not honestly complete a browser/device screenshot pass.
 - No model provider credentials were available. Model-off behaviour and the actual HTTP,
   dispatcher, persistence, and normalized-model-output paths were exercised, but not a live
   provider's interpretation quality.
 - I did not test the deployed Render instance or alter production/demo data.
+
+Chromium was ultimately installed from Chrome for Testing's direct Google storage endpoint after
+the Playwright CDN returned 403. `node scripts/mobile-inspect.js --check` captured all phone scenes,
+including the keyboard-open state, with no overflow or contrast findings; it repeated the 29
+already-known tap-target reports listed in the protocol. A separate real 390×844 browser flow opened
+an Inquiry, clicked **Work on this**, entered the person's own wording, rendered the governed
+proposal, confirmed it, and verified the resulting live Focus.

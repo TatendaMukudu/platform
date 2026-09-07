@@ -92,6 +92,9 @@ const ok = (name, value) => value ? (pass++, console.log('  PASS', name)) : (fai
 
     ok('CA16 object buttons are shortcuts into the assistant action path',
       /beginObjectAction\('create_focus'/.test(require('fs').readFileSync(require('path').join(__dirname, '../js/app.js'), 'utf8')));
+    ok('CA16b an object-thread action keeps its confirm card in the conversation instead of discarding it on reload',
+      /pending\.innerHTML = this\._renderAssistant\(data\)/.test(require('fs').readFileSync(require('path').join(__dirname, '../js/app.js'), 'utf8'))
+      && /\$\{primary\}[\s\S]*\$\{more \? `<details class="iq-more-actions"/.test(require('fs').readFileSync(require('path').join(__dirname, '../js/app.js'), 'utf8')));
     ok('CA17 the graph explains points, threshold, current origins and repeated-source behaviour',
       ['Each point is a dated moment', 'needed before this can be called', 'originSeries', 'does not add another origin'].every(x => require('fs').readFileSync(require('path').join(__dirname, '../js/app.js'), 'utf8').includes(x)));
     const mobileCss = require('fs').readFileSync(require('path').join(__dirname, '../css/member.css'), 'utf8');

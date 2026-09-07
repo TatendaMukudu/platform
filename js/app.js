@@ -12080,8 +12080,16 @@ const MemberApp = {
     if (!input) { say('Could not find the box to send from.'); return; }
     if (!text) { say('Write or say something first.'); return; }
     if (!thread) { say('This thread lost its place — go back and open it again.'); return; }
+    const turns = document.getElementById('iq-object-turns');
+    const esc = s => this._escape(String(s == null ? '' : s));
     input.disabled = true;
     say('Sending…');
+    if (turns) {
+      turns.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">${esc(text)}</div>`);
+      turns.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-iq iq-pending" data-object-pending="1" role="status"><span class="iq-typing" aria-hidden="true"><i></i><i></i><i></i></span></div>`);
+      turns.scrollTop = turns.scrollHeight;
+    }
+    input.value = '';
     try {
       if (this._pendingComposerAction && ['create_focus', 'disagree_with_inquiry'].includes(this._pendingComposerAction.type)) {
         this._pendingComposerAction.arguments = { ...(this._pendingComposerAction.arguments || {}),
@@ -12098,9 +12106,24 @@ const MemberApp = {
       this._pendingComposerAction = null;
       thread.conversationId = data.conversationId;
       say('');
-      await this.openObjectThread(thread.kind, thread.objectId);
+      const pending = turns && turns.querySelector('[data-object-pending="1"]');
+      if (pending) {
+        pending.removeAttribute('data-object-pending');
+        pending.classList.remove('iq-pending');
+        // Keep the live response contract intact. Reopening the thread here persisted the words
+        // but discarded its confirmable action cards, so “Work on this” could propose a Focus
+        // that the person had no way to approve.
+        pending.innerHTML = this._renderAssistant(data);
+      }
+      input.disabled = false;
+      input.placeholder = 'Say what you know, or ask…';
+      this._wsGrow(input);
+      turns?.scrollTo({ top: turns.scrollHeight, behavior: 'smooth' });
     } catch (e) {
       input.disabled = false;
+      input.value = text;
+      const pending = turns && turns.querySelector('[data-object-pending="1"]');
+      if (pending) pending.remove();
       say(`That did not send — ${(e && e.message) || 'unknown problem'}. Your words are still here.`);
     }
   },
@@ -12650,15 +12673,8 @@ const MemberApp = {
             the composer now states continuously. Once is reassurance; every time is noise. */ ''}
       ${clarifyHtml}
       ${savedHtml}
-      <div class="iq-make-row">
-        <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus',undefined,this)">Make this a focus</button>
-      </div>
-      ${/* SUGGESTIONS REMOVED, September 2026. The composer's Public/Private toggle asks who
-            something is for BEFORE it is said. A card asking the same question afterwards is
-            the same decision twice, and the second one arrives when a person has already moved
-            on. Consequential proposals (submitting work, drafting a calendar hold) still exist
-            in r.moreActions and will get their own surface; what is gone is the "keep this"
-            card, which only ever restated the toggle. */ ''}
+      ${primary}
+      ${more ? `<details class="iq-more-actions"><summary>More options</summary>${more}</details>` : ''}
     </div>`;
   },
 
