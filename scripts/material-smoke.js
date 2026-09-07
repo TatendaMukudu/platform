@@ -154,10 +154,32 @@ const DECK = [
     { personId: 'p3', sectionId: 's1', state: 'got_it',  at: 3 },
   ];
   const u = material.understanding(m, engagements, { members: 6, floor: teamState.cohortFloor(3, 6) });
+  /* The refusal is unchanged; only its WORDING is. It used to be matched on "below the floor",
+     which is part of the production floor's sentence "3 of 28 is below the floor of 5" — the
+     sentence that was handing back the arithmetic it refused. Matching the refusal by its
+     verdict and by the absence of counts is what MS14b onwards then proves. */
   ok('MS14 a report on three people in a squad of six is REFUSED — "two of six did not get it" is a name in a small squad',
-    u.ok === false && /below the floor/i.test(u.reason || ''));
+    u.ok === false && typeof u.reason === 'string' && u.reason.length > 20);
+  /* MS14b — ITS ENGLISH CLAIMED MORE THAN ITS PREDICATE PROVED, and Astra caught it by reading.
+     "carries NO counts at all" was asserted by checking three ARRAYS were empty, while the
+     object went on returning `cohort: {k, n}` — the exact arithmetic the floor exists to
+     withhold. Reproduced over HTTP afterwards and it was worse: the production floor's own
+     reason string is "3 of 28 is below the floor of 5", so the refusal stated k and n in the
+     reason, again in the cohort object, and a third time in the human sentence built from the
+     reason. A refusal made because three-of-twenty-eight cannot be disclosed disclosed it
+     three times.
+
+     An assertion whose sentence is stronger than its check is the same defect as a comment
+     that contradicts the line beneath it. Now it asserts what it says. */
   ok('MS14b …and the refusal carries NO counts at all, because returning them beside an ok:false is how a caller ends up rendering them anyway',
-    u.parts.length === 0 && u.struggling.length === 0 && u.untouched.length === 0);
+    u.parts.length === 0 && u.struggling.length === 0 && u.untouched.length === 0 &&
+    !u.cohort);
+  ok('MS14b2 …not in the object, and not in the REASON either — the floor\'s own wording is "3 of 28 is below the floor of 5", which hands back exactly what it refused',
+    !/\d+\s+of\s+\d+/.test(String(u.reason || '')) && !/\d/.test(String(u.reason || '')));
+  ok('MS14b3 …nor in the sentence a person reads, which is built from that reason and was stating it a third time',
+    !/\d+\s+of\s+\d+/.test(material.landedNote(u)));
+  ok('MS14b4 …while the refusal still SAYS it is a refusal and why, because a silent one reads as "nothing happened"',
+    /Held back/i.test(material.landedNote(u)) && /too few people/i.test(String(u.reason || '')));
   ok('MS14c …and says so plainly rather than reading as "nothing happened"',
     /Held back/i.test(material.landedNote(u)));
 

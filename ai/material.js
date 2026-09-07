@@ -212,10 +212,26 @@ function understanding(material = {}, engagements = [], { members = 0, floor = n
   const ok = !floor || floor.ok === true;
   return {
     ok,
-    // The refusal carries the reason and NO counts. Returning the numbers with an ok:false beside
-    // them is how a caller ends up rendering them anyway.
-    reason: ok ? null : _s(floor && floor.reason, 200),
-    cohort: { k, n },
+    /* THE REFUSAL MUST NOT STATE THE ARITHMETIC IT IS REFUSING. Found by Astra reading this
+       file, reproduced over HTTP, and worse than reported: on the refusal path this returned
+       `cohort: {k, n}` unconditionally, the production floor's own reason string is
+       "3 of 28 is below the floor of 5", and landedNote turned that into "Held back: 3 of 28
+       is below the floor of 5." So a refusal made precisely because three-of-twenty-eight
+       cannot be disclosed without pointing at three people disclosed it three times over.
+
+       The comment directly above used to say "The refusal carries the reason and NO counts"
+       while the next line returned the counts. It was true of the arrays and false of the
+       object, which is the whole defect in one line.
+
+       ai/team-state.js already bands exactly this case — a cohort-gated refusal there reads
+       "not enough safely attributable support to disclose", with a comment explaining that
+       stating k and n hands back exactly what was refused. That rule existed and was applied
+       in one place and not the other, which is how every drift in this codebase starts.
+
+       The FLOOR ITSELF is public (five either side, MIN_COHORT) — the number of people who
+       spoke is not. */
+    reason: ok ? null : 'too few people have said where they are for a count to be safe without pointing at individuals',
+    cohort: ok ? { k, n } : null,
     parts: ok ? parts : [],
     // The parts most people said they did not have yet, which is the coach's actual question.
     // Ordered by how many said so; ties by the author's own ordering, never by anything derived.
@@ -231,6 +247,8 @@ function understanding(material = {}, engagements = [], { members = 0, floor = n
 /* The plain sentence a coach reads. Deterministic, so it says the same thing with the writing
    engine off — and it never states a proportion the counts do not support. */
 function landedNote(u = {}) {
+  // The refusal sentence carries no counts either — it is read by the same person the numbers
+  // were withheld from, and "Held back: 3 of 28" is the disclosure said out loud.
   if (!u || u.ok !== true) return u && u.reason ? `Held back: ${u.reason}.` : 'Nothing to report yet.';
   const parts = _arr(u.parts);
   if (!parts.length) return 'Nothing attached to report on.';

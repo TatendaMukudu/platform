@@ -16424,7 +16424,11 @@ app.get('/api/materials/:id/understanding', requireAuth, (req, res) => {
     parts: (u.parts || []).map(({ gotRefs, notRefs, ...p }) => p),
     struggling: (u.struggling || []).map(({ gotRefs, notRefs, ...p }) => p),
     untouched: u.untouched,
-    cohort: { said: people, of: n, group: cohort.name },
+    /* AND THE ROUTE BUILDS ITS OWN, so fixing the module alone would have left the wire
+       unchanged. On a refusal this is null: `said` and `of` ARE the arithmetic the floor
+       exists to withhold, and a client that receives them will render them. The group's NAME
+       stays — the reader is in it, and naming the group discloses nothing about who spoke. */
+    cohort: u.ok ? { said: people, of: n, group: cohort.name } : { group: cohort.name },
     note: material.landedNote(u),
     limitations: [
       'Counts people, never names them.',

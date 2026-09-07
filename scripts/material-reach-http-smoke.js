@@ -210,7 +210,18 @@ const server = app.listen(0, async () => {
     await post(`/api/materials/${small.j.materialId}/engaged`, outT, { sectionId: 's1', state: 'not_yet' });
     const smallRep = await get(`/api/materials/${small.j.materialId}/understanding`, otherT);
     ok('MR18 a report on a ONE-PERSON squad is refused — "one of one did not get it" is a name, and the floor is the whole reason this surface can exist',
-      smallRep.status === 200 && smallRep.j.reported === false && /below the floor/i.test(smallRep.j.reason || ''));
+      smallRep.status === 200 && smallRep.j.reported === false && /too few people/i.test(smallRep.j.reason || ''));
+    /* MR18b2 — AND THE REFUSAL DOES NOT STATE WHAT IT REFUSED. This assertion used to match
+       "below the floor", which is part of the production wording "1 of 1 is below the floor of
+       5" — so the suite was matching on the leak. Astra found the object carrying `cohort`
+       unconditionally by reading; reproducing it showed the reason and the human sentence were
+       stating k and n as well. A refusal that names the arithmetic hands back exactly what it
+       withheld. */
+    ok('MR18b2 …and the refusal carries no counts anywhere on the wire — not in the reason, not in the cohort, not in the sentence a person reads',
+      !/\d+\s+of\s+\d+/.test(JSON.stringify(smallRep.j)) &&
+      !smallRep.j.cohort.said && !smallRep.j.cohort.of);
+    ok('MR18b3 …while still naming the group, which the reader is in and which discloses nobody',
+      typeof smallRep.j.cohort.group === 'string' && smallRep.j.cohort.group.length > 0);
     /* MR18c — THE LINE A DEFECT IN THIS SUITE DREW. The refusal first came back as ok:false, so
        every client would have read a lawful refusal as a failed request and rendered nothing —
        the one outcome a refusal must never produce. `ok` is whether the request worked; whether
@@ -386,8 +397,24 @@ const server = app.listen(0, async () => {
        The Reserves have said nothing. Their report must not inherit First Team's answers. */
     await post(`/api/materials/${MID}/engaged`, outT, { sectionId: 's1', state: 'not_yet' });
     const reservesRep = await get(`/api/materials/${MID}/understanding`, otherT);
-    ok('MR28 A DOCUMENT IS SHARED; A READING OF IT IS NOT — the Reserves\' report counts only what the Reserves said, not First Team\'s six answers on the same deck',
-      reservesRep.j.cohort.said === 1 && reservesRep.j.cohort.of === 1);
+    /* MR28 — REWRITTEN, because it was reading counts off a REFUSED report. The Reserves are a
+       squad of one, so their report can never clear the floor, and asserting `said === 1 && of
+       === 1` was verifying the scoping using the exact numbers the floor exists to withhold.
+       The scoping is proved two better ways below: at the record, where the `on` field is what
+       actually does the scoping, and at First Team's ALLOWED report in MR28b, whose counts are
+       legitimately present and must not have moved. */
+    ok('MR28 A DOCUMENT IS SHARED; A READING OF IT IS NOT — the Reserves\' one-person report is refused, and carries none of First Team\'s numbers with it',
+      reservesRep.j.reported === false && !reservesRep.j.cohort.said &&
+      !/\d+\s+of\s+\d+/.test(JSON.stringify(reservesRep.j)));
+    ok('MR28a2 …and the scoping is in the RECORD: every engagement names the object it was made through, so one deck backing two squads keeps two readings',
+      (() => { const all = S.materialEngage[C][MID] || [];
+        const ft = all.filter(e => e.on && e.on.id === 'tf1');
+        const rs = all.filter(e => e.on && e.on.id === 'tf2');
+        // Six from First Team, at least one from the Reserves, every record scoped, and the two
+        // sets disjoint — which is the property, rather than a count that moves when the suite
+        // grows another engagement above.
+        return ft.length === 6 && rs.length >= 1 && ft.length + rs.length === all.length &&
+          all.every(e => e.on && e.on.kind === 'focus'); })());
     const firstTeamRep = await get(`/api/materials/${MID}/understanding`, coachT);
     ok('MR28b …and First Team\'s report is unchanged by a Reserves player answering on the same document',
       firstTeamRep.j.cohort.said === 6 && firstTeamRep.j.cohort.of === 12);
