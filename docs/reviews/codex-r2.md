@@ -89,7 +89,7 @@ One attempted mutation replaced canonical Material lookup with an unsafe direct 
 - The current environment has `playwright-core` but not the Chromium binary expected by `scripts/mobile-inspect.js`; I did not rerun PR #84's prior 390x844 browser flow. The existing PR browser evidence remains untouched, but this report does not claim fresh browser verification.
 - No live model-provider credential was available. Deterministic model-off behavior, hostile normalized model output and real HTTP execution were verified; live-provider interpretation quality was not.
 - I did not exercise the deployed Render instance or mutate production data.
-- CI status was not yet available when the corrected code commit was created; it is checked separately after the report push.
+- GitHub Truth Layer run 760 completed successfully on report head `72052d79c76e81b0e0f93e567a358227853594f9`.
 
 Completion checklist:
 
@@ -114,5 +114,4 @@ Completion checklist:
 - [x] Narrow suites green
 - [x] `npm test` green
 - [x] Branch pushed
-- [ ] CI green if available
-
+- [x] CI green if available
