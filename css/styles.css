@@ -3104,6 +3104,10 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqt-chart:empty{display:none}
 .iqt-chart-head{font-size:var(--fs-sm);letter-spacing:.06em;text-transform:uppercase;
   color:var(--text-secondary);margin:0 0 .5rem}
+.iqt-chart-summary{font-size:var(--fs);color:var(--text-primary);line-height:1.4;margin:0 0 .35rem}
+.iqt-chart-key{font-size:var(--fs-sm);color:var(--text-secondary);margin:.35rem 0 .55rem}
+.iqt-chart-key summary{cursor:pointer;min-height:36px;display:flex;align-items:center;color:var(--text-secondary)}
+.iqt-chart-key div{line-height:1.5;padding:.15rem 0 .25rem}
 .iqt-chart-none{font-size:var(--fs);color:var(--text-secondary);line-height:1.5;
   border:1px solid var(--border);border-radius:12px;padding:.75rem;background:transparent}
 .iqt-svg{width:100%;height:auto;display:block;overflow:visible}

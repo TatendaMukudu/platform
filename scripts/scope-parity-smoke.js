@@ -118,7 +118,10 @@ for (const row of inventory) console.log(`server.js:${row.line} ${row.source}`);
    _timelineChart keeps its call but now reads the cohort floor rather than the role, and the
    per-person dots it drew were replaced by a single count for everybody — one dated dot per
    person carried WHEN each answered, which in a squad is often enough to say who. */
-ok('W4 inventory names every current scope reference', inventory.length === 69 && inventory.every(r => Number.isInteger(r.line) && r.source));
+/* 69 -> 72, composer control surface. All three are `_inNode` and deliberately node-local:
+   listing the caller's available discussion groups, validating the group selected on confirm,
+   and limiting invited participants to people who are both addressable and in that group. */
+ok('W4 inventory names every current scope reference', inventory.length === 72 && inventory.every(r => Number.isInteger(r.line) && r.source));
 
 console.log('\nMigration law: BRIDGE never; GATE governance AND Web; ENUMERATE/FILTER migrate later; WEB re-test only.');
 console.log(`\n=== scope-parity-smoke: ${pass} passed, ${fail} failed ===\n`);

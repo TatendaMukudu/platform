@@ -322,11 +322,11 @@ const server = app.listen(0, async () => {
     /* FC20 — THE FOURTH WAY IN. A belief thread had three verdicts, all of them ways to put it
        DOWN, and no way to act on what it had just told you. */
     ok('FC20 a High, Low or Inquiry offers "Work on this" — the one place a person is most likely to want a focus, and the only entry point that was missing',
-      /MemberApp\.focusOnThis\('/.test(src_) && />Work on this</.test(src_));
-    ok('FC20b …opening the SAME card as everywhere else, because a third way to make a focus is a third place for the audience to drift',
-      /focusOnThis\(kind, objectId, el\) \{[\s\S]{0,900}this\._openFocusForm\(marker,/.test(src_));
+      /MemberApp\.beginObjectAction\('create_focus'/.test(src_) && />Work on this</.test(src_));
+    ok('FC20b …entering the SAME composer action architecture rather than opening a parallel form',
+      /beginObjectAction\(type, kind, objectId\)[\s\S]{0,500}_pendingComposerAction/.test(src_));
     ok('FC20c …and carrying what it addresses through to the save',
-      /addressesKind: \(\(this\._focusAddresses \|\| \{\}\)\[id\] \|\| \{\}\)\.kind/.test(src_));
+      /live && \['inquiry', 'high', 'low'\]\.includes\(live\.kind\)[\s\S]{0,120}addresses/.test(srv_));
 
   } catch (e) { fail++; console.error('  FAIL suite threw:', e && e.stack); }
 
