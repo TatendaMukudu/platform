@@ -13645,7 +13645,12 @@ function _assessTopic(t) {
    An `about` value is never authority. It is resolved through the same object view used by the
    page, and an unreadable object becomes no context rather than an existence oracle. */
 function _composerActionContext(code, userId, opts = {}, conversation = null) {
-  const ref = _aboutRef(opts.about || (conversation && conversation.about));
+  const boundRef = _aboutRef(conversation && conversation.about);
+  const pageRef = _aboutRef(opts.about);
+  const contextMismatch = !!(boundRef && pageRef && boundRef !== pageRef);
+  // `about` is the conversation binding. Page state may establish a new binding, but
+  // it may never retarget an existing conversation to another object.
+  const ref = boundRef || pageRef;
   let object = null;
   if (ref) {
     const split = ref.indexOf(':');
@@ -13659,31 +13664,42 @@ function _composerActionContext(code, userId, opts = {}, conversation = null) {
     object,
     folders: _libFolders(code).filter(f => f.ownerId === userId).map(f => ({ id: f.id, name: f.name })),
     groups: Object.values(orgNodes[code] || {}).filter(n => n && _inNode(code, n.nodeId || n.id, userId))
-      .map(n => ({ id: n.nodeId || n.id, name: n.name || 'Group' })),
+      .map(n => ({ id: n.nodeId || n.id, name: n.name || 'Group', memberIds: [...(n.memberIds || [])].map(String).sort() })),
     contacts: _contactsFor(code, userId).map(c => ({ id: c.id, name: c.name, with: c.with || null })),
     forumAvailable: !!(object && (object.kind === 'inquiry' || object.kind === 'focus') &&
       ((object.raw?.subjectRef || '').startsWith('group:') || (object.raw?.participants || []).length > 1)),
     attachment: opts.attachment && typeof opts.attachment === 'object'
       ? { id: String(opts.attachment.id || '').slice(0, 120), name: String(opts.attachment.name || '').slice(0, 200) } : null,
     conversationId: conversation && conversation.id || null,
+    contextMismatch,
   };
 }
 
 async function _composerActionInterpret(code, text, context, priorMessages, requestedAction) {
+  if (context.contextMismatch) return { actions: [], needsClarification: 'This conversation belongs to a different object. Open a new conversation before acting here.' };
+  let reading;
   if (requestedAction) {
-    return composerActions.normalize({ actions: [{ type: requestedAction.type, arguments: requestedAction.arguments || {}, reason: 'selected from the current view' }] }, context);
+    reading = composerActions.normalize({ actions: [{ type: requestedAction.type, arguments: requestedAction.arguments || {}, reason: 'selected from the current view' }] }, context);
+    return composerActions.ground(reading, { text, priorMessages, context });
   }
   if (!ai.enabled() || ai.deterministicOnly()) return { actions: [], needsClarification: null, unavailable: true };
   try {
     const proposed = await ai.completeJSON({ org: code, taskType: 'composer_action_interpret', tier: 'micro',
       system: 'Return only the requested JSON. You interpret intent and propose an allow-listed action. You do not decide permission, visibility, confidence or state.',
       user: composerActions.prompt({ text, context, priorMessages }), maxTokens: 500, schema: ['actions'] });
-    return composerActions.normalize(proposed, context);
+    reading = composerActions.normalize(proposed, context);
+    return composerActions.ground(reading, { text, priorMessages, context });
   } catch (_) { return { actions: [], needsClarification: null, unavailable: true }; }
 }
 
 function _composerActionProposals(candidates, context, conversationId) {
-  return (candidates.actions || []).map(c => ({
+  return (candidates.actions || []).map(c => {
+    const chosenGroup = (context.groups || []).find(g => String(g.id) === String(c.arguments.groupId));
+    const addressable = new Set((context.contacts || []).map(x => String(x.id)));
+    const resolvedParticipantIds = chosenGroup
+      ? (chosenGroup.memberIds || []).filter(id => addressable.has(String(id))).map(String).sort()
+      : (c.arguments.participantIds || []).map(String).sort();
+    return ({
     id: 'prop_' + generateId(), actionType: c.type, capability: 'composer_action',
     label: ({
       create_focus: 'Start this focus', update_focus: 'Update this focus', record_focus_outcome: 'Record this focus outcome',
@@ -13692,11 +13708,45 @@ function _composerActionProposals(candidates, context, conversationId) {
       request_research: 'Show cited external reading', attach_material: 'Attach this material', keep_in_library: 'Keep this live object in Library',
       create_library_folder: 'Create this Library folder', discuss_with_group: 'Open the governed discussion', navigate_to_object: 'Open this object',
     })[c.type] || c.type,
-    payload: { ...c.arguments, context: context.object ? { kind: context.object.kind, id: context.object.id } : null, conversationId },
-    visibility: c.type === 'discuss_with_group' ? 'shared' : 'only_me', why: c.reason || 'You asked IntelliQ to do this.',
+    payload: { ...c.arguments, argumentSources: c.argumentSources || {},
+      context: context.object ? { kind: context.object.kind, id: context.object.id } : null, conversationId,
+      objectGuard: context.object ? _composerObjectGuard(context.object.raw) : null,
+      resolvedParticipantIds },
+    visibility: (c.type === 'discuss_with_group' || (c.type === 'update_focus' && ((c.arguments.participantIds || []).length || c.arguments.visibility === 'shared'))) ? 'shared' : 'only_me',
+    why: c.reason || 'You asked IntelliQ to do this.',
+    effect: _composerActionEffect(c, context),
     requiredApproval: c.requiresConfirmation, policyResult: { effect: c.requiresConfirmation ? 'require_approval' : 'allow', reason: 'server validation runs on execution' },
     evidenceBasis: [],
-  }));
+    });
+  });
+}
+
+function _composerObjectGuard(raw) {
+  if (!raw) return null;
+  const stable = raw.inquiryId ? {
+    inquiryId: raw.inquiryId, status: raw.status, leadingHypothesisId: raw.leadingHypothesisId,
+    signals: (raw.signals || []).map(s => [s.ref, s.status || 'active', !!s.dissents, s.supersededBy || null]),
+  } : {
+    id: raw.id, status: raw.status, text: raw.text, target: raw.target || null,
+    reviewAt: raw.reviewAt || null, visibility: raw.visibility || 'private', participants: raw.participants || [],
+  };
+  return _contentHash(JSON.stringify(stable));
+}
+
+function _composerActionEffect(candidate, context) {
+  const a = candidate.arguments || {}, sources = candidate.argumentSources || {};
+  const group = (context.groups || []).find(g => String(g.id) === String(a.groupId));
+  const people = (context.contacts || []).filter(c => (a.participantIds || []).includes(c.id));
+  return {
+    text: a.text || null, textSource: sources.text || null,
+    account: a.because || null,
+    target: a.target || null, reviewOn: a.reviewOn || null, outcome: a.outcome || null,
+    audience: group ? { id: group.id, name: group.name } : (people.length ? { ids: people.map(p => p.id), name: people.map(p => p.name).join(', ') } : null),
+    material: a.materialId && context.attachment ? { id: a.materialId, name: context.attachment.name || 'Attached material' } : null,
+    disclosure: candidate.type === 'discuss_with_group'
+      ? 'Only this wording becomes visible to this audience. The private conversation and other attachments stay private.'
+      : null,
+  };
 }
 
 async function _assistantTurn(code, userId, text, lens, opts = {}) {
@@ -13902,6 +13952,11 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     proposals = proposals.filter(p => !['capture', 'focus_proposal'].includes(p.actionType));
     proposals = [...composerProposals, ...proposals];
   }
+  if (actionReading.needsClarification) {
+    // Clarification is itself the semantic result. Re-offering the rejected
+    // private capture beside it recreates the original failure in different text.
+    proposals = proposals.filter(p => !['capture', 'focus_proposal'].includes(p.actionType));
+  }
   // If we ALREADY saved via an explicit command, don't ALSO offer a capture card for
   // the same text (no duplicate, no double-write).
   if (saved) proposals = proposals.filter(p => p.actionType !== 'capture');
@@ -14033,6 +14088,9 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
 
     if (otherProps.length) parts.push(`I can ${otherProps.map(p => p.label.toLowerCase()).join(', or ')} — say the word and I'll do it. Nothing happens until you confirm.`);
     if (!hasInsight && !hasAction && !hasAnswer && !sensitive) parts.push('Noted. Tell me what you\'d like me to do with this, or ask me anything.');
+  }
+  if (actionReading.needsClarification && !parts.some(x => String(x).includes(actionReading.needsClarification))) {
+    parts.push(actionReading.needsClarification);
   }
   let responseText = parts.join(' ');
   const priorAssistant = [...priorMessages].reverse().find(m => m.role === 'assistant' && m.text);
@@ -15997,7 +16055,7 @@ function _materialContext(code, userId, about) {
     const [kind, ...rest] = ref.split(':');
     const id = rest.join(':');
     const all = Object.values(_materials(code))
-      .filter(m => _materialOn(m, kind, id));
+      .filter(m => _materialOn(m, kind, id) && _materialFor(code, userId, m.materialId).ok);
     if (!all.length) return null;
     const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
     if (!obj) return null;   // attached to something this reader cannot open
@@ -16041,7 +16099,7 @@ function _conversationMaterialContext(code, userId, conversation) {
   if (!conversation || !(assistantConversations[_wsKey(code, userId)] || []).some(c => c.id === conversation.id)) return null;
   const latest = Object.values(_materials(code)).filter(m => _materialOn(m, 'conversation', conversation.id))
     .sort((a, b) => b.createdAt - a.createdAt)[0];
-  return latest ? material.contextFor(latest) : null;
+  return latest && _materialFor(code, userId, latest.materialId).ok ? material.contextFor(latest) : null;
 }
 
 /* A leader's READ becomes evidence about the person; a leader's HANDOFF never does (L-ES4).
@@ -16129,6 +16187,33 @@ app.post('/api/leader/observation', requireAuth, (req, res) => {
     note: `Recorded in your name. ${(orgUsers[code][subjectId] || {}).name || 'They'} can see it and can say if they saw it differently.` });
 });
 
+/* One canonical boundary for a person's deliberate contradicting account. The
+   words live in owner-only canonical evidence; the Inquiry receives only its
+   reference, origin and shape. Repeating the account deduplicates, while changing
+   it supersedes the earlier record and signal without deleting history. */
+function _recordPersonalDisagreement(code, userId, inquiry, because, now = Date.now()) {
+  const when = new Date(now).toISOString();
+  const rec = _recordEvidence(code, {
+    provider: 'user', source: 'reported', externalId: `inquiry-disagreement:${inquiry.inquiryId}:${userId}`,
+    subjectId: userId, ownerRef: userId, type: 'observation', label: 'Your contradicting account',
+    // The account has one stable factual identity. A later wording change is a
+    // correction of that account, not a second occasion or origin.
+    valueText: String(because).slice(0, 600), observedAt: new Date(inquiry.createdAt || 0).toISOString(), retrievedAt: when,
+    confidence: 'confirmed', visibility: 'private',
+    attributes: { inquiryId: inquiry.inquiryId, accountKind: 'disagreement' },
+  }, { because: String(because).slice(0, 600), inquiryId: inquiry.inquiryId });
+  if (!rec.envelope) return { ok: false, error: 'account_not_recorded' };
+  _indexEvidence(code, rec.envelope).catch(() => {});
+  const proposal = {
+    id: 'dis_' + generateId(), level: 'observation', directness: 'direct',
+    authority: 'self_report', source: 'self', specificity: 0.7,
+    originKind: 'self_report', originRef: `self:${userId}`, turnId: `dis_${userId}_${now}`,
+    contradicts: true,
+    ...(rec.envelope.correctionOf ? { corrects: [rec.envelope.correctionOf], correctionReason: 'The person revised their account.' } : {}),
+  };
+  return { ok: true, inquiry: diagnose.applyProposals(inquiry, [proposal], { now, evidenceRefOf: () => rec.id }), evidenceId: rec.id };
+}
+
 /* POST /api/me/disagree — { inquiryId, because }. The player's answer to one. */
 app.post('/api/me/disagree', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
@@ -16141,16 +16226,9 @@ app.post('/api/me/disagree', requireAuth, (req, res) => {
   const key = Object.keys(mine).find(k => mine[k] && mine[k].inquiryId === inquiryId);
   if (!key) return res.status(404).json({ error: 'no such belief of yours' });
 
-  const now = Date.now();
-  mine[key] = diagnose.applyProposals(mine[key], [{
-    id: 'dis_' + generateId(),
-    level: 'observation', directness: 'direct', authority: 'self_report', source: 'self',
-    specificity: 0.7, statement: because,
-    originKind: 'self_report', originRef: `self:${userId}`, turnId: `dis_${userId}_${now}`,
-    // THIS is what makes the belief contested. Not a flag somebody sets — a contradicting
-    // account on the record, which is what a disagreement actually is.
-    contradicts: true,
-  }], { now, evidenceRefOf: p => `${p.originRef}#${p.id}` });
+  const result = _recordPersonalDisagreement(code, userId, mine[key], because, Date.now());
+  if (!result.ok) return res.status(500).json({ error: result.error });
+  mine[key] = result.inquiry;
 
   _audit(code, { actor: userId, action: 'disagreed', subjectIds: [userId], basis: inquiryId });
   scheduleSave();
@@ -16223,7 +16301,9 @@ app.post('/api/assistant/attachments', requireAuth, (req, res) => {
     if (_allObjectsFor(code, userId).some(o => o.kind === kind && String(o.id) === id)) ref = { kind, id, at: Date.now(), by: userId };
   }
   const checksum = _materialChecksum(text);
-  let row = Object.values(_materials(code)).find(m => m && m.checksum === checksum);
+  // Composer uploads are private external reading. Deduplication may reuse only
+  // this owner's private copy; equal bytes owned by somebody else are not access.
+  let row = Object.values(_materials(code)).find(m => m && m.checksum === checksum && m.byId === userId && m.visibility === 'private');
   if (row) {
     if (!_materialOn(row, ref.kind, ref.id)) row.refs = _materialRefs(row).concat([ref]);
   } else {
@@ -16231,7 +16311,7 @@ app.post('/api/assistant/attachments', requireAuth, (req, res) => {
     row = { materialId: id, byId: userId, orgCode: code,
       title: String(b.title || 'Attached material').trim().slice(0, 200), filename: String(b.filename || b.title || '').slice(0, 200),
       kind: material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text', sections: material.segment(text, { kind: String(b.kind || 'text') }),
-      refs: [ref], checksum, createdAt: Date.now() };
+      refs: [ref], checksum, visibility: 'private', provenance: 'external', createdAt: Date.now() };
     _materials(code)[id] = row;
   }
   scheduleSave();
@@ -16253,6 +16333,9 @@ const _engageOf  = (code, id) => {
 function _materialFor(code, userId, materialId) {
   const m = _materials(code)[String(materialId)];
   if (!m) return { ok: false, status: 404, error: 'not found' };
+  if (m.visibility === 'private' && String(m.byId) !== String(userId)) {
+    return { ok: false, status: 404, error: 'not found' };
+  }
   const obj = _allObjectsFor(code, userId)
     .find(o => _materialRefs(m).some(r => r.kind === o.kind && String(r.id) === String(o.id)));
   // A material whose object the reader cannot see is a material that does not exist for them.
@@ -16311,7 +16394,8 @@ app.post('/api/materials', requireAuth, (req, res) => {
      copy — and the engagement already recorded against it stays with it instead of splitting
      across two records nobody can read together. */
   const checksum = _materialChecksum(text);
-  const already = Object.values(_materials(code)).find(m => m && m.checksum === checksum);
+  const already = Object.values(_materials(code)).find(m => m && m.checksum === checksum
+    && (m.visibility !== 'private' || _materialFor(code, userId, m.materialId).ok));
   if (already) {
     if (!_materialOn(already, kind, at.id)) {
       already.refs = _materialRefs(already).concat([{ kind, id: String(at.id), at: Date.now(), by: userId }]);
@@ -16332,6 +16416,7 @@ app.post('/api/materials', requireAuth, (req, res) => {
     kind: material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text',
     sections,
     checksum,
+    visibility: 'object', provenance: 'internal',
     // Where it is used. The first ref is what `attachTo` used to be, kept in that position so
     // anything still reading the old field sees the same answer.
     refs: [{ kind, id: String(at.id), at: Date.now(), by: userId }],
@@ -16352,9 +16437,9 @@ app.get('/api/objects/:kind/:id/materials', requireAuth, (req, res) => {
   const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
   if (!obj) return res.status(404).json({ error: 'not found' });
   const list = Object.values(_materials(code))
-    .filter(m => _materialOn(m, kind, id))
+    .filter(m => _materialOn(m, kind, id) && _materialFor(code, userId, m.materialId).ok)
     .sort((a, b) => b.createdAt - a.createdAt)
-    .map(m => ({ materialId: m.materialId, title: m.title, filename: m.filename, kind: m.kind,
+    .map(m => ({ materialId: m.materialId, title: m.title, filename: m.filename, kind: m.kind, provenance: m.provenance || 'internal',
       parts: (m.sections || []).length, by: _nameOf(code, m.byId), byId: m.byId, createdAt: m.createdAt }));
   res.json({ ok: true, materials: list });
 });
@@ -16368,7 +16453,7 @@ app.get('/api/materials/:id', requireAuth, (req, res) => {
   const mine = _engageOf(code, m.materialId).filter(e => e.personId === userId);
   const stateOf = sid => (mine.filter(e => e.sectionId === sid).sort((a, b) => b.at - a.at)[0] || {}).state || null;
   res.json({ ok: true,
-    material: { materialId: m.materialId, title: m.title, filename: m.filename, kind: m.kind,
+    material: { materialId: m.materialId, title: m.title, filename: m.filename, kind: m.kind, provenance: m.provenance || 'internal',
       by: _nameOf(code, m.byId), createdAt: m.createdAt, attachTo: m.attachTo },
     sections: (m.sections || []).map(s => ({ id: s.id, ordinal: s.ordinal, heading: s.heading, text: s.text,
       // WHERE YOU SAID YOU WERE, so somebody can change their mind rather than declare twice.
@@ -16595,28 +16680,34 @@ app.post('/api/materials/:id/recompose', requireAuth, async (req, res) => {
    PRODUCTION kernel what it made of the evidence at each point. Nothing is re-derived: a chart
    that computed its own band would eventually disagree with the sentence printed beside it. */
 function _firmingChart(inq, { title }) {
-  const live = (inq.signals || [])
-    .filter(s => s && s.kind !== 'interpretation' && (!s.status || s.status === 'active') && Number.isFinite(s.at))
+  const history = (inq.signals || [])
+    // A contradicting account is important, but it is not support. Plotting it on
+    // the solid "firming" line made argument look like corroboration.
+    .filter(s => s && s.kind !== 'interpretation' && !s.dissents && Number.isFinite(s.at))
     .sort((a, b) => a.at - b.at);
-  if (!live.length) return null;
+  if (!history.length) return null;
 
   const occasions = [];
-  const seenOrigins = new Map();   // originRef → the ref of the signal that first carried it
-  for (let i = 0; i < live.length; i++) {
-    const s = live[i];
+  const seenOrigins = new Map();   // originRef → current signal for that origin
+  for (const s of history) {
     const originRef = s.originRef ? String(s.originRef) : '';
-    // An occasion is recorded when a NEW independent origin first speaks. A fifth message from
-    // somebody already counted moves nothing, which is the law this chart exists to show.
-    if (!originRef || seenOrigins.has(originRef)) continue;
-    seenOrigins.set(originRef, String(s.ref));
-    const upTo = live.slice(0, i + 1);
-    const conf = diagnose.deriveConfidence(upTo, { now: s.at });
+    if (!originRef) continue;
+    const prior = seenOrigins.get(originRef);
+    const isCorrection = !!(prior && (prior.supersededBy === s.ref || s.correctionOf === prior.ref));
+    // Repetition is not an occasion. A correction is: it replaces the origin's
+    // reference without adding another origin, so history changes while the count
+    // truthfully stays level.
+    if (prior && !isCorrection) continue;
+    if (s.status === 'withdrawn') seenOrigins.delete(originRef);
+    else seenOrigins.set(originRef, s);
+    if (!seenOrigins.size) continue;
+    const current = [...seenOrigins.values()];
+    const conf = diagnose.deriveConfidence(current, { now: s.at });
     occasions.push({
       at: s.at,
-      // The refs ARE the count — one per independent origin that had spoken by this moment.
-      refs: [...seenOrigins.values()],
+      refs: [...seenOrigins.values()].map(x => String(x.ref)),
       band: conf.band,
-      label: `${seenOrigins.size} ${seenOrigins.size === 1 ? 'origin' : 'origins'}`,
+      label: `${seenOrigins.size} ${seenOrigins.size === 1 ? 'supporting origin' : 'supporting origins'}${isCorrection ? ' — corrected' : ''}`,
     });
   }
   if (!occasions.length) return null;
@@ -16635,7 +16726,7 @@ function _timelineChart(code, userId, obj) {
   if (created) events.push({ at: created, label: 'Set', marker: 'start', refs: [`focus:${obj.id}:created`] });
   const cohort = _materialCohort(code, obj);
   for (const m of Object.values(_materials(code))) {
-    if (!_materialOn(m, obj.kind, obj.id)) continue;
+    if (!_materialOn(m, obj.kind, obj.id) || !_materialFor(code, userId, m.materialId).ok) continue;
     events.push({ at: m.createdAt, label: `Attached: ${m.title}`, marker: 'material', refs: [`material:${m.materialId}`] });
     /* HOW MANY PEOPLE ENGAGED — ONE MARKER, NOT A DOT EACH, AND THE WHOLE GROUP SEES IT.
 
@@ -16675,7 +16766,7 @@ function _timelineChart(code, userId, obj) {
 /* HOW IT LANDED ACROSS A GROUP — the bars are the author's own parts. */
 function _spreadChart(code, userId, obj) {
   const mats = Object.values(_materials(code))
-    .filter(m => _materialOn(m, obj.kind, obj.id))
+    .filter(m => _materialOn(m, obj.kind, obj.id) && _materialFor(code, userId, m.materialId).ok)
     .sort((a, b) => b.createdAt - a.createdAt);
   if (!mats.length) return null;
   const m = mats[0];
@@ -16729,15 +16820,26 @@ function _chartFor(code, userId, obj, want = '') {
 
   if ((!want || want === 'spread')) {
     const spec = _spreadChart(code, userId, obj);
-    if (spec) return { spec, basis: spec.series.flatMap(s => s.points.flatMap(p => p.refs)) };
+    if (spec) {
+      const basis = Object.values(_materials(code)).filter(m => _materialOn(m, obj.kind, obj.id) && _materialFor(code, userId, m.materialId).ok)
+        .flatMap(m => _engageOf(code, m.materialId)).filter(e => !e.on || (e.on.kind === obj.kind && String(e.on.id) === String(obj.id)))
+        .map(e => e.ref).filter(Boolean);
+      return { spec, basis };
+    }
   }
   if ((!want || want === 'firming') && raw.signals) {
     const spec = _firmingChart(raw, { title: title ? `${title} — how this firmed up` : '' });
-    if (spec) return { spec, basis: spec.series.flatMap(s => s.points.flatMap(p => p.refs)) };
+    if (spec) return { spec, basis: (raw.signals || []).filter(s => s && s.kind !== 'interpretation' && !s.dissents).map(s => s.ref).filter(Boolean) };
   }
   if ((!want || want === 'timeline') && obj.kind === 'focus') {
     const spec = _timelineChart(code, userId, obj);
-    if (spec) return { spec, basis: spec.series[0].points.flatMap(p => p.refs) };
+    if (spec) {
+      const basis = [`focus:${obj.id}:created`, `focus:${obj.id}:review`, `focus:${obj.id}:outcome`];
+      for (const m of Object.values(_materials(code)).filter(m => _materialOn(m, obj.kind, obj.id) && _materialFor(code, userId, m.materialId).ok)) {
+        basis.push(`material:${m.materialId}`, ..._engageOf(code, m.materialId).map(e => e.ref).filter(Boolean));
+      }
+      return { spec, basis };
+    }
   }
   return null;
 }
@@ -17205,15 +17307,21 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
 
   if (prop.capability === 'composer_action') {
     const p = prop.payload || {};
+    // A proposal id authorises the frozen server-side payload the person saw. The
+    // browser may never turn confirmation into a second, hidden proposal.
+    if (Object.keys(overrides).length) return res.status(409).json({ error: 'proposal_payload_changed', note: 'That change needs a new proposal and confirmation.' });
     const ref = p.context || null;
     const live = ref && (ref.kind === 'conversation'
       ? ((assistantConversations[_wsKey(code, userId)] || []).some(c => c.id === ref.id) ? { kind: 'conversation', id: ref.id, raw: null } : null)
       : _allObjectsFor(code, userId).find(o => o.kind === ref.kind && String(o.id) === String(ref.id)));
     const needsObject = !['create_focus', 'create_library_folder', 'create_inquiry', 'discuss_with_group'].includes(prop.actionType);
     if (needsObject && !live) return res.status(404).json({ error: 'not found' });
+    if (p.objectGuard && live && _composerObjectGuard(live.raw) !== p.objectGuard) {
+      return res.status(409).json({ error: 'stale_proposal', note: 'This changed after the proposal was prepared. Review a fresh proposal before acting.' });
+    }
 
     if (prop.actionType === 'create_library_folder') {
-      const name = shelf.folderName(overrides.folderName || p.folderName);
+      const name = shelf.folderName(p.folderName);
       if (!name) return res.status(400).json({ error: 'folder name required' });
       let folder = _libFolders(code).find(f => f.ownerId === userId && f.name.toLowerCase() === name.toLowerCase());
       if (!folder) { folder = { id: 'fld_' + generateId(), ownerId: userId, name, createdAt: new Date().toISOString() }; _libFolders(code).push(folder); }
@@ -17222,7 +17330,7 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
     }
 
     if (prop.actionType === 'keep_in_library') {
-      const folderId = String(overrides.folderId || p.folderId || '') || null;
+      const folderId = String(p.folderId || '') || null;
       if (folderId && !_libFolders(code).some(f => f.id === folderId && f.ownerId === userId)) return res.status(400).json({ error: 'unknown folder' });
       const lookup = _shelfLookup(code, userId);
       if (!lookup(ref.kind, ref.id)) return res.status(404).json({ error: 'not found' });
@@ -17235,10 +17343,10 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
     }
 
     if (prop.actionType === 'create_focus') {
-      const text = String(overrides.text || p.text || '').trim().slice(0, 300);
+      const text = String(p.text || '').trim().slice(0, 300);
       if (!text) return res.status(400).json({ error: 'focus text required' });
-      const target = String(overrides.target || p.target || '').trim().slice(0, 300);
-      const reviewOn = String(overrides.reviewOn || p.reviewOn || '').trim().slice(0, 40);
+      const target = String(p.target || '').trim().slice(0, 300);
+      const reviewOn = String(p.reviewOn || '').trim().slice(0, 40);
       const reviewAt = reviewOn && Number.isFinite(Date.parse(reviewOn)) ? Date.parse(reviewOn) : null;
       const mem = _getMemory(code, userId); mem.focuses = mem.focuses || [];
       let focus = mem.focuses.find(f => f && f.status === 'active' && f.text === text);
@@ -17260,23 +17368,20 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
     if (prop.actionType === 'update_focus') {
       const focus = (_getMemory(code, userId).focuses || []).find(f => f.id === ref.id);
       if (!focus) return res.status(404).json({ error: 'not found' });
-      const wantedParticipants = Array.isArray(overrides.participantIds || p.participantIds) ? (overrides.participantIds || p.participantIds).map(String) : null;
+      const wantedParticipants = Array.isArray(p.participantIds) ? p.participantIds.map(String) : null;
       if (wantedParticipants) {
         const addressable = new Set(_contactsFor(code, userId).map(c => c.id));
         const accepted = [...new Set(wantedParticipants.filter(id => addressable.has(id)))];
         if (accepted.length !== wantedParticipants.length) return res.status(403).json({ error: 'one or more people are not addressable' });
-        if (accepted.length && overrides.confirmVisibilityIncrease !== true)
-          return res.status(409).json({ error: 'visibility_increase_requires_confirmation', from: focus.visibility || 'private', to: 'the selected people' });
         focus.participants = [userId, ...accepted]; focus.visibility = accepted.length ? 'invited' : 'private';
       }
-      if (overrides.text || p.text) focus.text = String(overrides.text || p.text).trim().slice(0, 300) || focus.text;
-      if ('target' in overrides || p.target) { const target = String(overrides.target ?? p.target ?? '').trim().slice(0, 300); if (target) focus.target = target; else delete focus.target; }
-      if ('reviewOn' in overrides || p.reviewOn) { const v = String(overrides.reviewOn ?? p.reviewOn ?? ''); const at = Date.parse(v); if (v && Number.isFinite(at)) focus.reviewAt = at; else delete focus.reviewAt; }
-      if (overrides.visibility || p.visibility) {
-        const visibility = String(overrides.visibility || p.visibility);
+      if (p.text) focus.text = String(p.text).trim().slice(0, 300) || focus.text;
+      if (p.target) { const target = String(p.target).trim().slice(0, 300); if (target) focus.target = target; }
+      if (p.reviewOn) { const v = String(p.reviewOn); const at = Date.parse(v); if (Number.isFinite(at)) focus.reviewAt = at; }
+      if (p.visibility) {
+        const visibility = String(p.visibility);
         if (!['private', 'shared'].includes(visibility)) return res.status(400).json({ error: 'unknown visibility' });
-        if (focus.visibility !== 'shared' && visibility === 'shared' && overrides.confirmVisibilityIncrease !== true)
-          return res.status(409).json({ error: 'visibility_increase_requires_confirmation', from: focus.visibility || 'private', to: 'the leaders of your groups' });
+        if (visibility === 'shared' && !wantedParticipants?.length) return res.status(400).json({ error: 'a named audience is required' });
         focus.visibility = visibility;
       }
       prop.confirmed = { at: new Date().toISOString(), focusId: focus.id }; scheduleSave();
@@ -17285,7 +17390,7 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
     }
 
     if (prop.actionType === 'create_inquiry') {
-      const topic = String(overrides.text || p.text || turn.rawInput || '').trim().slice(0, 200);
+      const topic = String(p.text || turn.rawInput || '').trim().slice(0, 200);
       if (!topic) return res.status(400).json({ error: 'inquiry topic required' });
       const concept = `person.inquiry.${_contentHash(topic)}`;
       const inq = _inquiryFor(code, `member:${userId}`, concept, topic, (orgMeta[code] || {}).orgMode || '', Date.now());
@@ -17295,19 +17400,17 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
     }
 
     if (prop.actionType === 'disagree_with_inquiry') {
-      const because = String(overrides.because || p.because || turn.rawInput || '').trim().slice(0, 600);
+      const because = String(p.because || turn.rawInput || '').trim().slice(0, 600);
       const inquiryId = live.raw?.inquiryId || live.id;
       const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
       const key = Object.keys(mine).find(k => mine[k] && mine[k].inquiryId === inquiryId);
       if (!key || !because) return res.status(key ? 400 : 404).json({ error: key ? 'say how you saw it' : 'not found' });
-      const now = Date.now();
-      mine[key] = diagnose.applyProposals(mine[key], [{ id: 'dis_' + generateId(), level: 'observation', directness: 'direct',
-        authority: 'self_report', source: 'self', specificity: 0.7, statement: because,
-        originKind: 'self_report', originRef: `self:${userId}`, turnId: `dis_${userId}_${now}`, contradicts: true }],
-        { now, evidenceRefOf: x => `${x.originRef}#${x.id}` });
+      const result = _recordPersonalDisagreement(code, userId, mine[key], because, Date.now());
+      if (!result.ok) return res.status(500).json({ error: result.error });
+      mine[key] = result.inquiry;
       prop.confirmed = { at: new Date().toISOString(), inquiryId }; scheduleSave();
       return res.json({ ok: true, confirmed: prop.actionType, outcome: 'contested', inquiryId,
-        note: 'Your account was recorded through the disagreement boundary. It was not averaged away.' });
+        evidenceId: result.evidenceId, note: 'Your account was recorded through the disagreement boundary. It was not averaged away.' });
     }
 
     if (prop.actionType === 'settle_inquiry') {
@@ -17315,17 +17418,17 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
       const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
       const key = Object.keys(mine).find(k => mine[k] && mine[k].inquiryId === inquiryId);
       if (!key) return res.status(404).json({ error: 'not found' });
-      const lead = (mine[key].hypotheses || []).find(h => h.id === mine[key].leadingHypothesisId);
-      if (!lead) return res.status(409).json({ error: 'there is no leading account to settle' });
-      lead.status = 'settled'; mine[key].status = 'resolved'; mine[key].settledBy = userId; mine[key].settledAt = Date.now();
-      prop.confirmed = { at: new Date().toISOString(), inquiryId }; scheduleSave();
-      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'resolved', inquiryId,
-        note: 'Recorded as your call. The evidence and alternatives remain in the history.' });
+      // Personal Inquiries are empirical working pictures. A user's call can classify
+      // one for their High/Low view, but cannot settle the proposition. Operational
+      // arrangements already have their canonical owner-answer/adjudication boundary;
+      // manufacturing a second one here would let this dispatcher author truth.
+      return res.status(409).json({ error: 'empirical_inquiry_cannot_be_settled_by_call', inquiryId,
+        note: 'Your call cannot settle an empirical question. The Inquiry remains live with its evidence and disagreement intact.' });
     }
 
     if (prop.actionType === 'record_focus_outcome') {
       const focus = (_getMemory(code, userId).focuses || []).find(f => f.id === ref.id);
-      const outcome = String(overrides.outcome || p.outcome || '');
+      const outcome = String(p.outcome || '');
       if (!focus) return res.status(404).json({ error: 'not found' });
       if (!['helped', 'no', 'mixed'].includes(outcome)) return res.status(400).json({ error: 'outcome must be helped, no or mixed' });
       focus.status = 'done'; focus.outcome = outcome; focus.resolvedAt = new Date().toISOString(); _completeFocusAction(code, focus, outcome, userId);
@@ -17334,9 +17437,10 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
     }
 
     if (prop.actionType === 'attach_material') {
-      const materialId = String(overrides.materialId || p.materialId || '');
-      const materialRow = _materials(code)[materialId];
-      if (!materialRow) return res.status(404).json({ error: 'material not found' });
+      const materialId = String(p.materialId || '');
+      const readable = _materialFor(code, userId, materialId);
+      if (!readable.ok) return res.status(404).json({ error: 'not found' });
+      const materialRow = readable.material;
       if (!_materialOn(materialRow, ref.kind, ref.id)) materialRow.refs = _materialRefs(materialRow).concat([{ kind: ref.kind, id: ref.id, at: Date.now(), by: userId }]);
       prop.confirmed = { at: new Date().toISOString(), materialId }; scheduleSave();
       return res.json({ ok: true, confirmed: prop.actionType, outcome: 'referenced', materialId,
@@ -17345,12 +17449,15 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
 
     if (prop.actionType === 'discuss_with_group') {
       if (!live || live.kind === 'conversation') {
-        const groupId = String(overrides.groupId || p.groupId || '');
+        const groupId = String(p.groupId || '');
         if (!groupId || !_inNode(code, groupId, userId)) return res.status(400).json({ error: 'choose a group you belong to' });
-        const text = String(overrides.text || p.text || '').trim().slice(0, 300);
+        const text = String(p.text || '').trim().slice(0, 300);
         if (!text) return res.status(400).json({ error: 'say what you want to discuss' });
         const addressable = new Set(_contactsFor(code, userId).map(c => c.id));
-        const participants = [...addressable].filter(id => _inNode(code, groupId, id));
+        const participants = [...addressable].filter(id => _inNode(code, groupId, id)).sort();
+        if (JSON.stringify(participants) !== JSON.stringify((p.resolvedParticipantIds || []).slice().sort())) {
+          return res.status(409).json({ error: 'stale_proposal', note: 'The group changed after this was prepared. Review a fresh proposal before sharing.' });
+        }
         const mem = _getMemory(code, userId); mem.focuses = mem.focuses || [];
         const focus = { id: 'foc_' + generateId(), text, type: 'self_set', status: 'active', outcome: null,
           visibility: 'invited', participants: [userId, ...participants], createdAt: new Date().toISOString(),

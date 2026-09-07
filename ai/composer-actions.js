@@ -89,4 +89,91 @@ function normalize(result, context = {}) {
   return { actions, needsClarification: typeof result?.needsClarification === 'string' ? result.needsClarification.slice(0, 300) : null };
 }
 
-module.exports = { ACTIONS, MODEL_SCHEMA, available, prompt, normalize };
+/* Model output is a reading, not a source of user intent. Consequential values are
+   retained only when they are grounded in the user's own words or resolve to a
+   named object already present in the server-built context. Suggested Focus/forum
+   wording is allowed, but is marked so the confirmation surface can name it as a
+   suggestion rather than silently attributing it to the person. */
+function ground(reading = {}, { text = '', priorMessages = [], context = {} } = {}) {
+  const current = String(text || '');
+  const priorUser = (priorMessages || []).filter(m => m && m.role === 'user')
+    .map(m => String(m.text || '')).filter(Boolean);
+  const corpus = [current, ...priorUser].join('\n').toLowerCase();
+  const stated = value => !!String(value || '').trim() && corpus.includes(String(value).trim().toLowerCase());
+  const currentHas = value => !!String(value || '').trim() && current.toLowerCase().includes(String(value).trim().toLowerCase());
+  const actions = [];
+  let needsClarification = reading.needsClarification || null;
+
+  for (const action of (reading.actions || [])) {
+    const raw = action.arguments || {};
+    const args = {};
+    const sources = {};
+    const keepStated = key => {
+      if (raw[key] && stated(raw[key])) { args[key] = raw[key]; sources[key] = 'user_stated'; }
+    };
+    ['because', 'folderName', 'target', 'reviewOn'].forEach(keepStated);
+
+    if (raw.text) {
+      args.text = raw.text;
+      sources.text = stated(raw.text) ? 'user_stated' : 'model_suggested';
+    }
+    if (!args.text && ['create_focus', 'discuss_with_group'].includes(action.type) && /\b(this|that|it)\b/i.test(current)) {
+      const antecedent = priorUser[priorUser.length - 1];
+      if (antecedent) { args.text = antecedent.slice(0, 300); sources.text = 'user_stated_reference'; }
+    }
+    if (!args.text && ['create_focus', 'create_inquiry'].includes(action.type) && current.trim()) {
+      args.text = current.trim().slice(0, 300); sources.text = 'user_stated';
+    }
+    if (action.type === 'disagree_with_inquiry' && !args.because && current.trim()) {
+      args.because = current.trim().slice(0, 600); sources.because = 'user_stated';
+    }
+
+    if (action.type === 'record_focus_outcome' && raw.outcome) {
+      const outcome = String(raw.outcome);
+      const explicit = outcome === 'helped' ? /\bhelped\b/i.test(current)
+        : outcome === 'mixed' ? /\bmixed\b/i.test(current)
+        : /\b(did not|didn['’]t|has not|hasn['’]t) help\b|\bno (?:change|difference|improvement)\b/i.test(current);
+      if (explicit) { args.outcome = outcome; sources.outcome = 'user_stated'; }
+      else needsClarification = needsClarification || 'What happened with this focus: did it help, not help, or was it mixed?';
+    }
+
+    const folders = context.folders || [];
+    const folder = folders.find(f => String(f.id) === String(raw.folderId) && currentHas(f.name));
+    if (folder) { args.folderId = folder.id; sources.folderId = 'deterministically_resolved'; }
+
+    const attachment = context.attachment || null;
+    if (raw.materialId && attachment && String(raw.materialId) === String(attachment.id)) {
+      args.materialId = String(attachment.id); sources.materialId = 'deterministically_resolved';
+    }
+
+    const groups = context.groups || [];
+    const namedGroups = groups.filter(g => currentHas(g.name));
+    let group = namedGroups.length === 1 ? namedGroups[0] : null;
+    if (!group && /\b(the |my |our )?(team|group|squad)\b/i.test(current) && groups.length === 1) group = groups[0];
+    if (action.type === 'discuss_with_group' && !(context.object && context.forumAvailable)) {
+      if (group) { args.groupId = group.id; sources.groupId = 'deterministically_resolved'; }
+      else needsClarification = needsClarification || (groups.length > 1
+        ? 'Which group do you want to discuss this with?'
+        : 'There is no unambiguous group available for this discussion.');
+    }
+
+    const contacts = context.contacts || [];
+    const namedContacts = contacts.filter(c => currentHas(c.name));
+    if (action.type === 'update_focus' && namedContacts.length) {
+      args.participantIds = namedContacts.map(c => c.id); sources.participantIds = 'deterministically_resolved';
+    }
+    if (raw.visibility && /\b(private|only me|share|shared|visible)\b/i.test(current)) {
+      args.visibility = /\b(private|only me)\b/i.test(current) ? 'private' : 'shared';
+      sources.visibility = 'user_stated';
+    }
+
+    const required = action.type === 'discuss_with_group' && !(context.object && context.forumAvailable) ? ['groupId', 'text']
+      : action.type === 'attach_material' ? ['materialId']
+      : action.type === 'record_focus_outcome' ? ['outcome'] : [];
+    if (required.some(k => !args[k])) continue;
+    actions.push({ ...action, arguments: args, argumentSources: sources });
+  }
+  return { actions, needsClarification };
+}
+
+module.exports = { ACTIONS, MODEL_SCHEMA, available, prompt, normalize, ground };

@@ -12622,9 +12622,21 @@ const MemberApp = {
       if (p.actionType === 'submit_work')      return this._renderSubmitWork(j.turnId, p);
       if (p.actionType === 'resolve_uncertainty' && p.resolvePreview) return this._renderResolvePreview(j.turnId, p);
       const state = p.draftOnly ? '<span class="iq-badge iq-badge-draft">Draft only — not scheduled</span>' : '';
+      const e = p.effect || {};
+      const exact = [
+        e.text ? `<div><strong>Wording:</strong> “${esc(e.text)}”${e.textSource === 'model_suggested' ? ' (suggested wording)' : ''}</div>` : '',
+        e.account ? `<div><strong>Account to record:</strong> “${esc(e.account)}”</div>` : '',
+        e.target ? `<div><strong>Target:</strong> ${esc(e.target)}</div>` : '',
+        e.reviewOn ? `<div><strong>Review:</strong> ${esc(e.reviewOn)}</div>` : '',
+        e.outcome ? `<div><strong>Outcome:</strong> ${esc(e.outcome)}</div>` : '',
+        e.audience ? `<div><strong>Audience:</strong> ${esc(e.audience.name)}</div>` : '',
+        e.material ? `<div><strong>Material:</strong> ${esc(e.material.name)}</div>` : '',
+        e.disclosure ? `<div>${esc(e.disclosure)}</div>` : '',
+      ].filter(Boolean).join('');
       return `<div class="iq-proposal" data-proposal="${esc(p.id)}">
         <div class="iq-proposal-top"><span class="iq-proposal-label">${esc(p.label)}</span> ${priv(p.visibility)} ${state}</div>
         <div class="iq-proposal-why">${esc(p.why)}</div>
+        ${exact ? `<div class="iq-submit-effect">${exact}</div>` : ''}
         <div class="iq-proposal-actions">
           <button class="btn-primary btn-sm" onclick="MemberApp.confirmProposal('${esc(j.turnId)}','${esc(p.id)}')">Confirm</button>
           <button class="btn btn-outline btn-sm" onclick="MemberApp.correctProposal('${esc(j.turnId)}','${esc(p.id)}')">Edit / Correct</button>
