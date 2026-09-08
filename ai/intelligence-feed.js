@@ -133,6 +133,17 @@ function normalizeArtifact(item = {}, opts = {}) {
     target: item.target ? _s(item.target, 120) : null,
     limitations: _arr(item.limitations, 160),
     evidenceRefs: _arr(item.evidenceRefs || item.cites || item.supportingMoments, 100),
+    /* Canonical relationship refs survive normalisation so later stages can connect
+       already-authorised artifacts without comparing prose. These fields are identity only:
+       they grant no access, carry no source text and may not author confidence. */
+    conceptRefs: _arr(item.conceptRefs || item.concepts, 120),
+    objectRefs: _arr(item.objectRefs || item.objects, 140),
+    contextRefs: _arr(item.contextRefs || item.contexts, 140),
+    addressesRefs: _arr(item.addressesRefs || item.addressesRef, 140),
+    correctionOf: item.correctionOf ? _s(item.correctionOf, 140) : null,
+    corrects: _arr(item.corrects, 140),
+    supersedes: _arr(item.supersedes, 140),
+    supersededBy: item.supersededBy ? _s(item.supersededBy, 140) : null,
     rationale: _arr(item.rationale, 180),
     requiresConfirmation: suggestion ? suggestion.requiresConfirmation === true : item.requiresConfirmation === true,
     /* Computed from the text this artifact will actually show, not inherited on trust.
@@ -166,6 +177,9 @@ function fromReasoner(agenda = [], proposals = []) {
     suggestion: byBelief.get(a.beliefId) || null,
     limitations: a.readiness === 'hold' ? ['held_by_reasoner'] : [],
     rationale: [a.register && `register:${a.register}`, a.readiness && `readiness:${a.readiness}`, a.shared && 'shared_pattern'].filter(Boolean),
+    evidenceRefs: a.evidenceRefs || a.cites || [],
+    conceptRefs: a.conceptRefs || (a.concept ? [a.concept] : []),
+    objectRefs: a.objectRefs || [],
   }, { source: 'reasoner', kind: 'belief' }));
 }
 
@@ -272,9 +286,6 @@ function fromOrgPlaybook({ candidates = [], entries = [], reviews = [] } = {}) {
     level: 'org',
     polarity: 'strength',
     priority: 'low',
-    // The band computed when the practice was confirmed, not a fresh assertion that it is
-    // confirmed. playbookEntryFrom preserves it as confidenceAtConfirmation; hardcoding
-    // 'confirmed' here discarded a real derived value. Absent it, claim nothing.
     confidence: e.confidenceAtConfirmation,
     title: e.subjectLabel || 'Confirmed practice',
     body: e.statement,
@@ -288,59 +299,33 @@ function fromOrgPlaybook({ candidates = [], entries = [], reviews = [] } = {}) {
     patternType: r.type || r.status,
     level: 'org',
     polarity: r.status === 'holding' ? 'strength' : r.status === 'contested' ? 'friction' : 'neutral',
-    priority: r.status === 'contested' ? 'high' : r.status === 'unsupported' ? 'medium' : 'low',
-    confidence: r.currentConfidence || r.confidence || 'none',
-    title: r.label || r.subjectLabel || r.status || 'Practice review',
-    body: r.reason || r.statement || '',
+    priority: r.status === 'contested' ? 'high' : 'low',
+    confidence: r.confidence || 'none',
+    title: r.subjectLabel || 'Practice review',
+    body: r.statement || r.outcomeLine || r.why || '',
+    evidenceRefs: r.evidenceRefs || r.supportingMoments || [],
     limitations: r.limitations || [],
-    suggestion: r.status && r.status !== 'holding' ? { text: 'Review whether this practice still belongs in the playbook.', requiresConfirmation: true, proposalType: 'playbook_lifecycle_review' } : null,
   }, { source: 'org_playbook', kind: 'practice_review' }));
 
   return [...candidateItems, ...entryItems, ...reviewItems];
 }
 
-function collect(input = {}, opts = {}) {
-  const items = [
-    ...fromReasoner(input.reasoner && input.reasoner.agenda || input.agenda || [], input.reasoner && input.reasoner.proposals || input.proposals || []),
-    ...fromProactive(input.proactive && input.proactive.insights || input.insights || []),
-    ...fromOutcomeBriefs(input.outcomeIntelligence && input.outcomeIntelligence.briefs || input.outcomeBriefs || []),
-    ...fromProcessReflections(input.processReflection && input.processReflection.reflections || input.reflections || []),
-    ...fromSelfModel(input.selfModel || {}),
-    ...fromOrgPlaybook(input.orgPlaybook || {}),
-    ...(input.extras || []).map(x => normalizeArtifact(x, { source: 'extra' })),
+function buildFeed({ agenda = [], proposals = [], proactive = [], outcomeBriefs = [], processReflections = [], selfModel = {}, playbook = {}, extra = [] } = {}) {
+  return [
+    ...fromReasoner(agenda, proposals),
+    ...fromProactive(proactive),
+    ...fromOutcomeBriefs(outcomeBriefs),
+    ...fromProcessReflections(processReflections),
+    ...fromSelfModel(selfModel),
+    ...fromOrgPlaybook(playbook),
+    ...(extra || []).filter(Boolean).map(x => normalizeArtifact(x, { source: x.source || 'extra' })),
   ];
-  return finalize(items, opts);
-}
-
-function finalize(items = [], opts = {}) {
-  const suppressed = new Set((opts.suppressed || []).map(x => _s(x)));
-  const seen = new Set();
-  const out = [];
-  for (const raw of (items || [])) {
-    const item = raw && raw.generatedBy === 'intelligence-feed' ? raw : normalizeArtifact(raw);
-    if (!item.safe || suppressed.has(item.id)) continue;
-    const dedupe = `${item.source}:${item.kind}:${item.patternType}:${item.subjectId || item.scope || ''}:${item.title}`;
-    if (seen.has(dedupe)) continue;
-    seen.add(dedupe);
-    out.push({ ...item, rationale: [...item.rationale, `source:${item.source}`] });
-  }
-  return {
-    items: out.sort((a, b) => a.source.localeCompare(b.source) || a.id.localeCompare(b.id)),
-    generatedBy: 'intelligence-feed',
-    safe: out.every(i => i.safe && (!i.suggestion || i.suggestion.requiresConfirmation === true)),
-    empty: out.length === 0,
-  };
-}
-
-function toPriorityInput(feed = {}) {
-  const items = Array.isArray(feed) ? feed : (feed.items || []);
-  return { feedItems: items };
 }
 
 module.exports = {
-  SOURCES, LEVELS, POLARITIES, POLARITY_ALIASES, POLARITY_BUCKET, BUCKETS,
-  PRIORITIES, CONFIDENCES, SOURCE_KIND, normalizePolarity, bucketOf,
-  normalizeArtifact, collect, finalize, toPriorityInput,
+  SOURCES, LEVELS, POLARITIES, BUCKETS, PRIORITIES, CONFIDENCES,
+  normalizePolarity, bucketOf, normalizeArtifact,
   fromReasoner, fromProactive, fromOutcomeBriefs, fromProcessReflections, fromSelfModel, fromOrgPlaybook,
+  buildFeed,
   _key,
 };
