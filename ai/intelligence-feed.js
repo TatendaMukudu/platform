@@ -86,6 +86,25 @@ function _id(source, kind, item) {
   return _s(item.id || item.dedupeKey || item.beliefId || item.fingerprint || item.habitId || item.sourceSignalId ||
     ('if_' + _hash(JSON.stringify([source, kind, item.patternType || item.kind || item.type, item.subjectId || item.scope, item.title || item.headline || item.claim || item.statement || item.body || item.question]))), 140);
 }
+function _uniq(values, n = 140) { return [...new Set(_arr(values, n))]; }
+function _typedRef(kind, id) { const v = _s(id, 120); return v ? `${kind}:${v}` : null; }
+
+/* Preserve relationships that the canonical owners already know. High/Low are projections
+   of an Inquiry and therefore carry inquiryId; group Focus carries origin.inquiryId. Signals
+   already hold evidence refs. This derives IDs only — no text matching, no new store, no access. */
+function _relationshipRefs(item = {}) {
+  const signalRefs = Array.isArray(item.signals) ? item.signals.map(s => s && (s.ref || s.evidenceRef)).filter(Boolean) : [];
+  const inquiryRef = _typedRef('inquiry', item.inquiryId);
+  const focusRef = _typedRef('focus', item.focusId);
+  const addressedInquiry = _typedRef('inquiry', item.origin && item.origin.inquiryId);
+  return {
+    evidenceRefs: _uniq([...(item.evidenceRefs || item.cites || item.supportingMoments || []), ...signalRefs], 100),
+    conceptRefs: _uniq([...(item.conceptRefs || item.concepts || []), item.topic && item.topic.canonicalConcept].filter(Boolean), 120),
+    objectRefs: _uniq([...(item.objectRefs || item.objects || []), inquiryRef, focusRef].filter(Boolean), 140),
+    contextRefs: _uniq(item.contextRefs || item.contexts || [], 140),
+    addressesRefs: _uniq([...(item.addressesRefs || (item.addressesRef ? [item.addressesRef] : [])), addressedInquiry].filter(Boolean), 140),
+  };
+}
 
 /* The ONE polarity vocabulary and High/Low decision. Producers retain the specific polarity
    because risk is not friction and progress is not strength; consumers ask this owner only
@@ -114,6 +133,7 @@ function normalizeArtifact(item = {}, opts = {}) {
   const title = _s(item.title || item.headline || item.signal || item.claim || item.statement || item.question || patternType.replace(/_/g, ' '), 180);
   const body = _s(item.body || item.outcomeLine || item.why || item.text || item.line || item.reason || '', 500);
   const id = _id(source, kind, { ...item, patternType, title, body });
+  const refs = _relationshipRefs(item);
   return {
     id,
     source,
@@ -132,14 +152,11 @@ function normalizeArtifact(item = {}, opts = {}) {
     suggestion,
     target: item.target ? _s(item.target, 120) : null,
     limitations: _arr(item.limitations, 160),
-    evidenceRefs: _arr(item.evidenceRefs || item.cites || item.supportingMoments, 100),
-    /* Canonical relationship refs survive normalisation so later stages can connect
-       already-authorised artifacts without comparing prose. These fields are identity only:
-       they grant no access, carry no source text and may not author confidence. */
-    conceptRefs: _arr(item.conceptRefs || item.concepts, 120),
-    objectRefs: _arr(item.objectRefs || item.objects, 140),
-    contextRefs: _arr(item.contextRefs || item.contexts, 140),
-    addressesRefs: _arr(item.addressesRefs || item.addressesRef, 140),
+    evidenceRefs: refs.evidenceRefs,
+    conceptRefs: refs.conceptRefs,
+    objectRefs: refs.objectRefs,
+    contextRefs: refs.contextRefs,
+    addressesRefs: refs.addressesRefs,
     correctionOf: item.correctionOf ? _s(item.correctionOf, 140) : null,
     corrects: _arr(item.corrects, 140),
     supersedes: _arr(item.supersedes, 140),
@@ -299,33 +316,59 @@ function fromOrgPlaybook({ candidates = [], entries = [], reviews = [] } = {}) {
     patternType: r.type || r.status,
     level: 'org',
     polarity: r.status === 'holding' ? 'strength' : r.status === 'contested' ? 'friction' : 'neutral',
-    priority: r.status === 'contested' ? 'high' : 'low',
-    confidence: r.confidence || 'none',
-    title: r.subjectLabel || 'Practice review',
-    body: r.statement || r.outcomeLine || r.why || '',
-    evidenceRefs: r.evidenceRefs || r.supportingMoments || [],
+    priority: r.status === 'contested' ? 'high' : r.status === 'unsupported' ? 'medium' : 'low',
+    confidence: r.currentConfidence || r.confidence || 'none',
+    title: r.label || r.subjectLabel || r.status || 'Practice review',
+    body: r.reason || r.statement || '',
     limitations: r.limitations || [],
+    suggestion: r.status && r.status !== 'holding' ? { text: 'Review whether this practice still belongs in the playbook.', requiresConfirmation: true, proposalType: 'playbook_lifecycle_review' } : null,
   }, { source: 'org_playbook', kind: 'practice_review' }));
 
   return [...candidateItems, ...entryItems, ...reviewItems];
 }
 
-function buildFeed({ agenda = [], proposals = [], proactive = [], outcomeBriefs = [], processReflections = [], selfModel = {}, playbook = {}, extra = [] } = {}) {
-  return [
-    ...fromReasoner(agenda, proposals),
-    ...fromProactive(proactive),
-    ...fromOutcomeBriefs(outcomeBriefs),
-    ...fromProcessReflections(processReflections),
-    ...fromSelfModel(selfModel),
-    ...fromOrgPlaybook(playbook),
-    ...(extra || []).filter(Boolean).map(x => normalizeArtifact(x, { source: x.source || 'extra' })),
+function collect(input = {}, opts = {}) {
+  const items = [
+    ...fromReasoner(input.reasoner && input.reasoner.agenda || input.agenda || [], input.reasoner && input.reasoner.proposals || input.proposals || []),
+    ...fromProactive(input.proactive && input.proactive.insights || input.insights || []),
+    ...fromOutcomeBriefs(input.outcomeIntelligence && input.outcomeIntelligence.briefs || input.outcomeBriefs || []),
+    ...fromProcessReflections(input.processReflection && input.processReflection.reflections || input.reflections || []),
+    ...fromSelfModel(input.selfModel || {}),
+    ...fromOrgPlaybook(input.orgPlaybook || {}),
+    ...(input.extras || []).map(x => normalizeArtifact(x, { source: 'extra' })),
   ];
+  return finalize(items, opts);
+}
+
+function finalize(items = [], opts = {}) {
+  const suppressed = new Set((opts.suppressed || []).map(x => _s(x)));
+  const seen = new Set();
+  const out = [];
+  for (const raw of (items || [])) {
+    const item = raw && raw.generatedBy === 'intelligence-feed' ? raw : normalizeArtifact(raw);
+    if (!item.safe || suppressed.has(item.id)) continue;
+    const dedupe = `${item.source}:${item.kind}:${item.patternType}:${item.subjectId || item.scope || ''}:${item.title}`;
+    if (seen.has(dedupe)) continue;
+    seen.add(dedupe);
+    out.push({ ...item, rationale: [...item.rationale, `source:${item.source}`] });
+  }
+  return {
+    items: out.sort((a, b) => a.source.localeCompare(b.source) || a.id.localeCompare(b.id)),
+    generatedBy: 'intelligence-feed',
+    safe: out.every(i => i.safe && (!i.suggestion || i.suggestion.requiresConfirmation === true)),
+    empty: out.length === 0,
+  };
+}
+
+function toPriorityInput(feed = {}) {
+  const items = Array.isArray(feed) ? feed : (feed.items || []);
+  return { feedItems: items };
 }
 
 module.exports = {
-  SOURCES, LEVELS, POLARITIES, BUCKETS, PRIORITIES, CONFIDENCES,
-  normalizePolarity, bucketOf, normalizeArtifact,
+  SOURCES, LEVELS, POLARITIES, POLARITY_ALIASES, POLARITY_BUCKET, BUCKETS,
+  PRIORITIES, CONFIDENCES, SOURCE_KIND, normalizePolarity, bucketOf,
+  normalizeArtifact, collect, finalize, toPriorityInput,
   fromReasoner, fromProactive, fromOutcomeBriefs, fromProcessReflections, fromSelfModel, fromOrgPlaybook,
-  buildFeed,
-  _key,
+  _relationshipRefs, _key,
 };
