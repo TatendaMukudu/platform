@@ -2,13 +2,16 @@
 
 ## Control-surface law
 
-The composer is the control surface; screens are views. Buttons are shortcuts into the same
-governed capability. The model interprets intent; the kernel owns truth and authority.
+The composer is the conversational control surface; screens are views. Natural-language and
+model-interpreted consequential actions use the governed proposal/confirmation path. An explicit
+direct control may call a canonical domain capability directly when its action and consequences
+are already visible and unambiguous. Both paths converge on the same domain owner: the model
+interprets intent, while deterministic code owns truth, authority and mutation law.
 
 The current path is:
 
 ```
-page context or button + the person's words
+page context + the person's words
   -> ai/composer-actions.js (one model-facing allow-list and schema)
   -> model proposes a typed action
   -> server resolves the page/object through the reader's existing gate
@@ -27,14 +30,15 @@ stale object becomes the same `not found` response. Conversation binding continu
 Validation errors, permission refusals, privacy facts, irreversible warnings and infrastructure
 failures stay deterministic. Coaching, acknowledgement, clarification, suggestions and transitions
 belong to the composer. When no model is available, explicit typed button shortcuts may still be
-validated and confirmed, but ambiguous natural language is not converted into a mutation with a
-regex. The draft stays in the private conversation and the response says interpretation is
-unavailable.
+validated and confirmed, and an explicit direct control may call its canonical capability.
+Ambiguous natural language is not converted into a mutation with a regex. The draft stays in the
+private conversation and the response says interpretation is unavailable.
 
-To add a capability, add one entry to `ai/composer-actions.js`, expose only the arguments a model
-may propose, and add one dispatcher branch that reuses the existing mutation and access gate. Do
-not add a new intent regex, a second endpoint-specific permission rule, or a canned conversational
-packet.
+To add a capability, first establish one deterministic domain owner for its validation, mutation
+and side effects. Then add one entry to `ai/composer-actions.js`, expose only the arguments a model
+may propose, and make the dispatcher call that owner. Explicit controls may call the same owner
+directly. Do not add a new intent regex, a second endpoint-specific permission rule, or a canned
+conversational packet.
 
 The prose boundary is deliberate. Deterministic text remains for validation errors, authority or
 privacy refusals, visibility and irreversibility warnings, exact persistence outcomes, cohort-floor
@@ -51,8 +55,10 @@ presented as understanding.
 - Main composer: `MemberApp.wsSend -> assistantTurn -> POST /api/assistant/turn ->
   _assistantTurn -> _composeTurn`; private history is `assistantConversations`, with durable
   `about` binding and source metadata.
-- Focus: creation and source continuity are `/api/me/focus`, `_getMemory(...).focuses`,
-  `_beginFocusAction`, and `focus.source`; outcomes close through `_completeFocusAction`.
+- Focus: `_createPersonalFocus`, `_updatePersonalFocus`, `_recordPersonalFocusOutcome`, and
+  `_resolvePersonalFocusAudience` own lifecycle and audience law. Direct HTTP routes and composer
+  confirmation are transports over those functions; `_beginFocusAction` and
+  `_completeFocusAction` remain their Action-loop hooks.
 - Inquiry: `_inquiryFor` and `diagnose.applyProposals` own state/evidence; disagreement is a
   contradicting self-report; the model never sets confidence.
 - Library: `ai/shelf.js` stores only `{kind,refId}` and `_shelfLookup` re-runs access on every read.

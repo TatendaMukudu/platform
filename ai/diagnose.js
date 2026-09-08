@@ -193,6 +193,31 @@ const UNKNOWN_ORIGIN_CAP = 2;
 const SIGNAL_STATUSES = ['active', 'superseded', 'withdrawn'];
 const isActive = s => !s || !s.status || s.status === 'active';
 
+/* One canonical identity/current-set rule for origins. Missing identity earns no
+   independent-origin vote. Corrections remain in history but only the current active
+   record for an origin appears in the set. Callers may exclude dissent when they are
+   specifically counting support rather than all current accounts. */
+function originIdentity(signal) {
+  const ref = signal && signal.originRef != null ? String(signal.originRef).trim().slice(0, 120) : '';
+  return ref || null;
+}
+function currentOriginSignals(signals = [], { includeDissent = true } = {}) {
+  const rows = (Array.isArray(signals) ? signals : []).filter(Boolean)
+    .map((signal, index) => ({ signal, index }))
+    .sort((a, b) => ((Number(a.signal.at) || 0) - (Number(b.signal.at) || 0)) || a.index - b.index);
+  const current = new Map();
+  for (const { signal } of rows) {
+    if (signal.kind === 'interpretation' || (!includeDissent && signal.dissents)) continue;
+    const id = originIdentity(signal);
+    if (!id) continue;
+    if (isActive(signal)) current.set(id, signal);
+    else if (current.get(id) === signal || signal.status === 'withdrawn') current.delete(id);
+  }
+  return current;
+}
+const currentOriginRefs = (signals, opts) => [...currentOriginSignals(signals, opts).keys()];
+const currentOriginCount = (signals, opts) => currentOriginSignals(signals, opts).size;
+
 /* How decisively the case against must beat the case for before an explanation is ruled out,
    and how close the two must be to count as a live disagreement. The margin is what stops one
    weak dissent felling a well-evidenced explanation; the contest band is what stops a real
@@ -228,7 +253,7 @@ function deriveConfidence(signals = [], { now = Date.now(), halfLifeDays = 45, a
   const known = new Map();          // originRef → true
   const unknownSources = new Set();
   for (const s of list) {
-    const ref = s.originRef ? String(s.originRef) : '';
+    const ref = originIdentity(s) || '';
     if (ref) known.set(ref, true);
     else unknownSources.add(String(s.source || 'self'));
   }
@@ -1203,5 +1228,6 @@ module.exports = {
   RELATIONSHIPS, resolveIdentity, addAlias,
   // Origin + correction: what evidence is based on, and what happens when it turns out to be wrong.
   ORIGIN_KINDS, SIGNAL_STATUSES, UNKNOWN_ORIGIN_CAP, REFUTATION_MARGIN, CONTEST_MARGIN,
-  originOf, canCorrect, supersede, isActive,
+  originOf, originIdentity, currentOriginSignals, currentOriginRefs, currentOriginCount,
+  canCorrect, supersede, isActive,
 };

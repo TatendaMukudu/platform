@@ -1479,16 +1479,15 @@ function _getMemory(orgCode, userId) {
 }
 
 function _focusFromGoal(code, userId, goal, opts = {}) {
-  const mem = _getMemory(code, userId);
   const title = String(goal || '').trim();
   if (!title) return null;
-  const existing = (mem.focuses || []).find(f => f.kind === 'goal' && f.text === title && f.status === 'active');
-  if (existing) return existing;
-  const focus = { id: opts.id || `foc_${generateId()}`, text: title, kind: 'goal', type: opts.type || 'goal',
-    participation: opts.participation || 'self', shape: opts.shape || 'parallel', participants: opts.participants || [userId],
-    invitedBy: opts.invitedBy || null, acceptedAt: opts.acceptedAt || new Date().toISOString(),
-    status: 'active', outcome: null, createdAt: opts.createdAt || new Date().toISOString() };
-  mem.focuses.unshift(focus); _beginFocusAction(code, focus, opts.invitedBy || userId, { subjectId: userId }); return focus;
+  const result = _createPersonalFocus(code, userId, { text: title, id: opts.id || `foc_${generateId()}`,
+    type: opts.type || 'goal', participantIds: (opts.participants || []).filter(id => id !== userId),
+    invitedBy: opts.invitedBy || null, createdAt: opts.createdAt,
+    origin: opts.origin || 'legacy_goal', kind: 'goal', participation: opts.participation || 'self',
+    shape: opts.shape || 'parallel', acceptedAt: opts.acceptedAt || opts.createdAt || new Date().toISOString() }, { strictAudience: false });
+  if (!result.ok) return null;
+  return result.focus;
 }
 /* memberGoals is keyed `code:userId` OR `code:name` — memberKey and userKey build the same
    shape and the older route wrote the name form, so the tail cannot be trusted to be an id.
@@ -2580,27 +2579,9 @@ app.post('/api/auth/complete-profile', requireAuth, (req, res) => {
 
     const goalText = String(mainGoals || '').trim().slice(0, 300);
     if (goalText) {
-      const mem = _getMemory(code, userId);
-      mem.focuses = mem.focuses || [];
-      const dup = mem.focuses.find(f => f && f.status === 'active' && f.text === goalText);
-      if (dup) { openedFocus = { id: dup.id, text: dup.text }; }
-      else {
-        /* No target and no review date, deliberately. The form did not ask for either, and a
-           focus is allowed to have neither (some things have no clean finish line). What is
-           refused is the server inventing them — focus_stalled fires off the review date, and a
-           stall notice about a day nobody chose is worse than no notice. */
-        const focus = {
-          id: 'foc_' + generateId(), text: goalText, type: 'self_set', status: 'active', outcome: null,
-          visibility: 'private', participants: [userId],
-          origin: 'onboarding',
-          createdAt: new Date().toISOString(),
-        };
-        mem.focuses.unshift(focus);
-        _beginFocusAction(code, focus, userId, { subjectId: userId });
-        mem.lastUpdated = new Date().toISOString();
-        _audit(code, { actor: userId, action: 'focus_created', subjectIds: [userId], basis: 'onboarding' });
-        openedFocus = { id: focus.id, text: focus.text };
-      }
+      /* No target/date: onboarding asked for neither. The canonical owner keeps that absence. */
+      const made = _createPersonalFocus(code, userId, { text: goalText, origin: 'onboarding', auditBasis: 'onboarding' });
+      if (made.ok) openedFocus = { id: made.focus.id, text: made.focus.text };
     }
   }
 
@@ -5064,7 +5045,7 @@ function _beliefStateFindings(code, userId, now) {
     const active = (inq.signals || []).filter(s => s && s.kind !== 'interpretation' && diagnose.isActive(s));
     const contested = inq.status === 'disputed' || active.some(s => s.dissents);
     const shaped = { ...inq, contested,
-      independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size };
+      independentOrigins: diagnose.currentOriginCount(active) };
     const label = present.humanTopic(inq.topic || {});
     if (!label) continue;
 
@@ -5677,17 +5658,13 @@ app.post('/api/me/prepared/act', requireAuth, (req, res) => {
   }
   const mem = _getMemory(code, userId);
   if (decision === 'approve') {
-    mem.focuses = mem.focuses || [];
-    const focus = {
-      id: 'foc_' + generateId(), text: String(text).slice(0, 300), type: type || null,
-      status: 'active', outcome: null, createdAt: new Date().toISOString(),
-    };
-    mem.focuses.unshift(focus); _beginFocusAction(code, focus, userId, { subjectId: userId });
+    const made = _createPersonalFocus(code, userId, { text, type: type || 'self_set' });
+    if (!made.ok) return res.status(made.status).json({ error: made.error });
   } else {
     // Dismiss teaches the Confidence Engine this kind of nudge didn't land for them.
     if (type) { try { _recordNoticeFeedback(code, type, 'dismiss'); } catch (_) {} }
   }
-  mem.lastUpdated = new Date().toISOString();
+  if (decision === 'dismiss') mem.lastUpdated = new Date().toISOString();
   scheduleSave();
   res.json({ ok: true, focuses: (mem.focuses || []).filter(f => f.status === 'active').map(f => ({ id: f.id, text: f.text })) });
 });
@@ -5710,158 +5687,20 @@ app.post('/api/me/prepared/act', requireAuth, (req, res) => {
    thing wearing the same word. */
 app.post('/api/me/focus', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
-  const text = String((req.body || {}).text || '').trim().slice(0, 300);
-  if (!text) return res.status(400).json({ error: 'Say what you want to work on.' });
-  const shared = (req.body || {}).share === true;
-  /* WHO IT IS WITH. "Public or private" only has two settings, and the founder's case is the
-     third one everybody actually wants: these three people, not the whole squad and not just
-     me. Names are checked against the ADDRESSABLE set — a person can only invite somebody they
-     are genuinely alongside, so an invite cannot be used to discover that a name exists. */
-  const wanted = Array.isArray((req.body || {}).participants) ? (req.body || {}).participants : [];
-  const addressable = new Set(_contactsFor(code, userId).map(c => c.id));
-  const participants = [...new Set(wanted.map(String).filter(id => addressable.has(id)))];
-  const rejected = wanted.length - participants.length;
-  const mem = _getMemory(code, userId);
-  mem.focuses = mem.focuses || [];
-
-  /* ── WHERE THIS CAME FROM ────────────────────────────────────────────────────────────────
-     Founder direction: a focus should feel like a conversation we deliberately keep working on.
-     So a focus made from a conversation REMEMBERS that conversation — and remembers it as a
-     REFERENCE, never as a copy.
-
-     That distinction is the whole design. Copying the transcript onto the focus would put the
-     person's private words inside an object they can later share with a coach, and sharing the
-     focus would then hand over the conversation that produced it without anybody deciding to.
-     A ref cannot leak that way: reading it goes back through a route that checks ownership every
-     time, so widening the focus's audience widens nothing else.
-
-     VALIDATED HERE, NOT TRUSTED. The conversation must be one of THIS person's own, in THIS
-     organisation — assistantConversations is keyed by their workspace key, so a conversation id
-     belonging to somebody else simply is not in the list and the reference is dropped. Message
-     ids are kept only if they exist in that thread. A bad reference becomes NO reference rather
-     than a stored pointer to something nobody can read. */
-  const source = (() => {
-    const b = req.body || {};
-    const convId = String(b.sourceConversationId || '').slice(0, 80);
-    if (!convId) return null;
-    const conv = (assistantConversations[_wsKey(code, userId)] || []).find(c => c && c.id === convId);
-    if (!conv) return null;   // not theirs, or not in this org — no reference at all
-    const want = Array.isArray(b.sourceMessageIds) ? b.sourceMessageIds.map(String).slice(0, 20) : [];
-    const have = new Set((conv.messages || []).map(m => String(m.id || m.messageId || '')));
-    const messageIds = [...new Set(want.filter(id => have.has(id)))];
-    return { conversationId: conv.id, messageIds, at: Date.now() };
-  })();
-
-  /* ── WHAT THIS FOCUS IS ADDRESSING ───────────────────────────────────────────────────────
-     Founder decision, taken over two alternatives: LINKED BOTH WAYS.
-
-     A focus started from a High, a Low or an Inquiry remembers which belief it is about — and
-     when the person later says whether trying it helped, that answer becomes evidence ON that
-     belief. So the loop closes: IntelliQ works something out, you do something about it, and what
-     happened feeds back into what it believes.
-
-     WHY THIS NEEDED A DECISION rather than a default: it makes a person's OWN ACTION a way a
-     belief's standing can move, alongside other people's accounts of what happened. That is a
-     real addition to the epistemic model, and the founder took it deliberately.
-
-     WHAT IT DOES NOT DO is let the link itself change anything. Starting a focus is not evidence;
-     the belief is untouched until there is an ANSWER to report, and that answer arrives through
-     the ordinary signal path with the person as its own origin — one origin, no direction, banded
-     by the kernel like everything else. Somebody starting five focuses on one Low has said
-     nothing about it five times.
-
-     VALIDATED, NOT TRUSTED, exactly as the conversation reference is: the belief must be one this
-     person can actually open, resolved through their own view. A ref to somebody else's belief
-     becomes NO ref rather than a stored pointer at it. */
-  const addresses = (() => {
-    const b = req.body || {};
-    const kind = String(b.addressesKind || '').trim();
-    const id = String(b.addressesId || '').trim().slice(0, 80);
-    if (!['inquiry', 'high', 'low'].includes(kind) || !id) return null;
-    const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
-    if (!obj) return null;   // not theirs to see — no reference at all
-    return { kind, id, at: Date.now() };
-  })();
-
-  /* SAME TEXT, STILL OPEN? Return it rather than making a second one — a list with the same
-     commitment on it twice is a list people stop trusting. This is also what makes a double tap
-     and a retry-after-timeout safe: the second call finds the first one's work and reports it,
-     instead of leaving two identical focuses behind.
-
-     It returns the FULL shape, not a reduced one. The reduced version meant a client rendering
-     the retry had no target, no review date and no source, so a successful retry looked like a
-     worse outcome than the call it was repeating. */
-  const existing = mem.focuses.find(f => f && f.status === 'active' && f.text === text);
-  if (existing) {
-    // A retry may be the first call that carried the source, so attach it if the original has
-    // none. Never overwrite one that is already there — that would re-point a focus at a
-    // different conversation on a stray retry.
-    if (source && !existing.source) { existing.source = source; scheduleSave(); }
-    return res.json({ ok: true, already: true,
-      focus: {
-        id: existing.id, text: existing.text, visibility: existing.visibility || 'private',
-        participants: existing.participants || [userId],
-        target: existing.target || null, reviewAt: existing.reviewAt || null,
-        source: existing.source ? { conversationId: existing.source.conversationId, messageIds: existing.source.messageIds } : null,
-      },
-      note: 'You already have this one open.' });
-  }
-  /* A FOCUS IS SOMETHING YOU WORK TOWARDS (founder, September 2026). The target says what would
-     tell you it worked; the review date says when to look. Neither is required — some things
-     have no clean finish line, and refusing to let somebody start until they invent a metric is
-     how a tool teaches people to make one up. But when they ARE given, "did what you tried
-     help?" stops being a feeling and becomes a check, and focus_stalled already fires off the
-     review date. */
-  const target = String((req.body || {}).target || '').trim().slice(0, 300);
-  const reviewOn = String((req.body || {}).reviewOn || '').trim().slice(0, 40);
-  const reviewAt = (() => {
-    if (!reviewOn) return null;
-    const t = Date.parse(reviewOn);
-    // An unparseable date is dropped rather than guessed at. A review date nobody set is
-    // honest; one the server invented would fire a stall notice about a day nobody chose.
-    return Number.isFinite(t) ? t : null;
-  })();
-
-  const focus = {
-    id: 'foc_' + generateId(), text, type: 'self_set', status: 'active', outcome: null,
-    // Inviting somebody by name IS sharing it with them; there is no such thing as a private
-    // focus that other people are in. The visibility field says who else can see it at all.
-    visibility: participants.length ? 'invited' : (shared ? 'shared' : 'private'),
-    participants: participants.length ? [userId, ...participants] : [userId],
-    ...(target ? { target } : {}),
-    ...(reviewAt ? { reviewAt } : {}),
-    ...(source ? { source } : {}),
-    ...(addresses ? { addresses } : {}),
-    createdAt: new Date().toISOString(),
-  };
-  mem.focuses.unshift(focus);
-  _beginFocusAction(code, focus, userId, { subjectId: userId });
-  mem.lastUpdated = new Date().toISOString();
-  _audit(code, { actor: userId, action: 'focus_created', subjectIds: [userId], basis: focus.visibility });
-  scheduleSave();
-  const named = participants.map(id => (orgUsers[code][id] || {}).name).filter(Boolean);
-  res.json({ ok: true,
-    focus: { id: focus.id, text: focus.text, visibility: focus.visibility, participants: focus.participants,
-      target: focus.target || null, reviewAt: focus.reviewAt || null,
-      source: source ? { conversationId: source.conversationId, messageIds: source.messageIds } : null,
-      addresses: addresses ? { kind: addresses.kind, id: addresses.id } : null },
-    /* THE AUDIENCE SENTENCE SAYS WHAT ACTUALLY HAPPENS.
-
-       `shared` is read by _memberGoalsFor, which is a LEADER'S view of a member. Squad peers
-       never see it, so the control that offered "My whole squad" was describing an audience the
-       backend does not have. The wording here was already right and the label was wrong; both
-       now say the same thing, and nothing was widened to make a label true. */
-    note: participants.length
-      ? `Set, with ${named.join(', ')}. Only the people in it can see it.${rejected ? ' Some names could not be added.' : ''}`
-      : shared ? 'Set. Whoever leads a group you are in can see this one. Your squad cannot.'
-               : 'Set, and private — only you can see it. You can share it later; nobody else can.',
-    /* ONE USEFUL QUESTION, so confirming a focus continues the conversation instead of ending it.
-       Deterministic and drawn from what the focus itself is missing, which is why it can be asked
-       with the writing engine off: no target yet is a different next question from no date. */
-    next: !target
-      ? 'What would tell you this was working?'
-      : !reviewAt ? 'When should we look at it?'
-                  : 'What is the first thing you will try?' });
+  const result = _createPersonalFocus(code, userId, {
+    ...(req.body || {}), participantIds: (req.body || {}).participants,
+  });
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  const named = result.audience.participantIds.map(id => (orgUsers[code][id] || {}).name).filter(Boolean);
+  const f = result.publicFocus;
+  res.json({ ok: true, already: result.already, focus: f,
+    note: result.already ? 'You already have this one open.'
+      : result.audience.participantIds.length
+        ? `Set, with ${named.join(', ')}. Only the people in it can see it.${result.audience.rejected ? ' Some names could not be added.' : ''}`
+        : f.visibility === 'shared' ? 'Set. Whoever leads a group you are in can see this one. Your squad cannot.'
+                                  : 'Set, and private — only you can see it. You can share it later; nobody else can.',
+    next: !f.target ? 'What would tell you this was working?'
+      : !f.reviewAt ? 'When should we look at it?' : 'What is the first thing you will try?' });
 });
 
 /* GET /api/me/focus/:id/source — the conversation a focus came from. OWNER ONLY.
@@ -5987,14 +5826,10 @@ app.post('/api/me/focus/:id/tried', requireAuth, (req, res) => {
 /* POST /api/me/focus/:id/visibility — widen or narrow it afterwards, owner only. */
 app.post('/api/me/focus/:id/visibility', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
-  const mem = _getMemory(code, userId);
-  const focus = (mem.focuses || []).find(f => f && f.id === String(req.params.id));
-  if (!focus) return res.status(404).json({ error: 'not found' });
   const want = (req.body || {}).visibility === 'shared' ? 'shared' : 'private';
-  focus.visibility = want;
-  _audit(code, { actor: userId, action: 'focus_visibility', subjectIds: [userId], basis: want });
-  scheduleSave();
-  res.json({ ok: true, visibility: want,
+  const result = _updatePersonalFocus(code, userId, req.params.id, { visibility: want });
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true, visibility: result.focus.visibility,
     note: want === 'shared' ? 'Shared — leaders of your groups can see it now.' : 'Private again — only you.' });
 });
 
@@ -6005,26 +5840,9 @@ app.post('/api/me/focus/:id/visibility', requireAuth, (req, res) => {
 app.post('/api/me/focus/outcome', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const { focusId, outcome } = req.body || {};
-  if (!code || !userId) return res.status(403).json({ error: 'Forbidden' });
-  if (!focusId || !['helped', 'no', 'mixed'].includes(outcome)) {
-    return res.status(400).json({ error: 'focusId and outcome (helped|no|mixed) required' });
-  }
-  const mem = _getMemory(code, userId);
-  const f = (mem.focuses || []).find(x => x.id === focusId);
-  if (!f) return res.status(404).json({ error: 'focus not found' });
-
-  f.status = 'done';
-  f.outcome = outcome;
-  f.resolvedAt = new Date().toISOString();
-  _completeFocusAction(code, f, outcome, userId);
-
-  // LEARN — feed the Confidence Engine so what genuinely helps this person
-  // surfaces more, and what doesn't fades.
-  if (f.type && outcome !== 'mixed') {
-    try { _recordNoticeFeedback(code, f.type, outcome === 'helped' ? 'useful' : 'dismiss'); } catch (_) {}
-  }
-  mem.lastUpdated = new Date().toISOString();
-  scheduleSave();
+  if (!focusId) return res.status(400).json({ error: 'focusId and outcome (helped|no|mixed) required' });
+  const result = _recordPersonalFocusOutcome(code, userId, focusId, outcome);
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
   res.json({ ok: true });
 });
 
@@ -8731,6 +8549,139 @@ function _completeFocusAction(code, focus, outcome, actorId) {
   action.observation = { result: outcome, observedBy: actorId, at: new Date().toISOString() };
   action.stage = 'learn'; action.status = 'evaluated'; action.evaluation = { result: outcome, improved: outcome === 'helped' || outcome === 'better' };
   return action;
+}
+
+/* ONE OWNER FOR A PERSON'S FOCUS LIFECYCLE.
+
+   HTTP controls and composer confirmations are transports. Neither owns Focus shape,
+   audience, source validation, idempotency, lifecycle or learning side effects. They
+   both call these functions. Proposal-time audience resolution deliberately calls the
+   same resolver again; confirmation re-resolves it so a stale membership snapshot is
+   authority for nothing. */
+function _resolvePersonalFocusAudience(code, userId, input = {}, { strict = false, expectedParticipantIds = null } = {}) {
+  const contacts = new Set(_contactsFor(code, userId).map(c => String(c.id)));
+  const groupId = String(input.groupId || '');
+  let requested = Array.isArray(input.participantIds || input.participants)
+    ? (input.participantIds || input.participants).map(String) : [];
+  if (groupId) {
+    const node = (orgNodes[code] || {})[groupId];
+    if (!node || !_inNode(code, groupId, userId)) return { ok: false, status: 403, error: 'audience unavailable' };
+    requested = (node.memberIds || []).map(String).filter(id => id !== String(userId));
+  }
+  const participantIds = [...new Set(requested.filter(id => id !== String(userId) && contacts.has(id)))].sort();
+  const rejected = requested.filter(id => id !== String(userId) && !contacts.has(id));
+  if (strict && rejected.length) return { ok: false, status: 403, error: 'audience unavailable' };
+  if (expectedParticipantIds && JSON.stringify(participantIds) !== JSON.stringify([...expectedParticipantIds].map(String).sort())) {
+    return { ok: false, status: 409, error: 'stale_audience' };
+  }
+  const requestedVisibility = input.share === true ? 'shared' : String(input.visibility || 'private');
+  if (!participantIds.length && !['private', 'shared'].includes(requestedVisibility)) {
+    return { ok: false, status: 400, error: 'unknown visibility' };
+  }
+  return { ok: true, groupId: groupId || null, participantIds,
+    participants: [String(userId), ...participantIds],
+    visibility: participantIds.length ? 'invited' : requestedVisibility,
+    rejected: rejected.length };
+}
+
+function _personalFocusSource(code, userId, input = {}) {
+  const convId = String(input.sourceConversationId || input.conversationId || '').slice(0, 80);
+  if (!convId) return null;
+  const conv = (assistantConversations[_wsKey(code, userId)] || []).find(c => c && c.id === convId);
+  if (!conv) return null;
+  const wanted = Array.isArray(input.sourceMessageIds) ? input.sourceMessageIds.map(String).slice(0, 20) : [];
+  const have = new Set((conv.messages || []).map(m => String(m.id || m.messageId || '')));
+  return { conversationId: conv.id, messageIds: [...new Set(wanted.filter(id => have.has(id)))], at: Date.now() };
+}
+
+function _personalFocusAddress(code, userId, input = {}) {
+  const kind = String(input.addressesKind || input.addresses?.kind || '');
+  const id = String(input.addressesId || input.addresses?.id || '').slice(0, 80);
+  if (!['inquiry', 'high', 'low'].includes(kind) || !id) return null;
+  return _allObjectsFor(code, userId).some(o => o.kind === kind && String(o.id) === id)
+    ? { kind, id, at: Date.now() } : null;
+}
+
+function _publicPersonalFocus(focus, userId) {
+  return { id: focus.id, text: focus.text, visibility: focus.visibility || 'private',
+    participants: focus.participants || [userId], target: focus.target || null,
+    reviewAt: focus.reviewAt || null,
+    source: focus.source ? { conversationId: focus.source.conversationId, messageIds: focus.source.messageIds || [] } : null,
+    addresses: focus.addresses ? { kind: focus.addresses.kind, id: focus.addresses.id } : null };
+}
+
+function _createPersonalFocus(code, userId, input = {}, opts = {}) {
+  const text = String(input.text || '').trim().slice(0, 300);
+  if (!text) return { ok: false, status: 400, error: 'Say what you want to work on.' };
+  const audience = _resolvePersonalFocusAudience(code, userId, input, {
+    strict: opts.strictAudience === true, expectedParticipantIds: opts.expectedParticipantIds || null });
+  if (!audience.ok) return audience;
+  const source = _personalFocusSource(code, userId, input);
+  const addresses = _personalFocusAddress(code, userId, input);
+  const target = String(input.target || '').trim().slice(0, 300);
+  const parsedReview = input.reviewAt != null ? Number(input.reviewAt) : Date.parse(String(input.reviewOn || ''));
+  const reviewAt = Number.isFinite(parsedReview) ? parsedReview : null;
+  const mem = _getMemory(code, userId);
+  const existing = (mem.focuses || []).find(f => f && f.status === 'active' && f.text === text
+    && (!input.kind || f.kind === input.kind));
+  if (existing) {
+    if (source && !existing.source) existing.source = source;
+    mem.lastUpdated = new Date().toISOString(); scheduleSave();
+    return { ok: true, already: true, focus: existing, publicFocus: _publicPersonalFocus(existing, userId), audience };
+  }
+  const focus = { id: input.id || 'foc_' + generateId(), text, type: input.type || 'self_set',
+    status: 'active', outcome: null, visibility: audience.visibility, participants: audience.participants,
+    ...(input.kind ? { kind: input.kind } : {}), ...(input.participation ? { participation: input.participation } : {}),
+    ...(input.shape ? { shape: input.shape } : {}), ...(input.acceptedAt ? { acceptedAt: input.acceptedAt } : {}),
+    ...(input.invitedBy ? { invitedBy: input.invitedBy } : {}),
+    ...(target ? { target } : {}), ...(reviewAt ? { reviewAt } : {}), ...(source ? { source } : {}),
+    ...(addresses ? { addresses } : {}), ...(input.origin ? { origin: input.origin } : {}),
+    createdAt: input.createdAt || new Date().toISOString() };
+  mem.focuses.unshift(focus);
+  _beginFocusAction(code, focus, input.invitedBy || userId, { subjectId: userId });
+  mem.lastUpdated = new Date().toISOString();
+  _audit(code, { actor: userId, action: 'focus_created', subjectIds: [userId], basis: input.auditBasis || audience.visibility });
+  scheduleSave();
+  return { ok: true, already: false, focus, publicFocus: _publicPersonalFocus(focus, userId), audience };
+}
+
+function _updatePersonalFocus(code, userId, focusId, input = {}, opts = {}) {
+  const mem = _getMemory(code, userId);
+  const focus = (mem.focuses || []).find(f => f && f.id === String(focusId));
+  if (!focus) return { ok: false, status: 404, error: 'not found' };
+  const changesAudience = input.groupId || input.participantIds || input.participants || input.visibility || input.share != null;
+  if (changesAudience) {
+    const audience = _resolvePersonalFocusAudience(code, userId, input, {
+      strict: opts.strictAudience === true, expectedParticipantIds: opts.expectedParticipantIds || null });
+    if (!audience.ok) return audience;
+    focus.visibility = audience.visibility; focus.participants = audience.participants;
+  }
+  if (input.text != null) { const text = String(input.text).trim().slice(0, 300); if (text) focus.text = text; }
+  if (input.target != null) { const target = String(input.target).trim().slice(0, 300); if (target) focus.target = target; }
+  if (input.reviewOn != null || input.reviewAt != null) {
+    const at = input.reviewAt != null ? Number(input.reviewAt) : Date.parse(String(input.reviewOn));
+    if (Number.isFinite(at)) focus.reviewAt = at;
+  }
+  focus.updatedAt = new Date().toISOString(); mem.lastUpdated = focus.updatedAt;
+  _audit(code, { actor: userId, action: changesAudience ? 'focus_visibility' : 'focus_updated', subjectIds: [userId], basis: focus.visibility || 'private' });
+  scheduleSave();
+  return { ok: true, focus, publicFocus: _publicPersonalFocus(focus, userId) };
+}
+
+function _recordPersonalFocusOutcome(code, userId, focusId, outcome) {
+  if (!['helped', 'no', 'mixed'].includes(outcome)) return { ok: false, status: 400, error: 'outcome must be helped, no or mixed' };
+  const mem = _getMemory(code, userId);
+  const focus = (mem.focuses || []).find(f => f && f.id === String(focusId));
+  if (!focus) return { ok: false, status: 404, error: 'focus not found' };
+  focus.status = 'done'; focus.outcome = outcome; focus.resolvedAt = new Date().toISOString();
+  _completeFocusAction(code, focus, outcome, userId);
+  if (focus.type && outcome !== 'mixed') {
+    try { _recordNoticeFeedback(code, focus.type, outcome === 'helped' ? 'useful' : 'dismiss'); } catch (_) {}
+  }
+  mem.lastUpdated = focus.resolvedAt;
+  _audit(code, { actor: userId, action: 'focus_outcome', subjectIds: [userId], basis: outcome });
+  scheduleSave();
+  return { ok: true, focus, publicFocus: _publicPersonalFocus(focus, userId) };
 }
 
 /* PROPOSE — the capability RECOMMENDS (grounded), and we snapshot the policy decision
@@ -13692,13 +13643,13 @@ async function _composerActionInterpret(code, text, context, priorMessages, requ
   } catch (_) { return { actions: [], needsClarification: null, unavailable: true }; }
 }
 
-function _composerActionProposals(candidates, context, conversationId) {
+function _composerActionProposals(code, userId, candidates, context, conversationId) {
   return (candidates.actions || []).map(c => {
     const chosenGroup = (context.groups || []).find(g => String(g.id) === String(c.arguments.groupId));
-    const addressable = new Set((context.contacts || []).map(x => String(x.id)));
-    const resolvedParticipantIds = chosenGroup
-      ? (chosenGroup.memberIds || []).filter(id => addressable.has(String(id))).map(String).sort()
-      : (c.arguments.participantIds || []).map(String).sort();
+    const audience = _resolvePersonalFocusAudience(code, userId, {
+      groupId: chosenGroup ? chosenGroup.id : null, participantIds: c.arguments.participantIds || [],
+      visibility: c.arguments.visibility || 'private' }, { strict: true });
+    const resolvedParticipantIds = audience.ok ? audience.participantIds : [];
     return ({
     id: 'prop_' + generateId(), actionType: c.type, capability: 'composer_action',
     label: ({
@@ -13945,7 +13896,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   const wantsWork = workItemId || interp.intents.some(i => i.type === 'assigned_work_help' || i.type === 'assigned_work_submit');
   const workCtx = wantsWork ? _assignedWorkContext(code, userId, workItemId) : null;
   let proposals = _lensPrioritize(lens, [], _assistantProposals(code, userId, interp, context, text, workCtx));
-  const composerProposals = _composerActionProposals(actionReading, actionContext, _conv.id);
+  const composerProposals = _composerActionProposals(code, userId, actionReading, actionContext, _conv.id);
   if (composerProposals.length) {
     // A semantic action replaces the generic capture/focus guesses. Showing both is the packet
     // loop that produced the repeated private response after the person had rejected it.
@@ -14763,7 +14714,7 @@ function _groupInquiryProjections(code, nodeId) {
       confidence: i.confidence,
       // What it rests on, counted the way confidence counts it: separate underlying occurrences,
       // not how many times the thing has been said.
-      independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size,
+      independentOrigins: diagnose.currentOriginCount(active),
       // Anonymity changes attribution, never counting (L-D38). The kernel retains identity so
       // five anonymous people remain five contributors rather than one "anonymous" voice.
       contributors: new Set(active.map(s => s.contributedBy).filter(Boolean)).size,
@@ -15735,7 +15686,7 @@ app.get('/api/me/calls', requireAuth, (req, res) => {
     if (!inq || !(inq.signals || []).length) continue;
     const active = (inq.signals || []).filter(s => s && s.kind !== 'interpretation' && diagnose.isActive(s));
     const shaped = { ...inq,
-      independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size,
+      independentOrigins: diagnose.currentOriginCount(active),
       contested: inq.status === 'disputed' || active.some(s => s.dissents) };
     if (!teamState.readyForCall(shaped)) continue;
     const call = calls[inq.inquiryId] || null;
@@ -15767,7 +15718,7 @@ app.post('/api/me/call', requireAuth, (req, res) => {
 
   const active = (inq.signals || []).filter(s => s && s.kind !== 'interpretation' && diagnose.isActive(s));
   const shaped = { ...inq,
-    independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size,
+    independentOrigins: diagnose.currentOriginCount(active),
     contested: inq.status === 'disputed' || active.some(s => s.dissents) };
 
   /* RULING 2, ENFORCED HERE AS WELL AS EXPRESSED IN THE KERNEL. Taking your call back cannot be
@@ -15855,7 +15806,7 @@ app.get('/api/inquiry', requireAuth, (req, res) => {
       corrected: sig.filter(s => s.supersededBy).length,
       // How many separate underlying occurrences this rests on, as opposed to how many times it
       // has been mentioned. The distinction confidence is built on, made visible.
-      origins: new Set(sig.filter(s => diagnose.isActive(s) && s.originRef).map(s => s.originRef)).size,
+      origins: diagnose.currentOriginCount(sig),
       stillUnknown: (i.missingSignals || []).map(m => m.question),
       falsifiers: i.falsifiers || [],
       contradictions: sig.filter(s => diagnose.isActive(s) && s.dissents).length,
@@ -15892,7 +15843,7 @@ app.get('/api/inquiry/:id/thread', requireAuth, (req, res) => {
     band: (inquiry.confidence || {}).band,
     because: (inquiry.confidence || {}).because || [],
     contributors: new Set(active.map(s => s.contributedBy).filter(Boolean)).size,
-    independentOrigins: new Set(active.map(s => s.originRef).filter(Boolean)).size,
+    independentOrigins: diagnose.currentOriginCount(active),
     stillUnknown: (inquiry.missingSignals || []).map(m => (m && m.question) || m).filter(Boolean),
     falsifiers: inquiry.falsifiers || [],
     contested: inquiry.status === 'disputed' || active.some(s => s.dissents),
@@ -16690,7 +16641,7 @@ function _firmingChart(inq, { title }) {
   const occasions = [];
   const seenOrigins = new Map();   // originRef → current signal for that origin
   for (const s of history) {
-    const originRef = s.originRef ? String(s.originRef) : '';
+    const originRef = diagnose.originIdentity(s) || '';
     if (!originRef) continue;
     const prior = seenOrigins.get(originRef);
     const isCorrection = !!(prior && (prior.supersededBy === s.ref || s.correctionOf === prior.ref));
@@ -17343,50 +17294,24 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
     }
 
     if (prop.actionType === 'create_focus') {
-      const text = String(p.text || '').trim().slice(0, 300);
-      if (!text) return res.status(400).json({ error: 'focus text required' });
-      const target = String(p.target || '').trim().slice(0, 300);
-      const reviewOn = String(p.reviewOn || '').trim().slice(0, 40);
-      const reviewAt = reviewOn && Number.isFinite(Date.parse(reviewOn)) ? Date.parse(reviewOn) : null;
-      const mem = _getMemory(code, userId); mem.focuses = mem.focuses || [];
-      let focus = mem.focuses.find(f => f && f.status === 'active' && f.text === text);
-      if (!focus) {
-        focus = { id: 'foc_' + generateId(), text, type: 'self_set', status: 'active', outcome: null,
-          visibility: 'private', participants: [userId], createdAt: new Date().toISOString(),
-          ...(target ? { target } : {}), ...(reviewAt ? { reviewAt } : {}),
-          ...(live && ['inquiry', 'high', 'low'].includes(live.kind) ? { addresses: { kind: live.kind, id: live.id, at: Date.now() } } : {}),
-          source: { conversationId: p.conversationId, messageIds: [], at: Date.now() } };
-        mem.focuses.unshift(focus); _beginFocusAction(code, focus, userId, { subjectId: userId });
-        _audit(code, { actor: userId, action: 'focus_created', subjectIds: [userId], basis: 'private' });
-      }
+      const result = _createPersonalFocus(code, userId, { text: p.text, target: p.target, reviewOn: p.reviewOn,
+        conversationId: p.conversationId,
+        addressesKind: live && ['inquiry', 'high', 'low'].includes(live.kind) ? live.kind : null,
+        addressesId: live && ['inquiry', 'high', 'low'].includes(live.kind) ? live.id : null }, { strictAudience: true });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      const focus = result.focus;
       prop.confirmed = { at: new Date().toISOString(), focusId: focus.id }; scheduleSave();
-      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'created', focus: { id: focus.id, text: focus.text, visibility: focus.visibility,
-        target: focus.target || null, reviewAt: focus.reviewAt || null }, next: focus.target ? 'When should we look at it?' : 'What would tell you this was working?',
+      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'created', focus: result.publicFocus,
+        next: focus.target ? 'When should we look at it?' : 'What would tell you this was working?',
         note: 'Focus started privately. No target or date was invented.' });
     }
 
     if (prop.actionType === 'update_focus') {
-      const focus = (_getMemory(code, userId).focuses || []).find(f => f.id === ref.id);
-      if (!focus) return res.status(404).json({ error: 'not found' });
-      const wantedParticipants = Array.isArray(p.participantIds) ? p.participantIds.map(String) : null;
-      if (wantedParticipants) {
-        const addressable = new Set(_contactsFor(code, userId).map(c => c.id));
-        const accepted = [...new Set(wantedParticipants.filter(id => addressable.has(id)))];
-        if (accepted.length !== wantedParticipants.length) return res.status(403).json({ error: 'one or more people are not addressable' });
-        focus.participants = [userId, ...accepted]; focus.visibility = accepted.length ? 'invited' : 'private';
-      }
-      if (p.text) focus.text = String(p.text).trim().slice(0, 300) || focus.text;
-      if (p.target) { const target = String(p.target).trim().slice(0, 300); if (target) focus.target = target; }
-      if (p.reviewOn) { const v = String(p.reviewOn); const at = Date.parse(v); if (Number.isFinite(at)) focus.reviewAt = at; }
-      if (p.visibility) {
-        const visibility = String(p.visibility);
-        if (!['private', 'shared'].includes(visibility)) return res.status(400).json({ error: 'unknown visibility' });
-        if (visibility === 'shared' && !wantedParticipants?.length) return res.status(400).json({ error: 'a named audience is required' });
-        focus.visibility = visibility;
-      }
-      prop.confirmed = { at: new Date().toISOString(), focusId: focus.id }; scheduleSave();
-      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'updated', focus: { id: focus.id, text: focus.text,
-        visibility: focus.visibility, target: focus.target || null, reviewAt: focus.reviewAt || null }, note: 'Focus updated.' });
+      const result = _updatePersonalFocus(code, userId, ref.id, { text: p.text, target: p.target,
+        reviewOn: p.reviewOn, visibility: p.visibility, participantIds: p.participantIds }, { strictAudience: true });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      prop.confirmed = { at: new Date().toISOString(), focusId: result.focus.id }; scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'updated', focus: result.publicFocus, note: 'Focus updated.' });
     }
 
     if (prop.actionType === 'create_inquiry') {
@@ -17427,13 +17352,11 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
     }
 
     if (prop.actionType === 'record_focus_outcome') {
-      const focus = (_getMemory(code, userId).focuses || []).find(f => f.id === ref.id);
       const outcome = String(p.outcome || '');
-      if (!focus) return res.status(404).json({ error: 'not found' });
-      if (!['helped', 'no', 'mixed'].includes(outcome)) return res.status(400).json({ error: 'outcome must be helped, no or mixed' });
-      focus.status = 'done'; focus.outcome = outcome; focus.resolvedAt = new Date().toISOString(); _completeFocusAction(code, focus, outcome, userId);
-      prop.confirmed = { at: new Date().toISOString(), focusId: focus.id, outcome }; scheduleSave();
-      return res.json({ ok: true, confirmed: prop.actionType, outcome, focusId: focus.id, note: 'Outcome recorded.' });
+      const result = _recordPersonalFocusOutcome(code, userId, ref.id, outcome);
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      prop.confirmed = { at: new Date().toISOString(), focusId: result.focus.id, outcome }; scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome, focusId: result.focus.id, note: 'Outcome recorded.' });
     }
 
     if (prop.actionType === 'attach_material') {
@@ -17450,19 +17373,12 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
     if (prop.actionType === 'discuss_with_group') {
       if (!live || live.kind === 'conversation') {
         const groupId = String(p.groupId || '');
-        if (!groupId || !_inNode(code, groupId, userId)) return res.status(400).json({ error: 'choose a group you belong to' });
         const text = String(p.text || '').trim().slice(0, 300);
-        if (!text) return res.status(400).json({ error: 'say what you want to discuss' });
-        const addressable = new Set(_contactsFor(code, userId).map(c => c.id));
-        const participants = [...addressable].filter(id => _inNode(code, groupId, id)).sort();
-        if (JSON.stringify(participants) !== JSON.stringify((p.resolvedParticipantIds || []).slice().sort())) {
-          return res.status(409).json({ error: 'stale_proposal', note: 'The group changed after this was prepared. Review a fresh proposal before sharing.' });
-        }
-        const mem = _getMemory(code, userId); mem.focuses = mem.focuses || [];
-        const focus = { id: 'foc_' + generateId(), text, type: 'self_set', status: 'active', outcome: null,
-          visibility: 'invited', participants: [userId, ...participants], createdAt: new Date().toISOString(),
-          source: { conversationId: p.conversationId, messageIds: [], at: Date.now() } };
-        mem.focuses.unshift(focus); _beginFocusAction(code, focus, userId, { subjectId: userId });
+        const result = _createPersonalFocus(code, userId, { text, groupId, conversationId: p.conversationId },
+          { strictAudience: true, expectedParticipantIds: p.resolvedParticipantIds || [] });
+        if (!result.ok) return res.status(result.status).json({ error: result.error === 'stale_audience' ? 'stale_proposal' : result.error,
+          ...(result.error === 'stale_audience' ? { note: 'The group changed after this was prepared. Review a fresh proposal before sharing.' } : {}) });
+        const focus = result.focus;
         prop.confirmed = { at: new Date().toISOString(), object: { kind: 'focus', id: focus.id } }; scheduleSave();
         return res.json({ ok: true, confirmed: prop.actionType, outcome: 'open_forum',
           forum: { room: 'focus', nodeId: null, objectId: focus.id }, focus: { id: focus.id, text: focus.text, visibility: focus.visibility },
@@ -21936,6 +21852,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
+  _createPersonalFocus, _updatePersonalFocus, _recordPersonalFocusOutcome, _resolvePersonalFocusAudience,
   _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, shelfFilings, _shelfLookup, inquiryStates, _migrateLegacyNotesToLibrary, orgNotes, orgMessages, orgStore, safeguardingFlags, _llmBudgetOk, _captureError, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
