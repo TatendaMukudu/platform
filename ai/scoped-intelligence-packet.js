@@ -21,6 +21,7 @@ const graph = require('./org-graph');
 const priority = require('./priority-office');
 const guard = require('./language-guard');
 const polarity = require('./intelligence-feed');
+const neighborhood = require('./evidence-neighborhood');
 
 const QUESTION_KINDS = Object.freeze(['process_challenge', 'context_gap', 'policy_question', 'practice_question', 'goal_question']);
 const PACKET_SECTIONS = Object.freeze(['high', 'low', 'process_questions', 'outcome_history', 'personal_patterns', 'playbook', 'questions_upward', 'other']);
@@ -39,8 +40,6 @@ function actorScope(nodes = [], actor = {}) {
     memberNodeIds: actor.memberNodeIds || graph.scopeOfActor(nodes, userId).memberNodeIds,
   };
   const visibleNodes = graph.visibleScope(g, declared);
-  // W-3 can make a branch leader see every node in a shallow graph. Authority
-  // therefore comes from leading a root node, never from incidental coverage.
   const leadsARootNode = declared.leaderNodeIds.some(
     n => g.byId.has(n) && (g.parentsOf.get(n) || new Set()).size === 0);
   const role = declared.leaderNodeIds.length ? (leadsARootNode ? 'top_leader' : 'leader') : 'member';
@@ -107,8 +106,6 @@ function questionArtifact(question = {}, scope = {}, nodes = {}) {
     carriesPrivateContent: false,
     reason: _s(question.reason || 'A scoped user raised a useful question for the web.', 180),
     requiresConfirmation: true,
-    // Computed. canUseItem below trusts this field as a gate, so declaring it true would
-    // let a module authorise its own output.
     safe: guard.describesOnly(text) && sensitivity === 'normal',
   };
 }
@@ -118,12 +115,19 @@ function routeQuestions(questions = [], scope = {}, nodes = {}) {
     .sort((a, b) => a.id.localeCompare(b.id));
 }
 
-function buildPacket({ actor = {}, nodes = [], feed = {}, questions = [], prefs = {}, usageSignals = {}, suppressed = [] } = {}, opts = {}) {
+function buildPacket({ actor = {}, nodes = [], feed = {}, questions = [], prefs = {}, usageSignals = {}, suppressed = [], currentItemId = null } = {}, opts = {}) {
   const scope = actorScope(nodes, actor);
   const feedItems = Array.isArray(feed) ? feed : (feed.items || []);
+
+  /* Authorise first. Cross-evidence is allowed to relate only what this reader may
+     already use. This ordering is the boundary: relevance can change attention,
+     never access. */
   const visibleItems = feedItems.filter(item => canUseItem(item, scope, nodes, opts));
+  const relatedItems = neighborhood.connect(visibleItems, { currentId: currentItemId, max: opts.maxRelated || 12 })
+    .map(item => ({ ...item, safe: [item.title, item.body].every(t => guard.describesOnly(t)) }));
+
   const upwardQuestions = routeQuestions(questions, scope, nodes);
-  const packetItems = [...visibleItems];
+  const packetItems = [...visibleItems, ...relatedItems];
   for (const q of upwardQuestions) {
     packetItems.push({
       id: q.id,
@@ -154,11 +158,12 @@ function buildPacket({ actor = {}, nodes = [], feed = {}, questions = [], prefs 
     lead: stamped.lead,
     queue: stamped.queue,
     sections: sectionItems(stamped.queue),
+    relatedItems,
     upwardQuestions,
     empty: stamped.empty,
     message: stamped.message,
     generatedBy: 'scoped-intelligence-packet',
-    safe: stamped.safe && upwardQuestions.every(q => q.safe && q.carriesPrivateContent === false),
+    safe: stamped.safe && relatedItems.every(r => r.safe) && upwardQuestions.every(q => q.safe && q.carriesPrivateContent === false),
   };
 }
 
