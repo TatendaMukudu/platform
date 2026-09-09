@@ -2,6 +2,7 @@
 
 **Started from:** `main` @ `5683df3de63d8daa54d345ab39fa262db1908d2e`
 **Branch:** `claude/pilot-closure-blockers`
+**Ending at:** `4cdc2705e49c594bbfe087e2517f959382d2f1dc`
 **Ran:** `npm test`, each new suite individually, a 20-mutation harness, and a real Chromium pass
 at 390x844 (`scripts/library-browser-check.js`).
 
