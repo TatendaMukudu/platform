@@ -46,6 +46,7 @@ const BACKEND_ONLY = new Map(Object.entries({
   '/api/platform/member-results': 'operator tooling',
   '/api/platform/org-checkins': 'operator tooling',
   '/api/delivery/unsubscribe': 'reached from an email link, not the app',
+  '/api/library/from-chat': 'FOUNDER DECISION, September 2026: there is one user-facing product called Library and it is the shelf, which indexes live governed objects BY REFERENCE. This route is the old one\'s copy-taking act — it flattened a live conversation into a second record that sat beside it and drifted from it with no way to tell which you were reading. Its caller is gone and the control that used to invoke it now files a reference through POST /api/library/shelf. The route and everything anybody already saved through it are deliberately untouched: retiring a surface is not the same act as deleting somebody\'s records, and doing both in the week before a pilot is how records are lost. Removing the subsystem is its own piece of work, after the pilot.',
   '/api/identity/reresolve': 'operator tooling',
 }));
 
