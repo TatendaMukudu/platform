@@ -11404,9 +11404,9 @@ const MemberApp = {
       const points = (originSeries && originSeries.points) || [];
       const current = points.length ? points[points.length - 1].value : 0;
       const threshold = c.threshold && c.threshold.value;
-      parts.push(`<div class="iqt-chart-summary"><strong>${esc(current)} independent ${current === 1 ? 'origin' : 'origins'} recorded</strong>${Number.isFinite(threshold) ? ` · ${esc(threshold)} needed before this can be called` : ''}</div>`);
+      parts.push(`<div class="iqt-chart-summary"><strong>${esc(current)} separate supporting ${current === 1 ? 'account' : 'accounts'}</strong>${Number.isFinite(threshold) ? ` · ${esc(threshold)} needed before IntelliQ can support a call` : ''}</div>`);
       parts.push(`<details class="iqt-chart-key"><summary>How to read this</summary><div>
-        Each point is a dated moment when the governed record changed. The solid line counts independent origins; the dashed line shows the evidence band. The threshold is the minimum before a call is supportable. Repeating one source does not add another origin.
+        From left to right, each point shows when another separate account supported this. The line does not move when the same account is repeated. The horizontal marker shows when there is enough support to make a call. Disagreement and corrections remain in the record and in IntelliQ's explanation; they are never turned into support on this line.
       </div></details>`);
     }
 
@@ -11433,7 +11433,10 @@ const MemberApp = {
       const x0 = Math.min(...xs), x1 = Math.max(...xs);
       const px = v => PADL + (x1 === x0 ? (W - PADL - PADR) / 2 : ((v - x0) / (x1 - x0)) * (W - PADL - PADR));
       const svg = [];
-      for (const s of (c.series || [])) {
+      const visibleSeries = c.kind === 'firming'
+        ? (c.series || []).filter(s => s.key === 'origins')
+        : (c.series || []);
+      for (const s of visibleSeries) {
         const pts = s.points || [];
         if (!pts.length) continue;
         const vs = pts.map(p => p.value);
@@ -11446,13 +11449,13 @@ const MemberApp = {
         if (c.threshold && s.unit === c.threshold.unit) {
           const ty = py(c.threshold.value).toFixed(1);
           svg.push(`<line class="iqt-thresh" x1="${PADL}" y1="${ty}" x2="${W - PADR}" y2="${ty}"/>`);
-          svg.push(`<text class="iqt-thresh-t" x="${PADL}" y="${Number(ty) - 4}">${esc(c.threshold.value)} — enough to be called</text>`);
+          svg.push(`<text class="iqt-thresh-t" x="${PADL}" y="${Number(ty) - 4}">${esc(c.threshold.value)} — enough support</text>`);
         }
       }
-      parts.push(`<svg class="iqt-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.title)}">${svg.join('')}</svg>`);
+      parts.push(`<div class="iqt-chart-y">${c.kind === 'firming' ? 'Separate supporting accounts' : 'Recorded events'}</div><svg class="iqt-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.title)}">${svg.join('')}</svg>`);
       const first = all.length ? new Date(x0).toLocaleDateString() : '';
       const last = all.length ? new Date(x1).toLocaleDateString() : '';
-      parts.push(`<div class="iqt-chart-axis"><span>${esc(first)}</span><span>${esc(last)}</span></div>`);
+      parts.push(`<div class="iqt-chart-axis"><span>${esc(first)}</span><span>Time</span><span>${esc(last)}</span></div>`);
     }
     // L-CH5 — a picture with no stated limits is read as complete.
     parts.push(`<ul class="iqt-chart-lim">${(c.limitations || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>`);
@@ -11907,6 +11910,7 @@ const MemberApp = {
       ${sources.map(s => `<div class="iq-src">
         <div class="iq-src-top"><span class="iq-src-kind">${esc(word[s.kind] || 'Source')}</span><span class="iq-src-label">${esc(s.label)}</span></div>
         ${s.detail ? `<div class="iq-src-detail">${esc(s.detail)}</div>` : ''}
+        ${s.kind === 'web' && /^https?:\/\//i.test(String(s.url || '')) ? `<a class="iq-src-link" href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">Open external source</a>` : ''}
       </div>`).join('')}
     </div>`;
   },

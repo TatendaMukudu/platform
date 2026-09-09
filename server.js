@@ -10156,7 +10156,15 @@ function _sourceList(items = [], said = '') {
     const detail = String(it.detail || '').trim().replace(/\s+/g, ' ').slice(0, 180);
     if (echoes(detail)) continue;
     seen.add(key);
-    out.push({ kind: String(it.kind || 'record'), label, detail, at: it.at || null });
+    const kind = String(it.kind || 'record');
+    let url = null;
+    if (kind === 'web') {
+      try {
+        const parsed = new URL(String(it.url || ''));
+        if (parsed.protocol === 'https:' || parsed.protocol === 'http:') url = parsed.href;
+      } catch (_) {}
+    }
+    out.push({ kind, label, detail, at: it.at || null, ...(url ? { url } : {}) });
     if (out.length >= SOURCE_CAP) break;
   }
   return out;
@@ -13607,7 +13615,8 @@ function _composerActionContext(code, userId, opts = {}, conversation = null) {
     const split = ref.indexOf(':');
     const kind = ref.slice(0, split), id = ref.slice(split + 1);
     const live = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
-    if (live) object = { kind, id, label: live.explained?.headline || live.present?.summary?.title || '', raw: live.raw || null };
+    if (live) object = { kind, id, label: live.explained?.headline || live.present?.summary?.title || '',
+      nodeId: live.whoseNodeId || live.raw?.nodeId || null, raw: live.raw || null };
   }
   if (!object && !ref && conversation) object = { kind: 'conversation', id: conversation.id, label: conversation.title || 'Conversation', raw: null };
   return {
@@ -13617,8 +13626,8 @@ function _composerActionContext(code, userId, opts = {}, conversation = null) {
     groups: Object.values(orgNodes[code] || {}).filter(n => n && _inNode(code, n.nodeId || n.id, userId))
       .map(n => ({ id: n.nodeId || n.id, name: n.name || 'Group', memberIds: [...(n.memberIds || [])].map(String).sort() })),
     contacts: _contactsFor(code, userId).map(c => ({ id: c.id, name: c.name, with: c.with || null })),
-    forumAvailable: !!(object && (object.kind === 'inquiry' || object.kind === 'focus') &&
-      ((object.raw?.subjectRef || '').startsWith('group:') || (object.raw?.participants || []).length > 1)),
+    forumAvailable: !!(object && ['inquiry', 'high', 'low', 'focus'].includes(object.kind) &&
+      (object.nodeId || (object.raw?.subjectRef || '').startsWith('group:') || (object.raw?.participants || []).length > 1)),
     attachment: opts.attachment && typeof opts.attachment === 'object'
       ? { id: String(opts.attachment.id || '').slice(0, 120), name: String(opts.attachment.name || '').slice(0, 200) } : null,
     conversationId: conversation && conversation.id || null,
@@ -17385,7 +17394,9 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
           note: 'Created a shared Focus for that group and opened its discussion. Forum speech is not evidence unless deliberately contributed.' });
       }
       const raw = live.raw || {};
-      const nodeId = String(raw.subjectRef || '').startsWith('group:') ? String(raw.subjectRef).slice(6) : null;
+      const nodeId = String(raw.subjectRef || '').startsWith('group:')
+        ? String(raw.subjectRef).slice(6)
+        : (live.whoseNodeId || raw.nodeId || null);
       const invited = live.kind === 'focus' && (raw.participants || []).includes(userId) && (raw.participants || []).length > 1;
       if (!nodeId && !invited) return res.status(403).json({ error: 'this object has no group discussion' });
       prop.confirmed = { at: new Date().toISOString(), object: ref }; scheduleSave();
@@ -21817,7 +21828,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library
   // a routed share lands in
-  orgMeta, libraryItems, _professionals,
+  orgMeta, libraryItems, _professionals, _sourceList,
   // exported for the truth layer: proves the role ladder never invents a title
   _subjectRoleContext, _domainDirective, _memberGoalsFor, _getMemory, _beliefStateFindings, _contactsFor,
   // exported for the truth layer: the canonical evidence boundary + identity lifecycle

@@ -320,7 +320,7 @@ const server = app.listen(0, async () => {
     ok('MR25e …with what the kernel made of the evidence at each moment, from the production kernel rather than a second copy of banding',
       (firm.j.chart.series.find(x => x.key === 'band') || {}).points.length === 3);
     ok('MR25f …and the chart says on itself that repeats do not move it, which is what people find hardest to believe about this product',
-      firm.j.chart.limitations.some(l => /the same person saying it again does not move this/i.test(l)));
+      firm.j.chart.limitations.some(l => /same account said again does not move this/i.test(l)));
 
     /* ── MR23: recreating it, governed. ── */
     const recomp = await post(`/api/materials/${MID}/recompose`, coachT, { intent: 'the same plan for next week at home' });

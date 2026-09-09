@@ -146,6 +146,19 @@ const ok = (name, value) => value ? (pass++, console.log('  PASS', name)) : (fai
 
     const groupId = (member.assignedNodeIds || [])[0];
     const groupName = (S.orgNodes[ALMA_CODE][groupId] || {}).name;
+    const groupHighs = await call(`/api/objects?kind=high&scope=group:${encodeURIComponent(groupId)}`, null, 'GET');
+    const groupHigh = groupHighs.json.objects?.[0];
+    ok('CA15a2 the pilot fixture contains a reachable group High for the Forum path', groupHighs.status === 200 && !!groupHigh);
+    if (groupHigh) {
+      const highDiscuss = await turn('discuss_with_group', `Discuss this with ${groupName}.`,
+        { kind: 'high', id: groupHigh.id }, { groupId });
+      const highProposal = highDiscuss.json.response.proposedActions.find(p => p.actionType === 'discuss_with_group');
+      ok('CA15a3 a group High can enter the governed Forum flow through its composer context', !!highProposal);
+      const highForum = await confirm(highDiscuss, 'discuss_with_group');
+      ok('CA15a4 confirming the High discussion opens its existing group room without expanding visibility',
+        highForum.json.outcome === 'open_forum' && highForum.json.forum?.room === 'group'
+        && highForum.json.forum?.objectId === groupHigh.id);
+    }
     const discussTurn = await call('/api/assistant/turn', { text: `No, I would like to discuss it with ${groupName}.`, conversationId: noModel1.json.conversationId,
       requestedAction: { type: 'discuss_with_group', arguments: { groupId, text: 'I do not know if we communicate efficiently.' } } });
     const discussProposal = discussTurn.json.response.proposedActions.find(p => p.actionType === 'discuss_with_group');
@@ -237,8 +250,19 @@ const ok = (name, value) => value ? (pass++, console.log('  PASS', name)) : (fai
     ok('CA16b an object-thread action keeps its confirm card in the conversation instead of discarding it on reload',
       /pending\.innerHTML = this\._renderAssistant\(data\)/.test(require('fs').readFileSync(require('path').join(__dirname, '../js/app.js'), 'utf8'))
       && /\$\{primary\}[\s\S]*\$\{more \? `<details class="iq-more-actions"/.test(require('fs').readFileSync(require('path').join(__dirname, '../js/app.js'), 'utf8')));
-    ok('CA17 the graph explains points, threshold, current origins and repeated-source behaviour',
-      ['Each point is a dated moment', 'needed before this can be called', 'originSeries', 'does not add another origin'].every(x => require('fs').readFileSync(require('path').join(__dirname, '../js/app.js'), 'utf8').includes(x)));
+    const appSource = require('fs').readFileSync(require('path').join(__dirname, '../js/app.js'), 'utf8');
+    const chartRenderer = appSource.slice(appSource.indexOf('_chartHTML(c)'), appSource.indexOf('/* ── MATERIAL', appSource.indexOf('_chartHTML(c)')));
+    ok('CA17 the pilot firming graph shows one plain-language support line with time and repetition explained',
+      /filter\(s => s\.key === 'origins'\)/.test(chartRenderer)
+      && /Separate supporting accounts/.test(chartRenderer) && />Time</.test(chartRenderer)
+      && /same account is repeated/.test(chartRenderer));
+    const externalSources = S._sourceList([
+      { kind: 'web', label: 'Coaching paper', detail: 'Outside research', url: 'https://example.org/paper' },
+      { kind: 'web', label: 'Unsafe', detail: 'Not a link', url: 'javascript:alert(1)' },
+    ], 'A separate answer');
+    ok('CA17d external assistant citations retain a usable web address and reject unsafe schemes',
+      externalSources[0]?.url === 'https://example.org/paper' && externalSources[1]?.url == null
+      && /Open external source/.test(appSource));
     const mobileCss = require('fs').readFileSync(require('path').join(__dirname, '../css/member.css'), 'utf8');
     ok('CA18 the phone composer and proposal controls stay compact rather than consuming the viewport',
       /@media \(max-width:640px\)[\s\S]*?\.iq-composer-input\{max-height:120px\}[\s\S]*?\.iq-proposal-actions/.test(mobileCss));
