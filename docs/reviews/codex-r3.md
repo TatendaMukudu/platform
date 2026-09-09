@@ -1,8 +1,8 @@
 # Review round 3 — Codex
 
-**Read:** main @ 5683df3de63d8daa54d345ab39fa262db1908d2e; PR #84 starting head @ 6680a7e68d0600f3e8ba5ba930a4aacd66052d7f; corrected code @ 9e208720d73bb9054690cb95a37ec535b784a2e3
+**Read:** main @ 5683df3de63d8daa54d345ab39fa262db1908d2e; PR #84 starting head @ 6680a7e68d0600f3e8ba5ba930a4aacd66052d7f; canonical-ownership code @ 9e208720d73bb9054690cb95a37ec535b784a2e3; final-proof starting head @ 0c7117fa3799f1013846c40dac5072348e72d7a9; corrected code @ 2c276e5fe50fe22cc5a343f4c1f0c17d164befab
 **Lane:** Narrow canonical-ownership correction: personal Focus lifecycle, Focus audience resolution, current-origin equivalence, and the control-surface claim.
-**Ran:** `git push --dry-run origin HEAD:refs/heads/codex/connectivity-check`; `node scripts/focus-ownership-parity-smoke.js`; `node scripts/composer-actions-smoke.js`; focused dependent suites listed below; `/tmp/focus-mutations.py`; scope-inventory mutation (71 -> 72); `npm test`; `git diff --check`.
+**Ran:** `git push --dry-run origin HEAD:refs/heads/codex/connectivity-check`; `node scripts/focus-ownership-parity-smoke.js`; `node scripts/composer-actions-smoke.js`; focused dependent suites listed below; `/tmp/focus-mutations.py`; scope-inventory mutation (71 -> 72); `/tmp/final-proof-mutations.py`; `npm test`; `git diff --check`.
 
 ## Scope actually covered
 
@@ -28,11 +28,13 @@ I did not redesign the composer, add a product capability, change Material/Forum
 - `_resolvePersonalFocusAudience` is the one audience owner. It validates group membership/addressability and returns the normalized visibility/participant snapshot. Proposal and confirmation call it independently; confirmation rejects stale snapshots.
 - `diagnose.originIdentity`, `currentOriginSignals`, `currentOriginRefs` and `currentOriginCount` now own current origin equivalence. Confidence, personal/team High/Low projections and chart reconstruction use that identity/currentness law.
 - `ASSISTANT_RUNTIME.md` now states the accurate invariant: natural-language/model-interpreted consequences use proposal/confirmation; explicit informed controls may call the same canonical domain owner directly.
-- `scripts/focus-ownership-parity-smoke.js` adds 15 behavioral/static assertions for direct/composer create, update, outcome, group sharing, source, idempotency, lifecycle, learning, lastUpdated, audience and origin parity.
+- `scripts/focus-ownership-parity-smoke.js` now carries 23 behavioral/static assertions. The final proof pins that unique signal refs never substitute for missing provenance, only explicitly active records contribute to current independent-origin state, update/outcome each advance `mem.lastUpdated`, and unauthorized or strict non-contact audiences cannot mutate a Focus.
+- **Intentional epistemic tightening:** `evidenceValence` previously fell back from missing `originRef` to a unique signal `ref`. It no longer does. Unknown origin is not independent corroboration, so two supportive records with different event refs but no established origins count as zero and cannot create a High or Low.
+- **Chosen status law:** only `status: active` contributes to the current independent-origin set. Status-less legacy evidence may remain readable under the separate admissibility law, but it cannot cast a current provenance vote; corrected, superseded and withdrawn records remain historical and do not count.
 
 ## Refused / escalated
 
-None. The correction removes duplicate ownership without changing privacy, ontology, epistemic or Forum contribution law.
+None. The correction leaves privacy, ontology and Forum contribution law unchanged. It intentionally tightens epistemic behavior: an event ref is no longer accepted as a surrogate origin, and status-less legacy records do not contribute to current independent-origin state.
 
 ## Not fixed, and why
 
@@ -58,8 +60,14 @@ None. The correction removes duplicate ownership without changing privacy, ontol
 | Replace the High/Low origin owner with a local count | OP2 |
 | Count dissent as chart support | OP3 |
 | Restore the pre-consolidation scope inventory count | W4 |
+| Restore `signal.ref` fallback when `originRef` is missing | OP4 |
+| Let status-less records enter the current-origin set | OP5 |
+| Remove update `mem.lastUpdated` assignment | FP6a and FP6b |
+| Remove outcome `mem.lastUpdated` assignment | FP8a and FP8b |
+| Remove requested-group membership authorization | FP10a |
+| Remove strict non-contact rejection | FP10b |
 
-Every new assertion was mutated independently. The harness captured stdout and stderr and required the named assertion to print `FAIL`; a generic crash was not counted.
+Every new assertion was mutated independently. The final-proof harness checked both output streams and required the named assertion(s) to print `FAIL`; all six F1-F4 mutations bit without a throw or hang. The harness captured stdout and stderr and required the named assertion to print `FAIL`; a generic crash was not counted.
 
 ## Touched another lane
 
@@ -71,15 +79,21 @@ Every new assertion was mutated independently. The harness captured stdout and s
 
 - No live provider credential was available; this pass changes deterministic capability ownership, not interpretation, and model-off plus normalized proposal paths were exercised.
 - I did not exercise Render or mutate production data.
-- GitHub Actions run `34193479545` completed GREEN for `node scripts/test.js` in 1m30s at review-report head `5729309`.
+- GitHub Actions run `34193479545` completed GREEN for `node scripts/test.js` in 1m30s at review-report head `5729309`. Final-proof CI run `34322867338` was RED although the same head was GREEN locally; the GitHub log blob was inaccessible from this environment, so a follow-up CI run is pending.
 
 Focused dependent suites: `focus-creation-smoke.js`, `focus-continuity-smoke.js`, `focus-reach-smoke.js`, `focus-action-owner-smoke.js`, `composer-actions-smoke.js`, `team-state-smoke.js`, `highs-lows-smoke.js`, `self-high-low-smoke.js`, `chart-governance-smoke.js`, `origin-correction-smoke.js`, `origin-independence-smoke.js`, `material-reach-http-smoke.js`, `private-evidence-smoke.js`, `forum-smoke.js`, `shelf-http-smoke.js`, `scope-parity-smoke.js`, and `asset-version-smoke.js`.
+
+ORIGIN LAW:
+PASS
 
 FOCUS OWNERSHIP:
 PASS
 
-CONTROL-SURFACE CLAIM:
-ACCURATELY NARROWED
-
-CANONICAL OWNERSHIP:
+AUDIENCE AUTHORITY:
 PASS
+
+MUTATION PROOF:
+PASS
+
+npm test:
+GREEN
