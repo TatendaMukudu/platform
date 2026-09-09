@@ -36,6 +36,13 @@ const ACTIONS = Object.freeze({
     description: 'Create a personal Library folder.' },
   discuss_with_group: { contexts: [null, 'conversation', 'inquiry', 'high', 'low', 'focus'], confirmation: true,
     description: 'Open the governed Forum room; a private noticing is first promoted to a Focus with an explicit group.' },
+  /* DECLARED, NEVER INFERRED (founder law, September 2026). The model may notice that a piece of
+     evidence looks like it bears on what somebody is working on and OFFER to mark it -- "this may
+     support what you're working on, mark it that way?" -- and that is the whole of its authority
+     here. Nothing is written until the person confirms, and the vocabulary is three closed words,
+     so the model cannot invent a fourth relation or decide which one applies. */
+  declare_focus_relation: { contexts: ['focus'], confirmation: true,
+    description: 'OFFER to record how a specific piece of evidence stands to this focus: supports, undermines or unclear. The person decides; you never decide for them, and you never read it off the direction the evidence carries on an inquiry.' },
   navigate_to_object: { contexts: ['inquiry', 'high', 'low', 'focus', 'conversation', 'material'], confirmation: false,
     description: 'Return a safe address for the current object.' },
 });

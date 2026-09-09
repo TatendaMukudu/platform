@@ -129,8 +129,170 @@ function stamp(input = {}) {
   };
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+   ATTENTION — "what deserves my attention now, and why?"
+
+   THE SAME DESK, A SECOND WINDOW. `buildQueue` above ranks already-derived FEED ARTIFACTS. This
+   ranks CANONICAL OBJECTS — an Inquiry, a Focus, a High, a Low — and the difference matters
+   enough to sit in one module rather than two: a second Priority Office would be a second answer
+   to "what matters", and two answers to that question is exactly the drift this codebase spends
+   its time correcting.
+
+   IT IS A READER. It takes objects and edges the CALLER HAS ALREADY AUTHORISED, and it takes no
+   userId, no org and no store, so it cannot decide access even by accident. An object the caller
+   did not pass in cannot appear, cannot influence an order, and cannot leak its existence through
+   a gap in a ranking.
+
+   NO SCORE. Ordering is a DECLARED SEQUENCE of reason codes, not a weighted sum. A weighted score
+   is a number nobody can argue with and everybody has to trust; a declared order is a list a
+   founder can read and disagree with. Ties break on when the thing actually changed, then on the
+   canonical ref, so the same inputs always produce the same order.
+
+   NO PREDICTION, NO PERSON SCORE. Every reason code below is a statement about a RECORD and about
+   the PAST: something arrived, something is still open, something was recorded. None is about a
+   person, and none is about what happens next. */
+
+/* THE REASON CODES. Closed, and each one is a deterministic fact somebody can check. The order of
+   this array IS the ranking law — earlier means it comes first. It is short on purpose. */
+const ATTENTION_REASONS = Object.freeze([
+  'explicitly_prioritised',        // a human marked it. Nothing outranks somebody saying so.
+  'contradiction_added',           // a current dissenting account arrived since they last looked
+  'new_independent_evidence',      // the count of CURRENT INDEPENDENT ORIGINS grew
+  'unresolved_after_focus_outcome',// the work was closed out; the question it addressed is still open
+  'outcome_missing',               // a focus has been running and nothing was ever recorded
+  'related_state_changed',         // something it is connected to moved
+]);
+
+const _reasonRank = r => { const i = ATTENTION_REASONS.indexOf(r); return i < 0 ? ATTENTION_REASONS.length : i; };
+const _ms = v => (Number.isFinite(Number(v)) ? Number(v) : Date.parse(String(v || '')) || 0);
+
+/* A focus that has been open this long with no outcome is worth a nudge. Declared, not tuned:
+   two weeks is the founder's review rhythm, and a number in a constant with a name is a number
+   somebody can change on purpose. */
+const OUTCOME_OVERDUE_MS = 14 * 24 * 60 * 60 * 1000;
+
+/* WHAT COUNTS AS INDEPENDENT, borrowed rather than re-implemented. The caller passes
+   `currentOriginCount` — ai/diagnose.js's own function — so this desk cannot accidentally invent
+   a second definition of independence in which one person saying a thing twice is two accounts. */
+function attentionQueue({ objects = [], edges = [], seen = {}, marked = [], now = Date.now(),
+  currentOriginCount = null, max = 10 } = {}) {
+  const rows = (Array.isArray(objects) ? objects : []).filter(o => o && o.kind && o.id);
+  const refOf = o => `${o.kind}:${o.id}`;
+  const byRef = new Map(rows.map(o => [refOf(o), o]));
+  const markedSet = new Set((Array.isArray(marked) ? marked : []).map(String));
+  const originsOf = typeof currentOriginCount === 'function' ? currentOriginCount : () => 0;
+  const out = [];
+
+  const add = (o, reason, changedAt, detail) => {
+    if (!ATTENTION_REASONS.includes(reason)) return;      // closed vocabulary, enforced at the writer
+    out.push({ ref: refOf(o), kind: o.kind, reason, changedAt: _ms(changedAt) || 0,
+      /* `detail` is COUNTS AND REFS ONLY. A statement here would put evidence text into a ranking,
+         which is the one thing a ranking must never carry. */
+      detail: detail || {} });
+  };
+
+  for (const o of rows) {
+    const raw = o.raw || {};
+    const last = _ms(seen[refOf(o)]);
+    const signals = Array.isArray(raw.signals) ? raw.signals : [];
+    const current = signals.filter(s => s && s.status === 'active');
+
+    if (markedSet.has(refOf(o))) add(o, 'explicitly_prioritised', raw.markedAt || now, {});
+
+    /* A dissent that ARRIVED SINCE THEY LOOKED. Not "there is a dissent" — a standing disagreement
+       they have already read is not news, and re-raising it every time would train them to ignore
+       the surface entirely. */
+    const newDissent = current.filter(s => s.dissents && _ms(s.at) > last);
+    if (last && newDissent.length) {
+      add(o, 'contradiction_added', Math.max(...newDissent.map(s => _ms(s.at))),
+        { records: newDissent.length, refs: newDissent.map(s => String(s.ref || '')).filter(Boolean).sort() });
+    }
+
+    /* INDEPENDENT ORIGINS, THEN AND NOW. Counted through the kernel's own function on both sides,
+       so five messages from one person move nothing and a correction cannot add a voice. */
+    if (last && (o.kind === 'inquiry') && String(raw.status || 'open') !== 'settled') {
+      /* THE "BEFORE" COUNT MUST USE THE STATUS AS IT WAS THEN, and getting this wrong is subtle
+         enough to be worth naming. Filtering by date and then counting with TODAY'S status
+         retroactively erases history: a record that was live when they last looked, and has since
+         been corrected, reads as though it was never there — so the count appears to have GROWN
+         and a plain correction surfaces as new independent evidence. A correction is not news.
+
+         A signal that was superseded by something that arrived AFTER they looked was still
+         standing when they looked, so it is restored to active for the historical count only. */
+      const atOf = new Map(signals.map(s => [String(s && s.ref), _ms(s && s.at)]));
+      const asItWas = signals.filter(s => _ms(s.at) <= last).map(s => {
+        const killedAt = s && s.supersededBy ? (atOf.get(String(s.supersededBy)) || 0) : 0;
+        return (killedAt && killedAt > last) ? { ...s, status: 'active' } : s;
+      });
+      const before = originsOf(asItWas);
+      const after = originsOf(signals);
+      if (after > before) {
+        const newest = current.filter(s => _ms(s.at) > last).map(s => _ms(s.at));
+        add(o, 'new_independent_evidence', newest.length ? Math.max(...newest) : now,
+          { originsBefore: before, originsNow: after });
+      }
+    }
+
+    if (o.kind === 'focus') {
+      const created = _ms(raw.createdAt);
+      const hasOutcome = !!raw.outcome;
+      if (!hasOutcome && created && (now - created) > OUTCOME_OVERDUE_MS && String(raw.status || 'active') === 'active') {
+        add(o, 'outcome_missing', created, { openForDays: Math.floor((now - created) / 86400000) });
+      }
+      /* THE LOOP LEFT HALF-SHUT. The work was closed out and the question it was started to work
+         on is still open — which is the most useful thing this desk can notice, and it is a plain
+         reading of two fields rather than an opinion about whether the work succeeded. */
+      const addr = raw.addresses && raw.addresses.kind && raw.addresses.id
+        ? `${raw.addresses.kind}:${raw.addresses.id}` : null;
+      const target = addr ? byRef.get(addr) : null;
+      if (hasOutcome && target && String((target.raw || {}).status || 'open') !== 'settled') {
+        add(target, 'unresolved_after_focus_outcome', raw.resolvedAt || now, { focus: refOf(o), outcome: String(raw.outcome) });
+      }
+    }
+  }
+
+  /* CONNECTED THINGS THAT MOVED. Only across edges the caller supplied, so this cannot reach an
+     object that was never authorised — and only when the far side genuinely changed since they
+     looked, so a static connection never becomes a standing reason to be interrupted. */
+  for (const e of (Array.isArray(edges) ? edges : [])) {
+    const from = byRef.get(e && e.from), to = byRef.get(e && e.to);
+    if (!from || !to) continue;
+    const last = _ms(seen[e.from]);
+    const movedAt = _ms((to.raw || {}).lastUpdatedAt || (to.raw || {}).resolvedAt);
+    if (last && movedAt > last) add(from, 'related_state_changed', movedAt, { related: e.to, via: e.type });
+  }
+
+  /* ONE ROW PER OBJECT, keeping its strongest reason, and every reason it had — a person asking
+     "why is this here" deserves all of it, and a person scanning deserves one line. */
+  /* ONE ROW PER OBJECT, WITH EVERY REASON IT HAD AND EACH REASON'S OWN DETAIL. An earlier version
+     kept only the winning reason's detail and reduced the rest to bare words, which silently threw
+     away the answer to "which focus, and what did they record" whenever an object had two reasons
+     — the row still looked complete, which is the worst way to lose something. */
+  const best = new Map();
+  for (const row of out) {
+    const entry = { reason: row.reason, changedAt: row.changedAt, detail: row.detail };
+    const prior = best.get(row.ref);
+    if (!prior) { best.set(row.ref, { ...row, reasons: [entry] }); continue; }
+    prior.reasons.push(entry);
+    if (_reasonRank(row.reason) < _reasonRank(prior.reason)) {
+      prior.reason = row.reason; prior.changedAt = row.changedAt; prior.detail = row.detail;
+    }
+  }
+  for (const r of best.values()) {
+    r.reasons.sort((a, b) => _reasonRank(a.reason) - _reasonRank(b.reason) || b.changedAt - a.changedAt);
+    r.alsoBecause = r.reasons.filter(x => x.reason !== r.reason).map(x => x.reason);
+  }
+
+  return [...best.values()]
+    .sort((a, b) => _reasonRank(a.reason) - _reasonRank(b.reason)
+      || b.changedAt - a.changedAt
+      || a.ref.localeCompare(b.ref))
+    .slice(0, Math.max(0, max));
+}
+
 module.exports = {
   normalizeItem, buildQueue, askFirstOffer, stamp,
   PRIORITY_RANK, CONF_RANK, POLARITY_RANK,
+  ATTENTION_REASONS, OUTCOME_OVERDUE_MS, attentionQueue,
   _score, _key,
 };

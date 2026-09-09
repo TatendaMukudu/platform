@@ -92,6 +92,7 @@ function buildContext({
   actions = [],        // [{ label }]       confirmable proposals available this turn
   material = null,     // { title, filename, text, sectionIds, partial } attached to THIS object
   connections = null,  // { related: [{type, kind, label}], loop } — edges the records already carry
+  attention = null,    // [{ reason, kind, label, detail }] — deterministic candidates, codes only
 } = {}) {
   const L = [];
   L.push('CONTEXT');
@@ -233,6 +234,37 @@ function buildContext({
     L.push('If they ask whether it helped or whether they are closer, describe what was recorded and');
     L.push('what has been observed since. Do not say what will happen, and do not turn a sequence');
     L.push('into a cause.');
+    L.push('');
+  }
+
+  /* ── WHAT DESERVES ATTENTION, AND WHY ────────────────────────────────────────────────────
+     THE REASON ARRIVES WITH THE ROW. Deterministic code decided both that this record is eligible
+     and why; the only thing left is to say it in a sentence somebody wants to read. That split is
+     the point — a model that could add its own candidate would be deciding what matters, which is
+     a judgement about somebody's record that no model gets to make here.
+
+     Each code is a fact about the PAST and about a RECORD. None is about a person and none is
+     about what happens next, so the prose must not become either. */
+  if (Array.isArray(attention) && attention.length) {
+    L.push('WHAT THEIR RECORD SAYS IS WORTH A LOOK (decided by the system, not by you — you may only');
+    L.push('put these into words, and you may NOT add anything that is not on this list):');
+    const say = {
+      explicitly_prioritised: 'they marked this as important themselves',
+      contradiction_added: 'an account disagreeing with it arrived since they last looked',
+      new_independent_evidence: 'more separate accounts have come in since they last looked',
+      unresolved_after_focus_outcome: 'the work on it was closed out, and it is still open',
+      outcome_missing: 'it has been running a while and nothing was ever recorded about how it went',
+      related_state_changed: 'something it is connected to has moved',
+    };
+    for (const a of attention.slice(0, 5)) {
+      const d2 = a.detail || {};
+      const extra = Number.isInteger(d2.originsBefore) && Number.isInteger(d2.originsNow)
+        ? ` (${d2.originsBefore} separate account(s) before, ${d2.originsNow} now)`
+        : Number.isInteger(d2.openForDays) ? ` (open ${d2.openForDays} days)` : '';
+      L.push(`  - ${a.kind}${a.label ? ` "${_clip(a.label, 110)}"` : ''}: ${say[a.reason] || a.reason}${extra}`);
+    }
+    L.push('Say what changed and what is still open. Do NOT say what will happen, do NOT say one');
+    L.push('thing caused another, and do NOT rate or score a person.');
     L.push('');
   }
 

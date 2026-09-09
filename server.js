@@ -8669,6 +8669,72 @@ function _updatePersonalFocus(code, userId, focusId, input = {}, opts = {}) {
   return { ok: true, focus, publicFocus: _publicPersonalFocus(focus, userId) };
 }
 
+/* ── HOW A PIECE OF EVIDENCE STANDS TO A FOCUS — DECLARED, NEVER INFERRED ──────────────────
+   FOUNDER LAW, September 2026: "Evidence relative to a Focus is DECLARED, never inferred. Do not
+   infer that evidence supports or undermines a Focus merely because of its direction on an
+   Inquiry."
+
+   THE REASON THE INFERENCE IS FORBIDDEN, stated so nobody re-derives it as an optimisation: a
+   signal's `direction` is declared ABOUT AN INQUIRY -- whether the thing being asked about is
+   getting better or worse. Whether that same record SUPPORTS OR UNDERMINES what a Focus is trying
+   to do is a different question with a different answer, and only the person doing the work knows
+   it. Evidence that a problem is worsening might mean the Focus is failing, or that it is aimed at
+   the right thing and started late. Reading one off the other would be the sentiment lexicon
+   returning through a side door.
+
+   It lives ON THE FOCUS, in the canonical Focus owner's own data, because that is what it is
+   about. It is not a second store, not a relationship table, and not an evidence record: it is a
+   field of a Focus, written only by this function, only after a human said so.
+
+   The vocabulary is three words and closed. `unclear` is not a hedge -- it is the honest answer
+   when somebody has looked and cannot tell, and having it is what stops `supports` becoming the
+   default for anything ambiguous. */
+const FOCUS_RELATIONS = Object.freeze(['supports', 'undermines', 'unclear']);
+
+function _declareFocusRelation(code, userId, focusId, evidenceRef, relation, opts = {}) {
+  if (!FOCUS_RELATIONS.includes(String(relation))) {
+    return { ok: false, status: 400, error: `relation must be ${FOCUS_RELATIONS.join(', ')}` };
+  }
+  const ref = String(evidenceRef || '').trim().slice(0, 120);
+  if (!ref) return { ok: false, status: 400, error: 'which evidence?' };
+
+  const mem = _getMemory(code, userId);
+  const focus = (mem.focuses || []).find(f => f && f.id === String(focusId));
+  if (!focus) return { ok: false, status: 404, error: 'not found' };
+
+  /* THE EVIDENCE MUST BE SOMETHING THIS PERSON CAN ALREADY SEE. Without this, declaring a relation
+     becomes an existence oracle: try refs until one is accepted. Checked against the same
+     authorised object set every other surface reads, never against the raw store. */
+  const readable = _allObjectsFor(code, userId)
+    .some(o => (o.raw && Array.isArray(o.raw.signals) ? o.raw.signals : []).some(sig => sig && String(sig.ref) === ref));
+  if (!readable) return { ok: false, status: 404, error: 'not found' };
+
+  focus.evidenceRelations = Array.isArray(focus.evidenceRelations) ? focus.evidenceRelations : [];
+  const prior = focus.evidenceRelations.find(r => r && r.ref === ref && r.by === userId);
+  const now = new Date().toISOString();
+  /* CORRECTIONS PRESERVE HISTORY. Changing your mind supersedes the earlier call and keeps it,
+     the same way a corrected signal stays in the record -- so "what did we think, and when" is
+     still answerable after somebody revises it. */
+  if (prior && prior.relation !== relation) { prior.supersededAt = now; prior.supersededBy = relation; }
+  else if (prior) return { ok: true, already: true, relation: prior, focus };
+
+  const rec = { ref, relation: String(relation), by: userId, at: now,
+    declaredVia: opts.via === 'confirmation' ? 'confirmation' : 'direct' };
+  focus.evidenceRelations.push(rec);
+  focus.updatedAt = now; mem.lastUpdated = now;
+  _audit(code, { actor: userId, action: 'focus_updated', subjectIds: [userId], basis: `relation:${relation}` });
+  scheduleSave();
+  return { ok: true, already: false, relation: rec, focus };
+}
+
+/* What a reader may see of those calls. Refs and words only -- the evidence itself stays where it
+   lives, and a superseded call is included so history is readable rather than quietly rewritten. */
+function _focusRelationsOf(focus) {
+  return (Array.isArray(focus && focus.evidenceRelations) ? focus.evidenceRelations : [])
+    .map(r => ({ ref: r.ref, relation: r.relation, at: r.at, declaredVia: r.declaredVia,
+      ...(r.supersededAt ? { supersededAt: r.supersededAt, supersededBy: r.supersededBy } : {}) }));
+}
+
 function _recordPersonalFocusOutcome(code, userId, focusId, outcome) {
   if (!['helped', 'no', 'mixed'].includes(outcome)) return { ok: false, status: 400, error: 'outcome must be helped, no or mixed' };
   const mem = _getMemory(code, userId);
@@ -10188,6 +10254,29 @@ const _degraded = reason => ({ degraded: COMPOSER_DEGRADED.includes(reason) ? re
    refs, labels and an outcome word -- never a statement, a headline body, or a message. Null when
    the turn is not about a governed object, because a connection graph with no anchor is a list of
    everything, which is not context. */
+/* The deterministic attention candidates, for the composer. Same gate, same desk, same order as
+   GET /api/me/attention -- authorise, then rank. Capped small: this is context for one sentence,
+   not a dashboard. */
+function _attentionContext(code, userId) {
+  try {
+    const authorised = _allObjectsFor(code, userId);
+    const mem = _getMemory(code, userId);
+    const queue = priorityOffice.attentionQueue({
+      objects: authorised, edges: crossEvidence.edges(authorised),
+      seen: {}, marked: Array.isArray(mem.prioritised) ? mem.prioritised.map(String) : [],
+      now: Date.now(), currentOriginCount: s2 => diagnose.currentOriginCount(s2), max: 5,
+    });
+    if (!queue.length) return null;
+    const byRef = new Map(authorised.map(o => [crossEvidence.refOf(o), o]));
+    return queue.map(row => {
+      const o = byRef.get(row.ref) || {};
+      return { reason: row.reason, kind: row.kind,
+        label: String((o.explained && o.explained.headline) || (o.present && o.present.summary && o.present.summary.title) || '').slice(0, 160),
+        detail: row.detail || {} };
+    });
+  } catch (_) { return null; }
+}
+
 function _crossEvidenceContext(code, userId, about) {
   try {
     const a = _turnAbout(about);
@@ -10338,6 +10427,14 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
          statements stay where they live, and the model is told plainly that a connection is not
          corroboration so it cannot narrate two linked records as two confirmations. */
       connections: _crossEvidenceContext(code, userId, about),
+      /* WHAT DESERVES ATTENTION, decided deterministically before the model sees it.
+
+         The model is handed reason CODES and labels for objects this person could already open,
+         and its job is to turn those into one sentence. It cannot add a candidate the desk did
+         not produce, because it is never given one; and it cannot invent a reason, because the
+         reason arrived with the row. Deterministic code decides what is eligible; the model
+         decides only how to say it. */
+      attention: _attentionContext(code, userId),
       actions: (actions || []).map(a => ({ label: a.label })),
     });
 
@@ -16832,6 +16929,76 @@ function _spreadChart(code, userId, obj) {
 }
 
 /* GET /api/objects/:kind/:id/chart — the picture for this object, or the reason there is none. */
+/* POST /api/objects/focus/:id/evidence-relation — { evidenceRef, relation }
+
+   THE DIRECT CONTROL for the founder's September 2026 law. A person reading a piece of evidence
+   on their own focus says how it stands to the work: supports, undermines, or unclear. It is an
+   explicit control whose action and consequence are visible and unambiguous, so under
+   ASSISTANT_RUNTIME.md it may call the canonical capability directly -- while the MODEL-suggested
+   path (`declare_focus_relation`) stays proposal-and-confirmation, because a suggestion the
+   person did not make is exactly what confirmation exists for.
+
+   Both doors end at `_declareFocusRelation`, which is the only thing that writes. */
+app.post('/api/objects/focus/:id/evidence-relation', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  const r = _declareFocusRelation(code, userId, String(req.params.id || ''),
+    b.evidenceRef || b.ref, b.relation, { via: 'direct' });
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  res.json({ ok: true, already: !!r.already, relation: r.relation,
+    note: 'Recorded as your call about this evidence. It says how you read it, and it changes nothing about how certain the evidence itself is.' });
+});
+
+/* GET /api/me/attention — "what deserves my attention now, and why?"
+
+   SCOPE FIRST, ALWAYS. `_allObjectsFor` is the same authorised object set every other object
+   surface reads. The Priority Office desk is handed THAT SET and the edges derived from it, and
+   it takes no userId, no org and no store -- so an object this person may not open cannot appear
+   in the list, cannot influence the order of the list, and cannot leak its existence by shifting
+   something else up or down. Relevance is computed after authorisation has already discarded the
+   rest, which is what makes "relevance never grants access" structural here.
+
+   IT SUGGESTS; IT DOES NOTHING. No notification is sent, no action created, no Forum opened, no
+   visibility changed, no Inquiry settled, no Focus touched. This is a read.
+
+   EVERY ROW CARRIES A DETERMINISTIC REASON CODE. The model is handed the codes and the authorised
+   material and writes the sentence; it never decides what is eligible and never invents a reason.
+   `?since=` lets a caller ask "what changed since I last looked" without the server keeping a
+   read-receipt store nobody asked for. */
+app.get('/api/me/attention', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const authorised = _allObjectsFor(code, userId);          // <- the gate, before anything else
+  const since = Number(req.query.since) || Date.parse(String(req.query.since || '')) || 0;
+  const seen = {};
+  if (since) for (const o of authorised) seen[crossEvidence.refOf(o)] = since;
+
+  const mem = _getMemory(code, userId);
+  const marked = Array.isArray(mem.prioritised) ? mem.prioritised.map(String) : [];
+
+  const queue = priorityOffice.attentionQueue({
+    objects: authorised,
+    edges: crossEvidence.edges(authorised),
+    seen, marked, now: Date.now(),
+    // The kernel's OWN definition of an independent origin, borrowed rather than re-implemented.
+    currentOriginCount: signals => diagnose.currentOriginCount(signals),
+  });
+
+  /* The far side is labelled from the same authorised object, so nothing is disclosed that a
+     plain read would not already show, and no statement travels inside a ranking row. */
+  const byRef = new Map(authorised.map(o => [crossEvidence.refOf(o), o]));
+  const items = queue.map(row => {
+    const o = byRef.get(row.ref) || {};
+    return { ...row,
+      label: String((o.explained && o.explained.headline) || (o.present && o.present.summary && o.present.summary.title) || '').slice(0, 160),
+      whose: o.whose || '', about: o.about || null };
+  });
+
+  res.json({ ok: true, items, reasons: priorityOffice.ATTENTION_REASONS,
+    note: items.length
+      ? 'These are things your record says changed or are still open. Nothing here predicts anything, and nothing has been done to them.'
+      : 'Nothing in your record has changed in a way worth interrupting you for.' });
+});
+
 /* GET /api/objects/:kind/:id/related — what this object is connected to, and (for a focus)
    the A -> B loop around it.
 
@@ -16869,7 +17036,11 @@ app.get('/api/objects/:kind/:id/related', requireAuth, (req, res) => {
   });
 
   const loop = kind === 'focus' ? crossEvidence.loop(authorised, target) : null;
-  res.json({ ok: true, about: self.about, ref: target, related, loop,
+  /* THE CALLS THIS PERSON HAS MADE about how evidence stands to this focus. Refs and words only,
+     superseded ones included, because "what did we think, and when" is part of the record. */
+  const relations = kind === 'focus'
+    ? _focusRelationsOf((_getMemory(code, userId).focuses || []).find(f => f && f.id === id) || {}) : [];
+  res.json({ ok: true, about: self.about, ref: target, related, loop, relations,
     note: 'These are connections the records already carry. A connection says two things are related; it does not make either of them more certain.' });
 });
 
@@ -17410,6 +17581,22 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
       if (!folder) { folder = { id: 'fld_' + generateId(), ownerId: userId, name, createdAt: new Date().toISOString() }; _libFolders(code).push(folder); }
       prop.confirmed = { at: new Date().toISOString(), folderId: folder.id }; scheduleSave();
       return res.json({ ok: true, confirmed: prop.actionType, outcome: 'created', folder: { id: folder.id, name: folder.name }, note: `Created “${folder.name}”.` });
+    }
+
+    if (prop.actionType === 'declare_focus_relation') {
+      /* THE ONLY PLACE A RELATION IS EVER WRITTEN. The proposal carried the model's suggestion;
+         this runs after the person pressed Confirm, and it calls the canonical Focus owner rather
+         than touching `mem.focuses` itself. If the model proposed a word outside the vocabulary,
+         the owner refuses it here -- the check is at the writer, not at the suggester, because a
+         validation that lives only where the suggestion is made is a validation somebody can walk
+         around by proposing from somewhere else. */
+      const result = _declareFocusRelation(code, userId, ref.id, p.evidenceRef || p.ref,
+        p.relation, { via: 'confirmation' });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      prop.confirmed = { at: new Date().toISOString(), relation: result.relation.relation }; scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome: result.already ? 'already' : 'recorded',
+        relation: result.relation,
+        note: 'Recorded as your call about this evidence. It says how you read it, and it changes nothing about how certain the evidence itself is.' });
     }
 
     if (prop.actionType === 'keep_in_library') {
