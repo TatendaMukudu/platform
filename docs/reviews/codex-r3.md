@@ -74,12 +74,13 @@ Every new assertion was mutated independently. The final-proof harness checked b
 - `ASSISTANT_RUNTIME.md`: narrowed the product claim as explicitly required.
 - `ai/team-state.js`: projection ownership had to converge on the kernel origin helper.
 - `scripts/test.js`: registers the focused parity suite.
+- `docs/INDEX.md`: refreshed its stale baseline to the reviewed `main` head after the PR merge commit crossed the enforced freshness limit; no indexed architecture text changed.
 
 ## What I could not verify
 
 - No live provider credential was available; this pass changes deterministic capability ownership, not interpretation, and model-off plus normalized proposal paths were exercised.
 - I did not exercise Render or mutate production data.
-- GitHub Actions run `34193479545` completed GREEN for `node scripts/test.js` in 1m30s at review-report head `5729309`. Final-proof CI run `34322867338` was RED although the same head was GREEN locally; the GitHub log blob was inaccessible from this environment, so a follow-up CI run is pending.
+- GitHub Actions run `34193479545` completed GREEN for `node scripts/test.js` in 1m30s at review-report head `5729309`. Final-proof CI runs `34322867338` and `34323157130` were RED because the PR merge commit put `docs/INDEX.md` 21 commits beyond its recorded baseline. The focused and full product suites were green; `docs-status-smoke.js` alone refused the stale index. The index baseline was refreshed to the reviewed `main` head `5683df3`, and final CI is pending.
 
 Focused dependent suites: `focus-creation-smoke.js`, `focus-continuity-smoke.js`, `focus-reach-smoke.js`, `focus-action-owner-smoke.js`, `composer-actions-smoke.js`, `team-state-smoke.js`, `highs-lows-smoke.js`, `self-high-low-smoke.js`, `chart-governance-smoke.js`, `origin-correction-smoke.js`, `origin-independence-smoke.js`, `material-reach-http-smoke.js`, `private-evidence-smoke.js`, `forum-smoke.js`, `shelf-http-smoke.js`, `scope-parity-smoke.js`, and `asset-version-smoke.js`.
 
