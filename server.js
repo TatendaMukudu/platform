@@ -63,6 +63,7 @@ const escalation        = require('./ai/escalation');
 const material          = require('./ai/material');
 const chart             = require('./ai/chart');
 const shelf             = require('./ai/shelf');
+const crossEvidence     = require('./ai/cross-evidence');
 const websearch         = require('./ai/websearch');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
@@ -10181,6 +10182,34 @@ function _sourceList(items = [], said = '') {
 const COMPOSER_DEGRADED = Object.freeze(['disabled', 'no_model', 'over_budget', 'empty', 'unverified', 'error']);
 const _degraded = reason => ({ degraded: COMPOSER_DEGRADED.includes(reason) ? reason : 'error' });
 
+/* WHAT THE THING THEY ARE LOOKING AT IS CONNECTED TO, for the composer.
+
+   Same gate, same module, same order as GET /related: authorise first, relate second. Returns
+   refs, labels and an outcome word -- never a statement, a headline body, or a message. Null when
+   the turn is not about a governed object, because a connection graph with no anchor is a list of
+   everything, which is not context. */
+function _crossEvidenceContext(code, userId, about) {
+  try {
+    const a = _turnAbout(about);
+    if (!a || !a.kind || !a.id) return null;
+    const authorised = _allObjectsFor(code, userId);
+    const self = authorised.find(o => o.kind === a.kind && String(o.id) === String(a.id));
+    if (!self) return null;
+    const target = crossEvidence.refOf(self);
+    const byRef = new Map(authorised.map(o => [crossEvidence.refOf(o), o]));
+    const related = crossEvidence.neighbourhood(authorised, target).slice(0, 8).map(e => {
+      const other = byRef.get(e.to) || {};
+      return { type: e.type, kind: other.kind || null,
+        label: String((other.explained && other.explained.headline) || (other.present && other.present.summary && other.present.summary.title) || '').slice(0, 160) };
+    });
+    const loop = self.kind === 'focus' ? crossEvidence.loop(authorised, target) : null;
+    if (!related.length && !loop) return null;
+    return { related, loop: loop ? { addresses: loop.addresses, outcome: loop.outcome,
+      observedSince: loop.observedSince ? loop.observedSince.records : null,
+      sharedOrigins: loop.sharedOrigins.length, open: loop.open } : null };
+  } catch (_) { return null; }
+}
+
 async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null, conversation = null } = {}) {
   // Every stage below used to fail silently into the deterministic path. The symptom of a
   // composer that never runs is not an error — it is a reply that reads like a template,
@@ -10300,6 +10329,15 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
          open. The alternative — looking the material up by id from the client's `about` — would
          make the client's claim about what it is reading into the access decision. */
       material: _materialContext(code, userId, about) || _conversationMaterialContext(code, userId, conversation),
+      /* HOW THIS CONNECTS TO THE REST OF THEIR RECORD.
+
+         "Why did we create this focus?" and "did it help?" are answerable only if the model can
+         see the edges the objects already carry. Assembled through _allObjectsFor -- the same
+         authorised set every object surface reads -- so the model is handed connections between
+         things this person could already open, and nothing else. Refs and labels only: the
+         statements stay where they live, and the model is told plainly that a connection is not
+         corroboration so it cannot narrate two linked records as two confirmations. */
+      connections: _crossEvidenceContext(code, userId, about),
       actions: (actions || []).map(a => ({ label: a.label })),
     });
 
@@ -16794,6 +16832,47 @@ function _spreadChart(code, userId, obj) {
 }
 
 /* GET /api/objects/:kind/:id/chart — the picture for this object, or the reason there is none. */
+/* GET /api/objects/:kind/:id/related — what this object is connected to, and (for a focus)
+   the A -> B loop around it.
+
+   SCOPE FIRST, RELATION SECOND, and the order is the whole safety argument rather than a
+   preference. `_allObjectsFor` is the same authorised object set every other object surface
+   reads; the relationship module is handed THAT SET and nothing else, so it is structurally
+   incapable of returning an edge to something this reader may not open. Relevance never becomes
+   authorisation, because relevance is computed after authorisation has already thrown the rest
+   away.
+
+   It also adds no truth. Every edge is a field that already exists on a governed object -- a
+   focus's `addresses`, a High's `inquiryId`, a signal's `ref` or `supersededBy` -- read back.
+   Nothing here mints an id, writes a store, or raises anybody's confidence. */
+app.get('/api/objects/:kind/:id/related', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const kind = String(req.params.kind || ''), id = String(req.params.id || '');
+  if (!crossEvidence.KINDS.includes(kind)) return res.status(404).json({ error: 'not found' });
+
+  const authorised = _allObjectsFor(code, userId);          // <- the gate, before anything else
+  const self = authorised.find(o => o.kind === kind && String(o.id) === id);
+  if (!self) return res.status(404).json({ error: 'not found' });
+
+  const target = crossEvidence.refOf(self);
+  const near = crossEvidence.neighbourhood(authorised, target);
+
+  /* THE FAR SIDE IS LABELLED FROM THE OBJECT, not from the edge. An edge carries refs only, so
+     the human-readable part is composed here from the same authorised object the reader could
+     open anyway -- which discloses nothing new, and keeps statements out of the edge itself. */
+  const byRef = new Map(authorised.map(o => [crossEvidence.refOf(o), o]));
+  const related = near.map(e => {
+    const other = byRef.get(e.to) || {};
+    return { ref: e.to, type: e.type, basis: e.basis, kind: other.kind || null,
+      label: (other.explained && other.explained.headline) || (other.present && other.present.summary && other.present.summary.title) || '',
+      whose: other.whose || '' };
+  });
+
+  const loop = kind === 'focus' ? crossEvidence.loop(authorised, target) : null;
+  res.json({ ok: true, about: self.about, ref: target, related, loop,
+    note: 'These are connections the records already carry. A connection says two things are related; it does not make either of them more certain.' });
+});
+
 app.get('/api/objects/:kind/:id/chart', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const kind = String(req.params.kind || ''), id = String(req.params.id || '');
