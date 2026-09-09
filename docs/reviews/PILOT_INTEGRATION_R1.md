@@ -3,7 +3,7 @@
 **Base:** PR #84 accepted head `6210974351ff5655752fa29f7e978edf2d21eb4a`
 **Integrated:** `claude/pilot-closure-blockers` @ `41ca75c`
 **Branch:** `claude/pilot-integration-r1`
-**Ending SHA:** recorded below, after the report commit.
+**Ending SHA:** `b20590db7bb3f02f327dce94d68f681eb2982d6b`
 
 **Ran:** `npm test` (twice — after the merge and after the new assertions), the twelve named
 regression suites individually, a 14-mutation harness, and a real Chromium pass at 390x844.
