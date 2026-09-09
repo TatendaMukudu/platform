@@ -42,6 +42,34 @@ const AttachmentHandler = {
 
   ACCEPT_ATTR: 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.md,.csv',
 
+  /* ── MATERIAL — only what can actually be READ ─────────────
+     TWO CAPABILITIES, TWO LISTS. The chat path sends a file to the model as a document or image
+     block, so ACCEPT_ATTR above legitimately offers PDFs and pictures and must NOT be narrowed.
+     The Material path sends TEXT to the server and the server never holds the file, so a format
+     this handler cannot turn into words is not a Material however legitimate it is elsewhere.
+
+     Advertising what will be refused is its own defect. A coach picks a scouting PDF, waits for
+     it to read, and is then told nothing readable came out of it — an honest message about a
+     file the picker should never have offered. `.doc` and `.ppt` are excluded for the same
+     reason and a less obvious one: they route to the docx and pptx processors, which open a zip,
+     and the legacy binary formats are not zips — they throw rather than returning empty.
+
+     The kinds are named here, next to the processors, so a processor that stops returning
+     `content` cannot leave an extension advertised for it. */
+  MATERIAL_KINDS: ['docx', 'xlsx', 'pptx', 'text', 'csv'],
+
+  MATERIAL_EXTENSIONS: {
+    '.txt':  'text',
+    '.md':   'text',
+    '.csv':  'csv',
+    '.docx': 'docx',
+    '.xlsx': 'xlsx',
+    '.pptx': 'pptx',
+  },
+
+  /* Derived, never typed twice — the picker and the parser table cannot drift apart. */
+  materialAcceptAttr() { return Object.keys(this.MATERIAL_EXTENSIONS).join(','); },
+
   /* ── Main entry point ─────────────────────────────────── */
   async process(file) {
     const kind = this.ACCEPTED[file.type];

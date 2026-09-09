@@ -10162,18 +10162,43 @@ function _sourceList(items = [], said = '') {
   return out;
 }
 
+/* WHY THE COMPOSER DID NOT WRITE THIS REPLY.
+
+   A CLOSED VOCABULARY, and deliberately a coarse one. Every value here is a fact about
+   IntelliQ's own state, and none of them names a provider, a model, a key, a rate limit or an
+   error message — the operator gets that detail from the logs and the metrics, and the person
+   reading the reply on a phone gets one sentence saying the normal response is not available.
+   Widening this to carry a message from a provider would put text nobody in this product wrote
+   in front of a user, which is the whole reason the gateway exists. */
+const COMPOSER_DEGRADED = Object.freeze(['disabled', 'no_model', 'over_budget', 'empty', 'unverified', 'error']);
+const _degraded = reason => ({ degraded: COMPOSER_DEGRADED.includes(reason) ? reason : 'error' });
+
 async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null, conversation = null } = {}) {
   // Every stage below used to fail silently into the deterministic path. The symptom of a
   // composer that never runs is not an error — it is a reply that reads like a template,
   // which is indistinguishable from a composer that ran and wrote something dull. Each exit
   // now says which stage stopped it, for the same reason the intake pass does.
-  if (!IQ_COMPOSER || !ai.enabled() || !_llmBudgetOk(code)) {
-    if (IQ_COMPOSER) console.log(`[composer] skipped — ${!ai.enabled() ? 'no model configured' : 'org over LLM budget'}`);
+  //
+  // AND EVERY EXIT NOW SAYS SO TO THE PERSON, not only to the log. Until this existed the six
+  // exits below all produced deterministic prose in IntelliQ's ordinary voice, so a rejected
+  // key, an exhausted budget and the grounding cage refusing an invented name were
+  // indistinguishable on the screen from IntelliQ having thought about it. The product did not
+  // fail; it changed character and kept going. A returned `degraded` is what makes the
+  // difference visible, and the deterministic reply still stands underneath it — the kernel
+  // decided, and what it decided is not made wrong by the model being unavailable to say it.
+  if (!IQ_COMPOSER) { _metric(code, 'composer_off'); return _degraded('disabled'); }
+  if (!ai.enabled()) {
+    console.log('[composer] skipped — no model configured');
     // Counted, not just logged. "Never ran" and "ran and was refused" produce the identical
     // reply on the phone and want opposite fixes — one is configuration, the other is the
     // grounding cage doing its job. A tally that cannot tell them apart is not a diagnosis.
-    _metric(code, IQ_COMPOSER ? 'composer_skipped' : 'composer_off');
-    return null;
+    _metric(code, 'composer_skipped');
+    return _degraded('no_model');
+  }
+  if (!_llmBudgetOk(code)) {
+    console.log('[composer] skipped — org over LLM budget');
+    _metric(code, 'composer_skipped');
+    return _degraded('over_budget');
   }
   try {
     const u = orgUsers[code]?.[userId] || {};
@@ -10277,7 +10302,7 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     if (!written || written.length < 2) {
       console.log('[composer] model returned nothing usable');
       _metric(code, 'composer_empty');
-      return null;
+      return _degraded('empty');
     }
 
     // VERIFY — the cage. An invented organisational specific fails the turn.
@@ -10289,7 +10314,11 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
       console.log(`[composer] refused — ${check.violations.join('; ')}`);
       _captureError(new Error('composer grounding violation: ' + check.violations.join('; ')), { route: '/api/assistant/turn', method: 'POST', status: 200, orgCode: code });
       _metric(code, 'composer_refused');
-      return null;                       // degrade to the deterministic path — never ship it
+      // Degrade to the deterministic path and SAY SO — never ship it, and never let a refusal
+      // read as an ordinary reply. The violations stay in the log; the reader is told only that
+      // the normal response is unavailable, because "the model tried to invent a teammate" is
+      // our problem to fix, not a sentence to put in front of somebody.
+      return _degraded('unverified');
     }
     if (need && conversation) diagnose.recordConversationQuestion(conversation, need.candidate, now);
     _metric(code, 'composer_used');
@@ -10312,7 +10341,7 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     // the product quietly reverts to templates with nothing anywhere saying why.
     console.log('[composer] threw:', e && e.message);
     _metric(code, 'composer_error');
-    return null;
+    return _degraded('error');
   }
 }
 
@@ -14014,17 +14043,25 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // reply that argues with itself. A safeguarding turn can never reach here — it returns the
   // crisis response and exits the turn far above. If the composer is off, unavailable, or its
   // output failed the grounding cage, we fall straight through to the deterministic composition.
-  let composedReply = null;
+  let composedReply = null, composerDegraded = null;
   // The gate is deliberately WIDE. Restricting it to questions meant an ordinary conversational
   // reply fell off the intelligent path: "you can make it public" was answered with "you marked
   // 2 things private — they've stayed private", which contradicts what was just said and ignores
   // the instruction in it. A person mid-conversation is owed a reply, not a recitation. The only
   // turn that skips the composer is an explicit command carrying its own payload (a literal
   // "save this as X"), where the deterministic confirmation IS the right answer.
-  if (IQ_COMPOSER && String(text || '').trim() && !(cls.command && cls.command.payload)) {
-    composedReply = await _composeTurn(code, userId, cls.questionText || text, {
+  //
+  // IQ_COMPOSER IS NOT CHECKED HERE ANY MORE, and that is the point rather than an oversight.
+  // The flag used to be tested twice — once to decide whether to call, once inside — so with the
+  // flag off the function was never entered and there was nothing to report. One place decides
+  // now, and a turn that is eligible for the composer always comes back with either a written
+  // reply or a reason there is none.
+  if (String(text || '').trim() && !(cls.command && cls.command.payload)) {
+    const attempt = await _composeTurn(code, userId, cls.questionText || text, {
       priorMessages, workCtx, actions: proposals, about: _turnAbout(opts.about), conversation: _conv,
     });
+    if (attempt && attempt.answer) composedReply = attempt;
+    else if (attempt && attempt.degraded) composerDegraded = attempt.degraded;
   }
   if (composedReply) parts.push(composedReply.answer);
   else {
@@ -14068,6 +14105,13 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // worst case a stale clarifier contradicting the reply above it. The prose stands on its own.
   const response = {
     responseText, mode, lens: lens || null,
+    /* WHETHER THIS IS INTELLIQ'S NORMAL VOICE. Structured, so the client renders one quiet
+       sentence of its own rather than the server smuggling an apology into `responseText` and
+       every assertion in the suite that reads that field going with it. `reason` is the closed
+       COMPOSER_DEGRADED vocabulary: an operational fact about IntelliQ, never a provider's
+       message. The deterministic reply above still stands — the kernel decided, and a decision
+       is not made wrong by the model being unavailable to phrase it. */
+    composer: composerDegraded ? { degraded: true, reason: composerDegraded } : { degraded: false, reason: null },
     groundedClaims: composedReply ? [] : groundedClaims, inferred: composedReply ? [] : inferred,
     limitations: context.limitations,
     proposedActions: publicProposals,

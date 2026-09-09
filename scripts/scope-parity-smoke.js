@@ -118,9 +118,14 @@ for (const row of inventory) console.log(`server.js:${row.line} ${row.source}`);
    _timelineChart keeps its call but now reads the cohort floor rather than the role, and the
    per-person dots it drew were replaced by a single count for everybody — one dated dot per
    person carried WHEN each answered, which in a squad is often enough to say who. */
-/* 72 -> 71, canonical Focus audience ownership. Proposal and confirmation used to rebuild group
-   membership in two places. Both now call `_resolvePersonalFocusAudience`, whose single `_inNode`
-   check is deliberately repeated at execution time rather than caching proposal authority. */
+/* 69 -> 71, canonical Focus audience ownership. The count went UP, not down, and the reason is
+   worth stating because the opposite was recorded here first: consolidating proposal-time and
+   confirmation-time group membership into `_resolvePersonalFocusAudience` did not remove a scope
+   reference, it moved both to one place and that place is new code, so the inventory gained
+   `server.js:8568 _inNode/_leadsNode` (the single consolidated check, deliberately re-run at
+   execution time rather than caching proposal authority) and `server.js:8695 getVisibleUserIds`
+   (pre-existing, renumbered by the insertion above it). Comment only — the assertion, the count
+   and the architecture are unchanged. */
 ok('W4 inventory names every current scope reference', inventory.length === 71 && inventory.every(r => Number.isInteger(r.line) && r.source));
 
 console.log('\nMigration law: BRIDGE never; GATE governance AND Web; ENUMERATE/FILTER migrate later; WEB re-test only.');

@@ -794,6 +794,9 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .iq-grounded{font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.4rem;line-height:1.45}
 .iq-tag{font-size:var(--fs-2xs);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);padding:1px 6px;border-radius:5px;margin-right:5px}
 .iq-privacy{font-size:var(--fs);color:var(--text-secondary);margin:0.35rem 0}
+/* Quiet, not an error. The reply above is still true; only the voice that wrote it changed. */
+.iq-degraded{font-size:var(--fs-sm);color:var(--text-muted);margin:0.35rem 0;padding:0.5rem 0.7rem;
+  border-left:2px solid var(--border-light);border-radius:0 8px 8px 0;background:var(--surface-1)}
 
 /* Proposal cards — calmer: soft surface, one clear label, generous padding. */
 .iq-proposals{margin-top:0.65rem;display:flex;flex-direction:column;gap:0.55rem}
