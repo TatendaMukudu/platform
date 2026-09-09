@@ -15,8 +15,13 @@ for (const code of ['focus-direct', 'focus-composer', 'focus-group-direct', 'foc
   store.orgUsers[code] = {
     owner: { id: 'owner', name: 'Owner', email: `owner@${code}.test`, role: 'member', orgCode: code, status: 'active', assignedNodeIds: ['g'] },
     peer: { id: 'peer', name: 'Peer', email: `peer@${code}.test`, role: 'member', orgCode: code, status: 'active', assignedNodeIds: ['g'] },
+    outsider: { id: 'outsider', name: 'Outsider', email: `outsider@${code}.test`, role: 'member', orgCode: code, status: 'active', assignedNodeIds: ['h'] },
   };
-  store.orgNodes[code] = { g: { nodeId: 'g', name: 'First Group', memberIds: ['owner', 'peer'], leaderIds: [] } };
+  store.orgNodes[code] = {
+    g: { nodeId: 'g', name: 'First Group', memberIds: ['owner', 'peer'], leaderIds: [] },
+    h: { nodeId: 'h', name: 'Other Group', memberIds: ['peer'], leaderIds: [] },
+    z: { nodeId: 'z', name: 'Outside Group', memberIds: ['outsider'], leaderIds: [] },
+  };
   store.userAiProfiles[`${code}:owner`] = { focuses: [], model: null, lastUpdated: null };
 }
 S._loadAllStores(store); S._rebuildEmailIndex(); S._backfillUserNodeIds();
@@ -67,6 +72,10 @@ const sideEffects = (code, focus) => ({
     ok('FP4 idempotency is identical across direct and composer create', directRetry.json.already === true && composerRetry.json.focus.id === cf.id
       && S._getMemory('focus-direct', 'owner').focuses.length === 1 && S._getMemory('focus-composer', 'owner').focuses.length === 1);
 
+    S._getMemory('focus-direct', 'owner').lastUpdated = '2000-01-01T00:00:00.000Z';
+    S._getMemory('focus-composer', 'owner').lastUpdated = '2000-01-01T00:00:00.000Z';
+    const directBeforeUpdate = S._getMemory('focus-direct', 'owner').lastUpdated;
+    const composerBeforeUpdate = S._getMemory('focus-composer', 'owner').lastUpdated;
     const directUpdate = await post('focus-direct', `/api/me/focus/${df.id}/visibility`, { visibility: 'shared' });
     const updateTurn = await propose('focus-composer', 'update_focus', 'Make this shared.', { kind: 'focus', id: cf.id }, { visibility: 'shared' });
     const composerUpdate = await confirm('focus-composer', updateTurn, 'update_focus');
@@ -75,7 +84,13 @@ const sideEffects = (code, focus) => ({
     const directUpdateEffects = sideEffects('focus-direct', df), composerUpdateEffects = sideEffects('focus-composer', cf);
     ok('FP6 both update transports set equivalent timestamps, lastUpdated and audit hooks', Number.isFinite(Date.parse(df.updatedAt)) && Number.isFinite(Date.parse(cf.updatedAt))
       && JSON.stringify(directUpdateEffects) === JSON.stringify(composerUpdateEffects));
+    ok('FP6a direct update advances memory lastUpdated itself', S._getMemory('focus-direct', 'owner').lastUpdated !== directBeforeUpdate);
+    ok('FP6b composer update advances memory lastUpdated itself', S._getMemory('focus-composer', 'owner').lastUpdated !== composerBeforeUpdate);
 
+    S._getMemory('focus-direct', 'owner').lastUpdated = '2001-01-01T00:00:00.000Z';
+    S._getMemory('focus-composer', 'owner').lastUpdated = '2001-01-01T00:00:00.000Z';
+    const directBeforeOutcome = S._getMemory('focus-direct', 'owner').lastUpdated;
+    const composerBeforeOutcome = S._getMemory('focus-composer', 'owner').lastUpdated;
     const directOutcome = await post('focus-direct', '/api/me/focus/outcome', { focusId: df.id, outcome: 'helped' });
     const outcomeTurn = await propose('focus-composer', 'record_focus_outcome', 'It helped.', { kind: 'focus', id: cf.id }, { outcome: 'helped' });
     const composerOutcome = await confirm('focus-composer', outcomeTurn, 'record_focus_outcome');
@@ -83,6 +98,8 @@ const sideEffects = (code, focus) => ({
     const directOutcomeEffects = sideEffects('focus-direct', df), composerOutcomeEffects = sideEffects('focus-composer', cf);
     ok('FP8 outcome parity includes learn lifecycle, notice feedback, lastUpdated and audit', JSON.stringify(directOutcomeEffects) === JSON.stringify(composerOutcomeEffects)
       && directOutcomeEffects.feedback?.useful === 1 && directOutcomeEffects.action && directOutcomeEffects.lastUpdated);
+    ok('FP8a direct outcome advances memory lastUpdated itself', S._getMemory('focus-direct', 'owner').lastUpdated !== directBeforeOutcome);
+    ok('FP8b composer outcome advances memory lastUpdated itself', S._getMemory('focus-composer', 'owner').lastUpdated !== composerBeforeOutcome);
 
     const gd = await post('focus-group-direct', '/api/me/focus', { text: 'Discuss our rest defence', participants: ['peer'] });
     const seedConversation = await post('focus-group-composer', '/api/assistant/turn', { text: 'Discuss our rest defence' });
@@ -94,6 +111,17 @@ const sideEffects = (code, focus) => ({
       && JSON.stringify(gdf.participants) === JSON.stringify(gcf.participants));
     ok('FP10 group-created Focus uses the same lifecycle owner and side effects', sideEffects('focus-group-direct', gdf).action && sideEffects('focus-group-composer', gcf).action
       && sideEffects('focus-group-direct', gdf).lastUpdated && sideEffects('focus-group-composer', gcf).lastUpdated);
+
+    const beforeForbidden = S._getMemory('focus-group-composer', 'owner').focuses.length;
+    const forbidden = S._resolvePersonalFocusAudience('focus-group-composer', 'owner', { groupId: 'h' }, { strict: true });
+    const forbiddenCreate = S._createPersonalFocus('focus-group-composer', 'owner', { text: 'Must not exist', groupId: 'h' }, { strictAudience: true });
+    ok('FP10a an actor outside a requested group is refused without creating a Focus', !forbidden.ok && forbidden.status === 403
+      && !forbiddenCreate.ok && S._getMemory('focus-group-composer', 'owner').focuses.length === beforeForbidden);
+    const beforeStrict = comparable(gcf);
+    const strictNonContact = S._resolvePersonalFocusAudience('focus-group-composer', 'owner', { participantIds: ['outsider'] }, { strict: true });
+    const strictUpdate = S._updatePersonalFocus('focus-group-composer', 'owner', gcf.id, { participantIds: ['outsider'] }, { strictAudience: true });
+    ok('FP10b a strict non-contact audience is refused without expanding Focus visibility', !strictNonContact.ok && strictNonContact.status === 403
+      && !strictUpdate.ok && JSON.stringify(comparable(gcf)) === JSON.stringify(beforeStrict));
 
     const serverSource = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
     const directCreateBody = serverSource.slice(serverSource.indexOf("app.post('/api/me/focus'"), serverSource.indexOf("/* GET /api/me/focus/:id/source"));
@@ -116,6 +144,21 @@ const sideEffects = (code, focus) => ({
     const graph = S._chartFor('focus-direct', 'owner', { kind: 'inquiry', id: 'origin-parity', raw: { signals }, present: { summary: { title: 'Origin parity' } } }, 'firming');
     const graphCount = graph.spec.series.find(x => x.key === 'origins').points.at(-1).value;
     ok('OP3 chart support count agrees with the canonical non-dissent current-origin set', graphCount === diagnose.currentOriginCount(signals, { includeDissent: false }));
+    const unknownOrigins = [
+      { ref: 'unique-a', at: 10, status: 'active', direction: 'improvement' },
+      { ref: 'unique-b', at: 11, status: 'active', direction: 'improvement' },
+    ];
+    const unknownValence = teamState.evidenceValence({ signals: unknownOrigins, confidence: { band: 'supported' } });
+    ok('OP4 unique signal refs without established origins provide no corroboration or High/Low filing', diagnose.currentOriginCount(unknownOrigins) === 0
+      && !unknownValence.ok && unknownValence.polarity === teamState.POLARITY.NEUTRAL);
+    const statusLaw = [
+      { ref: 'active', originRef: 'active-origin', at: 20, status: 'active' },
+      { ref: 'legacy', originRef: 'legacy-origin', at: 21 },
+      { ref: 'superseded', originRef: 'old-origin', at: 22, status: 'superseded' },
+      { ref: 'withdrawn', originRef: 'gone-origin', at: 23, status: 'withdrawn' },
+    ];
+    ok('OP5 only explicitly active signals contribute to current independent-origin state', diagnose.currentOriginCount(statusLaw) === 1
+      && diagnose.currentOriginRefs(statusLaw)[0] === 'active-origin');
   } catch (e) { fail++; console.error('  FAIL ownership parity threw', e && e.stack); }
   server.close();
   console.log(`\nfocus-ownership-parity-smoke: ${pass} passed, ${fail} failed`);

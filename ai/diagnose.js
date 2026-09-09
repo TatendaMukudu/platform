@@ -210,7 +210,10 @@ function currentOriginSignals(signals = [], { includeDissent = true } = {}) {
     if (signal.kind === 'interpretation' || (!includeDissent && signal.dissents)) continue;
     const id = originIdentity(signal);
     if (!id) continue;
-    if (isActive(signal)) current.set(id, signal);
+    // Current independent-origin state is stricter than legacy admissibility:
+    // only an explicitly active record may vote. A status-less record may remain
+    // readable as legacy evidence, but cannot establish current corroboration.
+    if (signal.status === 'active') current.set(id, signal);
     else if (current.get(id) === signal || signal.status === 'withdrawn') current.delete(id);
   }
   return current;
