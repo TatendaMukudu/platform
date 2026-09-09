@@ -3414,6 +3414,13 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .shelf-kind{font-size:var(--fs-xs);font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text-muted)}
 .shelf-label{font-size:var(--fs);color:var(--text-primary);line-height:1.4}
 .shelf-whose,.shelf-sub{font-size:var(--fs-xs);color:var(--text-muted)}
+/* PUTTING SOMETHING IN A FOLDER. A select rather than a drag or a second screen: the choice is
+   among names that already exist, and it has to be reachable with one thumb on a phone. */
+.shelf-move{display:flex;align-items:center;gap:.35rem;align-self:stretch}
+.shelf-move-label{font-size:var(--fs-xs);color:var(--text-muted)}
+.shelf-move-select{min-height:44px;max-width:9rem;padding:.4rem .5rem;border-radius:12px;cursor:pointer;
+  font-size:var(--fs-xs);background:var(--surface-1);border:1px solid var(--border);color:var(--text-secondary)}
+.shelf-move-select:focus-visible{outline:2px solid currentColor;outline-offset:2px}
 .shelf-x{align-self:stretch;padding:.4rem .7rem;border-radius:12px;cursor:pointer;
   font-size:var(--fs-xs);background:transparent;border:1px solid var(--border);color:var(--text-muted)}
 .shelf-x:hover{color:var(--text-primary);border-color:var(--border-light)}

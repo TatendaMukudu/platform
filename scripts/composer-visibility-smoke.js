@@ -124,15 +124,21 @@ const server = app.listen(0, async () => {
        first four came to be silent. ── */
     const src = require('fs').readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
     const fn = src.slice(src.indexOf('async function _composeTurn('), src.indexOf('/* ── THE EARS'));
-    const exits = (fn.match(/return null;/g) || []).length;
+    // AN EXIT IS NOW A `_degraded(...)`, NOT A BARE `return null`. The counters made the exits
+    // visible to an OPERATOR reading metrics; they never made them visible to the person holding
+    // the phone, who got deterministic prose in IntelliQ's ordinary voice with nothing saying the
+    // reply had changed hands. Both halves are the law now, so both are counted here.
+    const exits = (fn.match(/return _degraded\(/g) || []).length;
     // composer_used marks the SUCCESS path, not an exit. Counting it here let a deleted exit
     // counter hide behind it — the mutation that removed the skip counter left this green
     // while CV8 went red. An assertion that a stronger assertion has to rescue is not one.
     const counters = (fn.match(/_metric\(code, [^)]*['"]composer_(?!used)/g) || []).length;
-    ok('CV10 the composer body is found (the slice is not empty, which would make CV11 vacuous)',
-      fn.length > 500 && exits >= 3);
+    ok('CV10 the composer body is found, and every one of its six exits is accounted for (an empty slice would make CV11 vacuous)',
+      fn.length > 500 && exits >= 6);
     ok('CV11 every silent exit from the composer increments a counter — no exit may be added without one',
       counters >= exits);
+    ok('CV11b …and no exit returns a bare null any more, because a bare null is what the caller could not tell apart from the composer having nothing to say',
+      !/return null;/.test(fn));
 
     /* ── CV12: IQ_COMPOSER unset. A separate process, because the flag is read once at boot —
        which is itself the reason it can be wrong on a host for weeks without anyone noticing. ── */
