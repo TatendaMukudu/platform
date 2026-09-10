@@ -195,7 +195,16 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
        doubt. */
     const _isQuestion = t => /\?\s*$/.test(String(t).trim())
       || /^\s*(why|what|who|whom|whose|when|where|which|how|should|shall|could|can|would|will|do|does|did|is|are|was|were|am|tell me|explain|show me)\b/i.test(t);
-    const _statesIntent = t => /\b(work(?:ing)? on|focus on|start a focus|make (?:this )?a focus|commit to|i want to|i'?m going to|i am going to|i need to|i'?ll|let me|let'?s|going to try|try to|get better at|improve|practi[cs]e)\b/i.test(t);
+    /* ASKING FOR A FOCUS IN SO MANY WORDS IS THE PLAINEST INTENT THERE IS, and the first version
+       of this list did not contain it. It had `start a focus` and `make this a focus` written out
+       as two literals, so "Create a focus for recovery", "Set up a focus for recovery" and
+       "New focus: recovery" — the three ways a coach is most likely to phrase it — fell through to
+       the clarification and got asked what they wanted to change by a surface they had just told.
+       Two hand-written literals where a family of phrasings exists is the same defect as two
+       descriptions of one rule; the family is written once, here. */
+    const _asksForAFocus = /\b(?:creat(?:e|ing)|set(?:ting)?\s*up|start(?:ing)?|mak(?:e|ing)|add(?:ing)?|new)\s+(?:this\s+|a\s+|an\s+|the\s+|another\s+)*focus\b/i;
+    const _statesIntent = t => _asksForAFocus.test(t)
+      || /\b(work(?:ing)? on|focus on|commit to|i want to|i'?m going to|i am going to|i need to|i'?ll|let me|let'?s|going to try|try to|get better at|improve|practi[cs]e)\b/i.test(t);
     const _mayTakeWording = requested || (_statesIntent(current) && !_isQuestion(current));
 
     if (!args.text && ['create_focus', 'discuss_with_group'].includes(action.type)

@@ -72,6 +72,24 @@ ok('PX-A7 …which the model-proposed path does NOT, so the guard is doing the w
 ok('PX-A8 the guard reads sentence SHAPE, not sentiment — no lexicon of moods or directions',
   !/\b(worried|anxious|struggl|negative|positive|sentiment|mood|frustrat)\b/i.test(ACTIONS_SRC));
 
+/* ── AND THE GUARD MUST NOT REFUSE THE PLAINEST REQUEST THERE IS ────────────────────────────────
+   The first version of the guard listed `start a focus` and `make this a focus` as two hand-written
+   literals. So it refused "Create a focus for recovery" — a coach asking for a Focus in the most
+   direct words available was answered by a surface asking them what they wanted to change. The
+   guard was doing exactly what it was written to do and was still wrong, which is why these are
+   asserted from the phrasing side rather than from the regex. */
+const ASKS = ['Create a focus for recovery', 'Set up a focus for recovery', 'New focus: recovery',
+  'Setting up a focus on sleep', 'Add a focus for nutrition', 'Make this a focus',
+  'Start a focus on set pieces', 'Create focus for away travel'];
+ok('PX-A9 asking for a Focus in so many words starts one, in every phrasing a coach would use',
+  ASKS.every(t => titled(propose(t)) === t));
+ok('PX-A10 …and the same words in a QUESTION still do not, so the guard is not simply weakened',
+  ['What should I create a focus for?', 'How do I create a focus?', 'Should I make this a focus?',
+    'Can you set up a focus?', 'Which focus should I add?'].every(q => titled(propose(q)) === null));
+ok('PX-A11 …and a sentence merely CONTAINING the word focus is not a request to create one',
+  titled(propose('My focus has been all over the place lately')) === null
+  && titled(propose('That focus is finished')) === null);
+
 /* ══ B — METRICS HAVE ONE SHAPE ══════════════════════════════════════════════════════════════
    Live: Settings showed "1 undefined / 2 undefined / 3 undefined / 4 undefined". */
 console.log('\n  B — A METRIC IS A RECORD, NOT A STRING');
@@ -83,10 +101,21 @@ ok('PX-B2 …the id is DERIVED from the name, so it is identical across seed, se
 ok('PX-B3 …an existing id is never rewritten, so nothing referencing a metric loses it',
   _metricRecord({ metricId: 'met_original', name: 'Sleep' }).metricId === 'met_original');
 ok('PX-B4 …and an empty name is not a metric', _metricRecord('  ') === null && _metricRecord({ name: '' }) === null);
-ok('PX-B5 the seed writes canonical records, not the profile\'s bare strings',
-  /orgMetrics\[CODE\] = orgMeta\[CODE\]\.organizationProfile\.metrics\.map/.test(decomment(R('scripts/seed-alma.js'))));
-ok('PX-B6 the write route builds through the same owner, so there is one definition of a metric',
-  /const metric = _metricRecord\(\{ name, source \}/.test(SERVER));
+/* PX-B5 and PX-B6 USED TO READ SOURCE, and an independent audit was right to call them false
+   greens: one matched a literal `.map(` in the seed and the other a literal
+   `const metric = _metricRecord({ name, source }` in server.js. Both passed while renaming a
+   metric returned HTTP 500. A line of code existing is not that line running, and neither
+   assertion would have survived a rename that changed nothing.
+
+   What replaces them is behavioural and lives in scripts/metric-lifecycle-smoke.js, which drives
+   the routes. What stays HERE is the one property that is genuinely about the shape of the
+   repository rather than the behaviour of a request: that there is exactly ONE implementation of
+   metric identity. Two copies of a hash cannot be caught by exercising either one of them. */
+ok('PX-B5 nothing outside the canonical owner mints a metric id',
+  ['server.js', 'scripts/seed-alma.js', 'js/app.js'].every(f => !/met_['"`+ ]|'met_'\s*\+/.test(decomment(R(f))))
+  && /met_/.test(R('ai/metric-record.js')));
+ok('PX-B6 …and no second djb2 hash was copied out of it to derive one',
+  ['scripts/seed-alma.js', 'js/app.js'].every(f => !/5381/.test(decomment(R(f)))));
 ok('PX-B7 the SETTINGS renderer can never print "undefined" at a person, whatever shape reaches it',
   (() => {
     // Scoped to the one renderer that showed it. `${m.name}` is correct elsewhere, on paths fed

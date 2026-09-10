@@ -49,6 +49,7 @@ const bcrypt = require('bcryptjs');
 const diagnose = require('../ai/diagnose.js');
 const teamState = require('../ai/team-state.js');
 const contribution = require('../ai/contribution.js');
+const { metricRecord } = require('../ai/metric-record.js');
 
 const SALT = 8;                                        // demo speed over hardness
 const CODE = process.env.ALMA_CODE || 'alma-mens-soccer';
@@ -231,16 +232,14 @@ async function buildAlmaStore() {
      rendered "1 undefined / 2 undefined / 3 undefined / 4 undefined" to a real coach while the
      rename and delete controls silently matched nothing.
 
-     The id is derived from the name (the same rule `_metricRecord` uses on the server) so a
-     re-seed produces the identical record and nothing downstream sees a metric change identity. */
-  const _metricId = name => {
-    let h = 5381; const s = 'metric:' + name;
-    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
-    return 'met_' + h.toString(36);
-  };
-  orgMetrics[CODE] = orgMeta[CODE].organizationProfile.metrics.map((name, order) => ({
-    metricId: _metricId(name), name, source: 'org', order, createdAt: iso(onDay(0)),
-  }));
+     The id is derived from the name, by the SAME function the server uses, so a re-seed produces
+     the identical record and nothing downstream sees a metric change identity. This file used to
+     carry its own copy of that hash: two implementations of one identity rule, either of which
+     could have been edited without the other, and a drift between them would have silently
+     detached every seeded metric from the routes that address it by id. */
+  orgMetrics[CODE] = orgMeta[CODE].organizationProfile.metrics
+    .map((name, order) => metricRecord(name, order, { now: iso(onDay(0)) }))
+    .filter(Boolean);
 
   // ── Nodes. A college programme is one squad, not a hierarchy of age groups; the units that
   //    actually meet separately are the position groups and the first-year intake. ─────────

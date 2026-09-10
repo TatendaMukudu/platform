@@ -68,7 +68,8 @@ const websearch         = require('./ai/websearch');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
 const errorlog = require('./ai/errorlog');
-const metrics = require('./ai/metrics');
+const metrics = require('./ai/metrics');                 // per-org USAGE counters
+const { metricName, metricRecord, needsRepair: _metricsNeedRepair } = require('./ai/metric-record'); // what a PERFORMANCE metric is
 const renderArtifact = require('./ai/render-artifact');
 const googleProvider = require('./ai/providers/google');
 const delivery   = require('./ai/delivery');
@@ -2714,7 +2715,9 @@ app.post('/api/auth/complete-org-profile', requireAuth, (req, res) => {
     orgGoals[code] = profile.goals.map(g => ({ goalId: 'g_' + generateId(), text: String(g), createdAt: new Date().toISOString() }));
   }
   if (profile.metrics.length && !(orgMetrics[code] && orgMetrics[code].length)) {
-    orgMetrics[code] = profile.metrics.map((m, i) => ({ metricId: 'm_' + generateId(), name: String(m), source: 'org', order: i }));
+    // Through the one owner: a random `m_` id here would have given the same metric a different
+    // identity depending on which door created it, and `String(m)` coerced non-names into metrics.
+    orgMetrics[code] = profile.metrics.map((m, i) => metricRecord(m, i)).filter(Boolean);
   }
 
   scheduleSave();
@@ -18465,33 +18468,23 @@ app.get('/api/org/divisions', requireAuth, (req, res) => {
    Two and three were silent. A coach would have found them the first time they tried to tidy the
    list, which is exactly the week of the pilot.
 
-   ONE OWNER, USED BY EVERY PATH. The seed builds metrics through this function, the migration
-   below repairs data already written through it, and the route returns what it produced. A second
-   normaliser somewhere else is how the two shapes got here in the first place.
+   ONE OWNER, USED BY EVERY PATH. The owner is `ai/metric-record.js`. The seed builds metrics
+   through it, the org-approval flow builds them through it, the migration below repairs data
+   already written through it, and the routes return what it produced. A second normaliser
+   somewhere else is how the two shapes got here in the first place.
 
    THE ID IS DERIVED, NOT MINTED. `met_<hash of the name>` is stable across restarts, so the
    migration is idempotent: run it a hundred times and a metric keeps the id it had, and the links
    from anything referencing it do not rot. A random id would have made every boot produce a new
-   metric identity for the same metric. */
-function _metricRecord(entry, order = 0) {
-  if (entry && typeof entry === 'object') {
-    // Already canonical, or nearly: fill only what is genuinely absent. An existing metricId is
-    // never rewritten — that would break every reference to it.
-    const name = String(entry.name == null ? '' : entry.name).trim();
-    if (!name) return null;
-    return {
-      metricId: String(entry.metricId || `met_${_contentHash('metric:' + name)}`),
-      name,
-      source: entry.source || 'org',
-      order: Number.isFinite(entry.order) ? entry.order : order,
-      createdAt: entry.createdAt || new Date().toISOString(),
-    };
-  }
-  const name = String(entry == null ? '' : entry).trim();
-  if (!name) return null;
-  return { metricId: `met_${_contentHash('metric:' + name)}`, name, source: 'org', order,
-    createdAt: new Date().toISOString() };
-}
+   metric identity for the same metric.
+
+   A NAME IS A STRING, and that rule now lives in `ai/metric-record.js` with the shape itself.
+   It has to: this function used to say `String(entry.name).trim()`, which happily coerced an
+   object into a metric literally called "[object Object]", while `PUT` had its own copy of the
+   rule (`req.body.name.trim()`) that threw on the same input and returned HTTP 500. Two
+   descriptions of one rule always drift, and these two had already drifted into a stored lie and
+   a crash. There is one now, and every writer below goes through it. */
+const _metricRecord = metricRecord;
 
 /* Repair metrics written before the shape was enforced. Idempotent by construction: a record that
    is already canonical hashes to the same id and compares equal, so a healthy store is untouched
@@ -18500,7 +18493,7 @@ function _migrateLegacyMetrics() {
   let repaired = 0;
   for (const code of Object.keys(orgMetrics || {})) {
     const list = Array.isArray(orgMetrics[code]) ? orgMetrics[code] : [];
-    if (!list.some(m => typeof m !== 'object' || m === null || !m.metricId || !m.name)) continue;
+    if (!_metricsNeedRepair(list)) continue;
     orgMetrics[code] = list.map((m, i) => _metricRecord(m, i)).filter(Boolean);
     repaired += orgMetrics[code].length;
   }
@@ -18533,8 +18526,18 @@ app.put('/api/metrics/:metricId', requirePermission('manage_metrics'), (req, res
   const code   = req.iqSession.orgCode;
   const metric = (orgMetrics[code] || []).find(m => m.metricId === req.params.metricId);
   if (!metric) return res.status(404).json({ error: 'Metric not found' });
-  if (req.body.name  !== undefined) metric.name  = req.body.name.trim();
-  if (req.body.order !== undefined) metric.order = req.body.order;
+  /* Rename through the SAME definition of a name the create route uses. This line used to be
+     `req.body.name.trim()`: an object body threw and became a 500, and "   " was stored as an
+     empty name that then rendered as a blank row nobody could identify. */
+  if (req.body.name !== undefined) {
+    const renamed = metricName(req.body.name);
+    if (!renamed) return res.status(400).json({ error: 'name required' });
+    metric.name = renamed;
+  }
+  if (req.body.order !== undefined) {
+    if (!Number.isFinite(req.body.order)) return res.status(400).json({ error: 'order must be a number' });
+    metric.order = req.body.order;
+  }
   scheduleSave();
   res.json({ ok: true, metric });
 });
