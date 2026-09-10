@@ -69,7 +69,9 @@ const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
 const errorlog = require('./ai/errorlog');
 const metrics = require('./ai/metrics');                 // per-org USAGE counters
-const { metricName, metricRecord, needsRepair: _metricsNeedRepair } = require('./ai/metric-record'); // what a PERFORMANCE metric is
+const { metricName, metricRecord, needsRepair: _metricsNeedRepair,
+        findByName: _metricByName, dedupe: _metricDedupe,
+        uniqueMetricId: _metricUniqueId } = require('./ai/metric-record'); // what a PERFORMANCE metric is
 const renderArtifact = require('./ai/render-artifact');
 const googleProvider = require('./ai/providers/google');
 const delivery   = require('./ai/delivery');
@@ -2042,11 +2044,36 @@ app.post('/api/auth/join-invite', async (req, res) => {
      Deliberately narrow: same organisation, still dormant, and the invite names them. An account
      that has ever set a password is untouched and still gets the refusal below, so this can never
      become a way to take one over. */
+  /* ── AND THE INVITE MUST AUTHORISE THE ACCOUNT IT IS ACTIVATING ─────────────────────────────
+     The guard below asked three questions — same address, same organisation, still dormant — and
+     never asked the fourth: is this invite entitled to hand back THIS ACCOUNT'S ROLE? It is not a
+     theoretical gap. Reproduced end to end:
+
+       admin mints an invite with role=superadmin        -> 403 "You cannot invite someone above
+                                                                 your own level."
+       admin mints an invite with role=member, aimed at
+       a DORMANT superadmin's address                    -> 200
+       admin redeems it with a password of their choosing -> 200, activated, role: superadmin
+       that session mints a superadmin invite             -> 200
+       that session reads /api/admin/persistence          -> 200
+
+     The ceiling was enforced where invites are MINTED and then discarded where an account is
+     HANDED OVER, so the whole ladder could be climbed by aiming a permitted invite at an account
+     nobody was permitted to invite. An invite for a member may only activate a member.
+
+     The refusal is silent on purpose: it falls through to the ordinary duplicate-address answer
+     below rather than saying "that address belongs to a privileged dormant account", which would
+     turn this route into an oracle for finding one. Fail closed, and cheaply. */
+  const ROLE_RANK = { superadmin: 1, admin: 2, coach: 3, member: 4 };
+  const _inviteMayActivate = account =>
+    (ROLE_RANK[account && account.role] || 4) >= (ROLE_RANK[invite.role] || 4);
+
   const existing = emailIndex[emailNorm];
   if (existing && invite.email === emailNorm
       && existing.orgCode === code
       && users[existing.userId]
-      && users[existing.userId].passwordSet === false) {
+      && users[existing.userId].passwordSet === false
+      && _inviteMayActivate(users[existing.userId])) {
     const account = users[existing.userId];
     account.passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
     account.passwordSet = true;
@@ -18557,7 +18584,9 @@ function _migrateLegacyMetrics() {
   for (const code of Object.keys(orgMetrics || {})) {
     const list = Array.isArray(orgMetrics[code]) ? orgMetrics[code] : [];
     if (!_metricsNeedRepair(list)) continue;
-    orgMetrics[code] = list.map((m, i) => _metricRecord(m, i)).filter(Boolean);
+    // Dedupe as well as reshape: a store that already holds two rows under one derived id
+    // cannot be addressed unambiguously, and the first occurrence is the one people have seen.
+    orgMetrics[code] = _metricDedupe(list.map((m, i) => _metricRecord(m, i)).filter(Boolean));
     repaired += orgMetrics[code].length;
   }
   if (repaired) {
@@ -18580,6 +18609,15 @@ app.post('/api/metrics', requirePermission('manage_metrics'), (req, res) => {
   // Through the same owner as the seed and the migration, so there is one definition of a metric.
   const metric = _metricRecord({ name, source }, orgMetrics[code].length);
   if (!metric) return res.status(400).json({ error: 'name required' });
+  /* CREATING A NAME THAT EXISTS RETURNS THE ONE THAT EXISTS. The id is derived from the name, so
+     pushing a second record here minted a second row under the SAME primary key — and deleting
+     either then removed both, because the delete filters by id. Same answer the Org Tree gives to
+     a repeated create: `already`, and the record that was already there. */
+  const twin = _metricByName(orgMetrics[code], metric.name);
+  if (twin) return res.json({ ok: true, already: true, metric: twin });
+  // And the id must be free too: a renamed record keeps its original derived id, so recreating
+  // the name it used to have would collide with it. See uniqueMetricId.
+  metric.metricId = _metricUniqueId(metric.name, orgMetrics[code].map(m => m.metricId));
   orgMetrics[code].push(metric);
   scheduleSave();
   res.json({ ok: true, metric });
@@ -18595,6 +18633,12 @@ app.put('/api/metrics/:metricId', requirePermission('manage_metrics'), (req, res
   if (req.body.name !== undefined) {
     const renamed = metricName(req.body.name);
     if (!renamed) return res.status(400).json({ error: 'name required' });
+    /* A RENAME MAY NOT MANUFACTURE THE COLLISION THE CREATE ROUTE NOW REFUSES. Renaming onto a
+       name another record holds would give two records one derived id again, by the back door. */
+    const clash = _metricByName(orgMetrics[code], renamed);
+    if (clash && clash.metricId !== metric.metricId) {
+      return res.status(409).json({ error: `There is already a metric called "${renamed}".` });
+    }
     metric.name = renamed;
   }
   if (req.body.order !== undefined) {
@@ -19989,6 +20033,9 @@ app.post('/api/auth/bulk-import', requirePermission('edit_members'), _serializeT
   // Snapshot before any group node is touched, so the whole import commits or rolls back as one.
   const treeSnapshot = JSON.parse(JSON.stringify(orgNodes[code] || {}));
   let touchedTree = false;
+  /* What this request minted, so a failed commit can un-mint it. See the rollback below for why
+     leaving them behind was worse than never creating them. */
+  const mintedUserIds = [], mintedEmails = [];
 
   for (const row of importRows) {
     const name  = (row.name  || '').trim();
@@ -20056,6 +20103,7 @@ app.post('/api/auth/bulk-import', requirePermission('edit_members'), _serializeT
       importedAt: new Date().toISOString(),
     };
     emailIndex[email] = { orgCode: code, userId };
+    mintedUserIds.push(userId); mintedEmails.push(email);
 
     /* A GROUP CREATED BY IMPORTING IS THE SAME OBJECT AS A GROUP CREATED BY PRESSING THE BUTTON.
        This used to assign straight into `orgNodes[code]` with a bare `generateId()`: no `rev`, no
@@ -20080,12 +20128,38 @@ app.post('/api/auth/bulk-import', requirePermission('edit_members'), _serializeT
     created.push({ id: userId, name, role, group });
   }
 
-  /* ONE COMMIT FOR THE WHOLE IMPORT, through the tree's own compare-and-set. If the tree changed
-     under us while the rows were being processed, `_commitTreeMutation` rolls the tree back to
-     the snapshot, reloads it, and answers 409 — the same answer the tree route gives. The
-     accounts already created are reported honestly below rather than pretended away: they exist,
-     and re-importing the same file skips them by email, which is what makes the retry safe. */
-  if (touchedTree && !(await _commitTreeMutation(code, treeSnapshot, res))) return;
+  /* ── ONE COMMIT FOR THE WHOLE IMPORT, AND ONE ROLLBACK ─────────────────────────────────────
+     `_commitTreeMutation` rolls the TREE back on a compare-and-set conflict and answers 409. It
+     knows nothing about the accounts this loop has already put into `orgUsers` and `emailIndex`,
+     and an earlier version of this route simply returned at that point. The claim in the comment
+     that replaced — that the accounts "are reported honestly below" — was false: the `return`
+     happens before anything is reported, and the response is a bare `{error:'conflict'}`.
+
+     Reproduced by injecting a real conflict at `db.saveStores`:
+
+       HTTP 409, body {"error":"conflict","reason":"changed elsewhere"}
+       accounts left in orgUsers : a1@cas.test, b2@cas.test
+       tree nodes after rollback : (none)
+       their assignedNodeIds     : [[],[]]
+       the retry an operator makes: created 0, skipped 2, still no group, still unplaced
+
+     Two real accounts, in no unit, invisible to every scope computation, and PERMANENTLY
+     unrecoverable through this route because the retry skips them by email before it would have
+     placed them. `scheduleSave()` never ran either, so whether they survived a restart depended
+     on an unrelated later save.
+
+     So the accounts are un-minted here. Nothing this request created survives a failed commit,
+     which makes the retry the operator will make do exactly what they expect: import everything,
+     from a clean state. Rolling back is available precisely because these accounts are seconds
+     old and nothing can reference them yet. */
+  if (touchedTree && !(await _commitTreeMutation(code, treeSnapshot, res))) {
+    for (const uid of mintedUserIds) delete orgUsers[code][uid];
+    for (const em of mintedEmails)   delete emailIndex[em];
+    _backfillUserNodeIds();
+    scheduleSave();
+    console.warn(`[import] tree conflict — rolled back ${mintedUserIds.length} account(s); nothing was imported`);
+    return;   // _commitTreeMutation has already answered 409
+  }
 
   scheduleSave();
   /* NEVER A BLANKET SUCCESS. `ok` used to be the literal `true` whatever happened, so an import

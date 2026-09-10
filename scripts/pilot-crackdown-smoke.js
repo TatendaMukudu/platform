@@ -69,6 +69,49 @@ ok('PX-A6 …and the control path still accepts a bare noun phrase, because the 
   titled(propose('Sharper first touch under pressure', 'inquiry', true)) === 'Sharper first touch under pressure');
 ok('PX-A7 …which the model-proposed path does NOT, so the guard is doing the work',
   titled(propose('Sharper first touch under pressure', 'inquiry', false)) === null);
+/* ── AND THE GATE MUST COVER THE MODEL'S OWN WORDS ────────────────────────────────────────────
+   Every assertion above passes `arguments: {}`, so all of them exercise the FALLBACK path — the
+   one that manufactures a title when the model supplied none. An independent review pointed out
+   that the model usually does supply one, and that `raw.text` was copied in above the gate, so
+   the guard sat in the one place the model never had to pass through. Reproduced: every question
+   below staged a Focus as soon as the model proposed a title for it, and the first was even
+   labelled `user_stated`, because "improve recovery" is a substring of the question that only
+   ASKED about recovery.
+
+   `proposeWithModelText` drives `normalize()` on a model reply that carries text, exactly as the
+   real path does, rather than reaching into `ground()` with a hand-built object. */
+const proposeWithModelText = (text, modelText, kind = 'inquiry', requested = false) => {
+  const c = ctx(kind);
+  return A.ground(A.normalize({ actions: [{ type: 'create_focus', arguments: { text: modelText }, reason: 'r' }] }, c),
+    { text, priorMessages: [], context: c, requested });
+};
+ok('PX-A12 a question does not stage a Focus just because the model supplied a title for it',
+  ['How can I improve recovery?', 'Should I work on this?', 'What changed?', 'Why this?']
+    .every(q => titled(proposeWithModelText(q, 'improve recovery')) === null));
+ok('PX-A13 …the action is dropped rather than staged untitled, in every object context',
+  ['inquiry', 'focus', 'high', 'low'].every(k =>
+    proposeWithModelText('How can I improve recovery?', 'improve recovery', k).actions.length === 0));
+ok('PX-A14 …but a stated intention still takes the model\'s title',
+  titled(proposeWithModelText('I want to work on my first touch', 'first touch under pressure'))
+    === 'first touch under pressure');
+ok('PX-A15 …and a pressed control still does, because the press was the declaration',
+  titled(proposeWithModelText('Sharper first touch', 'Sharper first touch', 'inquiry', true))
+    === 'Sharper first touch');
+/* The gate is for the action that manufactures a commitment. An Inquiry opens a question rather
+   than a promise, so it is deliberately not narrowed here — asserted so that narrowing it later
+   is a decision somebody makes on purpose. */
+ok('PX-A16 create_inquiry is NOT narrowed by this gate — it opens a question, not a commitment',
+  (() => {
+    /* Deliberately NOT ctx('inquiry'): create_inquiry is not offered on an object that already IS
+       an inquiry, so normalize drops it and the assertion would have passed against a surface
+       that refuses everything -- the empty-fixture lie. It is offered on a Focus, so that is
+       where this is asked. Verified: available(ctx('focus')) contains create_inquiry. */
+    const c = ctx('focus');
+    if (!A.available(c).map(a => a.type).includes('create_inquiry')) return false;
+    const r = A.ground(A.normalize({ actions: [{ type: 'create_inquiry', arguments: { text: 'what changed in recovery' }, reason: 'r' }] }, c),
+      { text: 'What changed?', priorMessages: [], context: c });
+    return r.actions.length === 1 && r.actions[0].arguments.text === 'what changed in recovery';
+  })());
 ok('PX-A8 the guard reads sentence SHAPE, not sentiment — no lexicon of moods or directions',
   !/\b(worried|anxious|struggl|negative|positive|sentiment|mood|frustrat)\b/i.test(ACTIONS_SRC));
 
@@ -92,6 +135,13 @@ ok('PX-A10 …and the same words in a QUESTION still do not, so the guard is not
 ok('PX-A9b …including when the request is not the first thing in the sentence',
   ['I would like to create a focus for recovery', 'Actually, create a focus for recovery',
     'Please set up a focus for sleep', 'Right, new focus: recovery'].every(t => titled(propose(t)) === t));
+/* PX-A9c — THE POSSESSIVE FORM. Applying the gate to model-supplied text surfaced a phrase the
+   family had always missed: "Make that my focus" was refused, because `my` and `that` were not in
+   the determiner list. Only CA3b in composer-actions-smoke caught it, so it is pinned here too,
+   beside the rest of the phrasings a coach actually uses. */
+ok('PX-A9c …and when the determiner is a possessive rather than an article',
+  ['Make that my focus', 'Make this my focus', 'Make it my focus', 'Make this our focus']
+    .every(t => titled(propose(t)) === t));
 ok('PX-A11 …and a sentence merely CONTAINING the word focus is not a request to create one',
   titled(propose('My focus has been all over the place lately')) === null
   && titled(propose('That focus is finished')) === null);
@@ -207,6 +257,22 @@ ok('PX-D6b acting on a flag no longer opens a native prompt either',
 ok('PX-D6c …and the note still reaches the one route that records it',
   /\/api\/intelligence\/act/.test(APP)
   && APP.indexOf('async function _intelActSave(') < APP.indexOf('/api/intelligence/act'));
+/* PX-D6d — ROLE BINDING RETIRED, founder decision. The Team Readiness control opened a native
+   prompt and asked for a member's USER ID, which nobody knows: the last native input prompt in
+   the product, and a control with no path to a correct answer. Retired rather than replaced with
+   a member picker, which would be a feature rather than a pilot correction. The ROUTE survives —
+   it is a real confirmed mutation with history, and other code reads its bindings. */
+ok('PX-D6d the role-binding control and its prompt are gone, not just hidden',
+  !/trBindPrompt/.test(APP_RAW) && !/Bind \$\{_escAdvisor\(x\.roleRef/.test(APP_RAW));
+ok('PX-D6e …leaving no dead handler behind, because nothing still calls it',
+  !/onclick="trBindPrompt/.test(APP_RAW));
+ok('PX-D6f …and the route it used is untouched, so nothing that reads bindings broke',
+  /app\.post\('\/api\/org-context\/role-binding'/.test(SERVER) && /function _bindRole\(/.test(SERVER));
+ok('PX-D6g NO native input prompt survives anywhere in the client, on any surface',
+  (() => {
+    const files = ['js/app.js', 'js/tree.js', 'js/ui.js', 'js/chat.js', 'js/data.js', 'js/auth.js'];
+    return files.every(f => !/(^|[^.\w])prompt\s*\(/.test(decomment(R(f))));
+  })());
 ok('PX-D6 nothing on the member pilot path calls prompt() at all any more',
   (() => {
     // The member surface is MemberApp; the remaining two prompts are in leader/admin tooling.
@@ -264,8 +330,10 @@ ok('PX-E8 …failed addresses stay in the box and succeeded ones do not, so a re
 const IMPORTFN = APP.slice(APP.indexOf('async function _submitImport()'),
                            APP.indexOf('async function _submitEmailInvites()'));
 ok('PX-E9c a partial import is a per-row REPORT, so only a refused request throws',
-  IMPORTFN.length > 400 && /if \(!res\.ok\) throw/.test(IMPORTFN)
-  && !/if \(!data\.ok\) throw/.test(IMPORTFN));
+  IMPORTFN.length > 400 && /if \(!res\.ok\)/.test(IMPORTFN)
+  && !/if \(!data\.ok\)/.test(IMPORTFN));
+ok('PX-E9c2 …and a tree conflict says plainly that nothing was imported, which the rollback makes true',
+  /409/.test(IMPORTFN) && /Nothing was imported/.test(IMPORTFN));
 ok('PX-E9d …the count says how many of how many, and every failed row is rendered with its reason',
   /of \$\{data\.total \?\? _importRows\.length\} imported/.test(IMPORTFN)
   && /failed\.map\(/.test(IMPORTFN) && /f\.reason/.test(IMPORTFN));

@@ -341,27 +341,281 @@ only the intended changes and no mutation residue. Chromium was available at
 `/opt/pw-browsers/chromium-1194/chrome-linux/chrome` and was used; browser coverage is claimed
 because it ran, not inferred from source.
 
-## Verdict
+---
 
-The branch is in better shape than the report describing it claimed, in the sense that its server
-laws survived every attack designed against them — and in worse shape than the report claimed, in
-that its own correction to `bulk-import` had broken the screen that reads it, and five of its
-assertions could not fail. Both are now fixed and guarded.
+# Round 2 — Codex inline findings on PR #88
 
-The remaining blockers are operational, not code: nothing here has run against a real database or
-the deployed instance, and exactly one person at Alma can currently onboard anybody.
+The first pass of this gate said "every server law held" against the mutations it designed. That
+was true and it was not sufficient: an independent reviewer left five inline comments on the PR,
+each naming a specific code path, and four of them described defects the mutations in this gate had
+not been shaped to find. All four reproduce. The fifth had already been found and fixed here.
+
+Re-pinned before starting: `origin/main` `6805166…`, PR head `2cc2ec0568f45a6706800b681cd6a4537e46d05b`,
+working tree clean, `git push --dry-run` → `Everything up-to-date`.
+
+**Where the first pass fell short.** Its mutations attacked the laws the branch had *written down*.
+Codex read the code for laws nobody had written down yet — a role ceiling that stopped halfway
+through the flow, a rollback that covered one store and not the other, an identity scheme with no
+uniqueness rule, and a gate installed on the path the model does not take. Mutation testing proves
+an assertion can fail; it cannot invent the assertion that was never made.
+
+## Disposition
+
+| # | finding | result |
+| --- | --- | --- |
+| 1 | dormant privileged-account activation | **CONFIRMED — P1, privilege escalation. Fixed.** |
+| 2 | bulk-import CAS conflict after account creation | **CONFIRMED — P1. Fixed.** |
+| 3 | duplicate metric IDs | **CONFIRMED — P2, all four scenarios. Fixed.** |
+| 4 | model-supplied Focus text bypass | **CONFIRMED — P2. Fixed.** |
+| 5 | partial import unusable by the client | **CONFIRMED — already fixed at `ad80306`, before the comment was read.** Re-verified at this head. |
+
+**CONFIRMED: 5. REFUTED WITH EVIDENCE: 0.** Nothing Codex reported was wrong.
 
 ---
 
-PR HEAD VERIFIED: 057b380d31abd51ac60fe7558cb7a1d5af1128a5
-CLAIMED FIXES VERIFIED: 24/24
-NEW REAL DEFECTS FOUND: 1
-FALSE-GREEN TESTS FOUND: 5
+### 1 — A member invite could activate a dormant superadmin. CONFIRMED (P1)
+
+**Entry point:** `POST /api/auth/join-invite`. **Canonical owner:** the activation branch in
+`server.js`, which is the only place a dormant account is handed over.
+
+**Reproduced**, end to end, as a complete privilege escalation:
+
+```
+admin mints role=superadmin                       -> 403 "You cannot invite someone above your own level."
+admin mints role=member, aimed at a DORMANT
+  superadmin's address                            -> 200
+admin redeems it with a password they choose      -> 200, activated: true, role: superadmin
+that session mints a superadmin invite            -> 200   ESCALATED
+that session reads /api/admin/persistence         -> 200   ESCALATED
+```
+
+The same worked against a dormant plain admin. The guard asked three questions — same address, same
+organisation, still dormant — and never the fourth: *is this invite entitled to this account's
+role?* The ceiling was enforced where invites are **minted** and discarded where an account is
+**handed over**, so the whole ladder could be climbed by aiming a permitted invite at an account
+nobody was permitted to invite.
+
+This is `AGENTS.md`'s seventh epistemic invariant — fail closed — broken in the direction that
+matters most.
+
+**Fix.** An invite may only activate an account whose role is at or below the role the invite was
+minted for, using the ladder the mint-time ceiling already uses. The refusal is silent: it falls
+through to the ordinary duplicate-address answer rather than saying "that address belongs to a
+privileged dormant account", which would turn the route into an oracle for finding one.
+
+**Guards** (`scripts/onboard-invite-smoke.js`): `OI-C4` a member invite cannot activate a dormant
+superadmin; `OI-C5` nor a dormant admin, so the ceiling holds at every rung; `OI-C6` the refusal
+names no roles; `OI-C7` a member invite still activates a dormant **member**, which is what the
+branch exists for; `OI-C8` an **admin** invite still activates a dormant admin — this is a ceiling,
+not a ban.
+
+**Mutations:** removing the ceiling → `OI-C4`, `OI-C5`, `OI-C6` red. Inverting the comparison →
+the same three red. Both restored.
+
+---
+
+### 2 — An import that lost the tree left accounts behind. CONFIRMED (P1)
+
+**Entry point:** `POST /api/auth/bulk-import`. **Canonical owner:** `_commitTreeMutation`, which
+owns the tree's compare-and-set and knows nothing about accounts.
+
+**Reproduced** by stubbing `db.saveStores` to report a conflict on the `orgNodes` unit — the real
+durable boundary, injected before `server.js` is required so it is the one the server holds:
+
+```
+HTTP 409, body {"error":"conflict","reason":"changed elsewhere"}
+accounts left in orgUsers : a1@cas.test, b2@cas.test
+emailIndex entries left   : a1@cas.test, b2@cas.test
+tree nodes after rollback : (none)
+their assignedNodeIds     : [[],[]]
+
+the retry an operator makes: created 0, skipped 2, still no group, still unplaced
+```
+
+Worse than the comment claimed. Two real accounts, in no unit, invisible to every scope
+computation — and **permanently unrecoverable through this route**, because the retry skips them by
+email before it would have placed them. `scheduleSave()` never ran either, so whether they survived
+a restart depended on an unrelated later save happening to catch them.
+
+The R2 comment at that line asserted the accounts "are reported honestly below". They are not: the
+`return` happens before anything is reported. A comment claiming a behaviour the code does not have
+is worse than no comment.
+
+**Fix.** The import is atomic at the tree boundary. Every account this request minted is recorded
+as it goes and un-minted if the commit fails — accounts, email index, and the scope backfill. The
+409 stands, and it is now literally true that nothing was imported, so the retry does exactly what
+the operator expects. Rolling back is available precisely because these accounts are seconds old
+and nothing can reference them yet.
+
+**New registered suite** `scripts/import-conflict-smoke.js` (12): `IC-A1`–`A4` nothing minted
+survives a refused import; `IC-A5`–`A8` the retry therefore creates both people, makes the group
+once, places them, and their **scope** knows it; `IC-B1`–`B2` an import with no group column is
+untouched by a contended tree; `IC-C1`–`C2` the rollback removes only what that request minted,
+never anybody already in the roster.
+
+**Mutations:** rollback removed → 5 red. Accounts rolled back but the email index left behind → 4
+red. Nothing recorded as minted → 5 red. All restored.
+
+---
+
+### 3 — Two metrics could share one identity. CONFIRMED (P2)
+
+**Entry point:** `POST` / `PUT` / `DELETE /api/metrics`. **Canonical owner:** `ai/metric-record.js`.
+
+**Reproduced** over HTTP — all four scenarios the finding asks about:
+
+```
+"Sleep" created twice     -> two records, both met_1fxyk9o
+deleting either one       -> BOTH vanish (the delete filters by id)
+rename away, recreate     -> "Rest Quality" and a new "Sleep" holding one id
+rename one of a pair      -> `find` matched the FIRST record, so the WRONG one was renamed
+```
+
+**Fix, at the one owner**, keeping derived ids and changing no stored identity:
+
+- **Creating a name that exists returns the record that exists** (`already: true`), the same answer
+  the Org Tree gives a repeated create. Compared case-insensitively, because "Sleep" and "sleep"
+  are one metric to everybody except a hash.
+- **Renaming onto another record's name is refused** (409), so the collision cannot come back
+  through the door the create route now closes.
+- **The derived id is checked for freedom too.** A rename deliberately keeps the record's original
+  id, so after "Sleep" → "Rest Quality" there is a record holding `met_<hash of Sleep>` whose name
+  is no longer Sleep; recreating "Sleep" then collided with it even though the names differ. The
+  derived id stays the first choice — seeded ids are untouched — and only when it is already taken
+  does a deterministic suffix step in.
+- **The migration now treats a duplicate as damage** and dedupes, first occurrence winning, so a
+  store already holding collisions becomes addressable without renumbering anything that survives.
+
+**Guards** (`scripts/metric-lifecycle-smoke.js`): `ML-G1`–`G9` cover all four scenarios, the
+case/padding variants, id uniqueness across the store, the refused rename, renaming a record to its
+own name, and the repair of a store that already held a duplicate.
+
+**Mutations:** duplicate names allowed → 3 red. Id-collision check removed → 3 red. Rename allowed
+to collide → 1 red. Migration stops treating duplicates as damage → 1 red. All restored.
+
+---
+
+### 4 — The question gate sat on the path the model does not take. CONFIRMED (P2)
+
+**Entry point:** `ai/composer-actions.js` `ground()`, on the model-proposed path through
+`normalize()`. **Canonical owner:** `_mayTakeWording`.
+
+**Reproduced** by driving `normalize()` with a model reply that carries text, as the real path does:
+
+```
+"How can I improve recovery?"  + model text "improve recovery"  -> STAGED  (source: user_stated)
+"Why is this the thing worth looking at…?"                      -> STAGED
+"Should I work on this?"                                        -> STAGED
+"What changed?"                                                 -> STAGED
+```
+
+`raw.text` was copied into `args` **above** the gate, so the three carefully guarded fallbacks below
+only ever ran when the model supplied nothing. The guard was installed in the one place the model
+never had to pass through. And the first case was labelled `user_stated`, because "improve
+recovery" is a substring of a question that only asked *about* recovery — the provenance said the
+person had asked for a Focus they had merely enquired about.
+
+**Every PX-A assertion written in earlier passes used `arguments: {}`**, so the whole suite
+exercised the fallback path and none of it touched this one. That is a sixth false green, and it is
+the reason this survived two adversarial passes.
+
+**Fix.** `create_focus` — the action that manufactures a commitment — takes model-supplied text only
+when the turn passes the same gate the fallbacks pass. Everything else is unchanged: `create_inquiry`
+opens a question rather than a promise, `discuss_with_group` reaches a confirmation card naming the
+group, and a pressed control still declares intent by itself.
+
+**Guards** (`scripts/pilot-crackdown-smoke.js`): `PX-A12` questions do not stage a Focus even when
+the model titles one; `PX-A13` the action is dropped rather than staged untitled, in every object
+context; `PX-A14` a stated intention still takes the model's title; `PX-A15` a pressed control still
+does; `PX-A16` `create_inquiry` is deliberately **not** narrowed, asserted so that narrowing it
+later is a decision somebody makes on purpose.
+
+`PX-A16`'s first draft used an inquiry context, where `create_inquiry` is not offered at all — it
+would have passed against a surface that refuses everything, PROTOCOL's empty-fixture lie. It now
+asserts availability first and runs on a Focus.
+
+**Mutations:** gate removed from model text → `PX-A12`, `PX-A13` red. Gate over-applied to every
+action → `PX-A16` red. Both restored.
+
+**And the fix surfaced a real false negative.** `composer-actions-smoke` went red on `CA3b`, because
+"Make that my focus" was refused: `my` and `that` were not in the determiner list. The assertion was
+right and the product was wrong, so the phrase family was widened rather than the test relaxed —
+`PROTOCOL` §1. Over-acceptance re-checked: "My focus has been all over the place", "That focus is
+finished" and "Should I make this a focus?" are all still refused. Pinned by `PX-A9c`; removing the
+possessives turns `CA3b` and `PX-A9c` red.
+
+---
+
+### 5 — Partial import unusable by the client. CONFIRMED, already fixed
+
+This is `GATE-1` above, found by this gate at `ad80306` before the comment was read. Re-verified at
+this head: `OB-D1`–`OB-D6` and `PX-E9c`–`PX-E9e` all green, and a 409 now says plainly that nothing
+was imported — which finding 2's rollback is what makes true.
+
+---
+
+## Founder decision applied — Team Readiness role binding retired
+
+The control opened a native prompt asking the operator to type a member's **user id**, which nobody
+has any way of knowing: the last native input prompt in the product, and a control with no path to
+a correct answer.
+
+The button and `trBindPrompt` are both **removed**, not hidden. No handler is left referenced, so
+nothing renders an offer it cannot honour. `POST /api/org-context/role-binding` and `_bindRole` are
+**untouched** — a real confirmed mutation with history that other code reads bindings from. Only the
+doorway that could not be walked through is gone. No member picker was built.
+
+**Guards:** `PX-D6d` the control and its prompt are gone from the source; `PX-D6e` no dead handler
+remains; `PX-D6f` the route still exists, so nothing reading bindings broke; `PX-D6g` **no native
+input prompt survives anywhere in the client**, on any surface, comments stripped.
+
+**Mutation:** restoring the control → `PX-D6d`, `PX-D6e` red. Restored.
+
+## Verification at this head
+
+```
+npm test                                     TRUTH LAYER GREEN
+node scripts/import-conflict-smoke.js         12 passed, 0 failed   (new, registered)
+node scripts/onboard-invite-smoke.js          55 passed, 0 failed
+node scripts/metric-lifecycle-smoke.js        38 passed, 0 failed
+node scripts/pilot-crackdown-smoke.js         85 passed, 0 failed
+node scripts/composer-actions-smoke.js        45 passed, 0 failed
+node scripts/stack-browser-check.js          114 passed, 0 failed
+node scripts/onboard-browser-check.js         34 passed, 0 failed
+node scripts/priority-surface-browser-check.js 39 passed, 0 failed
+node scripts/library-browser-check.js         24 passed, 0 failed
+git diff --check                              clean
+```
+
+Fourteen further mutations in this round, each restored; `git diff --stat` shows only the intended
+changes and no residue.
+
+## What this round could not verify
+
+Unchanged from the first pass, and still the honest limits: no `DATABASE_URL`, no Render key, and
+`platform-827l.onrender.com:443` denied by this session's egress policy. **LIVE NEON VERIFIED: NO.
+LIVE RESTART DURABILITY VERIFIED: NO.** The runbook above stands.
+
+One thing this round adds to that list: the conflict in finding 2 was **injected**, not observed
+against a real contended Postgres. The rollback is proven against the boundary the server holds; it
+is not proven against a live store under genuine concurrency.
+
+## Verdict
+
+Four defects that two adversarial passes had missed, one of them a full privilege escalation from
+admin to superadmin. None was found by mutating the laws this branch had written down, because none
+of them had a law written down to mutate — which is the argument for a second reader rather than a
+second pass by the same one.
+
+All five are fixed, each with a behavioural guard on the production path and a mutation that turns
+it red. The remaining blockers are operational and unchanged.
+
+---
+
+CODEX INLINE FINDINGS DISPOSITIONED: 4/4
+CONFIRMED: 5
+REFUTED WITH EVIDENCE: 0
 PILOT CODE BLOCKERS: 0
 PILOT OPERATIONS BLOCKERS: 3
-DUPLICATE OWNERS: 0
-GITHUB CI: PASS
-LIVE NEON VERIFIED: NO
-LIVE RESTART DURABILITY VERIFIED: NO
 SAFE TO MERGE: YES
 READY FOR FINAL FOUNDER RETEST: YES

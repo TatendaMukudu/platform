@@ -134,6 +134,60 @@ const server = app.listen(0, async () => {
     ok('OI-C2 a dormant account in ANOTHER organisation is not reachable from this one\'s invite',
       cross.status === 400 && orgUsers[B].dorm.passwordSet === false);
 
+    /* ══ C — AND AN INVITE MAY NOT HAND BACK A ROLE IT COULD NOT HAVE MINTED ═══════════════════
+       The activation guard asked three questions — same address, same organisation, still dormant
+       — and never the fourth: is this invite entitled to THIS ACCOUNT'S ROLE? Reported by an
+       independent review and reproduced end to end as a full privilege escalation:
+
+         admin mints role=superadmin                       -> 403 "above your own level"
+         admin mints role=member at a dormant superadmin   -> 200
+         admin redeems it with a password they choose      -> 200, activated, role: superadmin
+         that session mints a superadmin invite            -> 200
+         that session reads /api/admin/persistence         -> 200
+
+       The ceiling was enforced where invites are minted and discarded where an account is handed
+       over, so the ladder could be climbed by aiming a permitted invite at an account nobody was
+       permitted to invite. */
+    orgUsers[A].dormsa = { id: 'dormsa', name: 'Dormant Owner', email: 'dormsa@onba.test',
+      role: 'superadmin', orgCode: A, status: 'active', passwordSet: false };
+    orgUsers[A].dormadm = { id: 'dormadm', name: 'Dormant Admin', email: 'dormadm@onba.test',
+      role: 'admin', orgCode: A, status: 'active', passwordSet: false };
+    orgUsers[A].dormmem = { id: 'dormmem', name: 'Dormant Member', email: 'dormmem@onba.test',
+      role: 'member', orgCode: A, status: 'active', passwordSet: false };
+    _rebuildEmailIndex();
+    const memberInviteFor = async addr =>
+      (await invite({ role: 'member', email: addr }, T.a)).j.token;
+
+    const grabSA = await join({ token: await memberInviteFor('dormsa@onba.test'),
+      name: 'Dormant Owner', email: 'dormsa@onba.test', password: 'chosen123' });
+    ok('OI-C4 a MEMBER invite cannot activate a dormant SUPERADMIN and hand back their role',
+      grabSA.status !== 200 && grabSA.j.activated !== true
+      && orgUsers[A].dormsa.passwordSet === false);
+    ok('OI-C5 …nor a dormant ADMIN, so the ceiling holds at every rung, not just the top one',
+      (await join({ token: await memberInviteFor('dormadm@onba.test'),
+        name: 'Dormant Admin', email: 'dormadm@onba.test', password: 'chosen123' })).status !== 200
+      && orgUsers[A].dormadm.passwordSet === false);
+    ok('OI-C6 …and the refusal does not announce that a privileged account is at that address',
+      !/superadmin|admin|privileg/i.test(JSON.stringify(grabSA.j || {})));
+    /* The legitimate case the whole activation branch exists for must still work, or this is not
+       a fix but a removal. */
+    ok('OI-C7 …while a member invite still activates a dormant MEMBER, which is the point of it',
+      (await join({ token: await memberInviteFor('dormmem@onba.test'),
+        name: 'Dormant Member', email: 'dormmem@onba.test', password: 'demo1234' })).j.activated === true
+      && orgUsers[A].dormmem.passwordSet === true);
+    /* And an invite minted AT the account's own level still activates it — the rule is a ceiling,
+       not a ban on ever activating a privileged account. Only a superadmin can mint this. */
+    orgUsers[A].dormadm2 = { id: 'dormadm2', name: 'Dormant Admin Two', email: 'dormadm2@onba.test',
+      role: 'admin', orgCode: A, status: 'active', passwordSet: false };
+    orgUsers[A].owner = { id: 'owner', name: 'Owner', email: 'owner@onba.test', role: 'superadmin',
+      orgCode: A, status: 'active', passwordSet: true, passwordHash: 'x' };
+    _rebuildEmailIndex();
+    const adminInvite = await invite({ role: 'admin', email: 'dormadm2@onba.test' }, issueToken('owner', A, 'superadmin'));
+    ok('OI-C8 …and an ADMIN invite does activate a dormant admin — a ceiling, not a ban',
+      (await join({ token: adminInvite.j.token, name: 'Dormant Admin Two',
+        email: 'dormadm2@onba.test', password: 'demo1234' })).j.activated === true
+      && orgUsers[A].dormadm2.passwordSet === true && orgUsers[A].dormadm2.role === 'admin');
+
     /* OI-C3 — THE LAW A MUTATION FOUND. Removing `invite.email === emailNorm` from the activation
        guard left every assertion green, because the ones above are held by the dormancy and
        organisation checks instead. What that clause alone protects is this: a GENERAL join link,

@@ -167,7 +167,57 @@ const server = app.listen(0, async () => {
     ok('ML-F3 …and every value is a real grant rather than an index',
       grants.every(g => Object.values(g).every(v => v === true)));
 
+    /* ══ G — TWO RECORDS MAY NOT SHARE ONE IDENTITY ═════════════════════════════════════════════
+       An independent review pointed out what deriving the id from the name costs if nothing else
+       is enforced, and all four parts reproduced over HTTP before this was fixed:
+
+         "Sleep" created twice   -> two records, both met_1fxyk9o
+         deleting either one     -> BOTH vanish, because the delete filters by id
+         rename away, recreate   -> "Rest Quality" and a new "Sleep" holding one id
+         rename one of a pair    -> `find` matched the FIRST, so the wrong record was renamed */
+    console.log('\n  G — TWO RECORDS MAY NOT SHARE ONE IDENTITY');
+    const fresh = async () => { orgMetrics[A].length = 0; };
+    await fresh();
+    const g1 = await req('POST', '/api/metrics', { name: 'Sleep' });
+    const g2 = await req('POST', '/api/metrics', { name: 'Sleep' });
+    ok('ML-G1 creating a name that exists returns the record that exists, and adds nothing',
+      g2.status === 200 && g2.j.already === true
+      && g2.j.metric.metricId === g1.j.metric.metricId && (await list()).length === 1);
+    const g3 = await req('POST', '/api/metrics', { name: '  sLeEp  ' });
+    ok('ML-G2 …case and padding do not make a second one — one metric to everybody except a hash',
+      g3.j.already === true && (await list()).length === 1);
+    ok('ML-G3 …and deleting it removes ONE record, leaving nothing behind under the same id',
+      (await req('DELETE', `/api/metrics/${g1.j.metric.metricId}`)).status === 200
+      && (await list()).length === 0);
+
+    await fresh();
+    const h1 = await req('POST', '/api/metrics', { name: 'Sleep' });
+    await req('PUT', `/api/metrics/${h1.j.metric.metricId}`, { name: 'Rest Quality' });
+    const h2 = await req('POST', '/api/metrics', { name: 'Sleep' });
+    ok('ML-G4 recreating a name a RENAMED record used to hold does not collide with its kept id',
+      h2.status === 200 && h2.j.metric.metricId !== h1.j.metric.metricId);
+    ok('ML-G5 …the renamed record keeps the identity it had, so nothing referencing it rots',
+      (await list()).some(m => m.metricId === h1.j.metric.metricId && m.name === 'Rest Quality'));
+    ok('ML-G6 …and every id in the store is unique',
+      (() => { const ids = orgMetrics[A].map(m => m.metricId); return new Set(ids).size === ids.length; })());
+    ok('ML-G7 renaming ONTO a name another record holds is refused rather than merging them',
+      (await req('PUT', `/api/metrics/${h2.j.metric.metricId}`, { name: 'Rest Quality' })).status === 409
+      && (await list()).find(m => m.metricId === h2.j.metric.metricId).name === 'Sleep');
+    ok('ML-G8 …while renaming a record to its OWN name is not a collision',
+      (await req('PUT', `/api/metrics/${h2.j.metric.metricId}`, { name: 'Sleep' })).status === 200);
+
+    /* A store that ALREADY holds duplicates — written before any of this existed — is repaired
+       rather than left unaddressable. The first occurrence wins, so the record people have been
+       looking at keeps its place. */
+    orgMetrics[A] = [canonical.metricRecord('Twin', 0), canonical.metricRecord('Twin', 1),
+                     canonical.metricRecord('Solo', 2)];
+    const repairedDupes = _migrateLegacyMetrics();
+    ok('ML-G9 a store that already held a duplicate is repaired to one record, keeping the first',
+      repairedDupes > 0 && orgMetrics[A].filter(m => m.name === 'Twin').length === 1
+      && orgMetrics[A].length === 2);
+
     console.log('\n  E — THE MIGRATION LEAVES A HEALTHY STORE ALONE');
+    orgMetrics[A] = [canonical.metricRecord('Steady', 0)];
     const before = JSON.stringify(orgMetrics[A]);
     const repaired = _migrateLegacyMetrics();
     ok('ML-E1 running it again repairs nothing and changes nothing',

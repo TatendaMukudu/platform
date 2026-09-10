@@ -69,13 +69,78 @@ function metricRecord(entry, order = 0, { now = null } = {}) {
   };
 }
 
-/* Is this list already canonical? The migration asks before touching anything, so a healthy store
-   is never rewritten and never triggers a save. */
-function needsRepair(list) {
-  if (!Array.isArray(list)) return false;
-  return list.some(m => !m || typeof m !== 'object' || Array.isArray(m)
-    || typeof m.metricId !== 'string' || !m.metricId
-    || metricName(m.name) === null || m.name !== metricName(m.name));
+/* THE ONE CASE NAME-UNIQUENESS ALONE DOES NOT COVER. A rename keeps the record's original id on
+   purpose, so that anything referencing the metric keeps working — which means after renaming
+   "Sleep" to "Rest Quality" there is a record holding `met_<hash of Sleep>` whose name is no
+   longer Sleep. Creating "Sleep" again then derives that same id, and the two collide even though
+   their names differ, so the name check never sees it. Reproduced.
+
+   The derived id stays the first choice, so nothing already stored changes and the seed keeps the
+   ids it has. Only when that exact id is already taken does a deterministic suffix step in. */
+function uniqueMetricId(name, takenIds = []) {
+  const base = metricId(name);
+  if (!base) return null;
+  const taken = new Set(takenIds);
+  if (!taken.has(base)) return base;
+  for (let n = 2; n < 1000; n++) {
+    const candidate = `${base}-${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${base}-${_hash(String(Date.now()))}`;
 }
 
-module.exports = { metricName, metricId, metricRecord, needsRepair };
+/* ── A NAME IS AN IDENTITY, SO TWO RECORDS CANNOT SHARE ONE ────────────────────────────────────
+   The id is derived from the name, which is what keeps a metric's identity stable across the
+   seed, the server and a restart. The cost of that choice is that two records with one name are
+   two records with one PRIMARY KEY, and nothing stopped the write route creating them. An
+   independent review reported it and every part reproduced over HTTP:
+
+     "Sleep" created twice       -> two records, both met_1fxyk9o
+     deleting either one         -> BOTH disappear (the delete filters by id)
+     rename away, recreate       -> a collision between "Rest Quality" and a new "Sleep"
+     rename one of a pair        -> `find` matched the FIRST record, so the wrong one was renamed
+
+   The fix keeps the derived id and adds the rule the id always implied: a name is unique within
+   an organisation, compared case-insensitively because "Sleep" and "sleep" are one metric to
+   everybody except a hash. Creating a name that exists returns the record that exists, which is
+   the same answer the Org Tree gives when somebody presses create twice — a retry is not a second
+   thing. No stored identity changes: this stops a duplicate being made, it does not renumber
+   anything already there. */
+function findByName(list, name) {
+  const n = metricName(name);
+  if (!n || !Array.isArray(list)) return null;
+  const key = n.toLowerCase();
+  return list.find(m => m && metricName(m.name) && m.name.trim().toLowerCase() === key) || null;
+}
+
+/* Is this list already canonical? The migration asks before touching anything, so a healthy store
+   is never rewritten and never triggers a save. A duplicated name counts as damage: the store
+   already holds two rows under one id and cannot be addressed unambiguously. */
+function needsRepair(list) {
+  if (!Array.isArray(list)) return false;
+  const shapeWrong = list.some(m => !m || typeof m !== 'object' || Array.isArray(m)
+    || typeof m.metricId !== 'string' || !m.metricId
+    || metricName(m.name) === null || m.name !== metricName(m.name));
+  if (shapeWrong) return true;
+  const ids = new Set(list.map(m => m.metricId));
+  return ids.size !== list.length;
+}
+
+/* Drop later records that collide with an earlier one, by id or by name. The FIRST occurrence
+   wins, so the record a person has been looking at keeps its place and its identity. */
+function dedupe(list) {
+  if (!Array.isArray(list)) return [];
+  const seenId = new Set(), seenName = new Set(), out = [];
+  for (const m of list) {
+    if (!m || typeof m !== 'object') continue;
+    const n = metricName(m.name);
+    if (!n) continue;
+    const key = n.toLowerCase();
+    if (seenId.has(m.metricId) || seenName.has(key)) continue;
+    seenId.add(m.metricId); seenName.add(key);
+    out.push(m);
+  }
+  return out;
+}
+
+module.exports = { metricName, metricId, metricRecord, needsRepair, findByName, dedupe, uniqueMetricId };

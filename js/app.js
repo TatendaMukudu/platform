@@ -3655,7 +3655,13 @@ async function _submitImport() {
        A refusal of the WHOLE request — 401, 403, 404, 413 — is a different thing and still
        throws: nothing was created, and `error` says why. A 200 is a per-row report, and every
        row is accounted for below. */
-    if (!res.ok) throw new Error(data.error || 'Import failed');
+    if (!res.ok) {
+      // 409 is the tree's compare-and-set answer. The server rolls the whole import back on that
+      // path, so "nothing was imported" is the literal truth and the retry is safe to offer.
+      throw new Error(res.status === 409
+        ? 'The org tree changed while this was importing. Nothing was imported — try again.'
+        : (data.error || 'Import failed'));
+    }
 
     const created = data.created || [], skipped = data.skipped || [], failed = data.failed || [];
     const line = [
@@ -4992,8 +4998,18 @@ async function renderTeamReadiness() {
   const q = (x) => {
     const who = x.targetType === 'person' ? 'a specific person'
       : x.targetType === 'role' ? `the ${_escAdvisor((x.roleRef || '').replace(/_/g, ' '))} role` : x.targetType;
-    const bindBtn = (x.targetType === 'role' && x.roleRef)
-      ? `<button class="btn-ghost btn-sm" style="font-size:var(--fs-sm)" onclick="trBindPrompt('${_escAdvisor(x.roleRef)}')">Bind ${_escAdvisor(x.roleRef.replace(/_/g, ' '))} to a person</button>` : '';
+    /* ROLE BINDING IS RETIRED FOR THE PILOT — founder decision, September 2026.
+       The control opened a native browser prompt and asked the operator to type a member's USER
+       ID, which nobody has any way of knowing. It was the last native input prompt in the product
+       and, for anyone who is not reading the database, a dead control: there was no path to a
+       correct answer. Retiring it was chosen over building a member picker, which is a feature and
+       not a pilot correction.
+
+       The ROUTE stays (`POST /api/org-context/role-binding`) — it is a real, tested, confirmed
+       mutation with history, and other things read the bindings it makes. Only the doorway that
+       could not be walked through is gone. Nothing is left rendered, so nothing offers what it
+       cannot do. */
+    const bindBtn = '';
     const answerBtn = x.uncertaintyId ? `<button class="btn btn-outline btn-sm" style="font-size:var(--fs-sm);margin-top:0.4rem" onclick="trAnswer('${_escAdvisor(x.uncertaintyId)}')">Answer this →</button>` : '';
     return `<div class="card" style="margin-bottom:0.5rem;${x.blocking ? 'border-left:3px solid var(--danger)' : ''}">
       <div style="font-size:var(--fs-md);font-weight:600">${_escAdvisor(x.question)}${x.blocking ? ' <span style="font-size:var(--fs-xs);color:var(--danger)">blocking</span>' : ''}</div>
@@ -5107,17 +5123,6 @@ async function trAsk() {
   } catch (e) { out.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Couldn't answer that right now.</div>`; }
 }
 
-async function trBindPrompt(roleRef) {
-  const userId = prompt(`Which member currently holds the "${roleRef.replace(/_/g, ' ')}" role? Enter their user id (routing only — no permissions change).`);
-  if (!userId) return;
-  try {
-    const r = await fetch('/api/org-context/role-binding', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ roleRef, userId: userId.trim() }) });
-    const d = await r.json();
-    if (!d.ok) throw new Error(d.error || 'Could not bind');
-    showToast('Role bound — questions will now route to that person.', 'success');
-    renderTeamReadiness();
-  } catch (e) { showToast(e.message || 'Could not bind role', 'error'); }
-}
 
 /* ── Organisational memory — the derived-state timeline (Phase A: history, not advice).
    Reads /api/org-memory/timeline: most-recent-first moments, each with a plain-language

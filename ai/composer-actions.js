@@ -164,10 +164,6 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
     };
     ['because', 'folderName', 'target', 'reviewOn'].forEach(keepStated);
 
-    if (raw.text) {
-      args.text = raw.text;
-      sources.text = stated(raw.text) ? 'user_stated' : 'model_suggested';
-    }
     /* ── A QUESTION IS NOT A COMMITMENT ─────────────────────────────────────────────────────
        Both fallbacks below manufacture a Focus TITLE out of the person's raw words when the
        model proposed create_focus and supplied none. Neither asked whether the person had said
@@ -202,10 +198,37 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
        the clarification and got asked what they wanted to change by a surface they had just told.
        Two hand-written literals where a family of phrasings exists is the same defect as two
        descriptions of one rule; the family is written once, here. */
-    const _asksForAFocus = /\b(?:creat(?:e|ing)|set(?:ting)?\s*up|start(?:ing)?|mak(?:e|ing)|add(?:ing)?|new)\s+(?:this\s+|a\s+|an\s+|the\s+|another\s+)*focus\b/i;
+    /* The determiner list carries POSSESSIVES as well as articles. Applying this gate to
+       model-supplied text surfaced a phrase the family had always missed: "Make that my focus" is
+       about as plain an instruction as exists, and it was refused, because `my` and `that` were
+       not in the list. The suite caught it (CA3b), and the right answer was to widen the family
+       rather than to relax the assertion — the product was wrong, not the test. */
+    const _asksForAFocus = /\b(?:creat(?:e|ing)|set(?:ting)?\s*up|start(?:ing)?|mak(?:e|ing)|add(?:ing)?|new)\s+(?:this\s+|that\s+|it\s+|a\s+|an\s+|the\s+|another\s+|my\s+|our\s+)*focus\b/i;
     const _statesIntent = t => _asksForAFocus.test(t)
       || /\b(work(?:ing)? on|focus on|commit to|i want to|i'?m going to|i am going to|i need to|i'?ll|let me|let'?s|going to try|try to|get better at|improve|practi[cs]e)\b/i.test(t);
     const _mayTakeWording = requested || (_statesIntent(current) && !_isQuestion(current));
+
+    /* ── AND THE GATE APPLIES TO THE MODEL'S OWN WORDS, NOT ONLY TO THE FALLBACKS ──────────────
+       This block used to sit ABOVE the gate and copied `raw.text` in unconditionally, so the
+       three fallbacks below — each carefully guarded — only ever ran when the model supplied
+       nothing. An independent review reported it and it reproduced exactly:
+
+         "How can I improve recovery?"  + model text "improve recovery"  -> STAGED
+         "Should I work on this?"       + model text "improve recovery"  -> STAGED
+         "What changed?"                + model text "improve recovery"  -> STAGED
+
+       The guard was in the one place the model never needed to go through. Worse, the first of
+       those was labelled `user_stated`, because "improve recovery" is a substring of the question
+       — so the provenance said the person had asked for a Focus they had only asked ABOUT.
+
+       `create_focus` is the action that manufactures a commitment, so it is the one that has to
+       ask. The others keep taking model text as before: `create_inquiry` opens a question rather
+       than a promise, and `discuss_with_group` reaches a confirmation card that names the group.
+       A pressed control still declares intent by itself, which is what `requested` carries. */
+    if (raw.text && (action.type !== 'create_focus' || _mayTakeWording)) {
+      args.text = raw.text;
+      sources.text = stated(raw.text) ? 'user_stated' : 'model_suggested';
+    }
 
     if (!args.text && ['create_focus', 'discuss_with_group'].includes(action.type)
         && /\b(this|that|it)\b/i.test(current)
