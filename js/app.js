@@ -11242,6 +11242,18 @@ const MemberApp = {
             onclick="MemberApp.beginObjectAction('keep_in_library','${esc(kind)}','${esc(objectId)}')">Keep</button>
           ${kind === 'inquiry' ? `<button type="button" class="iqt-verdict" onclick="MemberApp.beginObjectAction('settle_inquiry','${esc(kind)}','${esc(objectId)}')">That's settled</button>` : ''}
           <button type="button" class="iqt-verdict" onclick="MemberApp.beginObjectAction('disagree_with_inquiry','${esc(kind)}','${esc(objectId)}')">I disagree</button>
+          <!-- KEEP THIS NEAR THE TOP. The personal attention override, and the only writer of it
+               from a screen. It is a VERDICT, beside the others, because it is a thing a person
+               says about a belief — not a star in the corner of a card, which is how a private
+               preference starts looking like a rating everybody can see.
+
+               It states which way it will go, so the control is never ambiguous about current
+               state, and it stages the request through beginObjectAction like every other verdict
+               here: a button does not own a mutation, it stages the same typed request the model
+               may propose and confirmation still crosses the one dispatcher. -->
+          <button type="button" class="iqt-verdict"
+            onclick="MemberApp.beginObjectAction('${data.prioritised ? 'unprioritise_object' : 'prioritise_object'}','${esc(kind)}','${esc(objectId)}')">${
+              data.prioritised ? 'Take off my priorities' : 'Keep near the top'}</button>
           <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('aside')">Not now</button>
         </div>`;
       // The call sits WITH the belief, above the verdicts, and is filled in after the thread
@@ -12052,6 +12064,11 @@ const MemberApp = {
     }
     input.value = type === 'keep_in_library' ? 'Keep this in my Library.'
       : type === 'settle_inquiry' ? 'I think this is settled now.'
+      // The person's own words for the two priority acts, so the turn reads as something they
+      // said rather than a control that fired. The server resolves the target from the bound
+      // object; nothing in this sentence names it, and nothing needs to.
+      : type === 'prioritise_object' ? 'Keep this near the top for me.'
+      : type === 'unprioritise_object' ? 'Take this off my priorities.'
       : type === 'discuss_with_group' ? 'I would like to discuss this with the group.' : 'Open this.';
     await this.inquirySend();
   },

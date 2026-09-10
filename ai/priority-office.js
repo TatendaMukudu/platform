@@ -197,7 +197,13 @@ function attentionQueue({ objects = [], edges = [], seen = {}, marked = [], now 
     const signals = Array.isArray(raw.signals) ? raw.signals : [];
     const current = signals.filter(s => s && s.status === 'active');
 
-    if (markedSet.has(refOf(o))) add(o, 'explicitly_prioritised', raw.markedAt || now, {});
+    /* WHOSE MARK IT IS, carried in the detail so it cannot be read as anybody else's. The queue is
+       built from ONE person's marks (the caller passes their own `marked` list and nobody else's),
+       so `byYou` is a fact about this row rather than an attribution the desk had to work out. It
+       matters because the failure mode here is not a leak, it is a misreading: a thing at the top
+       with no owner named reads as the organisation having decided it is important, and that is a
+       claim nobody made. */
+    if (markedSet.has(refOf(o))) add(o, 'explicitly_prioritised', raw.markedAt || now, { byYou: true });
 
     /* A dissent that ARRIVED SINCE THEY LOOKED. Not "there is a dissent" — a standing disagreement
        they have already read is not news, and re-raising it every time would train them to ignore

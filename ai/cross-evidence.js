@@ -240,5 +240,20 @@ function loop(objects = [], focusRef = null) {
   };
 }
 
-module.exports = { REL, INVERSE, KINDS, ref, refOf, parseRef, edges, neighbourhood, loop,
+/* HOW ONE PIECE OF EVIDENCE STANDS TO ONE FOCUS. Three words, closed, and DECLARED — never read
+   off the direction that evidence carries on an inquiry, which is a different question with a
+   different answer (see `_declareFocusRelation`).
+
+   It lives here, in the module that owns how things relate, because it had begun to live in two
+   places: the writer in `server.js` and the proposal path in `ai/composer-actions.js` both need
+   it, and two copies of a closed vocabulary is how a fourth word eventually gets in through
+   whichever copy somebody forgot. One owner; both import it; the WRITER still enforces it, because
+   a check that lives only where a suggestion is made is a check you can walk around by proposing
+   from somewhere else.
+
+   `unclear` is not a hedge. It is the honest answer when somebody has looked and cannot tell, and
+   having it is what stops `supports` becoming the default for anything ambiguous. */
+const FOCUS_RELATIONS = Object.freeze(['supports', 'undermines', 'unclear']);
+
+module.exports = { REL, INVERSE, KINDS, FOCUS_RELATIONS, ref, refOf, parseRef, edges, neighbourhood, loop,
   evidenceRefsOf, originRefsOf };

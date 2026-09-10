@@ -8686,10 +8686,11 @@ function _updatePersonalFocus(code, userId, focusId, input = {}, opts = {}) {
    about. It is not a second store, not a relationship table, and not an evidence record: it is a
    field of a Focus, written only by this function, only after a human said so.
 
-   The vocabulary is three words and closed. `unclear` is not a hedge -- it is the honest answer
-   when somebody has looked and cannot tell, and having it is what stops `supports` becoming the
-   default for anything ambiguous. */
-const FOCUS_RELATIONS = Object.freeze(['supports', 'undermines', 'unclear']);
+   The vocabulary is three words and closed, and it is imported rather than restated: it now has
+   ONE owner (`ai/cross-evidence.js`), because the proposal path needs the same three words and two
+   copies of a closed vocabulary is how a fourth word gets in through whichever copy somebody
+   forgot. The ENFORCEMENT stays here, at the writer, for the reason it always did. */
+const { FOCUS_RELATIONS } = crossEvidence;
 
 function _declareFocusRelation(code, userId, focusId, evidenceRef, relation, opts = {}) {
   if (!FOCUS_RELATIONS.includes(String(relation))) {
@@ -8710,7 +8711,13 @@ function _declareFocusRelation(code, userId, focusId, evidenceRef, relation, opt
   if (!readable) return { ok: false, status: 404, error: 'not found' };
 
   focus.evidenceRelations = Array.isArray(focus.evidenceRelations) ? focus.evidenceRelations : [];
-  const prior = focus.evidenceRelations.find(r => r && r.ref === ref && r.by === userId);
+  /* THE PRIOR CALL IS THE ONE STILL STANDING, not the first one ever made. `find` without the
+     supersession check returned the OLDEST record — which, once somebody had changed their mind
+     even once, was already superseded. So a third call comparing against it saw a difference that
+     was not there, superseded an already-superseded record a second time, and pushed a duplicate:
+     say "unclear" twice after "supports" and the focus ended up carrying two live `unclear` calls.
+     History that gains entries nobody made is not preserved history. */
+  const prior = focus.evidenceRelations.find(r => r && r.ref === ref && r.by === userId && !r.supersededAt);
   const now = new Date().toISOString();
   /* CORRECTIONS PRESERVE HISTORY. Changing your mind supersedes the earlier call and keeps it,
      the same way a corrected signal stays in the record -- so "what did we think, and when" is
@@ -8725,6 +8732,111 @@ function _declareFocusRelation(code, userId, focusId, evidenceRef, relation, opt
   _audit(code, { actor: userId, action: 'focus_updated', subjectIds: [userId], basis: `relation:${relation}` });
   scheduleSave();
   return { ok: true, already: false, relation: rec, focus };
+}
+
+/* ── WHICH PIECE OF EVIDENCE IS "THIS"? ────────────────────────────────────────────────────────
+   FOUNDER LAW, September 2026: the evidence object is DETERMINISTICALLY BOUND from the person's
+   current lawful context. The model never names it. This is the only function that decides it.
+
+   Two lawful bindings, and no third:
+
+     `in_view`  -- the person is looking at one specific record and the client said so. The claim
+                   is checked against the reader's OWN authorised objects, so a ref they cannot
+                   already see does not resolve. It is checked against the BOUND OBJECT's own
+                   records first: "this evidence, on this focus" is one statement, not two, and
+                   accepting a ref that belongs to some other object would let the page's claim
+                   about what it is showing choose the subject of a written relation.
+     `sole`     -- the object carries exactly one current record. Then "this evidence" has one
+                   possible referent and resolving it is reading, not guessing.
+
+   ANYTHING ELSE RETURNS NULL, and null means the action is never offered. No list of refs is put
+   in front of the model, no "did you mean one of these three", and nothing is picked because it
+   was first or most recent. The person is asked which one they mean. A relation written against
+   evidence somebody did not choose is worse than no relation at all -- it is a declared human
+   judgement with no human behind it. */
+function _boundEvidence(code, userId, object, claimed) {
+  if (!object || !object.kind || !object.id) return null;
+  const authorised = _allObjectsFor(code, userId);
+  const self = authorised.find(o => o.kind === object.kind && String(o.id) === String(object.id));
+  if (!self) return null;
+
+  /* WHAT IS IN SCOPE, AND WHY IT IS NOT JUST "THIS OBJECT'S OWN RECORDS".
+
+     The first version of this looked only at `self.raw.signals`, which was wrong in a way that
+     made the whole capability dead on the founder's own example: a personal FOCUS carries no
+     records of its own. Its evidence lives on the thing it addresses. So "I am on my focus,
+     looking at this piece of evidence" could never resolve, and the fix for the dead path would
+     have been dead in exactly the same place.
+
+     A focus's lawful neighbourhood is itself plus the ONE object it declares it addresses -- an
+     existing field, the same one the cross-evidence reader traverses, resolved through the same
+     authorised set. Nothing wider: not "any evidence this reader can see", which would let a page
+     bind a record from an unrelated part of somebody's record to a focus they happen to have
+     open, and not the whole neighbourhood graph, which is a different question than "what am I
+     looking at". */
+  const scope = [self];
+  const addr = self.kind === 'focus' && self.raw && self.raw.addresses;
+  if (addr && addr.kind && addr.id) {
+    const target = authorised.find(o => o.kind === addr.kind && String(o.id) === String(addr.id));
+    if (target) scope.push(target);
+  }
+  const own = scope
+    .flatMap(o => (o.raw && Array.isArray(o.raw.signals) ? o.raw.signals : []))
+    .filter(s => s && s.ref && String(s.status || 'active') === 'active');
+
+  const want = String(claimed || '').trim().slice(0, 120);
+  if (want) {
+    const hit = own.find(s => String(s.ref) === want);
+    // Refs and nothing else. The statement stays where it lives; this function has read it and
+    // deliberately carries none of it forward.
+    return hit ? { ref: String(hit.ref), via: 'in_view' } : null;
+  }
+  if (own.length === 1) return { ref: String(own[0].ref), via: 'sole' };
+  return null;
+}
+
+/* ── THE PERSONAL ATTENTION OVERRIDE ───────────────────────────────────────────────────────────
+   FOUNDER LAW, September 2026: `prioritised` is true or false and nothing else. No number, no
+   high/medium/low, no AI-authored value, and never a judgement about a person.
+
+   ONE OWNER, and it is this function. `mem.prioritised` already existed and was already read by
+   the Priority Office in two places; what it never had was anything that could write it, so the
+   top of the ranking law -- "a human said so, and nothing outranks that" -- could not fire for
+   anybody. No new object and no new store: a list of canonical refs on the person's own memory,
+   which is where the rest of their private state already lives.
+
+   PRIVATE, AND STRUCTURALLY SO. It is stored under the actor's own memory, so it cannot be read
+   as anybody else's mark and cannot be read as the organisation's. It touches no audience, no
+   participant list and no visibility field -- marking something changes who is reminded of it,
+   never who can see it. Those are different questions and this function only answers one.
+
+   The mark is on the OBJECT'S canonical ref, resolved through the same authorised set every other
+   surface reads, so a ref this person cannot open is 404 and never an existence oracle. */
+function _setPersonalPriority(code, userId, kind, id, on) {
+  const target = _allObjectsFor(code, userId)
+    .find(o => o.kind === String(kind) && String(o.id) === String(id));
+  if (!target) return { ok: false, status: 404, error: 'not found' };
+  const ref = crossEvidence.refOf(target);
+  if (!ref) return { ok: false, status: 404, error: 'not found' };
+
+  const mem = _getMemory(code, userId);
+  const list = Array.isArray(mem.prioritised) ? mem.prioritised.map(String) : [];
+  const had = list.includes(ref);
+  const want = on === true;
+  mem.prioritised = want ? (had ? list : [...list, ref]) : list.filter(r => r !== ref);
+  if (had !== want) {
+    mem.lastUpdated = new Date().toISOString();
+    _audit(code, { actor: userId, action: 'focus_updated', subjectIds: [userId],
+      basis: want ? 'prioritised' : 'unprioritised' });
+    scheduleSave();
+  }
+  /* WHAT IS ACTUALLY STORED, READ BACK — not an echo of what was asked for. Returning `want` here
+     means the function reports its own success, so a write that silently did nothing still
+     answers "prioritised: false, done". That is the same class of bug as a hardcoded `safe: true`
+     (AGENTS.md, epistemic invariant 1), and it was found by a mutation that removed the unmark and
+     could not make this line lie. */
+  const stored = (Array.isArray(mem.prioritised) ? mem.prioritised.map(String) : []).includes(ref);
+  return { ok: true, ref, prioritised: stored, already: had === want };
 }
 
 /* What a reader may see of those calls. Refs and words only -- the evidence itself stays where it
@@ -13794,6 +13906,13 @@ function _composerActionContext(code, userId, opts = {}, conversation = null) {
       (object.nodeId || (object.raw?.subjectRef || '').startsWith('group:') || (object.raw?.participants || []).length > 1)),
     attachment: opts.attachment && typeof opts.attachment === 'object'
       ? { id: String(opts.attachment.id || '').slice(0, 120), name: String(opts.attachment.name || '').slice(0, 200) } : null,
+    /* THE ONE PIECE OF EVIDENCE THIS TURN IS ABOUT, resolved by the server from the reader's own
+       authorised objects. `opts.evidenceRef` is the page's CLAIM about what is on screen, not a
+       permission: it is checked against the bound object's own records before it means anything,
+       and it resolves to a ref and nothing else. Null here means the relation action is never
+       offered, which is the founder's "do not guess" expressed as a missing capability rather than
+       as a rule somebody has to remember. */
+    evidence: _boundEvidence(code, userId, object, opts.evidenceRef),
     conversationId: conversation && conversation.id || null,
     contextMismatch,
   };
@@ -13831,6 +13950,13 @@ function _composerActionProposals(code, userId, candidates, context, conversatio
       settle_inquiry: 'Record that this is settled', disagree_with_inquiry: 'Record your disagreement',
       request_research: 'Show cited external reading', attach_material: 'Attach this material', keep_in_library: 'Keep this live object in Library',
       create_library_folder: 'Create this Library folder', discuss_with_group: 'Open the governed discussion', navigate_to_object: 'Open this object',
+      /* A LABEL IS WHAT SOMEBODY READS BEFORE THEY PRESS CONFIRM. Without an entry here the map
+         falls through to the action's own name and the card reads `declare_focus_relation`, which
+         is an identifier in front of a person and tells them nothing about what they are agreeing
+         to. Every action in the vocabulary now has one; `composer-actions-smoke` requires it. */
+      declare_focus_relation: 'Record how you read this evidence',
+      prioritise_object: 'Keep this near the top for you',
+      unprioritise_object: 'Take this off your priorities',
     })[c.type] || c.type,
     payload: { ...c.arguments, argumentSources: c.argumentSources || {},
       context: context.object ? { kind: context.object.kind, id: context.object.id } : null, conversationId,
@@ -13867,9 +13993,21 @@ function _composerActionEffect(candidate, context) {
     target: a.target || null, reviewOn: a.reviewOn || null, outcome: a.outcome || null,
     audience: group ? { id: group.id, name: group.name } : (people.length ? { ids: people.map(p => p.id), name: people.map(p => p.name).join(', ') } : null),
     material: a.materialId && context.attachment ? { id: a.materialId, name: context.attachment.name || 'Attached material' } : null,
+    /* THE WORD, AND WHOSE IDEA IT WAS. A confirmation that does not say the model suggested
+       `supports` is asking somebody to agree to a judgement without telling them it is not yet
+       theirs. The evidence REF is deliberately not here: it is a server-resolved identifier, the
+       person is looking at the record it names, and printing an internal id at them explains
+       nothing. */
+    relation: a.relation || null, relationSource: sources.relation || null,
+    /* Said in the two clauses that matter, because both are things people assume wrongly about a
+       priority mark: it is not a level, and it is not visible to anybody else. */
+    priority: candidate.type === 'prioritise_object' ? 'on'
+      : candidate.type === 'unprioritise_object' ? 'off' : null,
     disclosure: candidate.type === 'discuss_with_group'
       ? 'Only this wording becomes visible to this audience. The private conversation and other attachments stay private.'
-      : null,
+      : (candidate.type === 'prioritise_object' || candidate.type === 'unprioritise_object')
+        ? 'This is yours alone. It changes what comes up first for you and nothing about who can see this or what anybody else thinks of it.'
+        : null,
   };
 }
 
@@ -14352,6 +14490,10 @@ app.post('/api/assistant/turn', requireAuth, async (req, res) => {
     const r = await _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId,
       subjectMemberId: req.body?.subjectMemberId, conversationId: req.body?.conversationId,
       about: req.body?.about, surface: req.body?.surface, attachment: req.body?.attachment,
+      /* WHAT THE PAGE SAYS IS IN VIEW. A claim, not a permission: `_boundEvidence` checks it
+         against the reader's own authorised objects and against the bound object's own records
+         before it decides anything, and discards it otherwise. */
+      evidenceRef: req.body?.evidenceRef,
       requestedAction: req.body?.requestedAction });
     _metric(code, 'turn');
     /* DID THIS TURN PRODUCE EVIDENCE ABOUT ME? If so the person is asked, once, which way what
@@ -15510,7 +15652,14 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
   const _invited = kind === 'focus'
     && Array.isArray(object.raw && object.raw.participants) && object.raw.participants.length > 1;
   const _forum = !!_nodeId || _invited;
+  /* WHETHER THIS READER HAS MARKED IT. Read from their OWN memory, so it is their mark and can be
+     nobody else's -- the control has to be able to say "take this off" rather than offering to add
+     a mark that is already there, and a screen that cannot tell is a screen that lies about state.
+     It is a fact about the reader, not about the object, and it travels no further than them. */
+  const _mine = Array.isArray(_getMemory(code, userId).prioritised)
+    ? _getMemory(code, userId).prioritised.map(String) : [];
   res.json({ ok: true, about: object.about, opening: object.explained, present: object.present,
+    prioritised: _mine.includes(`${kind}:${object.id}`),
     shared: _forum, forumAvailable: _forum, sharedByRule: _forum, nodeId: _nodeId,
     forumKind: _nodeId ? 'group' : (_invited ? 'focus' : null),
     conversation: conversation ? { id: conversation.id, updatedAt: conversation.updatedAt } : null,
@@ -16949,6 +17098,36 @@ app.post('/api/objects/focus/:id/evidence-relation', requireAuth, (req, res) => 
     note: 'Recorded as your call about this evidence. It says how you read it, and it changes nothing about how certain the evidence itself is.' });
 });
 
+/* POST /api/objects/:kind/:id/priority — "keep this near the top for me", and its undo.
+
+   A PERSONAL ATTENTION OVERRIDE, NOT A SCORE. The body carries one boolean and there is nothing
+   else it could carry: no level, no weight, no rank, no reason the machine has to interpret. That
+   is the whole of the vocabulary the founder decided, and a route that cannot express a number
+   cannot later be talked into storing one.
+
+   PRIVATE. It is written to the actor's own memory by `_setPersonalPriority` and touches no
+   audience, no participant list and no visibility field. Marking something changes what IntelliQ
+   brings up for you; it does not tell anybody you did it, and it does not claim the organisation
+   thinks anything.
+
+   IT SETTLES NOTHING. No inquiry moves, no confidence changes, no evidence is added. The Priority
+   Office reads the marker and puts the thing first; that is the entire effect. */
+app.post('/api/objects/:kind/:id/priority', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const body = req.body || {};
+  // Explicit, and only ever explicit. A missing field is not "off": it is a caller who did not say,
+  // and guessing which way somebody meant a toggle is how a mark gets removed by accident.
+  if (typeof body.prioritised !== 'boolean') {
+    return res.status(400).json({ error: 'prioritised must be true or false' });
+  }
+  const r = _setPersonalPriority(code, userId, req.params.kind, req.params.id, body.prioritised);
+  if (!r.ok) return res.status(r.status).json({ error: r.error });
+  res.json({ ok: true, ref: r.ref, prioritised: r.prioritised, already: !!r.already,
+    note: r.prioritised
+      ? 'Kept near the top for you. This is yours alone — it changes nothing about who can see this.'
+      : 'Taken off your priorities. It goes back to ordinary ordering.' });
+});
+
 /* GET /api/me/attention — "what deserves my attention now, and why?"
 
    SCOPE FIRST, ALWAYS. `_allObjectsFor` is the same authorised object set every other object
@@ -17606,6 +17785,24 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
       return res.json({ ok: true, confirmed: prop.actionType, outcome: result.already ? 'already' : 'recorded',
         relation: result.relation,
         note: 'Recorded as your call about this evidence. It says how you read it, and it changes nothing about how certain the evidence itself is.' });
+    }
+
+    /* THE ONLY PLACE A PRIORITY MARK IS EVER WRITTEN FROM A CONVERSATION, and it goes through the
+       same canonical owner the direct route uses. The TARGET is `ref` -- the object this turn was
+       already bound to and which the dispatcher has just re-resolved through `_allObjectsFor`
+       above -- never anything the model proposed, because the model proposed no arguments at all
+       for these two actions. */
+    if (prop.actionType === 'prioritise_object' || prop.actionType === 'unprioritise_object') {
+      const on = prop.actionType === 'prioritise_object';
+      const result = _setPersonalPriority(code, userId, ref.kind, ref.id, on);
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      prop.confirmed = { at: new Date().toISOString(), prioritised: result.prioritised }; scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType,
+        outcome: result.already ? 'already' : (on ? 'prioritised' : 'unprioritised'),
+        prioritised: result.prioritised, ref: result.ref,
+        note: on
+          ? 'Kept near the top for you. This is yours alone — it changes nothing about who can see this.'
+          : 'Taken off your priorities. It goes back to ordinary ordering.' });
     }
 
     if (prop.actionType === 'keep_in_library') {

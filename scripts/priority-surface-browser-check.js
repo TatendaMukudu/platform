@@ -213,6 +213,63 @@ _rebuildEmailIndex();
     ok('N25 …and the composer still does not trigger the iOS zoom', m.inputFs >= 16);
     ok('N26 the walk threw no page errors of the product\'s own', pageErrors.length === 0);
 
+    /* ── THE PERSONAL ATTENTION OVERRIDE, DRIVEN AS A PERSON ────────────────────────────────
+       Founder decision, September 2026. The whole point of this block is that the mark is made
+       through a SCREEN, by clicking, and then shows up on Home — the two halves that a route test
+       cannot put together. */
+    console.log('\n  PRIORITY — MARKED BY A HUMAN, ON A SCREEN');
+    await home();
+    await page.click('#iq-brief .iq-att-primary .iq-inq-topic');
+    await page.waitForTimeout(1600);
+    const markBtn = await page.$('#iq-inquiries-page button:has-text("Keep near the top")');
+    ok('N28 the object thread offers the mark, beside the other verdicts', !!markBtn);
+    await markBtn.click();
+    await page.waitForTimeout(1800);
+
+    /* A BUTTON DOES NOT OWN A MUTATION. It stages the same typed request the model may propose,
+       and confirmation still crosses the one dispatcher — so at this point nothing is marked yet
+       and there is a card asking. */
+    const marksNow = await api('GET', '/api/me/attention');
+    ok('N29 …and clicking it has NOT marked anything yet — confirmation is still owed',
+      !((marksNow.j.items || []).some(r => r.reason === 'explicitly_prioritised')));
+    const confirmBtn = await page.$('#iq-inquiries-page button:has-text("Confirm")');
+    ok('N30 …a confirmation is on screen, in the person\'s own words', !!confirmBtn);
+    if (confirmBtn) { await confirmBtn.click(); await page.waitForTimeout(1800); }
+
+    const marked = await api('GET', '/api/me/attention');
+    const first = (marked.j.items || [])[0];
+    ok('N31 after confirming, the marked thing is what the Priority Office puts first',
+      !!first && first.reason === 'explicitly_prioritised' && first.ref === 'inquiry:q1');
+    ok('N32 …because the PERSON said so, and the row says that rather than implying the club did',
+      /^You marked this/.test(String(first.why || '')) && first.detail && first.detail.byYou === true);
+
+    await home();
+    const homeMarked = await page.$eval('#iq-brief', el => el.innerText);
+    ok('N33 …and Home shows it, still as one card and still with no badge or number',
+      /Recovery between games/i.test(homeMarked) && /You marked this/i.test(homeMarked)
+      && !/\d+%|\bpriority\b|\brank\b/i.test(homeMarked));
+    ok('N34 …still at most three things on the first screen',
+      (await page.$$('#iq-brief .iq-att-primary')).length === 1
+      && (await page.$$('#iq-brief .iq-att-also')).length <= 2);
+
+    console.log('\n  PRIORITY — AND IT COMES BACK OFF');
+    await page.click('#iq-brief .iq-att-primary .iq-inq-topic');
+    await page.waitForTimeout(1600);
+    const offBtn = await page.$('#iq-inquiries-page button:has-text("Take off my priorities")');
+    ok('N35 the control now offers the undo, so it never lies about current state', !!offBtn);
+    if (offBtn) {
+      await offBtn.click(); await page.waitForTimeout(1600);
+      const c2 = await page.$('#iq-inquiries-page button:has-text("Confirm")');
+      if (c2) { await c2.click(); await page.waitForTimeout(1800); }
+    }
+    const unmarked = await api('GET', '/api/me/attention');
+    ok('N36 …and unmarking returns the list to what the record alone says',
+      !((unmarked.j.items || []).some(r => r.reason === 'explicitly_prioritised')));
+    const q1thread = await api('GET', '/api/objects/inquiry/q1/thread?scope=self');
+    ok('N37 …with the object itself untouched throughout: no visibility changed, nothing settled',
+      q1thread.j.prioritised === false && q1thread.j.shared === false
+      && String((q1thread.j.raw || {}).status || 'open') !== 'settled');
+
     console.log('\n  NOTHING WAS DONE TO ANYTHING');
     const untouched = await api('GET', '/api/objects/inquiry/q1/thread?scope=self');
     ok('N27 the surfaced inquiry is still open — surfacing settled nothing',
