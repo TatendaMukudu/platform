@@ -278,6 +278,14 @@ const server = app.listen(0, async () => {
       && typeof defenders[0].updatedAt === 'string');
     ok('OI-H2 …and the imported person is in it',
       defenders[0].memberIds.includes(g1.j.created[0].id));
+    /* OI-H2b PINS THE COMMIT ITSELF, which nothing did. Removing `_commitTreeMutation` from the
+       import left every assertion green, so "the import commits through the tree owner" was a
+       claim with no test behind it. The commit is not only a save: it calls `_backfillUserNodeIds`,
+       which rebuilds `user.assignedNodeIds` from node membership — and THAT is what scope reads.
+       Without it an imported person sits in the node's memberIds while being, to every visibility
+       computation in the product, in no unit at all. */
+    ok('OI-H2b …and their SCOPE knows it, because the import went through the tree commit',
+      (orgUsers[A][g1.j.created[0].id].assignedNodeIds || []).includes(defenders[0].nodeId));
     const g2 = await imp([{ name: 'Group Two', email: 'g2@onba.test', group: 'defenders' }]);
     ok('OI-H3 a second import naming the same group differently-cased reuses the node',
       g2.status === 200 && Object.values(orgNodes[A]).filter(n => /^defenders$/i.test(String(n.name))).length === 1);

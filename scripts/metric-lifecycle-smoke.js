@@ -93,6 +93,16 @@ const server = app.listen(0, async () => {
     }
     ok('ML-B3 …and after all of that the metric still has the name the coach gave it',
       (await list()).find(m => m.metricId === id).name === 'Recovery');
+    /* ML-B3b EXISTS BECAUSE ML-B4 COULD NOT BITE. A gate mutation changed the rename to validate
+       `metricName(req.body.name)` and then store `req.body.name` RAW, which would put "  Padded  "
+       in the store — and every assertion stayed green, because no test ever renamed with padding
+       and ML-B4 only inspects the names that happen to be there. An assertion over a set that
+       never contains the bad case is the empty-fixture lie. */
+    const padded = await req('PUT', `/api/metrics/${id}`, { name: '   Padded Name   ' });
+    ok('ML-B3b a rename TRIMS what it stores, rather than validating one string and storing another',
+      padded.status === 200 && padded.j.metric.name === 'Padded Name'
+      && (await list()).find(m => m.metricId === id).name === 'Padded Name');
+    await req('PUT', `/api/metrics/${id}`, { name: 'Recovery' });   // put it back for ML-B3
     ok('ML-B4 …and no metric in the store has a name that is not a trimmed non-empty string',
       (await list()).every(m => canonical.metricName(m.name) === m.name));
     ok('ML-B5 an order that is not a number is refused rather than written into the sort key',

@@ -86,6 +86,12 @@ ok('PX-A9 asking for a Focus in so many words starts one, in every phrasing a co
 ok('PX-A10 …and the same words in a QUESTION still do not, so the guard is not simply weakened',
   ['What should I create a focus for?', 'How do I create a focus?', 'Should I make this a focus?',
     'Can you set up a focus?', 'Which focus should I add?'].every(q => titled(propose(q)) === null));
+/* PX-A9b EXISTS BECAUSE PX-A9 COULD NOT BITE ON THE ANCHOR. A gate mutation anchored the family
+   to `^`, so only a sentence STARTING with the request would be taken — and every phrasing in
+   PX-A9 starts with it, so nothing went red. People do not always open with the verb. */
+ok('PX-A9b …including when the request is not the first thing in the sentence',
+  ['I would like to create a focus for recovery', 'Actually, create a focus for recovery',
+    'Please set up a focus for sleep', 'Right, new focus: recovery'].every(t => titled(propose(t)) === t));
 ok('PX-A11 …and a sentence merely CONTAINING the word focus is not a request to create one',
   titled(propose('My focus has been all over the place lately')) === null
   && titled(propose('That focus is finished')) === null);
@@ -116,6 +122,26 @@ ok('PX-B5 nothing outside the canonical owner mints a metric id',
   && /met_/.test(R('ai/metric-record.js')));
 ok('PX-B6 …and no second djb2 hash was copied out of it to derive one',
   ['scripts/seed-alma.js', 'js/app.js'].every(f => !/5381/.test(decomment(R(f)))));
+
+/* PX-B6b — THE SAME OWNERSHIP QUESTION, FOR TREE NODES, and it needs its own assertion for the
+   reason the metric one does. A gate mutation replaced the importer's call to `_addTreeNode` with
+   a FAITHFUL re-implementation — same id prefix, same fields, same duplicate scan — and every
+   behavioural assertion stayed green, correctly, because the behaviour was identical. Behaviour
+   tests cannot see a second owner on the day it is written; they see it on the day the two copies
+   drift, which is too late. One place mints a node id, and this is what says so. */
+/* The first version of this counted the literal `'nd_' + generateId()`, spaces and all — so a copy
+   written `'nd_'+generateId()` slipped straight past it, which the gate mutation proved. Counting
+   an exact spelling is the vacuous-regex lie wearing a different hat. Any concatenation of the
+   prefix with anything is what gets counted now. */
+const MINTS_NODE_ID = /(['"`]nd_['"`]\s*\+)|(\+\s*['"`]nd_)|(`nd_\$\{)/g;
+ok('PX-B6b exactly one place in the server mints an Org Tree node id, however it is spelled',
+  (SERVER.match(MINTS_NODE_ID) || []).length === 1);
+ok('PX-B6c …and it is inside the canonical owner, not in a route or an importer',
+  (() => {
+    const owner = SERVER.slice(SERVER.indexOf('function _addTreeNode(code,'));
+    const body  = owner.slice(0, owner.indexOf('\napp.post('));
+    return body.length > 200 && new RegExp(MINTS_NODE_ID.source).test(body);
+  })());
 ok('PX-B7 the SETTINGS renderer can never print "undefined" at a person, whatever shape reaches it',
   (() => {
     // Scoped to the one renderer that showed it. `${m.name}` is correct elsewhere, on paths fed
@@ -225,6 +251,27 @@ ok('PX-E7 …every failed address is rendered with its reason',
   /failures\.map\(/.test(BATCH) && /f\.reason/.test(BATCH));
 ok('PX-E8 …failed addresses stay in the box and succeeded ones do not, so a resubmit cannot double a link',
   /box\.value = failures\.map/.test(BATCH));
+/* ── AND THE ONE THE PREVIOUS ROUND BROKE WHILE FIXING ITS SERVER ───────────────────────────────
+   `bulk-import` was corrected to stop returning `ok: true` over failed rows. The client's
+   `if (!data.ok) throw new Error(data.error || 'Import failed')` then turned that correction into
+   the opposite lie: a three-row file with one bad address created two real accounts and the
+   screen said "Import failed" — no counts, no failed row, and no roster refresh, because the
+   throw skipped it. Nothing tested this function, so it went green through CI.
+
+   The behavioural proof is in scripts/onboard-browser-check.js (section D), which drives the real
+   `_submitImport`. That suite needs a browser and is deliberately not in `npm test`, so this pins
+   the same law hermetically: the whole-request refusal is what throws, never the per-row report. */
+const IMPORTFN = APP.slice(APP.indexOf('async function _submitImport()'),
+                           APP.indexOf('async function _submitEmailInvites()'));
+ok('PX-E9c a partial import is a per-row REPORT, so only a refused request throws',
+  IMPORTFN.length > 400 && /if \(!res\.ok\) throw/.test(IMPORTFN)
+  && !/if \(!data\.ok\) throw/.test(IMPORTFN));
+ok('PX-E9d …the count says how many of how many, and every failed row is rendered with its reason',
+  /of \$\{data\.total \?\? _importRows\.length\} imported/.test(IMPORTFN)
+  && /failed\.map\(/.test(IMPORTFN) && /f\.reason/.test(IMPORTFN));
+ok('PX-E9e …and the roster is refreshed whatever the per-row outcome was',
+  IMPORTFN.indexOf('loadRealOrgData') > IMPORTFN.indexOf('failed.map('));
+
 /* The same pattern, in a second place, found while checking for mutation residue: adding
    AI-suggested metrics counted only successes and toasted "success" whatever happened. */
 ok('PX-E9b the metric bulk-add says how many of how many, and names what was refused',

@@ -179,6 +179,97 @@ _rebuildEmailIndex();
       (S.orgNodes[C].n1.memberIds || []).filter(id =>
         (S.orgUsers[C][id] || {}).email === 'injected@example.com').length === 1);
     ok('OB-C8 …and no page error was thrown by any of it', B.errs.length === 0 || console.log('     errors:', B.errs) || false);
+
+    /* ══ D — A PARTIAL CSV IMPORT IS NOT "IMPORT FAILED" ══════════════════════════════════════
+       Found by this gate, and it was shipped green through CI because NOTHING tested this
+       function. When the route was corrected to stop claiming blanket success, the client's
+       `if (!data.ok) throw new Error(data.error || 'Import failed')` turned that correction into
+       the opposite lie: a three-row file with one bad address created two real accounts, and the
+       screen said "Import failed". The coach was told nobody was imported while two people had
+       accounts, was never shown which row was wrong, and the roster was never refreshed because
+       the throw skipped it. */
+    console.log('\n  D — A PARTIAL CSV IMPORT REPORTS EVERY ROW');
+    const imported = await B.page.evaluate(async () => {
+      _openOnboardSection('import');
+      await new Promise(r => setTimeout(r, 400));
+      // The exact shape _previewImportFile produces from a parsed CSV.
+      _importRows = [
+        { name: 'Row One', email: 'row1@example.com', role: 'member' },
+        { name: 'Row Two', email: 'row2@example.com', role: 'member' },
+        { name: 'Row Bad', email: 'not-an-address',   role: 'member' },
+      ];
+      await _submitImport();
+      await new Promise(r => setTimeout(r, 900));
+      return (document.getElementById('ob-import-result') || {}).innerText || '';
+    });
+    ok('OB-D1 the screen does NOT say the import failed when two accounts were created',
+      !/^Import failed/.test(imported.trim()) && !/^Could not/i.test(imported.trim()));
+    ok('OB-D2 …it says how many of how many', /2 of 3 imported/.test(imported));
+    ok('OB-D3 …and names the row that could not be imported, with the reason',
+      /Row Bad/.test(imported) && /Invalid email/i.test(imported));
+    ok('OB-D4 the two accounts really do exist on the server, so the screen was telling the truth',
+      ['row1@example.com', 'row2@example.com']
+        .every(e => Object.values(S.orgUsers[C]).some(u => u.email === e))
+      && !Object.values(S.orgUsers[C]).some(u => u.email === 'not-an-address'));
+    ok('OB-D5 …and a clean import still reads as a plain success',
+      await B.page.evaluate(async () => {
+        _importRows = [{ name: 'Row Three', email: 'row3@example.com', role: 'member' }];
+        await _submitImport();
+        await new Promise(r => setTimeout(r, 800));
+        const t = (document.getElementById('ob-import-result') || {}).innerText || '';
+        return /1 of 1 imported/.test(t) && !/could not be imported/.test(t);
+      }));
+    ok('OB-D6 …and no page error was thrown by any of it', B.errs.length === 0 || console.log('     errors:', B.errs) || false);
+
+    /* ══ E — A RETRY THAT ALSO FAILS IS STILL RETRYABLE ═══════════════════════════════════════
+       OB-C6 only ever exercised a retry that SUCCEEDED. If the first retry fails too — a
+       genuinely contended tree, or an operator without manage_tree — the control must survive,
+       or the placement state is lost and the account is stranded outside its unit with no way
+       back except editing the Org Tree by hand. */
+    console.log('\n  E — A RETRY THAT ALSO FAILS IS STILL RETRYABLE');
+    const stubborn = await B.page.evaluate(async () => {
+      const realFetch = window.fetch;
+      window.fetch = (u, o) => (String(u).includes('/api/tree/node/')
+        ? Promise.resolve(new Response(JSON.stringify({ error: 'conflict' }), { status: 409 }))
+        : realFetch(u, o));
+      _openOnboardSection('add');
+      await new Promise(r => setTimeout(r, 400));
+      document.getElementById('ob-add-first').value = 'Stubborn';
+      document.getElementById('ob-add-last').value  = 'Case';
+      document.getElementById('ob-add-email').value = 'stubborn@example.com';
+      const sel = document.getElementById('ob-add-node');
+      if (sel) sel.value = 'n1';
+      await _submitAddPerson();
+      await new Promise(r => setTimeout(r, 800));
+      // First retry, still refused.
+      document.querySelector('#ob-add-assign button').click();
+      await new Promise(r => setTimeout(r, 900));
+      const after = (document.getElementById('ob-add-assign') || {}).innerText || '';
+      const stillThere = !!document.querySelector('#ob-add-assign button');
+      // Second retry, this time the tree answers normally.
+      window.fetch = realFetch;
+      let placed = false;
+      if (stillThere) {
+        document.querySelector('#ob-add-assign button').click();
+        await new Promise(r => setTimeout(r, 900));
+        placed = /Placed\./.test((document.getElementById('ob-add-assign') || {}).innerText || '');
+      }
+      return { after, stillThere, placed };
+    });
+    ok('OB-E1 a retry that also fails says so', /Still not placed/.test(stubborn.after));
+    ok('OB-E2 …and does NOT take the retry control away with it', stubborn.stillThere === true);
+    ok('OB-E3 …so the third attempt can still place them once the tree is free', stubborn.placed === true);
+    ok('OB-E4 …exactly once, with no duplicate membership from three attempts',
+      (S.orgNodes[C].n1.memberIds || []).filter(id =>
+        (S.orgUsers[C][id] || {}).email === 'stubborn@example.com').length === 1);
+    /* OB-E5 REACHES THE CASE THE OTHERS CANNOT. Every retry above ran while the person was NOT
+       yet in the node, so removing the already-present check was a no-op and nothing went red —
+       PROTOCOL's ninth lie. Idempotency only means anything AFTER a successful placement, so
+       this calls the real function once more on somebody who is already there. */
+    const stubbornId = Object.values(S.orgUsers[C]).find(u => u.email === 'stubborn@example.com').id;
+    ok('OB-E5 placing somebody who is ALREADY in the unit is a no-op, not a second membership',
+      await B.page.evaluate(async id => (await _assignMemberToNode('n1', id)) === '', stubbornId)
+      && (S.orgNodes[C].n1.memberIds || []).filter(x => x === stubbornId).length === 1);
   } catch (e) {
     fail++; console.error('  FAIL onboard browser check threw:', e && e.stack);
   }

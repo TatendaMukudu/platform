@@ -3643,10 +3643,36 @@ async function _submitImport() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ orgCode: AppState.orgCode, users: _importRows }),
     });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || 'Import failed');
-    if (resEl) resEl.innerHTML = `<span style="color:var(--success)">${data.created.length} imported${data.skipped.length ? `, ${data.skipped.length} skipped (already exist)` : ''}.</span>`;
-    showToast(`${data.created.length} people imported`, 'success');
+    const data = await res.json().catch(() => ({}));
+    /* ── `ok: false` MEANS "NOT EVERY ROW", NOT "NOTHING HAPPENED" ──────────────────────────────
+       This line used to be `if (!data.ok) throw new Error(data.error || 'Import failed')`, and
+       when the route was corrected to stop claiming blanket success it turned that correction
+       into a worse lie in the other direction. Reproduced: a three-row file with one bad address
+       created two real accounts, returned `ok:false` with no `error` field, and the screen said
+       "Import failed". Two people had accounts; the coach was told nobody did, was never shown
+       which row was wrong, and the roster was never refreshed because the throw skipped it.
+
+       A refusal of the WHOLE request — 401, 403, 404, 413 — is a different thing and still
+       throws: nothing was created, and `error` says why. A 200 is a per-row report, and every
+       row is accounted for below. */
+    if (!res.ok) throw new Error(data.error || 'Import failed');
+
+    const created = data.created || [], skipped = data.skipped || [], failed = data.failed || [];
+    const line = [
+      `${created.length} of ${data.total ?? _importRows.length} imported`,
+      skipped.length ? `${skipped.length} already existed` : '',
+      failed.length  ? `${failed.length} could not be imported` : '',
+    ].filter(Boolean).join(' · ');
+    if (resEl) resEl.innerHTML =
+      `<div style="color:var(--${failed.length ? 'warning' : 'success'});font-weight:600;margin-bottom:0.4rem">${_escHtml(line)}.</div>`
+      + failed.map(f => `<div style="margin-bottom:0.3rem;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:8px;font-size:var(--fs)">
+          <span style="font-weight:600">${_escHtml(typeof f.row === 'string' ? f.row : JSON.stringify(f.row))}</span>
+          <span style="color:var(--text-secondary)"> — ${_escHtml(f.reason || 'refused')}</span>
+        </div>`).join('');
+    showToast(failed.length ? `${created.length} imported, ${failed.length} not` : `${created.length} people imported`,
+      failed.length ? 'warning' : 'success');
+    // Outside the old throw's shadow: the accounts exist either way, so the roster is refreshed
+    // either way. It used to be skipped on any partial failure.
     await loadRealOrgData();
     _renderOnboardRecent();
   } catch(e) {
