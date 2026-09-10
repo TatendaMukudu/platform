@@ -15,7 +15,7 @@ in PR #88's own suite that could not go red**.
 | --- | --- |
 | `origin/main` | `680516631c5e53b6c86bc5d436a98efe8eea630f` |
 | PR #88 head on arrival (matches the expected head) | `057b380d31abd51ac60fe7558cb7a1d5af1128a5` |
-| PR #88 head on leaving | see the final commit on `claude/pilot-crackdown-r1` |
+| PR #88 head on leaving | `ad80306fd44e8d203721a1d3d7a5f40d3af4b266` |
 
 Push-connectivity check, run first as `AGENTS.md` requires:
 `git push --dry-run -u origin HEAD:claude/pilot-crackdown-r1` → `Everything up-to-date`. Push works.
