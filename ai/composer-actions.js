@@ -145,7 +145,7 @@ function normalize(result, context = {}) {
    named object already present in the server-built context. Suggested Focus/forum
    wording is allowed, but is marked so the confirmation surface can name it as a
    suggestion rather than silently attributing it to the person. */
-function ground(reading = {}, { text = '', priorMessages = [], context = {} } = {}) {
+function ground(reading = {}, { text = '', priorMessages = [], context = {}, requested = false } = {}) {
   const current = String(text || '');
   const priorUser = (priorMessages || []).filter(m => m && m.role === 'user')
     .map(m => String(m.text || '')).filter(Boolean);
@@ -168,12 +168,51 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {} } = 
       args.text = raw.text;
       sources.text = stated(raw.text) ? 'user_stated' : 'model_suggested';
     }
-    if (!args.text && ['create_focus', 'discuss_with_group'].includes(action.type) && /\b(this|that|it)\b/i.test(current)) {
+    /* ── A QUESTION IS NOT A COMMITMENT ─────────────────────────────────────────────────────
+       Both fallbacks below manufacture a Focus TITLE out of the person's raw words when the
+       model proposed create_focus and supplied none. Neither asked whether the person had said
+       anything resembling intent — so on a real phone, asking "Why is this the thing worth
+       looking at, and what is it resting on?" produced a proposal to start a Focus called
+       exactly that. Seven ordinary questions did the same, in every object context.
+
+       The rule the product already applies everywhere else is the fix: a consequential value is
+       taken from the turn only when the turn EXPLICITLY carries it. `record_focus_outcome` will
+       not accept "helped" unless the person wrote "helped"; `visibility` will not widen unless
+       the person wrote "share". `create_focus` was the one consequential action that would take
+       anything at all.
+
+       THIS IS SYNTAX, NOT SENTIMENT. It reads the shape of the sentence — is it phrased as a
+       question, does it contain a stated intent to act — exactly as the outcome check reads for
+       a literal word. It does not classify mood, infer direction, or decide what somebody meant.
+       That distinction is the one PROTOCOL draws, and it is the reason no lexicon is returning
+       here by the back door.
+
+       A CONTROL IS ITSELF THE DECLARATION. "Work on this" on an object thread stages this action
+       and then asks the person what they want to change; they answer with a bare noun phrase
+       ("Sharper first touch") that carries no marker and is not a question. That is intent
+       already declared by pressing the button, so `requested` bypasses the test. Only the
+       model-proposed path has to find intent in the words, because only there is intent in
+       doubt. */
+    const _isQuestion = t => /\?\s*$/.test(String(t).trim())
+      || /^\s*(why|what|who|whom|whose|when|where|which|how|should|shall|could|can|would|will|do|does|did|is|are|was|were|am|tell me|explain|show me)\b/i.test(t);
+    const _statesIntent = t => /\b(work(?:ing)? on|focus on|start a focus|make (?:this )?a focus|commit to|i want to|i'?m going to|i am going to|i need to|i'?ll|let me|let'?s|going to try|try to|get better at|improve|practi[cs]e)\b/i.test(t);
+    const _mayTakeWording = requested || (_statesIntent(current) && !_isQuestion(current));
+
+    if (!args.text && ['create_focus', 'discuss_with_group'].includes(action.type)
+        && /\b(this|that|it)\b/i.test(current)
+        && (action.type === 'discuss_with_group' || _mayTakeWording)) {
       const antecedent = priorUser[priorUser.length - 1];
       if (antecedent) { args.text = antecedent.slice(0, 300); sources.text = 'user_stated_reference'; }
     }
-    if (!args.text && ['create_focus', 'create_inquiry'].includes(action.type) && current.trim()) {
+    if (!args.text && ['create_focus', 'create_inquiry'].includes(action.type) && current.trim()
+        && _mayTakeWording) {
       args.text = current.trim().slice(0, 300); sources.text = 'user_stated';
+    }
+    if (!args.text && action.type === 'create_focus' && current.trim() && !_mayTakeWording) {
+      // Say why nothing happened. Silence after a question that the model read as intent is how
+      // somebody learns not to trust the surface.
+      needsClarification = needsClarification
+        || 'I can answer that, or start a focus on it — say what you would want to change and I will set one up.';
     }
     if (action.type === 'disagree_with_inquiry' && !args.because && current.trim()) {
       args.because = current.trim().slice(0, 600); sources.because = 'user_stated';
@@ -255,6 +294,9 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {} } = 
       // A half-formed relation proposal would reach a confirmation card that could not say what
       // confirming it would do.
       : action.type === 'declare_focus_relation' ? ['evidenceRef', 'relation']
+      // A create_focus with no lawful wording is not a weaker proposal, it is an untitled
+      // commitment. Dropped, with the clarification above explaining what would start one.
+      : action.type === 'create_focus' ? ['text']
       : action.type === 'record_focus_outcome' ? ['outcome'] : [];
     if (required.some(k => !args[k])) continue;
     actions.push({ ...action, arguments: args, argumentSources: sources });

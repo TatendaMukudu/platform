@@ -2965,7 +2965,14 @@ async function renderMetricsSettings() {
     el.innerHTML = AppState.orgMetrics.map((m, i) => `
       <div style="display:flex;align-items:center;gap:0.5rem;padding:0.55rem 0;border-bottom:1px solid var(--border)">
         <span style="font-size:var(--fs);color:var(--text-muted);width:20px;text-align:right">${i+1}</span>
-        <span style="flex:1;font-size:var(--fs-md);font-weight:500">${m.name}</span>
+        <span style="flex:1;font-size:var(--fs-md);font-weight:500">${
+          /* NEVER "undefined" IN FRONT OF A PERSON (product law 4). The schema mismatch that
+             caused this is fixed at its source -- the seed now writes canonical records and a
+             startup migration repairs data already stored -- so this line should never need the
+             fallback. It is here because a renderer that prints undefined when handed an
+             unexpected shape is its own defect, independent of what put the shape there, and the
+             three other metric call sites in this file already read it exactly this way. */
+          _escHtml(m && m.name ? m.name : (typeof m === 'string' ? m : 'Unnamed metric'))}</span>
         <span style="font-size:var(--fs-sm);color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:1px 6px">${m.source || 'org'}</span>
         ${Auth.canDo('manage_metrics') ? `
           <button onclick="deleteMetric('${m.metricId}')" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:var(--fs-md);padding:2px 4px" title="Delete"></button>` : ''}
@@ -3204,7 +3211,15 @@ function renderOnboardHub() {
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0.75rem;margin-bottom:1.5rem">
       ${_onboardCard('add',    '', 'Add Member',         'Add one person with their email',   color)}
       ${_onboardCard('import', '', 'Import Spreadsheet', 'Upload a CSV or XLSX file',         color)}
-      ${_onboardCard('invite', '',  'Invite by Email',    'Send personalised email invites',   color)}
+      ${/* HONEST LABEL. This card said "Invite by Email / Send personalised email invites" while
+            the panel it opens admitted, in its own body text, that "Email delivery is not yet
+            active - you copy and send the link yourself." Nothing in this repository sends email:
+            there is no provider, no SMTP client, no queue and no send call. The card was the only
+            place claiming otherwise, and it is the part a coach reads first.
+
+            What the feature ACTUALLY does is real and useful - it mints one unique invite link
+            per address - so the name now says that instead of being removed. */''}
+      ${_onboardCard('invite', '',  'Invite by Email',    'Create one invite link per email address', color)}
       ${_onboardCard('link',   '', 'Generate Join Link', 'Shareable self-registration link',  color)}
     </div>
 
@@ -3284,10 +3299,10 @@ function _openOnboardSection(section) {
   } else if (section === 'invite') {
     el.innerHTML = `
       <div class="card" style="margin-bottom:0">
-        <div class="card-header"><div class="card-title">Invite by Email</div></div>
+        <div class="card-header"><div class="card-title">Invite links by email address</div></div>
         <div class="card-body">
           <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
-            Enter email addresses, one per line. Each gets a unique invite link to copy and share. (Email delivery is not yet active — you copy and send the link yourself.)
+            Enter email addresses, one per line. Each one gets its own invite link for you to copy and send. IntelliQ does not send the email — nothing is delivered until you share the link yourself.
           </div>
           <textarea id="ob-invite-emails" class="form-input" rows="4"
             placeholder="john@company.com&#10;sarah@company.com&#10;alex@company.com" style="margin-bottom:0.6rem;font-family:monospace"></textarea>
@@ -8947,15 +8962,58 @@ const MemberApp = {
 
   openShelfFolder(id) { this._shelfFolder = id || null; this._renderShelf(); },
 
-  async newShelfFolder() {
-    const name = prompt('Name this folder');
-    if (!name || !name.trim()) return;
+  /* ── NAMING A FOLDER, IN THE PRODUCT ──────────────────────────────────────────────────────
+     This was `prompt('Name this folder')`. A native dialog is a different application
+     interrupting: it carries the browser's chrome and the site's hostname, it cannot be styled,
+     it blocks the page, and on an iPhone it looks like a security dialogue rather than part of
+     IntelliQ. The founder hit it on a real phone and it reads as something has gone wrong.
+
+     No new modal system: this is the same `.iq-field` inline row the composer and the continuity
+     prompt already use. It opens in place, Enter commits, Escape closes, and nothing is created
+     until the person presses Create. */
+  newShelfFolder() {
+    const box = document.getElementById('iq-shelf-newfolder');
+    if (!box) return;
+    if (box.dataset.open === '1') { this._closeShelfFolder(); return; }
+    box.dataset.open = '1';
+    box.innerHTML = `
+      <div class="iq-field">
+        <input type="text" class="iq-field-input" id="iq-shelf-foldername" maxlength="60"
+          placeholder="Name this folder" aria-label="Name this folder"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();MemberApp._createShelfFolder()}
+                     else if(event.key==='Escape'){event.preventDefault();MemberApp._closeShelfFolder()}">
+      </div>
+      <div class="iq-proposal-actions">
+        <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._createShelfFolder()">Create</button>
+        <button type="button" class="btn-ghost btn-sm" onclick="MemberApp._closeShelfFolder()">Cancel</button>
+      </div>
+      <div class="iq-fp-said" id="iq-shelf-foldersaid" role="status" aria-live="polite"></div>`;
+    const i = document.getElementById('iq-shelf-foldername');
+    if (i) i.focus();
+  },
+
+  _closeShelfFolder() {
+    const box = document.getElementById('iq-shelf-newfolder');
+    if (box) { box.dataset.open = '0'; box.innerHTML = ''; }
+  },
+
+  async _createShelfFolder() {
+    const input = document.getElementById('iq-shelf-foldername');
+    const said = document.getElementById('iq-shelf-foldersaid');
+    const name = String((input && input.value) || '').trim();
+    // An empty name is not an error to shout about — it is somebody who has not typed yet.
+    if (!name) { if (input) input.focus(); return; }
+    if (said) said.textContent = 'Creating…';
     try {
       const r = await fetch('/api/library/folders', { method: 'POST', headers: this._authHeaders(),
-        body: JSON.stringify({ name: name.trim() }) });
+        body: JSON.stringify({ name }) });
       if (!r.ok) throw new Error(String(r.status));
+      this._closeShelfFolder();
       await this._renderShelf();
-    } catch (_) { this.showToast('That folder could not be made. Nothing has changed.', 'warning'); }
+    } catch (_) {
+      if (said) said.textContent = 'That folder could not be made. Nothing has changed.';
+      else this.showToast('That folder could not be made. Nothing has changed.', 'warning');
+    }
   },
 
   /* KEEP THIS — the control that fills the shelf up, called from an object card.
@@ -11009,7 +11067,22 @@ const MemberApp = {
     box.innerHTML = `<div class="iq-fp-audrow">${list.map((a, i) => `
       <button type="button" class="iq-make-chip${i === 0 ? ' is-on' : ''}" id="${esc(id)}-aud-${i}"
         onclick="MemberApp._pickAudience('${esc(id)}',${i})">${esc(a.label)}${
-        Number.isFinite(a.reaches) && a.kind !== 'self' ? ` <span class="iq-aud-n">${esc(a.reaches)}</span>` : ''}</button>`).join('')}</div>`;
+        /* THE COUNT SAYS WHAT IT COUNTS. This rendered the reach as a BARE INTEGER directly after
+           the group name — `${label} <span>1</span>` — with a span carrying no margin, no unit and
+           no delimiter. At chip size the gap disappears and a real coach read
+           "Coaching staff · Alma College Men's Soccer1" and reasonably took the 1 for part of the
+           name. The number was never wrong; it was never labelled.
+
+           The intended form is written down in two other places already — the route that produces
+           this field says "Coaching staff · Men's Soccer (2 people)", and _pickAudience below says
+           "Right now that is 1 person." This chip was the one copy that drifted, so it is brought
+           back to the house form rather than being nudged apart with a margin: a spacing fix would
+           have left a bare number sitting next to a name, which is the actual defect.
+
+           A group genuinely named "Squad 1" still reads correctly, because the count is now
+           parenthesised and carries its own noun. */
+        Number.isFinite(a.reaches) && a.kind !== 'self'
+          ? ` <span class="iq-aud-n">(${esc(a.reaches)} ${a.reaches === 1 ? 'person' : 'people'})</span>` : ''}</button>`).join('')}</div>`;
     this._pickAudience(id, 0);
   },
 
@@ -13134,8 +13207,40 @@ const MemberApp = {
     else if (j && j.navigate) this.openObjectThread(j.navigate.kind, j.navigate.id);
     return j;
   },
+  /* ── CORRECTING A PROPOSAL, IN THE CARD ───────────────────────────────────────────────────
+     This opened `window.prompt(...)`. On the governed-discussion path the founder walked, that
+     put a browser dialog over a confirmation card at the exact moment somebody is deciding what
+     to share — the worst possible place for a control that looks like it belongs to the browser
+     rather than to IntelliQ.
+
+     Opened INSIDE the proposal card instead, using the same `.iq-field` row the rest of the
+     product uses. The correction still goes through the same route; only the way it is asked
+     for has changed. Called again WITH text (from the inline field) it proceeds exactly as
+     before, so the server contract is untouched. */
   async correctProposal(turnId, proposalId, correction) {
-    const c = correction || window.prompt('What should I change? (e.g. "just a note", "keep this private", "do not remind me")');
+    if (!correction) {
+      const card = document.querySelector(`[data-proposal="${proposalId}"]`);
+      if (!card) return null;
+      let box = card.querySelector('.iq-correct-box');
+      if (box) { box.remove(); return null; }          // tapping Edit again closes it
+      const esc = s => this._escape(String(s == null ? '' : s));
+      card.insertAdjacentHTML('beforeend', `
+        <div class="iq-correct-box">
+          <div class="iq-field"><textarea class="iq-field-input" id="corr-${esc(proposalId)}" rows="2"
+            placeholder="What should I change? For example: just a note, keep this private, do not remind me"
+            aria-label="What should I change?"></textarea></div>
+          <div class="iq-proposal-actions">
+            <button type="button" class="btn btn-outline btn-sm"
+              onclick="MemberApp._sendCorrection('${esc(turnId)}','${esc(proposalId)}')">Send that</button>
+            <button type="button" class="btn-ghost btn-sm"
+              onclick="this.closest('.iq-correct-box').remove()">Cancel</button>
+          </div>
+        </div>`);
+      const t = card.querySelector(`#corr-${CSS.escape(String(proposalId))}`);
+      if (t) t.focus();
+      return null;
+    }
+    const c = correction;
     if (!c) return null;
     const r = await fetch(`/api/assistant/turn/${turnId}/correct`, { method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, correction: c }) });
@@ -13144,6 +13249,18 @@ const MemberApp = {
     if (cardEl && j.ok) cardEl.querySelector('.iq-proposal-why')?.insertAdjacentHTML('beforeend', ` <em class="iq-corrected">(updated: ${this._escape((j.applied || []).join(', ') || 'noted')})</em>`);
     return j;
   },
+  /* Reads the inline field and hands the text to the one correction path. Split out so the
+     onclick above stays a single call and the route keeps exactly one caller. */
+  async _sendCorrection(turnId, proposalId) {
+    const card = document.querySelector(`[data-proposal="${proposalId}"]`);
+    const t = card && card.querySelector('.iq-correct-box .iq-field-input');
+    const text = String((t && t.value) || '').trim();
+    if (!text) { if (t) t.focus(); return null; }
+    const box = card.querySelector('.iq-correct-box');
+    if (box) box.remove();
+    return this.correctProposal(turnId, proposalId, text);
+  },
+
   // Dismiss is a client-side hide of a proposal — nothing was persisted, so nothing to undo.
   dismissProposal(proposalId) { const el = document.querySelector(`[data-proposal="${proposalId}"]`); if (el) el.remove(); },
 

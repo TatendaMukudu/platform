@@ -13923,7 +13923,12 @@ async function _composerActionInterpret(code, text, context, priorMessages, requ
   let reading;
   if (requestedAction) {
     reading = composerActions.normalize({ actions: [{ type: requestedAction.type, arguments: requestedAction.arguments || {}, reason: 'selected from the current view' }] }, context);
-    return composerActions.ground(reading, { text, priorMessages, context });
+    /* THE PERSON PRESSED THE CONTROL. "Work on this" stages create_focus and then asks what they
+       want to change; the answer is a bare noun phrase, not a sentence declaring intent, and it
+       is not a question. Intent was declared by the press, so grounding does not have to find it
+       in the wording. The model-proposed path below passes no such flag, which is the whole point:
+       there, intent is exactly what is in doubt. */
+    return composerActions.ground(reading, { text, priorMessages, context, requested: true });
   }
   if (!ai.enabled() || ai.deterministicOnly()) return { actions: [], needsClarification: null, unavailable: true };
   try {
@@ -18374,6 +18379,67 @@ app.get('/api/org/divisions', requireAuth, (req, res) => {
    Three sources: org (superadmin-defined), shared (leader), personal (member)
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* ── WHAT A METRIC IS ──────────────────────────────────────────────────────────────────────────
+   THE CANONICAL SHAPE IS THE ONE THE WRITER PRODUCES: `POST /api/metrics` has always stored
+   `{ metricId, name, source, order, createdAt }`. Nothing else was ever a metric — but the Alma
+   seed wrote plain STRINGS into the same store, and `GET /api/metrics` handed them straight out.
+
+   That single mismatch produced three live defects, only one of which was visible:
+
+     1. Settings rendered `m.name` on a string and showed "1 undefined / 2 undefined / ...",
+        which is product law 4 broken in front of a coach;
+     2. `PUT /api/metrics/:metricId` could never find a seeded metric, so none could be renamed;
+     3. `deleteMetric` could never find one either, so none could be removed.
+
+   Two and three were silent. A coach would have found them the first time they tried to tidy the
+   list, which is exactly the week of the pilot.
+
+   ONE OWNER, USED BY EVERY PATH. The seed builds metrics through this function, the migration
+   below repairs data already written through it, and the route returns what it produced. A second
+   normaliser somewhere else is how the two shapes got here in the first place.
+
+   THE ID IS DERIVED, NOT MINTED. `met_<hash of the name>` is stable across restarts, so the
+   migration is idempotent: run it a hundred times and a metric keeps the id it had, and the links
+   from anything referencing it do not rot. A random id would have made every boot produce a new
+   metric identity for the same metric. */
+function _metricRecord(entry, order = 0) {
+  if (entry && typeof entry === 'object') {
+    // Already canonical, or nearly: fill only what is genuinely absent. An existing metricId is
+    // never rewritten — that would break every reference to it.
+    const name = String(entry.name == null ? '' : entry.name).trim();
+    if (!name) return null;
+    return {
+      metricId: String(entry.metricId || `met_${_contentHash('metric:' + name)}`),
+      name,
+      source: entry.source || 'org',
+      order: Number.isFinite(entry.order) ? entry.order : order,
+      createdAt: entry.createdAt || new Date().toISOString(),
+    };
+  }
+  const name = String(entry == null ? '' : entry).trim();
+  if (!name) return null;
+  return { metricId: `met_${_contentHash('metric:' + name)}`, name, source: 'org', order,
+    createdAt: new Date().toISOString() };
+}
+
+/* Repair metrics written before the shape was enforced. Idempotent by construction: a record that
+   is already canonical hashes to the same id and compares equal, so a healthy store is untouched
+   and nothing is rewritten or re-saved. Runs once at startup beside the other migrations. */
+function _migrateLegacyMetrics() {
+  let repaired = 0;
+  for (const code of Object.keys(orgMetrics || {})) {
+    const list = Array.isArray(orgMetrics[code]) ? orgMetrics[code] : [];
+    if (!list.some(m => typeof m !== 'object' || m === null || !m.metricId || !m.name)) continue;
+    orgMetrics[code] = list.map((m, i) => _metricRecord(m, i)).filter(Boolean);
+    repaired += orgMetrics[code].length;
+  }
+  if (repaired) {
+    console.log(`[metrics] normalised ${repaired} metric(s) to the canonical shape`);
+    scheduleSave();
+  }
+  return repaired;
+}
+
 app.get('/api/metrics', requireAuth, (req, res) => {
   const code = req.iqSession.orgCode;
   res.json({ ok: true, metrics: orgMetrics[code] || [] });
@@ -18384,13 +18450,9 @@ app.post('/api/metrics', requirePermission('manage_metrics'), (req, res) => {
   const { name, source } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
   if (!orgMetrics[code]) orgMetrics[code] = [];
-  const metric = {
-    metricId: 'met_' + generateId(),
-    name:     name.trim(),
-    source:   source || 'org',
-    order:    orgMetrics[code].length,
-    createdAt: new Date().toISOString(),
-  };
+  // Through the same owner as the seed and the migration, so there is one definition of a metric.
+  const metric = _metricRecord({ name, source }, orgMetrics[code].length);
+  if (!metric) return res.status(400).json({ error: 'name required' });
   orgMetrics[code].push(metric);
   scheduleSave();
   res.json({ ok: true, metric });
@@ -22380,7 +22442,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
   _createPersonalFocus, _updatePersonalFocus, _recordPersonalFocusOutcome, _resolvePersonalFocusAudience,
-  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, shelfFilings, _shelfLookup, inquiryStates, _migrateLegacyNotesToLibrary, orgNotes, orgMessages, orgStore, safeguardingFlags, _llmBudgetOk, _captureError, checkinProposals,
+  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, shelfFilings, _shelfLookup, inquiryStates, _migrateLegacyNotesToLibrary, _migrateLegacyMetrics, _metricRecord, orgMetrics, orgNotes, orgMessages, orgStore, safeguardingFlags, _llmBudgetOk, _captureError, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
   // exported for the truth layer: grounded retrieval over canonical evidence
@@ -22456,6 +22518,10 @@ if (require.main === module) (async () => {
 
     // 5a. One home — sweep any legacy notes into the Library (idempotent; adds only the missing mirrors).
     try { _migrateLegacyNotesToLibrary(); } catch (e) { console.warn('[library] note migration skipped:', e && e.message); }
+
+    // 5a1. Metrics written before the shape was enforced. Idempotent and deterministic: a healthy
+    //      store is untouched and triggers no save. See _metricRecord for why the id is derived.
+    try { _migrateLegacyMetrics(); } catch (e) { console.warn('[metrics] normalisation skipped:', e && e.message); }
 
     // 5a2. Optional demo seed on boot, for a host with no shell (Render's free tier). SEED_ALMA=1
     //      seeds once and skips if the org is already there; 'force' re-seeds. Additive: it
