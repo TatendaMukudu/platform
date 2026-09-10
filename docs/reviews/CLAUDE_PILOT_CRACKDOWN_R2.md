@@ -10,9 +10,11 @@ defect was present and it was not, that is recorded too.
 | --- | --- |
 | `origin/main` at the start and end of this pass (unmoved) | `680516631c5e53b6c86bc5d436a98efe8eea630f` |
 | `origin/claude/pilot-crackdown-r1` on arrival | `872075feaa1e8c9a7dd2eac9b72ac387dc703a1a` |
-| `origin/claude/pilot-crackdown-r1` on leaving | `5d41db8` |
+| `origin/claude/pilot-crackdown-r1` on leaving | `2b5b521` (plus this report's own commit) |
 
-Three commits: `2daa1c7`, `22abb45`, `5d41db8`.
+Commits: `2daa1c7`, `22abb45`, `5d41db8`, `2b5b521`.
+
+**Pull request: https://github.com/TatendaMukudu/platform/pull/88** — open, not merged.
 
 The push-connectivity check was run before any work started and again after the container was
 restarted mid-pass: `git push --dry-run -u origin HEAD:claude/pilot-crackdown-r1` succeeded both
@@ -363,6 +365,11 @@ None reproduced. Two items are open but are not blockers:
    against a live store.
 2. `confirm()` remains on destructive admin actions. Deliberate, and unchanged from the line drawn
    in round 1.
+
+## Pull request
+
+https://github.com/TatendaMukudu/platform/pull/88 — `claude/pilot-crackdown-r1` into `main`, open,
+**not merged**.
 
 ## Remaining operational blockers
 
