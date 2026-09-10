@@ -168,6 +168,19 @@ ok('PX-D4 correcting a proposal no longer opens a native prompt',
 ok('PX-D5 …it opens inside the proposal card, and still reaches the one correction route',
   /iq-correct-box/.test(APP) && /_sendCorrection/.test(APP)
   && /turn\/\$\{turnId\}\/correct/.test(APP));
+/* PX-D6b — THE LAST ONE. "I acted on this" on a Priority Office card opened `prompt()` to collect
+   a sentence that then became a stored record: the same defect as the two above, on a leader
+   surface the pilot exercises, and the reason PX-D6 had to be scoped to MemberApp to pass. */
+ok('PX-D6b acting on a flag no longer opens a native prompt either',
+  (() => {
+    const fn = APP.slice(APP.indexOf('function intelAct(memberId'),
+                         APP.indexOf('async function _intelActSave('));
+    return fn.length > 200 && !/(^|[^.\w])prompt\(/.test(fn)
+      && /iq-field-input/.test(fn) && /_intelActSave\(/.test(fn);
+  })());
+ok('PX-D6c …and the note still reaches the one route that records it',
+  /\/api\/intelligence\/act/.test(APP)
+  && APP.indexOf('async function _intelActSave(') < APP.indexOf('/api/intelligence/act'));
 ok('PX-D6 nothing on the member pilot path calls prompt() at all any more',
   (() => {
     // The member surface is MemberApp; the remaining two prompts are in leader/admin tooling.
@@ -274,8 +287,10 @@ ok('PX-F4 a save writes only units whose content HASH changed',
 
 /* ══ G — ONBOARDING, FROM CODEX'S INDEPENDENT AUDIT ══════════════════════════════════════════
    Six findings were reported; five were reproduced here against this branch before anything was
-   changed, and each assertion below pins the fix for one of them. PB-5 (invite authority depends
-   on node leadership) is a founder decision and is deliberately NOT asserted either way. */
+   changed, and each assertion below pins the fix for one of them. The sixth — that invite
+   authority depended on node leadership — was a founder decision rather than a defect, and has
+   since been decided: the canonical `edit_members` permission, never a position in the tree. It
+   is asserted in scripts/onboard-invite-smoke.js section F, where the other authority laws live. */
 console.log('\n  G — CSV IS PARSED, NOT SPLIT');
 const CSVROWS = (() => {
   const b = APP_RAW.slice(APP_RAW.indexOf('function _parseCSVRows(text) {'));

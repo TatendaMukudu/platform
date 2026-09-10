@@ -6881,9 +6881,38 @@ function _intelCard(it) {
 
    These act on PERSON items only. A Web item names nobody, so there is nobody to
    act on and no card renders these buttons. */
-async function intelAct(memberId, patternType, btn) {
-  const action = prompt('What did you do? A quick note of the action you took:');
-  if (!action || !action.trim()) return;
+/* THE PRODUCT ASKS, NOT THE BROWSER — the last native input prompt on a pilot surface.
+
+   "I acted on this" opened `prompt()`, a dialog belonging to Chrome rather than to IntelliQ, to
+   collect a sentence that then became a stored record. On a phone that reads as the browser
+   interrupting, and it is the same defect already closed for naming a Library folder and for
+   correcting a proposal. It opens the same inline row those two use, inside the card it belongs
+   to, so what is being answered stays visible while it is answered. */
+function intelAct(memberId, patternType, btn) {
+  const cta = document.getElementById(`intel-cta-${memberId}`);
+  if (!cta || document.getElementById(`intel-act-${memberId}`)) return;
+  const box = document.createElement('div');
+  box.className = 'iq-field';
+  box.id = `intel-act-${memberId}`;
+  box.style.marginTop = '0.5rem';
+  box.innerHTML = `
+    <label class="form-label" for="intel-act-in-${_escHtml(memberId)}">WHAT DID YOU DO?</label>
+    <input class="iq-field-input form-input" id="intel-act-in-${_escHtml(memberId)}" placeholder="A quick note of the action you took" />
+    <div style="margin-top:0.4rem;display:flex;gap:0.4rem">
+      <button class="intel-btn" id="intel-act-save-${_escHtml(memberId)}">Save</button>
+      <button class="intel-btn intel-btn-ghost" id="intel-act-cancel-${_escHtml(memberId)}">Cancel</button>
+    </div>`;
+  cta.appendChild(box);
+  const input = document.getElementById(`intel-act-in-${memberId}`);
+  if (input) input.focus();
+  const close = () => box.remove();
+  document.getElementById(`intel-act-cancel-${memberId}`).onclick = close;
+  const save = () => { const v = (input?.value || '').trim(); if (v) { close(); _intelActSave(memberId, patternType, v, btn); } };
+  document.getElementById(`intel-act-save-${memberId}`).onclick = save;
+  if (input) input.onkeydown = e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') close(); };
+}
+
+async function _intelActSave(memberId, patternType, action, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
     const res = await fetch('/api/intelligence/act', {
