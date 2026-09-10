@@ -1347,9 +1347,14 @@ async function copyMemberInviteLink(userId, email) {
   try {
     const res  = await authFetch('/api/auth/invite', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
+      /* BOUND TO THE PERSON THIS LINK IS FOR. `label: email || userId` fell back to a user id,
+         which is not an address, so the server read it as a general label and minted an OPEN
+         link — one anybody holding it could redeem — from a control that says it is generating
+         a link for one named member. Their address is declared instead, and a member without
+         one is refused rather than handed an open link by accident. */
       body: JSON.stringify({
         orgCode: AppState.orgCode, role: 'member',
-        label: email || userId, expiryDays: 14,
+        email: email || '', label: email || userId, expiryDays: 14,
       }),
     });
     const data = await res.json();
@@ -1366,9 +1371,14 @@ async function regenerateMemberInvite(userId, email) {
   try {
     const res  = await authFetch('/api/auth/invite', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
+      /* BOUND TO THE PERSON THIS LINK IS FOR. `label: email || userId` fell back to a user id,
+         which is not an address, so the server read it as a general label and minted an OPEN
+         link — one anybody holding it could redeem — from a control that says it is generating
+         a link for one named member. Their address is declared instead, and a member without
+         one is refused rather than handed an open link by accident. */
       body: JSON.stringify({
         orgCode: AppState.orgCode, role: 'member',
-        label: email || userId, expiryDays: 14,
+        email: email || '', label: email || userId, expiryDays: 14,
       }),
     });
     const data = await res.json();
@@ -2358,6 +2368,9 @@ function approveAlertDraft() {
 async function renderPeople() {
   const subEl = document.getElementById('people-sub');
   if (subEl) subEl.textContent = `${AppState.orgName} · ${Auth.currentUser?.name || 'Admin'}`;
+  // The page can be opened from the nav without any tab being pressed, so this is where the
+  // onboarding controls are revealed for somebody who may use them. See _applyOnboardAuthority.
+  _applyOnboardAuthority();
 
   const container = document.getElementById('org-tree-container');
   if (!container) return;
@@ -2965,7 +2978,14 @@ async function renderMetricsSettings() {
     el.innerHTML = AppState.orgMetrics.map((m, i) => `
       <div style="display:flex;align-items:center;gap:0.5rem;padding:0.55rem 0;border-bottom:1px solid var(--border)">
         <span style="font-size:var(--fs);color:var(--text-muted);width:20px;text-align:right">${i+1}</span>
-        <span style="flex:1;font-size:var(--fs-md);font-weight:500">${m.name}</span>
+        <span style="flex:1;font-size:var(--fs-md);font-weight:500">${
+          /* NEVER "undefined" IN FRONT OF A PERSON (product law 4). The schema mismatch that
+             caused this is fixed at its source -- the seed now writes canonical records and a
+             startup migration repairs data already stored -- so this line should never need the
+             fallback. It is here because a renderer that prints undefined when handed an
+             unexpected shape is its own defect, independent of what put the shape there, and the
+             three other metric call sites in this file already read it exactly this way. */
+          _escHtml(m && m.name ? m.name : (typeof m === 'string' ? m : 'Unnamed metric'))}</span>
         <span style="font-size:var(--fs-sm);color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:4px;padding:1px 6px">${m.source || 'org'}</span>
         ${Auth.canDo('manage_metrics') ? `
           <button onclick="deleteMetric('${m.metricId}')" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:var(--fs-md);padding:2px 4px" title="Delete"></button>` : ''}
@@ -3057,19 +3077,27 @@ async function _addSuggestedMetrics() {
   const checkboxes = document.querySelectorAll('#settings-metric-form input[type=checkbox]:checked');
   const names      = Array.from(checkboxes).map(c => c.value);
   let added = 0;
+  const refused = [];
   for (const name of names) {
     try {
       const res = await fetch('/api/metrics', {
         method: 'POST', headers: Auth._headers(),
         body: JSON.stringify({ name, source: 'org' }),
       });
-      const data = await res.json();
-      if (data.ok) added++;
-    } catch(e) { /* skip */ }
+      const data = await res.json().catch(() => ({}));
+      if (data.ok) added++; else refused.push(`${name}: ${data.error || `refused (${res.status})`}`);
+    } catch(e) { refused.push(`${name}: ${e.message || 'could not reach the server'}`); }
   }
   document.getElementById('settings-metric-form').innerHTML = '';
   renderMetricsSettings();
-  showToast(`${added} metric${added!==1?'s':''} added `, 'success');
+  /* The same blanket success the invite batch used to show, in a second place: a metric the
+     server refused was counted out of existence and the toast said "success" regardless. It now
+     says how many of how many, and names what would not go in. */
+  if (refused.length) {
+    showToast(`${added} of ${names.length} added — ${refused.join('; ')}`, 'warning');
+  } else {
+    showToast(`${added} metric${added!==1?'s':''} added`, 'success');
+  }
 }
 
 /* ── VALUES SETTINGS ─────────────────────────────────────── */
@@ -3173,8 +3201,36 @@ async function deleteGoal(goalId) {
   } catch(e) { showToast(e.message, 'warning'); }
 }
 
+/* ── WHO MAY ADD PEOPLE, ON THE SCREEN AND ON THE WIRE ─────────────────────────────────────────
+   `edit_members` is the permission all three onboarding routes enforce, so it is the permission
+   these controls hang off — through Auth.canDo, the same owner Settings and the Org Tree already
+   use, rather than a second opinion assembled in the client.
+
+   Before this, the Org Tree page showed "+ Add Member" and an "Onboard" tab to everyone who could
+   reach the page. A person without the permission could fill in a colleague's name and address,
+   press the button, and be told 403 by a server they had no reason to expect to refuse them. A
+   control that cannot work is worse than no control: it says the product is broken rather than
+   that the job is not theirs.
+
+   Hidden by default in the markup and revealed here, never the other way round — a slow or failed
+   /me must not flash an offer it cannot honour. */
+function _canOnboard() { try { return Auth.canDo('edit_members'); } catch (_) { return false; } }
+function _applyOnboardAuthority() {
+  const may = _canOnboard();
+  ['people-add-member', 'people-tabbtn-onboard'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = !may;
+  });
+  return may;
+}
+
 /* ── PEOPLE PAGE TABS ────────────────────────────────────── */
 function switchPeopleTab(tab) {
+  /* Re-read on every tab switch: this is also what REVEALS the controls for somebody who does
+     have the permission, and the tab can still be reached by a stale deep link or a cached nav,
+     so authority is not assumed from the fact that a control happened to be visible. */
+  const mayOnboard = _applyOnboardAuthority();
+  if (tab === 'onboard' && !mayOnboard) tab = 'tree';
   // 'groups' retired September 2026 — the tree is the one structure. A tab name arriving from
   // anywhere stale falls back to the tree rather than showing an empty panel.
   if (tab === 'groups') tab = 'tree';
@@ -3198,13 +3254,28 @@ function renderOnboardHub() {
   const el    = document.getElementById('onboard-hub-content');
   if (!el) return;
   const color = ORG_MODES[AppState.mode]?.color || 'var(--accent)';
+  if (!_applyOnboardAuthority()) {
+    // Says whose job it is, so the reader knows what to do next rather than assuming a fault.
+    el.innerHTML = `<div class="card"><div class="card-title">Adding people is not part of your access</div>
+      <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:0.4rem">
+        An admin can grant you member management from Settings.</div></div>`;
+    return;
+  }
 
   el.innerHTML = `
     <!-- Method cards -->
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0.75rem;margin-bottom:1.5rem">
       ${_onboardCard('add',    '', 'Add Member',         'Add one person with their email',   color)}
-      ${_onboardCard('import', '', 'Import Spreadsheet', 'Upload a CSV or XLSX file',         color)}
-      ${_onboardCard('invite', '',  'Invite by Email',    'Send personalised email invites',   color)}
+      ${_onboardCard('import', '', 'Import Spreadsheet', 'Upload a CSV file',                 color)}
+      ${/* HONEST LABEL. This card said "Invite by Email / Send personalised email invites" while
+            the panel it opens admitted, in its own body text, that "Email delivery is not yet
+            active - you copy and send the link yourself." Nothing in this repository sends email:
+            there is no provider, no SMTP client, no queue and no send call. The card was the only
+            place claiming otherwise, and it is the part a coach reads first.
+
+            What the feature ACTUALLY does is real and useful - it mints one unique invite link
+            per address - so the name now says that instead of being removed. */''}
+      ${_onboardCard('invite', '',  'Invite by Email',    'Create one invite link per email address', color)}
       ${_onboardCard('link',   '', 'Generate Join Link', 'Shareable self-registration link',  color)}
     </div>
 
@@ -3235,10 +3306,15 @@ function _openOnboardSection(section) {
   if (!el) return;
 
   if (section === 'add') {
-    // Build node selector from OrgTree
-    const nodeOptions = Object.values(OrgTree._nodes || {})
+    /* The node picker is only offered to somebody who may actually write the tree. Assignment goes
+       through PUT /api/tree/node, which asks for `manage_tree` — a permission `edit_members` does
+       not imply. Offering the picker to a person who cannot use it produced the worst kind of
+       failure: the account was created, the assignment was refused, and the screen showed the
+       refusal as though the whole thing had failed. */
+    const mayAssign = (() => { try { return Auth.canDo('manage_tree'); } catch (_) { return false; } })();
+    const nodeOptions = !mayAssign ? '' : Object.values(OrgTree._nodes || {})
       .sort((a,b)=>a.name.localeCompare(b.name))
-      .map(n => `<option value="${n.nodeId}">${n.name}</option>`).join('');
+      .map(n => `<option value="${_escHtml(n.nodeId)}">${_escHtml(n.name)}</option>`).join('');
 
     el.innerHTML = `
       <div class="card" style="margin-bottom:0">
@@ -3270,10 +3346,10 @@ function _openOnboardSection(section) {
         <div class="card-header"><div class="card-title">Import Spreadsheet</div></div>
         <div class="card-body">
           <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.8rem;line-height:1.6">
-            Upload a <strong>CSV</strong> or <strong>XLSX</strong> file. Required columns: <code>name</code>, <code>email</code>. Optional: <code>role</code>, <code>group</code>/<code>department</code>.
+            Upload a <strong>CSV</strong> file. Required columns: <code>name</code>, <code>email</code>. Optional: <code>role</code>, <code>group</code>/<code>department</code>. Names containing a comma are fine if the cell is quoted, which is what a spreadsheet does when it exports. Excel workbooks are not read yet — use File, Save As, CSV.
           </div>
           <div style="margin-bottom:0.8rem">
-            <input type="file" id="ob-import-file" accept=".csv,.xlsx,.xls" class="form-input" style="padding:6px" onchange="_previewImportFile()" />
+            <input type="file" id="ob-import-file" accept=".csv" class="form-input" style="padding:6px" onchange="_previewImportFile()" />
           </div>
           <div id="ob-import-preview" style="margin-bottom:0.8rem"></div>
           <button class="btn btn-accent btn-sm" id="ob-import-btn" onclick="_submitImport()" style="display:none">Import All</button>
@@ -3284,10 +3360,10 @@ function _openOnboardSection(section) {
   } else if (section === 'invite') {
     el.innerHTML = `
       <div class="card" style="margin-bottom:0">
-        <div class="card-header"><div class="card-title">Invite by Email</div></div>
+        <div class="card-header"><div class="card-title">Invite links by email address</div></div>
         <div class="card-body">
           <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
-            Enter email addresses, one per line. Each gets a unique invite link to copy and share. (Email delivery is not yet active — you copy and send the link yourself.)
+            Enter email addresses, one per line. Each one gets its own invite link for you to copy and send. IntelliQ does not send the email — nothing is delivered until you share the link yourself.
           </div>
           <textarea id="ob-invite-emails" class="form-input" rows="4"
             placeholder="john@company.com&#10;sarah@company.com&#10;alex@company.com" style="margin-bottom:0.6rem;font-family:monospace"></textarea>
@@ -3368,18 +3444,21 @@ async function _submitAddPerson() {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
 
-    // Assign to org tree node if selected
+    /* ── THE ACCOUNT EXISTS FROM HERE ON, AND THE SCREEN MUST NEVER SAY OTHERWISE ───────────────
+       This step used to `throw`, which landed in the catch below and replaced the whole panel
+       with one line: "The organisation tree changed. Reload and try again." The account had
+       already been created. No invite link was minted, so nothing was shown to share, and the
+       obvious response — fill the form in again — hit "An account with this email already
+       exists." That is the same dormant-account dead end this branch closed once already,
+       reached by a different door: a compare-and-set conflict on the tree.
+
+       There is no transaction spanning the two writes and pretending otherwise would be worse, so
+       the outcome is reported for what it is. The account is made, the link is made, and the
+       assignment is offered again as its own retry — adding a member id that is already present
+       is a no-op, so pressing it twice cannot double anything, and it never touches the account. */
+    let assignError = '';
     if (nodeId && OrgTree._nodes[nodeId]) {
-      const currentIds = OrgTree._nodes[nodeId].memberIds || [];
-      if (!currentIds.includes(data.user.id)) {
-        const treeRes = await fetch(`/api/tree/node/${nodeId}`, {
-          method: 'PUT', headers: Auth._headers(),
-          body: JSON.stringify({ memberIds: [...currentIds, data.user.id], ifRev: OrgTree._nodes[nodeId].rev }),
-        });
-        const treeData = await treeRes.json();
-        if (!treeData.ok) throw new Error(treeData.error || 'The organisation tree changed. Reload and try again.');
-        OrgTree._nodes[nodeId] = treeData.node;
-      }
+      assignError = await _assignMemberToNode(nodeId, data.user.id);
     }
 
     // Generate an invite link for this person so admin can share it
@@ -3387,7 +3466,8 @@ async function _submitAddPerson() {
     try {
       const invRes  = await authFetch('/api/auth/invite', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orgCode: AppState.orgCode, role, label: email, expiryDays: 14 }),
+        // Declared as an address — this link is for the person whose account was just created.
+        body: JSON.stringify({ orgCode: AppState.orgCode, role, email, label: email, expiryDays: 14 }),
       });
       const invData = await invRes.json();
       if (invData.ok) inviteLink = `${window.location.origin}${invData.url}`;
@@ -3395,7 +3475,12 @@ async function _submitAddPerson() {
 
     const safeLink = inviteLink.replace(/'/g, "\\'");
     if (resEl) resEl.innerHTML = `
-      <div style="color:var(--success);margin-bottom:0.4rem">Account created for ${fullName}.</div>
+      <div style="color:var(--success);margin-bottom:0.4rem">Account created for ${_escHtml(fullName)}.</div>
+      ${assignError ? `<div id="ob-add-assign" style="color:var(--warning);margin-bottom:0.5rem">
+           Not added to ${_escHtml((OrgTree._nodes[nodeId] || {}).name || 'the selected unit')} yet — ${_escHtml(assignError)}
+           <button class="btn btn-outline btn-sm" style="margin-left:0.4rem;padding:2px 8px;font-size:var(--fs-sm)"
+             onclick="_retryAddMemberAssignment('${_escHtml(nodeId)}','${_escHtml(data.user.id)}')">Retry placement</button>
+         </div>` : ''}
       ${inviteLink
         ? `<div style="font-size:var(--fs);color:var(--text-muted);margin-bottom:0.3rem">Share this link so they can set their password:</div>
            <div style="font-family:monospace;font-size:var(--fs-sm);color:var(--accent);word-break:break-all;margin-bottom:0.3rem">${inviteLink}</div>
@@ -3406,10 +3491,59 @@ async function _submitAddPerson() {
     // Clear fields
     ['ob-add-first','ob-add-last','ob-add-email'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     _renderOnboardRecent();
-    showToast(`${fullName} added `, 'success');
+    // The toast says which of the two things happened, because "added" over a failed placement is
+    // the false-success this whole branch exists to remove.
+    showToast(assignError ? `${fullName} added, placement still pending` : `${fullName} added`,
+      assignError ? 'warning' : 'success');
   } catch(e) {
     if (resEl) resEl.textContent = e.message;
   }
+}
+
+/* Put a person into a tree node through the canonical route, with the node's CURRENT revision.
+   Returns '' on success or a sentence explaining what stopped it — never throws, because every
+   caller has already created an account by the time it runs.
+
+   Idempotent by construction: a member id already in the node is left alone and reported as done,
+   so a retry after a lost response is indistinguishable from the first attempt. */
+async function _assignMemberToNode(nodeId, userId) {
+  try {
+    // Re-read the tree first: a stale `rev` held since the panel opened is the single most likely
+    // cause of the conflict this function exists to survive.
+    try { await OrgTree.load(); } catch (_) { /* fall through with what we have */ }
+    const node = (OrgTree._nodes || {})[nodeId];
+    if (!node) return 'that unit no longer exists';
+    const currentIds = node.memberIds || [];
+    if (currentIds.includes(userId)) return '';
+    const treeRes = await fetch(`/api/tree/node/${nodeId}`, {
+      method: 'PUT', headers: Auth._headers(),
+      body: JSON.stringify({ memberIds: [...currentIds, userId], ifRev: node.rev }),
+    });
+    const treeData = await treeRes.json().catch(() => ({}));
+    if (!treeData.ok) {
+      if (treeRes.status === 403) return 'you do not have permission to change the org tree';
+      if (treeRes.status === 409 || treeRes.status === 428) return 'the org tree changed while this was saving';
+      return treeData.error || 'the org tree could not be updated';
+    }
+    OrgTree._nodes[nodeId] = treeData.node;
+    return '';
+  } catch (e) {
+    return e.message || 'the org tree could not be reached';
+  }
+}
+
+async function _retryAddMemberAssignment(nodeId, userId) {
+  const el = document.getElementById('ob-add-assign');
+  if (el) el.textContent = 'Placing…';
+  const err = await _assignMemberToNode(nodeId, userId);
+  if (!err) {
+    if (el) { el.style.color = 'var(--success)'; el.textContent = 'Placed.'; }
+    showToast('Placement complete', 'success');
+    return;
+  }
+  if (el) el.innerHTML = `Still not placed — ${_escHtml(err)}
+    <button class="btn btn-outline btn-sm" style="margin-left:0.4rem;padding:2px 8px;font-size:var(--fs-sm)"
+      onclick="_retryAddMemberAssignment('${_escHtml(nodeId)}','${_escHtml(userId)}')">Retry placement</button>`;
 }
 
 let _importRows = [];
@@ -3421,6 +3555,20 @@ async function _previewImportFile() {
   el.innerHTML = '<div style="color:var(--text-muted);font-size:var(--fs)">Parsing…</div>';
 
   try {
+    /* A WORKBOOK IS NOT TEXT. The picker advertised .xlsx and .xls, and this read every file with
+       file.text() and split it on commas -- so a ZIP-based workbook was parsed as if it were CSV
+       and produced silent nonsense. Onboarding never calls XLSX.read and never reads an
+       ArrayBuffer; the format was offered, not implemented.
+
+       The picker now offers only what onboarding can actually read, and a workbook dropped in
+       anyway is REFUSED with a sentence rather than corrupted. Implementing XLSX import is a
+       product decision, not a bug fix, and it is recorded as an open one. */
+    if (/\.(xlsx|xls)$/i.test(file.name || '')) {
+      el.innerHTML = '<div style="color:var(--warning);font-size:var(--fs)">Spreadsheet files (.xlsx / .xls) cannot be imported yet. Save the sheet as CSV and choose it again.</div>';
+      if (btn) btn.style.display = 'none';
+      _importRows = [];
+      return;
+    }
     const text = await file.text();
     _importRows = _parseCSV(text);
     if (!_importRows.length) { el.innerHTML = '<div style="color:var(--warning);font-size:var(--fs)">No rows found. Check file format.</div>'; return; }
@@ -3429,24 +3577,59 @@ async function _previewImportFile() {
       <div style="font-size:var(--fs);color:var(--text-muted);margin-bottom:0.4rem">${_importRows.length} row(s) found — preview:</div>
       <div style="overflow-x:auto;max-height:180px;border:1px solid var(--border);border-radius:6px">
         <table style="width:100%;border-collapse:collapse;font-size:var(--fs-sm)">
-          <thead><tr style="background:var(--surface-2)">${Object.keys(_importRows[0]).map(k=>`<th style="padding:4px 8px;text-align:left;border-bottom:1px solid var(--border)">${k}</th>`).join('')}</tr></thead>
-          <tbody>${_importRows.slice(0,5).map(r=>`<tr>${Object.values(r).map(v=>`<td style="padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-secondary)">${v||''}</td>`).join('')}</tr>`).join('')}</tbody>
+          <thead><tr style="background:var(--surface-2)">${Object.keys(_importRows[0]).map(k=>`<th style="padding:4px 8px;text-align:left;border-bottom:1px solid var(--border)">${_escHtml(k)}</th>`).join('')}</tr></thead>
+          <tbody>${_importRows.slice(0,5).map(r=>`<tr>${Object.values(r).map(v=>`<td style="padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-secondary)">${_escHtml(v||'')}</td>`).join('')}</tr>`).join('')}</tbody>
         </table>
       </div>`;
     if (btn) btn.style.display = 'inline-block';
   } catch(e) {
-    el.innerHTML = `<div style="color:var(--danger);font-size:var(--fs)">Could not parse file: ${e.message}</div>`;
+    el.innerHTML = `<div style="color:var(--danger);font-size:var(--fs)">Could not parse file: ${_escHtml(e.message)}</div>`;
   }
 }
 
+/* ── READING A CSV, INCLUDING THE QUOTED ONES ──────────────────────────────────────────────────
+   This was `line.split(',')`, which is not CSV parsing. A quoted comma -- the single most common
+   thing in a real roster export, because that is how "Lovelace, Ada" is written -- shifted every
+   column after it. Reproduced:
+
+     "Lovelace, Ada",ada@example.com,member
+       -> { name: "Lovelace", email: "Ada", role: "ada@example.com" }
+
+   The preview then showed the corrupted values as if they were the file, and the import either
+   failed validation or created something nobody typed.
+
+   A proper scanner: quoted fields may contain commas and newlines, and "" inside a quoted field
+   is a literal quote. Small, standard, and it is the format the picker already advertises. */
+function _parseCSVRows(text) {
+  const rows = [];
+  let row = [], field = '', quoted = false;
+  const src = String(text == null ? '' : text).replace(/\r\n?/g, '\n');
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') { field += '"'; i++; }   // "" is one literal quote
+        else quoted = false;
+      } else field += ch;
+      continue;
+    }
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === ',') { row.push(field); field = ''; continue; }
+    if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; continue; }
+    field += ch;
+  }
+  row.push(field);
+  rows.push(row);
+  return rows.filter(r => r.some(c => String(c).trim()));
+}
+
 function _parseCSV(text) {
-  const lines = text.replace(/\r/g,'').split('\n').filter(l => l.trim());
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[^a-z]/g,''));
-  return lines.slice(1).map(line => {
-    const vals = line.split(',');
-    const obj  = {};
-    headers.forEach((h, i) => { obj[h] = (vals[i] || '').trim().replace(/^"|"$/g,''); });
+  const rows = _parseCSVRows(text);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map(h => String(h).trim().toLowerCase().replace(/[^a-z]/g, ''));
+  return rows.slice(1).map(vals => {
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = String(vals[i] == null ? '' : vals[i]).trim(); });
     return obj;
   }).filter(r => r.name);
 }
@@ -3460,10 +3643,42 @@ async function _submitImport() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ orgCode: AppState.orgCode, users: _importRows }),
     });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || 'Import failed');
-    if (resEl) resEl.innerHTML = `<span style="color:var(--success)">${data.created.length} imported${data.skipped.length ? `, ${data.skipped.length} skipped (already exist)` : ''}.</span>`;
-    showToast(`${data.created.length} people imported`, 'success');
+    const data = await res.json().catch(() => ({}));
+    /* ── `ok: false` MEANS "NOT EVERY ROW", NOT "NOTHING HAPPENED" ──────────────────────────────
+       This line used to be `if (!data.ok) throw new Error(data.error || 'Import failed')`, and
+       when the route was corrected to stop claiming blanket success it turned that correction
+       into a worse lie in the other direction. Reproduced: a three-row file with one bad address
+       created two real accounts, returned `ok:false` with no `error` field, and the screen said
+       "Import failed". Two people had accounts; the coach was told nobody did, was never shown
+       which row was wrong, and the roster was never refreshed because the throw skipped it.
+
+       A refusal of the WHOLE request — 401, 403, 404, 413 — is a different thing and still
+       throws: nothing was created, and `error` says why. A 200 is a per-row report, and every
+       row is accounted for below. */
+    if (!res.ok) {
+      // 409 is the tree's compare-and-set answer. The server rolls the whole import back on that
+      // path, so "nothing was imported" is the literal truth and the retry is safe to offer.
+      throw new Error(res.status === 409
+        ? 'The org tree changed while this was importing. Nothing was imported — try again.'
+        : (data.error || 'Import failed'));
+    }
+
+    const created = data.created || [], skipped = data.skipped || [], failed = data.failed || [];
+    const line = [
+      `${created.length} of ${data.total ?? _importRows.length} imported`,
+      skipped.length ? `${skipped.length} already existed` : '',
+      failed.length  ? `${failed.length} could not be imported` : '',
+    ].filter(Boolean).join(' · ');
+    if (resEl) resEl.innerHTML =
+      `<div style="color:var(--${failed.length ? 'warning' : 'success'});font-weight:600;margin-bottom:0.4rem">${_escHtml(line)}.</div>`
+      + failed.map(f => `<div style="margin-bottom:0.3rem;padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:8px;font-size:var(--fs)">
+          <span style="font-weight:600">${_escHtml(typeof f.row === 'string' ? f.row : JSON.stringify(f.row))}</span>
+          <span style="color:var(--text-secondary)"> — ${_escHtml(f.reason || 'refused')}</span>
+        </div>`).join('');
+    showToast(failed.length ? `${created.length} imported, ${failed.length} not` : `${created.length} people imported`,
+      failed.length ? 'warning' : 'success');
+    // Outside the old throw's shadow: the accounts exist either way, so the roster is refreshed
+    // either way. It used to be skipped on any partial failure.
     await loadRealOrgData();
     _renderOnboardRecent();
   } catch(e) {
@@ -3479,31 +3694,60 @@ async function _submitEmailInvites() {
   const emails    = emailsRaw.split('\n').map(e => e.trim()).filter(Boolean);
   if (!emails.length) { if (resEl) resEl.textContent = 'Enter at least one email.'; return; }
   if (resEl) resEl.innerHTML = 'Creating invite links…';
-  const results = [];
+  /* ── A BATCH REPORTS EVERY ROW, INCLUDING THE ONES THAT DID NOT WORK ────────────────────────
+     This loop used to push a result only `if (data.ok)` and swallow every thrown request in a
+     `catch(e) { /* skip *​/ }`. A refusal therefore left no trace at all: paste ten addresses,
+     have nine refused, and the screen showed one link under a heading about sharing them. The
+     admin's own list is the only record that the other nine were ever attempted, and nothing
+     told them to check it.
+
+     Both outcomes are collected now, with the reason the server gave, and both are rendered.
+     Nothing here retries by itself — a failed row keeps its address in the box so the person can
+     fix it and submit again, and a succeeded row is not re-minted by that second submission
+     being about the failures. */
+  const results = [], failures = [];
   for (const email of emails) {
     try {
       const res  = await authFetch('/api/auth/invite', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orgCode: AppState.orgCode, role, group, label: email, expiryDays: 14 }),
+        // `email`, not just `label`: this panel is one link per named person, so the address is
+        // declared as an address and a typo comes back as a refusal rather than an open link.
+        body: JSON.stringify({ orgCode: AppState.orgCode, role, group, email, label: email, expiryDays: 14 }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (data.ok) results.push({ email, url: `${window.location.origin}${data.url}` });
-    } catch(e) { /* skip */ }
+      else failures.push({ email, reason: data.error || `refused (${res.status})` });
+    } catch(e) { failures.push({ email, reason: e.message || 'could not reach the server' }); }
   }
+  // Leave the failures in the box, and only the failures: resubmitting cannot duplicate a link
+  // that was already created.
+  const box = document.getElementById('ob-invite-emails');
+  if (box) box.value = failures.map(f => f.email).join('\n');
+
   if (resEl) {
-    resEl.innerHTML = results.length
+    const head = failures.length
+      ? `<div style="color:var(--warning);font-weight:600;margin-bottom:0.5rem">
+           ${results.length} of ${emails.length} invite ${emails.length === 1 ? 'link' : 'links'} created.
+           ${failures.length} could not be. The addresses that failed are still in the box above.</div>`
+      : `<div style="color:var(--success);font-weight:600;margin-bottom:0.5rem">
+           ${results.length} invite ${results.length === 1 ? 'link' : 'links'} created.</div>`;
+    const note = results.length
       ? `<div style="font-size:var(--fs);color:var(--text-muted);margin-bottom:0.5rem">
-           Email delivery is not yet active. Share these links directly with each person.
-         </div>` +
-        results.map(r => {
-          const safeUrl = r.url.replace(/'/g, "\\'");
-          return `<div style="margin-bottom:0.5rem;padding:0.5rem 0.7rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:var(--fs)">
-            <div style="font-weight:600;margin-bottom:0.2rem">Invite created for <span style="color:var(--accent)">${r.email}</span></div>
-            <div style="font-family:monospace;font-size:var(--fs-sm);color:var(--text-secondary);word-break:break-all;margin-bottom:0.3rem">${r.url}</div>
-            <button onclick="navigator.clipboard.writeText('${safeUrl}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:var(--fs-sm)">Copy Link</button>
-          </div>`;
-        }).join('')
-      : '<span style="color:var(--danger)">Could not generate links.</span>';
+           IntelliQ does not send the email. Share each link with the person yourself.</div>` : '';
+    const good = results.map(r => {
+      const safeUrl = r.url.replace(/'/g, "\\'");
+      return `<div style="margin-bottom:0.5rem;padding:0.5rem 0.7rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:var(--fs)">
+        <div style="font-weight:600;margin-bottom:0.2rem">Invite created for <span style="color:var(--accent)">${_escHtml(r.email)}</span></div>
+        <div style="font-family:monospace;font-size:var(--fs-sm);color:var(--text-secondary);word-break:break-all;margin-bottom:0.3rem">${_escHtml(r.url)}</div>
+        <button onclick="navigator.clipboard.writeText('${_escHtml(safeUrl)}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:var(--fs-sm)">Copy Link</button>
+      </div>`;
+    }).join('');
+    const bad = failures.map(f =>
+      `<div style="margin-bottom:0.4rem;padding:0.5rem 0.7rem;border:1px solid var(--border);border-radius:8px;font-size:var(--fs)">
+        <span style="font-weight:600">${_escHtml(f.email)}</span>
+        <span style="color:var(--text-secondary)"> — ${_escHtml(f.reason)}</span>
+      </div>`).join('');
+    resEl.innerHTML = head + note + good + bad;
   }
 }
 
@@ -4754,8 +4998,18 @@ async function renderTeamReadiness() {
   const q = (x) => {
     const who = x.targetType === 'person' ? 'a specific person'
       : x.targetType === 'role' ? `the ${_escAdvisor((x.roleRef || '').replace(/_/g, ' '))} role` : x.targetType;
-    const bindBtn = (x.targetType === 'role' && x.roleRef)
-      ? `<button class="btn-ghost btn-sm" style="font-size:var(--fs-sm)" onclick="trBindPrompt('${_escAdvisor(x.roleRef)}')">Bind ${_escAdvisor(x.roleRef.replace(/_/g, ' '))} to a person</button>` : '';
+    /* ROLE BINDING IS RETIRED FOR THE PILOT — founder decision, September 2026.
+       The control opened a native browser prompt and asked the operator to type a member's USER
+       ID, which nobody has any way of knowing. It was the last native input prompt in the product
+       and, for anyone who is not reading the database, a dead control: there was no path to a
+       correct answer. Retiring it was chosen over building a member picker, which is a feature and
+       not a pilot correction.
+
+       The ROUTE stays (`POST /api/org-context/role-binding`) — it is a real, tested, confirmed
+       mutation with history, and other things read the bindings it makes. Only the doorway that
+       could not be walked through is gone. Nothing is left rendered, so nothing offers what it
+       cannot do. */
+    const bindBtn = '';
     const answerBtn = x.uncertaintyId ? `<button class="btn btn-outline btn-sm" style="font-size:var(--fs-sm);margin-top:0.4rem" onclick="trAnswer('${_escAdvisor(x.uncertaintyId)}')">Answer this →</button>` : '';
     return `<div class="card" style="margin-bottom:0.5rem;${x.blocking ? 'border-left:3px solid var(--danger)' : ''}">
       <div style="font-size:var(--fs-md);font-weight:600">${_escAdvisor(x.question)}${x.blocking ? ' <span style="font-size:var(--fs-xs);color:var(--danger)">blocking</span>' : ''}</div>
@@ -4869,17 +5123,6 @@ async function trAsk() {
   } catch (e) { out.innerHTML = `<div style="font-size:var(--fs);color:var(--text-muted)">Couldn't answer that right now.</div>`; }
 }
 
-async function trBindPrompt(roleRef) {
-  const userId = prompt(`Which member currently holds the "${roleRef.replace(/_/g, ' ')}" role? Enter their user id (routing only — no permissions change).`);
-  if (!userId) return;
-  try {
-    const r = await fetch('/api/org-context/role-binding', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ roleRef, userId: userId.trim() }) });
-    const d = await r.json();
-    if (!d.ok) throw new Error(d.error || 'Could not bind');
-    showToast('Role bound — questions will now route to that person.', 'success');
-    renderTeamReadiness();
-  } catch (e) { showToast(e.message || 'Could not bind role', 'error'); }
-}
 
 /* ── Organisational memory — the derived-state timeline (Phase A: history, not advice).
    Reads /api/org-memory/timeline: most-recent-first moments, each with a plain-language
@@ -6669,9 +6912,38 @@ function _intelCard(it) {
 
    These act on PERSON items only. A Web item names nobody, so there is nobody to
    act on and no card renders these buttons. */
-async function intelAct(memberId, patternType, btn) {
-  const action = prompt('What did you do? A quick note of the action you took:');
-  if (!action || !action.trim()) return;
+/* THE PRODUCT ASKS, NOT THE BROWSER — the last native input prompt on a pilot surface.
+
+   "I acted on this" opened `prompt()`, a dialog belonging to Chrome rather than to IntelliQ, to
+   collect a sentence that then became a stored record. On a phone that reads as the browser
+   interrupting, and it is the same defect already closed for naming a Library folder and for
+   correcting a proposal. It opens the same inline row those two use, inside the card it belongs
+   to, so what is being answered stays visible while it is answered. */
+function intelAct(memberId, patternType, btn) {
+  const cta = document.getElementById(`intel-cta-${memberId}`);
+  if (!cta || document.getElementById(`intel-act-${memberId}`)) return;
+  const box = document.createElement('div');
+  box.className = 'iq-field';
+  box.id = `intel-act-${memberId}`;
+  box.style.marginTop = '0.5rem';
+  box.innerHTML = `
+    <label class="form-label" for="intel-act-in-${_escHtml(memberId)}">WHAT DID YOU DO?</label>
+    <input class="iq-field-input form-input" id="intel-act-in-${_escHtml(memberId)}" placeholder="A quick note of the action you took" />
+    <div style="margin-top:0.4rem;display:flex;gap:0.4rem">
+      <button class="intel-btn" id="intel-act-save-${_escHtml(memberId)}">Save</button>
+      <button class="intel-btn intel-btn-ghost" id="intel-act-cancel-${_escHtml(memberId)}">Cancel</button>
+    </div>`;
+  cta.appendChild(box);
+  const input = document.getElementById(`intel-act-in-${memberId}`);
+  if (input) input.focus();
+  const close = () => box.remove();
+  document.getElementById(`intel-act-cancel-${memberId}`).onclick = close;
+  const save = () => { const v = (input?.value || '').trim(); if (v) { close(); _intelActSave(memberId, patternType, v, btn); } };
+  document.getElementById(`intel-act-save-${memberId}`).onclick = save;
+  if (input) input.onkeydown = e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') close(); };
+}
+
+async function _intelActSave(memberId, patternType, action, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
     const res = await fetch('/api/intelligence/act', {
@@ -8947,15 +9219,58 @@ const MemberApp = {
 
   openShelfFolder(id) { this._shelfFolder = id || null; this._renderShelf(); },
 
-  async newShelfFolder() {
-    const name = prompt('Name this folder');
-    if (!name || !name.trim()) return;
+  /* ── NAMING A FOLDER, IN THE PRODUCT ──────────────────────────────────────────────────────
+     This was `prompt('Name this folder')`. A native dialog is a different application
+     interrupting: it carries the browser's chrome and the site's hostname, it cannot be styled,
+     it blocks the page, and on an iPhone it looks like a security dialogue rather than part of
+     IntelliQ. The founder hit it on a real phone and it reads as something has gone wrong.
+
+     No new modal system: this is the same `.iq-field` inline row the composer and the continuity
+     prompt already use. It opens in place, Enter commits, Escape closes, and nothing is created
+     until the person presses Create. */
+  newShelfFolder() {
+    const box = document.getElementById('iq-shelf-newfolder');
+    if (!box) return;
+    if (box.dataset.open === '1') { this._closeShelfFolder(); return; }
+    box.dataset.open = '1';
+    box.innerHTML = `
+      <div class="iq-field">
+        <input type="text" class="iq-field-input" id="iq-shelf-foldername" maxlength="60"
+          placeholder="Name this folder" aria-label="Name this folder"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();MemberApp._createShelfFolder()}
+                     else if(event.key==='Escape'){event.preventDefault();MemberApp._closeShelfFolder()}">
+      </div>
+      <div class="iq-proposal-actions">
+        <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._createShelfFolder()">Create</button>
+        <button type="button" class="btn-ghost btn-sm" onclick="MemberApp._closeShelfFolder()">Cancel</button>
+      </div>
+      <div class="iq-fp-said" id="iq-shelf-foldersaid" role="status" aria-live="polite"></div>`;
+    const i = document.getElementById('iq-shelf-foldername');
+    if (i) i.focus();
+  },
+
+  _closeShelfFolder() {
+    const box = document.getElementById('iq-shelf-newfolder');
+    if (box) { box.dataset.open = '0'; box.innerHTML = ''; }
+  },
+
+  async _createShelfFolder() {
+    const input = document.getElementById('iq-shelf-foldername');
+    const said = document.getElementById('iq-shelf-foldersaid');
+    const name = String((input && input.value) || '').trim();
+    // An empty name is not an error to shout about — it is somebody who has not typed yet.
+    if (!name) { if (input) input.focus(); return; }
+    if (said) said.textContent = 'Creating…';
     try {
       const r = await fetch('/api/library/folders', { method: 'POST', headers: this._authHeaders(),
-        body: JSON.stringify({ name: name.trim() }) });
+        body: JSON.stringify({ name }) });
       if (!r.ok) throw new Error(String(r.status));
+      this._closeShelfFolder();
       await this._renderShelf();
-    } catch (_) { this.showToast('That folder could not be made. Nothing has changed.', 'warning'); }
+    } catch (_) {
+      if (said) said.textContent = 'That folder could not be made. Nothing has changed.';
+      else this.showToast('That folder could not be made. Nothing has changed.', 'warning');
+    }
   },
 
   /* KEEP THIS — the control that fills the shelf up, called from an object card.
@@ -11009,7 +11324,22 @@ const MemberApp = {
     box.innerHTML = `<div class="iq-fp-audrow">${list.map((a, i) => `
       <button type="button" class="iq-make-chip${i === 0 ? ' is-on' : ''}" id="${esc(id)}-aud-${i}"
         onclick="MemberApp._pickAudience('${esc(id)}',${i})">${esc(a.label)}${
-        Number.isFinite(a.reaches) && a.kind !== 'self' ? ` <span class="iq-aud-n">${esc(a.reaches)}</span>` : ''}</button>`).join('')}</div>`;
+        /* THE COUNT SAYS WHAT IT COUNTS. This rendered the reach as a BARE INTEGER directly after
+           the group name — `${label} <span>1</span>` — with a span carrying no margin, no unit and
+           no delimiter. At chip size the gap disappears and a real coach read
+           "Coaching staff · Alma College Men's Soccer1" and reasonably took the 1 for part of the
+           name. The number was never wrong; it was never labelled.
+
+           The intended form is written down in two other places already — the route that produces
+           this field says "Coaching staff · Men's Soccer (2 people)", and _pickAudience below says
+           "Right now that is 1 person." This chip was the one copy that drifted, so it is brought
+           back to the house form rather than being nudged apart with a margin: a spacing fix would
+           have left a bare number sitting next to a name, which is the actual defect.
+
+           A group genuinely named "Squad 1" still reads correctly, because the count is now
+           parenthesised and carries its own noun. */
+        Number.isFinite(a.reaches) && a.kind !== 'self'
+          ? ` <span class="iq-aud-n">(${esc(a.reaches)} ${a.reaches === 1 ? 'person' : 'people'})</span>` : ''}</button>`).join('')}</div>`;
     this._pickAudience(id, 0);
   },
 
@@ -13134,8 +13464,40 @@ const MemberApp = {
     else if (j && j.navigate) this.openObjectThread(j.navigate.kind, j.navigate.id);
     return j;
   },
+  /* ── CORRECTING A PROPOSAL, IN THE CARD ───────────────────────────────────────────────────
+     This opened `window.prompt(...)`. On the governed-discussion path the founder walked, that
+     put a browser dialog over a confirmation card at the exact moment somebody is deciding what
+     to share — the worst possible place for a control that looks like it belongs to the browser
+     rather than to IntelliQ.
+
+     Opened INSIDE the proposal card instead, using the same `.iq-field` row the rest of the
+     product uses. The correction still goes through the same route; only the way it is asked
+     for has changed. Called again WITH text (from the inline field) it proceeds exactly as
+     before, so the server contract is untouched. */
   async correctProposal(turnId, proposalId, correction) {
-    const c = correction || window.prompt('What should I change? (e.g. "just a note", "keep this private", "do not remind me")');
+    if (!correction) {
+      const card = document.querySelector(`[data-proposal="${proposalId}"]`);
+      if (!card) return null;
+      let box = card.querySelector('.iq-correct-box');
+      if (box) { box.remove(); return null; }          // tapping Edit again closes it
+      const esc = s => this._escape(String(s == null ? '' : s));
+      card.insertAdjacentHTML('beforeend', `
+        <div class="iq-correct-box">
+          <div class="iq-field"><textarea class="iq-field-input" id="corr-${esc(proposalId)}" rows="2"
+            placeholder="What should I change? For example: just a note, keep this private, do not remind me"
+            aria-label="What should I change?"></textarea></div>
+          <div class="iq-proposal-actions">
+            <button type="button" class="btn btn-outline btn-sm"
+              onclick="MemberApp._sendCorrection('${esc(turnId)}','${esc(proposalId)}')">Send that</button>
+            <button type="button" class="btn-ghost btn-sm"
+              onclick="this.closest('.iq-correct-box').remove()">Cancel</button>
+          </div>
+        </div>`);
+      const t = card.querySelector(`#corr-${CSS.escape(String(proposalId))}`);
+      if (t) t.focus();
+      return null;
+    }
+    const c = correction;
     if (!c) return null;
     const r = await fetch(`/api/assistant/turn/${turnId}/correct`, { method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, correction: c }) });
@@ -13144,6 +13506,18 @@ const MemberApp = {
     if (cardEl && j.ok) cardEl.querySelector('.iq-proposal-why')?.insertAdjacentHTML('beforeend', ` <em class="iq-corrected">(updated: ${this._escape((j.applied || []).join(', ') || 'noted')})</em>`);
     return j;
   },
+  /* Reads the inline field and hands the text to the one correction path. Split out so the
+     onclick above stays a single call and the route keeps exactly one caller. */
+  async _sendCorrection(turnId, proposalId) {
+    const card = document.querySelector(`[data-proposal="${proposalId}"]`);
+    const t = card && card.querySelector('.iq-correct-box .iq-field-input');
+    const text = String((t && t.value) || '').trim();
+    if (!text) { if (t) t.focus(); return null; }
+    const box = card.querySelector('.iq-correct-box');
+    if (box) box.remove();
+    return this.correctProposal(turnId, proposalId, text);
+  },
+
   // Dismiss is a client-side hide of a proposal — nothing was persisted, so nothing to undo.
   dismissProposal(proposalId) { const el = document.querySelector(`[data-proposal="${proposalId}"]`); if (el) el.remove(); },
 

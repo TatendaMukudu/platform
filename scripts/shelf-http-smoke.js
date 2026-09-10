@@ -172,8 +172,19 @@ const server = app.listen(0, async () => {
        either one alone is a feature nobody can reach: a button wired to nothing, or a function
        nothing presses. */
     const html = require('fs').readFileSync(require('path').join(__dirname, '..', 'index.html'), 'utf8');
-    ok('SX11c …and a folder can be made from the page it is used on — the control in the markup AND the handler behind it, because either alone is unreachable',
-      /onclick="MemberApp\.newShelfFolder\(\)"/.test(html) && /async newShelfFolder\(\)/.test(src));
+    /* Rewritten September 2026, and STRENGTHENED rather than relaxed. It required
+       `async newShelfFolder()` — the keyword, not the behaviour — so it went red when naming a
+       folder moved out of a native `prompt()` and into an inline field: the opener became
+       synchronous and the awaiting moved to the function that actually creates the folder. The
+       law was never about `async`. It is that all THREE parts of the door exist, because any one
+       alone is a feature nobody can reach: the control in the markup, the handler behind it, and
+       somewhere for the field to render. The third clause is new, and is exactly what would have
+       caught an inline field with no container. */
+    ok('SX11c …and a folder can be made from the page it is used on — control, handler and the field\'s container, because any one alone is unreachable',
+      /onclick="MemberApp\.newShelfFolder\(\)"/.test(html)
+      && /newShelfFolder\(\)\s*\{/.test(src)
+      && /id="iq-shelf-newfolder"/.test(html)
+      && /\/api\/library\/folders/.test(src));
     ok('SX11e …and the page the nav opens is the shelf, with the notes composer that made copies gone from it',
       /id="shelf-list"/.test(html) && !/id="note-content"/.test(html) && !/MemberApp\.submitNote\(\)/.test(html));
     /* SX11d — anchored to the CALL and not to the definition. Four assertions in this codebase

@@ -68,7 +68,10 @@ const websearch         = require('./ai/websearch');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
 const errorlog = require('./ai/errorlog');
-const metrics = require('./ai/metrics');
+const metrics = require('./ai/metrics');                 // per-org USAGE counters
+const { metricName, metricRecord, needsRepair: _metricsNeedRepair,
+        findByName: _metricByName, dedupe: _metricDedupe,
+        uniqueMetricId: _metricUniqueId } = require('./ai/metric-record'); // what a PERFORMANCE metric is
 const renderArtifact = require('./ai/render-artifact');
 const googleProvider = require('./ai/providers/google');
 const delivery   = require('./ai/delivery');
@@ -1817,7 +1820,23 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 /* ── Create user (admin/coach adds someone below them) ─────────────────── */
-app.post('/api/auth/create-user', requireAuth, async (req, res) => {
+/* ── ONE PERMISSION GOVERNS ADDING PEOPLE ──────────────────────────────────────────────────────
+   There are three doors into this capability — Add Member, an invite link, and CSV import — and
+   until now they disagreed about who may open them. `bulk-import` asked for `edit_members`. These
+   two asked `_isLeader`, which is a DETECTOR, not a grant: it returns true for anyone who merely
+   SITS IN a node that happens to have a sub-node beneath it, whether or not anybody appointed
+   them. The two rules were not just different, they were inverted. Measured, before this change:
+
+     a member who sits in a parent node, never appointed, no edit_members
+         invite 200 · create-user 200 · bulk-import 403
+     a member explicitly granted edit_members, who leads nothing
+         invite 403 · create-user 403 · bulk-import reached the handler
+
+   So the person the organisation had actually authorised was refused at two doors out of three,
+   and a person nobody had authorised was admitted at the other two. `edit_members` is the
+   canonical permission and it is what all three ask for now. Tree position is still what decides
+   WHERE a new person lands — it is no longer what decides whether they may be added at all. */
+app.post('/api/auth/create-user', requirePermission('edit_members'), async (req, res) => {
   // The creator + org are the SESSION, never the body — no creating users in another org, and
   // no claiming to be a higher-privileged creator. The new user's details still come from the body.
   const code = req.iqSession.orgCode;
@@ -1830,11 +1849,12 @@ app.post('/api/auth/create-user', requireAuth, async (req, res) => {
   if (!creator) return res.status(403).json({ error: 'Creator not found' });
 
   const roleLevel = { superadmin:1, admin:2, coach:3, member:4 };
-  // A leader (node / supervisor / group lead) may add plain MEMBERS under
-  // themselves even when their own role is 'member' — item C. They cannot create
-  // anyone above member, and the new member is forced into their subtree below.
-  const leaderAddingMember = role === 'member' && _isLeader(code, creatorId);
-  if (roleLevel[role] <= roleLevel[creator.role] && creator.role !== 'superadmin' && !leaderAddingMember) {
+  /* Somebody whose own ROLE is 'member' may still add plain MEMBERS — that is the whole point of
+     granting them `edit_members`. What they may never do is create anyone at or above their own
+     level, and the new member is forced into their subtree below. This used to read `_isLeader`,
+     which meant sitting in a node with a child beneath it was enough. */
+  const mayAddMembers = role === 'member' && _userHasPerm(code, creatorId, 'edit_members');
+  if (roleLevel[role] <= roleLevel[creator.role] && creator.role !== 'superadmin' && !mayAddMembers) {
     return res.status(403).json({ error: 'You cannot create someone at or above your level' });
   }
   // For non-admin leaders, force placement under themselves so they can never
@@ -1891,13 +1911,16 @@ app.post('/api/auth/create-user', requireAuth, async (req, res) => {
 // or imported in bulk via /api/auth/bulk-import (which requires email column).
 
 /* ── Generate invite link ───────────────────────────────────────────────── */
-app.post('/api/auth/invite', requireAuth, (req, res) => {
+/* Minting an invite is adding a person to the organisation with one extra step, so it asks for
+   the same permission Add Member and CSV import ask for — see the note above create-user for what
+   the three doors used to disagree about. Never for a role above the inviter's own (closes:
+   anyone inviting themselves in as superadmin), and never for another org: the org is the
+   session, not the body. */
+app.post('/api/auth/invite', requirePermission('edit_members'), (req, res) => {
   const orgCode = req.iqSession.orgCode;
-  const { role, supervisorId, group, label, usageLimit, expiryDays } = req.body;
-  // Only a leader/admin may mint invites — for their OWN org, and never for a role above their
-  // own (closes: anyone inviting themselves in as superadmin to any org).
+  const { role, supervisorId, group, label, email, usageLimit, expiryDays } = req.body;
   const inviter = orgUsers[orgCode]?.[req.iqSession.userId];
-  if (!inviter || !_isLeader(orgCode, req.iqSession.userId)) return res.status(403).json({ error: 'Only a leader can create invites.' });
+  if (!inviter) return res.status(403).json({ error: 'Inviter not found.' });
   const roleLevel = { superadmin: 1, admin: 2, coach: 3, member: 4 };
   const wantRole = role || 'member';
   if ((roleLevel[wantRole] || 4) < (roleLevel[inviter.role] || 4) && inviter.role !== 'superadmin') {
@@ -1905,12 +1928,47 @@ app.post('/api/auth/invite', requireAuth, (req, res) => {
   }
   const token = generateToken();
   const days  = Math.min(Math.max(parseInt(expiryDays) || 7, 1), 90);
+  /* AN INVITE AIMED AT A PERSON IS BOUND TO THEIR ADDRESS.
+
+     `label` was stored as presentation metadata and nothing else, so an invite created for
+     "target@a.test" could be redeemed by anybody who had the link, under any address they liked.
+     Reproduced: registering `different@a.test` through a link labelled `target@a.test` returned
+     200 and created that different account inside the organisation.
+
+     `invite.email` is not a new field. `invite-info` already returns it ("prefill if invite was
+     email-targeted") and `join-invite` already falls back to it. Only the writer was missing, so
+     the binding those two routes were written for never existed. An address that does not look
+     like one is kept as a label and binds nothing, which is what a general join link is. */
+  /* AN ADDRESS THE CALLER MEANT IS DECLARED, NOT INFERRED.
+
+     Binding was worked out by running a regex over `label`, which meant the caller never had to
+     say whether they were naming a person or labelling a link — the server guessed. A browser
+     check caught what that costs: the "Invite by Email" panel sends the typed address as `label`,
+     so pasting a list with a typo in it ("also bad") produced a link that looked exactly like the
+     other two and was bound to nobody. An OPEN join link, mintable by mistake, from a screen whose
+     entire purpose is one link per named person.
+
+     `email` is the explicit field for "this invite is for this person". When it is present it must
+     be an address or the request is refused — a typo is now a 400 that says so, not a link. The
+     label inference stays for the Generate Join Link panel, where "First Team intake" is a label
+     and binds nothing, which is what an open link is for. */
+  if (email !== undefined && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim())) {
+    const shown = String(email || '').trim();
+    return res.status(400).json({ error: shown
+      ? `"${shown.slice(0, 80)}" is not an email address.`
+      : 'An invite for a specific person needs their email address.' });
+  }
+  const targeted = email !== undefined
+    ? String(email).trim().toLowerCase()
+    : (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(label || '').trim())
+      ? String(label).trim().toLowerCase() : '');
   inviteTokens[token] = {
     orgCode:    orgCode.toLowerCase(),
     role:       role || 'member',
     supervisorId,
     group:      group || '',
     label:      label || '',
+    email:      targeted,
     usageLimit: usageLimit ? parseInt(usageLimit) : null,
     useCount:   0,
     expiresAt:  Date.now() + days * 24 * 60 * 60 * 1000,
@@ -1962,6 +2020,73 @@ app.post('/api/auth/join-invite', async (req, res) => {
   // Email: use provided, or fall back to invite-embedded email
   const emailNorm = ((email || invite.email || '')).toLowerCase().trim();
   if (!emailNorm) return res.status(400).json({ error: 'Email address is required.' });
+
+  /* AN EMAIL-BOUND INVITE IS FOR THAT PERSON, AND ONLY THEM. Without this a targeted link was a
+     general one: whoever held it could join under any address. */
+  if (invite.email && invite.email !== emailNorm) {
+    return res.status(403).json({ error: 'This invite was created for a different email address.' });
+  }
+
+  /* ── ACTIVATING AN ACCOUNT SOMEBODY WAS ALREADY ADDED AS ────────────────────────────────────
+     Add Member creates a real account with `passwordSet: false` and then hands the admin a link
+     described as "share this link so they can set their password". That link was a NEW-ACCOUNT
+     token, so redeeming it hit the duplicate-email refusal below and the account could never be
+     activated: it could not log in (its password is random and unknown) and could not register
+     (its address is already indexed). Reproduced end to end -- 400, and one account left dormant
+     forever. The promise on the screen was simply not true.
+
+     Completed here rather than escalated, because no ontology is being decided: the account, the
+     token and the set-password semantics all already exist, and the only thing missing was the
+     step that joins them. What made it unsafe before was the missing binding above -- claiming a
+     dormant account required nothing but its address. It now requires an invite MINTED FOR that
+     address, which is the same bar as being sent the link in the first place.
+
+     Deliberately narrow: same organisation, still dormant, and the invite names them. An account
+     that has ever set a password is untouched and still gets the refusal below, so this can never
+     become a way to take one over. */
+  /* ── AND THE INVITE MUST AUTHORISE THE ACCOUNT IT IS ACTIVATING ─────────────────────────────
+     The guard below asked three questions — same address, same organisation, still dormant — and
+     never asked the fourth: is this invite entitled to hand back THIS ACCOUNT'S ROLE? It is not a
+     theoretical gap. Reproduced end to end:
+
+       admin mints an invite with role=superadmin        -> 403 "You cannot invite someone above
+                                                                 your own level."
+       admin mints an invite with role=member, aimed at
+       a DORMANT superadmin's address                    -> 200
+       admin redeems it with a password of their choosing -> 200, activated, role: superadmin
+       that session mints a superadmin invite             -> 200
+       that session reads /api/admin/persistence          -> 200
+
+     The ceiling was enforced where invites are MINTED and then discarded where an account is
+     HANDED OVER, so the whole ladder could be climbed by aiming a permitted invite at an account
+     nobody was permitted to invite. An invite for a member may only activate a member.
+
+     The refusal is silent on purpose: it falls through to the ordinary duplicate-address answer
+     below rather than saying "that address belongs to a privileged dormant account", which would
+     turn this route into an oracle for finding one. Fail closed, and cheaply. */
+  const ROLE_RANK = { superadmin: 1, admin: 2, coach: 3, member: 4 };
+  const _inviteMayActivate = account =>
+    (ROLE_RANK[account && account.role] || 4) >= (ROLE_RANK[invite.role] || 4);
+
+  const existing = emailIndex[emailNorm];
+  if (existing && invite.email === emailNorm
+      && existing.orgCode === code
+      && users[existing.userId]
+      && users[existing.userId].passwordSet === false
+      && _inviteMayActivate(users[existing.userId])) {
+    const account = users[existing.userId];
+    account.passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+    account.passwordSet = true;
+    account.status = 'active';
+    if (fullName) { account.name = fullName; if (fName) account.firstName = fName; if (lName) account.lastName = lName; }
+    invite.useCount = (invite.useCount || 0) + 1;
+    scheduleSave();
+    _audit(code, { actor: account.id, action: 'member_activated', subjectIds: [account.id], basis: 'invite' });
+    return res.json({ ok: true, activated: true,
+      token: issueToken(account.id, code, account.role),
+      user: { id: account.id, name: account.name, email: account.email, role: account.role, orgCode: code } });
+  }
+
   if (emailIndex[emailNorm]) return res.status(400).json({ error: 'An account with this email already exists. Please log in instead.' });
 
   const exists = Object.values(users).find(u => u.name.toLowerCase() === fullName.toLowerCase());
@@ -2658,7 +2783,9 @@ app.post('/api/auth/complete-org-profile', requireAuth, (req, res) => {
     orgGoals[code] = profile.goals.map(g => ({ goalId: 'g_' + generateId(), text: String(g), createdAt: new Date().toISOString() }));
   }
   if (profile.metrics.length && !(orgMetrics[code] && orgMetrics[code].length)) {
-    orgMetrics[code] = profile.metrics.map((m, i) => ({ metricId: 'm_' + generateId(), name: String(m), source: 'org', order: i }));
+    // Through the one owner: a random `m_` id here would have given the same metric a different
+    // identity depending on which door created it, and `String(m)` coerced non-names into metrics.
+    orgMetrics[code] = profile.metrics.map((m, i) => metricRecord(m, i)).filter(Boolean);
   }
 
   scheduleSave();
@@ -2893,21 +3020,44 @@ async function _commitTreeMutation(code, snapshot, res) {
   }
 }
 
-app.post('/api/tree/node', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
-  const code = req.iqSession.orgCode;
-  const { name, parentId, description, ifRev } = req.body;
-  if (!name) return res.status(400).json({ error: 'name required' });
+/* ── _addTreeNode — THE ONE PLACE A NODE COMES INTO EXISTENCE ──────────────────────────────────
+   Extracted from the route below because it had a second implementation. CSV import created a
+   group node by assigning straight into `orgNodes[code]`: no trimmed-name check, no duplicate
+   check, no `rev`, no parent linkage, and outside the serialisation and compare-and-set the route
+   goes through. A group made by importing a spreadsheet was therefore a different kind of object
+   from a group made by pressing the button — one of them could be created twice by a retry, and
+   neither the tree's revision numbers nor its conflict detection knew it had happened.
+
+   This mutates the in-memory tree and nothing else. The CALLER holds the CAS boundary: snapshot
+   first, then `_commitTreeMutation`, which is what rolls the snapshot back on a conflict. Keeping
+   the commit with the caller is what lets an importer create several nodes and commit them as one
+   unit, rather than one fragile write per row. */
+function _addTreeNode(code, { name, parentId = null, description = '' } = {}) {
+  /* VALIDATE THE NAME THAT WILL BE STORED, not the one that arrived. `if (!name)` passed a string
+     of spaces and the node was then created with `name.trim()` -- so "   " stored a node with an
+     EMPTY name, reproduced. Trim first, then decide. */
+  const nodeName = String(name == null ? '' : name).trim();
+  if (!nodeName) return { error: 'name required', status: 400 };
   if (!orgNodes[code]) orgNodes[code] = {};
-  const parent = parentId ? orgNodes[code][parentId] : null;
-  if (parentId && !parent) return res.status(404).json({ error: 'Parent node not found' });
-  if (parent && !_treePrecondition(res, parent, ifRev)) return;
-  const snapshot = JSON.parse(JSON.stringify(orgNodes[code]));
+  if (parentId && !orgNodes[code][parentId]) return { error: 'Parent node not found', status: 404 };
+
+  /* RETRY IS NOT A SECOND NODE. Two identical creates both returned 200 and produced two nodes,
+     so a lost response followed by the human retry everybody performs duplicated the structure --
+     reproduced. A sibling with the same name under the same parent is that retry, not a second
+     unit: an organisation does not hold two distinct groups with one name in one place. The
+     existing node is returned instead, so pressing the button twice is indistinguishable from
+     pressing it once. `already` tells an honest caller which happened. */
+  const twin = Object.values(orgNodes[code]).find(n =>
+    n && String(n.parentId || '') === String(parentId || '')
+    && String(n.name || '').trim().toLowerCase() === nodeName.toLowerCase());
+  if (twin) return { node: twin, already: true };
+
   const nodeId = 'nd_' + generateId();
   const now    = new Date().toISOString();
   orgNodes[code][nodeId] = {
     nodeId,
-    name:        name.trim(),
-    description: (description || '').trim(),
+    name:        nodeName,
+    description: String(description == null ? '' : description).trim(),
     parentId:    parentId || null,
     childNodeIds: [],
     memberIds:   [],
@@ -2923,8 +3073,22 @@ app.post('/api/tree/node', requirePermission('manage_tree'), _serializeTreeMutat
     orgNodes[code][parentId].updatedAt = now;
     orgNodes[code][parentId].rev = (orgNodes[code][parentId].rev || 0) + 1;
   }
+  return { node: orgNodes[code][nodeId], already: false };
+}
+
+app.post('/api/tree/node', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
+  const code = req.iqSession.orgCode;
+  const { name, parentId, description, ifRev } = req.body;
+  const parent = parentId ? orgNodes[code]?.[parentId] : null;
+  if (parentId && !parent) return res.status(404).json({ error: 'Parent node not found' });
+  if (parent && !_treePrecondition(res, parent, ifRev)) return;
+
+  const snapshot = JSON.parse(JSON.stringify(orgNodes[code] || {}));
+  const made = _addTreeNode(code, { name, parentId, description });
+  if (made.error) return res.status(made.status).json({ error: made.error });
+  if (made.already) return res.json({ ok: true, already: true, node: made.node });
   if (!(await _commitTreeMutation(code, snapshot, res))) return;
-  res.json({ ok: true, node: orgNodes[code][nodeId] });
+  res.json({ ok: true, node: made.node });
 });
 
 app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
@@ -13923,7 +14087,12 @@ async function _composerActionInterpret(code, text, context, priorMessages, requ
   let reading;
   if (requestedAction) {
     reading = composerActions.normalize({ actions: [{ type: requestedAction.type, arguments: requestedAction.arguments || {}, reason: 'selected from the current view' }] }, context);
-    return composerActions.ground(reading, { text, priorMessages, context });
+    /* THE PERSON PRESSED THE CONTROL. "Work on this" stages create_focus and then asks what they
+       want to change; the answer is a bare noun phrase, not a sentence declaring intent, and it
+       is not a question. Intent was declared by the press, so grounding does not have to find it
+       in the wording. The model-proposed path below passes no such flag, which is the whole point:
+       there, intent is exactly what is in doubt. */
+    return composerActions.ground(reading, { text, priorMessages, context, requested: true });
   }
   if (!ai.enabled() || ai.deterministicOnly()) return { actions: [], needsClarification: null, unavailable: true };
   try {
@@ -18374,6 +18543,59 @@ app.get('/api/org/divisions', requireAuth, (req, res) => {
    Three sources: org (superadmin-defined), shared (leader), personal (member)
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* ── WHAT A METRIC IS ──────────────────────────────────────────────────────────────────────────
+   THE CANONICAL SHAPE IS THE ONE THE WRITER PRODUCES: `POST /api/metrics` has always stored
+   `{ metricId, name, source, order, createdAt }`. Nothing else was ever a metric — but the Alma
+   seed wrote plain STRINGS into the same store, and `GET /api/metrics` handed them straight out.
+
+   That single mismatch produced three live defects, only one of which was visible:
+
+     1. Settings rendered `m.name` on a string and showed "1 undefined / 2 undefined / ...",
+        which is product law 4 broken in front of a coach;
+     2. `PUT /api/metrics/:metricId` could never find a seeded metric, so none could be renamed;
+     3. `deleteMetric` could never find one either, so none could be removed.
+
+   Two and three were silent. A coach would have found them the first time they tried to tidy the
+   list, which is exactly the week of the pilot.
+
+   ONE OWNER, USED BY EVERY PATH. The owner is `ai/metric-record.js`. The seed builds metrics
+   through it, the org-approval flow builds them through it, the migration below repairs data
+   already written through it, and the routes return what it produced. A second normaliser
+   somewhere else is how the two shapes got here in the first place.
+
+   THE ID IS DERIVED, NOT MINTED. `met_<hash of the name>` is stable across restarts, so the
+   migration is idempotent: run it a hundred times and a metric keeps the id it had, and the links
+   from anything referencing it do not rot. A random id would have made every boot produce a new
+   metric identity for the same metric.
+
+   A NAME IS A STRING, and that rule now lives in `ai/metric-record.js` with the shape itself.
+   It has to: this function used to say `String(entry.name).trim()`, which happily coerced an
+   object into a metric literally called "[object Object]", while `PUT` had its own copy of the
+   rule (`req.body.name.trim()`) that threw on the same input and returned HTTP 500. Two
+   descriptions of one rule always drift, and these two had already drifted into a stored lie and
+   a crash. There is one now, and every writer below goes through it. */
+const _metricRecord = metricRecord;
+
+/* Repair metrics written before the shape was enforced. Idempotent by construction: a record that
+   is already canonical hashes to the same id and compares equal, so a healthy store is untouched
+   and nothing is rewritten or re-saved. Runs once at startup beside the other migrations. */
+function _migrateLegacyMetrics() {
+  let repaired = 0;
+  for (const code of Object.keys(orgMetrics || {})) {
+    const list = Array.isArray(orgMetrics[code]) ? orgMetrics[code] : [];
+    if (!_metricsNeedRepair(list)) continue;
+    // Dedupe as well as reshape: a store that already holds two rows under one derived id
+    // cannot be addressed unambiguously, and the first occurrence is the one people have seen.
+    orgMetrics[code] = _metricDedupe(list.map((m, i) => _metricRecord(m, i)).filter(Boolean));
+    repaired += orgMetrics[code].length;
+  }
+  if (repaired) {
+    console.log(`[metrics] normalised ${repaired} metric(s) to the canonical shape`);
+    scheduleSave();
+  }
+  return repaired;
+}
+
 app.get('/api/metrics', requireAuth, (req, res) => {
   const code = req.iqSession.orgCode;
   res.json({ ok: true, metrics: orgMetrics[code] || [] });
@@ -18384,13 +18606,18 @@ app.post('/api/metrics', requirePermission('manage_metrics'), (req, res) => {
   const { name, source } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
   if (!orgMetrics[code]) orgMetrics[code] = [];
-  const metric = {
-    metricId: 'met_' + generateId(),
-    name:     name.trim(),
-    source:   source || 'org',
-    order:    orgMetrics[code].length,
-    createdAt: new Date().toISOString(),
-  };
+  // Through the same owner as the seed and the migration, so there is one definition of a metric.
+  const metric = _metricRecord({ name, source }, orgMetrics[code].length);
+  if (!metric) return res.status(400).json({ error: 'name required' });
+  /* CREATING A NAME THAT EXISTS RETURNS THE ONE THAT EXISTS. The id is derived from the name, so
+     pushing a second record here minted a second row under the SAME primary key — and deleting
+     either then removed both, because the delete filters by id. Same answer the Org Tree gives to
+     a repeated create: `already`, and the record that was already there. */
+  const twin = _metricByName(orgMetrics[code], metric.name);
+  if (twin) return res.json({ ok: true, already: true, metric: twin });
+  // And the id must be free too: a renamed record keeps its original derived id, so recreating
+  // the name it used to have would collide with it. See uniqueMetricId.
+  metric.metricId = _metricUniqueId(metric.name, orgMetrics[code].map(m => m.metricId));
   orgMetrics[code].push(metric);
   scheduleSave();
   res.json({ ok: true, metric });
@@ -18400,8 +18627,24 @@ app.put('/api/metrics/:metricId', requirePermission('manage_metrics'), (req, res
   const code   = req.iqSession.orgCode;
   const metric = (orgMetrics[code] || []).find(m => m.metricId === req.params.metricId);
   if (!metric) return res.status(404).json({ error: 'Metric not found' });
-  if (req.body.name  !== undefined) metric.name  = req.body.name.trim();
-  if (req.body.order !== undefined) metric.order = req.body.order;
+  /* Rename through the SAME definition of a name the create route uses. This line used to be
+     `req.body.name.trim()`: an object body threw and became a 500, and "   " was stored as an
+     empty name that then rendered as a blank row nobody could identify. */
+  if (req.body.name !== undefined) {
+    const renamed = metricName(req.body.name);
+    if (!renamed) return res.status(400).json({ error: 'name required' });
+    /* A RENAME MAY NOT MANUFACTURE THE COLLISION THE CREATE ROUTE NOW REFUSES. Renaming onto a
+       name another record holds would give two records one derived id again, by the back door. */
+    const clash = _metricByName(orgMetrics[code], renamed);
+    if (clash && clash.metricId !== metric.metricId) {
+      return res.status(409).json({ error: `There is already a metric called "${renamed}".` });
+    }
+    metric.name = renamed;
+  }
+  if (req.body.order !== undefined) {
+    if (!Number.isFinite(req.body.order)) return res.status(400).json({ error: 'order must be a number' });
+    metric.order = req.body.order;
+  }
   scheduleSave();
   res.json({ ok: true, metric });
 });
@@ -19723,7 +19966,26 @@ app.post('/api/platform/update-org-mode', requirePermission('manage_settings'), 
   res.json({ ok: true, orgCode: code, orgMode });
 });
 
-/* ── Bulk import users (CSV/XLSX parsed client-side) ─────────────────── */
+/* ── Bulk import users (CSV parsed client-side; CSV is the only format the pilot accepts) ─── */
+/* ── WHAT AN IMPORT MAY NOT EXCEED ─────────────────────────────────────────────────────────────
+   The route accepted an array of any length and hashed a password for every row it kept. bcrypt
+   at the configured cost is deliberately slow — that is its job — and it is synchronous work on
+   the one event loop this process has. A 20,000-row array is therefore not a large import, it is
+   an outage: every other request in the organisation waits behind it, and the accounts already
+   created stay created.
+
+   So the size is checked BEFORE the first account is minted, and the refusal says what the limit
+   is and what was sent, because "too large" without a number tells somebody nothing about how to
+   split their file. The numbers are pilot-scale on purpose — a college squad is tens of people,
+   not thousands — and they are stated here, in the route that enforces them, so there is one
+   place to change them.
+
+   Field lengths are capped for the same reason a name field on a form is: a 4 MB string in a name
+   column is not a name, and it would be copied into the user record, every projection built from
+   it, and every save of the org from then on. */
+const IMPORT_MAX_ROWS  = 500;
+const IMPORT_MAX_FIELD = 120;   // name, email, group — each, after trimming
+
 /* SECURITY — THE WORST OF THE THREE, because this one MINTS ACCOUNTS.
 
    It took the organisation from the BODY and required nothing but a session, so an ordinary
@@ -19742,7 +20004,9 @@ app.post('/api/platform/update-org-mode', requirePermission('manage_settings'), 
              level. Without it, an admin (who has edit_members and cannot mint a superadmin
              invite) could mint one here — the ceiling has to live wherever accounts are made,
              not only where invites are. */
-app.post('/api/auth/bulk-import', requirePermission('edit_members'), async (req, res) => {
+/* `_serializeTreeMutation` because this route now creates tree nodes: two imports naming the same
+   group must queue behind one another exactly as two presses of the create button do. */
+app.post('/api/auth/bulk-import', requirePermission('edit_members'), _serializeTreeMutation, async (req, res) => {
   const { orgCode, users: importRows } = req.body;
   if (!Array.isArray(importRows)) return res.status(400).json({ error: 'users[] required' });
   const code = String(req.iqSession.orgCode || '').toLowerCase().trim();
@@ -19753,12 +20017,25 @@ app.post('/api/auth/bulk-import', requirePermission('edit_members'), async (req,
 
   if (!orgUsers[code]) return res.status(404).json({ error: 'Org not found' });
 
+  // Before a single account is minted. See IMPORT_MAX_ROWS for why this cannot be a per-row check.
+  if (importRows.length > IMPORT_MAX_ROWS) {
+    return res.status(413).json({
+      error: `This import has ${importRows.length} rows. IntelliQ accepts up to ${IMPORT_MAX_ROWS} at a time — split the file and import it in parts.`,
+      limit: IMPORT_MAX_ROWS, received: importRows.length });
+  }
+
   /* THE CEILING. Same ladder /api/auth/invite uses, and deliberately the same numbers rather
      than a second table that could drift away from it. */
   const ROLE_LEVEL = { superadmin: 1, admin: 2, coach: 3, member: 4 };
   const creatorLevel = ROLE_LEVEL[creator.role] || 4;
 
   const created = [], skipped = [], failed = [];
+  // Snapshot before any group node is touched, so the whole import commits or rolls back as one.
+  const treeSnapshot = JSON.parse(JSON.stringify(orgNodes[code] || {}));
+  let touchedTree = false;
+  /* What this request minted, so a failed commit can un-mint it. See the rollback below for why
+     leaving them behind was worse than never creating them. */
+  const mintedUserIds = [], mintedEmails = [];
 
   for (const row of importRows) {
     const name  = (row.name  || '').trim();
@@ -19786,9 +20063,19 @@ app.post('/api/auth/bulk-import', requirePermission('edit_members'), async (req,
       continue;
     }
 
-    if (!name) { failed.push({ row, reason: 'Missing name' }); continue; }
-    if (!email) { failed.push({ row, reason: 'Missing email' }); continue; }
+    if (!name) { failed.push({ row: row && row.email ? String(row.email).slice(0, IMPORT_MAX_FIELD) : '(row with no name)', reason: 'Missing name' }); continue; }
+    if (!email) { failed.push({ row: name, reason: 'Missing email' }); continue; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { failed.push({ row: name, reason: 'Invalid email format' }); continue; }
+    /* Refused per row, not for the whole file: one absurd cell should not cost somebody the other
+       499 rows. The reported row is truncated too — echoing a 4 MB name back at the client would
+       make the RESPONSE the outage instead of the request. */
+    const tooLong = [['name', name], ['email', email], ['group', group]]
+      .find(([, v]) => v.length > IMPORT_MAX_FIELD);
+    if (tooLong) {
+      failed.push({ row: name.slice(0, IMPORT_MAX_FIELD),
+        reason: `${tooLong[0]} is longer than ${IMPORT_MAX_FIELD} characters` });
+      continue;
+    }
 
     // Check for duplicate by email (global) or name (org)
     if (emailIndex[email]) { skipped.push(`${name} (email already used)`); continue; }
@@ -19816,24 +20103,70 @@ app.post('/api/auth/bulk-import', requirePermission('edit_members'), async (req,
       importedAt: new Date().toISOString(),
     };
     emailIndex[email] = { orgCode: code, userId };
+    mintedUserIds.push(userId); mintedEmails.push(email);
 
-    // Auto-create group if it doesn't exist
+    /* A GROUP CREATED BY IMPORTING IS THE SAME OBJECT AS A GROUP CREATED BY PRESSING THE BUTTON.
+       This used to assign straight into `orgNodes[code]` with a bare `generateId()`: no `rev`, no
+       `parentId`, no `childNodeIds`, no duplicate check beyond a case-insensitive name scan, and
+       entirely outside the tree's compare-and-set. Two imports naming the same group could race
+       into two nodes, and neither the tree's revisions nor its conflict detection ever knew a
+       write had happened. `_addTreeNode` is the owner the route uses; it is the owner here. */
     if (group) {
-      const groupExists = _groups(code).some(g => g.name.toLowerCase() === group.toLowerCase());
-      if (!groupExists) {
-        const nodeId = generateId();
-        (orgNodes[code] = orgNodes[code] || {})[nodeId] = { nodeId, name: group, orgCode: code, memberIds: [], leaderIds: [], createdAt: new Date().toISOString() };
+      const made = _addTreeNode(code, { name: group });
+      const node = made.node;
+      if (node) {
+        if (!Array.isArray(node.memberIds)) node.memberIds = [];
+        if (!node.memberIds.includes(userId)) {
+          node.memberIds.push(userId);
+          node.updatedAt = new Date().toISOString();
+          node.rev = (node.rev || 0) + 1;
+        }
+        touchedTree = true;
       }
-      // Add member to group
-      const gObj = _groups(code).find(g => g.name.toLowerCase() === group.toLowerCase());
-      if (gObj && !gObj.memberIds.includes(userId)) gObj.memberIds.push(userId);
     }
 
     created.push({ id: userId, name, role, group });
   }
 
+  /* ── ONE COMMIT FOR THE WHOLE IMPORT, AND ONE ROLLBACK ─────────────────────────────────────
+     `_commitTreeMutation` rolls the TREE back on a compare-and-set conflict and answers 409. It
+     knows nothing about the accounts this loop has already put into `orgUsers` and `emailIndex`,
+     and an earlier version of this route simply returned at that point. The claim in the comment
+     that replaced — that the accounts "are reported honestly below" — was false: the `return`
+     happens before anything is reported, and the response is a bare `{error:'conflict'}`.
+
+     Reproduced by injecting a real conflict at `db.saveStores`:
+
+       HTTP 409, body {"error":"conflict","reason":"changed elsewhere"}
+       accounts left in orgUsers : a1@cas.test, b2@cas.test
+       tree nodes after rollback : (none)
+       their assignedNodeIds     : [[],[]]
+       the retry an operator makes: created 0, skipped 2, still no group, still unplaced
+
+     Two real accounts, in no unit, invisible to every scope computation, and PERMANENTLY
+     unrecoverable through this route because the retry skips them by email before it would have
+     placed them. `scheduleSave()` never ran either, so whether they survived a restart depended
+     on an unrelated later save.
+
+     So the accounts are un-minted here. Nothing this request created survives a failed commit,
+     which makes the retry the operator will make do exactly what they expect: import everything,
+     from a clean state. Rolling back is available precisely because these accounts are seconds
+     old and nothing can reference them yet. */
+  if (touchedTree && !(await _commitTreeMutation(code, treeSnapshot, res))) {
+    for (const uid of mintedUserIds) delete orgUsers[code][uid];
+    for (const em of mintedEmails)   delete emailIndex[em];
+    _backfillUserNodeIds();
+    scheduleSave();
+    console.warn(`[import] tree conflict — rolled back ${mintedUserIds.length} account(s); nothing was imported`);
+    return;   // _commitTreeMutation has already answered 409
+  }
+
   scheduleSave();
-  res.json({ ok: true, created, skipped, failed, total: importRows.length });
+  /* NEVER A BLANKET SUCCESS. `ok` used to be the literal `true` whatever happened, so an import
+     where every row failed answered the client with a success it then rendered as one. `ok` now
+     means what the word means: every row the file contained became an account. */
+  res.json({ ok: failed.length === 0, created, skipped, failed, total: importRows.length,
+    counts: { created: created.length, skipped: skipped.length, failed: failed.length } });
 });
 
 /* ── List active join/invite links ───────────────────────────────────── */
@@ -22380,7 +22713,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
   _createPersonalFocus, _updatePersonalFocus, _recordPersonalFocusOutcome, _resolvePersonalFocusAudience,
-  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, shelfFilings, _shelfLookup, inquiryStates, _migrateLegacyNotesToLibrary, orgNotes, orgMessages, orgStore, safeguardingFlags, _llmBudgetOk, _captureError, checkinProposals,
+  _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, shelfFilings, _shelfLookup, inquiryStates, _migrateLegacyNotesToLibrary, _migrateLegacyMetrics, _metricRecord, orgMetrics, orgNotes, orgMessages, orgStore, safeguardingFlags, _llmBudgetOk, _captureError, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,
   // exported for the truth layer: grounded retrieval over canonical evidence
@@ -22390,7 +22723,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _getOrgState, _buildOrgStateInputs, orgStateConfig, orgContextRecords, _confirmOrgContext,
   _resolveSubjectRef, _inquiryFor, _eraseSubjectInquiries,
   // exported for the truth layer: classifications are labels on membership, never hierarchy
-  _setClassifications, _classificationsOf, _membersWithClassification, _isLeader,
+  _setClassifications, _classificationsOf, _membersWithClassification, _isLeader, userPermissions, _resolveRoleDefaults,
   _teamReadiness, roleBindings, _bindRole, activeQuestions, _activeQuestionFrom, _writeResolutionEvidence,
   // exported for the truth layer: organisational memory (Phase A) — the derived-state timeline
   orgStateHistory, _recordOrgSnapshot,
@@ -22456,6 +22789,10 @@ if (require.main === module) (async () => {
 
     // 5a. One home — sweep any legacy notes into the Library (idempotent; adds only the missing mirrors).
     try { _migrateLegacyNotesToLibrary(); } catch (e) { console.warn('[library] note migration skipped:', e && e.message); }
+
+    // 5a1. Metrics written before the shape was enforced. Idempotent and deterministic: a healthy
+    //      store is untouched and triggers no save. See _metricRecord for why the id is derived.
+    try { _migrateLegacyMetrics(); } catch (e) { console.warn('[metrics] normalisation skipped:', e && e.message); }
 
     // 5a2. Optional demo seed on boot, for a host with no shell (Render's free tier). SEED_ALMA=1
     //      seeds once and skips if the org is already there; 'force' re-seeds. Additive: it

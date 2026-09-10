@@ -79,11 +79,26 @@ _teamFocuses(C, 'n1').push(teamState.newFocus({
 
   /* ── 2. CREATE A FOLDER ───────────────────────────────────────────────────────────────── */
   console.log('\n  CREATE A FOLDER');
-  page.once('dialog', d => d.accept('Set pieces'));
-  await page.evaluate(() => MemberApp.newShelfFolder());
-  await page.waitForTimeout(700);
+  /* DRIVEN THROUGH THE REAL CONTROLS. This used to accept a native `dialog` event, because naming
+     a folder opened `prompt()`. It does not any more — a browser dialog on a phone reads as the
+     browser interrupting rather than as IntelliQ asking — so the harness now does what a person
+     does: press New folder, type into the inline field, press Create. That is a better test as
+     well as a necessary one; the old version could not have caught a field that never rendered. */
+  let dialogs = 0;
+  page.on('dialog', d => { dialogs++; d.dismiss().catch(() => {}); });
+  await page.click('button:has-text("New folder")');
+  await page.waitForTimeout(300);
+  const field = await page.$('#iq-shelf-foldername');
+  ok('B2a pressing New folder opens a field in the page, not a browser dialog', !!field && dialogs === 0);
+  if (field) {
+    await field.fill('Set pieces');
+    await page.click('#iq-shelf-newfolder button:has-text("Create")');
+    await page.waitForTimeout(800);
+  }
   const chipText = await page.$eval('#shelf-folders', el => el.textContent || '').catch(() => '');
   ok('B2 a folder can be created and named, and its chip appears', /Set pieces/.test(chipText));
+  ok('B2b …and the field closes once the folder exists',
+    !(await page.$('#iq-shelf-foldername')));
 
   /* ── 3. KEEP AN OBJECT THROUGH THE GOVERNED ACTION ────────────────────────────────────────
      PR #84's law: a consequence on a governed object is proposed and confirmed, not fired by a

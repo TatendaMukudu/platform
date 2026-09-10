@@ -109,9 +109,23 @@ const server = app.listen(0, async () => {
     ok('OA9 a leader can READ the tree — which is the thing the founder asked for first',
       tree.status === 200 && Array.isArray((tree.j || {}).nodes));
 
+    /* OA10 USED TO ASSERT THAT LEADING A NODE WAS ENOUGH TO MINT AN INVITE. It is not, by founder
+       decision: adding people to an organisation is governed by `edit_members`, the permission
+       that already governs it at Add Member and at CSV import, and a position in the Org Tree
+       does not confer it. The old assertion is not weakened here — it is replaced by the stronger
+       pair, that the permission decides and the tree position does not.
+
+       This matters for the NAV, which is what this suite is about: a menu item pointing at a 403
+       is worse than no menu item. The onboarding controls are hidden for anyone without
+       `edit_members` (see _applyOnboardAuthority), so the menu and the server still agree. */
     const invite = await post('/api/auth/invite', coachTok, { role: 'member' });
-    ok('OA10 …and can onboard: minting an invite is already leader-gated, not admin-gated',
-      invite.status === 200 && invite.j && invite.j.ok !== false);
+    ok('OA10 leading a node does NOT by itself confer the right to add people to the org',
+      invite.status === 403 && S._isLeader(C, 'coach') === true);
+    S.userPermissions[C] = { ...(S.userPermissions[C] || {}), coach: { edit_members: true } };
+    ok('OA10b …and the coach CAN onboard the moment the org grants edit_members',
+      (await post('/api/auth/invite', coachTok, { role: 'member' })).status === 200);
+    ok('OA10c …which is the same permission the screen hides those controls behind',
+      /_applyOnboardAuthority/.test(appjs) && /Auth\.canDo\('edit_members'\)/.test(appjs));
 
     const overReach = await post('/api/auth/invite', coachTok, { role: 'superadmin' });
     ok('OA11 …but cannot invite somebody above their own level',

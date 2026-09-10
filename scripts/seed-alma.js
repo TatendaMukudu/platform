@@ -49,6 +49,7 @@ const bcrypt = require('bcryptjs');
 const diagnose = require('../ai/diagnose.js');
 const teamState = require('../ai/team-state.js');
 const contribution = require('../ai/contribution.js');
+const { metricRecord } = require('../ai/metric-record.js');
 
 const SALT = 8;                                        // demo speed over hardness
 const CODE = process.env.ALMA_CODE || 'alma-mens-soccer';
@@ -222,7 +223,23 @@ async function buildAlmaStore() {
   };
   orgValues[CODE] = VALUES;
   orgGoals[CODE] = orgMeta[CODE].organizationProfile.goals.map(text => ({ goalId: 'g_' + rid(), text, createdAt: iso(onDay(0)) }));
-  orgMetrics[CODE] = orgMeta[CODE].organizationProfile.metrics;
+  /* CANONICAL METRIC RECORDS, not bare strings.
+
+     The organisation profile lists metrics as plain names, which is right for a profile — it is
+     prose about the club. `orgMetrics` is a different thing: it is the store the metric ROUTES
+     read and write, and its shape has always been { metricId, name, source, order, createdAt }.
+     Writing the profile's strings straight into it put two shapes in one store, and Settings then
+     rendered "1 undefined / 2 undefined / 3 undefined / 4 undefined" to a real coach while the
+     rename and delete controls silently matched nothing.
+
+     The id is derived from the name, by the SAME function the server uses, so a re-seed produces
+     the identical record and nothing downstream sees a metric change identity. This file used to
+     carry its own copy of that hash: two implementations of one identity rule, either of which
+     could have been edited without the other, and a drift between them would have silently
+     detached every seeded metric from the routes that address it by id. */
+  orgMetrics[CODE] = orgMeta[CODE].organizationProfile.metrics
+    .map((name, order) => metricRecord(name, order, { now: iso(onDay(0)) }))
+    .filter(Boolean);
 
   // ── Nodes. A college programme is one squad, not a hierarchy of age groups; the units that
   //    actually meet separately are the position groups and the first-year intake. ─────────
@@ -251,9 +268,19 @@ async function buildAlmaStore() {
   [midfield, frontline, firstYears].forEach(n => addLeader(n, assistant));
   addLeader(keepers, assistant);
   addLeader(backline, assistant);
-  userPermissions[CODE][headCoach] = ['manage_settings', 'manage_people', 'view_org'];
-  userPermissions[CODE][assistant] = ['view_org'];
-  userPermissions[CODE][trainer]   = ['view_org'];
+  /* EXPLICIT GRANTS ARE A MAP, because that is what reads them. `_effectivePermissions` spreads
+     this value over the role defaults — `{ ...roleDefaults, ...leaderGrants, ...explicit }` — so
+     an ARRAY spread to `{0:'manage_settings', 1:'manage_people', 2:'view_org'}` and granted
+     nothing at all. Two of those three were not permission names either: the roster permission is
+     `edit_members`, and there is no `manage_people` or `view_org` anywhere in the server.
+
+     It went unnoticed because the head coach is a superadmin, who bypasses every check, so the
+     grants never had to work. The assistant and the trainer were left with nothing, which is what
+     the seed already meant — they lead their units through the tree, and leading is not the same
+     as managing the roster. Stated here rather than implied by a broken shape. */
+  userPermissions[CODE][headCoach] = { manage_settings: true, edit_members: true, view_members: true };
+  userPermissions[CODE][assistant] = { view_members: true };
+  userPermissions[CODE][trainer]   = { view_members: true };
 
   // ── The roster ────────────────────────────────────────────────────────────
   const players = [];
