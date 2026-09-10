@@ -99,7 +99,7 @@ function buildFirming({ title = '', occasions = [], threshold = null, limitation
     const bi = BAND_STEPS.indexOf(_s(o.band, 40));
     if (bi >= 0) bandPts.push({ at, value: bi, refs, label: _s(o.band, 40) });
   }
-  const series = [{ key: 'origins', name: 'Independent origins', unit: 'count', points: pts }];
+  const series = [{ key: 'origins', name: 'Separate supporting accounts', unit: 'count', points: pts }];
   if (bandPts.length) series.push({
     key: 'band', name: 'What the evidence supported', unit: 'band', points: bandPts,
     ticks: BAND_STEPS.slice(),
@@ -110,13 +110,13 @@ function buildFirming({ title = '', occasions = [], threshold = null, limitation
        only legible against it: two origins is not "a bit more evidence", it is the difference
        between a question and a finding. */
     threshold: _num(threshold) === null ? null : { unit: 'count', value: _num(threshold),
-      name: 'Enough independent origins to be called' },
+      name: 'Enough separate accounts to support a call' },
     /* THE CAVEAT IS INTRINSIC, NOT SUPPLIED. A suite caught this as optional: the server passed
        "origins, not messages" in as a limitation, so the single most important thing to say about
        this chart depended on every future caller remembering to say it. The line below is what
        the chart PLOTS, so the chart states it. */
     limitations: [
-      'Independent origins, not messages — the same person saying it again does not move this.',
+      'Separate first-hand accounts, not repeated messages — the same account said again does not move this.',
       'Counts occasions on the record. Something that happened and was never said is not here.',
       ...(_arr(limitations).map(l => _s(l, 200))),
     ],

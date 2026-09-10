@@ -450,7 +450,7 @@ const inq = (o = {}) => ({
         // SIX contributors, so the two-sided floor is cleared at fourteen members: six named,
         // eight uncounted, both sides above five.
         signals: ['p1','p2','p3','p4','p5','p6'].map((id, i) => (
-          { ref: `e${i}`, kind: 'observation', originRef: `o_${i}`, contributedBy: id, contributorVisibility: 'named', at: i + 1 })),
+          { ref: `e${i}`, kind: 'observation', originRef: `o_${i}`, contributedBy: id, contributorVisibility: 'named', status: 'active', at: i + 1 })),
         missingSignals: [{ question: 'Does the improvement hold after a loss?' }],
         confidence: { score: 0.6, band: 'probable', because: [] },
         status: 'probable', timeline: [], createdAt: 1, lastUpdatedAt: 9,

@@ -142,6 +142,7 @@ function contextFor(material = {}, { sectionIds = null, cap = CONTEXT_CAP } = {}
   return {
     title: _s(material.title, 200),
     filename: _s(material.filename, 200),
+    provenance: material.provenance === 'external' ? 'external' : 'internal',
     sectionIds: included,
     /* PARTIAL IS MEASURED AGAINST THE WHOLE DOCUMENT, NEVER AGAINST THE SELECTION.
        This compared `included` to `secs` — the already-filtered set — so handing over three

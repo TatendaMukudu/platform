@@ -912,6 +912,10 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
   .iq-msg-iq{max-width:97%}
   .iq-empty-title{font-size:var(--fs-xl)}
   .iq-composer{border-radius:var(--radius)}
+  .iq-composer-input{max-height:120px}
+  .iq-proposal{padding:.65rem .75rem}
+  .iq-proposal-actions{gap:.35rem}
+  .iq-proposal-actions .btn-sm,.iq-proposal-actions .btn-ghost{flex:1 1 auto}
   .app-main{flex-wrap:wrap}
   .app-action{width:100%;margin-top:0.2rem}
   .app-action .btn-sm{width:100%}

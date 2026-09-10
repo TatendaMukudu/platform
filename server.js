@@ -55,6 +55,7 @@ const audit      = require('./ai/audit');
 const reasoningRegister = require('./ai/reasoning-register');
 const kernelCoreasoning = require('./ai/kernel-coreasoning');
 const composer          = require('./ai/composer');
+const composerActions   = require('./ai/composer-actions');
 const diagnose          = require('./ai/diagnose');
 const contribution      = require('./ai/contribution');
 const forum             = require('./ai/forum');
@@ -1478,16 +1479,15 @@ function _getMemory(orgCode, userId) {
 }
 
 function _focusFromGoal(code, userId, goal, opts = {}) {
-  const mem = _getMemory(code, userId);
   const title = String(goal || '').trim();
   if (!title) return null;
-  const existing = (mem.focuses || []).find(f => f.kind === 'goal' && f.text === title && f.status === 'active');
-  if (existing) return existing;
-  const focus = { id: opts.id || `foc_${generateId()}`, text: title, kind: 'goal', type: opts.type || 'goal',
-    participation: opts.participation || 'self', shape: opts.shape || 'parallel', participants: opts.participants || [userId],
-    invitedBy: opts.invitedBy || null, acceptedAt: opts.acceptedAt || new Date().toISOString(),
-    status: 'active', outcome: null, createdAt: opts.createdAt || new Date().toISOString() };
-  mem.focuses.unshift(focus); _beginFocusAction(code, focus, opts.invitedBy || userId, { subjectId: userId }); return focus;
+  const result = _createPersonalFocus(code, userId, { text: title, id: opts.id || `foc_${generateId()}`,
+    type: opts.type || 'goal', participantIds: (opts.participants || []).filter(id => id !== userId),
+    invitedBy: opts.invitedBy || null, createdAt: opts.createdAt,
+    origin: opts.origin || 'legacy_goal', kind: 'goal', participation: opts.participation || 'self',
+    shape: opts.shape || 'parallel', acceptedAt: opts.acceptedAt || opts.createdAt || new Date().toISOString() }, { strictAudience: false });
+  if (!result.ok) return null;
+  return result.focus;
 }
 /* memberGoals is keyed `code:userId` OR `code:name` — memberKey and userKey build the same
    shape and the older route wrote the name form, so the tail cannot be trusted to be an id.
@@ -2579,27 +2579,9 @@ app.post('/api/auth/complete-profile', requireAuth, (req, res) => {
 
     const goalText = String(mainGoals || '').trim().slice(0, 300);
     if (goalText) {
-      const mem = _getMemory(code, userId);
-      mem.focuses = mem.focuses || [];
-      const dup = mem.focuses.find(f => f && f.status === 'active' && f.text === goalText);
-      if (dup) { openedFocus = { id: dup.id, text: dup.text }; }
-      else {
-        /* No target and no review date, deliberately. The form did not ask for either, and a
-           focus is allowed to have neither (some things have no clean finish line). What is
-           refused is the server inventing them — focus_stalled fires off the review date, and a
-           stall notice about a day nobody chose is worse than no notice. */
-        const focus = {
-          id: 'foc_' + generateId(), text: goalText, type: 'self_set', status: 'active', outcome: null,
-          visibility: 'private', participants: [userId],
-          origin: 'onboarding',
-          createdAt: new Date().toISOString(),
-        };
-        mem.focuses.unshift(focus);
-        _beginFocusAction(code, focus, userId, { subjectId: userId });
-        mem.lastUpdated = new Date().toISOString();
-        _audit(code, { actor: userId, action: 'focus_created', subjectIds: [userId], basis: 'onboarding' });
-        openedFocus = { id: focus.id, text: focus.text };
-      }
+      /* No target/date: onboarding asked for neither. The canonical owner keeps that absence. */
+      const made = _createPersonalFocus(code, userId, { text: goalText, origin: 'onboarding', auditBasis: 'onboarding' });
+      if (made.ok) openedFocus = { id: made.focus.id, text: made.focus.text };
     }
   }
 
@@ -5063,7 +5045,7 @@ function _beliefStateFindings(code, userId, now) {
     const active = (inq.signals || []).filter(s => s && s.kind !== 'interpretation' && diagnose.isActive(s));
     const contested = inq.status === 'disputed' || active.some(s => s.dissents);
     const shaped = { ...inq, contested,
-      independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size };
+      independentOrigins: diagnose.currentOriginCount(active) };
     const label = present.humanTopic(inq.topic || {});
     if (!label) continue;
 
@@ -5676,17 +5658,13 @@ app.post('/api/me/prepared/act', requireAuth, (req, res) => {
   }
   const mem = _getMemory(code, userId);
   if (decision === 'approve') {
-    mem.focuses = mem.focuses || [];
-    const focus = {
-      id: 'foc_' + generateId(), text: String(text).slice(0, 300), type: type || null,
-      status: 'active', outcome: null, createdAt: new Date().toISOString(),
-    };
-    mem.focuses.unshift(focus); _beginFocusAction(code, focus, userId, { subjectId: userId });
+    const made = _createPersonalFocus(code, userId, { text, type: type || 'self_set' });
+    if (!made.ok) return res.status(made.status).json({ error: made.error });
   } else {
     // Dismiss teaches the Confidence Engine this kind of nudge didn't land for them.
     if (type) { try { _recordNoticeFeedback(code, type, 'dismiss'); } catch (_) {} }
   }
-  mem.lastUpdated = new Date().toISOString();
+  if (decision === 'dismiss') mem.lastUpdated = new Date().toISOString();
   scheduleSave();
   res.json({ ok: true, focuses: (mem.focuses || []).filter(f => f.status === 'active').map(f => ({ id: f.id, text: f.text })) });
 });
@@ -5709,158 +5687,20 @@ app.post('/api/me/prepared/act', requireAuth, (req, res) => {
    thing wearing the same word. */
 app.post('/api/me/focus', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
-  const text = String((req.body || {}).text || '').trim().slice(0, 300);
-  if (!text) return res.status(400).json({ error: 'Say what you want to work on.' });
-  const shared = (req.body || {}).share === true;
-  /* WHO IT IS WITH. "Public or private" only has two settings, and the founder's case is the
-     third one everybody actually wants: these three people, not the whole squad and not just
-     me. Names are checked against the ADDRESSABLE set — a person can only invite somebody they
-     are genuinely alongside, so an invite cannot be used to discover that a name exists. */
-  const wanted = Array.isArray((req.body || {}).participants) ? (req.body || {}).participants : [];
-  const addressable = new Set(_contactsFor(code, userId).map(c => c.id));
-  const participants = [...new Set(wanted.map(String).filter(id => addressable.has(id)))];
-  const rejected = wanted.length - participants.length;
-  const mem = _getMemory(code, userId);
-  mem.focuses = mem.focuses || [];
-
-  /* ── WHERE THIS CAME FROM ────────────────────────────────────────────────────────────────
-     Founder direction: a focus should feel like a conversation we deliberately keep working on.
-     So a focus made from a conversation REMEMBERS that conversation — and remembers it as a
-     REFERENCE, never as a copy.
-
-     That distinction is the whole design. Copying the transcript onto the focus would put the
-     person's private words inside an object they can later share with a coach, and sharing the
-     focus would then hand over the conversation that produced it without anybody deciding to.
-     A ref cannot leak that way: reading it goes back through a route that checks ownership every
-     time, so widening the focus's audience widens nothing else.
-
-     VALIDATED HERE, NOT TRUSTED. The conversation must be one of THIS person's own, in THIS
-     organisation — assistantConversations is keyed by their workspace key, so a conversation id
-     belonging to somebody else simply is not in the list and the reference is dropped. Message
-     ids are kept only if they exist in that thread. A bad reference becomes NO reference rather
-     than a stored pointer to something nobody can read. */
-  const source = (() => {
-    const b = req.body || {};
-    const convId = String(b.sourceConversationId || '').slice(0, 80);
-    if (!convId) return null;
-    const conv = (assistantConversations[_wsKey(code, userId)] || []).find(c => c && c.id === convId);
-    if (!conv) return null;   // not theirs, or not in this org — no reference at all
-    const want = Array.isArray(b.sourceMessageIds) ? b.sourceMessageIds.map(String).slice(0, 20) : [];
-    const have = new Set((conv.messages || []).map(m => String(m.id || m.messageId || '')));
-    const messageIds = [...new Set(want.filter(id => have.has(id)))];
-    return { conversationId: conv.id, messageIds, at: Date.now() };
-  })();
-
-  /* ── WHAT THIS FOCUS IS ADDRESSING ───────────────────────────────────────────────────────
-     Founder decision, taken over two alternatives: LINKED BOTH WAYS.
-
-     A focus started from a High, a Low or an Inquiry remembers which belief it is about — and
-     when the person later says whether trying it helped, that answer becomes evidence ON that
-     belief. So the loop closes: IntelliQ works something out, you do something about it, and what
-     happened feeds back into what it believes.
-
-     WHY THIS NEEDED A DECISION rather than a default: it makes a person's OWN ACTION a way a
-     belief's standing can move, alongside other people's accounts of what happened. That is a
-     real addition to the epistemic model, and the founder took it deliberately.
-
-     WHAT IT DOES NOT DO is let the link itself change anything. Starting a focus is not evidence;
-     the belief is untouched until there is an ANSWER to report, and that answer arrives through
-     the ordinary signal path with the person as its own origin — one origin, no direction, banded
-     by the kernel like everything else. Somebody starting five focuses on one Low has said
-     nothing about it five times.
-
-     VALIDATED, NOT TRUSTED, exactly as the conversation reference is: the belief must be one this
-     person can actually open, resolved through their own view. A ref to somebody else's belief
-     becomes NO ref rather than a stored pointer at it. */
-  const addresses = (() => {
-    const b = req.body || {};
-    const kind = String(b.addressesKind || '').trim();
-    const id = String(b.addressesId || '').trim().slice(0, 80);
-    if (!['inquiry', 'high', 'low'].includes(kind) || !id) return null;
-    const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
-    if (!obj) return null;   // not theirs to see — no reference at all
-    return { kind, id, at: Date.now() };
-  })();
-
-  /* SAME TEXT, STILL OPEN? Return it rather than making a second one — a list with the same
-     commitment on it twice is a list people stop trusting. This is also what makes a double tap
-     and a retry-after-timeout safe: the second call finds the first one's work and reports it,
-     instead of leaving two identical focuses behind.
-
-     It returns the FULL shape, not a reduced one. The reduced version meant a client rendering
-     the retry had no target, no review date and no source, so a successful retry looked like a
-     worse outcome than the call it was repeating. */
-  const existing = mem.focuses.find(f => f && f.status === 'active' && f.text === text);
-  if (existing) {
-    // A retry may be the first call that carried the source, so attach it if the original has
-    // none. Never overwrite one that is already there — that would re-point a focus at a
-    // different conversation on a stray retry.
-    if (source && !existing.source) { existing.source = source; scheduleSave(); }
-    return res.json({ ok: true, already: true,
-      focus: {
-        id: existing.id, text: existing.text, visibility: existing.visibility || 'private',
-        participants: existing.participants || [userId],
-        target: existing.target || null, reviewAt: existing.reviewAt || null,
-        source: existing.source ? { conversationId: existing.source.conversationId, messageIds: existing.source.messageIds } : null,
-      },
-      note: 'You already have this one open.' });
-  }
-  /* A FOCUS IS SOMETHING YOU WORK TOWARDS (founder, September 2026). The target says what would
-     tell you it worked; the review date says when to look. Neither is required — some things
-     have no clean finish line, and refusing to let somebody start until they invent a metric is
-     how a tool teaches people to make one up. But when they ARE given, "did what you tried
-     help?" stops being a feeling and becomes a check, and focus_stalled already fires off the
-     review date. */
-  const target = String((req.body || {}).target || '').trim().slice(0, 300);
-  const reviewOn = String((req.body || {}).reviewOn || '').trim().slice(0, 40);
-  const reviewAt = (() => {
-    if (!reviewOn) return null;
-    const t = Date.parse(reviewOn);
-    // An unparseable date is dropped rather than guessed at. A review date nobody set is
-    // honest; one the server invented would fire a stall notice about a day nobody chose.
-    return Number.isFinite(t) ? t : null;
-  })();
-
-  const focus = {
-    id: 'foc_' + generateId(), text, type: 'self_set', status: 'active', outcome: null,
-    // Inviting somebody by name IS sharing it with them; there is no such thing as a private
-    // focus that other people are in. The visibility field says who else can see it at all.
-    visibility: participants.length ? 'invited' : (shared ? 'shared' : 'private'),
-    participants: participants.length ? [userId, ...participants] : [userId],
-    ...(target ? { target } : {}),
-    ...(reviewAt ? { reviewAt } : {}),
-    ...(source ? { source } : {}),
-    ...(addresses ? { addresses } : {}),
-    createdAt: new Date().toISOString(),
-  };
-  mem.focuses.unshift(focus);
-  _beginFocusAction(code, focus, userId, { subjectId: userId });
-  mem.lastUpdated = new Date().toISOString();
-  _audit(code, { actor: userId, action: 'focus_created', subjectIds: [userId], basis: focus.visibility });
-  scheduleSave();
-  const named = participants.map(id => (orgUsers[code][id] || {}).name).filter(Boolean);
-  res.json({ ok: true,
-    focus: { id: focus.id, text: focus.text, visibility: focus.visibility, participants: focus.participants,
-      target: focus.target || null, reviewAt: focus.reviewAt || null,
-      source: source ? { conversationId: source.conversationId, messageIds: source.messageIds } : null,
-      addresses: addresses ? { kind: addresses.kind, id: addresses.id } : null },
-    /* THE AUDIENCE SENTENCE SAYS WHAT ACTUALLY HAPPENS.
-
-       `shared` is read by _memberGoalsFor, which is a LEADER'S view of a member. Squad peers
-       never see it, so the control that offered "My whole squad" was describing an audience the
-       backend does not have. The wording here was already right and the label was wrong; both
-       now say the same thing, and nothing was widened to make a label true. */
-    note: participants.length
-      ? `Set, with ${named.join(', ')}. Only the people in it can see it.${rejected ? ' Some names could not be added.' : ''}`
-      : shared ? 'Set. Whoever leads a group you are in can see this one. Your squad cannot.'
-               : 'Set, and private — only you can see it. You can share it later; nobody else can.',
-    /* ONE USEFUL QUESTION, so confirming a focus continues the conversation instead of ending it.
-       Deterministic and drawn from what the focus itself is missing, which is why it can be asked
-       with the writing engine off: no target yet is a different next question from no date. */
-    next: !target
-      ? 'What would tell you this was working?'
-      : !reviewAt ? 'When should we look at it?'
-                  : 'What is the first thing you will try?' });
+  const result = _createPersonalFocus(code, userId, {
+    ...(req.body || {}), participantIds: (req.body || {}).participants,
+  });
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  const named = result.audience.participantIds.map(id => (orgUsers[code][id] || {}).name).filter(Boolean);
+  const f = result.publicFocus;
+  res.json({ ok: true, already: result.already, focus: f,
+    note: result.already ? 'You already have this one open.'
+      : result.audience.participantIds.length
+        ? `Set, with ${named.join(', ')}. Only the people in it can see it.${result.audience.rejected ? ' Some names could not be added.' : ''}`
+        : f.visibility === 'shared' ? 'Set. Whoever leads a group you are in can see this one. Your squad cannot.'
+                                  : 'Set, and private — only you can see it. You can share it later; nobody else can.',
+    next: !f.target ? 'What would tell you this was working?'
+      : !f.reviewAt ? 'When should we look at it?' : 'What is the first thing you will try?' });
 });
 
 /* GET /api/me/focus/:id/source — the conversation a focus came from. OWNER ONLY.
@@ -5986,14 +5826,10 @@ app.post('/api/me/focus/:id/tried', requireAuth, (req, res) => {
 /* POST /api/me/focus/:id/visibility — widen or narrow it afterwards, owner only. */
 app.post('/api/me/focus/:id/visibility', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
-  const mem = _getMemory(code, userId);
-  const focus = (mem.focuses || []).find(f => f && f.id === String(req.params.id));
-  if (!focus) return res.status(404).json({ error: 'not found' });
   const want = (req.body || {}).visibility === 'shared' ? 'shared' : 'private';
-  focus.visibility = want;
-  _audit(code, { actor: userId, action: 'focus_visibility', subjectIds: [userId], basis: want });
-  scheduleSave();
-  res.json({ ok: true, visibility: want,
+  const result = _updatePersonalFocus(code, userId, req.params.id, { visibility: want });
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
+  res.json({ ok: true, visibility: result.focus.visibility,
     note: want === 'shared' ? 'Shared — leaders of your groups can see it now.' : 'Private again — only you.' });
 });
 
@@ -6004,26 +5840,9 @@ app.post('/api/me/focus/:id/visibility', requireAuth, (req, res) => {
 app.post('/api/me/focus/outcome', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const { focusId, outcome } = req.body || {};
-  if (!code || !userId) return res.status(403).json({ error: 'Forbidden' });
-  if (!focusId || !['helped', 'no', 'mixed'].includes(outcome)) {
-    return res.status(400).json({ error: 'focusId and outcome (helped|no|mixed) required' });
-  }
-  const mem = _getMemory(code, userId);
-  const f = (mem.focuses || []).find(x => x.id === focusId);
-  if (!f) return res.status(404).json({ error: 'focus not found' });
-
-  f.status = 'done';
-  f.outcome = outcome;
-  f.resolvedAt = new Date().toISOString();
-  _completeFocusAction(code, f, outcome, userId);
-
-  // LEARN — feed the Confidence Engine so what genuinely helps this person
-  // surfaces more, and what doesn't fades.
-  if (f.type && outcome !== 'mixed') {
-    try { _recordNoticeFeedback(code, f.type, outcome === 'helped' ? 'useful' : 'dismiss'); } catch (_) {}
-  }
-  mem.lastUpdated = new Date().toISOString();
-  scheduleSave();
+  if (!focusId) return res.status(400).json({ error: 'focusId and outcome (helped|no|mixed) required' });
+  const result = _recordPersonalFocusOutcome(code, userId, focusId, outcome);
+  if (!result.ok) return res.status(result.status).json({ error: result.error });
   res.json({ ok: true });
 });
 
@@ -8732,6 +8551,139 @@ function _completeFocusAction(code, focus, outcome, actorId) {
   return action;
 }
 
+/* ONE OWNER FOR A PERSON'S FOCUS LIFECYCLE.
+
+   HTTP controls and composer confirmations are transports. Neither owns Focus shape,
+   audience, source validation, idempotency, lifecycle or learning side effects. They
+   both call these functions. Proposal-time audience resolution deliberately calls the
+   same resolver again; confirmation re-resolves it so a stale membership snapshot is
+   authority for nothing. */
+function _resolvePersonalFocusAudience(code, userId, input = {}, { strict = false, expectedParticipantIds = null } = {}) {
+  const contacts = new Set(_contactsFor(code, userId).map(c => String(c.id)));
+  const groupId = String(input.groupId || '');
+  let requested = Array.isArray(input.participantIds || input.participants)
+    ? (input.participantIds || input.participants).map(String) : [];
+  if (groupId) {
+    const node = (orgNodes[code] || {})[groupId];
+    if (!node || !_inNode(code, groupId, userId)) return { ok: false, status: 403, error: 'audience unavailable' };
+    requested = (node.memberIds || []).map(String).filter(id => id !== String(userId));
+  }
+  const participantIds = [...new Set(requested.filter(id => id !== String(userId) && contacts.has(id)))].sort();
+  const rejected = requested.filter(id => id !== String(userId) && !contacts.has(id));
+  if (strict && rejected.length) return { ok: false, status: 403, error: 'audience unavailable' };
+  if (expectedParticipantIds && JSON.stringify(participantIds) !== JSON.stringify([...expectedParticipantIds].map(String).sort())) {
+    return { ok: false, status: 409, error: 'stale_audience' };
+  }
+  const requestedVisibility = input.share === true ? 'shared' : String(input.visibility || 'private');
+  if (!participantIds.length && !['private', 'shared'].includes(requestedVisibility)) {
+    return { ok: false, status: 400, error: 'unknown visibility' };
+  }
+  return { ok: true, groupId: groupId || null, participantIds,
+    participants: [String(userId), ...participantIds],
+    visibility: participantIds.length ? 'invited' : requestedVisibility,
+    rejected: rejected.length };
+}
+
+function _personalFocusSource(code, userId, input = {}) {
+  const convId = String(input.sourceConversationId || input.conversationId || '').slice(0, 80);
+  if (!convId) return null;
+  const conv = (assistantConversations[_wsKey(code, userId)] || []).find(c => c && c.id === convId);
+  if (!conv) return null;
+  const wanted = Array.isArray(input.sourceMessageIds) ? input.sourceMessageIds.map(String).slice(0, 20) : [];
+  const have = new Set((conv.messages || []).map(m => String(m.id || m.messageId || '')));
+  return { conversationId: conv.id, messageIds: [...new Set(wanted.filter(id => have.has(id)))], at: Date.now() };
+}
+
+function _personalFocusAddress(code, userId, input = {}) {
+  const kind = String(input.addressesKind || input.addresses?.kind || '');
+  const id = String(input.addressesId || input.addresses?.id || '').slice(0, 80);
+  if (!['inquiry', 'high', 'low'].includes(kind) || !id) return null;
+  return _allObjectsFor(code, userId).some(o => o.kind === kind && String(o.id) === id)
+    ? { kind, id, at: Date.now() } : null;
+}
+
+function _publicPersonalFocus(focus, userId) {
+  return { id: focus.id, text: focus.text, visibility: focus.visibility || 'private',
+    participants: focus.participants || [userId], target: focus.target || null,
+    reviewAt: focus.reviewAt || null,
+    source: focus.source ? { conversationId: focus.source.conversationId, messageIds: focus.source.messageIds || [] } : null,
+    addresses: focus.addresses ? { kind: focus.addresses.kind, id: focus.addresses.id } : null };
+}
+
+function _createPersonalFocus(code, userId, input = {}, opts = {}) {
+  const text = String(input.text || '').trim().slice(0, 300);
+  if (!text) return { ok: false, status: 400, error: 'Say what you want to work on.' };
+  const audience = _resolvePersonalFocusAudience(code, userId, input, {
+    strict: opts.strictAudience === true, expectedParticipantIds: opts.expectedParticipantIds || null });
+  if (!audience.ok) return audience;
+  const source = _personalFocusSource(code, userId, input);
+  const addresses = _personalFocusAddress(code, userId, input);
+  const target = String(input.target || '').trim().slice(0, 300);
+  const parsedReview = input.reviewAt != null ? Number(input.reviewAt) : Date.parse(String(input.reviewOn || ''));
+  const reviewAt = Number.isFinite(parsedReview) ? parsedReview : null;
+  const mem = _getMemory(code, userId);
+  const existing = (mem.focuses || []).find(f => f && f.status === 'active' && f.text === text
+    && (!input.kind || f.kind === input.kind));
+  if (existing) {
+    if (source && !existing.source) existing.source = source;
+    mem.lastUpdated = new Date().toISOString(); scheduleSave();
+    return { ok: true, already: true, focus: existing, publicFocus: _publicPersonalFocus(existing, userId), audience };
+  }
+  const focus = { id: input.id || 'foc_' + generateId(), text, type: input.type || 'self_set',
+    status: 'active', outcome: null, visibility: audience.visibility, participants: audience.participants,
+    ...(input.kind ? { kind: input.kind } : {}), ...(input.participation ? { participation: input.participation } : {}),
+    ...(input.shape ? { shape: input.shape } : {}), ...(input.acceptedAt ? { acceptedAt: input.acceptedAt } : {}),
+    ...(input.invitedBy ? { invitedBy: input.invitedBy } : {}),
+    ...(target ? { target } : {}), ...(reviewAt ? { reviewAt } : {}), ...(source ? { source } : {}),
+    ...(addresses ? { addresses } : {}), ...(input.origin ? { origin: input.origin } : {}),
+    createdAt: input.createdAt || new Date().toISOString() };
+  mem.focuses.unshift(focus);
+  _beginFocusAction(code, focus, input.invitedBy || userId, { subjectId: userId });
+  mem.lastUpdated = new Date().toISOString();
+  _audit(code, { actor: userId, action: 'focus_created', subjectIds: [userId], basis: input.auditBasis || audience.visibility });
+  scheduleSave();
+  return { ok: true, already: false, focus, publicFocus: _publicPersonalFocus(focus, userId), audience };
+}
+
+function _updatePersonalFocus(code, userId, focusId, input = {}, opts = {}) {
+  const mem = _getMemory(code, userId);
+  const focus = (mem.focuses || []).find(f => f && f.id === String(focusId));
+  if (!focus) return { ok: false, status: 404, error: 'not found' };
+  const changesAudience = input.groupId || input.participantIds || input.participants || input.visibility || input.share != null;
+  if (changesAudience) {
+    const audience = _resolvePersonalFocusAudience(code, userId, input, {
+      strict: opts.strictAudience === true, expectedParticipantIds: opts.expectedParticipantIds || null });
+    if (!audience.ok) return audience;
+    focus.visibility = audience.visibility; focus.participants = audience.participants;
+  }
+  if (input.text != null) { const text = String(input.text).trim().slice(0, 300); if (text) focus.text = text; }
+  if (input.target != null) { const target = String(input.target).trim().slice(0, 300); if (target) focus.target = target; }
+  if (input.reviewOn != null || input.reviewAt != null) {
+    const at = input.reviewAt != null ? Number(input.reviewAt) : Date.parse(String(input.reviewOn));
+    if (Number.isFinite(at)) focus.reviewAt = at;
+  }
+  focus.updatedAt = new Date().toISOString(); mem.lastUpdated = focus.updatedAt;
+  _audit(code, { actor: userId, action: changesAudience ? 'focus_visibility' : 'focus_updated', subjectIds: [userId], basis: focus.visibility || 'private' });
+  scheduleSave();
+  return { ok: true, focus, publicFocus: _publicPersonalFocus(focus, userId) };
+}
+
+function _recordPersonalFocusOutcome(code, userId, focusId, outcome) {
+  if (!['helped', 'no', 'mixed'].includes(outcome)) return { ok: false, status: 400, error: 'outcome must be helped, no or mixed' };
+  const mem = _getMemory(code, userId);
+  const focus = (mem.focuses || []).find(f => f && f.id === String(focusId));
+  if (!focus) return { ok: false, status: 404, error: 'focus not found' };
+  focus.status = 'done'; focus.outcome = outcome; focus.resolvedAt = new Date().toISOString();
+  _completeFocusAction(code, focus, outcome, userId);
+  if (focus.type && outcome !== 'mixed') {
+    try { _recordNoticeFeedback(code, focus.type, outcome === 'helped' ? 'useful' : 'dismiss'); } catch (_) {}
+  }
+  mem.lastUpdated = focus.resolvedAt;
+  _audit(code, { actor: userId, action: 'focus_outcome', subjectIds: [userId], basis: outcome });
+  scheduleSave();
+  return { ok: true, focus, publicFocus: _publicPersonalFocus(focus, userId) };
+}
+
 /* PROPOSE — the capability RECOMMENDS (grounded), and we snapshot the policy decision
    for the intended authority so the human sees up front what will/won't be allowed. */
 app.post('/api/actions/propose', requireAuth, (req, res) => {
@@ -10204,7 +10156,15 @@ function _sourceList(items = [], said = '') {
     const detail = String(it.detail || '').trim().replace(/\s+/g, ' ').slice(0, 180);
     if (echoes(detail)) continue;
     seen.add(key);
-    out.push({ kind: String(it.kind || 'record'), label, detail, at: it.at || null });
+    const kind = String(it.kind || 'record');
+    let url = null;
+    if (kind === 'web') {
+      try {
+        const parsed = new URL(String(it.url || ''));
+        if (parsed.protocol === 'https:' || parsed.protocol === 'http:') url = parsed.href;
+      } catch (_) {}
+    }
+    out.push({ kind, label, detail, at: it.at || null, ...(url ? { url } : {}) });
     if (out.length >= SOURCE_CAP) break;
   }
   return out;
@@ -10314,7 +10274,7 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
          so a person is only ever handed material from something they were already cleared to
          open. The alternative — looking the material up by id from the client's `about` — would
          make the client's claim about what it is reading into the access decision. */
-      material: _materialContext(code, userId, about),
+      material: _materialContext(code, userId, about) || _conversationMaterialContext(code, userId, conversation),
       actions: (actions || []).map(a => ({ label: a.label })),
     });
 
@@ -13640,6 +13600,115 @@ function _assessTopic(t) {
   return m ? m[1].trim().replace(/[.?!,;].*$/, '').trim() : '';
 }
 
+/* The page tells the composer where the person is; the server decides what that address means.
+   An `about` value is never authority. It is resolved through the same object view used by the
+   page, and an unreadable object becomes no context rather than an existence oracle. */
+function _composerActionContext(code, userId, opts = {}, conversation = null) {
+  const boundRef = _aboutRef(conversation && conversation.about);
+  const pageRef = _aboutRef(opts.about);
+  const contextMismatch = !!(boundRef && pageRef && boundRef !== pageRef);
+  // `about` is the conversation binding. Page state may establish a new binding, but
+  // it may never retarget an existing conversation to another object.
+  const ref = boundRef || pageRef;
+  let object = null;
+  if (ref) {
+    const split = ref.indexOf(':');
+    const kind = ref.slice(0, split), id = ref.slice(split + 1);
+    const live = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
+    if (live) object = { kind, id, label: live.explained?.headline || live.present?.summary?.title || '',
+      nodeId: live.whoseNodeId || live.raw?.nodeId || null, raw: live.raw || null };
+  }
+  if (!object && !ref && conversation) object = { kind: 'conversation', id: conversation.id, label: conversation.title || 'Conversation', raw: null };
+  return {
+    surface: String(opts.surface || (object ? object.kind : 'home')).slice(0, 40),
+    object,
+    folders: _libFolders(code).filter(f => f.ownerId === userId).map(f => ({ id: f.id, name: f.name })),
+    groups: Object.values(orgNodes[code] || {}).filter(n => n && _inNode(code, n.nodeId || n.id, userId))
+      .map(n => ({ id: n.nodeId || n.id, name: n.name || 'Group', memberIds: [...(n.memberIds || [])].map(String).sort() })),
+    contacts: _contactsFor(code, userId).map(c => ({ id: c.id, name: c.name, with: c.with || null })),
+    forumAvailable: !!(object && ['inquiry', 'high', 'low', 'focus'].includes(object.kind) &&
+      (object.nodeId || (object.raw?.subjectRef || '').startsWith('group:') || (object.raw?.participants || []).length > 1)),
+    attachment: opts.attachment && typeof opts.attachment === 'object'
+      ? { id: String(opts.attachment.id || '').slice(0, 120), name: String(opts.attachment.name || '').slice(0, 200) } : null,
+    conversationId: conversation && conversation.id || null,
+    contextMismatch,
+  };
+}
+
+async function _composerActionInterpret(code, text, context, priorMessages, requestedAction) {
+  if (context.contextMismatch) return { actions: [], needsClarification: 'This conversation belongs to a different object. Open a new conversation before acting here.' };
+  let reading;
+  if (requestedAction) {
+    reading = composerActions.normalize({ actions: [{ type: requestedAction.type, arguments: requestedAction.arguments || {}, reason: 'selected from the current view' }] }, context);
+    return composerActions.ground(reading, { text, priorMessages, context });
+  }
+  if (!ai.enabled() || ai.deterministicOnly()) return { actions: [], needsClarification: null, unavailable: true };
+  try {
+    const proposed = await ai.completeJSON({ org: code, taskType: 'composer_action_interpret', tier: 'micro',
+      system: 'Return only the requested JSON. You interpret intent and propose an allow-listed action. You do not decide permission, visibility, confidence or state.',
+      user: composerActions.prompt({ text, context, priorMessages }), maxTokens: 500, schema: ['actions'] });
+    reading = composerActions.normalize(proposed, context);
+    return composerActions.ground(reading, { text, priorMessages, context });
+  } catch (_) { return { actions: [], needsClarification: null, unavailable: true }; }
+}
+
+function _composerActionProposals(code, userId, candidates, context, conversationId) {
+  return (candidates.actions || []).map(c => {
+    const chosenGroup = (context.groups || []).find(g => String(g.id) === String(c.arguments.groupId));
+    const audience = _resolvePersonalFocusAudience(code, userId, {
+      groupId: chosenGroup ? chosenGroup.id : null, participantIds: c.arguments.participantIds || [],
+      visibility: c.arguments.visibility || 'private' }, { strict: true });
+    const resolvedParticipantIds = audience.ok ? audience.participantIds : [];
+    return ({
+    id: 'prop_' + generateId(), actionType: c.type, capability: 'composer_action',
+    label: ({
+      create_focus: 'Start this focus', update_focus: 'Update this focus', record_focus_outcome: 'Record this focus outcome',
+      inspect_inquiry: 'Show this inquiry', create_inquiry: 'Open this as an inquiry', show_evidence: 'Show the governed evidence',
+      settle_inquiry: 'Record that this is settled', disagree_with_inquiry: 'Record your disagreement',
+      request_research: 'Show cited external reading', attach_material: 'Attach this material', keep_in_library: 'Keep this live object in Library',
+      create_library_folder: 'Create this Library folder', discuss_with_group: 'Open the governed discussion', navigate_to_object: 'Open this object',
+    })[c.type] || c.type,
+    payload: { ...c.arguments, argumentSources: c.argumentSources || {},
+      context: context.object ? { kind: context.object.kind, id: context.object.id } : null, conversationId,
+      objectGuard: context.object ? _composerObjectGuard(context.object.raw) : null,
+      resolvedParticipantIds },
+    visibility: (c.type === 'discuss_with_group' || (c.type === 'update_focus' && ((c.arguments.participantIds || []).length || c.arguments.visibility === 'shared'))) ? 'shared' : 'only_me',
+    why: c.reason || 'You asked IntelliQ to do this.',
+    effect: _composerActionEffect(c, context),
+    requiredApproval: c.requiresConfirmation, policyResult: { effect: c.requiresConfirmation ? 'require_approval' : 'allow', reason: 'server validation runs on execution' },
+    evidenceBasis: [],
+    });
+  });
+}
+
+function _composerObjectGuard(raw) {
+  if (!raw) return null;
+  const stable = raw.inquiryId ? {
+    inquiryId: raw.inquiryId, status: raw.status, leadingHypothesisId: raw.leadingHypothesisId,
+    signals: (raw.signals || []).map(s => [s.ref, s.status || 'active', !!s.dissents, s.supersededBy || null]),
+  } : {
+    id: raw.id, status: raw.status, text: raw.text, target: raw.target || null,
+    reviewAt: raw.reviewAt || null, visibility: raw.visibility || 'private', participants: raw.participants || [],
+  };
+  return _contentHash(JSON.stringify(stable));
+}
+
+function _composerActionEffect(candidate, context) {
+  const a = candidate.arguments || {}, sources = candidate.argumentSources || {};
+  const group = (context.groups || []).find(g => String(g.id) === String(a.groupId));
+  const people = (context.contacts || []).filter(c => (a.participantIds || []).includes(c.id));
+  return {
+    text: a.text || null, textSource: sources.text || null,
+    account: a.because || null,
+    target: a.target || null, reviewOn: a.reviewOn || null, outcome: a.outcome || null,
+    audience: group ? { id: group.id, name: group.name } : (people.length ? { ids: people.map(p => p.id), name: people.map(p => p.name).join(', ') } : null),
+    material: a.materialId && context.attachment ? { id: a.materialId, name: context.attachment.name || 'Attached material' } : null,
+    disclosure: candidate.type === 'discuss_with_group'
+      ? 'Only this wording becomes visible to this audience. The private conversation and other attachments stay private.'
+      : null,
+  };
+}
+
 async function _assistantTurn(code, userId, text, lens, opts = {}) {
   lens = ASSISTANT_LENSES.includes(lens) ? lens : null;
   const workItemId = opts.workItemId ? String(opts.workItemId).slice(0, 80) : null;
@@ -13667,6 +13736,8 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   const _conv = _resolveConversation(_convKey, opts.conversationId, _convSeed, Date.now(), opts.about || null);
   diagnose.noteConversationResponse(_conv, text);
   const priorMessages = (_conv.messages || []).slice(-8).map(m => ({ role: m.role, text: m.text }));
+  const actionContext = _composerActionContext(code, userId, opts, _conv);
+  const actionReading = await _composerActionInterpret(code, text, actionContext, priorMessages, opts.requestedAction || null);
 
   // ── DUTY OF CARE (first, deterministic) ──────────────────────────────────────
   // Before anything else — and independent of the LLM — check the person's own words for risk.
@@ -13834,6 +13905,18 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   const wantsWork = workItemId || interp.intents.some(i => i.type === 'assigned_work_help' || i.type === 'assigned_work_submit');
   const workCtx = wantsWork ? _assignedWorkContext(code, userId, workItemId) : null;
   let proposals = _lensPrioritize(lens, [], _assistantProposals(code, userId, interp, context, text, workCtx));
+  const composerProposals = _composerActionProposals(code, userId, actionReading, actionContext, _conv.id);
+  if (composerProposals.length) {
+    // A semantic action replaces the generic capture/focus guesses. Showing both is the packet
+    // loop that produced the repeated private response after the person had rejected it.
+    proposals = proposals.filter(p => !['capture', 'focus_proposal'].includes(p.actionType));
+    proposals = [...composerProposals, ...proposals];
+  }
+  if (actionReading.needsClarification) {
+    // Clarification is itself the semantic result. Re-offering the rejected
+    // private capture beside it recreates the original failure in different text.
+    proposals = proposals.filter(p => !['capture', 'focus_proposal'].includes(p.actionType));
+  }
   // If we ALREADY saved via an explicit command, don't ALSO offer a capture card for
   // the same text (no duplicate, no double-write).
   if (saved) proposals = proposals.filter(p => p.actionType !== 'capture');
@@ -13966,7 +14049,16 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     if (otherProps.length) parts.push(`I can ${otherProps.map(p => p.label.toLowerCase()).join(', or ')} — say the word and I'll do it. Nothing happens until you confirm.`);
     if (!hasInsight && !hasAction && !hasAnswer && !sensitive) parts.push('Noted. Tell me what you\'d like me to do with this, or ask me anything.');
   }
-  const responseText = parts.join(' ');
+  if (actionReading.needsClarification && !parts.some(x => String(x).includes(actionReading.needsClarification))) {
+    parts.push(actionReading.needsClarification);
+  }
+  let responseText = parts.join(' ');
+  const priorAssistant = [...priorMessages].reverse().find(m => m.role === 'assistant' && m.text);
+  if (priorAssistant && responseText.trim() === String(priorAssistant.text).trim()) {
+    responseText = actionReading.unavailable
+      ? 'I cannot reliably interpret that change while the language model is unavailable. Your message is still in this private conversation, and nothing was saved or shared.'
+      : 'I heard that as a change to what you wanted. Nothing was saved or shared; tell me which action you want me to prepare.';
+  }
 
   // Post-kernel bound (cite only owner-authorised basis; never raise confidence / drop limits).
   const composed = _composeForAudience(code, kernelArt, { role: 'member', subjectId: userId, viewerId: userId, purpose: 'personal_assistance', text: responseText });
@@ -14078,7 +14170,10 @@ app.post('/api/assistant/turn', requireAuth, async (req, res) => {
   // happen INSIDE _assistantTurn, in a defined order (persist → ground). The endpoint
   // is a thin boundary — no second retrieval, no endpoint-specific privacy logic.
   try {
-    const r = await _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId, subjectMemberId: req.body?.subjectMemberId, conversationId: req.body?.conversationId, about: req.body?.about });
+    const r = await _assistantTurn(code, userId, text, req.body?.lens, { workItemId: req.body?.workItemId,
+      subjectMemberId: req.body?.subjectMemberId, conversationId: req.body?.conversationId,
+      about: req.body?.about, surface: req.body?.surface, attachment: req.body?.attachment,
+      requestedAction: req.body?.requestedAction });
     _metric(code, 'turn');
     /* DID THIS TURN PRODUCE EVIDENCE ABOUT ME? If so the person is asked, once, which way what
        they just said points. That tap is the ONLY thing that gives a signal a direction — the
@@ -14628,7 +14723,7 @@ function _groupInquiryProjections(code, nodeId) {
       confidence: i.confidence,
       // What it rests on, counted the way confidence counts it: separate underlying occurrences,
       // not how many times the thing has been said.
-      independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size,
+      independentOrigins: diagnose.currentOriginCount(active),
       // Anonymity changes attribution, never counting (L-D38). The kernel retains identity so
       // five anonymous people remain five contributors rather than one "anonymous" voice.
       contributors: new Set(active.map(s => s.contributedBy).filter(Boolean)).size,
@@ -15600,7 +15695,7 @@ app.get('/api/me/calls', requireAuth, (req, res) => {
     if (!inq || !(inq.signals || []).length) continue;
     const active = (inq.signals || []).filter(s => s && s.kind !== 'interpretation' && diagnose.isActive(s));
     const shaped = { ...inq,
-      independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size,
+      independentOrigins: diagnose.currentOriginCount(active),
       contested: inq.status === 'disputed' || active.some(s => s.dissents) };
     if (!teamState.readyForCall(shaped)) continue;
     const call = calls[inq.inquiryId] || null;
@@ -15632,7 +15727,7 @@ app.post('/api/me/call', requireAuth, (req, res) => {
 
   const active = (inq.signals || []).filter(s => s && s.kind !== 'interpretation' && diagnose.isActive(s));
   const shaped = { ...inq,
-    independentOrigins: new Set(active.filter(s => s.originRef).map(s => s.originRef)).size,
+    independentOrigins: diagnose.currentOriginCount(active),
     contested: inq.status === 'disputed' || active.some(s => s.dissents) };
 
   /* RULING 2, ENFORCED HERE AS WELL AS EXPRESSED IN THE KERNEL. Taking your call back cannot be
@@ -15720,7 +15815,7 @@ app.get('/api/inquiry', requireAuth, (req, res) => {
       corrected: sig.filter(s => s.supersededBy).length,
       // How many separate underlying occurrences this rests on, as opposed to how many times it
       // has been mentioned. The distinction confidence is built on, made visible.
-      origins: new Set(sig.filter(s => diagnose.isActive(s) && s.originRef).map(s => s.originRef)).size,
+      origins: diagnose.currentOriginCount(sig),
       stillUnknown: (i.missingSignals || []).map(m => m.question),
       falsifiers: i.falsifiers || [],
       contradictions: sig.filter(s => diagnose.isActive(s) && s.dissents).length,
@@ -15757,7 +15852,7 @@ app.get('/api/inquiry/:id/thread', requireAuth, (req, res) => {
     band: (inquiry.confidence || {}).band,
     because: (inquiry.confidence || {}).because || [],
     contributors: new Set(active.map(s => s.contributedBy).filter(Boolean)).size,
-    independentOrigins: new Set(active.map(s => s.originRef).filter(Boolean)).size,
+    independentOrigins: diagnose.currentOriginCount(active),
     stillUnknown: (inquiry.missingSignals || []).map(m => (m && m.question) || m).filter(Boolean),
     falsifiers: inquiry.falsifiers || [],
     contested: inquiry.status === 'disputed' || active.some(s => s.dissents),
@@ -15920,7 +16015,7 @@ function _materialContext(code, userId, about) {
     const [kind, ...rest] = ref.split(':');
     const id = rest.join(':');
     const all = Object.values(_materials(code))
-      .filter(m => _materialOn(m, kind, id));
+      .filter(m => _materialOn(m, kind, id) && _materialFor(code, userId, m.materialId).ok);
     if (!all.length) return null;
     const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
     if (!obj) return null;   // attached to something this reader cannot open
@@ -15958,6 +16053,13 @@ function _materialContext(code, userId, about) {
 
     return material.contextFor(m, { sectionIds: stuck.length ? stuck : null });
   } catch (_) { return null; }
+}
+
+function _conversationMaterialContext(code, userId, conversation) {
+  if (!conversation || !(assistantConversations[_wsKey(code, userId)] || []).some(c => c.id === conversation.id)) return null;
+  const latest = Object.values(_materials(code)).filter(m => _materialOn(m, 'conversation', conversation.id))
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
+  return latest && _materialFor(code, userId, latest.materialId).ok ? material.contextFor(latest) : null;
 }
 
 /* A leader's READ becomes evidence about the person; a leader's HANDOFF never does (L-ES4).
@@ -16045,6 +16147,33 @@ app.post('/api/leader/observation', requireAuth, (req, res) => {
     note: `Recorded in your name. ${(orgUsers[code][subjectId] || {}).name || 'They'} can see it and can say if they saw it differently.` });
 });
 
+/* One canonical boundary for a person's deliberate contradicting account. The
+   words live in owner-only canonical evidence; the Inquiry receives only its
+   reference, origin and shape. Repeating the account deduplicates, while changing
+   it supersedes the earlier record and signal without deleting history. */
+function _recordPersonalDisagreement(code, userId, inquiry, because, now = Date.now()) {
+  const when = new Date(now).toISOString();
+  const rec = _recordEvidence(code, {
+    provider: 'user', source: 'reported', externalId: `inquiry-disagreement:${inquiry.inquiryId}:${userId}`,
+    subjectId: userId, ownerRef: userId, type: 'observation', label: 'Your contradicting account',
+    // The account has one stable factual identity. A later wording change is a
+    // correction of that account, not a second occasion or origin.
+    valueText: String(because).slice(0, 600), observedAt: new Date(inquiry.createdAt || 0).toISOString(), retrievedAt: when,
+    confidence: 'confirmed', visibility: 'private',
+    attributes: { inquiryId: inquiry.inquiryId, accountKind: 'disagreement' },
+  }, { because: String(because).slice(0, 600), inquiryId: inquiry.inquiryId });
+  if (!rec.envelope) return { ok: false, error: 'account_not_recorded' };
+  _indexEvidence(code, rec.envelope).catch(() => {});
+  const proposal = {
+    id: 'dis_' + generateId(), level: 'observation', directness: 'direct',
+    authority: 'self_report', source: 'self', specificity: 0.7,
+    originKind: 'self_report', originRef: `self:${userId}`, turnId: `dis_${userId}_${now}`,
+    contradicts: true,
+    ...(rec.envelope.correctionOf ? { corrects: [rec.envelope.correctionOf], correctionReason: 'The person revised their account.' } : {}),
+  };
+  return { ok: true, inquiry: diagnose.applyProposals(inquiry, [proposal], { now, evidenceRefOf: () => rec.id }), evidenceId: rec.id };
+}
+
 /* POST /api/me/disagree — { inquiryId, because }. The player's answer to one. */
 app.post('/api/me/disagree', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
@@ -16057,16 +16186,9 @@ app.post('/api/me/disagree', requireAuth, (req, res) => {
   const key = Object.keys(mine).find(k => mine[k] && mine[k].inquiryId === inquiryId);
   if (!key) return res.status(404).json({ error: 'no such belief of yours' });
 
-  const now = Date.now();
-  mine[key] = diagnose.applyProposals(mine[key], [{
-    id: 'dis_' + generateId(),
-    level: 'observation', directness: 'direct', authority: 'self_report', source: 'self',
-    specificity: 0.7, statement: because,
-    originKind: 'self_report', originRef: `self:${userId}`, turnId: `dis_${userId}_${now}`,
-    // THIS is what makes the belief contested. Not a flag somebody sets — a contradicting
-    // account on the record, which is what a disagreement actually is.
-    contradicts: true,
-  }], { now, evidenceRefOf: p => `${p.originRef}#${p.id}` });
+  const result = _recordPersonalDisagreement(code, userId, mine[key], because, Date.now());
+  if (!result.ok) return res.status(500).json({ error: result.error });
+  mine[key] = result.inquiry;
 
   _audit(code, { actor: userId, action: 'disagreed', subjectIds: [userId], basis: inquiryId });
   scheduleSave();
@@ -16120,6 +16242,42 @@ const _materials = code => (materials[code] || (materials[code] = {}));
 function _materialChecksum(text) {
   return require('crypto').createHash('sha256').update(String(text || '')).digest('hex').slice(0, 32);
 }
+
+/* The universal composer attachment door. Files are material, not evidence about the person or
+   organisation. They are anchored either to the currently authorised object or to the caller's
+   private conversation, and later turns receive only the bounded material context. */
+app.post('/api/assistant/attachments', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const b = req.body || {};
+  const text = String(b.text || '');
+  if (!text.trim()) return res.status(400).json({ error: 'attachment text required' });
+  if (text.length > material.TEXT_CAP) return res.status(413).json({ error: 'attachment is too large' });
+  const key = _wsKey(code, userId);
+  const conv = _resolveConversation(key, b.conversationId, b.title || 'Attached material', Date.now(), b.about || null);
+  const about = _aboutRef(b.about);
+  let ref = { kind: 'conversation', id: conv.id, at: Date.now(), by: userId };
+  if (about) {
+    const n = about.indexOf(':'), kind = about.slice(0, n), id = about.slice(n + 1);
+    if (_allObjectsFor(code, userId).some(o => o.kind === kind && String(o.id) === id)) ref = { kind, id, at: Date.now(), by: userId };
+  }
+  const checksum = _materialChecksum(text);
+  // Composer uploads are private external reading. Deduplication may reuse only
+  // this owner's private copy; equal bytes owned by somebody else are not access.
+  let row = Object.values(_materials(code)).find(m => m && m.checksum === checksum && m.byId === userId && m.visibility === 'private');
+  if (row) {
+    if (!_materialOn(row, ref.kind, ref.id)) row.refs = _materialRefs(row).concat([ref]);
+  } else {
+    const id = 'mat_' + generateId();
+    row = { materialId: id, byId: userId, orgCode: code,
+      title: String(b.title || 'Attached material').trim().slice(0, 200), filename: String(b.filename || b.title || '').slice(0, 200),
+      kind: material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text', sections: material.segment(text, { kind: String(b.kind || 'text') }),
+      refs: [ref], checksum, visibility: 'private', provenance: 'external', createdAt: Date.now() };
+    _materials(code)[id] = row;
+  }
+  scheduleSave();
+  res.json({ ok: true, materialId: row.materialId, conversationId: conv.id, attachedTo: { kind: ref.kind, id: ref.id },
+    parts: row.sections.length, epistemicEffect: 'none', note: 'Available to this conversation as external material. It is not evidence about you or the organisation.' });
+});
 /* Where a document is used. `attachTo` was singular and is kept as the FIRST ref so every
    existing reader keeps working while the shape moves underneath them. */
 const _materialRefs = m => (Array.isArray(m && m.refs) ? m.refs : (m && m.attachTo ? [m.attachTo] : []));
@@ -16135,6 +16293,9 @@ const _engageOf  = (code, id) => {
 function _materialFor(code, userId, materialId) {
   const m = _materials(code)[String(materialId)];
   if (!m) return { ok: false, status: 404, error: 'not found' };
+  if (m.visibility === 'private' && String(m.byId) !== String(userId)) {
+    return { ok: false, status: 404, error: 'not found' };
+  }
   const obj = _allObjectsFor(code, userId)
     .find(o => _materialRefs(m).some(r => r.kind === o.kind && String(r.id) === String(o.id)));
   // A material whose object the reader cannot see is a material that does not exist for them.
@@ -16193,7 +16354,8 @@ app.post('/api/materials', requireAuth, (req, res) => {
      copy — and the engagement already recorded against it stays with it instead of splitting
      across two records nobody can read together. */
   const checksum = _materialChecksum(text);
-  const already = Object.values(_materials(code)).find(m => m && m.checksum === checksum);
+  const already = Object.values(_materials(code)).find(m => m && m.checksum === checksum
+    && (m.visibility !== 'private' || _materialFor(code, userId, m.materialId).ok));
   if (already) {
     if (!_materialOn(already, kind, at.id)) {
       already.refs = _materialRefs(already).concat([{ kind, id: String(at.id), at: Date.now(), by: userId }]);
@@ -16214,6 +16376,7 @@ app.post('/api/materials', requireAuth, (req, res) => {
     kind: material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text',
     sections,
     checksum,
+    visibility: 'object', provenance: 'internal',
     // Where it is used. The first ref is what `attachTo` used to be, kept in that position so
     // anything still reading the old field sees the same answer.
     refs: [{ kind, id: String(at.id), at: Date.now(), by: userId }],
@@ -16234,9 +16397,9 @@ app.get('/api/objects/:kind/:id/materials', requireAuth, (req, res) => {
   const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === id);
   if (!obj) return res.status(404).json({ error: 'not found' });
   const list = Object.values(_materials(code))
-    .filter(m => _materialOn(m, kind, id))
+    .filter(m => _materialOn(m, kind, id) && _materialFor(code, userId, m.materialId).ok)
     .sort((a, b) => b.createdAt - a.createdAt)
-    .map(m => ({ materialId: m.materialId, title: m.title, filename: m.filename, kind: m.kind,
+    .map(m => ({ materialId: m.materialId, title: m.title, filename: m.filename, kind: m.kind, provenance: m.provenance || 'internal',
       parts: (m.sections || []).length, by: _nameOf(code, m.byId), byId: m.byId, createdAt: m.createdAt }));
   res.json({ ok: true, materials: list });
 });
@@ -16250,7 +16413,7 @@ app.get('/api/materials/:id', requireAuth, (req, res) => {
   const mine = _engageOf(code, m.materialId).filter(e => e.personId === userId);
   const stateOf = sid => (mine.filter(e => e.sectionId === sid).sort((a, b) => b.at - a.at)[0] || {}).state || null;
   res.json({ ok: true,
-    material: { materialId: m.materialId, title: m.title, filename: m.filename, kind: m.kind,
+    material: { materialId: m.materialId, title: m.title, filename: m.filename, kind: m.kind, provenance: m.provenance || 'internal',
       by: _nameOf(code, m.byId), createdAt: m.createdAt, attachTo: m.attachTo },
     sections: (m.sections || []).map(s => ({ id: s.id, ordinal: s.ordinal, heading: s.heading, text: s.text,
       // WHERE YOU SAID YOU WERE, so somebody can change their mind rather than declare twice.
@@ -16477,28 +16640,34 @@ app.post('/api/materials/:id/recompose', requireAuth, async (req, res) => {
    PRODUCTION kernel what it made of the evidence at each point. Nothing is re-derived: a chart
    that computed its own band would eventually disagree with the sentence printed beside it. */
 function _firmingChart(inq, { title }) {
-  const live = (inq.signals || [])
-    .filter(s => s && s.kind !== 'interpretation' && (!s.status || s.status === 'active') && Number.isFinite(s.at))
+  const history = (inq.signals || [])
+    // A contradicting account is important, but it is not support. Plotting it on
+    // the solid "firming" line made argument look like corroboration.
+    .filter(s => s && s.kind !== 'interpretation' && !s.dissents && Number.isFinite(s.at))
     .sort((a, b) => a.at - b.at);
-  if (!live.length) return null;
+  if (!history.length) return null;
 
   const occasions = [];
-  const seenOrigins = new Map();   // originRef → the ref of the signal that first carried it
-  for (let i = 0; i < live.length; i++) {
-    const s = live[i];
-    const originRef = s.originRef ? String(s.originRef) : '';
-    // An occasion is recorded when a NEW independent origin first speaks. A fifth message from
-    // somebody already counted moves nothing, which is the law this chart exists to show.
-    if (!originRef || seenOrigins.has(originRef)) continue;
-    seenOrigins.set(originRef, String(s.ref));
-    const upTo = live.slice(0, i + 1);
-    const conf = diagnose.deriveConfidence(upTo, { now: s.at });
+  const seenOrigins = new Map();   // originRef → current signal for that origin
+  for (const s of history) {
+    const originRef = diagnose.originIdentity(s) || '';
+    if (!originRef) continue;
+    const prior = seenOrigins.get(originRef);
+    const isCorrection = !!(prior && (prior.supersededBy === s.ref || s.correctionOf === prior.ref));
+    // Repetition is not an occasion. A correction is: it replaces the origin's
+    // reference without adding another origin, so history changes while the count
+    // truthfully stays level.
+    if (prior && !isCorrection) continue;
+    if (s.status === 'withdrawn') seenOrigins.delete(originRef);
+    else seenOrigins.set(originRef, s);
+    if (!seenOrigins.size) continue;
+    const current = [...seenOrigins.values()];
+    const conf = diagnose.deriveConfidence(current, { now: s.at });
     occasions.push({
       at: s.at,
-      // The refs ARE the count — one per independent origin that had spoken by this moment.
-      refs: [...seenOrigins.values()],
+      refs: [...seenOrigins.values()].map(x => String(x.ref)),
       band: conf.band,
-      label: `${seenOrigins.size} ${seenOrigins.size === 1 ? 'origin' : 'origins'}`,
+      label: `${seenOrigins.size} ${seenOrigins.size === 1 ? 'supporting origin' : 'supporting origins'}${isCorrection ? ' — corrected' : ''}`,
     });
   }
   if (!occasions.length) return null;
@@ -16517,7 +16686,7 @@ function _timelineChart(code, userId, obj) {
   if (created) events.push({ at: created, label: 'Set', marker: 'start', refs: [`focus:${obj.id}:created`] });
   const cohort = _materialCohort(code, obj);
   for (const m of Object.values(_materials(code))) {
-    if (!_materialOn(m, obj.kind, obj.id)) continue;
+    if (!_materialOn(m, obj.kind, obj.id) || !_materialFor(code, userId, m.materialId).ok) continue;
     events.push({ at: m.createdAt, label: `Attached: ${m.title}`, marker: 'material', refs: [`material:${m.materialId}`] });
     /* HOW MANY PEOPLE ENGAGED — ONE MARKER, NOT A DOT EACH, AND THE WHOLE GROUP SEES IT.
 
@@ -16557,7 +16726,7 @@ function _timelineChart(code, userId, obj) {
 /* HOW IT LANDED ACROSS A GROUP — the bars are the author's own parts. */
 function _spreadChart(code, userId, obj) {
   const mats = Object.values(_materials(code))
-    .filter(m => _materialOn(m, obj.kind, obj.id))
+    .filter(m => _materialOn(m, obj.kind, obj.id) && _materialFor(code, userId, m.materialId).ok)
     .sort((a, b) => b.createdAt - a.createdAt);
   if (!mats.length) return null;
   const m = mats[0];
@@ -16611,15 +16780,26 @@ function _chartFor(code, userId, obj, want = '') {
 
   if ((!want || want === 'spread')) {
     const spec = _spreadChart(code, userId, obj);
-    if (spec) return { spec, basis: spec.series.flatMap(s => s.points.flatMap(p => p.refs)) };
+    if (spec) {
+      const basis = Object.values(_materials(code)).filter(m => _materialOn(m, obj.kind, obj.id) && _materialFor(code, userId, m.materialId).ok)
+        .flatMap(m => _engageOf(code, m.materialId)).filter(e => !e.on || (e.on.kind === obj.kind && String(e.on.id) === String(obj.id)))
+        .map(e => e.ref).filter(Boolean);
+      return { spec, basis };
+    }
   }
   if ((!want || want === 'firming') && raw.signals) {
     const spec = _firmingChart(raw, { title: title ? `${title} — how this firmed up` : '' });
-    if (spec) return { spec, basis: spec.series.flatMap(s => s.points.flatMap(p => p.refs)) };
+    if (spec) return { spec, basis: (raw.signals || []).filter(s => s && s.kind !== 'interpretation' && !s.dissents).map(s => s.ref).filter(Boolean) };
   }
   if ((!want || want === 'timeline') && obj.kind === 'focus') {
     const spec = _timelineChart(code, userId, obj);
-    if (spec) return { spec, basis: spec.series[0].points.flatMap(p => p.refs) };
+    if (spec) {
+      const basis = [`focus:${obj.id}:created`, `focus:${obj.id}:review`, `focus:${obj.id}:outcome`];
+      for (const m of Object.values(_materials(code)).filter(m => _materialOn(m, obj.kind, obj.id) && _materialFor(code, userId, m.materialId).ok)) {
+        basis.push(`material:${m.materialId}`, ..._engageOf(code, m.materialId).map(e => e.ref).filter(Boolean));
+      }
+      return { spec, basis };
+    }
   }
   return null;
 }
@@ -17084,6 +17264,153 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
   // Idempotency / duplicate-submit guard: a proposal executes AT MOST once — no double write.
   if (prop.confirmed) return res.status(409).json({ error: 'already confirmed' });
   const overrides = req.body?.overrides || {};
+
+  if (prop.capability === 'composer_action') {
+    const p = prop.payload || {};
+    // A proposal id authorises the frozen server-side payload the person saw. The
+    // browser may never turn confirmation into a second, hidden proposal.
+    if (Object.keys(overrides).length) return res.status(409).json({ error: 'proposal_payload_changed', note: 'That change needs a new proposal and confirmation.' });
+    const ref = p.context || null;
+    const live = ref && (ref.kind === 'conversation'
+      ? ((assistantConversations[_wsKey(code, userId)] || []).some(c => c.id === ref.id) ? { kind: 'conversation', id: ref.id, raw: null } : null)
+      : _allObjectsFor(code, userId).find(o => o.kind === ref.kind && String(o.id) === String(ref.id)));
+    const needsObject = !['create_focus', 'create_library_folder', 'create_inquiry', 'discuss_with_group'].includes(prop.actionType);
+    if (needsObject && !live) return res.status(404).json({ error: 'not found' });
+    if (p.objectGuard && live && _composerObjectGuard(live.raw) !== p.objectGuard) {
+      return res.status(409).json({ error: 'stale_proposal', note: 'This changed after the proposal was prepared. Review a fresh proposal before acting.' });
+    }
+
+    if (prop.actionType === 'create_library_folder') {
+      const name = shelf.folderName(p.folderName);
+      if (!name) return res.status(400).json({ error: 'folder name required' });
+      let folder = _libFolders(code).find(f => f.ownerId === userId && f.name.toLowerCase() === name.toLowerCase());
+      if (!folder) { folder = { id: 'fld_' + generateId(), ownerId: userId, name, createdAt: new Date().toISOString() }; _libFolders(code).push(folder); }
+      prop.confirmed = { at: new Date().toISOString(), folderId: folder.id }; scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'created', folder: { id: folder.id, name: folder.name }, note: `Created “${folder.name}”.` });
+    }
+
+    if (prop.actionType === 'keep_in_library') {
+      const folderId = String(p.folderId || '') || null;
+      if (folderId && !_libFolders(code).some(f => f.id === folderId && f.ownerId === userId)) return res.status(400).json({ error: 'unknown folder' });
+      const lookup = _shelfLookup(code, userId);
+      if (!lookup(ref.kind, ref.id)) return res.status(404).json({ error: 'not found' });
+      const result = shelf.file(_myShelf(code, userId), { kind: ref.kind, refId: ref.id }, { folderId, at: Date.now(), id: 'shf_' + generateId() });
+      if (!result.ok) return res.status(400).json({ error: result.reason });
+      if (result.added) _shelfOf(code).push({ ...result.entry, ownerId: userId });
+      prop.confirmed = { at: new Date().toISOString(), filingId: result.entry.id }; scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome: result.moved ? 'moved' : 'filed', filed: result.entry,
+        note: 'Kept as a live reference. It is not a copy and grants no access.' });
+    }
+
+    if (prop.actionType === 'create_focus') {
+      const result = _createPersonalFocus(code, userId, { text: p.text, target: p.target, reviewOn: p.reviewOn,
+        conversationId: p.conversationId,
+        addressesKind: live && ['inquiry', 'high', 'low'].includes(live.kind) ? live.kind : null,
+        addressesId: live && ['inquiry', 'high', 'low'].includes(live.kind) ? live.id : null }, { strictAudience: true });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      const focus = result.focus;
+      prop.confirmed = { at: new Date().toISOString(), focusId: focus.id }; scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'created', focus: result.publicFocus,
+        next: focus.target ? 'When should we look at it?' : 'What would tell you this was working?',
+        note: 'Focus started privately. No target or date was invented.' });
+    }
+
+    if (prop.actionType === 'update_focus') {
+      const result = _updatePersonalFocus(code, userId, ref.id, { text: p.text, target: p.target,
+        reviewOn: p.reviewOn, visibility: p.visibility, participantIds: p.participantIds }, { strictAudience: true });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      prop.confirmed = { at: new Date().toISOString(), focusId: result.focus.id }; scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'updated', focus: result.publicFocus, note: 'Focus updated.' });
+    }
+
+    if (prop.actionType === 'create_inquiry') {
+      const topic = String(p.text || turn.rawInput || '').trim().slice(0, 200);
+      if (!topic) return res.status(400).json({ error: 'inquiry topic required' });
+      const concept = `person.inquiry.${_contentHash(topic)}`;
+      const inq = _inquiryFor(code, `member:${userId}`, concept, topic, (orgMeta[code] || {}).orgMode || '', Date.now());
+      prop.confirmed = { at: new Date().toISOString(), inquiryId: inq.inquiryId }; scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'opened', inquiry: { id: inq.inquiryId, status: inq.status },
+        note: 'Inquiry opened as an unsettled question. No confidence or answer was invented.' });
+    }
+
+    if (prop.actionType === 'disagree_with_inquiry') {
+      const because = String(p.because || turn.rawInput || '').trim().slice(0, 600);
+      const inquiryId = live.raw?.inquiryId || live.id;
+      const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+      const key = Object.keys(mine).find(k => mine[k] && mine[k].inquiryId === inquiryId);
+      if (!key || !because) return res.status(key ? 400 : 404).json({ error: key ? 'say how you saw it' : 'not found' });
+      const result = _recordPersonalDisagreement(code, userId, mine[key], because, Date.now());
+      if (!result.ok) return res.status(500).json({ error: result.error });
+      mine[key] = result.inquiry;
+      prop.confirmed = { at: new Date().toISOString(), inquiryId }; scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'contested', inquiryId,
+        evidenceId: result.evidenceId, note: 'Your account was recorded through the disagreement boundary. It was not averaged away.' });
+    }
+
+    if (prop.actionType === 'settle_inquiry') {
+      const inquiryId = live.raw?.inquiryId || live.id;
+      const mine = (inquiryStates[code] || {})[`member:${userId}`] || {};
+      const key = Object.keys(mine).find(k => mine[k] && mine[k].inquiryId === inquiryId);
+      if (!key) return res.status(404).json({ error: 'not found' });
+      // Personal Inquiries are empirical working pictures. A user's call can classify
+      // one for their High/Low view, but cannot settle the proposition. Operational
+      // arrangements already have their canonical owner-answer/adjudication boundary;
+      // manufacturing a second one here would let this dispatcher author truth.
+      return res.status(409).json({ error: 'empirical_inquiry_cannot_be_settled_by_call', inquiryId,
+        note: 'Your call cannot settle an empirical question. The Inquiry remains live with its evidence and disagreement intact.' });
+    }
+
+    if (prop.actionType === 'record_focus_outcome') {
+      const outcome = String(p.outcome || '');
+      const result = _recordPersonalFocusOutcome(code, userId, ref.id, outcome);
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      prop.confirmed = { at: new Date().toISOString(), focusId: result.focus.id, outcome }; scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome, focusId: result.focus.id, note: 'Outcome recorded.' });
+    }
+
+    if (prop.actionType === 'attach_material') {
+      const materialId = String(p.materialId || '');
+      const readable = _materialFor(code, userId, materialId);
+      if (!readable.ok) return res.status(404).json({ error: 'not found' });
+      const materialRow = readable.material;
+      if (!_materialOn(materialRow, ref.kind, ref.id)) materialRow.refs = _materialRefs(materialRow).concat([{ kind: ref.kind, id: ref.id, at: Date.now(), by: userId }]);
+      prop.confirmed = { at: new Date().toISOString(), materialId }; scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'referenced', materialId,
+        note: 'Attached by reference. External material did not become evidence about your organisation.' });
+    }
+
+    if (prop.actionType === 'discuss_with_group') {
+      if (!live || live.kind === 'conversation') {
+        const groupId = String(p.groupId || '');
+        const text = String(p.text || '').trim().slice(0, 300);
+        const result = _createPersonalFocus(code, userId, { text, groupId, conversationId: p.conversationId },
+          { strictAudience: true, expectedParticipantIds: p.resolvedParticipantIds || [] });
+        if (!result.ok) return res.status(result.status).json({ error: result.error === 'stale_audience' ? 'stale_proposal' : result.error,
+          ...(result.error === 'stale_audience' ? { note: 'The group changed after this was prepared. Review a fresh proposal before sharing.' } : {}) });
+        const focus = result.focus;
+        prop.confirmed = { at: new Date().toISOString(), object: { kind: 'focus', id: focus.id } }; scheduleSave();
+        return res.json({ ok: true, confirmed: prop.actionType, outcome: 'open_forum',
+          forum: { room: 'focus', nodeId: null, objectId: focus.id }, focus: { id: focus.id, text: focus.text, visibility: focus.visibility },
+          note: 'Created a shared Focus for that group and opened its discussion. Forum speech is not evidence unless deliberately contributed.' });
+      }
+      const raw = live.raw || {};
+      const nodeId = String(raw.subjectRef || '').startsWith('group:')
+        ? String(raw.subjectRef).slice(6)
+        : (live.whoseNodeId || raw.nodeId || null);
+      const invited = live.kind === 'focus' && (raw.participants || []).includes(userId) && (raw.participants || []).length > 1;
+      if (!nodeId && !invited) return res.status(403).json({ error: 'this object has no group discussion' });
+      prop.confirmed = { at: new Date().toISOString(), object: ref }; scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'open_forum', forum: { room: nodeId ? 'group' : 'focus', nodeId, objectId: ref.id },
+        note: 'Discussion opened. Nothing said there counts as evidence unless its author deliberately contributes it.' });
+    }
+
+    if (['inspect_inquiry', 'show_evidence', 'request_research', 'navigate_to_object'].includes(prop.actionType)) {
+      prop.confirmed = { at: new Date().toISOString(), object: ref };
+      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'navigate', navigate: { kind: ref.kind, id: ref.id },
+        note: prop.actionType === 'request_research' ? 'Opening cited external reading. It is not a finding about you.' : 'Opening the live object.' });
+    }
+    return res.status(400).json({ error: 'unsupported composer action' });
+  }
 
   if (prop.actionType === 'share_with_professional') {
     // The member's own words, to one named person, at the member's instruction. Their edit wins
@@ -21501,7 +21828,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library
   // a routed share lands in
-  orgMeta, libraryItems, _professionals,
+  orgMeta, libraryItems, _professionals, _sourceList,
   // exported for the truth layer: proves the role ladder never invents a title
   _subjectRoleContext, _domainDirective, _memberGoalsFor, _getMemory, _beliefStateFindings, _contactsFor,
   // exported for the truth layer: the canonical evidence boundary + identity lifecycle
@@ -21536,6 +21863,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _assessmentPresentationState, ASSESSMENT_VERDICTS,
   // exported for the truth layer: unified MyWorkspace assistant runtime (slice 1)
   _assistantTurn, _assistantInterpret, _assistantContext, _recordCheckin, _assignedWorkContext, _submitAssignment,
+  _createPersonalFocus, _updatePersonalFocus, _recordPersonalFocusOutcome, _resolvePersonalFocusAudience,
   _extractMetricsFromText, _importTeamTable, assistantTurns, assistantConversations, libraryFolders, libraryItems, shelfFilings, _shelfLookup, inquiryStates, _migrateLegacyNotesToLibrary, orgNotes, orgMessages, orgStore, safeguardingFlags, _llmBudgetOk, _captureError, checkinProposals,
   // exported for the truth layer: the proactive surfacing layer (post-kernel projection)
   _proactiveInsights, _reliabilityByType, _recordNoticeFeedback, proactivePrefs, insightSuppression, noticeFeedback,

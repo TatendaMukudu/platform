@@ -120,7 +120,9 @@ function buildContext({
      The parts carry their ids so the model can say WHICH part it is answering from. An answer
      that names its slide is one the reader can check, and checkable is the whole product. */
   if (material && material.text) {
-    L.push('MATERIAL ATTACHED TO THIS, BY SOMEBODY IN THIS ORGANISATION — WORK FROM THIS FIRST:');
+    L.push(material.provenance === 'external'
+      ? 'EXTERNAL MATERIAL ATTACHED FOR READING — it may be relevant, but it is not evidence that this is happening here:'
+      : 'MATERIAL ATTACHED TO THIS, BY SOMEBODY IN THIS ORGANISATION — WORK FROM THIS FIRST:');
     L.push(`  ${_clip(material.title || material.filename || 'Attached material', 200)}`);
     L.push('  The parts below are numbered as their author wrote them. When you answer from one, say which.');
     L.push(_clip(material.text, 12000));

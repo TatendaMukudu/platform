@@ -1,5 +1,75 @@
 # Unified MyWorkspace Assistant Runtime — Slice 1
 
+## Control-surface law
+
+The composer is the conversational control surface; screens are views. Natural-language and
+model-interpreted consequential actions use the governed proposal/confirmation path. An explicit
+direct control may call a canonical domain capability directly when its action and consequences
+are already visible and unambiguous. Both paths converge on the same domain owner: the model
+interprets intent, while deterministic code owns truth, authority and mutation law.
+
+The current path is:
+
+```
+page context + the person's words
+  -> ai/composer-actions.js (one model-facing allow-list and schema)
+  -> model proposes a typed action
+  -> server resolves the page/object through the reader's existing gate
+  -> assistant turn stores a proposal, not a mutation
+  -> explicit confirmation for persistent or shared effects
+  -> the dispatcher re-resolves authority and calls the existing Focus, Inquiry, Forum,
+     Material, Library-shelf, assessment, check-in, workspace, or action-contract boundary
+  -> a structured outcome returns to the same conversation
+```
+
+Context is explicit `{surface, about:{kind,id}, conversationId, attachment}` data. A client label
+is never authority: the server resolves `about` through `_allObjectsFor`, and an inaccessible or
+stale object becomes the same `not found` response. Conversation binding continues to use
+`conversation.about === "kind:id"`; labels never replace that key.
+
+Validation errors, permission refusals, privacy facts, irreversible warnings and infrastructure
+failures stay deterministic. Coaching, acknowledgement, clarification, suggestions and transitions
+belong to the composer. When no model is available, explicit typed button shortcuts may still be
+validated and confirmed, and an explicit direct control may call its canonical capability.
+Ambiguous natural language is not converted into a mutation with a regex. The draft stays in the
+private conversation and the response says interpretation is unavailable.
+
+To add a capability, first establish one deterministic domain owner for its validation, mutation
+and side effects. Then add one entry to `ai/composer-actions.js`, expose only the arguments a model
+may propose, and make the dispatcher call that owner. Explicit controls may call the same owner
+directly. Do not add a new intent regex, a second endpoint-specific permission rule, or a canned
+conversational packet.
+
+The prose boundary is deliberate. Deterministic text remains for validation errors, authority or
+privacy refusals, visibility and irreversibility warnings, exact persistence outcomes, cohort-floor
+refusals, and provider/infrastructure failure. Coaching, acknowledgement, follow-up questions,
+clarification, suggestions and transitions are composed from those facts. The repeated
+“I can keep this — private to you” defect came from `_assistantProposals` producing the same
+generic capture card on every turn while the deterministic fallback concatenated its label into
+the reply; neither layer interpreted the second turn against the first. Semantic action proposals
+now replace generic capture guesses, and an exact duplicate fallback is refused rather than
+presented as understanding.
+
+### Implementation map used for this change
+
+- Main composer: `MemberApp.wsSend -> assistantTurn -> POST /api/assistant/turn ->
+  _assistantTurn -> _composeTurn`; private history is `assistantConversations`, with durable
+  `about` binding and source metadata.
+- Focus: `_createPersonalFocus`, `_updatePersonalFocus`, `_recordPersonalFocusOutcome`, and
+  `_resolvePersonalFocusAudience` own lifecycle and audience law. Direct HTTP routes and composer
+  confirmation are transports over those functions; `_beginFocusAction` and
+  `_completeFocusAction` remain their Action-loop hooks.
+- Inquiry: `_inquiryFor` and `diagnose.applyProposals` own state/evidence; disagreement is a
+  contradicting self-report; the model never sets confidence.
+- Library: `ai/shelf.js` stores only `{kind,refId}` and `_shelfLookup` re-runs access on every read.
+- Material: `ai/material.js` segments bounded source text; `_materialContext` injects it only after
+  object/conversation access resolution. Composer attachments are material with
+  `epistemicEffect:none`, never internal evidence.
+- Forum: group and invited-Focus rooms retain their existing membership checks; posting remains
+  speech with no epistemic effect until deliberate contribution.
+- Charts: `ai/chart.js` supplies governed points, threshold and limitations; the client maps those
+  decided values to pixels and progressively explains their meaning.
+
 One user-facing IntelliQ assistant, one MyWorkspace composer. This slice proves a single
 interaction can be interpreted safely and routed through the **existing** OS architecture —
 canonical evidence gateway, kernel, and the universal action contract — without creating a

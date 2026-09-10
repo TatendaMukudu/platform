@@ -11197,16 +11197,16 @@ const MemberApp = {
                on." A belief thread had three verdicts and no way to DO anything about what it
                had just told you — the one place a person is most likely to want to. -->
           <button type="button" class="iqt-verdict is-do"
-            onclick="MemberApp.focusOnThis('${esc(kind)}','${esc(objectId)}',this)">Work on this</button>
+            onclick="MemberApp.beginObjectAction('create_focus','${esc(kind)}','${esc(objectId)}')">Work on this</button>
           <!-- KEEP, NOT SAVE. Save is what the old Library meant and what everybody reads it as:
                a copy, frozen, yours. This puts a reference on your shelf so you can find this
                again; the belief stays exactly where it is, still changing, still governed by
                whoever it belongs to. Filing it says nothing about it — not agreement, not a
                direction, and the kernel never hears about it (L-SH3). -->
           <button type="button" class="iqt-verdict"
-            onclick="MemberApp.fileToShelf('${esc(kind)}','${esc(objectId)}')">Keep</button>
-          <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('answered')">That's settled</button>
-          <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('contest')">I disagree</button>
+            onclick="MemberApp.beginObjectAction('keep_in_library','${esc(kind)}','${esc(objectId)}')">Keep</button>
+          ${kind === 'inquiry' ? `<button type="button" class="iqt-verdict" onclick="MemberApp.beginObjectAction('settle_inquiry','${esc(kind)}','${esc(objectId)}')">That's settled</button>` : ''}
+          <button type="button" class="iqt-verdict" onclick="MemberApp.beginObjectAction('disagree_with_inquiry','${esc(kind)}','${esc(objectId)}')">I disagree</button>
           <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('aside')">Not now</button>
         </div>`;
       // The call sits WITH the belief, above the verdicts, and is filled in after the thread
@@ -11231,7 +11231,7 @@ const MemberApp = {
               <h1 class="iqt-title">${esc(title)}</h1>
               ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}">${esc(sum.standing)}</span>` : ''}
             </div>
-            ${data.forumAvailable ? `<button type="button" class="iqt-forum" onclick="MemberApp.openForum('${esc(data.nodeId || '')}','${esc(objectId)}','${esc(data.forumKind || 'group')}','${esc(kind)}')">Forum</button>` : ''}
+            ${data.forumAvailable ? `<button type="button" class="iqt-forum" onclick="MemberApp.beginObjectAction('discuss_with_group','${esc(kind)}','${esc(objectId)}')">Forum</button>` : ''}
 
           </div>
           ${body}
@@ -11399,6 +11399,17 @@ const MemberApp = {
     const W = 320, H = 132, PADL = 30, PADR = 10, PADT = 12, PADB = 24;
     const parts = [`<div class="iqt-chart-head">${esc(c.title)}</div>`];
 
+    if (c.kind === 'firming') {
+      const originSeries = (c.series || []).find(s => s.key === 'origins');
+      const points = (originSeries && originSeries.points) || [];
+      const current = points.length ? points[points.length - 1].value : 0;
+      const threshold = c.threshold && c.threshold.value;
+      parts.push(`<div class="iqt-chart-summary"><strong>${esc(current)} separate supporting ${current === 1 ? 'account' : 'accounts'}</strong>${Number.isFinite(threshold) ? ` · ${esc(threshold)} needed before IntelliQ can support a call` : ''}</div>`);
+      parts.push(`<details class="iqt-chart-key"><summary>How to read this</summary><div>
+        From left to right, each point shows when another separate account supported this. The line does not move when the same account is repeated. The horizontal marker shows when there is enough support to make a call. Disagreement and corrections remain in the record and in IntelliQ's explanation; they are never turned into support on this line.
+      </div></details>`);
+    }
+
     if (c.kind === 'spread') {
       // TWO SERIES, DRAWN AS TWO. A part where three people said they were stuck and a part
       // nobody opened are both a short "said they had it" bar, and showing only that one would
@@ -11422,7 +11433,10 @@ const MemberApp = {
       const x0 = Math.min(...xs), x1 = Math.max(...xs);
       const px = v => PADL + (x1 === x0 ? (W - PADL - PADR) / 2 : ((v - x0) / (x1 - x0)) * (W - PADL - PADR));
       const svg = [];
-      for (const s of (c.series || [])) {
+      const visibleSeries = c.kind === 'firming'
+        ? (c.series || []).filter(s => s.key === 'origins')
+        : (c.series || []);
+      for (const s of visibleSeries) {
         const pts = s.points || [];
         if (!pts.length) continue;
         const vs = pts.map(p => p.value);
@@ -11435,13 +11449,13 @@ const MemberApp = {
         if (c.threshold && s.unit === c.threshold.unit) {
           const ty = py(c.threshold.value).toFixed(1);
           svg.push(`<line class="iqt-thresh" x1="${PADL}" y1="${ty}" x2="${W - PADR}" y2="${ty}"/>`);
-          svg.push(`<text class="iqt-thresh-t" x="${PADL}" y="${Number(ty) - 4}">${esc(c.threshold.value)} — enough to be called</text>`);
+          svg.push(`<text class="iqt-thresh-t" x="${PADL}" y="${Number(ty) - 4}">${esc(c.threshold.value)} — enough support</text>`);
         }
       }
-      parts.push(`<svg class="iqt-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.title)}">${svg.join('')}</svg>`);
+      parts.push(`<div class="iqt-chart-y">${c.kind === 'firming' ? 'Separate supporting accounts' : 'Recorded events'}</div><svg class="iqt-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.title)}">${svg.join('')}</svg>`);
       const first = all.length ? new Date(x0).toLocaleDateString() : '';
       const last = all.length ? new Date(x1).toLocaleDateString() : '';
-      parts.push(`<div class="iqt-chart-axis"><span>${esc(first)}</span><span>${esc(last)}</span></div>`);
+      parts.push(`<div class="iqt-chart-axis"><span>${esc(first)}</span><span>Time</span><span>${esc(last)}</span></div>`);
     }
     // L-CH5 — a picture with no stated limits is read as complete.
     parts.push(`<ul class="iqt-chart-lim">${(c.limitations || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>`);
@@ -11896,6 +11910,7 @@ const MemberApp = {
       ${sources.map(s => `<div class="iq-src">
         <div class="iq-src-top"><span class="iq-src-kind">${esc(word[s.kind] || 'Source')}</span><span class="iq-src-label">${esc(s.label)}</span></div>
         ${s.detail ? `<div class="iq-src-detail">${esc(s.detail)}</div>` : ''}
+        ${s.kind === 'web' && /^https?:\/\//i.test(String(s.url || '')) ? `<a class="iq-src-link" href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">Open external source</a>` : ''}
       </div>`).join('')}
     </div>`;
   },
@@ -11978,6 +11993,27 @@ const MemberApp = {
 
   openInquiryThread(inquiryId) { return this.openObjectThread('inquiry', inquiryId); },
 
+  /* Buttons do not own mutations. They stage the same typed request the model may propose and
+     put it through the composer; the server still resolves the object and confirmation still
+     crosses the one dispatcher. Actions needing the person's words wait in the visible composer. */
+  async beginObjectAction(type, kind, objectId) {
+    const input = document.getElementById('iq-object-input');
+    if (!input) return;
+    this._pendingComposerAction = { type, arguments: {} };
+    this._composerAbout = { kind, id: objectId };
+    const needsWords = type === 'create_focus' || type === 'disagree_with_inquiry';
+    if (needsWords) {
+      input.value = '';
+      input.placeholder = type === 'create_focus' ? 'What do you want to change or improve here?' : 'What do you think is happening instead?';
+      this._wsGrow(input); input.focus();
+      return;
+    }
+    input.value = type === 'keep_in_library' ? 'Keep this in my Library.'
+      : type === 'settle_inquiry' ? 'I think this is settled now.'
+      : type === 'discuss_with_group' ? 'I would like to discuss this with the group.' : 'Open this.';
+    await this.inquirySend();
+  },
+
   /* The three things a person can do to a belief. Each prefills the composer rather than firing
      a silent state change: a verdict is something you SAY, so it goes through the same governed
      turn as everything else and the kernel decides what it means. */
@@ -12048,21 +12084,50 @@ const MemberApp = {
     if (!input) { say('Could not find the box to send from.'); return; }
     if (!text) { say('Write or say something first.'); return; }
     if (!thread) { say('This thread lost its place — go back and open it again.'); return; }
+    const turns = document.getElementById('iq-object-turns');
+    const esc = s => this._escape(String(s == null ? '' : s));
     input.disabled = true;
     say('Sending…');
+    if (turns) {
+      turns.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">${esc(text)}</div>`);
+      turns.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-iq iq-pending" data-object-pending="1" role="status"><span class="iq-typing" aria-hidden="true"><i></i><i></i><i></i></span></div>`);
+      turns.scrollTop = turns.scrollHeight;
+    }
+    input.value = '';
     try {
+      if (this._pendingComposerAction && ['create_focus', 'disagree_with_inquiry'].includes(this._pendingComposerAction.type)) {
+        this._pendingComposerAction.arguments = { ...(this._pendingComposerAction.arguments || {}),
+          ...(this._pendingComposerAction.type === 'create_focus' ? { text } : { because: text }) };
+      }
       const response = await fetch('/api/assistant/turn', { method: 'POST', headers: this._authHeaders(), body: JSON.stringify({
         text, conversationId: thread.conversationId || undefined, about: thread.about,
+        surface: thread.kind, requestedAction: this._pendingComposerAction || undefined,
       }) });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data || !data.ok) {
         throw new Error((data && data.error) || `server said ${response.status}`);
       }
+      this._pendingComposerAction = null;
       thread.conversationId = data.conversationId;
       say('');
-      await this.openObjectThread(thread.kind, thread.objectId);
+      const pending = turns && turns.querySelector('[data-object-pending="1"]');
+      if (pending) {
+        pending.removeAttribute('data-object-pending');
+        pending.classList.remove('iq-pending');
+        // Keep the live response contract intact. Reopening the thread here persisted the words
+        // but discarded its confirmable action cards, so “Work on this” could propose a Focus
+        // that the person had no way to approve.
+        pending.innerHTML = this._renderAssistant(data);
+      }
+      input.disabled = false;
+      input.placeholder = 'Say what you know, or ask…';
+      this._wsGrow(input);
+      turns?.scrollTo({ top: turns.scrollHeight, behavior: 'smooth' });
     } catch (e) {
       input.disabled = false;
+      input.value = text;
+      const pending = turns && turns.querySelector('[data-object-pending="1"]');
+      if (pending) pending.remove();
       say(`That did not send — ${(e && e.message) || 'unknown problem'}. Your words are still here.`);
     }
   },
@@ -12494,20 +12559,19 @@ const MemberApp = {
       const parsed = await AttachmentHandler.process(file);
       const content = parsed.content || parsed.summary || '';
       if (!String(content).trim()) throw new Error('I couldn’t read any text from that file.');
-      const r = await fetch('/api/evidence/import', {
+      const objectThread = this._inquiryThread;
+      const about = objectThread && objectThread.about ? objectThread.about : (this._composerAbout || null);
+      const r = await fetch('/api/assistant/attachments', {
         method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
-        body: JSON.stringify({ format: this._knowledgeFormat(file.name), content: String(content), sourceName: file.name }),
+        body: JSON.stringify({ kind: this._knowledgeFormat(file.name), text: String(content), title: file.name, filename: file.name,
+          conversationId: objectThread?.conversationId || this._chatConvId || undefined, about }),
       });
       const raw = await r.text(); let d; try { d = JSON.parse(raw); } catch (_) { d = null; }
       if (!r.ok || !d || d.ok === false) throw new Error((d && d.error) || 'I couldn’t save that.');
-      const bits = [];
-      if (d.imported) bits.push(`Saved ${d.imported} item${d.imported !== 1 ? 's' : ''} from ${esc(file.name)}`);
-      if (d.duplicates) bits.push(`${d.duplicates} already known`);
-      // Honest about how it will be trusted — truth depends on who inputted it.
-      const kept = d.authority === 'organisation' ? 'kept as authoritative organisation evidence'
-                 : d.authority === 'shared_unverified' ? 'shared with the team as your account (not yet verified)'
-                 : 'private to you';
-      done(`${bits.join(' · ') || 'Nothing new to add'} — ${kept}, and I can use it now. Ask me anything about it.`);
+      if (d.conversationId && !objectThread) this._rememberChat(d.conversationId);
+      if (objectThread && d.conversationId) objectThread.conversationId = d.conversationId;
+      this._pendingAttachment = { id: d.materialId, name: file.name };
+      done(`Read ${d.parts} ${d.parts === 1 ? 'part' : 'parts'} from ${esc(file.name)}. It is context for this conversation, not evidence about you or your organisation.`);
     } catch (e) {
       done(`<span class="iq-error-text">${esc(e.message || 'I couldn’t add that file.')}</span>`);
     }
@@ -12530,11 +12594,16 @@ const MemberApp = {
         // makes it explicit, and it is only ever set from an authorised profile entry point.
         // A card's own thread carries its `about` context via cardSend; the main composer is the
         // general conversation and carries none.
-        body: JSON.stringify({ text, conversationId: threaded ? (this._chatConvId || undefined) : undefined, lens: this._wsActiveLens || undefined, workItemId: this._wsWorkItemId || undefined, subjectMemberId: this._wsSubjectMemberId || undefined }) });
+        body: JSON.stringify({ text, conversationId: threaded ? (this._chatConvId || undefined) : undefined,
+          lens: this._wsActiveLens || undefined, workItemId: this._wsWorkItemId || undefined,
+          subjectMemberId: this._wsSubjectMemberId || undefined, about: this._composerAbout || undefined,
+          surface: this._composerAbout?.kind || 'home', requestedAction: this._pendingComposerAction || undefined,
+          attachment: this._pendingAttachment || undefined }) });
       clearTimeout(timer);
       if (r.status === 401) return { ok: false, reason: 'auth' };
       const j = await r.json();
       if (!j || !j.ok) return { ok: false, reason: 'server' };
+      this._pendingComposerAction = null;
       if (threaded && j.conversationId) this._rememberChat(j.conversationId);
       this._lastTurnId = j.turnId;
       if (targetEl) targetEl.innerHTML = this._renderAssistant(j);
@@ -12557,9 +12626,21 @@ const MemberApp = {
       if (p.actionType === 'submit_work')      return this._renderSubmitWork(j.turnId, p);
       if (p.actionType === 'resolve_uncertainty' && p.resolvePreview) return this._renderResolvePreview(j.turnId, p);
       const state = p.draftOnly ? '<span class="iq-badge iq-badge-draft">Draft only — not scheduled</span>' : '';
+      const e = p.effect || {};
+      const exact = [
+        e.text ? `<div><strong>Wording:</strong> “${esc(e.text)}”${e.textSource === 'model_suggested' ? ' (suggested wording)' : ''}</div>` : '',
+        e.account ? `<div><strong>Account to record:</strong> “${esc(e.account)}”</div>` : '',
+        e.target ? `<div><strong>Target:</strong> ${esc(e.target)}</div>` : '',
+        e.reviewOn ? `<div><strong>Review:</strong> ${esc(e.reviewOn)}</div>` : '',
+        e.outcome ? `<div><strong>Outcome:</strong> ${esc(e.outcome)}</div>` : '',
+        e.audience ? `<div><strong>Audience:</strong> ${esc(e.audience.name)}</div>` : '',
+        e.material ? `<div><strong>Material:</strong> ${esc(e.material.name)}</div>` : '',
+        e.disclosure ? `<div>${esc(e.disclosure)}</div>` : '',
+      ].filter(Boolean).join('');
       return `<div class="iq-proposal" data-proposal="${esc(p.id)}">
         <div class="iq-proposal-top"><span class="iq-proposal-label">${esc(p.label)}</span> ${priv(p.visibility)} ${state}</div>
         <div class="iq-proposal-why">${esc(p.why)}</div>
+        ${exact ? `<div class="iq-submit-effect">${exact}</div>` : ''}
         <div class="iq-proposal-actions">
           <button class="btn-primary btn-sm" onclick="MemberApp.confirmProposal('${esc(j.turnId)}','${esc(p.id)}')">Confirm</button>
           <button class="btn btn-outline btn-sm" onclick="MemberApp.correctProposal('${esc(j.turnId)}','${esc(p.id)}')">Edit / Correct</button>
@@ -12608,15 +12689,8 @@ const MemberApp = {
             the composer now states continuously. Once is reassurance; every time is noise. */ ''}
       ${clarifyHtml}
       ${savedHtml}
-      <div class="iq-make-row">
-        <button type="button" class="iq-make-chip" onclick="MemberApp._startObject('focus',undefined,this)">Make this a focus</button>
-      </div>
-      ${/* SUGGESTIONS REMOVED, September 2026. The composer's Public/Private toggle asks who
-            something is for BEFORE it is said. A card asking the same question afterwards is
-            the same decision twice, and the second one arrives when a person has already moved
-            on. Consequential proposals (submitting work, drafting a calendar hold) still exist
-            in r.moreActions and will get their own surface; what is gone is the "keep this"
-            card, which only ever restated the toggle. */ ''}
+      ${primary}
+      ${more ? `<details class="iq-more-actions"><summary>More options</summary>${more}</details>` : ''}
     </div>`;
   },
 
@@ -12996,6 +13070,8 @@ const MemberApp = {
         cardEl.innerHTML = `<div class="iq-confirmed">${this._escape(said || 'Done.')}</div>`;
       }
     }
+    if (j && j.forum) this.openForum(j.forum.nodeId || '', j.forum.objectId, j.forum.room, this._inquiryThread?.kind || 'inquiry');
+    else if (j && j.navigate) this.openObjectThread(j.navigate.kind, j.navigate.id);
     return j;
   },
   async correctProposal(turnId, proposalId, correction) {

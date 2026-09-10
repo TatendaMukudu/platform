@@ -166,8 +166,8 @@ const server = app.listen(0, async () => {
     ok('SX11 the Library page reads the SHELF rather than the old notes list',
       /fetch\('\/api\/library\/shelf/.test(src) && /MemberApp\._renderShelf\(/.test(src));
     ok('SX11b …something can actually be filed from a card, which is the half that makes the shelf fill up at all',
-      /fetch\('\/api\/library\/shelf', \{ method: 'POST'/.test(src) &&
-      /onclick="MemberApp\.fileToShelf\('\$\{esc\(kind\)\}','\$\{esc\(objectId\)\}'\)"/.test(src));
+      /beginObjectAction\('keep_in_library'/.test(src) &&
+      /requestedAction: this\._pendingComposerAction/.test(src));
     /* SX11c — BOTH HALVES, because the handler and the control live in different files and
        either one alone is a feature nobody can reach: a button wired to nothing, or a function
        nothing presses. */

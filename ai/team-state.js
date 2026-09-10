@@ -54,11 +54,10 @@
    same provenance as everything else. Three values only — the third is not a hedge, it
    is the honest answer when someone genuinely does not know, and it is load-bearing:
    an inquiry nobody can call is an Inquiry, which is the correct place for it. */
-/* The ONE dependency, and it does not cost this module its purity: ai/voice.js imports nothing,
-   performs no IO, calls no model, and is deterministic. Composing here rather than at each caller
-   is what stops the same object reading differently on the team surface and on home. */
+/* Pure dependencies: voice owns phrasing; diagnose owns origin equivalence/currentness. */
 const voice = require('./voice');
 const polarityOwner = require('./intelligence-feed');
+const diagnose = require('./diagnose');
 
 const VALENCES = Object.freeze(['working_well', 'worth_attention', 'unsure']);
 
@@ -168,19 +167,12 @@ function valenceOf(contributions = []) {
 function originsOf(inquiry = {}) {
   const declared = _num(inquiry.independentOrigins);
   if (declared) return declared;
-  const refs = new Set();
-  for (const sig of _arr(inquiry.signals)) {
-    if (!sig || sig.kind === 'interpretation' || sig.status !== 'active') continue;
-    const ref = _s(sig.originRef || '', 120);
-    if (ref) refs.add(ref);
-  }
-  return refs.size;
+  return diagnose.currentOriginCount(_arr(inquiry.signals));
 }
 
 function evidenceValence(inquiry = {}, { now = Date.now() } = {}) {
   const band = _s((inquiry.confidence || {}).band || 'tentative', 32);
-  const signals = _arr(inquiry.signals)
-    .filter(s => s && s.kind !== 'interpretation' && s.status === 'active' && !s.dissents);
+  const signals = [...diagnose.currentOriginSignals(_arr(inquiry.signals), { includeDissent: false }).values()];
 
   /* One vote per origin, and the most recent one it cast. A person who said "worse" in
      September and "better" in November has changed their mind, not voted twice. An origin that
@@ -189,7 +181,7 @@ function evidenceValence(inquiry = {}, { now = Date.now() } = {}) {
   for (const sig of signals) {
     const dir = _s(sig.direction || 'neutral', 16);
     if (dir !== 'improvement' && dir !== 'decline') continue;
-    const key = _s(sig.originRef || sig.ref || '', 120);
+    const key = diagnose.originIdentity(sig);
     if (!key) continue;
     const prev = byOrigin.get(key);
     if (!prev || _num(sig.at) >= _num(prev.at)) byOrigin.set(key, { dir, at: _num(sig.at) });

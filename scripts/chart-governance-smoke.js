@@ -168,9 +168,9 @@ ok('CG8 the band axis is the kernel\'s four steps, in the kernel\'s order',
      the line in as a limitation, which meant the single most important thing to say about this
      chart depended on every future caller remembering to say it. It is what the chart PLOTS, so
      the builder states it and a caller cannot omit it. Asserted with NO limitations passed in. */
-  ok('CG16 …and the chart itself says it counts origins and not messages — the caveat is intrinsic, not something a caller has to remember to supply',
+  ok('CG16 …and the chart itself explains separate first-hand accounts rather than exposing kernel terminology',
     chart.buildFirming({ occasions: [{ at: t0, refs: ['s1'], band: 'tentative' }] })
-      .limitations.some(l => /the same person saying it again does not move this/i.test(l)));
+      .limitations.some(l => /separate first-hand accounts/i.test(l) && /same account said again does not move/i.test(l)));
 }
 
 /* ── CG16b: THE SPREAD IS TWO SERIES, and a mutation collapsing it to one bit nothing.
