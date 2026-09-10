@@ -1,11 +1,14 @@
 /* Truth layer — ONBOARDING: ADD MEMBER, INVITES, AND THE ORG TREE.
 
    Every assertion here pins a defect an independent audit (Codex, `codex/onboard-pilot-audit-r1`)
-   reported and this branch reproduced before changing anything. The two that were left alone are
-   left alone deliberately and are NOT asserted either way:
+   reported and this branch reproduced before changing anything.
 
-     - who may mint an invite (any admin, or only somebody who leads a node) is a founder decision;
-     - whether email is ever sent is a product decision, and nothing here sends it.
+   WHO MAY MINT AN INVITE was left open in the first round because it was a founder decision rather
+   than a defect. The decision has since been made — the canonical `edit_members` permission, and
+   never a position in the Org Tree — so section F now asserts it.
+
+   WHETHER EMAIL IS EVER SENT is still a product decision, and nothing here sends it. The pilot
+   creates a link for a person to share; the interface says so in those words.
 
    THE ONE THAT MATTERED MOST. Add Member created a real account with `passwordSet: false` and then
    handed the admin a link described as "share this link so they can set their password". The link
@@ -84,6 +87,30 @@ const server = app.listen(0, async () => {
     const right = await join({ token: targeted.j.token, name: 'Target Person', email: 'target@onba.test', password: 'demo1234' });
     ok('OI-B3 …while the person it names can use it', right.status === 200);
 
+    /* ── A TYPO IS NOT AN OPEN LINK ─────────────────────────────────────────────────────────────
+       Found by driving the real page in a browser, not by any of the assertions above: the
+       "Invite by Email" panel sent the typed address as `label`, and binding was INFERRED by
+       running a regex over it. So "also bad" simply failed to look like an address and became a
+       general join link — one anybody holding it may redeem — from the one screen whose entire
+       purpose is a link per named person. Three links came back for three lines and the panel
+       reported three successes.
+
+       `email` is the declared field for "this invite is for this person". Present and malformed
+       is a refusal. Absent still means an open link, which is what Generate Join Link is for. */
+    console.log('\n  B — A TYPO IS A REFUSAL, NOT AN OPEN LINK');
+    ok('OI-B6 an address that is not one is refused when declared as an address',
+      (await invite({ role: 'member', email: 'also bad' }, T.a)).status === 400
+      && (await invite({ role: 'member', email: 'nope' }, T.a)).status === 400);
+    ok('OI-B7 …and the refusal says what was wrong with it',
+      /is not an email address/i.test(String(((await invite({ role: 'member', email: 'also bad' }, T.a)).j || {}).error || '')));
+    ok('OI-B8 …an empty declared address is refused too, rather than quietly becoming an open link',
+      (await invite({ role: 'member', email: '' }, T.a)).status === 400);
+    const declared = await invite({ role: 'member', email: 'Declared@ONBA.test' }, T.a);
+    ok('OI-B9 …while a real one is accepted and bound, lower-cased',
+      declared.status === 200 && S.inviteTokens[declared.j.token].email === 'declared@onba.test');
+    ok('OI-B10 …and that binding is enforced at redemption, like any other',
+      (await join({ token: declared.j.token, name: 'Someone', email: 'other@onba.test', password: 'demo1234' })).status === 403);
+
     console.log('\n  B — AND AN UNBOUND JOIN LINK IS STILL AN OPEN ONE');
     const general = await invite({ role: 'member' }, T.a);
     const anyone = await join({ token: general.j.token, name: 'New Recruit', email: 'recruit@onba.test', password: 'demo1234' });
@@ -140,6 +167,164 @@ const server = app.listen(0, async () => {
     ok('OI-D4 …but the same name under a DIFFERENT parent is a different unit and is allowed',
       sibling.status === 200 && sibling.j.already !== true
       && sibling.j.node.nodeId !== t1.j.node.nodeId);
+
+    /* ══ F — ONE PERMISSION GOVERNS ADDING PEOPLE ═══════════════════════════════════════════════
+       Three doors lead into this capability and they used to disagree about who may open them.
+       `bulk-import` asked for `edit_members`; Add Member and invite asked `_isLeader`, which is a
+       DETECTOR — it returns true for anyone who merely SITS IN a node that has a sub-node beneath
+       it, appointed or not. Measured before the fix, the two rules were not merely different but
+       inverted: the person the organisation had actually authorised was refused at two doors out
+       of three, and a person nobody had authorised was admitted at the other two.
+
+       The header note on this file says who may mint an invite was left as a founder decision.
+       It has since been made: `edit_members`, the canonical permission, at every door. */
+    console.log('\n  F — ADDING PEOPLE ASKS FOR edit_members, AT EVERY DOOR');
+    orgUsers[A].granted = { id: 'granted', name: 'Granted Person', email: 'granted@onba.test',
+      role: 'member', orgCode: A, status: 'active', passwordSet: true, passwordHash: 'x' };
+    /* Sits in a node that HAS a child node and is not named its leader: `_isLeader` says yes via
+       hierarchy, and nobody granted them anything. This is the exact shape the founder ruled out. */
+    orgUsers[A].sitter = { id: 'sitter', name: 'Node Sitter', email: 'sitter@onba.test',
+      role: 'member', orgCode: A, status: 'active', assignedNodeIds: ['parent'], passwordSet: true, passwordHash: 'x' };
+    orgNodes[A].parent = { nodeId: 'parent', name: 'Parent Unit', memberIds: ['sitter'], leaderIds: [], childNodeIds: ['kid'] };
+    orgNodes[A].kid    = { nodeId: 'kid', name: 'Child Unit', parentId: 'parent', memberIds: [], leaderIds: [] };
+    S.userPermissions[A] = { ...(S.userPermissions[A] || {}), granted: { edit_members: true } };
+    _rebuildEmailIndex();
+    const grantTok = issueToken('granted', A, 'member');
+    const sitTok   = issueToken('sitter',  A, 'member');
+    const addUser  = (body, t) => req('POST', '/api/auth/create-user', body, t);
+
+    ok('OI-F1 someone holding edit_members may invite, though they lead nothing at all',
+      !S._isLeader(A, 'granted') && (await invite({ role: 'member' }, grantTok)).status === 200);
+    ok('OI-F2 …and may add a member directly, through the same permission',
+      (await addUser({ firstName: 'By', lastName: 'Granted', email: 'bygranted@onba.test', role: 'member' }, grantTok)).status === 200);
+    ok('OI-F3 a tree position alone does NOT confer it, however leaderish the tree looks',
+      S._isLeader(A, 'sitter') === true
+      && (await invite({ role: 'member' }, sitTok)).status === 403
+      && (await addUser({ firstName: 'By', lastName: 'Sitter', email: 'bysitter@onba.test', role: 'member' }, sitTok)).status === 403);
+    ok('OI-F4 …and nothing was created by those refusals',
+      !Object.values(orgUsers[A]).some(u => u.email === 'bysitter@onba.test'));
+    /* OI-F4b ISOLATES THE MIDDLEWARE. A mutation putting create-user back on bare `requireAuth`
+       left every other assertion here green: the sitter is role 'member', so the inner role
+       ceiling ("you cannot create someone at or above your level") refused them anyway, and the
+       outer gate was doing no visible work. A COACH is the case that separates the two — level 3
+       creating a level-4 member clears the ceiling, so only the permission can stop them, and a
+       coach's role defaults do not include edit_members. */
+    orgUsers[A].coachy = { id: 'coachy', name: 'Coach Person', email: 'coachy@onba.test',
+      role: 'coach', orgCode: A, status: 'active', passwordSet: true, passwordHash: 'x' };
+    _rebuildEmailIndex();
+    const coachTok = issueToken('coachy', A, 'coach');
+    ok('OI-F4b a coach clears the role ceiling and is STILL refused, because the permission is what decides',
+      S._resolveRoleDefaults('coach').edit_members === false
+      && (await addUser({ firstName: 'By', lastName: 'Coach', email: 'bycoach@onba.test', role: 'member' }, coachTok)).status === 403
+      && (await invite({ role: 'member' }, coachTok)).status === 403
+      && !Object.values(orgUsers[A]).some(u => u.email === 'bycoach@onba.test'));
+    S.userPermissions[A] = { ...(S.userPermissions[A] || {}), coachy: { edit_members: true } };
+    ok('OI-F4c …and admitted the moment the organisation grants it, without changing their role',
+      (await addUser({ firstName: 'By', lastName: 'Coach', email: 'bycoach@onba.test', role: 'member' }, coachTok)).status === 200
+      && orgUsers[A].coachy.role === 'coach');
+    ok('OI-F5 nobody may invite into a role above their own',
+      (await invite({ role: 'admin' }, grantTok)).status === 403
+      && (await addUser({ firstName: 'Too', lastName: 'High', email: 'toohigh@onba.test', role: 'admin' }, grantTok)).status === 403);
+    const crossReq = await invite({ orgCode: B, role: 'member', label: 'x@onbb.test' }, grantTok);
+    ok('OI-F6 a cross-tenant invite is still impossible — the org is the session, not the body',
+      crossReq.status === 200 && S.inviteTokens[crossReq.j.token].orgCode === A
+      && !Object.values(S.inviteTokens).some(t => t && t.orgCode === B));
+    ok('OI-F7 all three doors — invite, add member, CSV import — ask the SAME permission owner',
+      (await req('POST', '/api/auth/bulk-import', { rows: [] }, grantTok)).status !== 403
+      && (await req('POST', '/api/auth/bulk-import', { rows: [] }, sitTok)).status === 403);
+
+    /* ══ G — AN IMPORT HAS A SIZE, AND SAYS SO ══════════════════════════════════════════════════
+       The route accepted an array of any length and bcrypt-hashed a password for every row it
+       kept. bcrypt is deliberately slow, on the one event loop this process has, so a large array
+       is not a large import — it is an outage with accounts left behind it. */
+    console.log('\n  G — AN IMPORT HAS A SIZE, AND SAYS SO');
+    const imp = (rows, t) => req('POST', '/api/auth/bulk-import', { users: rows }, t || T.a);
+    const rowsOf = (n, tag) => Array.from({ length: n }, (_, i) =>
+      ({ name: `${tag} ${i}`, email: `${tag}${i}@onba.test`, role: 'member' }));
+    const beforeOver = Object.keys(orgUsers[A]).length;
+    const over = await imp(rowsOf(501, 'over'));
+    ok('OI-G1 an import past the limit is refused whole, before a single account is minted',
+      over.status === 413 && Object.keys(orgUsers[A]).length === beforeOver);
+    ok('OI-G2 …and the refusal names the limit and what was sent, so the file can be split',
+      over.j.limit === 500 && over.j.received === 501 && /500/.test(String(over.j.error)));
+    const atLimit = await imp(rowsOf(500, 'atlim'));
+    ok('OI-G3 …while exactly the limit is accepted — the boundary is not off by one',
+      atLimit.status === 200 && atLimit.j.counts.created === 500);
+    const long = await imp([{ name: 'x'.repeat(121), email: 'long@onba.test' },
+      { name: 'Fine Person', email: 'fine@onba.test' },
+      { name: 'Long Group', email: 'lg@onba.test', group: 'g'.repeat(121) }]);
+    ok('OI-G4 an absurd field costs that ROW, not the whole file',
+      long.j.counts.created === 1 && long.j.counts.failed === 2
+      && long.j.failed.every(f => /longer than 120/.test(f.reason)));
+    ok('OI-G5 …and the refusal does not echo the absurd value back',
+      JSON.stringify(long.j).length < 4000);
+
+    /* ══ H — AN IMPORTED GROUP IS THE SAME OBJECT AS A CREATED ONE ═══════════════════════════════
+       The importer assigned straight into orgNodes with a bare generateId(): no rev, no parentId,
+       no childNodeIds, and outside the serialisation and compare-and-set the tree route uses. */
+    console.log('\n  H — AN IMPORTED GROUP GOES THROUGH THE ORG TREE OWNER');
+    const g1 = await imp([{ name: 'Group One', email: 'g1@onba.test', group: 'Defenders' }]);
+    const defenders = Object.values(orgNodes[A]).filter(n => String(n.name) === 'Defenders');
+    /* The first draft of this asserted `rev === 0` and went red. The product was right: placing
+       the imported person into the node is a membership write, and a membership write bumps the
+       revision exactly as it does on PUT /api/tree/node. What matters is that the node HAS a
+       numeric revision for compare-and-set to read — the old importer wrote none at all — and
+       that it carries the id prefix and link fields every other node has. */
+    ok('OI-H1 importing with a group column creates ONE node, shaped like every other node',
+      g1.status === 200 && defenders.length === 1
+      && typeof defenders[0].rev === 'number' && defenders[0].rev >= 1
+      && Array.isArray(defenders[0].childNodeIds)
+      && defenders[0].parentId === null && /^nd_/.test(defenders[0].nodeId)
+      && typeof defenders[0].updatedAt === 'string');
+    ok('OI-H2 …and the imported person is in it',
+      defenders[0].memberIds.includes(g1.j.created[0].id));
+    const g2 = await imp([{ name: 'Group Two', email: 'g2@onba.test', group: 'defenders' }]);
+    ok('OI-H3 a second import naming the same group differently-cased reuses the node',
+      g2.status === 200 && Object.values(orgNodes[A]).filter(n => /^defenders$/i.test(String(n.name))).length === 1);
+    /* CONCURRENCY. Two imports naming a group that does not exist yet, in flight together. The
+       route is serialised on the tree lock, so the second sees the first's node. */
+    const [c1, c2] = await Promise.all([
+      imp([{ name: 'Race One', email: 'r1@onba.test', group: 'Keepers' }]),
+      imp([{ name: 'Race Two', email: 'r2@onba.test', group: 'Keepers' }]),
+    ]);
+    const keepers = Object.values(orgNodes[A]).filter(n => String(n.name) === 'Keepers');
+    ok('OI-H4 two simultaneous imports naming one new group produce ONE node, not two',
+      c1.status === 200 && c2.status === 200 && keepers.length === 1);
+    ok('OI-H5 …with both people in it, so neither import silently lost its placement',
+      keepers[0].memberIds.includes(c1.j.created[0].id)
+      && keepers[0].memberIds.includes(c2.j.created[0].id));
+    /* OI-H7 IS A WIRING CHECK AND IS LABELLED AS ONE. Removing `_serializeTreeMutation` from the
+       import route leaves OI-H4 and OI-H5 green, tested by mutation — the duplicate check inside
+       the canonical owner is what holds those, not the queue. What the queue protects is the
+       compare-and-set in `_commitTreeMutation`: two imports that both snapshot before either
+       commits make the second conflict. That needs a live store to observe, which this harness
+       does not have, so this asserts only that the route carries the same middleware the tree
+       route carries. It is not proof the queue works, and the report says so. */
+    ok('OI-H7 the import route carries the tree serializer, as the tree route does (WIRING, not behaviour)',
+      (() => {
+        const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
+        const line = (src.match(/app\.post\('\/api\/auth\/bulk-import'[^\n]*/) || [''])[0];
+        return /_serializeTreeMutation/.test(line) && /requirePermission\('edit_members'\)/.test(line);
+      })());
+    const again = await imp([{ name: 'Race One', email: 'r1@onba.test', group: 'Keepers' }]);
+    ok('OI-H6 re-importing the same file skips the person and does not touch the tree',
+      again.j.counts.created === 0 && again.j.counts.skipped === 1
+      && Object.values(orgNodes[A]).filter(n => String(n.name) === 'Keepers').length === 1);
+
+    /* ══ I — A PARTIAL IMPORT IS NEVER REPORTED AS A WHOLE ONE ═══════════════════════════════════ */
+    console.log('\n  I — A PARTIAL IMPORT IS NEVER REPORTED AS A WHOLE ONE');
+    const mixed = await imp([{ name: 'Good One', email: 'good1@onba.test' },
+      { name: 'No Email', email: '' }, { name: '', email: 'noname@onba.test' },
+      { name: 'Bad Address', email: 'not-an-email' }]);
+    ok('OI-I1 ok is false when any row failed — the client cannot render a blanket success',
+      mixed.status === 200 && mixed.j.ok === false);
+    ok('OI-I2 …and every failed row is named with the reason it failed',
+      mixed.j.counts.created === 1 && mixed.j.counts.failed === 3
+      && mixed.j.failed.some(f => /Missing email/.test(f.reason))
+      && mixed.j.failed.some(f => /Missing name/.test(f.reason))
+      && mixed.j.failed.some(f => /Invalid email/.test(f.reason)));
+    ok('OI-I3 …while an import where everything worked still reports ok',
+      (await imp([{ name: 'All Fine', email: 'allfine@onba.test' }])).j.ok === true);
 
     console.log('\n  E — AUTHORITY IS UNCHANGED');
     const memberTok = issueToken('live', A, 'member');

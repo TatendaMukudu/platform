@@ -268,9 +268,19 @@ async function buildAlmaStore() {
   [midfield, frontline, firstYears].forEach(n => addLeader(n, assistant));
   addLeader(keepers, assistant);
   addLeader(backline, assistant);
-  userPermissions[CODE][headCoach] = ['manage_settings', 'manage_people', 'view_org'];
-  userPermissions[CODE][assistant] = ['view_org'];
-  userPermissions[CODE][trainer]   = ['view_org'];
+  /* EXPLICIT GRANTS ARE A MAP, because that is what reads them. `_effectivePermissions` spreads
+     this value over the role defaults — `{ ...roleDefaults, ...leaderGrants, ...explicit }` — so
+     an ARRAY spread to `{0:'manage_settings', 1:'manage_people', 2:'view_org'}` and granted
+     nothing at all. Two of those three were not permission names either: the roster permission is
+     `edit_members`, and there is no `manage_people` or `view_org` anywhere in the server.
+
+     It went unnoticed because the head coach is a superadmin, who bypasses every check, so the
+     grants never had to work. The assistant and the trainer were left with nothing, which is what
+     the seed already meant — they lead their units through the tree, and leading is not the same
+     as managing the roster. Stated here rather than implied by a broken shape. */
+  userPermissions[CODE][headCoach] = { manage_settings: true, edit_members: true, view_members: true };
+  userPermissions[CODE][assistant] = { view_members: true };
+  userPermissions[CODE][trainer]   = { view_members: true };
 
   // ── The roster ────────────────────────────────────────────────────────────
   const players = [];

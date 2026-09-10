@@ -139,6 +139,24 @@ const server = app.listen(0, async () => {
       (await req('POST', '/api/metrics', { name: 'Claimed' }, issueToken('lead', A, 'member'))).status === 200
       && (await req('POST', '/api/metrics', { name: 'Claimed Too' }, issueToken('memb', A, 'admin'))).status === 403);
 
+    /* ══ F — A STORED PERMISSION GRANT IS THE SHAPE THAT READS IT ═══════════════════════════════
+       Same class of defect as the metric shape, found while tracing invitation authority.
+       `_effectivePermissions` spreads the stored grant over the role defaults —
+       `{ ...roleDefaults, ...leaderGrants, ...explicit }` — so an ARRAY spreads to
+       `{0:'manage_settings', 1:'manage_people', 2:'view_org'}` and grants nothing at all. The demo
+       organisation stored arrays. It never showed, because the one person holding them is a
+       superadmin, who bypasses every permission check; the grants never had to work. Two of the
+       three names were not permissions either — the roster permission is `edit_members`. */
+    console.log('\n  F — A STORED PERMISSION GRANT IS THE SHAPE THAT READS IT');
+    const seedPerms = (await buildAlmaStore()).store.userPermissions[ALMA_CODE] || {};
+    const grants = Object.values(seedPerms);
+    ok('ML-F1 the demo organisation stores grants as a map, which is what the resolver spreads',
+      grants.length > 0 && grants.every(g => g && typeof g === 'object' && !Array.isArray(g)));
+    ok('ML-F2 …every key is a permission the server actually recognises',
+      grants.every(g => Object.keys(g).every(k => k in S._resolveRoleDefaults('member'))));
+    ok('ML-F3 …and every value is a real grant rather than an index',
+      grants.every(g => Object.values(g).every(v => v === true)));
+
     console.log('\n  E — THE MIGRATION LEAVES A HEALTHY STORE ALONE');
     const before = JSON.stringify(orgMetrics[A]);
     const repaired = _migrateLegacyMetrics();

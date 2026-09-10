@@ -1347,9 +1347,14 @@ async function copyMemberInviteLink(userId, email) {
   try {
     const res  = await authFetch('/api/auth/invite', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
+      /* BOUND TO THE PERSON THIS LINK IS FOR. `label: email || userId` fell back to a user id,
+         which is not an address, so the server read it as a general label and minted an OPEN
+         link — one anybody holding it could redeem — from a control that says it is generating
+         a link for one named member. Their address is declared instead, and a member without
+         one is refused rather than handed an open link by accident. */
       body: JSON.stringify({
         orgCode: AppState.orgCode, role: 'member',
-        label: email || userId, expiryDays: 14,
+        email: email || '', label: email || userId, expiryDays: 14,
       }),
     });
     const data = await res.json();
@@ -1366,9 +1371,14 @@ async function regenerateMemberInvite(userId, email) {
   try {
     const res  = await authFetch('/api/auth/invite', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
+      /* BOUND TO THE PERSON THIS LINK IS FOR. `label: email || userId` fell back to a user id,
+         which is not an address, so the server read it as a general label and minted an OPEN
+         link — one anybody holding it could redeem — from a control that says it is generating
+         a link for one named member. Their address is declared instead, and a member without
+         one is refused rather than handed an open link by accident. */
       body: JSON.stringify({
         orgCode: AppState.orgCode, role: 'member',
-        label: email || userId, expiryDays: 14,
+        email: email || '', label: email || userId, expiryDays: 14,
       }),
     });
     const data = await res.json();
@@ -2358,6 +2368,9 @@ function approveAlertDraft() {
 async function renderPeople() {
   const subEl = document.getElementById('people-sub');
   if (subEl) subEl.textContent = `${AppState.orgName} · ${Auth.currentUser?.name || 'Admin'}`;
+  // The page can be opened from the nav without any tab being pressed, so this is where the
+  // onboarding controls are revealed for somebody who may use them. See _applyOnboardAuthority.
+  _applyOnboardAuthority();
 
   const container = document.getElementById('org-tree-container');
   if (!container) return;
@@ -3064,19 +3077,27 @@ async function _addSuggestedMetrics() {
   const checkboxes = document.querySelectorAll('#settings-metric-form input[type=checkbox]:checked');
   const names      = Array.from(checkboxes).map(c => c.value);
   let added = 0;
+  const refused = [];
   for (const name of names) {
     try {
       const res = await fetch('/api/metrics', {
         method: 'POST', headers: Auth._headers(),
         body: JSON.stringify({ name, source: 'org' }),
       });
-      const data = await res.json();
-      if (data.ok) added++;
-    } catch(e) { /* skip */ }
+      const data = await res.json().catch(() => ({}));
+      if (data.ok) added++; else refused.push(`${name}: ${data.error || `refused (${res.status})`}`);
+    } catch(e) { refused.push(`${name}: ${e.message || 'could not reach the server'}`); }
   }
   document.getElementById('settings-metric-form').innerHTML = '';
   renderMetricsSettings();
-  showToast(`${added} metric${added!==1?'s':''} added `, 'success');
+  /* The same blanket success the invite batch used to show, in a second place: a metric the
+     server refused was counted out of existence and the toast said "success" regardless. It now
+     says how many of how many, and names what would not go in. */
+  if (refused.length) {
+    showToast(`${added} of ${names.length} added — ${refused.join('; ')}`, 'warning');
+  } else {
+    showToast(`${added} metric${added!==1?'s':''} added`, 'success');
+  }
 }
 
 /* ── VALUES SETTINGS ─────────────────────────────────────── */
@@ -3180,8 +3201,36 @@ async function deleteGoal(goalId) {
   } catch(e) { showToast(e.message, 'warning'); }
 }
 
+/* ── WHO MAY ADD PEOPLE, ON THE SCREEN AND ON THE WIRE ─────────────────────────────────────────
+   `edit_members` is the permission all three onboarding routes enforce, so it is the permission
+   these controls hang off — through Auth.canDo, the same owner Settings and the Org Tree already
+   use, rather than a second opinion assembled in the client.
+
+   Before this, the Org Tree page showed "+ Add Member" and an "Onboard" tab to everyone who could
+   reach the page. A person without the permission could fill in a colleague's name and address,
+   press the button, and be told 403 by a server they had no reason to expect to refuse them. A
+   control that cannot work is worse than no control: it says the product is broken rather than
+   that the job is not theirs.
+
+   Hidden by default in the markup and revealed here, never the other way round — a slow or failed
+   /me must not flash an offer it cannot honour. */
+function _canOnboard() { try { return Auth.canDo('edit_members'); } catch (_) { return false; } }
+function _applyOnboardAuthority() {
+  const may = _canOnboard();
+  ['people-add-member', 'people-tabbtn-onboard'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = !may;
+  });
+  return may;
+}
+
 /* ── PEOPLE PAGE TABS ────────────────────────────────────── */
 function switchPeopleTab(tab) {
+  /* Re-read on every tab switch: this is also what REVEALS the controls for somebody who does
+     have the permission, and the tab can still be reached by a stale deep link or a cached nav,
+     so authority is not assumed from the fact that a control happened to be visible. */
+  const mayOnboard = _applyOnboardAuthority();
+  if (tab === 'onboard' && !mayOnboard) tab = 'tree';
   // 'groups' retired September 2026 — the tree is the one structure. A tab name arriving from
   // anywhere stale falls back to the tree rather than showing an empty panel.
   if (tab === 'groups') tab = 'tree';
@@ -3205,6 +3254,13 @@ function renderOnboardHub() {
   const el    = document.getElementById('onboard-hub-content');
   if (!el) return;
   const color = ORG_MODES[AppState.mode]?.color || 'var(--accent)';
+  if (!_applyOnboardAuthority()) {
+    // Says whose job it is, so the reader knows what to do next rather than assuming a fault.
+    el.innerHTML = `<div class="card"><div class="card-title">Adding people is not part of your access</div>
+      <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-top:0.4rem">
+        An admin can grant you member management from Settings.</div></div>`;
+    return;
+  }
 
   el.innerHTML = `
     <!-- Method cards -->
@@ -3250,10 +3306,15 @@ function _openOnboardSection(section) {
   if (!el) return;
 
   if (section === 'add') {
-    // Build node selector from OrgTree
-    const nodeOptions = Object.values(OrgTree._nodes || {})
+    /* The node picker is only offered to somebody who may actually write the tree. Assignment goes
+       through PUT /api/tree/node, which asks for `manage_tree` — a permission `edit_members` does
+       not imply. Offering the picker to a person who cannot use it produced the worst kind of
+       failure: the account was created, the assignment was refused, and the screen showed the
+       refusal as though the whole thing had failed. */
+    const mayAssign = (() => { try { return Auth.canDo('manage_tree'); } catch (_) { return false; } })();
+    const nodeOptions = !mayAssign ? '' : Object.values(OrgTree._nodes || {})
       .sort((a,b)=>a.name.localeCompare(b.name))
-      .map(n => `<option value="${n.nodeId}">${n.name}</option>`).join('');
+      .map(n => `<option value="${_escHtml(n.nodeId)}">${_escHtml(n.name)}</option>`).join('');
 
     el.innerHTML = `
       <div class="card" style="margin-bottom:0">
@@ -3383,18 +3444,21 @@ async function _submitAddPerson() {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
 
-    // Assign to org tree node if selected
+    /* ── THE ACCOUNT EXISTS FROM HERE ON, AND THE SCREEN MUST NEVER SAY OTHERWISE ───────────────
+       This step used to `throw`, which landed in the catch below and replaced the whole panel
+       with one line: "The organisation tree changed. Reload and try again." The account had
+       already been created. No invite link was minted, so nothing was shown to share, and the
+       obvious response — fill the form in again — hit "An account with this email already
+       exists." That is the same dormant-account dead end this branch closed once already,
+       reached by a different door: a compare-and-set conflict on the tree.
+
+       There is no transaction spanning the two writes and pretending otherwise would be worse, so
+       the outcome is reported for what it is. The account is made, the link is made, and the
+       assignment is offered again as its own retry — adding a member id that is already present
+       is a no-op, so pressing it twice cannot double anything, and it never touches the account. */
+    let assignError = '';
     if (nodeId && OrgTree._nodes[nodeId]) {
-      const currentIds = OrgTree._nodes[nodeId].memberIds || [];
-      if (!currentIds.includes(data.user.id)) {
-        const treeRes = await fetch(`/api/tree/node/${nodeId}`, {
-          method: 'PUT', headers: Auth._headers(),
-          body: JSON.stringify({ memberIds: [...currentIds, data.user.id], ifRev: OrgTree._nodes[nodeId].rev }),
-        });
-        const treeData = await treeRes.json();
-        if (!treeData.ok) throw new Error(treeData.error || 'The organisation tree changed. Reload and try again.');
-        OrgTree._nodes[nodeId] = treeData.node;
-      }
+      assignError = await _assignMemberToNode(nodeId, data.user.id);
     }
 
     // Generate an invite link for this person so admin can share it
@@ -3402,7 +3466,8 @@ async function _submitAddPerson() {
     try {
       const invRes  = await authFetch('/api/auth/invite', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orgCode: AppState.orgCode, role, label: email, expiryDays: 14 }),
+        // Declared as an address — this link is for the person whose account was just created.
+        body: JSON.stringify({ orgCode: AppState.orgCode, role, email, label: email, expiryDays: 14 }),
       });
       const invData = await invRes.json();
       if (invData.ok) inviteLink = `${window.location.origin}${invData.url}`;
@@ -3410,7 +3475,12 @@ async function _submitAddPerson() {
 
     const safeLink = inviteLink.replace(/'/g, "\\'");
     if (resEl) resEl.innerHTML = `
-      <div style="color:var(--success);margin-bottom:0.4rem">Account created for ${fullName}.</div>
+      <div style="color:var(--success);margin-bottom:0.4rem">Account created for ${_escHtml(fullName)}.</div>
+      ${assignError ? `<div id="ob-add-assign" style="color:var(--warning);margin-bottom:0.5rem">
+           Not added to ${_escHtml((OrgTree._nodes[nodeId] || {}).name || 'the selected unit')} yet — ${_escHtml(assignError)}
+           <button class="btn btn-outline btn-sm" style="margin-left:0.4rem;padding:2px 8px;font-size:var(--fs-sm)"
+             onclick="_retryAddMemberAssignment('${_escHtml(nodeId)}','${_escHtml(data.user.id)}')">Retry placement</button>
+         </div>` : ''}
       ${inviteLink
         ? `<div style="font-size:var(--fs);color:var(--text-muted);margin-bottom:0.3rem">Share this link so they can set their password:</div>
            <div style="font-family:monospace;font-size:var(--fs-sm);color:var(--accent);word-break:break-all;margin-bottom:0.3rem">${inviteLink}</div>
@@ -3421,10 +3491,59 @@ async function _submitAddPerson() {
     // Clear fields
     ['ob-add-first','ob-add-last','ob-add-email'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     _renderOnboardRecent();
-    showToast(`${fullName} added `, 'success');
+    // The toast says which of the two things happened, because "added" over a failed placement is
+    // the false-success this whole branch exists to remove.
+    showToast(assignError ? `${fullName} added, placement still pending` : `${fullName} added`,
+      assignError ? 'warning' : 'success');
   } catch(e) {
     if (resEl) resEl.textContent = e.message;
   }
+}
+
+/* Put a person into a tree node through the canonical route, with the node's CURRENT revision.
+   Returns '' on success or a sentence explaining what stopped it — never throws, because every
+   caller has already created an account by the time it runs.
+
+   Idempotent by construction: a member id already in the node is left alone and reported as done,
+   so a retry after a lost response is indistinguishable from the first attempt. */
+async function _assignMemberToNode(nodeId, userId) {
+  try {
+    // Re-read the tree first: a stale `rev` held since the panel opened is the single most likely
+    // cause of the conflict this function exists to survive.
+    try { await OrgTree.load(); } catch (_) { /* fall through with what we have */ }
+    const node = (OrgTree._nodes || {})[nodeId];
+    if (!node) return 'that unit no longer exists';
+    const currentIds = node.memberIds || [];
+    if (currentIds.includes(userId)) return '';
+    const treeRes = await fetch(`/api/tree/node/${nodeId}`, {
+      method: 'PUT', headers: Auth._headers(),
+      body: JSON.stringify({ memberIds: [...currentIds, userId], ifRev: node.rev }),
+    });
+    const treeData = await treeRes.json().catch(() => ({}));
+    if (!treeData.ok) {
+      if (treeRes.status === 403) return 'you do not have permission to change the org tree';
+      if (treeRes.status === 409 || treeRes.status === 428) return 'the org tree changed while this was saving';
+      return treeData.error || 'the org tree could not be updated';
+    }
+    OrgTree._nodes[nodeId] = treeData.node;
+    return '';
+  } catch (e) {
+    return e.message || 'the org tree could not be reached';
+  }
+}
+
+async function _retryAddMemberAssignment(nodeId, userId) {
+  const el = document.getElementById('ob-add-assign');
+  if (el) el.textContent = 'Placing…';
+  const err = await _assignMemberToNode(nodeId, userId);
+  if (!err) {
+    if (el) { el.style.color = 'var(--success)'; el.textContent = 'Placed.'; }
+    showToast('Placement complete', 'success');
+    return;
+  }
+  if (el) el.innerHTML = `Still not placed — ${_escHtml(err)}
+    <button class="btn btn-outline btn-sm" style="margin-left:0.4rem;padding:2px 8px;font-size:var(--fs-sm)"
+      onclick="_retryAddMemberAssignment('${_escHtml(nodeId)}','${_escHtml(userId)}')">Retry placement</button>`;
 }
 
 let _importRows = [];
@@ -3543,31 +3662,60 @@ async function _submitEmailInvites() {
   const emails    = emailsRaw.split('\n').map(e => e.trim()).filter(Boolean);
   if (!emails.length) { if (resEl) resEl.textContent = 'Enter at least one email.'; return; }
   if (resEl) resEl.innerHTML = 'Creating invite links…';
-  const results = [];
+  /* ── A BATCH REPORTS EVERY ROW, INCLUDING THE ONES THAT DID NOT WORK ────────────────────────
+     This loop used to push a result only `if (data.ok)` and swallow every thrown request in a
+     `catch(e) { /* skip *​/ }`. A refusal therefore left no trace at all: paste ten addresses,
+     have nine refused, and the screen showed one link under a heading about sharing them. The
+     admin's own list is the only record that the other nine were ever attempted, and nothing
+     told them to check it.
+
+     Both outcomes are collected now, with the reason the server gave, and both are rendered.
+     Nothing here retries by itself — a failed row keeps its address in the box so the person can
+     fix it and submit again, and a succeeded row is not re-minted by that second submission
+     being about the failures. */
+  const results = [], failures = [];
   for (const email of emails) {
     try {
       const res  = await authFetch('/api/auth/invite', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orgCode: AppState.orgCode, role, group, label: email, expiryDays: 14 }),
+        // `email`, not just `label`: this panel is one link per named person, so the address is
+        // declared as an address and a typo comes back as a refusal rather than an open link.
+        body: JSON.stringify({ orgCode: AppState.orgCode, role, group, email, label: email, expiryDays: 14 }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (data.ok) results.push({ email, url: `${window.location.origin}${data.url}` });
-    } catch(e) { /* skip */ }
+      else failures.push({ email, reason: data.error || `refused (${res.status})` });
+    } catch(e) { failures.push({ email, reason: e.message || 'could not reach the server' }); }
   }
+  // Leave the failures in the box, and only the failures: resubmitting cannot duplicate a link
+  // that was already created.
+  const box = document.getElementById('ob-invite-emails');
+  if (box) box.value = failures.map(f => f.email).join('\n');
+
   if (resEl) {
-    resEl.innerHTML = results.length
+    const head = failures.length
+      ? `<div style="color:var(--warning);font-weight:600;margin-bottom:0.5rem">
+           ${results.length} of ${emails.length} invite ${emails.length === 1 ? 'link' : 'links'} created.
+           ${failures.length} could not be. The addresses that failed are still in the box above.</div>`
+      : `<div style="color:var(--success);font-weight:600;margin-bottom:0.5rem">
+           ${results.length} invite ${results.length === 1 ? 'link' : 'links'} created.</div>`;
+    const note = results.length
       ? `<div style="font-size:var(--fs);color:var(--text-muted);margin-bottom:0.5rem">
-           Email delivery is not yet active. Share these links directly with each person.
-         </div>` +
-        results.map(r => {
-          const safeUrl = r.url.replace(/'/g, "\\'");
-          return `<div style="margin-bottom:0.5rem;padding:0.5rem 0.7rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:var(--fs)">
-            <div style="font-weight:600;margin-bottom:0.2rem">Invite created for <span style="color:var(--accent)">${r.email}</span></div>
-            <div style="font-family:monospace;font-size:var(--fs-sm);color:var(--text-secondary);word-break:break-all;margin-bottom:0.3rem">${r.url}</div>
-            <button onclick="navigator.clipboard.writeText('${safeUrl}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:var(--fs-sm)">Copy Link</button>
-          </div>`;
-        }).join('')
-      : '<span style="color:var(--danger)">Could not generate links.</span>';
+           IntelliQ does not send the email. Share each link with the person yourself.</div>` : '';
+    const good = results.map(r => {
+      const safeUrl = r.url.replace(/'/g, "\\'");
+      return `<div style="margin-bottom:0.5rem;padding:0.5rem 0.7rem;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:var(--fs)">
+        <div style="font-weight:600;margin-bottom:0.2rem">Invite created for <span style="color:var(--accent)">${_escHtml(r.email)}</span></div>
+        <div style="font-family:monospace;font-size:var(--fs-sm);color:var(--text-secondary);word-break:break-all;margin-bottom:0.3rem">${_escHtml(r.url)}</div>
+        <button onclick="navigator.clipboard.writeText('${_escHtml(safeUrl)}').then(()=>showToast('Link copied!','success'))" class="btn btn-outline btn-sm" style="padding:2px 8px;font-size:var(--fs-sm)">Copy Link</button>
+      </div>`;
+    }).join('');
+    const bad = failures.map(f =>
+      `<div style="margin-bottom:0.4rem;padding:0.5rem 0.7rem;border:1px solid var(--border);border-radius:8px;font-size:var(--fs)">
+        <span style="font-weight:600">${_escHtml(f.email)}</span>
+        <span style="color:var(--text-secondary)"> — ${_escHtml(f.reason)}</span>
+      </div>`).join('');
+    resEl.innerHTML = head + note + good + bad;
   }
 }
 

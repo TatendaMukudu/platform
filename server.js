@@ -1818,7 +1818,23 @@ app.post('/api/auth/login', async (req, res) => {
 });
 
 /* ── Create user (admin/coach adds someone below them) ─────────────────── */
-app.post('/api/auth/create-user', requireAuth, async (req, res) => {
+/* ── ONE PERMISSION GOVERNS ADDING PEOPLE ──────────────────────────────────────────────────────
+   There are three doors into this capability — Add Member, an invite link, and CSV import — and
+   until now they disagreed about who may open them. `bulk-import` asked for `edit_members`. These
+   two asked `_isLeader`, which is a DETECTOR, not a grant: it returns true for anyone who merely
+   SITS IN a node that happens to have a sub-node beneath it, whether or not anybody appointed
+   them. The two rules were not just different, they were inverted. Measured, before this change:
+
+     a member who sits in a parent node, never appointed, no edit_members
+         invite 200 · create-user 200 · bulk-import 403
+     a member explicitly granted edit_members, who leads nothing
+         invite 403 · create-user 403 · bulk-import reached the handler
+
+   So the person the organisation had actually authorised was refused at two doors out of three,
+   and a person nobody had authorised was admitted at the other two. `edit_members` is the
+   canonical permission and it is what all three ask for now. Tree position is still what decides
+   WHERE a new person lands — it is no longer what decides whether they may be added at all. */
+app.post('/api/auth/create-user', requirePermission('edit_members'), async (req, res) => {
   // The creator + org are the SESSION, never the body — no creating users in another org, and
   // no claiming to be a higher-privileged creator. The new user's details still come from the body.
   const code = req.iqSession.orgCode;
@@ -1831,11 +1847,12 @@ app.post('/api/auth/create-user', requireAuth, async (req, res) => {
   if (!creator) return res.status(403).json({ error: 'Creator not found' });
 
   const roleLevel = { superadmin:1, admin:2, coach:3, member:4 };
-  // A leader (node / supervisor / group lead) may add plain MEMBERS under
-  // themselves even when their own role is 'member' — item C. They cannot create
-  // anyone above member, and the new member is forced into their subtree below.
-  const leaderAddingMember = role === 'member' && _isLeader(code, creatorId);
-  if (roleLevel[role] <= roleLevel[creator.role] && creator.role !== 'superadmin' && !leaderAddingMember) {
+  /* Somebody whose own ROLE is 'member' may still add plain MEMBERS — that is the whole point of
+     granting them `edit_members`. What they may never do is create anyone at or above their own
+     level, and the new member is forced into their subtree below. This used to read `_isLeader`,
+     which meant sitting in a node with a child beneath it was enough. */
+  const mayAddMembers = role === 'member' && _userHasPerm(code, creatorId, 'edit_members');
+  if (roleLevel[role] <= roleLevel[creator.role] && creator.role !== 'superadmin' && !mayAddMembers) {
     return res.status(403).json({ error: 'You cannot create someone at or above your level' });
   }
   // For non-admin leaders, force placement under themselves so they can never
@@ -1892,13 +1909,16 @@ app.post('/api/auth/create-user', requireAuth, async (req, res) => {
 // or imported in bulk via /api/auth/bulk-import (which requires email column).
 
 /* ── Generate invite link ───────────────────────────────────────────────── */
-app.post('/api/auth/invite', requireAuth, (req, res) => {
+/* Minting an invite is adding a person to the organisation with one extra step, so it asks for
+   the same permission Add Member and CSV import ask for — see the note above create-user for what
+   the three doors used to disagree about. Never for a role above the inviter's own (closes:
+   anyone inviting themselves in as superadmin), and never for another org: the org is the
+   session, not the body. */
+app.post('/api/auth/invite', requirePermission('edit_members'), (req, res) => {
   const orgCode = req.iqSession.orgCode;
-  const { role, supervisorId, group, label, usageLimit, expiryDays } = req.body;
-  // Only a leader/admin may mint invites — for their OWN org, and never for a role above their
-  // own (closes: anyone inviting themselves in as superadmin to any org).
+  const { role, supervisorId, group, label, email, usageLimit, expiryDays } = req.body;
   const inviter = orgUsers[orgCode]?.[req.iqSession.userId];
-  if (!inviter || !_isLeader(orgCode, req.iqSession.userId)) return res.status(403).json({ error: 'Only a leader can create invites.' });
+  if (!inviter) return res.status(403).json({ error: 'Inviter not found.' });
   const roleLevel = { superadmin: 1, admin: 2, coach: 3, member: 4 };
   const wantRole = role || 'member';
   if ((roleLevel[wantRole] || 4) < (roleLevel[inviter.role] || 4) && inviter.role !== 'superadmin') {
@@ -1917,8 +1937,29 @@ app.post('/api/auth/invite', requireAuth, (req, res) => {
      email-targeted") and `join-invite` already falls back to it. Only the writer was missing, so
      the binding those two routes were written for never existed. An address that does not look
      like one is kept as a label and binds nothing, which is what a general join link is. */
-  const targeted = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(label || '').trim())
-    ? String(label).trim().toLowerCase() : '';
+  /* AN ADDRESS THE CALLER MEANT IS DECLARED, NOT INFERRED.
+
+     Binding was worked out by running a regex over `label`, which meant the caller never had to
+     say whether they were naming a person or labelling a link — the server guessed. A browser
+     check caught what that costs: the "Invite by Email" panel sends the typed address as `label`,
+     so pasting a list with a typo in it ("also bad") produced a link that looked exactly like the
+     other two and was bound to nobody. An OPEN join link, mintable by mistake, from a screen whose
+     entire purpose is one link per named person.
+
+     `email` is the explicit field for "this invite is for this person". When it is present it must
+     be an address or the request is refused — a typo is now a 400 that says so, not a link. The
+     label inference stays for the Generate Join Link panel, where "First Team intake" is a label
+     and binds nothing, which is what an open link is for. */
+  if (email !== undefined && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim())) {
+    const shown = String(email || '').trim();
+    return res.status(400).json({ error: shown
+      ? `"${shown.slice(0, 80)}" is not an email address.`
+      : 'An invite for a specific person needs their email address.' });
+  }
+  const targeted = email !== undefined
+    ? String(email).trim().toLowerCase()
+    : (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(label || '').trim())
+      ? String(label).trim().toLowerCase() : '');
   inviteTokens[token] = {
     orgCode:    orgCode.toLowerCase(),
     role:       role || 'member',
@@ -2952,18 +2993,26 @@ async function _commitTreeMutation(code, snapshot, res) {
   }
 }
 
-app.post('/api/tree/node', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
-  const code = req.iqSession.orgCode;
-  const { name, parentId, description, ifRev } = req.body;
+/* ── _addTreeNode — THE ONE PLACE A NODE COMES INTO EXISTENCE ──────────────────────────────────
+   Extracted from the route below because it had a second implementation. CSV import created a
+   group node by assigning straight into `orgNodes[code]`: no trimmed-name check, no duplicate
+   check, no `rev`, no parent linkage, and outside the serialisation and compare-and-set the route
+   goes through. A group made by importing a spreadsheet was therefore a different kind of object
+   from a group made by pressing the button — one of them could be created twice by a retry, and
+   neither the tree's revision numbers nor its conflict detection knew it had happened.
+
+   This mutates the in-memory tree and nothing else. The CALLER holds the CAS boundary: snapshot
+   first, then `_commitTreeMutation`, which is what rolls the snapshot back on a conflict. Keeping
+   the commit with the caller is what lets an importer create several nodes and commit them as one
+   unit, rather than one fragile write per row. */
+function _addTreeNode(code, { name, parentId = null, description = '' } = {}) {
   /* VALIDATE THE NAME THAT WILL BE STORED, not the one that arrived. `if (!name)` passed a string
      of spaces and the node was then created with `name.trim()` -- so "   " stored a node with an
      EMPTY name, reproduced. Trim first, then decide. */
   const nodeName = String(name == null ? '' : name).trim();
-  if (!nodeName) return res.status(400).json({ error: 'name required' });
+  if (!nodeName) return { error: 'name required', status: 400 };
   if (!orgNodes[code]) orgNodes[code] = {};
-  const parent = parentId ? orgNodes[code][parentId] : null;
-  if (parentId && !parent) return res.status(404).json({ error: 'Parent node not found' });
-  if (parent && !_treePrecondition(res, parent, ifRev)) return;
+  if (parentId && !orgNodes[code][parentId]) return { error: 'Parent node not found', status: 404 };
 
   /* RETRY IS NOT A SECOND NODE. Two identical creates both returned 200 and produced two nodes,
      so a lost response followed by the human retry everybody performs duplicated the structure --
@@ -2974,14 +3023,14 @@ app.post('/api/tree/node', requirePermission('manage_tree'), _serializeTreeMutat
   const twin = Object.values(orgNodes[code]).find(n =>
     n && String(n.parentId || '') === String(parentId || '')
     && String(n.name || '').trim().toLowerCase() === nodeName.toLowerCase());
-  if (twin) return res.json({ ok: true, already: true, node: twin });
-  const snapshot = JSON.parse(JSON.stringify(orgNodes[code]));
+  if (twin) return { node: twin, already: true };
+
   const nodeId = 'nd_' + generateId();
   const now    = new Date().toISOString();
   orgNodes[code][nodeId] = {
     nodeId,
     name:        nodeName,
-    description: (description || '').trim(),
+    description: String(description == null ? '' : description).trim(),
     parentId:    parentId || null,
     childNodeIds: [],
     memberIds:   [],
@@ -2997,8 +3046,22 @@ app.post('/api/tree/node', requirePermission('manage_tree'), _serializeTreeMutat
     orgNodes[code][parentId].updatedAt = now;
     orgNodes[code][parentId].rev = (orgNodes[code][parentId].rev || 0) + 1;
   }
+  return { node: orgNodes[code][nodeId], already: false };
+}
+
+app.post('/api/tree/node', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
+  const code = req.iqSession.orgCode;
+  const { name, parentId, description, ifRev } = req.body;
+  const parent = parentId ? orgNodes[code]?.[parentId] : null;
+  if (parentId && !parent) return res.status(404).json({ error: 'Parent node not found' });
+  if (parent && !_treePrecondition(res, parent, ifRev)) return;
+
+  const snapshot = JSON.parse(JSON.stringify(orgNodes[code] || {}));
+  const made = _addTreeNode(code, { name, parentId, description });
+  if (made.error) return res.status(made.status).json({ error: made.error });
+  if (made.already) return res.json({ ok: true, already: true, node: made.node });
   if (!(await _commitTreeMutation(code, snapshot, res))) return;
-  res.json({ ok: true, node: orgNodes[code][nodeId] });
+  res.json({ ok: true, node: made.node });
 });
 
 app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
@@ -19859,7 +19922,26 @@ app.post('/api/platform/update-org-mode', requirePermission('manage_settings'), 
   res.json({ ok: true, orgCode: code, orgMode });
 });
 
-/* ── Bulk import users (CSV/XLSX parsed client-side) ─────────────────── */
+/* ── Bulk import users (CSV parsed client-side; CSV is the only format the pilot accepts) ─── */
+/* ── WHAT AN IMPORT MAY NOT EXCEED ─────────────────────────────────────────────────────────────
+   The route accepted an array of any length and hashed a password for every row it kept. bcrypt
+   at the configured cost is deliberately slow — that is its job — and it is synchronous work on
+   the one event loop this process has. A 20,000-row array is therefore not a large import, it is
+   an outage: every other request in the organisation waits behind it, and the accounts already
+   created stay created.
+
+   So the size is checked BEFORE the first account is minted, and the refusal says what the limit
+   is and what was sent, because "too large" without a number tells somebody nothing about how to
+   split their file. The numbers are pilot-scale on purpose — a college squad is tens of people,
+   not thousands — and they are stated here, in the route that enforces them, so there is one
+   place to change them.
+
+   Field lengths are capped for the same reason a name field on a form is: a 4 MB string in a name
+   column is not a name, and it would be copied into the user record, every projection built from
+   it, and every save of the org from then on. */
+const IMPORT_MAX_ROWS  = 500;
+const IMPORT_MAX_FIELD = 120;   // name, email, group — each, after trimming
+
 /* SECURITY — THE WORST OF THE THREE, because this one MINTS ACCOUNTS.
 
    It took the organisation from the BODY and required nothing but a session, so an ordinary
@@ -19878,7 +19960,9 @@ app.post('/api/platform/update-org-mode', requirePermission('manage_settings'), 
              level. Without it, an admin (who has edit_members and cannot mint a superadmin
              invite) could mint one here — the ceiling has to live wherever accounts are made,
              not only where invites are. */
-app.post('/api/auth/bulk-import', requirePermission('edit_members'), async (req, res) => {
+/* `_serializeTreeMutation` because this route now creates tree nodes: two imports naming the same
+   group must queue behind one another exactly as two presses of the create button do. */
+app.post('/api/auth/bulk-import', requirePermission('edit_members'), _serializeTreeMutation, async (req, res) => {
   const { orgCode, users: importRows } = req.body;
   if (!Array.isArray(importRows)) return res.status(400).json({ error: 'users[] required' });
   const code = String(req.iqSession.orgCode || '').toLowerCase().trim();
@@ -19889,12 +19973,22 @@ app.post('/api/auth/bulk-import', requirePermission('edit_members'), async (req,
 
   if (!orgUsers[code]) return res.status(404).json({ error: 'Org not found' });
 
+  // Before a single account is minted. See IMPORT_MAX_ROWS for why this cannot be a per-row check.
+  if (importRows.length > IMPORT_MAX_ROWS) {
+    return res.status(413).json({
+      error: `This import has ${importRows.length} rows. IntelliQ accepts up to ${IMPORT_MAX_ROWS} at a time — split the file and import it in parts.`,
+      limit: IMPORT_MAX_ROWS, received: importRows.length });
+  }
+
   /* THE CEILING. Same ladder /api/auth/invite uses, and deliberately the same numbers rather
      than a second table that could drift away from it. */
   const ROLE_LEVEL = { superadmin: 1, admin: 2, coach: 3, member: 4 };
   const creatorLevel = ROLE_LEVEL[creator.role] || 4;
 
   const created = [], skipped = [], failed = [];
+  // Snapshot before any group node is touched, so the whole import commits or rolls back as one.
+  const treeSnapshot = JSON.parse(JSON.stringify(orgNodes[code] || {}));
+  let touchedTree = false;
 
   for (const row of importRows) {
     const name  = (row.name  || '').trim();
@@ -19922,9 +20016,19 @@ app.post('/api/auth/bulk-import', requirePermission('edit_members'), async (req,
       continue;
     }
 
-    if (!name) { failed.push({ row, reason: 'Missing name' }); continue; }
-    if (!email) { failed.push({ row, reason: 'Missing email' }); continue; }
+    if (!name) { failed.push({ row: row && row.email ? String(row.email).slice(0, IMPORT_MAX_FIELD) : '(row with no name)', reason: 'Missing name' }); continue; }
+    if (!email) { failed.push({ row: name, reason: 'Missing email' }); continue; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { failed.push({ row: name, reason: 'Invalid email format' }); continue; }
+    /* Refused per row, not for the whole file: one absurd cell should not cost somebody the other
+       499 rows. The reported row is truncated too — echoing a 4 MB name back at the client would
+       make the RESPONSE the outage instead of the request. */
+    const tooLong = [['name', name], ['email', email], ['group', group]]
+      .find(([, v]) => v.length > IMPORT_MAX_FIELD);
+    if (tooLong) {
+      failed.push({ row: name.slice(0, IMPORT_MAX_FIELD),
+        reason: `${tooLong[0]} is longer than ${IMPORT_MAX_FIELD} characters` });
+      continue;
+    }
 
     // Check for duplicate by email (global) or name (org)
     if (emailIndex[email]) { skipped.push(`${name} (email already used)`); continue; }
@@ -19953,23 +20057,42 @@ app.post('/api/auth/bulk-import', requirePermission('edit_members'), async (req,
     };
     emailIndex[email] = { orgCode: code, userId };
 
-    // Auto-create group if it doesn't exist
+    /* A GROUP CREATED BY IMPORTING IS THE SAME OBJECT AS A GROUP CREATED BY PRESSING THE BUTTON.
+       This used to assign straight into `orgNodes[code]` with a bare `generateId()`: no `rev`, no
+       `parentId`, no `childNodeIds`, no duplicate check beyond a case-insensitive name scan, and
+       entirely outside the tree's compare-and-set. Two imports naming the same group could race
+       into two nodes, and neither the tree's revisions nor its conflict detection ever knew a
+       write had happened. `_addTreeNode` is the owner the route uses; it is the owner here. */
     if (group) {
-      const groupExists = _groups(code).some(g => g.name.toLowerCase() === group.toLowerCase());
-      if (!groupExists) {
-        const nodeId = generateId();
-        (orgNodes[code] = orgNodes[code] || {})[nodeId] = { nodeId, name: group, orgCode: code, memberIds: [], leaderIds: [], createdAt: new Date().toISOString() };
+      const made = _addTreeNode(code, { name: group });
+      const node = made.node;
+      if (node) {
+        if (!Array.isArray(node.memberIds)) node.memberIds = [];
+        if (!node.memberIds.includes(userId)) {
+          node.memberIds.push(userId);
+          node.updatedAt = new Date().toISOString();
+          node.rev = (node.rev || 0) + 1;
+        }
+        touchedTree = true;
       }
-      // Add member to group
-      const gObj = _groups(code).find(g => g.name.toLowerCase() === group.toLowerCase());
-      if (gObj && !gObj.memberIds.includes(userId)) gObj.memberIds.push(userId);
     }
 
     created.push({ id: userId, name, role, group });
   }
 
+  /* ONE COMMIT FOR THE WHOLE IMPORT, through the tree's own compare-and-set. If the tree changed
+     under us while the rows were being processed, `_commitTreeMutation` rolls the tree back to
+     the snapshot, reloads it, and answers 409 — the same answer the tree route gives. The
+     accounts already created are reported honestly below rather than pretended away: they exist,
+     and re-importing the same file skips them by email, which is what makes the retry safe. */
+  if (touchedTree && !(await _commitTreeMutation(code, treeSnapshot, res))) return;
+
   scheduleSave();
-  res.json({ ok: true, created, skipped, failed, total: importRows.length });
+  /* NEVER A BLANKET SUCCESS. `ok` used to be the literal `true` whatever happened, so an import
+     where every row failed answered the client with a success it then rendered as one. `ok` now
+     means what the word means: every row the file contained became an account. */
+  res.json({ ok: failed.length === 0, created, skipped, failed, total: importRows.length,
+    counts: { created: created.length, skipped: skipped.length, failed: failed.length } });
 });
 
 /* ── List active join/invite links ───────────────────────────────────── */
@@ -22526,7 +22649,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _getOrgState, _buildOrgStateInputs, orgStateConfig, orgContextRecords, _confirmOrgContext,
   _resolveSubjectRef, _inquiryFor, _eraseSubjectInquiries,
   // exported for the truth layer: classifications are labels on membership, never hierarchy
-  _setClassifications, _classificationsOf, _membersWithClassification, _isLeader,
+  _setClassifications, _classificationsOf, _membersWithClassification, _isLeader, userPermissions, _resolveRoleDefaults,
   _teamReadiness, roleBindings, _bindRole, activeQuestions, _activeQuestionFrom, _writeResolutionEvidence,
   // exported for the truth layer: organisational memory (Phase A) — the derived-state timeline
   orgStateHistory, _recordOrgSnapshot,

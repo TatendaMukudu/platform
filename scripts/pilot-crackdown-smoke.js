@@ -190,6 +190,74 @@ ok('PX-E3 …and what it actually does is what it says: it creates links',
 ok('PX-E4 …stated plainly rather than in a parenthetical afterthought',
   /IntelliQ does not send the email/.test(APP));
 
+/* ══ E2 — A BATCH SAYS WHAT HAPPENED TO EVERY ROW ═══════════════════════════════════════════
+   The email-invite panel pushed a result only `if (data.ok)` and swallowed every thrown request
+   in an empty catch. Paste ten addresses, have nine refused, and the screen showed one link under
+   a heading about sharing them: the nine simply never appeared. */
+console.log('\n  E — AND A BATCH REPORTS ITS FAILURES');
+const BATCH = APP.slice(APP.indexOf('async function _submitEmailInvites()'),
+                        APP.indexOf('async function _createJoinLink()'));
+/* The first version of PX-E5 asserted only that `failures.push(` appeared somewhere in the
+   function. Deleting the `else` branch that records a REFUSAL left it green, because the catch
+   branch that records a thrown REQUEST still matched — the second call site trap, exactly as
+   PROTOCOL describes it. Both branches are pinned separately now: a refusal and a network failure
+   are two different ways to lose a row and each needs its own record. */
+ok('PX-E5 a row the server REFUSED is recorded with the reason it gave',
+  BATCH.length > 400 && /else failures\.push\(\{ email, reason: data\.error/.test(BATCH));
+ok('PX-E5b …and a row whose request THREW is recorded too, rather than silently skipped',
+  /catch\s*\(e\)\s*\{\s*failures\.push\(/.test(BATCH) && !/catch\s*\(e\)\s*\{\s*\/\*/.test(BATCH));
+ok('PX-E6 …the count rendered is created-out-of-attempted, so a partial batch cannot read as whole',
+  /of \$\{emails\.length\}/.test(BATCH));
+ok('PX-E7 …every failed address is rendered with its reason',
+  /failures\.map\(/.test(BATCH) && /f\.reason/.test(BATCH));
+ok('PX-E8 …failed addresses stay in the box and succeeded ones do not, so a resubmit cannot double a link',
+  /box\.value = failures\.map/.test(BATCH));
+/* The same pattern, in a second place, found while checking for mutation residue: adding
+   AI-suggested metrics counted only successes and toasted "success" whatever happened. */
+ok('PX-E9b the metric bulk-add says how many of how many, and names what was refused',
+  (() => {
+    const fn = APP.slice(APP.indexOf('async function _addSuggestedMetrics()'),
+                         APP.indexOf('async function _addSuggestedMetrics()') + 1400);
+    return fn.length > 300 && /refused\.push\(/.test(fn) && /of \$\{names\.length\}/.test(fn)
+      && !/catch\(e\) \{ \}/.test(fn);
+  })());
+ok('PX-E9 …and an address is escaped before it is written into the page',
+  /_escHtml\(r\.email\)/.test(BATCH) && /_escHtml\(f\.email\)/.test(BATCH)
+  && !/\$\{r\.email\}/.test(BATCH));
+
+/* ══ E3 — ADD MEMBER NEVER LOSES AN ACCOUNT IT JUST MADE ════════════════════════════════════
+   Two writes with no transaction between them: create the account, then place them in the tree.
+   The second used to `throw`, so a compare-and-set conflict replaced the whole panel with "The
+   organisation tree changed. Reload and try again." The account existed. No invite link had been
+   minted, so there was nothing to share, and filling the form in again hit "An account with this
+   email already exists" — the dormant-account dead end, reached through a different door. */
+console.log('\n  E — AND ADD MEMBER TELLS THE TRUTH ABOUT A PARTIAL SUCCESS');
+const ADDP = APP.slice(APP.indexOf('async function _submitAddPerson()'),
+                       APP.indexOf('async function _assignMemberToNode('));
+ok('PX-E10 a failed placement no longer throws away the account that was just created',
+  ADDP.length > 400 && !/throw new Error\(treeData\.error/.test(ADDP)
+  && /assignError/.test(ADDP));
+ok('PX-E11 …the invite link is still minted, so there is something to hand the person',
+  ADDP.indexOf('assignError') < ADDP.indexOf('/api/auth/invite'));
+ok('PX-E12 …the screen names the unit that was not joined and offers that step again on its own',
+  /Retry placement/.test(APP) && /_retryAddMemberAssignment/.test(APP));
+ok('PX-E13 …and the toast does not say "added" over a placement that did not happen',
+  /placement still pending/.test(ADDP));
+const ASSIGN = APP.slice(APP.indexOf('async function _assignMemberToNode('),
+                         APP.indexOf('async function _retryAddMemberAssignment('));
+ok('PX-E14 the retry is idempotent: somebody already in the node is left alone, not added twice',
+  /currentIds\.includes\(userId\)/.test(ASSIGN));
+ok('PX-E15 …and it re-reads the tree first, because a stale revision is what caused the conflict',
+  /OrgTree\.load\(\)/.test(ASSIGN) && /ifRev: node\.rev/.test(ASSIGN));
+ok('PX-E16 the node picker is only offered to somebody who may write the tree',
+  /Auth\.canDo\('manage_tree'\)/.test(APP.slice(APP.indexOf('function _openOnboardSection('),
+                                                 APP.indexOf('function _openOnboardSection(') + 1400)));
+
+/* Explicit permission grants must be a MAP, not an array — that assertion needs the seed built,
+   which is asynchronous, so it lives in scripts/metric-lifecycle-smoke.js (section F) where there
+   is an async context to await it in. Written here first, it would have handed `ok()` a Promise,
+   which is truthy whatever it resolves to: a green that could never go red. */
+
 /* ══ F — PERSISTENCE STAYS BOUNDED ═══════════════════════════════════════════════════════════
    Not a live defect: a guard against returning to the whole-platform blob that put the database
    at 92% of its monthly transfer allowance. */
