@@ -711,6 +711,17 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .iq-inq-gaplabel{font-size:var(--fs-2xs);text-transform:uppercase;letter-spacing:0.05em;color:var(--accent);margin-right:0.35rem}
 .iq-inq-alt{font-size:var(--fs-sm);color:var(--text-muted);margin-top:0.35rem;font-style:italic}
 .iq-inq-note{font-size:var(--fs-xs);color:var(--text-muted);margin-top:0.2rem}
+/* WHAT THE PRIORITY OFFICE SURFACED. Deliberately the SAME card as everything else — a distinct
+   treatment here would read as a second kind of thing on the first screen, which is the dashboard
+   this is not. The only additions are the "Why this?" control and, under it, at most two quiet
+   lines. No badge, no rank number, no colour standing in for importance: the ordering is the
+   server's and it is not something a person should have to decode from a swatch. */
+.iq-att-acts{margin-top:0.55rem}
+.iq-att-also{display:block;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--border);
+  padding:0.6rem 0.2rem 0;margin-top:0.1rem;cursor:pointer;font:inherit;color:inherit}
+.iq-att-also-topic{display:block;font-size:var(--fs-sm);color:var(--text-secondary)}
+.iq-att-also-why{display:block;font-size:var(--fs-xs);color:var(--text-muted);margin-top:0.15rem}
+.iq-att-also:hover .iq-att-also-topic{color:var(--text-primary)}
 /* HOW IT CHANGED — collapsed by default. The current read is what you usually want; the
    history is what makes it defensible when you doubt it. */
 .iq-inq-hist{margin-top:0.5rem;padding-top:0.5rem;border-top:1px solid var(--border)}
@@ -794,6 +805,9 @@ details.collapse-card > *:not(summary) { margin-top: 0.4rem; }
 .iq-grounded{font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.4rem;line-height:1.45}
 .iq-tag{font-size:var(--fs-2xs);font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,transparent);padding:1px 6px;border-radius:5px;margin-right:5px}
 .iq-privacy{font-size:var(--fs);color:var(--text-secondary);margin:0.35rem 0}
+/* Quiet, not an error. The reply above is still true; only the voice that wrote it changed. */
+.iq-degraded{font-size:var(--fs-sm);color:var(--text-muted);margin:0.35rem 0;padding:0.5rem 0.7rem;
+  border-left:2px solid var(--border-light);border-radius:0 8px 8px 0;background:var(--surface-1)}
 
 /* Proposal cards — calmer: soft surface, one clear label, generous padding. */
 .iq-proposals{margin-top:0.65rem;display:flex;flex-direction:column;gap:0.55rem}

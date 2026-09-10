@@ -5539,8 +5539,8 @@ async function renderToday() {
       <div class="tdy-chathead">
         <button class="tdy-headbtn" onclick="todayNewChat()" title="Start a new conversation">＋ New</button>
         <button class="tdy-headbtn" onclick="todayHistoryOpen()" title="Your past conversations">History</button>
-        <button class="tdy-headbtn" onclick="todaySaveChatToLibrary()" title="Save this conversation to your Library">Save</button>
-        <button class="tdy-headbtn" onclick="todayLibraryOpen()" title="Your Library — folders, notes, saved chats">Library</button>
+        <button class="tdy-headbtn" onclick="todayKeepChat()" title="Keep this conversation in your Library — a reference, not a copy">Keep</button>
+        <button class="tdy-headbtn" onclick="navigate('notes')" title="Your Library — the things you have kept">Library</button>
       </div>
       <div id="today-history" class="tdy-history" style="display:none"></div>
       <div id="today-thread" class="tdy-thread"></div>
@@ -5792,6 +5792,7 @@ async function todayAsk() {
     if (out) out.innerHTML = '';
     const res = j.response || {};
     thread.insertAdjacentHTML('beforeend', todayBubble('assistant', res.responseText || '', res.qa || {}));
+    thread.insertAdjacentHTML('beforeend', iqDegradedNote(res.composer));
     // Duty of care: if this turn was a safeguarding response, surface the real resources
     // prominently right under the message — help must be impossible to miss.
     if (res.safeguarding && (res.safeguarding.resources || []).length) {
@@ -5805,6 +5806,24 @@ async function todayAsk() {
 
 /* One chat bubble. Assistant bubbles carry provenance chips so the two registers — general
    reasoning vs a read of your data vs something to confirm — are visible at a glance. */
+/* ── WHEN THIS IS NOT INTELLIQ'S NORMAL VOICE ────────────────────────────────
+   The server returns `response.composer.degraded` on every path where the model did not write
+   the reply — off, unconfigured, over budget, empty output, refused by the grounding cage, or
+   thrown. Without this line all six of those looked exactly like IntelliQ having thought about
+   it: the product did not fail, it changed character mid-conversation and carried on.
+
+   ONE SENTENCE, ONE PLACE, BOTH SURFACES. Two copies of a sentence drift, and a degraded notice
+   that says different things on two screens is worse than none. It says nothing about a
+   provider, a model, a key or an error — `reason` stays on the server for the logs — because
+   that detail is ours to act on and is not an explanation anybody reading this is owed.
+
+   It does not retract the reply. The kernel decided, and a decision is not made wrong by the
+   model being unavailable to phrase it. */
+function iqDegradedNote(composer) {
+  if (!composer || !composer.degraded) return '';
+  return `<div class="iq-degraded" role="status">IntelliQ's normal response isn't available right now. This reply was put together from your record instead — what it says still holds, the wording is just plainer than usual.</div>`;
+}
+
 function todayBubble(role, text, qa) {
   const esc = _escAdvisor;
   const chips = (role === 'assistant') ? todayProvenanceChips(qa || {}) : '';
@@ -5898,114 +5917,26 @@ async function todayDeleteConversation(id, ev) {
   } catch (_) {}
 }
 
-/* ── THE LIBRARY (modal) — one home for saved chats, notes, artifacts ─────────
-   Personal folders; each item private by default, shareable by an explicit choice. */
-window.IQLib = window.IQLib || { view: 'mine', folderId: null, folders: [], items: [], openId: null };
+/* ── KEEPING A CONVERSATION — the reference model ─────────────────────────────
+   FOUNDER DECISION, September 2026: there is ONE user-facing product called Library, and it is
+   the shelf. What stood here was the other one — a modal that took a COPY. `from-chat` flattened
+   a live conversation into a second record that sat beside it and drifted from it with no way to
+   tell which you were reading, and a `visibility: 'shared'` flag granted teammates a read through
+   a quieter rule than the governed audiences. Both are out of the user-facing product.
 
-/* Save the current conversation into the Library — the "successful session" flow. */
-async function todaySaveChatToLibrary() {
+   WHAT IS REMOVED IS THE DOOR, NOT THE DATA. The routes, the store, and everything anybody has
+   already put in it are untouched. Retiring a surface is not the same act as deleting somebody's
+   records, and doing both in the week before a pilot is how records are lost.
+
+   PRODUCT LAW: Library indexes live governed objects BY REFERENCE. Keeping something does not
+   copy it, does not grant anybody access, does not create evidence, and does not change
+   epistemic state. So the control is "Keep", not "Save" — Save is what the old Library did and
+   what everybody expects it to mean — and it files through the one canonical shelf route. */
+async function todayKeepChat() {
   const conv = window.IQChat && window.IQChat.conversationId;
-  if (!conv) { alert('Start a conversation first, then save it.'); return; }
-  const title = prompt('Save this conversation as — give it a name:', '');
-  if (title === null) return;
-  try {
-    const r = await (await fetch('/api/library/from-chat', { method: 'POST', headers: Auth._headers(),
-      body: JSON.stringify({ conversationId: conv, title: title.trim() || undefined }) })).json();
-    if (r && r.ok) { window.IQLib.view = 'mine'; window.IQLib.folderId = null; todayLibraryOpen(); }
-    else alert("Couldn't save that.");
-  } catch (_) { alert("Couldn't save that."); }
+  if (!conv) { showToast('Start a conversation first, then keep it.', 'info'); return; }
+  await MemberApp.fileToShelf('conversation', conv);
 }
-
-async function todayLibraryOpen() {
-  document.getElementById('iq-lib-modal')?.remove();
-  const el = document.createElement('div');
-  el.id = 'iq-lib-modal'; el.className = 'modal-overlay'; el.style.display = 'flex';
-  el.onclick = (e) => { if (e.target === el) libClose(); };
-  el.innerHTML = `<div class="modal-card lib-card">
-    <div class="lib-head"><div class="modal-title" style="margin:0">Library</div>
-      <button class="tdy-headbtn" onclick="libClose()">Close</button></div>
-    <div class="lib-body"><div class="lib-side" id="lib-side"></div><div class="lib-main" id="lib-main"></div></div>
-    <div class="tdy-privacy" style="text-align:left;margin:.6rem .2rem 0">Private by default · “Shared” means teammates can see it · sharing a note never makes it a fact until you confirm it as evidence</div>
-  </div>`;
-  document.body.appendChild(el);
-  await libLoad();
-}
-function libClose() { document.getElementById('iq-lib-modal')?.remove(); }
-
-async function libLoad() {
-  try {
-    const [f, i] = await Promise.all([
-      fetch('/api/library/folders', { headers: Auth._headers() }).then(r => r.json()),
-      fetch('/api/library?scope=all', { headers: Auth._headers() }).then(r => r.json()),
-    ]);
-    window.IQLib.folders = (f && f.folders) || [];
-    window.IQLib.items = (i && i.items) || [];
-  } catch (_) { window.IQLib.folders = []; window.IQLib.items = []; }
-  libRender();
-}
-
-function libRender() {
-  const L = window.IQLib, esc = _escAdvisor;
-  const side = document.getElementById('lib-side'), main = document.getElementById('lib-main');
-  if (!side || !main) return;
-  const sel = (on) => on ? 'lib-navsel' : '';
-  side.innerHTML = `
-    <button class="lib-nav ${sel(L.view==='mine'&&!L.folderId)}" onclick="libSelect('mine',null)">All mine</button>
-    <button class="lib-nav ${sel(L.view==='shared')}" onclick="libSelect('shared',null)">Shared with me</button>
-    <div class="lib-navlabel">Folders</div>
-    ${L.folders.map(f => `<button class="lib-nav ${sel(L.folderId===f.id)}" onclick="libSelect('mine','${esc(f.id)}')">${esc(f.name)} <span class="lib-count">${f.itemCount||0}</span></button>`).join('')}
-    <button class="lib-nav lib-addfld" onclick="libNewFolder()">＋ New folder</button>
-    <button class="btn btn-accent btn-sm" style="margin-top:.6rem;width:100%" onclick="libNewNote()">＋ New note</button>`;
-  // filter items for the current view
-  let items = L.items.slice();
-  if (L.view === 'shared') items = items.filter(x => !x.mine);
-  else { items = items.filter(x => x.mine); if (L.folderId) items = items.filter(x => x.folderId === L.folderId); }
-  if (L.openId) { main.innerHTML = libDetail(L.items.find(x => x.id === L.openId)); return; }
-  main.innerHTML = items.length ? items.map(it => `
-    <div class="lib-item" onclick="libOpen('${esc(it.id)}')">
-      <div class="lib-item-main">
-        <div class="lib-item-title">${esc(it.title)}</div>
-        <div class="lib-item-meta">${esc(todayWhen(it.updatedAt))}${it.mine?'':' · shared with you'}</div>
-      </div>
-      <span class="lib-vis ${it.visibility==='shared'?'vis-shared':'vis-private'}">${it.visibility==='shared'?'Shared':'Private'}</span>
-    </div>`).join('') : `<div class="tdy-histempty">Nothing here yet. Save a chat, or make a note.</div>`;
-}
-
-function libDetail(it) {
-  if (!it) return '';
-  const esc = _escAdvisor;
-  const folderOpts = ['<option value="">— no folder —</option>'].concat(window.IQLib.folders.map(f => `<option value="${esc(f.id)}" ${it.folderId===f.id?'selected':''}>${esc(f.name)}</option>`)).join('');
-  const owner = it.mine;
-  return `<div class="lib-detail">
-    <button class="tdy-headbtn" onclick="libBack()">← Back</button>
-    <div class="lib-dtitle">${esc(it.title)}</div>
-    <div class="lib-dbody">${esc(it.body||'')}</div>
-    ${owner ? `<div class="lib-dactions">
-      <label class="lib-dctl">Folder <select onchange="libMove('${esc(it.id)}',this.value)">${folderOpts}</select></label>
-      <label class="lib-dctl">Visibility <select onchange="libShare('${esc(it.id)}',this.value)">
-        <option value="private" ${it.visibility==='private'?'selected':''}>Private (only me)</option>
-        <option value="shared" ${it.visibility==='shared'?'selected':''}>Shared (my teammates)</option></select></label>
-      <button class="btn-ghost btn-sm" style="color:var(--danger,#d05a5a)" onclick="libDelete('${esc(it.id)}')">Delete</button>
-    </div>` : `<div class="lib-dctl" style="color:var(--text-muted)">Shared with you — read-only</div>`}
-  </div>`;
-}
-function libOpen(id) { window.IQLib.openId = id; libRender(); }
-function libBack() { window.IQLib.openId = null; libRender(); }
-function libSelect(view, folderId) { window.IQLib.view = view; window.IQLib.folderId = folderId; window.IQLib.openId = null; libRender(); }
-
-async function libNewFolder() {
-  const name = prompt('Folder name:', ''); if (!name || !name.trim()) return;
-  try { await fetch('/api/library/folders', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ name: name.trim() }) }); await libLoad(); } catch (_) {}
-}
-async function libNewNote() {
-  const title = prompt('Note title:', ''); if (title === null) return;
-  const body = prompt('What do you want to remember?', ''); if (body === null) return;
-  const folderId = (window.IQLib.view === 'mine' && window.IQLib.folderId) ? window.IQLib.folderId : null;
-  try { await fetch('/api/library', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ type: 'note', title: title.trim() || 'Untitled', body, folderId }) }); await libLoad(); } catch (_) {}
-}
-async function libMove(id, folderId) { try { await fetch('/api/library/' + encodeURIComponent(id), { method: 'PATCH', headers: Auth._headers(), body: JSON.stringify({ folderId: folderId || null }) }); await libLoad(); } catch (_) {} }
-async function libShare(id, visibility) { try { await fetch('/api/library/' + encodeURIComponent(id), { method: 'PATCH', headers: Auth._headers(), body: JSON.stringify({ visibility }) }); await libLoad(); } catch (_) {} }
-async function libDelete(id) { if (!confirm('Delete this item?')) return; try { await fetch('/api/library/' + encodeURIComponent(id), { method: 'DELETE', headers: Auth._headers() }); window.IQLib.openId = null; await libLoad(); } catch (_) {} }
 
 /* Render the GOVERNED proposals for the latest turn (check-in / private note …) with
    confirm/dismiss — nothing saved until confirmed. The reply text itself now lives in the
@@ -8979,6 +8910,21 @@ const MemberApp = {
     }
 
     const KIND = { focus: 'Focus', high: 'High', low: 'Low', inquiry: 'Inquiry', conversation: 'Conversation', material: 'Material' };
+
+    /* THE DOOR INTO A FOLDER. Folders could be created and named before this existed, and
+       nothing could ever be put in one — the route accepted a folder, the smoke suite proved the
+       route accepted a folder, and the only call site passed two arguments. Every chip read 0
+       forever. A test that exercises a route says nothing about whether a person can reach it.
+
+       It is a select, not a second folder screen, because filing is a choice among names that
+       already exist. Changing it calls the SAME canonical route as Keep: POST /api/library/shelf
+       already treats re-filing something as a move (ai/shelf.js `file`), so there is one filing
+       operation and one folder state, not a second one living in the client. */
+    const folderOptions = (selected) => ['<option value="">No folder</option>']
+      .concat((d.folders || []).map(f =>
+        `<option value="${this._escape(f.id)}"${(selected || '') === f.id ? ' selected' : ''}>${this._escape(f.name)}</option>`))
+      .join('');
+
     list.innerHTML = items.map(i => `
       <div class="shelf-row">
         <button type="button" class="shelf-open" onclick="MemberApp.openFromShelf('${this._escape(i.kind)}','${this._escape(i.refId)}')">
@@ -8987,6 +8933,14 @@ const MemberApp = {
           ${i.whose ? `<span class="shelf-whose">${this._escape(i.whose)}</span>` : ''}
           ${i.sub ? `<span class="shelf-sub">${this._escape(i.sub)}</span>` : ''}
         </button>
+        ${(d.folders || []).length ? `
+        <label class="shelf-move">
+          <span class="shelf-move-label">Folder</span>
+          <select class="shelf-move-select" aria-label="Which folder ${this._escape(i.label)} is in"
+            onchange="MemberApp.fileToShelf('${this._escape(i.kind)}','${this._escape(i.refId)}',this.value)">
+            ${folderOptions(i.folderId)}
+          </select>
+        </label>` : ''}
         <button type="button" class="shelf-x" title="Take off the shelf" onclick="MemberApp.unfileFromShelf('${this._escape(i.id)}')">Remove</button>
       </div>`).join('');
   },
@@ -10733,11 +10687,92 @@ const MemberApp = {
     }
   },
 
+  /* ── WHAT THE PRIORITY OFFICE SAYS IS WORTH A LOOK ────────────────────────────────────────
+     THE SERVER DECIDES; THIS RENDERS. `/api/me/attention` returns an ordered list, already
+     authorised, each row carrying a deterministic reason code and the desk's own plain sentence
+     for it. Nothing here sorts, scores, re-ranks, filters or re-phrases: the order on the screen
+     is the order that arrived, and the reason text is the server's words. That is the whole
+     safety argument for putting this on the first screen — a browser that re-decides priority is
+     a second Priority Office nobody can test.
+
+     IT IS NOT A DASHBOARD. One thing, and at most two quiet lines under it. No counts of how many
+     other things there are, no badges, no numbers standing in for importance, and no list that
+     grows with the record. Home is one question; when the desk has something, THAT is the
+     question, and when it has nothing the ordinary top-of-record card stands as before.
+
+     IT IS NOT INTELLIQ SPEAKING. The reason line is a label on a card, in the same slot the
+     provenance line has always used — never an assistant bubble. Asking "Why this?" starts a real
+     composed turn bound to the object, which is where prose comes from and where the degraded
+     notice already says so when the model is unavailable. */
+  _attentionRow(it) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    return { kind: esc(it.kind || ''), id: esc(it.id || ''),
+      label: esc(it.label || 'Something in your record'), why: esc(it.why || '') };
+  },
+
+  _renderAttention(items) {
+    const box = document.getElementById('iq-brief');
+    if (!box) return;
+    // ONE primary and at most two secondary — a slice of what the server sent, in the order it
+    // sent it. Never a re-sort: `items` arrives ranked and is consumed front to back.
+    const top = this._attentionRow(items[0]);
+    const rest = items.slice(1, 3).map(i => this._attentionRow(i));
+    const open = r => `MemberApp.openObjectThread('${r.kind}','${r.id}')`;
+    const secondary = rest.map(r => `
+      <button type="button" class="iq-att-also" onclick="${open(r)}">
+        <span class="iq-att-also-topic">${r.label}</span>
+        ${r.why ? `<span class="iq-att-also-why">${r.why}</span>` : ''}
+      </button>`).join('');
+    box.innerHTML = `
+      <div class="iq-home-one">
+        <article class="iq-inq iq-att-primary" role="button" tabindex="0" onclick="${open(top)}"
+          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${open(top)}}">
+          <div class="iq-inq-head"><span class="iq-inq-topic">${top.label}</span></div>
+          ${top.why ? `<div class="iq-inq-why">${top.why}</div>` : ''}
+          <div class="iq-att-acts">
+            <button type="button" class="btn-ghost btn-sm"
+              onclick="event.stopPropagation();MemberApp.attentionWhy('${top.kind}','${top.id}')">Why this?</button>
+          </div>
+        </article>
+        ${secondary}
+      </div>`;
+  },
+
+  /* "WHY THIS?" IS A CONVERSATION, NOT A TOOLTIP. It binds the composer to the canonical object
+     and sends an ordinary turn, so the answer is written by the model from the authorised record —
+     the reason code, what the object is connected to, and what it rests on — and comes back
+     through the same path as every other reply, degraded notice included. Nothing new is written
+     and nothing is settled by asking. */
+  attentionWhy(kind, id) {
+    if (!kind || !id) return;
+    this._composerAbout = { kind, id };
+    // Through the composer input rather than wsSend's retry argument, so the question they asked
+    // appears in the thread above the answer. An answer with no visible question reads as the
+    // product volunteering an opinion.
+    const i = document.getElementById('iq-composer-input');
+    if (!i) return;
+    i.value = 'Why is this the thing worth looking at, and what is it resting on?';
+    this.wsSend();
+  },
+
   async _loadTopQuestion() {
     const box = document.getElementById('iq-brief');
     if (!box) return;
     const kinds = ['inquiry', 'focus', 'low', 'high'];
     box.innerHTML = `<p class="iq-home-loading" role="status">Looking at your record…</p>`;
+
+    /* THE DESK FIRST. If it has nothing, that is a real answer — "nothing in your record changed
+       in a way worth interrupting you for" — and the ordinary top-of-record card below stands
+       unchanged. A failed request is NOT an empty desk and must not silently become one, so only
+       a well-formed answer with items takes this path. */
+    let att = null;
+    try {
+      att = await fetch('/api/me/attention', { headers: this._authHeaders() })
+        .then(r => (r.ok ? r.json() : null));
+    } catch (_) { att = null; }
+    if (att && att.ok && Array.isArray(att.items) && att.items.length) {
+      return this._renderAttention(att.items);
+    }
 
     let all = [];
     let failures = 0;
@@ -11207,6 +11242,18 @@ const MemberApp = {
             onclick="MemberApp.beginObjectAction('keep_in_library','${esc(kind)}','${esc(objectId)}')">Keep</button>
           ${kind === 'inquiry' ? `<button type="button" class="iqt-verdict" onclick="MemberApp.beginObjectAction('settle_inquiry','${esc(kind)}','${esc(objectId)}')">That's settled</button>` : ''}
           <button type="button" class="iqt-verdict" onclick="MemberApp.beginObjectAction('disagree_with_inquiry','${esc(kind)}','${esc(objectId)}')">I disagree</button>
+          <!-- KEEP THIS NEAR THE TOP. The personal attention override, and the only writer of it
+               from a screen. It is a VERDICT, beside the others, because it is a thing a person
+               says about a belief — not a star in the corner of a card, which is how a private
+               preference starts looking like a rating everybody can see.
+
+               It states which way it will go, so the control is never ambiguous about current
+               state, and it stages the request through beginObjectAction like every other verdict
+               here: a button does not own a mutation, it stages the same typed request the model
+               may propose and confirmation still crosses the one dispatcher. -->
+          <button type="button" class="iqt-verdict"
+            onclick="MemberApp.beginObjectAction('${data.prioritised ? 'unprioritise_object' : 'prioritise_object'}','${esc(kind)}','${esc(objectId)}')">${
+              data.prioritised ? 'Take off my priorities' : 'Keep near the top'}</button>
           <button type="button" class="iqt-verdict" onclick="MemberApp.inquiryOverflow('aside')">Not now</button>
         </div>`;
       // The call sits WITH the belief, above the verdicts, and is filled in after the thread
@@ -11480,7 +11527,14 @@ const MemberApp = {
     } catch (_) { return; }
     const list = (j && j.materials) || [];
     const attach = `<button type="button" class="iqt-mat-add" onclick="MemberApp.attachMaterial('${esc(kind)}','${esc(objectId)}')">Attach material</button>
-      <input type="file" id="iqt-mat-file" class="iq-hidden-file" accept="${esc((window.AttachmentHandler && AttachmentHandler.ACCEPT_ATTR) || '')}">`;
+      ${/* `typeof AttachmentHandler`, NOT `window.AttachmentHandler`. The handler is a top-level
+            `const` in a classic script, and a top-level const does not become a property of
+            window — so this guard was always false and the accept attribute always rendered
+            EMPTY. An empty accept offers every file on the phone, which is the opposite of what
+            the guard was for, and it was invisible to every source-level test because the source
+            said the right thing. Found by opening the page. The rest of this file already uses
+            `typeof AttachmentHandler === 'undefined'` for exactly this reason. */''}
+      <input type="file" id="iqt-mat-file" class="iq-hidden-file" accept="${esc(typeof AttachmentHandler !== 'undefined' ? AttachmentHandler.materialAcceptAttr() : '')}">`;
     if (!list.length) {
       box.innerHTML = `<div class="iqt-mat-empty">Nothing attached yet. Attach a deck, a document or a spreadsheet and IntelliQ will answer from it.</div>${attach}`;
       return;
@@ -12010,6 +12064,11 @@ const MemberApp = {
     }
     input.value = type === 'keep_in_library' ? 'Keep this in my Library.'
       : type === 'settle_inquiry' ? 'I think this is settled now.'
+      // The person's own words for the two priority acts, so the turn reads as something they
+      // said rather than a control that fired. The server resolves the target from the bound
+      // object; nothing in this sentence names it, and nothing needs to.
+      : type === 'prioritise_object' ? 'Keep this near the top for me.'
+      : type === 'unprioritise_object' ? 'Take this off my priorities.'
       : type === 'discuss_with_group' ? 'I would like to discuss this with the group.' : 'Open this.';
     await this.inquirySend();
   },
@@ -12673,6 +12732,7 @@ const MemberApp = {
     const srcs = r.sources || [];
     return `<div class="iq-response">
       <p class="iq-response-text">${esc(r.responseText)}</p>
+      ${iqDegradedNote(r.composer)}
       ${this._sourcesHTML(srcs)}
       ${this._msgActions(r.responseText, { messageId: j.messageId || null, at: j.at || null, sources: srcs, conversationId: j.conversationId || this._chatConvId || null })}
       ${(() => {

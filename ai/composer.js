@@ -91,6 +91,8 @@ function buildContext({
   priorMessages = [],  // [{ role, text }]
   actions = [],        // [{ label }]       confirmable proposals available this turn
   material = null,     // { title, filename, text, sectionIds, partial } attached to THIS object
+  connections = null,  // { related: [{type, kind, label}], loop } — edges the records already carry
+  attention = null,    // [{ reason, kind, label, detail }] — deterministic candidates, codes only
 } = {}) {
   const L = [];
   L.push('CONTEXT');
@@ -194,6 +196,75 @@ function buildContext({
     L.push(`  What is missing: ${_clip(c.question || '', 300)}`);
     if (need.distinguishes && need.distinguishes.length) L.push(`  It would tell us between: ${need.distinguishes.map(d => _clip(String(d), 60)).join(' vs ')}`);
     L.push('  Ask it naturally and only if it fits what they just said. Never ask two questions.');
+    L.push('');
+  }
+
+  /* ── HOW THIS CONNECTS TO THE REST OF THEIR RECORD ──────────────────────────────────────
+     Every line here is an edge the objects already carried — a focus saying what it was started
+     to work on, a High naming the inquiry it came from, two records citing one piece of evidence.
+     None of it is new truth and none of it is a judgement about whether the connection is good.
+
+     THE WARNING IS PART OF THE CONTEXT, not a comment about it. Handed a list of connections, the
+     natural thing for a model to write is "three separate things point at this" — which is the
+     repetition-is-corroboration error stated in prose, and the one place this feature could
+     quietly break the epistemic law it was built inside. So the bundle says the rule out loud, in
+     the same block as the data it applies to. */
+  if (connections && ((connections.related || []).length || connections.loop)) {
+    L.push('HOW THIS CONNECTS TO THEIR OTHER RECORDS (connections only — a connection does NOT make');
+    L.push('either side more certain, and two records resting on one account are still one account):');
+    for (const r of (connections.related || [])) {
+      const how = ({ addresses: 'was started to work on', addressed_by: 'is being worked on by',
+        projected_from: 'came out of', projected_to: 'produced',
+        shares_evidence: 'rests on some of the same evidence as',
+        supersedes: 'replaced', superseded_by: 'was replaced by' })[r.type] || 'is connected to';
+      L.push(`  - this ${how} a ${r.kind || 'record'}${r.label ? `: ${_clip(r.label, 120)}` : ''}`);
+    }
+    const lp = connections.loop;
+    if (lp) {
+      if (lp.outcome) L.push(`  - the person recorded the outcome of this focus as: ${lp.outcome}`);
+      else L.push('  - no outcome has been recorded on this focus yet');
+      if (lp.sharedOrigins) L.push(`  - it and the thing it addresses rest on ${lp.sharedOrigins} of the same account(s) — the SAME account, not extra support`);
+      if (typeof lp.observedSince === 'number') {
+        L.push(lp.observedSince > 0
+          ? `  - ${lp.observedSince} record(s) have arrived on that thing SINCE the outcome was recorded. That is what has been observed since; it is NOT evidence the focus caused it, and you must not say it was.`
+          : '  - nothing has been recorded on that thing since the outcome, so there is no movement to describe either way');
+      }
+      for (const gap of (lp.open || [])) L.push(`  - OPEN: ${gap}`);
+    }
+    L.push('If they ask whether it helped or whether they are closer, describe what was recorded and');
+    L.push('what has been observed since. Do not say what will happen, and do not turn a sequence');
+    L.push('into a cause.');
+    L.push('');
+  }
+
+  /* ── WHAT DESERVES ATTENTION, AND WHY ────────────────────────────────────────────────────
+     THE REASON ARRIVES WITH THE ROW. Deterministic code decided both that this record is eligible
+     and why; the only thing left is to say it in a sentence somebody wants to read. That split is
+     the point — a model that could add its own candidate would be deciding what matters, which is
+     a judgement about somebody's record that no model gets to make here.
+
+     Each code is a fact about the PAST and about a RECORD. None is about a person and none is
+     about what happens next, so the prose must not become either. */
+  if (Array.isArray(attention) && attention.length) {
+    L.push('WHAT THEIR RECORD SAYS IS WORTH A LOOK (decided by the system, not by you — you may only');
+    L.push('put these into words, and you may NOT add anything that is not on this list):');
+    const say = {
+      explicitly_prioritised: 'they marked this as important themselves',
+      contradiction_added: 'an account disagreeing with it arrived since they last looked',
+      new_independent_evidence: 'more separate accounts have come in since they last looked',
+      unresolved_after_focus_outcome: 'the work on it was closed out, and it is still open',
+      outcome_missing: 'it has been running a while and nothing was ever recorded about how it went',
+      related_state_changed: 'something it is connected to has moved',
+    };
+    for (const a of attention.slice(0, 5)) {
+      const d2 = a.detail || {};
+      const extra = Number.isInteger(d2.originsBefore) && Number.isInteger(d2.originsNow)
+        ? ` (${d2.originsBefore} separate account(s) before, ${d2.originsNow} now)`
+        : Number.isInteger(d2.openForDays) ? ` (open ${d2.openForDays} days)` : '';
+      L.push(`  - ${a.kind}${a.label ? ` "${_clip(a.label, 110)}"` : ''}: ${say[a.reason] || a.reason}${extra}`);
+    }
+    L.push('Say what changed and what is still open. Do NOT say what will happen, do NOT say one');
+    L.push('thing caused another, and do NOT rate or score a person.');
     L.push('');
   }
 
