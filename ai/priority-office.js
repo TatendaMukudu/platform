@@ -290,9 +290,59 @@ function attentionQueue({ objects = [], edges = [], seen = {}, marked = [], now 
     .slice(0, Math.max(0, max));
 }
 
+/* ── SAYING THE REASON OUT LOUD ───────────────────────────────────────────────────────────────
+   A reason code is a fact the desk computed; `new_independent_evidence` is not a sentence anybody
+   should ever be shown. This turns each code into the plainest true statement of that fact, and it
+   lives HERE, beside the codes it phrases, so that adding a seventh code without a way to say it
+   is visible in one file rather than discovered on a screen.
+
+   THIS IS A LABEL, NOT INTELLIQ TALKING. It states what the desk found and stops. It is rendered
+   in the card's own reason slot, never as an assistant message, because deterministic prose
+   wearing the assistant's voice is how a product changes character without saying so. The actual
+   explanation -- "why this one, and what does it rest on?" -- is a composed turn, which is where
+   prose belongs and where the degraded notice already tells you when the model was unavailable.
+
+   WHAT IT MAY NOT SAY. No score, no rank, no percentage, no prediction, and no claim that one
+   thing caused another. Counts of separate accounts are facts about the record and are stated as
+   such -- the same thing the provenance line has always said -- never as a strength rating. */
+function attentionSentence(row = {}) {
+  const d = (row && row.detail) || {};
+  const n = v => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
+  switch (row && row.reason) {
+    case 'explicitly_prioritised':
+      return 'You marked this as important.';
+    case 'contradiction_added': {
+      const c = n(d.records);
+      return c > 1
+        ? `${c} accounts that disagree have come in since you last looked.`
+        : 'An account that disagrees has come in since you last looked.';
+    }
+    case 'new_independent_evidence': {
+      const before = n(d.originsBefore), now = n(d.originsNow);
+      // Never render a count the desk did not actually supply — an empty number in front of a
+      // person is worse than the plain sentence underneath it.
+      if (!now || now <= before) return 'Separate accounts have come in since you last looked.';
+      return `${now} separate accounts have said something about this now, where there ${
+        before === 1 ? 'was 1' : `were ${before}`} last time you looked.`;
+    }
+    case 'unresolved_after_focus_outcome':
+      return 'You recorded an outcome for the work on this, and the question itself is still open.';
+    case 'outcome_missing': {
+      const days = n(d.openForDays);
+      return days
+        ? `This has been open ${days} days and no outcome has been recorded.`
+        : 'This has been open a while and no outcome has been recorded.';
+    }
+    case 'related_state_changed':
+      return 'Something this is connected to has changed since you last looked.';
+    default:
+      return null;
+  }
+}
+
 module.exports = {
   normalizeItem, buildQueue, askFirstOffer, stamp,
   PRIORITY_RANK, CONF_RANK, POLARITY_RANK,
-  ATTENTION_REASONS, OUTCOME_OVERDUE_MS, attentionQueue,
+  ATTENTION_REASONS, OUTCOME_OVERDUE_MS, attentionQueue, attentionSentence,
   _score, _key,
 };

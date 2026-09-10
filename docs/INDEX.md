@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `5683df3`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `f844c3a`. **Branch:** `claude/platform-work-summary-nmb0cm`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
 ---
@@ -366,6 +366,8 @@ is how the team surface already worked, and it is the only reason to trust eithe
 | Onboarding | answering, once, about themselves | one person is one origin and no answer carries a direction — a first-day account is the BEFORE, never a movement | `onboarding-evidence-smoke` |
 | Attached material | saying, per part, whether they have it | the parts are the AUTHOR's sections; silence is reported as silence, never as confusion; the report counts people and names none | `material-smoke`, `material-reach-http-smoke` |
 | Graphs | nothing — a graph is a read | every point names its evidence and a count must EQUAL it; units are count/band/date only; a group chart below the cohort floor is refused with a reason | `chart-governance-smoke` |
+| How evidence stands to a focus | saying `supports` / `undermines` / `unclear`, or confirming the offer of one | DECLARED, never inferred: a signal's direction on an inquiry says nothing about whether it supports what a focus is trying to do. One writer, closed vocabulary, changing your mind supersedes and keeps the earlier call | `priority-office-attention-smoke` |
+| What is worth a look | nothing — the list is a read, and it settles nothing | eligibility, order and reason are deterministic; the order IS a declared list of six reason codes, not a weighted score. Home shows one thing and at most two quiet lines, each opening the canonical object; the browser never re-ranks and "Why this?" is an ordinary composed turn | `priority-office-attention-smoke`, `priority-surface-smoke` |
 
 ### The two modules added for the last of these
 

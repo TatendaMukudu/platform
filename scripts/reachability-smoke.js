@@ -47,8 +47,7 @@ const BACKEND_ONLY = new Map(Object.entries({
   '/api/platform/org-checkins': 'operator tooling',
   '/api/delivery/unsubscribe': 'reached from an email link, not the app',
   '/api/library/from-chat': 'FOUNDER DECISION, September 2026: there is one user-facing product called Library and it is the shelf, which indexes live governed objects BY REFERENCE. This route is the old one\'s copy-taking act — it flattened a live conversation into a second record that sat beside it and drifted from it with no way to tell which you were reading. Its caller is gone and the control that used to invoke it now files a reference through POST /api/library/shelf. The route and everything anybody already saved through it are deliberately untouched: retiring a surface is not the same act as deleting somebody\'s records, and doing both in the week before a pilot is how records are lost. Removing the subsystem is its own piece of work, after the pilot.',
-  '/api/me/attention': 'the Priority Office retrieval contract, September 2026. The attention list DOES reach the user today -- the composer assembles it server-side through _attentionContext, so "what should I look at?" is answerable in conversation -- but no client screen fetches this route yet, and the founder brief for this pass explicitly said to prefer a retrieval contract over a dashboard. It is exercised end to end by priority-office-attention-smoke, including the authorisation gate. When a surface is built it gets a caller and comes off this list; declaring it here rather than faking a caller is the honest version of "no UI yet".',
-  '/api/objects/focus/:id/evidence-relation': 'the DIRECT half of the founder\'s September 2026 declared-relation law (supports / undermines / unclear). The MODEL-suggested half is live and reachable: declare_focus_relation is a registered composer action requiring confirmation, so a person can already be offered the relation and confirm it in conversation. This route is the explicit control for a focus screen that has not been built yet; both doors end at the same canonical owner, _declareFocusRelation, and priority-office-attention-smoke exercises this one including its refusals.',
+  '/api/objects/focus/:id/evidence-relation': 'the DIRECT half of the founder\'s September 2026 declared-relation law (supports / undermines / unclear), and it is BACKEND-ONLY IN BOTH DIRECTIONS TODAY. An earlier version of this entry claimed the model-suggested half was already reachable because declare_focus_relation is a registered composer action. That was wrong, and reproducing it is what found the defect: composer-actions normalize() retains a fixed list of argument keys which does not include `relation` or `evidenceRef`, so a proposal reaches the confirm branch carrying neither and the canonical owner refuses it. Registration is not reachability. Completing that path means deciding what evidence identifiers a model may be shown in order to name ONE piece of evidence, which is a disclosure decision and not a UI question, so it is written up in docs/reviews/PRIORITY_SURFACE_R1.md as a founder decision rather than guessed at here. The direct route works, is exercised including its refusals by priority-office-attention-smoke, and is the control a focus screen will use.',
   '/api/identity/reresolve': 'operator tooling',
 }));
 
@@ -134,6 +133,12 @@ ok('the open question is reachable', front.includes('/api/inquiry/lead'));
    builds prose from raw fields is how one object came to read differently on every surface. */
 ok('the lead question renders the composed explanation, not hand-built prose',
   front.includes('lead.explained') && front.includes('wouldChangeMyMind'));
+/* The Priority Office door, named because it spent a whole pass declared backend-only. A route
+   in the file is not a door; the door is a FETCH whose result is RENDERED. Both halves, or this
+   check would pass against a fetch whose answer is dropped on the floor. */
+ok('the Priority Office reaches a screen: Home fetches the attention list and renders it',
+  /fetch\('\/api\/me\/attention'/.test(front) && /_renderAttention\(att\.items\)/.test(front)
+  && /_renderAttention\(items\)\s*\{/.test(front));
 
 console.log(`\nreachability-smoke: ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

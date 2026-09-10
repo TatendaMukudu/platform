@@ -10687,11 +10687,92 @@ const MemberApp = {
     }
   },
 
+  /* ── WHAT THE PRIORITY OFFICE SAYS IS WORTH A LOOK ────────────────────────────────────────
+     THE SERVER DECIDES; THIS RENDERS. `/api/me/attention` returns an ordered list, already
+     authorised, each row carrying a deterministic reason code and the desk's own plain sentence
+     for it. Nothing here sorts, scores, re-ranks, filters or re-phrases: the order on the screen
+     is the order that arrived, and the reason text is the server's words. That is the whole
+     safety argument for putting this on the first screen — a browser that re-decides priority is
+     a second Priority Office nobody can test.
+
+     IT IS NOT A DASHBOARD. One thing, and at most two quiet lines under it. No counts of how many
+     other things there are, no badges, no numbers standing in for importance, and no list that
+     grows with the record. Home is one question; when the desk has something, THAT is the
+     question, and when it has nothing the ordinary top-of-record card stands as before.
+
+     IT IS NOT INTELLIQ SPEAKING. The reason line is a label on a card, in the same slot the
+     provenance line has always used — never an assistant bubble. Asking "Why this?" starts a real
+     composed turn bound to the object, which is where prose comes from and where the degraded
+     notice already says so when the model is unavailable. */
+  _attentionRow(it) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    return { kind: esc(it.kind || ''), id: esc(it.id || ''),
+      label: esc(it.label || 'Something in your record'), why: esc(it.why || '') };
+  },
+
+  _renderAttention(items) {
+    const box = document.getElementById('iq-brief');
+    if (!box) return;
+    // ONE primary and at most two secondary — a slice of what the server sent, in the order it
+    // sent it. Never a re-sort: `items` arrives ranked and is consumed front to back.
+    const top = this._attentionRow(items[0]);
+    const rest = items.slice(1, 3).map(i => this._attentionRow(i));
+    const open = r => `MemberApp.openObjectThread('${r.kind}','${r.id}')`;
+    const secondary = rest.map(r => `
+      <button type="button" class="iq-att-also" onclick="${open(r)}">
+        <span class="iq-att-also-topic">${r.label}</span>
+        ${r.why ? `<span class="iq-att-also-why">${r.why}</span>` : ''}
+      </button>`).join('');
+    box.innerHTML = `
+      <div class="iq-home-one">
+        <article class="iq-inq iq-att-primary" role="button" tabindex="0" onclick="${open(top)}"
+          onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${open(top)}}">
+          <div class="iq-inq-head"><span class="iq-inq-topic">${top.label}</span></div>
+          ${top.why ? `<div class="iq-inq-why">${top.why}</div>` : ''}
+          <div class="iq-att-acts">
+            <button type="button" class="btn-ghost btn-sm"
+              onclick="event.stopPropagation();MemberApp.attentionWhy('${top.kind}','${top.id}')">Why this?</button>
+          </div>
+        </article>
+        ${secondary}
+      </div>`;
+  },
+
+  /* "WHY THIS?" IS A CONVERSATION, NOT A TOOLTIP. It binds the composer to the canonical object
+     and sends an ordinary turn, so the answer is written by the model from the authorised record —
+     the reason code, what the object is connected to, and what it rests on — and comes back
+     through the same path as every other reply, degraded notice included. Nothing new is written
+     and nothing is settled by asking. */
+  attentionWhy(kind, id) {
+    if (!kind || !id) return;
+    this._composerAbout = { kind, id };
+    // Through the composer input rather than wsSend's retry argument, so the question they asked
+    // appears in the thread above the answer. An answer with no visible question reads as the
+    // product volunteering an opinion.
+    const i = document.getElementById('iq-composer-input');
+    if (!i) return;
+    i.value = 'Why is this the thing worth looking at, and what is it resting on?';
+    this.wsSend();
+  },
+
   async _loadTopQuestion() {
     const box = document.getElementById('iq-brief');
     if (!box) return;
     const kinds = ['inquiry', 'focus', 'low', 'high'];
     box.innerHTML = `<p class="iq-home-loading" role="status">Looking at your record…</p>`;
+
+    /* THE DESK FIRST. If it has nothing, that is a real answer — "nothing in your record changed
+       in a way worth interrupting you for" — and the ordinary top-of-record card below stands
+       unchanged. A failed request is NOT an empty desk and must not silently become one, so only
+       a well-formed answer with items takes this path. */
+    let att = null;
+    try {
+      att = await fetch('/api/me/attention', { headers: this._authHeaders() })
+        .then(r => (r.ok ? r.json() : null));
+    } catch (_) { att = null; }
+    if (att && att.ok && Array.isArray(att.items) && att.items.length) {
+      return this._renderAttention(att.items);
+    }
 
     let all = [];
     let failures = 0;

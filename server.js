@@ -16990,6 +16990,15 @@ app.get('/api/me/attention', requireAuth, (req, res) => {
     const o = byRef.get(row.ref) || {};
     return { ...row,
       label: String((o.explained && o.explained.headline) || (o.present && o.present.summary && o.present.summary.title) || '').slice(0, 160),
+      /* THE CANONICAL ADDRESS, SPLIT OUT. The client opens the object by kind and id through the
+         same thread route every other surface uses. It is handed both rather than left to parse
+         `kind:id` itself, because a client that parses a ref is a client that owns a second copy
+         of the ref format, and two formats for one identity is two identities. */
+      id: o.id != null ? String(o.id) : null,
+      /* THE REASON, IN WORDS. Composed by the desk that owns the codes (one owner), never by the
+         browser -- a client that phrases a reason code is a client that can be shown saying
+         something the server did not decide. */
+      why: priorityOffice.attentionSentence(row) || null,
       whose: o.whose || '', about: o.about || null };
   });
 
