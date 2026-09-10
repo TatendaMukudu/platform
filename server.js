@@ -1905,12 +1905,26 @@ app.post('/api/auth/invite', requireAuth, (req, res) => {
   }
   const token = generateToken();
   const days  = Math.min(Math.max(parseInt(expiryDays) || 7, 1), 90);
+  /* AN INVITE AIMED AT A PERSON IS BOUND TO THEIR ADDRESS.
+
+     `label` was stored as presentation metadata and nothing else, so an invite created for
+     "target@a.test" could be redeemed by anybody who had the link, under any address they liked.
+     Reproduced: registering `different@a.test` through a link labelled `target@a.test` returned
+     200 and created that different account inside the organisation.
+
+     `invite.email` is not a new field. `invite-info` already returns it ("prefill if invite was
+     email-targeted") and `join-invite` already falls back to it. Only the writer was missing, so
+     the binding those two routes were written for never existed. An address that does not look
+     like one is kept as a label and binds nothing, which is what a general join link is. */
+  const targeted = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(label || '').trim())
+    ? String(label).trim().toLowerCase() : '';
   inviteTokens[token] = {
     orgCode:    orgCode.toLowerCase(),
     role:       role || 'member',
     supervisorId,
     group:      group || '',
     label:      label || '',
+    email:      targeted,
     usageLimit: usageLimit ? parseInt(usageLimit) : null,
     useCount:   0,
     expiresAt:  Date.now() + days * 24 * 60 * 60 * 1000,
@@ -1962,6 +1976,48 @@ app.post('/api/auth/join-invite', async (req, res) => {
   // Email: use provided, or fall back to invite-embedded email
   const emailNorm = ((email || invite.email || '')).toLowerCase().trim();
   if (!emailNorm) return res.status(400).json({ error: 'Email address is required.' });
+
+  /* AN EMAIL-BOUND INVITE IS FOR THAT PERSON, AND ONLY THEM. Without this a targeted link was a
+     general one: whoever held it could join under any address. */
+  if (invite.email && invite.email !== emailNorm) {
+    return res.status(403).json({ error: 'This invite was created for a different email address.' });
+  }
+
+  /* ── ACTIVATING AN ACCOUNT SOMEBODY WAS ALREADY ADDED AS ────────────────────────────────────
+     Add Member creates a real account with `passwordSet: false` and then hands the admin a link
+     described as "share this link so they can set their password". That link was a NEW-ACCOUNT
+     token, so redeeming it hit the duplicate-email refusal below and the account could never be
+     activated: it could not log in (its password is random and unknown) and could not register
+     (its address is already indexed). Reproduced end to end -- 400, and one account left dormant
+     forever. The promise on the screen was simply not true.
+
+     Completed here rather than escalated, because no ontology is being decided: the account, the
+     token and the set-password semantics all already exist, and the only thing missing was the
+     step that joins them. What made it unsafe before was the missing binding above -- claiming a
+     dormant account required nothing but its address. It now requires an invite MINTED FOR that
+     address, which is the same bar as being sent the link in the first place.
+
+     Deliberately narrow: same organisation, still dormant, and the invite names them. An account
+     that has ever set a password is untouched and still gets the refusal below, so this can never
+     become a way to take one over. */
+  const existing = emailIndex[emailNorm];
+  if (existing && invite.email === emailNorm
+      && existing.orgCode === code
+      && users[existing.userId]
+      && users[existing.userId].passwordSet === false) {
+    const account = users[existing.userId];
+    account.passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+    account.passwordSet = true;
+    account.status = 'active';
+    if (fullName) { account.name = fullName; if (fName) account.firstName = fName; if (lName) account.lastName = lName; }
+    invite.useCount = (invite.useCount || 0) + 1;
+    scheduleSave();
+    _audit(code, { actor: account.id, action: 'member_activated', subjectIds: [account.id], basis: 'invite' });
+    return res.json({ ok: true, activated: true,
+      token: issueToken(account.id, code, account.role),
+      user: { id: account.id, name: account.name, email: account.email, role: account.role, orgCode: code } });
+  }
+
   if (emailIndex[emailNorm]) return res.status(400).json({ error: 'An account with this email already exists. Please log in instead.' });
 
   const exists = Object.values(users).find(u => u.name.toLowerCase() === fullName.toLowerCase());
@@ -2896,17 +2952,32 @@ async function _commitTreeMutation(code, snapshot, res) {
 app.post('/api/tree/node', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
   const code = req.iqSession.orgCode;
   const { name, parentId, description, ifRev } = req.body;
-  if (!name) return res.status(400).json({ error: 'name required' });
+  /* VALIDATE THE NAME THAT WILL BE STORED, not the one that arrived. `if (!name)` passed a string
+     of spaces and the node was then created with `name.trim()` -- so "   " stored a node with an
+     EMPTY name, reproduced. Trim first, then decide. */
+  const nodeName = String(name == null ? '' : name).trim();
+  if (!nodeName) return res.status(400).json({ error: 'name required' });
   if (!orgNodes[code]) orgNodes[code] = {};
   const parent = parentId ? orgNodes[code][parentId] : null;
   if (parentId && !parent) return res.status(404).json({ error: 'Parent node not found' });
   if (parent && !_treePrecondition(res, parent, ifRev)) return;
+
+  /* RETRY IS NOT A SECOND NODE. Two identical creates both returned 200 and produced two nodes,
+     so a lost response followed by the human retry everybody performs duplicated the structure --
+     reproduced. A sibling with the same name under the same parent is that retry, not a second
+     unit: an organisation does not hold two distinct groups with one name in one place. The
+     existing node is returned instead, so pressing the button twice is indistinguishable from
+     pressing it once. `already` tells an honest caller which happened. */
+  const twin = Object.values(orgNodes[code]).find(n =>
+    n && String(n.parentId || '') === String(parentId || '')
+    && String(n.name || '').trim().toLowerCase() === nodeName.toLowerCase());
+  if (twin) return res.json({ ok: true, already: true, node: twin });
   const snapshot = JSON.parse(JSON.stringify(orgNodes[code]));
   const nodeId = 'nd_' + generateId();
   const now    = new Date().toISOString();
   orgNodes[code][nodeId] = {
     nodeId,
-    name:        name.trim(),
+    name:        nodeName,
     description: (description || '').trim(),
     parentId:    parentId || null,
     childNodeIds: [],

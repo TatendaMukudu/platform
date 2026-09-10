@@ -175,6 +175,47 @@ ok('PX-F3 …and the legacy blob is a FUNCTION, so a healthy start never pays fo
 ok('PX-F4 a save writes only units whose content HASH changed',
   /if \(_saveHashes\.get\(key\) !== h\) \{\s*\n\s*changed\[key\] = value;/.test(SERVER));
 
+/* ══ G — ONBOARDING, FROM CODEX'S INDEPENDENT AUDIT ══════════════════════════════════════════
+   Six findings were reported; five were reproduced here against this branch before anything was
+   changed, and each assertion below pins the fix for one of them. PB-5 (invite authority depends
+   on node leadership) is a founder decision and is deliberately NOT asserted either way. */
+console.log('\n  G — CSV IS PARSED, NOT SPLIT');
+const CSVROWS = (() => {
+  const b = APP_RAW.slice(APP_RAW.indexOf('function _parseCSVRows(text) {'));
+  const rows = b.slice(0, b.indexOf('\nfunction _parseCSV(text)'));
+  const p2 = b.slice(b.indexOf('function _parseCSV(text)'));
+  const fn = p2.slice(0, p2.indexOf('\n}\n') + 3);
+  const _rows = new Function('return ' + rows)();
+  return { rows: _rows, parse: new Function('_parseCSVRows', 'return ' + fn)(_rows) };
+})();
+ok('PX-G1 a quoted comma no longer shifts every column after it',
+  (() => { const r = CSVROWS.parse('name,email,role\n"Lovelace, Ada",ada@example.com,member')[0];
+    return r && r.name === 'Lovelace, Ada' && r.email === 'ada@example.com' && r.role === 'member'; })());
+ok('PX-G2 …plain rows are unchanged',
+  (() => { const r = CSVROWS.parse('name,email,role\nAda Lovelace,ada@example.com,member')[0];
+    return r && r.name === 'Ada Lovelace' && r.email === 'ada@example.com'; })());
+ok('PX-G3 …and a doubled quote inside a quoted field is one literal quote',
+  (CSVROWS.parse('name,email\n"She said ""hi""",e@x.io')[0] || {}).name === 'She said "hi"');
+ok('PX-G4 the parser is a scanner, not a split on commas',
+  !/line\.split\(','\)/.test(APP) && /function _parseCSVRows/.test(APP));
+
+console.log('\n  G — A SPREADSHEET IS UNTRUSTED INPUT');
+ok('PX-G5 every preview cell and header is escaped before it reaches innerHTML',
+  (() => { const prev = APP.slice(APP.indexOf('async function _previewImportFile()'),
+                                 APP.indexOf('function _parseCSVRows'));
+    return /_escHtml\(k\)/.test(prev) && /_escHtml\(v\|\|''\)/.test(prev)
+      && !/\$\{k\}<\/th>/.test(prev) && !/\$\{v\|\|''\}<\/td>/.test(prev); })());
+ok('PX-G6 …including the parse-error message, which also came from the file',
+  /_escHtml\(e\.message\)/.test(APP));
+
+console.log('\n  G — THE PICKER OFFERS ONLY WHAT IT CAN READ');
+ok('PX-G7 the file input no longer advertises a format onboarding cannot parse',
+  /id="ob-import-file" accept="\.csv"/.test(APP_RAW));
+ok('PX-G8 …a workbook chosen anyway is refused with a sentence, never parsed as text',
+  /cannot be imported yet/.test(APP) && /\(xlsx\|xls\)\$/.test(APP));
+ok('PX-G9 …and no surface still claims XLSX import works',
+  !/Upload a CSV or XLSX/.test(APP_RAW) && !/<strong>XLSX<\/strong>/.test(APP_RAW));
+
 console.log('\n  F — AND THE PILOT ORGANISATION IS SMALL');
 (async () => {
   const { buildAlmaStore, ALMA_CODE } = require('./seed-alma.js');

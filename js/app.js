@@ -3210,7 +3210,7 @@ function renderOnboardHub() {
     <!-- Method cards -->
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0.75rem;margin-bottom:1.5rem">
       ${_onboardCard('add',    '', 'Add Member',         'Add one person with their email',   color)}
-      ${_onboardCard('import', '', 'Import Spreadsheet', 'Upload a CSV or XLSX file',         color)}
+      ${_onboardCard('import', '', 'Import Spreadsheet', 'Upload a CSV file',                 color)}
       ${/* HONEST LABEL. This card said "Invite by Email / Send personalised email invites" while
             the panel it opens admitted, in its own body text, that "Email delivery is not yet
             active - you copy and send the link yourself." Nothing in this repository sends email:
@@ -3285,10 +3285,10 @@ function _openOnboardSection(section) {
         <div class="card-header"><div class="card-title">Import Spreadsheet</div></div>
         <div class="card-body">
           <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.8rem;line-height:1.6">
-            Upload a <strong>CSV</strong> or <strong>XLSX</strong> file. Required columns: <code>name</code>, <code>email</code>. Optional: <code>role</code>, <code>group</code>/<code>department</code>.
+            Upload a <strong>CSV</strong> file. Required columns: <code>name</code>, <code>email</code>. Optional: <code>role</code>, <code>group</code>/<code>department</code>. Names containing a comma are fine if the cell is quoted, which is what a spreadsheet does when it exports. Excel workbooks are not read yet — use File, Save As, CSV.
           </div>
           <div style="margin-bottom:0.8rem">
-            <input type="file" id="ob-import-file" accept=".csv,.xlsx,.xls" class="form-input" style="padding:6px" onchange="_previewImportFile()" />
+            <input type="file" id="ob-import-file" accept=".csv" class="form-input" style="padding:6px" onchange="_previewImportFile()" />
           </div>
           <div id="ob-import-preview" style="margin-bottom:0.8rem"></div>
           <button class="btn btn-accent btn-sm" id="ob-import-btn" onclick="_submitImport()" style="display:none">Import All</button>
@@ -3436,6 +3436,20 @@ async function _previewImportFile() {
   el.innerHTML = '<div style="color:var(--text-muted);font-size:var(--fs)">Parsing…</div>';
 
   try {
+    /* A WORKBOOK IS NOT TEXT. The picker advertised .xlsx and .xls, and this read every file with
+       file.text() and split it on commas -- so a ZIP-based workbook was parsed as if it were CSV
+       and produced silent nonsense. Onboarding never calls XLSX.read and never reads an
+       ArrayBuffer; the format was offered, not implemented.
+
+       The picker now offers only what onboarding can actually read, and a workbook dropped in
+       anyway is REFUSED with a sentence rather than corrupted. Implementing XLSX import is a
+       product decision, not a bug fix, and it is recorded as an open one. */
+    if (/\.(xlsx|xls)$/i.test(file.name || '')) {
+      el.innerHTML = '<div style="color:var(--warning);font-size:var(--fs)">Spreadsheet files (.xlsx / .xls) cannot be imported yet. Save the sheet as CSV and choose it again.</div>';
+      if (btn) btn.style.display = 'none';
+      _importRows = [];
+      return;
+    }
     const text = await file.text();
     _importRows = _parseCSV(text);
     if (!_importRows.length) { el.innerHTML = '<div style="color:var(--warning);font-size:var(--fs)">No rows found. Check file format.</div>'; return; }
@@ -3444,24 +3458,59 @@ async function _previewImportFile() {
       <div style="font-size:var(--fs);color:var(--text-muted);margin-bottom:0.4rem">${_importRows.length} row(s) found — preview:</div>
       <div style="overflow-x:auto;max-height:180px;border:1px solid var(--border);border-radius:6px">
         <table style="width:100%;border-collapse:collapse;font-size:var(--fs-sm)">
-          <thead><tr style="background:var(--surface-2)">${Object.keys(_importRows[0]).map(k=>`<th style="padding:4px 8px;text-align:left;border-bottom:1px solid var(--border)">${k}</th>`).join('')}</tr></thead>
-          <tbody>${_importRows.slice(0,5).map(r=>`<tr>${Object.values(r).map(v=>`<td style="padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-secondary)">${v||''}</td>`).join('')}</tr>`).join('')}</tbody>
+          <thead><tr style="background:var(--surface-2)">${Object.keys(_importRows[0]).map(k=>`<th style="padding:4px 8px;text-align:left;border-bottom:1px solid var(--border)">${_escHtml(k)}</th>`).join('')}</tr></thead>
+          <tbody>${_importRows.slice(0,5).map(r=>`<tr>${Object.values(r).map(v=>`<td style="padding:4px 8px;border-bottom:1px solid var(--border);color:var(--text-secondary)">${_escHtml(v||'')}</td>`).join('')}</tr>`).join('')}</tbody>
         </table>
       </div>`;
     if (btn) btn.style.display = 'inline-block';
   } catch(e) {
-    el.innerHTML = `<div style="color:var(--danger);font-size:var(--fs)">Could not parse file: ${e.message}</div>`;
+    el.innerHTML = `<div style="color:var(--danger);font-size:var(--fs)">Could not parse file: ${_escHtml(e.message)}</div>`;
   }
 }
 
+/* ── READING A CSV, INCLUDING THE QUOTED ONES ──────────────────────────────────────────────────
+   This was `line.split(',')`, which is not CSV parsing. A quoted comma -- the single most common
+   thing in a real roster export, because that is how "Lovelace, Ada" is written -- shifted every
+   column after it. Reproduced:
+
+     "Lovelace, Ada",ada@example.com,member
+       -> { name: "Lovelace", email: "Ada", role: "ada@example.com" }
+
+   The preview then showed the corrupted values as if they were the file, and the import either
+   failed validation or created something nobody typed.
+
+   A proper scanner: quoted fields may contain commas and newlines, and "" inside a quoted field
+   is a literal quote. Small, standard, and it is the format the picker already advertises. */
+function _parseCSVRows(text) {
+  const rows = [];
+  let row = [], field = '', quoted = false;
+  const src = String(text == null ? '' : text).replace(/\r\n?/g, '\n');
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') { field += '"'; i++; }   // "" is one literal quote
+        else quoted = false;
+      } else field += ch;
+      continue;
+    }
+    if (ch === '"') { quoted = true; continue; }
+    if (ch === ',') { row.push(field); field = ''; continue; }
+    if (ch === '\n') { row.push(field); rows.push(row); row = []; field = ''; continue; }
+    field += ch;
+  }
+  row.push(field);
+  rows.push(row);
+  return rows.filter(r => r.some(c => String(c).trim()));
+}
+
 function _parseCSV(text) {
-  const lines = text.replace(/\r/g,'').split('\n').filter(l => l.trim());
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[^a-z]/g,''));
-  return lines.slice(1).map(line => {
-    const vals = line.split(',');
-    const obj  = {};
-    headers.forEach((h, i) => { obj[h] = (vals[i] || '').trim().replace(/^"|"$/g,''); });
+  const rows = _parseCSVRows(text);
+  if (rows.length < 2) return [];
+  const headers = rows[0].map(h => String(h).trim().toLowerCase().replace(/[^a-z]/g, ''));
+  return rows.slice(1).map(vals => {
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = String(vals[i] == null ? '' : vals[i]).trim(); });
     return obj;
   }).filter(r => r.name);
 }

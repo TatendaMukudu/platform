@@ -1,4 +1,4 @@
-# Pilot crackdown — round 1
+# Pilot crackdown — rounds 1 and 2
 
 **Base:** `main` @ `680516631c5e53b6c86bc5d436a98efe8eea630f` — fetched and confirmed; **main has
 not moved** since the final stack landed.
@@ -301,6 +301,154 @@ Listed because a 43-section brief silently half-answered is worse than one hones
 
 ---
 
+## Round 2 — disposition of the independent Codex audits
+
+### One of the two audits does not exist
+
+`codex/work-pilot-independent-audit-r1` **is not on the remote**, and commit `e69a9ba` is not a
+valid object in this repository:
+
+```
+$ git fetch origin codex/work-pilot-independent-audit-r1
+fatal: couldn't find remote ref codex/work-pilot-independent-audit-r1
+$ git cat-file -t e69a9ba
+fatal: Not a valid object name e69a9ba
+```
+
+`docs/reviews/CODEX_PILOT_CRACKDOWN_CHECKPOINT_A.md` exists on **no** fetched branch. Nothing from
+Checkpoint A is disposed of below, because nothing from it could be read. If it was pushed
+somewhere else, or under another name, it needs re-pointing.
+
+`codex/onboard-pilot-audit-r1` @ `d2d64f3` was read in full and every finding is dispositioned.
+
+### Every finding, reproduced first
+
+Codex's report is an assertion until it fails on this branch. All six were re-run here before
+anything was changed; five reproduced exactly, and the reproductions are the basis for the fixes.
+
+| # | Finding | Reproduced? | Disposition |
+|---|---|---|---|
+| **PB-1** | Add Member creates an account its invite cannot activate | **YES** — 200, `passwordSet:false`, then 400 "An account with this email already exists", account dormant forever | **FIXED** |
+| **PB-2** | XLSX import is UI only | **YES** — picker accepted `.xlsx`; `_previewImportFile` calls `file.text()`, never `XLSX.read` or `arrayBuffer` | **INTERFACE MADE TRUTHFUL**; implementation is an open decision |
+| **PB-3** | Quoted CSV is column-shifted | **YES** — `"Lovelace, Ada",ada@example.com,member` parsed as `{name:"Lovelace", email:"Ada", role:"ada@example.com"}` | **FIXED** |
+| **PB-4** | Invite is not bound to the entered email | **YES** — invite stored no email; registering a *different* address returned 200 | **FIXED** |
+| **PB-5** | Invite authority depends on node leadership | **YES** — admin without leadership 403, with leadership 200 | **NOT CHANGED — founder decision** |
+| **PB-6** | Tree create not retry-safe; blank name stored | **YES** — two identical creates made two nodes; `"   "` stored a node with an empty name | **FIXED** |
+| *(read-only)* | CSV preview interpolates cells into `innerHTML` unescaped | **REPRODUCED** — Codex marked this Read; a cell of `<img src=x onerror=...>` parses and is interpolated raw into an admin's browser | **FIXED** |
+
+### PB-1 and PB-4 were two halves of one defect, and fixing them together closed a hole
+
+`invite-info` already returned `invite.email` ("prefill if invite was email-targeted") and
+`join-invite` already fell back to it. **Only the writer was missing** — `/api/auth/invite` stored
+the address as `label`, presentation metadata, so the binding those two routes were written for
+never existed. That is why a targeted link could be redeemed by anyone under any address.
+
+So the fix completes an existing design rather than adding one:
+
+1. An invite whose label **is an email address** now stores `email` and is bound to it. A label
+   that is not an address ("First Team intake") binds nothing, so a general join link is unchanged.
+2. A bound invite redeemed under a different address is **403**.
+3. `join-invite` **activates** an existing dormant account when the invite names that address —
+   instead of the dead-end refusal.
+
+**Activation is safe precisely because the binding now exists.** It requires the invite to name the
+address, the account to be in the same organisation, and `passwordSet === false`. An account that
+has ever had a password is untouched and still gets the duplicate refusal, so this can never become
+a takeover route. No ontology was decided: the account, the token and the set-password semantics
+all already existed; the step joining them did not.
+
+**The message on the screen — "Share this link so they can set their password" — is now true.** It
+was not before.
+
+### Two findings are product decisions, and are recorded rather than invented around
+
+**XLSX import.** Not implemented, and implementing a workbook reader is a product decision. The
+interface is now truthful instead: the picker offers `.csv` only, the card says "Upload a CSV
+file", the panel says Excel workbooks are not read yet and to save as CSV, and a workbook dropped
+in anyway is **refused with a sentence** rather than silently parsed as text and corrupted.
+
+> **Open decision:** implement XLSX import (the repository already has an attachment-side XLSX
+> processor that onboarding does not use), or leave CSV as the supported format for the pilot.
+
+**Email delivery.** Independently confirmed: no provider, client, queue, SDK or send call in
+`server.js`, `db.js`, `package.json` or `js/app.js`. `/api/auth/invite` stores a token, logs the
+URL and returns it. **EMAIL DELIVERY ACTUALLY SENDS: NO** — unchanged from round 1, where the card
+was already corrected to "Create one invite link per email address".
+
+> **Open decision:** build email delivery, or keep link-sharing as the pilot's onboarding method.
+> Nothing was built for the pilot, per instruction.
+
+**PB-5, invite authority.** Reproduced and deliberately unchanged. The route requires
+`_isLeader(...)` while the join-link listing accepts admin/superadmin or `manage_settings` — two
+gates giving different answers to one question. Which is correct is an authority-model decision,
+and `L-AU1` (membership describes structure; explicit leadership grants authority) argues both ways
+depending on whether onboarding is a structural or a leadership act.
+
+> **Open decision:** is minting an invite something any org admin may do, or only somebody who
+> currently leads a node?
+
+### Assertions added, and mutation-proven
+
+`scripts/onboard-invite-smoke.js` (**new**, 20 assertions, registered in `npm test`) and nine
+additions to `pilot-crackdown-smoke` (now 49).
+
+**20 mutations run; 18 bit, 1 crashed, and 1 could not be isolated.** Three of the first-run misses
+were my own mutations being no-ops or aimed at the wrong guard, and correcting them was the useful
+part:
+
+| # | Mutation | Red |
+|---|---|---|
+| Y1 | invite stops binding the email | `OI-A3`, `OI-A4`, `OI-A5`, `OI-B1`, `OI-B2` |
+| Y2 | remove the bound-email check | `OI-B1`, `OI-B2` |
+| Y3 | remove activation, restoring the dead end | `OI-A3`, `OI-A4`, `OI-A5` |
+| Y4 | activation stops requiring a dormant account | `OI-C1` |
+| Y6b | activation stops requiring the invite to name the address | `OI-C3` |
+| Y7 | tree create no longer retry-safe | `OI-D1`, `OI-D2` |
+| Y8 | validate the name before trimming again | `OI-D3` |
+| Y9 | duplicate rule ignores the parent | `OI-D4` |
+| Y10b | scanner stops honouring quotes around a comma | `PX-G1` |
+| Y11 | quoted fields not recognised at all | `PX-G1`, `PX-G3` |
+| Y12 | drop the doubled-quote rule | `PX-G3` |
+| Y13 / Y14 | preview cells / headers unescaped | `PX-G5` |
+| Y15 | parse error interpolated raw | `PX-G6` |
+| Y16 | picker advertises XLSX again | `PX-G7` |
+| Y17 | workbook parsed as text again | `PX-G8` |
+
+**A mutation found a law nobody had asserted.** Removing `invite.email === emailNorm` from the
+activation guard left every assertion green — the others are held by the dormancy and organisation
+checks. What that clause alone protects is that a **general** join link, which anybody may hold,
+cannot be used to claim a dormant account by typing its address. `OI-C3` now pins it, and `Y6b`
+proves it bites.
+
+**One guard could not be isolated, and that is recorded rather than forced.** The explicit
+`existing.orgCode === code` clause is redundant: `users[existing.userId]` is already scoped to the
+session organisation, so a cross-org account fails that lookup first. `OI-C2` is genuinely held —
+by the lookup. The extra clause is belt-and-braces and no valid mutation isolates it.
+
+### Ownership consolidated
+
+- **One activation path.** `join-invite` is now the single route that turns a dormant account into
+  a usable one. `/api/auth/set-password`'s token path still exists for somebody who is already
+  signed in and has never set a password; it was never reachable by an added member, because it
+  needs a Bearer session they cannot obtain.
+- **One CSV reader.** `_parseCSVRows` scans; `_parseCSV` shapes rows from it. The old inline
+  `line.split(',')` is gone.
+- **One duplicate rule for tree nodes.** Same name under the same parent returns the existing node
+  with `already: true`; the same name under a different parent is a different unit and is allowed.
+
+### Not covered from this audit
+
+- The **import size and row bounds** Codex raised (only the 25 MB JSON ceiling protects a request
+  that could ask for thousands of sequential bcrypt hashes). **Not addressed** — real, and a
+  denial-of-service boundary rather than a pilot-journey defect.
+- **Invite-by-email partial failure reporting** (the client suppresses per-address errors and shows
+  only successful links). **Not addressed.**
+- Add Member's **account-first / tree-second** transaction, which can report failure after the
+  account exists. **Not addressed**; Codex marked it Read and did not reproduce it either.
+- Import group names **auto-create tree nodes outside the CAS boundary**. **Not addressed.**
+
+---
+
 MAIN BASE SHA: **680516631c5e53b6c86bc5d436a98efe8eea630f**
 ENDING SHA: *(the commit at the head of `claude/pilot-crackdown-r1`)*
 
@@ -345,11 +493,11 @@ MISLEADING CAPABILITY CLAIMS REMAINING: **UNKNOWN — not audited.** One was fou
 the Platform Grade / Active Features claims were not examined
 MOBILE SETTINGS: **NOT ADDRESSED**
 
-MEMBERS: **NOT AUDITED**
-ORG TREE: **NOT AUDITED**
-ADD MEMBER: **NOT AUDITED**
-JOIN LINK: **NOT AUDITED**
-SPREADSHEET IMPORT: **NOT AUDITED**
+MEMBERS: **PARTIAL** (add/activate/invite/tree audited and fixed; bulk-import bounds not addressed)
+ORG TREE: **PASS** (was FAIL: retry duplication and blank names, both fixed)
+ADD MEMBER: **PASS** (was FAIL: reproduced dead-end account, fixed and mutation-proven)
+JOIN LINK: **PASS** (unbound links unchanged; targeted links now bound)
+SPREADSHEET IMPORT: **PARTIAL** (CSV fixed including quoted fields and the injection surface; XLSX is an open decision and the interface no longer claims it)
 EMAIL DELIVERY ACTUALLY SENDS: **NO** (proven: no provider, no client, no send path)
 
 HOME / PRIORITY: **PASS** (preserved; 114/114 at both widths)
