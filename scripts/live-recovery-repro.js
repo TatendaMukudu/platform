@@ -572,6 +572,68 @@ app.get('/__harness/stalled-body', (req, res) => {
         && /How sure IntelliQ is/.test(src) && /aria-label="\$\{esc\(sum\.standing\)\}/.test(src));
       ok('LR-20b …and it is reachable without a mouse',
         /class="iq-inq-band iq-band-\$\{esc\(sum\.band \|\| 'tentative'\)\}" tabindex="0"/.test(src));
+
+      /* LR-20c — AND THE EXPLANATION IS NOT WRITTEN HERE. The first version of LR-20 was satisfied
+         by a band→sentence lookup in the browser, which is what an independent review then found
+         was asserting independence the kernel had specifically failed to establish. A map keyed on
+         the band cannot be right, so its absence is the assertion. */
+      /* COMMENTS ARE NOT CODE. The comment that replaced the table quotes the sentence the table
+         used to print, because a fix whose reason is not written down gets undone — and a guard
+         reading the raw file would see that quotation and call the defect present. */
+      const CODE = src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+      ok('LR-20c the browser holds no band-keyed table of confidence sentences',
+        !/_CONFIDENCE_WHY\s*=/.test(CODE)
+        && !/several separate accounts point the same way/.test(CODE));
+      ok('LR-20d …and the badge reads the explanation the SERVER composed',
+        /standingWhy/.test(src));
+    }
+
+    /* ══ PHASE D — THE BADGE IN A REAL BROWSER ══════════════════════════════════════════════
+       The card is rendered by the real _objectCard with the real projection shape, and the title
+       and aria-label a person would actually get are read off the DOM. The band is held constant
+       across two opposite evidence shapes, because the defect was precisely that the band decided
+       the sentence: if the band still decides it, these two read the same. */
+    console.log('\n  PHASE D — THE CONFIDENCE BADGE SAYS WHAT THE EVIDENCE IS');
+    {
+      const { page, ctx } = await openApp();
+      const present = require('../ai/present.js');
+      const diagnose = require('../ai/diagnose.js');
+      const SIG = o => Object.assign({ kind: 'observation', status: 'active', at: Date.now(),
+        directness: 'direct', authority: 'corroborated', specificity: 0.7 }, o);
+      // Same band, opposite evidence: three reports of unestablished origin, versus two
+      // established independent ones. Both land on `supported`.
+      const unknownOrigin = ['a', 'b', 'c'].map((s, n) => SIG({ source: s, turnId: 't' + n }));
+      const independent = [SIG({ source: 'a', originRef: 'o1', turnId: 't1' }),
+        SIG({ source: 'b', originRef: 'o2', turnId: 't2' })];
+      const cardFor = signals => present.inquiryCard({
+        topic: { canonicalConcept: 'football.press_shape', label: 'Press shape' },
+        hypothesis: 'The press keeps forcing us backwards',
+        confidence: diagnose.deriveConfidence(signals),
+      });
+      const a = cardFor(unknownOrigin), b = cardFor(independent);
+      ok('LR-D0 both fixtures land on the SAME band, so the band cannot be what distinguishes them',
+        a.summary.band === 'supported' && b.summary.band === 'supported');
+
+      const read = card => page.evaluate(p => {
+        const html = MemberApp._objectCard({ kind: 'inquiry', id: 'i1', present: p }, 'inquiry');
+        const host = document.createElement('div');
+        host.innerHTML = html;
+        const badge = host.querySelector('.iq-inq-band');
+        return badge ? { title: badge.getAttribute('title') || '', aria: badge.getAttribute('aria-label') || '' } : null;
+      }, card);
+      const ra = await read(a), rb = await read(b);
+      ok('LR-D1 the badge is rendered with an explanation a person can read',
+        !!ra && ra.title.length > 10 && !!rb && rb.title.length > 10);
+      ok('LR-D2 reports of UNESTABLISHED origin never claim separate accounts — the review’s finding',
+        !!ra && !/separate accounts/.test(ra.title)
+        && /where it came from has not been established/.test(ra.title));
+      ok('LR-D3 …while two genuinely independent origins DO say so, at the same band',
+        !!rb && /separate accounts point the same way/.test(rb.title));
+      ok('LR-D4 so two opposite evidence shapes at ONE band read differently on screen',
+        !!ra && !!rb && ra.title !== rb.title);
+      ok('LR-D5 …and a screen reader is told the same thing as the tooltip, not less',
+        !!ra && ra.aria.includes(ra.title) && !!rb && rb.aria.includes(rb.title));
+      await ctx.close();
     }
   } catch (e) { fail++; console.error('  FAIL repro suite threw:', e && e.stack); }
 

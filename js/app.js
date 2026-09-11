@@ -2036,18 +2036,30 @@ const _CONFIDENCE_WORDS = { clear: 'Fairly sure', strong: 'Well supported', supp
    Focus card and had no way to find out what it was telling them. A label that only means
    something to whoever wrote it is not a label; it is decoration that looks like information.
 
-   This says what the WORD IS ABOUT — how much independent evidence stands behind it — because
-   that is the one thing the badge is measuring and the one thing nothing on the card said. */
-const _CONFIDENCE_WHY = {
-  clear:     'How sure IntelliQ is: several separate accounts point the same way.',
-  strong:    'How sure IntelliQ is: several separate accounts point the same way.',
-  supported: 'How sure IntelliQ is: several separate accounts point the same way.',
-  probable:  'How sure IntelliQ is: more than one account points this way.',
-  emerging:  'How sure IntelliQ is: this is starting to show up in more than one place.',
-  tentative: 'How sure IntelliQ is: this rests on very little so far, so treat it as a starting point.',
-  weak:      'How sure IntelliQ is: this rests on very little so far, so treat it as a starting point.',
-};
-function _confidenceWhy(band) { return _CONFIDENCE_WHY[String(band || '').toLowerCase()] || 'How sure IntelliQ is about this.'; }
+   THE FIRST ANSWER TO THAT WAS ITSELF A LIE, and an independent review was right to call it. It
+   was a seven-entry lookup HERE, in the browser, keyed on the BAND — and its text for `supported`,
+   `strong` and `clear` was "several separate accounts point the same way". A band cannot carry
+   that claim:
+
+     · several reports whose ORIGIN was never established reach `supported` with the independent
+       origin count at ZERO. The whole origin/occasion apparatus in ai/diagnose.js exists because
+       we cannot then rule out a room repeating one telling, and this asserted the very
+       independence the kernel had specifically failed to establish.
+     · one origin retold by four people is capped rather than refused, so it sits in a band whose
+       tooltip said several separate accounts.
+     · a CONTESTED picture — real disagreement, the most informative state the system has — was
+       described as everything pointing the same way.
+
+   The words now come from the server, composed by ai/present.js from the counts ai/diagnose.js
+   computed the score from, and arrive on the card as `summary.standingWhy`. Nothing about the
+   evidence is decided here. This function only reads that field and, where an older record
+   carries no explanation, says less rather than inventing one — because the fallback IS the
+   defect: a sentence that is always available is a sentence that is sometimes untrue. */
+function _confidenceWhy(summary) {
+  const s = (summary && typeof summary === 'object') ? summary : {};
+  const why = typeof s.standingWhy === 'string' ? s.standingWhy.trim() : '';
+  return why || 'How sure IntelliQ is about this, from what has been recorded.';
+}
 
 function _answerabilityRecords(items, emptyText) {
   if (!Array.isArray(items) || !items.length) return `<p style="color:var(--text-muted);margin:0">${_escHtml(emptyText)}</p>`;
@@ -11830,7 +11842,7 @@ const MemberApp = {
         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${open()}}">
         <div class="iq-inq-head">
           <span class="iq-inq-topic">${esc(title)}</span>
-          ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}" tabindex="0" title="${esc(_confidenceWhy(sum.band))}" aria-label="${esc(sum.standing)} — ${esc(_confidenceWhy(sum.band))}">${esc(sum.standing)}</span>` : ''}
+          ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}" tabindex="0" title="${esc(_confidenceWhy(sum))}" aria-label="${esc(sum.standing)} — ${esc(_confidenceWhy(sum))}">${esc(sum.standing)}</span>` : ''}
           ${shared ? `<span class="iq-inq-forum" title="Others can discuss this">Forum</span>` : ''}
         </div>
         ${item.whose && item.whose !== 'you'
@@ -11984,7 +11996,7 @@ const MemberApp = {
           <div class="iqt-head">
             <div class="iqt-head-mid">
               <h1 class="iqt-title">${esc(title)}</h1>
-              ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}" tabindex="0" title="${esc(_confidenceWhy(sum.band))}" aria-label="${esc(sum.standing)} — ${esc(_confidenceWhy(sum.band))}">${esc(sum.standing)}</span>` : ''}
+              ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}" tabindex="0" title="${esc(_confidenceWhy(sum))}" aria-label="${esc(sum.standing)} — ${esc(_confidenceWhy(sum))}">${esc(sum.standing)}</span>` : ''}
             </div>
             ${/* THE FORUM IS AN ICON, not the word "Forum". A text label in a header bar competes
                   with the object's own title for the one line a phone gives you, and it reads as a
