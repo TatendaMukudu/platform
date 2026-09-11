@@ -12649,19 +12649,41 @@ const MemberApp = {
         const top = s.unit === 'band' ? (c.series.find(x => x.key === 'band')?.ticks || []).length - 1
           : Math.max(1, ...vs, c.threshold ? c.threshold.value : 0);
         const py = v => H - PADB - (top <= 0 ? 0 : (v / top) * (H - PADT - PADB));
-        const d = pts.map((p, i) => `${i ? 'L' : 'M'}${px(p.at).toFixed(1)},${py(p.value).toFixed(1)}`).join(' ');
-        svg.push(`<path class="iqt-line iqt-line-${esc(s.key)}" d="${d}"/>`);
-        svg.push(pts.map(p => `<circle class="iqt-dot iqt-dot-${esc(s.key)}" cx="${px(p.at).toFixed(1)}" cy="${py(p.value).toFixed(1)}" r="3"><title>${esc(p.label)}</title></circle>`).join(''));
+        /* L-CH6 — A LINE IS DRAWN ONLY WHERE THE SERVER SAYS THERE IS A TREND.
+
+           THE FOUNDER SAW THIS ON A REAL SCREEN: two accounts recorded on the SAME DATE, drawn as
+           a VERTICAL LINE. `px` collapses a zero-width time range to the middle of the axis, so
+           every point landed on one x and the path between them went straight up — which is not a
+           degenerate trend, it is a picture of an infinite rate of change, produced by the least
+           information the chart can hold.
+
+           The shape is not decided here. ai/chart.js derives it from the points and the gate
+           refuses a declaration that disagrees with them, so this renders what it was told. A
+           series the server has not shaped gets no line either: an undeclared shape is exactly
+           the renderer's guess that produced the defect. */
+        const isTrend = s.shape === 'trend';
+        if (isTrend) {
+          const d = pts.map((p, i) => `${i ? 'L' : 'M'}${px(p.at).toFixed(1)},${py(p.value).toFixed(1)}`).join(' ');
+          svg.push(`<path class="iqt-line iqt-line-${esc(s.key)}" d="${d}"/>`);
+        }
+        svg.push(pts.map(p => `<circle class="iqt-dot iqt-dot-${esc(s.key)}${isTrend ? '' : ' iqt-dot-state'}" cx="${px(p.at).toFixed(1)}" cy="${py(p.value).toFixed(1)}" r="${isTrend ? 3 : 5}"><title>${esc(p.label)}</title></circle>`).join(''));
         if (c.threshold && s.unit === c.threshold.unit) {
           const ty = py(c.threshold.value).toFixed(1);
           svg.push(`<line class="iqt-thresh" x1="${PADL}" y1="${ty}" x2="${W - PADR}" y2="${ty}"/>`);
           svg.push(`<text class="iqt-thresh-t" x="${PADL}" y="${Number(ty) - 4}">${esc(c.threshold.value)} — enough support</text>`);
         }
       }
-      parts.push(`<div class="iqt-chart-y">${c.kind === 'firming' ? 'Separate supporting accounts' : 'Recorded events'}</div><svg class="iqt-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.title)}">${svg.join('')}</svg>`);
+      /* WHETHER TIME IS AN AXIS AT ALL. A chart the server shaped as `state` has one moment in
+         it, so a "Time" axis running from that date to the same date is a label for a dimension
+         the picture does not have — and printing the same date at both ends is how a reader
+         concludes the product is broken rather than that the record is young. */
+      const anyTrend = visibleSeries.some(s => s.shape === 'trend');
+      parts.push(`<div class="iqt-chart-y">${c.kind === 'firming' ? 'Separate supporting accounts' : 'Recorded events'}</div><svg class="iqt-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.title)}${anyTrend ? '' : ' — one moment on the record, shown as points rather than a line'}">${svg.join('')}</svg>`);
       const first = all.length ? new Date(x0).toLocaleDateString() : '';
       const last = all.length ? new Date(x1).toLocaleDateString() : '';
-      parts.push(`<div class="iqt-chart-axis"><span>${esc(first)}</span><span>Time</span><span>${esc(last)}</span></div>`);
+      parts.push(anyTrend
+        ? `<div class="iqt-chart-axis"><span>${esc(first)}</span><span>Time</span><span>${esc(last)}</span></div>`
+        : `<div class="iqt-chart-axis iqt-chart-axis-state"><span>${esc(first)}</span><span>one moment on the record</span></div>`);
     }
     // L-CH5 — a picture with no stated limits is read as complete.
     parts.push(`<ul class="iqt-chart-lim">${(c.limitations || []).map(l => `<li>${esc(l)}</li>`).join('')}</ul>`);

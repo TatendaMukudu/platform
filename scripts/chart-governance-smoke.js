@@ -220,5 +220,104 @@ ok('CG8 the band axis is the kernel\'s four steps, in the kernel\'s order',
     chart.governChart(built, { basis: ['f1', 'm1'] }).ok === true);
 }
 
+/* ══ CG19 — L-CH6: A LINE IS A CLAIM ABOUT CHANGE OVER TIME ═════════════════════════════════
+   THE FOUNDER SAW THIS ON A REAL SCREEN (observations 15-17): two accounts recorded on the SAME
+   DATE were drawn as a VERTICAL LINE. The renderer collapses a zero-width time range to the
+   middle of the axis, so every point lands on one x and the path between them goes straight up.
+   That is not a degenerate trend — it is a picture of an infinite rate of change, produced by the
+   least information the chart can hold, and it is the most dramatic shape the product can draw.
+
+   The shape is derived from the points, declared on the series, and RE-DERIVED by the gate, which
+   refuses a declaration that disagrees. A caller that could declare `trend` over one timestamp
+   could draw the defect back, and it would arrive looking like every other chart. */
+console.log('\n  CG19 — ONE MOMENT IS NOT A MOVEMENT');
+{
+  const same = chart.buildFirming({ occasions: [
+    { at: t0, refs: ['a1'], band: 'emerging' },
+    { at: t0, refs: ['a1', 'a2'], band: 'probable' },
+  ] });
+  ok('CG19a two accounts recorded at the SAME timestamp are a STATE, never a trend',
+    same.series[0].shape === 'state' && same.series[0].distinctTimes === 1);
+  ok('CG19a2 …and the band series alongside it is shaped the same way, since it shares the moments',
+    (same.series.find(x => x.key === 'band') || {}).shape === 'state');
+  ok('CG19a3 …and the chart SAYS so itself rather than leaving a caller to remember it',
+    same.limitations.some(l => /recorded at the same moment/i.test(l)));
+  ok('CG19a4 …while still being a perfectly drawable chart — this is a shape rule, not a refusal',
+    chart.governChart(same, { basis: ['a1', 'a2'] }).ok === true);
+
+  /* SAME DAY, DIFFERENT MOMENTS. Deliberately a trend: two things four hours apart are two
+     moments and the record can honestly say which came first. Whether four hours means anything
+     is the reader's judgement, not a renderer's to make by silently rounding to a day. */
+  const sameDay = chart.buildFirming({ occasions: [
+    { at: t0, refs: ['a1'], band: 'emerging' },
+    { at: t0 + 4 * 3600000, refs: ['a1', 'a2'], band: 'probable' },
+  ] });
+  ok('CG19b two moments on the same DAY are still two moments, and may be drawn as a trend',
+    sameDay.series[0].shape === 'trend' && sameDay.series[0].distinctTimes === 2);
+  ok('CG19b2 …and carries no one-moment caveat, because it is not one moment',
+    !sameDay.limitations.some(l => /recorded at the same moment/i.test(l)));
+
+  const days = chart.buildFirming({ occasions: [
+    { at: t0, refs: ['a1'], band: 'emerging' },
+    { at: t0 + DAY, refs: ['a1', 'a2'], band: 'probable' },
+    { at: t0 + 2 * DAY, refs: ['a1', 'a2', 'a3'], band: 'supported' },
+  ] });
+  ok('CG19c genuinely distinct days are a trend', days.series[0].shape === 'trend'
+    && days.series[0].distinctTimes === 3
+    && chart.governChart(days, { basis: ['a1', 'a2', 'a3'] }).ok === true);
+
+  const one = chart.buildFirming({ occasions: [{ at: t0, refs: ['a1'], band: 'emerging' }] });
+  ok('CG19d a single point is a state, not a line of length zero', one.series[0].shape === 'state');
+
+  /* THE GATE, which is what makes the declaration worth anything. */
+  const forged = JSON.parse(JSON.stringify(same));
+  forged.series.forEach(x => { x.shape = 'trend'; });
+  const verdict = chart.governChart(forged, { basis: ['a1', 'a2'] });
+  ok('CG19e a caller DECLARING a trend over one timestamp is refused — the gate re-derives the shape',
+    verdict.ok === false
+    && verdict.violations.some(v => v.kind === 'shape_disagrees_with_time' && v.actual === 'state'));
+  ok('CG19e2 …and is told what it is, rather than being told the record is empty',
+    /only has one moment in it/i.test(chart.refusalNote(verdict.violations)));
+
+  const undeclared = JSON.parse(JSON.stringify(days));
+  undeclared.series.forEach(x => { delete x.shape; });
+  ok('CG19f a series with NO declared shape is refused too — an undeclared shape is the renderer\'s guess, and that guess is what drew the vertical line',
+    chart.governChart(undeclared, { basis: ['a1', 'a2', 'a3'] }).ok === false);
+
+  /* A TIMELINE OF ONE EVENT is a list with a date on it. */
+  const oneEvent = chart.buildTimeline({ events: [{ at: t0, label: 'Set', refs: ['f1'] }] });
+  ok('CG19g a timeline with one event is a state and says so',
+    oneEvent.series[0].shape === 'state'
+    && oneEvent.limitations.some(l => /recorded at the same moment/i.test(l)));
+
+  /* A SPREAD IS CATEGORICAL. Time is not an axis, so it is neither a trend nor a state. */
+  const spread = chart.buildSpread({ categories: [{ key: 'a', label: 'A', refs: ['r1'], notRefs: [] }],
+    floor: { ok: true } });
+  ok('CG19h a spread is CATEGORY — bars, with time not an axis at all',
+    spread.series.every(x => x.shape === 'category' && x.distinctTimes === 0));
+  ok('CG19h2 …and it is not made to carry a one-moment caveat about a dimension it does not have',
+    !spread.limitations.some(l => /recorded at the same moment/i.test(l)));
+}
+
+/* CG20 — the renderer obeys the shape rather than deciding one. Source-level, decommented,
+   because the defect lived in a single ternary that the hermetic suite cannot execute. */
+console.log('\n  CG20 — AND THE RENDERER DRAWS WHAT IT WAS TOLD');
+{
+  const fs_ = require('fs'), path_ = require('path');
+  const APP = fs_.readFileSync(path_.join(__dirname, '..', 'js', 'app.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+  const fn = APP.slice(APP.indexOf('_chartHTML(c) {'), APP.indexOf('async _renderMaterial('));
+  ok('CG20a the chart renderer is found (an empty slice would make the rest vacuous)',
+    fn.length > 800 && /iqt-svg/.test(fn));
+  ok('CG20b it asks the SERVER what shape the record is, and never works it out itself',
+    /s\.shape === 'trend'/.test(fn));
+  ok('CG20c …and the path is drawn only inside that branch',
+    /isTrend\s*\)\s*\{[\s\S]{0,400}iqt-line/.test(fn));
+  ok('CG20d …so no line can be emitted for a state series',
+    !/svg\.push\(`<path class="iqt-line[\s\S]{0,40}`\);\s*\n\s*svg\.push\(pts\.map/.test(fn));
+  ok('CG20e …and a one-moment chart is not given a "Time" axis running from a date to itself',
+    /anyTrend/.test(fn) && /one moment on the record/.test(fn));
+}
+
 console.log(`\nchart-governance-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

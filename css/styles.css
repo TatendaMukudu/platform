@@ -3511,3 +3511,9 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqg-hist-text{flex:1 1 14ch;font-size:var(--fs-md);line-height:1.45;color:var(--text-primary);
   overflow-wrap:anywhere}
 .iqg-hist-out{flex:0 0 auto;font-size:var(--fs-sm);color:var(--text-secondary)}
+
+/* L-CH6 — ONE MOMENT IS NOT A MOVEMENT. A `state` series is drawn as points and no line, so a
+   larger dot is what carries it: at 3px an unconnected point reads as a speck of dust, and the
+   whole picture reads as a chart that failed to render rather than as a record that is young. */
+.iqt-dot-state{r:5}
+.iqt-chart-axis-state{justify-content:flex-start;gap:.6rem}
