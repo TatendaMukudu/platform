@@ -705,6 +705,18 @@ function navigate(dest){
   //    (Explicit entry points — askAboutMember / askAboutWork — navigate first, THEN set context.)
   try { if (typeof MemberApp !== 'undefined') { if (MemberApp.clearSubject) MemberApp.clearSubject(); MemberApp._wsWorkItemId = null; } } catch (_) {}
 
+  /* 3b. AND EVERY LIVE MICROPHONE STOPS. A recogniser is bound to a TEXTAREA BY ID, and
+     navigating replaces the page that textarea was on — so a session left running would keep
+     listening to somebody who has walked away from the composer, and would deliver its final
+     result into whatever element now happens to hold that id, on a screen they are not looking
+     at. `cancel` restores the draft rather than keeping the speech, which is right here: they
+     left, they did not finish.
+
+     Session end already did this (see _sessionEnded). Navigation did not, and navigation is the
+     ordinary case — somebody taps the microphone, changes their mind, and taps Home. */
+  try { if (window.IQVoice && IQVoice.cancelAll) IQVoice.cancelAll(); } catch (_) {}
+  try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (_) {}
+
   // 4. Activate the canonical surface + one-authority nav/title/active state.
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
@@ -2547,9 +2559,29 @@ async function _renderRealCapabilities() {
   const comp = (h && h.composer) || {};
   const compReason = comp.why
     || (comp.effective ? '' : 'The composer is not writing replies on this host.');
+  /* TWO DIFFERENT THINGS THAT BOTH GET CALLED "VOICE", and a panel that reports on the system
+     must not be the place they get conflated.
+
+       SERVER TRANSCRIPTION  an OpenAI key turning an audio file into text, on the host. This is
+                             what /api/health's `voice` means, and it is a fact about the host.
+       THE BROWSER MICROPHONE  SpeechRecognition, on THIS device, in THIS browser. The server
+                             cannot know whether it exists — Safari and Chrome differ, and a
+                             person can decline the permission — so it is answered HERE, by
+                             asking the browser, which is the only thing that knows.
+
+     Reporting either from the other would be a lie in whichever direction it went: a host with a
+     key does not give somebody a microphone, and a browser with a microphone does not give the
+     host transcription. They are separate rows because they are separate questions with separate
+     fixes. */
+  const micHere = !!(window.IQVoice && IQVoice.isSupported && IQVoice.isSupported());
+  const speakHere = !!(window.speechSynthesis && window.SpeechSynthesisUtterance);
   const rows = [
     ['Conversation written by the model', !!comp.effective, compReason],
-    ['Voice notes transcribed', !!h.voice, 'Needs an OpenAI key for transcription.'],
+    ['Voice notes transcribed on the server', !!h.voice, 'Needs an OpenAI key on the host. This is not the microphone in your browser.'],
+    ['Speaking instead of typing, on this device', micHere,
+      'This browser does not offer speech recognition. Typing works as normal, and this is about your browser rather than about IntelliQ.'],
+    ['Reading replies aloud, on this device', speakHere,
+      'This browser cannot read text aloud. Replies are on screen as they always are.'],
     ['Documents read for you', !!h.readsFiles, 'Needs a model that can read files.'],
     ['The one composer surface', !!comp.on, 'IQ_COMPOSER is not switched on for this host.'],
   ];
@@ -13153,7 +13185,7 @@ const MemberApp = {
         <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1z"/><path d="M17 14l-4.2 7.1a1.7 1.7 0 0 1-3.1-1.2L10.8 15H5.5a2 2 0 0 1-1.95-2.45l1.4-6A2 2 0 0 1 6.9 5H17"/></svg>
       </button>
       <button type="button" class="iq-act" aria-label="Read this aloud" title="Read aloud"
-        onclick="MemberApp._speak(${j(text)})">
+        onclick="MemberApp._speak(${j(text)}, ${j(JSON.stringify(sources || []))}, this)">
         <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>
       </button>
       ${has ? `<button type="button" class="iq-act iq-act-src" aria-expanded="false"
@@ -13238,19 +13270,67 @@ const MemberApp = {
     if (btn) btn.textContent = show ? 'Hide' : 'See what I think so far';
   },
 
-  /* Read aloud, on request only. Browser speech synthesis — no vendor, no upload, no audio
-     leaving the device. If the browser cannot do it, the button simply does nothing rather
-     than promising something that will not happen. */
-  _speak(textJson) {
-    let text = ''; try { text = JSON.parse(textJson); } catch (_) { return; }
+  /* ── READ ALOUD ──────────────────────────────────────────────────────────────────────────
+     BROWSER speech synthesis, on request only. No vendor, no upload, no audio leaving the
+     device — and it is a COMPLETELY SEPARATE CAPABILITY from the server-side transcription in
+     ai/gateway.js. They share the word "voice" and nothing else: one is the browser reading text
+     out on this device, the other is an OpenAI key turning an audio file into text on a server.
+     Conflating them would have Settings promise a microphone because a key exists somewhere, or
+     promise reading-aloud because a browser has a microphone.
+
+     TWO THINGS WERE WRONG HERE.
+
+     IT FAILED SILENTLY. "If the browser cannot do it, the button simply does nothing" — which is
+     the defect class this entire engagement exists to remove. A person taps Read aloud, nothing
+     happens, and there is no way to tell a browser that cannot speak from a phone on silent from
+     a product that is broken. Every exit now SAYS something, in the live region the row already
+     carries for exactly this purpose.
+
+     IT SPOKE LESS THAN THE SCREEN SHOWED. A reply on screen sits above its sources and, where
+     there is one, its standing — and somebody listening rather than reading got the claim with
+     neither. Reading a claim aloud and leaving its uncertainty behind is the one asymmetry
+     between the two channels that actually matters, because a spoken sentence carries more
+     confidence than a written one, not less. So what is spoken is what is VISIBLE: the same
+     words, then how many sources it rests on. Nothing is added that is not on the screen, and
+     nothing on the screen that qualifies the claim is dropped. */
+  _speak(textJson, sourcesJson, btn) {
+    let text = ''; try { text = JSON.parse(textJson); } catch (_) { text = ''; }
+    let sources = []; try { sources = JSON.parse(JSON.parse(sourcesJson || '"[]"')); } catch (_) { sources = []; }
+    if (!Array.isArray(sources)) sources = [];
+    // The live region under this row. Already there, already announced — the state of a control
+    // belongs beside the control.
+    const say = (msg) => {
+      const row = btn && btn.closest ? btn.closest('.iq-msg-acts') : null;
+      const out = row ? row.querySelector('.iq-act-said') : null;
+      if (out) out.textContent = msg;
+    };
     const synth = window.speechSynthesis;
-    if (!synth || !window.SpeechSynthesisUtterance || !text) return;
+    if (!synth || !window.SpeechSynthesisUtterance) {
+      say('This browser cannot read text aloud. The reply is on screen as it always is.');
+      return false;
+    }
+    if (!text) { say('There is nothing to read out here.'); return false; }
+
+    /* WHAT IS SPOKEN IS WHAT IS SHOWN. The source count is the same fact the "N sources" control
+       under the message already states; saying it aloud is how a listener gets what a reader gets
+       by looking. It is never invented — with no sources it is not claimed. */
+    const disclosure = sources.length
+      ? ` This rests on ${sources.length} source${sources.length === 1 ? '' : 's'}, shown under the reply.`
+      : '';
     try {
       synth.cancel();                       // one voice at a time; tapping again stops the last
-      const u = new SpeechSynthesisUtterance(text);
+      const u = new SpeechSynthesisUtterance(text + disclosure);
       u.rate = 1.0; u.lang = document.documentElement.lang || 'en-GB';
+      // A failure AFTER speaking starts is still a failure, and the browser reports it here.
+      u.onerror = () => say('Reading aloud stopped. The reply is on screen.');
+      u.onend = () => say('');
       synth.speak(u);
-    } catch (_) {}
+      say('Reading aloud…');
+      return true;
+    } catch (_) {
+      say('Reading aloud is not working just now. The reply is on screen.');
+      return false;
+    }
   },
 
 
