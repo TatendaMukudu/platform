@@ -417,10 +417,23 @@ ok('PX-E20 the platform-grade tier system is gone: no constant, no switcher, no 
 ok('PX-E21 …and no surface prints a letter grade as a verdict, on an organisation or on a person',
   !/-Grade/.test(CLIENT_SRC));
 /* PX-E22 FIRST MATCHED THE DEFINITION, NOT THE CALL -- PROTOCOL's first lie, and deleting the call
-   from renderSettings left it green. It now requires renderSettings to actually call it. */
+   from renderSettings left it green. It now requires renderSettings to actually call it.
+
+   REWRITTEN AGAIN, September 2026, and worth saying why rather than quietly re-spelling it. The
+   middle clause matched the literal `fetch('/api/health'` -- a PROXY for "the panel asks the
+   server at render time", which is the actual law. The panel now asks through MemberApp._read,
+   the app's one bounded reader, so the proxy went stale while the law it stood for held. The
+   proxy is replaced with the law, tightened: the read must happen INSIDE _renderRealCapabilities
+   (the old clause would have been satisfied by a fetch anywhere in a 12,000-line file) and it
+   must be a live read of /api/health by either transport. Nothing has been relaxed -- a constant
+   in place of the read still fails, and now so does a read that moved out of the panel. */
+const _capPanel = APP.slice(APP.indexOf('async function _renderRealCapabilities('),
+  APP.indexOf('async function _renderBuildLine('));
 ok('PX-E22 what Settings shows instead is read from the server at render time, not from a constant',
   /function renderSettings\(\)\{[\s\S]{0,600}_renderRealCapabilities\(\);/.test(APP)
-  && /fetch\('\/api\/health'/.test(APP) && /not a plan or a tier/.test(APP_RAW));
+  && _capPanel.length > 400
+  && /(MemberApp\._read|fetch)\(\s*'\/api\/health'/.test(_capPanel)
+  && /not a plan or a tier/.test(APP_RAW));
 ok('PX-E23 …and it can say OFF, which a list of ticks had no way to express',
   /\$\{on \? 'ON' : 'OFF'\}/.test(APP_RAW));
 

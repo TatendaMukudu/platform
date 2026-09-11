@@ -2447,11 +2447,11 @@ async function _reloadForNewBuild() {
 let _buildState = null;
 async function _checkBuildIdentity() {
   const mine = _clientAssetStamp();
-  let h = null;
-  try {
-    const res = await fetch('/api/health', { headers: Auth._headers() });
-    h = res.ok ? await res.json() : null;
-  } catch (_) { h = null; }
+  // Through the one bounded reader, like the capability panel above it. An unbounded fetch here
+  // was the reason "Checking which version you are running…" could sit on the screen for ever on
+  // exactly the flaky connection that makes somebody ask which version they are running.
+  const r = await MemberApp._read('/api/health');
+  const h = r.ok ? r.data : null;
   const server = (h && h.build) || null;
   _buildState = {
     clientStamp: mine,
@@ -2507,25 +2507,39 @@ async function _renderRealCapabilities() {
   if (!box) return;
   const esc = s => _escHtml(String(s == null ? '' : s));
   box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs)">Checking…</div>`;
-  let h = null;
-  try {
-    const res = await fetch('/api/health', { headers: Auth._headers() });
-    h = res.ok ? await res.json() : null;
-  } catch (_) { h = null; }
-  if (!h) {
-    box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs)">
-      Could not check what is switched on just now.
-      <button class="btn-ghost btn-sm" onclick="_renderRealCapabilities()">Try again</button></div>`;
+  /* THE ONE READER, HERE TOO. This used to be a bare `fetch` with no timeout and no abort, which
+     is the exact shape MemberApp._read was written to retire: a host that accepts the connection
+     and never answers left "Checking…" on the screen for as long as somebody was willing to look
+     at it, and an ended session was reported as "could not check" rather than as an ended session.
+     A second networking path in the one panel whose entire job is to report truthfully about the
+     system is the worst place in the product to keep one. */
+  const r = await MemberApp._read('/api/health');
+  if (!r.ok) {
+    // One banner, written over whatever was there — never appended, so a retry cannot stack them.
+    box.innerHTML = MemberApp._readFailedHTML(r, '_renderRealCapabilities()');
     return;
   }
-  /* Each row is a fact the server just reported, with the honest "off" reason it gave where there
-     is one. No row is listed that the server cannot speak to. */
+  const h = r.data;
+  /* Each row is a fact the server just reported, with the REASON it gave where one is off.
+
+     Two defects an independent review found here. The composer row read `composer.on`, the host
+     flag alone, so a host with IQ_COMPOSER=1 and no model key showed the composer ON while the
+     same payload said every reply came from the deterministic templates. And the reason line read
+     `composer.why`, WHICH DID NOT EXIST in the payload at all, so the fallback string was printed
+     whatever the real cause was — "no key" shown to somebody whose actual reason was
+     deterministic-only mode.
+
+     `composer.effective` is the AND of every switch that has to be true, and `composer.why` is now
+     a real field carrying the server's own reason. Nothing is derived here that the server has not
+     already decided: this renders the answer rather than recomputing it. */
+  const comp = (h && h.composer) || {};
+  const compReason = comp.why
+    || (comp.effective ? '' : 'The composer is not writing replies on this host.');
   const rows = [
-    ['Conversation grounded in your record', !!(h.ai && h.ai.enabled),
-      (h.composer && h.composer.why) || 'No language-model key is configured, so replies fall back to deterministic text.'],
+    ['Conversation written by the model', !!comp.effective, compReason],
     ['Voice notes transcribed', !!h.voice, 'Needs an OpenAI key for transcription.'],
     ['Documents read for you', !!h.readsFiles, 'Needs a model that can read files.'],
-    ['The one composer', !!(h.composer && h.composer.on), 'IQ_COMPOSER is not switched on for this host.'],
+    ['The one composer surface', !!comp.on, 'IQ_COMPOSER is not switched on for this host.'],
   ];
   box.innerHTML = rows.map(([label, on, why]) => `
     <div style="display:flex;align-items:flex-start;gap:8px;padding:0.5rem 0;border-bottom:1px solid var(--border)">
@@ -7863,39 +7877,57 @@ const MemberApp = {
 
      `reason` is a closed vocabulary, deliberately: fail closed, and never enumerate the bad cases
      as "everything except empty". */
+  /* THE HEADERS ARE NOT THE ANSWER. An independent review found the timer was cleared the instant
+     `fetch` resolved — and `fetch` resolves on the RESPONSE HEADERS, not on the body. A server that
+     writes `HTTP/1.1 200` and `Content-Type: application/json` and then stalls mid-body leaves
+     `res.json()` awaiting bytes that never arrive, with the abort already cancelled and nothing
+     left to interrupt it. That is the ORIGINAL defect this helper exists to remove — "Looking at
+     your record…", indefinitely — reintroduced one line further down, and it is the shape a
+     dropped mobile connection actually takes, because the phone has the headers already.
+
+     So the timer spans the whole read, headers AND body, and is cleared in `finally` — once, on
+     every exit including a throw, which is the only placement that cannot be defeated by adding a
+     return. `ctrl.signal.aborted` then still distinguishes our timeout from a transport failure at
+     either stage, since a body aborted by this controller lands in the same catch. */
   async _read(url, { timeoutMs = 12000, method = 'GET', body = null } = {}) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    let res;
     try {
-      res = await fetch(url, { method, headers: this._authHeaders(), signal: ctrl.signal,
-        body: body == null ? undefined : JSON.stringify(body) });
-    } catch (e) {
+      let res;
+      try {
+        res = await fetch(url, { method, headers: this._authHeaders(), signal: ctrl.signal,
+          body: body == null ? undefined : JSON.stringify(body) });
+      } catch (e) {
+        // An abort is OUR timeout; anything else at this layer never reached the server.
+        return ctrl.signal.aborted
+          ? { ok: false, reason: 'timeout', message: 'That took too long to come back.' }
+          : { ok: false, reason: 'offline', message: 'IntelliQ could not be reached.' };
+      }
+      if (res.status === 401) {
+        // The session is the app's state, not this call's. Told once, here, where the truth arrives.
+        this._sessionEnded();
+        return { ok: false, reason: 'auth', status: 401, message: 'Your session has ended.' };
+      }
+      if (res.status === 403) return { ok: false, reason: 'forbidden', status: 403, message: 'You do not have access to this.' };
+      let data = null;
+      let bodyAborted = false;
+      try { data = await res.json(); } catch (_) { data = null; bodyAborted = ctrl.signal.aborted; }
+      // A body that never finished arriving is a TIMEOUT, not a malformed record. Calling it
+      // malformed would tell somebody the server sent nonsense when the server sent nothing yet.
+      if (bodyAborted) return { ok: false, reason: 'timeout', message: 'That took too long to come back.' };
+      if (!res.ok) {
+        return { ok: false, reason: 'http', status: res.status,
+          message: (data && data.error) || 'IntelliQ could not load this just now.' };
+      }
+      // A 200 that is not JSON, or JSON that is not an object, is not a record. Saying "malformed"
+      // is honest; treating it as an empty record is the defect this whole helper exists to remove.
+      if (!data || typeof data !== 'object') {
+        return { ok: false, reason: 'malformed', status: res.status, message: 'IntelliQ could not read the reply.' };
+      }
+      return { ok: true, data, status: res.status };
+    } finally {
       clearTimeout(timer);
-      // An abort is OUR timeout; anything else at this layer never reached the server.
-      return ctrl.signal.aborted
-        ? { ok: false, reason: 'timeout', message: 'That took too long to come back.' }
-        : { ok: false, reason: 'offline', message: 'IntelliQ could not be reached.' };
     }
-    clearTimeout(timer);
-    if (res.status === 401) {
-      // The session is the app's state, not this call's. Told once, here, where the truth arrives.
-      this._sessionEnded();
-      return { ok: false, reason: 'auth', status: 401, message: 'Your session has ended.' };
-    }
-    if (res.status === 403) return { ok: false, reason: 'forbidden', status: 403, message: 'You do not have access to this.' };
-    let data = null;
-    try { data = await res.json(); } catch (_) { data = null; }
-    if (!res.ok) {
-      return { ok: false, reason: 'http', status: res.status,
-        message: (data && data.error) || 'IntelliQ could not load this just now.' };
-    }
-    // A 200 that is not JSON, or JSON that is not an object, is not a record. Saying "malformed"
-    // is honest; treating it as an empty record is the defect this whole helper exists to remove.
-    if (!data || typeof data !== 'object') {
-      return { ok: false, reason: 'malformed', status: res.status, message: 'IntelliQ could not read the reply.' };
-    }
-    return { ok: true, data, status: res.status };
   },
 
   /* What a person is shown when a read fails. One sentence saying what happened, and one control

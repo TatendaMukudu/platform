@@ -7316,9 +7316,16 @@ function _readiness() {
 }
 
 app.get('/api/health', (req, res) => {
+  /* THE ORDER IS THE ARGUMENT. Each branch is only askable once the one above it is settled:
+     a host flag that is off makes the key irrelevant, no-egress makes a configured key
+     irrelevant, and whether the provider ANSWERED is only a question once a key exists and is
+     allowed to be used. The last branch is the only one that reports something observed rather
+     than something configured — see ai/gateway.js providerFault(). */
+  const providerFault = ai.providerFault();
   const composerOff = !IQ_COMPOSER ? 'IQ_COMPOSER is not set to 1 on this host'
     : ai.deterministicOnly() ? 'deterministic-only mode is on — no model is called'
     : !ai.enabled() ? 'no language-model key is configured'
+    : providerFault ? providerFault.reason
     : null;
   res.json({
     ok: true,
@@ -7332,9 +7339,29 @@ app.get('/api/health', (req, res) => {
     reasoning: ai.enabled()
       ? 'connected — replies are grounded and reasoned'
       : 'no key — running on deterministic fallbacks (set ANTHROPIC_API_KEY)',
+    /* ── THE COMPOSER HAS TWO SWITCHES AND THEY CAN DISAGREE ──────────────────────────────────
+       `on` is the host flag alone, so with IQ_COMPOSER=1 and no model key it said ON while
+       `writes` said off in the same payload. A reader had to notice the contradiction and resolve
+       it themselves; the Settings panel did not, and reported the composer as active on a host
+       where every reply came from the deterministic templates.
+
+       `effective` is the answer to the question anybody is actually asking — is the model writing
+       these replies — and it is the AND of every switch that has to be true. `why` is the reason
+       when it is not, as a field rather than a sentence the client has to parse out of `writes`.
+       The client used to read `composer.why`, which DID NOT EXIST, so it always fell back to
+       "no language-model key is configured" even when the real reason was deterministic-only mode
+       or a host flag. */
     composer: {
       on: IQ_COMPOSER,
+      effective: !!IQ_COMPOSER && !composerOff,
+      why: composerOff,
       deterministicOnly: ai.deterministicOnly(),
+      providerKey: !!(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY),
+      /* Configured is not reachable. `providerKey` is the claim; this is what the last attempt
+         actually saw. `providerFaultAt` is a timestamp, not an error body — nothing the provider
+         said is copied into an unauthenticated route. */
+      providerReachable: !providerFault,
+      providerFaultAt: providerFault ? providerFault.at : null,
       writes: composerOff
         ? `off — ${composerOff}; every reply is written by the deterministic templates`
         : 'on — the model writes the reply and the deterministic core grounds it',

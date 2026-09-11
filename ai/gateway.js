@@ -196,27 +196,77 @@ function _isSamplingRejected(err) {
    configuration most likely to need it, since setting both is how you misconfigure both. */
 const FALLBACK_MODEL = 'claude-haiku-4-5';
 
+/* ── WAS THE PROVIDER ACTUALLY THERE? ──────────────────────────────────────
+   A key in the environment is a CLAIM, not a fact. `enabled()` reads the claim: it says a key
+   is configured and no-egress is off. It cannot say the provider answered, and on a host whose
+   key has been revoked, whose account is rate-limited, or whose egress is blocked, `enabled()`
+   stays true for ever while every reply silently comes from the deterministic templates. The
+   product then tells its owner that the model is writing, which is the one thing it is not.
+
+   So this records what the last real call OBSERVED, and nothing more. It is set only when a
+   completion has exhausted every retry and both providers and is about to throw, and cleared the
+   moment any completion succeeds. Deterministic-only, missing attribution and an exhausted budget
+   are refused BEFORE the provider is touched and are deliberately not recorded here: they are
+   facts about this host or this organisation, not about the provider, and folding them together
+   would make the field a rumour. Nothing is inferred, nothing decays on a timer: the field says
+   "the last attempt failed like this", which is exactly what is known.
+──────────────────────────────────────────────────────────────────────────── */
+let _providerFault = null;
+function _noteProviderReached() { _providerFault = null; }
+function _noteProviderFault(err) {
+  const status = err?.status || err?.statusCode || null;
+  _providerFault = {
+    at: new Date().toISOString(),
+    status: status || null,
+    // A reason a person can act on. No message body from the provider is copied in: it can carry
+    // prompt fragments, and this field is read by an unauthenticated health route.
+    reason: (status === 401 || status === 403)
+      ? 'the language-model provider rejected the configured key'
+      : status === 429
+        ? 'the language-model provider is rate-limiting this host'
+        : 'the language-model provider could not be reached',
+  };
+}
+/* A copy, so no caller can edit the record by holding it. */
+function providerFault() { return _providerFault ? { ..._providerFault } : null; }
+function _resetProviderFault() { _providerFault = null; }
+
 /* ── complete ──────────────────────────────────────────────────────────────
    Returns the assistant text (string). Retries network/5xx/429 with backoff.
    If the chosen tier's model is unavailable, downshifts once to `micro`
    so a misconfigured AI_MODEL_REASON degrades gracefully instead of 500ing.
+
+   The pre-flight refusals live out here and the provider attempt lives in `_completeViaProvider`,
+   so that the reachability record above wraps EVERY path that talks to a provider and NO path
+   that does not. Marking success or failure at each individual `return` inside the retry loop is
+   how one of five exits ends up missing the line.
 ──────────────────────────────────────────────────────────────────────────── */
-async function complete({
-  tier = 'micro', model, system, messages, user,
-  maxTokens = 400, temperature, fallbackToMicro = true, org, taskType = 'unspecified',
-}) {
+async function complete(opts = {}) {
   // No-egress backstop: refuse to call any model in deterministic-only mode, even if a
   // key is present and a caller forgot to check enabled(). Nothing leaves the box.
   if (deterministicOnly()) throw new Error('LLM disabled (deterministic-only mode)');
   // ATTRIBUTION BEFORE BUDGET, because an unattributed call cannot be budgeted. Refused here
   // rather than absorbed into a shared bucket every organisation would then be sharing.
-  _requireOrg(org, taskType);
-  if (!_consumeBudget(org)) {
+  _requireOrg(opts.org, opts.taskType);
+  if (!_consumeBudget(opts.org)) {
     const err = new Error('LLM budget exhausted');
     err.code = 'LLM_BUDGET_EXHAUSTED';
     throw err;
   }
+  try {
+    const out = await _completeViaProvider(opts);
+    _noteProviderReached();
+    return out;
+  } catch (err) {
+    _noteProviderFault(err);
+    throw err;
+  }
+}
 
+async function _completeViaProvider({
+  tier = 'micro', model, system, messages, user,
+  maxTokens = 400, temperature, fallbackToMicro = true, org, taskType = 'unspecified',
+}) {
   const primary = model || MODELS[tier] || MODELS.micro;
   const msgs    = messages || [{ role: 'user', content: user }];
 
@@ -503,4 +553,5 @@ async function searchWeb({ query, system, maxUses = 3, maxTokens = 900, org, tas
 
 module.exports = { complete, completeJSON, parseJSON, MODELS, client, enabled, PLATFORM_ORG, _requireOrg, canTranscribe, transcribe, canUnderstand, understand, deterministicOnly, setDeterministicOnly,
   budgetAvailable, usageFor, _consumeBudget, _resetGatewayState,
+  providerFault, _resetProviderFault,
   canSearchWeb, searchWeb, WEB_SEARCH_TOOL };
