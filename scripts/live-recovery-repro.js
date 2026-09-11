@@ -35,6 +35,22 @@ _loadAllStores({
 });
 _rebuildEmailIndex();
 
+/* ── A SAME-ORIGIN ENDPOINT THAT SENDS ITS HEADERS AND THEN STOPS ──────────────────────────────
+   HARNESS-ONLY, mounted onto the app instance inside this test process. It is not in server.js and
+   never ships; it exists because `fetch` resolves on the RESPONSE HEADERS, and no route interceptor
+   can express "answer, then stall mid-body" — Playwright's fulfil sends a complete body or nothing
+   at all. The condition it recreates is the ordinary shape of a dropped mobile connection: the
+   phone already has `HTTP/1.1 200` and `Content-Type: application/json`, and the bytes stop.
+
+   Same origin deliberately, because the thing under test is the client's own read, and a
+   cross-origin stand-in would be testing CORS. */
+app.get('/__harness/stalled-body', (req, res) => {
+  res.status(200);
+  res.set('Content-Type', 'application/json');
+  res.write('{"objects":[');          // headers flushed, body opened, and never finished
+  // No res.end(), ever. The socket is closed when the harness closes the server.
+});
+
 (async () => {
   const server = await new Promise(res => { const s = app.listen(0, () => res(s)); });
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -63,6 +79,18 @@ _rebuildEmailIndex();
       }
       if (how === 'html500') {
         return route.fulfill({ status: 500, contentType: 'text/html', body: '<html>nope</html>' });
+      }
+      // The connection refused outright — a phone off the network, which is a different outcome
+      // from a request that hangs and a different one again from a server that answers badly.
+      if (how === 'offline') return route.abort('failed');
+      // An arbitrary reply, so a surface can be driven through a specific payload rather than only
+      // through a status code. `{ status, body, contentType }`; a non-string body is JSON-encoded.
+      if (how && typeof how === 'object') {
+        return route.fulfill({
+          status: how.status == null ? 200 : how.status,
+          contentType: how.contentType || 'application/json',
+          body: typeof how.body === 'string' ? how.body : JSON.stringify(how.body),
+        });
       }
       return route.continue();
     });
@@ -307,6 +335,166 @@ _rebuildEmailIndex();
       // an empty fixture proving nothing about what a real late result would do.
       ok('LR-S6 …and a transcript that arrives afterwards is not inserted',
         res.handler === true && !/late sentence/.test(res.text));
+      await ctx.close();
+    }
+
+    /* ══ PHASE C — WHAT THE CAPABILITY PANEL ACTUALLY RENDERS ═══════════════════════════════
+       Five states of "is the model writing these replies", driven through the real panel in a
+       real browser. Four of them used to render identically, because the row read the host flag
+       alone and the reason line read a field that did not exist in the payload. The assertions
+       below read the rendered text, not the payload: the defect was entirely in the gap between
+       the two, so a test that checked the JSON would have passed throughout.
+
+       `_renderRealCapabilities` is called directly rather than through the Settings nav, because
+       #settings-features is in the document at every route and the panel is the unit under test.
+       It is the real production function writing into the real node. */
+    console.log('\n  PHASE C — THE FIVE STATES OF THE COMPOSER, AS RENDERED');
+    {
+      const HEALTH = (composer, extra = {}) => ({ body: Object.assign({
+        ok: true, ai: { enabled: true, claude: true, openai: false }, voice: false, readsFiles: true,
+        composer, time: new Date().toISOString(),
+        build: { commit: 'abc1234', commitShort: 'abc1234', startedAt: new Date().toISOString(),
+          startId: 'hz1', assetStamp: 'unknown' },
+        readiness: { process: true, storesLoaded: true, ready: true, durableStore: true },
+      }, extra) });
+
+      // What a person actually sees: the label, whether it reads ON or OFF, and the reason under it.
+      const readPanel = page => page.evaluate(async () => {
+        await _renderRealCapabilities();
+        const box = document.getElementById('settings-features');
+        const flat = d => (d.innerText || '').replace(/\s+/g, ' ').trim();
+        const rows = [...box.querySelectorAll('div')].map(flat).filter(t => /^(ON|OFF) /.test(t));
+        return { text: box.innerText || '', rows, banners: box.querySelectorAll('.iq-read-failed').length };
+      });
+      /* NEVER READ A MISSING ROW AS A PASSING ONE. Every negative assertion below ("no reason is
+         printed", "is never rendered as a missing key") is satisfied for free by the empty string,
+         so a broken selector would have reported the whole phase green against nothing at all —
+         which is exactly what the first version of this did. The row must be FOUND to be judged. */
+      const NO_ROW = '<<the row was not rendered>>';
+      const modelRow = p => p.rows.find(t => /Conversation written by the model/.test(t)) || NO_ROW;
+
+      const plan = {};
+      const { page, ctx } = await openApp(plan);
+
+      /* C1 — enabled and writable. */
+      plan['/api/health'] = HEALTH({ on: true, effective: true, why: null, deterministicOnly: false,
+        providerKey: true, providerReachable: true, providerFaultAt: null,
+        writes: 'on — the model writes the reply and the deterministic core grounds it' });
+      const p1 = await readPanel(page);
+      ok('LR-C0 the panel renders its four capability rows (an empty panel satisfies every negative assertion below for free)',
+        p1.rows.length === 4 && modelRow(p1) !== NO_ROW);
+      ok('LR-C1 composer enabled and writable renders ON for "written by the model"',
+        /^ON /.test(modelRow(p1)) && /Conversation written by the model/.test(modelRow(p1)));
+      ok('LR-C1b …with no reason printed beneath it, because there is nothing to act on',
+        /^ON /.test(modelRow(p1))
+        && !/is not writing|no language-model key|deterministic-only|provider/i.test(modelRow(p1)));
+
+      /* C2 — the switch on, the writes off. THE ORIGINAL DEFECT: this payload rendered ON. */
+      plan['/api/health'] = HEALTH({ on: true, effective: false, why: 'no language-model key is configured',
+        deterministicOnly: false, providerKey: false, providerReachable: true, providerFaultAt: null,
+        writes: 'off — no language-model key is configured; every reply is written by the deterministic templates' });
+      const p2 = await readPanel(page);
+      ok('LR-C2 the host switch being ON does not make the model row say ON — the defect the review found',
+        p2.rows.length === 4 && /^OFF /.test(modelRow(p2)));
+      ok('LR-C2b …while the host switch keeps its OWN row, which is still honestly ON',
+        /^ON /.test(p2.rows.find(r => /composer surface/.test(r)) || NO_ROW));
+
+      /* C3 — no model key. The reason must be the server's, not the client's fallback. */
+      ok('LR-C3 no model key prints the SERVER’S reason, the one a person can act on',
+        /^OFF /.test(modelRow(p2)) && /no language-model key is configured/.test(modelRow(p2)));
+
+      /* C4 — deterministic-only, WITH a key present. Previously indistinguishable from C3: the
+         panel printed "No language-model key is configured" at a customer who had deliberately
+         forbidden egress and may have to prove it. */
+      plan['/api/health'] = HEALTH({ on: true, effective: false,
+        why: 'deterministic-only mode is on — no model is called', deterministicOnly: true,
+        providerKey: true, providerReachable: true, providerFaultAt: null,
+        writes: 'off — deterministic-only mode is on — no model is called; every reply is written by the deterministic templates' });
+      const p4 = await readPanel(page);
+      ok('LR-C4 deterministic-only mode is named on screen as its own cause',
+        /^OFF /.test(modelRow(p4)) && /deterministic-only/.test(modelRow(p4)));
+      ok('LR-C4b …and is never rendered as a missing key, which is the opposite diagnosis',
+        /^OFF /.test(modelRow(p4)) && !/key is configured/.test(modelRow(p4)));
+
+      /* C5 — provider unavailable. Every switch green, the provider refusing. */
+      plan['/api/health'] = HEALTH({ on: true, effective: false,
+        why: 'the language-model provider rejected the configured key', deterministicOnly: false,
+        providerKey: true, providerReachable: false, providerFaultAt: new Date().toISOString(),
+        writes: 'off — the language-model provider rejected the configured key; every reply is written by the deterministic templates' });
+      const p5 = await readPanel(page);
+      ok('LR-C5 a provider that refuses is named on screen, though the flag, the key and egress are all green',
+        /^OFF /.test(modelRow(p5)) && /provider/.test(modelRow(p5)));
+      ok('LR-C5b …and the four distinct payloads produce four distinguishable readings, not one',
+        ![p1, p2, p4, p5].some(p => modelRow(p) === NO_ROW)
+        && new Set([modelRow(p1), modelRow(p2), modelRow(p4), modelRow(p5)]).size === 4);
+
+      /* ── THE PANEL'S OWN READ. It reports on the system; it must not be the part that fails
+         silently. Each outcome is a different sentence and a different available action. ── */
+      console.log('\n  PHASE C — AND WHEN THE PANEL ITSELF CANNOT READ');
+      plan['/api/health'] = 'offline';
+      const off = await readPanel(page);
+      ok('LR-C6 a request that never reaches the server says so, and offers a retry',
+        off.banners === 1 && /could not be reached/i.test(off.text) && /Try again/.test(off.text));
+
+      plan['/api/health'] = { status: 200, contentType: 'text/plain', body: 'not json at all' };
+      const mal = await readPanel(page);
+      ok('LR-C7 a 200 that is not a record says the reply could not be read — never an empty panel',
+        mal.banners === 1 && /could not read the reply/i.test(mal.text));
+
+      plan['/api/health'] = 401;
+      const auth = await readPanel(page);
+      ok('LR-C8 a 401 is reported as an ended session, not as "could not check"',
+        auth.banners === 1 && /session has ended/i.test(auth.text) && /Sign in/.test(auth.text));
+      ok('LR-C8b …and it offers signing in rather than a retry that cannot work',
+        !/Try again/.test(auth.text));
+
+      /* NO DUPLICATE BANNERS. The failure banner is written OVER the panel; three failed reads in
+         a row must leave one, not three, and must not leave a stale row list above them. */
+      plan['/api/health'] = 'offline';
+      await readPanel(page); await readPanel(page);
+      const thrice = await readPanel(page);
+      ok('LR-C9 three failed reads in a row leave exactly ONE banner',
+        thrice.banners === 1);
+      ok('LR-C9b …and no stale capability rows underneath it, which would be the old answer shown as the current one',
+        thrice.rows.length === 0);
+
+      /* RETRY. The control on the banner is the real one a person taps. */
+      plan['/api/health'] = HEALTH({ on: true, effective: true, why: null, deterministicOnly: false,
+        providerKey: true, providerReachable: true, providerFaultAt: null,
+        writes: 'on — the model writes the reply and the deterministic core grounds it' });
+      const retried = await page.evaluate(async () => {
+        const box = document.getElementById('settings-features');
+        const btn = [...box.querySelectorAll('button')].find(b => /Try again/.test(b.innerText || ''));
+        if (!btn) return { clicked: false };
+        btn.click();
+        await new Promise(r => setTimeout(r, 800));
+        return { clicked: true, text: box.innerText || '',
+          banners: box.querySelectorAll('.iq-read-failed').length };
+      });
+      ok('LR-C10 tapping the retry on the banner re-reads and renders the real panel',
+        retried.clicked === true && retried.banners === 0
+        && /Conversation written by the model/.test(retried.text));
+
+      /* ── THE READ IS BOUNDED THROUGH THE BODY ─────────────────────────────────────────────
+         Against the code as it was, this hangs for ever: the timer was cleared when the headers
+         arrived, and res.json() then awaited bytes that never came with nothing left to abort it.
+         The race below is the assertion — a read that does not come back loses it. ── */
+      console.log('\n  PHASE C — A BODY THAT STOPS MID-TRANSFER IS STILL BOUNDED');
+      const stalled = await page.evaluate(async () => {
+        const started = Date.now();
+        const r = await Promise.race([
+          MemberApp._read('/__harness/stalled-body', { timeoutMs: 1200 }),
+          new Promise(res => setTimeout(() => res({ NEVER_CAME_BACK: true }), 8000)),
+        ]);
+        return { r, ms: Date.now() - started };
+      });
+      ok('LR-C11 a reply whose HEADERS arrive and whose BODY never completes still comes back',
+        !stalled.r.NEVER_CAME_BACK);
+      ok('LR-C11b …bounded by the timeout the caller asked for, not by the caller giving up',
+        stalled.ms < 6000);
+      ok('LR-C11c …reported as a TIMEOUT, because the server sent nothing yet rather than nonsense',
+        stalled.r.ok === false && stalled.r.reason === 'timeout');
+
       await ctx.close();
     }
 
