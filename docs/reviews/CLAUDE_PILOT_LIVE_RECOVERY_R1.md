@@ -1120,9 +1120,11 @@ Unchanged from round 2, and I am not claiming any of it:
   Forum → private bounded to the same object with no author; private → Forum only through an
   explicit action with an audience preview and a confirmation.
 - **OUTPUT MANIFEST CONSISTENCY: PARTIAL.** The manifest exists, is verified on five channels, and
-  is wired into the composer's prose path. The card, graph, citation and voice channels are proven
-  **against the module**, not yet routed through it in production — `_chartHTML`, `_msgActions` and
-  `_speak` still verify by their own older gates.
+  is wired into the composer's prose path, where it runs **before** the older `verifyGrounding`
+  cage — both must pass, and either refusing degrades the turn; the order decides only which
+  violation gets logged. The card, graph, citation and voice channels are proven **against the
+  module**, not yet routed through it in production — `_chartHTML`, `_msgActions` and `_speak`
+  still verify by their own older gates.
 - **VOICE INPUT: PASS** for the laws, hermetically and at source. **VOICE OUTPUT: PARTIAL** — it no
   longer fails silently and carries the source disclosure, but it is not yet verified against the
   manifest and has never been heard on iOS.

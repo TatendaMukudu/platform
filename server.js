@@ -10895,9 +10895,13 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
        ONE RECORD OF WHAT MAY BE SAID, built from the SAME authorised material the model was
        handed, and checked by every channel that says it.
 
-       The cage below (`verifyGrounding`) stays, and stays first: it is the older, looser check
-       against the context blob, and it catches things a manifest cannot — a quoted title, a name
-       that appears nowhere in the bundle. What it could NOT do is the founder's requirement, that
+       The cage (`verifyGrounding`) stays, and runs SECOND: it is the older, looser check against
+       the context blob, and it catches things a manifest cannot — a quoted title, or a name that
+       appears nowhere in the bundle at all. The manifest runs first because its refusals are the
+       more precise ones, so a reply that fails both is logged with the reason that will actually
+       help. Order affects only which violation is recorded; a reply has to satisfy BOTH, and
+       either one refusing degrades the turn. What the cage could NOT do is the founder's
+       requirement, that
        the verifier "reject unsupported organisation-specific numbers, dates, names, results and
        claims" without relying only on keyword checks. Asking "is this number anywhere in four
        thousand words of context" is a keyword check, and almost every small number is somewhere
