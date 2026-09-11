@@ -1131,7 +1131,19 @@ Unchanged from round 2, and I am not claiming any of it:
 - **PILOT CODE BLOCKERS: 0.** The round-2 blocker (the group loop having no doorway) is closed.
 - **PILOT OPERATIONS BLOCKERS: 3.** No `DATABASE_URL`, no Render key, no model key — unchanged, and
   none of them is a code problem.
-- **CI ON EXACT HEAD:** stated below as the run that was actually observed.
+- **CI ON EXACT HEAD: PASS.** Truth Layer run **798**
+  (<https://github.com/TatendaMukudu/platform/actions/runs/34653760109>), `head_sha`
+  **f7d35513a32e3208707c79b7e135127871246f81**, which is the exact head of this branch. Conclusion
+  **success**, read from the Actions **run** API rather than from check-runs — a previous pass
+  reported this branch's CI as hung on the strength of a check-runs response still saying
+  `in_progress` after the run had finished, so the run record is the one that decides. One job,
+  `node scripts/test.js`; "Run the truth layer" 22:23:25Z → 22:25:58Z; whole run 2m53s. The event is
+  `pull_request`, so what GitHub actually ran is the **merge commit** of f7d3551 into the base, not
+  f7d3551 standing alone — which is why `docs-status-smoke` counts one commit more there than it
+  does locally. That is a difference in what is being tested, and it is stated rather than smoothed
+  over. This line names the head as it stood when the run was observed; the commit that writes the
+  line down is this file and nothing else, and its own run is reported on the pull request, because
+  a report cannot contain the identifier of the commit that contains it.
 
 ---
 
@@ -1146,6 +1158,6 @@ VOICE OUTPUT: PARTIAL
 FALSE-GREEN TESTS FOUND THIS PASS: 6
 PILOT CODE BLOCKERS: 0
 PILOT OPERATIONS BLOCKERS: 3
-GITHUB CI ON EXACT HEAD: PENDING
+GITHUB CI ON EXACT HEAD: PASS
 SAFE TO MERGE: NO
 READY FOR FINAL FOUNDER PHONE/RESTART RETEST: NO
