@@ -4,7 +4,7 @@
 **Branch:** `claude/pilot-live-recovery-r1`
 **Round 1 final SHA:** `0b72b87b1792947ac0a6568f24bcaaa00272f343`
 **Round 2 (correction pass) starting SHA:** `58e1c68f1867bdcba8434c287117a99962ba261b`
-**Round 2 final SHA:** `1898dc0db3e65ee7f2ff77da72fc0bde4946aa96`
+**Round 2 final SHA:** `46c4604` (this report), code at `1898dc0`
 **Pull request:** https://github.com/TatendaMukudu/platform/pull/89 — open, not merged.
 
 > **Round 2 begins at the heading "Correction pass — round 2" near the end of this document.**
