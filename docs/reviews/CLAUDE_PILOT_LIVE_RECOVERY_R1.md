@@ -1137,13 +1137,31 @@ Unchanged from round 2, and I am not claiming any of it:
   **success**, read from the Actions **run** API rather than from check-runs — a previous pass
   reported this branch's CI as hung on the strength of a check-runs response still saying
   `in_progress` after the run had finished, so the run record is the one that decides. One job,
-  `node scripts/test.js`; "Run the truth layer" 22:23:25Z → 22:25:58Z; whole run 2m53s. The event is
-  `pull_request`, so what GitHub actually ran is the **merge commit** of f7d3551 into the base, not
-  f7d3551 standing alone — which is why `docs-status-smoke` counts one commit more there than it
-  does locally. That is a difference in what is being tested, and it is stated rather than smoothed
-  over. This line names the head as it stood when the run was observed; the commit that writes the
-  line down is this file and nothing else, and its own run is reported on the pull request, because
-  a report cannot contain the identifier of the commit that contains it.
+  `node scripts/test.js`; "Run the truth layer" 22:23:25Z → 22:25:58Z; whole run 2m53s.
+
+  **Then the next run went red, and it is the most useful thing in this section.** The commit that
+  wrote this line down changed documentation and nothing else, `npm test` was green on it, and CI
+  failed: `docs-status-smoke`, which asserts `docs/INDEX.md` is not more than twenty commits behind
+  HEAD. The event is `pull_request`, so what GitHub runs is a **synthetic merge commit** of this
+  branch into the base rather than this branch's head — one extra commit. The count was therefore
+  **20 locally and 21 in CI**, and the threshold sat exactly in that gap: green on the machine
+  anybody checks it from, red on the machine that gates the merge, with no change between them
+  worth failing over. A measure that disagrees with itself by a constant depending on where it runs
+  is a coin flip at its own boundary, and a local green that cannot predict CI is the same false
+  comfort as a green suite over a broken product.
+
+  Both halves fixed, and neither is the threshold. `docs-status-smoke` now counts with
+  `--no-merges`, which removes the harness's own construction and **not** the work: proven by
+  building a real merge of a divergent base and counting both ways — 22 with merges, 21 without, so
+  the merge commit stops counting while the base-branch commit it carries is still counted. And the
+  guard was *right on the substance*: `docs/INDEX.md` was written against `58e1c68` and genuinely
+  had not seen this branch, still recording thirteen observations dispositioned and still stating
+  that the group Focus and Inquiry routes have no client caller — which item A closed. The index is
+  rewritten against the current head, not nudged past the limit. The staleness guard was re-driven
+  at 25 commits behind and goes red, so it has not been defanged.
+
+  This line names the head as it stood when the run was observed; the commit that writes the line
+  down cannot contain its own identifier, so its run is reported on the pull request instead.
 
 ---
 

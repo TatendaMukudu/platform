@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `58e1c68`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `31da6e7`. **Branch:** `claude/platform-work-summary-nmb0cm`.
 **Pilot work lands through** `claude/pilot-*` branches; §10 records what has merged since `f844c3a`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
@@ -349,7 +349,7 @@ who had real evidence in the system. Guard: `highs-lows-smoke`.
 
 ## 10 · September 10-11, 2026 — the pilot passes
 
-Twenty commits between `f844c3a` and `58e1c68`, in four rounds. The class that links them is the
+Forty commits between `f844c3a` and `31da6e7`, in five rounds. The class that links them is the
 one §8 named and this index exists to stop an agent rediscovering: **the suite was green and the
 person holding the phone was not getting it.**
 
@@ -371,8 +371,9 @@ access even by accident. It is not a relationship store and must not become one.
 | An invite address is DECLARED, so a typo is a refusal rather than an open join link | `POST /api/auth/invite` |
 
 **PR #89 (open) — live recovery.** The founder used the deployed product on a phone and found
-thirty-one things. Thirteen dispositioned so far; see `docs/reviews/CLAUDE_PILOT_LIVE_RECOVERY_R1.md`
-for the full table including what is NOT done.
+thirty-one things. **Twenty-one dispositioned** across three rounds; see
+`docs/reviews/CLAUDE_PILOT_LIVE_RECOVERY_R1.md` for the full table including what is NOT done, which
+is the half of it worth reading.
 
 | Correction | Canonical owner |
 |---|---|
@@ -381,6 +382,24 @@ for the full table including what is NOT done.
 | A render ticket per container, so a slow earlier request cannot repaint the page you are on | `_claimRender` / `_stillCurrent` |
 | One terminal signed-out state that disables every composer | `MemberApp._sessionEnded` |
 | Settings reports what the server says is on, not a tier | `_renderRealCapabilities` |
+| The group half of the A→B loop gets a door at both ends | `openGroupNode` / `_renderGroupNoticings` |
+| "Does this object have a Forum" is asked in one place and counts current readable members | `_forumAudience` |
+| Forum informs private conversation for the same object only, and never the reverse without a confirmation | `_forumContext` / `share_to_forum` |
+| A line is a claim about change over time, so one distinct timestamp may not be drawn as one | `ai/chart.js` `timeShape` |
+| What five channels may say is declared once and verified against | `ai/manifest.js` |
+| An attached file's class is earned, not asserted: permission, provenance, confirmation | `ai/material.js` `classifyRequest` |
+| Settings is three tiers with three audiences, and a tier you may not use is absent rather than greyed out | `SETTINGS_TAB_ACCESS` / `_maySeeSettingsTab` |
+| External reading is scoped to the object it was asked from, and a focus with no concept refuses | reading route + `_objectBucket` |
+
+**Three rounds, and the class did not change.** Round 3's worst finding was not a wrong rule but a
+correct one drawn into `display:none`: `#me-group` carried a `hidden` attribute nothing ever
+removed, so a member's only way to offer a noticing did not exist, so no group inquiry could open
+from the product at all. Sibling shapes: `_objectBucket` reading `state.focuses`, which the
+projection has never returned; `forumAvailable` computed three different ways in three files;
+`text.trim()` used to ask whether anything readable came out of a file, which a NUL passes. Each was
+green in the suite and broken in the hand. **Six false-green tests were found this pass, all
+written by the agent that found them**, and each is named in the report rather than quietly
+re-spelled.
 
 **Removed, because it claimed what did not exist:** the Platform Grade tier system — a client-side
 constant listing nine "Active Features" including *Complete security*, selected by a switcher that
@@ -390,10 +409,13 @@ same removal took a letter-grade badge off a person's profile (product law 1).
 **A reachability hole, and what it hid.** `reachability-smoke` accepted a route as reached if its
 last path segment appeared anywhere in the client. `/api/group` is a prefix of `/api/groups`, so
 every `/api/group/:nodeId/…` route passed on a stranger's words. Tightened, it exposed 26 routes —
-including **`/api/group/:nodeId/focus` and `/api/group/:nodeId/inquiry`, which have no client caller
-at all.** Group-level Focus and Inquiry creation is server-side only, so the node half of the A→B
-loop is reachable by nothing a person can tap. That set is dated and counted; it is **not** a
-parking space, and the routes in it are debt to be closed rather than accepted.
+including **`/api/group/:nodeId/focus` and `/api/group/:nodeId/inquiry`, which had no client caller
+at all.** Group-level Focus and Inquiry creation was server-side only, so the node half of the A→B
+loop was reachable by nothing a person could tap: fully built, fully governed, fully tested, and a
+capability nobody had. **PR #89 closed those three** (the two above and `/focus/:id/outcome`) by
+giving the team card somewhere to go, and the list has a shrink check now — it previously had none,
+so a route on it could quietly gain a caller and stay billed as debt. That set is dated and counted;
+it is **not** a parking space.
 
 **Suites added in these passes:** `metric-lifecycle-smoke`, `import-conflict-smoke`,
 `onboard-invite-smoke` (extended), `pilot-crackdown-smoke` (extended). Browser-only, outside
