@@ -2,7 +2,8 @@
 
 **Starting SHA:** `84d2c6afe073d99c65317aa0fc62b3e47c4c7448` (`main`, PR #88 merged)
 **Branch:** `claude/pilot-live-recovery-r1`
-**Final SHA:** `db3e8dc1065cf8678c56de9a1ac0a30f6cd614c0`
+**Final SHA:** `0b72b87b1792947ac0a6568f24bcaaa00272f343`
+**Pull request:** https://github.com/TatendaMukudu/platform/pull/89 — open, not merged.
 
 Push-connectivity check run first, as `AGENTS.md` requires: `git push --dry-run` to a scratch ref
 succeeded before any file was edited.
