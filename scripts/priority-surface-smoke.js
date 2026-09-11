@@ -95,16 +95,23 @@ ok('PS-B4 …and no reason code appears anywhere in the front end at all',
 
 /* ══ C — IT IS A DOOR, NOT A FETCH ════════════════════════════════════════════════════════════ */
 console.log('\n  C — THE ROUTE HAS A REAL DOOR');
-ok('PS-C1 Home fetches the attention list', /fetch\('\/api\/me\/attention'/.test(LOAD));
+/* PS-C1..C3 REPOINTED to the bounded reader. Home no longer calls `fetch` directly: every read in
+   the client goes through `_read`, which is what stopped Home hanging on "Looking at your record…"
+   and what makes a failed read incapable of returning data at all. The laws are unchanged --
+   Home asks for the desk, renders only a well-formed answer, and never reads a failure as an empty
+   desk -- and they are asserted against the call that now makes them true. */
+ok('PS-C1 Home asks for the attention list, through the bounded reader',
+  /this\._read\('\/api\/me\/attention', \{ timeoutMs/.test(LOAD));
 /* THE GUARD AND THE CALL, ASSERTED AS ONE EXPRESSION. The first version of this matched
    `_renderAttention(att.items)` anywhere in the function, and stayed green when the branch above
    it was changed to `if (false)` — a render call that can never run, which is PROTOCOL lie #1
    wearing a door's clothes. The condition has to be a real test of the response. */
 ok('PS-C2 …and RENDERS the answer, from a branch that actually tests the response',
-  /if\s*\(att\s*&&\s*att\.ok\s*&&[\s\S]{4,90}?\)\s*\{\s*return this\._renderAttention\(att\.items\);/.test(LOAD));
+  /if\s*\(att\.ok\s*&&\s*att\.data\.ok\s*&&[\s\S]{4,110}?\)\s*\{\s*return this\._renderAttention\(att\.data\.items\);/.test(LOAD));
 ok('PS-C3 …and a failed request is not treated as an empty desk — only a well-formed answer renders',
-  /att\.ok\s*&&\s*Array\.isArray\(att\.items\)\s*&&\s*att\.items\.length/.test(LOAD)
-  && /catch\s*\(_\)\s*\{\s*att\s*=\s*null;?\s*\}/.test(LOAD));
+  /att\.ok\s*&&\s*att\.data\.ok\s*&&\s*Array\.isArray\(att\.data\.items\)\s*&&\s*att\.data\.items\.length/.test(LOAD));
+ok('PS-C3b …and a desk request that never comes back cannot leave Home loading for ever',
+  /this\._read\('\/api\/me\/attention', \{ timeoutMs: \d+/.test(LOAD));
 ok('PS-C4 …and when the desk has nothing, the ordinary top-of-record card still stands',
   /iq-home-empty|iq-home-failed/.test(LOAD) && /_objectCard\(top,\s*top\.kind\)/.test(LOAD));
 

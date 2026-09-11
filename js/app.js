@@ -941,7 +941,9 @@ async function handleSetup() {
   const lastName    = (document.getElementById('setup-last-name')?.value       || '').trim();
   const email       = (document.getElementById('setup-email')?.value           || '').trim().toLowerCase();
   const password    = (document.getElementById('setup-password')?.value        || '').trim();
-  const grade       = document.getElementById('setup-grade')?.value            || 'A';
+  // PLATFORM GRADE REMOVED: there was never a server-side grade, and nothing an organisation
+  // chose here changed anything about what they got.
+  const grade       = 'A';
   const description = (document.getElementById('setup-org-description')?.value || '').trim();
   const errEl       = document.getElementById('setup-error');
   errEl.style.display = 'none';
@@ -1501,7 +1503,8 @@ function renderSidebar(){
   const color    = modeInfo.color || '#4f8ef7';
 
   document.querySelector('.sb-logo-text').textContent = 'Platform';
-  document.querySelector('.sb-logo-sub').textContent  = AppState.grade + '-Grade · IntelliQ';
+  // The sidebar used to print "A-Grade · IntelliQ" from a tier that did not exist.
+  document.querySelector('.sb-logo-sub').textContent  = 'IntelliQ';
 
   const badge = document.querySelector('.mode-badge');
   if (badge) {
@@ -2029,6 +2032,23 @@ async function showAdvanceNotices() {
 const _CONFIDENCE_WORDS = { clear: 'Fairly sure', strong: 'Well supported', supported: 'Well supported',
   probable: 'Likely', emerging: 'Taking shape', tentative: 'Early thinking', weak: 'Early thinking' };
 
+/* WHAT THE BADGE MEANS, IN THE WORDS A PERSON WOULD USE. The founder read "EARLY THINKING" on a
+   Focus card and had no way to find out what it was telling them. A label that only means
+   something to whoever wrote it is not a label; it is decoration that looks like information.
+
+   This says what the WORD IS ABOUT — how much independent evidence stands behind it — because
+   that is the one thing the badge is measuring and the one thing nothing on the card said. */
+const _CONFIDENCE_WHY = {
+  clear:     'How sure IntelliQ is: several separate accounts point the same way.',
+  strong:    'How sure IntelliQ is: several separate accounts point the same way.',
+  supported: 'How sure IntelliQ is: several separate accounts point the same way.',
+  probable:  'How sure IntelliQ is: more than one account points this way.',
+  emerging:  'How sure IntelliQ is: this is starting to show up in more than one place.',
+  tentative: 'How sure IntelliQ is: this rests on very little so far, so treat it as a starting point.',
+  weak:      'How sure IntelliQ is: this rests on very little so far, so treat it as a starting point.',
+};
+function _confidenceWhy(band) { return _CONFIDENCE_WHY[String(band || '').toLowerCase()] || 'How sure IntelliQ is about this.'; }
+
 function _answerabilityRecords(items, emptyText) {
   if (!Array.isArray(items) || !items.length) return `<p style="color:var(--text-muted);margin:0">${_escHtml(emptyText)}</p>`;
   return items.map(item => {
@@ -2388,23 +2408,69 @@ async function renderPeople() {
   }
 }
 
+/* ── WHAT IS ACTUALLY SWITCHED ON ──────────────────────────────────────────────────────────────
+   This panel used to be `PLATFORM_GRADES[grade].features` — a list in `js/data.js` — rendered with
+   green ticks under the heading "Active Features". For the A grade it claimed:
+
+     Full IntelliQ · Real-time monitoring · Behavioral trend analysis · Wellness alerts ·
+     AI development plans · External data integration · Mandated reporter tools ·
+     Advanced analytics · Complete security
+
+   None of it was checked against anything. The grade it came from was a CLIENT-SIDE VARIABLE: the
+   server has no notion of a platform grade at all, and `switchGrade` set `AppState.grade`,
+   re-rendered, and toasted "Switched to A-Grade Platform" — a success message for a change that
+   never left the browser. A person reading that panel was told nine capabilities were active, by
+   a tier they could switch themselves, backed by nothing.
+
+   "Complete security" is the one that must never be printed under any circumstances, and it was
+   printed with a tick beside it.
+
+   What replaces it is the smallest honest thing: ask the server what is on, and say so — including
+   when the answer is "off", which the old panel had no way to express. `/api/health` already
+   reports exactly this and is the owner; nothing new computes capability here. */
+async function _renderRealCapabilities() {
+  const box = document.getElementById('settings-features');
+  if (!box) return;
+  const esc = s => _escHtml(String(s == null ? '' : s));
+  box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs)">Checking…</div>`;
+  let h = null;
+  try {
+    const res = await fetch('/api/health', { headers: Auth._headers() });
+    h = res.ok ? await res.json() : null;
+  } catch (_) { h = null; }
+  if (!h) {
+    box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs)">
+      Could not check what is switched on just now.
+      <button class="btn-ghost btn-sm" onclick="_renderRealCapabilities()">Try again</button></div>`;
+    return;
+  }
+  /* Each row is a fact the server just reported, with the honest "off" reason it gave where there
+     is one. No row is listed that the server cannot speak to. */
+  const rows = [
+    ['Conversation grounded in your record', !!(h.ai && h.ai.enabled),
+      (h.composer && h.composer.why) || 'No language-model key is configured, so replies fall back to deterministic text.'],
+    ['Voice notes transcribed', !!h.voice, 'Needs an OpenAI key for transcription.'],
+    ['Documents read for you', !!h.readsFiles, 'Needs a model that can read files.'],
+    ['The one composer', !!(h.composer && h.composer.on), 'IQ_COMPOSER is not switched on for this host.'],
+  ];
+  box.innerHTML = rows.map(([label, on, why]) => `
+    <div style="display:flex;align-items:flex-start;gap:8px;padding:0.5rem 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:var(--fs-sm);font-weight:700;color:${on ? 'var(--success)' : 'var(--text-muted)'};min-width:2.4rem">${on ? 'ON' : 'OFF'}</span>
+      <span style="font-size:var(--fs-md)">${esc(label)}${on ? '' : `<div style="font-size:var(--fs-sm);color:var(--text-muted)">${esc(why)}</div>`}</span>
+    </div>`).join('')
+    + `<div style="font-size:var(--fs-sm);color:var(--text-muted);padding-top:0.6rem">
+         This is what the server reports right now, not a plan or a tier.</div>`;
+}
+
 /* ── SETTINGS PAGE ───────────────────────────────────────── */
 function renderSettings(){
   const mode  = AppState.mode;
   const info  = ORG_MODES[mode] || { label: mode || 'Custom', icon: '' };
-  const grade = AppState.grade;
 
   document.getElementById('settings-org-name').textContent  = AppState.orgName;
   document.getElementById('settings-mode').textContent      = `${info.icon || ''} ${info.label || mode}`.trim();
-  document.getElementById('settings-grade').innerHTML       = gradeBadgeHTML(grade);
   document.getElementById('settings-admin').textContent     = AppState.adminName;
-
-  const features = PLATFORM_GRADES[grade]?.features || [];
-  document.getElementById('settings-features').innerHTML = features.map(f=>`
-    <div style="display:flex;align-items:center;gap:8px;padding:0.5rem 0;border-bottom:1px solid var(--border)">
-      <span style="color:var(--success);font-size:var(--fs-lg)"></span>
-      <span style="font-size:var(--fs-md)">${f}</span>
-    </div>`).join('');
+  _renderRealCapabilities();
 
   // Load values into textarea
   _loadValuesIntoTextarea();
@@ -4102,7 +4168,12 @@ function _showProfileInner(id, m){
   document.getElementById('pm-role').textContent    = `${m.role} · ${m.group}`;
   document.getElementById('pm-avatar').textContent  = m.initials;
   document.getElementById('pm-avatar').style.background = color;
-  document.getElementById('pm-grade').innerHTML     = gradeBadgeHTML(m.iqGrade);
+  /* NO LETTER GRADE ON A PERSON. Product law 1 is "directional, never graded — no letter grades
+     as verdicts", and this rendered `${grade}-Grade` beside somebody's name. Nothing ever set
+     `iqGrade`, so it drew nothing in practice — a loaded gun rather than a live defect, and it is
+     unloaded here rather than left for somebody to populate. */
+  const pmGrade = document.getElementById('pm-grade');
+  if (pmGrade) pmGrade.innerHTML = '';
   document.getElementById('pm-joined').textContent  = m.joinDate ? `Joined ${m.joinDate}` : '';
   document.getElementById('pm-active').textContent  = m.lastActive ? `Active: ${m.lastActive}` : 'Not active yet';
   document.getElementById('pm-streak').textContent  = m.streak ? `${m.streak}-day streak` : '';
@@ -7668,6 +7739,123 @@ const MemberApp = {
     return h;
   },
 
+  /* ── THE ONE WAY THIS APP READS FROM THE SERVER ────────────────────────────────────────────
+     Not a second networking layer: a single honest reader that the surfaces which failed live now
+     share, so they can stop each inventing their own answer to "what just happened".
+
+     Two founder observations come straight from its absence.
+
+     "Looking at your record…", indefinitely. `_loadTopQuestion` awaited five requests with no
+     timeout and no abort. A request that never comes back leaves that line on the screen for as
+     long as somebody is willing to look at it. Nothing in the client was bounded except the
+     composer.
+
+     A failed read shown as an empty record. `_renderBucketPage` called `r.json()` without ever
+     looking at `r.ok`, so a 403 or a 500 with a JSON error body produced `{error:…}`, and
+     `(j && j.objects) || []` turned that into an empty list. The page then rendered "Nothing has
+     stood out as going well yet." — the product telling somebody their record is empty because it
+     could not read it. The founder suspected exactly this, and was right.
+
+     So this returns a DISCRIMINATED result and never a bare value. `ok` is the only shape that
+     carries data; every other outcome names itself, and a caller that ignores the difference will
+     read `undefined` rather than silently render emptiness.
+
+         { ok: true,  data }
+         { ok: false, reason: 'auth' | 'forbidden' | 'http' | 'timeout' | 'offline' | 'malformed',
+           status, message }
+
+     `reason` is a closed vocabulary, deliberately: fail closed, and never enumerate the bad cases
+     as "everything except empty". */
+  async _read(url, { timeoutMs = 12000, method = 'GET', body = null } = {}) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    let res;
+    try {
+      res = await fetch(url, { method, headers: this._authHeaders(), signal: ctrl.signal,
+        body: body == null ? undefined : JSON.stringify(body) });
+    } catch (e) {
+      clearTimeout(timer);
+      // An abort is OUR timeout; anything else at this layer never reached the server.
+      return ctrl.signal.aborted
+        ? { ok: false, reason: 'timeout', message: 'That took too long to come back.' }
+        : { ok: false, reason: 'offline', message: 'IntelliQ could not be reached.' };
+    }
+    clearTimeout(timer);
+    if (res.status === 401) {
+      // The session is the app's state, not this call's. Told once, here, where the truth arrives.
+      this._sessionEnded();
+      return { ok: false, reason: 'auth', status: 401, message: 'Your session has ended.' };
+    }
+    if (res.status === 403) return { ok: false, reason: 'forbidden', status: 403, message: 'You do not have access to this.' };
+    let data = null;
+    try { data = await res.json(); } catch (_) { data = null; }
+    if (!res.ok) {
+      return { ok: false, reason: 'http', status: res.status,
+        message: (data && data.error) || 'IntelliQ could not load this just now.' };
+    }
+    // A 200 that is not JSON, or JSON that is not an object, is not a record. Saying "malformed"
+    // is honest; treating it as an empty record is the defect this whole helper exists to remove.
+    if (!data || typeof data !== 'object') {
+      return { ok: false, reason: 'malformed', status: res.status, message: 'IntelliQ could not read the reply.' };
+    }
+    return { ok: true, data, status: res.status };
+  },
+
+  /* What a person is shown when a read fails. One sentence saying what happened, and one control
+     that does the same thing again — never several competing ones, which is what the founder saw.
+     `onRetry` is a JS expression string because these render into innerHTML like everything else
+     on these pages. */
+  _readFailedHTML(r, onRetry) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const msg = (r && r.message) || 'IntelliQ could not load this just now.';
+    // An ended session is not a connection problem, and must not offer a retry that cannot work.
+    if (r && r.reason === 'auth') {
+      return `<div class="iq-read-failed" role="alert"><p>${esc(msg)} Sign in again to carry on.</p>
+        <button type="button" class="btn btn-outline btn-sm" onclick="Auth.logout()">Sign in</button></div>`;
+    }
+    return `<div class="iq-read-failed" role="alert"><p>${esc(msg)} Nothing has been lost.</p>
+      ${onRetry ? `<button type="button" class="btn btn-outline btn-sm" onclick="${onRetry}">Try again</button>` : ''}</div>`;
+  },
+
+  /* ── THE LAST WRITE WINS, AND IT MUST BE THE ONE YOU ASKED FOR ─────────────────────────────
+     The founder tapped Highs, then Lows, and got the Lows heading above "Nothing has stood out as
+     going well yet." — the Highs copy. The heading is written synchronously when a render starts;
+     the body is written when its request returns. So a slow earlier request finishing second
+     overwrites the page somebody is actually looking at.
+
+     Every render of a shared container takes a ticket first. When its request comes back it checks
+     whether it is still the current one, and if it is not, it writes nothing at all. */
+  /* PER CONTAINER, NOT PER APP. The first version of this used one counter for the whole client,
+     so any two surfaces rendering at once cancelled each other: Home claimed a ticket, the bucket
+     page claimed the next one, and Home then threw away its own answer and rendered nothing. The
+     race being guarded is between two renders of THE SAME container, so the ticket is per key. */
+  _renderSeq: {},
+  _claimRender(key = 'default') { return (this._renderSeq[key] = (this._renderSeq[key] || 0) + 1); },
+  _stillCurrent(key, ticket) { return ticket === this._renderSeq[key]; },
+
+  /* ── A CONTROL THAT CANNOT WORK MUST NOT INVITE YOU TO USE IT ──────────────────────────────
+     The founder's session had expired and the composer still accepted typing, still offered the
+     microphone, and still offered the paperclip. Everything typed into it was going to be thrown
+     away by a 401, and a voice note recorded there would have been recorded for nothing.
+
+     Every composer in the app comes from `_composerHTML`, so every composer is reached from here.
+     Idempotent: a dozen 401s in a row produce one state, not a dozen banners — which is the other
+     half of what the founder saw, several competing messages at once. */
+  _sessionOver: false,
+  _sessionEnded() {
+    if (this._sessionOver) return;
+    this._sessionOver = true;
+    document.querySelectorAll('.iq-composer').forEach(c => {
+      c.classList.add('iq-composer-off');
+      c.querySelectorAll('textarea, button, input').forEach(el => { el.disabled = true; });
+      // A <label> with a hidden file input is not disableable; hide the doorway instead.
+      c.querySelectorAll('.iq-attach').forEach(el => { el.hidden = true; });
+    });
+    document.querySelectorAll('.iq-voice-state').forEach(el => {
+      el.textContent = 'Your session has ended. Sign in again to carry on.';
+    });
+  },
+
   /* ── localStorage keys (userId-scoped) ──────────────────── */
   _lsResults()  { return `iq_results_${this._userId}`; },
   _lsCheckins() { return `iq_checkins_${this._userId}`; },
@@ -10782,11 +10970,24 @@ const MemberApp = {
     if (h) h.textContent = copy.title;
     if (hs) hs.textContent = copy.sub;
 
+    const ticket = this._claimRender('bucket');
     box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-md)">Loading…</div>`;
     // SELF AND TEAM, one list, ranked together — the client asked only for scope=self, so every
     // team object was computed and unreachable, and a coach opened this and saw nothing.
-    let j; try { j = await fetch(`/api/objects?kind=${encodeURIComponent(kind)}&scope=all`, { headers: this._authHeaders() }).then(r => r.json()); } catch (_) { j = null; }
-    const list = (j && j.objects) || [];
+    const r = await this._read(`/api/objects?kind=${encodeURIComponent(kind)}&scope=all`);
+    /* THE PAGE MAY HAVE MOVED ON. Tapping Highs and then Lows used to leave whichever request
+       finished last in the container, under the heading of whichever was tapped last — the
+       founder read the Lows heading above the Highs empty line. */
+    if (!this._stillCurrent('bucket', ticket)) return;
+    /* AND A FAILED READ IS NOT AN EMPTY RECORD. This used to be `(j && j.objects) || []`, over a
+       `r.json()` that never checked `r.ok`, so every refusal and every server error became an
+       empty list and then the empty state. Telling somebody nothing has stood out for them when
+       the truth is that IntelliQ could not read their record is the worst kind of quiet. */
+    if (!r.ok) {
+      box.innerHTML = this._readFailedHTML(r, `MemberApp._renderBucketPage('${esc(kind)}')`);
+      return;
+    }
+    const list = Array.isArray(r.data.objects) ? r.data.objects : [];
 
     const make = copy.make
       ? `<button type="button" class="iq-make" onclick="MemberApp._startObject('${esc(kind)}',undefined,this)">${esc(copy.make)}</button>`
@@ -11080,34 +11281,35 @@ const MemberApp = {
        in a way worth interrupting you for" — and the ordinary top-of-record card below stands
        unchanged. A failed request is NOT an empty desk and must not silently become one, so only
        a well-formed answer with items takes this path. */
-    let att = null;
-    try {
-      att = await fetch('/api/me/attention', { headers: this._authHeaders() })
-        .then(r => (r.ok ? r.json() : null));
-    } catch (_) { att = null; }
-    if (att && att.ok && Array.isArray(att.items) && att.items.length) {
-      return this._renderAttention(att.items);
+    /* BOUNDED, because the founder watched this line for as long as they were willing to. Every
+       request here used to be an unbounded `await fetch`, so one that never came back left
+       "Looking at your record…" on the screen permanently — no timeout, no abort, no way out
+       except reloading the page. `_read` gives up and says so. */
+    const ticket = this._claimRender('brief');
+    // A shorter bound than the default: this is the first thing a person looks at, and the
+    // founder looked at it for a very long time.
+    const att = await this._read('/api/me/attention', { timeoutMs: 8000 });
+    if (!this._stillCurrent('brief', ticket)) return;
+    if (att.ok && att.data.ok && Array.isArray(att.data.items) && att.data.items.length) {
+      return this._renderAttention(att.data.items);
     }
 
     let all = [];
     let failures = 0;
-    const results = await Promise.all(kinds.map(k =>
-      fetch(`/api/objects?kind=${k}&scope=all`, { headers: this._authHeaders() })
-        .then(r => (r.ok ? r.json() : null))
-        .catch(() => null)));
-    for (const j of results) {
-      // A null is a request that did not come back, NOT a kind with nothing in it. The
+    let lastFailure = null;
+    const results = await Promise.all(kinds.map(k => this._read(`/api/objects?kind=${k}&scope=all`, { timeoutMs: 8000 })));
+    if (!this._stillCurrent('brief', ticket)) return;
+    for (const r of results) {
+      // A failed read is a request that did not come back, NOT a kind with nothing in it. The
       // difference is the whole point of this function.
-      if (!j || !Array.isArray(j.objects)) { failures++; continue; }
-      all = all.concat(j.objects.filter(o => !o.parked));
+      if (!r.ok || !Array.isArray(r.data.objects)) { failures++; lastFailure = lastFailure || (r.ok ? null : r); continue; }
+      all = all.concat(r.data.objects.filter(o => !o.parked));
     }
 
     if (failures === kinds.length) {
-      box.innerHTML = `<div class="iq-home-failed" role="alert">
-        <p>Your record could not be loaded just now. This is a connection problem, not an empty record —
-        nothing has been lost.</p>
-        <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp._loadTopQuestion()">Try again</button>
-      </div>`;
+      box.innerHTML = this._readFailedHTML(
+        lastFailure || { message: 'Your record could not be loaded just now.' },
+        'MemberApp._loadTopQuestion()');
       return;
     }
 
@@ -11464,7 +11666,7 @@ const MemberApp = {
         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${open()}}">
         <div class="iq-inq-head">
           <span class="iq-inq-topic">${esc(title)}</span>
-          ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}">${esc(sum.standing)}</span>` : ''}
+          ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}" tabindex="0" title="${esc(_confidenceWhy(sum.band))}" aria-label="${esc(sum.standing)} — ${esc(_confidenceWhy(sum.band))}">${esc(sum.standing)}</span>` : ''}
           ${shared ? `<span class="iq-inq-forum" title="Others can discuss this">Forum</span>` : ''}
         </div>
         ${item.whose && item.whose !== 'you'
@@ -11510,10 +11712,22 @@ const MemberApp = {
     // thread stacked two titles and two subtitles on top of the thing you tapped.
     const shell = document.querySelector('#page-inquiry .page-header');
     if (shell) shell.setAttribute('hidden', '');
+    const ticket = this._claimRender('bucket');
     try {
-      const response = await fetch(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/thread?scope=self`, { headers: this._authHeaders() });
-      const data = await response.json();
-      if (!response.ok || !data.ok) throw new Error('not found');
+      /* BOUNDED AND DISCRIMINATED. This used to be an unbounded fetch inside a try/catch whose
+         only answer was "This could not be opened right now." — no retry, no way back, and no
+         difference between an ended session, a refusal, a server error and a bug in the render
+         below. The founder hit that wall on Highs, on Lows and on Inquiries. */
+      const r = await this._read(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/thread?scope=self`);
+      if (!this._stillCurrent('bucket', ticket)) return;
+      if (!r.ok || !r.data.ok) {
+        box.innerHTML = this._readFailedHTML(r.ok ? { message: 'IntelliQ could not open this.' } : r,
+          `MemberApp.openObjectThread('${esc(kind)}','${esc(objectId)}')`)
+          + `<button type="button" class="btn btn-outline btn-sm" style="margin-top:0.5rem"
+               onclick="MemberApp._renderBucketPage('${esc(kind)}')">Back to ${esc((this._bucketCopy[kind] || {}).title || 'the list')}</button>`;
+        return;
+      }
+      const data = r.data;
       const x = data.opening || {};
       const p = data.present || {}; const sum = p.summary || {}; const det = p.detail || {};
       this._inquiryThread = { kind, objectId, about: data.about, conversationId: data.conversation && data.conversation.id };
@@ -11606,9 +11820,17 @@ const MemberApp = {
           <div class="iqt-head">
             <div class="iqt-head-mid">
               <h1 class="iqt-title">${esc(title)}</h1>
-              ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}">${esc(sum.standing)}</span>` : ''}
+              ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}" tabindex="0" title="${esc(_confidenceWhy(sum.band))}" aria-label="${esc(sum.standing)} — ${esc(_confidenceWhy(sum.band))}">${esc(sum.standing)}</span>` : ''}
             </div>
-            ${data.forumAvailable ? `<button type="button" class="iqt-forum" onclick="MemberApp.beginObjectAction('discuss_with_group','${esc(kind)}','${esc(objectId)}')">Forum</button>` : ''}
+            ${/* THE FORUM IS AN ICON, not the word "Forum". A text label in a header bar competes
+                  with the object's own title for the one line a phone gives you, and it reads as a
+                  section rather than as the place this object's people are talking. This is the
+                  shared-tray glyph from the same inline-SVG system every other control here uses --
+                  no emoji, per the repository convention -- with the label carried accessibly
+                  rather than visually, a 44px target, and a pressed state. */''}
+            ${data.forumAvailable ? `<button type="button" class="iqt-forum" aria-label="Open the discussion for this with the people who can see it" title="Discussion" aria-pressed="false" onclick="MemberApp.beginObjectAction('discuss_with_group','${esc(kind)}','${esc(objectId)}')">
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+            </button>` : ''}
 
           </div>
           ${body}
@@ -11619,8 +11841,14 @@ const MemberApp = {
       this._renderChart(kind, objectId);
       this._renderMaterial(kind, objectId);
       this._renderReading(kind, objectId);
-    } catch (_) {
-      box.innerHTML = `<div class="iq-empty-sub">This could not be opened right now.</div>`;
+    } catch (e) {
+      /* A THROW HERE IS A BUG IN THE RENDER, not a failure to read — the read above has already
+         answered for itself. Saying so, and still offering both a retry and a way back, is what
+         the single terminal line never did. */
+      box.innerHTML = this._readFailedHTML({ message: 'IntelliQ could not show this.' },
+        `MemberApp.openObjectThread('${esc(kind)}','${esc(objectId)}')`)
+        + `<button type="button" class="btn btn-outline btn-sm" style="margin-top:0.5rem"
+             onclick="MemberApp._renderBucketPage('${esc(kind)}')">Back to ${esc((this._bucketCopy[kind] || {}).title || 'the list')}</button>`;
     }
   },
 
@@ -12167,27 +12395,33 @@ const MemberApp = {
      forum — so they cannot drift again. */
   _composerHTML({ id, placeholder, send, mic, state, attach = true, hint = '' } = {}) {
     const esc = s => this._escape(String(s == null ? '' : s));
+    /* A composer rendered AFTER the session ended must come out disabled. `_sessionEnded` reaches
+       every composer on the page when the 401 arrives, but a page rendered a moment later would
+       otherwise put a fresh, fully usable one back — which is how the founder ended up typing into
+       a composer that had no session to send it with. Disabled here, at the one owner. */
+    const off = this._sessionOver;
+    const dis = off ? ' disabled' : '';
     return `
       <div class="iq-composer-wrap">
-        <div class="iq-composer">
-          ${attach ? `<label class="iq-attach" for="${esc(id)}-file" title="Add a document IntelliQ can use" aria-label="Add a document">
+        <div class="iq-composer${off ? ' iq-composer-off' : ''}">
+          ${attach && !off ? `<label class="iq-attach" for="${esc(id)}-file" title="Add a document IntelliQ can use" aria-label="Add a document">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5 12.5 21a4 4 0 0 1-5.66-5.66l8.49-8.48a2.5 2.5 0 0 1 3.54 3.54l-8.49 8.48a1 1 0 0 1-1.41-1.41l7.78-7.78"/></svg>
             <input type="file" class="iq-attach-input" id="${esc(id)}-file" accept=".txt,.md,.markdown,.csv,.json,.pdf,.doc,.docx" onchange="MemberApp.wsAttach(this)">
           </label>` : ''}
-          <textarea id="${esc(id)}" class="iq-composer-input" rows="1" aria-label="${esc(placeholder)}"
+          <textarea id="${esc(id)}" class="iq-composer-input" rows="1" aria-label="${esc(placeholder)}"${dis}
             placeholder="${esc(placeholder)}"
             oninput="MemberApp._wsGrow(this)"
             onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();${send}}"></textarea>
-          <button class="iq-mic" id="${esc(mic)}" type="button" aria-label="Speak instead of typing"
+          <button class="iq-mic" id="${esc(mic)}" type="button"${dis} aria-label="Speak instead of typing"
             title="Speak instead of typing" aria-pressed="false" onclick="MemberApp._micFor('${esc(id)}','${esc(mic)}','${esc(state)}')">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a7 7 0 0 1-14 0M12 18v3"/></svg>
           </button>
-          <button class="iq-send" type="button" aria-label="Send" title="Send" onclick="${send}">
+          <button class="iq-send" type="button"${dis} aria-label="Send" title="Send" onclick="${send}">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6M5 13l7-7 7 7"/></svg>
           </button>
         </div>
         ${hint}
-        <div class="iq-voice-state" id="${esc(state)}" role="status" aria-live="assertive"></div>
+        <div class="iq-voice-state" id="${esc(state)}" role="status" aria-live="assertive">${off ? 'Your session has ended. Sign in again to carry on.' : ''}</div>
       </div>`;
   },
 

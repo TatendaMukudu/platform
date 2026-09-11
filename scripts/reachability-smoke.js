@@ -105,9 +105,41 @@ const KNOWN_ORPHANS = new Set([
 ]);
 
 const server = R('server.js');
+/* js/voice.js was missing from this list, so anything only voice.js calls read as unreachable and
+   anything voice.js is the sole caller of could not be seen at all. Every client file, or the
+   guard is measuring a subset and calling it the product. */
 const FRONT_FILES = ['js/app.js', 'js/auth.js', 'js/chat.js', 'js/data.js',
-  'js/ui.js', 'js/tree.js', 'js/attachments.js', 'js/scenarios.js', 'js/charts.js', 'index.html'];
+  'js/ui.js', 'js/tree.js', 'js/attachments.js', 'js/scenarios.js', 'js/charts.js',
+  'js/voice.js', 'index.html'];
 const front = FRONT_FILES.map(R).join('');
+
+/* ── EXPOSED BY CLOSING THE TAIL HOLE, 11 September 2026 ────────────────────────────────────
+   Tightening `reachable` (the tail must now follow the prefix inside one quoted URL) revealed
+   routes the looser rule had been passing on a stranger's words. Two separate accidents were
+   doing it: `/health` in `/api/connections/:id/health` was satisfied by an unrelated call to
+   `/api/health`, and every `/api/group/:nodeId/...` route was satisfied because `/api/group` is a
+   PREFIX OF `/api/groups`, which the client calls constantly.
+
+   These are NOT in KNOWN_ORPHANS, which this file says is frozen debt rather than a parking
+   space. They are a dated, counted set with a different meaning: each one needs a decision, and
+   the count must not grow. The most consequential are named in the report --
+   `/api/group/:nodeId/focus` and `/api/group/:nodeId/inquiry` have no client caller at all, which
+   means group-level Focus and Inquiry creation is server-side only and the node half of the A->B
+   loop is reachable by nothing a person can tap. */
+const TAIL_HOLE_EXPOSED = new Set([
+  '/api/assessments/:id/ask', '/api/assessments/:memberId/presentation',
+  '/api/assessments/templates/:id/stage', '/api/checkin/:memberId/intelligence',
+  '/api/connections/:id/mapping', '/api/evidence/:id/audience', '/api/evidence/:id/resolve',
+  '/api/group/:nodeId/focus', '/api/group/:nodeId/focus/:focusId/outcome',
+  '/api/group/:nodeId/inquiry', '/api/group/:nodeId/roster', '/api/group/:nodeId/roster/:userId',
+  '/api/group/:nodeId/withdraw', '/api/inquiry/:id/dismiss', '/api/mappings/:id/retire',
+  '/api/me/focus/:id/source', '/api/me/focus/:id/visibility', '/api/messages/:msgId/read',
+  '/api/notes/:noteId/ask', '/api/org-context/:id/retire',
+  '/api/org-learning/observations/:fingerprint/dismiss',
+  '/api/org-memory/moments/:fingerprint/explain', '/api/org-playbook/:fingerprint/retire',
+  '/api/org-playbook/candidates/:fingerprint/confirm',
+  '/api/org-playbook/candidates/:fingerprint/dismiss', '/api/reason/:beliefId/feedback',
+]);
 
 const routes = [...new Set((server.match(/app\.(?:get|post|patch|put|delete)\(\s*'([^']+)'/g) || [])
   .map(m => m.replace(/^.*'([^']+)'.*$/, '$1')))].sort();
@@ -132,12 +164,26 @@ const reachable = r => {
   const firstParam = segs.findIndex(s => s.startsWith(':'));
   const prefix = '/' + segs.slice(0, firstParam).join('/');
   const tail = segs.slice(firstParam + 1).filter(s => !s.startsWith(':'));
-  return prefix.length > 5 && front.includes(prefix) && tail.every(t => front.includes('/' + t));
+  /* AND THE TAIL HAS TO FOLLOW THE PREFIX IN ONE STRING. A second hole, found on 11 September
+     2026 when an unrelated new call to `/api/health` made `/api/connections/:id/health` look
+     reached: `front.includes('/health')` is true of `/api/health`, so any route whose last
+     segment happens to be a word used elsewhere could be satisfied by a stranger. Requiring the
+     tail to appear AFTER the prefix inside the same quoted URL -- no quote or backtick in between
+     -- means a neighbour on a different path can no longer stand in for it. */
+  if (prefix.length <= 5 || !front.includes(prefix)) return false;
+  return tail.every(t => new RegExp(
+    prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "[^'\"`\\s]{0,160}/" + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  ).test(front));
 };
 
 console.log('\n  ROUTE REACHABILITY');
+ok(`the tail-hole set is exactly the 26 it exposed, and has not grown (${TAIL_HOLE_EXPOSED.size})`,
+  TAIL_HOLE_EXPOSED.size === 26);
+ok('…and every route in it is still a real declared route, so the set cannot outlive its subject',
+  [...TAIL_HOLE_EXPOSED].every(r => routes.includes(r)));
 ok(`every route is reachable, backend-only, or recorded debt (${routes.length} routes)`, (() => {
   const surprises = routes.filter(r => !reachable(r) && !BACKEND_ONLY.has(r) && !KNOWN_ORPHANS.has(r)
+    && !TAIL_HOLE_EXPOSED.has(r)
     && !PREFIX_HOLE_ORPHANS.has(r));
   if (surprises.length) {
     console.log('\n    NEW ORPHANS — built, and nothing calls them:');
@@ -192,7 +238,7 @@ ok('the lead question renders the composed explanation, not hand-built prose',
    in the file is not a door; the door is a FETCH whose result is RENDERED. Both halves, or this
    check would pass against a fetch whose answer is dropped on the floor. */
 ok('the Priority Office reaches a screen: Home fetches the attention list and renders it',
-  /fetch\('\/api\/me\/attention'/.test(front) && /_renderAttention\(att\.items\)/.test(front)
+  /_read\('\/api\/me\/attention'/.test(front) && /_renderAttention\(att\.data\.items\)/.test(front)
   && /_renderAttention\(items\)\s*\{/.test(front));
 
 console.log(`\nreachability-smoke: ${pass} passed, ${fail} failed\n`);

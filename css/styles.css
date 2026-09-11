@@ -3028,11 +3028,12 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqt-back{display:inline-flex;align-items:center;gap:.3rem;min-height:44px;padding:0;
   border:0;background:transparent;color:var(--text-muted);cursor:pointer;font-size:var(--fs-md)}
 .iqt-back:focus-visible{outline:2px solid currentColor;outline-offset:2px}
-.iqt-forum{margin-left:auto;font-size:var(--fs-xs);letter-spacing:.07em;text-transform:uppercase;
-  min-height:36px;padding:.3rem .75rem;border-radius:999px;cursor:pointer;
-  color:var(--accent);background:transparent;
-  border:1px solid color-mix(in srgb, var(--accent) 45%, transparent)}
+/* An icon control, not a word: 44px so it is reachable with a thumb, and visibly pressed. */
+.iqt-forum{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;
+  min-width:44px;min-height:44px;padding:0;border:0;background:none;cursor:pointer;
+  color:var(--text-secondary);border-radius:10px}
 .iqt-forum:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.iqt-forum:hover,.iqt-forum[aria-pressed="true"]{color:var(--text-primary);background:var(--surface-2)}
 .iqf-you{font-size:var(--fs-xs);letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted)}
 .iq-msg-gone{opacity:.45;font-style:italic}
 
