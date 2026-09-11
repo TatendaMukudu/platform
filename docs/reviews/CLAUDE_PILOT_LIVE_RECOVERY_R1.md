@@ -647,7 +647,10 @@ assertions**, all green.
 **Sixty-six mutations** run against the production line across the nine work items. Six of them
 came back **green**, which is the useful half of the number: every one was a weakness in a test I
 had just written, each is named under *False greens* below, and each was rewritten and re-run until
-the mutation went red. The final state is 66 applied, 66 red, tree verified clean after each.
+the mutation went red. The final state is 66 applied, 66 red, tree verified clean after each. The
+**seventh** false green under that heading was not found by a mutation at all — it was found by CI
+going red on a tree `npm test` called green, which is the only way that particular defect can be
+found, because it is a disagreement between two machines rather than a hole in one assertion.
 
 ---
 
@@ -983,7 +986,7 @@ recognises one spelling of a thing recognises the spelling, not the thing.
 
 ---
 
-## False greens found this pass — six, all mine
+## False greens found this pass — seven, all mine
 
 Recorded because a reviewer should not have to find them.
 
@@ -1009,6 +1012,13 @@ Recorded because a reviewer should not have to find them.
    matched the call; `BM3` showed uncited prose and I had no behavioural test at all; `BM6` made the
    origin lookup subject-blind and **my collision fixture declared the correct subject first**, so
    `find()` returned the right object anyway. The decoy is declared first now.
+7. **`docs-status-smoke` was green locally and red in CI on the same tree**, which is the one shape
+   that makes every other green in this report worth less: the check anybody runs before pushing
+   could not predict the check that gates the merge. It counted the `pull_request` event's
+   **synthetic merge commit** as work the index had not seen, so its answer was one higher in CI
+   than on the machine it was being read from, and the threshold happened to sit in that gap. It now
+   counts `--no-merges`. Found by the failure, not by reading, and detailed under the CI verdict
+   line below.
 
 Two more in the same class, caught and fixed: **`HM5`** (the device row hard-coded to `true` looked
 identical in a Chromium that *has* speech recognition — a fourth session with the API deleted now
@@ -1131,16 +1141,17 @@ Unchanged from round 2, and I am not claiming any of it:
 - **PILOT CODE BLOCKERS: 0.** The round-2 blocker (the group loop having no doorway) is closed.
 - **PILOT OPERATIONS BLOCKERS: 3.** No `DATABASE_URL`, no Render key, no model key — unchanged, and
   none of them is a code problem.
-- **CI ON EXACT HEAD: PASS.** Truth Layer run **798**
-  (<https://github.com/TatendaMukudu/platform/actions/runs/34653760109>), `head_sha`
-  **f7d35513a32e3208707c79b7e135127871246f81**, which is the exact head of this branch. Conclusion
-  **success**, read from the Actions **run** API rather than from check-runs — a previous pass
-  reported this branch's CI as hung on the strength of a check-runs response still saying
-  `in_progress` after the run had finished, so the run record is the one that decides. One job,
-  `node scripts/test.js`; "Run the truth layer" 22:23:25Z → 22:25:58Z; whole run 2m53s.
+- **CI ON EXACT HEAD: PASS.** Truth Layer run **800**
+  (<https://github.com/TatendaMukudu/platform/actions/runs/34655002948>), `head_sha`
+  **8e47510bd4677793e71b7bf211dfc443a4778f5b**, conclusion **success**, one job
+  (`node scripts/test.js`), 2m32s. Run **798** on `f7d3551`
+  (<https://github.com/TatendaMukudu/platform/actions/runs/34653760109>) was the first green on this
+  branch's head, 2m53s. Both read from the Actions **run** API rather than from check-runs — a
+  previous pass reported this branch's CI as hung on the strength of a check-runs response still
+  saying `in_progress` after the run had finished, so the run record is the one that decides.
 
-  **Then the next run went red, and it is the most useful thing in this section.** The commit that
-  wrote this line down changed documentation and nothing else, `npm test` was green on it, and CI
+  **Between them, run 799 went red, and it is the most useful thing in this section.** The commit it
+  ran on changed documentation and nothing else, `npm test` was green on it, and CI
   failed: `docs-status-smoke`, which asserts `docs/INDEX.md` is not more than twenty commits behind
   HEAD. The event is `pull_request`, so what GitHub runs is a **synthetic merge commit** of this
   branch into the base rather than this branch's head — one extra commit. The count was therefore
@@ -1173,7 +1184,7 @@ FORUM ONE-WAY CONTEXT: PASS
 OUTPUT MANIFEST CONSISTENCY: PARTIAL
 VOICE INPUT: PASS
 VOICE OUTPUT: PARTIAL
-FALSE-GREEN TESTS FOUND THIS PASS: 6
+FALSE-GREEN TESTS FOUND THIS PASS: 7
 PILOT CODE BLOCKERS: 0
 PILOT OPERATIONS BLOCKERS: 3
 GITHUB CI ON EXACT HEAD: PASS
