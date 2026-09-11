@@ -2573,15 +2573,9 @@ async function _renderRealCapabilities() {
      key does not give somebody a microphone, and a browser with a microphone does not give the
      host transcription. They are separate rows because they are separate questions with separate
      fixes. */
-  const micHere = !!(window.IQVoice && IQVoice.isSupported && IQVoice.isSupported());
-  const speakHere = !!(window.speechSynthesis && window.SpeechSynthesisUtterance);
   const rows = [
     ['Conversation written by the model', !!comp.effective, compReason],
     ['Voice notes transcribed on the server', !!h.voice, 'Needs an OpenAI key on the host. This is not the microphone in your browser.'],
-    ['Speaking instead of typing, on this device', micHere,
-      'This browser does not offer speech recognition. Typing works as normal, and this is about your browser rather than about IntelliQ.'],
-    ['Reading replies aloud, on this device', speakHere,
-      'This browser cannot read text aloud. Replies are on screen as they always are.'],
     ['Documents read for you', !!h.readsFiles, 'Needs a model that can read files.'],
     ['The one composer surface', !!comp.on, 'IQ_COMPOSER is not switched on for this host.'],
   ];
@@ -2592,8 +2586,41 @@ async function _renderRealCapabilities() {
     </div>`).join('')
     + `<div style="font-size:var(--fs-sm);color:var(--text-muted);padding-top:0.6rem">
          This is what the server reports right now, not a plan or a tier.</div>`
-    + `<div id="iq-build-line" style="font-size:var(--fs-sm);color:var(--text-muted);padding-top:0.5rem;
-         border-top:1px solid var(--border);margin-top:0.5rem">Checking which version you are running…</div>`;
+;
+  /* THE BUILD LINE MOVED, and is no longer minted here. It belongs to the person holding the
+     phone rather than to a host diagnostic, so it lives in the You tab where everybody can reach
+     it — this panel is superadmin-only. Creating it in both places would put two elements with
+     one id in the document, and getElementById returns whichever comes first. */
+}
+
+/* ── WHAT THIS DEVICE CAN DO ──────────────────────────────────────────────────────────────
+   Every authenticated person, no permission required, because none of it is anybody else's to
+   grant. And ANSWERED BY THE BROWSER, because the browser is the only thing that knows: Safari
+   and Chrome differ on speech recognition, a person can decline the microphone permission, and a
+   server with an OpenAI key has given nobody a microphone.
+
+   Deliberately separate from the server capability panel, which is superadmin-only and reports on
+   the HOST. Three things get called "voice" in this product and they share nothing but the word;
+   reporting either device capability from the server's key, or the server's transcription from
+   this browser's microphone, would be a lie in whichever direction it went. */
+async function _renderYourDevice() {
+  const box = document.getElementById('settings-you-device');
+  if (!box) return;
+  const esc = s => _escHtml(String(s == null ? '' : s));
+  const rows = [
+    ['Speaking instead of typing', !!(window.IQVoice && IQVoice.isSupported && IQVoice.isSupported()),
+      'This browser does not offer speech recognition. Typing works as normal — this is about your browser, not about IntelliQ.'],
+    ['Reading replies aloud', !!(window.speechSynthesis && window.SpeechSynthesisUtterance),
+      'This browser cannot read text aloud. Replies are on screen as they always are.'],
+  ];
+  box.innerHTML = rows.map(([label, on, why]) => `
+    <div style="display:flex;align-items:flex-start;gap:8px;padding:0.5rem 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:var(--fs-sm);font-weight:700;color:${on ? 'var(--success)' : 'var(--text-muted)'};min-width:2.4rem">${on ? 'ON' : 'OFF'}</span>
+      <span style="font-size:var(--fs-md)">${esc(label)}${on ? '' : `<div style="font-size:var(--fs-sm);color:var(--text-muted)">${esc(why)}</div>`}</span>
+    </div>`).join('')
+    + `<div style="font-size:var(--fs-sm);color:var(--text-muted);padding-top:0.6rem">
+         This is what your browser on this device can do. It is not about the server, and nothing
+         here is switched on or off by IntelliQ.</div>`;
   _renderBuildLine();
 }
 
@@ -2619,21 +2646,51 @@ async function _renderBuildLine() {
 
 /* ── SETTINGS PAGE ───────────────────────────────────────── */
 function renderSettings(){
+  /* ── THREE TIERS, AND A TAB SOMEBODY MAY NOT USE IS NOT DRAWN ─────────────────────────────
+     FOUNDER DECISION, September 2026: Personal Settings for every authenticated user,
+     Organisation Settings for authorised administrators, Platform diagnostics for superadmins —
+     and "do not give ordinary members administrative Settings merely to make the route visible".
+
+     Both halves of that matter. Settings was superadmin-ONLY, so an ordinary member had nowhere
+     at all to answer "can this phone use its microphone" or "which build am I running" — the
+     second of which the founder specifically needed answerable while holding the device. And the
+     one page mixed a club's configuration with host diagnostics, so the same screen that sets
+     display language also carried a button that deletes an organisation.
+
+     Tabs a person may not use are REMOVED rather than disabled: "Settings exists but most of it
+     is greyed out" teaches somebody the product is not for them. It is a COURTESY — every route
+     behind these controls checks for itself, and _maySeeSettingsTab reads the same permissions
+     the server enforces so the tab drawn and the route that answers cannot be two opinions. */
+  const allowed = SETTINGS_TABS.filter(t => _maySeeSettingsTab(t));
+  SETTINGS_TABS.forEach(t => {
+    const btn = document.querySelector(`#page-settings .tab-btn[data-tab="${t}"]`);
+    if (btn) btn.hidden = !allowed.includes(t);
+  });
+
+  // Org fields are only in the DOM for people who have the org tab; guard every write.
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   const mode  = AppState.mode;
   const info  = ORG_MODES[mode] || { label: mode || 'Custom', icon: '' };
+  set('settings-org-name', AppState.orgName);
+  set('settings-mode', `${info.icon || ''} ${info.label || mode}`.trim());
+  set('settings-admin', AppState.adminName);
 
-  document.getElementById('settings-org-name').textContent  = AppState.orgName;
-  document.getElementById('settings-mode').textContent      = `${info.icon || ''} ${info.label || mode}`.trim();
-  document.getElementById('settings-admin').textContent     = AppState.adminName;
-  _renderRealCapabilities();
+  /* EVERY PERSON LANDS ON THEIR OWN TAB. Not on the organisation's — that is somebody's job,
+     not everybody's first screen, and for a member it would be the one tab they cannot open. */
+  switchSettingsTab('you');
 
-  // Load values into textarea
-  _loadValuesIntoTextarea();
-  if (typeof loadConnections === 'function') loadConnections();
-  if (typeof loadOAuthCatalog === 'function') loadOAuthCatalog();
-  if (typeof loadDomainCatalog === 'function') loadDomainCatalog();
-  if (typeof loadMappings === 'function') loadMappings();
-  if (typeof loadPolicies === 'function') loadPolicies();
+  // The host diagnostics panel, only for whoever can actually see the tab it lives in. Calling
+  // it for a member would fire a request whose answer has nowhere to render.
+  if (_maySeeSettingsTab('platform')) _renderRealCapabilities();
+
+  if (_maySeeSettingsTab('org')) {
+    _loadValuesIntoTextarea();
+    if (typeof loadConnections === 'function') loadConnections();
+    if (typeof loadOAuthCatalog === 'function') loadOAuthCatalog();
+    if (typeof loadDomainCatalog === 'function') loadDomainCatalog();
+    if (typeof loadMappings === 'function') loadMappings();
+    if (typeof loadPolicies === 'function') loadPolicies();
+  }
 }
 
 /* The organisational constitution — the rules IntelliQ follows before acting. */
@@ -3167,13 +3224,42 @@ async function seedDemoOrg() {
   }
 }
 
+const SETTINGS_TABS = ['you', 'org', 'metrics', 'values', 'goals', 'platform', 'grade'];
+
+/* WHO MAY SEE WHICH TAB. Read from the same permissions the server enforces, so the tab that is
+   drawn and the route that will answer cannot be two different opinions. This is a COURTESY: it
+   decides what is shown, never what is possible, and every route behind these controls checks
+   for itself. A `canDo` that throws — an older cached session with no permissions block — is read
+   as "no", because showing somebody a control that will refuse them is its own small lie. */
+const SETTINGS_TAB_ACCESS = {
+  // Yours. No permission required, because none of it is anybody else's to grant.
+  you:      () => true,
+  // An authorised administrator. Not "a superadmin": the founder's word is administrators, and
+  // the org's own configuration belongs to whoever runs the org.
+  org:      () => Auth.canDo('manage_settings') || Auth.canDo('manage_values')
+                || Auth.canDo('manage_metrics') || Auth.canDo('manage_tree'),
+  metrics:  () => Auth.canDo('manage_metrics'),
+  values:   () => Auth.canDo('manage_values'),
+  goals:    () => Auth.canDo('manage_goals'),
+  // The HOST. Diagnostics that belong to whoever runs the instance, not whoever runs the club.
+  platform: () => Auth.isSuperAdmin(),
+  grade:    () => false,
+};
+function _maySeeSettingsTab(tab) {
+  const f = SETTINGS_TAB_ACCESS[tab];
+  try { return typeof f === 'function' ? !!f() : false; } catch (_) { return false; }
+}
+
 function switchSettingsTab(tab) {
-  ['org','metrics','values','goals','grade'].forEach(t => {
+  // A tab somebody may not use is not a tab they may switch to, whatever they type in a console.
+  if (!_maySeeSettingsTab(tab)) tab = 'you';
+  SETTINGS_TABS.forEach(t => {
     const el  = document.getElementById(`settings-tab-${t}`);
     const btn = document.querySelector(`#page-settings .tab-btn[data-tab="${t}"]`);
     if (el)  el.style.display  = t === tab ? 'block' : 'none';
     if (btn) btn.classList.toggle('active', t === tab);
   });
+  if (tab === 'you')     _renderYourDevice();
   if (tab === 'metrics') renderMetricsSettings();
   if (tab === 'values')  _loadValuesIntoTextarea();
   if (tab === 'goals')   renderGoalsSettings();
@@ -11150,7 +11236,13 @@ const MemberApp = {
      for anyone who actually leads a node, which is a fact about the tree rather than a title.
      Settings (and billing, when there is billing) belong to whoever owns the account. */
   _NAV_EXTRA: [
-    { id: 'settings', label: 'Settings', when: () => Auth.isSuperAdmin(),
+    /* SETTINGS IS FOR EVERYONE, and what is inside it is what is gated. It used to be
+       superadmin-only, so an ordinary member had nowhere to answer "can this phone use its
+       microphone" or "which build am I running" — and the second is the question the founder
+       needed answerable while standing in front of the device. A member opening it gets THEIR
+       settings, not the organisation's: see renderSettings, where the tabs somebody may not use
+       are removed rather than greyed out. */
+    { id: 'settings', label: 'Settings', when: () => true,
       icon: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' },
   ],
 

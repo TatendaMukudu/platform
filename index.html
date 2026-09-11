@@ -46,8 +46,8 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260911u"/>
-<link rel="stylesheet" href="css/member.css?v=20260911u"/>
+<link rel="stylesheet" href="css/styles.css?v=20260911v"/>
+<link rel="stylesheet" href="css/member.css?v=20260911v"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -358,37 +358,69 @@
            ════════════════════════════ -->
       <section class="page" id="page-settings">
         <div class="section-header">
-          <div class="section-title">Platform Settings</div>
+          <div class="section-title">Settings</div>
         </div>
 
-        <!-- Settings tabs -->
-        <div class="tabs" style="margin-bottom:1.5rem">
-          <button class="tab-btn active" data-tab="org"         onclick="switchSettingsTab('org')">Organisation</button>
-          <button class="tab-btn"         data-tab="metrics"    onclick="switchSettingsTab('metrics')">Metrics</button>
-          <button class="tab-btn"         data-tab="values"     onclick="switchSettingsTab('values')">Values</button>
-          <button class="tab-btn"         data-tab="goals"      onclick="switchSettingsTab('goals')">Org Goals</button>
+        <!-- THREE TIERS, THREE AUDIENCES (founder decision, September 2026).
+
+             YOU          every authenticated person. Their device, their build, what is held
+                          about them and who can see it. No permission required, because none of
+                          it is anybody else's business to grant.
+             ORGANISATION an authorised administrator. What the org is, what it measures, what
+                          IntelliQ may do on its behalf, what it is connected to.
+             PLATFORM     a superadmin. Diagnostics about the HOST, which belong to whoever runs
+                          the instance rather than to whoever runs the club.
+
+             The tabs a person may not use are REMOVED, not disabled: "Settings exists but most
+             of it is greyed out" teaches somebody that the product is not for them. Which tabs
+             appear is decided in renderSettings() from the same permissions the server enforces,
+             so this is a courtesy and never a gate -- every route behind these controls checks
+             for itself. -->
+        <div class="tabs" style="margin-bottom:1.5rem" id="settings-tabs">
+          <button class="tab-btn active" data-tab="you"      onclick="switchSettingsTab('you')">You</button>
+          <button class="tab-btn"         data-tab="org"      onclick="switchSettingsTab('org')">Organisation</button>
+          <button class="tab-btn"         data-tab="metrics"  onclick="switchSettingsTab('metrics')">Metrics</button>
+          <button class="tab-btn"         data-tab="values"   onclick="switchSettingsTab('values')">Values</button>
+          <button class="tab-btn"         data-tab="goals"    onclick="switchSettingsTab('goals')">Org Goals</button>
+          <button class="tab-btn"         data-tab="platform" onclick="switchSettingsTab('platform')">Platform</button>
         </div>
 
-        <!-- Organisation tab -->
-        <div id="settings-tab-org">
+        <!-- ══ YOU ══ Every authenticated person, no permission required. -->
+        <div id="settings-tab-you">
           <div class="grid-2">
             <div class="card">
-              <div class="card-header"><div class="card-title">Organisation Details</div></div>
+              <div class="card-header"><div class="card-title">This device</div></div>
+              <div class="card-body" id="settings-you-device"></div>
+            </div>
+            <div class="card">
+              <div class="card-header"><div class="card-title">Which version you are running</div></div>
               <div class="card-body">
-                <div style="margin-bottom:0.8rem">
-                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">ORG NAME</div>
-                  <div style="font-weight:600" id="settings-org-name">—</div>
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.6rem;line-height:1.5">
+                  The question "is this phone running the build that was just deployed?" has to be
+                  answerable while you are standing in front of the phone.
                 </div>
-                <div style="margin-bottom:0.8rem">
-                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">TYPE / CONTEXT</div>
-                  <div style="font-weight:600" id="settings-mode">—</div>
-                </div>
-                <div>
-                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">ADMINISTRATOR</div>
-                  <div style="font-weight:600" id="settings-admin">—</div>
-                </div>
+                <div id="iq-build-line" style="font-size:var(--fs-sm);color:var(--text-muted)">Checking which version you are running…</div>
               </div>
             </div>
+            <div class="card">
+              <div class="card-header"><div class="card-title">What IntelliQ holds about you</div></div>
+              <div class="card-body">
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+                  Everything held about you, who has looked at it, and exactly who can see each
+                  record. Yours to read whenever you want it, without asking anybody.
+                </div>
+                <button class="btn btn-outline btn-sm" onclick="navigate('my-data')">Open my record</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ PLATFORM ══ Superadmin only. Diagnostics about the HOST, which belong to whoever
+             runs the instance rather than to whoever runs the club. These were mixed in with the
+             organisation's own settings, so a coach's configuration screen carried a button that
+             deletes an organisation and another that reseeds the demo. -->
+        <div id="settings-tab-platform" style="display:none">
+          <div class="grid-2">
             <div class="card">
               <!-- WHAT IS ACTUALLY SWITCHED ON, read from the server at render time. This panel
                    used to list nine tier "features" from a client-side constant - including
@@ -397,16 +429,6 @@
                    plainly when one is off. -->
               <div class="card-header"><div class="card-title">What is switched on</div></div>
               <div class="card-body" id="settings-features"></div>
-            </div>
-            <div class="card">
-              <div class="card-header"><div class="card-title">Display language</div></div>
-              <div class="card-body">
-                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
-                  IntelliQ's intelligence is universal — the same kernel for a club, a school, or a business. This only changes the <strong>words</strong> it shows your people. Pick the set that fits, and IntelliQ will say "player / team / match", "student / class / lesson", or "team member / department / meeting" throughout.
-                </div>
-                <div id="domain-catalog" style="display:flex;flex-direction:column;gap:0.4rem"></div>
-                <div id="domain-status" style="font-size:var(--fs);margin-top:0.5rem"></div>
-              </div>
             </div>
             <div class="card">
               <div class="card-header"><div class="card-title">AI / Kernel Intelligence</div></div>
@@ -456,6 +478,45 @@
                 </details>
               </div>
             </div>
+          </div>
+        </div>
+
+
+        <!-- Organisation tab -->
+        <div id="settings-tab-org">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-header"><div class="card-title">Organisation Details</div></div>
+              <div class="card-body">
+                <div style="margin-bottom:0.8rem">
+                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">ORG NAME</div>
+                  <div style="font-weight:600" id="settings-org-name">—</div>
+                </div>
+                <div style="margin-bottom:0.8rem">
+                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">TYPE / CONTEXT</div>
+                  <div style="font-weight:600" id="settings-mode">—</div>
+                </div>
+                <div>
+                  <div style="font-size:var(--fs-sm);color:var(--text-secondary);margin-bottom:2px">ADMINISTRATOR</div>
+                  <div style="font-weight:600" id="settings-admin">—</div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="card">
+              <div class="card-header"><div class="card-title">Display language</div></div>
+              <div class="card-body">
+                <div style="font-size:var(--fs);color:var(--text-secondary);margin-bottom:0.7rem;line-height:1.5">
+                  IntelliQ's intelligence is universal — the same kernel for a club, a school, or a business. This only changes the <strong>words</strong> it shows your people. Pick the set that fits, and IntelliQ will say "player / team / match", "student / class / lesson", or "team member / department / meeting" throughout.
+                </div>
+                <div id="domain-catalog" style="display:flex;flex-direction:column;gap:0.4rem"></div>
+                <div id="domain-status" style="font-size:var(--fs);margin-top:0.5rem"></div>
+              </div>
+            </div>
+            
+            
+            
+            
             <div class="card">
               <div class="card-header"><div class="card-title">Connect any app (API)</div></div>
               <div class="card-body">
@@ -1532,8 +1593,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260911u"></script>
-<script src="js/auth.js?v=20260911u"></script>
+<script src="js/data.js?v=20260911v"></script>
+<script src="js/auth.js?v=20260911v"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1601,14 +1662,14 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260911u"></script>
-<script src="js/ui.js?v=20260911u"></script>
-<script src="js/attachments.js?v=20260911u"></script>
-<script src="js/scenarios.js?v=20260911u"></script>
-<script src="js/chat.js?v=20260911u"></script>
-<script src="js/tree.js?v=20260911u"></script>
-<script src="js/voice.js?v=20260911u"></script>
-<script src="js/app.js?v=20260911u"></script>
+<script src="js/charts.js?v=20260911v"></script>
+<script src="js/ui.js?v=20260911v"></script>
+<script src="js/attachments.js?v=20260911v"></script>
+<script src="js/scenarios.js?v=20260911v"></script>
+<script src="js/chat.js?v=20260911v"></script>
+<script src="js/tree.js?v=20260911v"></script>
+<script src="js/voice.js?v=20260911v"></script>
+<script src="js/app.js?v=20260911v"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->

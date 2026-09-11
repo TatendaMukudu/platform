@@ -429,8 +429,20 @@ ok('PX-E21 …and no surface prints a letter grade as a verdict, on an organisat
    in place of the read still fails, and now so does a read that moved out of the panel. */
 const _capPanel = APP.slice(APP.indexOf('async function _renderRealCapabilities('),
   APP.indexOf('async function _renderBuildLine('));
+/* THE 600-CHARACTER WINDOW WENT STALE, September 2026, for a legitimate reason: Settings was
+   split into three tiers (You / Organisation / Platform) and the host capability panel now lives
+   in the superadmin tab, so renderSettings reaches it through
+   `if (_maySeeSettingsTab('platform')) _renderRealCapabilities();` rather than as a bare call in
+   the first few lines. The window was measuring PROXIMITY, which was never the law.
+
+   The law has two halves and both are asserted directly: renderSettings must REACH the panel, and
+   the panel must perform a LIVE READ rather than render a constant. Widened where it was an
+   artefact, tightened where it matters — the read must be inside the panel, not anywhere in a
+   twelve-thousand-line file. */
+const _settingsFn = APP.slice(APP.indexOf('function renderSettings(){'),
+  APP.indexOf('const _POLICY_COLOR'));
 ok('PX-E22 what Settings shows instead is read from the server at render time, not from a constant',
-  /function renderSettings\(\)\{[\s\S]{0,600}_renderRealCapabilities\(\);/.test(APP)
+  _settingsFn.length > 200 && /_renderRealCapabilities\(\)/.test(_settingsFn)
   && _capPanel.length > 400
   && /(MemberApp\._read|fetch)\(\s*'\/api\/health'/.test(_capPanel)
   && /not a plan or a tier/.test(APP_RAW));
