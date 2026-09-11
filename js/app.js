@@ -12072,8 +12072,22 @@ const MemberApp = {
                   section rather than as the place this object's people are talking. This is the
                   shared-tray glyph from the same inline-SVG system every other control here uses --
                   no emoji, per the repository convention -- with the label carried accessibly
-                  rather than visually, a 44px target, and a pressed state. */''}
-            ${data.forumAvailable ? `<button type="button" class="iqt-forum" aria-label="Open the discussion for this with the people who can see it" title="Discussion" aria-pressed="false" onclick="MemberApp.beginObjectAction('discuss_with_group','${esc(kind)}','${esc(objectId)}')">
+                  rather than visually and a 44px target.
+
+                  `aria-pressed="false"` WAS A LIE ABOUT WHAT THIS CONTROL IS. aria-pressed makes a
+                  button a TOGGLE, and a screen reader announces it as one: "Open discussion,
+                  toggle button, not pressed". This opens a room. It has no on and no off, nothing
+                  ever sets it to true, and there is no state for it to report — so the attribute
+                  described a control that does not exist and would have had a blind user waiting
+                  for something to switch. Removed rather than corrected, because the honest value
+                  of an attribute that does not apply is its absence.
+
+                  WHETHER IT APPEARS AT ALL is the server's answer (_forumAudience), never this
+                  file's: a High, Low, Inquiry or Focus has a Forum when two or more people can
+                  CURRENTLY read it. `forumReadable` and `forumWhy` say how many and why not. */''}
+            ${data.forumAvailable ? `<button type="button" class="iqt-forum" aria-label="Open forum${
+              data.forumReadable ? ` — ${esc(String(data.forumReadable))} people can read this` : ''
+            }" title="Open forum" onclick="MemberApp.beginObjectAction('discuss_with_group','${esc(kind)}','${esc(objectId)}')">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
             </button>` : ''}
 

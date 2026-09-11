@@ -10673,6 +10673,59 @@ function _crossEvidenceContext(code, userId, about) {
   } catch (_) { return null; }
 }
 
+/* ── THE FORUM FOR THE THING THEY ARE LOOKING AT, AND NOTHING ELSE ────────────────────────────
+   FOUNDER DECISION, September 2026: Forum content may inform private conversation FOR THAT SAME
+   OBJECT ONLY. Private conversation never enters a Forum without a separate explicit
+   share-and-confirm, which is a different act with its own route and its own preview.
+
+   THE DIRECTION IS THE DESIGN. This is a READ of a room the person can already open by tapping
+   the icon at the top of the same screen, so it discloses nothing they could not already see; it
+   saves them going to look. Nothing is written, nothing is shared, and no message leaves the room
+   it was said in.
+
+   SAME OBJECT IS STRUCTURAL, NOT A PROMISE. The room is resolved from `about` -- the object whose
+   thread this turn is in -- through _forumAudience, the same owner the icon asks. There is no
+   parameter for a different object, so a turn about focus A cannot be handed focus B's room even
+   by a caller that wanted to. And access is re-checked here rather than inherited from the fact
+   that a thread exists: a person removed from the room this morning gets nothing this afternoon.
+
+   BOUNDED. The last few messages, clipped. A model handed a whole room will summarise the room,
+   and a summary of a room is the thing that starts sounding like a finding.
+
+   NOT EVIDENCE, AND THE BUNDLE SAYS SO. ai/composer.js prints the rule in the same block as the
+   data, because a model handed six agreeing messages will otherwise write "the group agrees". */
+function _forumContext(code, userId, about) {
+  try {
+    const a = _turnAbout(about);
+    if (!a || !a.kind || !a.id) return null;
+    const object = _allObjectsFor(code, userId).find(o => o.kind === a.kind && String(o.id) === String(a.id));
+    if (!object) return null;                       // not theirs to read: no room, no context
+    const aud = _forumAudience(code, userId, object);
+    if (!aud.available) return null;
+    // Membership of the room, re-checked now. Availability says a room exists; this says they
+    // are in it. A leader who may read the group's state is in the node room by _mayReadGroup.
+    const inRoom = aud.forumKind === 'group'
+      ? _mayReadGroup(code, aud.key, userId)
+      : aud.members.includes(userId);
+    if (!inRoom) return null;
+    /* THE KEY FORMATS ARE THE ONES THE WRITERS ACTUALLY USE, not a third spelling invented here.
+       A node room is keyed by the inquiry's own id (_forumThread), and a group High or Low IS a
+       projection of that inquiry, so its object id is the same id. A focus room is keyed
+       `focus:<objectId>` (_forumRoom). Guessing a composite key would have read nothing and
+       returned "no forum" for every room that exists, which is the quietest possible failure. */
+    const key = aud.forumKind === 'group' ? String(a.id) : `focus:${a.id}`;
+    const thread = (forumThreads[code] || {})[key];
+    if (!thread) return null;
+    const visible = forum.visibleThread(thread, { viewerId: userId });
+    const messages = (visible.messages || [])
+      .filter(m => m && m.status !== 'removed' && m.text)      // a withdrawal is not speech
+      .slice(-6)
+      .map(m => ({ text: String(m.text).slice(0, 400) }));     // text only — never an author
+    if (!messages.length) return null;
+    return { people: aud.readable, messages, sameObject: `${a.kind}:${a.id}` };
+  } catch (_) { return null; }
+}
+
 async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null, conversation = null } = {}) {
   // Every stage below used to fail silently into the deterministic path. The symptom of a
   // composer that never runs is not an error — it is a reply that reads like a template,
@@ -10801,6 +10854,10 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
          statements stay where they live, and the model is told plainly that a connection is not
          corroboration so it cannot narrate two linked records as two confirmations. */
       connections: _crossEvidenceContext(code, userId, about),
+      /* WHAT THIS OBJECT'S PEOPLE HAVE BEEN SAYING. One way, same object only, never evidence —
+         see _forumContext. The bundle carries the rule beside the data rather than trusting a
+         prompt to remember it. */
+      forum: _forumContext(code, userId, about),
       /* WHAT DESERVES ATTENTION, decided deterministically before the model sees it.
 
          The model is handed reason CODES and labels for objects this person could already open,
@@ -14164,8 +14221,20 @@ function _composerActionContext(code, userId, opts = {}, conversation = null) {
     groups: Object.values(orgNodes[code] || {}).filter(n => n && _inNode(code, n.nodeId || n.id, userId))
       .map(n => ({ id: n.nodeId || n.id, name: n.name || 'Group', memberIds: [...(n.memberIds || [])].map(String).sort() })),
     contacts: _contactsFor(code, userId).map(c => ({ id: c.id, name: c.name, with: c.with || null })),
-    forumAvailable: !!(object && ['inquiry', 'high', 'low', 'focus'].includes(object.kind) &&
-      (object.nodeId || (object.raw?.subjectRef || '').startsWith('group:') || (object.raw?.participants || []).length > 1)),
+    /* THE SAME OWNER THE SCREEN USES. This was a second, differently-worded copy of the rule —
+       it accepted a group subjectRef and accepted participants on any kind, where the thread route
+       did neither — so one object could have a Forum in conversation and none on its own screen. */
+    forumAvailable: _forumAudience(code, userId, object).available,
+    /* THE ROOM ITSELF, so a share-to-forum confirmation can NAME who will see it rather than
+       describe them. A preview that says "your group" is not a preview; it is a reassurance. The
+       count and the room's name come from the same owner that decides the Forum exists at all. */
+    forumRoom: (() => {
+      const a = _forumAudience(code, userId, object);
+      if (!a.available) return null;
+      const node = a.forumKind === 'group' ? (orgNodes[code] || {})[a.key] : null;
+      return { kind: a.forumKind, key: a.key, readable: a.readable,
+        name: node ? (node.name || 'this group') : 'the people on this' };
+    })(),
     attachment: opts.attachment && typeof opts.attachment === 'object'
       ? { id: String(opts.attachment.id || '').slice(0, 120), name: String(opts.attachment.name || '').slice(0, 200) } : null,
     /* THE ONE PIECE OF EVIDENCE THIS TURN IS ABOUT, resolved by the server from the reader's own
@@ -14217,6 +14286,7 @@ function _composerActionProposals(code, userId, candidates, context, conversatio
       settle_inquiry: 'Record that this is settled', disagree_with_inquiry: 'Record your disagreement',
       request_research: 'Show cited external reading', attach_material: 'Attach this material', keep_in_library: 'Keep this live object in Library',
       create_library_folder: 'Create this Library folder', discuss_with_group: 'Open the governed discussion', navigate_to_object: 'Open this object',
+      share_to_forum: 'Put this to the forum',
       /* A LABEL IS WHAT SOMEBODY READS BEFORE THEY PRESS CONFIRM. Without an entry here the map
          falls through to the action's own name and the card reads `declare_focus_relation`, which
          is an identifier in front of a person and tells them nothing about what they are agreeing
@@ -14229,7 +14299,8 @@ function _composerActionProposals(code, userId, candidates, context, conversatio
       context: context.object ? { kind: context.object.kind, id: context.object.id } : null, conversationId,
       objectGuard: context.object ? _composerObjectGuard(context.object.raw) : null,
       resolvedParticipantIds },
-    visibility: (c.type === 'discuss_with_group' || (c.type === 'update_focus' && ((c.arguments.participantIds || []).length || c.arguments.visibility === 'shared'))) ? 'shared' : 'only_me',
+    visibility: (c.type === 'discuss_with_group' || c.type === 'share_to_forum'
+      || (c.type === 'update_focus' && ((c.arguments.participantIds || []).length || c.arguments.visibility === 'shared'))) ? 'shared' : 'only_me',
     why: c.reason || 'You asked IntelliQ to do this.',
     effect: _composerActionEffect(c, context),
     requiredApproval: c.requiresConfirmation, policyResult: { effect: c.requiresConfirmation ? 'require_approval' : 'allow', reason: 'server validation runs on execution' },
@@ -14258,7 +14329,14 @@ function _composerActionEffect(candidate, context) {
     text: a.text || null, textSource: sources.text || null,
     account: a.because || null,
     target: a.target || null, reviewOn: a.reviewOn || null, outcome: a.outcome || null,
-    audience: group ? { id: group.id, name: group.name } : (people.length ? { ids: people.map(p => p.id), name: people.map(p => p.name).join(', ') } : null),
+    /* A SHARE'S AUDIENCE IS THE OBJECT'S ROOM, resolved by the server, never an argument the model
+       supplied. The model does not choose who sees something; the object does, and the person
+       reads it here before confirming. */
+    audience: candidate.type === 'share_to_forum'
+      ? (context.forumRoom
+        ? { id: context.forumRoom.key, name: context.forumRoom.name, readable: context.forumRoom.readable }
+        : null)
+      : (group ? { id: group.id, name: group.name } : (people.length ? { ids: people.map(p => p.id), name: people.map(p => p.name).join(', ') } : null)),
     material: a.materialId && context.attachment ? { id: a.materialId, name: context.attachment.name || 'Attached material' } : null,
     /* THE WORD, AND WHOSE IDEA IT WAS. A confirmation that does not say the model suggested
        `supports` is asking somebody to agree to a judgement without telling them it is not yet
@@ -14270,7 +14348,13 @@ function _composerActionEffect(candidate, context) {
        priority mark: it is not a level, and it is not visible to anybody else. */
     priority: candidate.type === 'prioritise_object' ? 'on'
       : candidate.type === 'unprioritise_object' ? 'off' : null,
-    disclosure: candidate.type === 'discuss_with_group'
+    disclosure: candidate.type === 'share_to_forum'
+      /* THE SENTENCE SOMEBODY READS BEFORE THEY DISCLOSE SOMETHING. It says the three things a
+         person actually needs: exactly what crosses, exactly what does not, and that speech in a
+         forum is speech rather than evidence — because somebody who believes they are "submitting
+         evidence" is agreeing to something different from what will happen. */
+      ? 'Only these words are posted, to the people named above. The rest of this conversation stays private. What you post is speech, not evidence — it changes nothing about what IntelliQ believes unless you separately offer it as your own account.'
+      : candidate.type === 'discuss_with_group'
       ? 'Only this wording becomes visible to this audience. The private conversation and other attachments stay private.'
       : (candidate.type === 'prioritise_object' || candidate.type === 'unprioritise_object')
         ? 'This is yours alone. It changes what comes up first for you and nothing about who can see this or what anybody else thinks of it.'
@@ -15820,7 +15904,24 @@ function _objectBucket(code, userId, scope = 'self') {
       focuses: _teamFocuses(code, nodeId), now: Date.now(),
     });
     add('high', state.high); add('low', state.low); add('inquiry', state.question);
-    for (const focus of state.focuses || []) add('focus', focus);
+    /* `state.focuses` DOES NOT EXIST, and never did. ai/team-state.js buildTeamState returns the
+       active `focus` and the closed `history`; there is no plural field, so `state.focuses || []`
+       was an empty array on every call and this loop never ran once. The consequence was silent
+       and total: a group's Focus had no thread, which means no conversation, no attached material,
+       no chart, no forum icon and no A -> B loop — every one of those surfaces resolves its object
+       through this bucket, and for a group Focus the object was never in it.
+
+       Nothing failed, because `|| []` is a perfectly valid instruction to iterate nothing. Same
+       shape as the undefined CSS token and the `hidden` container: a fallback that makes a typo
+       into a quiet, valid, wrong answer.
+
+       BOTH are added. A closed focus with its outcome recorded is exactly what somebody wants to
+       open and talk about — "we tried that, here is what happened" — and dropping it the moment
+       it stops being current would lose the half of the loop that has anything to say. */
+    if (state.focus) add('focus', state.focus);
+    for (const past of state.history || []) {
+      if (past && past.focusId !== (state.focus && state.focus.focusId)) add('focus', past);
+    }
   } else return null;
 
   return out.sort((a, b) => (a.parked - b.parked) || (b.score - a.score) || a.id.localeCompare(b.id));
@@ -15914,21 +16015,14 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
   // focus. A group object always qualifies (the node is the people); a personal focus qualifies
   // once somebody else has been invited into it. A thread that is just you and IntelliQ has
   // nobody to talk to and gets no forum.
+  /* ONE OWNER. This route and the composer context used to compute availability separately, with
+     rules that had already drifted apart — and neither counted PEOPLE, so a one-member node got a
+     Forum with nobody in it. Both now ask _forumAudience, which resolves the CURRENT readable set
+     on every read. Nothing is cached here, which is what makes a roster change revoke the room on
+     the very next request rather than after a sweep. */
   const _nodeId = scope.startsWith('group:') ? scope.slice(6) : null;
-  //
-  // WHAT IS ACTUALLY WIRED: the forum route is `/api/group/:nodeId/forum/:inquiryId`, so a forum
-  // is REACHABLE only for a group thread. A personal focus with people invited satisfies the
-  // founder's rule but has no route behind it, and rendering the control there would give a
-  // button that 404s. So `forumAvailable` says where it works, `shared` says where the rule says
-  // it should — and the gap between them is the server work still to do, stated rather than
-  // papered over with a button that fails.
-  // THE GAP IS CLOSED. `forumAvailable` used to be true only for a node room, and this comment
-  // used to record a focus with invitees as work still to do. /api/forum/:kind/:objectId is now
-  // that work, so the rule and what is reachable finally say the same thing — which is the only
-  // acceptable end state for a flag whose whole purpose was to admit they differed.
-  const _invited = kind === 'focus'
-    && Array.isArray(object.raw && object.raw.participants) && object.raw.participants.length > 1;
-  const _forum = !!_nodeId || _invited;
+  const _aud = _forumAudience(code, userId, _nodeId ? { ...object, nodeId: _nodeId } : object);
+  const _forum = _aud.available;
   /* WHETHER THIS READER HAS MARKED IT. Read from their OWN memory, so it is their mark and can be
      nobody else's -- the control has to be able to say "take this off" rather than offering to add
      a mark that is already there, and a screen that cannot tell is a screen that lies about state.
@@ -15938,7 +16032,11 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
   res.json({ ok: true, about: object.about, opening: object.explained, present: object.present,
     prioritised: _mine.includes(`${kind}:${object.id}`),
     shared: _forum, forumAvailable: _forum, sharedByRule: _forum, nodeId: _nodeId,
-    forumKind: _nodeId ? 'group' : (_invited ? 'focus' : null),
+    forumKind: _aud.forumKind,
+    /* HOW MANY PEOPLE, AND WHY NOT. A screen that is told only "no" has to invent a reason, and
+       "fewer than two people can read this" is a fact worth being able to say rather than an
+       absence a reader has to interpret. The count is of the room, never a list of who is in it. */
+    forumReadable: _aud.readable, forumWhy: _aud.available ? null : _aud.reason,
     conversation: conversation ? { id: conversation.id, updatedAt: conversation.updatedAt } : null,
     messages: conversation ? (conversation.messages || []).map(_historyMessage) : [] });
 });
@@ -16136,6 +16234,73 @@ app.get('/api/objects/:kind/:id/reading', requireAuth, async (req, res) => {
 
    The epistemic boundary is UNCHANGED and unchangeable here: this path touches forumThreads and
    nothing else. Ten people agreeing in a focus room moves no confidence anywhere. */
+/* ── THE ONE OWNER OF "DOES THIS OBJECT HAVE A FORUM" ──────────────────────────────────────
+   FOUNDER DECISION, September 2026: the creator explicitly chooses the audience, and any High,
+   Low, Inquiry or Focus with TWO OR MORE CURRENT READABLE MEMBERS has an object Forum.
+
+   THE DEFECT THIS REPLACES. `forumAvailable` was computed in two places with two different
+   rules, and they had already drifted:
+
+     the thread route     !!nodeId || (kind === 'focus' && participants.length > 1)
+     the composer context object.nodeId || subjectRef.startsWith('group:') || participants.length > 1
+
+   The second accepted a group subjectRef and accepted participants on ANY kind; the first did
+   neither. So the same object could have a Forum in conversation and no Forum on its own screen.
+   Two descriptions of one rule always drift — this file has found that four times now — and the
+   fix is one description, not two corrected ones.
+
+   AND NEITHER IMPLEMENTED THE RULE. Both read "is there a node" rather than "are there two
+   people". A node with one member on its roster — a squad mid-build, a group somebody was
+   removed from — showed a Forum with nobody in it to talk to. The rule counts PEOPLE.
+
+   CURRENT, NOT REMEMBERED. The set is resolved on every read from the roster and the
+   participant list as they stand right now. Nothing is cached and no list is stored, which is
+   what makes an audience change revoke access on the very next read rather than after a sweep.
+   The same property is why a removed participant loses the room immediately.
+
+   Returns the COUNT as well as the flag, because "fewer than two people" is a fact worth being
+   able to say on screen, and a caller that only gets a boolean has to invent a reason. */
+function _forumAudience(code, userId, object) {
+  const kind = String((object && object.kind) || '');
+  const none = (reason) => ({ available: false, readable: 0, reason, key: null, forumKind: null, members: [] });
+  if (!['inquiry', 'high', 'low', 'focus'].includes(kind)) {
+    return none('only a High, a Low, an Inquiry or a Focus can have a discussion');
+  }
+  const raw = (object && object.raw) || {};
+
+  /* A NODE ROOM — whoever is on the roster right now, members and leaders alike. A leader of the
+     node reads the group's own state (see _mayReadGroup) and so belongs in the count; leaving
+     them out would make a coach and one player read as one person. */
+  const subjectRef = String(raw.subjectRef || '');
+  const nodeId = (object && object.nodeId) || raw.nodeId
+    || (subjectRef.startsWith('group:') ? subjectRef.slice(6) : null)
+    || (object && object.whoseNodeId) || null;
+  if (nodeId && (orgNodes[code] || {})[nodeId]) {
+    const people = [...new Set([..._nodeMembers(code, nodeId), ..._nodeLeaders(code, nodeId)])]
+      // A person whose account is gone is not somebody you can talk to. Counting them would put
+      // a Forum on an object whose room is one living person and one departed one.
+      .filter(id => !!(orgUsers[code] || {})[id]);
+    if (people.length < 2) {
+      return { available: false, readable: people.length, key: null, forumKind: null, members: people,
+        reason: 'there is nobody else in this group yet' };
+    }
+    return { available: true, readable: people.length, key: nodeId, forumKind: 'group', members: people };
+  }
+
+  /* A FOCUS ROOM — the people named on it. Membership is the INVITATION and does not change
+     because a roster did, which is why this is a separate branch rather than one clever list. */
+  const invited = Array.isArray(raw.participants)
+    ? [...new Set(raw.participants.map(String))].filter(id => !!(orgUsers[code] || {})[id]) : [];
+  if (kind === 'focus' && invited.length >= 2) {
+    return { available: true, readable: invited.length, key: String(object.id), forumKind: 'focus', members: invited };
+  }
+  if (kind === 'focus' && invited.length) {
+    return { available: false, readable: invited.length, key: null, forumKind: null, members: invited,
+      reason: 'this one is just you — there is nobody to discuss it with' };
+  }
+  return none('this one is just you — there is nobody to discuss it with');
+}
+
 function _forumRoom(code, userId, kind, objectId) {
   if (kind !== 'focus') {
     // Group inquiries have their own route above, whose room is the node. Saying so is better
@@ -16146,12 +16311,15 @@ function _forumRoom(code, userId, kind, objectId) {
     .find(o => o && o.kind === 'focus' && String(o.id) === String(objectId));
   if (!obj) return { ok: false, status: 404, error: 'not found' };
   const raw = obj.raw || {};
-  const members = Array.isArray(raw.participants) ? raw.participants.filter(Boolean) : [];
-  // A focus with nobody else on it is you and IntelliQ, which is a conversation and already has
-  // one. The founder's rule is 2+ PEOPLE, and one person is not two.
-  if (members.length < 2) {
-    return { ok: false, status: 400, error: 'this one is just you — there is nobody to discuss it with' };
+  /* WHO IS IN THE ROOM IS ASKED OF THE ONE OWNER, so the room a person can open and the icon
+     that offers it can never disagree. This branch used to count `raw.participants` itself —
+     a third copy of the rule alongside the thread route and the composer context, and the copy
+     that would have kept counting a departed account as somebody you can talk to. */
+  const aud = _forumAudience(code, userId, obj);
+  if (!aud.available) {
+    return { ok: false, status: 400, error: aud.reason || 'this one is just you — there is nobody to discuss it with' };
   }
+  const members = aud.members;
   if (!members.includes(userId)) return { ok: false, status: 403, error: 'not part of this' };
   return { ok: true, key: `focus:${objectId}`, members, subjectRef: raw.nodeId ? `group:${raw.nodeId}` : `member:${userId}` };
 }
@@ -18196,6 +18364,68 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
       prop.confirmed = { at: new Date().toISOString(), object: ref }; scheduleSave();
       return res.json({ ok: true, confirmed: prop.actionType, outcome: 'open_forum', forum: { room: nodeId ? 'group' : 'focus', nodeId, objectId: ref.id },
         note: 'Discussion opened. Nothing said there counts as evidence unless its author deliberately contributes it.' });
+    }
+
+    /* ── PRIVATE -> FORUM, THE ONLY PATH ────────────────────────────────────────────────────
+       FOUNDER DECISION: private conversation never enters a Forum without a separate explicit
+       Share to Forum action, an audience preview, and a confirmation. This is that action, at the
+       point where the person has read the audience and pressed confirm.
+
+       Everything that could be taken from somewhere else is taken from the server instead:
+
+         THE ROOM is the room of the object the turn is bound to (`live`), resolved through
+         _forumAudience -- the same owner that decides the icon appears. The proposal cannot name
+         a different one, because nothing here reads a room from the payload.
+         MEMBERSHIP is re-checked NOW, not inherited from the proposal being staged. A person
+         removed from the squad between staging and confirming is refused here.
+         THE WORDS are the person's, and their EDIT WINS. `overrides.text` is what they were
+         looking at on the card; a share whose wording they did not see is a share they did not
+         make.
+
+       AND IT IS SPEECH. It goes through forum.newMessage into forumThreads, the same path a typed
+       message takes, and touches nothing else -- no signal, no origin, no contribution, no
+       confidence. Making it count is a separate deliberate act by its author through the existing
+       contribution boundary, and the reply says so. */
+    if (prop.actionType === 'share_to_forum') {
+      if (!live || live.kind === 'conversation') {
+        return res.status(400).json({ error: 'open the thing you want to put to the forum first' });
+      }
+      const aud = _forumAudience(code, userId, live);
+      if (!aud.available) {
+        return res.status(403).json({ error: aud.reason || 'this object has no forum' });
+      }
+      const inRoom = aud.forumKind === 'group'
+        ? _mayReadGroup(code, aud.key, userId) : aud.members.includes(userId);
+      if (!inRoom) return res.status(403).json({ error: 'not part of this' });
+
+      const body = String(overrides.text || p.text || '').trim().slice(0, 4000);
+      if (!body) return res.status(400).json({ error: 'nothing_to_share' });
+
+      const key = aud.forumKind === 'group' ? String(ref.id) : `focus:${ref.id}`;
+      const threads = (forumThreads[code] = forumThreads[code] || {});
+      if (!threads[key]) {
+        threads[key] = forum.newThread({ inquiryId: key,
+          nodeId: aud.forumKind === 'group' ? aud.key : '',
+          subjectRef: aud.forumKind === 'group' ? `group:${aud.key}` : `member:${userId}` });
+      }
+      const msg = forum.newMessage({ id: 'fm_' + generateId(), authorId: userId, text: body, replyTo: null });
+      threads[key].messages.push(msg);
+      if (threads[key].messages.length > forum.THREAD_CAP) {
+        threads[key].messages.splice(0, threads[key].messages.length - forum.THREAD_CAP);
+      }
+      prop.confirmed = { at: new Date().toISOString(), object: ref, shared: true };
+      /* NOT AUDITED, DELIBERATELY. My first version called _audit with action 'forum_post', which
+         is not in ai/audit.js's allow-list — so record() refused it and the call was a silent
+         no-op that READ like a record being kept. Widening the vocabulary would have been worse:
+         that trail is "who accessed whose personal data", the basis for a subject access request,
+         and a person choosing to say something in a room they are already in is not an access of
+         anybody's data. The post is recorded where a post belongs — in the thread, with its
+         author held by the kernel — and the proposal carries its own confirmation stamp above. */
+      scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'posted_to_forum',
+        messageId: msg.messageId, epistemicEffect: 'none',
+        forum: { room: aud.forumKind, nodeId: aud.forumKind === 'group' ? aud.key : null, objectId: ref.id },
+        note: 'Posted to the forum for this. It is speech, not evidence — it changes nothing about what IntelliQ believes unless you separately offer it as your own account.' });
     }
 
     if (['inspect_inquiry', 'show_evidence', 'request_research', 'navigate_to_object'].includes(prop.actionType)) {
