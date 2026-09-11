@@ -140,7 +140,25 @@ for (const row of inventory) console.log(`server.js:${row.line} ${row.source}`);
    group-loop-browser-check GB-F5 drives the forged call from a real browser).
 
    Comment only — the assertion, the architecture and every divergence above are unchanged. */
-ok('W4 inventory names every current scope reference', inventory.length === 72 && inventory.every(r => Number.isInteger(r.line) && r.source));
+/* 72 -> 74, material classification (L-MT6). Two new `_leadsNode` references, both asking the
+   same question in the two places it has to be asked: may this person speak for the group this
+   material is attached to?
+
+     POST /api/materials                        at the moment of upload
+     POST /api/materials/:id/classification     at the moment of confirmation
+
+   BOTH, deliberately, and the second is the one that matters. Permission is RE-DERIVED when the
+   claim is confirmed rather than inherited from whatever was true when the file was attached, so
+   somebody who has since been taken off the node cannot confirm a claim about it. Caching the
+   first answer would have been one reference instead of two and wrong the first time a roster
+   moved.
+
+   The count going UP is the honest record: this is a NEW gate on a path that previously had
+   none — material carried a hard-coded `provenance: 'internal'` and nothing distinguished "a
+   scouting deck to read from" from "a claim about this squad". It grants nothing; it is the
+   thing that REFUSES, and material-classification-smoke drives every combination of its three
+   requirements including the one the founder named: user assertion alone. */
+ok('W4 inventory names every current scope reference', inventory.length === 74 && inventory.every(r => Number.isInteger(r.line) && r.source));
 
 console.log('\nMigration law: BRIDGE never; GATE governance AND Web; ENUMERATE/FILTER migrate later; WEB re-test only.');
 console.log(`\n=== scope-parity-smoke: ${pass} passed, ${fail} failed ===\n`);

@@ -12906,11 +12906,96 @@ const MemberApp = {
           body: JSON.stringify({ attachTo: { kind, id: objectId }, title: file.name, filename: file.name, kind: parsed.kind, text }),
         }).then(x => x.json());
         if (!r.ok) return say(r.error || 'That could not be attached.');
-        say(r.note || 'Attached.');
+        /* WHAT CAME OUT, AND WHAT IT IS. The founder's "read it and work from it" is only
+           trustworthy if a person can see how much was actually read: a forty-slide deck that
+           yielded four sections means something went wrong with the file, and silence about that
+           is how somebody comes to believe IntelliQ has read a document it has four paragraphs of.
+
+           Every attachment lands as SOMETHING TO READ FROM. Making it evidence about the
+           organisation is a separate, deliberate act with its own requirements, offered here
+           rather than assumed — see _classifyMaterial. */
+        const ex = r.extracted || {};
+        const read = ex.characters
+          ? `Read ${ex.characters.toLocaleString()} characters into ${ex.sections} ${ex.sections === 1 ? 'part' : 'parts'}.`
+          : '';
+        const capped = ex.truncated ? ' That file was longer than IntelliQ will hold, so the end of it is not here.'
+          : ex.sectionsCapped ? ' It had more parts than IntelliQ will hold, so the last ones are not here.' : '';
+        say(`${r.note || 'Attached.'} ${read}${capped}`.trim());
         this._renderMaterial(kind, objectId);
+        if (r.materialId) this._offerClassification(r.materialId, kind, objectId, r);
       } catch (e) { say(e && e.message ? e.message : 'That file could not be read.'); }
     };
     input.click();
+  },
+
+  /* ── WHAT KIND OF THING DID YOU JUST ATTACH? ─────────────────────────────────────────────
+     Offered AFTER the file is safely in, never as a condition of attaching it — a person who has
+     just uploaded a deck should not have to answer an ontology question before it is saved.
+
+     The three are not a dropdown of synonyms. They differ in what they can DO: something to read
+     from changes nothing IntelliQ believes; your own account is yours and needs nobody's
+     permission; evidence about the organisation can change what the product believes about
+     people, and therefore cannot be asserted. The server decides, downgrades what was not earned,
+     and says which of permission, provenance or confirmation was missing — this surface only
+     asks and reports. */
+  _offerClassification(materialId, kind, objectId, result) {
+    const box = document.getElementById('iqt-mat-state');
+    if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const current = String((result && result.classification) || 'external_context');
+    box.innerHTML = `
+      <div class="iqt-mat-class">
+        <div class="iqt-mat-class-now">Filed as: <strong>${esc((result && result.classificationLabel) || 'Something to read from')}</strong></div>
+        <div class="iqt-mat-class-means">${esc((result && result.classificationMeans) || '')}</div>
+        ${result && result.classificationReason ? `<div class="iqt-mat-class-why">${esc(result.classificationReason)}</div>` : ''}
+        ${current === 'external_context' ? `
+          <div class="iqt-mat-class-ask">Is it more than that?</div>
+          <div class="iqt-mat-class-btns">
+            <button type="button" class="btn btn-outline btn-sm"
+              onclick="MemberApp._reclassifyMaterial('${esc(materialId)}','${esc(kind)}','${esc(objectId)}','personal_evidence')">It is my own account</button>
+            <button type="button" class="btn btn-outline btn-sm"
+              onclick="MemberApp._reclassifyMaterial('${esc(materialId)}','${esc(kind)}','${esc(objectId)}','organisation_evidence')">It is evidence about this organisation</button>
+          </div>` : ''}
+      </div>`;
+  },
+
+  /* The deliberate act. For organisation evidence it also asks for the SOURCE, because a claim
+     about an organisation with no stated source is an opinion, and the difference is the whole
+     reason this classification exists. The server re-checks everything. */
+  async _reclassifyMaterial(materialId, kind, objectId, want) {
+    const box = document.getElementById('iqt-mat-state');
+    if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    if (want === 'organisation_evidence') {
+      box.innerHTML = `
+        <div class="iqt-mat-class">
+          <label class="iqt-mat-class-ask" for="iqt-mat-src">Where did this come from?</label>
+          <div class="iq-field"><textarea id="iqt-mat-src" class="iq-field-input" rows="2"
+            placeholder="The match report, the league's own data, a session you ran"></textarea></div>
+          <div class="iqt-mat-class-means">Evidence about this organisation needs somebody entitled
+            to say it, a stated source, and your explicit confirmation. Attaching a file is not
+            enough on its own.</div>
+          <div class="iqt-mat-class-btns">
+            <button type="button" class="btn btn-primary btn-sm"
+              onclick="MemberApp._confirmClassification('${esc(materialId)}','${esc(kind)}','${esc(objectId)}','organisation_evidence')">Record it as that</button>
+            <button type="button" class="btn btn-outline btn-sm"
+              onclick="MemberApp._renderMaterial('${esc(kind)}','${esc(objectId)}')">Leave it as reading</button>
+          </div>
+        </div>`;
+      return;
+    }
+    this._confirmClassification(materialId, kind, objectId, want);
+  },
+
+  async _confirmClassification(materialId, kind, objectId, want) {
+    const src = document.getElementById('iqt-mat-src');
+    const r = await this._read(`/api/materials/${encodeURIComponent(materialId)}/classification`, {
+      method: 'POST',
+      body: { classification: want, source: src ? String(src.value || '') : '', confirmClassification: true },
+    });
+    const box = document.getElementById('iqt-mat-state');
+    if (!r.ok) { if (box) box.textContent = r.message || 'That could not be recorded just now.'; return; }
+    this._offerClassification(materialId, kind, objectId, r.data);
   },
 
   async openMaterial(materialId) {

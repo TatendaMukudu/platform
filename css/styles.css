@@ -3524,3 +3524,12 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqt-reading-rel{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.5;
   margin:.35rem 0 .5rem;padding-left:.6rem;border-left:2px solid var(--border)}
 .iqt-reading-none{font-size:var(--fs-sm);color:var(--text-muted);line-height:1.5;padding:.5rem 0}
+
+/* WHAT KIND OF THING THIS IS. Set apart from the attachment row, because it is a question about
+   the material rather than a property of it, and a person answers it once. */
+.iqt-mat-class{margin:.6rem 0 0;padding:.7rem;border:1px solid var(--border);border-radius:12px}
+.iqt-mat-class-now{font-size:var(--fs-md);color:var(--text-primary)}
+.iqt-mat-class-means,.iqt-mat-class-why{font-size:var(--fs-sm);color:var(--text-secondary);
+  line-height:1.5;margin:.3rem 0 0}
+.iqt-mat-class-ask{display:block;font-size:var(--fs-md);color:var(--text-primary);margin:.6rem 0 .35rem}
+.iqt-mat-class-btns{display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.45rem}

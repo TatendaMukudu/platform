@@ -17171,7 +17171,15 @@ app.post('/api/materials', requireAuth, (req, res) => {
   const kind = String(at.kind || '');
   if (!['focus', 'inquiry', 'high', 'low'].includes(kind)) return res.status(400).json({ error: 'attach it to a focus, inquiry, high or low' });
   const text = String(b.text || '');
-  if (!text.trim()) return res.status(400).json({ error: 'nothing readable came out of that file' });
+  /* `text.trim()` IS NOT ENOUGH, and finding out why cost an attachment list with a
+     control-character heading in it. trim() strips WHITESPACE; a NUL is not whitespace. So a
+     corrupt binary — a .pptx that failed to parse, an image renamed to .txt — arrives as control
+     characters, survives that check intact, and becomes a real material with unreadable parts.
+     `hasReadableText` asks the question that was actually meant: is there a character in here
+     somebody could read? */
+  if (!material.hasReadableText(text)) {
+    return res.status(400).json({ error: 'nothing readable came out of that file' });
+  }
   if (text.length > material.TEXT_CAP) return res.status(413).json({ error: `that file is larger than IntelliQ will hold (${material.TEXT_CAP} characters of text)` });
 
   const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === String(at.id));
@@ -17202,6 +17210,28 @@ app.post('/api/materials', requireAuth, (req, res) => {
       note: `This is already in your library, so it is the same one — not a second copy. What people have already said about it stays with it.` });
   }
 
+  /* L-MT6 — WHAT KIND OF THING THIS IS, DECIDED BY THE SERVER FROM WHAT IS TRUE.
+
+     The client SAYS what it is asking for; it never decides. `mayAttest` is the same
+     leads-this-node question `_mayAttach` already answered above — somebody entitled to speak for
+     the group the material is attached to — so a person cannot make a claim about an organisation
+     by uploading a file to it. Provenance and confirmation are the person's own deliberate acts
+     and are read from the request, because there is nowhere else they could come from; what stops
+     them being enough on their own is that permission is not.
+
+     A failed request DOWNGRADES to external context and says which of the three was missing.
+     Refusing would lose the file; accepting silently would let an assertion become a fact. */
+  const _mayAttest = _mayAttach(code, userId, obj)
+    && (obj.raw && (obj.raw.nodeId || String(obj.raw.subjectRef || '').startsWith('group:'))
+      ? _leadsNode(code, (obj.raw.nodeId || String(obj.raw.subjectRef).slice(6)), userId)
+      : false);
+  const _cls = material.classifyRequest({
+    requested: String(b.classification || ''),
+    mayAttest: _mayAttest,
+    provenance: String(b.source || '').trim().slice(0, 300),
+    confirmed: b.confirmClassification === true,
+  });
+
   const id = 'mat_' + generateId();
   _materials(code)[id] = {
     materialId: id, byId: userId, orgCode: code,
@@ -17210,6 +17240,11 @@ app.post('/api/materials', requireAuth, (req, res) => {
     kind: material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text',
     sections,
     checksum,
+    /* WHAT IT IS, AND WHERE IT CAME FROM, recorded together. `classification` is what was
+       actually granted, never what was asked for; `source` is the stated provenance and is empty
+       unless somebody stated one. */
+    classification: _cls.class,
+    source: _cls.class === 'organisation_evidence' ? String(b.source || '').trim().slice(0, 300) : '',
     visibility: 'object', provenance: 'internal',
     // Where it is used. The first ref is what `attachTo` used to be, kept in that position so
     // anything still reading the old field sees the same answer.
@@ -17220,6 +17255,25 @@ app.post('/api/materials', requireAuth, (req, res) => {
   _audit(code, { actor: userId, action: 'material_attached', subjectIds: [], basis: `${kind}:${at.id} (${sections.length} parts)` });
   scheduleSave();
   res.json({ ok: true, materialId: id, parts: sections.length,
+    /* WHAT WAS RECORDED, AND — WHEN IT IS NOT WHAT WAS ASKED FOR — WHY. A downgrade a person is
+       not told about is a product that quietly disagrees with them. */
+    classification: _cls.class,
+    classificationLabel: (material.CLASS_TEXT[_cls.class] || {}).label || '',
+    classificationMeans: (material.CLASS_TEXT[_cls.class] || {}).means || '',
+    classificationGranted: _cls.granted,
+    classificationReason: _cls.reason || null,
+    /* HOW MUCH WAS ACTUALLY READ. The founder's "read it and work from it" is only trustworthy if
+       a person can see what came out — a 40-slide deck that yielded four sections means something
+       went wrong with the file, and silence about that is how somebody comes to believe IntelliQ
+       has read a document it has four paragraphs of. */
+    extracted: {
+      characters: text.length,
+      sections: sections.length,
+      cap: material.TEXT_CAP,
+      truncated: text.length >= material.TEXT_CAP,
+      sectionCap: material.SECTION_CAP,
+      sectionsCapped: sections.length >= material.SECTION_CAP,
+    },
     sections: sections.map(s => ({ id: s.id, ordinal: s.ordinal, heading: s.heading })),
     note: `Attached, in ${sections.length} ${sections.length === 1 ? 'part' : 'parts'}. IntelliQ will answer from it, and you will see which parts landed.` });
 });
@@ -17239,6 +17293,60 @@ app.get('/api/objects/:kind/:id/materials', requireAuth, (req, res) => {
 });
 
 /* GET /api/materials/:id — read it. The parts, in the author's order, in their words. */
+/* POST /api/materials/:id/classification — say deliberately what this material IS.
+
+   SEPARATE FROM ATTACHING IT, which is the whole point. A person who has just uploaded a deck
+   should not have to answer an ontology question before it is saved, and a consequential
+   classification must never be a side effect of an upload. So the file lands as something to
+   read from, and this is the deliberate second act.
+
+   ONLY ITS AUTHOR. Somebody else's material is not yours to reclassify: turning another person's
+   attachment into evidence about the organisation would be putting words in their mouth, which is
+   the same law the contribution boundary keeps for speech.
+
+   AND THE SERVER RE-CHECKS EVERYTHING. Permission is re-derived now, not inherited from whatever
+   was true when the file was attached — a leader who has since been taken off the node cannot
+   confirm a claim about it. A request that fails is DOWNGRADED with its reason, never refused,
+   because refusing would strand the material and silence would let an assertion become a fact. */
+app.post('/api/materials/:id/classification', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const id = String(req.params.id || '');
+  const m = _materials(code)[id];
+  if (!m) return res.status(404).json({ error: 'not found' });
+  const seen = _materialFor(code, userId, id);
+  if (!seen.ok) return res.status(404).json({ error: 'not found' });
+  if (String(m.byId) !== String(userId)) {
+    return res.status(403).json({ error: 'only the person who attached this can say what it is' });
+  }
+
+  const b = req.body || {};
+  // The object it hangs on, resolved through the reader's own authorised set, so permission is
+  // asked about a thing they can actually open.
+  const first = _materialRefs(m)[0] || m.attachTo || {};
+  const obj = _allObjectsFor(code, userId).find(o => o.kind === first.kind && String(o.id) === String(first.id));
+  const nodeId = obj && obj.raw
+    ? (obj.raw.nodeId || (String(obj.raw.subjectRef || '').startsWith('group:') ? String(obj.raw.subjectRef).slice(6) : null))
+    : null;
+  const mayAttest = !!(obj && nodeId && _leadsNode(code, nodeId, userId));
+
+  const cls = material.classifyRequest({
+    requested: String(b.classification || ''),
+    mayAttest,
+    provenance: String(b.source || '').trim().slice(0, 300),
+    confirmed: b.confirmClassification === true,
+  });
+  m.classification = cls.class;
+  m.source = cls.class === 'organisation_evidence' ? String(b.source || '').trim().slice(0, 300) : '';
+  scheduleSave();
+  res.json({ ok: true, materialId: id,
+    classification: cls.class,
+    classificationLabel: (material.CLASS_TEXT[cls.class] || {}).label || '',
+    classificationMeans: (material.CLASS_TEXT[cls.class] || {}).means || '',
+    classificationGranted: cls.granted,
+    classificationReason: cls.reason || null,
+    note: cls.granted ? 'Recorded.' : 'Kept as something to read from.' });
+});
+
 app.get('/api/materials/:id', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const r = _materialFor(code, userId, req.params.id);
