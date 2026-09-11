@@ -186,6 +186,53 @@ _rebuildEmailIndex();
       await ctx.close();
     }
 
+    /* ══ PHASE 1 — THE PHONE CAN SAY WHICH BUILD IT IS RUNNING ══════════════════════════════
+       The first pass closed by admitting stale assets could not be ruled out. These drive the
+       real comparison in a real browser: the client reads the stamp it actually loaded, asks the
+       server which one it is serving, and says so where a person can read it. */
+    console.log('\n  PHASE 1 — BUILD IDENTITY, VISIBLE WITHOUT DEVTOOLS');
+    {
+      const { page, ctx } = await openApp();
+      const same = await page.evaluate(async () => {
+        const st = await _checkBuildIdentity();
+        return { client: st.clientStamp, server: st.serverStamp, commit: st.commit, stale: st.stale };
+      });
+      ok('LR-B1 the client reports the stamp it actually loaded, not "unknown"',
+        /^[0-9a-z]+$/.test(same.client) && same.client !== 'unknown');
+      ok('LR-B2 …the server reports the same one when nothing is stale',
+        same.server === same.client && same.stale === false);
+      ok('LR-B3 …and a real commit comes back, so a person can compare it with the PR head',
+        /^[0-9a-f]{7}$/.test(same.commit));
+
+      /* THE STALE CASE. The server is made to report a different stamp -- exactly what an old
+         cached shell talking to a newer server looks like. */
+      await page.route('**/api/health', async route => {
+        const res = await route.fetch();
+        const j = await res.json();
+        j.build = { ...(j.build || {}), assetStamp: 'DIFFERENT' };
+        return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(j) });
+      });
+      const stale = await page.evaluate(async () => {
+        const st = await _checkBuildIdentity();
+        const shown = await _announceStaleBuild();
+        const bar = document.getElementById('iq-stale-build');
+        return { stale: st.stale, shown, text: bar ? bar.innerText : '',
+                 buttons: bar ? bar.querySelectorAll('button').length : 0 };
+      });
+      ok('LR-B4 a device running older assets than the server is DETECTED', stale.stale === true);
+      ok('LR-B5 …and told so in plain words, with one way to fix it',
+        /older version/i.test(stale.text) && stale.buttons === 1);
+      /* Offered, not performed: a reload the product triggers by itself is how a reload loop
+         starts, and the founder was already looking at a page that would not settle. */
+      const url1 = page.url();
+      await page.evaluate(() => _announceStaleBuild());
+      await page.waitForTimeout(1200);
+      ok('LR-B6 …offered once, and the page does not reload itself',
+        page.url() === url1
+        && (await page.evaluate(() => document.querySelectorAll('#iq-stale-build').length)) === 1);
+      await ctx.close();
+    }
+
     /* ══ 18 — AUDIENCE SPACING ══════════════════════════════════════════════════════════════ */
     console.log('\n  OBSERVATION 18 — AUDIENCE NAMES ARE NOT GLUED TO THEIR COUNTS');
     {

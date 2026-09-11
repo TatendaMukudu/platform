@@ -3430,3 +3430,10 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
   font-size:var(--fs-xs);background:transparent;border:1px solid var(--border);color:var(--text-muted)}
 .shelf-x:hover{color:var(--text-primary);border-color:var(--border-light)}
 .shelf-x:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+
+/* The stale-shell notice: one line, above the safe area, never covering the composer. */
+.iq-stale-build{position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;flex-wrap:wrap;
+  align-items:center;justify-content:center;gap:.6rem;padding:.6rem 1rem;
+  padding-bottom:calc(.6rem + env(safe-area-inset-bottom,0px));
+  background:var(--surface-2);border-top:1px solid var(--border);
+  font-size:var(--fs);color:var(--text-primary)}

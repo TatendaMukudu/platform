@@ -2408,6 +2408,80 @@ async function renderPeople() {
   }
 }
 
+/* ── WHICH BUILD IS THIS PHONE ACTUALLY RUNNING? ───────────────────────────────────────────────
+   The first recovery pass closed by saying stale assets could not be ruled out as an explanation
+   for what the founder saw, because nothing in the product could answer the question. It can now,
+   and without opening developer tools on a phone, which was the other half of the problem.
+
+   The client reads its own stamp from the script tag the browser actually loaded -- not from a
+   constant, which would only ever tell you what the source says rather than what arrived -- and
+   compares it with the stamp the SERVER is currently serving in index.html. Those differing is
+   exactly the stale-asset case: an old cached shell talking to a newer server. */
+function _clientAssetStamp() {
+  try {
+    const el = document.querySelector('script[src*="js/app.js?v="]')
+      || document.querySelector('link[href*="css/styles.css?v="]');
+    const src = el ? (el.getAttribute('src') || el.getAttribute('href') || '') : '';
+    const m = src.match(/[?&]v=([A-Za-z0-9]+)/);
+    return (m && m[1]) || 'unknown';
+  } catch (_) { return 'unknown'; }
+}
+
+/* One reload that actually clears the shell. Reuses the recovery path index.html already carries
+   -- drop the caches, unregister the worker, then reload with a cache-busting parameter -- rather
+   than a bare location.reload(), which on iOS will happily hand back the same cached shell. */
+async function _reloadForNewBuild() {
+  try {
+    if (window.caches && caches.keys) {
+      const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k)));
+    }
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      const rs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(rs.map(r => r.unregister()));
+    }
+  } catch (_) { /* clearing is best-effort; the reload below is the part that matters */ }
+  try { const u = new URL(location.href); u.searchParams.set('_fresh', Date.now()); location.replace(u.toString()); }
+  catch (_) { location.reload(); }
+}
+
+let _buildState = null;
+async function _checkBuildIdentity() {
+  const mine = _clientAssetStamp();
+  let h = null;
+  try {
+    const res = await fetch('/api/health', { headers: Auth._headers() });
+    h = res.ok ? await res.json() : null;
+  } catch (_) { h = null; }
+  const server = (h && h.build) || null;
+  _buildState = {
+    clientStamp: mine,
+    serverStamp: server ? server.assetStamp : 'unknown',
+    commit: server ? server.commitShort : 'unknown',
+    startedAt: server ? server.startedAt : null,
+    readiness: (h && h.readiness) || null,
+    // Only a real disagreement counts. Two unknowns are not a mismatch, they are two unknowns,
+    // and telling somebody their app is stale on that basis would be a guess wearing a warning.
+    stale: !!(server && server.assetStamp && server.assetStamp !== 'unknown'
+      && mine !== 'unknown' && server.assetStamp !== mine),
+  };
+  return _buildState;
+}
+
+/* A STALE SHELL SHOULD SAY SO, ONCE. Not a reload loop: it offers, the person chooses. */
+async function _announceStaleBuild() {
+  const st = await _checkBuildIdentity();
+  if (!st.stale) return false;
+  if (document.getElementById('iq-stale-build')) return true;
+  const bar = document.createElement('div');
+  bar.id = 'iq-stale-build';
+  bar.setAttribute('role', 'status');
+  bar.className = 'iq-stale-build';
+  bar.innerHTML = `<span>This page is running an older version of IntelliQ than the server.</span>
+    <button type="button" class="btn btn-outline btn-sm" onclick="_reloadForNewBuild()">Load the new version</button>`;
+  document.body.appendChild(bar);
+  return true;
+}
+
 /* ── WHAT IS ACTUALLY SWITCHED ON ──────────────────────────────────────────────────────────────
    This panel used to be `PLATFORM_GRADES[grade].features` — a list in `js/data.js` — rendered with
    green ticks under the heading "Active Features". For the A grade it claimed:
@@ -2459,7 +2533,30 @@ async function _renderRealCapabilities() {
       <span style="font-size:var(--fs-md)">${esc(label)}${on ? '' : `<div style="font-size:var(--fs-sm);color:var(--text-muted)">${esc(why)}</div>`}</span>
     </div>`).join('')
     + `<div style="font-size:var(--fs-sm);color:var(--text-muted);padding-top:0.6rem">
-         This is what the server reports right now, not a plan or a tier.</div>`;
+         This is what the server reports right now, not a plan or a tier.</div>`
+    + `<div id="iq-build-line" style="font-size:var(--fs-sm);color:var(--text-muted);padding-top:0.5rem;
+         border-top:1px solid var(--border);margin-top:0.5rem">Checking which version you are running…</div>`;
+  _renderBuildLine();
+}
+
+/* THE LINE THE FOUNDER CAN READ ON A PHONE. Deliberately available to any authenticated user
+   rather than hidden behind superadmin: the question "is this device running the build I just
+   deployed?" is the one that has to be answerable while standing in front of the device, and a
+   commit short-hash, a cache stamp and a start time are not secrets. The deeper persistence and
+   provider diagnostics stay behind /api/admin/persistence, which is superadmin-gated. */
+async function _renderBuildLine() {
+  const el = document.getElementById('iq-build-line');
+  if (!el) return;
+  const esc = s => _escHtml(String(s == null ? '' : s));
+  const st = await _checkBuildIdentity();
+  const r = st.readiness || {};
+  const readyWord = r.storesLoaded ? 'loaded' : 'not loaded yet';
+  el.innerHTML = `
+    <div>Server build <strong>${esc(st.commit)}</strong>, started ${esc(st.startedAt ? new Date(st.startedAt).toLocaleString() : 'unknown')}.</div>
+    <div>This device is running assets <strong>${esc(st.clientStamp)}</strong>; the server is serving <strong>${esc(st.serverStamp)}</strong>.</div>
+    <div>Records ${esc(readyWord)}${r.durableStore === false ? ' · durable store unavailable' : ''}.</div>
+    ${st.stale ? `<div style="color:var(--warning);margin-top:0.3rem">These do not match — this device has an older copy.
+      <button class="btn-ghost btn-sm" onclick="_reloadForNewBuild()">Load the new version</button></div>` : ''}`;
 }
 
 /* ── SETTINGS PAGE ───────────────────────────────────────── */

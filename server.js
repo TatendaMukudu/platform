@@ -7246,6 +7246,75 @@ app.delete('/api/tutorials/:id', requireAuth, (req, res) => {
    stdout, which the person holding the phone cannot read. Switches only: no org data, no
    counts, no refusal text (a grounding violation quotes what the model invented, which can
    name a person). The per-org tally lives behind auth on /api/admin/metrics. */
+/* ── BUILD IDENTITY ────────────────────────────────────────────────────────────────────────────
+   The first live-recovery pass ended by saying it could not rule out stale assets as an
+   explanation for what the founder saw on their phone, because nothing in the product could
+   answer "which build am I looking at?". This is that answer.
+
+   Four separate facts, because they fail separately and conflating them is how "it's deployed"
+   became a thing people believed rather than checked:
+
+     commit     which source this process was built from. Read from the platform's own env
+                (Render sets RENDER_GIT_COMMIT) or from git at boot; 'unknown' when neither is
+                available, which is honest and is NOT the same as claiming a match.
+     startedAt  when THIS process began. A restart moves it; a redeploy moves it. It is how you
+                tell "the service restarted" from "the service is the one I left running".
+     startId    a value minted once per process, so two answers from the same process are
+                provably the same process even if the clock is coarse.
+     assetStamp the cache stamp index.html is serving RIGHT NOW, read from disk at boot. This is
+                the server's view of which client it is handing out; the browser reports the one
+                it actually loaded, and the two being different is exactly the stale-asset case.
+
+   No secrets: a commit hash, a timestamp, a random id and a cache stamp. */
+let _FULL_COMMIT = 'unknown';
+const BUILD = (() => {
+  let commit = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT
+    || process.env.SOURCE_VERSION || process.env.VERCEL_GIT_COMMIT_SHA || '';
+  if (!commit) {
+    try {
+      commit = require('child_process')
+        .execFileSync('git', ['rev-parse', 'HEAD'], { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] })
+        .toString().trim();
+    } catch (_) { commit = ''; }
+  }
+  let assetStamp = '';
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'index.html'), 'utf8');
+    const m = html.match(/(?:src|href)="(?:js|css)\/[A-Za-z0-9_.-]+\.(?:js|css)\?v=([A-Za-z0-9]+)"/);
+    assetStamp = (m && m[1]) || '';
+  } catch (_) { assetStamp = ''; }
+  _FULL_COMMIT = commit || 'unknown';
+  return {
+    /* PUBLIC IDENTITY IS THE SHORT HASH. The full 40-character SHA was in this payload until
+       `endpoint-smoke` caught it: a long opaque alphanumeric string is exactly the shape of a
+       leaked key, and the guard that says so is worth more than the convenience. Seven characters
+       is what a person compares against a PR head by eye anyway. The full SHA is still available,
+       behind the superadmin persistence diagnostic, to anybody who needs to be exact. */
+    commit: commit ? commit.slice(0, 7) : 'unknown',
+    commitShort: commit ? commit.slice(0, 7) : 'unknown',
+    commitFull: undefined,
+    startedAt: new Date().toISOString(),
+    startId: Math.random().toString(36).slice(2, 10),
+    assetStamp: assetStamp || 'unknown',
+  };
+})();
+
+/* READINESS IS NOT ONE FLAG. The brief is explicit: do not report the product ready before the
+   required stores are loaded. These are separate questions with separate answers, and a caller
+   that wants one must not be handed another. */
+function _readiness() {
+  const storesLoaded = !!(orgMeta && Object.keys(orgMeta).length >= 0 && _storesLoadedAt);
+  return {
+    process: true,                                   // if this reply exists, the process is alive
+    storesLoaded,
+    storesLoadedAt: _storesLoadedAt || null,
+    durableStore: !!(_persistenceReady && _persistenceReady.ready),
+    durableReason: (_persistenceReady && _persistenceReady.error) || null,
+    persistenceMode: PERSISTENCE_MODE,
+    ready: storesLoaded,                             // what a client may act on
+  };
+}
+
 app.get('/api/health', (req, res) => {
   const composerOff = !IQ_COMPOSER ? 'IQ_COMPOSER is not set to 1 on this host'
     : ai.deterministicOnly() ? 'deterministic-only mode is on — no model is called'
@@ -7271,6 +7340,8 @@ app.get('/api/health', (req, res) => {
         : 'on — the model writes the reply and the deterministic core grounds it',
     },
     time: new Date().toISOString(),
+    build: BUILD,
+    readiness: _readiness(),
   });
 });
 
@@ -17803,6 +17874,7 @@ app.get('/api/admin/persistence', requireAuth, async (req, res) => {
 
   const body = {
     ok: true,
+    build: { ...BUILD, commitFull: _FULL_COMMIT },
     mode: PERSISTENCE_MODE,
     debounceMs: SAVE_DEBOUNCE_MS,
     saves: {
@@ -22545,7 +22617,13 @@ const LEARNING_CACHE_TTL   = 2 * 60 * 60 * 1000; // 2 hours
 
 /* Populate all in-memory store objects from a loaded data blob.
    Uses Object.assign so the existing const references stay valid. */
+/* When the required stores actually became available. `readiness.ready` is this and nothing else:
+   the brief's rule is that the product must not report itself ready before they are loaded, and a
+   timestamp is the only form of that claim which cannot be true by default. */
+let _storesLoadedAt = null;
+
 function _loadAllStores(data) {
+  _storesLoadedAt = new Date().toISOString();
   Object.assign(orgMeta,          data.orgMeta          || {});
   Object.assign(orgUsers,         data.orgUsers         || {});
   Object.assign(inviteTokens,     data.inviteTokens     || {});

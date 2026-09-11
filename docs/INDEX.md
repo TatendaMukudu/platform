@@ -1,7 +1,8 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `f844c3a`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `58e1c68`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Pilot work lands through** `claude/pilot-*` branches; §10 records what has merged since `f844c3a`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
 ---
@@ -345,6 +346,63 @@ the daily check-in was retired** — six of the seven detectors read the mood se
 produced — so the app reported *"Nothing needs your attention right now, you're in a steady
 place"* to a person it could not see at all. Zero highs and zero lows across 28 seeded players
 who had real evidence in the system. Guard: `highs-lows-smoke`.
+
+## 10 · September 10-11, 2026 — the pilot passes
+
+Twenty commits between `f844c3a` and `58e1c68`, in four rounds. The class that links them is the
+one §8 named and this index exists to stop an agent rediscovering: **the suite was green and the
+person holding the phone was not getting it.**
+
+**PR #86, #87 — the pilot stack.** Cross-evidence, the Priority Office, surfacing and closure.
+`ai/cross-evidence.js` is a READER over canonical fields (`focus.addresses`, `raw.inquiryId`,
+`signal.supersededBy`, shared `signal.ref`) and takes no identity at all, so it cannot decide
+access even by accident. It is not a relationship store and must not become one.
+
+**PR #88 — crackdown R2 and two adversarial gates.** What it corrected, and where the owner is:
+
+| Correction | Canonical owner |
+|---|---|
+| Four metric-record builders converged to one; name uniqueness; derived ids stay stable | `ai/metric-record.js` |
+| Invite, Add Member and CSV import all ask `edit_members`; tree position confers nothing | `requirePermission` |
+| An invite may only activate an account at or below its own role (closed an admin→superadmin escalation) | `join-invite` activation branch |
+| A CSV import is atomic at the tree boundary: a failed commit un-mints every account it made | `bulk-import` + `_commitTreeMutation` |
+| Imported group nodes go through the one node writer | `_addTreeNode` |
+| The question gate covers model-supplied Focus text, not only the fallback path | `ai/composer-actions.js` |
+| An invite address is DECLARED, so a typo is a refusal rather than an open join link | `POST /api/auth/invite` |
+
+**PR #89 (open) — live recovery.** The founder used the deployed product on a phone and found
+thirty-one things. Thirteen dispositioned so far; see `docs/reviews/CLAUDE_PILOT_LIVE_RECOVERY_R1.md`
+for the full table including what is NOT done.
+
+| Correction | Canonical owner |
+|---|---|
+| One bounded reader; a failed read can never be mistaken for an empty record | `MemberApp._read` |
+| One failure state with exactly one retry control | `MemberApp._readFailedHTML` |
+| A render ticket per container, so a slow earlier request cannot repaint the page you are on | `_claimRender` / `_stillCurrent` |
+| One terminal signed-out state that disables every composer | `MemberApp._sessionEnded` |
+| Settings reports what the server says is on, not a tier | `_renderRealCapabilities` |
+
+**Removed, because it claimed what did not exist:** the Platform Grade tier system — a client-side
+constant listing nine "Active Features" including *Complete security*, selected by a switcher that
+toasted success for a change that never left the browser. The server has no notion of a grade. The
+same removal took a letter-grade badge off a person's profile (product law 1).
+
+**A reachability hole, and what it hid.** `reachability-smoke` accepted a route as reached if its
+last path segment appeared anywhere in the client. `/api/group` is a prefix of `/api/groups`, so
+every `/api/group/:nodeId/…` route passed on a stranger's words. Tightened, it exposed 26 routes —
+including **`/api/group/:nodeId/focus` and `/api/group/:nodeId/inquiry`, which have no client caller
+at all.** Group-level Focus and Inquiry creation is server-side only, so the node half of the A→B
+loop is reachable by nothing a person can tap. That set is dated and counted; it is **not** a
+parking space, and the routes in it are debt to be closed rather than accepted.
+
+**Suites added in these passes:** `metric-lifecycle-smoke`, `import-conflict-smoke`,
+`onboard-invite-smoke` (extended), `pilot-crackdown-smoke` (extended). Browser-only, outside
+`npm test` because they need a binary: `live-recovery-repro`, `onboard-browser-check`,
+`stack-browser-check`, `priority-surface-browser-check`, `library-browser-check`.
+
+**Still not verified by anybody:** live Neon, restart durability, deployed build identity, and real
+iPhone/Safari behaviour. Every report in `docs/reviews/` that touches these says so; do not read a
+green suite as any of them.
 
 ## 9 · The person decides, the machine holds the gates
 
