@@ -2,8 +2,13 @@
 
 **Starting SHA:** `84d2c6afe073d99c65317aa0fc62b3e47c4c7448` (`main`, PR #88 merged)
 **Branch:** `claude/pilot-live-recovery-r1`
-**Final SHA:** `0b72b87b1792947ac0a6568f24bcaaa00272f343`
+**Round 1 final SHA:** `0b72b87b1792947ac0a6568f24bcaaa00272f343`
+**Round 2 (correction pass) starting SHA:** `58e1c68f1867bdcba8434c287117a99962ba261b`
+**Round 2 final SHA:** `1898dc0db3e65ee7f2ff77da72fc0bde4946aa96`
 **Pull request:** https://github.com/TatendaMukudu/platform/pull/89 — open, not merged.
+
+> **Round 2 begins at the heading "Correction pass — round 2" near the end of this document.**
+> Everything above it is round 1 and is left as written, including what it said it had not done.
 
 Push-connectivity check run first, as `AGENTS.md` requires: `git push --dry-run` to a scratch ref
 succeeded before any file was edited.
@@ -375,3 +380,236 @@ PILOT CODE BLOCKERS: 1 (group Focus and Inquiry have no client caller)
 PILOT OPERATIONS BLOCKERS: 3
 SAFE FOR CODEX AND MULTI-AGENT ADVERSARIAL REVIEW: YES
 READY FOR FINAL FOUNDER RETEST: NO
+
+---
+
+# Correction pass — round 2
+
+**From** `58e1c68` **to** `1898dc0`. Push-connectivity check run first; `npm test` run before any
+change; every finding below reproduced through its production path before it was touched.
+
+## What this round covers, and what it does not
+
+Round 1 dispositioned 13 of 31 observations. **This round adds the CI fix, Phase 1 and Phase 2 in
+full, and leaves the rest explicitly undone.** The 25-category table below marks every category,
+including the ones nobody has touched, because a report that only lists work performed is how a
+gap survives three passes.
+
+**FOUNDER OBSERVATIONS DISPOSITIONED: 15/31.** Two more than round 1 — observations 2 and 23 are
+partly addressed by the readiness contract and the voice fixes respectively, and are marked PARTIAL
+rather than done.
+
+## CI — fixed first, as instructed
+
+`docs-status-smoke` failed on `58e1c68`: the index was 21 commits behind a threshold of 20.
+
+**A detail worth keeping:** it passes locally at 20 and fails in CI at 21 because GitHub's
+`pull_request` event tests the **merge commit**, which adds one. Any PR sitting within one commit
+of the threshold will pass locally and fail in CI. The threshold was not touched.
+
+The index was genuinely stale, so it is re-stamped **and rewritten**: a new §10 records the four
+pilot rounds, where each canonical owner now lives, the suites added, and the two group routes with
+no client caller. Re-stamping without content would have satisfied the guard while defeating its
+stated purpose.
+
+## The test that was editing the repository
+
+`asset-version-smoke` wrote its lock file whenever it was satisfied, so **`npm test` mutated the
+working tree**. Two costs, and the second is the one that matters: a run left a dirty tree and a
+lock change could ride into an unrelated commit without anybody choosing it; and a test whose
+result depends on how many times it has been run is the opposite of a guard.
+
+It now only compares. Recording is `npm run stamp:record` — a deliberate step, so the person
+bumping the stamp is the person who records it.
+
+**Proven, not asserted:** the hash of `git status --porcelain` before and after a full `npm test`
+is now identical.
+
+## Phase 1 — build identity · DONE
+
+Round 1 closed by admitting stale assets could not be ruled out, because nothing in the product
+could answer the question.
+
+| Fact | Where it comes from | Why separate |
+| --- | --- | --- |
+| `commit` | Render's env, or `git rev-parse` at boot, or `"unknown"` | "unknown" is honest and is **not** a claim of a match |
+| `startedAt` + `startId` | once per process | distinguishes a restart from a service you left running |
+| `assetStamp` | read from `index.html` **on disk at boot** | the server's view of which client it is handing out; hard-coding it would let it drift |
+| `readiness` | process / storesLoaded / durableStore, answered separately | the brief's rule: do not report ready before the stores are loaded |
+
+**Readiness cannot default to true.** `ready` is derived from a timestamp that is `null` until a
+load actually happens. Before any load: `storesLoaded: false, ready: false, process: true`.
+
+**The client reads its own stamp from the script tag the browser really loaded** — not a constant,
+which would only ever report what the source says rather than what arrived — and compares it with
+the server's. Different means an old cached shell talking to a newer server. It says so in one
+line, offers **one** reload that clears caches and unregisters the worker, and **does not reload
+itself**: a page that reloads itself is how a reload loop starts, and the founder was already
+looking at a page that would not settle. Two unknowns are treated as unknown, not as a mismatch.
+
+Visible to any authenticated user in Settings, deliberately: *"is this device running the build I
+just deployed?"* has to be answerable while standing in front of the device.
+
+**The full SHA is not in the public payload.** `endpoint-smoke` caught it, correctly — a
+40-character opaque alphanumeric is the shape of a leaked key. Seven characters is what you compare
+by eye; the full one stays behind the superadmin persistence diagnostic.
+
+**Service worker audited:** network-first for GETs, never caches `/api/`, drops every non-current
+cache on activate, `skipWaiting` + `clients.claim`. Guards `BI-E1`–`BI-E4`.
+
+**Guards:** `scripts/build-identity-smoke.js` (28, registered) + `LR-B1`–`LR-B6` in a real browser.
+**Mutations:** readiness defaulting to true → `BI-B1` red; served stamp hard-coded → `BI-A7` red;
+client reporting a baked-in stamp → `BI-D1` red *(after tightening — see false greens)*.
+
+## Phase 2 — one terminal session state · DONE
+
+The gate was right that `_read` was not a boundary. Every **write** answered the same fact locally:
+
+| Surface | What it did with a 401 | Now |
+| --- | --- | --- |
+| composer POST | returned `{reason:'auth'}` to its own caller | `_classifyWrite` |
+| attachment upload | became "I couldn't save that", inside one card | `_classifyWrite` |
+| card thread | reported "I couldn't reach IntelliQ" — a *connection* problem | `_classifyWrite` |
+| Forum write | swallowed everything in `catch (_) {}` | `_classifyWrite` |
+| `_sessionEnded` | selected `.iq-composer` only | every write surface + voice |
+
+**The Forum one was losing messages, not just mishandling auth.** It cleared the box first, fired
+the POST, and checked nothing. A refusal, an ended session or a dropped connection lost what
+somebody had just written, silently. The text is not cleared until it is sent; a failure gives it
+back and says which kind it was.
+
+**The microphone was a real defect in `js/voice.js`,** not only a missing disable. `rec.onresult`
+had no session guard. `cancel()` aborts the recogniser, but abort is a *request* to the browser's
+engine, not a guarantee nothing further is delivered — and the handler wrote whatever arrived.
+Measured directly with the guard removed, a late result lands as `"a late sentence"` in a composer
+on a page that has already told the person to sign in. The session registry is the authority now,
+and `IQVoice.cancelAll()` ends every live session from one call, because `_sessionEnded` cannot
+know which surfaces are listening.
+
+**Guards:** `LR-S1`–`LR-S6` — three write surfaces, the message-loss case, and the late transcript.
+**Mutations:** composer answering locally → 2 red; card thread dropped from the surface list → 1
+red; voice guard removed → 1 red *(after correction — see false greens)*.
+
+## Two false greens found this pass, both mine
+
+| # | Assertion | The lie | Now |
+| --- | --- | --- | --- |
+| FG-3 | `BI-D1` (client reads its loaded stamp) | matched a `querySelector` line that **survived the mutation but was no longer used** — PROTOCOL lie #1 | reads the whole function body and refuses to find a literal stamp in it |
+| FG-4 | `LR-S6` (no late transcript) | read the textarea **200 ms after** the write; something between put the box back, so the mutation stayed green | reads at the instant of the write, and requires the handler to exist so it cannot pass against a recogniser that was never wired |
+
+FG-4 is the more instructive: the law was right and the *instant* was wrong. It was found by
+measuring the mutation by hand rather than trusting the green, which is the only reason it is in
+this table instead of shipping.
+
+**And one process failure of mine:** a mutation run was killed by a timeout with the voice guard
+still removed. It was restored by hand and re-verified. The rule is to check the tree rather than
+assume the harness finished.
+
+## The 25 audit categories
+
+| # | Category | Result | Evidence / where it stands |
+| --- | --- | --- | --- |
+| 1 | Startup / build identity / readiness / stale assets | **DONE** | `build-identity-smoke` (28) + `LR-B1`–`B6`; 3 mutations |
+| 2 | Auth terminal state, all write surfaces | **DONE** | `LR-S1`–`S6`; 3 mutations; Forum message-loss closed |
+| 3 | Home and memory | **PARTIAL** | Home bounded and honest (round 1); **bounded memory hydration before composer readiness NOT built** |
+| 4 | Highs | **PARTIAL** | failure/empty states correct; content semantics not re-verified |
+| 5 | Lows | **PARTIAL** | as Highs; the race is fixed and guarded |
+| 6 | Inquiries | **PARTIAL** | open/failure paths correct; relationship display not addressed |
+| 7 | Focuses | **NOT DONE** | creation panel, "Early thinking" explained only |
+| 8 | Human A→B loop | **PARTIAL** | personal loop exists (`ai/cross-evidence.js`, 14/14 in an earlier pass, **not re-driven here**) |
+| 9 | Single-node cross-reference | **FAIL** | **open blocker — see below** |
+| 10 | Human/node-scoped external web reading | **NOT DONE** | `/api/objects/:kind/:id/reading` and `ai/websearch.js` not audited this pass |
+| 11 | Evidence manifest / deterministic output verification | **NOT DONE** | `verifyGrounding()` not strengthened |
+| 12 | Prose / card / graph / voice consistency | **NOT DONE** | no shared manifest built |
+| 13 | Universal non-sector architecture | **NOT AUDITED** | `ai/packs.js` supplies vocabulary; whether it forks behaviour is unverified |
+| 14 | Object Forums | **PARTIAL** | icon done (round 1); availability-from-current-audience not re-verified |
+| 15 | One-way Forum→private context | **NOT DONE** | bounded reader not built |
+| 16 | Private→Forum non-flow | **NOT VERIFIED** | believed impossible; not tested this pass |
+| 17 | Voice input | **PARTIAL** | cancellation, late-transcript and session coupling fixed and guarded; permission/unsupported states not re-verified |
+| 18 | Voice output | **NOT DONE** | read-aloud still silently no-ops where unsupported |
+| 19 | Attachments / Material / Library | **NOT DONE** | the PDF classification flow is unbuilt; observations 12–14 stand |
+| 20 | Mobile conversation-first UI | **NOT DONE** | object thread is still the long packet; 8 competing controls remain |
+| 21 | Personal vs organisation Settings | **NOT DONE** | members still have no personal Settings destination |
+| 22 | Capability truth | **PARTIAL** | tier fiction removed (round 1); `/api/health` mapping still conflates browser mic with server transcription |
+| 23 | Demo / fake claims | **DONE** | Platform Grade, nine "Active Features", "Complete security", letter grades all removed and guarded |
+| 24 | CI and false-green coverage | **DONE** | CI fixed; test purity proven; 2 false greens found and corrected |
+| 25 | Live persistence / restart / deployment | **NOT VERIFIABLE HERE** | no credentials, host denied by egress policy |
+
+## The open pilot code blocker
+
+**`/api/group/:nodeId/focus` and `/api/group/:nodeId/inquiry` still have no client caller.**
+
+Reproduced by `reachability-smoke` with the tightened matcher (round 1). The routes themselves are
+well built — leader-gated via `_leadsNode`, the named origin Inquiry is verified to belong to that
+group before it can be claimed, and both use the shared constructor in `ai/team-state.js`. What is
+missing is a tappable way in.
+
+**I did not build it in this pass, deliberately.** A group Focus needs an audience decision, a
+confirmation path and a Forum consequence, and a partly-wired entry point would be a new misleading
+control — precisely the class of defect this engagement exists to remove. It is recorded here as
+the founder's call rather than decided quietly.
+
+Until it exists, **the node half of the A→B loop is unreachable through the UI**, and
+`SINGLE-NODE CROSS-REFERENCE` is FAIL rather than PARTIAL.
+
+## Commands run
+
+```
+git push --dry-run origin HEAD:refs/heads/claude/connectivity-check   ok
+npm test                                        TRUTH LAYER GREEN
+node scripts/build-identity-smoke.js            28 passed, 0 failed   (new, registered)
+node scripts/live-recovery-repro.js             35 passed, 0 failed   (was 17 at 58e1c68)
+node scripts/stack-browser-check.js            114 passed, 0 failed
+node scripts/priority-surface-browser-check.js  39 passed, 0 failed
+node scripts/onboard-browser-check.js           34 passed, 0 failed
+node scripts/library-browser-check.js           24 passed, 0 failed
+git diff --check                                clean
+git status hash before/after npm test           identical
+```
+
+Six mutations this round, each restored and verified in the tree by hand.
+
+## Founder retest script
+
+Because none of the operational claims can be made from here, these are the steps that would settle
+them. Nothing below was performed.
+
+1. **Build identity.** Open Settings on the phone. Compare the seven-character server build against
+   the PR head. Compare *"This device is running assets X; the server is serving Y"* — they should
+   match. If they differ, tap **Load the new version** and confirm they match afterwards.
+2. **Stale rollover.** Leave a tab open. Deploy. Return to the tab: it should say it is running an
+   older version and offer one reload. It must not reload by itself, and must not loop.
+3. **Mid-session expiry.** Sign in, start typing, then invalidate the session. Expect: one sign-in
+   message, a disabled composer, no microphone, no paperclip, and — if you were dictating — no
+   transcript appearing afterwards.
+4. **Forum message safety.** Post to a Forum with the network off. Your text must still be in the
+   box.
+5. **Home hydration.** Open Home on a slow connection. It must resolve or say it could not, within
+   about eight seconds, with one **Try again**.
+6. **A→B, personal.** Record a Low, form an Inquiry from it, start a Focus addressing it, record an
+   outcome, then ask what changed. **The group equivalent is not reachable — see the blocker.**
+7. **Restart.** Restart the service; re-check records, memory and any uploaded material. Compare
+   `startedAt` before and after: it must move.
+
+## Still not verified by anybody
+
+Live Neon, restart durability, deployed build identity, real provider configuration, and real
+iPhone/Safari behaviour. No `DATABASE_URL`, no Render key, and `platform-827l.onrender.com` is
+denied by this session's egress policy. Chromium at 390×844 and 430×932 is **not** iOS Safari.
+
+---
+
+FOUNDER OBSERVATIONS DISPOSITIONED: 15/31
+AUDIT CATEGORIES DISPOSITIONED: 25/25
+HUMAN EVIDENCE WEB: PARTIAL
+SINGLE-NODE CROSS-REFERENCE: FAIL
+FORUM ONE-WAY CONTEXT: FAIL
+OUTPUT MANIFEST CONSISTENCY: FAIL
+VOICE INPUT: PARTIAL
+VOICE OUTPUT: FAIL
+FALSE-GREEN TESTS FOUND THIS PASS: 2
+PILOT CODE BLOCKERS: 1
+PILOT OPERATIONS BLOCKERS: 3
+GITHUB CI ON EXACT HEAD: PENDING VERIFICATION
+SAFE TO MERGE: NO
+READY FOR FINAL FOUNDER PHONE/RESTART RETEST: NO
