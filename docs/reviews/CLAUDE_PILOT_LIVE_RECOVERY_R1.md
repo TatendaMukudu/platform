@@ -591,6 +591,21 @@ them. Nothing below was performed.
 7. **Restart.** Restart the service; re-check records, memory and any uploaded material. Compare
    `startedAt` before and after: it must move.
 
+## CI on the exact head — confirmed
+
+```
+check run "node scripts/test.js" on e628cab
+started 2026-09-11T08:05:02Z, completed 08:07:44Z, conclusion SUCCESS
+https://github.com/TatendaMukudu/platform/actions/runs/34577425780/job/103192969949
+```
+
+**A correction against myself.** While waiting for this I polled the check-runs API repeatedly and
+was served `in_progress` for roughly twenty minutes, and reported it as "still running, not
+claimed". The run had in fact finished in 2m42s — its normal duration — and the API was returning a
+stale status to my polling. The caution was right (do not claim a pass you have not seen) but the
+inference drawn from it — that the job might be hung — was wrong. Recorded because a reviewer
+reading the earlier line would otherwise be looking for a CI problem that never existed.
+
 ## Still not verified by anybody
 
 Live Neon, restart durability, deployed build identity, real provider configuration, and real
@@ -610,6 +625,6 @@ VOICE OUTPUT: FAIL
 FALSE-GREEN TESTS FOUND THIS PASS: 2
 PILOT CODE BLOCKERS: 1
 PILOT OPERATIONS BLOCKERS: 3
-GITHUB CI ON EXACT HEAD: PENDING VERIFICATION
+GITHUB CI ON EXACT HEAD: PASS
 SAFE TO MERGE: NO
 READY FOR FINAL FOUNDER PHONE/RESTART RETEST: NO
