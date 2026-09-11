@@ -143,9 +143,12 @@ const unknownOrigin = ['a', 'b', 'c'].map((s, n) => SIG({ source: s, turnId: 't'
 ok('PR25 several reports of UNESTABLISHED origin say the origin is unestablished',
   /where it came from has not been established/.test(why(unknownOrigin))
   && !/separate accounts/.test(why(unknownOrigin)));
+/* Read through a guard, not through a dot. Removing the shape from deriveConfidence is one of the
+   mutations this suite is meant to catch, and a TypeError here would kill the process before the
+   later assertions ran — turning a complete red into a truncated one that hides what else broke. */
 ok('PR25b …and this is exactly the shape whose BAND would have justified the old claim, which is why the band cannot be the source',
   bandOf(unknownOrigin) === 'supported'
-  && D.deriveConfidence(unknownOrigin).origin.independentOrigins === 0);
+  && ((D.deriveConfidence(unknownOrigin) || {}).origin || {}).independentOrigins === 0);
 
 /* 6 — two genuinely independent origins: the ONLY shape that earns the claim. */
 const independent = [SIG({ source: 'a', originRef: 'o1', turnId: 't1' }),
