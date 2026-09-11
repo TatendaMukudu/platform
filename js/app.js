@@ -7939,18 +7939,53 @@ const MemberApp = {
      Idempotent: a dozen 401s in a row produce one state, not a dozen banners — which is the other
      half of what the founder saw, several competing messages at once. */
   _sessionOver: false,
+
+  /* EVERY WRITING SURFACE, NOT JUST THE COMPOSER. The first version of this selected
+     `.iq-composer` and stopped there, which was the shape of the app as I understood it and not
+     the shape of the app. An inventory found three more places a person can write:
+
+       .iq-composer          Home, object threads, Forum          (was covered)
+       .iq-cardthread-input  the thread inside an attention card  (was NOT)
+       .iq-attach-input      the file picker behind the paperclip (label, not disableable)
+       IQVoice sessions      a live microphone on any of them     (was NOT)
+
+     The microphone is the one that matters most. A recogniser left running delivers its final
+     result whenever it finishes, so a session that ended mid-sentence could put a transcript into
+     a composer minutes later — into a page that has no session to send it with, after the person
+     has already been told to sign in. `IQVoice.cancelAll` ends every live session, and cancel
+     rather than stop, because the text belongs to a session that is gone. */
+  _WRITE_SURFACES: ['.iq-composer', '.iq-cardthread-input'],
+
   _sessionEnded() {
     if (this._sessionOver) return;
     this._sessionOver = true;
-    document.querySelectorAll('.iq-composer').forEach(c => {
-      c.classList.add('iq-composer-off');
-      c.querySelectorAll('textarea, button, input').forEach(el => { el.disabled = true; });
-      // A <label> with a hidden file input is not disableable; hide the doorway instead.
-      c.querySelectorAll('.iq-attach').forEach(el => { el.hidden = true; });
+    // Stop listening FIRST: a transcript arriving after the controls are disabled is exactly the
+    // late-write this is here to prevent.
+    try { if (window.IQVoice && IQVoice.cancelAll) IQVoice.cancelAll(); } catch (_) {}
+    this._WRITE_SURFACES.forEach(sel => {
+      document.querySelectorAll(sel).forEach(c => {
+        c.classList.add('iq-composer-off');
+        c.querySelectorAll('textarea, button, input, select').forEach(el => { el.disabled = true; });
+        // A <label> with a hidden file input is not disableable; hide the doorway instead.
+        c.querySelectorAll('.iq-attach').forEach(el => { el.hidden = true; });
+      });
     });
+    document.querySelectorAll('.iq-attach').forEach(el => { el.hidden = true; });
     document.querySelectorAll('.iq-voice-state').forEach(el => {
       el.textContent = 'Your session has ended. Sign in again to carry on.';
     });
+  },
+
+  /* THE ONE CLASSIFICATION, FOR WRITES AS WELL AS READS. `_read` already turns a 401 into the
+     terminal state; a POST that discovers the same thing must not answer it locally and leave the
+     rest of the app believing it is signed in. Callers keep their own shapes — this only makes
+     sure the app-wide consequence happens exactly once, wherever the truth arrives. */
+  _classifyWrite(res) {
+    if (!res) return { ok: false, reason: 'offline' };
+    if (res.status === 401) { this._sessionEnded(); return { ok: false, reason: 'auth', status: 401 }; }
+    if (res.status === 403) return { ok: false, reason: 'forbidden', status: 403 };
+    if (!res.ok) return { ok: false, reason: 'http', status: res.status };
+    return { ok: true, status: res.status };
   },
 
   /* ── localStorage keys (userId-scoped) ──────────────────── */
@@ -12460,12 +12495,34 @@ const MemberApp = {
     const ctx = this._forumCtx;
     const text = String(input && input.value || '').trim();
     if (!text || !ctx) return;
-    input.value = '';
+    /* THE TEXT IS NOT CLEARED UNTIL IT IS SENT. This cleared the box first, fired the POST, and
+       swallowed every outcome in `catch (_) {}` — no status check at all. So a refusal, an ended
+       session or a dropped connection lost what somebody had just written, silently, with the
+       room re-rendering as though nothing had happened. Message loss is worse than a visible
+       failure, and it was invisible by construction. */
+    const sendBtn = document.querySelector('#iq-forum-input ~ .iq-send, .iq-composer .iq-send');
+    if (sendBtn) sendBtn.disabled = true;
+    let res = null;
     try {
-      await fetch(this._forumURL(ctx), {
+      res = await fetch(this._forumURL(ctx), {
         method: 'POST', headers: this._authHeaders(), body: JSON.stringify({ text }),
       });
-    } catch (_) {}
+    } catch (_) { res = null; }
+    if (sendBtn) sendBtn.disabled = false;
+    const c = this._classifyWrite(res);
+    if (!c.ok) {
+      // Give them their words back, and say why. `_classifyWrite` has already ended the session
+      // app-wide if that is what happened, so the composer will be disabled underneath this.
+      input.value = text;
+      const state = document.getElementById('iqf-voice-state');
+      if (state) {
+        state.textContent = c.reason === 'auth' ? 'Your session has ended — this was not posted.'
+          : c.reason === 'forbidden' ? 'You are no longer part of this discussion — this was not posted.'
+          : 'That did not post. Your message is still here — try again.';
+      }
+      return;
+    }
+    input.value = '';
     this.openForum(ctx.nodeId, ctx.objectId, ctx.room, ctx.backKind);
   },
 
@@ -13060,21 +13117,31 @@ const MemberApp = {
     if (ta && !isOpening) { ta.value = ''; this._wsGrow(ta); }
 
     this._cardThreads = this._cardThreads || this._cardThreadsLoad();
-    let j = null;
+    let j = null, cls = null;
     try {
       const r = await fetch('/api/assistant/turn', { method: 'POST',
         headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
         body: JSON.stringify({ text, conversationId: this._cardThreads[dedupeKey] || undefined,
           about: { headline: info.headline, body: info.body } }) });
-      j = await r.json();
+      // The card thread is a write surface like any other, and its 401 is the same fact as every
+      // other 401. It used to report "I couldn't reach IntelliQ" — a connection problem — for a
+      // session that had simply ended, and left this textarea usable for the next attempt.
+      cls = this._classifyWrite(r);
+      j = cls.ok ? await r.json() : null;
       if (j && j.conversationId) { this._cardThreads[dedupeKey] = j.conversationId; this._cardThreadsSave(); }
-    } catch (_) { j = null; }
+    } catch (_) { j = null; cls = { ok: false, reason: 'offline' }; }
 
     const pend = msgs && msgs.querySelector('[data-pending="1"]');
     if (pend) {
       pend.removeAttribute('data-pending');
       if (j && j.ok) pend.innerHTML = this._renderAssistant(j);
-      else { pend.classList.add('iq-msg-error'); pend.innerHTML = `<div class="iq-error-text">I couldn't reach IntelliQ just now.</div>`; }
+      else {
+        pend.classList.add('iq-msg-error');
+        const why = cls && cls.reason === 'auth' ? 'Your session has ended. Sign in again to carry on.'
+          : cls && cls.reason === 'forbidden' ? 'You do not have access to this any more.'
+          : "I couldn't reach IntelliQ just now.";
+        pend.innerHTML = `<div class="iq-error-text">${this._escape(why)}</div>`;
+      }
     }
     this._cardSending = false;
   },
@@ -13287,6 +13354,14 @@ const MemberApp = {
           conversationId: objectThread?.conversationId || this._chatConvId || undefined, about }),
       });
       const raw = await r.text(); let d; try { d = JSON.parse(raw); } catch (_) { d = null; }
+      /* An upload that discovers the session has ended is the SAME fact as a read discovering it,
+         and it used to become a local "I couldn't save that" inside this one card — leaving the
+         composer, the microphone and the paperclip live for the next attempt, which could not
+         work either. Through the one classifier, so the whole app learns it once. */
+      if (r.status === 401) {
+        this._classifyWrite(r);
+        throw new Error('Your session has ended. Sign in again to carry on.');
+      }
       if (!r.ok || !d || d.ok === false) throw new Error((d && d.error) || 'I couldn’t save that.');
       if (d.conversationId && !objectThread) this._rememberChat(d.conversationId);
       if (objectThread && d.conversationId) objectThread.conversationId = d.conversationId;
@@ -13320,7 +13395,10 @@ const MemberApp = {
           surface: this._composerAbout?.kind || 'home', requestedAction: this._pendingComposerAction || undefined,
           attachment: this._pendingAttachment || undefined }) });
       clearTimeout(timer);
-      if (r.status === 401) return { ok: false, reason: 'auth' };
+      // Through the one classifier: a composer POST discovering an ended session must end it for
+      // the whole app, not only for this turn. This used to return locally and leave every other
+      // surface believing it was still signed in.
+      if (r.status === 401) return this._classifyWrite(r);
       const j = await r.json();
       if (!j || !j.ok) return { ok: false, reason: 'server' };
       this._pendingComposerAction = null;

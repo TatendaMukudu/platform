@@ -186,6 +186,130 @@ _rebuildEmailIndex();
       await ctx.close();
     }
 
+    /* ══ PHASE 2 — ONE TERMINAL SESSION STATE, FOR EVERY WAY OF WRITING ═════════════════════
+       `_read` already turned a 401 into the terminal state. The gate found that every WRITE path
+       answered it locally instead: the composer POST returned `{reason:'auth'}` to its own caller,
+       an upload turned it into "I couldn't save that", the card thread reported a connection
+       problem, and the Forum swallowed it entirely — having already cleared the box. Meanwhile
+       `_sessionEnded` only ever selected `.iq-composer`, so the card thread stayed usable and a
+       live microphone kept listening. */
+    console.log('\n  PHASE 2 — A 401 ON ANY WRITE ENDS THE SESSION EVERYWHERE');
+    const writeCases = [
+      ['the composer POST', async page => page.evaluate(async () => {
+        document.getElementById('iq-composer-input').value = 'hello';
+        await MemberApp.wsSend();
+      })],
+      /* The card thread needs the same two things production gives it: an insight in the registry
+         and a rendered card carrying its key. Anything less and cardSend returns before it ever
+         reaches the network, which would make this assertion pass against a surface that never
+         ran -- PROTOCOL's empty fixture. */
+      ['a card-thread write', async page => page.evaluate(async () => {
+        MemberApp._insights = { ...(MemberApp._insights || {}), x: { headline: 'h', body: 'b' } };
+        document.body.insertAdjacentHTML('beforeend',
+          '<div class="iq-insight" data-key="x"><div class="iq-cardthread-msgs"></div>'
+          + '<div class="iq-cardthread-input"><textarea class="iq-cardthread-ta"></textarea></div></div>');
+        if (!MemberApp._cardEl('x')) throw new Error('fixture did not render the card');
+        await MemberApp.cardSend('x', 'hello');
+      })],
+      ['a Forum write', async page => page.evaluate(async () => {
+        MemberApp._forumCtx = { nodeId: 'n1', objectId: 'o1', room: 'r', backKind: 'high' };
+        document.body.insertAdjacentHTML('beforeend',
+          '<textarea id="iq-forum-input">something worth keeping</textarea>');
+        await MemberApp.forumSend();
+      })],
+    ];
+    for (const [label, act] of writeCases) {
+      const { page, ctx } = await openApp();
+      await page.evaluate(() => navigate('home'));
+      await page.waitForTimeout(900);
+      // Everything is fine until the write. Only then does the server refuse.
+      await page.route('**/api/**', route => route.fulfill({ status: 401,
+        contentType: 'application/json', body: JSON.stringify({ error: 'Authentication required.' }) }));
+      try { await act(page); } catch (_) { /* the surface may throw; the app-wide state is the test */ }
+      await page.waitForTimeout(900);
+      const state = await page.evaluate(() => {
+        const usable = el => el && !el.disabled && el.offsetParent !== null;
+        return {
+          over: !!MemberApp._sessionOver,
+          composer: usable(document.getElementById('iq-composer-input')),
+          mic: usable(document.getElementById('iq-mic')),
+          attachVisible: [...document.querySelectorAll('.iq-attach')].some(e => !e.hidden),
+          cardTa: [...document.querySelectorAll('.iq-cardthread-ta')].some(t => !t.disabled),
+        };
+      });
+      ok(`LR-S1 (${label}) a 401 ends the session for the whole app, not just this surface`, state.over === true);
+      ok(`LR-S2 (${label}) …the composer, microphone and paperclip are all closed`,
+        !state.composer && !state.mic && !state.attachVisible);
+      ok(`LR-S3 (${label}) …including the card thread, which is a separate place to write`, !state.cardTa);
+      await ctx.close();
+    }
+
+    /* THE FORUM MESSAGE ITSELF. Losing what somebody wrote is worse than showing them a failure,
+       and this lost it silently: the box was cleared before the request, and every outcome was
+       swallowed by an empty catch. */
+    {
+      const { page, ctx } = await openApp();
+      await page.evaluate(() => navigate('home'));
+      await page.waitForTimeout(800);
+      await page.route('**/api/**', route => route.fulfill({ status: 401,
+        contentType: 'application/json', body: JSON.stringify({ error: 'Authentication required.' }) }));
+      const kept = await page.evaluate(async () => {
+        MemberApp._forumCtx = { nodeId: 'n1', objectId: 'o1', room: 'r', backKind: 'high' };
+        document.body.insertAdjacentHTML('beforeend',
+          '<textarea id="iq-forum-input">something worth keeping</textarea>');
+        await MemberApp.forumSend();
+        await new Promise(r => setTimeout(r, 400));
+        return document.getElementById('iq-forum-input').value;
+      });
+      ok('LR-S4 a Forum message that does not post is given back, not silently lost',
+        kept === 'something worth keeping');
+      await ctx.close();
+    }
+
+    /* THE LATE TRANSCRIPT. A recogniser left running delivers whenever it finishes, so a session
+       that ended mid-sentence could put text into a composer minutes later — on a page that has
+       no session to send it with, after the person was told to sign in. */
+    {
+      const { page, ctx } = await openApp();
+      await page.evaluate(() => navigate('home'));
+      await page.waitForTimeout(900);
+      const res = await page.evaluate(async () => {
+        // A fake recogniser with the surface IQVoice drives, so the test is deterministic and
+        // does not need a microphone or a permission prompt.
+        let aborted = false, live = null;
+        window.SpeechRecognition = function () {
+          live = this;
+          this.start = () => {}; this.stop = () => {}; this.abort = () => { aborted = true; };
+        };
+        const ta = document.getElementById('iq-composer-input');
+        ta.value = '';
+        IQVoice.start('iq-composer-input', {});
+        const listening = IQVoice.isListening('iq-composer-input');
+        // The session ends because of something else entirely — an unrelated read.
+        MemberApp._sessionEnded();
+        // …and only then does the recogniser deliver.
+        /* READ IT AT THE MOMENT IT WOULD BE WRITTEN. The first version waited 200ms and read the
+           textarea afterwards, and the mutation that removes the guard did NOT turn it red --
+           something between the write and the read put the box back. Measured directly with the
+           guard removed, the late result really does land ("a late sentence"), so the assertion
+           was testing the wrong instant rather than the wrong law. */
+        let afterResult = ta.value;
+        if (live && live.onresult) {
+          live.onresult({ resultIndex: 0, results: [Object.assign(
+            [{ transcript: 'a late sentence' }], { isFinal: true, length: 1 })] });
+          afterResult = ta.value;
+        }
+        return { listening, aborted, text: afterResult, handler: !!(live && live.onresult),
+                 stillListening: IQVoice.isListening('iq-composer-input') };
+      });
+      ok('LR-S5 an ended session cancels a live microphone', res.listening === true && res.stillListening === false);
+      // The handler must EXIST, or this would pass against a recogniser that was never wired --
+      // an empty fixture proving nothing about what a real late result would do.
+      ok('LR-S6 …and a transcript that arrives afterwards is not inserted',
+        res.handler === true && !/late sentence/.test(res.text));
+      await ctx.close();
+    }
+
     /* ══ PHASE 1 — THE PHONE CAN SAY WHICH BUILD IT IS RUNNING ══════════════════════════════
        The first pass closed by admitting stale assets could not be ruled out. These drive the
        real comparison in a real browser: the client reads the stamp it actually loaded, asks the

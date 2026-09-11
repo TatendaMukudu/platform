@@ -98,6 +98,14 @@
     IQVoice._sessions[targetId] = session;
 
     rec.onresult = function (e) {
+      /* A CANCELLED SESSION DOES NOT GET TO WRITE. `cancel()` aborts the recogniser and clears
+         this session, but abort is a REQUEST to the browser's engine, not a guarantee that no
+         further result is delivered — a final result already in flight still arrives, and this
+         handler used to write it into the textarea regardless. So a session that ended while
+         somebody was mid-sentence could put their words into a composer afterwards, on a page
+         that had already told them to sign in. The session registry is the authority: if this
+         session is no longer the live one, nothing is written. */
+      if (IQVoice._sessions[targetId] !== session) return;
       var text = '';
       for (var i = e.resultIndex; i < e.results.length; i++) text += e.results[i][0].transcript;
       session.final = text;
@@ -155,6 +163,19 @@
     if (s.rec) { try { s.rec.abort(); } catch (e) {} }
     IQVoice._sessions[targetId] = null;
     return true;
+  };
+
+  /* CANCEL EVERYTHING, from one call. The session can end while somebody is mid-sentence into a
+     microphone on a surface nothing else knows about, and a recogniser left running will happily
+     deliver a final result minutes later, into a composer that no longer has a session to send it
+     with. There is exactly one registry of live sessions, so there is exactly one place to end
+     them all. */
+  IQVoice.cancelAll = function () {
+    var n = 0;
+    Object.keys(IQVoice._sessions || {}).forEach(function (id) {
+      if (IQVoice._sessions[id] && IQVoice.cancel(id)) n++;
+    });
+    return n;
   };
 
   global.IQVoice = IQVoice;
