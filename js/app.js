@@ -6750,8 +6750,13 @@ async function _renderLeadInquiry() {
 
    Failure is silent by design. This is one strip on a page that already works without it;
    a group surface that cannot load should not take down the leader's home. */
-async function _renderTeamState() {
-  const box = document.getElementById('team-state');
+/* THE CONTAINER IS A PARAMETER because this strip now mounts in three places and an id can only
+   ever be in one of them. It renders on the leader's home, on the full team briefing, and — added
+   September 2026 — on THE ONE HOME every account lands on, which is the only one a coach reliably
+   reaches. Copying the renderer to do that would have been a second definition of what a group
+   card is; three call sites and one function is the whole point of the one-app rule. */
+async function _renderTeamState(containerId = 'team-state') {
+  const box = document.getElementById(containerId);
   if (!box) return;
   try {
     const mineRes = await fetch('/api/group/mine', { headers: Auth._headers() });
@@ -6815,8 +6820,20 @@ function _teamStateCard(s) {
     ? (focus.origin && focus.origin.from === 'inquiry' ? 'from an open inquiry' : 'set by a leader')
     : '';
 
+  /* THE DOOR. This card has shown a group's High, Low, Inquiry and Focus for a while and led
+     NOWHERE -- so the group's half of the A -> B loop (its inquiries, setting a focus out of one,
+     recording what came of it) was three fully built routes with nothing a person could tap to
+     reach them. A summary that cannot be opened is a poster.
+
+     The whole card is the target rather than a chevron in the corner: on a phone the card is
+     already the size of the thing you would aim at, and a separate small control beside it is a
+     second place to miss. */
+  const open = `MemberApp.openGroupNode('${esc(s.node.nodeId)}')`;
   return `
-    <div class="tstate-card">
+    <div class="tstate-card tstate-open" role="button" tabindex="0"
+      aria-label="Open ${esc(s.node.name)}"
+      onclick="${open}"
+      onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${open}}">
       <div class="tstate-head">
         <div class="tstate-name">${esc(s.node.name)}</div>
         <div class="tstate-count">${s.node.memberCount} ${_v(s.node.memberCount === 1 ? 'member' : 'members')}</div>
@@ -7835,6 +7852,11 @@ const MemberApp = {
   _noteTag:     '',
   _notesFilter: 'All',
   _myGroups:    [],
+  /* Org NODES this person is in, from /api/group/mine -- {nodeId, name, role}. A separate field
+     from `_myGroups` above, which is the /api/groups message-recipient list, because they are
+     different things with different shapes and one name for both is how a selector ends up
+     rendering `undefined`. */
+  _myNodes:     [],
   _cachedNotes: [],
   _chatConvId:  null,   // the member's live threaded conversation (same runtime as the leader)
   _insights:    {},     // dedupeKey -> { headline, body, patternType } for the cards on screen
@@ -8302,6 +8324,17 @@ const MemberApp = {
     // The unified MyWorkspace assistant surface is the primary home experience.
     try { this._renderMyWorkspace(this._wsActiveLens || 'today'); } catch (_) {}
     this._renderMeContext();
+    /* THE GROUP, ON THE HOME EVERYBODY ACTUALLY LANDS ON. `home` routes to _renderHome for every
+       account; the group card rendered only on `leader-home` and on the full team briefing, so a
+       coach opening the app saw their squad's High, Low, Inquiry and Focus nowhere — and since
+       that card is now the door to the group's half of the A -> B loop, the loop was unreachable
+       from the first screen as well as from the routes.
+
+       This is NOT the feed the founder cut from Home. That was five blocks of noticings,
+       questions, prepared items and notes competing above the fold. This is one card per group a
+       person is actually in, naming the four objects the product is about, and it is the same
+       renderer as the other two mounts rather than a copy of it. */
+    try { if (typeof _renderTeamState === 'function') _renderTeamState('home-team-state'); } catch (_) {}
   },
 
   /* Fetch and render the proactive open-state: the kernel has "already worked".
@@ -8381,7 +8414,10 @@ const MemberApp = {
       prepEl.innerHTML = html;
     }
     this._renderMeNotes();
-    this._renderGroupNoticings();
+    /* NOT CALLED HERE ANY MORE. It wrote into `#me-group`, which is `hidden` and which nothing
+       ever un-hides, so every Home render paid for /api/group/mine plus one /candidates request
+       per group in order to draw cards into a `display:none` box. The surface now lives on the
+       group's own screen -- see _renderGroupNoticings. */
   },
 
   /* ── THINGS THAT MIGHT CONCERN YOUR GROUP ─────────────────────────────────
@@ -8398,14 +8434,44 @@ const MemberApp = {
      second is yours to answer — the system does not read your sentence and decide it for you,
      and a team's Highs and Lows are built from those answers rather than from a sentiment
      model's guess about your words. */
-  async _renderGroupNoticings() {
-    const el = document.getElementById('me-group');
+  /* ── A SURFACE THAT HAD BEEN RENDERING INTO A NODE NOBODY COULD SEE ──────────────────────
+     Found this pass, in a browser, and it is the INPUT half of the group loop.
+
+     `#me-group` carries a `hidden` attribute in index.html, the stylesheet has
+     `[hidden]{display:none!important}`, and nothing in the client ever removes it. So this
+     renderer -- called on every single Home render, fetching /api/group/mine and one /candidates
+     per group each time -- wrote its cards into an element with `display:none` and
+     `offsetParent:null`. Verified in Chromium rather than argued from the source.
+
+     What that cost: offering a noticing to a group is the ONLY way a member's private observation
+     becomes material the group can reason about, and a group inquiry opens only when two
+     INDEPENDENT people have done it. With no visible control, no member could ever offer one, so
+     no group inquiry could ever open from the product. The group half of the A -> B loop was
+     unreachable from BOTH ends -- no door in at the bottom, no door in at the top.
+
+     It is not un-hidden on Home. The founder cut the five-block feed from the first screen
+     deliberately and this was part of it. It is mounted where it belongs instead: on the group's
+     own screen, scoped to THAT group, beside the inquiries it feeds. Same boundary, same words,
+     same server checks -- the card still says nobody can see it yet, and offering is still a
+     separate deliberate act. Only the place it is drawn has changed. */
+  async _renderGroupNoticings(onlyNodeId = null, containerId = 'me-group') {
+    const el = document.getElementById(containerId);
     if (!el) return;
     const esc = t => this._escape(t || '');
     try {
       const mineRes = await fetch('/api/group/mine', { headers: this._authHeaders() });
       if (!mineRes.ok) { el.innerHTML = ''; return; }
-      const groups = ((await mineRes.json()).groups || []);
+      let groups = ((await mineRes.json()).groups || []);
+      if (onlyNodeId) groups = groups.filter(g => g && String(g.nodeId) === String(onlyNodeId));
+      /* Remembered so the group screen can tell whether to DRAW a leader-only control. It is
+         never the gate: _leadsNode on the route is, and a forged call still gets 403 from it.
+
+         DELIBERATELY NOT `_myGroups`, which already exists and means something else entirely --
+         the /api/groups message-recipient list, whose rows are {id, name}. These rows are org
+         NODES, {nodeId, name, role}. Writing them into that field would have left the message
+         group selector rendering `value="undefined"` for every option, which is the two-meanings
+         -one-name failure this codebase keeps finding. */
+      this._myNodes = groups;
       if (!groups.length) { el.innerHTML = ''; return; }
 
       const blocks = (await Promise.all(groups.map(async g => {
@@ -8414,7 +8480,9 @@ const MemberApp = {
         const cands = (r && r.candidates) || [];
         if (!cands.length) return '';
         return `
-          <div class="me-section-label">Might concern ${esc(g.name)} — yours alone until you say otherwise</div>
+          <div class="me-section-label">${onlyNodeId
+            ? 'Things you said that might concern this group — yours alone until you say otherwise'
+            : `Might concern ${esc(g.name)} — yours alone until you say otherwise`}</div>
           ${cands.map(c => `
             <div class="card mg-card" id="mg-${esc(c.candidateId)}">
               <div class="me-row-text">${esc(c.label || c.concept)}</div>
@@ -11983,7 +12051,8 @@ const MemberApp = {
         + `<div class="iqt-call" id="iqt-call"></div>`
         + `<div class="iqt-chart" id="iqt-chart"></div>`
         + `<div class="iqt-mat" id="iqt-mat"></div>`
-        + `<div class="iqt-reading" id="iqt-reading"></div>${verdicts}`;
+        + `<div class="iqt-reading" id="iqt-reading"></div>`
+        + `<div class="iqt-related" id="iqt-related"></div>${verdicts}`;
 
       box.innerHTML = `
         <div class="iq-object-thread">
@@ -12017,6 +12086,7 @@ const MemberApp = {
       this._renderChart(kind, objectId);
       this._renderMaterial(kind, objectId);
       this._renderReading(kind, objectId);
+      this._renderRelated(kind, objectId);
     } catch (e) {
       /* A THROW HERE IS A BUG IN THE RENDER, not a failure to read — the read above has already
          answered for itself. Saying so, and still offering both a retry and a way back, is what
@@ -12120,6 +12190,347 @@ const MemberApp = {
 
      The query is built from the TOPIC, never from anything the person wrote, and the surface
      says so plainly rather than leaving somebody to wonder what was sent. */
+  /* ══ THE GROUP'S HALF OF THE LOOP ═════════════════════════════════════════════════════════
+     `/api/group/:nodeId/inquiry`, `/api/group/:nodeId/focus` and its `/outcome` had NO CLIENT
+     CALLER AT AL: three routes, fully built, fully governed, fully tested server-side, and
+     unreachable by anything a person could tap. `reachability-smoke` records them by name. The
+     personal loop (High/Low → Inquiry → Focus → outcome → what came after) has been walkable for
+     a while; the group's has not, which is why the A → B web was reported PARTIAL rather than
+     done. This is that doorway.
+
+     WHAT IT DOES NOT DO. It does not re-decide anything. Which claim may be surfaced, whether a
+     cohort is large enough to say it without naming anybody, whether an origin count is
+     independent, who may set a focus — all of that was settled by ai/team-state.js and the route
+     guards before a byte reached here. A refusal is RENDERED IN THE SERVER'S OWN WORDS, never
+     softened and never silently dropped, because "nothing is shown" and "something is being held
+     back, and here is why" are different facts and the second is the one a leader can act on.
+
+     AUTHORITY IS THE SERVER'S. The leader-only controls below are hidden from a member because
+     showing somebody a button that will 403 is its own small lie — but hiding is a courtesy, not
+     the gate. The gate is `_leadsNode` on the route, and a member who forges the call still gets
+     403 from it. */
+  async openGroupNode(nodeId) {
+    let box = document.getElementById('iq-inquiries-page');
+    if (!box || !box.offsetParent) {
+      try { navigate('inquiry'); } catch (_) {}
+      box = document.getElementById('iq-inquiries-page');
+    }
+    if (!box) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const shell = document.querySelector('#page-inquiry .page-header');
+    if (shell) shell.setAttribute('hidden', '');
+    box.innerHTML = `<div style="color:var(--text-muted);font-size:var(--fs-md)">Loading…</div>`;
+    const ticket = this._claimRender('bucket');
+
+    // Two reads, in parallel: the settled picture and the working list. They answer different
+    // questions and fail separately, so a failure in one must not blank the other.
+    const [st, inq] = await Promise.all([
+      this._read(`/api/group/${encodeURIComponent(nodeId)}/state`),
+      this._read(`/api/group/${encodeURIComponent(nodeId)}/inquiry`),
+    ]);
+    if (!this._stillCurrent('bucket', ticket)) return;
+    if (!st.ok || !st.data || !st.data.ok) {
+      box.innerHTML = this._readFailedHTML(st.ok ? { message: 'IntelliQ could not open this group.' } : st,
+        `MemberApp.openGroupNode('${esc(nodeId)}')`);
+      return;
+    }
+    const s = st.data;
+    const inquiries = (inq.ok && inq.data && inq.data.ok) ? (inq.data.inquiries || []) : [];
+    // A failed working-list read is NOT an empty working list. Said out loud rather than rendered
+    // as calm emptiness, which is the defect this whole recovery pass is named after.
+    const inqFailed = !(inq.ok && inq.data && inq.data.ok);
+    /* THE SERVER SAYS WHO LEADS. `viewer.leads` comes from `_leadsNode` -- the same function that
+       guards the write routes -- so the control that is drawn and the authority that is checked
+       can never be two different opinions. The fallback is the roster this client may happen to
+       have loaded, and it fails CLOSED to "not a leader": drawing nothing is recoverable (the
+       person is one tap from Home and can come back), drawing a control that 403s is not. */
+    const leads = s.viewer && typeof s.viewer.leads === 'boolean'
+      ? s.viewer.leads : this._leadsGroup(nodeId);
+    this._groupView = { nodeId, leads };
+
+    const focus = s.focus && s.focus.status === 'active' ? s.focus : null;
+    const history = (s.history || []).filter(f => f && f.outcome);
+
+    const row = (label, text, sub) => text ? `
+      <div class="iqg-line"><div class="iqg-label">${esc(label)}</div>
+        <div class="iqg-text">${esc(text)}${sub ? `<span class="iqg-sub">${esc(sub)}</span>` : ''}</div></div>` : '';
+
+    box.innerHTML = `
+      <div class="iq-object-thread iq-group-thread">
+        <div class="iqt-bar">
+          <button class="iqt-back" type="button" onclick="navigate('home')">
+            <svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+            Home
+          </button>
+        </div>
+        <div class="iqt-head">
+          <div class="iqt-head-mid">
+            <h1 class="iqt-title">${esc(s.node.name)}</h1>
+            <span class="iqg-count">${s.node.memberCount} ${s.node.memberCount === 1 ? 'person' : 'people'}</span>
+          </div>
+        </div>
+
+        <div class="iqg-state">
+          ${row('High', s.high && (s.high.claim || s.high.about))}
+          ${row('Low', s.low && (s.low.claim || s.low.about))}
+          ${row('Question', s.question && s.question.question,
+            s.question && s.question.contested ? 'people describe this differently' : '')}
+          ${row('Focus', focus && focus.text,
+            focus && focus.origin && focus.origin.from === 'inquiry' ? 'from an open inquiry' : (focus ? 'set by a leader' : ''))}
+          ${(s.withheld || []).length ? `<div class="iqg-withheld">Not shown yet: ${
+            (s.withheld || []).map(w => esc(w.about)).join(', ')} — too few people have spoken about
+            ${(s.withheld || []).length === 1 ? 'it' : 'them'} to say so without pointing at individuals.</div>` : ''}
+          <div class="iqg-says">${esc(s.statement || '')}</div>
+        </div>
+
+        ${/* THE FOCUS AND ITS OUTCOME. The loop closes here for a group, and the outcome control
+              appears only on a focus that is actually running. `unclear` is offered with the same
+              weight as the other two, deliberately: a focus that ran alongside six other changes
+              has an honest answer, and recording it is worth more than a guess that later gets
+              counted as evidence about what works. */''}
+        ${focus ? `
+          <div class="iqg-focus">
+            <div class="iqg-focus-head">What this group is working on</div>
+            <div class="iqg-focus-text">${esc(focus.text)}</div>
+            ${leads ? `
+              <div class="iqg-focus-ask">When it has run, what happened?</div>
+              <div class="iqg-outcome-btns">
+                ${['helped', 'no_change', 'unclear'].map(rkey => `
+                  <button type="button" class="btn btn-outline btn-sm"
+                    onclick="MemberApp.recordGroupOutcome('${esc(nodeId)}','${esc(focus.focusId)}','${rkey}')"
+                  >${esc(this._OUTCOME_WORDS[rkey])}</button>`).join('')}
+              </div>
+              <div class="iqg-note">Recording this is how the group learns what actually helped. It is
+                an observation about what followed, never a claim that the focus caused it.</div>`
+              : `<div class="iqg-note">A leader of this group records what came of it.</div>`}
+          </div>` : ''}
+
+        ${/* THE INPUT HALF, where it can actually be seen. This is the member's own private
+              noticings about this group -- nobody else can see them, they count toward nothing,
+              and offering one is a separate deliberate act. It is the only way a member's
+              observation becomes something the group can reason about, and it had been rendering
+              into a permanently hidden element on Home. */''}
+        <div class="iqg-mine" id="iqg-mine"></div>
+
+        <div class="iqg-inq">
+          <div class="iqg-inq-head">What the group is working out</div>
+          ${inqFailed
+            ? this._readFailedHTML(inq.ok ? { message: 'IntelliQ could not read what this group is working out.' } : inq,
+                `MemberApp.openGroupNode('${esc(nodeId)}')`)
+            : inquiries.length
+              ? inquiries.map(i => this._groupInquiryRow(nodeId, i, leads)).join('')
+              : `<div class="iqg-empty">Nothing is being worked out at this grain yet. It opens when
+                   more than one person has independently offered the same thing.</div>`}
+        </div>
+
+        ${history.length ? `
+          <div class="iqg-hist">
+            <div class="iqg-hist-head">What this group has tried</div>
+            ${history.map(f => `
+              <div class="iqg-hist-row">
+                <div class="iqg-hist-text">${esc(f.text)}</div>
+                <div class="iqg-hist-out">${esc(this._OUTCOME_WORDS[f.outcome && f.outcome.result] || 'recorded')}</div>
+              </div>`).join('')}
+            <div class="iqg-note">What was recorded after each one. Nothing here says a focus caused
+              what followed it.</div>
+          </div>` : ''}
+      </div>`;
+    // Filled in after the screen renders, so a slow answer never holds up the group itself.
+    this._renderGroupNoticings(nodeId, 'iqg-mine');
+  },
+
+  /* One group inquiry, and the only place a group Focus can be started FROM one — which is what
+     makes `origin.from === 'inquiry'` true rather than decorative. A leader who simply has an
+     idea uses the composer; that records `from: 'leader'`, and the difference is what stops
+     outcome learning crediting the system for a coach's own thinking. */
+  _groupInquiryRow(nodeId, i, leads) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const label = (i.topic && (i.topic.label || i.topic.canonicalConcept)) || 'Something the group is working out';
+    return `
+      <div class="iqg-inq-row" id="iqg-inq-${esc(i.inquiryId)}">
+        <div class="iqg-inq-topic">${esc(label)}</div>
+        ${i.hypothesis ? `<div class="iqg-inq-claim">${esc(i.hypothesis)}</div>` : ''}
+        <div class="iqg-inq-meta">
+          ${i.contested ? 'People describe this differently' :
+            (typeof i.independentOrigins === 'number'
+              ? `${i.independentOrigins} separate ${i.independentOrigins === 1 ? 'account' : 'accounts'}`
+              : 'several accounts')}
+        </div>
+        ${(i.stillUnknown || [])[0] ? `<div class="iqg-inq-open">Still unknown: ${esc(i.stillUnknown[0])}</div>` : ''}
+        ${leads ? `<button type="button" class="btn btn-outline btn-sm"
+          onclick="MemberApp.startGroupFocus('${esc(nodeId)}','${esc(i.inquiryId)}')">Work on this as a group</button>` : ''}
+      </div>`;
+  },
+
+  /* Does this person lead the group? Read from the roles the session already carries, and used
+     ONLY to decide what to draw. The server decides what may happen. */
+  _leadsGroup(nodeId) {
+    try {
+      const g = (this._myNodes || []).find(x => x && String(x.nodeId) === String(nodeId));
+      return !!(g && g.role === 'leader');
+    } catch (_) { return false; }
+  },
+
+  /* Start a group focus OUT OF an inquiry. The text is the leader's, typed here, because a focus
+     is a commitment somebody makes rather than a sentence the system writes for them — but the
+     inquiry it came out of travels with it, server-verified against that group's own inquiries,
+     so the origin cannot be claimed for evidence that does not exist. */
+  async startGroupFocus(nodeId, inquiryId) {
+    const row = document.getElementById(`iqg-inq-${inquiryId}`);
+    if (!row) return;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    if (row.querySelector('.iqg-start')) return;          // already open; never two panels
+    const panel = document.createElement('div');
+    panel.className = 'iqg-start';
+    panel.innerHTML = `
+      <label class="iqg-start-l" for="iqg-t-${esc(inquiryId)}">What will this group do about it?</label>
+      ${/* THE SHARED FIELD SHELL, not a box of its own. focus-shape-smoke measures this as a bill
+            that may shrink and may never grow, because "different fonts and sizes on every page"
+            is what 34 hand-rolled textareas actually looked like. My first version of this wore
+            `iq-field` -- the WRAPPER class -- on the textarea itself, and the guard was right to
+            count it as a thirty-third. */''}
+      <div class="iq-field"><textarea id="iqg-t-${esc(inquiryId)}" class="iq-field-input" rows="2"
+        placeholder="In your own words — what you are committing the group to"></textarea></div>
+      <div class="iqg-start-btns">
+        <button type="button" class="btn btn-primary btn-sm"
+          onclick="MemberApp.confirmGroupFocus('${esc(nodeId)}','${esc(inquiryId)}')">Set this focus</button>
+        <button type="button" class="btn btn-outline btn-sm"
+          onclick="this.closest('.iqg-start').remove()">Not now</button>
+      </div>
+      <div class="iqg-start-note">Everyone in this group will see it. It records that it came out of
+        this inquiry, so what is learnt later is attached to the right thing.</div>`;
+    row.appendChild(panel);
+    const ta = panel.querySelector('textarea');
+    if (ta) ta.focus();
+  },
+
+  async confirmGroupFocus(nodeId, inquiryId) {
+    const ta = document.getElementById(`iqg-t-${inquiryId}`);
+    const text = ta ? String(ta.value || '').trim() : '';
+    const panel = ta && ta.closest('.iqg-start');
+    if (!text) {
+      if (panel) panel.querySelector('.iqg-start-note').textContent =
+        'Say what the group will do, in your own words, before setting it.';
+      return;
+    }
+    const r = await this._read(`/api/group/${encodeURIComponent(nodeId)}/focus`,
+      { method: 'POST', body: { text, fromInquiryId: inquiryId } });
+    if (!r.ok) {
+      if (panel) panel.querySelector('.iqg-start-note').textContent =
+        (r.message || 'That could not be set just now.') + ' Nothing has been lost.';
+      return;
+    }
+    this.openGroupNode(nodeId);
+  },
+
+  /* What came of it. Three words, the server's closed vocabulary, and the screen says plainly
+     that this is an observation rather than a verdict on cause. */
+  async recordGroupOutcome(nodeId, focusId, result) {
+    const r = await this._read(
+      `/api/group/${encodeURIComponent(nodeId)}/focus/${encodeURIComponent(focusId)}/outcome`,
+      { method: 'POST', body: { result } });
+    if (!r.ok) {
+      const box = document.querySelector('.iqg-focus .iqg-note');
+      if (box) box.textContent = (r.message || 'That could not be recorded just now.') + ' Nothing has been lost.';
+      return;
+    }
+    this.openGroupNode(nodeId);
+  },
+
+  /* ── WHAT THIS IS CONNECTED TO, AND — FOR A FOCUS — THE A → B LOOP ───────────────────────
+     THE DOOR THAT WAS MISSING. `/api/objects/:kind/:id/related` has existed since the
+     cross-evidence pass and `reachability-smoke` records it by name as a route no screen fetches.
+     The composer could answer "why did we start this" in conversation because the same
+     neighbourhood is assembled server-side for it — so the capability was real and the doorway
+     was not, which is the exact failure mode that file exists to catch. A route with no caller is
+     a capability nobody has.
+
+     IT ADDS NO TRUTH AND IT MAKES NO CLAIM. Every edge is a field the records already carry, read
+     back by ai/cross-evidence.js, which takes no identity and is handed the reader's already
+     authorised set — so an edge to something they may not open cannot come back. The loop's
+     `observedSince` is a COUNT of what arrived after the outcome was recorded, on the thing the
+     focus addressed. It is not a claim that the focus caused any of it, and the words here are
+     chosen so that a reader cannot come away thinking it is: "recorded since", never "because".
+
+     `open` is rendered as prominently as the rest. A person asking "did that work" deserves to be
+     told which part of the answer does not exist yet, rather than a confident-sounding sentence
+     built over a gap. */
+  async _renderRelated(kind, objectId) {
+    const box = document.getElementById('iqt-related');
+    if (!box) return;
+    const r = await this._read(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/related`);
+    if (!r.ok || !r.data || !r.data.ok) { box.innerHTML = ''; return; }
+    const j = r.data;
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const related = (j.related || []).filter(x => x && x.kind && x.label);
+    const loop = j.loop || null;
+
+    // The words for an edge. The server sends the machine name; a person reads a sentence, and
+    // the sentence is about the RECORD rather than about cause.
+    const EDGE = {
+      addresses: 'This was started to work on',
+      addressed_by: 'Being worked on by',
+      projected_from: 'Came out of',
+      projected_to: 'Led to',
+      shares_evidence: 'Rests on some of the same records as',
+      supersedes: 'Replaced',
+      superseded_by: 'Was replaced by',
+    };
+
+    const links = related.length ? `
+      <div class="iqt-rel-list">
+        ${related.slice(0, 6).map(x => `
+          <button type="button" class="iqt-rel-row"
+            onclick="MemberApp.openObjectThread('${esc(x.kind)}','${esc(String(x.ref || '').split(':').slice(1).join(':'))}')">
+            <span class="iqt-rel-type">${esc(EDGE[x.type] || 'Connected to')}</span>
+            <span class="iqt-rel-label">${esc(x.label)}</span>
+          </button>`).join('')}
+      </div>` : '';
+
+    /* THE LOOP, IN FOUR LINES A PERSON CAN FOLLOW. Only on a focus, and only the parts that
+       exist — a missing part is named in `open` rather than filled in with a guess. */
+    let loopHTML = '';
+    if (loop) {
+      const a = related.find(x => x.ref === loop.addresses);
+      const since = loop.observedSince;
+      loopHTML = `
+        <div class="iqt-loop">
+          <div class="iqt-loop-head">How this has gone</div>
+          ${loop.addresses && a ? `<div class="iqt-loop-step"><span class="iqt-loop-k">Started to work on</span>
+            <span class="iqt-loop-v">${esc(a.label)}</span></div>` : ''}
+          ${loop.sharedOrigins && loop.sharedOrigins.length ? `<div class="iqt-loop-step">
+            <span class="iqt-loop-k">Resting on</span>
+            <span class="iqt-loop-v">${loop.sharedOrigins.length === 1
+              ? 'the same account it came from' : 'the same accounts it came from'}</span></div>` : ''}
+          ${loop.outcome ? `<div class="iqt-loop-step"><span class="iqt-loop-k">What you recorded</span>
+            <span class="iqt-loop-v">${esc(this._OUTCOME_WORDS[loop.outcome] || loop.outcome)}</span></div>` : ''}
+          ${since ? `<div class="iqt-loop-step"><span class="iqt-loop-k">Recorded since</span>
+            <span class="iqt-loop-v">${since.records === 0 ? 'nothing yet'
+              : `${since.records} ${since.records === 1 ? 'thing' : 'things'} on what it was working on`}</span></div>` : ''}
+          ${/* SAID EVERY TIME, not only when something arrived. The sentence exists to stop the
+                count above being read as a verdict, and a caveat that appears only sometimes is
+                one a reader learns to skip. */''}
+          ${since ? `<div class="iqt-loop-caveat">That is what has been recorded since — not a
+            claim that the focus caused it.</div>` : ''}
+          ${(loop.open || []).length ? `<div class="iqt-loop-open">Still open: ${
+            esc((loop.open || []).join('; '))}.</div>` : ''}
+        </div>`;
+    }
+
+    if (!links && !loopHTML) { box.innerHTML = ''; return; }
+    box.innerHTML = `
+      <div class="iqt-rel">
+        ${links ? `<div class="iqt-rel-head">Connected to</div>${links}` : ''}
+        ${loopHTML}
+        <div class="iqt-rel-note">${esc(j.note || '')}</div>
+      </div>`;
+  },
+
+  /* The three outcome words, in a person's language. The closed vocabulary belongs to
+     ai/team-state.js OUTCOME_RESULTS; this is only its English, in one place so the group
+     screen and the object thread cannot drift into two readings of one word. */
+  _OUTCOME_WORDS: { helped: 'It helped', no_change: 'Nothing changed', unclear: 'Too tangled to tell' },
+
   async _renderReading(kind, objectId) {
     const box = document.getElementById('iqt-reading');
     if (!box) return;

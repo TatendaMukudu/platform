@@ -15717,7 +15717,17 @@ app.get('/api/group/:nodeId/state', requireAuth, (req, res) => {
   });
   _auditFindingEmission(code, userId, [state.high, state.low].filter(Boolean), [], 'group state');
   _audit(code, { actor: userId, action: 'team_state_view', subjectIds: [], basis: 'group_state' });
-  res.json({ ok: true, ...state });
+  /* WHAT THIS READER MAY DO, ANSWERED BY THE SAME FUNCTION THAT WILL ENFORCE IT. A screen has to
+     know whether to draw a leader-only control, and the alternatives were both worse: infer it in
+     the browser from a roster the client happens to have loaded (wrong the moment somebody opens
+     the group from a screen that never loaded one, and a second definition of leadership either
+     way), or draw the control for everybody and let the route 403 (showing a person a button that
+     cannot work is its own small lie).
+
+     It is a COURTESY, NOT A GATE, and the distinction is the whole safety argument: `_leadsNode`
+     on the write routes is the gate, it is the same call, and a member who forges the request
+     still gets 403 from it. Nothing here grants anything. */
+  res.json({ ok: true, ...state, viewer: { leads: _leadsNode(code, nodeId, userId) } });
 });
 
 /* GET /api/objects — the one four-bucket read, parameterised by grain rather than role.

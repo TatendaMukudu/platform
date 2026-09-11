@@ -3437,3 +3437,77 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
   padding-bottom:calc(.6rem + env(safe-area-inset-bottom,0px));
   background:var(--surface-2);border-top:1px solid var(--border);
   font-size:var(--fs);color:var(--text-primary)}
+
+/* ── CONNECTIONS, AND THE A → B LOOP ────────────────────────────────────────────────────────
+   The relationships the records already carried, read back onto the screen. Drawn quietly and
+   below the belief rather than beside it: a connection is context for what you are reading, and
+   putting it level with the claim would let "related to" start looking like "supported by".
+
+   The caveat under the loop is not small print. It is the sentence that stops a count of what
+   was recorded afterwards being read as a verdict on cause, so it sits in the flow at the same
+   size as the rest of the section rather than shrinking away under it. */
+.iqt-related{margin:.85rem 0 0}
+.iqt-related:empty{display:none}
+.iqt-rel{padding:.85rem;border:1px solid var(--border);border-radius:12px}
+.iqt-rel-head,.iqt-loop-head{font-size:var(--fs-sm);letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-secondary);margin:0 0 .45rem}
+.iqt-rel-list{display:flex;flex-direction:column;gap:.3rem}
+/* A whole row is the target. 44px is the floor the typography guard enforces, and a row of two
+   spans is exactly the shape that ends up 28px tall if nobody says otherwise. */
+.iqt-rel-row{display:flex;flex-direction:column;align-items:flex-start;gap:.1rem;width:100%;
+  min-height:44px;padding:.4rem .5rem;border:0;border-radius:10px;background:none;cursor:pointer;
+  text-align:left;color:var(--text-primary);font:inherit}
+.iqt-rel-row:hover{background:var(--surface-2)}
+.iqt-rel-row:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.iqt-rel-type{font-size:var(--fs-sm);color:var(--text-secondary)}
+.iqt-rel-label{font-size:var(--fs-md);line-height:1.4;overflow-wrap:anywhere}
+.iqt-rel-note{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.5rem 0 0}
+.iqt-loop{margin:.7rem 0 0;padding-top:.7rem;border-top:1px solid var(--border)}
+.iqt-loop-step{display:flex;flex-wrap:wrap;gap:.4rem;align-items:baseline;padding:.2rem 0}
+.iqt-loop-k{flex:0 0 auto;font-size:var(--fs-sm);color:var(--text-secondary)}
+.iqt-loop-v{flex:1 1 12ch;font-size:var(--fs-md);color:var(--text-primary);overflow-wrap:anywhere}
+.iqt-loop-caveat,.iqt-loop-open{font-size:var(--fs);color:var(--text-secondary);line-height:1.5;
+  margin:.5rem 0 0}
+
+/* ── A GROUP, OPENED ────────────────────────────────────────────────────────────────────────
+   The same thread shape an object gets, because a group IS a subject here and giving it a
+   different-looking screen would teach that it is a different kind of thing. */
+.tstate-open{cursor:pointer}
+.tstate-open:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.iqg-count{font-size:var(--fs-sm);color:var(--text-secondary);white-space:nowrap}
+.iqg-state{margin:.5rem 0 1rem}
+.iqg-line{display:flex;flex-wrap:wrap;gap:.5rem;align-items:baseline;padding:.4rem 0;
+  border-bottom:1px solid var(--border)}
+.iqg-label{flex:0 0 auto;min-width:5rem;font-size:var(--fs-sm);letter-spacing:.04em;
+  text-transform:uppercase;color:var(--text-secondary)}
+.iqg-text{flex:1 1 14ch;font-size:var(--fs-md);line-height:1.45;color:var(--text-primary);
+  overflow-wrap:anywhere}
+.iqg-sub{display:block;font-size:var(--fs-sm);color:var(--text-secondary)}
+.iqg-withheld,.iqg-note,.iqg-empty{font-size:var(--fs);color:var(--text-secondary);line-height:1.5;
+  margin:.55rem 0 0}
+.iqg-says{font-size:var(--fs-lg);line-height:1.5;color:var(--text-primary);margin:.7rem 0 0;
+  overflow-wrap:anywhere}
+.iqg-focus{margin:1rem 0;padding:.85rem;border:1px solid var(--border);border-radius:12px}
+.iqg-focus-head,.iqg-inq-head,.iqg-hist-head{font-size:var(--fs-sm);letter-spacing:.06em;
+  text-transform:uppercase;color:var(--text-secondary);margin:0 0 .45rem}
+.iqg-focus-text{font-size:var(--fs-lg);line-height:1.5;color:var(--text-primary);
+  overflow-wrap:anywhere}
+.iqg-focus-ask{font-size:var(--fs-md);color:var(--text-primary);margin:.7rem 0 .4rem}
+/* Wraps rather than scrolls: three outcome words at 390px do not fit on one line, and a control
+   a person has to drag sideways to find is a control that does not get used. */
+.iqg-outcome-btns,.iqg-start-btns{display:flex;flex-wrap:wrap;gap:.45rem}
+.iqg-inq{margin:1rem 0}
+.iqg-inq-row{padding:.7rem 0;border-bottom:1px solid var(--border)}
+.iqg-inq-topic{font-size:var(--fs-lg);line-height:1.4;color:var(--text-primary);overflow-wrap:anywhere}
+.iqg-inq-claim{font-size:var(--fs-md);line-height:1.5;color:var(--text-secondary);margin:.2rem 0 0;
+  overflow-wrap:anywhere}
+.iqg-inq-meta,.iqg-inq-open{font-size:var(--fs-sm);color:var(--text-secondary);margin:.3rem 0 .45rem}
+.iqg-start{margin:.6rem 0 0}
+.iqg-start-l{display:block;font-size:var(--fs-md);color:var(--text-primary);margin:0 0 .35rem}
+.iqg-start-note{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.45rem 0 0}
+.iqg-hist{margin:1rem 0}
+.iqg-hist-row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:baseline;padding:.4rem 0;
+  border-bottom:1px solid var(--border)}
+.iqg-hist-text{flex:1 1 14ch;font-size:var(--fs-md);line-height:1.45;color:var(--text-primary);
+  overflow-wrap:anywhere}
+.iqg-hist-out{flex:0 0 auto;font-size:var(--fs-sm);color:var(--text-secondary)}
