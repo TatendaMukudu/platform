@@ -49,9 +49,23 @@
           manifest marked as carrying the uncertainty — because a spoken sentence sounds more
           certain than a written one, and the qualification is the first thing a summariser cuts.
 
-   L-MF6  EVERY EXTERNAL CLAIM CARRIES ITS SOURCE. Uncited external material is refused here as
-          firmly as ai/websearch.js refuses it, so a second route to the screen does not become a
-          way around the first gate.
+   L-MF6  EVERY EXTERNAL CLAIM CARRIES ITS SOURCE, AND THE SOURCE ACTUALLY USED IS THE ONE SHOWN.
+          Uncited external material is refused here as firmly as ai/websearch.js refuses it, so a
+          second route to the screen does not become a way around the first gate. And the other
+          direction, which is the one a reader cannot check for themselves: an external claim whose
+          source is APPROVED but NOT EMITTED is refused too. A reply resting on a page nobody is
+          shown is indistinguishable, on screen, from a reply resting on the page above it.
+
+   L-MF7  A GRAPH MAY NOT OUTRUN ITS SENTENCE. A series drawn as a `trend` asserts movement over
+          time, which is a stronger claim than the same points drawn as states — so the movement
+          has to be a claim somebody approved, named on the series. And where that claim carries
+          the uncertainty, the picture carries it too: a line with no stated limit is read as a
+          finding, and a chart is the most persuasive object this product can put on a screen.
+
+   L-MF8  ONE ANSWER, NOT FIVE. `approve()` is the runtime gate: every channel this answer will
+          leave by, checked against the SAME manifest in one place, plus the agreement between
+          them by claim id. A channel verified in isolation can still be the odd one out, and the
+          odd one out is what a reader ends up believing.
 
    PURE: no IO, no LLM, no clock of its own. Given a manifest and some output, it answers.
    ============================================================ */
@@ -104,7 +118,11 @@ const _WORD_NUMBERS = Object.freeze({
      approve, and refusing them would refuse honest hedging. */
 });
 const _NUMBER_WORD = Object.keys(_WORD_NUMBERS).join('|');
-const _COUNTABLE = '(?:of\\s+(?:your|the|this)|separate|independent|distinct|different|people|players|members|teammates|accounts|origins|occasions|records|times|sessions|focuses|inquiries|highs|lows)';
+/* `sources` is here because wiring the voice channel found it missing: the spoken disclosure says
+   "this rests on N sources", which is a count about THIS ORGANISATION'S record and was sailing
+   through unchecked because the word was not on this list. A figure the verifier does not
+   recognise as a figure is a figure nobody approved. */
+const _COUNTABLE = '(?:of\\s+(?:your|the|this)|separate|independent|distinct|different|people|players|members|teammates|accounts|origins|occasions|records|times|sessions|sources|focuses|inquiries|highs|lows)';
 const _COUNT_CLAIM = new RegExp(`\\b(\\d{1,4}|${_NUMBER_WORD})\\s+${_COUNTABLE}\\b`, 'gi');
 const _POSSESSIVE_COUNT = new RegExp(`\\b(?:you|they|we)\\s+have\\s+(\\d{1,4}|${_NUMBER_WORD})\\b`, 'gi');
 const _ORDINAL_RESULT = new RegExp(`\\b(?:won|lost|drew|scored|conceded|finished)\\s+(\\d{1,4}|${_NUMBER_WORD})\\b`, 'gi');
@@ -162,10 +180,16 @@ function manifest({ subject = '', claims = [], graph = null, limitations = [], p
     /* L-MF4 — the graph's own provenance, kept beside the claims rather than inside one, because
        a series is drawn from many claims and belongs to the answer rather than to a sentence. */
     graph: graph ? {
+      /* THE MOMENTS THE RECORD HOLDS. Supplied by whoever owns the record, not by whoever drew
+         the picture — which is what makes a plotted timestamp checkable at all. */
+      moments: [...new Set(_arr(graph.moments).map(t => _num(t)).filter(t => t !== null))],
       series: _arr(graph.series).map(s => ({
         key: _s(s && s.key, 80),
         unit: _s(s && s.unit, 40),
         shape: _s(s && s.shape, 20),
+        /* L-MF7 — the claim the MOVEMENT rests on. Only a `trend` needs one: states and
+           categories assert no change, so there is no extra claim to approve. */
+        claim: _s(s && s.claim, 80),
         points: _arr(s && s.points).map(p => ({
           at: _num(p && p.at), value: _num(p && p.value),
           refs: [...new Set(_arr(p && p.refs).map(r => _s(r, 120)).filter(Boolean))],
@@ -202,6 +226,29 @@ function particularsIn(text) {
   return { numbers: [...numbers], dates: [...dates], quotes: [...quotes] };
 }
 
+/* DID THE SUBSTANCE SURVIVE? Matched on a statement's distinctive words rather than the whole
+   sentence, because a voice channel legitimately rephrases for the ear and demanding a verbatim
+   match would either fail every honest rendering or be switched off as unusable. The test is that
+   enough of the statement's own uncommon words are there for it to be recognisably the same thing
+   said — not that it was said the same way. */
+function _survives(statement, lowerText) {
+  const words = _s(statement, 400).toLowerCase().split(/[^a-z0-9']+/).filter(w => w.length > 4);
+  const distinctive = words.slice(0, 8);
+  if (!distinctive.length) return false;
+  const present = distinctive.filter(w => lowerText.includes(w)).length;
+  return present >= Math.max(1, Math.ceil(distinctive.length * 0.5));
+}
+
+/* WHICH APPROVED CLAIMS IS THIS CHANNEL ACTUALLY RESTING ON? Derived from the text rather than
+   declared by the caller, deliberately: a caller that declares its own claim list is a caller
+   whose list stays right while its output drifts, which is the whole failure this file exists to
+   catch. Same substance test as the voice laws use, so "what the prose rests on" and "what voice
+   must not drop" are one question asked once. */
+function claimsIn(text, mf) {
+  const lower = _s(text, 8000).toLowerCase();
+  return _arr(mf && mf.claims).filter(c => _survives(c.text, lower)).map(c => c.id);
+}
+
 /* ── THE GATE ────────────────────────────────────────────────────────────────────────────────
    One function, five channels, one manifest. Returns { ok, violations } and NEVER a partly
    approved output — a caller that gets `ok:false` has nothing to show and must degrade.
@@ -223,18 +270,54 @@ function verify(channel, output, mf, { roster = [] } = {}) {
   /* ── GRAPH (L-MF4) ──────────────────────────────────────────────────────────────────────── */
   if (ch === 'graph') {
     const allowed = new Map();
-    for (const s of _arr(mf.graph && mf.graph.series)) {
-      allowed.set(s.key, new Set(s.points.map(p => `${p.at}|${p.value}`)));
-    }
+    for (const s of _arr(mf.graph && mf.graph.series)) allowed.set(s.key, s);
+    const byId = new Map(mf.claims.map(c => [c.id, c]));
+    /* FAIL CLOSED ON A MANIFEST THAT CANNOT VOUCH FOR TIME. A picture with dated points, checked
+       against a record that declared no moments, is a picture checked against nothing — and an
+       empty list read as "no constraint" is the fail-open shape this codebase keeps finding in
+       its own gates (AGENTS.md, epistemic invariant 7). If a caller plots dates it has to say
+       which dates the record holds. */
+    const moments = new Set(_arr(mf.graph && mf.graph.moments));
+    const anyDated = _arr(output && output.series).some(s => _arr(s && s.points).some(p => _num(p && p.at) !== null));
+    if (anyDated && !moments.size) violations.push({ kind: 'graph_moments_unknown' });
     for (const s of _arr(output && output.series)) {
       const key = _s(s && s.key, 80);
-      const set = allowed.get(key);
-      if (!set) { violations.push({ kind: 'graph_series_not_in_manifest', series: key }); continue; }
+      const approvedSeries = allowed.get(key);
+      if (!approvedSeries) { violations.push({ kind: 'graph_series_not_in_manifest', series: key }); continue; }
+      const set = new Set(approvedSeries.points.map(p => `${p.at}|${p.value}`));
       for (const p of _arr(s && s.points)) {
         const sig = `${_num(p && p.at)}|${_num(p && p.value)}`;
         if (!set.has(sig)) {
           violations.push({ kind: 'graph_value_not_in_manifest', series: key,
             at: _num(p && p.at), value: _num(p && p.value) });
+        }
+      }
+      /* ── L-MF7 — A LINE IS A CLAIM, AND SOMEBODY HAS TO HAVE MADE IT ──────────────────────
+         Drawn as a trend, this series says the thing moved. The values being individually
+         approved does not approve that: the same approved points drawn as states say only that
+         each was recorded, which is a weaker and often the only honest statement. So the
+         movement is named on the approved series, and a caller that cannot name it cannot draw
+         the line. */
+      if (_s(s && s.shape, 20) === 'trend') {
+        const claimId = _s(approvedSeries.claim, 80);
+        const c = claimId ? byId.get(claimId) : null;
+        /* AND EVERY MOMENT IT PLOTS IS A MOMENT THE RECORD HOLDS. Checked against the record's
+           own dated facts rather than against the series that was just drawn, so a builder that
+           invents or shifts a timestamp is caught by something that did not help draw it. */
+        if (moments.size) {
+          for (const p of _arr(s && s.points)) {
+            const at = _num(p && p.at);
+            if (at !== null && !moments.has(at)) {
+              violations.push({ kind: 'graph_time_not_in_record', series: key, at });
+            }
+          }
+        }
+        if (!c) {
+          violations.push({ kind: 'graph_trend_without_claim', series: key, claim: claimId || null });
+        } else if (c.carriesUncertainty && !_arr(output && output.limitations).length) {
+          /* The picture that rests on a qualified claim has to show the qualification. A reader
+             who takes in the line and none of the prose has been told the strong half only. */
+          violations.push({ kind: 'graph_dropped_uncertainty', series: key, claim: c.id });
         }
       }
     }
@@ -244,15 +327,25 @@ function verify(channel, output, mf, { roster = [] } = {}) {
   /* ── CITATIONS (L-MF6) ──────────────────────────────────────────────────────────────────── */
   if (ch === 'citations') {
     const approved = new Set(mf.claims.map(c => c.citation && c.citation.url).filter(Boolean));
+    const shown = new Set();
     for (const c of _arr(output)) {
       const url = _s(c && c.url, 500);
       if (!url) { violations.push({ kind: 'citation_without_url' }); continue; }
+      shown.add(url);
       if (!approved.has(url)) violations.push({ kind: 'citation_not_in_manifest', url });
     }
-    // And the other direction: an external claim whose source did not travel with it.
     for (const c of mf.claims) {
+      // An external claim whose source did not travel with it.
       if (c.stance === 'external' && !c.citation) {
         violations.push({ kind: 'external_claim_without_citation', claim: c.id });
+        continue;
+      }
+      /* AND THE DIRECTION A READER CANNOT CHECK: the source this claim was actually built from
+         is approved, and then not shown. Nothing on screen distinguishes an answer resting on a
+         page you were given from one resting on a page you were not — so the citation channel
+         has to carry every source the answer used, not merely no source it did not. */
+      if (c.stance === 'external' && c.citation && !shown.has(c.citation.url)) {
+        violations.push({ kind: 'citation_omitted', claim: c.id, url: c.citation.url });
       }
     }
     return { ok: !violations.length, violations };
@@ -287,16 +380,16 @@ function verify(channel, output, mf, { roster = [] } = {}) {
     const lower = text.toLowerCase();
     for (const c of mf.claims) {
       if (!c.carriesUncertainty) continue;
-      /* Matched on the claim's distinctive words rather than the whole sentence: a voice channel
-         legitimately rephrases for the ear, and demanding a verbatim match would either fail
-         every honest rendering or be dropped as unusable. The test is that the SUBSTANCE survived
-         — enough of the claim's own uncommon words to be recognisably the same statement. */
-      const words = c.text.toLowerCase().split(/[^a-z0-9']+/).filter(w => w.length > 4);
-      const distinctive = words.slice(0, 8);
-      const present = distinctive.filter(w => lower.includes(w)).length;
-      if (!distinctive.length || present < Math.max(1, Math.ceil(distinctive.length * 0.5))) {
+      if (!_survives(c.text, lower)) {
         violations.push({ kind: 'voice_dropped_uncertainty', claim: c.id, text: _s(c.text, 80) });
       }
+    }
+    /* THE LIMITATIONS ARE NOT OPTIONAL EITHER. "This rests on one account" is the sentence that
+       makes the sentence before it safe to hear, and it is the first thing a summariser cuts —
+       for the same reason a person skims past it, which is that it is the least interesting part.
+       Checked for both the answer's own limits and any a single claim carries. */
+    for (const lim of [..._arr(mf.limitations), ...mf.claims.flatMap(c => _arr(c.limitations))]) {
+      if (!_survives(lim, lower)) violations.push({ kind: 'voice_dropped_limitation', text: _s(lim, 120) });
     }
   }
 
@@ -315,6 +408,77 @@ function channelsAgree(a = [], b = []) {
   return { ok: !onlyA.length && !onlyB.length, onlyA, onlyB };
 }
 
+/* ── L-MF8 — THE RUNTIME GATE ────────────────────────────────────────────────────────────────
+   ONE ANSWER, EVERY DOOR IT LEAVES BY, ONE PLACE.
+
+   `verify` answers about one channel. That is what a unit test needs and it is NOT what a reader
+   needs, because a reader is not shown one channel — they are shown the prose, the card beside
+   it, the picture under it, the chips below that, and then they press the speaker. Five separately
+   verified channels can each be defensible and still not be the same answer, and the one that
+   disagrees is the one somebody walks away believing.
+
+   So callers do not verify channel by channel. They hand the whole answer here and get back
+   either the approved result or a refusal — never a partly approved answer, because a caller
+   holding "the prose was fine" will ship the prose.
+
+   Each channel arrives as `{ value, claims }`: what will be shown, and which claims of the
+   manifest it rests on. The claims are what makes AGREEMENT checkable — the channels are meant
+   to read differently, so comparing their words would either pass everything or fail everything,
+   while comparing what they rest on asks the question that matters. Prose is the reference where
+   it exists, because prose is the channel the others were derived from. */
+function approve(mf, channels = {}, { roster = [] } = {}) {
+  const violations = [];
+  if (!mf || !_arr(mf.claims).length) {
+    const v = [{ kind: 'no_manifest' }];
+    return { ok: false, violations: v, note: refusalNote(v), channels: {} };
+  }
+  const known = new Set(mf.claims.map(c => c.id));
+  const given = CHANNELS.filter(ch => channels && channels[ch] != null);
+  if (!given.length) {
+    const v = [{ kind: 'no_channels' }];
+    return { ok: false, violations: v, note: refusalNote(v), channels: {} };
+  }
+
+  const declared = {};
+  for (const ch of given) {
+    const spec = channels[ch];
+    const value = spec && Object.prototype.hasOwnProperty.call(spec, 'value') ? spec.value : spec;
+    const r = verify(ch, value, mf, { roster });
+    if (!r.ok) violations.push(...r.violations);
+    /* A channel may DECLARE what it rests on or stay silent. Silence is honest for a channel
+       that carries no claims of its own — a citation list rests on the claims, not the other way
+       round — so only declarations are compared, and a declaration naming a claim this answer
+       does not hold is refused whatever else it says. */
+    if (spec && Array.isArray(spec.claims)) {
+      const ids = spec.claims.map(x => _s(x, 80)).filter(Boolean);
+      for (const id of ids) {
+        if (!known.has(id)) violations.push({ kind: 'claim_not_in_manifest', channel: ch, claim: id });
+      }
+      declared[ch] = ids;
+    }
+  }
+
+  const names = Object.keys(declared);
+  const ref = Object.prototype.hasOwnProperty.call(declared, 'prose') ? 'prose' : names[0];
+  for (const ch of names) {
+    if (ch === ref) continue;
+    const agree = channelsAgree(declared[ref], declared[ch]);
+    if (!agree.ok) {
+      violations.push({ kind: 'channels_disagree', a: ref, b: ch,
+        onlyA: agree.onlyA.slice(0, 8), onlyB: agree.onlyB.slice(0, 8) });
+    }
+  }
+
+  const ok = !violations.length;
+  return {
+    ok, violations, note: ok ? '' : refusalNote(violations),
+    channels: ok ? Object.fromEntries(given.map(ch => {
+      const spec = channels[ch];
+      return [ch, spec && Object.prototype.hasOwnProperty.call(spec, 'value') ? spec.value : spec];
+    })) : {},
+  };
+}
+
 /* The sentence under a refusal. A caller that cannot show its answer should say something true
    rather than nothing, and "held back" without a reason teaches people to click past refusals. */
 function refusalNote(violations = []) {
@@ -331,12 +495,29 @@ function refusalNote(violations = []) {
     case 'graph_value_not_in_manifest':
     case 'graph_series_not_in_manifest':
       return 'Held back — the picture showed a value that does not come from the record.';
+    case 'graph_moments_unknown':
+      return 'Held back — the picture is dated and nothing said which dates the record actually holds.';
+    case 'graph_time_not_in_record':
+      return 'Held back — the picture put something at a moment the record does not have.';
+    case 'graph_trend_without_claim':
+      return 'Held back — the picture drew a line through the record, and nothing in this answer claims it moved.';
+    case 'graph_dropped_uncertainty':
+      return 'Held back — the picture showed the finding without the limit that goes with it.';
     case 'citation_not_in_manifest':
     case 'citation_without_url':
     case 'external_claim_without_citation':
       return 'Held back — something from outside IntelliQ arrived without its source.';
+    case 'citation_omitted':
+      return 'Held back — this used something from outside IntelliQ and did not show you which source.';
     case 'voice_dropped_uncertainty':
       return 'Read aloud was held back — it left out how uncertain this is, and spoken words carry more weight than written ones.';
+    case 'voice_dropped_limitation':
+      return 'Read aloud was held back — it left out what this answer cannot show.';
+    case 'channels_disagree':
+      return 'Held back — two parts of this answer were not saying the same thing.';
+    case 'claim_not_in_manifest':
+      return 'Held back — part of this answer rests on something that was never approved.';
+    case 'no_channels':
     case 'no_manifest':
       return 'Held back — there is no approved answer behind this.';
     default:
@@ -346,5 +527,5 @@ function refusalNote(violations = []) {
 
 module.exports = {
   STANCES, CHANNELS,
-  claim, manifest, particularsIn, verify, channelsAgree, refusalNote,
+  claim, manifest, particularsIn, claimsIn, verify, approve, channelsAgree, refusalNote,
 };

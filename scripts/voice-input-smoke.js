@@ -231,40 +231,132 @@ console.log('\n  THREE CAPABILITIES, THREE ANSWERS');
    got the claim without them. Reading a claim aloud and leaving its qualification behind is the
    one asymmetry between the two channels that matters, because a spoken sentence carries more
    confidence than a written one, not less. */
-console.log('\n  READING ALOUD SAYS WHAT THE SCREEN SAYS, OR SAYS WHY NOT');
+console.log('\n  READING ALOUD SPEAKS WHAT IT WAS APPROVED TO SPEAK, OR SAYS WHY NOT');
 {
+  /* ══ REWRITTEN, AND NOT WEAKENED — THE LAW MOVED, SO THE TEST MOVED WITH IT ══════════════
+     V25/V25c/V26 asserted that the browser built the spoken sentence: the message text plus a
+     source count IT counted, `new SpeechSynthesisUtterance(text + disclosure)`. Those assertions
+     were right about the old design and they were pinning the thing an independent gate was
+     right to object to — a second author for one answer, on the one channel nothing verified.
+
+     What is spoken is now composed on the SERVER beside the prose, put through ai/manifest.js
+     with every other channel, and read out verbatim. So the browser's law is no longer "compose
+     it correctly"; it is "compose NOTHING, say every state out loud, and never draw a control
+     that cannot work".
+
+     AND THESE ARE DRIVEN, NOT READ. The production methods are lifted out of js/app.js as source
+     and executed against a stubbed speechSynthesis, because the previous version of this block
+     was six regexes over a file — and one of them (V24b) matched its own comment. */
   const APP_RAW = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
   const APP = APP_RAW.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
-  const fn = APP.slice(APP.indexOf('_speak(textJson'), APP.indexOf('openInquiryThread(inquiryId)'));
-  ok('V24 the read-aloud handler is found', fn.length > 300 && /SpeechSynthesisUtterance/.test(fn));
-  /* V24b WAS A FALSE GREEN OF MINE, found by mutation VM1 and worth recording rather than
-     quietly re-spelling. It tested `/cannot read text aloud/.test(APP_RAW)` — the RAW source,
-     comments included — so the comment ABOVE the function explaining the defect satisfied it
-     whatever the code did. And its negative half looked for `return;` while the mutation wrote
-     `return false;`. Two independent reasons to pass, neither of them the law.
+  const from = APP_RAW.indexOf('_voiceSupported() {');
+  const to   = APP_RAW.indexOf('openInquiryThread(inquiryId)');
+  const SRC  = from > -1 && to > from ? APP_RAW.slice(from, to) : '';
+  ok('V24 the read-aloud methods are found as one block (a wrong slice must fail loudly, not pass vacuously)',
+    SRC.length > 1200 && /_speak\(btn, speechJson\)/.test(SRC) && /_voiceControl\(speech, rid\)/.test(SRC));
 
-     The law is that NO EXIT IS SILENT. So every `return` in the function body must be preceded
-     by a `say(...)` — checked structurally over the decommented body rather than by matching one
-     spelling of one failure. */
-  ok('V24b a browser that cannot speak is TOLD to the person, not swallowed', (() => {
-    const body = fn.slice(fn.indexOf('{'));
-    // Each early exit, with the 200 characters before it. A silent one has no say() in that window.
-    const exits = [...body.matchAll(/return\s+(?:false|true)?\s*;/g)];
-    if (exits.length < 2) return false;                  // no exits found: the slice is wrong
-    return exits.every(m => /say\(/.test(body.slice(Math.max(0, m.index - 220), m.index)));
-  })());
-  ok('V24c …and so is a failure that happens after speaking has started',
-    /u\.onerror/.test(fn));
-  ok('V24d …through the live region the row already carries, beside the control',
-    /iq-act-said/.test(fn) && /aria-live="polite"/.test(APP_RAW));
-  ok('V25 what is spoken carries the source disclosure the screen shows',
-    /rests on \$\{sources\.length\} source/.test(APP_RAW));
-  ok('V25b …and never claims sources when there are none',
-    /sources\.length\s*\?/.test(fn));
-  ok('V25c …and invents nothing that is not on the screen — the utterance is the text plus that one disclosure',
-    /new SpeechSynthesisUtterance\(text \+ disclosure\)/.test(fn));
-  ok('V26 the control hands the sources it was rendered with, so the two cannot drift',
-    /MemberApp\._speak\(\$\{j\(text\)\}, \$\{j\(JSON\.stringify\(sources \|\| \[\]\)\)\}, this\)/.test(APP_RAW));
+  /* The stub. A fake utterance records what it was asked to say; a fake row records what the
+     live region was told. Nothing here is a copy of the production code — it is the environment
+     the production code runs in. */
+  const synth = { spoken: [], cancels: 0, cancel() { this.cancels++; }, speak(u) { this.spoken.push(u); this.last = u; } };
+  function Utt(t) { this.text = t; }
+  /* BOTH, and the reason matters: in a browser `window.X` and a bare `X` are the same binding,
+     and in Node they are not. A harness that sets only `window.SpeechSynthesisUtterance` makes
+     `new SpeechSynthesisUtterance(...)` throw — which the production code catches and reports as
+     an error state, so the test would have been measuring its own environment. */
+  global.window = { speechSynthesis: synth, SpeechSynthesisUtterance: Utt };
+  global.SpeechSynthesisUtterance = Utt;
+  global.document = { documentElement: { lang: 'en-GB' } };
+  const mkBtn = () => {
+    const said = { textContent: '' };
+    const btn = {
+      attrs: { 'data-voice-state': 'idle' }, classes: new Set(),
+      closest: () => ({ querySelector: () => said }),
+      setAttribute(k, v) { this.attrs[k] = v; }, getAttribute(k) { return this.attrs[k]; },
+      classList: { toggle(c, on) { if (on) btn.classes.add(c); else btn.classes.delete(c); } },
+    };
+    btn.said = said;
+    return btn;
+  };
+  let V = null;
+  try {
+    // eslint-disable-next-line no-eval
+    V = eval(`({ _escape(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); },\n${SRC}\n})`);
+  } catch (e) { V = null; }
+  ok('V24a …and they run outside a browser, against a stubbed speechSynthesis', !!V && typeof V._speak === 'function');
+
+  const APPROVED = 'You have been recovering well. This rests on 2 sources, shown under the reply.';
+  /* What the ONCLICK ATTRIBUTE evaluates to at the moment the browser calls the handler: the
+     attribute source is `JSON.stringify(JSON.stringify(s))`, so the runtime argument is one level
+     of JSON, not two. Getting this wrong is how a control that "works" in a test is silent on a
+     phone, so the encoding is asserted against the control that actually renders it. */
+  const arg = t => JSON.stringify(String(t));
+
+  if (V) {
+    const b1 = mkBtn();
+    const started = V._speak(b1, arg(APPROVED));
+    ok('V25 what is spoken is the rendering it was HANDED, verbatim — the browser composes nothing',
+      started === true && synth.last && synth.last.text === APPROVED);
+    ok('V25b …and the control says it has started, in the live region beside it',
+      b1.said.textContent === V._VOICE_WORDS.starting && b1.getAttribute('data-voice-state') === 'starting');
+    synth.last.onstart();
+    ok('V25c …then that it is speaking, which is a different fact from having asked it to',
+      b1.said.textContent === V._VOICE_WORDS.speaking && b1.getAttribute('aria-label') === 'Stop reading aloud');
+
+    // PRESSING IT AGAIN IS THE STOP CONTROL — and the retry path, since a stopped row can start again.
+    const stopped = V._speak(b1, arg(APPROVED));
+    ok('V26 pressing the control that is speaking stops it, and the row SAYS it stopped',
+      stopped === false && b1.said.textContent === V._VOICE_WORDS.stopped && b1.getAttribute('data-voice-state') === 'stopped');
+    ok('V26b …and it can be started again from there, so a person who stopped it is not stuck',
+      V._speak(b1, arg(APPROVED)) === true);
+
+    // A NEWER UTTERANCE REPLACES AN OLDER ONE, DETERMINISTICALLY, and the row it replaced is told.
+    const b2 = mkBtn();
+    V._speak(b2, arg('A different approved answer.'));
+    ok('V27 a second reply read aloud replaces the first — one voice at a time across the whole app',
+      synth.last.text === 'A different approved answer.');
+    ok('V27b …and the reply it interrupted says so rather than being left announcing that it is still reading',
+      b1.said.textContent === V._VOICE_WORDS.interrupted);
+
+    // A FAILURE AFTER SPEAKING HAS STARTED IS STILL A FAILURE.
+    synth.last.onerror();
+    ok('V28 a failure after speaking started is announced, with a retry the person can act on',
+      b2.said.textContent === V._VOICE_WORDS.error && /retry/i.test(V._VOICE_WORDS.error));
+
+    // AND NAVIGATION STOPS IT THROUGH THE SAME OWNER.
+    const b3 = mkBtn();
+    V._speak(b3, arg(APPROVED));
+    V._voiceStop('stopped');
+    ok('V28b _voiceStop cancels the engine and tells the row, which is what navigation calls',
+      b3.said.textContent === V._VOICE_WORDS.stopped && synth.cancels > 0);
+
+    /* A CONTROL THAT CANNOT WORK IS NOT DRAWN. Two ways this happens and neither may be silent:
+       the browser has no speech synthesis, or the server sent no approved rendering. */
+    ok('V29 with an approved rendering and a browser that can speak, a real button is drawn',
+      /<button/.test(V._voiceControl(APPROVED, 'r1')) && /data-voice-state="idle"/.test(V._voiceControl(APPROVED, 'r1')));
+    ok('V29b with NO approved rendering there is no button at all — the reason is drawn instead',
+      !/<button/.test(V._voiceControl('', 'r1')) && /data-voice="none"/.test(V._voiceControl('', 'r1')));
+    const realSynth = global.window.speechSynthesis;
+    global.window.speechSynthesis = undefined;
+    ok('V29c and a browser that cannot speak is TOLD to the person, not given a button that does nothing',
+      !/<button/.test(V._voiceControl(APPROVED, 'r1')) && /data-voice="unsupported"/.test(V._voiceControl(APPROVED, 'r1')));
+    ok('V29d …and pressing anyway, if one somehow survived, still says something rather than failing in silence',
+      (() => { const b = mkBtn(); const r = V._speak(b, arg(APPROVED));
+        return r === false && b.said.textContent === V._VOICE_WORDS.error; })());
+    global.window.speechSynthesis = realSynth;
+
+    ok('V29e every state a person can be in has words — none of them is the empty string except the end of a finished reading',
+      ['starting', 'speaking', 'stopped', 'interrupted', 'error'].every(k => (V._VOICE_WORDS[k] || '').length > 3)
+      && V._VOICE_WORDS.ended === '');
+  }
+  try { delete global.window; delete global.document; delete global.SpeechSynthesisUtterance; } catch (_) {}
+
+  /* AND THE TWO STRUCTURAL FACTS THE HARNESS ABOVE CANNOT SEE: that the control is REACHED from
+     the action row with the server's rendering, and that leaving the page stops it. */
+  ok('V30 the action row hands the control the SERVER\'s approved rendering, so there is nothing local to drift from',
+    /\$\{this\._voiceControl\(speech, rid\)\}/.test(APP) && /speech: m\.speech/.test(APP) && /speech: r\.speech/.test(APP));
+  ok('V30b leaving the page stops anything being read aloud, through the one owner rather than a second cancel',
+    /MemberApp\._voiceStop\('stopped'\)/.test(APP) && !/window\.speechSynthesis\.cancel\(\);\s*$/m.test(APP.slice(0, APP.indexOf('_voiceSupported'))));
 }
 
 /* ══ A CANCELLED RECOGNISER MAY NEVER WRITE AGAIN ═══════════════════════════════════════════
@@ -322,8 +414,13 @@ console.log('\n  LEAVING THE PAGE ENDS THE MICROPHONE');
   ok('V27 navigate() is found', nav.length > 400 && /NAV_ROUTES/.test(nav));
   ok('V27b every live microphone is cancelled on navigation',
     /IQVoice\.cancelAll\(\)/.test(nav));
-  ok('V27c …and anything being read aloud stops too, since the reply it belongs to is gone',
-    /speechSynthesis\.cancel\(\)/.test(nav));
+  /* V27c USED TO PIN A SECOND `speechSynthesis.cancel()` INSIDE navigate(), which was right when
+     navigation was the only thing that stopped a reading. It is now one owner: `_voiceStop`
+     cancels the engine AND tells the row it was stopped, so a page change no longer leaves a
+     control announcing "Reading aloud…" on a screen nobody is looking at. Pinning the raw call
+     here would have pinned the weaker of the two behaviours. */
+  ok('V27c …and anything being read aloud stops too, through the owner that also tells the row it stopped',
+    /MemberApp\._voiceStop\('stopped'\)/.test(nav) && !/speechSynthesis\.cancel\(\);/.test(nav));
   ok('V28 session end still cancels as well — navigation did not replace it',
     (APP.match(/IQVoice\.cancelAll\(\)/g) || []).length >= 2);
   ok('V28b and cancel RESTORES the draft rather than keeping the speech, because they left mid-sentence',

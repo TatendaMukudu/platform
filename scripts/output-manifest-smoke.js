@@ -60,10 +60,11 @@ const MF = M.manifest({
       text: 'Recovery guidance generally suggests a lighter middle day between fixtures.',
       citation: { url: 'https://example.org/recovery', title: 'Recovery guidance', at: '2025-02-01' } }),
   ],
-  graph: { series: [{ key: 'origins', unit: 'count', shape: 'trend', points: [
-    { at: 1_699_000_000_000, value: 1, refs: ['ev_a'] },
-    { at: 1_700_000_000_000, value: 2, refs: ['ev_a', 'ev_b'] },
-  ] }] },
+  graph: { moments: [1_699_000_000_000, 1_700_000_000_000],
+    series: [{ key: 'origins', unit: 'count', shape: 'trend', claim: 'c_origins', points: [
+      { at: 1_699_000_000_000, value: 1, refs: ['ev_a'] },
+      { at: 1_700_000_000_000, value: 2, refs: ['ev_a', 'ev_b'] },
+    ] }] },
 });
 
 const V = (ch, out, extra) => M.verify(ch, out, MF, extra || { roster: ROSTER });
@@ -99,7 +100,17 @@ try {
       { at: 1_699_000_000_000, value: 1 }, { at: 1_700_000_000_000, value: 2 }] }] }).ok === true);
   ok('OM-B4 …so are the citations the manifest holds',
     V('citations', [{ url: 'https://example.org/recovery', title: 'Recovery guidance' }]).ok === true);
-  ok('OM-B5 …and so is the voice, which keeps the uncertainty', V('voice', HONEST).ok === true);
+  /* THE SPOKEN RENDERING CARRIES MORE THAN THE PROSE, and has to. A reader can see the
+     limitation sitting under the answer; a listener gets only what is said, so the answer's own
+     limits travel in the utterance or they were not told. This is what production composes. */
+  const SPOKEN = HONEST + ' Counts occasions on the record. Something that happened and was never '
+    + 'said is not here. This rests on 2 sources, shown under the reply.';
+  ok('OM-B5 …and so is the voice, which keeps the uncertainty AND the answer\'s stated limits',
+    V('voice', SPOKEN).ok === true);
+  ok('OM-B5b …while the same words WITHOUT the limitation are refused on voice, and only on voice',
+    (() => { const r = V('voice', HONEST);
+      return r.ok === false && r.violations.some(v => v.kind === 'voice_dropped_limitation')
+        && V('prose', HONEST).ok === true; })());
   ok('OM-B6 general knowledge that states no organisational figure is untouched',
     V('prose', 'Warm-ups usually have three phases and build intensity gradually.').ok === true);
 
@@ -176,7 +187,8 @@ try {
       return r.ok === false && r.violations.some(v => v.kind === 'voice_dropped_uncertainty'); })());
   ok('OM-C8c …while a REPHRASING that keeps the substance is allowed, or an honest reading would fail',
     V('voice', 'Two separate accounts point the same way. This rests on two accounts, one of them a '
-      + 'fortnight old, so treat it as a starting point rather than settled.').ok === true);
+      + 'fortnight old, so treat it as a starting point rather than settled. Counts occasions on '
+      + 'the record. Something that happened and was never said is not here.').ok === true);
   ok('OM-C8d …and the same omission is NOT refused on prose, because that is the channel the caveat is visible on',
     V('prose', 'Two separate accounts point the same way about your recovery between games.').ok === true);
 
@@ -220,12 +232,122 @@ try {
     /manifest\.manifest\(\{/.test(SERVER) && /subject: `member:\$\{userId\}`/.test(SERVER));
   ok('OM-F1b …with a claim for each belief, each record and each piece of assigned work',
     /beliefs\.slice\(0, 8\)\.map/.test(SERVER) && /evidence\.slice\(0, 12\)\.map/.test(SERVER));
-  ok('OM-F2 …and VERIFIES the written reply against it before anything is returned',
-    /manifest\.verify\('prose', written, _mf/.test(SERVER));
+  /* OM-F2 WAS A SOURCE-SHAPE ASSERTION PINNING A SINGLE-CHANNEL CALL, and the call it pinned is
+     gone — not because the law weakened but because it got stronger: the composer no longer
+     verifies one channel, it puts the whole answer through `approve`, which checks every channel
+     this reply will leave by and their agreement. The behaviour is driven for real in
+     output-channels-http-smoke.js against the live routes; what stays here is the structural
+     backstop that the gate is REACHED and that a refusal degrades rather than ships. */
+  ok('OM-F2 …and puts the whole answer — prose, voice and citations — through ONE gate before returning',
+    /manifest\.approve\(_mf, \{[\s\S]{0,400}prose:[\s\S]{0,200}voice:[\s\S]{0,200}citations:/.test(SERVER));
   ok('OM-F2b …degrading rather than shipping when it refuses',
-    /mfCheck\.ok[\s\S]{0,400}_degraded\('unverified'\)/.test(SERVER));
+    /_approved\.ok[\s\S]{0,400}_degraded\('unverified'\)/.test(SERVER));
+  ok('OM-F2c …and the spoken rendering is composed on the SERVER, so the browser has nothing to author',
+    /_speechFor\(\{ text: written/.test(SERVER) && !/new SpeechSynthesisUtterance\(text \+ disclosure\)/.test(decomment(R('js/app.js'))));
   ok('OM-F3 the older cage is still there too — two gates with different failure modes, neither load-bearing alone',
     /composer\.verifyGrounding\(written/.test(SERVER));
+
+  /* ══ G — A GRAPH MAY NOT OUTRUN ITS SENTENCE (L-MF7) ════════════════════════════════════
+     The values being individually approved does not approve the LINE. Two approved points drawn
+     as states say each was recorded; the same two drawn as a trend say the thing moved, which is
+     a different and stronger claim, and it is the one a reader takes away. */
+  console.log('\n  G — THE GRAPH MAY NOT SAY MORE THAN THE WORDS BESIDE IT');
+  const MOMENTS = [1_699_000_000_000, 1_700_000_000_000];
+  const withGraph = (series, extra = {}) => M.manifest({
+    subject: 's', claims: [M.claim({ id: 'moved', text: 'This record holds two separate dated occasions to compare.', stance: 'inferred', ...extra })],
+    graph: { moments: MOMENTS, series },
+  });
+  const TREND_PTS = [{ at: MOMENTS[0], value: 1 }, { at: MOMENTS[1], value: 2 }];
+  const mfTrend = withGraph([{ key: 'origins', unit: 'count', shape: 'trend', claim: 'moved', points: TREND_PTS }]);
+  ok('OM-G1 a trend whose movement IS claimed, drawn from the manifest, is approved',
+    M.verify('graph', { series: [{ key: 'origins', shape: 'trend', points: TREND_PTS }] }, mfTrend).ok === true);
+  ok('OM-G2 the SAME approved points drawn as a trend with no claim behind the movement are refused',
+    (() => {
+      const mf = withGraph([{ key: 'origins', unit: 'count', shape: 'trend', points: TREND_PTS }]);   // no `claim`
+      const r = M.verify('graph', { series: [{ key: 'origins', shape: 'trend', points: TREND_PTS }] }, mf);
+      return r.ok === false && r.violations.some(v => v.kind === 'graph_trend_without_claim');
+    })());
+  ok('OM-G2b …and the same points drawn as STATES are fine, because states assert no movement',
+    M.verify('graph', { series: [{ key: 'origins', shape: 'state', points: TREND_PTS }] },
+      withGraph([{ key: 'origins', unit: 'count', shape: 'state', points: TREND_PTS }])).ok === true);
+  ok('OM-G3 a trend resting on a claim that carries the uncertainty must show a limit, or it is refused',
+    (() => {
+      const mf = withGraph([{ key: 'origins', unit: 'count', shape: 'trend', claim: 'moved', points: TREND_PTS }], { carriesUncertainty: true });
+      const bare = M.verify('graph', { series: [{ key: 'origins', shape: 'trend', points: TREND_PTS }] }, mf);
+      const shown = M.verify('graph', { limitations: ['One origin only.'], series: [{ key: 'origins', shape: 'trend', points: TREND_PTS }] }, mf);
+      return bare.ok === false && bare.violations.some(v => v.kind === 'graph_dropped_uncertainty') && shown.ok === true;
+    })());
+  ok('OM-G4 a moment the RECORD does not hold is refused even when the value is approved',
+    (() => {
+      const r = M.verify('graph', { series: [{ key: 'origins', shape: 'trend',
+        points: [{ at: MOMENTS[0], value: 1 }, { at: 1_695_000_000_000, value: 2 }] }] }, mfTrend);
+      return r.ok === false && r.violations.some(v => v.kind === 'graph_time_not_in_record');
+    })());
+  ok('OM-G4b …and the moments come from the record, not from the series, or the check would be the drawing marking its own work',
+    mfTrend.graph.moments.length === 2 && mfTrend.graph.moments.every(t => MOMENTS.includes(t)));
+
+  /* ══ H — THE SOURCE ACTUALLY USED IS THE ONE SHOWN (L-MF6, both directions) ══════════════ */
+  console.log('\n  H — THE SOURCE ACTUALLY USED IS THE ONE SHOWN');
+  ok('OM-H1 an external claim whose approved source is NOT shown is refused — nothing on screen distinguishes it from an answer that rested on the source above it',
+    (() => { const r = V('citations', []);
+      return r.ok === false && r.violations.some(v => v.kind === 'citation_omitted'); })());
+  ok('OM-H2 …and showing it passes, which is the only difference between the two cases',
+    V('citations', [{ url: 'https://example.org/recovery' }]).ok === true);
+  ok('OM-H3 an answer with no external claim at all is not made to cite anything',
+    M.verify('citations', [], M.manifest({ claims: [M.claim({ id: 'a', text: 'recorded thing', stance: 'recorded' })] })).ok === true);
+
+  /* ══ I — ONE ANSWER, EVERY DOOR, ONE CALL (L-MF8) ═══════════════════════════════════════ */
+  console.log('\n  I — ONE ANSWER, EVERY DOOR, ONE CALL');
+  ok('OM-I1 approve passes an answer whose channels agree and each verify',
+    M.approve(MF, { prose: { value: HONEST, claims: M.claimsIn(HONEST, MF) },
+      voice: { value: SPOKEN, claims: M.claimsIn(HONEST, MF) },
+      citations: { value: [{ url: 'https://example.org/recovery' }] } }, { roster: ROSTER }).ok === true);
+  ok('OM-I2 one bad channel fails the WHOLE answer — a caller handed "the prose was fine" ships the prose',
+    (() => { const r = M.approve(MF, { prose: { value: HONEST }, voice: { value: HONEST } }, { roster: ROSTER });
+      return r.ok === false && r.violations.some(v => v.kind === 'voice_dropped_limitation')
+        && Object.keys(r.channels).length === 0; })());
+  ok('OM-I3 …and a refusal carries a sentence a person can be shown, never a bare false',
+    M.approve(MF, { prose: { value: HONEST }, voice: { value: HONEST } }, { roster: ROSTER }).note.length > 20);
+  ok('OM-I4 two channels resting on DIFFERENT claims are refused even when each verifies alone',
+    (() => {
+      const r = M.approve(MF, { prose: { value: HONEST, claims: ['c_origins', 'c_hedge'] },
+        voice: { value: SPOKEN, claims: ['c_origins'] } }, { roster: ROSTER });
+      return r.ok === false && r.violations.some(v => v.kind === 'channels_disagree' && v.b === 'voice');
+    })());
+  ok('OM-I5 a channel declaring a claim this answer does not hold is refused',
+    (() => { const r = M.approve(MF, { prose: { value: HONEST, claims: ['c_invented'] } }, { roster: ROSTER });
+      return r.ok === false && r.violations.some(v => v.kind === 'claim_not_in_manifest'); })());
+  ok('OM-I6 claimsIn is derived from the TEXT, so a caller cannot declare a list that stays right while its output drifts',
+    (() => { const full = M.claimsIn(HONEST, MF), stale = M.claimsIn('Nothing in particular happened.', MF);
+      return full.includes('c_origins') && full.includes('c_hedge') && stale.length === 0; })());
+  /* THE COUNTEREXAMPLE THE BRIEF NAMES: THE PROSE IS RIGHT AND ANOTHER CHANNEL IS STALE. This is
+     the shape that survives every per-channel check, because the stale channel is not saying
+     anything FALSE — it is saying something that was true of the previous answer. Only a
+     comparison between channels can see it, which is why `approve` exists. */
+  ok('OM-I7a prose correct, VOICE still reading the previous answer — each channel verifies alone and the answer is still refused',
+    (() => {
+      /* A rendering of the PREVIOUS answer: it keeps the uncertainty and the limits, so every
+         per-channel law is satisfied — and it is missing the finding the prose actually made. */
+      const stale = 'This rests on two accounts and one of them is a fortnight old, so treat it as '
+        + 'a starting point rather than settled. Counts occasions on the record. Something that '
+        + 'happened and was never said is not here.';
+      return M.verify('prose', HONEST, MF, { roster: ROSTER }).ok === true
+        && M.verify('voice', stale, MF, { roster: ROSTER }).ok === true
+        && M.approve(MF, { prose: { value: HONEST, claims: M.claimsIn(HONEST, MF) },
+             voice: { value: stale, claims: M.claimsIn(stale, MF) } }, { roster: ROSTER }).ok === false;
+    })());
+  ok('OM-I7b prose correct, GRAPH overconfident — the same approved points drawn as a movement nobody claimed',
+    (() => {
+      const mf = M.manifest({ subject: 's', limitations: [],
+        claims: [M.claim({ id: 'card', text: 'Two accounts point the same way about recovery.', numbers: [2] })],
+        graph: { moments: MOMENTS, series: [{ key: 'origins', unit: 'count', shape: 'trend', points: TREND_PTS }] } });
+      return M.verify('prose', 'Two accounts point the same way about recovery.', mf).ok === true
+        && M.approve(mf, { prose: { value: 'Two accounts point the same way about recovery.' },
+             graph: { value: { series: [{ key: 'origins', shape: 'trend', points: TREND_PTS }] } } }).ok === false;
+    })());
+  ok('OM-I7 an answer with no manifest behind it cannot be approved by handing it no channels either',
+    M.approve(M.manifest({ claims: [] }), { prose: { value: 'anything' } }).ok === false
+    && M.approve(MF, {}).ok === false);
 
 } catch (e) { fail++; console.error('  FAIL output-manifest suite threw:', e && e.stack); }
 

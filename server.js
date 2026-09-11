@@ -10574,7 +10574,33 @@ function _turnAbout(about) {
 function _historyMessage(m = {}) {
   return { id: m.id || null, role: m.role, text: m.text, at: m.at,
     reasoning: !!m.reasoning, register: m.register || null, provenance: m.provenance || [],
-    sources: m.sources || [], rating: m.rating || null };
+    speech: m.speech || '', sources: m.sources || [], rating: m.rating || null };
+}
+
+/* ── WHAT IS SPOKEN — THE VOICE CHANNEL'S ONE OWNER ─────────────────────────────────────────
+   Reading a reply aloud used to be assembled in the browser out of whatever the action row
+   happened to be holding. That is a second author for the same answer, on the one channel
+   nothing verified, and it is the channel where drift costs most: a spoken sentence carries more
+   confidence than a written one, and the qualification is the first thing an assembler drops.
+
+   So the spoken rendering is composed HERE, once, beside the prose it belongs to, and travels
+   with the reply. The browser reads it out and composes nothing.
+
+   THE ORDER IS THE POINT. The answer, then what it cannot show, then what it rests on — because
+   a listener cannot skim back, and a caveat that arrives after the listener has stopped
+   listening was not said. Nothing is invented: with no sources the count is not claimed, and
+   every limitation is one the manifest already carries. */
+function _speechFor({ text = '', sourceCount = 0, limitations = [] } = {}) {
+  const body = String(text || '').trim();
+  if (!body) return '';
+  const parts = [body];
+  for (const l of (Array.isArray(limitations) ? limitations : []).slice(0, 3)) {
+    const s = String(l || '').trim();
+    if (s) parts.push(/[.!?]$/.test(s) ? s : `${s}.`);
+  }
+  const n = Number(sourceCount) || 0;
+  if (n > 0) parts.push(`This rests on ${n} source${n === 1 ? '' : 's'}, shown under the reply.`);
+  return parts.join(' ');
 }
 
 const SOURCE_CAP = 6;
@@ -10910,10 +10936,25 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
        So the manifest lists the particulars each claim is ALLOWED to state, which is a far smaller
        and far more exact set. Both run. Two gates with different failure modes catch more than
        either, and neither is load-bearing alone. */
+    /* THE CITATION CHANNEL IS BUILT FIRST, because the answer is allowed to say how many sources
+       it rests on and that figure has to be an APPROVED figure like any other. Building the list
+       after the manifest is how "this rests on five sources" became a number nobody had checked. */
+    const _sources = _sourceList([
+      ...evidence.map(e => ({ kind: 'record', label: e.source || 'Something you told me', detail: e.text })),
+      ...beliefs.map(b => ({ kind: 'belief', label: 'What I am working out', detail: b.text })),
+      ...assignedWork.map(w => ({ kind: 'work', label: w.title, detail: w.status ? `Your work — ${w.status}` : 'Your work' })),
+    ], written);
+    /* WHAT THIS ANSWER CANNOT SHOW. One account is a starting point, not a finding, and the
+       listener is the one who most needs telling — see L-MF5. Stated on the manifest so every
+       channel is measured against it rather than each deciding whether to mention it. */
+    const _limits = (evidence.length + beliefs.length === 1)
+      ? ['This rests on a single account so far, so it is a starting point rather than a finding.']
+      : [];
     const _mf = manifest.manifest({
       subject: `member:${userId}`,
       at: now,
       privacyScope: 'you alone unless you share it',
+      limitations: _limits,
       claims: [
         // What the kernel already believes, with the counts it is entitled to state.
         ...beliefs.slice(0, 8).map((b, i) => manifest.claim({
@@ -10937,12 +10978,27 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
            many records it read — both of which are true, approved, and the point. */
         manifest.claim({ id: 'reader', text: String(u.name || ''), stance: 'recorded',
           names: [String(u.name || '')].filter(Boolean),
-          numbers: [beliefs.length, evidence.length, assignedWork.length].filter(n => n > 0) }),
+          numbers: [beliefs.length, evidence.length, assignedWork.length, _sources.length].filter(n => n > 0) }),
       ],
     });
-    const mfCheck = manifest.verify('prose', written, _mf, { roster });
-    if (!mfCheck.ok) {
-      console.log(`[composer] manifest refused — ${mfCheck.violations.map(v => `${v.kind}:${v.value ?? ''}`).join('; ')}`);
+
+    /* ── EVERY DOOR THIS ANSWER LEAVES BY, CHECKED IN ONE PLACE (L-MF8) ─────────────────────
+       The prose, the sources under it, and the words the speaker will read. One manifest, one
+       call, and a refusal in any channel degrades the whole turn — because a caller handed "the
+       prose was fine" ships the prose, and the person then hears a different answer than they
+       read.
+
+       WHAT IS SPOKEN IS BUILT HERE, ON THE SERVER, and travels with the reply. It used to be
+       assembled in the browser from whatever the row happened to hold, which is a second author
+       for the same answer and the one channel nothing verified. */
+    const _speech = _speechFor({ text: written, sourceCount: _sources.length, limitations: _limits });
+    const _approved = manifest.approve(_mf, {
+      prose: { value: written, claims: manifest.claimsIn(written, _mf) },
+      voice: { value: _speech, claims: manifest.claimsIn(_speech, _mf) },
+      citations: { value: _sources.filter(s => s && s.url) },
+    }, { roster });
+    if (!_approved.ok) {
+      console.log(`[composer] manifest refused — ${_approved.violations.map(v => `${v.kind}:${v.value ?? v.claim ?? ''}`).join('; ')}`);
       _metric(code, 'composer_refused');
       return _degraded('unverified');
     }
@@ -10970,11 +11026,7 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     // showing them back to that same reader discloses nothing they were not just told. It is a
     // display of the basis, not a second read.
     return { answer: written, grounded: beliefs.length + evidence.length > 0,
-      sources: _sourceList([
-        ...evidence.map(e => ({ kind: 'record', label: e.source || 'Something you told me', detail: e.text })),
-        ...beliefs.map(b => ({ kind: 'belief', label: 'What I am working out', detail: b.text })),
-        ...assignedWork.map(w => ({ kind: 'work', label: w.title, detail: w.status ? `Your work — ${w.status}` : 'Your work' })),
-      ], written) };
+      sources: _sources, speech: _speech, limitations: _limits };
   } catch (e) {
     // A swallowed exception here is the worst of the lot: a rejected model ID, an auth failure or
     // a rate limit all look exactly like "the composer had nothing to say", and every reply in
@@ -14802,8 +14854,23 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // the raw material the model already reasoned over. Surfacing it underneath produced a
   // non-sequitur ("You marked 1 thing private") sitting under an unrelated answer, and in the
   // worst case a stale clarifier contradicting the reply above it. The prose stands on its own.
+  /* THE SOURCES, ONCE. They are the citation channel AND the figure the spoken disclosure states,
+     so building them twice is building two answers to "what does this rest on". */
+  const _respSources = composedReply ? (composedReply.sources || []) : _sourceList([
+    ...((qa && qa.citations) || []).map(c => ({ kind: 'record', label: c.label || c.ref || 'Your record', detail: c.excerpt || c.text || '', at: c.date || c.at || null })),
+    ...((qa && qa.webSources) || []).map(w => ({ kind: 'web', label: w.title || w.source, detail: w.snippet || '', url: w.url })),
+    ...(hasInsight ? groundedClaims.slice(0, 3).map(c => ({ kind: 'belief', label: 'What I am working out', detail: c.text })) : []),
+  ], responseText);
   const response = {
     responseText, mode, lens: lens || null,
+    /* THE SPOKEN RENDERING, composed on the server for BOTH paths. The composed path's went
+       through the manifest gate above; the deterministic path's text was written by the kernel
+       rather than by a model, so there is no second author to disagree with — but it gets the
+       same limitations and the same source disclosure, because a listener's entitlement to those
+       does not depend on which engine wrote the sentence. */
+    speech: composedReply && composedReply.speech
+      ? composedReply.speech
+      : _speechFor({ text: responseText, sourceCount: (_respSources || []).length, limitations: context.limitations }),
     /* WHETHER THIS IS INTELLIQ'S NORMAL VOICE. Structured, so the client renders one quiet
        sentence of its own rather than the server smuggling an apology into `responseText` and
        every assertion in the suite that reads that field going with it. `reason` is the closed
@@ -14833,11 +14900,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     // question-answering path already produced. Both paths cite or neither does: a reply whose
     // provenance depends on which engine happened to write it teaches people that the chips
     // are decoration, and the composed path is the one that most needs to be checkable.
-    sources: composedReply ? (composedReply.sources || []) : _sourceList([
-      ...((qa && qa.citations) || []).map(c => ({ kind: 'record', label: c.label || c.ref || 'Your record', detail: c.excerpt || c.text || '', at: c.date || c.at || null })),
-      ...((qa && qa.webSources) || []).map(w => ({ kind: 'web', label: w.title || w.source, detail: w.snippet || '', url: w.url })),
-      ...(hasInsight ? groundedClaims.slice(0, 3).map(c => ({ kind: 'belief', label: 'What I am working out', detail: c.text })) : []),
-    ], responseText),
+    sources: _respSources,
     // A preview of operating-context records to CONFIRM (never persisted here).
     orgContextProposal,
     // Ambiguity: which open question is the user answering (never guessed).
@@ -14871,6 +14934,12 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // the reason you reopen a thread is to check something.
   _conv.messages.push({ role: 'assistant', text: response.responseText, at: _nowIso, id: 'm_' + generateId(),
     reasoning: !!(qa && qa.reasoning), register: (qa && qa.register) || null, provenance: (qa && qa.provenance) || [],
+    /* The approved spoken rendering rides with the message for the same reason the sources do:
+       a person reopens a thread to check something, and read-aloud that works only while the
+       bubble is still on screen is read-aloud that is missing whenever it is wanted. It is not a
+       second record of the answer — it is the same approved answer in the form the other channel
+       needs, stored rather than recomposed by a browser. */
+    speech: response.speech || '',
     sources: response.sources || [] });
   if (_conv.messages.length > CONV_MSG_CAP) _conv.messages.splice(0, _conv.messages.length - CONV_MSG_CAP);
   _conv.updatedAt = _nowIso;
@@ -16071,6 +16140,38 @@ app.get('/api/objects', requireAuth, (req, res) => {
 
 /* Every object opens as a thread. The opening is recomposed from the current object on every
    read and is never appended to assistantConversations (L-OC1). */
+/* WHAT A BELIEF IS STANDING ON, in one sentence. Moved here out of the browser: the same counts
+   now have to be SPOKEN as well as shown, and a figure computed in two places is two figures that
+   will eventually disagree. The client renders this; it no longer composes it. */
+function _provenanceLine(d = {}) {
+  const n = d.evidenceCount || 0, o = d.independentOrigins || 0, c = d.corrected || 0;
+  if (!n) return 'Nothing recorded under this yet.';
+  const bits = [`${n} thing${n === 1 ? '' : 's'} you've told me`];
+  if (o > 1) bits.push(`from ${o} separate occasions`);
+  else if (o === 1) bits.push('all from one telling');
+  if (c) bits.push(`${c} since corrected`);
+  if (d.contested) bits.push('and accounts disagree');
+  return bits.join(', ') + '.';
+}
+
+/* THE OPENING CARD, COMPOSED ONCE. It is the object's own explanation and it is the `card`
+   channel of the object's answer — so it is built here, beside the manifest it will be checked
+   against, rather than assembled in the browser from four fields of a payload. */
+function _openingFor(obj) {
+  const sum = (obj && obj.present && obj.present.summary) || {};
+  const det = (obj && obj.present && obj.present.detail) || {};
+  const text = [sum.thinking || (obj && obj.explained && obj.explained.claim) || '', sum.openQuestion || '']
+    .filter(Boolean).join(' ');
+  const sources = [];
+  const n = Number(det.evidenceCount) || 0;
+  if (n) sources.push({ kind: 'record', label: `${n} thing${n === 1 ? '' : 's'} you told me`, detail: _provenanceLine(det) });
+  for (const b of (det.because || []).slice(0, 3)) sources.push({ kind: 'belief', label: 'Why I think this', detail: b });
+  for (const a of (det.alternatives || []).slice(0, 2)) {
+    if (a && a.statement) sources.push({ kind: 'belief', label: 'A rival reading', detail: a.statement });
+  }
+  return { text, sources };
+}
+
 app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const kind = String(req.params.kind || '');
@@ -16105,7 +16206,32 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
      It is a fact about the reader, not about the object, and it travels no further than them. */
   const _mine = Array.isArray(_getMemory(code, userId).prioritised)
     ? _getMemory(code, userId).prioritised.map(String) : [];
+  /* ── THE OPENING IS AN ANSWER, AND IT LEAVES BY TWO DOORS ───────────────────────────────
+     The card a reader sees and the words a listener hears, checked against ONE manifest built
+     from this object's own signals. Degraded per channel rather than all-or-nothing, because the
+     two failures are not the same failure: a card that cannot be shown has to be replaced by the
+     reason, while a reading that cannot be spoken leaves a perfectly good card on the screen and
+     only owes the person an explanation for the missing control. */
+  const _open = _openingFor(object);
+  const _omf = _objectManifest(code, userId, object, { sourceCount: _open.sources.length });
+  const _oRoster = Object.values(orgUsers[code] || {}).filter(p => p && p.status !== 'removed' && p.name).map(p => p.name);
+  const _oSpeech = _speechFor({ text: _open.text, sourceCount: _open.sources.length, limitations: _omf.limitations });
+  const _oApproved = manifest.approve(_omf, {
+    card: { value: _open.text, claims: manifest.claimsIn(_open.text, _omf) },
+    voice: { value: _oSpeech, claims: manifest.claimsIn(_oSpeech, _omf) },
+  }, { roster: _oRoster });
+  const _voiceOnly = _oApproved.violations.filter(v =>
+    v.channel === 'voice' || String(v.kind).startsWith('voice_')
+    || (v.kind === 'channels_disagree' && (v.a === 'voice' || v.b === 'voice')));
+  const _cardRefused = _oApproved.violations.length > _voiceOnly.length;
+
   res.json({ ok: true, about: object.about, opening: object.explained, present: object.present,
+    /* Composed on the server, rendered by the client. `speech` empty means there is nothing
+       approved to read aloud, and `speechNote` says why rather than leaving a dead control. */
+    openingText: _cardRefused ? _oApproved.note : _open.text,
+    openingSources: _cardRefused ? [] : _open.sources,
+    openingSpeech: _oApproved.ok ? _oSpeech : '',
+    openingNote: _oApproved.ok ? '' : _oApproved.note,
     prioritised: _mine.includes(`${kind}:${object.id}`),
     shared: _forum, forumAvailable: _forum, sharedByRule: _forum, nodeId: _nodeId,
     forumKind: _aud.forumKind,
@@ -17912,6 +18038,111 @@ app.get('/api/objects/:kind/:id/related', requireAuth, (req, res) => {
     note: 'These are connections the records already carry. A connection says two things are related; it does not make either of them more certain.' });
 });
 
+/* ── ONE MANIFEST PER OBJECT (L-MF1) ─────────────────────────────────────────────────────────
+   A thread's opening card, the picture under it and the chips beside it are three channels of ONE
+   answer about ONE object, and each used to decide for itself what it was entitled to say. The
+   card is composed by ai/voice.js, the picture by ai/chart.js, the chips by the client — three
+   authors, no shared record of what the object actually supports.
+
+   This is that record. Built from the object's OWN signals, so it is the record talking rather
+   than a restatement of whatever the card happened to compose.
+
+   THE MOVEMENT CLAIM IS THE ONE THAT MATTERS. A picture drawn as a line says the thing changed
+   over time. `governChart` already refuses a line whose POINTS do not span two moments — but a
+   chart built from the wrong points can satisfy that and still be a line through a record that
+   never moved. So the movement is claimed here, from the signals, and L-MF7 refuses a trend that
+   cannot name it. Two different questions: does the picture agree with itself, and does it agree
+   with the record. */
+/* EVERY DATED FACT THIS OBJECT'S RECORD ACTUALLY HOLDS. Read from the record — signals, when the
+   object was set, reviewed and closed, when material was attached and when somebody engaged with
+   it — and NOT from the chart builders, which is the whole point: a picture is checked against
+   the record rather than against the code that drew it. A timestamp on a chart that is not a
+   moment in the record is an invented moment however plausible the value beside it looks. */
+function _recordMoments(code, userId, obj) {
+  const raw = (obj && obj.raw) || {};
+  const out = new Set();
+  const add = (v) => {
+    const t = Number.isFinite(v) ? Number(v) : (Date.parse(v || '') || NaN);
+    if (Number.isFinite(t) && t > 0) out.add(t);
+  };
+  for (const s of (raw.signals || [])) add(s && s.at);
+  add(raw.createdAt); add(raw.reviewAt); add(raw.updatedAt); add(raw.at);
+  add(raw.outcome && raw.outcome.at);
+  for (const m of Object.values(_materials(code))) {
+    if (!_materialOn(m, obj.kind, obj.id) || !_materialFor(code, userId, m.materialId).ok) continue;
+    add(m.createdAt);
+    for (const e of _engageOf(code, m.materialId)) add(e && e.at);
+  }
+  return [...out];
+}
+
+function _objectManifest(code, userId, obj, { chartSpec = null, sourceCount = 0, now = Date.now() } = {}) {
+  const raw = (obj && obj.raw) || {};
+  const sum = (obj && obj.present && obj.present.summary) || {};
+  const det = (obj && obj.present && obj.present.detail) || {};
+  const sigs = ((raw.signals || []).filter(s => s && s.ref));
+  const origins = new Set(sigs.map(s => diagnose.originIdentity(s) || String(s.ref)).filter(Boolean));
+  const times = _recordMoments(code, userId, obj);
+  const refs = sigs.map(s => String(s.ref));
+
+  const claims = [];
+  /* THE CARD'S OWN SENTENCE, and the counts it is entitled to state: how many accounts, how many
+     separate origins. Those two are the figures a belief card legitimately says and everything
+     else about this organisation it does not. */
+  const headline = String(sum.thinking || (obj.explained && obj.explained.claim) || '');
+  if (headline) {
+    claims.push(manifest.claim({
+      id: 'card', text: headline, stance: 'inferred', basis: refs, at: times[times.length - 1] || null,
+      numbers: [..._figuresIn(headline), origins.size, sigs.length, Number(det.evidenceCount) || 0].filter(n => n > 0),
+    }));
+  }
+  const ask = String(sum.openQuestion || '');
+  if (ask) claims.push(manifest.claim({ id: 'ask', text: ask, stance: 'advice', numbers: _figuresIn(ask) }));
+  /* THE FIGURES THIS ANSWER IS ENTITLED TO STATE ABOUT ITSELF: how many accounts, how many
+     separate origins, how many sources are shown beneath it. Deliberately carries NO text — it
+     approves numbers and states nothing, so it can never be counted as a claim a channel rests
+     on and can never make two channels look like they disagree. */
+  claims.push(manifest.claim({ id: 'counts', text: '', stance: 'recorded', basis: refs,
+    numbers: [origins.size, sigs.length, Number(det.evidenceCount) || 0, Number(sourceCount) || 0].filter(n => n > 0) }));
+  for (const [i, s] of sigs.slice(0, 12).entries()) {
+    claims.push(manifest.claim({ id: `signal_${i}`, text: String(s.text || s.summary || ''), stance: 'recorded',
+      basis: [String(s.ref)], at: Number.isFinite(s.at) ? s.at : null,
+      numbers: _figuresIn(String(s.text || s.summary || '')) }));
+  }
+  /* DID ANYTHING MOVE? Two distinct moments on the record is the whole of it, and it is a claim
+     about the RECORD rather than about the world — hence `inferred`, and hence carrying the
+     uncertainty until the origins clear the floor the rest of the kernel uses. */
+  const _sorted = [...times].sort((a, b) => a - b);
+  if (_sorted.length >= 2) {
+    claims.push(manifest.claim({
+      id: 'movement', stance: 'inferred', basis: refs, at: _sorted[_sorted.length - 1],
+      text: `This record holds ${_sorted.length} separate dated occasions, so there is a before and an after to compare.`,
+      numbers: [_sorted.length, origins.size].filter(n => n > 0),
+      carriesUncertainty: origins.size === 1,
+    }));
+  }
+
+  const limitations = [];
+  if (origins.size === 1) limitations.push('Everything here traces back to a single origin, so repetition is not adding certainty.');
+
+  return manifest.manifest({
+    subject: obj && obj.about ? String(obj.about) : '',
+    at: now, privacyScope: obj && obj.whose ? String(obj.whose) : '', limitations,
+    claims,
+    graph: chartSpec ? {
+      // THE MOMENTS THE RECORD HOLDS, so a plotted timestamp can be checked against the record
+      // rather than against the builder that produced it.
+      moments: times,
+      series: (chartSpec.series || []).map(s => ({
+        key: s && s.key, unit: s && s.unit, shape: s && s.shape,
+        // Only a trend needs a claim behind it; a state or a category asserts no change.
+        claim: (s && s.shape) === 'trend' ? 'movement' : '',
+        points: (s && s.points) || [],
+      })),
+    } : null,
+  });
+}
+
 app.get('/api/objects/:kind/:id/chart', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const kind = String(req.params.kind || ''), id = String(req.params.id || '');
@@ -17930,6 +18161,20 @@ app.get('/api/objects/:kind/:id/chart', requireAuth, (req, res) => {
   if (!governed.ok) {
     return res.json({ ok: true, chart: null, note: chart.refusalNote(governed.violations),
       violations: governed.violations.map(v => v.kind) });
+  }
+  /* ── AND THEN THE SAME QUESTION EVERY OTHER CHANNEL ANSWERS (L-MF4, L-MF7) ─────────────────
+     governChart asks whether the picture agrees with itself. This asks whether it agrees with the
+     ANSWER — the same manifest the object's card is checked against — which is the question that
+     catches a line drawn through a record that never moved, and a value that changed between the
+     governance step and the response. A refused picture returns its reason and no chart, exactly
+     as a governance refusal does: a half-drawn chart is worse than none, because a reader takes
+     what is drawn for the whole. */
+  const _mf = _objectManifest(code, userId, obj, { chartSpec: built.spec });
+  const _ok = manifest.approve(_mf, { graph: { value: governed.chart } });
+  if (!_ok.ok) {
+    console.log(`[chart] manifest refused — ${_ok.violations.map(v => v.kind).join('; ')}`);
+    return res.json({ ok: true, chart: null, note: _ok.note,
+      violations: _ok.violations.map(v => v.kind) });
   }
   res.json({ ok: true, chart: governed.chart });
 });

@@ -715,7 +715,9 @@ function navigate(dest){
      Session end already did this (see _sessionEnded). Navigation did not, and navigation is the
      ordinary case — somebody taps the microphone, changes their mind, and taps Home. */
   try { if (window.IQVoice && IQVoice.cancelAll) IQVoice.cancelAll(); } catch (_) {}
-  try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (_) {}
+  /* And anything being READ ALOUD stops, through the one owner, so the row it was reading is
+     told it stopped rather than left announcing "Reading aloud…" on a page nobody is on. */
+  try { if (typeof MemberApp !== 'undefined' && MemberApp._voiceStop) MemberApp._voiceStop('stopped'); } catch (_) {}
 
   // 4. Activate the canonical surface + one-authority nav/title/active state.
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -11158,7 +11160,7 @@ const MemberApp = {
       box.innerHTML = msgs.map(m => m.role === 'user'
         ? `<div class="iq-msg iq-msg-user">${esc(m.text)}</div>`
         : `<div class="iq-msg iq-msg-iq">${esc(m.text)}${this._sourcesHTML(m.sources)}${
-            this._msgActions(m.text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources, conversationId: id })}</div>`).join('');
+            this._msgActions(m.text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources, speech: m.speech, conversationId: id })}</div>`).join('');
       box.scrollTop = box.scrollHeight;
     } catch (_) { /* a restore that fails leaves an empty thread, never an error card */ }
   },
@@ -12136,15 +12138,15 @@ const MemberApp = {
       // entering a chat between you and IntelliQ."
       // The opening's sources are the object's own basis — what the belief is standing on.
       // Composed on every read (L-OC1) like the rest of the opening, never stored.
-      const openSources = [];
-      if (det.evidenceCount) openSources.push({ kind: 'record', label: `${det.evidenceCount} thing${det.evidenceCount === 1 ? '' : 's'} you told me`,
-        detail: this._provenanceLine(det) });
-      (det.because || []).slice(0, 3).forEach(b => openSources.push({ kind: 'belief', label: 'Why I think this', detail: b }));
-      (det.alternatives || []).slice(0, 2).forEach(a => a && a.statement && openSources.push({ kind: 'belief', label: 'A rival reading', detail: a.statement }));
-      const openText = [sum.thinking || x.claim || '', sum.openQuestion || ''].filter(Boolean).join(' ');
+      // COMPOSED ON THE SERVER, beside the manifest that approved it — the card and the spoken
+      // rendering are two channels of one answer, and a browser assembling either of them is a
+      // second author for the same statement.
+      const openSources = data.openingSources || [];
+      const openText = data.openingText || '';
       const openingBubble = `<div class="iq-msg iq-msg-iq iqt-open-msg">${opening}
         ${this._sourcesHTML(openSources)}
-        ${this._msgActions(openText, { sources: openSources })}</div>`;
+        ${this._msgActions(openText, { sources: openSources, speech: data.openingSpeech })}
+        ${data.openingNote ? `<div class="iq-act-note" data-voice="refused">${esc(data.openingNote)}</div>` : ''}</div>`;
       // Closing and contesting are the two things a person can DO to a belief, so they sit with
       // the belief rather than inside an overflow menu nobody opens.
       const verdicts = `
@@ -13351,7 +13353,7 @@ const MemberApp = {
     if (mine) return `<div class="iq-msg iq-msg-user">${esc(text)}</div>`;
     return `<div class="iq-msg iq-msg-iq">${esc(text)}
       ${this._sourcesHTML(m.sources)}
-      ${this._msgActions(text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources })}</div>`;
+      ${this._msgActions(text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources, speech: m.speech })}</div>`;
   },
 
   /* ── WHAT INTELLIQ SAID, AND WHAT YOU CAN DO WITH IT ───────────────────────────────────
@@ -13369,7 +13371,7 @@ const MemberApp = {
      The row is deliberately quiet — small, low-contrast, no colour on the rating (D14b: no
      red/amber/green anywhere a judgement could be read off a face). It appears on assistant
      messages only. */
-  _msgActions(text, { messageId = null, at = null, rating = null, sources = null, conversationId = null } = {}) {
+  _msgActions(text, { messageId = null, at = null, rating = null, sources = null, conversationId = null, speech = '' } = {}) {
     const esc = s => this._escape(String(s == null ? '' : s));
     const j = v => this._escape(JSON.stringify(JSON.stringify(v == null ? '' : v)));
     const has = Array.isArray(sources) && sources.length;
@@ -13388,10 +13390,10 @@ const MemberApp = {
         onclick="MemberApp._rateMsg(this,'down')">
         <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1z"/><path d="M17 14l-4.2 7.1a1.7 1.7 0 0 1-3.1-1.2L10.8 15H5.5a2 2 0 0 1-1.95-2.45l1.4-6A2 2 0 0 1 6.9 5H17"/></svg>
       </button>
-      <button type="button" class="iq-act" aria-label="Read this aloud" title="Read aloud"
-        onclick="MemberApp._speak(${j(text)}, ${j(JSON.stringify(sources || []))}, this)">
-        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>
-      </button>
+      <!-- READ ALOUD speaks the SERVER'S approved rendering of this answer, handed in here and
+           never assembled from the row. A control that cannot work is not drawn: an unsupported
+           browser gets the reason in its place rather than a button that does nothing. -->
+      ${this._voiceControl(speech, rid)}
       ${has ? `<button type="button" class="iq-act iq-act-src" aria-expanded="false"
         onclick="MemberApp._toggleSources(this)">${sources.length} source${sources.length === 1 ? '' : 's'}</button>` : ''}
       <span class="iq-act-said" role="status" aria-live="polite"></span>
@@ -13497,42 +13499,106 @@ const MemberApp = {
      confidence than a written one, not less. So what is spoken is what is VISIBLE: the same
      words, then how many sources it rests on. Nothing is added that is not on the screen, and
      nothing on the screen that qualifies the claim is dropped. */
-  _speak(textJson, sourcesJson, btn) {
-    let text = ''; try { text = JSON.parse(textJson); } catch (_) { text = ''; }
-    let sources = []; try { sources = JSON.parse(JSON.parse(sourcesJson || '"[]"')); } catch (_) { sources = []; }
-    if (!Array.isArray(sources)) sources = [];
-    // The live region under this row. Already there, already announced — the state of a control
-    // belongs beside the control.
-    const say = (msg) => {
-      const row = btn && btn.closest ? btn.closest('.iq-msg-acts') : null;
-      const out = row ? row.querySelector('.iq-act-said') : null;
-      if (out) out.textContent = msg;
-    };
-    const synth = window.speechSynthesis;
-    if (!synth || !window.SpeechSynthesisUtterance) {
-      say('This browser cannot read text aloud. The reply is on screen as it always is.');
+  /* Can THIS browser speak? Asked of the browser, never inferred from a server capability — a
+     host with an OpenAI key has given nobody a loudspeaker. */
+  _voiceSupported() {
+    try { return !!(window.speechSynthesis && window.SpeechSynthesisUtterance); } catch (_) { return false; }
+  },
+
+  /* THE CONTROL, OR THE REASON THERE ISN'T ONE. Two ways this cannot work, and neither may be
+     silent: the browser has no speech synthesis, or the server sent no approved rendering of this
+     answer to speak. Drawing a button in either case teaches somebody the product is broken,
+     because a control that does nothing when pressed is indistinguishable from one that failed. */
+  _voiceControl(speech, rid) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    if (!this._voiceSupported()) {
+      return `<span class="iq-act-note" data-voice="unsupported">This browser cannot read replies aloud.</span>`;
+    }
+    if (!String(speech || '').trim()) {
+      return `<span class="iq-act-note" data-voice="none">No approved reading for this message.</span>`;
+    }
+    return `<button type="button" class="iq-act iq-act-voice" aria-label="Read this aloud" title="Read aloud"
+        data-voice-state="idle" data-voice-for="${esc(rid)}"
+        onclick="MemberApp._speak(this, ${this._escape(JSON.stringify(JSON.stringify(String(speech))))})">
+        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>
+      </button>`;
+  },
+
+  /* The one place a voice-output state becomes words. Every exit says something — the whole
+     defect this replaced was a control that failed in silence. */
+  _VOICE_WORDS: {
+    starting: 'Starting to read aloud…',
+    speaking: 'Reading aloud…',
+    stopped: 'Stopped.',
+    interrupted: 'Stopped — a newer reply took over.',
+    error: 'Reading aloud failed. Press again to retry.',
+    ended: '',
+  },
+
+  _voiceState(btn, state) {
+    if (!btn) return;
+    const row = btn.closest ? btn.closest('.iq-msg-acts') : null;
+    const out = row ? row.querySelector('.iq-act-said') : null;
+    const word = Object.prototype.hasOwnProperty.call(this._VOICE_WORDS, state) ? this._VOICE_WORDS[state] : '';
+    if (out) out.textContent = word;
+    btn.setAttribute('data-voice-state', state);
+    const speaking = state === 'starting' || state === 'speaking';
+    btn.setAttribute('aria-label', speaking ? 'Stop reading aloud' : 'Read this aloud');
+    btn.setAttribute('title', speaking ? 'Stop' : 'Read aloud');
+    btn.classList.toggle('is-on', speaking);
+  },
+
+  /* Stop whatever is being read, and SAY that it was stopped rather than leaving the last state
+     on screen. Called when a newer utterance takes over and when the page changes underneath. */
+  _voiceStop(why) {
+    const prev = this._voiceBtn;
+    this._voiceBtn = null;
+    try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (_) {}
+    if (prev && prev.isConnected !== false) this._voiceState(prev, why || 'stopped');
+  },
+
+  /* ── READ ALOUD ──────────────────────────────────────────────────────────────────────────
+     SPEAKS THE SERVER'S APPROVED RENDERING AND COMPOSES NOTHING. The previous version built the
+     spoken sentence here, in the browser, out of the message text plus a source count it counted
+     itself — a second author for one answer, on the channel nothing verified. What is spoken now
+     is what the manifest gate approved beside the prose: the same words, then what the answer
+     cannot show, then what it rests on.
+
+     Pressing it again STOPS it. One utterance at a time across the whole app, and the one it
+     replaces is told it was replaced. */
+  _speak(btn, speechJson) {
+    /* ONE parse. The attribute holds `"the words"` as a JS literal, so by the time this runs the
+       argument is already a JSON string; parsing it twice would throw on every ordinary sentence
+       and the control would be silent again. */
+    let text = ''; try { text = JSON.parse(speechJson || '""'); } catch (_) { text = ''; }
+    const synth = this._voiceSupported() ? window.speechSynthesis : null;
+    if (!synth) { this._voiceState(btn, 'error'); return false; }
+    if (!String(text).trim()) { this._voiceState(btn, 'error'); return false; }
+
+    // Pressing the control that is currently speaking is the stop control. Deliberate: a person
+    // who wants it to stop reaches for the thing that started it.
+    const state = btn && btn.getAttribute ? btn.getAttribute('data-voice-state') : 'idle';
+    if (this._voiceBtn === btn && (state === 'speaking' || state === 'starting')) {
+      this._voiceStop('stopped');
       return false;
     }
-    if (!text) { say('There is nothing to read out here.'); return false; }
+    // A newer utterance REPLACES an older one, and the older row says so.
+    if (this._voiceBtn && this._voiceBtn !== btn) this._voiceStop('interrupted');
 
-    /* WHAT IS SPOKEN IS WHAT IS SHOWN. The source count is the same fact the "N sources" control
-       under the message already states; saying it aloud is how a listener gets what a reader gets
-       by looking. It is never invented — with no sources it is not claimed. */
-    const disclosure = sources.length
-      ? ` This rests on ${sources.length} source${sources.length === 1 ? '' : 's'}, shown under the reply.`
-      : '';
     try {
-      synth.cancel();                       // one voice at a time; tapping again stops the last
-      const u = new SpeechSynthesisUtterance(text + disclosure);
+      synth.cancel();
+      const u = new SpeechSynthesisUtterance(String(text));
       u.rate = 1.0; u.lang = document.documentElement.lang || 'en-GB';
-      // A failure AFTER speaking starts is still a failure, and the browser reports it here.
-      u.onerror = () => say('Reading aloud stopped. The reply is on screen.');
-      u.onend = () => say('');
+      u.onstart = () => { if (this._voiceBtn === btn) this._voiceState(btn, 'speaking'); };
+      u.onerror = () => { if (this._voiceBtn === btn) { this._voiceBtn = null; this._voiceState(btn, 'error'); } };
+      u.onend = () => { if (this._voiceBtn === btn) { this._voiceBtn = null; this._voiceState(btn, 'ended'); } };
+      this._voiceBtn = btn;
+      this._voiceState(btn, 'starting');
       synth.speak(u);
-      say('Reading aloud…');
       return true;
     } catch (_) {
-      say('Reading aloud is not working just now. The reply is on screen.');
+      this._voiceBtn = null;
+      this._voiceState(btn, 'error');
       return false;
     }
   },
@@ -13710,19 +13776,9 @@ const MemberApp = {
     if (btn) { btn.setAttribute('aria-expanded', open ? 'true' : 'false'); btn.textContent = open ? 'Hide' : 'Why I think this'; }
   },
 
-  /* Provenance in one plain sentence rather than four counted fields. "4 things you've told me,
-     from 2 separate occasions" is the same information as evidenceCount/independentOrigins and
-     is the difference between a record and a reason. */
-  _provenanceLine(d) {
-    const n = d.evidenceCount || 0, o = d.independentOrigins || 0, c = d.corrected || 0;
-    if (!n) return 'Nothing recorded under this yet.';
-    const bits = [`${n} thing${n === 1 ? '' : 's'} you've told me`];
-    if (o > 1) bits.push(`from ${o} separate occasions`);
-    else if (o === 1) bits.push('all from one telling');
-    if (c) bits.push(`${c} since corrected`);
-    if (d.contested) bits.push('and accounts disagree');
-    return bits.join(', ') + '.';
-  },
+  /* `_provenanceLine` used to live here. It moved to the server (see server.js) when the opening
+     card gained a spoken channel: the same counts are now both shown and said, and a figure
+     computed in the browser and again on the server is two figures waiting to disagree. */
 
   /* Open the assistant ALREADY POINTED AT this object, through the existing `about` binding —
      no new route, no floating chatbot with no context. */
@@ -14076,7 +14132,7 @@ const MemberApp = {
       thread.innerHTML = (j.messages || []).map(m => m.role === 'user'
         ? `<div class="iq-msg iq-msg-user">${esc(m.text)}</div>`
         : `<div class="iq-msg iq-msg-iq">${esc(m.text)}${this._sourcesHTML(m.sources)}${
-            this._msgActions(m.text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources, conversationId: j.conversation.id })}</div>`).join('');
+            this._msgActions(m.text, { messageId: m.id, at: m.at, rating: m.rating, sources: m.sources, speech: m.speech, conversationId: j.conversation.id })}</div>`).join('');
       thread.scrollTop = thread.scrollHeight;
     } catch (e) { thread.innerHTML = `<div class="iq-msg iq-msg-iq">Couldn't open that conversation.</div>`; }
   },
@@ -14248,7 +14304,7 @@ const MemberApp = {
       <p class="iq-response-text">${esc(r.responseText)}</p>
       ${iqDegradedNote(r.composer)}
       ${this._sourcesHTML(srcs)}
-      ${this._msgActions(r.responseText, { messageId: j.messageId || null, at: j.at || null, sources: srcs, conversationId: j.conversationId || this._chatConvId || null })}
+      ${this._msgActions(r.responseText, { messageId: j.messageId || null, at: j.at || null, sources: srcs, speech: r.speech, conversationId: j.conversationId || this._chatConvId || null })}
       ${(() => {
         // The deterministic path pushes groundedClaims[0].text into the reply itself, so this
         // block was repeating the sentence directly underneath it with a GROUNDED tag on it —
