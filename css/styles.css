@@ -3517,3 +3517,10 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
    whole picture reads as a chart that failed to render rather than as a record that is young. */
 .iqt-dot-state{r:5}
 .iqt-chart-axis-state{justify-content:flex-start;gap:.6rem}
+
+/* External reading, and how it stands to what it sits under. Set apart from the answer itself so
+   the boundary between "what the outside world says" and "what IntelliQ holds" is visible rather
+   than merely stated. */
+.iqt-reading-rel{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.5;
+  margin:.35rem 0 .5rem;padding-left:.6rem;border-left:2px solid var(--border)}
+.iqt-reading-none{font-size:var(--fs-sm);color:var(--text-muted);line-height:1.5;padding:.5rem 0}

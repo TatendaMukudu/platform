@@ -12065,7 +12065,17 @@ const MemberApp = {
      Returning to a thread you have already spoken in does NOT replay the opening. You pick the
      conversation back up, with one quiet link if you want to re-read what it thinks. Being told
      the same paragraph every time is how a product teaches you to scroll past it. */
-  async openObjectThread(kind, objectId) {
+  /* THE SCOPE TRAVELS WITH THE OBJECT. A group's High, Low, Inquiry or Focus lives in the
+     `group:<nodeId>` bucket, not in `self` -- so opening one with the hard-coded `scope=self` this
+     used to send was a 404 for everybody including its own leader, and the group screen therefore
+     had nothing to open into. Every surface the thread fills (material, chart, reading,
+     connections) resolves its object through the same bucket, so the scope has to reach all of
+     them or the thread opens and its contents quietly do not.
+
+     It is NOT an access claim. `_objectBucket` decides what is in a scope, and a person asking for
+     a group they are not in gets an empty bucket and a 404 -- the same answer a stranger gets, so
+     asking reveals nothing. */
+  async openObjectThread(kind, objectId, scope = 'self') {
     // The thread renders into the bucket page's container, which does not exist on Home — so
     // tapping the card on Home silently did nothing. Navigate there first, then render.
     let box = document.getElementById('iq-inquiries-page');
@@ -12086,7 +12096,7 @@ const MemberApp = {
          only answer was "This could not be opened right now." — no retry, no way back, and no
          difference between an ended session, a refusal, a server error and a bug in the render
          below. The founder hit that wall on Highs, on Lows and on Inquiries. */
-      const r = await this._read(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/thread?scope=self`);
+      const r = await this._read(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/thread?scope=${encodeURIComponent(scope)}`);
       if (!this._stillCurrent('bucket', ticket)) return;
       if (!r.ok || !r.data.ok) {
         box.innerHTML = this._readFailedHTML(r.ok ? { message: 'IntelliQ could not open this.' } : r,
@@ -12223,7 +12233,7 @@ const MemberApp = {
       this._renderCallRow(objectId);
       this._renderChart(kind, objectId);
       this._renderMaterial(kind, objectId);
-      this._renderReading(kind, objectId);
+      this._renderReading(kind, objectId, scope);
       this._renderRelated(kind, objectId);
     } catch (e) {
       /* A THROW HERE IS A BUG IN THE RENDER, not a failure to read — the read above has already
@@ -12669,15 +12679,27 @@ const MemberApp = {
      screen and the object thread cannot drift into two readings of one word. */
   _OUTCOME_WORDS: { helped: 'It helped', no_change: 'Nothing changed', unclear: 'Too tangled to tell' },
 
-  async _renderReading(kind, objectId) {
+  async _renderReading(kind, objectId, scope = 'self') {
     const box = document.getElementById('iqt-reading');
     if (!box) return;
-    let j = null;
-    try {
-      j = await fetch(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/reading?scope=self`,
-        { headers: this._authHeaders() }).then(r => r.json());
-    } catch (_) { return; }
-    if (!j || !j.ok) { box.innerHTML = ''; return; }
+    /* THROUGH THE ONE BOUNDED READER, and carrying the scope of the object being read. A group
+       object is not in the `self` bucket, so the hard-coded scope this used to send meant reading
+       was unreachable for anything at group grain -- the route was correct and nothing could ask
+       it the right question. */
+    const r = await this._read(`/api/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/reading?scope=${encodeURIComponent(scope)}`);
+    const j = r.ok ? r.data : null;
+    /* A REFUSAL IS NOT A FAILURE, and is not shown as one. `ok:false` here means the server
+       declined to show uncited text, or there is nothing searchable, or this deployment sends
+       nothing outside -- all correct outcomes, and none of them worth a red banner. The reason
+       is rendered quietly instead, because "no outside reading, and here is why" is a fact and an
+       empty space is a bug. */
+    if (!j) { box.innerHTML = ''; return; }
+    if (!j.ok) {
+      box.innerHTML = j.reason
+        ? `<div class="iqt-reading-none">No outside reading here — ${this._escape(String(j.reason))}.</div>`
+        : '';
+      return;
+    }
     const esc = s => this._escape(String(s == null ? '' : s));
     box.innerHTML = `
       <div class="iqt-reading-head">Worth reading</div>
@@ -12690,6 +12712,11 @@ const MemberApp = {
             ${c.at ? `<span class="iqt-reading-at">${esc(c.at)}</span>` : ''}
           </a>`).join('')}
       </div>
+      ${/* HOW IT STANDS TO WHAT THEY ARE READING, in the server's words. A paragraph sitting
+             under a belief is assumed to be about that belief unless something says otherwise,
+             and "about the topic in general, and it changes nothing here" is the sentence that
+             stops external reading being read as corroboration from the outside world. */''}
+      ${j.relation && j.relation.line ? `<div class="iqt-reading-rel">${esc(j.relation.line)}</div>` : ''}
       <div class="iqt-reading-note">${esc(j.note)}</div>
       <div class="iqt-reading-q">Searched for "${esc(j.query)}" — ${esc(j.queryNote || 'built from the topic, not from anything you wrote.')}</div>`;
   },

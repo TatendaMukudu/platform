@@ -15918,10 +15918,20 @@ function _objectBucket(code, userId, scope = 'self') {
        BOTH are added. A closed focus with its outcome recorded is exactly what somebody wants to
        open and talk about — "we tried that, here is what happened" — and dropping it the moment
        it stops being current would lose the half of the loop that has anything to say. */
-    if (state.focus) add('focus', state.focus);
-    for (const past of state.history || []) {
-      if (past && past.focusId !== (state.focus && state.focus.focusId)) add('focus', past);
-    }
+    /* EVERY FOCUS THIS GROUP HAS, from the canonical list rather than from the projection's slots.
+
+       `state.focuses` never existed — buildTeamState returns the ACTIVE focus and the closed
+       `history`, so `state.focuses || []` iterated nothing on every call and a group Focus was
+       never in the object bucket at all: no thread, no material, no chart, no forum, no A -> B
+       loop, because every one of those surfaces resolves its object through here.
+
+       Reading `state.focus` and `state.history` instead fixed the common case and left a subtler
+       hole, found by reading-scope-smoke: `history` is `status !== 'active' || outcome`, so a
+       SECOND active focus with no outcome yet is in neither slot and stays unreachable. The
+       projection's slots answer "what is the group working on" — one thing, deliberately — and
+       that is a different question from "what objects does this group have". Asking the canonical
+       list removes the dependence on which slot a projection happened to put something in. */
+    for (const f of _teamFocuses(code, nodeId) || []) add('focus', f);
   } else return null;
 
   return out.sort((a, b) => (a.parked - b.parked) || (b.score - a.score) || a.id.localeCompare(b.id));
@@ -16171,7 +16181,36 @@ app.get('/api/objects/:kind/:id/reading', requireAuth, async (req, res) => {
     .find(x => x && x.kind === kind && String(x.id) === String(req.params.id));
   if (!object) return res.status(404).json({ error: 'not found' });
 
-  const topic = (object.raw && object.raw.topic) || {};
+  /* WHAT THIS IS ABOUT, IN VOCABULARY THE SYSTEM OWNS.
+
+     An Inquiry, a High and a Low carry a canonical concept. A FOCUS does not: ai/team-state.js
+     normalizeFocus keeps its text, its status and its origin, and deliberately drops any topic —
+     so a focus reaching here has nothing searchable except the sentence a person typed, and that
+     sentence must never become a query (L-WS1). The honest answer for a focus somebody simply had
+     an idea for is therefore "there is nothing here to search on that is not something you wrote",
+     and that is what the refusal below says.
+
+     BUT A FOCUS STARTED OUT OF AN INQUIRY HAS ONE, and it is the inquiry's. `origin.inquiryId` is
+     a field the record already carries, survives normalisation, and is verified against this
+     group's own inquiries when the focus is created — so borrowing that inquiry's CONCEPT is
+     reading owned vocabulary off a link that already exists, not manufacturing a topic. The
+     person's words are still nowhere near the query.
+
+     RESOLVED WITHIN THE READER'S OWN SCOPE. The lookup is against the same subject the object
+     belongs to, so it cannot reach an inquiry from another group or another tenant even if an id
+     collided — which is exactly the shape group-loop-smoke's same-id fixture exists to catch. */
+  let topic = (object.raw && object.raw.topic) || {};
+  if (!topic.canonicalConcept) {
+    const originId = String(((object.raw || {}).origin || {}).inquiryId || '');
+    if (originId) {
+      const nodeId = String(req.query.scope || '').startsWith('group:')
+        ? String(req.query.scope).slice(6) : ((object.raw || {}).nodeId || null);
+      const subjectRef = nodeId ? `group:${nodeId}` : `member:${userId}`;
+      const bySubject = (inquiryStates[code] || {})[subjectRef] || {};
+      const origin = Object.values(bySubject).find(i => i && i.inquiryId === originId);
+      if (origin && origin.topic && origin.topic.canonicalConcept) topic = origin.topic;
+    }
+  }
   const built = websearch.deriveQuery({
     canonicalConcept: topic.canonicalConcept || '',
     domain: topic.domain || (orgMeta[code] || {}).orgMode || '',
@@ -16204,8 +16243,30 @@ app.get('/api/objects/:kind/:id/reading', requireAuth, async (req, res) => {
     const answer = websearch.answerFrom(content);
     if (!answer.ok) return res.json({ ok: false, available: true, query: built.query, reason: answer.reason });
     _audit(code, { actor: userId, action: 'web_reading', subjectIds: [userId], basis: built.query });
+    /* HOW THIS STANDS TO THE THING THEY ARE LOOKING AT, said by the server rather than left to a
+       reader to assume. Three clauses, and each is there because the assumption it blocks is the
+       natural one to make about a paragraph sitting under a belief:
+
+         WHAT IT IS ABOUT   the TOPIC, in the reader's own words -- not the claim, not the person.
+                            Somebody who does not know what was searched cannot judge whether the
+                            answer is relevant, and will assume it was searched about them.
+         WHAT IT IS NOT     it is about the subject in general, not about this record, not about
+                            anybody here. Nothing outside IntelliQ has seen this record.
+         WHAT IT DOES NOT DO  it changes no confidence and counts as no account. External reading
+                            arriving next to a band that then moved would read as corroboration
+                            from the outside world, which is the one thing it can never be.
+
+       No causal language, and none possible: this is composed from the topic label and fixed
+       clauses, so there is no path by which a model's phrasing becomes a claim about cause. */
+    const _topicLabel = present.humanTopic(topic) || 'this topic';
     return res.json({ ok: true, available: true, query: built.query, queryNote: built.note,
-      text: answer.text, citations: answer.citations, kind: 'advice', note: answer.note });
+      text: answer.text, citations: answer.citations, kind: 'advice', note: answer.note,
+      relation: {
+        about: _topicLabel,
+        line: `General reading about ${_topicLabel}. Nothing about this record, or about anybody here, `
+          + `was sent outside IntelliQ, and nothing that came back counts as an account or changes `
+          + `how sure IntelliQ is about anything.`,
+      } });
   } catch (e) {
     return res.json({ ok: false, available: true, query: built.query,
       reason: 'the search did not come back just now' });
