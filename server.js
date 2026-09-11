@@ -64,6 +64,7 @@ const material          = require('./ai/material');
 const chart             = require('./ai/chart');
 const shelf             = require('./ai/shelf');
 const crossEvidence     = require('./ai/cross-evidence');
+const manifest          = require('./ai/manifest');       // D: one record of what may be said, five channels that say it
 const websearch         = require('./ai/websearch');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
@@ -10726,6 +10727,14 @@ function _forumContext(code, userId, about) {
   } catch (_) { return null; }
 }
 
+/* EVERY FIGURE A PIECE OF APPROVED TEXT ACTUALLY CONTAINS, so a claim may restate its own
+   numbers. A belief that says "two independent origins" must be allowed to be repeated; what the
+   manifest refuses is a figure that appears in NO approved claim. Digits only here, because this
+   reads material the kernel wrote rather than prose a model wrote. */
+function _figuresIn(text) {
+  return [...new Set((String(text || '').match(/\b\d{1,4}\b/g) || []).map(Number))];
+}
+
 async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null, conversation = null } = {}) {
   // Every stage below used to fail silently into the deterministic path. The symptom of a
   // composer that never runs is not an error — it is a reply that reads like a template,
@@ -10881,6 +10890,59 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
 
     // VERIFY — the cage. An invented organisational specific fails the turn.
     const roster = Object.values(orgUsers[code] || {}).filter(p => p && p.status !== 'removed' && p.name).map(p => p.name);
+
+    /* ── THE OUTPUT MANIFEST (L-MF1) ────────────────────────────────────────────────────────
+       ONE RECORD OF WHAT MAY BE SAID, built from the SAME authorised material the model was
+       handed, and checked by every channel that says it.
+
+       The cage below (`verifyGrounding`) stays, and stays first: it is the older, looser check
+       against the context blob, and it catches things a manifest cannot — a quoted title, a name
+       that appears nowhere in the bundle. What it could NOT do is the founder's requirement, that
+       the verifier "reject unsupported organisation-specific numbers, dates, names, results and
+       claims" without relying only on keyword checks. Asking "is this number anywhere in four
+       thousand words of context" is a keyword check, and almost every small number is somewhere
+       in a bundle that contains timestamps and ids.
+
+       So the manifest lists the particulars each claim is ALLOWED to state, which is a far smaller
+       and far more exact set. Both run. Two gates with different failure modes catch more than
+       either, and neither is load-bearing alone. */
+    const _mf = manifest.manifest({
+      subject: `member:${userId}`,
+      at: now,
+      privacyScope: 'you alone unless you share it',
+      claims: [
+        // What the kernel already believes, with the counts it is entitled to state.
+        ...beliefs.slice(0, 8).map((b, i) => manifest.claim({
+          id: `belief_${i}`, text: String(b.text || ''), stance: 'inferred',
+          basis: [b.ref].filter(Boolean),
+          numbers: _figuresIn(String(b.text || '')),
+        })),
+        // What the person actually told us. Recorded, and the strongest stance there is.
+        ...evidence.slice(0, 12).map((e, i) => manifest.claim({
+          id: `record_${i}`, text: String(e.text || ''), stance: 'recorded',
+          basis: [e.ref].filter(Boolean),
+          numbers: _figuresIn(String(e.text || '')),
+          names: [String(e.source || '')].filter(Boolean),
+        })),
+        ...assignedWork.slice(0, 8).map((w, i) => manifest.claim({
+          id: `work_${i}`, text: String(w.title || ''), stance: 'recorded',
+          numbers: _figuresIn(String(w.title || '')),
+        })),
+        /* THE READER THEMSELVES, and the count of what this rests on. Without these two the
+           manifest would refuse an honest reply that says the person's own name or states how
+           many records it read — both of which are true, approved, and the point. */
+        manifest.claim({ id: 'reader', text: String(u.name || ''), stance: 'recorded',
+          names: [String(u.name || '')].filter(Boolean),
+          numbers: [beliefs.length, evidence.length, assignedWork.length].filter(n => n > 0) }),
+      ],
+    });
+    const mfCheck = manifest.verify('prose', written, _mf, { roster });
+    if (!mfCheck.ok) {
+      console.log(`[composer] manifest refused — ${mfCheck.violations.map(v => `${v.kind}:${v.value ?? ''}`).join('; ')}`);
+      _metric(code, 'composer_refused');
+      return _degraded('unverified');
+    }
+
     const check = composer.verifyGrounding(written, { contextText, roster, readerName: u.name || '' });
     if (!check.ok) {
       // The violations are the interesting part: they say WHAT the model invented, which is the
