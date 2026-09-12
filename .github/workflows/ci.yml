@@ -72,3 +72,24 @@ jobs:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/intelliq
           PG_SSL_DISABLE: '1'
         run: node scripts/durable-restart-check.js
+
+
+  settings-browser:
+    name: Settings roles in Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NODE_ENV: test
+      DB_OPTIONAL: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Install Chromium for the browser gate
+        run: node node_modules/playwright-core/cli.js install --with-deps chromium
+      - name: Exercise Settings permissions in a real browser
+        run: node scripts/settings-tiers-browser-check.js
