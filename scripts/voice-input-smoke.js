@@ -299,7 +299,14 @@ console.log('\n  READING ALOUD SPEAKS WHAT IT WAS APPROVED TO SPEAK, OR SAYS WHY
       started === true && synth.last && synth.last.text === APPROVED);
     ok('V25b …and the control says it has started, in the live region beside it',
       b1.said.textContent === V._VOICE_WORDS.starting && b1.getAttribute('data-voice-state') === 'starting');
-    synth.last.onstart();
+    /* THE HANDLERS ARE ASSERTED BEFORE THEY ARE CALLED. Calling a missing one throws, and a
+       throw kills the script before any FAIL is printed — PROTOCOL lie #8, and two of my own
+       mutations landed exactly there. A missing handler is a real defect (the browser would have
+       no way to report that state), so it gets a FAIL of its own rather than a stack trace. */
+    ok('V25b2 the browser is given a handler for every state it can report back',
+      typeof synth.last.onstart === 'function' && typeof synth.last.onerror === 'function'
+      && typeof synth.last.onend === 'function');
+    if (typeof synth.last.onstart === 'function') synth.last.onstart();
     ok('V25c …then that it is speaking, which is a different fact from having asked it to',
       b1.said.textContent === V._VOICE_WORDS.speaking && b1.getAttribute('aria-label') === 'Stop reading aloud');
 
@@ -319,7 +326,7 @@ console.log('\n  READING ALOUD SPEAKS WHAT IT WAS APPROVED TO SPEAK, OR SAYS WHY
       b1.said.textContent === V._VOICE_WORDS.interrupted);
 
     // A FAILURE AFTER SPEAKING HAS STARTED IS STILL A FAILURE.
-    synth.last.onerror();
+    if (typeof synth.last.onerror === 'function') synth.last.onerror();
     ok('V28 a failure after speaking started is announced, with a retry the person can act on',
       b2.said.textContent === V._VOICE_WORDS.error && /retry/i.test(V._VOICE_WORDS.error));
 
@@ -398,6 +405,22 @@ console.log('\n  A CANCELLED RECOGNISER MAY NEVER WRITE AGAIN');
   inst2.onresult({ resultIndex: 0, results: [[{ transcript: 'the live one' }]] });
   ok('V31e …while the live session still works normally', ta.value.includes('the live one'));
   V.cancel('box');
+
+  /* AND THE OTHER WAY A SESSION ENDS. `cancel` is the person tapping stop; `cancelAll` is the
+     app deciding for them — sign-out and every navigation call it. The founder's defect was on
+     THAT path (tap the microphone, change your mind, tap Home), so testing only the deliberate
+     stop tests the case that was already working. */
+  const ta2 = area(env, 'box2', 'draft before leaving');
+  V.start('box2', { onState });
+  const inst3 = env._instances[env._instances.length - 1];
+  inst3.onresult({ resultIndex: 0, results: [[{ transcript: 'mid sentence' }]] });
+  ok('V31f a live session writes while it is live', ta2.value.includes('mid sentence'));
+  V.cancelAll();
+  ok('V31g …and cancelAll — what sign-out and every navigation call — restores the draft',
+    ta2.value === 'draft before leaving');
+  inst3.onresult({ resultIndex: 0, results: [[{ transcript: 'delivered after they left' }]] });
+  ok('V31h …and a result delivered AFTER the session ended writes nothing, on a page they are no longer on',
+    ta2.value === 'draft before leaving');
 }
 
 /* ══ A LIVE MICROPHONE DOES NOT SURVIVE LEAVING THE PAGE ════════════════════════════════════
