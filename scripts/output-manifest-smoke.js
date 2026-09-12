@@ -349,6 +349,73 @@ try {
     M.approve(M.manifest({ claims: [] }), { prose: { value: 'anything' } }).ok === false
     && M.approve(MF, {}).ok === false);
 
+  /* ── J — L-MF2b · A FIGURE BELONGS TO THE CLAIM IT IS ABOUT ────────────────────────────────
+     An independent gate found this and it is the most interesting failure this file has held: an
+     answer in which every word is approved, every figure is approved, and the sentence is false.
+     Two claims, two figures, and the model swaps them. A membership test — "is 3 anywhere in this
+     manifest" — cannot see a swap, because both halves are genuinely there. It is the same class
+     as OM-I7a: nothing is invented, and the relation between true things is wrong.
+
+     The four negatives below are the whole reason this is a comparison rather than a threshold.
+     A rephrasing loses context coverage against every claim at once and must therefore accuse
+     nobody; a figure with no context at all — a source count — has nothing to be about; and one
+     sentence carrying both figures honestly must survive, because that sentence is the ordinary
+     case this law would otherwise make unwritable. */
+  console.log('\n  J — A FIGURE IS BOUND TO ITS OWN CLAIM, NOT TO THE MANIFEST AS A BAG OF NUMBERS');
+  {
+    const CROSS = M.manifest({
+      subject: 'member:ash',
+      claims: [
+        M.claim({ id: 'c_rec', text: 'Two separate accounts concern recovery between fixtures', stance: 'recorded', numbers: [2], basis: ['s1', 's2'] }),
+        M.claim({ id: 'c_att', text: 'Three separate accounts concern attendance at training', stance: 'recorded', numbers: [3], basis: ['s3', 's4', 's5'] }),
+      ],
+    });
+    const v = (t) => M.verify('prose', t, CROSS);
+    ok('OM-J1 THE GATE\'S OWN COUNTEREXAMPLE: "Three separate accounts concern recovery" is refused, though 3 and recovery are each approved',
+      () => { const r = v('Three separate accounts concern recovery.');
+        return r.ok === false && r.violations.some(x => x.kind === 'number_crossed_claims' && x.value === 3); });
+    ok('OM-J1b …and it names both ends of the crossing, so a log line says which claim the figure was stated about and which one it belongs to',
+      () => { const x = v('Three separate accounts concern recovery.').violations[0];
+        return x.statedAbout === 'c_rec' && x.approvedFor === 'c_att'; });
+    ok('OM-J1c …and it is refused in the other direction too, so this is a rule rather than one hard-coded sentence',
+      () => { const r = v('Two separate accounts concern attendance.');
+        return r.ok === false && r.violations.some(x => x.kind === 'number_crossed_claims' && x.value === 2); });
+    ok('OM-J2 the honest sentence about recovery passes',        v('Two separate accounts concern recovery.').ok === true);
+    ok('OM-J2b the honest sentence about attendance passes',     v('Three separate accounts concern attendance.').ok === true);
+    ok('OM-J2c BOTH figures in ONE sentence, each with its own, passes — the clause is the unit, not the sentence',
+      v('Two separate accounts concern recovery, and three separate accounts concern attendance.').ok === true);
+    ok('OM-J2d a REPHRASED honest figure passes — losing coverage against every claim equally accuses nobody',
+      v('Two separate records mentioning recovery are on file.').ok === true);
+    ok('OM-J2e a figure with no context of its own falls back to membership rather than to a guess',
+      v('This rests on 3 sources.').ok === true);
+    /* THE CLAUSE IS THE UNIT, AND THIS IS THE ASSERTION THAT MAKES THAT LOAD-BEARING. The figure
+       here has almost no context of its own — "2 accounts", then the sentence moves on — while
+       the clause AFTER it is long, specific, and about the other topic entirely. Read to the end
+       of the sentence, the rival claim out-covers the holder and an honest sentence is refused.
+       Read to the end of the CLAUSE, which is what a figure is actually about, nothing happens.
+       Without this case a mutation widening the boundary to the whole sentence survives the whole
+       suite, which is how a loosened rule stays green. */
+    ok('OM-J2f a bare figure whose sentence CONTINUES into the other topic is not accused by the words after it',
+      v('There are 2 accounts, and attendance at training concerns three separate accounts.').ok === true);
+    ok('OM-J3 a figure in NO claim is still refused by L-MF2, and reported as absent rather than as crossed',
+      () => { const r = v('Nine separate accounts concern recovery.');
+        return r.ok === false && r.violations.length === 1 && r.violations[0].kind === 'number_not_in_manifest'; });
+    ok('OM-J4 the refusal has its own sentence — "the wrong thing" is a different fact from "not in the record"',
+      M.refusalNote([{ kind: 'number_crossed_claims' }]) !== M.refusalNote([{ kind: 'number_not_in_manifest' }])
+      && /wrong thing/i.test(M.refusalNote([{ kind: 'number_crossed_claims' }])));
+    ok('OM-J5 a single-claim manifest has nothing to cross, and is not made stricter by this law',
+      () => { const one = M.manifest({ claims: [M.claim({ id: 'only', text: 'Two separate accounts concern recovery', numbers: [2] })] });
+        return M.verify('prose', 'Two separate accounts concern recovery.', one).ok === true; });
+    ok('OM-J6 and it applies to every channel that says words, not to prose alone — a spoken crossing is the worse one',
+      () => {
+        const r = M.verify('card', 'Three separate accounts concern recovery.', CROSS);
+        const s = M.verify('voice', 'Three separate accounts concern recovery.', CROSS);
+        return r.ok === false && s.ok === false;
+      });
+    ok('OM-J7 the whole bundle is refused, not the prose alone — a caller handed a partly approved answer ships it',
+      M.approve(CROSS, { prose: { value: 'Three separate accounts concern recovery.' } }).ok === false);
+  }
+
 } catch (e) { fail++; console.error('  FAIL output-manifest suite threw:', e && e.stack); }
 
 console.log(`\noutput-manifest-smoke: ${pass} passed, ${fail} failed\n`);

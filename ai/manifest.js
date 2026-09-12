@@ -226,6 +226,67 @@ function particularsIn(text) {
   return { numbers: [...numbers], dates: [...dates], quotes: [...quotes] };
 }
 
+/* ── L-MF2b — A FIGURE BELONGS TO THE CLAIM IT IS ABOUT ──────────────────────────────────────
+   `particularsIn` answers "which figures does this text state". That is the wrong question on its
+   own, and an independent gate was right to say so: pooling every approved number into one set
+   asks only whether the figure appears SOMEWHERE in the manifest, so an answer holding "two
+   accounts concern recovery" and "three accounts concern attendance" approves
+
+       "Three separate accounts concern recovery."
+
+   — a sentence in which every word is approved, every figure is approved, and the claim it makes
+   is false. Both halves are real; the crossing is the lie, and the pooled set cannot see a
+   crossing because it has thrown away which claim each number came from.
+
+   WHAT DECIDES. A figure carries the words around it — the rest of its clause — and those words
+   say what it is a count OF. The figure is refused when the text's own context points MORE
+   CLEARLY at a claim that did not approve it than at any claim that did. That comparison, rather
+   than a threshold, is what keeps this usable: a rephrasing ("records mentioning recovery" for
+   "accounts concerning recovery") loses coverage against every claim equally and so accuses
+   nobody, while a crossed number loses it against exactly one. A figure with no context at all —
+   "this rests on 3 sources" — has nothing to be about, and falls back to the membership test that
+   was already there rather than to a guess.
+
+   WHY THE CLAUSE AND NOT THE SENTENCE. "Two separate accounts concern recovery, and three concern
+   attendance" is one sentence about two things. Read whole, its context contains both topics and
+   binds neither. The clause is the unit a figure is actually about. */
+const _CLAUSE_END = /[.,;:!?—]|\s+(?:and|but|while|whereas|although|though|which|whose)\s+/i;
+
+function _contextAfter(text, index) {
+  const rest = _s(text, 8000).slice(index);
+  const m = rest.match(_CLAUSE_END);
+  return (m ? rest.slice(0, m.index) : rest).trim().split(/\s+/).slice(0, 8).join(' ');
+}
+
+/* Every place this text states a figure, WITH the words that say what it counts. Deliberately a
+   second function rather than a richer `particularsIn`: that one is the public summary and is
+   asserted against by name elsewhere, and widening a shape callers already read is how a fix
+   becomes a second defect. */
+function _numberSites(text) {
+  const t = _s(text, 4000);
+  const sites = [];
+  for (const re of [_COUNT_CLAIM, _POSSESSIVE_COUNT, _ORDINAL_RESULT]) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(t)) !== null) {
+      const raw = String(m[1] || '').toLowerCase();
+      const n = Object.prototype.hasOwnProperty.call(_WORD_NUMBERS, raw) ? _WORD_NUMBERS[raw] : _num(raw);
+      if (n !== null) sites.push({ value: n, context: _contextAfter(t, m.index + m[0].length) });
+    }
+  }
+  return sites;
+}
+
+/* HOW MUCH OF THIS CONTEXT DOES THAT CLAIM ACCOUNT FOR? Counted in distinctive words, the same
+   currency `_survives` uses, so "is this the same statement" and "is this figure about that
+   statement" are not two different notions of sameness drifting apart. */
+function _covers(claimText, context) {
+  const words = [...new Set(_s(context, 200).toLowerCase().split(/[^a-z0-9']+/).filter(w => w.length > 4))];
+  if (!words.length) return 0;
+  const lower = _s(claimText, 1000).toLowerCase();
+  return words.filter(w => lower.includes(w)).length;
+}
+
 /* DID THE SUBSTANCE SURVIVE? Matched on a statement's distinctive words rather than the whole
    sentence, because a voice channel legitimately rephrases for the ear and demanding a verbatim
    match would either fail every honest rendering or be switched off as unusable. The test is that
@@ -359,6 +420,25 @@ function verify(channel, output, mf, { roster = [] } = {}) {
   for (const n of said.numbers) {
     if (!approvedNumbers.has(n)) violations.push({ kind: 'number_not_in_manifest', channel: ch, value: n });
   }
+  /* L-MF2b — and a figure the manifest DOES hold is still refused if it has been attached to the
+     wrong claim. Only figures that cleared the membership test above reach this, so a reader of a
+     refusal gets one reason rather than two for the same word. */
+  const crossed = new Set();
+  for (const site of _numberSites(text)) {
+    if (!approvedNumbers.has(site.value) || crossed.has(site.value)) continue;
+    let held = -1, heldBy = null, other = -1, otherIs = null;
+    for (const c of mf.claims) {
+      const score = _covers(c.text, site.context);
+      if (c.numbers.includes(site.value)) {
+        if (score > held) { held = score; heldBy = c.id; }
+      } else if (score > other) { other = score; otherIs = c.id; }
+    }
+    if (other > held) {
+      crossed.add(site.value);
+      violations.push({ kind: 'number_crossed_claims', channel: ch, value: site.value,
+        statedAbout: otherIs, approvedFor: heldBy });
+    }
+  }
   for (const d of said.dates) {
     if (!approvedDates.has(d.toLowerCase())) violations.push({ kind: 'date_not_in_manifest', channel: ch, value: d });
   }
@@ -486,6 +566,8 @@ function refusalNote(violations = []) {
   switch (v.kind) {
     case 'number_not_in_manifest':
       return 'Held back — it stated a figure about your records that the record does not support.';
+    case 'number_crossed_claims':
+      return 'Held back — it attached a figure from your records to the wrong thing.';
     case 'date_not_in_manifest':
       return 'Held back — it stated a date that is not in the record it claims to describe.';
     case 'name_not_in_manifest':
