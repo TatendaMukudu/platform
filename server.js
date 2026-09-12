@@ -626,6 +626,8 @@ async function _reconstruct(storeData) {
         _unitRevs.set(key, Number(revisions[key] || 0));
       }
       _persistenceReady = { ready: true, error: null };
+      // The stores ARE loaded on this path — it is the one every real instance takes.
+      _markStoresLoaded();
       console.log(`[db] Split persistence: ${n} durable unit(s) loaded (authoritative)`);
       return { mode: 'split', units: n, authoritative: 'split' };
     }
@@ -23462,8 +23464,22 @@ const LEARNING_CACHE_TTL   = 2 * 60 * 60 * 1000; // 2 hours
    timestamp is the only form of that claim which cannot be true by default. */
 let _storesLoadedAt = null;
 
+/* ONE PLACE THAT SAYS THE STORES ARE LOADED, because there is more than one way to load them and
+   only one of them was saying so.
+
+   FOUND BY RUNNING THE REAL SERVER AGAINST A REAL DATABASE, which no suite in this repository had
+   ever done: every test runs DB_OPTIONAL=1, and the in-memory path goes through _loadAllStores,
+   which set this. The AUTHORITATIVE SPLIT PATH does not — it calls _applyUnits — so on every real
+   deployment that has ever saved once, `readiness.storesLoaded` was false and `readiness.ready`
+   was FALSE FOREVER, on a completely healthy instance serving every request correctly.
+
+   Nothing failed. The product worked and reported itself not ready, which is the readiness level
+   lying in the safe direction — and a readiness probe nobody can believe is a readiness probe
+   nobody reads. */
+function _markStoresLoaded() { _storesLoadedAt = new Date().toISOString(); }
+
 function _loadAllStores(data) {
-  _storesLoadedAt = new Date().toISOString();
+  _markStoresLoaded();
   Object.assign(orgMeta,          data.orgMeta          || {});
   Object.assign(orgUsers,         data.orgUsers         || {});
   Object.assign(inviteTokens,     data.inviteTokens     || {});

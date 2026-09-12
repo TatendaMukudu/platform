@@ -100,6 +100,25 @@ const server = app.listen(0, async () => {
     ok('RL-C5 a save refuses when authoritative persistence has not loaded, rather than writing to memory and reporting success',
       /_persistenceReady\.error \|\| 'durable persistence is not ready'/.test(SRC));
 
+    /* ── RL-C6: THE BUG THIS LEVEL ACTUALLY HAD, AND THE HERMETIC LAYER COULD NOT SEE ────────
+       Every suite in this repository runs DB_OPTIONAL=1, whose load goes through
+       `_loadAllStores` — which set the marker. The AUTHORITATIVE SPLIT PATH, the one every real
+       deployment takes once it has saved anything, calls `_applyUnits` and did not. So a
+       completely healthy instance serving every request correctly reported `storesLoaded: false`
+       and `ready: false` FOREVER. Found by running the real server against a real PostgreSQL
+       (scripts/durable-restart-check.js), which nothing here had ever done.
+
+       These two are structural, and that is stated rather than dressed up: a hermetic suite
+       cannot take the split path. What it CAN do is refuse to let a third load path forget —
+       there is one marker and both loaders call it. */
+    ok('RL-C6 there is ONE function that says the stores are loaded, so a load path cannot have its own opinion',
+      (SRC.match(/function _markStoresLoaded\(\)/g) || []).length === 1
+      && !/_storesLoadedAt = new Date\(\)\.toISOString\(\);[\s\S]{0,40}Object\.assign/.test(SRC.replace(/function _markStoresLoaded\(\) \{[^}]*\}/, '')));
+    ok('RL-C6b …and BOTH load paths call it — the in-memory one and the authoritative split one',
+      (SRC.match(/_markStoresLoaded\(\);/g) || []).length >= 2
+      && /Split persistence: \$\{n\} durable unit\(s\) loaded/.test(SRC)
+      && /_markStoresLoaded\(\);[\s\S]{0,200}Split persistence/.test(SRC));
+
     console.log('\n  D — AND WHAT IS NOT CLAIMED IS NOT CLAIMED');
     ok('RL-D1 the health payload never asserts that anything survived a restart',
       !/survive|restartSafe|restartProven/i.test(JSON.stringify(h.j)));
