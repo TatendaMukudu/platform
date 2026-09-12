@@ -92,9 +92,9 @@ somewhere with poor signal, or turn mobile data off mid-upload.
 
 ## F · Neon persistence and restart — 6 minutes
 
-**Nothing in this repository has tested Neon.** Round 5 ran the real server against a real
-PostgreSQL 16 in a container, which is not the same claim: no network partition, no pooler, no cold
-start, no managed-service failure modes.
+**Nothing in this repository has tested Neon.** GitHub Actions tested the real server and
+acknowledged-write restart against a PostgreSQL 16 service, which is not the same claim: no Neon
+pooler, network partition, cold start or managed-service failure modes were exercised.
 
 | # | Do this | Expect | If not |
 |---|---|---|---|
@@ -103,7 +103,7 @@ start, no managed-service failure modes.
 | F3 | Open the app. Do **not** sign in again if you do not have to. | Your session still works, and everything from F1 is there. | |
 | F4 | Settings → You → the build line. | It reports the stores loaded and ready. | A healthy instance reporting "not ready" was a real defect this engagement found; if it returns, the readiness probe is lying again. |
 | F5 | Record a focus outcome. Restart again. Check it survived. | | |
-| F6 | **If you can**, have two people write at the same moment — both creating an account, or both closing a focus — then restart and check both survived. | Both there. | Round 5 observed **one of two concurrent writes surviving** against a local PostgreSQL: a lost update. If you see it here, run one instance for the pilot. This is the open operations question. |
+| F6 | **If you can**, create accounts concurrently with two people, then restart and check both. | Each HTTP-successful account and its email sign-in survives. A conflict response must be explicit and the refused person can retry successfully. | A successful creation disappearing is a pilot code blocker, not a reason to quietly operate with fewer instances. Record the responses and do not sign off. GitHub Actions PostgreSQL passed the corrected case; Neon has not. |
 
 ---
 
@@ -123,6 +123,5 @@ For each step that does **not** behave as described: the step number, what you s
 build line from Settings → You, and the time. That is enough to reproduce it. A screenshot of the
 build line with the failure on screen is worth more than a description of either.
 
-**And the steps that pass matter too.** B1 through B7 have never been observed by anybody. When you
-have done them, reading aloud stops being PARTIAL — and that is one of the two conditions still
-holding this pull request at SAFE TO MERGE: NO.
+**And the steps that pass matter too.** B1 through B7 have never been observed by anybody. After you have done them on the deployed tested build, reading aloud can stop being PARTIAL.
+Real provider behavior and Render/Neon durability still require their own evidence before sign-off.
