@@ -6569,7 +6569,7 @@ function todayRenderProposals(j) {
     return `<div id="today-prop-${esc(p.id)}" class="tdy-prop">
       <div class="tdy-prop-head">${esc(p.label)} <span class="tdy-nbadge">${priv}</span></div>
       ${p.why ? `<div class="tdy-prop-why">${esc(p.why)}</div>` : ''}
-      ${share ? `<div class="tdy-prop-why">Audience: ${esc(audience.name || 'Forum')} (${esc(audience.readable)} current readers). Only these edited words will be shared; the rest of this conversation stays private. A Forum post is speech, not evidence.</div><label>Words to share<textarea class="iq-share-edit" aria-label="Words to share">${esc(effect.text || '')}</textarea></label>` : ''}
+      ${share ? `<div class="tdy-prop-why">Audience: ${esc(audience.name || 'Forum')} (${esc(audience.readable)} current readers). Only these edited words will be shared; the rest of this conversation stays private. A Forum post is speech, not evidence.</div><label class="iq-field">Words to share<textarea class="iq-field-input iq-share-edit" aria-label="Words to share">${esc(effect.text || '')}</textarea></label>` : ''}
       <div class="tdy-actions" style="margin-top:0.5rem">
         <button class="btn btn-accent btn-sm" onclick="todayTurnConfirm('${esc(j.turnId)}','${esc(p.id)}',this)">Confirm</button>
         <button class="btn-ghost btn-sm" onclick="todayTurnDismiss('${esc(p.id)}')">Dismiss</button>
@@ -14321,7 +14321,7 @@ const MemberApp = {
         <div class="iq-proposal-top"><span class="iq-proposal-label">${esc(p.label)}</span> ${priv(p.visibility)} ${state}</div>
         <div class="iq-proposal-why">${esc(p.why)}</div>
         ${exact ? `<div class="iq-submit-effect">${exact}</div>` : ''}
-        ${p.actionType === 'share_to_forum' ? `<label>Words to share<textarea class="iq-share-edit" aria-label="Words to share">${esc(e.text || '')}</textarea></label>` : ''}
+        ${p.actionType === 'share_to_forum' ? `<label class="iq-field">Words to share<textarea class="iq-field-input iq-share-edit" aria-label="Words to share">${esc(e.text || '')}</textarea></label>` : ''}
         <div class="iq-proposal-actions">
           <button class="btn-primary btn-sm" onclick="MemberApp.confirmProposal('${esc(j.turnId)}','${esc(p.id)}')">Confirm</button>
           <button class="btn btn-outline btn-sm" onclick="MemberApp.correctProposal('${esc(j.turnId)}','${esc(p.id)}')">Edit / Correct</button>
