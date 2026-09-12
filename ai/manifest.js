@@ -263,9 +263,18 @@ function _contextAfter(text, index) {
 function _contextBefore(text, index) {
   const prefix = _s(text, 8000).slice(0, index);
   const ends = new RegExp(_CLAUSE_END.source, 'gi');
-  let boundary = 0, m;
-  while ((m = ends.exec(prefix)) !== null) boundary = m.index + m[0].length;
-  return prefix.slice(boundary).trim().split(/\s+/).slice(-8).join(' ');
+  let boundary = 0, previous = 0, separator = '', m;
+  while ((m = ends.exec(prefix)) !== null) {
+    previous = boundary;
+    boundary = m.index + m[0].length;
+    separator = m[0];
+  }
+  const current = prefix.slice(boundary).trim();
+  // A colon or introductory comma can separate a topic from its figure without
+  // starting a new claim: "For recovery, there were three accounts."
+  const intro = /^[,:]$/.test(separator) && current.split(/\s+/).filter(Boolean).length <= 2
+    ? prefix.slice(previous, boundary - separator.length).trim() : '';
+  return [intro, current].filter(Boolean).join(' ').split(/\s+/).slice(-8).join(' ');
 }
 
 /* Every place this text states a figure, WITH the words that say what it counts. Deliberately a
