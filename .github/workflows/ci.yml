@@ -70,4 +70,5 @@ jobs:
       - name: Prove acknowledged accounts survive two-process restart
         env:
           DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/intelliq
+          PG_SSL_DISABLE: '1'
         run: node scripts/durable-restart-check.js
