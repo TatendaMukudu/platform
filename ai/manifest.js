@@ -373,6 +373,14 @@ function verify(channel, output, mf, { roster = [] } = {}) {
             at: _num(p && p.at), value: _num(p && p.value) });
         }
       }
+      /* Each dated picture, not only a trend, must use a moment actually recorded. */
+      if (moments.size) {
+        for (const p of _arr(s && s.points)) {
+          const at = _num(p && p.at);
+          if (at !== null && !moments.has(at))
+            violations.push({ kind: 'graph_time_not_in_record', series: key, at });
+        }
+      }
       /* ── L-MF7 — A LINE IS A CLAIM, AND SOMEBODY HAS TO HAVE MADE IT ──────────────────────
          Drawn as a trend, this series says the thing moved. The values being individually
          approved does not approve that: the same approved points drawn as states say only that
@@ -382,17 +390,6 @@ function verify(channel, output, mf, { roster = [] } = {}) {
       if (_s(s && s.shape, 20) === 'trend') {
         const claimId = _s(approvedSeries.claim, 80);
         const c = claimId ? byId.get(claimId) : null;
-        /* AND EVERY MOMENT IT PLOTS IS A MOMENT THE RECORD HOLDS. Checked against the record's
-           own dated facts rather than against the series that was just drawn, so a builder that
-           invents or shifts a timestamp is caught by something that did not help draw it. */
-        if (moments.size) {
-          for (const p of _arr(s && s.points)) {
-            const at = _num(p && p.at);
-            if (at !== null && !moments.has(at)) {
-              violations.push({ kind: 'graph_time_not_in_record', series: key, at });
-            }
-          }
-        }
         if (!c) {
           violations.push({ kind: 'graph_trend_without_claim', series: key, claim: claimId || null });
         } else if (c.carriesUncertainty && !_arr(output && output.limitations).length) {

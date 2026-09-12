@@ -18098,11 +18098,31 @@ function _firmingChart(inq, { title }) {
     });
   }
   if (!occasions.length) return null;
-  return chart.buildFirming({
+  const spec = chart.buildFirming({
     title: title || 'How this firmed up',
     occasions,
     threshold: teamState.MIN_ORIGINS,
   });
+  // Keep the independent replay beside the built chart until the response boundary. The
+  // builder's own points must never become their own evidence in the manifest.
+  return { spec, recordOccasions: occasions };
+}
+
+function _firmingMatchesRecord(spec, occasions) {
+  if (!spec || spec.kind !== 'firming' || !Array.isArray(spec.series)) return false;
+  if (spec.series.some(s => !s || !['origins', 'band'].includes(s.key))) return false;
+  const origins = spec.series.filter(s => s.key === 'origins');
+  const bands = spec.series.filter(s => s.key === 'band');
+  if (origins.length !== 1 || bands.length > 1) return false;
+  const sameRefs = (a, b) => Array.isArray(a) && a.length === b.length && a.every((ref, i) => ref === b[i]);
+  const samePoints = (actual, expected) => Array.isArray(actual) && actual.length === expected.length
+    && actual.every((p, i) => p && p.at === expected[i].at
+      && p.value === expected[i].value && sameRefs(p.refs, expected[i].refs));
+  const expectedOrigins = occasions.map(o => ({ at: o.at, value: o.refs.length, refs: o.refs }));
+  const expectedBands = occasions.map(o => ({ at: o.at, value: chart.BAND_STEPS.indexOf(o.band), refs: o.refs }))
+    .filter(o => o.value >= 0);
+  return samePoints(origins[0].points, expectedOrigins)
+    && (expectedBands.length ? bands.length === 1 && samePoints(bands[0].points, expectedBands) : bands.length === 0);
 }
 
 /* WHAT HAPPENED, IN ORDER. For a focus: set, material attached, reviewed, closed. Dates only. */
@@ -18469,6 +18489,11 @@ app.get('/api/objects/:kind/:id/chart', requireAuth, (req, res) => {
     return res.json({ ok: true, chart: null, note: _ok.note,
       violations: _ok.violations.map(v => v.kind) });
   }
+  if (built.recordOccasions && !_firmingMatchesRecord(governed.chart, built.recordOccasions)) {
+    return res.json({ ok: true, chart: null,
+      note: chart.refusalNote([{ kind: 'graph_point_not_in_record' }]),
+      violations: ['graph_point_not_in_record'] });
+  }
   res.json({ ok: true, chart: governed.chart });
 });
 
@@ -18488,8 +18513,8 @@ function _chartFor(code, userId, obj, want = '') {
     }
   }
   if ((!want || want === 'firming') && raw.signals) {
-    const spec = _firmingChart(raw, { title: title ? `${title} — how this firmed up` : '' });
-    if (spec) return { spec, basis: (raw.signals || []).filter(s => s && s.kind !== 'interpretation' && !s.dissents).map(s => s.ref).filter(Boolean) };
+    const firming = _firmingChart(raw, { title: title ? `${title} — how this firmed up` : '' });
+    if (firming) return { ...firming, basis: (raw.signals || []).filter(s => s && s.kind !== 'interpretation' && !s.dissents).map(s => s.ref).filter(Boolean) };
   }
   if ((!want || want === 'timeline') && obj.kind === 'focus') {
     const spec = _timelineChart(code, userId, obj);
