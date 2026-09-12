@@ -17453,14 +17453,40 @@ app.post('/api/assistant/attachments', requireAuth, (req, res) => {
   if (!text.trim()) return res.status(400).json({ error: 'attachment text required' });
   if (text.length > material.TEXT_CAP) return res.status(413).json({ error: 'attachment is too large' });
   const key = _wsKey(code, userId);
-  const conv = _resolveConversation(key, b.conversationId, b.title || 'Attached material', Date.now(), b.about || null);
+  const checksum = _materialChecksum(text);
+  /* ── A RETRY AFTER AN ANSWER THAT NEVER ARRIVED ─────────────────────────────────────────────
+     The founder's device class is a phone on a stadium connection, and the failure that matters
+     there is not a refused request — it is one the server ACCEPTED and whose reply never came
+     back. The client's ceiling fires, the person presses Try again, and the second request is
+     byte-identical to the first with no conversationId, because the client never learned one.
+
+     The MATERIAL was already safe: deduplicated below by checksum, owner and private visibility.
+     The CONVERSATION was not. Each attempt with no id made a new thread, so one upload on a bad
+     connection left two or three in somebody's list, each holding the same document, and the
+     person had no way to tell which was the real one.
+
+     RECONCILED FROM STATE THE SERVER ALREADY HOLDS, not from a new key the client would have to
+     mint and remember: the checksum that identifies the document also identifies the thread the
+     earlier attempt created for it. Same bytes, same owner, no conversation named -> the same
+     conversation. It is scoped to this owner's own private copy, exactly as the material
+     deduplication is, so equal bytes belonging to somebody else are not a way into their thread.
+
+     A conversationId the client DOES send always wins: a person attaching a document inside a
+     thread they are already in is not retrying anything. */
+  let _priorConvId = null;
+  if (!b.conversationId) {
+    const prior = Object.values(_materials(code))
+      .find(m => m && m.checksum === checksum && m.byId === userId && m.visibility === 'private');
+    const priorRef = prior && _materialRefs(prior).find(r => r && r.kind === 'conversation');
+    if (priorRef && _assistantConvs(key).some(c => c.id === String(priorRef.id))) _priorConvId = String(priorRef.id);
+  }
+  const conv = _resolveConversation(key, b.conversationId || _priorConvId, b.title || 'Attached material', Date.now(), b.about || null);
   const about = _aboutRef(b.about);
   let ref = { kind: 'conversation', id: conv.id, at: Date.now(), by: userId };
   if (about) {
     const n = about.indexOf(':'), kind = about.slice(0, n), id = about.slice(n + 1);
     if (_allObjectsFor(code, userId).some(o => o.kind === kind && String(o.id) === id)) ref = { kind, id, at: Date.now(), by: userId };
   }
-  const checksum = _materialChecksum(text);
   // Composer uploads are private external reading. Deduplication may reuse only
   // this owner's private copy; equal bytes owned by somebody else are not access.
   let row = Object.values(_materials(code)).find(m => m && m.checksum === checksum && m.byId === userId && m.visibility === 'private');

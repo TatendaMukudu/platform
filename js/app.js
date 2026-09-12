@@ -14131,8 +14131,18 @@ const MemberApp = {
         });
         raw = await r.text();
       } catch (err) {
+        /* WHAT THIS CARD MAY AND MAY NOT CLAIM. It said "Nothing was saved", and it could not
+           know that: an aborted fetch says nothing whatever about what the server did with the
+           bytes it already had. The material may be committed and the thread may exist; the only
+           thing that certainly failed is the journey home. Telling somebody their work was lost
+           when it was not is worse than telling them nothing, because it is the sentence that
+           makes them do it over.
+
+           So the card says what is true — it could not be confirmed — and then says the thing
+           that makes Try again safe to press, which is now a property of the server rather than a
+           hope: the same document sent twice reconciles to one material and one thread. */
         throw new Error(String(err && err.name) === 'AbortError' || String(err) === 'timeout'
-          ? 'That took too long to send. Nothing was saved.'
+          ? 'That took too long to confirm, so I cannot tell you whether it saved. Try again — the same file will not be added twice.'
           : 'I could not reach IntelliQ to save that.');
       } finally { clearTimeout(timer); }
       let d; try { d = JSON.parse(raw); } catch (_) { d = null; }

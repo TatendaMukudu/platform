@@ -140,8 +140,18 @@ ok('M8 the upload is bounded — a stalled POST cannot leave the card reading fo
   wsAttachFn.length > 400 && /new AbortController\(\)/.test(wsAttachFn) && /signal: ctrl\.signal/.test(wsAttachFn));
 ok('M8b …and the timer is cleared in a `finally`, so it stays live through the body read',
   /finally \{ clearTimeout\(timer\); \}/.test(wsAttachFn));
-ok('M8c …and a timeout says so in words rather than reporting a save that did not happen',
-  /took too long to send\. Nothing was saved/.test(wsAttachFn));
+/* M8c USED TO PIN THE OPPOSITE SENTENCE, and the reason is worth keeping. It asserted the card
+   said "took too long to send. Nothing was saved", under the heading "rather than reporting a
+   save that did not happen" — which is the right instinct aimed at the wrong risk. The risk in
+   the other direction is larger: an aborted fetch says nothing about what the server did with the
+   bytes it already had, so "Nothing was saved" is a claim the client cannot make, and it is the
+   sentence that makes somebody upload the same document again. What the card may say is that it
+   could not CONFIRM. See attachment-retry-http-smoke, which drives the retry that sentence
+   invites and proves the server reconciles it to one material and one thread. */
+ok('M8c …and a timeout says what it KNOWS — that it could not confirm — rather than claiming a loss it cannot see',
+  !/Nothing was saved/.test(wsAttachFn)
+  && /cannot tell you whether it saved/i.test(wsAttachFn)
+  && /will not be added twice/i.test(wsAttachFn));
 ok('M8d a failed upload offers a retry, because the picker has already been cleared',
   /wsAttachRetry/.test(wsAttachFn) && /Try again/.test(wsAttachFn));
 ok('M8e …once, not forever — a control that retries endlessly teaches somebody to keep pressing it',
