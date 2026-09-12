@@ -67,6 +67,7 @@
   /* WHICH BUTTON IS SPEAKING. Module-level on purpose: one utterance at a time is a property of
      the device, not of a row, and tracking it per row is how two readings end up overlapping. */
   var liveBtn = null;
+  var liveUtterance = null;
 
   /* The state goes to three places at once, because they answer three different questions: the
      live region says it to a screen reader, the attribute says it to a test and to CSS, and the
@@ -91,6 +92,7 @@
   function stop(why) {
     var prev = liveBtn;
     liveBtn = null;
+    liveUtterance = null;
     try { if (global.speechSynthesis) global.speechSynthesis.cancel(); } catch (e) {}
     if (prev) setState(prev, why || 'stopped');
   }
@@ -116,15 +118,17 @@
       var u = new global.SpeechSynthesisUtterance(String(text));
       u.rate = 1.0;
       u.lang = (global.document && global.document.documentElement && global.document.documentElement.lang) || 'en-GB';
-      u.onstart = function () { if (liveBtn === btn) setState(btn, 'speaking'); };
-      u.onerror = function () { if (liveBtn === btn) { liveBtn = null; setState(btn, 'error'); } };
-      u.onend   = function () { if (liveBtn === btn) { liveBtn = null; setState(btn, 'ended'); } };
+      u.onstart = function () { if (liveBtn === btn && liveUtterance === u) setState(btn, 'speaking'); };
+      u.onerror = function () { if (liveBtn === btn && liveUtterance === u) { liveBtn = null; liveUtterance = null; setState(btn, 'error'); } };
+      u.onend   = function () { if (liveBtn === btn && liveUtterance === u) { liveBtn = null; liveUtterance = null; setState(btn, 'ended'); } };
       liveBtn = btn;
+      liveUtterance = u;
       setState(btn, 'starting');
       global.speechSynthesis.speak(u);
       return true;
     } catch (e) {
       liveBtn = null;
+      liveUtterance = null;
       setState(btn, 'error');
       return false;
     }
