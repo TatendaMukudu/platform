@@ -34,7 +34,7 @@ process.env.IQ_COMPOSER = '1';
 
 const ai = require('../ai/gateway.js');
 const S  = require('../server.js');
-const { app, _loadAllStores, _rebuildEmailIndex, issueToken, orgNodes } = S;
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken, orgNodes, orgUsers, teamFocuses } = S;
 
 let pass = 0, fail = 0;
 /* A THROW IS A FAILURE, NOT A SILENT EXIT — PROTOCOL lie #8. */
@@ -261,16 +261,80 @@ const server = app.listen(0, async () => {
       ok(`FC-F1 the ${kind.toUpperCase()} card says it has a room, and says the SAME thing its own screen says`,
         !!row && row.forumAvailable === true && row.forumAvailable === th.j.forumAvailable);
     }
-    /* A ONE-PERSON NODE. The node exists, so every rule that asked "is there a node" said yes;
-       the rule that asks "are there two people" says no, and the card must agree. */
-    const solo = await get('/api/objects?kind=focus&scope=group:res', T.out);
-    ok('FC-F2 a SINGLETON node\'s objects are not offered a room on the card either',
-      solo.status === 200 && ((solo.j && solo.j.objects) || []).every(o => o.forumAvailable === false));
-    ok('FC-F2b …and the card and the screen still agree about it, which is the whole reason there is one owner',
-      (() => {
-        const rows = (solo.j && solo.j.objects) || [];
-        return rows.length === 0 || rows.every(o => o.forumAvailable === false);
-      })());
+    /* ── A ONE-PERSON NODE, AND THE CARD HAS TO BE THERE FOR THIS TO MEAN ANYTHING ────────────
+       The node exists, so every rule that asked "is there a node" said yes; the rule that asks
+       "are there two people" says no, and the card must agree.
+
+       THE FIRST VERSION OF THIS WAS VACUOUS AND AN INDEPENDENT GATE CAUGHT IT. The Reserves had
+       no teamFocuses row at all, so the list came back EMPTY — and `[].every(...)` is true, as is
+       `rows.length === 0 ||` anything. Both assertions passed against a screen with nothing on
+       it, which is PROTOCOL lie #5 wearing lie #4's coat: an unrepresentative fixture whose
+       emptiness satisfies every negative claim for free. It is the same hole that let a browser
+       phase go green against an empty row list two rounds ago.
+
+       So the singleton focus is SEEDED, its card is REQUIRED to exist, and only then is its
+       availability asserted. Then a second person joins the Reserves and the icon has to appear —
+       because "never true" and "true only with two" are the same assertion until something makes
+       it true. */
+    teamFocuses[C] = teamFocuses[C] || {};
+    teamFocuses[C].res = [{
+      focusId: 'tf_solo', nodeId: 'res', text: 'One person, one focus, no room',
+      status: 'active', createdAt: NOW - 3 * DAY, by: 'out',
+      origin: { from: 'leader', by: 'out', at: NOW - 3 * DAY, inquiryId: null },
+    }];
+    const rowFor = async (who, id) => {
+      const r = await get(`/api/objects?kind=focus&scope=group:res`, who);
+      return ((r.j && r.j.objects) || []).find(o => o.id === id) || null;
+    };
+    const soloRow = await rowFor(T.out, 'tf_solo');
+    const soloThread = await get('/api/objects/focus/tf_solo/thread?scope=group:res', T.out);
+    const soloRoom = await get('/api/forum/focus/tf_solo', T.out);
+    ok('FC-F2pre the singleton node\'s focus HAS a card — every assertion below is about a card that exists',
+      !!soloRow);
+    ok('FC-F2 …and that card is NOT offered a room, because there is nobody in it but them',
+      !!soloRow && soloRow.forumAvailable === false);
+    ok('FC-F2b …and its own screen says exactly the same, which is the whole reason there is one owner',
+      soloThread.status === 200 && soloThread.j.forumAvailable === false
+      && !!soloRow && soloThread.j.forumAvailable === soloRow.forumAvailable
+      && soloThread.j.forumReadable === 1);
+    ok('FC-F2c …and the room itself refuses to open, rather than opening empty',
+      soloRoom.status >= 400);
+    /* AND IT APPEARS THE MOMENT THERE ARE TWO. Without this the three assertions above are
+       equally satisfied by an indicator hard-coded to false. */
+    orgNodes[C].res.memberIds = ['out', 'p12'];
+    const pairRow = await rowFor(T.out, 'tf_solo');
+    const pairThread = await get('/api/objects/focus/tf_solo/thread?scope=group:res', T.out);
+    ok('FC-F2d a SECOND currently eligible member appears and the same card now offers the room',
+      !!pairRow && pairRow.forumAvailable === true);
+    ok('FC-F2d2 …and its screen agrees, counting two people rather than one',
+      pairThread.status === 200 && pairThread.j.forumAvailable === true
+      && pairThread.j.forumReadable === 2);
+    /* TWO ACCOUNTS ARE NOT TWO PEOPLE YOU CAN TALK TO. `_forumAudience` asked only whether the
+       account OBJECT existed, while eleven other readers in this codebase ask about `status` —
+       so a person the rest of the product treats as gone was still counted, and the room would
+       be one living person and one departed one. That fails OPEN, which AGENTS.md invariant 7
+       forbids. No route in the product currently writes a non-active status onto an account, so
+       this is a rule made consistent rather than a live defect reproduced, and the report says so
+       in exactly those words. */
+    const _wasStatus = orgUsers[C].p12.status;
+    orgUsers[C].p12.status = 'removed';
+    const goneRow = await rowFor(T.out, 'tf_solo');
+    ok('FC-F2e …and an account marked as gone stops counting on the very next read, so a room of one is not offered as a room of two',
+      !!goneRow && goneRow.forumAvailable === false);
+    orgUsers[C].p12.status = _wasStatus;
+    const backRow = await rowFor(T.out, 'tf_solo');
+    ok('FC-F2f …and comes back when they do, because the answer is computed rather than stored',
+      !!backRow && backRow.forumAvailable === true);
+    /* AN ACCOUNT THAT HAS NOT YET CHOSEN A PASSWORD IS STILL SOMEBODY. They are on the roster and
+       their leader can see them there; a room that appeared the moment they set a password would
+       flicker on an event nobody in the room can observe. */
+    const _wasSet = orgUsers[C].p12.passwordSet;
+    orgUsers[C].p12.passwordSet = false;
+    const pendingRow = await rowFor(T.out, 'tf_solo');
+    ok('FC-F2g an invited member who has not activated yet still counts, because they are on the roster and their leader can see them there',
+      !!pendingRow && pendingRow.forumAvailable === true);
+    orgUsers[C].p12.passwordSet = _wasSet;
+    orgNodes[C].res.memberIds = ['out'];
 
     /* REMOVED FROM THE NODE — the card, on the very next read, exactly as the room was. */
     /* A LEADER IS SOMEBODY YOU CAN TALK TO. Shrinking the roster to one MEMBER leaves a room of
@@ -285,12 +349,12 @@ const server = app.listen(0, async () => {
     orgNodes[C].sq.leaderIds = [];
     const shrunk = await get('/api/objects?kind=focus&scope=group:sq', T.p1);
     ok('FC-F3a …and a node that has shrunk to ONE PERSON stops offering the icon on the very next read',
-      ((shrunk.j && shrunk.j.objects) || []).every(o => o.forumAvailable === false));
+      ((shrunk.j && shrunk.j.objects) || []).length > 0 && ((shrunk.j && shrunk.j.objects) || []).every(o => o.forumAvailable === false));
     orgNodes[C].sq.memberIds = [];
     orgNodes[C].sq.leaderIds = keepL;
     const emptied = await get('/api/objects?kind=focus&scope=group:sq', T.coach);
     ok('FC-F3b …and an EMPTY node offers it to nobody, including the leader who can still read it',
-      ((emptied.j && emptied.j.objects) || []).every(o => o.forumAvailable === false));
+      ((emptied.j && emptied.j.objects) || []).length > 0 && ((emptied.j && emptied.j.objects) || []).every(o => o.forumAvailable === false));
     orgNodes[C].sq.memberIds = keep2;
     orgNodes[C].sq.leaderIds = keepL;
     const restored = await get('/api/objects?kind=focus&scope=group:sq', T.p1);

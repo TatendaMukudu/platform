@@ -38,7 +38,7 @@ process.env.IQ_COMPOSER = '1';
 
 const fs = require('fs'), path = require('path');
 const S = require('../server.js');
-const { app, _loadAllStores, _rebuildEmailIndex, issueToken, orgNodes, forumThreads,
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken, orgNodes, orgUsers, forumThreads,
   _forumAudience, _forumContext, groupCandidates, inquiryStates } = S;
 
 let pass = 0, fail = 0;
@@ -297,6 +297,47 @@ const server = app.listen(0, async () => {
       _forumAudience(C, 'p1', { id: 'x', raw: { nodeId: 'crowd' } }).available === false);
     ok('FA-H6 an EMPTY node — one that exists with nobody on it — has no room either',
       _forumAudience(C, 'sib', obj('inquiry', { nodeId: 'sibling' })).available === false);
+    /* ── AN ACCOUNT IS NOT A PERSON YOU CAN TALK TO ────────────────────────────────────────
+       This owner asked only whether the account OBJECT existed, while eleven other readers in
+       the codebase ask about `status`. That fails OPEN: a person the rest of the product treats
+       as gone was still counted toward the two a room needs, so the last two people in a squad
+       could be one living person and one departed one. AGENTS.md invariant 7 forbids exactly
+       that shape.
+
+       CLASSIFIED HONESTLY: no route in the product currently writes a non-active status onto an
+       account — `_removePerson` deletes the record and strips the rosters — so this is a rule
+       made consistent with the other eleven readers, not a live defect reproduced through a
+       product path. The state is reachable through seeded and imported data, which is where the
+       other readers' checks came from in the first place. */
+    {
+      const was = orgUsers[C].p2 && orgUsers[C].p2.status;
+      ok('FA-H7 a three-person node is a room of three while everybody is present',
+        _forumAudience(C, 'p1', obj('inquiry', { nodeId: 'crowd' })).readable === 3);
+      orgUsers[C].p2.status = 'removed';
+      const short = _forumAudience(C, 'p1', obj('inquiry', { nodeId: 'crowd' }));
+      ok('FA-H7b …and an account marked as gone stops counting, on the very next read',
+        short.readable === 2 && short.available === true);
+      /* The three people on this node are two players and the LEADER, so reducing it to one
+         present person means marking the coach gone as well. Asserting against the wrong count
+         here would have reported a product defect that was a fixture mistake — the same trap that
+         caught the "shrink the roster to one member" case, where the coach was still in the room. */
+      const wasCoach = orgUsers[C].coach.status;
+      orgUsers[C].coach.status = 'removed';
+      const pair = _forumAudience(C, 'p1', obj('inquiry', { nodeId: 'crowd' }));
+      ok('FA-H7c …and when that leaves ONE person present, the room closes rather than being offered to nobody',
+        pair.readable === 1 && pair.available === false
+        && /nobody else in this group/i.test(pair.reason || ''));
+      orgUsers[C].p2.status = was; orgUsers[C].coach.status = wasCoach;
+      ok('FA-H7d …and it reopens when they are back, because the answer is computed rather than stored',
+        _forumAudience(C, 'p1', obj('inquiry', { nodeId: 'crowd' })).available === true);
+      /* AN ACCOUNT WITH NO STATUS FIELD AT ALL is present. Refusing those would empty every room
+         in an organisation whose records predate the field, which is a worse failure than the one
+         this rule prevents. */
+      delete orgUsers[C].p2.status;
+      ok('FA-H7e an account written before this field existed still counts, because "not marked otherwise" is the rule and not "marked active"',
+        _forumAudience(C, 'p1', obj('inquiry', { nodeId: 'crowd' })).readable === 3);
+      orgUsers[C].p2.status = was;
+    }
 
     /* ══ I — ONE WAY, ONE OBJECT, AND IT IS BEHAVIOUR RATHER THAN A PROMISE ═══════════════ */
     console.log('\n  I — FORUM INFORMS THIS OBJECT\'S CONVERSATION, AND NO OTHER');

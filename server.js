@@ -16638,6 +16638,25 @@ app.get('/api/objects/:kind/:id/reading', requireAuth, async (req, res) => {
 
    Returns the COUNT as well as the flag, because "fewer than two people" is a fact worth being
    able to say on screen, and a caller that only gets a boolean has to invent a reason. */
+/* IS THIS SOMEBODY YOU COULD ACTUALLY TALK TO? One predicate, because the product already had
+   several: eleven readers ask `status !== 'removed'` or `status === 'active'`, and
+   `_forumAudience` asked only whether the account OBJECT existed. That last one fails OPEN — it
+   counts a person the rest of the product treats as gone, and a Forum offered on a room of one
+   living person and one departed one is exactly the surface AGENTS.md invariant 7 forbids.
+
+   THE RULE IS "NOT MARKED OTHERWISE", not "marked active", and the difference matters on real
+   data: an account written before this field existed carries no `status` at all, and refusing
+   those would empty every room in an older organisation. A status that is present and says
+   anything other than active is taken at its word.
+
+   An account with `passwordSet: false` — somebody invited who has not yet activated — is
+   deliberately COUNTED. They are on the roster, their leader can see them there, and a room that
+   appears the moment they choose a password would make the icon flicker on an event nobody in the
+   room can observe. */
+function _personPresent(u) {
+  return !!u && (u.status == null || u.status === '' || u.status === 'active');
+}
+
 function _forumAudience(code, userId, object) {
   const kind = String((object && object.kind) || '');
   const none = (reason) => ({ available: false, readable: 0, reason, key: null, forumKind: null, members: [] });
@@ -16665,8 +16684,10 @@ function _forumAudience(code, userId, object) {
   if (nodeId && (orgNodes[code] || {})[nodeId]) {
     const people = [...new Set([..._nodeMembers(code, nodeId), ..._nodeLeaders(code, nodeId)])]
       // A person whose account is gone is not somebody you can talk to. Counting them would put
-      // a Forum on an object whose room is one living person and one departed one.
-      .filter(id => !!(orgUsers[code] || {})[id]);
+      // a Forum on an object whose room is one living person and one departed one. This used to
+      // ask only whether the account OBJECT existed, which counted an account the rest of the
+      // product treats as gone — see _personPresent.
+      .filter(id => _personPresent((orgUsers[code] || {})[id]));
     if (people.length < 2) {
       return { available: false, readable: people.length, key: null, forumKind: null, members: people,
         reason: 'there is nobody else in this group yet' };
@@ -16677,7 +16698,7 @@ function _forumAudience(code, userId, object) {
   /* A FOCUS ROOM — the people named on it. Membership is the INVITATION and does not change
      because a roster did, which is why this is a separate branch rather than one clever list. */
   const invited = Array.isArray(raw.participants)
-    ? [...new Set(raw.participants.map(String))].filter(id => !!(orgUsers[code] || {})[id]) : [];
+    ? [...new Set(raw.participants.map(String))].filter(id => _personPresent((orgUsers[code] || {})[id])) : [];
   if (kind === 'focus' && invited.length >= 2) {
     return { available: true, readable: invited.length, key: String(object.id), forumKind: 'focus', members: invited };
   }
@@ -18809,9 +18830,29 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
 
   if (prop.capability === 'composer_action') {
     const p = prop.payload || {};
-    // A proposal id authorises the frozen server-side payload the person saw. The
-    // browser may never turn confirmation into a second, hidden proposal.
-    if (Object.keys(overrides).length) return res.status(409).json({ error: 'proposal_payload_changed', note: 'That change needs a new proposal and confirmation.' });
+    /* A proposal id authorises the frozen server-side payload the person saw. The browser may
+       never turn confirmation into a second, hidden proposal.
+
+       ONE EXCEPTION, AND IT IS NAMED RATHER THAN GENERAL. `share_to_forum` is the action whose
+       payload IS the thing the person is meant to edit: ai/composer-actions.js states it as the
+       contract — "the text is the PERSON'S, carried in `text` and editable on the card, because a
+       share whose wording the person did not see is a share they did not make" — and the handler
+       below reads `overrides.text` and says the same in its own comment.
+
+       BOTH OF THOSE WERE DEAD. This guard rejected every override before either could run, so the
+       card's edit box could not post and confirming an edited share answered
+       `proposal_payload_changed`. A capability described in two comments and exercised by nothing
+       is exactly the class this engagement keeps finding; it was found here by pressing the
+       button rather than by reading the handler, which is the only way it could have been found.
+
+       The exception is one FIELD on one ACTION, allow-listed by name in both directions: any
+       other key, on any action, still refuses. So the narrow thing a person is meant to change is
+       the only thing they can change, and a browser still cannot rewrite the room, the object or
+       the audience. What is posted is speech, by its author, into a room they are already in, and
+       the handler re-checks membership and re-reads the room from the server regardless. */
+    const _editable = prop.actionType === 'share_to_forum' ? ['text'] : [];
+    const _changed = Object.keys(overrides).filter(k => !_editable.includes(k));
+    if (_changed.length) return res.status(409).json({ error: 'proposal_payload_changed', note: 'That change needs a new proposal and confirmation.' });
     const ref = p.context || null;
     const live = ref && (ref.kind === 'conversation'
       ? ((assistantConversations[_wsKey(code, userId)] || []).some(c => c.id === ref.id) ? { kind: 'conversation', id: ref.id, raw: null } : null)
