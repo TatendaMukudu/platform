@@ -97,6 +97,23 @@ ok('PX-A14 …but a stated intention still takes the model\'s title',
 ok('PX-A15 …and a pressed control still does, because the press was the declaration',
   titled(proposeWithModelText('Sharper first touch', 'Sharper first touch', 'inquiry', true))
     === 'Sharper first touch');
+/* Live player regression: the sentence started with hesitation, so the old question guard missed
+   the embedded "can you" and the model/fallback made the whole question a Focus title. Also drive
+   the requested-control transport: tapping Work on this must not license a question as wording. */
+const HESITANT_QUESTIONS = ["I'm not sure can you create the focus",
+  'I’m not sure can you create the focus',
+  'I wonder if you can create a focus',
+  'I am not sure whether to start a focus'];
+ok('PX-A17 a hesitant embedded question cannot become a Focus in fallback or model-title transport',
+  ['inquiry', 'focus', 'high', 'low'].every(k => HESITANT_QUESTIONS.every(q =>
+    titled(propose(q, k)) === null && titled(proposeWithModelText(q, 'late-game concentration and discipline under fatigue', k)) === null)));
+ok('PX-A18 pressing Work on this does not make a question a valid Focus title',
+  HESITANT_QUESTIONS.every(q => titled(propose(q, 'inquiry', true)) === null
+    && titled(proposeWithModelText(q, 'late-game concentration and discipline under fatigue', 'inquiry', true)) === null));
+ok('PX-A19 an explicit instruction after hesitation still offers a Focus',
+  titled(propose("I'm not sure, create a focus for recovery")) === "I'm not sure, create a focus for recovery");
+ok('PX-A20 a hesitant question gives an actionable clarification rather than silently creating',
+  HESITANT_QUESTIONS.every(q => /say what you would want to change/i.test(String(propose(q).needsClarification || ''))));
 /* The gate is for the action that manufactures a commitment. An Inquiry opens a question rather
    than a promise, so it is deliberately not narrowed here — asserted so that narrowing it later
    is a decision somebody makes on purpose. */
