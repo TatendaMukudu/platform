@@ -145,6 +145,20 @@ your change makes one of them false, the change is wrong, not the invariant.
   that way. Setup for the Codex environment is in `docs/CODEX_PUSH_PATH.md`; verify with
   `git push --dry-run origin HEAD:refs/heads/codex/connectivity-check` BEFORE starting, not
   after.
+- **Exception, and it is narrow: work whose deliverable is a REPORT rather than a commit.**
+  A review, an audit, an investigation, a second opinion. Findings do not die with the
+  container — they survive in the transcript. So when the push check fails and the task is
+  one of those, do the work and deliver the report in chat; somebody with write access
+  commits it on your behalf, attributed to you. Say plainly at the top that you could not
+  push and that the report is unverified against CI.
+
+  The rule above exists because three *implementation* tasks were lost, and the thing lost
+  was the code. Applying it to a review loses the review to protect a commit that was never
+  the point. Astra stopped correctly under the old wording and produced nothing, which cost
+  more than the failure the rule guards against.
+
+  This is not permission to implement without pushing. If the task changes code, the old
+  rule stands: stop.
 
 ### Environment / safety
 
