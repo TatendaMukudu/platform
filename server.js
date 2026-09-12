@@ -19100,6 +19100,9 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
        confidence. Making it count is a separate deliberate act by its author through the existing
        contribution boundary, and the reply says so. */
     if (prop.actionType === 'share_to_forum') {
+      if (prop.visibility === 'only_me' || p.visibility === 'only_me') {
+        return res.status(409).json({ error: 'share_withdrawn', note: 'Make a fresh public proposal if you want to share.' });
+      }
       if (!live || live.kind === 'conversation') {
         return res.status(400).json({ error: 'open the thing you want to put to the forum first' });
       }
@@ -19111,7 +19114,8 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
         ? _mayReadGroup(code, aud.key, userId) : aud.members.includes(userId);
       if (!inRoom) return res.status(403).json({ error: 'not part of this' });
 
-      const body = String(overrides.text || p.text || '').trim().slice(0, 4000);
+      const editedText = Object.prototype.hasOwnProperty.call(overrides, 'text') ? overrides.text : p.text;
+      const body = String(editedText == null ? '' : editedText).trim().slice(0, 4000);
       if (!body) return res.status(400).json({ error: 'nothing_to_share' });
 
       const key = aud.forumKind === 'group' ? String(ref.id) : `focus:${ref.id}`;
@@ -19341,7 +19345,14 @@ app.post('/api/assistant/turn/:turnId/correct', requireAuth, (req, res) => {
   const applied = [];
   if (prop) {
     if (/just a note|not a plan/i.test(correction)) { prop.payload.purpose = 'note'; prop.label = 'Keep this — private to you'; applied.push('purpose→note'); }
-    if (/keep (all of )?this private|keep it private|only me|private/i.test(correction)) { prop.payload.visibility = 'only_me'; prop.visibility = 'only_me'; applied.push('visibility→only_me'); }
+    if (/keep (all of )?this private|keep it private|only me|private/i.test(correction)) {
+      if (prop.actionType === 'share_to_forum') {
+        turn._proposals = (turn._proposals || []).filter(p => p.id !== prop.id);
+        applied.push('withdrew public share');
+      } else {
+        prop.payload.visibility = 'only_me'; prop.visibility = 'only_me'; applied.push('visibility→only_me');
+      }
+    }
     if (/belongs to work|this is work/i.test(correction)) { prop.payload.scope = 'personal_shared'; applied.push('scope→work (visibility unchanged — still needs explicit confirm to share)'); }
     if (/do not remind|don'?t remind|no reminder/i.test(correction)) { turn._proposals = (turn._proposals || []).filter(p => p.actionType !== 'checkin_proposal'); applied.push('dropped check-in proposal'); }
     // Correcting a current-state check-in updates the PROPOSED RECORD (never the original message).
