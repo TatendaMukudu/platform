@@ -219,6 +219,7 @@ const SUITES = [
   'css-token-smoke.js', // a colour that falls back is a colour nobody chose: every token used must be defined, and no light-theme hex sits in a fallback
   'asset-version-smoke.js', // shipped code must reach the BROWSER: one cache stamp, and it changes when the assets do
   'present-smoke.js', // the presentation layer: canonical keys never reach a reader, four bands translate one to one, first screen carries one open question
+  'voice-output-identity-smoke.js', // cancelled utterance callbacks never change a restarted reading on the same button
   'voice-input-smoke.js', // voice is an input method: no audio kept, nothing self-starts, every failure leaves typing working
   'relationship-ref-smoke.js', // D-A3: endpoint-bearing relationship subjects - symmetric canonicalisation, declared direction, erasure discovery, fail closed
   'forum-anonymity-smoke.js', // D-A2: anonymous to every human including leaders; the kernel keeps protected authorship so origins, echo, correction and withdrawal still work
