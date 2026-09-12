@@ -359,7 +359,7 @@ function verify(channel, output, mf, { roster = [] } = {}) {
        its own gates (AGENTS.md, epistemic invariant 7). If a caller plots dates it has to say
        which dates the record holds. */
     const moments = new Set(_arr(mf.graph && mf.graph.moments));
-    const anyDated = _arr(output && output.series).some(s => _arr(s && s.points).some(p => _num(p && p.at) !== null));
+    const anyDated = _arr(output && output.series).some(s => _arr(s && s.points).some(p => p && p.at != null && _num(p.at) !== null));
     if (anyDated && !moments.size) violations.push({ kind: 'graph_moments_unknown' });
     for (const s of _arr(output && output.series)) {
       const key = _s(s && s.key, 80);
@@ -376,7 +376,7 @@ function verify(channel, output, mf, { roster = [] } = {}) {
       /* Each dated picture, not only a trend, must use a moment actually recorded. */
       if (moments.size) {
         for (const p of _arr(s && s.points)) {
-          const at = _num(p && p.at);
+          const at = p && p.at != null ? _num(p.at) : null;
           if (at !== null && !moments.has(at))
             violations.push({ kind: 'graph_time_not_in_record', series: key, at });
         }
