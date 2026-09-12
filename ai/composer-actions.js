@@ -38,6 +38,29 @@ const ACTIONS = Object.freeze({
     description: 'Create a personal Library folder.' },
   discuss_with_group: { contexts: [null, 'conversation', 'inquiry', 'high', 'low', 'focus'], confirmation: true,
     description: 'Open the governed Forum room; a private noticing is first promoted to a Focus with an explicit group.' },
+  /* PRIVATE -> FORUM IS A DISCLOSURE, AND DISCLOSURE IS NEVER A SIDE EFFECT.
+
+     FOUNDER DECISION, September 2026: Forum content may inform private conversation for that same
+     object; private conversation NEVER enters a Forum without a separate explicit Share to Forum
+     action, an audience preview, and a confirmation.
+
+     The direction is the whole design. Forum -> private is a READ of a room the person can already
+     open from the same screen, so it shows them nothing new. This is the other way, and every
+     property below exists because of that asymmetry:
+
+       it is its own action, not an argument on another one, so it can never be reached as a
+       variation of something the person meant to do;
+       `confirmation: true`, so nothing is written until a human presses confirm;
+       the text is the PERSON'S, carried in `text` and editable on the card, because a share whose
+       wording the person did not see is a share they did not make;
+       the audience is resolved and PREVIEWED by the server from the object's current readable
+       room, so the card names who will see it rather than describing them.
+
+     The model may OFFER it -- "do you want to put that to the group?" -- and that is the whole of
+     its authority. It never chooses the room (that is the object's), never chooses the words
+     (those are the person's), and cannot make the share happen. */
+  share_to_forum: { contexts: ['inquiry', 'high', 'low', 'focus'], confirmation: true,
+    description: 'OFFER to put something the person has said into the Forum for the object they are looking at. Propose ONLY the wording, taken from what they actually said. You do not choose the room -- it is the room of the object in view -- and nothing is shared until they read the audience and confirm. Never offer this for anything they have not themselves just said in this conversation.' },
   /* DECLARED, NEVER INFERRED (founder law, September 2026). The model may notice that a piece of
      evidence looks like it bears on what somebody is working on and OFFER to mark it -- "this may
      support what you're working on, mark it that way?" -- and that is the whole of its authority
@@ -190,7 +213,11 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
        model-proposed path has to find intent in the words, because only there is intent in
        doubt. */
     const _isQuestion = t => /\?\s*$/.test(String(t).trim())
-      || /^\s*(why|what|who|whom|whose|when|where|which|how|should|shall|could|can|would|will|do|does|did|is|are|was|were|am|tell me|explain|show me)\b/i.test(t);
+      || /^\s*(why|what|who|whom|whose|when|where|which|how|should|shall|could|can|would|will|do|does|did|is|are|was|were|am|tell me|explain|show me)\b/i.test(t)
+      // A question can begin with hesitation, not a question word: "I'm not sure can you
+      // create the focus" was saved verbatim as a Focus on a phone. A pressed control is
+      // intent to work, not permission to use a question as the commitment's wording.
+      || /\b(?:can|could|would|will|should)\s+you\b|\b(?:i(?:'|’)?m|i am)\s+not\s+sure\s+(?:if|whether)\b|\bi\s+wonder\s+(?:if|whether)\b/i.test(t);
     /* ASKING FOR A FOCUS IN SO MANY WORDS IS THE PLAINEST INTENT THERE IS, and the first version
        of this list did not contain it. It had `start a focus` and `make this a focus` written out
        as two literals, so "Create a focus for recovery", "Set up a focus for recovery" and
@@ -206,7 +233,7 @@ function ground(reading = {}, { text = '', priorMessages = [], context = {}, req
     const _asksForAFocus = /\b(?:creat(?:e|ing)|set(?:ting)?\s*up|start(?:ing)?|mak(?:e|ing)|add(?:ing)?|new)\s+(?:this\s+|that\s+|it\s+|a\s+|an\s+|the\s+|another\s+|my\s+|our\s+)*focus\b/i;
     const _statesIntent = t => _asksForAFocus.test(t)
       || /\b(work(?:ing)? on|focus on|commit to|i want to|i'?m going to|i am going to|i need to|i'?ll|let me|let'?s|going to try|try to|get better at|improve|practi[cs]e)\b/i.test(t);
-    const _mayTakeWording = requested || (_statesIntent(current) && !_isQuestion(current));
+    const _mayTakeWording = !_isQuestion(current) && (requested || _statesIntent(current));
 
     /* ── AND THE GATE APPLIES TO THE MODEL'S OWN WORDS, NOT ONLY TO THE FALLBACKS ──────────────
        This block used to sit ABOVE the gate and copied `raw.text` in unconditionally, so the

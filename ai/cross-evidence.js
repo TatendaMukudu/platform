@@ -73,10 +73,41 @@ function parseRef(r) {
 /* WHAT THIS OBJECT POINTS AT, taken only from fields that already exist. Returns refs, never
    text. An object whose pointer names something outside the passed-in set simply yields no edge —
    the caller's scope gate decided that, not this module. */
-function _addressRef(o) {
+/* WHAT A FOCUS WAS STARTED TO WORK ON — AND THERE ARE TWO RECORDS OF IT, BECAUSE THERE ARE TWO
+   KINDS OF FOCUS AND TWO OWNERS WROTE THEM.
+
+     A PERSONAL Focus carries  raw.addresses = { kind, id }   — the object-and-focus contract
+     A GROUP Focus carries     raw.origin.inquiryId           — ai/team-state.js newFocus()
+
+   This module read the first shape only, so a group Focus produced `edges: []` and `addresses:
+   null` — no relationship at all, on the half of the product where the A -> B loop is the point.
+   An independent gate found it, and found the reason the suite did not: the fixture that proved
+   this reader was a PERSONAL Focus written in the personal shape, so its green result said
+   nothing whatever about the group path it was taken to cover.
+
+   READ BOTH, DO NOT REWRITE EITHER. The alternative — normalising stored group Focuses into the
+   personal shape — would put a second author on records ai/team-state.js owns, and would have to
+   run against every focus that already exists. `origin.inquiryId` is the canonical owner's field
+   and stays the canonical owner's field; this is the reader catching up to it.
+
+   `origin.from` is NOT consulted here on purpose. It distinguishes a Focus the system proposed
+   from one a leader decided alone, which matters to outcome learning and not at all to whether
+   the link exists: a leader who starts a focus on an inquiry has still started it on that
+   inquiry. Requiring from === 'inquiry' would drop a real edge over a provenance flag. */
+function _addressed(o) {
   const a = (o && o.raw && o.raw.addresses) || (o && o.addresses) || null;
-  return a && a.kind && a.id ? ref(a.kind, a.id) : null;
+  if (a && a.kind && a.id) { const r = ref(a.kind, a.id); if (r) return { ref: r, basis: 'focus.addresses' }; }
+  if (!o || o.kind !== 'focus') return null;
+  const origin = (o.raw && o.raw.origin) || o.origin || null;
+  const inquiryId = origin && origin.inquiryId ? _s(origin.inquiryId, 80) : '';
+  const r = inquiryId ? ref('inquiry', inquiryId) : null;
+  /* THE BASIS NAMES THE FIELD THAT PRODUCED THE EDGE, and it has to be the RIGHT field: this
+     module's own rule is that an edge nobody can trace back to a field is an edge somebody will
+     eventually treat as a judgement. A group edge reported as `focus.addresses` would send the
+     next reader to a field that is not there. */
+  return r ? { ref: r, basis: 'focus.origin.inquiryId' } : null;
 }
+function _addressRef(o) { const a = _addressed(o); return a ? a.ref : null; }
 function _projectedFromRef(o) {
   // A High or Low is a projection OF an inquiry. A focus is not, and an inquiry is not itself.
   if (!o || (o.kind !== 'high' && o.kind !== 'low')) return null;
@@ -137,8 +168,11 @@ function edges(objects = []) {
   for (const o of rows) {
     const self = refOf(o);
 
-    const addressed = _addressRef(o);
-    if (addressed) { add(self, 'addresses', addressed, 'focus.addresses'); add(addressed, 'addressed_by', self, 'focus.addresses'); }
+    const addressed = _addressed(o);
+    if (addressed) {
+      add(self, 'addresses', addressed.ref, addressed.basis);
+      add(addressed.ref, 'addressed_by', self, addressed.basis);
+    }
 
     const projected = _projectedFromRef(o);
     if (projected) { add(self, 'projected_from', projected, 'raw.inquiryId'); add(projected, 'projected_to', self, 'raw.inquiryId'); }
@@ -204,8 +238,39 @@ function loop(objects = [], focusRef = null) {
   const a = addressesRef ? byRef.get(addressesRef) : null;
 
   const raw = f.raw || {};
-  const outcome = raw.outcome || null;
-  const resolvedAt = Date.parse(raw.resolvedAt || '') || null;
+  /* THE OUTCOME IS A RECORD, NOT A STRING. `teamState.recordFocusOutcome` writes
+     `{ result, note, by, at }`, and this read was `raw.outcome || null` clipped to 20 characters
+     — so `_s` stringified the object and the bundle handed the model "the person recorded the
+     outcome of this focus as: [object Object]". Nothing failed: the field was present, the
+     sentence was well formed, and the only thing wrong with it was that it said nothing. Found by
+     driving the real turn and reading the prompt. The older string form is still accepted, because
+     a focus closed before that field became a record still has a result worth stating. */
+  const _rawOutcome = raw.outcome || null;
+  const outcome = (_rawOutcome && typeof _rawOutcome === 'object')
+    ? (_rawOutcome.result || null)
+    : _rawOutcome;
+  /* WHEN IT WAS CLOSED — AND, AGAIN, THERE ARE TWO RECORDS OF IT.
+
+       A PERSONAL Focus writes  raw.resolvedAt      — an ISO string
+       A GROUP Focus writes     raw.outcome.at      — an epoch number, by recordFocusOutcome
+
+     Reading only the first meant a group Focus with a recorded outcome had `resolvedAt: null`,
+     and `observedSince` is gated on it — so "what has arrived SINCE you closed this" was null on
+     every group Focus in the product. That is the second half of the same defect as `addresses`
+     above: the reader knew one owner's field names and the loop it exists to close belongs to
+     both. The two are recorded SEPARATELY rather than fixed together, because the timestamp and
+     the link fail independently and a reader who fixed one would have been satisfied.
+
+     A number is taken as an epoch, a string is parsed. Nothing here writes back. */
+  const _at = (v) => {
+    if (v == null || v === '') return null;
+    const n = Number(v);
+    if (Number.isFinite(n) && n > 0) return n;
+    const p = Date.parse(String(v));
+    return Number.isFinite(p) && p > 0 ? p : null;
+  };
+  const resolvedAt = _at(raw.resolvedAt)
+    || (_rawOutcome && typeof _rawOutcome === 'object' ? _at(_rawOutcome.at) : null);
 
   /* WHAT ARRIVED AFTER. Only on the object the focus addressed, only from signals that are
      current, and only as a COUNT plus their refs — the statements stay where they live. */

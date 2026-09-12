@@ -1,7 +1,7 @@
 {
   "name": "intelliq-platform",
   "version": "1.0.0",
-  "description": "IntelliQ — Universal Intelligence Engine",
+  "description": "IntelliQ \u2014 Universal Intelligence Engine",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -11,7 +11,8 @@
     "smoke:advisor": "node scripts/advisor-smoke.js",
     "smoke:frontend": "node scripts/frontend-smoke.js",
     "smoke:llm": "node scripts/llm-smoke.js",
-    "demo:seed": "node -e \"require('./scripts/seed-alma').buildAlmaStore().then(r=>console.log(JSON.stringify(r.summary,null,2)))\""
+    "demo:seed": "node -e \"require('./scripts/seed-alma').buildAlmaStore().then(r=>console.log(JSON.stringify(r.summary,null,2)))\"",
+    "stamp:record": "node scripts/stamp-record.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.3",

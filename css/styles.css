@@ -2919,8 +2919,9 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iq-make:focus-visible{outline:2px solid currentColor;outline-offset:2px}
 .iq-more-objects{display:block;width:100%;margin:.6rem 0 0;padding:.7rem;min-height:44px;border-radius:12px;
   border:1px dashed var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-md)}
-.iq-inq-forum{margin-left:auto;font-size:var(--fs-xs);letter-spacing:.04em;text-transform:uppercase;
-  color:var(--text-secondary);border:1px solid var(--border);border-radius:999px;padding:.1rem .5rem}
+/* The indicator that this thread has a room, as a glyph rather than the word. Text-shaped rules
+   (uppercase, letter-spacing, a pill border) were describing a label that is no longer there. */
+.iq-inq-forum{margin-left:auto;display:inline-flex;align-items:center;color:var(--text-secondary)}
 
 /* ── HOME IS ONE QUESTION ────────────────────────────────────────────────────
    Founder decision, September 2026. Greeting, the single highest-priority thing IntelliQ wants
@@ -3028,11 +3029,12 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iqt-back{display:inline-flex;align-items:center;gap:.3rem;min-height:44px;padding:0;
   border:0;background:transparent;color:var(--text-muted);cursor:pointer;font-size:var(--fs-md)}
 .iqt-back:focus-visible{outline:2px solid currentColor;outline-offset:2px}
-.iqt-forum{margin-left:auto;font-size:var(--fs-xs);letter-spacing:.07em;text-transform:uppercase;
-  min-height:36px;padding:.3rem .75rem;border-radius:999px;cursor:pointer;
-  color:var(--accent);background:transparent;
-  border:1px solid color-mix(in srgb, var(--accent) 45%, transparent)}
+/* An icon control, not a word: 44px so it is reachable with a thumb, and visibly pressed. */
+.iqt-forum{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;
+  min-width:44px;min-height:44px;padding:0;border:0;background:none;cursor:pointer;
+  color:var(--text-secondary);border-radius:10px}
 .iqt-forum:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.iqt-forum:hover,.iqt-forum[aria-pressed="true"]{color:var(--text-primary);background:var(--surface-2)}
 .iqf-you{font-size:var(--fs-xs);letter-spacing:.07em;text-transform:uppercase;color:var(--text-muted)}
 .iq-msg-gone{opacity:.45;font-style:italic}
 
@@ -3429,3 +3431,106 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
   font-size:var(--fs-xs);background:transparent;border:1px solid var(--border);color:var(--text-muted)}
 .shelf-x:hover{color:var(--text-primary);border-color:var(--border-light)}
 .shelf-x:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+
+/* The stale-shell notice: one line, above the safe area, never covering the composer. */
+.iq-stale-build{position:fixed;left:0;right:0;bottom:0;z-index:60;display:flex;flex-wrap:wrap;
+  align-items:center;justify-content:center;gap:.6rem;padding:.6rem 1rem;
+  padding-bottom:calc(.6rem + env(safe-area-inset-bottom,0px));
+  background:var(--surface-2);border-top:1px solid var(--border);
+  font-size:var(--fs);color:var(--text-primary)}
+
+/* ── CONNECTIONS, AND THE A → B LOOP ────────────────────────────────────────────────────────
+   The relationships the records already carried, read back onto the screen. Drawn quietly and
+   below the belief rather than beside it: a connection is context for what you are reading, and
+   putting it level with the claim would let "related to" start looking like "supported by".
+
+   The caveat under the loop is not small print. It is the sentence that stops a count of what
+   was recorded afterwards being read as a verdict on cause, so it sits in the flow at the same
+   size as the rest of the section rather than shrinking away under it. */
+.iqt-related{margin:.85rem 0 0}
+.iqt-related:empty{display:none}
+.iqt-rel{padding:.85rem;border:1px solid var(--border);border-radius:12px}
+.iqt-rel-head,.iqt-loop-head{font-size:var(--fs-sm);letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-secondary);margin:0 0 .45rem}
+.iqt-rel-list{display:flex;flex-direction:column;gap:.3rem}
+/* A whole row is the target. 44px is the floor the typography guard enforces, and a row of two
+   spans is exactly the shape that ends up 28px tall if nobody says otherwise. */
+.iqt-rel-row{display:flex;flex-direction:column;align-items:flex-start;gap:.1rem;width:100%;
+  min-height:44px;padding:.4rem .5rem;border:0;border-radius:10px;background:none;cursor:pointer;
+  text-align:left;color:var(--text-primary);font:inherit}
+.iqt-rel-row:hover{background:var(--surface-2)}
+.iqt-rel-row:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.iqt-rel-type{font-size:var(--fs-sm);color:var(--text-secondary)}
+.iqt-rel-label{font-size:var(--fs-md);line-height:1.4;overflow-wrap:anywhere}
+.iqt-rel-note{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.5rem 0 0}
+.iqt-loop{margin:.7rem 0 0;padding-top:.7rem;border-top:1px solid var(--border)}
+.iqt-loop-step{display:flex;flex-wrap:wrap;gap:.4rem;align-items:baseline;padding:.2rem 0}
+.iqt-loop-k{flex:0 0 auto;font-size:var(--fs-sm);color:var(--text-secondary)}
+.iqt-loop-v{flex:1 1 12ch;font-size:var(--fs-md);color:var(--text-primary);overflow-wrap:anywhere}
+.iqt-loop-caveat,.iqt-loop-open{font-size:var(--fs);color:var(--text-secondary);line-height:1.5;
+  margin:.5rem 0 0}
+
+/* ── A GROUP, OPENED ────────────────────────────────────────────────────────────────────────
+   The same thread shape an object gets, because a group IS a subject here and giving it a
+   different-looking screen would teach that it is a different kind of thing. */
+.tstate-open{cursor:pointer}
+.tstate-open:focus-visible{outline:2px solid currentColor;outline-offset:2px}
+.iqg-count{font-size:var(--fs-sm);color:var(--text-secondary);white-space:nowrap}
+.iqg-state{margin:.5rem 0 1rem}
+.iqg-line{display:flex;flex-wrap:wrap;gap:.5rem;align-items:baseline;padding:.4rem 0;
+  border-bottom:1px solid var(--border)}
+.iqg-label{flex:0 0 auto;min-width:5rem;font-size:var(--fs-sm);letter-spacing:.04em;
+  text-transform:uppercase;color:var(--text-secondary)}
+.iqg-text{flex:1 1 14ch;font-size:var(--fs-md);line-height:1.45;color:var(--text-primary);
+  overflow-wrap:anywhere}
+.iqg-sub{display:block;font-size:var(--fs-sm);color:var(--text-secondary)}
+.iqg-withheld,.iqg-note,.iqg-empty{font-size:var(--fs);color:var(--text-secondary);line-height:1.5;
+  margin:.55rem 0 0}
+.iqg-says{font-size:var(--fs-lg);line-height:1.5;color:var(--text-primary);margin:.7rem 0 0;
+  overflow-wrap:anywhere}
+.iqg-focus{margin:1rem 0;padding:.85rem;border:1px solid var(--border);border-radius:12px}
+.iqg-focus-head,.iqg-inq-head,.iqg-hist-head{font-size:var(--fs-sm);letter-spacing:.06em;
+  text-transform:uppercase;color:var(--text-secondary);margin:0 0 .45rem}
+.iqg-focus-text{font-size:var(--fs-lg);line-height:1.5;color:var(--text-primary);
+  overflow-wrap:anywhere}
+.iqg-focus-ask{font-size:var(--fs-md);color:var(--text-primary);margin:.7rem 0 .4rem}
+/* Wraps rather than scrolls: three outcome words at 390px do not fit on one line, and a control
+   a person has to drag sideways to find is a control that does not get used. */
+.iqg-outcome-btns,.iqg-start-btns{display:flex;flex-wrap:wrap;gap:.45rem}
+.iqg-inq{margin:1rem 0}
+.iqg-inq-row{padding:.7rem 0;border-bottom:1px solid var(--border)}
+.iqg-inq-topic{font-size:var(--fs-lg);line-height:1.4;color:var(--text-primary);overflow-wrap:anywhere}
+.iqg-inq-claim{font-size:var(--fs-md);line-height:1.5;color:var(--text-secondary);margin:.2rem 0 0;
+  overflow-wrap:anywhere}
+.iqg-inq-meta,.iqg-inq-open{font-size:var(--fs-sm);color:var(--text-secondary);margin:.3rem 0 .45rem}
+.iqg-start{margin:.6rem 0 0}
+.iqg-start-l{display:block;font-size:var(--fs-md);color:var(--text-primary);margin:0 0 .35rem}
+.iqg-start-note{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.45;margin:.45rem 0 0}
+.iqg-hist{margin:1rem 0}
+.iqg-hist-row{display:flex;flex-wrap:wrap;gap:.5rem;align-items:baseline;padding:.4rem 0;
+  border-bottom:1px solid var(--border)}
+.iqg-hist-text{flex:1 1 14ch;font-size:var(--fs-md);line-height:1.45;color:var(--text-primary);
+  overflow-wrap:anywhere}
+.iqg-hist-out{flex:0 0 auto;font-size:var(--fs-sm);color:var(--text-secondary)}
+
+/* L-CH6 — ONE MOMENT IS NOT A MOVEMENT. A `state` series is drawn as points and no line, so a
+   larger dot is what carries it: at 3px an unconnected point reads as a speck of dust, and the
+   whole picture reads as a chart that failed to render rather than as a record that is young. */
+.iqt-dot-state{r:5}
+.iqt-chart-axis-state{justify-content:flex-start;gap:.6rem}
+
+/* External reading, and how it stands to what it sits under. Set apart from the answer itself so
+   the boundary between "what the outside world says" and "what IntelliQ holds" is visible rather
+   than merely stated. */
+.iqt-reading-rel{font-size:var(--fs-sm);color:var(--text-secondary);line-height:1.5;
+  margin:.35rem 0 .5rem;padding-left:.6rem;border-left:2px solid var(--border)}
+.iqt-reading-none{font-size:var(--fs-sm);color:var(--text-muted);line-height:1.5;padding:.5rem 0}
+
+/* WHAT KIND OF THING THIS IS. Set apart from the attachment row, because it is a question about
+   the material rather than a property of it, and a person answers it once. */
+.iqt-mat-class{margin:.6rem 0 0;padding:.7rem;border:1px solid var(--border);border-radius:12px}
+.iqt-mat-class-now{font-size:var(--fs-md);color:var(--text-primary)}
+.iqt-mat-class-means,.iqt-mat-class-why{font-size:var(--fs-sm);color:var(--text-secondary);
+  line-height:1.5;margin:.3rem 0 0}
+.iqt-mat-class-ask{display:block;font-size:var(--fs-md);color:var(--text-primary);margin:.6rem 0 .35rem}
+.iqt-mat-class-btns{display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.45rem}

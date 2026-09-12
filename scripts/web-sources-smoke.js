@@ -165,8 +165,21 @@ const server = app.listen(0, async () => {
 
     /* WS12: the call site. */
     const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'app.js'), 'utf8');
+    /* REWRITTEN September 2026, and it would otherwise have CONTRADICTED reading-scope-smoke.
+
+       This pinned two literals: the exact call `this._renderReading(kind, objectId)` and the exact
+       URL `/reading?scope=self`. Both were proxies for the law "the thread actually asks for the
+       reading". The hard-coded `scope=self` turned out to be a DEFECT rather than a detail — a
+       group's High, Low, Inquiry or Focus lives in the `group:<nodeId>` bucket, so reading was
+       unreachable at group grain for everybody including the group's own leader — and the scope
+       now travels with the object. RS-G1 asserts that `scope=self` is gone; this asserted it was
+       present. Two suites, one product, opposite demands: the older assertion was pinning the bug.
+
+       The law is what it always was, in two halves: the thread CALLS the renderer, and the
+       renderer FETCHES the reading route. Neither half alone is a door. */
     ok('WS12 the thread actually asks for the reading, rather than defining a renderer nothing calls',
-      /this\._renderReading\(kind, objectId\)/.test(src) && /\/reading\?scope=self/.test(src));
+      /this\._renderReading\(kind, objectId/.test(src)
+      && /_renderReading\(kind, objectId, scope[\s\S]{0,600}\/reading\?scope=/.test(src));
     ok('WS12b …and every source is a link the person can go and check for themselves',
       /href="\$\{esc\(c\.url\)\}"/.test(src) && /rel="noopener noreferrer"/.test(src));
     ok('WS12c …and the surface tells them what was searched for and that it was not their words',

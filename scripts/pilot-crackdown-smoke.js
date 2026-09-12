@@ -97,6 +97,23 @@ ok('PX-A14 …but a stated intention still takes the model\'s title',
 ok('PX-A15 …and a pressed control still does, because the press was the declaration',
   titled(proposeWithModelText('Sharper first touch', 'Sharper first touch', 'inquiry', true))
     === 'Sharper first touch');
+/* Live player regression: the sentence started with hesitation, so the old question guard missed
+   the embedded "can you" and the model/fallback made the whole question a Focus title. Also drive
+   the requested-control transport: tapping Work on this must not license a question as wording. */
+const HESITANT_QUESTIONS = ["I'm not sure can you create the focus",
+  'I’m not sure can you create the focus',
+  'I wonder if you can create a focus',
+  'I am not sure whether to start a focus'];
+ok('PX-A17 a hesitant embedded question cannot become a Focus in fallback or model-title transport',
+  ['inquiry', 'focus', 'high', 'low'].every(k => HESITANT_QUESTIONS.every(q =>
+    titled(propose(q, k)) === null && titled(proposeWithModelText(q, 'late-game concentration and discipline under fatigue', k)) === null)));
+ok('PX-A18 pressing Work on this does not make a question a valid Focus title',
+  HESITANT_QUESTIONS.every(q => titled(propose(q, 'inquiry', true)) === null
+    && titled(proposeWithModelText(q, 'late-game concentration and discipline under fatigue', 'inquiry', true)) === null));
+ok('PX-A19 an explicit instruction after hesitation still offers a Focus',
+  titled(propose("I'm not sure, create a focus for recovery")) === "I'm not sure, create a focus for recovery");
+ok('PX-A20 a hesitant question gives an actionable clarification rather than silently creating',
+  HESITANT_QUESTIONS.every(q => /say what you would want to change/i.test(String(propose(q).needsClarification || ''))));
 /* The gate is for the action that manufactures a commitment. An Inquiry opens a question rather
    than a promise, so it is deliberately not narrowed here — asserted so that narrowing it later
    is a decision somebody makes on purpose. */
@@ -385,6 +402,69 @@ ok('PX-E16 the node picker is only offered to somebody who may write the tree',
    which is asynchronous, so it lives in scripts/metric-lifecycle-smoke.js (section F) where there
    is an async context to await it in. Written here first, it would have handed `ok()` a Promise,
    which is truthy whatever it resolves to: a green that could never go red. */
+
+/* ══ E5 — SETTINGS MAY NOT CLAIM CAPABILITIES THE PRODUCT DOES NOT HAVE ══════════════════════
+   Live, the founder read a Settings panel headed "Active Features" listing, under green ticks:
+   Full IntelliQ, Real-time monitoring, Behavioural trend analysis, Wellness alerts, AI development
+   plans, External data integration, Mandated reporter tools, Advanced analytics, and Complete
+   security. None of it was checked against anything. It came from a client-side constant selected
+   by a "Platform Grade" the SERVER HAS NO NOTION OF -- `switchGrade` set a variable in the browser,
+   re-rendered, and toasted "Switched to A-Grade Platform" for a change that never left the page.
+
+   "Complete security" is the one that must never be printed under any circumstances. It was
+   printed with a tick beside it. */
+console.log('\n  E — AND SETTINGS DOES NOT CLAIM CAPABILITIES THAT DO NOT EXIST');
+/* DECOMMENTED, INCLUDING HTML COMMENTS. The first run of these five went red against the very
+   comments explaining the removal -- the same trap the header of this file describes, met again by
+   the person who wrote the warning. `decomment` handles JS; an HTML comment needed stripping too,
+   because index.html now carries a note saying what the panel used to claim. */
+const _deHtml = t => String(t).replace(/<!--[\s\S]*?-->/g, ' ');
+const CLIENT_SRC = decomment(APP_RAW) + decomment(R('js/data.js')) + decomment(R('js/ui.js'))
+  + decomment(_deHtml(R('index.html')));
+ok('PX-E18 the nine tier claims are gone from every client source',
+  ['Real-time monitoring', 'Behavioral trend analysis', 'Behavioural trend analysis',
+   'Wellness alerts', 'AI development plans', 'External data integration',
+   'Mandated reporter tools', 'Advanced analytics']
+    .every(claim => !new RegExp(claim.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(CLIENT_SRC)));
+ok('PX-E19 …and "Complete security" appears nowhere, which is the one that can never be earned',
+  !/Complete security/i.test(CLIENT_SRC));
+ok('PX-E20 the platform-grade tier system is gone: no constant, no switcher, no badge',
+  !/PLATFORM_GRADES\s*=/.test(CLIENT_SRC) && !/function switchGrade/.test(CLIENT_SRC)
+  && !/function gradeBadgeHTML/.test(CLIENT_SRC));
+ok('PX-E21 …and no surface prints a letter grade as a verdict, on an organisation or on a person',
+  !/-Grade/.test(CLIENT_SRC));
+/* PX-E22 FIRST MATCHED THE DEFINITION, NOT THE CALL -- PROTOCOL's first lie, and deleting the call
+   from renderSettings left it green. It now requires renderSettings to actually call it.
+
+   REWRITTEN AGAIN, September 2026, and worth saying why rather than quietly re-spelling it. The
+   middle clause matched the literal `fetch('/api/health'` -- a PROXY for "the panel asks the
+   server at render time", which is the actual law. The panel now asks through MemberApp._read,
+   the app's one bounded reader, so the proxy went stale while the law it stood for held. The
+   proxy is replaced with the law, tightened: the read must happen INSIDE _renderRealCapabilities
+   (the old clause would have been satisfied by a fetch anywhere in a 12,000-line file) and it
+   must be a live read of /api/health by either transport. Nothing has been relaxed -- a constant
+   in place of the read still fails, and now so does a read that moved out of the panel. */
+const _capPanel = APP.slice(APP.indexOf('async function _renderRealCapabilities('),
+  APP.indexOf('async function _renderBuildLine('));
+/* THE 600-CHARACTER WINDOW WENT STALE, September 2026, for a legitimate reason: Settings was
+   split into three tiers (You / Organisation / Platform) and the host capability panel now lives
+   in the superadmin tab, so renderSettings reaches it through
+   `if (_maySeeSettingsTab('platform')) _renderRealCapabilities();` rather than as a bare call in
+   the first few lines. The window was measuring PROXIMITY, which was never the law.
+
+   The law has two halves and both are asserted directly: renderSettings must REACH the panel, and
+   the panel must perform a LIVE READ rather than render a constant. Widened where it was an
+   artefact, tightened where it matters — the read must be inside the panel, not anywhere in a
+   twelve-thousand-line file. */
+const _settingsFn = APP.slice(APP.indexOf('function renderSettings(){'),
+  APP.indexOf('const _POLICY_COLOR'));
+ok('PX-E22 what Settings shows instead is read from the server at render time, not from a constant',
+  _settingsFn.length > 200 && /_renderRealCapabilities\(\)/.test(_settingsFn)
+  && _capPanel.length > 400
+  && /(MemberApp\._read|fetch)\(\s*'\/api\/health'/.test(_capPanel)
+  && /not a plan or a tier/.test(APP_RAW));
+ok('PX-E23 …and it can say OFF, which a list of ticks had no way to express',
+  /\$\{on \? 'ON' : 'OFF'\}/.test(APP_RAW));
 
 /* ══ F — PERSISTENCE STAYS BOUNDED ═══════════════════════════════════════════════════════════
    Not a live defect: a guard against returning to the whole-platform blob that put the database
