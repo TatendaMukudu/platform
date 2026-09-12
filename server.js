@@ -17521,31 +17521,52 @@ app.post('/api/assistant/attachments', requireAuth, (req, res) => {
 
      A conversationId the client DOES send always wins: a person attaching a document inside a
      thread they are already in is not retrying anything. */
-  let _priorConvId = null;
-  if (!b.conversationId) {
-    const prior = Object.values(_materials(code))
-      .find(m => m && m.checksum === checksum && m.byId === userId && m.visibility === 'private');
-    const priorRef = prior && _materialRefs(prior).find(r => r && r.kind === 'conversation');
-    if (priorRef && _assistantConvs(key).some(c => c.id === String(priorRef.id))) _priorConvId = String(priorRef.id);
-  }
-  const conv = _resolveConversation(key, b.conversationId || _priorConvId, b.title || 'Attached material', Date.now(), b.about || null);
   const about = _aboutRef(b.about);
-  let ref = { kind: 'conversation', id: conv.id, at: Date.now(), by: userId };
+  if (b.about && !about) return res.status(400).json({ error: 'invalid attachment context' });
   if (about) {
     const n = about.indexOf(':'), kind = about.slice(0, n), id = about.slice(n + 1);
-    if (_allObjectsFor(code, userId).some(o => o.kind === kind && String(o.id) === id)) ref = { kind, id, at: Date.now(), by: userId };
+    if (!_allObjectsFor(code, userId).some(o => o.kind === kind && String(o.id) === id)) {
+      return res.status(404).json({ error: 'object not found' });
+    }
   }
-  // Composer uploads are private external reading. Deduplication may reuse only
-  // this owner's private copy; equal bytes owned by somebody else are not access.
-  let row = Object.values(_materials(code)).find(m => m && m.checksum === checksum && m.byId === userId && m.visibility === 'private');
+  const existing = Object.values(_materials(code))
+    .find(m => m && m.checksum === checksum && m.byId === userId && m.visibility === 'private');
+  const conversations = _assistantConvs(key);
+  if (b.conversationId) {
+    const named = conversations.find(c => c.id === String(b.conversationId));
+    if (!named) return res.status(404).json({ error: 'conversation not found' });
+    if ((named.about || null) !== (about || null)) {
+      return res.status(409).json({ error: 'attachment_context_mismatch' });
+    }
+  }
+  let priorConvId = null;
+  if (!b.conversationId && existing) {
+    const refs = _materialRefs(existing).filter(r => r && r.kind === 'conversation');
+    const prior = refs.map(r => conversations.find(c => c.id === String(r.id)))
+      .find(c => c && (c.about || null) === (about || null));
+    if (prior) priorConvId = prior.id;
+  }
+  const conv = _resolveConversation(key, b.conversationId || priorConvId,
+    b.title || 'Attached material', Date.now(), about);
+  const conversationRef = { kind: 'conversation', id: conv.id, at: Date.now(), by: userId };
+  let ref = conversationRef;
+  if (about) {
+    const n = about.indexOf(':'), kind = about.slice(0, n), id = about.slice(n + 1);
+    ref = { kind, id, at: Date.now(), by: userId };
+  }
+  // An object-bound upload keeps BOTH the object and its exact conversation association.
+  // Equal bytes in another object reuse the private material, never the prior thread.
+  let row = existing;
   if (row) {
     if (!_materialOn(row, ref.kind, ref.id)) row.refs = _materialRefs(row).concat([ref]);
+    if (!_materialOn(row, 'conversation', conv.id)) row.refs = _materialRefs(row).concat([conversationRef]);
   } else {
     const id = 'mat_' + generateId();
     row = { materialId: id, byId: userId, orgCode: code,
       title: String(b.title || 'Attached material').trim().slice(0, 200), filename: String(b.filename || b.title || '').slice(0, 200),
       kind: material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text', sections: material.segment(text, { kind: String(b.kind || 'text') }),
-      refs: [ref], checksum, visibility: 'private', provenance: 'external', createdAt: Date.now() };
+      refs: ref === conversationRef ? [conversationRef] : [ref, conversationRef],
+      checksum, visibility: 'private', provenance: 'external', createdAt: Date.now() };
     _materials(code)[id] = row;
   }
   scheduleSave();
