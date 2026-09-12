@@ -194,7 +194,8 @@ const server = app.listen(0, async () => {
       ok(`FC-B1b …with the rule beside the data, so six agreeing messages cannot become "the group agrees" (${kind})`,
         /not evidence|changes nothing|does not (?:make|count)/i.test(seen[kind]));
       ok(`FC-B1c …and NO AUTHOR, because forum speech is anonymous to every human and the one reader that is not a human must not be the way round it (${kind})`,
-        !/Player 1|Player 2|Player 3|Player 4/.test(seen[kind].slice(seen[kind].indexOf('DISCUSS'))));
+        seen[kind].indexOf('DISCUSS') >= 0
+        && !/Player 1|Player 2|Player 3|Player 4/.test(seen[kind].slice(seen[kind].indexOf('DISCUSS'))));
     }
 
     console.log('\n  C — AND ONLY THAT OBJECT\'S');

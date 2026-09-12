@@ -285,15 +285,43 @@ const server = app.listen(0, async () => {
       after.status === 200 && !!after.j.chart
       && JSON.stringify(after.j.chart) === JSON.stringify(clean.j.chart));
 
+    /* A state point is a dated assertion too. Previously the independent moment check ran
+       only for a trend, letting a one-point chart invent a date that its inquiry never held. */
+    try {
+      chartMod.buildFirming = args => {
+        const spec = realBuildFirming(args);
+        const origins = (spec.series || []).find(x => x.key === 'origins');
+        if (origins && origins.points.length === 1) origins.points[0].at += 1;
+        return spec;
+      };
+      const badState = await get('/api/objects/inquiry/one/chart?kind=firming');
+      ok('OC-F2-state a one-point state chart cannot shift its only recorded moment',
+        badState.status === 200 && badState.j.chart === null
+        && (badState.j.violations || []).includes('graph_time_not_in_record'));
+    } finally { chartMod.buildFirming = realBuildFirming; }
+
+    /* Swapping two REAL recorded dates between points is more subtle: membership alone
+       passes, but the 2-origin count is then falsely shown at the earlier date. */
+    try {
+      chartMod.buildFirming = args => {
+        const spec = realBuildFirming(args);
+        const origins = (spec.series || []).find(x => x.key === 'origins');
+        if (origins && origins.points.length >= 2)
+          [origins.points[0].at, origins.points[1].at] = [origins.points[1].at, origins.points[0].at];
+        return spec;
+      };
+      const swapped = await get('/api/objects/inquiry/two/chart?kind=firming');
+      ok('OC-F2-swap the chart cannot put a later count on an earlier recorded moment',
+        swapped.status === 200 && swapped.j.chart === null
+        && (swapped.j.violations || []).includes('graph_point_not_in_record'));
+    } finally { chartMod.buildFirming = realBuildFirming; }
+
     /* ══ CROSS-ROUTE: THE CARD AND THE PICTURE ANSWER TO THE SAME RECORD ════════════════════
        The gate's other objection: the thread route builds a manifest for the card and the voice,
-       the chart route builds another for the graph, and "one shared manifest across what a person
-       sees" was therefore not established by anything that had been run. It is one OWNER —
-       `_objectManifest` — and this is what that buys, stated as a fact a test can check rather
-       than as a claim about the source: every moment the picture plots is a moment the card's own
-       manifest vouches for, and both come from the object's signals rather than from whichever
-       route asked. If the two routes ever read different records, the first thing to diverge is
-       this. */
+       the chart route builds another for the graph. These are TWO manifests constructed
+       by the same owner, not one shared instance. Verify agreement about the actual object's
+       count and dated evidence on the two routes; no route may endorse a chart builder's
+       point as its own proof of that point. */
     const thTwo = await get('/api/objects/inquiry/two/thread?scope=self');
     const chTwo = await get('/api/objects/inquiry/two/chart?kind=firming');
     ok('OC-F3 the card route and the chart route describe the SAME object from the same record',
@@ -308,15 +336,17 @@ const server = app.listen(0, async () => {
         const m = String(thTwo.j.openingSpeech || '').match(/rests on (\d+) sources?/);
         return !!m && Number(m[1]) === (thTwo.j.openingSources || []).length;
       });
-    /* AND THE RECORD MOVING MOVES BOTH. A new account on the same object, written through the
-       ordinary route, has to show up in the card's count AND as a new moment in the picture. Two
+    /* AND THE RECORD MOVING MOVES BOTH. A new account on the same object has to show up
+       in the card's evidence count AND as a new moment in the picture. Two
        routes reading two records would move one of these and not the other, and that is the
        failure "one manifest" is supposed to make impossible. */
     inquiryStates[C]['member:ash'].two.signals.push(SIG('o_c', NOW - 12 * 3600 * 1000));
     const thAfter = await get('/api/objects/inquiry/two/thread?scope=self');
     const chAfter = await get('/api/objects/inquiry/two/chart?kind=firming');
-    ok('OC-F4 a new account on the record moves the CARD',
-      (thAfter.j.openingSources || []).length >= (thTwo.j.openingSources || []).length);
+    ok('OC-F4 a new account on the record moves the CARD count, not merely a stable number of source chips',
+      (thAfter.j.present?.detail?.evidenceCount || 0) === (thTwo.j.present?.detail?.evidenceCount || 0) + 1
+      && (thTwo.j.openingSources || []).some(x => x.kind === 'record' && /^2 things you told me$/.test(x.label || ''))
+      && (thAfter.j.openingSources || []).some(x => x.kind === 'record' && /^3 things you told me$/.test(x.label || '')));
     ok('OC-F4b …and the same account moves the PICTURE, at the moment it was recorded',
       () => {
         const plotted = new Set(((chAfter.j.chart || {}).series || []).flatMap(s => (s.points || []).map(p => p.at)));
