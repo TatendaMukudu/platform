@@ -10644,7 +10644,26 @@ function _speechFor({ text = '', sourceCount = 0, limitations = [] } = {}) {
   const body = String(text || '').trim();
   if (!body) return '';
   const parts = [body];
-  for (const l of (Array.isArray(limitations) ? limitations : []).slice(0, 3)) {
+  /* EVERY LIMITATION, NOT THE FIRST THREE. This clipped at three, silently, and an independent
+     gate was right to ask what happens to the fourth.
+
+     Two things are wrong with a silent clip here, and the second is the one that bites. The
+     obvious one: a listener cannot see the caveats sitting under the answer, so the spoken
+     rendering is the only place they exist — dropping one tells the listener less than the reader
+     was told, which is the exact inversion of why this function exists.
+
+     The one that would have arrived as an unexplained refusal: ai/manifest.js L-MF5's sibling law
+     requires EVERY limitation on the manifest to survive into the voice channel and pushes
+     `voice_dropped_limitation` otherwise. So a fourth limitation would not have been quietly
+     dropped on the composed path — it would have REFUSED the whole turn, and the reader would
+     have got a degraded answer with nothing anywhere saying why. The clip and the gate were two
+     rules about one thing, disagreeing.
+
+     Today's producers top out at three (ai/reasoning-register.js contributes at most three), so
+     this has never fired in front of anybody. That is a fact about the current callers, not a
+     property of the function, and it is exactly the kind of margin that disappears the next time
+     somebody adds a caveat. */
+  for (const l of (Array.isArray(limitations) ? limitations : [])) {
     const s = String(l || '').trim();
     if (s) parts.push(/[.!?]$/.test(s) ? s : `${s}.`);
   }
@@ -23686,7 +23705,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // The two forum owners, exported so a suite can drive them against object shapes the bucket
   // produces for kinds that are derived rather than stored (a group High is a projection, not a
   // record), and so the one-way context can be asserted as BEHAVIOUR rather than as source shape.
-  _forumAudience, _forumContext,
+  _forumAudience, _forumContext, _speechFor,
   _inNode, _leadsNode, forumThreads, _forumThread,
   raises, _raises, _ladderFor, _admitLeaderRead,
   // exported for the truth layer: attached material, whether it landed, and the graphs

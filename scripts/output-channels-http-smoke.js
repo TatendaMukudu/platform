@@ -325,6 +325,72 @@ const server = app.listen(0, async () => {
     ok('OC-F4c …and the picture still passes the card\'s own manifest afterwards, which is the whole point of one owner',
       chAfter.status === 200 && !!chAfter.j.chart && !chAfter.j.violations);
 
+    /* ══ G — THE SPOKEN RENDERING KEEPS EVERY CAVEAT THE WRITTEN ONE SHOWS ══════════════════
+       An independent gate asked what happens on the DETERMINISTIC path, and it was right to: the
+       composed reply's rendering goes through `manifest.approve` above, while the fallback calls
+       `_speechFor` directly and nothing checks the result. What that found was a silent clip —
+       `.slice(0, 3)` on the limitations — and the interesting part is not the dropped sentence.
+
+       It is that ai/manifest.js's voice law requires EVERY limitation on the manifest to survive
+       into the spoken channel and refuses with `voice_dropped_limitation` otherwise. So a fourth
+       limitation would not have been quietly dropped on the composed path; it would have refused
+       the whole turn, and the reader would have seen a degraded answer with nothing anywhere
+       saying why. Two rules about one thing, disagreeing, with today's only producer topping out
+       at exactly three — which is why nobody had seen it.
+
+       BOTH OWNERS, DRIVEN TOGETHER. This is not a source check: `_speechFor` is the production
+       composer of what is spoken and `manifest.verify` is the production gate it has to satisfy,
+       and the assertion is that the first satisfies the second at a size the product has not yet
+       reached but is one caveat away from. */
+    console.log('\n  G — WHAT IS SPOKEN KEEPS EVERY CAVEAT WHAT IS WRITTEN SHOWS');
+    {
+      const FOUR = [
+        'This counts occasions on the record, not everything that happened.',
+        'One of these accounts is a fortnight old.',
+        'Nobody has said anything about the away games.',
+        /* THE FOURTH IS DELIBERATELY UNLIKE THE OTHER THREE. My first one was 'this rests on
+           what was said, not what was measured', whose only distinctive words are 'rests' and
+           'measured' -- and 'rests' appears in the source-disclosure sentence every rendering
+           already ends with, so the substance test found half of it and called it present. The
+           assertion that a CLIPPED rendering is refused then passed a clipped rendering. A
+           negative assertion needs a fixture whose absence is detectable. */
+        'Nothing here reflects the goalkeeping sessions nobody wrote down.',
+      ];
+      const spoken = S._speechFor({ text: 'Two separate accounts point the same way about recovery.',
+        sourceCount: 2, limitations: FOUR });
+      ok('OC-G1 a reply carrying FOUR limitations speaks all four — the fourth is not silently dropped',
+        FOUR.every(l => String(spoken).includes(l)));
+      ok('OC-G1b …and still says what it rests on afterwards, so the disclosure is not pushed off the end',
+        /rests on 2 sources/.test(String(spoken)));
+      const mf = M.manifest({ limitations: FOUR,
+        claims: [M.claim({ id: 'card', text: 'Two separate accounts point the same way about recovery.', numbers: [2] })] });
+      ok('OC-G2 …and the rendering PASSES the same voice gate the composed path is held to, which a clipped one cannot',
+        M.verify('voice', spoken, mf).ok === true);
+      ok('OC-G2b …while a rendering missing one of them is refused by that gate, naming the limitation it lost',
+        () => {
+          const clipped = S._speechFor({ text: 'Two separate accounts point the same way about recovery.',
+            sourceCount: 2, limitations: FOUR.slice(0, 3) });
+          const r = M.verify('voice', clipped, mf);
+          return r.ok === false && r.violations.some(v => v.kind === 'voice_dropped_limitation');
+        });
+      /* AND THE SAME FUNCTION IS WHAT THE DETERMINISTIC ROUTE USES. Driven through the wire so
+         this is not a claim about a helper nobody calls: the model is made to refuse, the turn
+         degrades, and the spoken rendering that comes back still carries the answer and the
+         source disclosure rather than being dropped along with the composer. */
+      say('You have seven separate accounts pointing the same way about your recovery.');
+      const degraded = ((await turn(ASK)) || {}).response || {};
+      ok('OC-G3 the deterministic reply still gets a spoken rendering, because a listener does not lose the product when the model does',
+        degraded.composer && degraded.composer.degraded === true
+        && typeof degraded.speech === 'string' && degraded.speech.length > 0);
+      ok('OC-G3b …which BEGINS with the words on the screen, so the two channels are one answer on this path too',
+        String(degraded.speech).startsWith(String(degraded.responseText)));
+      ok('OC-G4 …and every limitation the reply SHOWS is also one it SAYS — the listener is told no less than the reader',
+        () => {
+          const shown = Array.isArray(degraded.limitations) ? degraded.limitations : [];
+          return shown.every(l => String(degraded.speech).includes(String(l).replace(/[.!?]$/, '')));
+        });
+    }
+
   } catch (e) { fail++; console.error('  FAIL output-channels suite threw:', e && e.stack); }
 
   restore();

@@ -217,6 +217,45 @@ const STUB = `
       await page.waitForTimeout(200);
       ok('VOB-D2 …and pressing again after a failure actually works, so the retry is not a suggestion',
         (await buttons[0].getAttribute('data-voice-state')) === 'speaking');
+
+      /* ══ D2 — A NEW ANSWER, WHICH IS NOT THE SAME EVENT AS A SECOND BUTTON ═════════════════
+         Section C proves that pressing a different row's control takes over. An independent gate
+         was right that this is a DIFFERENT event from the one the founder's defect describes:
+         somebody asks a second question while the first reply is still being spoken, touching no
+         control at all, and the old answer finishes over the new one on screen — two answers at
+         once, and the one they are looking at is not the one they can hear.
+
+         Until now that case was pinned by a regex over js/app.js. This drives the real renderer:
+         `_renderAssistant` is the method every reply goes through, called here with the shape the
+         route returns, while an utterance is genuinely live. */
+      console.log('\n  D2 — A NEW ANSWER ARRIVING STOPS THE OLD ONE, WITHOUT ANYBODY TOUCHING A CONTROL');
+      /* D2 left this row SPEAKING, and pressing the control that is speaking is the stop control —
+         so there is deliberately no click here. The point of the section is that nobody touches
+         anything. */
+      ok('VOB-D3pre a reply is genuinely being spoken before the new answer arrives',
+        (await buttons[0].getAttribute('data-voice-state')) === 'speaking'
+        && (await page.evaluate(() => !!window.IQVoiceOut.speaking())) === true);
+      const cancelsBefore = await page.evaluate(() => window.__iqSpeech.cancels);
+      await page.evaluate(() => {
+        // The shape the turn route returns, rendered by the method every reply goes through.
+        MemberApp._renderAssistant({ turnId: 't_new', response: {
+          responseText: 'A completely different answer.', speech: 'A completely different answer.',
+          mode: 'personal_assistance', composer: { degraded: false, reason: null },
+          groundedClaims: [], inferred: [], limitations: [], proposedActions: [],
+          primaryActions: [], moreActions: [], sources: [], cites: [],
+        } });
+      });
+      await page.waitForTimeout(200);
+      const afterNew = await page.evaluate(() => ({
+        state: document.querySelectorAll('.iq-act-voice')[0].getAttribute('data-voice-state'),
+        said: document.querySelectorAll('.iq-msg-acts .iq-act-said')[0].textContent,
+        cancels: window.__iqSpeech.cancels,
+        live: !!window.IQVoiceOut.speaking(),
+      }));
+      ok('VOB-D3 the row that was reading is told a newer reply took over, rather than left announcing that it is still going',
+        afterNew.state === 'interrupted' && /newer reply took over/i.test(afterNew.said));
+      ok('VOB-D3b …and the ENGINE was actually cancelled, so the old answer is not still audible over the new one',
+        afterNew.cancels > cancelsBefore && afterNew.live === false);
     }
 
     console.log('\n  E — UNSUPPORTED: NO BUTTON AT ALL, AND THE REASON IN ITS PLACE');
