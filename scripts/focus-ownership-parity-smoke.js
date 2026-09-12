@@ -32,6 +32,11 @@ const post = async (code, route, body) => {
   const r = await fetch(base + route, { method: 'POST', headers: { authorization: `Bearer ${token(code)}`, 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
   return { status: r.status, json: await r.json() };
 };
+const as = async (code, user, route, method = 'GET', body = null) => {
+  const r = await fetch(base + route, { method, headers: { authorization: `Bearer ${S.issueToken(user, code, 'member')}`, 'content-type': 'application/json' },
+    ...(body ? { body: JSON.stringify(body) } : {}) });
+  return { status: r.status, json: await r.json() };
+};
 const propose = (code, type, text, about, args, conversationId) => post(code, '/api/assistant/turn', {
   text, about, surface: about?.kind || 'home', conversationId, requestedAction: { type, arguments: args || {} },
 });
@@ -122,6 +127,36 @@ const sideEffects = (code, focus) => ({
     const strictUpdate = S._updatePersonalFocus('focus-group-composer', 'owner', gcf.id, { participantIds: ['outsider'] }, { strictAudience: true });
     ok('FP10b a strict non-contact audience is refused without expanding Focus visibility', !strictNonContact.ok && strictNonContact.status === 403
       && !strictUpdate.ok && JSON.stringify(comparable(gcf)) === JSON.stringify(beforeStrict));
+
+    /* A real audience read, not just a stored participants array. The contact may be removed
+       after invitation; the object and its private source must not follow them. */
+    const namedConversation = await post('focus-group-direct', '/api/assistant/turn', { text: 'Private source context' });
+    const named = await post('focus-group-direct', '/api/me/focus', { text: 'A goal with exactly one invitee',
+      participants: ['peer'], sourceConversationId: namedConversation.json.conversationId });
+    const focusId = named.json?.focus?.id;
+    const peerBefore = await as('focus-group-direct', 'peer', `/api/objects/focus/${focusId}/thread`);
+    const outsiderBefore = await as('focus-group-direct', 'outsider', `/api/objects/focus/${focusId}/thread`);
+    const sourceRefused = await as('focus-group-direct', 'peer', `/api/me/focus/${focusId}/source`);
+    const sourceOwned = await as('focus-group-direct', 'owner', `/api/me/focus/${focusId}/source`);
+    ok('FP13 a selected contact can read only the invited Focus, not its source conversation; an outsider cannot read either',
+      named.status === 200 && named.json?.focus?.visibility === 'invited' &&
+      peerBefore.status === 200 && outsiderBefore.status === 404 && sourceRefused.status === 404 && sourceOwned.status === 200);
+    const mistaken = await as('focus-group-direct', 'owner', '/api/me/focus', 'POST',
+      { text: 'A different goal', participants: ['outsider'] });
+    ok('FP14 direct creation refuses unknown recipients instead of silently dropping them and claiming success',
+      mistaken.status === 403 && !S._getMemory('focus-group-direct', 'owner').focuses.some(f => f.text === 'A different goal'));
+    const differentAudience = await post('focus-group-direct', '/api/me/focus',
+      { text: 'A goal with exactly one invitee' });
+    ok('FP15 retrying the same text with another audience cannot report an invitation or change who sees the existing Focus',
+      differentAudience.status === 409 && focusState('focus-group-direct', focusId)?.participants?.includes('peer'));
+    S.orgNodes['focus-group-direct'].g.memberIds = ['owner'];
+    S.orgUsers['focus-group-direct'].peer.assignedNodeIds = ['h'];
+    const peerAfter = await as('focus-group-direct', 'peer', `/api/objects/focus/${focusId}/thread`);
+    const peerForumAfter = await as('focus-group-direct', 'peer', `/api/forum/focus/${focusId}`);
+    const ownerForumAfter = await as('focus-group-direct', 'owner', `/api/forum/focus/${focusId}`);
+    ok('FP16 leaving the shared contact scope revokes both object and Forum access; owner no longer sees a phantom recipient',
+      peerAfter.status === 404 && peerForumAfter.status === 404 && ownerForumAfter.status === 400 &&
+      (await as('focus-group-direct', 'owner', `/api/objects/focus/${focusId}/thread`)).status === 200);
 
     const serverSource = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
     const directCreateBody = serverSource.slice(serverSource.indexOf("app.post('/api/me/focus'"), serverSource.indexOf("/* GET /api/me/focus/:id/source"));
