@@ -237,9 +237,14 @@ function buildContext({
       }
       for (const gap of (lp.open || [])) L.push(`  - OPEN: ${gap}`);
     }
-    L.push('If they ask whether it helped or whether they are closer, describe what was recorded and');
-    L.push('what has been observed since. Do not say what will happen, and do not turn a sequence');
-    L.push('into a cause.');
+    if (lp && (lp.open || []).includes('post-outcome evidence cannot yet be described at this group level')) {
+      L.push('If they ask whether it helped, do not infer or reveal a post-outcome count,');
+      L.push('trend, signal reference or change below the group privacy floor.');
+    } else {
+      L.push('If they ask whether it helped or whether they are closer, describe what was recorded and');
+      L.push('what has been observed since. Do not say what will happen, and do not turn a sequence');
+      L.push('into a cause.');
+    }
     L.push('');
   }
 
