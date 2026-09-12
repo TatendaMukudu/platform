@@ -197,8 +197,9 @@ async function untilReady() {
       post('/api/auth/create-user', { firstName: 'Conc', lastName: 'One', email: E1, role: 'member', password: 'a-long-enough-password' }, tok),
       post2('/api/auth/create-user', { firstName: 'Conc', lastName: 'Two', email: E2, role: 'member', password: 'a-long-enough-password' }, tok),
     ]);
-    ok('DR-F1 both processes accepted the request they were given — the CAS is about the WRITE, not about refusing callers',
-      w1.status === 200 && w2.status === 200);
+    ok('DR-F1 every caller gets an honest result: durable 200 or recoverable conflict, never a silent acknowledged loss',
+      [w1, w2].every(w => w.status === 200 || w.status === 409 || w.status === 503)
+      && [w1, w2].some(w => w.status === 200));
     // Let both save cycles land and any conflict resolve through a reload.
     await new Promise(r => setTimeout(r, 4000));
     await stop(second.child);
@@ -211,8 +212,14 @@ async function untilReady() {
       after.status === 200 && /Head Coach/.test(tree) && /Alex Mbeki/.test(tree));
     const survived = [/Conc One/.test(tree), /Conc Two/.test(tree)].filter(Boolean).length;
     console.log(`      (of the two concurrent writes, ${survived} survived the restart)`);
-    ok('DR-F3 …and at least one of the two concurrent writes is durable, so a conflict costs an update rather than everything',
-      survived >= 1);
+    ok('DR-F3 EVERY 200-acknowledged account survives the restart — a successful onboarding cannot disappear',
+      survived >= 1 && (w1.status !== 200 || /Conc One/.test(tree))
+      && (w2.status !== 200 || /Conc Two/.test(tree)));
+    const login1 = w1.status === 200 ? await post('/api/auth/login', { email: E1, password: 'a-long-enough-password' }) : null;
+    const login2 = w2.status === 200 ? await post('/api/auth/login', { email: E2, password: 'a-long-enough-password' }) : null;
+    ok('DR-F3b every 200-acknowledged email index and password survive as a real login',
+      (!login1 || (login1.status === 200 && !!login1.j?.token))
+      && (!login2 || (login2.status === 200 && !!login2.j?.token)));
     ok('DR-F4 …and nothing PARTIAL survived: every account in the tree has an id, a name and a role',
       (() => {
         const rows = (after.j && (after.j.tree || after.j.users)) || [];

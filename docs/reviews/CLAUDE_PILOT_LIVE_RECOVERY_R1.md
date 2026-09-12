@@ -1,5 +1,8 @@
 # Pilot live recovery — round 1
 
+> **Independent Codex gate, 2026-09-12 (draft PR #90): SAFE TO MERGE: NO.**
+> The Round 6 summary below is a historical claim, not a current independent sign-off. Acknowledged onboarding writes can still be lost: `server.js` responds 200 before a durable save, while the opt-in two-process `scripts/durable-restart-check.js` previously accepted one survivor of two 200s. The guard has now been strengthened, but no live PostgreSQL/Neon/Render restart has been rerun. Cloud corrective work on claim binding, cohort privacy, Forum sharing, voice identity and attachment context is in draft PR #90; exact-head CI and rendered controls require confirmation. Actual iPhone speech and live provider remain unverified. The founder phone/restart script is a required retest, not a substitute for closing code blockers.
+
 **Starting SHA:** `84d2c6afe073d99c65317aa0fc62b3e47c4c7448` (`main`, PR #88 merged)
 **Branch:** `claude/pilot-live-recovery-r1`
 **Round 1 final SHA:** `0b72b87b1792947ac0a6568f24bcaaa00272f343`
