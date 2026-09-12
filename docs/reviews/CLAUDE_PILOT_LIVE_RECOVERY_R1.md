@@ -1464,3 +1464,247 @@ PILOT OPERATIONS BLOCKERS: 3
 GITHUB CI ON EXACT HEAD: PASS
 SAFE TO MERGE: NO
 READY FOR FINAL FOUNDER PHONE/RESTART RETEST: NO
+
+---
+
+# Round 5 — merge-readiness: the dead capabilities driven, voice finished, and the first real database
+
+**Round 5 starting SHA:** `8f0b9c6`
+**Branch:** `claude/pilot-live-recovery-r1` · **PR #89 — open, not merged.**
+
+Round 4 *corrected* three dead capabilities and *drove* none of them. A fix with no test that bites
+is a fix waiting to be undone — and it was the absence of a driving test that let all three die
+unnoticed in the first place. This round drives them, finishes voice output, and runs the product
+against a real database for the first time in its history.
+
+`npm test` **GREEN** — 252 registered suites. Nine browser suites, **409 assertions**, all green.
+Working tree byte-identical before and after the run. `git diff --check` clean.
+**Seventeen mutations** applied; sixteen red, and the seventeenth is recorded below rather than
+counted as a pass.
+
+---
+
+## 1 · The three dead capabilities, driven
+
+### `_crossEvidenceContext` · **CONFIRMED**
+
+| | |
+|---|---|
+| **Production entry point** | `POST /api/assistant/turn`, bound to an object |
+| **Canonical owner** | `_crossEvidenceContext` → `ai/cross-evidence.js` |
+| **Reproduction** | `ai.complete` replaced with a capture; the real turn runs; every assertion is about the string the model was handed. |
+| **Registered test** | `cross-evidence-context-http-smoke` (21, new) |
+| **Mutations** | M80 the old `_turnAbout` read · M81 the `connections:` line · M82 the outcome · M84 the authorised set — **all red** |
+
+Driven: the relationship named correctly (*"this was started to work on an inquiry: Recovery
+between fixtures"*), the outcome the person recorded, what has arrived **since** as a count, and the
+causal refusal in the same block as the data. Half the file is what must *not* be there — no private
+sentence, no unrelated object of the reader's own, none of another person's, no other tenant, nobody
+else named.
+
+**A second defect under the first.** `focus.outcome` is a record — `{result, note, by, at}` — and
+`ai/cross-evidence.js` read `raw.outcome || null` and clipped it to twenty characters, so the model
+was handed **"the person recorded the outcome of this focus as: `[object Object]`"**. The field was
+present, the sentence was well formed, and the only thing wrong with it was that it said nothing.
+
+**Mutation M83 survived, and the suite now says why.** Removing `if (!self) return null` changed
+nothing any assertion could see, because that check is not the gate: every edge is derived over
+`_allObjectsFor(code, userId)`, the reader's *own* authorised set, so another person's object has no
+edges to find. M84 mutates the authorised set instead and CE-D1 goes red. A reader of that file
+should know which line is load-bearing.
+
+### `_forumContext` · **CONFIRMED**, all four kinds
+
+| | |
+|---|---|
+| **Production entry points** | `POST /api/assistant/turn`; `/api/group/:nodeId/forum/:inquiryId`; `/api/forum/:kind/:objectId` |
+| **Registered test** | `forum-context-http-smoke` (46, new) |
+| **Mutations** | M90 the reader · M91 the room key · M92 the caller · M93 the membership re-check — **all red** |
+
+A group **High**, a group **Low**, the lead **Inquiry** and a group **Focus**, each with a
+distinctive sentence posted into its own room through the routes a person uses. Each turn carries
+its own room's words and none of the other three. A member removed from the node is handed nothing
+**on the very next turn**, and it returns when they do. Another tenant fails closed at the object.
+
+**An empty room is not a failed read**: a room nobody has spoken in answers 200 with no messages, a
+room that does not exist answers with an error, and a room somebody may not read is refused rather
+than returned empty.
+
+**Twelve members, five contributors**, and the numbers are the point — the cohort floor is
+**two-sided**, so a squad of six can never surface a High at all and every assertion about one would
+pass against a permanently refusing surface. My first fixture was exactly that.
+
+### The Forum indicator · **CONFIRMED**, and it found a third disagreement
+
+| | |
+|---|---|
+| **Production entry point** | `GET /api/objects?kind=…&scope=…` — the projection the cards are built from |
+| **Registered tests** | `forum-context-http-smoke` §F; `forum-audience-smoke` §K; `group-loop-browser-check` §I (browser) |
+| **Mutations** | M94 the node read off the scope · M95 the projection dropping availability — **both red** |
+
+Driving the projection found that a group High, Low or Inquiry reported `forumAvailable: false` on
+the **list** while its own **screen** reported true: `ai/team-state.js`'s projection carries neither
+a `nodeId` nor a group `subjectRef`, and the thread route was injecting the node from its scope
+while the list route was not. Every bucket item carries `scope`, so the **owner** reads it and no
+caller has to remember to inject anything.
+
+The browser guard **fails if the card list is empty**, because every negative assertion below it is
+satisfied for free by an empty screen — which is how the last browser hole passed. A squad object
+carries the indicator as an inline SVG with an accessible name; the coach's own personal focus
+carries none; the literal word "Forum" is nowhere on the cards. The room's own `<h1>` heading stays:
+it is a heading, not a control.
+
+---
+
+## 2 · Voice output · **COMPLETE IN CODE, UNHEARD ON ANY DEVICE**
+
+| | |
+|---|---|
+| **Canonical owner** | **`js/voice-output.js` (`window.IQVoiceOut`)** — new |
+| **Registered test** | `voice-input-smoke` (74 → 83), loading the module rather than slicing app.js |
+| **Browser test** | `voice-output-browser-check` (16, new) — five states by tapping a real button at 390px |
+| **Mutations** | M100 interrupt · M101 the unsupported branch · M102 the swallowed throw · M103 `onerror` · M104 `stop`'s announcement — **all red** |
+
+The state machine lived inside `js/app.js`, beside the row that renders the button — which is how it
+came to *compose* the spoken sentence in the first place. Moving it out removes the place where a
+second author for one answer can grow back. `app.js` now holds no `SpeechSynthesisUtterance`, no
+state table and no handler.
+
+**The law that makes the rest true, now asserted:** the owner never *reads* text out of the page —
+no `innerText`, no `textContent` read, no `querySelector` for a message. The only thing it writes
+into the page is a **state**, into the live region the row already carries.
+
+**A new answer now stops the old one.** Asking a second question while the first reply was still
+being spoken left the old answer finishing over the new one on screen. And the Settings row
+"Reading replies aloud" now asks `IQVoiceOut.isSupported()` instead of testing the globals itself —
+a second implementation of a question the owner already answers.
+
+**Two things the browser found that the hermetic layer could not.** `window.speechSynthesis = {…}`
+fails **silently** in Chromium (it is a read-only accessor), so my first stub left the native engine
+in place and I read the resulting throw as a product defect. And **mutation M102 survived the
+hermetic suite** — making the catch swallow a synchronous engine refusal — because the stub never
+threw. That is the VM5 lesson exactly: a law defended in one place travels only as far as that place
+gets run. V28c/V28d drive it hermetically now.
+
+**PARTIAL for the founder's purposes, and it is the only thing keeping this item from DONE:**
+reading aloud has still never been **heard**, on iOS or anywhere else.
+
+---
+
+## 3 · Live verification — what was run, and what could not be
+
+The instruction was explicit: *do not convert a simulated Chromium result into live verification*,
+and *state exactly which item is missing*. Here is the state of this container, checked rather than
+assumed:
+
+```
+DATABASE_URL       absent          RENDER_API_KEY   absent
+ANTHROPIC_API_KEY  absent          RENDER_SERVICE_ID absent
+OPENAI_API_KEY     absent          a real iPhone    not attachable to a container
+curl https://intelliq-platform.onrender.com/api/health  →  egress denied by the proxy (403)
+```
+
+| Founder's item | Status | Missing |
+|---|---|---|
+| **A · Build and deployment** | **NOT RUN** | Render credentials and a reachable deployed instance. Nothing here says anything about the deployed commit, the browser-loaded asset stamp against a live server, or a stale service worker. |
+| **B · Neon persistence** | **PARTIAL — real PostgreSQL, not Neon** | A Neon `DATABASE_URL`. See below. |
+| **C · Provider and composer** | **PARTIAL** | A provider key. The *unavailable* and *deterministic-only* behaviours were driven; a real provider responding was not. |
+| **D · Real pilot flows** | **PARTIAL** | A deployed instance and a human. The account chain was driven on real persistence; the conversational and Forum flows were driven only against in-memory instances. |
+| **E · Real device** | **NOT RUN** | An actual iPhone. Chromium at 390×844 is not iOS Safari, and no assertion in this repository claims otherwise. |
+
+### What *was* run: a real PostgreSQL 16, and it found a production defect
+
+`scripts/durable-restart-check.js` (**32 assertions**, opt-in, needs `DATABASE_URL`) starts the
+**real server as a child process** against a **real PostgreSQL 16**, creates an organisation and
+accounts through the ordinary routes, **kills the process**, boots a second one against the same
+database, and looks for all of it.
+
+> **Ran:** `DATABASE_URL=postgres://postgres@127.0.0.1:5432/intelliq node scripts/durable-restart-check.js`
+> — PostgreSQL 16.13 in this container, SSL enabled with a self-signed certificate because
+> `db.js` requires SSL. **32 passed, 0 failed.**
+
+**THE DEFECT.** Every suite in this repository runs `DB_OPTIONAL=1`, whose load goes through
+`_loadAllStores` — which set `_storesLoadedAt`. The **authoritative split path**, the one every real
+deployment takes the moment it has saved anything, calls `_applyUnits` and never set it. So a
+completely healthy instance, serving every request correctly, reported **`storesLoaded: false` and
+`ready: false` forever**. Nothing failed; the product worked and told its operator it was not ready,
+which is a readiness probe nobody can believe and therefore a readiness probe nobody reads. There is
+one `_markStoresLoaded()` now and both load paths call it. Mutation **M110** removes the split call
+and goes red in both layers.
+
+**A real concurrent CAS conflict**, which a single process can never produce because its writes are
+serialised: two processes, one database, one durable unit, two simultaneous account creations. Both
+callers were accepted — the CAS is about the *write* — and after a restart **one of the two
+survived**. That is a lost update, not a torn one: the org is whole, every account has an id, a name
+and a role, and no password hash leaves the tree.
+
+**Pilot onboarding on real persistence, across a restart:** a leader issues an invite, the service is
+**restarted**, the invite is still activatable, the new account signs in to the right organisation
+with the role the invite carried, a member cannot reach an administrative write, and they can sign in
+again from scratch. **No secrets** in any payload or in the service log.
+
+**What this is not, and the distinction is not a technicality.** A local PostgreSQL in the same
+container has no network partition, no connection ceiling, no cold start, no pooler and no
+managed-service failure modes. It is **not Neon** and **not Render**, and it says nothing about the
+deployed build or the pilot instance.
+
+---
+
+## 4 · Operations findings for the founder
+
+1. **Two instances writing the same organisation at once can lose an account creation.** Observed,
+   not inferred: one of two concurrent creations survived. This matters on a rolling deploy or a
+   second dyno. The data stays coherent; an update is lost. **Founder/operator decision:** run one
+   instance for the pilot, or accept the loss window.
+2. **The action row's tap target is 36px**, not the 44px this product uses for primary controls —
+   the whole row (copy, useful, not useful, read aloud) has always been 36. The voice control is
+   asserted to be *no smaller than its siblings*; changing the row is a product decision about that
+   row, and it is recorded here rather than silently normalised by a test written to match it.
+3. **`db.js` requires SSL unconditionally.** Correct for Neon; it means a self-hosted PostgreSQL
+   without TLS cannot be used at all. Noted, not changed.
+
+---
+
+## 5 · Commands run, round 5
+
+```
+npm test                                          GREEN, 252 registered suites
+git diff --check                                  clean
+md5sum $(git ls-files) | md5sum                   identical before and after npm test
+node scripts/<nine browser suites>.js             409 assertions, 0 failed
+DATABASE_URL=… node scripts/durable-restart-check.js   32 assertions, 0 failed (real PostgreSQL 16)
+17 mutations, stdout AND stderr read              16 red; M83 recorded, not counted
+```
+
+---
+
+## 6 · Why this still says NO
+
+The merge gate the founder set has five conditions. Three are met and two are not:
+
+| Condition | Met? |
+|---|---|
+| The three dead capabilities behaviourally proven | **YES** — driven through production paths, mutations red |
+| Voice output complete, or explicitly deferred by the founder | **CODE COMPLETE, NOT HEARD.** Needs the founder's acceptance, which is not mine to give |
+| Live Neon / restart / deployment checks pass | **NO** — no Neon, no Render. A real PostgreSQL is not the same claim |
+| Real pilot onboarding works | **PARTIAL** — the account chain, on real persistence, with no browser and no device |
+| No pilot code or operations blocker remains | **NO** — three operations blockers stand, all credential-shaped |
+
+---
+
+FOUNDER OBSERVATIONS DISPOSITIONED: 21/31
+DEAD CAPABILITY 1 — CROSS-EVIDENCE CONTEXT: CONFIRMED (driven, 4 mutations red)
+DEAD CAPABILITY 2 — FORUM CONTEXT, ALL FOUR KINDS: CONFIRMED (driven, 4 mutations red)
+DEAD CAPABILITY 3 — FORUM INDICATOR ON THE CARD: CONFIRMED (driven, 2 mutations red, browser guard)
+VOICE OUTPUT: CODE COMPLETE — ONE OWNER, 5 MUTATIONS RED — NEVER HEARD ON A DEVICE
+DURABLE PERSISTENCE: PARTIAL — REAL POSTGRESQL, NOT NEON (32 assertions, 1 production defect fixed)
+BUILD AND DEPLOYMENT: NOT RUN — NO RENDER CREDENTIALS, NO REACHABLE INSTANCE
+PROVIDER RESPONDING: NOT RUN — NO PROVIDER KEY
+REAL DEVICE: NOT RUN — NO IPHONE
+DEFECTS FOUND THIS ROUND: 4 (outcome as [object Object]; card/screen availability disagreement; storesLoaded never set on the authoritative path; a new answer not stopping the old utterance)
+MUTATIONS THIS ROUND: 17 applied, 16 red, 1 recorded as a non-gate
+PILOT CODE BLOCKERS: 0
+PILOT OPERATIONS BLOCKERS: 3
+GITHUB CI ON EXACT HEAD: PENDING
+SAFE TO MERGE: NO
+READY FOR FINAL FOUNDER PHONE/RESTART RETEST: NO

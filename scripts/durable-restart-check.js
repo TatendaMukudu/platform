@@ -44,12 +44,12 @@ const PORT = 8100 + Math.floor(Math.random() * 500);
 const BASE = `http://127.0.0.1:${PORT}`;
 const ORG = { orgName: `Durable Check ${Date.now()}`, orgMode: 'sports' };
 
-function boot(label, port) {
+function boot(label, port, envExtra) {
   const p = port || PORT;
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
       env: { ...process.env, PORT: String(p), DATABASE_URL: DB, PERSISTENCE_MODE: 'split',
-        NODE_ENV: 'production', DB_OPTIONAL: '', IQ_COMPOSER: '' },
+        NODE_ENV: 'production', DB_OPTIONAL: '', IQ_COMPOSER: '', ...(envExtra || {}) },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '';
@@ -223,6 +223,84 @@ async function untilReady() {
       })());
     ok('DR-F5 …and no account carries a password hash out of the tree, which a half-written row would be the likeliest way to leak',
       !/passwordHash/.test(tree));
+
+    /* ══ G — PILOT ONBOARDING, THROUGH THE DURABLE PATH, ACROSS A RESTART ══════════════════
+       The chain a real pilot starts with: a leader invites somebody, that person activates an
+       account, signs in, and gets exactly the permissions their role carries. Every one of those
+       steps writes to a durable unit, and none of them has ever been exercised against a database
+       — invites in particular live in their own store, so "the invite survived a restart" is a
+       claim nothing had made.
+
+       It is NOT the whole of the founder's pilot list: no browser, no real device, no deployed
+       build, no provider. It is the account chain, on real persistence. */
+    console.log('\n  G — PILOT ONBOARDING, ON REAL PERSISTENCE, ACROSS A RESTART');
+    const inv = await post('/api/auth/invite', { role: 'member', label: 'First squad' }, tok);
+    ok('DR-G1 a leader can issue an invite',
+      inv.status === 200 && !!(inv.j && (inv.j.token || inv.j.inviteToken || inv.j.link)));
+    const inviteToken = (inv.j && (inv.j.token || inv.j.inviteToken))
+      || String((inv.j && inv.j.link) || '').split('=').pop();
+
+    /* THE RESTART GOES HERE, BETWEEN ISSUING AND ACTIVATING. That is the real shape: an invite is
+       sent on Monday and opened on Wednesday, and the service has restarted in between. */
+    await stop(b.child);
+    b = await boot('fourth boot');
+    await untilReady();
+
+    const joinEmail = `joiner.${Date.now()}@durable.test`;
+    const join = await post('/api/auth/join-invite', {
+      token: inviteToken, firstName: 'New', lastName: 'Joiner', email: joinEmail, password: 'a-long-enough-password',
+    });
+    ok('DR-G2 THE INVITE SURVIVED THE RESTART — it can still be activated afterwards',
+      join.status === 200 && !!(join.j && join.j.token));
+    const joinTok = join.j && join.j.token;
+    const joinMe = await get('/api/auth/me', joinTok);
+    ok('DR-G3 …and the new account signs in to the RIGHT organisation with the role the invite carried',
+      joinMe.status === 200 && joinMe.j.user && joinMe.j.user.role === 'member'
+      && joinMe.j.org && joinMe.j.org.orgName === ORG.orgName);
+    ok('DR-G4 …with a member\'s permissions and not a leader\'s',
+      joinMe.j.permissions && joinMe.j.permissions.edit_members !== true);
+    ok('DR-G5 …and a member cannot reach an administrative write, which is the gate the UI only decorates',
+      (await post('/api/auth/invite', { role: 'member' }, joinTok)).status === 403);
+
+    const login = await post('/api/auth/login', { email: joinEmail, password: 'a-long-enough-password' });
+    ok('DR-G6 …and they can sign in again from scratch, so the password reached the durable store',
+      login.status === 200 && !!(login.j && login.j.token));
+
+    /* ══ H — AND NOTHING SECRET IS IN WHAT ANYBODY IS HANDED ═══════════════════════════════ */
+    console.log('\n  H — NO SECRETS IN THE RESPONSES OR THE LOG');
+    const hFinal = await get('/api/health');
+    const payloads = JSON.stringify([hFinal.j, joinMe.j, (await get('/api/auth/org-tree', tok)).j]);
+    ok('DR-H1 no password hash, no session token store and no connection string in any payload',
+      !/passwordHash/.test(payloads) && !/\$2[aby]\$/.test(payloads)
+      && !/postgres:\/\//.test(payloads) && !/sslmode/.test(payloads));
+    /* THE REASON IS THE FIRST TRUE ONE, IN ORDER, and on this host that is the HOST FLAG rather
+       than the missing key — a flag that is off makes the key irrelevant, so saying "no key"
+       would send an operator to the wrong dashboard. Both branches are driven: this process runs
+       with IQ_COMPOSER unset, and the one below runs with it set and no key. */
+    ok('DR-H2 the health payload reports the composer as ineffective, with the FIRST reason in order',
+      hFinal.j.composer && hFinal.j.composer.effective === false
+      && /IQ_COMPOSER is not set to 1/i.test(hFinal.j.composer.why || ''));
+    ok('DR-H2b …and never names or echoes a key, only whether one is configured',
+      hFinal.j.composer.providerKey === false
+      && !/sk-|api[_-]?key|ANTHROPIC|OPENAI/i.test(JSON.stringify(hFinal.j.composer)));
+    {
+      /* THE UNAVAILABLE-PROVIDER CASE, with the flag ON and no key — the state a pilot host is in
+         the moment somebody sets the flag and forgets the secret. */
+      const withFlag = await boot('composer on, no key', PORT + 2, { IQ_COMPOSER: '1' });
+      const hf = await fetch(`http://127.0.0.1:${PORT + 2}/api/health`).then(r => r.json()).catch(() => null);
+      ok('DR-H2c with the composer switched ON and NO key, the reason moves to the key rather than staying on the flag',
+        !!hf && hf.composer && hf.composer.effective === false && hf.composer.on === true
+        && /no language-model key is configured/i.test(hf.composer.why || ''));
+      ok('DR-H2d …and `writes` says the same thing as `effective`, so the two cannot disagree in one payload',
+        !!hf && /off —/.test(hf.composer.writes || '') && hf.composer.effective === false);
+      await stop(withFlag.child);
+    }
+    ok('DR-H3 …and the build identity is a short commit, never a full opaque string that reads like a secret',
+      hFinal.j.build && typeof hFinal.j.build.commit === 'string' && hFinal.j.build.commit.length <= 8
+      && hFinal.j.build.commitFull === undefined);
+    const serverLog = b.log();
+    ok('DR-H4 the service log carries no connection string and no bcrypt hash',
+      !/postgres:\/\/[^\s]*:[^\s]*@/.test(serverLog) && !/\$2[aby]\$/.test(serverLog));
 
     console.log('\n  E — WHAT THIS RUN DOES NOT SAY');
     console.log('      It is a local PostgreSQL in this container: no network partition, no pooler,');
