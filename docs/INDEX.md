@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `31da6e7`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `a270a9b`. **Branch:** `claude/platform-work-summary-nmb0cm`.
 **Pilot work lands through** `claude/pilot-*` branches; §10 records what has merged since `f844c3a`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
@@ -349,7 +349,7 @@ who had real evidence in the system. Guard: `highs-lows-smoke`.
 
 ## 10 · September 10-11, 2026 — the pilot passes
 
-Forty commits between `f844c3a` and `31da6e7`, in five rounds. The class that links them is the
+Forty-seven commits between `f844c3a` and `a270a9b`, in six rounds. The class that links them is the
 one §8 named and this index exists to stop an agent rediscovering: **the suite was green and the
 person holding the phone was not getting it.**
 
@@ -390,6 +390,26 @@ is the half of it worth reading.
 | An attached file's class is earned, not asserted: permission, provenance, confirmation | `ai/material.js` `classifyRequest` |
 | Settings is three tiers with three audiences, and a tier you may not use is absent rather than greyed out | `SETTINGS_TAB_ACCESS` / `_maySeeSettingsTab` |
 | External reading is scoped to the object it was asked from, and a focus with no concept refuses | reading route + `_objectBucket` |
+
+**Round 4 — the independent gate's eight items, and three DEAD CAPABILITIES.** The gate accepted
+eight of round 3's claims and returned seven items, with an objection worth keeping: *a verifier
+nothing calls on the way to a screen is a verifier that will be correct about an answer nobody was
+shown.* Acting on it found three things that were reported PASS and were not happening at all:
+
+| Dead capability | Why nothing failed |
+|---|---|
+| `_forumContext` returned null on **every** call | it parsed `_turnAbout(about)` and read `a.kind`; `_turnAbout` returns `{headline, body}` |
+| `_crossEvidenceContext` returned null on **every** call | the same line, in the function beside it |
+| the card's Forum indicator could never be true | it read fields the objects projection strips |
+
+Also in round 4: `manifest.approve()` as a **runtime** gate over every channel an answer leaves by,
+with the spoken rendering composed on the server (it had been assembled in the browser); the member
+half of the A→B loop driven from the personal composer rather than from a seeded candidate, which
+found that a candidate's label was the raw canonical key (`football.press_shape`) because the intake
+contract never asks for one; a third file-accept list on the composer's paperclip that offered four
+formats guaranteed to fail and omitted the two the capability exists for; `durableStore` reporting
+TRUE in memory-only mode; and the universality claim in AGENTS.md law 9 finally checked — four
+domains, byte-identical evidence, byte-identical epistemic answer.
 
 **Three rounds, and the class did not change.** Round 3's worst finding was not a wrong rule but a
 correct one drawn into `display:none`: `#me-group` carried a `hidden` attribute nothing ever

@@ -1190,3 +1190,266 @@ PILOT OPERATIONS BLOCKERS: 3
 GITHUB CI ON EXACT HEAD: PASS
 SAFE TO MERGE: NO
 READY FOR FINAL FOUNDER PHONE/RESTART RETEST: NO
+
+---
+
+# Round 4 — the independent gate's eight items
+
+**Round 4 starting SHA:** `c7fb104`
+**Branch:** `claude/pilot-live-recovery-r1` · **PR #89 — open, not merged.**
+
+The independent gate accepted eight of round 3's claims and refused the rest, with a specific and
+correct objection: *a verifier nothing calls on the way to a screen is a verifier that will be
+correct about an answer nobody was shown.* Seven items were returned for independent disposition.
+
+`npm test` **GREEN** — 250 registered suites. Eight browser suites, **387 assertions**, all green.
+Working tree byte-identical before and after the run. `git diff --check` clean.
+
+**Twenty-eight mutations** applied to the production line, all ending red. Three of them
+(**M1, M5, M7**) survive every behavioural assertion and are red only on a structural one; that is
+stated where it is true rather than blurred, and the reason is given below. Two (**M41, M42**)
+first *crashed* the suite rather than failing it — PROTOCOL lie #8, in my own harness — and the
+harness was fixed so a missing handler now produces a FAIL naming the actual defect.
+
+## Three dead capabilities, all previously reported PASS
+
+The round-3 report said the Forum-informs-this-object rule worked and that the composer was handed
+its cross-evidence connections. Both were false, and I had read that code twice.
+
+| What | Where | Why nothing failed |
+|---|---|---|
+| `_forumContext` returned null on **every** call | `server.js` | It parsed `_turnAbout(about)` and read `a.kind`. `_turnAbout` returns `{headline, body}` — it has never returned a kind. |
+| `_crossEvidenceContext` returned null on **every** call | `server.js` | The same line, the same mistake, in the function beside it. |
+| The card's Forum indicator could never be true | `js/app.js` | It read `item.shared` and `item.participants`; the objects projection strips `raw` and never sets `shared`. |
+
+A reader that returns null is indistinguishable from "there was nothing to add". That is the third
+time this engagement has found a correct mechanism with no door, and the first two were found the
+same way: by driving it rather than reading it.
+
+---
+
+## Item 1 — SHARED OUTPUT MANIFEST · **DONE (runtime)**
+
+| | |
+|---|---|
+| **Production entry points** | `POST /api/assistant/turn`; `GET /api/objects/:kind/:id/thread`; `GET /api/objects/:kind/:id/chart` |
+| **Canonical owner** | `ai/manifest.js` — `manifest()`, `approve()`; `_speechFor` and `_objectManifest` in `server.js` |
+| **Reproduction** | Drove all three routes and read every channel off the wire (`output-channels-http-smoke`). |
+| **Registered tests** | `output-manifest-smoke` (49 → 69), `output-channels-http-smoke` (26, new) |
+| **Mutations** | M1–M11, all red |
+| **Verdict** | **CONFIRMED** for prose, citations, voice and the object card+graph. |
+
+`approve()` is the runtime gate: every channel an answer leaves by, checked against one manifest in
+one place, plus agreement between them **by claim id** — the channels are meant to read
+differently, so comparing their words would pass everything or fail everything, while comparing
+what they rest on asks the question that matters. It returns the approved result or a refusal,
+never a partly approved answer, because a caller handed "the prose was fine" ships the prose.
+
+**The spoken channel moved to the server.** It was assembled in the browser from the message text
+plus a source count the browser counted itself — a second author for one answer, on the one channel
+nothing verified. `_speechFor` composes it once, beside the prose, in an order that is the point:
+the answer, then what it cannot show, then what it rests on, because a listener cannot skim back.
+
+**Four laws added, each from a hole the wiring found.** L-MF6's second direction (an external claim
+whose approved source is *not shown* is refused — nothing on screen distinguishes an answer resting
+on a page you were given from one resting on a page you were not). **L-MF7**, a graph may not
+outrun its sentence: the points being individually approved does not approve the *line*, so the
+movement is a claim named on the series and derived from the record's own dated facts rather than
+from the builder that drew the picture. **L-MF8**, one answer, every door, one call. And voice now
+loses the **limitations** as well as the uncertainty.
+
+Two more found by running it: `sources` was not in the countable vocabulary, so "this rests on N
+sources" — a count about this organisation's record — went unchecked; and an empty moments list read
+as "no constraint", the fail-**open** shape AGENTS.md invariant 7 forbids.
+
+**What is honest about M1/M5/M7.** Dropping the voice channel from the composer's `approve` call
+(M1), the chart route's gate (M5), and the thread route's card channel (M7) each survive every
+behavioural assertion in this repository, because **no live fixture can make those channels
+violate**: the spoken rendering is derived from the approved prose by appending approved material,
+and every plotted moment comes from a record fact. They are gates against the next change to
+`_speechFor` or to a chart builder, and ai/manifest.js is driven against exactly those cases at the
+module. Their presence is pinned structurally and their behaviour at the module; the report says
+which is which rather than claiming behavioural coverage it does not have.
+
+**Counterexample the brief names, driven:** prose correct while the voice is still reading the
+*previous* answer — each channel verifying alone, the answer refused anyway (`OM-I7a`); and prose
+correct while the graph is overconfident, the same approved points drawn as a movement nobody
+claimed (`OM-I7b`).
+
+**Not done:** the card channel's claim approves its own figures, exactly as the belief claims do on
+the prose path — both are kernel-authored, so "the card invented a figure" is not a live risk the
+way it is for a model. What the manifest adds for the card is that its spoken rendering and its
+picture must agree with it.
+
+## Item 2 — HUMAN A→B LOOP, THE REAL MEMBER PATH · **CONFIRMED**
+
+| | |
+|---|---|
+| **Production entry point** | `POST /api/assistant/turn` → `_intakeTurn` → `_noteGroupCandidates` |
+| **Canonical owner** | `ai/contribution.js`; `/api/group/:nodeId/candidates`, `/contribute`, `/focus`, `/focus/:id/outcome` |
+| **Reproduction** | Nine-step walk from the personal composer to a closed group Focus. |
+| **Registered tests** | `member-contribution-http-smoke` (40, new); `group-loop-browser-check` (47, no seeded candidate) |
+| **Mutations** | M20 candidate wiring, M21 the explicit-contribution gate, M22 origins-as-contributors — all red |
+
+`ai.completeJSON` is the one seam, because that is where a model reads an utterance; the grounding,
+the scope classifier, the candidate store and every route after it are real. Driven: noticing
+without publishing; nobody else seeing it, leader included; a reference carrying its origin; one
+voice failing to open the inquiry; **two people relaying one origin refused as ECHO**; two
+independent origins opening it; no private sentence anywhere in the group projection; a Focus with
+`origin.from === 'inquiry'`; an outcome including the honest `unclear`; the closed focus kept and
+the loop reopening.
+
+**A defect the seeded fixture was hiding.** The intake contract never asks a model for a `label`
+(read `INTAKE_PROMPT`), so a candidate's label was always the raw canonical key — the member's only
+way into the group loop offered them **"football.press_shape"** to contribute. The seeded candidate
+carried a human sentence, which is exactly how a browser check stays green about a screen nobody
+could use.
+
+## Item 3 — OBJECT FORUMS AND PRIVACY · **CONFIRMED**, after three fixes
+
+| | |
+|---|---|
+| **Production entry points** | thread route; `/api/forum/:kind/:objectId`; `/api/group/:nodeId/forum/:inquiryId`; `POST /api/assistant/turn` |
+| **Canonical owner** | `_forumAudience` (availability) and `_forumContext` (one-way read) |
+| **Registered tests** | `forum-audience-smoke` (42 → 80) |
+| **Mutations** | M30–M33, all red |
+
+All four kinds now driven — a group High, Low, Inquiry and Focus on a three-person node; the same
+four on a **one-person** node; the same four personal — plus a kind that is not one of the four and
+an object with no kind at all, both failing closed. Cross-object, cross-tenant, and a member
+removed from the node getting nothing **on the very next read** and it coming back when they
+return. Speech is not evidence: posting reports `epistemicEffect: 'none'` and leaves the inquiry
+byte-for-byte unchanged; somebody else cannot offer your words; its author can, only through the
+same contribution boundary. `FA-L` drives the real turn and reads what the model was handed.
+
+The three fixes are the table at the top of this round. The icon decision is applied: the card's
+literal word "Forum" is now the same inline SVG as the control on the object's own screen, with its
+meaning carried accessibly and no tap target of its own.
+
+**Kept deliberately:** the `<h1>Forum</h1>` heading *inside* the room. The founder's instruction is
+about button text where the icon decision applies; a heading telling somebody which room they are
+in is not a control, and removing it would leave the page unlabelled.
+
+## Item 4 — VOICE · **PARTIAL**
+
+| | |
+|---|---|
+| **Canonical owners** | `js/voice.js` session registry (input); `_speechFor` + `MemberApp._speak` / `_voiceControl` (output) |
+| **Registered tests** | `voice-input-smoke` (60 → 74) — the production methods lifted out of `js/app.js` and **executed** against a stubbed `speechSynthesis` |
+| **Mutations** | M40 session guard, M41 speaking state, M42 error-after-start — all red |
+
+Input: V31 proved a late result after **cancel**, which was the working case. The founder's actual
+defect was `cancelAll` — what sign-out and every navigation call — and V31f–h now drive it.
+
+Output: states are `unsupported`, `starting`, `speaking`, `stopped`, `interrupted`, `error`, each
+with words; a control that cannot work is not drawn and the reason is drawn in its place; pressing
+it again stops it and it can be started again; a newer utterance replaces an older one and the row
+it replaced says so.
+
+**PARTIAL, and why:** reading aloud has never been heard on iOS, or on any real device. What is
+proven is the state machine and the refusals; nothing here says Safari speaks.
+
+## Item 5 — ATTACHMENTS AND LIBRARY · **CONFIRMED**
+
+| | |
+|---|---|
+| **Canonical owner** | `AttachmentHandler.MATERIAL_EXTENSIONS` / `materialAcceptAttr()` |
+| **Registered tests** | `material-accept-smoke` (14 → 26) |
+| **Mutations** | M50 the hand-written list, M51 the unbounded upload, M52 the missing retry — all red |
+
+The shared composer's paperclip was a **third** accept list on a path that is unambiguously the
+Material path: it offered `.json` and `.markdown` (no parser entry), `.doc` (routes to the docx
+processor, which opens a zip — a legacy binary is not a zip), and `.pdf` (returns bytes), while
+omitting `.pptx` and `.xlsx`, the two formats the capability exists for. Derived now.
+
+The upload had **no ceiling** — the one write in `js/app.js` that was not bounded. 30s, cleared in
+`finally`, a timeout that says "nothing was saved", and a retry, because the picker is cleared
+before the request.
+
+Unchanged and restated: a file attached in conversation is named as **context**, never as evidence,
+and promotion stays a separate deliberate act through `POST /api/materials/:id/classification`.
+
+**Not verified:** mobile file selection on a real device. Chromium is not a phone picker.
+
+## Item 6 — READINESS AND OPERATIONS · **CONFIRMED**
+
+| | |
+|---|---|
+| **Canonical owner** | `_readiness()` in `server.js`; `/api/health` |
+| **Registered tests** | `readiness-levels-smoke` (20, new) |
+| **Mutations** | M60 durability ignoring configuration, M61 `ready` collapsing into durability — both red |
+
+Found while writing it: **`durableStore` reported TRUE in memory-only mode.**
+`_persistenceReady.ready` is the save path's question — may this process attempt a write — and is
+deliberately true with `DB_OPTIONAL`. Reporting that as durable told a reader writes survive a
+restart on a host where nothing does. A store that is not configured is not durable however
+willingly this process writes to it.
+
+`persistenceConfigured` is now its own field. `ready` stays stores-loaded **on purpose** — a request
+served correctly from memory is a served request — and the law is that the two never collapse into
+one field. Levels 4 and 5 are answered by the gateway and the build stamp, the only things that
+know.
+
+## Item 7 — UNIVERSALITY · **CONFIRMED**
+
+| | |
+|---|---|
+| **Canonical owner** | `ai/packs.js` |
+| **Registered tests** | `cross-domain-smoke` (31, new) |
+| **Mutations** | M70 a vertical pack appearing, M71 a domain adding a concept — both red |
+
+Four organisations — sports, education, business, nonprofit, plus universal as a control — same
+people, same node shape, byte-identical signals, driven through the real group inquiry route. The
+band, score, independent origins, contributor count, contested flag and signal count are identical
+across all five. The four vocabularies name the **same set of concepts**; only the words differ.
+
+`PACKS` holds one pack and `resolvePack` returns it whatever it is handed. The server has **exactly
+one** comparison against a domain id and it selects a word, not a behaviour; that count is pinned,
+and the scan of every other `ai/*.js` is proven against a planted fork rather than trusted for its
+silence.
+
+---
+
+## Still not verified by anybody, round 4
+
+- **Live Neon, restart durability, deployed build identity, Render behaviour.** No `DATABASE_URL`,
+  no Render key. `readiness-levels-smoke` asserts the health payload never *claims* any of them.
+- **Real provider configuration.** No model key. Every composed-reply assertion in this round runs
+  against a stubbed `ai.complete` / `ai.completeJSON`; what is proven is what the product does with
+  a written reply, not what a real model writes.
+- **Real iPhone / Safari.** Chromium at 390×844 and 430×932 is not iOS Safari. **Reading aloud has
+  never been heard.**
+- **Mobile file selection and real binary parsing.**
+- **Settings overflow and clipping at 390px** (observations 24–26) — structurally addressed,
+  unmeasured.
+- **Sector packages** (observation 29) is now audited as code (item 7); nobody has used one.
+- Observations **6, 22** remain as they were.
+
+## Commands run, round 4
+
+```
+npm test                                    GREEN, 250 registered suites
+git diff --check                            clean
+md5sum $(git ls-files) | md5sum             identical before and after npm test
+node scripts/<eight browser suites>.js      387 assertions, 0 failed
+28 mutations, stdout AND stderr read        28 red
+```
+
+---
+
+FOUNDER OBSERVATIONS DISPOSITIONED: 21/31
+AUDIT CATEGORIES DISPOSITIONED: 25/25
+GATE ITEM 1 — OUTPUT MANIFEST: DONE (runtime wiring, three channels degraded on refusal)
+GATE ITEM 2 — A→B MEMBER CONTRIBUTION: CONFIRMED
+GATE ITEM 3 — FORUM SEMANTICS: CONFIRMED
+GATE ITEM 4 — VOICE INPUT: CONFIRMED · VOICE OUTPUT: PARTIAL
+GATE ITEM 5 — ATTACHMENTS AND LIBRARY: CONFIRMED
+GATE ITEM 6 — READINESS LEVELS: CONFIRMED
+GATE ITEM 7 — UNIVERSALITY: CONFIRMED
+DEAD CAPABILITIES FOUND THIS ROUND: 3
+MUTATIONS THIS ROUND: 28 applied, 28 red
+PILOT CODE BLOCKERS: 0
+PILOT OPERATIONS BLOCKERS: 3
+GITHUB CI ON EXACT HEAD: PENDING
+SAFE TO MERGE: NO
+READY FOR FINAL FOUNDER PHONE/RESTART RETEST: NO
