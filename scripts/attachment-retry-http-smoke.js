@@ -49,6 +49,10 @@ _loadAllStores({
     rio: { id: 'rio', name: 'Rio Salvatierra', email: 'r@t.io', role: 'member', orgCode: C, status: 'active', assignedNodeIds: [] },
   } },
   orgNodes: { [C]: {} },
+  userAiProfiles: { [`${C}:ash`]: { focuses: [
+    { focusId: 'f_one', text: 'First personal focus', status: 'active', createdAt: Date.now() },
+    { focusId: 'f_two', text: 'Second personal focus', status: 'active', createdAt: Date.now() },
+  ] } },
 });
 _rebuildEmailIndex();
 
@@ -152,15 +156,40 @@ const server = app.listen(0, async () => {
     const stolen = await post({ kind: 'text', text: 'Rio attaching into a thread that is not his.',
       title: 'x.pdf', filename: 'x.pdf', conversationId: first.j.conversationId }, 'rio');
     ok('ATR-F5 naming another person\'s conversation outright does not reach it — the thread store is per person, which is the gate the two checks above are often mistaken for',
-      stolen.status === 200 && stolen.j.conversationId !== first.j.conversationId);
+      stolen.status === 404 && !stolen.j.conversationId);
     ok('ATR-F5b …and that person\'s thread is untouched by the attempt',
       (await convs('ash')).length === 2);
+
+    console.log('\n  F2 — RETRY RECONCILIATION IS BOUND TO THE EXACT OBJECT');
+    const focusOne = await post({ kind: 'text', text: DOC, title: 'recovery.pdf',
+      about: { kind: 'focus', id: 'f_one' } });
+    const focusAgain = await post({ kind: 'text', text: DOC, title: 'recovery.pdf',
+      about: { kind: 'focus', id: 'f_one' } });
+    ok('ATR-F6 same-owner same-Focus retry reuses its one object thread',
+      focusOne.status === 200 && focusAgain.status === 200
+      && focusAgain.j.conversationId === focusOne.j.conversationId
+      && focusOne.j.conversationId !== first.j.conversationId);
+    const focusTwo = await post({ kind: 'text', text: DOC, title: 'recovery.pdf',
+      about: { kind: 'focus', id: 'f_two' } });
+    ok('ATR-F7 identical material attached to another Focus creates a distinct thread',
+      focusTwo.status === 200 && focusTwo.j.materialId === focusOne.j.materialId
+      && focusTwo.j.conversationId !== focusOne.j.conversationId);
+    ok('ATR-F8 private chat never becomes bound to an unrelated Focus',
+      (await convs()).find(c => c.id === first.j.conversationId)?.about == null);
+    ok('ATR-F9 an explicitly supplied private conversation cannot be rebound by an object upload',
+      (await post({ kind: 'text', text: DOC, about: { kind: 'focus', id: 'f_one' },
+        conversationId: first.j.conversationId })).status === 409);
+    ok('ATR-F10 an explicitly supplied matching object conversation is preserved',
+      (await post({ kind: 'text', text: OTHER, about: { kind: 'focus', id: 'f_one' },
+        conversationId: focusOne.j.conversationId })).j?.conversationId === focusOne.j.conversationId);
+    ok('ATR-F11 another owner cannot name this person\'s object or attachment thread',
+      (await post({ kind: 'text', text: DOC, about: { kind: 'focus', id: 'f_one' } }, 'rio')).status === 404);
 
     console.log('\n  G — AND AN UPLOAD THAT GENUINELY CANNOT BE ACCEPTED IS STILL REFUSED');
     ok('ATR-G1 an empty attachment is refused rather than reconciled into an existing one',
       (await post({ kind: 'text', text: '   ', title: 'blank.pdf' })).status === 400);
     ok('ATR-G2 …and nothing was added by the attempt',
-      mine().length === 3 && (await convs()).length === 2);
+      mine().length === 3 && (await convs()).length === 4);
 
     console.log('\n  H — AND THE CARD SAYS WHAT IT KNOWS, WHICH IS NOT "NOTHING WAS SAVED"');
     /* The server half above is what makes Try again safe. The client half is what a person
