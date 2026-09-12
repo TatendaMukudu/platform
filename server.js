@@ -1905,7 +1905,31 @@ app.post('/api/auth/create-user', requirePermission('edit_members'), async (req,
   emailIndex[emailNorm] = { orgCode: code, userId };
   scheduleSave();
 
-  res.json({ ok: true, user: { ...users[userId], passwordHash: undefined } });
+  // A 200 is an acknowledgement of durable creation, not merely an in-memory
+  // mutation. A competing instance can win the orgUsers CAS and replace this
+  // provisional row during a conflict reload. Refuse the losing caller and
+  // leave their address available for an honest retry.
+  try {
+    await _flushPersistence();
+  } catch (err) {
+    if (orgUsers[code]?.[userId]) {
+      delete orgUsers[code][userId];
+      scheduleSave();
+    }
+    if (emailIndex[emailNorm]?.userId === userId) delete emailIndex[emailNorm];
+    return res.status(err.code === 'DURABLE_CONFLICT' ? 409 : 503).json({
+      error: 'Account creation could not be confirmed as durable. Please retry.',
+    });
+  }
+  // A non-failLoud save already in progress can report a CAS conflict, reload
+  // this unit, and then let the flush complete as a no-op. Check the committed
+  // identity rather than trusting a resolved flush alone.
+  const created = orgUsers[code]?.[userId];
+  if (!created || created.email !== emailNorm) {
+    if (emailIndex[emailNorm]?.userId === userId) delete emailIndex[emailNorm];
+    return res.status(409).json({ error: 'Another account write won. Please retry.' });
+  }
+  res.json({ ok: true, user: { ...created, passwordHash: undefined } });
 });
 
 /* ── Bulk create (name-only) REMOVED — use bulk-import with email instead ── */
