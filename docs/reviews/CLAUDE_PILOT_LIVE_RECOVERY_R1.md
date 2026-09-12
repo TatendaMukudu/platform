@@ -1435,6 +1435,17 @@ node scripts/<eight browser suites>.js      387 assertions, 0 failed
 28 mutations, stdout AND stderr read        28 red
 ```
 
+**CI, read from the Actions RUN api rather than from check-runs** — a pass on this branch once
+reported CI as hung on the strength of a check-runs response still saying `in_progress` after the
+run had finished, so the run record is what decides. **Runs 802–809, one per item commit, every
+one green.** The last of them is run **809**
+(<https://github.com/TatendaMukudu/platform/actions/runs/34676477324>) on
+`778667acc7cf038923e50c3da46216576901a109`, 3m05s, one job. The event is `pull_request`, so what
+GitHub runs is the synthetic merge of this branch into the base rather than the branch head
+standing alone. This line names the head as it stood when the run was observed; the commit that
+writes the line down cannot contain its own identifier, so its run is reported on the pull request
+instead.
+
 ---
 
 FOUNDER OBSERVATIONS DISPOSITIONED: 21/31
@@ -1450,6 +1461,6 @@ DEAD CAPABILITIES FOUND THIS ROUND: 3
 MUTATIONS THIS ROUND: 28 applied, 28 red
 PILOT CODE BLOCKERS: 0
 PILOT OPERATIONS BLOCKERS: 3
-GITHUB CI ON EXACT HEAD: PENDING
+GITHUB CI ON EXACT HEAD: PASS
 SAFE TO MERGE: NO
 READY FOR FINAL FOUNDER PHONE/RESTART RETEST: NO
