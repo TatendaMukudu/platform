@@ -32,6 +32,11 @@ process.env.IQ_COMPOSER = '1';
 
 const ai = require('../ai/gateway.js');
 const M  = require('../ai/manifest.js');
+/* The chart BUILDER, held as a module object so section F can make it compute a timestamp instead
+   of reading one — the same technique the provider boundary above uses, and for the same reason:
+   the only honest way to prove a gate fires is to create the condition it exists to catch, in
+   production code, and then drive the real route. */
+const chartMod = require('../ai/chart.js');
 const S  = require('../server.js');
 const { app, _loadAllStores, _rebuildEmailIndex, issueToken, inquiryStates } = S;
 
@@ -117,17 +122,17 @@ const server = app.listen(0, async () => {
     ok('OC-A2b …which begins with the words that are on the screen, so the two channels are one answer',
       String(resp1.speech).startsWith(String(resp1.responseText)));
     ok('OC-A3 …and states what it rests on, with the count the citation channel actually carries',
-      (() => {
+      () => {
         const m = String(resp1.speech).match(/rests on (\d+) sources?/);
         return !!m && Number(m[1]) === (resp1.sources || []).length && (resp1.sources || []).length > 0;
-      })());
+      });
     ok('OC-A3b …a figure that is APPROVED, not merely printed — the same manifest refuses any other one',
-      (() => {
+      () => {
         const mf = M.manifest({ claims: [M.claim({ id: 'reader', text: 'x', numbers: [(resp1.sources || []).length] })] });
         const good = M.verify('voice', `This rests on ${(resp1.sources || []).length} sources, shown under the reply.`, mf);
         const bad  = M.verify('voice', `This rests on ${(resp1.sources || []).length + 7} sources, shown under the reply.`, mf);
         return good.ok === true && bad.ok === false;
-      })());
+      });
     ok('OC-A4 the citation channel and the chips under the reply are the same list, not two answers to "what is this built on"',
       Array.isArray(resp1.sources) && resp1.sources.every(s => s && s.kind && s.label));
 
@@ -186,12 +191,12 @@ const server = app.listen(0, async () => {
     ok('OC-D1 a belief with two dated origins gets its picture, and it is a line',
       ch.status === 200 && !!ch.j.chart && (ch.j.chart.series || []).some(s => s.shape === 'trend'));
     ok('OC-D1b …drawn only at moments the record actually holds',
-      (() => {
+      () => {
         const moments = new Set(inquiryStates[C]['member:ash'].two.signals.map(s => s.at));
-        return (ch.j.chart.series || []).every(s => (s.points || []).every(p => p.at == null || moments.has(p.at)));
-      })());
+        return ((ch.j.chart || {}).series || []).every(s => (s.points || []).every(p => p.at == null || moments.has(p.at)));
+      });
     ok('OC-D2 …and it carries what it cannot show, which is what lets a trend rest on a qualified claim',
-      Array.isArray(ch.j.chart.limitations) && ch.j.chart.limitations.length > 0);
+      () => Array.isArray((ch.j.chart || {}).limitations) && ch.j.chart.limitations.length > 0);
     const ch1 = await get('/api/objects/inquiry/one/chart?kind=firming');
     ok('OC-D3 one moment on the record is drawn as a STATE, never a line — an infinite rate of change is the most dramatic shape this product can draw',
       ch1.status === 200 && (!ch1.j.chart || (ch1.j.chart.series || []).every(s => s.shape !== 'trend')));
@@ -215,15 +220,13 @@ const server = app.listen(0, async () => {
       /IQVoiceOut\.control\(speech, rid\)/.test(APP)
       && /data-voice="unsupported"/.test(VOUT) && /data-voice="none"/.test(VOUT));
 
-    /* ── OC-E4/E5 ARE STRUCTURAL, AND THE REASON IS WORTH STATING RATHER THAN HIDING ─────────
-       No fixture in this file can make the chart route's manifest gate REFUSE, because nothing
-       the product legitimately draws violates it: every plotted moment comes from a record fact
-       and the moments list is read from those same record facts. A gate that cannot fire on live
-       data is still worth having — it is what catches the next builder that computes a timestamp
-       instead of reading one, and ai/manifest.js is driven against exactly that case in
-       output-manifest-smoke OM-G4 — but a behavioural assertion claiming to prove it would be
-       claiming something these fixtures cannot show. So the gate's PRESENCE is pinned here, its
-       BEHAVIOUR is pinned at the module, and the report says which is which. */
+    /* ── OC-E4/E5 ARE STRUCTURAL, AND SECTION F IS WHY THEY ARE NO LONGER THE ONLY THING ──────
+       These two pin that the gate is CALLED. Round 4 left them as the whole of the graph story,
+       with the honest note that no fixture here could make the chart route refuse — and an
+       independent gate was right that "a graph-gate removal must be caught by a behavioural
+       assertion, not solely a source check". Section F does that. These stay because a call site
+       that has been deleted and a call site that cannot fire read the same in a test log, and
+       saying which is which is cheaper than working it out again next round. */
     const SRV = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
     ok('OC-E4 the chart route puts the picture through the manifest before returning it, and refuses with a reason rather than half-drawing',
@@ -232,6 +235,95 @@ const server = app.listen(0, async () => {
     ok('OC-E5 …and the thread route does the same for the card and its spoken rendering, per channel rather than all-or-nothing',
       /manifest\.approve\(_omf, \{[\s\S]{0,200}card:[\s\S]{0,200}voice:/.test(SRV)
       && /_cardRefused \? _oApproved\.note : _open\.text/.test(SRV));
+
+    /* ══ F — THE GRAPH GATE, FIRED THROUGH THE REAL ROUTE ═══════════════════════════════════
+       Why this needs doing at all, and why it could not be done with a fixture: the chart route
+       reads the moments the record holds and the points the picture plots from the SAME object,
+       through one owner, so no arrangement of signals can make them disagree. That is the good
+       news and it is exactly what makes the gate untestable by arranging data — the condition it
+       exists to catch is a BUILDER that computes a timestamp rather than reading one, and no
+       builder in this repository does.
+
+       So the builder is made to do it, at the module boundary, for one call: `buildFirming` shifts
+       one plotted moment by a single millisecond. Nothing else changes — the value, the refs, the
+       shape and the series key are untouched, so `governChart` still passes it and the picture is
+       drawn from real evidence at a moment the record does not have. One millisecond, because a
+       gate that only catches an obviously wrong date is a gate that catches nothing: the real
+       defect is a builder rounding, bucketing or re-stamping, and those are off by a little.
+
+       This is the same instrument as `say()` above. It steers PRODUCTION code through the module
+       object server.js holds; the route, the handler, the governance step and the gate are all the
+       real ones. */
+    console.log('\n  F — AND THE PICTURE IS CHECKED AGAINST THE RECORD, NOT AGAINST ITSELF');
+    const realBuildFirming = chartMod.buildFirming;
+    const clean = await get('/api/objects/inquiry/two/chart?kind=firming');
+    ok('OC-F0 the honest picture is drawn, so what follows is about the gate and not about a broken fixture',
+      clean.status === 200 && !!clean.j.chart && !clean.j.note);
+    try {
+      chartMod.buildFirming = (args) => {
+        const spec = realBuildFirming(args);
+        // ONE moment, moved by ONE millisecond. Still evidenced, still the right shape.
+        for (const s of (spec.series || [])) {
+          for (const p of (s.points || [])) { if (p && Number.isFinite(p.at)) { p.at = p.at + 1; break; } }
+        }
+        return spec;
+      };
+      const bad = await get('/api/objects/inquiry/two/chart?kind=firming');
+      ok('OC-F1 a picture plotting a moment the record does not hold is REFUSED by the route, not returned',
+        bad.status === 200 && bad.j.chart === null);
+      ok('OC-F1b …naming the law it broke, so the next builder is told what it did',
+        Array.isArray(bad.j.violations) && bad.j.violations.includes('graph_time_not_in_record'));
+      ok('OC-F1c …with a sentence for the reader rather than a silent empty panel',
+        typeof bad.j.note === 'string' && /moment the record does not have/i.test(bad.j.note));
+      ok('OC-F1d …and NOTHING is half-drawn: a reader takes what is on the screen for the whole',
+        bad.j.chart === null && !(bad.j.chart && bad.j.chart.series));
+    } finally {
+      chartMod.buildFirming = realBuildFirming;
+    }
+    const after = await get('/api/objects/inquiry/two/chart?kind=firming');
+    ok('OC-F2 and with the builder honest again the same picture is drawn, so the refusal was about the moment and not about the route breaking',
+      after.status === 200 && !!after.j.chart
+      && JSON.stringify(after.j.chart) === JSON.stringify(clean.j.chart));
+
+    /* ══ CROSS-ROUTE: THE CARD AND THE PICTURE ANSWER TO THE SAME RECORD ════════════════════
+       The gate's other objection: the thread route builds a manifest for the card and the voice,
+       the chart route builds another for the graph, and "one shared manifest across what a person
+       sees" was therefore not established by anything that had been run. It is one OWNER —
+       `_objectManifest` — and this is what that buys, stated as a fact a test can check rather
+       than as a claim about the source: every moment the picture plots is a moment the card's own
+       manifest vouches for, and both come from the object's signals rather than from whichever
+       route asked. If the two routes ever read different records, the first thing to diverge is
+       this. */
+    const thTwo = await get('/api/objects/inquiry/two/thread?scope=self');
+    const chTwo = await get('/api/objects/inquiry/two/chart?kind=firming');
+    ok('OC-F3 the card route and the chart route describe the SAME object from the same record',
+      () => {
+        if (thTwo.status !== 200 || chTwo.status !== 200) return false;
+        const recorded = new Set(inquiryStates[C]['member:ash'].two.signals.map(s => s.at));
+        const plotted = ((chTwo.j.chart || {}).series || []).flatMap(s => (s.points || []).map(p => p.at)).filter(a => a != null);
+        return plotted.length > 0 && plotted.every(a => recorded.has(a));
+      });
+    ok('OC-F3b …and the card states the source count the card route actually carries, so neither door invents a figure of its own',
+      () => {
+        const m = String(thTwo.j.openingSpeech || '').match(/rests on (\d+) sources?/);
+        return !!m && Number(m[1]) === (thTwo.j.openingSources || []).length;
+      });
+    /* AND THE RECORD MOVING MOVES BOTH. A new account on the same object, written through the
+       ordinary route, has to show up in the card's count AND as a new moment in the picture. Two
+       routes reading two records would move one of these and not the other, and that is the
+       failure "one manifest" is supposed to make impossible. */
+    inquiryStates[C]['member:ash'].two.signals.push(SIG('o_c', NOW - 12 * 3600 * 1000));
+    const thAfter = await get('/api/objects/inquiry/two/thread?scope=self');
+    const chAfter = await get('/api/objects/inquiry/two/chart?kind=firming');
+    ok('OC-F4 a new account on the record moves the CARD',
+      (thAfter.j.openingSources || []).length >= (thTwo.j.openingSources || []).length);
+    ok('OC-F4b …and the same account moves the PICTURE, at the moment it was recorded',
+      () => {
+        const plotted = new Set(((chAfter.j.chart || {}).series || []).flatMap(s => (s.points || []).map(p => p.at)));
+        return plotted.has(NOW - 12 * 3600 * 1000);
+      });
+    ok('OC-F4c …and the picture still passes the card\'s own manifest afterwards, which is the whole point of one owner',
+      chAfter.status === 200 && !!chAfter.j.chart && !chAfter.j.violations);
 
   } catch (e) { fail++; console.error('  FAIL output-channels suite threw:', e && e.stack); }
 
