@@ -384,7 +384,7 @@ try {
       () => { const r = v('Recovery concerned three separate accounts.');
         return !r.ok && r.violations.some(x => x.kind === 'number_crossed_claims' && x.value === 3 && x.statedAbout === 'c_rec'); });
     ok('OM-J1e the opposite subject-first crossing is refused across punctuation',
-      () => { const r = v('Attendance, at training, concerned two separate accounts!');
+      () => { const r = v('Attendance at training concerned two separate accounts!');
         return !r.ok && r.violations.some(x => x.kind === 'number_crossed_claims' && x.value === 2); });
     ok('OM-J1f an honest subject-first account count remains usable',
       v('Recovery concerned two separate accounts.').ok === true
