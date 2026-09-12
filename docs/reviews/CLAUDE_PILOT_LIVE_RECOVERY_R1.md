@@ -1945,3 +1945,80 @@ leaves its most misleading answer bare.
 | M170 the share handler's membership re-check | The object is resolved through `_allObjectsFor` first; a removed member gets 404 before the handler runs |
 | M191 / M191b / M191c the attachment reconciliation's ownership checks | Conversations are stored per person; `_resolveConversation` cannot find another person's id in this person's list |
 | M192 reconciliation running when a conversationId is given | `b.conversationId || _priorConvId` — the named one still wins, so it is a behavioural no-op |
+
+---
+
+## Commands run, round 6
+
+```
+npm test                                       GREEN, 256 registered suites, 0 failing assertions
+md5sum $(git ls-files) | md5sum                IDENTICAL before and after the run
+git diff --check                               clean
+node scripts/<browser suites>.js               all green, including the two changed this round
+                                                 voice-output-browser-check      19 (16 -> 19)
+                                                 settings-tiers-browser-check    39 (31 -> 39)
+DATABASE_URL=… node scripts/durable-restart-check.js   32 assertions, 0 failed (round 5, unchanged)
+26 mutations applied, stdout AND stderr read   22 red; 4 recorded as non-gates, not counted
+```
+
+**The asset stamp caught me.** `js/app.js` changed in 6.4, 6.6 and 6.7 and the stamp in
+`index.html` did not move with it. `asset-version-smoke` went red on the full run, which is exactly
+what it is for: a phone keeping the old bundle runs none of those fixes while reporting the new
+commit — the stale-asset class the founder's very first live report turned out to be. Stamp
+`20260912c` → `20260912d`, in `index.html` **and** in the recorded fingerprint, because a stamp
+bumped without recording it is the same lie one step later.
+
+## 8 · Live verification — unchanged from round 5, and that is the point
+
+Nothing in round 6 added a live proof, because nothing in round 6 added a credential. The table
+stands exactly as it did:
+
+| Founder's item | Status | Missing |
+|---|---|---|
+| **A · Build and deployment** | **NOT RUN** | Render credentials, a reachable deployed instance |
+| **B · Neon persistence** | **PARTIAL — real PostgreSQL, not Neon** | A Neon `DATABASE_URL` |
+| **C · Provider and composer** | **PARTIAL** | A provider key |
+| **D · Real pilot flows** | **PARTIAL** | A deployed instance and a human |
+| **E · Real device** | **NOT RUN** | An actual iPhone |
+
+`docs/reviews/FOUNDER_PHONE_RESTART_SCRIPT.md` is the rest of it: every check no container can do,
+as numbered steps with expected results and, for each, what it means if you see something else.
+**Section B has never been observed by anybody** — reading aloud on a real device — and it is one
+of the two conditions still holding this open.
+
+## 9 · Why this still says NO
+
+| Condition the founder set | Met? |
+|---|---|
+| The three dead capabilities behaviourally proven | **YES** (round 5, unchanged) |
+| The independent gate's seven items reproduced or refuted at the current head | **YES** — thirteen findings, all classified |
+| Voice output complete, or explicitly deferred by the founder | **CODE COMPLETE, NOT HEARD.** A stubbed engine is not an iPhone |
+| Live Neon / restart / deployment checks pass | **NO** — no Neon, no Render |
+| Real pilot onboarding works | **PARTIAL** — the account chain on real persistence, no browser, no device |
+| No pilot code or operations blocker remains | **NO** — three operations blockers stand, all credential-shaped |
+
+---
+
+FOUNDER OBSERVATIONS DISPOSITIONED: 21/31
+GATE ITEMS THIS ROUND: 7 raised, 13 findings, 0 left unclassified
+P1 CROSSED CLAIM NUMBER: CONFIRMED, FIXED (L-MF2b, 4 mutations red)
+P1 GRAPH GATE: CONFIRMED, NOW FIRES THROUGH THE REAL ROUTE (3 mutations red)
+P1 CROSS-ROUTE ONE MANIFEST: PROVEN BEHAVIOURALLY
+P1 GROUP FOCUS A-TO-B: CONFIRMED, THREE DEFECTS FIXED (5 mutations red)
+P1/P2 SINGLETON FOCUS FIXTURE: CONFIRMED VACUOUS, FIXED
+P1/P2 FORUM ACTIVE STATUS: CONFIRMED FAIL-OPEN, REFUTED AS REACHABLE, FIXED ANYWAY
+P1/P2 PRIVATE TO FORUM: DRIVEN, AND A DEAD CAPABILITY FOUND (the edit could not post)
+P2 VOICE FALLBACK PARITY: CONFIRMED, FIXED
+P2 NEW ANSWER STOPS UTTERANCE: ALREADY FIXED AT HEAD, GUARD STRENGTHENED TO BEHAVIOURAL
+P2 ATTACHMENT CONFIRMATION AND RETRY: CONFIRMED BOTH HALVES, FIXED
+P2 SETTINGS PARTIAL GRANT: CONFIRMED, FIXED
+P2 PROVIDER REACHABILITY: CONFIRMED, FIXED (and the suite had encoded it as correct)
+P2 VOICE INPUT LABEL: CONFIRMED, FIXED
+DEFECTS FOUND THIS ROUND: 13
+MISTAKES OF MINE RECORDED: 7
+MUTATIONS THIS ROUND: 26 applied, 22 red, 4 recorded as non-gates
+PILOT CODE BLOCKERS: 0
+PILOT OPERATIONS BLOCKERS: 3
+GITHUB CI ON EXACT HEAD: PASS (run 819, head 89726cc)
+SAFE TO MERGE: NO
+READY FOR FINAL FOUNDER PHONE/RESTART RETEST: YES — see docs/reviews/FOUNDER_PHONE_RESTART_SCRIPT.md
