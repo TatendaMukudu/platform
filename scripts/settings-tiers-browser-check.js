@@ -189,6 +189,15 @@ userPermissions[C] = { metricsonly: { manage_metrics: true } };
       !/Remove an organisation/i.test(a.view.pageText));
     ok('ST-B3 …and they still land on their own tab first, not on the organisation’s',
       a.view.panels.you === true && a.view.panels.org === false);
+    const valuesShortcutForEditor = await a.page.evaluate(() => {
+      switchSettingsTab('org');
+      const btn = document.getElementById('settings-org-values-shortcut');
+      const visible = !!btn && getComputedStyle(btn).display !== 'none';
+      if (visible) btn.click();
+      return { visible, opened: !!document.getElementById('settings-tab-values') && document.getElementById('settings-tab-values').style.display !== 'none' };
+    });
+    ok('ST-B4 an authorised values editor sees and can use the real Organisation shortcut',
+      valuesShortcutForEditor.visible && valuesShortcutForEditor.opened);
     await a.ctx.close();
 
     console.log('\n  C — A SUPERADMIN GETS ALL THREE');
@@ -270,6 +279,10 @@ userPermissions[C] = { metricsonly: { manage_metrics: true } };
         ingestBtn: !!document.getElementById('ingest-token-btn'),
         connAddBtn: !!document.getElementById('conn-add-btn'),
         domainCards: (document.getElementById('domain-catalog') || {}).children?.length || 0,
+        valuesShortcut: (() => {
+          const btn = document.getElementById('settings-org-values-shortcut');
+          return !!btn && getComputedStyle(btn).display !== 'none';
+        })(),
       };
       const gated = [...el.querySelectorAll('[data-gated="manage_settings"]')].length;
       el.style.display = wasHidden;
@@ -278,6 +291,8 @@ userPermissions[C] = { metricsonly: { manage_metrics: true } };
     ok('ST-D2c no control that would refuse them is drawn — the buttons are gone, not merely disabled',
       orgPanel.live.ingestBtn === false && orgPanel.live.connAddBtn === false
       && orgPanel.live.domainCards === 0);
+    ok('ST-D2c-values a metrics-only grant cannot see an Edit values shortcut that would refuse or redirect them',
+      orgPanel.live.valuesShortcut === false);
     ok('ST-D2d …and the reason is drawn where they were, because an absence with no explanation is indistinguishable from a broken product',
       orgPanel.gated >= 4 && /organisation-settings permission/i.test(orgPanel.text));
     ok('ST-D2e …while Organisation Details, which is a read and genuinely theirs, is still there',

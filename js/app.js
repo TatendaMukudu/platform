@@ -2705,7 +2705,11 @@ function renderSettings(){
   if (_maySeeSettingsTab('platform')) _renderRealCapabilities();
 
   if (_maySeeSettingsTab('org')) {
-    _loadValuesIntoTextarea();
+    // The Organisation tab also opens for metrics-only and tree-only grants. A
+    // jump to Values is a write affordance and must be shown only to its editor.
+    const valuesShortcut = document.getElementById('settings-org-values-shortcut');
+    if (valuesShortcut) valuesShortcut.style.display = Auth.canDo('manage_values') ? '' : 'none';
+    if (Auth.canDo('manage_values')) _loadValuesIntoTextarea();
     /* THE TAB IS NOT THE CONTROL, and an independent gate was right that treating them as one
        thing was a lie on the screen. `SETTINGS_TAB_ACCESS.org` opens for ANY of four permissions
        — settings, values, metrics or tree — because the Organisation tab holds things that belong

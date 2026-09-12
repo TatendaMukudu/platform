@@ -46,8 +46,8 @@
 <meta name="apple-mobile-web-app-title" content="IntelliQ"/>
 <link rel="apple-touch-icon" href="/icons/apple-touch-180.png"/>
 <link rel="icon" type="image/png" href="/icons/icon-192.png"/>
-<link rel="stylesheet" href="css/styles.css?v=20260912f"/>
-<link rel="stylesheet" href="css/member.css?v=20260912f"/>
+<link rel="stylesheet" href="css/styles.css?v=20260912g"/>
+<link rel="stylesheet" href="css/member.css?v=20260912g"/>
 <!-- Chart.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 <!-- JSZip — for reading .docx / .xlsx / .pptx in browser -->
@@ -594,9 +594,9 @@
                 <div style="font-size:var(--fs);color:var(--text-secondary);line-height:1.6">
                   Your AI reasons from <strong>your organisation's values</strong> — the ones set here.
                   The Advisor, Group Copilot, briefings and check-in responses all take on that perspective,
-                  without ever quoting or lecturing. Edit them in the <strong>Values</strong> tab.
+                  without ever quoting or lecturing. An authorised values editor can change them in the <strong>Values</strong> tab.
                 </div>
-                <button class="btn btn-outline btn-sm" style="margin-top:0.7rem" onclick="switchSettingsTab('values')">Edit values →</button>
+                <button id="settings-org-values-shortcut" class="btn btn-outline btn-sm" style="margin-top:0.7rem" onclick="switchSettingsTab('values')">Edit values →</button>
               </div>
             </div>
           </div>
@@ -1593,8 +1593,8 @@
 </div><!-- /member-shell -->
 
 <!-- ── SCRIPTS ──────────────────────────────────────────── -->
-<script src="js/data.js?v=20260912f"></script>
-<script src="js/auth.js?v=20260912f"></script>
+<script src="js/data.js?v=20260912g"></script>
+<script src="js/auth.js?v=20260912g"></script>
 <!-- ════════════════════════════════════════════════════════
      SUPER ADMIN ORG SETUP WIZARD (Layer 1 of 2)
      Full-screen overlay shown after first org creation / login
@@ -1662,15 +1662,15 @@
   </div>
 </div>
 
-<script src="js/charts.js?v=20260912f"></script>
-<script src="js/ui.js?v=20260912f"></script>
-<script src="js/attachments.js?v=20260912f"></script>
-<script src="js/scenarios.js?v=20260912f"></script>
-<script src="js/chat.js?v=20260912f"></script>
-<script src="js/tree.js?v=20260912f"></script>
-<script src="js/voice.js?v=20260912f"></script>
-<script src="js/voice-output.js?v=20260912f"></script>
-<script src="js/app.js?v=20260912f"></script>
+<script src="js/charts.js?v=20260912g"></script>
+<script src="js/ui.js?v=20260912g"></script>
+<script src="js/attachments.js?v=20260912g"></script>
+<script src="js/scenarios.js?v=20260912g"></script>
+<script src="js/chat.js?v=20260912g"></script>
+<script src="js/tree.js?v=20260912g"></script>
+<script src="js/voice.js?v=20260912g"></script>
+<script src="js/voice-output.js?v=20260912g"></script>
+<script src="js/app.js?v=20260912g"></script>
 
 <!-- Register the service worker so the app is installable (Add to Home Screen)
      and works offline. Network-first, so deploys are never stale. -->
