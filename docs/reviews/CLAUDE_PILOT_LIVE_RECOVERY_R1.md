@@ -1954,9 +1954,12 @@ leaves its most misleading answer bare.
 npm test                                       GREEN, 256 registered suites, 0 failing assertions
 md5sum $(git ls-files) | md5sum                IDENTICAL before and after the run
 git diff --check                               clean
-node scripts/<browser suites>.js               all green, including the two changed this round
-                                                 voice-output-browser-check      19 (16 -> 19)
-                                                 settings-tiers-browser-check    39 (31 -> 39)
+node scripts/<nine browser suites>.js          362 assertions, 0 failed
+                                                 chart-shape          40   library      24
+                                                 group-loop           53   onboard      34
+                                                 priority-surface     39   stack       114
+                                                 voice-output         19   (16 -> 19, changed)
+                                                 settings-tiers       39   (31 -> 39, changed)
 DATABASE_URL=… node scripts/durable-restart-check.js   32 assertions, 0 failed (round 5, unchanged)
 26 mutations applied, stdout AND stderr read   22 red; 4 recorded as non-gates, not counted
 ```
