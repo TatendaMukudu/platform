@@ -5881,7 +5881,7 @@ app.post('/api/me/focus', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const result = _createPersonalFocus(code, userId, {
     ...(req.body || {}), participantIds: (req.body || {}).participants,
-  });
+  }, { strictAudience: true });
   if (!result.ok) return res.status(result.status).json({ error: result.error });
   const named = result.audience.participantIds.map(id => (orgUsers[code][id] || {}).name).filter(Boolean);
   const f = result.publicFocus;
@@ -8960,6 +8960,12 @@ function _createPersonalFocus(code, userId, input = {}, opts = {}) {
   const existing = (mem.focuses || []).find(f => f && f.status === 'active' && f.text === text
     && (!input.kind || f.kind === input.kind));
   if (existing) {
+    // A retry with identical wording cannot report success for a different audience.
+    if (existing.visibility !== audience.visibility ||
+        JSON.stringify([...(existing.participants || [userId])].map(String).sort()) !==
+        JSON.stringify([...audience.participants].map(String).sort())) {
+      return { ok: false, status: 409, error: 'This Focus is already open for a different audience. Open it to change who can see it.' };
+    }
     if (source && !existing.source) existing.source = source;
     mem.lastUpdated = new Date().toISOString(); scheduleSave();
     return { ok: true, already: true, focus: existing, publicFocus: _publicPersonalFocus(existing, userId), audience };
@@ -16166,14 +16172,19 @@ function _objectBucket(code, userId, scope = 'self') {
 
     // (a) Mine — the ones I set for myself.
     const memory = userAiProfiles[`${code}:${userId}`] || {};
-    for (const focus of memory.focuses || []) addFocus(focus);
+    for (const focus of memory.focuses || []) addFocus(focus, { ownerId: userId });
 
     // (b) Ones somebody invited me into by name.
     for (const [key, mem] of Object.entries(userAiProfiles)) {
       if (!key.startsWith(`${code}:`) || key === `${code}:${userId}`) continue;
+      const ownerId = key.slice(code.length + 1);
+      const stillAddressable = _contactsFor(code, ownerId).some(c => c.id === userId);
+      if (!stillAddressable) continue;
       for (const f of (mem && mem.focuses) || []) {
         if (Array.isArray(f.participants) && f.participants.includes(userId)) {
-          addFocus(f, { invited: true, participants: f.participants });
+          // An invited person may see the Focus, never the source conversation reference.
+          const { source, ...readable } = f;
+          addFocus(readable, { invited: true, ownerId, participants: f.participants });
         }
       }
     }
@@ -16778,10 +16789,13 @@ function _forumAudience(code, userId, object) {
     return { available: true, readable: people.length, key: nodeId, forumKind: 'group', members: people };
   }
 
-  /* A FOCUS ROOM — the people named on it. Membership is the INVITATION and does not change
-     because a roster did, which is why this is a separate branch rather than one clever list. */
+  /* A personal Focus invitation is only readable while owner and invitee remain eligible
+     contacts. Re-derive that set for room counts, icons, and writes as well as object reads. */
+  const ownerId = String(raw.ownerId || '');
+  const eligible = ownerId ? new Set([ownerId, ..._contactsFor(code, ownerId).map(c => String(c.id))]) : null;
   const invited = Array.isArray(raw.participants)
-    ? [...new Set(raw.participants.map(String))].filter(id => _personPresent((orgUsers[code] || {})[id])) : [];
+    ? [...new Set(raw.participants.map(String))].filter(id =>
+      _personPresent((orgUsers[code] || {})[id]) && (!eligible || eligible.has(id))) : [];
   if (kind === 'focus' && invited.length >= 2) {
     return { available: true, readable: invited.length, key: String(object.id), forumKind: 'focus', members: invited };
   }
