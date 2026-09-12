@@ -199,12 +199,21 @@ const server = app.listen(0, async () => {
     console.log('\n  E — AND THE BROWSER AUTHORS NONE OF IT');
     const APP = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'app.js'), 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    /* THE OWNER MOVED OUT OF app.js into js/voice-output.js, which is the point rather than an
+       accident: the state machine sitting beside the row that renders the button is how it came
+       to compose the spoken sentence in the first place. So the app is checked for DELEGATION and
+       for the absence of a second implementation; the owner's own behaviour is driven in
+       voice-input-smoke against a stubbed speechSynthesis. */
+    const VOUT = require('fs').readFileSync(require('path').join(__dirname, '..', 'js', 'voice-output.js'), 'utf8');
     ok('OC-E1 read-aloud speaks the rendering it was handed and composes nothing',
-      /_speak\(btn, speechJson\)/.test(APP) && !/This rests on \$\{sources\.length\}/.test(APP));
+      /IQVoiceOut\.control\(speech, rid\)/.test(APP)
+      && !/This rests on \$\{sources\.length\}/.test(APP)
+      && !/SpeechSynthesisUtterance/.test(APP));
     ok('OC-E2 …and the opening card is rendered from the server\'s composed text, not rebuilt from the payload',
       /data\.openingText/.test(APP) && !/\[sum\.thinking \|\| x\.claim/.test(APP));
     ok('OC-E3 a control that cannot work is not drawn — the reason is drawn instead',
-      /_voiceControl\(speech, rid\)/.test(APP) && /data-voice="unsupported"/.test(APP) && /data-voice="none"/.test(APP));
+      /IQVoiceOut\.control\(speech, rid\)/.test(APP)
+      && /data-voice="unsupported"/.test(VOUT) && /data-voice="none"/.test(VOUT));
 
     /* ── OC-E4/E5 ARE STRUCTURAL, AND THE REASON IS WORTH STATING RATHER THAN HIDING ─────────
        No fixture in this file can make the chart route's manifest gate REFUSE, because nothing

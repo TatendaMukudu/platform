@@ -2612,7 +2612,11 @@ async function _renderYourDevice() {
   const rows = [
     ['Speaking instead of typing', !!(window.IQVoice && IQVoice.isSupported && IQVoice.isSupported()),
       'This browser does not offer speech recognition. Typing works as normal — this is about your browser, not about IntelliQ.'],
-    ['Reading replies aloud', !!(window.speechSynthesis && window.SpeechSynthesisUtterance),
+    /* ASKED OF THE OWNER, exactly as the line above asks IQVoice. This row used to test
+       `window.speechSynthesis && window.SpeechSynthesisUtterance` itself — a second
+       implementation of one question, which is how a Settings panel comes to report a capability
+       the control beside it has already refused to draw. */
+    ['Reading replies aloud', !!(window.IQVoiceOut && IQVoiceOut.isSupported && IQVoiceOut.isSupported()),
       'This browser cannot read text aloud. Replies are on screen as they always are.'],
   ];
   box.innerHTML = rows.map(([label, on, why]) => `
@@ -13515,110 +13519,25 @@ const MemberApp = {
      confidence than a written one, not less. So what is spoken is what is VISIBLE: the same
      words, then how many sources it rests on. Nothing is added that is not on the screen, and
      nothing on the screen that qualifies the claim is dropped. */
-  /* Can THIS browser speak? Asked of the browser, never inferred from a server capability — a
-     host with an OpenAI key has given nobody a loudspeaker. */
-  _voiceSupported() {
-    try { return !!(window.speechSynthesis && window.SpeechSynthesisUtterance); } catch (_) { return false; }
-  },
+  /* ── READING ALOUD LIVES IN ONE PLACE, AND IT IS NOT THIS FILE ───────────────────────────
+     js/voice-output.js (window.IQVoiceOut) owns the whole state machine: whether this browser can
+     speak, whether there is an approved rendering to speak, what is drawn when there is not, and
+     every state in between. It used to live here, beside the row that renders the button, which
+     is how it came to COMPOSE the spoken sentence out of the message text and a source count it
+     counted for itself — a second author for one answer, on the channel where drift costs most.
 
-  /* THE CONTROL, OR THE REASON THERE ISN'T ONE. Two ways this cannot work, and neither may be
-     silent: the browser has no speech synthesis, or the server sent no approved rendering of this
-     answer to speak. Drawing a button in either case teaches somebody the product is broken,
-     because a control that does nothing when pressed is indistinguishable from one that failed. */
+     What is left here is delegation and nothing else. If a voice rule appears below this comment
+     again, it is a second implementation and it is the bug. */
   _voiceControl(speech, rid) {
-    const esc = s => this._escape(String(s == null ? '' : s));
-    if (!this._voiceSupported()) {
-      return `<span class="iq-act-note" data-voice="unsupported">This browser cannot read replies aloud.</span>`;
-    }
-    if (!String(speech || '').trim()) {
-      return `<span class="iq-act-note" data-voice="none">No approved reading for this message.</span>`;
-    }
-    return `<button type="button" class="iq-act iq-act-voice" aria-label="Read this aloud" title="Read aloud"
-        data-voice-state="idle" data-voice-for="${esc(rid)}"
-        onclick="MemberApp._speak(this, ${this._escape(JSON.stringify(JSON.stringify(String(speech))))})">
-        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>
-      </button>`;
+    if (typeof IQVoiceOut === 'undefined') return '';
+    return IQVoiceOut.control(speech, rid);
   },
 
-  /* The one place a voice-output state becomes words. Every exit says something — the whole
-     defect this replaced was a control that failed in silence. */
-  _VOICE_WORDS: {
-    starting: 'Starting to read aloud…',
-    speaking: 'Reading aloud…',
-    stopped: 'Stopped.',
-    interrupted: 'Stopped — a newer reply took over.',
-    error: 'Reading aloud failed. Press again to retry.',
-    ended: '',
-  },
-
-  _voiceState(btn, state) {
-    if (!btn) return;
-    const row = btn.closest ? btn.closest('.iq-msg-acts') : null;
-    const out = row ? row.querySelector('.iq-act-said') : null;
-    const word = Object.prototype.hasOwnProperty.call(this._VOICE_WORDS, state) ? this._VOICE_WORDS[state] : '';
-    if (out) out.textContent = word;
-    btn.setAttribute('data-voice-state', state);
-    const speaking = state === 'starting' || state === 'speaking';
-    btn.setAttribute('aria-label', speaking ? 'Stop reading aloud' : 'Read this aloud');
-    btn.setAttribute('title', speaking ? 'Stop' : 'Read aloud');
-    btn.classList.toggle('is-on', speaking);
-  },
-
-  /* Stop whatever is being read, and SAY that it was stopped rather than leaving the last state
-     on screen. Called when a newer utterance takes over and when the page changes underneath. */
+  /* Stop anything being read aloud. Navigation and a newly arrived answer both call this: a
+     reading belongs to the answer it came from, and both of those replace it. */
   _voiceStop(why) {
-    const prev = this._voiceBtn;
-    this._voiceBtn = null;
-    try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (_) {}
-    if (prev && prev.isConnected !== false) this._voiceState(prev, why || 'stopped');
+    try { if (typeof IQVoiceOut !== 'undefined') IQVoiceOut.stop(why || 'stopped'); } catch (_) {}
   },
-
-  /* ── READ ALOUD ──────────────────────────────────────────────────────────────────────────
-     SPEAKS THE SERVER'S APPROVED RENDERING AND COMPOSES NOTHING. The previous version built the
-     spoken sentence here, in the browser, out of the message text plus a source count it counted
-     itself — a second author for one answer, on the channel nothing verified. What is spoken now
-     is what the manifest gate approved beside the prose: the same words, then what the answer
-     cannot show, then what it rests on.
-
-     Pressing it again STOPS it. One utterance at a time across the whole app, and the one it
-     replaces is told it was replaced. */
-  _speak(btn, speechJson) {
-    /* ONE parse. The attribute holds `"the words"` as a JS literal, so by the time this runs the
-       argument is already a JSON string; parsing it twice would throw on every ordinary sentence
-       and the control would be silent again. */
-    let text = ''; try { text = JSON.parse(speechJson || '""'); } catch (_) { text = ''; }
-    const synth = this._voiceSupported() ? window.speechSynthesis : null;
-    if (!synth) { this._voiceState(btn, 'error'); return false; }
-    if (!String(text).trim()) { this._voiceState(btn, 'error'); return false; }
-
-    // Pressing the control that is currently speaking is the stop control. Deliberate: a person
-    // who wants it to stop reaches for the thing that started it.
-    const state = btn && btn.getAttribute ? btn.getAttribute('data-voice-state') : 'idle';
-    if (this._voiceBtn === btn && (state === 'speaking' || state === 'starting')) {
-      this._voiceStop('stopped');
-      return false;
-    }
-    // A newer utterance REPLACES an older one, and the older row says so.
-    if (this._voiceBtn && this._voiceBtn !== btn) this._voiceStop('interrupted');
-
-    try {
-      synth.cancel();
-      const u = new SpeechSynthesisUtterance(String(text));
-      u.rate = 1.0; u.lang = document.documentElement.lang || 'en-GB';
-      u.onstart = () => { if (this._voiceBtn === btn) this._voiceState(btn, 'speaking'); };
-      u.onerror = () => { if (this._voiceBtn === btn) { this._voiceBtn = null; this._voiceState(btn, 'error'); } };
-      u.onend = () => { if (this._voiceBtn === btn) { this._voiceBtn = null; this._voiceState(btn, 'ended'); } };
-      this._voiceBtn = btn;
-      this._voiceState(btn, 'starting');
-      synth.speak(u);
-      return true;
-    } catch (_) {
-      this._voiceBtn = null;
-      this._voiceState(btn, 'error');
-      return false;
-    }
-  },
-
 
   openInquiryThread(inquiryId) { return this.openObjectThread('inquiry', inquiryId); },
 
@@ -14291,6 +14210,12 @@ const MemberApp = {
   // One IntelliQ voice. Distinguishes grounded vs suggested; shows privacy clearly; renders a
   // SMALL prioritised proposal set (primary + "More options"); confirm / correct / dismiss.
   _renderAssistant(j) {
+    /* A NEW ANSWER STOPS THE OLD ONE BEING READ. Without this a person asks a second question
+       while the first reply is still being spoken and hears the OLD answer finish over the new
+       one on screen — two answers at once, and the one they are looking at is not the one they
+       can hear. The row that was reading is told it was interrupted rather than left announcing
+       that it is still going. */
+    this._voiceStop('interrupted');
     const esc = s => this._escape(String(s == null ? '' : s));
     const r = j.response || {};
     const priv = v => v === 'only_me'
