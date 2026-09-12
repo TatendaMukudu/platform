@@ -135,7 +135,12 @@ ok('M7e NO hand-written accept list survives on a path that sends text to the se
    long as somebody was willing to wait, which is the defect the bounded reader exists to remove,
    arriving through the one door that had not been fixed. And its error card had no control, on
    the surface where a person has already done the work of finding the file. */
-const wsAttachFn = appJs.slice(appJs.indexOf('async wsAttach(fileInput)'), appJs.indexOf('async assistantTurn('));
+/* DECOMMENTED, and the reason is the same trap twice in one round: the comment that explains why
+   the old sentence went away quotes the old sentence, so a search for it finds the explanation
+   and reports the defect as still present. An assertion that cannot tell code from the prose
+   about it will be wrong in whichever direction somebody last wrote. */
+const wsAttachFn = appJs.slice(appJs.indexOf('async wsAttach(fileInput)'), appJs.indexOf('async assistantTurn('))
+  .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, ' ');
 ok('M8 the upload is bounded — a stalled POST cannot leave the card reading forever',
   wsAttachFn.length > 400 && /new AbortController\(\)/.test(wsAttachFn) && /signal: ctrl\.signal/.test(wsAttachFn));
 ok('M8b …and the timer is cleared in a `finally`, so it stays live through the body read',
