@@ -184,12 +184,12 @@ const server = app.listen(0, async () => {
     ok('GFL-C3 …and the outcome the LEADER recorded, as the result rather than a stringified record',
       /the person recorded the outcome of this focus as: better/i.test(block())
       && !/\[object Object\]/.test(handed));
-    ok('GFL-C4 …and what has arrived on that inquiry SINCE the outcome, as a real count',
-      /2 record\(s\) have arrived on that thing SINCE the outcome/i.test(block()));
-    ok('GFL-C4b …counting only the inquiry this focus addressed, not everything the squad has said since',
-      !/3 record\(s\) have arrived/i.test(block()));
-    ok('GFL-C5 …with the causal refusal in the same block as the data, not left to a prompt to remember',
-      /is NOT evidence the focus caused it, and you must not say it was/i.test(block()));
+    ok('GFL-C4 two post-outcome contributors in twelve are below the floor, so no count is supplied',
+      !/record\(s\) have arrived/i.test(block()) && !/nothing has been recorded on that thing/i.test(block()));
+    ok('GFL-C4b the model receives the same neutral privacy caveat whether zero or four contributed',
+      /post-outcome evidence cannot yet be described at this group level/i.test(block()));
+    ok('GFL-C5 no below-floor change or causal inference is solicited',
+      /do not infer or reveal a post-outcome count/i.test(block()));
     ok('GFL-C6 …and the repetition rule, because a list of connections is the shape that invites "three things point at this"',
       /a connection does NOT make/i.test(handed)
       && /two records resting on one account are still one account/i.test(handed));
@@ -205,6 +205,23 @@ const server = app.listen(0, async () => {
       !/goalkeeper is starting it quicker/i.test(block()) && !/when they press two/i.test(block()));
     ok('GFL-D2 nobody is NAMED in the bundle — a count of accounts is not a list of who gave them',
       !/Player \d/i.test(block()) && !/Head Coach/i.test(block()));
+
+    // Record volume is not cohort size: a third signal from p6 still means two people.
+    inquiryStates[C]['group:sq'].inq_q.signals.push(SIG('p6', 'inq_q', AFTER + 3, 'one more observation'));
+    handed = '';
+    await turn('p1', 'What changed?', { kind: 'focus', id: FID });
+    ok('GFL-C8 repeated reports by one contributor remain below the post-outcome floor',
+      !/record\(s\) have arrived/i.test(block()));
+    inquiryStates[C]['group:sq'].inq_q.signals.push(
+      SIG('p8', 'inq_q', AFTER + 4, 'a new independent account'),
+      SIG('p9', 'inq_q', AFTER + 5, 'another independent account'),
+      SIG('p10', 'inq_q', AFTER + 6, 'one more independent account'));
+    handed = '';
+    await turn('p1', 'What changed?', { kind: 'focus', id: FID });
+    ok('GFL-C9 five distinct post-outcome contributors permit the six scoped records',
+      /6 record\(s\) have arrived on that thing SINCE the outcome/i.test(block()));
+    ok('GFL-C10 legitimate above-floor loop retains the non-causal refusal',
+      /is NOT evidence the focus caused it/i.test(block()));
 
     console.log('\n  E — THE OTHER END OF THE SAME EDGE, AND THE ENDS THAT DO NOT EXIST');
     handed = '';
