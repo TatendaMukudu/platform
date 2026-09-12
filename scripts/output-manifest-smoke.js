@@ -380,6 +380,15 @@ try {
     ok('OM-J1c …and it is refused in the other direction too, so this is a rule rather than one hard-coded sentence',
       () => { const r = v('Two separate accounts concern attendance.');
         return r.ok === false && r.violations.some(x => x.kind === 'number_crossed_claims' && x.value === 2); });
+    ok('OM-J1d a subject before the count cannot borrow another claim\'s approved figure',
+      () => { const r = v('Recovery concerned three separate accounts.');
+        return !r.ok && r.violations.some(x => x.kind === 'number_crossed_claims' && x.value === 3 && x.statedAbout === 'c_rec'); });
+    ok('OM-J1e the opposite subject-first crossing is refused across punctuation',
+      () => { const r = v('Attendance, at training, concerned two separate accounts!');
+        return !r.ok && r.violations.some(x => x.kind === 'number_crossed_claims' && x.value === 2); });
+    ok('OM-J1f an honest subject-first account count remains usable',
+      v('Recovery concerned two separate accounts.').ok === true
+      && v('Attendance concerned three separate accounts.').ok === true);
     ok('OM-J2 the honest sentence about recovery passes',        v('Two separate accounts concern recovery.').ok === true);
     ok('OM-J2b the honest sentence about attendance passes',     v('Three separate accounts concern attendance.').ok === true);
     ok('OM-J2c BOTH figures in ONE sentence, each with its own, passes — the clause is the unit, not the sentence',
