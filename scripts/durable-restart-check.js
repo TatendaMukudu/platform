@@ -220,6 +220,37 @@ async function untilReady() {
     ok('DR-F3b every 200-acknowledged email index and password survive as a real login',
       (!login1 || (login1.status === 200 && !!login1.j?.token))
       && (!login2 || (login2.status === 200 && !!login2.j?.token)));
+    // A refused caller must be able to recover on the remaining instance. A
+    // clean 409 that permanently reserves its address is not a usable conflict.
+    const refused = [
+      { response: w1, firstName: 'Conc', lastName: 'One', email: E1 },
+      { response: w2, firstName: 'Conc', lastName: 'Two', email: E2 },
+    ].filter(row => row.response.status !== 200);
+    const recovered = [];
+    for (const row of refused) {
+      const retry = await post('/api/auth/create-user', {
+        firstName: row.firstName, lastName: row.lastName, email: row.email,
+        role: 'member', password: 'a-long-enough-password',
+      }, tok);
+      recovered.push({ ...row, retry });
+    }
+    ok('DR-F3c a recoverably refused account succeeds on retry after the winner is reloaded',
+      recovered.every(row => row.retry.status === 200 && !!row.retry.j?.user?.id));
+    if (recovered.length) {
+      await stop(b.child);
+      b = await boot('recovered-account restart');
+      await untilReady();
+    }
+    const retryTreeResponse = await get('/api/auth/org-tree', tok);
+    const retryTree = JSON.stringify((retryTreeResponse.j &&
+      (retryTreeResponse.j.tree || retryTreeResponse.j.users || retryTreeResponse.j)) || []);
+    const retryLogins = await Promise.all(recovered.map(row => post('/api/auth/login', {
+      email: row.email, password: 'a-long-enough-password',
+    })));
+    ok('DR-F3d a retried account and email index both survive another process restart',
+      retryTreeResponse.status === 200
+      && recovered.every((row, i) => retryTree.includes(row.firstName + ' ' + row.lastName)
+        && retryLogins[i].status === 200 && !!retryLogins[i].j?.token));
     ok('DR-F4 …and nothing PARTIAL survived: every account in the tree has an id, a name and a role',
       (() => {
         const rows = (after.j && (after.j.tree || after.j.users)) || [];
