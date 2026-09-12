@@ -389,6 +389,17 @@ try {
     ok('OM-J1f an honest subject-first account count remains usable',
       v('Recovery concerned two separate accounts.').ok === true
       && v('Attendance concerned three separate accounts.').ok === true);
+    ok('OM-J1g a colon-introduced recovery claim cannot borrow attendance three',
+      () => { const r = v('Recovery: three separate accounts.');
+        return !r.ok && r.violations.some(x => x.kind === 'number_crossed_claims' && x.value === 3); });
+    ok('OM-J1h a comma-introduced recovery claim cannot borrow attendance three',
+      () => { const r = v('For recovery, three separate accounts.');
+        return !r.ok && r.violations.some(x => x.kind === 'number_crossed_claims' && x.value === 3); });
+    ok('OM-J1i introductory comma with filler cannot borrow attendance three',
+      () => { const r = v('Regarding recovery, there were three independent accounts.');
+        return !r.ok && r.violations.some(x => x.kind === 'number_crossed_claims' && x.value === 3); });
+    ok('OM-J1j punctuation must not turn the honest number into a false refusal',
+      v('Recovery: two separate accounts.').ok === true && v('For attendance, three separate accounts.').ok === true);
     ok('OM-J2 the honest sentence about recovery passes',        v('Two separate accounts concern recovery.').ok === true);
     ok('OM-J2b the honest sentence about attendance passes',     v('Three separate accounts concern attendance.').ok === true);
     ok('OM-J2c BOTH figures in ONE sentence, each with its own, passes — the clause is the unit, not the sentence',
