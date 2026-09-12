@@ -13298,7 +13298,14 @@ const MemberApp = {
         <div class="iq-composer${off ? ' iq-composer-off' : ''}">
           ${attach && !off ? `<label class="iq-attach" for="${esc(id)}-file" title="Add a document IntelliQ can use" aria-label="Add a document">
             <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.5 12.5 21a4 4 0 0 1-5.66-5.66l8.49-8.48a2.5 2.5 0 0 1 3.54 3.54l-8.49 8.48a1 1 0 0 1-1.41-1.41l7.78-7.78"/></svg>
-            <input type="file" class="iq-attach-input" id="${esc(id)}-file" accept=".txt,.md,.markdown,.csv,.json,.pdf,.doc,.docx" onchange="MemberApp.wsAttach(this)">
+            <!-- WHAT THIS PICKER OFFERS IS DERIVED, never typed here. It used to be a third
+                 hand-written list that agreed with neither of the two real ones: it offered .json
+                 and .markdown, which the parser has no entry for; .doc, which routes to the docx
+                 processor and throws because a legacy binary is not a zip; and NOT .pptx or .xlsx,
+                 which are the formats the whole material feature was built for. This composer
+                 sends TEXT to the server, so the list it may offer is the Material list, and the
+                 one owner beside the processors is the only place it is written down. -->
+            <input type="file" class="iq-attach-input" id="${esc(id)}-file" accept="${esc(typeof AttachmentHandler !== 'undefined' ? AttachmentHandler.materialAcceptAttr() : '')}" onchange="MemberApp.wsAttach(this)">
           </label>` : ''}
           <textarea id="${esc(id)}" class="iq-composer-input" rows="1" aria-label="${esc(placeholder)}"${dis}
             placeholder="${esc(placeholder)}"
@@ -14188,12 +14195,28 @@ const MemberApp = {
       if (!String(content).trim()) throw new Error('I couldn’t read any text from that file.');
       const objectThread = this._inquiryThread;
       const about = objectThread && objectThread.about ? objectThread.about : (this._composerAbout || null);
-      const r = await fetch('/api/assistant/attachments', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
-        body: JSON.stringify({ kind: this._knowledgeFormat(file.name), text: String(content), title: file.name, filename: file.name,
-          conversationId: objectThread?.conversationId || this._chatConvId || undefined, about }),
-      });
-      const raw = await r.text(); let d; try { d = JSON.parse(raw); } catch (_) { d = null; }
+      /* BOUNDED, like every other write in this file. An upload with no ceiling leaves
+         "Reading that file…" on the screen for as long as the person is willing to wait, which
+         is the same defect the bounded reader was built to remove — and the mobile case it
+         matters most for is the one where the connection drops mid-transfer, which resolves the
+         headers and then stalls. Cleared in `finally`, never on the headers. */
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort('timeout'), 30000);
+      let r, raw;
+      try {
+        r = await fetch('/api/assistant/attachments', {
+          method: 'POST', signal: ctrl.signal,
+          headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
+          body: JSON.stringify({ kind: this._knowledgeFormat(file.name), text: String(content), title: file.name, filename: file.name,
+            conversationId: objectThread?.conversationId || this._chatConvId || undefined, about }),
+        });
+        raw = await r.text();
+      } catch (err) {
+        throw new Error(String(err && err.name) === 'AbortError' || String(err) === 'timeout'
+          ? 'That took too long to send. Nothing was saved.'
+          : 'I could not reach IntelliQ to save that.');
+      } finally { clearTimeout(timer); }
+      let d; try { d = JSON.parse(raw); } catch (_) { d = null; }
       /* An upload that discovers the session has ended is the SAME fact as a read discovering it,
          and it used to become a local "I couldn't save that" inside this one card — leaving the
          composer, the microphone and the paperclip live for the next attempt, which could not
@@ -14208,8 +14231,24 @@ const MemberApp = {
       this._pendingAttachment = { id: d.materialId, name: file.name };
       done(`Read ${d.parts} ${d.parts === 1 ? 'part' : 'parts'} from ${esc(file.name)}. It is context for this conversation, not evidence about you or your organisation.`);
     } catch (e) {
-      done(`<span class="iq-error-text">${esc(e.message || 'I couldn’t add that file.')}</span>`);
+      /* AND A WAY BACK. An error card with no control is a dead end on the one surface where a
+         person has already done the work of finding the file — the picker has been cleared, so
+         without this they have to go and find it again to learn whether it was the file or the
+         connection. The File object is held for exactly one retry and dropped after it. */
+      this._retryAttach = file;
+      done(`<span class="iq-error-text">${esc(e.message || 'I couldn’t add that file.')}</span>`
+        + ` <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp.wsAttachRetry(this)">Try again</button>`);
     }
+  },
+
+  /* The same file, the same path, once. Not a loop: a control that retries forever teaches
+     somebody to keep pressing it while nothing changes. */
+  wsAttachRetry(btn) {
+    const file = this._retryAttach;
+    this._retryAttach = null;
+    if (btn) btn.remove();
+    if (!file) return;
+    return this.wsAttach({ files: [file], value: '' });
   },
 
   /* Routes ONE composer input through the unified runtime WITH the active lens as a bounded

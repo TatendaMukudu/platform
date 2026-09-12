@@ -99,5 +99,59 @@ ok('M6 the picker\'s guard is `typeof AttachmentHandler`, not `window.Attachment
 ok('M6b …and no guard anywhere in the client reaches for the handler through window',
   !/window\.AttachmentHandler\s*&&/.test(appJs));
 
+/* ── M7 — THE SHARED COMPOSER WAS A THIRD LIST, AND IT AGREED WITH NEITHER ──────────────────
+   Every composer in the product renders from _composerHTML, and its paperclip carried a
+   hand-written `.txt,.md,.markdown,.csv,.json,.pdf,.doc,.docx`. That list:
+
+     offered .json and .markdown   the parser has no entry for either — process() throws
+     offered .doc                  routes to the docx processor, which opens a zip; a legacy
+                                   binary is not a zip, so it throws rather than returning empty
+     offered .pdf                  comes back as BYTES, so the "no text" error is the only
+                                   possible outcome on a path that sends text to the server
+     omitted .pptx and .xlsx       the two formats the whole material capability exists for
+
+   And wsAttach sends TEXT to /api/assistant/attachments, so this IS the Material path — the same
+   path the Material picker uses, advertising a different set of files. */
+const composerInput = (appJs.match(/<input type="file" class="iq-attach-input"[^>]*>/) || [''])[0];
+ok('M7 the shared composer\'s paperclip asks the same owner the Material picker asks',
+  /materialAcceptAttr\(\)/.test(composerInput));
+ok('M7b …and no longer advertises a format the parser would refuse or throw on',
+  !/\.json/.test(composerInput) && !/\.markdown/.test(composerInput)
+  && !/\.doc[,"]/.test(composerInput) && !/\.pdf/.test(composerInput));
+ok('M7c …and it offers the two formats the capability was built for, which the hand-written list left out',
+  (() => { const attr = A && A.materialAcceptAttr ? A.materialAcceptAttr() : '';
+    return attr.includes('.pptx') && attr.includes('.xlsx') && /materialAcceptAttr/.test(composerInput); })());
+ok('M7d …through the same `typeof` guard, since the window form renders an EMPTY accept that offers every file on the phone',
+  /typeof AttachmentHandler !== 'undefined' \? AttachmentHandler\.materialAcceptAttr\(\)/.test(composerInput));
+ok('M7e NO hand-written accept list survives on a path that sends text to the server',
+  (() => {
+    const inputs = appJs.match(/<input type="file"[^>]*>/g) || [];
+    const textPath = inputs.filter(t => /wsAttach|iqt-mat-file/.test(t));
+    return textPath.length >= 2 && textPath.every(t => /materialAcceptAttr\(\)/.test(t));
+  })());
+
+/* ── M8 — AN UPLOAD IS A WRITE, AND EVERY OTHER WRITE IN THIS FILE IS BOUNDED ──────────────
+   wsAttach had no ceiling at all: a stalled POST left "Reading that file…" on the screen for as
+   long as somebody was willing to wait, which is the defect the bounded reader exists to remove,
+   arriving through the one door that had not been fixed. And its error card had no control, on
+   the surface where a person has already done the work of finding the file. */
+const wsAttachFn = appJs.slice(appJs.indexOf('async wsAttach(fileInput)'), appJs.indexOf('async assistantTurn('));
+ok('M8 the upload is bounded — a stalled POST cannot leave the card reading forever',
+  wsAttachFn.length > 400 && /new AbortController\(\)/.test(wsAttachFn) && /signal: ctrl\.signal/.test(wsAttachFn));
+ok('M8b …and the timer is cleared in a `finally`, so it stays live through the body read',
+  /finally \{ clearTimeout\(timer\); \}/.test(wsAttachFn));
+ok('M8c …and a timeout says so in words rather than reporting a save that did not happen',
+  /took too long to send\. Nothing was saved/.test(wsAttachFn));
+ok('M8d a failed upload offers a retry, because the picker has already been cleared',
+  /wsAttachRetry/.test(wsAttachFn) && /Try again/.test(wsAttachFn));
+ok('M8e …once, not forever — a control that retries endlessly teaches somebody to keep pressing it',
+  /this\._retryAttach = null;/.test(appJs));
+
+/* ── M9 — AND IT NEVER CLAIMS THE FILE IS EVIDENCE ────────────────────────────────────────── */
+ok('M9 a file attached in conversation is named as CONTEXT, never as evidence about anybody',
+  /context for this conversation, not evidence about you or your organisation/.test(wsAttachFn));
+ok('M9b …and turning one into evidence is a separate, deliberate act with its own route',
+  /\/classification/.test(appJs));
+
 console.log(`\nmaterial-accept-smoke: ${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
