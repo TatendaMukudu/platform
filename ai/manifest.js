@@ -258,6 +258,16 @@ function _contextAfter(text, index) {
   return (m ? rest.slice(0, m.index) : rest).trim().split(/\s+/).slice(0, 8).join(' ');
 }
 
+/* A subject can precede the figure: "Recovery concerned three separate accounts." Looking only
+   after the number leaves this clause without a topic and lets it borrow another claim's three. */
+function _contextBefore(text, index) {
+  const prefix = _s(text, 8000).slice(0, index);
+  const ends = new RegExp(_CLAUSE_END.source, 'gi');
+  let boundary = 0, m;
+  while ((m = ends.exec(prefix)) !== null) boundary = m.index + m[0].length;
+  return prefix.slice(boundary).trim().split(/\s+/).slice(-8).join(' ');
+}
+
 /* Every place this text states a figure, WITH the words that say what it counts. Deliberately a
    second function rather than a richer `particularsIn`: that one is the public summary and is
    asserted against by name elsewhere, and widening a shape callers already read is how a fix
@@ -271,7 +281,8 @@ function _numberSites(text) {
     while ((m = re.exec(t)) !== null) {
       const raw = String(m[1] || '').toLowerCase();
       const n = Object.prototype.hasOwnProperty.call(_WORD_NUMBERS, raw) ? _WORD_NUMBERS[raw] : _num(raw);
-      if (n !== null) sites.push({ value: n, context: _contextAfter(t, m.index + m[0].length) });
+      if (n !== null) sites.push({ value: n, context: [_contextBefore(t, m.index),
+        _contextAfter(t, m.index + m[0].length)].filter(Boolean).join(' ') });
     }
   }
   return sites;
