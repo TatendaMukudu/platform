@@ -241,6 +241,30 @@ const server = app.listen(0, async () => {
     ok('FS-F5 …and an edit that empties the message posts nothing rather than an empty line in the room',
       empty.status === 400 && /nothing_to_share/.test(String((empty.j || {}).error || '')));
 
+    const stagedCleared = await stage('p1', { kind: 'inquiry', id: 'inq_q' });
+    ok('FS-F6 an explicitly empty share edit starts with a real proposal', !!stagedCleared.prop);
+    const roomBeforeClear = await roomOf('p2');
+    const cleared = await post(`/api/assistant/turn/${stagedCleared.turnId}/confirm`,
+      { proposalId: stagedCleared.prop.id, overrides: { text: '' } }, T.p1);
+    const roomAfterClear = await roomOf('p2');
+    ok('FS-F7 empty-string edits are refused and cannot silently restore model wording',
+      cleared.status === 400 && /nothing_to_share/.test(String((cleared.j || {}).error || ''))
+      && (roomAfterClear.j?.messages || []).length === (roomBeforeClear.j?.messages || []).length);
+
+    const stagedPrivate = await stage('p1', { kind: 'inquiry', id: 'inq_q' });
+    ok('FS-F8 a public share can be withdrawn from a real staged proposal', !!stagedPrivate.prop);
+    const corrected = await post(`/api/assistant/turn/${stagedPrivate.turnId}/correct`,
+      { proposalId: stagedPrivate.prop.id, correction: 'keep this private' }, T.p1);
+    const afterCorrection = await roomOf('p2');
+    const attempted = await post(`/api/assistant/turn/${stagedPrivate.turnId}/confirm`,
+      { proposalId: stagedPrivate.prop.id }, T.p1);
+    const afterAttempt = await roomOf('p2');
+    ok('FS-F9 private correction withdraws the public proposal instead of labelling it safe to confirm',
+      corrected.status === 200 && corrected.j?.applied?.includes('withdrew public share')
+      && !(corrected.j?.proposals || []).some(p => p.id === stagedPrivate.prop.id));
+    ok('FS-F10 the old confirm cannot post; another member sees no new message',
+      attempted.status === 404 && (afterAttempt.j?.messages || []).length === (afterCorrection.j?.messages || []).length);
+
     console.log('\n  G — AND THE PRIVATE CONVERSATION STAYS PRIVATE');
     /* The person says something in the private thread that they never offered to share. It must
        not be in the room, by any route — the only thing that crosses is what they confirmed. */
