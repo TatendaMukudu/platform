@@ -12028,16 +12028,25 @@ const MemberApp = {
     const same = rawClaim.replace(/\s*\.\s*$/, '').trim().toLowerCase() === title.trim().toLowerCase();
     const claim = same ? '' : rawClaim;
     const open = () => `MemberApp.openObjectThread('${esc(item.kind)}','${esc(item.id)}')`;
-    // A thread others were invited into carries a forum. A private one does not, and the icon
-    // is how a person tells the difference at a glance.
-    const shared = item.shared === true || (Array.isArray(item.participants) && item.participants.length > 1);
+    /* WHETHER THIS ONE HAS A ROOM IS THE SERVER'S ANSWER, from the same owner the object's own
+       screen asks. It used to be decided here — `item.shared === true || participants.length > 1`
+       — and neither field is in this payload, so the indicator was a fourth availability rule
+       that could never be true and a person scanning their list could not tell which of these
+       threads had anybody in them. */
+    const shared = item.forumAvailable === true;
     return `
       <article class="iq-inq" role="button" tabindex="0" onclick="${open()}"
         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${open()}}">
         <div class="iq-inq-head">
           <span class="iq-inq-topic">${esc(title)}</span>
           ${sum.standing ? `<span class="iq-inq-band iq-band-${esc(sum.band || 'tentative')}" tabindex="0" title="${esc(_confidenceWhy(sum))}" aria-label="${esc(sum.standing)} — ${esc(_confidenceWhy(sum))}">${esc(sum.standing)}</span>` : ''}
-          ${shared ? `<span class="iq-inq-forum" title="Others can discuss this">Forum</span>` : ''}
+          ${/* THE SAME GLYPH AS THE CONTROL ON THE OBJECT'S OWN SCREEN, not the word "Forum".
+                One decision, one icon, one meaning: a text badge in a card header competes with
+                the object's title for the line a phone gives you and reads as a category rather
+                than as "there are people in here". This is an indicator and not a button — the
+                whole card is already the control that opens the thread — so it carries its
+                meaning accessibly and takes no tap target of its own. */''}
+          ${shared ? `<span class="iq-inq-forum" role="img" aria-label="Others can discuss this" title="Others can discuss this"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span>` : ''}
         </div>
         ${item.whose && item.whose !== 'you'
           // WHOSE IS THIS. One list holds a person's own and their squad's, ranked together, so

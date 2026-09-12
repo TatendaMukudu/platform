@@ -2919,8 +2919,9 @@ html,body{max-width:100%;overflow-x:hidden;overscroll-behavior-y:none}
 .iq-make:focus-visible{outline:2px solid currentColor;outline-offset:2px}
 .iq-more-objects{display:block;width:100%;margin:.6rem 0 0;padding:.7rem;min-height:44px;border-radius:12px;
   border:1px dashed var(--border);background:transparent;color:var(--text-secondary);cursor:pointer;font-size:var(--fs-md)}
-.iq-inq-forum{margin-left:auto;font-size:var(--fs-xs);letter-spacing:.04em;text-transform:uppercase;
-  color:var(--text-secondary);border:1px solid var(--border);border-radius:999px;padding:.1rem .5rem}
+/* The indicator that this thread has a room, as a glyph rather than the word. Text-shaped rules
+   (uppercase, letter-spacing, a pill border) were describing a label that is no longer there. */
+.iq-inq-forum{margin-left:auto;display:inline-flex;align-items:center;color:var(--text-secondary)}
 
 /* ── HOME IS ONE QUESTION ────────────────────────────────────────────────────
    Founder decision, September 2026. Greeting, the single highest-priority thing IntelliQ wants

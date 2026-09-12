@@ -10553,6 +10553,22 @@ async function _governedReason(code, userId, question, { register, priorMessages
    OWN card, echoed back by their own client — the same trust level as anything they type — so it
    is hard-capped and treated as untrusted content inside the context block, never as instruction.
    The grounding cage still verifies whatever the model writes on top of it. */
+/* AN OBJECT REF, SPLIT. `kind:id` in, `{kind, id}` out, through the one validator that decides
+   what a ref may look like — so a caller cannot reach an object by inventing a spelling.
+
+   THIS EXISTS BECAUSE TWO READERS WERE PARSING THE WRONG SHAPE. `_turnAbout` below turns a bound
+   object into the HEADLINE AND BODY a prompt reads; it has never returned a kind or an id.
+   `_crossEvidenceContext` and `_forumContext` both called it and then read `a.kind`, which is
+   undefined on every call — so both returned null every time, and the composer's connections
+   bundle and the Forum-informs-this-object rule were silently not happening at all. Neither
+   failed; both looked exactly like "there was nothing to add". */
+function _splitAboutRef(v) {
+  const ref = _aboutRef(v);
+  if (!ref) return null;
+  const i = ref.indexOf(':');
+  return { kind: ref.slice(0, i), id: ref.slice(i + 1) };
+}
+
 function _turnAbout(about) {
   if (!about || typeof about !== 'object') return null;
   const h = String(about.headline || '').slice(0, 200).trim();
@@ -10678,10 +10694,10 @@ function _attentionContext(code, userId) {
   } catch (_) { return null; }
 }
 
-function _crossEvidenceContext(code, userId, about) {
+function _crossEvidenceContext(code, userId, aboutRef) {
   try {
-    const a = _turnAbout(about);
-    if (!a || !a.kind || !a.id) return null;
+    const a = _splitAboutRef(aboutRef);
+    if (!a) return null;
     const authorised = _allObjectsFor(code, userId);
     const self = authorised.find(o => o.kind === a.kind && String(o.id) === String(a.id));
     if (!self) return null;
@@ -10721,10 +10737,10 @@ function _crossEvidenceContext(code, userId, about) {
 
    NOT EVIDENCE, AND THE BUNDLE SAYS SO. ai/composer.js prints the rule in the same block as the
    data, because a model handed six agreeing messages will otherwise write "the group agrees". */
-function _forumContext(code, userId, about) {
+function _forumContext(code, userId, aboutRef) {
   try {
-    const a = _turnAbout(about);
-    if (!a || !a.kind || !a.id) return null;
+    const a = _splitAboutRef(aboutRef);
+    if (!a) return null;
     const object = _allObjectsFor(code, userId).find(o => o.kind === a.kind && String(o.id) === String(a.id));
     if (!object) return null;                       // not theirs to read: no room, no context
     const aud = _forumAudience(code, userId, object);
@@ -10740,7 +10756,18 @@ function _forumContext(code, userId, about) {
        projection of that inquiry, so its object id is the same id. A focus room is keyed
        `focus:<objectId>` (_forumRoom). Guessing a composite key would have read nothing and
        returned "no forum" for every room that exists, which is the quietest possible failure. */
-    const key = aud.forumKind === 'group' ? String(a.id) : `focus:${a.id}`;
+    /* KEYED ON THE OBJECT'S KIND, NOT ON THE AUDIENCE'S. This branch used to read
+       `aud.forumKind === 'group'`, which is a fact about WHO IS IN THE ROOM rather than about
+       WHERE THE ROOM IS WRITTEN — and those two come apart on the commonest Focus in the
+       product. A squad's focus carries a nodeId, so _forumAudience resolves its room as a node
+       room and reports forumKind 'group'; but its thread is written by _forumRoom at
+       `focus:<id>`, because that is the writer a focus room has. So the read looked at
+       `tf_...`, found nothing, and returned "no forum" for a room that existed and that the
+       person could open by tapping the icon on the same screen. The founder's rule — Forum
+       content may inform private conversation FOR THAT SAME OBJECT — was silently not
+       happening for every group Focus. Reproduced by posting into the room and reading the
+       context back, not argued from the code. */
+    const key = a.kind === 'focus' ? `focus:${a.id}` : String(a.id);
     const thread = (forumThreads[code] || {})[key];
     if (!thread) return null;
     const visible = forum.visibleThread(thread, { viewerId: userId });
@@ -10761,7 +10788,7 @@ function _figuresIn(text) {
   return [...new Set((String(text || '').match(/\b\d{1,4}\b/g) || []).map(Number))];
 }
 
-async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null, conversation = null } = {}) {
+async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null, aboutRef = null, conversation = null } = {}) {
   // Every stage below used to fail silently into the deterministic path. The symptom of a
   // composer that never runs is not an error — it is a reply that reads like a template,
   // which is indistinguishable from a composer that ran and wrote something dull. Each exit
@@ -10888,11 +10915,11 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
          things this person could already open, and nothing else. Refs and labels only: the
          statements stay where they live, and the model is told plainly that a connection is not
          corroboration so it cannot narrate two linked records as two confirmations. */
-      connections: _crossEvidenceContext(code, userId, about),
+      connections: _crossEvidenceContext(code, userId, aboutRef),
       /* WHAT THIS OBJECT'S PEOPLE HAVE BEEN SAYING. One way, same object only, never evidence —
          see _forumContext. The bundle carries the rule beside the data rather than trusting a
          prompt to remember it. */
-      forum: _forumContext(code, userId, about),
+      forum: _forumContext(code, userId, aboutRef),
       /* WHAT DESERVES ATTENTION, decided deterministically before the model sees it.
 
          The model is handed reason CODES and labels for objects this person could already open,
@@ -14342,6 +14369,11 @@ function _composerActionContext(code, userId, opts = {}, conversation = null) {
   return {
     surface: String(opts.surface || (object ? object.kind : 'home')).slice(0, 40),
     object,
+    /* THE RESOLVED REF, in the one spelling every other reader uses. The composer's `about` is a
+       HEADLINE AND BODY for the prompt, which is a different thing from the object's identity —
+       and two readers downstream were parsing the prompt shape as if it were the ref, so both
+       quietly returned nothing. Resolved once, here, where the binding is decided. */
+    objectRef: ref || null,
     folders: _libFolders(code).filter(f => f.ownerId === userId).map(f => ({ id: f.id, name: f.name })),
     groups: Object.values(orgNodes[code] || {}).filter(n => n && _inNode(code, n.nodeId || n.id, userId))
       .map(n => ({ id: n.nodeId || n.id, name: n.name || 'Group', memberIds: [...(n.memberIds || [])].map(String).sort() })),
@@ -14817,6 +14849,9 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   if (String(text || '').trim() && !(cls.command && cls.command.payload)) {
     const attempt = await _composeTurn(code, userId, cls.questionText || text, {
       priorMessages, workCtx, actions: proposals, about: _turnAbout(opts.about), conversation: _conv,
+      // The object this turn is bound to, as a REF. `about` above is the headline/body the prompt
+      // reads; this is the identity every authorised lookup needs.
+      aboutRef: actionContext.objectRef,
     });
     if (attempt && attempt.answer) composedReply = attempt;
     else if (attempt && attempt.degraded) composerDegraded = attempt.degraded;
@@ -16139,7 +16174,17 @@ app.get('/api/objects', requireAuth, (req, res) => {
      object carries. */
   const all = scope === 'all' ? _allObjectsFor(code, userId) : _objectBucket(code, userId, scope);
   if (!all) return res.status(403).json({ error: 'scope unavailable' });
-  const objects = all.filter(item => item.kind === kind).map(({ raw, ...item }) => item);
+  /* WHETHER EACH ONE HAS A ROOM, answered by the one owner, before `raw` is stripped.
+
+     The card used to decide this for itself: `item.shared === true || (item.participants || []).length > 1`.
+     Neither field survives this projection — `shared` is set by the thread route and `participants`
+     lives on `raw` — so the indicator was a fourth availability rule that could never be true, and
+     a person scanning their list could not tell which of these threads had anybody in them. Asked
+     here, on every read, with nothing cached: a roster change takes the icon off the card on the
+     very next request, exactly as it does on the object's own screen. */
+  const objects = all.filter(item => item.kind === kind)
+    .map(item => ({ ...item, forumAvailable: _forumAudience(code, userId, item).available }))
+    .map(({ raw, ...item }) => item);
   // ONE RANKING over both, so the top of the list is the top of the list.
   objects.sort((a, b) => (b.score || 0) - (a.score || 0));
   res.json({ ok: true, kind, scope, objects });
@@ -23501,6 +23546,10 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   emailIndex, activeSessions, inviteTokens, userAiProfiles,
   // exported for the truth layer: the group contribution boundary
   groupCandidates, orgNodes, _groupSubjectRef, _noteGroupCandidates, _admitGroupContributions,
+  // The two forum owners, exported so a suite can drive them against object shapes the bucket
+  // produces for kinds that are derived rather than stored (a group High is a projection, not a
+  // record), and so the one-way context can be asserted as BEHAVIOUR rather than as source shape.
+  _forumAudience, _forumContext,
   _inNode, _leadsNode, forumThreads, _forumThread,
   raises, _raises, _ladderFor, _admitLeaderRead,
   // exported for the truth layer: attached material, whether it landed, and the graphs

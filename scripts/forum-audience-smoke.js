@@ -38,7 +38,8 @@ process.env.IQ_COMPOSER = '1';
 
 const fs = require('fs'), path = require('path');
 const S = require('../server.js');
-const { app, _loadAllStores, _rebuildEmailIndex, issueToken, orgNodes, forumThreads } = S;
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken, orgNodes, forumThreads,
+  _forumAudience, _forumContext, groupCandidates, inquiryStates } = S;
 
 let pass = 0, fail = 0;
 const ok = (n, c) => { let v = false; try { v = typeof c === 'function' ? c() : c; } catch (_) { v = false; }
@@ -212,9 +213,16 @@ const server = app.listen(0, async () => {
       && /do not say "the group/i.test(R('ai/composer.js')));
     ok('FA-E4 …and never carries an author, because forum speech is anonymous to every human',
       !/m\.by/.test(CTX) && !/authorId/.test(CTX));
+    /* FA-E5 REWRITTEN, AND NOT WEAKENED. It pinned the parameter NAME `about`, which was right
+       about the law (one object, no parameter for another) and wrong about what that parameter
+       was carrying: `about` is the headline and body a prompt reads, and this reader needs the
+       object's identity. The two were being conflated, which is exactly the defect block I now
+       guards. The law is unchanged and asserted the same way — one bound ref in, no second
+       object reachable — and the behaviour is driven below rather than only read here. */
     ok('FA-E5 the server resolves the room from the object the turn is BOUND to, with no parameter for another',
-      /function _forumContext\(code, userId, about\)/.test(SRC)
-      && /_forumContext\(code, userId, about\)/.test(SRC));
+      /function _forumContext\(code, userId, aboutRef\)/.test(SRC)
+      && /_forumContext\(code, userId, aboutRef\)/.test(SRC)
+      && /aboutRef: actionContext\.objectRef/.test(SRC));
     ok('FA-E5b …re-checking membership at the moment of the turn rather than inheriting it',
       /_forumContext[\s\S]{0,1400}_mayReadGroup\(code, aud\.key, userId\)/.test(SRC));
     ok('FA-E6 …and drops a withdrawn message, because taking something back is not speech',
@@ -261,6 +269,139 @@ const server = app.listen(0, async () => {
     ok('FA-G5 …at a 44px target, which the stylesheet gives it',
       /\.iqt-forum\{[^}]*min-width:44px[^}]*min-height:44px/.test(R('css/styles.css').replace(/\s+/g, ''))
       || /min-width:44px;min-height:44px/.test(R('css/styles.css').replace(/\s+/g, '')));
+
+    /* ══ H — ALL FOUR KINDS, AND A KIND THAT IS NOT ONE ═══════════════════════════════════
+       The founder's rule names High, Low, Inquiry and Focus. A group High is a PROJECTION of an
+       inquiry rather than a stored record, so it cannot be seeded into the bucket the way a focus
+       can — it is driven here against the canonical owner, with the object shape the bucket
+       actually produces for it, rather than left untested because it is inconvenient to fixture. */
+    console.log('\n  H — THE RULE IS ONE RULE, AND IT COVERS ALL FOUR KINDS');
+    const obj = (kind, raw, extra) => ({ kind, id: 'x1', about: `${kind}:x1`, raw: raw || {}, ...(extra || {}) });
+    for (const kind of ['high', 'low', 'inquiry', 'focus']) {
+      const inRoom = _forumAudience(C, 'p1', obj(kind, { nodeId: 'crowd' }));
+      ok(`FA-H1 a group ${kind.toUpperCase()} on a three-person node has a forum, and says how many can read it`,
+        inRoom.available === true && inRoom.readable === 3 && inRoom.forumKind === 'group');
+      const alone = _forumAudience(C, 'solo', obj(kind, { nodeId: 'lonely' }));
+      ok(`FA-H2 …and the same ${kind.toUpperCase()} on a ONE-person node has none, with the reason said out loud`,
+        alone.available === false && alone.readable === 1 && /nobody else in this group/i.test(alone.reason || ''));
+      const personal = _forumAudience(C, 'p1', obj(kind, {}));
+      ok(`FA-H3 …and a PERSONAL ${kind.toUpperCase()} nobody else can read has none either`,
+        personal.available === false && /just you/i.test(personal.reason || ''));
+    }
+    ok('FA-H4 a group subjectRef resolves the room even when the object carries no nodeId of its own',
+      _forumAudience(C, 'p1', obj('high', { subjectRef: 'group:crowd' })).available === true);
+    ok('FA-H5 a kind that is not one of the four is REFUSED rather than falling through to a room',
+      (() => { const r = _forumAudience(C, 'p1', obj('material', { nodeId: 'crowd' }));
+        return r.available === false && /High, a Low, an Inquiry or a Focus/.test(r.reason || ''); })());
+    ok('FA-H5b …including an object with no kind at all, which is the shape a bug arrives in',
+      _forumAudience(C, 'p1', { id: 'x', raw: { nodeId: 'crowd' } }).available === false);
+    ok('FA-H6 an EMPTY node — one that exists with nobody on it — has no room either',
+      _forumAudience(C, 'sib', obj('inquiry', { nodeId: 'sibling' })).available === false);
+
+    /* ══ I — ONE WAY, ONE OBJECT, AND IT IS BEHAVIOUR RATHER THAN A PROMISE ═══════════════ */
+    console.log('\n  I — FORUM INFORMS THIS OBJECT\'S CONVERSATION, AND NO OTHER');
+    /* DRIVEN THROUGH THE ROOM A PERSON ACTUALLY OPENS, and that is what found the defect this
+       block now guards: a squad's focus is written at `focus:<id>` by _forumRoom, and the read
+       was keyed on the AUDIENCE's forumKind rather than on the object's kind — which for a group
+       focus says 'group', so the composer looked for `tf_crowd`, found nothing, and returned
+       "no forum" for a room the person could open by tapping the icon on the same screen. The
+       founder's rule was silently not happening for the commonest Focus in the product. */
+    await post('/api/forum/focus/tf_crowd', p1T, { text: 'We are stepping at different moments in the press' });
+    const ctxSame = _forumContext(C, 'p1', 'focus:tf_crowd');
+    ok('FA-I1 a turn about THIS object is handed this object\'s room',
+      !!ctxSame && ctxSame.messages.length === 1 && /stepping at different moments/.test(ctxSame.messages[0].text));
+    ok('FA-I1a …and a GROUP focus is not a special case that quietly gets nothing — its room is written where its writer writes it',
+      !!ctxSame && ctxSame.sameObject === 'focus:tf_crowd');
+    ok('FA-I1b …with no author on it, because forum speech is anonymous to every human and the one reader that is not a human must not be the way round that',
+      !('authorId' in ctxSame.messages[0]) && !JSON.stringify(ctxSame).includes('p1'));
+    ok('FA-I2 …and a turn about a DIFFERENT object the same person can also read is handed nothing from it',
+      _forumContext(C, 'p1', 'inquiry:inq_crowd') === null);
+    ok('FA-I2b …and neither is a group object in a node this person is not on',
+      _forumContext(C, 'p1', 'inquiry:inq_lonely') === null);
+    ok('FA-I3 somebody who cannot read the object at all gets nothing',
+      _forumContext(C, 'solo', 'focus:tf_crowd') === null);
+    ok('FA-I3b …and neither does another tenant, which fails closed at the object rather than at the room',
+      _forumContext(X, 'far', 'focus:tf_crowd') === null);
+    ok('FA-I4 a person REMOVED from the node gets nothing on the very next read, with nothing swept',
+      (() => {
+        const node = orgNodes[C].crowd;
+        const keep = node.memberIds.slice();
+        node.memberIds = keep.filter(id => id !== 'p1');
+        const after = _forumContext(C, 'p1', 'focus:tf_crowd');
+        node.memberIds = keep;
+        return after === null;
+      })());
+    ok('FA-I4b …and it comes back when they do, because nothing was stored to go stale',
+      !!_forumContext(C, 'p1', 'focus:tf_crowd'));
+
+    /* ══ J — SPEECH IS NOT EVIDENCE UNTIL ITS AUTHOR OFFERS IT ════════════════════════════ */
+    console.log('\n  J — SAYING IT CHANGES NOTHING UNTIL SOMEBODY OFFERS IT');
+    const beforeSignals = JSON.stringify((inquiryStates[C] || {})['group:crowd'] || {});
+    const spoke = await post('/api/group/crowd/forum/inq_crowd', p2T, { text: 'I saw the same thing on Saturday from the far side' });
+    ok('FA-J1 posting into the room says so: no epistemic effect at all',
+      spoke.status === 200 && spoke.j.epistemicEffect === 'none');
+    ok('FA-J1b …and the group inquiry is byte-for-byte what it was before anybody spoke',
+      JSON.stringify((inquiryStates[C] || {})['group:crowd'] || {}) === beforeSignals);
+    const notMine = await post(`/api/group/crowd/forum/inq_crowd/${spoke.j.messageId}/contribute`, p1T, {});
+    ok('FA-J2 somebody else cannot offer YOUR words as evidence — authorship, not leadership',
+      notMine.status === 403);
+    const mineNow = await post(`/api/group/crowd/forum/inq_crowd/${spoke.j.messageId}/contribute`, p2T, {});
+    ok('FA-J2b …and its author can, through the SAME contribution boundary everything else uses',
+      mineNow.status === 200);
+    ok('FA-J3 …which produces a candidate holding the MESSAGE ID, never the words',
+      (() => { const c = (groupCandidates[C] || []).find(x => x.evidenceRef === spoke.j.messageId);
+        return !!c && !JSON.stringify(c).includes('far side'); })());
+
+    /* ══ K — THE INDICATOR ON THE CARD IS THE SERVER'S ANSWER ═════════════════════════════
+       And it was not. The card decided for itself: `item.shared === true || participants.length > 1`.
+       Neither field survives the objects projection — `shared` is written by the thread route and
+       `participants` lives on `raw` — so the indicator was a FOURTH availability rule that could
+       never be true, and a person scanning their list could not tell which threads had anybody in
+       them. Found by looking for the literal word "Forum" the founder asked to have removed. */
+    console.log('\n  K — AND THE CARD ASKS THE SAME OWNER AS THE SCREEN');
+    const list = await get('/api/objects?kind=focus&scope=all', p1T);
+    ok('FA-K1 the objects list carries whether each one has a room',
+      list.status === 200 && (list.j.objects || []).every(o => typeof o.forumAvailable === 'boolean'));
+    ok('FA-K2 …true for the squad focus and false for the one-person one, which is the same answer its own screen gives',
+      (() => {
+        const byId = Object.fromEntries((list.j.objects || []).map(o => [o.id, o.forumAvailable]));
+        return byId.tf_crowd === true && (!('tf_lonely' in byId) || byId.tf_lonely === false);
+      })());
+    ok('FA-K3 the card renders the ICON and not the word "Forum"',
+      /iq-inq-forum[^>]*>\s*<svg/.test(R('js/app.js')) && !/>Forum<\/span>/.test(R('js/app.js')));
+    ok('FA-K3b …with its meaning carried accessibly, since a glyph on its own says nothing to a screen reader',
+      /class="iq-inq-forum" role="img" aria-label="Others can discuss this"/.test(R('js/app.js')));
+    ok('FA-K4 …and NO surface computes availability for itself any more, the client included',
+      !/item\.shared === true \|\| \(Array\.isArray\(item\.participants\)/.test(APP)
+      && /item\.forumAvailable === true/.test(APP));
+
+    /* ══ L — AND IT REACHES THE MODEL, WHICH IS THE ONLY THING THAT MAKES ANY OF IT TRUE ═══
+       Every assertion above about the Forum-informs-this-object rule is an assertion about a
+       function. This one is about the PRODUCT: it drives the real turn and reads what the model
+       was actually handed, because the defect this block exists for was two readers returning
+       null on every call while the bundle they fed looked exactly like "there was nothing to
+       add". A capability that silently produces nothing is indistinguishable from one that is
+       not wired at all — and for a fortnight, that is what this was. */
+    console.log('\n  L — AND THE ROOM ACTUALLY REACHES THE TURN');
+    {
+      const gw = require('../ai/gateway.js');
+      const REAL = { enabled: gw.enabled, budgetAvailable: gw.budgetAvailable, complete: gw.complete };
+      let handed = '';
+      Object.assign(gw, {
+        enabled: () => true, budgetAvailable: () => true,
+        complete: async (o) => { handed = String((o && o.user) || ''); return ''; },
+      });
+      await post('/api/assistant/turn', p1T, { text: 'What should we do about this focus?', about: { kind: 'focus', id: 'tf_crowd' } });
+      ok('FA-L1 a turn bound to the object is handed that object\'s room',
+        /stepping at different moments/.test(handed));
+      ok('FA-L1b …with the rule printed beside the data, so a model handed six agreeing messages cannot write "the group agrees"',
+        /not evidence|does not (?:make|count)|changes nothing/i.test(handed));
+      handed = '';
+      await post('/api/assistant/turn', p1T, { text: 'And what about the other thing?', about: { kind: 'inquiry', id: 'inq_crowd' } });
+      ok('FA-L2 …and a turn bound to a DIFFERENT object is handed none of it',
+        !/stepping at different moments/.test(handed));
+      Object.assign(gw, REAL);
+    }
 
   } catch (e) { fail++; console.error('  FAIL forum-audience suite threw:', e && e.stack); }
 
