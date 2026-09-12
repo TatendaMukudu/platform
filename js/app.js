@@ -6594,6 +6594,10 @@ async function todayTurnConfirm(turnId, proposalId, btn) {
     const overrides = edited ? { text: edited.value } : {};
     const r = await fetch('/api/assistant/turn/' + encodeURIComponent(turnId) + '/confirm', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ proposalId, overrides }) });
     const d = await r.json();
+    if (r.status === 409 && d.error === 'forum_audience_changed') {
+      if (card) card.innerHTML = `<div class="tdy-settled" role="status">${_escAdvisor(d.note || 'The people who can read this room changed. Preview and confirm a fresh share.')}</div>`;
+      return;
+    }
     if (!d.ok) throw new Error('confirm failed');
     if (card) card.innerHTML = `<div class="tdy-settled">${_escAdvisor(d.note || 'Done.')}</div>`;
   } catch (e) { if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; } if (typeof showToast === 'function') showToast('Could not confirm right now.', 'error'); }
@@ -14741,6 +14745,13 @@ const MemberApp = {
       reset();
       if (window.confirm(`Make this visible to ${j.to}? It's private right now.`))
         return this.confirmProposal(turnId, proposalId, { ...(overrides || {}), confirmVisibilityIncrease: true });
+      return j;
+    }
+    if (r.status === 409 && j && j.error === 'forum_audience_changed') {
+      this._confirming.delete(proposalId);
+      btns.forEach(b => { if (b !== primary) b.disabled = false; });
+      if (primary) primary.textContent = 'Preview required';
+      inlineError(j.note || 'The people who can read this room changed. Preview and confirm a fresh share.');
       return j;
     }
     if (!j || !j.ok) { reset(); inlineError(j && /already/.test(j.error || '') ? 'This was already done.' : 'Couldn’t complete that — please try again.'); return j; }

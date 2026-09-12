@@ -155,7 +155,7 @@ Object.assign(ai, {
     }, second.envelope);
     const home = page.locator('#today-prop-' + second.prop.id);
     ok('FB-6 Home shows exact proposed words and current readers before Confirm',
-      (await home.innerText()).includes(SAID)
+      (await home.locator('textarea.iq-share-edit').inputValue()) === SAID
       && /13 current readers/.test(await home.innerText())
       && /rest of this conversation stays private/.test(await home.innerText()));
     const homeWords = 'our own note about changing shape at half-time';
