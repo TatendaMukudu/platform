@@ -218,7 +218,12 @@ function buildContext({
         projected_from: 'came out of', projected_to: 'produced',
         shares_evidence: 'rests on some of the same evidence as',
         supersedes: 'replaced', superseded_by: 'was replaced by' })[r.type] || 'is connected to';
-      L.push(`  - this ${how} a ${r.kind || 'record'}${r.label ? `: ${_clip(r.label, 120)}` : ''}`);
+      /* "a inquiry" was reaching the model. A bundle this careful about not turning a sequence
+         into a cause should not read as though nobody proof-read it: the surrounding sentences
+         are the ones asking a model to be precise, and sloppiness in the frame invites sloppiness
+         in the answer. Four kinds, one of which begins with a vowel. */
+      const kind = r.kind || 'record';
+      L.push(`  - this ${how} ${/^[aeiou]/i.test(kind) ? 'an' : 'a'} ${kind}${r.label ? `: ${_clip(r.label, 120)}` : ''}`);
     }
     const lp = connections.loop;
     if (lp) {

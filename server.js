@@ -10732,7 +10732,10 @@ function _crossEvidenceContext(code, userId, aboutRef) {
   try {
     const a = _splitAboutRef(aboutRef);
     if (!a) return null;
-    const authorised = _allObjectsFor(code, userId);
+    /* The SAME authorised set, with each object's own evidence joined back on — see
+       `_objectsWithEvidenceFor`. It adds no object; it only stops a group projection from
+       reporting "nothing has happened" when what it means is "I cannot see what happened". */
+    const authorised = _objectsWithEvidenceFor(code, userId);
     const self = authorised.find(o => o.kind === a.kind && String(o.id) === String(a.id));
     if (!self) return null;
     const target = crossEvidence.refOf(self);
@@ -16173,6 +16176,42 @@ function _allObjectsFor(code, userId) {
     }
   }
   return all;
+}
+
+/* ── THE SAME AUTHORISED OBJECTS, EACH CARRYING THE EVIDENCE ITS OWN RECORD HOLDS ────────────
+   A GROUP object is a PROJECTION. `ai/team-state.js` builds the High, the Low and the lead
+   Inquiry out of a node's inquiries and returns a surface — a headline, a band, a question, an
+   unknown — and deliberately not the signals underneath, because the surface exists to be shown
+   to a squad and a signal carries who said it. `_objectBucket` files that projection, so a group
+   object's `raw` has no `signals` at all.
+
+   WHAT THAT COST, found by driving a real group Focus end to end: `loop()` counts what has
+   arrived on the thing a Focus addressed SINCE its outcome, and it counts that over the
+   addressed object's signals. For every group Focus in the product that count was structurally
+   zero — not "nothing has happened", which is a fact, but "this reader cannot see anything that
+   happens", which is a different statement wearing the same words. The turn then told the model
+   "nothing has been recorded on that thing since the outcome" while two accounts sat in the
+   record, and a model handed that writes a confident sentence about a standstill.
+
+   SO THE EVIDENCE IS JOINED BACK AT READ TIME, from the canonical store, for objects this reader
+   has ALREADY been cleared to see — `_allObjectsFor` did the authorising and this adds nothing to
+   that set, not one object. Nothing is written and nothing is cached: a membership change is
+   reflected on the next read, exactly as everywhere else.
+
+   ONE OWNER, because the alternative is the failure this codebase keeps finding: a second caller
+   needing the same join, writing its own, and the two drifting. Callers that want the surface as
+   a squad sees it keep calling `_allObjectsFor` and are unaffected. */
+function _objectsWithEvidenceFor(code, userId) {
+  return _allObjectsFor(code, userId).map(o => {
+    const raw = (o && o.raw) || {};
+    if (Array.isArray(raw.signals) && raw.signals.length) return o;
+    const nodeId = o.whoseNodeId || raw.nodeId || null;
+    if (!nodeId) return o;
+    const bySubject = (inquiryStates[code] || {})[`group:${nodeId}`] || {};
+    const canonical = Object.values(bySubject).find(i => i && String(i.inquiryId) === String(o.id));
+    if (!canonical || !Array.isArray(canonical.signals)) return o;
+    return { ...o, raw: { ...raw, signals: canonical.signals } };
+  });
 }
 
 app.get('/api/objects', requireAuth, (req, res) => {
@@ -23610,7 +23649,7 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   _inNode, _leadsNode, forumThreads, _forumThread,
   raises, _raises, _ladderFor, _admitLeaderRead,
   // exported for the truth layer: attached material, whether it landed, and the graphs
-  materials, materialEngage, _materials, _engageOf, _materialCohort, _allObjectsFor, _chartFor, _materialContext,
+  materials, materialEngage, _materials, _engageOf, _materialCohort, _allObjectsFor, _objectsWithEvidenceFor, _chartFor, _materialContext,
   teamFocuses, _teamFocuses, _groupInquiryProjections, _groupPatternFindings, _mayReadGroup, _teamStateAnswer, _leadInquiry,
   reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library

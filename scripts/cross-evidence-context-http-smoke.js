@@ -196,11 +196,31 @@ const server = app.listen(0, async () => {
        not the gate, and a reader of this file should know which is which. M84 mutates the
        authorised set to somebody else's and CE-D1 goes red. */
     ok('CE-D3 the edges are derived over the READER\'s authorised objects, which is the gate the early return is often mistaken for',
-      (() => {
+      () => {
         const SRC = require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8');
         const fn = SRC.slice(SRC.indexOf('function _crossEvidenceContext('), SRC.indexOf('function _forumContext('));
-        return /_allObjectsFor\(code, userId\)/.test(fn) && /crossEvidence\.neighbourhood\(authorised/.test(fn);
-      })());
+        return /_objectsWithEvidenceFor\(code, userId\)/.test(fn) && /crossEvidence\.neighbourhood\(authorised/.test(fn);
+      });
+    /* AND THE SET IT DERIVES OVER IS THE AUTHORISED SET, UNCHANGED — asserted rather than read.
+       `_objectsWithEvidenceFor` joins each group projection back to the evidence its own record
+       holds, because a group Focus's "what has arrived since" was structurally zero without it.
+       A join is exactly the shape that quietly widens a set, and this one must not: same objects,
+       same refs, same order, every time. If it ever adds one, it has become a second authoriser
+       and CE-D4 is the thing that says so. */
+    ok('CE-D4 joining the evidence back on adds NOT ONE OBJECT to what the reader was cleared to see',
+      () => {
+        const plain = S._allObjectsFor(C, 'me').map(o => `${o.kind}:${o.id}`);
+        const joined = S._objectsWithEvidenceFor(C, 'me').map(o => `${o.kind}:${o.id}`);
+        return plain.length > 0 && joined.length === plain.length
+          && joined.every((r, i) => r === plain[i]);
+      });
+    ok('CE-D4b …and the same holds for a reader whose authorised set is a different one',
+      () => {
+        const a = S._allObjectsFor(C, 'other').map(o => `${o.kind}:${o.id}`);
+        const b = S._objectsWithEvidenceFor(C, 'other').map(o => `${o.kind}:${o.id}`);
+        return b.length === a.length && b.every((r, i) => r === a[i])
+          && !b.some(r => S._allObjectsFor(C, 'me').map(o => `${o.kind}:${o.id}`).includes(r) && r.startsWith('focus:foc_deload'));
+      });
 
     /* ── E — THE READER IS REACHED THROUGH THE REF, WHICH IS THE BUG THAT WAS THERE ──────────
        The defect was not the bundle's contents; it was that the reader was handed the prompt's
