@@ -72,23 +72,53 @@ _loadAllStores({
       timeline: [], lastUpdatedAt: NOW,
     },
   } } },
-  /* A REAL CANDIDATE FOR p1, so the member's own way in is asserted against a rendered control
-     rather than against an empty box. `status: 'detected'` and `contributorId` are what the route
-     filters on -- getting either wrong would produce zero cards, and "zero cards" satisfies a
-     naive check for free, which is the empty-fixture lie this project keeps finding in its tests. */
-  groupCandidates: { [C]: [{
-    candidateId: 'cand_press', nodeId: 'first', contributorId: 'p1', ownerId: 'p1',
-    concept: 'football.press_shape', label: 'How we press from the front',
-    reason: 'you said something that might concern this group',
-    status: 'detected', scope: 'group', evidenceRef: 'ev_o_p1',
-    createdAt: NOW - DAY, expiresAt: NOW + 30 * DAY,
-  }] },
+  /* NO SEEDED CANDIDATE. The previous version of this file put one in the store, which asserted
+     the member's control against a row the FIXTURE created — and an independent gate was right
+     that this proves the control renders, not that a person talking to IntelliQ ever produces
+     something for it to render. The candidate below is made by the real path: p1 says something
+     in their own private conversation and the intake notices it. */
 });
 _rebuildEmailIndex();
+
+/* THE ONE SEAM: where a model reads an utterance and proposes what was observed. Everything
+   after it — grounding, the scope classifier, the candidate store, the routes — is real. */
+const ai = require('../ai/gateway.js');
+Object.assign(ai, {
+  enabled: () => true,
+  budgetAvailable: () => true,
+  complete: async () => '',
+  completeJSON: async () => ({
+    worthInquiry: true,
+    concepts: [], unknowns: [],
+    proposals: [{
+      level: 'observation', id: 'ev_said_p1', originRef: 'p1_sat_match', originKind: 'first_hand',
+      text: 'the press is forcing us backwards',
+      sourceSpan: SAID_BY_P1, domainConcept: 'football.press_shape', concerns: 'group',
+    }],
+  }),
+});
+const SAID_BY_P1 = 'Our press keeps forcing us backwards and we are not stepping together.';
 
 (async () => {
   const server = await new Promise(res => { const s = app.listen(0, () => res(s)); });
   const base = `http://127.0.0.1:${server.address().port}`;
+
+  /* THE MEMBER SPEAKS FIRST, through the personal composer, and the candidate their own control
+     will render is the one that produces. Intake runs unawaited, so this polls for it rather than
+     sleeping a fixed time — and gives up loudly rather than continuing against an empty box. */
+  const p1Tok = issueToken('p1', C, 'member');
+  await fetch(`${base}/api/assistant/turn`, { method: 'POST',
+    headers: { Authorization: `Bearer ${p1Tok}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: SAID_BY_P1 }) }).catch(() => {});
+  let madeCandidate = false;
+  for (let i = 0; i < 80; i++) {
+    const r = await fetch(`${base}/api/group/first/candidates`, { headers: { Authorization: `Bearer ${p1Tok}` } })
+      .then(x => x.json()).catch(() => null);
+    if (r && (r.candidates || []).length) { madeCandidate = true; break; }
+    await new Promise(res => setTimeout(res, 25));
+  }
+  ok('GB-A0 a member talking to IntelliQ in their own conversation produces the candidate this screen will show — nothing below is asserted against a seeded row',
+    madeCandidate);
   const token = issueToken('coach', C, 'coach');
   const browser = await chromium.launch({ executablePath: EXE, args: ['--no-sandbox'] });
   const ctx = await browser.newContext({ viewport: IPHONE, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -304,8 +334,14 @@ _rebuildEmailIndex();
     ok('GB-G0b …in an element that is actually VISIBLE — the defect was a renderer writing into display:none',
       mineVisible === true);
     const mineText = await mpage.evaluate(() => ((document.querySelector('#iqg-mine') || {}).innerText || ''));
-    ok('GB-G0c …naming the thing this member could offer, so the box is not empty by accident',
-      /How we press from the front/.test(mineText));
+    /* GB-G0c REWRITTEN, AND IT FOUND A DEFECT. It used to look for "How we press from the front",
+       which was the label the SEEDED fixture carried. Driven through the real path there is no
+       such sentence: the intake contract never asks a model for a label, so a candidate's label
+       was always the raw canonical concept and this card offered the member
+       "football.press_shape" to contribute. The label now goes through present.humanTopic, and
+       the assertion checks BOTH halves — that the words are there and that the key is not. */
+    ok('GB-G0c …naming the thing this member could offer in WORDS, not the canonical key the concept is stored under',
+      /Press Shape/i.test(mineText) && !/football\./.test(mineText));
     const offerBtns = await mpage.$$('#iqg-mine .mg-actions button');
     ok('GB-G0c2 …with all four controls a person can reach — three directions and "keep it to myself"',
       offerBtns.length === 4);

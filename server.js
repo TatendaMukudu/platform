@@ -11313,7 +11313,14 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
          The evidence stays exactly where it is, private to them; what is recorded is a private
          suggestion they may later act on. Membership noticed something; membership published
          nothing. */
-      try { _noteGroupCandidates(code, userId, subjectRef, props, key, props[0].label || concept); }
+      /* THE LABEL IS THE WORDS A PERSON READS ON THE CARD, so it goes through the one owner that
+         turns a canonical key into language. Found by driving the real path in a browser rather
+         than seeding a candidate: the intake contract never asks a model for a `label`, so this
+         was ALWAYS `props[0].label || concept` — the raw concept key — and the member's own way
+         into the group loop offered them "football.press_shape" to contribute. The seeded
+         fixture that used to stand in for this carried a human sentence, which is exactly how a
+         browser check can be green about a screen nobody could use. */
+      try { _noteGroupCandidates(code, userId, subjectRef, props, key, props[0].label || present.humanTopic({ canonicalConcept: concept })); }
       catch (e) { console.warn('[group] candidate detection skipped:', e && e.message); }
       // An unknown naming a live concept goes only there. One that names nothing, or names a
       // concept that just folded away, goes to the primary — never to everybody.
