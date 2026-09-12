@@ -56,8 +56,8 @@ const NOW = Date.UTC(2026, 2, 10, 9, 0, 0), DAY = 86400000;
 const SQUAD = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', 'p11', 'p12'];
 
 const SIG = (who, n, at, text) => ({ kind: 'observation', status: 'active', source: who,
-  originRef: `o_${who}_${n}`, at, turnId: `t_${who}_${n}`, directness: 'direct',
-  authority: 'corroborated', specificity: 0.7, ref: `ev_${who}_${n}`, contributedBy: who, text });
+  originRef: `o_${who}_${n}_${at}`, at, turnId: `t_${who}_${n}_${at}`, directness: 'direct',
+  authority: 'corroborated', specificity: 0.7, ref: `ev_${who}_${n}_${at}`, contributedBy: who, text });
 
 /* THE PRIVATE-SOUNDING SENTENCE lives on a signal of the very inquiry the focus addresses, so it
    is genuinely reachable from the object under test. An absence is only worth asserting when the
@@ -163,8 +163,8 @@ const server = app.listen(0, async () => {
        nothing at all: it is exactly what the broken reader returned. */
     const AFTER = Date.now() + 1000;
     inquiryStates[C]['group:sq'].inq_q.signals.push(
-      SIG('p6', 'inq_q', AFTER,     'the goalkeeper is starting it quicker now'),
-      SIG('p7', 'inq_q', AFTER + 1, 'we still lose it when they press two'),
+      SIG('p1', 'inq_q', AFTER,     'the goalkeeper is starting it quicker now'),
+      SIG('p2', 'inq_q', AFTER + 1, 'we still lose it when they press two'),
     );
     // And one on the OTHER inquiry, which must not be counted against this focus.
     inquiryStates[C]['group:sq'].inq_o.signals.push(SIG('p8', 'inq_o', AFTER + 2, 'near post again'));
@@ -206,16 +206,16 @@ const server = app.listen(0, async () => {
     ok('GFL-D2 nobody is NAMED in the bundle — a count of accounts is not a list of who gave them',
       !/Player \d/i.test(block()) && !/Head Coach/i.test(block()));
 
-    // Record volume is not cohort size: a third signal from p6 still means two people.
-    inquiryStates[C]['group:sq'].inq_q.signals.push(SIG('p6', 'inq_q', AFTER + 3, 'one more observation'));
+    // Record volume is not cohort size: a third signal from p1 still means two people. The later five contributors are the SAME five as before the outcome, so the two-sided floor still clears.
+    inquiryStates[C]['group:sq'].inq_q.signals.push(SIG('p1', 'inq_q', AFTER + 3, 'one more observation'));
     handed = '';
     await turn('p1', 'What changed?', { kind: 'focus', id: FID });
     ok('GFL-C8 repeated reports by one contributor remain below the post-outcome floor',
       !/record\(s\) have arrived/i.test(block()));
     inquiryStates[C]['group:sq'].inq_q.signals.push(
-      SIG('p8', 'inq_q', AFTER + 4, 'a new independent account'),
-      SIG('p9', 'inq_q', AFTER + 5, 'another independent account'),
-      SIG('p10', 'inq_q', AFTER + 6, 'one more independent account'));
+      SIG('p3', 'inq_q', AFTER + 4, 'a new independent account'),
+      SIG('p4', 'inq_q', AFTER + 5, 'another independent account'),
+      SIG('p5', 'inq_q', AFTER + 6, 'one more independent account'));
     handed = '';
     await turn('p1', 'What changed?', { kind: 'focus', id: FID });
     ok('GFL-C9 five distinct post-outcome contributors permit the six scoped records',

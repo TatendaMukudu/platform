@@ -6563,9 +6563,13 @@ function todayRenderProposals(j) {
   const proposals = r.primaryActions || r.proposedActions || [];
   const propHtml = proposals.map(p => {
     const priv = p.visibility === 'only_me' ? 'Private' : 'Confirm to share';
+    const share = p.actionType === 'share_to_forum';
+    const effect = p.effect || {};
+    const audience = effect.audience || {};
     return `<div id="today-prop-${esc(p.id)}" class="tdy-prop">
       <div class="tdy-prop-head">${esc(p.label)} <span class="tdy-nbadge">${priv}</span></div>
       ${p.why ? `<div class="tdy-prop-why">${esc(p.why)}</div>` : ''}
+      ${share ? `<div class="tdy-prop-why">Audience: ${esc(audience.name || 'Forum')} (${esc(audience.readable)} current readers). Only these edited words will be shared; the rest of this conversation stays private. A Forum post is speech, not evidence.</div><label>Words to share<textarea class="iq-share-edit" aria-label="Words to share">${esc(effect.text || '')}</textarea></label>` : ''}
       <div class="tdy-actions" style="margin-top:0.5rem">
         <button class="btn btn-accent btn-sm" onclick="todayTurnConfirm('${esc(j.turnId)}','${esc(p.id)}',this)">Confirm</button>
         <button class="btn-ghost btn-sm" onclick="todayTurnDismiss('${esc(p.id)}')">Dismiss</button>
@@ -6581,7 +6585,10 @@ async function todayTurnConfirm(turnId, proposalId, btn) {
   const card = document.getElementById('today-prop-' + proposalId);
   if (btn) { btn.disabled = true; btn.textContent = 'Confirming…'; }
   try {
-    const r = await fetch('/api/assistant/turn/' + encodeURIComponent(turnId) + '/confirm', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ proposalId }) });
+    const edited = card && card.querySelector('.iq-share-edit');
+    if (edited && !edited.value.trim()) throw new Error('Share text is empty');
+    const overrides = edited ? { text: edited.value } : {};
+    const r = await fetch('/api/assistant/turn/' + encodeURIComponent(turnId) + '/confirm', { method: 'POST', headers: Auth._headers(), body: JSON.stringify({ proposalId, overrides }) });
     const d = await r.json();
     if (!d.ok) throw new Error('confirm failed');
     if (card) card.innerHTML = `<div class="tdy-settled">${_escAdvisor(d.note || 'Done.')}</div>`;
@@ -14156,6 +14163,12 @@ const MemberApp = {
   async wsAttach(fileInput) {
     const file = fileInput && fileInput.files && fileInput.files[0];
     if (!file) return;
+    const objectThread = this._inquiryThread;
+    const retryContext = fileInput && fileInput.retryContext;
+    const about = retryContext ? retryContext.about : (objectThread && objectThread.about ? objectThread.about : (this._composerAbout || null));
+    // Never borrow the plain private chat's conversation ID for a scoped object.
+    // Retrying after navigation keeps the original object and conversation binding.
+    const conversationId = retryContext ? retryContext.conversationId : (about ? (objectThread?.conversationId || undefined) : (this._chatConvId || undefined));
     const thread = document.getElementById('iq-conversation');
     const esc = s => this._escape(String(s == null ? '' : s));
     if (thread) thread.insertAdjacentHTML('beforeend', `<div class="iq-msg iq-msg-user">${esc(file.name)}</div>`);
@@ -14168,8 +14181,7 @@ const MemberApp = {
       const parsed = await AttachmentHandler.process(file);
       const content = parsed.content || parsed.summary || '';
       if (!String(content).trim()) throw new Error('I couldn’t read any text from that file.');
-      const objectThread = this._inquiryThread;
-      const about = objectThread && objectThread.about ? objectThread.about : (this._composerAbout || null);
+
       /* BOUNDED, like every other write in this file. An upload with no ceiling leaves
          "Reading that file…" on the screen for as long as the person is willing to wait, which
          is the same defect the bounded reader was built to remove — and the mobile case it
@@ -14183,7 +14195,7 @@ const MemberApp = {
           method: 'POST', signal: ctrl.signal,
           headers: { 'Content-Type': 'application/json', ...this._authHeaders() },
           body: JSON.stringify({ kind: this._knowledgeFormat(file.name), text: String(content), title: file.name, filename: file.name,
-            conversationId: objectThread?.conversationId || this._chatConvId || undefined, about }),
+            conversationId, about }),
         });
         raw = await r.text();
       } catch (err) {
@@ -14211,8 +14223,8 @@ const MemberApp = {
         throw new Error('Your session has ended. Sign in again to carry on.');
       }
       if (!r.ok || !d || d.ok === false) throw new Error((d && d.error) || 'I couldn’t save that.');
-      if (d.conversationId && !objectThread) this._rememberChat(d.conversationId);
-      if (objectThread && d.conversationId) objectThread.conversationId = d.conversationId;
+      if (d.conversationId && !about) this._rememberChat(d.conversationId);
+      if (objectThread && d.conversationId && JSON.stringify(objectThread.about || null) === JSON.stringify(about)) objectThread.conversationId = d.conversationId;
       this._pendingAttachment = { id: d.materialId, name: file.name };
       done(`Read ${d.parts} ${d.parts === 1 ? 'part' : 'parts'} from ${esc(file.name)}. It is context for this conversation, not evidence about you or your organisation.`);
     } catch (e) {
@@ -14220,7 +14232,7 @@ const MemberApp = {
          person has already done the work of finding the file — the picker has been cleared, so
          without this they have to go and find it again to learn whether it was the file or the
          connection. The File object is held for exactly one retry and dropped after it. */
-      this._retryAttach = file;
+      this._retryAttach = { file, about, conversationId };
       done(`<span class="iq-error-text">${esc(e.message || 'I couldn’t add that file.')}</span>`
         + ` <button type="button" class="btn btn-outline btn-sm" onclick="MemberApp.wsAttachRetry(this)">Try again</button>`);
     }
@@ -14229,11 +14241,11 @@ const MemberApp = {
   /* The same file, the same path, once. Not a loop: a control that retries forever teaches
      somebody to keep pressing it while nothing changes. */
   wsAttachRetry(btn) {
-    const file = this._retryAttach;
+    const retry = this._retryAttach;
     this._retryAttach = null;
     if (btn) btn.remove();
-    if (!file) return;
-    return this.wsAttach({ files: [file], value: '' });
+    if (!retry) return;
+    return this.wsAttach({ files: [retry.file], value: '', retryContext: retry });
   },
 
   /* Routes ONE composer input through the unified runtime WITH the active lens as a bounded
@@ -14301,7 +14313,7 @@ const MemberApp = {
         e.target ? `<div><strong>Target:</strong> ${esc(e.target)}</div>` : '',
         e.reviewOn ? `<div><strong>Review:</strong> ${esc(e.reviewOn)}</div>` : '',
         e.outcome ? `<div><strong>Outcome:</strong> ${esc(e.outcome)}</div>` : '',
-        e.audience ? `<div><strong>Audience:</strong> ${esc(e.audience.name)}</div>` : '',
+        e.audience ? `<div><strong>Audience:</strong> ${esc(e.audience.name)}${p.actionType === 'share_to_forum' ? ` (${esc(e.audience.readable)} current readers)` : ''}</div>` : '',
         e.material ? `<div><strong>Material:</strong> ${esc(e.material.name)}</div>` : '',
         e.disclosure ? `<div>${esc(e.disclosure)}</div>` : '',
       ].filter(Boolean).join('');
@@ -14309,6 +14321,7 @@ const MemberApp = {
         <div class="iq-proposal-top"><span class="iq-proposal-label">${esc(p.label)}</span> ${priv(p.visibility)} ${state}</div>
         <div class="iq-proposal-why">${esc(p.why)}</div>
         ${exact ? `<div class="iq-submit-effect">${exact}</div>` : ''}
+        ${p.actionType === 'share_to_forum' ? `<label>Words to share<textarea class="iq-share-edit" aria-label="Words to share">${esc(e.text || '')}</textarea></label>` : ''}
         <div class="iq-proposal-actions">
           <button class="btn-primary btn-sm" onclick="MemberApp.confirmProposal('${esc(j.turnId)}','${esc(p.id)}')">Confirm</button>
           <button class="btn btn-outline btn-sm" onclick="MemberApp.correctProposal('${esc(j.turnId)}','${esc(p.id)}')">Edit / Correct</button>
@@ -14701,6 +14714,12 @@ const MemberApp = {
     this._confirming = this._confirming || new Set();
     if (this._confirming.has(proposalId)) return;
     this._confirming.add(proposalId);
+    const edited = cardEl && cardEl.querySelector('.iq-share-edit');
+    if (edited && !edited.value.trim()) { cardEl.querySelector('.iq-inline-error')?.remove();
+      const error = document.createElement('div'); error.className = 'iq-inline-error';
+      error.textContent = 'Enter the words to share, or dismiss this proposal.'; cardEl.appendChild(error);
+      this._confirming.delete(proposalId); return null; }
+    const approvedOverrides = edited ? { ...(overrides || {}), text: edited.value } : overrides;
     const btns = cardEl ? Array.from(cardEl.querySelectorAll('button')) : [];
     const primary = cardEl ? cardEl.querySelector('.btn-primary') : null;
     const primaryText = primary ? primary.textContent : '';
@@ -14710,7 +14729,7 @@ const MemberApp = {
     let r, j;
     try {
       r = await fetch(`/api/assistant/turn/${turnId}/confirm`, { method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, overrides: overrides || {} }) });
+        headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, overrides: approvedOverrides || {} }) });
       j = await r.json();
     } catch (_) { reset(); inlineError('Couldn’t reach the server — please try again.'); return null; }
     if (r.status === 409 && /visibility_increase/.test(j.error || '')) {
@@ -14782,7 +14801,9 @@ const MemberApp = {
       headers: { 'Content-Type': 'application/json', ...this._authHeaders() }, body: JSON.stringify({ proposalId, correction: c }) });
     const j = await r.json();
     const cardEl = document.querySelector(`[data-proposal="${proposalId}"]`);
-    if (cardEl && j.ok) cardEl.querySelector('.iq-proposal-why')?.insertAdjacentHTML('beforeend', ` <em class="iq-corrected">(updated: ${this._escape((j.applied || []).join(', ') || 'noted')})</em>`);
+    if (cardEl && j.ok && (j.applied || []).includes('withdrew public share')) {
+      cardEl.innerHTML = '<div class="iq-confirmed">Public share withdrawn. Nothing was posted.</div>';
+    } else if (cardEl && j.ok) cardEl.querySelector('.iq-proposal-why')?.insertAdjacentHTML('beforeend', ` <em class="iq-corrected">(updated: ${this._escape((j.applied || []).join(', ') || 'noted')})</em>`);
     return j;
   },
   /* Reads the inline field and hands the text to the one correction path. Split out so the

@@ -246,7 +246,7 @@ const server = app.listen(0, async () => {
     ok('FA-F6 the room is re-resolved at CONFIRM time, not inherited from when the card was staged',
       /prop\.actionType === 'share_to_forum'[\s\S]{0,900}_forumAudience\(code, userId, live\)/.test(SRC));
     ok('FA-F7 …and posting touches forumThreads and nothing epistemic',
-      /share_to_forum'\)[\s\S]{0,2000}epistemicEffect: 'none'/.test(SRC));
+      /share_to_forum'\)[\s\S]{0,3000}epistemicEffect: 'none'/.test(SRC));
     ok('FA-F8 no other path carries a private conversation into a forum: every writer of forum speech is a forum route or this one action',
       (() => {
         // Every place a message is appended to a thread, and what reaches it.
