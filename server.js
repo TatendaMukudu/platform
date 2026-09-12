@@ -10779,9 +10779,31 @@ function _crossEvidenceContext(code, userId, aboutRef) {
     });
     const loop = self.kind === 'focus' ? crossEvidence.loop(authorised, target) : null;
     if (!related.length && !loop) return null;
+    let groupPostWithheld = false;
+    if (loop && loop.addresses && self.raw && self.raw.nodeId) {
+      const nodeId = self.raw.nodeId;
+      const addressed = byRef.get(loop.addresses);
+      if (addressed && addressed.kind === 'inquiry' && addressed.whoseNodeId === nodeId) {
+        const canonical = Object.values((inquiryStates[code] || {})[`group:${nodeId}`] || {})
+          .find(i => i && String(i.inquiryId) === String(addressed.id));
+        const active = ((canonical && canonical.signals) || [])
+          .filter(x => x && x.kind !== 'interpretation' && diagnose.isActive(x));
+        const atRaw = self.raw.outcome && self.raw.outcome.at;
+        const since = Number(atRaw) || Date.parse(String(atRaw || ''));
+        const post = Number.isFinite(since) && since > 0 ? active.filter(x => Number(x.at) > since) : [];
+        const n = _nodeMembers(code, nodeId).length;
+        const allPeople = new Set(active.map(x => x.contributedBy).filter(Boolean)).size;
+        const postPeople = new Set(post.map(x => x.contributedBy).filter(Boolean)).size;
+        groupPostWithheld = !teamState.cohortFloor(allPeople, n).ok
+          || !teamState.cohortFloor(postPeople, n).ok;
+      }
+    }
+    const safeOpen = loop ? loop.open.filter(x => !groupPostWithheld
+      || x !== 'nothing has been recorded on it since the outcome') : [];
+    if (groupPostWithheld) safeOpen.push('post-outcome evidence cannot yet be described at this group level');
     return { related, loop: loop ? { addresses: loop.addresses, outcome: loop.outcome,
-      observedSince: loop.observedSince ? loop.observedSince.records : null,
-      sharedOrigins: loop.sharedOrigins.length, open: loop.open } : null };
+      observedSince: !groupPostWithheld && loop.observedSince ? loop.observedSince.records : null,
+      sharedOrigins: loop.sharedOrigins.length, open: safeOpen } : null };
   } catch (_) { return null; }
 }
 
@@ -14459,7 +14481,7 @@ function _composerActionContext(code, userId, opts = {}, conversation = null) {
       if (!a.available) return null;
       const node = a.forumKind === 'group' ? (orgNodes[code] || {})[a.key] : null;
       return { kind: a.forumKind, key: a.key, readable: a.readable,
-        name: node ? (node.name || 'this group') : 'the people on this' };
+        signature: _forumAudienceSignature(a), name: node ? (node.name || 'this group') : 'the people on this' };
     })(),
     attachment: opts.attachment && typeof opts.attachment === 'object'
       ? { id: String(opts.attachment.id || '').slice(0, 120), name: String(opts.attachment.name || '').slice(0, 200) } : null,
@@ -14524,6 +14546,7 @@ function _composerActionProposals(code, userId, candidates, context, conversatio
     payload: { ...c.arguments, argumentSources: c.argumentSources || {},
       context: context.object ? { kind: context.object.kind, id: context.object.id } : null, conversationId,
       objectGuard: context.object ? _composerObjectGuard(context.object.raw) : null,
+      audienceSignature: c.type === 'share_to_forum' && context.forumRoom ? context.forumRoom.signature : null,
       resolvedParticipantIds },
     visibility: (c.type === 'discuss_with_group' || c.type === 'share_to_forum'
       || (c.type === 'update_focus' && ((c.arguments.participantIds || []).length || c.arguments.visibility === 'shared'))) ? 'shared' : 'only_me',
@@ -16236,13 +16259,17 @@ function _allObjectsFor(code, userId) {
 function _objectsWithEvidenceFor(code, userId) {
   return _allObjectsFor(code, userId).map(o => {
     const raw = (o && o.raw) || {};
-    if (Array.isArray(raw.signals) && raw.signals.length) return o;
     const nodeId = o.whoseNodeId || raw.nodeId || null;
-    if (!nodeId) return o;
+    if (o.kind !== 'inquiry' || !nodeId) return o;
     const bySubject = (inquiryStates[code] || {})[`group:${nodeId}`] || {};
     const canonical = Object.values(bySubject).find(i => i && String(i.inquiryId) === String(o.id));
     if (!canonical || !Array.isArray(canonical.signals)) return o;
-    return { ...o, raw: { ...raw, signals: canonical.signals } };
+    const active = canonical.signals.filter(x => x && x.kind !== 'interpretation' && diagnose.isActive(x));
+    const contributors = new Set(active.map(x => x.contributedBy).filter(Boolean)).size;
+    if (!teamState.cohortFloor(contributors, _nodeMembers(code, nodeId).length).ok) {
+      return { ...o, raw: { ...raw, signals: [] } };
+    }
+    return { ...o, raw: { ...raw, signals: active } };
   });
 }
 
@@ -16739,6 +16766,14 @@ function _forumAudience(code, userId, object) {
       reason: 'this one is just you — there is nobody to discuss it with' };
   }
   return none('this one is just you — there is nobody to discuss it with');
+}
+
+function _forumAudienceSignature(a) {
+  if (!a || !a.available) return null;
+  // Only the precise recipient set approved at staging may receive these words.
+  return require('crypto').createHash('sha256')
+    .update(JSON.stringify([a.forumKind, a.key, [...new Set(a.members)].sort()]))
+    .digest('hex');
 }
 
 function _forumRoom(code, userId, kind, objectId) {
@@ -19110,6 +19145,9 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
       if (!aud.available) {
         return res.status(403).json({ error: aud.reason || 'this object has no forum' });
       }
+      if (!p.audienceSignature || p.audienceSignature !== _forumAudienceSignature(aud)) {
+        return res.status(409).json({ error: 'forum_audience_changed', note: 'The people who can read this room changed. Preview and confirm a fresh share.' });
+      }
       const inRoom = aud.forumKind === 'group'
         ? _mayReadGroup(code, aud.key, userId) : aud.members.includes(userId);
       if (!inRoom) return res.status(403).json({ error: 'not part of this' });
@@ -19118,7 +19156,7 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
       const body = String(editedText == null ? '' : editedText).trim().slice(0, 4000);
       if (!body) return res.status(400).json({ error: 'nothing_to_share' });
 
-      const key = aud.forumKind === 'group' ? String(ref.id) : `focus:${ref.id}`;
+      const key = ref.kind === 'focus' ? `focus:${ref.id}` : String(ref.id);
       const threads = (forumThreads[code] = forumThreads[code] || {});
       if (!threads[key]) {
         threads[key] = forum.newThread({ inquiryId: key,
@@ -19141,7 +19179,7 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
       scheduleSave();
       return res.json({ ok: true, confirmed: prop.actionType, outcome: 'posted_to_forum',
         messageId: msg.messageId, epistemicEffect: 'none',
-        forum: { room: aud.forumKind, nodeId: aud.forumKind === 'group' ? aud.key : null, objectId: ref.id },
+        forum: { room: ref.kind === 'focus' ? 'focus' : 'group', nodeId: ref.kind === 'focus' ? null : aud.key, objectId: ref.id },
         note: 'Posted to the forum for this. It is speech, not evidence — it changes nothing about what IntelliQ believes unless you separately offer it as your own account.' });
     }
 
