@@ -184,12 +184,29 @@ const server = app.listen(0, async () => {
       !((roomAfterRefusal.j && roomAfterRefusal.j.messages) || []).some(m => String(m.text || '').includes(SAID)
         && m.authorId === 'p2'));
     orgNodes[C].sq.memberIds = keepM;
+    const stagedRoster = await stage('p1', { kind: 'inquiry', id: 'inq_q' });
+    const beforeRoster = await roomOf('p2');
+    // Same headcount, different recipients: a count-only comparison would miss this.
+    orgNodes[C].sq.memberIds = keepM.filter(id => id !== 'p3').concat(['out']);
+    const changedRoster = await post(`/api/assistant/turn/${stagedRoster.turnId}/confirm`,
+      { proposalId: stagedRoster.prop.id }, T.p1);
+    ok('FS-C2 a same-size recipient swap requires a fresh audience preview and consent',
+      changedRoster.status === 409 && /forum_audience_changed/.test(String((changedRoster.j || {}).error || '')));
+    orgNodes[C].sq.memberIds = keepM;
+    const afterRoster = await roomOf('p2');
+    ok('FS-C3 a refused stale-audience share writes no message',
+      ((afterRoster.j && afterRoster.j.messages) || []).length === ((beforeRoster.j && beforeRoster.j.messages) || []).length);
 
     console.log('\n  D — THE ROOM IS THE OBJECT\'S, AND THE PROPOSAL CANNOT NAME ANOTHER ONE');
     const stagedFocus = await stage('p1', { kind: 'focus', id: 'tf_press' });
     const doneFocus = await post(`/api/assistant/turn/${stagedFocus.turnId}/confirm`, { proposalId: stagedFocus.prop.id }, T.p1);
     ok('FS-D1 a share staged on the FOCUS lands in the focus\'s own room',
-      doneFocus.status === 200 && doneFocus.j.forum && doneFocus.j.forum.objectId === 'tf_press');
+      doneFocus.status === 200 && doneFocus.j.forum && doneFocus.j.forum.objectId === 'tf_press'
+      && doneFocus.j.forum.room === 'focus');
+    const focusRoom = await get('/api/forum/focus/tf_press', T.p2);
+    ok('FS-D1b another member actually reads the confirmed words in that Focus room',
+      focusRoom.status === 200 && ((focusRoom.j && focusRoom.j.messages) || [])
+        .some(m => String(m.text || '').includes(SAID)));
     const inq = await roomOf('p1');
     ok('FS-D2 …and NOT in the inquiry\'s room, though both belong to the same squad — same object is structural, not a promise',
       ((inq.j && inq.j.messages) || []).filter(m => String(m.text || '').includes(SAID)).length === 1);
