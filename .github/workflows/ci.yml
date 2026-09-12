@@ -93,3 +93,5 @@ jobs:
         run: node node_modules/playwright-core/cli.js install --with-deps chromium
       - name: Exercise Settings permissions in a real browser
         run: node scripts/settings-tiers-browser-check.js
+      - name: Exercise Forum sharing through rendered controls
+        run: node scripts/forum-share-browser-check.js
