@@ -42,7 +42,8 @@ if (!process.env.DATABASE_URL && !DB_OPTIONAL) {
 
 const pool = process.env.DATABASE_URL ? new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  // CI's isolated PostgreSQL service has no TLS; production retains TLS by default.
+  ssl: process.env.PG_SSL_DISABLE === '1' ? false : { rejectUnauthorized: false },
   max: 5,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 8000,
