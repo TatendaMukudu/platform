@@ -64,6 +64,7 @@ const material          = require('./ai/material');
 const chart             = require('./ai/chart');
 const shelf             = require('./ai/shelf');
 const crossEvidence     = require('./ai/cross-evidence');
+const manifest          = require('./ai/manifest');       // D: one record of what may be said, five channels that say it
 const websearch         = require('./ai/websearch');
 const safeguarding = require('./ai/safeguarding');
 const rateLimit = require('./ai/rate-limit');
@@ -625,6 +626,8 @@ async function _reconstruct(storeData) {
         _unitRevs.set(key, Number(revisions[key] || 0));
       }
       _persistenceReady = { ready: true, error: null };
+      // The stores ARE loaded on this path — it is the one every real instance takes.
+      _markStoresLoaded();
       console.log(`[db] Split persistence: ${n} durable unit(s) loaded (authoritative)`);
       return { mode: 'split', units: n, authoritative: 'split' };
     }
@@ -7246,10 +7249,119 @@ app.delete('/api/tutorials/:id', requireAuth, (req, res) => {
    stdout, which the person holding the phone cannot read. Switches only: no org data, no
    counts, no refusal text (a grounding violation quotes what the model invented, which can
    name a person). The per-org tally lives behind auth on /api/admin/metrics. */
+/* ── BUILD IDENTITY ────────────────────────────────────────────────────────────────────────────
+   The first live-recovery pass ended by saying it could not rule out stale assets as an
+   explanation for what the founder saw on their phone, because nothing in the product could
+   answer "which build am I looking at?". This is that answer.
+
+   Four separate facts, because they fail separately and conflating them is how "it's deployed"
+   became a thing people believed rather than checked:
+
+     commit     which source this process was built from. Read from the platform's own env
+                (Render sets RENDER_GIT_COMMIT) or from git at boot; 'unknown' when neither is
+                available, which is honest and is NOT the same as claiming a match.
+     startedAt  when THIS process began. A restart moves it; a redeploy moves it. It is how you
+                tell "the service restarted" from "the service is the one I left running".
+     startId    a value minted once per process, so two answers from the same process are
+                provably the same process even if the clock is coarse.
+     assetStamp the cache stamp index.html is serving RIGHT NOW, read from disk at boot. This is
+                the server's view of which client it is handing out; the browser reports the one
+                it actually loaded, and the two being different is exactly the stale-asset case.
+
+   No secrets: a commit hash, a timestamp, a random id and a cache stamp. */
+let _FULL_COMMIT = 'unknown';
+const BUILD = (() => {
+  let commit = process.env.RENDER_GIT_COMMIT || process.env.GIT_COMMIT
+    || process.env.SOURCE_VERSION || process.env.VERCEL_GIT_COMMIT_SHA || '';
+  if (!commit) {
+    try {
+      commit = require('child_process')
+        .execFileSync('git', ['rev-parse', 'HEAD'], { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] })
+        .toString().trim();
+    } catch (_) { commit = ''; }
+  }
+  let assetStamp = '';
+  try {
+    const html = require('fs').readFileSync(require('path').join(__dirname, 'index.html'), 'utf8');
+    const m = html.match(/(?:src|href)="(?:js|css)\/[A-Za-z0-9_.-]+\.(?:js|css)\?v=([A-Za-z0-9]+)"/);
+    assetStamp = (m && m[1]) || '';
+  } catch (_) { assetStamp = ''; }
+  _FULL_COMMIT = commit || 'unknown';
+  return {
+    /* PUBLIC IDENTITY IS THE SHORT HASH. The full 40-character SHA was in this payload until
+       `endpoint-smoke` caught it: a long opaque alphanumeric string is exactly the shape of a
+       leaked key, and the guard that says so is worth more than the convenience. Seven characters
+       is what a person compares against a PR head by eye anyway. The full SHA is still available,
+       behind the superadmin persistence diagnostic, to anybody who needs to be exact. */
+    commit: commit ? commit.slice(0, 7) : 'unknown',
+    commitShort: commit ? commit.slice(0, 7) : 'unknown',
+    commitFull: undefined,
+    startedAt: new Date().toISOString(),
+    startId: Math.random().toString(36).slice(2, 10),
+    assetStamp: assetStamp || 'unknown',
+  };
+})();
+
+/* READINESS IS NOT ONE FLAG. The brief is explicit: do not report the product ready before the
+   required stores are loaded. These are separate questions with separate answers, and a caller
+   that wants one must not be handed another. */
+function _readiness() {
+  const storesLoaded = !!(orgMeta && Object.keys(orgMeta).length >= 0 && _storesLoadedAt);
+  /* IS THERE A DURABLE STORE AT ALL? A different question from whether writing to it is safe,
+     and the difference is the one that gets misread: a host with no DATABASE_URL is running
+     entirely in memory, so everything works, nothing is wrong, and NOTHING SURVIVES A RESTART.
+     A host that has a database whose authoritative load failed is a different situation with a
+     different remedy, and reporting both as "not durable" tells an operator neither.
+
+     DB_OPTIONAL is the in-memory mode db.js runs the truth layer in; it is deliberately counted
+     as "no durable store configured" rather than as a database, because that is what it is. */
+  const configured = !!process.env.DATABASE_URL && process.env.DB_OPTIONAL !== '1';
+  /* AND DURABLE MEANS DURABLE. `_persistenceReady.ready` is the SAVE PATH's question — may this
+     process attempt a write — and it is deliberately true in memory-only mode, because in that
+     mode a write into memory is the correct behaviour rather than a failure. Reporting that as
+     `durableStore: true` told a reader that writes survive a restart on a host where nothing
+     does, which is the exact conflation this block exists to prevent, one level down from the
+     one the founder named. A store that is not configured is not durable however willingly this
+     process writes to it. */
+  const durable = configured && !!(_persistenceReady && _persistenceReady.ready);
+  return {
+    process: true,                                   // if this reply exists, the process is alive
+    storesLoaded,
+    storesLoadedAt: _storesLoadedAt || null,
+    /* THE FIVE LEVELS, EACH ANSWERED BY THE THING THAT KNOWS, and deliberately not collapsed:
+         process               this reply exists
+         storesLoaded          the state a request reads is in memory
+         persistenceConfigured a durable store exists to write to
+         durableStore          writing to it right now is safe
+       Level 4 (a model is reachable) and level 5 (which build is deployed) are answered in
+       /api/health's `composer` and `build` blocks, by the gateway and the build stamp
+       respectively, because a readiness probe is not the right owner for either. */
+    persistenceConfigured: configured,
+    durableStore: durable,
+    durableReason: (_persistenceReady && _persistenceReady.error)
+      || (!durable && !configured ? 'no durable store is configured — this instance is in memory only' : null),
+    persistenceMode: PERSISTENCE_MODE,
+    /* WHAT A CLIENT MAY ACT ON, and it is stores-loaded ON PURPOSE: a request can be served
+       correctly from memory, and refusing to serve until a database answers would make a
+       degraded instance look like a dead one. It is NOT a statement that anything will survive
+       a restart, which is what `durableStore` is for, and no caller may read it as one —
+       readiness-levels-smoke drives every combination to keep the two apart. */
+    ready: storesLoaded,
+  };
+}
+
 app.get('/api/health', (req, res) => {
+  /* THE ORDER IS THE ARGUMENT. Each branch is only askable once the one above it is settled:
+     a host flag that is off makes the key irrelevant, no-egress makes a configured key
+     irrelevant, and whether the provider ANSWERED is only a question once a key exists and is
+     allowed to be used. The last branch is the only one that reports something observed rather
+     than something configured — see ai/gateway.js providerFault(). */
+  const providerFault = ai.providerFault();
+  const _reach = ai.providerReachability();
   const composerOff = !IQ_COMPOSER ? 'IQ_COMPOSER is not set to 1 on this host'
     : ai.deterministicOnly() ? 'deterministic-only mode is on — no model is called'
     : !ai.enabled() ? 'no language-model key is configured'
+    : providerFault ? providerFault.reason
     : null;
   res.json({
     ok: true,
@@ -7263,14 +7375,48 @@ app.get('/api/health', (req, res) => {
     reasoning: ai.enabled()
       ? 'connected — replies are grounded and reasoned'
       : 'no key — running on deterministic fallbacks (set ANTHROPIC_API_KEY)',
+    /* ── THE COMPOSER HAS TWO SWITCHES AND THEY CAN DISAGREE ──────────────────────────────────
+       `on` is the host flag alone, so with IQ_COMPOSER=1 and no model key it said ON while
+       `writes` said off in the same payload. A reader had to notice the contradiction and resolve
+       it themselves; the Settings panel did not, and reported the composer as active on a host
+       where every reply came from the deterministic templates.
+
+       `effective` is the answer to the question anybody is actually asking — is the model writing
+       these replies — and it is the AND of every switch that has to be true. `why` is the reason
+       when it is not, as a field rather than a sentence the client has to parse out of `writes`.
+       The client used to read `composer.why`, which DID NOT EXIST, so it always fell back to
+       "no language-model key is configured" even when the real reason was deterministic-only mode
+       or a host flag. */
     composer: {
       on: IQ_COMPOSER,
+      effective: !!IQ_COMPOSER && !composerOff,
+      why: composerOff,
       deterministicOnly: ai.deterministicOnly(),
+      providerKey: !!(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY),
+      /* Configured is not reachable, and UNTRIED is not reachable either — which is what this
+         used to say. `providerReachable: !providerFault` turned "no failure recorded" into a
+         claim, so a host with no key, where no completion is ever attempted, reported the
+         provider as reachable with no observation anywhere behind it.
+
+         Three states now, each an observation or the honest absence of one:
+           null   nothing has been asked of a provider since this process started
+           true   a completion SUCCEEDED, and `providerLastSeenAt` says when
+           false  a completion exhausted every retry and both providers, at `providerFaultAt`
+         `providerReachability` carries the same answer as a word, because a tri-state boolean is
+         a shape a reader gets wrong and a word is one they cannot. `providerFaultAt` is still a
+         timestamp and never an error body — nothing the provider said is copied into an
+         unauthenticated route. */
+      providerReachable: _reach.state === 'unknown' ? null : _reach.state === 'reachable',
+      providerReachability: _reach.state,
+      providerLastSeenAt: _reach.state === 'reachable' ? _reach.at : null,
+      providerFaultAt: providerFault ? providerFault.at : null,
       writes: composerOff
         ? `off — ${composerOff}; every reply is written by the deterministic templates`
         : 'on — the model writes the reply and the deterministic core grounds it',
     },
     time: new Date().toISOString(),
+    build: BUILD,
+    readiness: _readiness(),
   });
 });
 
@@ -10454,6 +10600,22 @@ async function _governedReason(code, userId, question, { register, priorMessages
    OWN card, echoed back by their own client — the same trust level as anything they type — so it
    is hard-capped and treated as untrusted content inside the context block, never as instruction.
    The grounding cage still verifies whatever the model writes on top of it. */
+/* AN OBJECT REF, SPLIT. `kind:id` in, `{kind, id}` out, through the one validator that decides
+   what a ref may look like — so a caller cannot reach an object by inventing a spelling.
+
+   THIS EXISTS BECAUSE TWO READERS WERE PARSING THE WRONG SHAPE. `_turnAbout` below turns a bound
+   object into the HEADLINE AND BODY a prompt reads; it has never returned a kind or an id.
+   `_crossEvidenceContext` and `_forumContext` both called it and then read `a.kind`, which is
+   undefined on every call — so both returned null every time, and the composer's connections
+   bundle and the Forum-informs-this-object rule were silently not happening at all. Neither
+   failed; both looked exactly like "there was nothing to add". */
+function _splitAboutRef(v) {
+  const ref = _aboutRef(v);
+  if (!ref) return null;
+  const i = ref.indexOf(':');
+  return { kind: ref.slice(0, i), id: ref.slice(i + 1) };
+}
+
 function _turnAbout(about) {
   if (!about || typeof about !== 'object') return null;
   const h = String(about.headline || '').slice(0, 200).trim();
@@ -10475,7 +10637,52 @@ function _turnAbout(about) {
 function _historyMessage(m = {}) {
   return { id: m.id || null, role: m.role, text: m.text, at: m.at,
     reasoning: !!m.reasoning, register: m.register || null, provenance: m.provenance || [],
-    sources: m.sources || [], rating: m.rating || null };
+    speech: m.speech || '', sources: m.sources || [], rating: m.rating || null };
+}
+
+/* ── WHAT IS SPOKEN — THE VOICE CHANNEL'S ONE OWNER ─────────────────────────────────────────
+   Reading a reply aloud used to be assembled in the browser out of whatever the action row
+   happened to be holding. That is a second author for the same answer, on the one channel
+   nothing verified, and it is the channel where drift costs most: a spoken sentence carries more
+   confidence than a written one, and the qualification is the first thing an assembler drops.
+
+   So the spoken rendering is composed HERE, once, beside the prose it belongs to, and travels
+   with the reply. The browser reads it out and composes nothing.
+
+   THE ORDER IS THE POINT. The answer, then what it cannot show, then what it rests on — because
+   a listener cannot skim back, and a caveat that arrives after the listener has stopped
+   listening was not said. Nothing is invented: with no sources the count is not claimed, and
+   every limitation is one the manifest already carries. */
+function _speechFor({ text = '', sourceCount = 0, limitations = [] } = {}) {
+  const body = String(text || '').trim();
+  if (!body) return '';
+  const parts = [body];
+  /* EVERY LIMITATION, NOT THE FIRST THREE. This clipped at three, silently, and an independent
+     gate was right to ask what happens to the fourth.
+
+     Two things are wrong with a silent clip here, and the second is the one that bites. The
+     obvious one: a listener cannot see the caveats sitting under the answer, so the spoken
+     rendering is the only place they exist — dropping one tells the listener less than the reader
+     was told, which is the exact inversion of why this function exists.
+
+     The one that would have arrived as an unexplained refusal: ai/manifest.js L-MF5's sibling law
+     requires EVERY limitation on the manifest to survive into the voice channel and pushes
+     `voice_dropped_limitation` otherwise. So a fourth limitation would not have been quietly
+     dropped on the composed path — it would have REFUSED the whole turn, and the reader would
+     have got a degraded answer with nothing anywhere saying why. The clip and the gate were two
+     rules about one thing, disagreeing.
+
+     Today's producers top out at three (ai/reasoning-register.js contributes at most three), so
+     this has never fired in front of anybody. That is a fact about the current callers, not a
+     property of the function, and it is exactly the kind of margin that disappears the next time
+     somebody adds a caveat. */
+  for (const l of (Array.isArray(limitations) ? limitations : [])) {
+    const s = String(l || '').trim();
+    if (s) parts.push(/[.!?]$/.test(s) ? s : `${s}.`);
+  }
+  const n = Number(sourceCount) || 0;
+  if (n > 0) parts.push(`This rests on ${n} source${n === 1 ? '' : 's'}, shown under the reply.`);
+  return parts.join(' ');
 }
 
 const SOURCE_CAP = 6;
@@ -10553,11 +10760,14 @@ function _attentionContext(code, userId) {
   } catch (_) { return null; }
 }
 
-function _crossEvidenceContext(code, userId, about) {
+function _crossEvidenceContext(code, userId, aboutRef) {
   try {
-    const a = _turnAbout(about);
-    if (!a || !a.kind || !a.id) return null;
-    const authorised = _allObjectsFor(code, userId);
+    const a = _splitAboutRef(aboutRef);
+    if (!a) return null;
+    /* The SAME authorised set, with each object's own evidence joined back on — see
+       `_objectsWithEvidenceFor`. It adds no object; it only stops a group projection from
+       reporting "nothing has happened" when what it means is "I cannot see what happened". */
+    const authorised = _objectsWithEvidenceFor(code, userId);
     const self = authorised.find(o => o.kind === a.kind && String(o.id) === String(a.id));
     if (!self) return null;
     const target = crossEvidence.refOf(self);
@@ -10575,7 +10785,79 @@ function _crossEvidenceContext(code, userId, about) {
   } catch (_) { return null; }
 }
 
-async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null, conversation = null } = {}) {
+/* ── THE FORUM FOR THE THING THEY ARE LOOKING AT, AND NOTHING ELSE ────────────────────────────
+   FOUNDER DECISION, September 2026: Forum content may inform private conversation FOR THAT SAME
+   OBJECT ONLY. Private conversation never enters a Forum without a separate explicit
+   share-and-confirm, which is a different act with its own route and its own preview.
+
+   THE DIRECTION IS THE DESIGN. This is a READ of a room the person can already open by tapping
+   the icon at the top of the same screen, so it discloses nothing they could not already see; it
+   saves them going to look. Nothing is written, nothing is shared, and no message leaves the room
+   it was said in.
+
+   SAME OBJECT IS STRUCTURAL, NOT A PROMISE. The room is resolved from `about` -- the object whose
+   thread this turn is in -- through _forumAudience, the same owner the icon asks. There is no
+   parameter for a different object, so a turn about focus A cannot be handed focus B's room even
+   by a caller that wanted to. And access is re-checked here rather than inherited from the fact
+   that a thread exists: a person removed from the room this morning gets nothing this afternoon.
+
+   BOUNDED. The last few messages, clipped. A model handed a whole room will summarise the room,
+   and a summary of a room is the thing that starts sounding like a finding.
+
+   NOT EVIDENCE, AND THE BUNDLE SAYS SO. ai/composer.js prints the rule in the same block as the
+   data, because a model handed six agreeing messages will otherwise write "the group agrees". */
+function _forumContext(code, userId, aboutRef) {
+  try {
+    const a = _splitAboutRef(aboutRef);
+    if (!a) return null;
+    const object = _allObjectsFor(code, userId).find(o => o.kind === a.kind && String(o.id) === String(a.id));
+    if (!object) return null;                       // not theirs to read: no room, no context
+    const aud = _forumAudience(code, userId, object);
+    if (!aud.available) return null;
+    // Membership of the room, re-checked now. Availability says a room exists; this says they
+    // are in it. A leader who may read the group's state is in the node room by _mayReadGroup.
+    const inRoom = aud.forumKind === 'group'
+      ? _mayReadGroup(code, aud.key, userId)
+      : aud.members.includes(userId);
+    if (!inRoom) return null;
+    /* THE KEY FORMATS ARE THE ONES THE WRITERS ACTUALLY USE, not a third spelling invented here.
+       A node room is keyed by the inquiry's own id (_forumThread), and a group High or Low IS a
+       projection of that inquiry, so its object id is the same id. A focus room is keyed
+       `focus:<objectId>` (_forumRoom). Guessing a composite key would have read nothing and
+       returned "no forum" for every room that exists, which is the quietest possible failure. */
+    /* KEYED ON THE OBJECT'S KIND, NOT ON THE AUDIENCE'S. This branch used to read
+       `aud.forumKind === 'group'`, which is a fact about WHO IS IN THE ROOM rather than about
+       WHERE THE ROOM IS WRITTEN — and those two come apart on the commonest Focus in the
+       product. A squad's focus carries a nodeId, so _forumAudience resolves its room as a node
+       room and reports forumKind 'group'; but its thread is written by _forumRoom at
+       `focus:<id>`, because that is the writer a focus room has. So the read looked at
+       `tf_...`, found nothing, and returned "no forum" for a room that existed and that the
+       person could open by tapping the icon on the same screen. The founder's rule — Forum
+       content may inform private conversation FOR THAT SAME OBJECT — was silently not
+       happening for every group Focus. Reproduced by posting into the room and reading the
+       context back, not argued from the code. */
+    const key = a.kind === 'focus' ? `focus:${a.id}` : String(a.id);
+    const thread = (forumThreads[code] || {})[key];
+    if (!thread) return null;
+    const visible = forum.visibleThread(thread, { viewerId: userId });
+    const messages = (visible.messages || [])
+      .filter(m => m && m.status !== 'removed' && m.text)      // a withdrawal is not speech
+      .slice(-6)
+      .map(m => ({ text: String(m.text).slice(0, 400) }));     // text only — never an author
+    if (!messages.length) return null;
+    return { people: aud.readable, messages, sameObject: `${a.kind}:${a.id}` };
+  } catch (_) { return null; }
+}
+
+/* EVERY FIGURE A PIECE OF APPROVED TEXT ACTUALLY CONTAINS, so a claim may restate its own
+   numbers. A belief that says "two independent origins" must be allowed to be repeated; what the
+   manifest refuses is a figure that appears in NO approved claim. Digits only here, because this
+   reads material the kernel wrote rather than prose a model wrote. */
+function _figuresIn(text) {
+  return [...new Set((String(text || '').match(/\b\d{1,4}\b/g) || []).map(Number))];
+}
+
+async function _composeTurn(code, userId, question, { priorMessages = [], workCtx = null, actions = [], about = null, aboutRef = null, conversation = null } = {}) {
   // Every stage below used to fail silently into the deterministic path. The symptom of a
   // composer that never runs is not an error — it is a reply that reads like a template,
   // which is indistinguishable from a composer that ran and wrote something dull. Each exit
@@ -10702,7 +10984,11 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
          things this person could already open, and nothing else. Refs and labels only: the
          statements stay where they live, and the model is told plainly that a connection is not
          corroboration so it cannot narrate two linked records as two confirmations. */
-      connections: _crossEvidenceContext(code, userId, about),
+      connections: _crossEvidenceContext(code, userId, aboutRef),
+      /* WHAT THIS OBJECT'S PEOPLE HAVE BEEN SAYING. One way, same object only, never evidence —
+         see _forumContext. The bundle carries the rule beside the data rather than trusting a
+         prompt to remember it. */
+      forum: _forumContext(code, userId, aboutRef),
       /* WHAT DESERVES ATTENTION, decided deterministically before the model sees it.
 
          The model is handed reason CODES and labels for objects this person could already open,
@@ -10726,6 +11012,93 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
 
     // VERIFY — the cage. An invented organisational specific fails the turn.
     const roster = Object.values(orgUsers[code] || {}).filter(p => p && p.status !== 'removed' && p.name).map(p => p.name);
+
+    /* ── THE OUTPUT MANIFEST (L-MF1) ────────────────────────────────────────────────────────
+       ONE RECORD OF WHAT MAY BE SAID, built from the SAME authorised material the model was
+       handed, and checked by every channel that says it.
+
+       The cage (`verifyGrounding`) stays, and runs SECOND: it is the older, looser check against
+       the context blob, and it catches things a manifest cannot — a quoted title, or a name that
+       appears nowhere in the bundle at all. The manifest runs first because its refusals are the
+       more precise ones, so a reply that fails both is logged with the reason that will actually
+       help. Order affects only which violation is recorded; a reply has to satisfy BOTH, and
+       either one refusing degrades the turn. What the cage could NOT do is the founder's
+       requirement, that
+       the verifier "reject unsupported organisation-specific numbers, dates, names, results and
+       claims" without relying only on keyword checks. Asking "is this number anywhere in four
+       thousand words of context" is a keyword check, and almost every small number is somewhere
+       in a bundle that contains timestamps and ids.
+
+       So the manifest lists the particulars each claim is ALLOWED to state, which is a far smaller
+       and far more exact set. Both run. Two gates with different failure modes catch more than
+       either, and neither is load-bearing alone. */
+    /* THE CITATION CHANNEL IS BUILT FIRST, because the answer is allowed to say how many sources
+       it rests on and that figure has to be an APPROVED figure like any other. Building the list
+       after the manifest is how "this rests on five sources" became a number nobody had checked. */
+    const _sources = _sourceList([
+      ...evidence.map(e => ({ kind: 'record', label: e.source || 'Something you told me', detail: e.text })),
+      ...beliefs.map(b => ({ kind: 'belief', label: 'What I am working out', detail: b.text })),
+      ...assignedWork.map(w => ({ kind: 'work', label: w.title, detail: w.status ? `Your work — ${w.status}` : 'Your work' })),
+    ], written);
+    /* WHAT THIS ANSWER CANNOT SHOW. One account is a starting point, not a finding, and the
+       listener is the one who most needs telling — see L-MF5. Stated on the manifest so every
+       channel is measured against it rather than each deciding whether to mention it. */
+    const _limits = (evidence.length + beliefs.length === 1)
+      ? ['This rests on a single account so far, so it is a starting point rather than a finding.']
+      : [];
+    const _mf = manifest.manifest({
+      subject: `member:${userId}`,
+      at: now,
+      privacyScope: 'you alone unless you share it',
+      limitations: _limits,
+      claims: [
+        // What the kernel already believes, with the counts it is entitled to state.
+        ...beliefs.slice(0, 8).map((b, i) => manifest.claim({
+          id: `belief_${i}`, text: String(b.text || ''), stance: 'inferred',
+          basis: [b.ref].filter(Boolean),
+          numbers: _figuresIn(String(b.text || '')),
+        })),
+        // What the person actually told us. Recorded, and the strongest stance there is.
+        ...evidence.slice(0, 12).map((e, i) => manifest.claim({
+          id: `record_${i}`, text: String(e.text || ''), stance: 'recorded',
+          basis: [e.ref].filter(Boolean),
+          numbers: _figuresIn(String(e.text || '')),
+          names: [String(e.source || '')].filter(Boolean),
+        })),
+        ...assignedWork.slice(0, 8).map((w, i) => manifest.claim({
+          id: `work_${i}`, text: String(w.title || ''), stance: 'recorded',
+          numbers: _figuresIn(String(w.title || '')),
+        })),
+        /* THE READER THEMSELVES, and the count of what this rests on. Without these two the
+           manifest would refuse an honest reply that says the person's own name or states how
+           many records it read — both of which are true, approved, and the point. */
+        manifest.claim({ id: 'reader', text: String(u.name || ''), stance: 'recorded',
+          names: [String(u.name || '')].filter(Boolean),
+          numbers: [beliefs.length, evidence.length, assignedWork.length, _sources.length].filter(n => n > 0) }),
+      ],
+    });
+
+    /* ── EVERY DOOR THIS ANSWER LEAVES BY, CHECKED IN ONE PLACE (L-MF8) ─────────────────────
+       The prose, the sources under it, and the words the speaker will read. One manifest, one
+       call, and a refusal in any channel degrades the whole turn — because a caller handed "the
+       prose was fine" ships the prose, and the person then hears a different answer than they
+       read.
+
+       WHAT IS SPOKEN IS BUILT HERE, ON THE SERVER, and travels with the reply. It used to be
+       assembled in the browser from whatever the row happened to hold, which is a second author
+       for the same answer and the one channel nothing verified. */
+    const _speech = _speechFor({ text: written, sourceCount: _sources.length, limitations: _limits });
+    const _approved = manifest.approve(_mf, {
+      prose: { value: written, claims: manifest.claimsIn(written, _mf) },
+      voice: { value: _speech, claims: manifest.claimsIn(_speech, _mf) },
+      citations: { value: _sources.filter(s => s && s.url) },
+    }, { roster });
+    if (!_approved.ok) {
+      console.log(`[composer] manifest refused — ${_approved.violations.map(v => `${v.kind}:${v.value ?? v.claim ?? ''}`).join('; ')}`);
+      _metric(code, 'composer_refused');
+      return _degraded('unverified');
+    }
+
     const check = composer.verifyGrounding(written, { contextText, roster, readerName: u.name || '' });
     if (!check.ok) {
       // The violations are the interesting part: they say WHAT the model invented, which is the
@@ -10749,11 +11122,7 @@ async function _composeTurn(code, userId, question, { priorMessages = [], workCt
     // showing them back to that same reader discloses nothing they were not just told. It is a
     // display of the basis, not a second read.
     return { answer: written, grounded: beliefs.length + evidence.length > 0,
-      sources: _sourceList([
-        ...evidence.map(e => ({ kind: 'record', label: e.source || 'Something you told me', detail: e.text })),
-        ...beliefs.map(b => ({ kind: 'belief', label: 'What I am working out', detail: b.text })),
-        ...assignedWork.map(w => ({ kind: 'work', label: w.title, detail: w.status ? `Your work — ${w.status}` : 'Your work' })),
-      ], written) };
+      sources: _sources, speech: _speech, limitations: _limits };
   } catch (e) {
     // A swallowed exception here is the worst of the lot: a rejected model ID, an auth failure or
     // a rate limit all look exactly like "the composer had nothing to say", and every reply in
@@ -11040,7 +11409,14 @@ async function _intakeTurn(code, userId, text, { turnId = '', priorMessages = []
          The evidence stays exactly where it is, private to them; what is recorded is a private
          suggestion they may later act on. Membership noticed something; membership published
          nothing. */
-      try { _noteGroupCandidates(code, userId, subjectRef, props, key, props[0].label || concept); }
+      /* THE LABEL IS THE WORDS A PERSON READS ON THE CARD, so it goes through the one owner that
+         turns a canonical key into language. Found by driving the real path in a browser rather
+         than seeding a candidate: the intake contract never asks a model for a `label`, so this
+         was ALWAYS `props[0].label || concept` — the raw concept key — and the member's own way
+         into the group loop offered them "football.press_shape" to contribute. The seeded
+         fixture that used to stand in for this carried a human sentence, which is exactly how a
+         browser check can be green about a screen nobody could use. */
+      try { _noteGroupCandidates(code, userId, subjectRef, props, key, props[0].label || present.humanTopic({ canonicalConcept: concept })); }
       catch (e) { console.warn('[group] candidate detection skipped:', e && e.message); }
       // An unknown naming a live concept goes only there. One that names nothing, or names a
       // concept that just folded away, goes to the primary — never to everybody.
@@ -14062,12 +14438,29 @@ function _composerActionContext(code, userId, opts = {}, conversation = null) {
   return {
     surface: String(opts.surface || (object ? object.kind : 'home')).slice(0, 40),
     object,
+    /* THE RESOLVED REF, in the one spelling every other reader uses. The composer's `about` is a
+       HEADLINE AND BODY for the prompt, which is a different thing from the object's identity —
+       and two readers downstream were parsing the prompt shape as if it were the ref, so both
+       quietly returned nothing. Resolved once, here, where the binding is decided. */
+    objectRef: ref || null,
     folders: _libFolders(code).filter(f => f.ownerId === userId).map(f => ({ id: f.id, name: f.name })),
     groups: Object.values(orgNodes[code] || {}).filter(n => n && _inNode(code, n.nodeId || n.id, userId))
       .map(n => ({ id: n.nodeId || n.id, name: n.name || 'Group', memberIds: [...(n.memberIds || [])].map(String).sort() })),
     contacts: _contactsFor(code, userId).map(c => ({ id: c.id, name: c.name, with: c.with || null })),
-    forumAvailable: !!(object && ['inquiry', 'high', 'low', 'focus'].includes(object.kind) &&
-      (object.nodeId || (object.raw?.subjectRef || '').startsWith('group:') || (object.raw?.participants || []).length > 1)),
+    /* THE SAME OWNER THE SCREEN USES. This was a second, differently-worded copy of the rule —
+       it accepted a group subjectRef and accepted participants on any kind, where the thread route
+       did neither — so one object could have a Forum in conversation and none on its own screen. */
+    forumAvailable: _forumAudience(code, userId, object).available,
+    /* THE ROOM ITSELF, so a share-to-forum confirmation can NAME who will see it rather than
+       describe them. A preview that says "your group" is not a preview; it is a reassurance. The
+       count and the room's name come from the same owner that decides the Forum exists at all. */
+    forumRoom: (() => {
+      const a = _forumAudience(code, userId, object);
+      if (!a.available) return null;
+      const node = a.forumKind === 'group' ? (orgNodes[code] || {})[a.key] : null;
+      return { kind: a.forumKind, key: a.key, readable: a.readable,
+        name: node ? (node.name || 'this group') : 'the people on this' };
+    })(),
     attachment: opts.attachment && typeof opts.attachment === 'object'
       ? { id: String(opts.attachment.id || '').slice(0, 120), name: String(opts.attachment.name || '').slice(0, 200) } : null,
     /* THE ONE PIECE OF EVIDENCE THIS TURN IS ABOUT, resolved by the server from the reader's own
@@ -14119,6 +14512,7 @@ function _composerActionProposals(code, userId, candidates, context, conversatio
       settle_inquiry: 'Record that this is settled', disagree_with_inquiry: 'Record your disagreement',
       request_research: 'Show cited external reading', attach_material: 'Attach this material', keep_in_library: 'Keep this live object in Library',
       create_library_folder: 'Create this Library folder', discuss_with_group: 'Open the governed discussion', navigate_to_object: 'Open this object',
+      share_to_forum: 'Put this to the forum',
       /* A LABEL IS WHAT SOMEBODY READS BEFORE THEY PRESS CONFIRM. Without an entry here the map
          falls through to the action's own name and the card reads `declare_focus_relation`, which
          is an identifier in front of a person and tells them nothing about what they are agreeing
@@ -14131,7 +14525,8 @@ function _composerActionProposals(code, userId, candidates, context, conversatio
       context: context.object ? { kind: context.object.kind, id: context.object.id } : null, conversationId,
       objectGuard: context.object ? _composerObjectGuard(context.object.raw) : null,
       resolvedParticipantIds },
-    visibility: (c.type === 'discuss_with_group' || (c.type === 'update_focus' && ((c.arguments.participantIds || []).length || c.arguments.visibility === 'shared'))) ? 'shared' : 'only_me',
+    visibility: (c.type === 'discuss_with_group' || c.type === 'share_to_forum'
+      || (c.type === 'update_focus' && ((c.arguments.participantIds || []).length || c.arguments.visibility === 'shared'))) ? 'shared' : 'only_me',
     why: c.reason || 'You asked IntelliQ to do this.',
     effect: _composerActionEffect(c, context),
     requiredApproval: c.requiresConfirmation, policyResult: { effect: c.requiresConfirmation ? 'require_approval' : 'allow', reason: 'server validation runs on execution' },
@@ -14160,7 +14555,14 @@ function _composerActionEffect(candidate, context) {
     text: a.text || null, textSource: sources.text || null,
     account: a.because || null,
     target: a.target || null, reviewOn: a.reviewOn || null, outcome: a.outcome || null,
-    audience: group ? { id: group.id, name: group.name } : (people.length ? { ids: people.map(p => p.id), name: people.map(p => p.name).join(', ') } : null),
+    /* A SHARE'S AUDIENCE IS THE OBJECT'S ROOM, resolved by the server, never an argument the model
+       supplied. The model does not choose who sees something; the object does, and the person
+       reads it here before confirming. */
+    audience: candidate.type === 'share_to_forum'
+      ? (context.forumRoom
+        ? { id: context.forumRoom.key, name: context.forumRoom.name, readable: context.forumRoom.readable }
+        : null)
+      : (group ? { id: group.id, name: group.name } : (people.length ? { ids: people.map(p => p.id), name: people.map(p => p.name).join(', ') } : null)),
     material: a.materialId && context.attachment ? { id: a.materialId, name: context.attachment.name || 'Attached material' } : null,
     /* THE WORD, AND WHOSE IDEA IT WAS. A confirmation that does not say the model suggested
        `supports` is asking somebody to agree to a judgement without telling them it is not yet
@@ -14172,7 +14574,13 @@ function _composerActionEffect(candidate, context) {
        priority mark: it is not a level, and it is not visible to anybody else. */
     priority: candidate.type === 'prioritise_object' ? 'on'
       : candidate.type === 'unprioritise_object' ? 'off' : null,
-    disclosure: candidate.type === 'discuss_with_group'
+    disclosure: candidate.type === 'share_to_forum'
+      /* THE SENTENCE SOMEBODY READS BEFORE THEY DISCLOSE SOMETHING. It says the three things a
+         person actually needs: exactly what crosses, exactly what does not, and that speech in a
+         forum is speech rather than evidence — because somebody who believes they are "submitting
+         evidence" is agreeing to something different from what will happen. */
+      ? 'Only these words are posted, to the people named above. The rest of this conversation stays private. What you post is speech, not evidence — it changes nothing about what IntelliQ believes unless you separately offer it as your own account.'
+      : candidate.type === 'discuss_with_group'
       ? 'Only this wording becomes visible to this audience. The private conversation and other attachments stay private.'
       : (candidate.type === 'prioritise_object' || candidate.type === 'unprioritise_object')
         ? 'This is yours alone. It changes what comes up first for you and nothing about who can see this or what anybody else thinks of it.'
@@ -14510,6 +14918,9 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   if (String(text || '').trim() && !(cls.command && cls.command.payload)) {
     const attempt = await _composeTurn(code, userId, cls.questionText || text, {
       priorMessages, workCtx, actions: proposals, about: _turnAbout(opts.about), conversation: _conv,
+      // The object this turn is bound to, as a REF. `about` above is the headline/body the prompt
+      // reads; this is the identity every authorised lookup needs.
+      aboutRef: actionContext.objectRef,
     });
     if (attempt && attempt.answer) composedReply = attempt;
     else if (attempt && attempt.degraded) composerDegraded = attempt.degraded;
@@ -14554,8 +14965,23 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // the raw material the model already reasoned over. Surfacing it underneath produced a
   // non-sequitur ("You marked 1 thing private") sitting under an unrelated answer, and in the
   // worst case a stale clarifier contradicting the reply above it. The prose stands on its own.
+  /* THE SOURCES, ONCE. They are the citation channel AND the figure the spoken disclosure states,
+     so building them twice is building two answers to "what does this rest on". */
+  const _respSources = composedReply ? (composedReply.sources || []) : _sourceList([
+    ...((qa && qa.citations) || []).map(c => ({ kind: 'record', label: c.label || c.ref || 'Your record', detail: c.excerpt || c.text || '', at: c.date || c.at || null })),
+    ...((qa && qa.webSources) || []).map(w => ({ kind: 'web', label: w.title || w.source, detail: w.snippet || '', url: w.url })),
+    ...(hasInsight ? groundedClaims.slice(0, 3).map(c => ({ kind: 'belief', label: 'What I am working out', detail: c.text })) : []),
+  ], responseText);
   const response = {
     responseText, mode, lens: lens || null,
+    /* THE SPOKEN RENDERING, composed on the server for BOTH paths. The composed path's went
+       through the manifest gate above; the deterministic path's text was written by the kernel
+       rather than by a model, so there is no second author to disagree with — but it gets the
+       same limitations and the same source disclosure, because a listener's entitlement to those
+       does not depend on which engine wrote the sentence. */
+    speech: composedReply && composedReply.speech
+      ? composedReply.speech
+      : _speechFor({ text: responseText, sourceCount: (_respSources || []).length, limitations: context.limitations }),
     /* WHETHER THIS IS INTELLIQ'S NORMAL VOICE. Structured, so the client renders one quiet
        sentence of its own rather than the server smuggling an apology into `responseText` and
        every assertion in the suite that reads that field going with it. `reason` is the closed
@@ -14585,11 +15011,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     // question-answering path already produced. Both paths cite or neither does: a reply whose
     // provenance depends on which engine happened to write it teaches people that the chips
     // are decoration, and the composed path is the one that most needs to be checkable.
-    sources: composedReply ? (composedReply.sources || []) : _sourceList([
-      ...((qa && qa.citations) || []).map(c => ({ kind: 'record', label: c.label || c.ref || 'Your record', detail: c.excerpt || c.text || '', at: c.date || c.at || null })),
-      ...((qa && qa.webSources) || []).map(w => ({ kind: 'web', label: w.title || w.source, detail: w.snippet || '', url: w.url })),
-      ...(hasInsight ? groundedClaims.slice(0, 3).map(c => ({ kind: 'belief', label: 'What I am working out', detail: c.text })) : []),
-    ], responseText),
+    sources: _respSources,
     // A preview of operating-context records to CONFIRM (never persisted here).
     orgContextProposal,
     // Ambiguity: which open question is the user answering (never guessed).
@@ -14623,6 +15045,12 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
   // the reason you reopen a thread is to check something.
   _conv.messages.push({ role: 'assistant', text: response.responseText, at: _nowIso, id: 'm_' + generateId(),
     reasoning: !!(qa && qa.reasoning), register: (qa && qa.register) || null, provenance: (qa && qa.provenance) || [],
+    /* The approved spoken rendering rides with the message for the same reason the sources do:
+       a person reopens a thread to check something, and read-aloud that works only while the
+       bubble is still on screen is read-aloud that is missing whenever it is wanted. It is not a
+       second record of the answer — it is the same approved answer in the form the other channel
+       needs, stored rather than recomposed by a browser. */
+    speech: response.speech || '',
     sources: response.sources || [] });
   if (_conv.messages.length > CONV_MSG_CAP) _conv.messages.splice(0, _conv.messages.length - CONV_MSG_CAP);
   _conv.updatedAt = _nowIso;
@@ -15619,7 +16047,17 @@ app.get('/api/group/:nodeId/state', requireAuth, (req, res) => {
   });
   _auditFindingEmission(code, userId, [state.high, state.low].filter(Boolean), [], 'group state');
   _audit(code, { actor: userId, action: 'team_state_view', subjectIds: [], basis: 'group_state' });
-  res.json({ ok: true, ...state });
+  /* WHAT THIS READER MAY DO, ANSWERED BY THE SAME FUNCTION THAT WILL ENFORCE IT. A screen has to
+     know whether to draw a leader-only control, and the alternatives were both worse: infer it in
+     the browser from a roster the client happens to have loaded (wrong the moment somebody opens
+     the group from a screen that never loaded one, and a second definition of leadership either
+     way), or draw the control for everybody and let the route 403 (showing a person a button that
+     cannot work is its own small lie).
+
+     It is a COURTESY, NOT A GATE, and the distinction is the whole safety argument: `_leadsNode`
+     on the write routes is the gate, it is the same call, and a member who forges the request
+     still gets 403 from it. Nothing here grants anything. */
+  res.json({ ok: true, ...state, viewer: { leads: _leadsNode(code, nodeId, userId) } });
 });
 
 /* GET /api/objects — the one four-bucket read, parameterised by grain rather than role.
@@ -15712,7 +16150,34 @@ function _objectBucket(code, userId, scope = 'self') {
       focuses: _teamFocuses(code, nodeId), now: Date.now(),
     });
     add('high', state.high); add('low', state.low); add('inquiry', state.question);
-    for (const focus of state.focuses || []) add('focus', focus);
+    /* `state.focuses` DOES NOT EXIST, and never did. ai/team-state.js buildTeamState returns the
+       active `focus` and the closed `history`; there is no plural field, so `state.focuses || []`
+       was an empty array on every call and this loop never ran once. The consequence was silent
+       and total: a group's Focus had no thread, which means no conversation, no attached material,
+       no chart, no forum icon and no A -> B loop — every one of those surfaces resolves its object
+       through this bucket, and for a group Focus the object was never in it.
+
+       Nothing failed, because `|| []` is a perfectly valid instruction to iterate nothing. Same
+       shape as the undefined CSS token and the `hidden` container: a fallback that makes a typo
+       into a quiet, valid, wrong answer.
+
+       BOTH are added. A closed focus with its outcome recorded is exactly what somebody wants to
+       open and talk about — "we tried that, here is what happened" — and dropping it the moment
+       it stops being current would lose the half of the loop that has anything to say. */
+    /* EVERY FOCUS THIS GROUP HAS, from the canonical list rather than from the projection's slots.
+
+       `state.focuses` never existed — buildTeamState returns the ACTIVE focus and the closed
+       `history`, so `state.focuses || []` iterated nothing on every call and a group Focus was
+       never in the object bucket at all: no thread, no material, no chart, no forum, no A -> B
+       loop, because every one of those surfaces resolves its object through here.
+
+       Reading `state.focus` and `state.history` instead fixed the common case and left a subtler
+       hole, found by reading-scope-smoke: `history` is `status !== 'active' || outcome`, so a
+       SECOND active focus with no outcome yet is in neither slot and stays unreachable. The
+       projection's slots answer "what is the group working on" — one thing, deliberately — and
+       that is a different question from "what objects does this group have". Asking the canonical
+       list removes the dependence on which slot a projection happened to put something in. */
+    for (const f of _teamFocuses(code, nodeId) || []) add('focus', f);
   } else return null;
 
   return out.sort((a, b) => (a.parked - b.parked) || (b.score - a.score) || a.id.localeCompare(b.id));
@@ -15743,6 +16208,42 @@ function _allObjectsFor(code, userId) {
     }
   }
   return all;
+}
+
+/* ── THE SAME AUTHORISED OBJECTS, EACH CARRYING THE EVIDENCE ITS OWN RECORD HOLDS ────────────
+   A GROUP object is a PROJECTION. `ai/team-state.js` builds the High, the Low and the lead
+   Inquiry out of a node's inquiries and returns a surface — a headline, a band, a question, an
+   unknown — and deliberately not the signals underneath, because the surface exists to be shown
+   to a squad and a signal carries who said it. `_objectBucket` files that projection, so a group
+   object's `raw` has no `signals` at all.
+
+   WHAT THAT COST, found by driving a real group Focus end to end: `loop()` counts what has
+   arrived on the thing a Focus addressed SINCE its outcome, and it counts that over the
+   addressed object's signals. For every group Focus in the product that count was structurally
+   zero — not "nothing has happened", which is a fact, but "this reader cannot see anything that
+   happens", which is a different statement wearing the same words. The turn then told the model
+   "nothing has been recorded on that thing since the outcome" while two accounts sat in the
+   record, and a model handed that writes a confident sentence about a standstill.
+
+   SO THE EVIDENCE IS JOINED BACK AT READ TIME, from the canonical store, for objects this reader
+   has ALREADY been cleared to see — `_allObjectsFor` did the authorising and this adds nothing to
+   that set, not one object. Nothing is written and nothing is cached: a membership change is
+   reflected on the next read, exactly as everywhere else.
+
+   ONE OWNER, because the alternative is the failure this codebase keeps finding: a second caller
+   needing the same join, writing its own, and the two drifting. Callers that want the surface as
+   a squad sees it keep calling `_allObjectsFor` and are unaffected. */
+function _objectsWithEvidenceFor(code, userId) {
+  return _allObjectsFor(code, userId).map(o => {
+    const raw = (o && o.raw) || {};
+    if (Array.isArray(raw.signals) && raw.signals.length) return o;
+    const nodeId = o.whoseNodeId || raw.nodeId || null;
+    if (!nodeId) return o;
+    const bySubject = (inquiryStates[code] || {})[`group:${nodeId}`] || {};
+    const canonical = Object.values(bySubject).find(i => i && String(i.inquiryId) === String(o.id));
+    if (!canonical || !Array.isArray(canonical.signals)) return o;
+    return { ...o, raw: { ...raw, signals: canonical.signals } };
+  });
 }
 
 app.get('/api/objects', requireAuth, (req, res) => {
@@ -15778,7 +16279,17 @@ app.get('/api/objects', requireAuth, (req, res) => {
      object carries. */
   const all = scope === 'all' ? _allObjectsFor(code, userId) : _objectBucket(code, userId, scope);
   if (!all) return res.status(403).json({ error: 'scope unavailable' });
-  const objects = all.filter(item => item.kind === kind).map(({ raw, ...item }) => item);
+  /* WHETHER EACH ONE HAS A ROOM, answered by the one owner, before `raw` is stripped.
+
+     The card used to decide this for itself: `item.shared === true || (item.participants || []).length > 1`.
+     Neither field survives this projection — `shared` is set by the thread route and `participants`
+     lives on `raw` — so the indicator was a fourth availability rule that could never be true, and
+     a person scanning their list could not tell which of these threads had anybody in them. Asked
+     here, on every read, with nothing cached: a roster change takes the icon off the card on the
+     very next request, exactly as it does on the object's own screen. */
+  const objects = all.filter(item => item.kind === kind)
+    .map(item => ({ ...item, forumAvailable: _forumAudience(code, userId, item).available }))
+    .map(({ raw, ...item }) => item);
   // ONE RANKING over both, so the top of the list is the top of the list.
   objects.sort((a, b) => (b.score || 0) - (a.score || 0));
   res.json({ ok: true, kind, scope, objects });
@@ -15786,6 +16297,38 @@ app.get('/api/objects', requireAuth, (req, res) => {
 
 /* Every object opens as a thread. The opening is recomposed from the current object on every
    read and is never appended to assistantConversations (L-OC1). */
+/* WHAT A BELIEF IS STANDING ON, in one sentence. Moved here out of the browser: the same counts
+   now have to be SPOKEN as well as shown, and a figure computed in two places is two figures that
+   will eventually disagree. The client renders this; it no longer composes it. */
+function _provenanceLine(d = {}) {
+  const n = d.evidenceCount || 0, o = d.independentOrigins || 0, c = d.corrected || 0;
+  if (!n) return 'Nothing recorded under this yet.';
+  const bits = [`${n} thing${n === 1 ? '' : 's'} you've told me`];
+  if (o > 1) bits.push(`from ${o} separate occasions`);
+  else if (o === 1) bits.push('all from one telling');
+  if (c) bits.push(`${c} since corrected`);
+  if (d.contested) bits.push('and accounts disagree');
+  return bits.join(', ') + '.';
+}
+
+/* THE OPENING CARD, COMPOSED ONCE. It is the object's own explanation and it is the `card`
+   channel of the object's answer — so it is built here, beside the manifest it will be checked
+   against, rather than assembled in the browser from four fields of a payload. */
+function _openingFor(obj) {
+  const sum = (obj && obj.present && obj.present.summary) || {};
+  const det = (obj && obj.present && obj.present.detail) || {};
+  const text = [sum.thinking || (obj && obj.explained && obj.explained.claim) || '', sum.openQuestion || '']
+    .filter(Boolean).join(' ');
+  const sources = [];
+  const n = Number(det.evidenceCount) || 0;
+  if (n) sources.push({ kind: 'record', label: `${n} thing${n === 1 ? '' : 's'} you told me`, detail: _provenanceLine(det) });
+  for (const b of (det.because || []).slice(0, 3)) sources.push({ kind: 'belief', label: 'Why I think this', detail: b });
+  for (const a of (det.alternatives || []).slice(0, 2)) {
+    if (a && a.statement) sources.push({ kind: 'belief', label: 'A rival reading', detail: a.statement });
+  }
+  return { text, sources };
+}
+
 app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const kind = String(req.params.kind || '');
@@ -15806,31 +16349,53 @@ app.get('/api/objects/:kind/:id/thread', requireAuth, (req, res) => {
   // focus. A group object always qualifies (the node is the people); a personal focus qualifies
   // once somebody else has been invited into it. A thread that is just you and IntelliQ has
   // nobody to talk to and gets no forum.
+  /* ONE OWNER. This route and the composer context used to compute availability separately, with
+     rules that had already drifted apart — and neither counted PEOPLE, so a one-member node got a
+     Forum with nobody in it. Both now ask _forumAudience, which resolves the CURRENT readable set
+     on every read. Nothing is cached here, which is what makes a roster change revoke the room on
+     the very next request rather than after a sweep. */
   const _nodeId = scope.startsWith('group:') ? scope.slice(6) : null;
-  //
-  // WHAT IS ACTUALLY WIRED: the forum route is `/api/group/:nodeId/forum/:inquiryId`, so a forum
-  // is REACHABLE only for a group thread. A personal focus with people invited satisfies the
-  // founder's rule but has no route behind it, and rendering the control there would give a
-  // button that 404s. So `forumAvailable` says where it works, `shared` says where the rule says
-  // it should — and the gap between them is the server work still to do, stated rather than
-  // papered over with a button that fails.
-  // THE GAP IS CLOSED. `forumAvailable` used to be true only for a node room, and this comment
-  // used to record a focus with invitees as work still to do. /api/forum/:kind/:objectId is now
-  // that work, so the rule and what is reachable finally say the same thing — which is the only
-  // acceptable end state for a flag whose whole purpose was to admit they differed.
-  const _invited = kind === 'focus'
-    && Array.isArray(object.raw && object.raw.participants) && object.raw.participants.length > 1;
-  const _forum = !!_nodeId || _invited;
+  const _aud = _forumAudience(code, userId, _nodeId ? { ...object, nodeId: _nodeId } : object);
+  const _forum = _aud.available;
   /* WHETHER THIS READER HAS MARKED IT. Read from their OWN memory, so it is their mark and can be
      nobody else's -- the control has to be able to say "take this off" rather than offering to add
      a mark that is already there, and a screen that cannot tell is a screen that lies about state.
      It is a fact about the reader, not about the object, and it travels no further than them. */
   const _mine = Array.isArray(_getMemory(code, userId).prioritised)
     ? _getMemory(code, userId).prioritised.map(String) : [];
+  /* ── THE OPENING IS AN ANSWER, AND IT LEAVES BY TWO DOORS ───────────────────────────────
+     The card a reader sees and the words a listener hears, checked against ONE manifest built
+     from this object's own signals. Degraded per channel rather than all-or-nothing, because the
+     two failures are not the same failure: a card that cannot be shown has to be replaced by the
+     reason, while a reading that cannot be spoken leaves a perfectly good card on the screen and
+     only owes the person an explanation for the missing control. */
+  const _open = _openingFor(object);
+  const _omf = _objectManifest(code, userId, object, { sourceCount: _open.sources.length });
+  const _oRoster = Object.values(orgUsers[code] || {}).filter(p => p && p.status !== 'removed' && p.name).map(p => p.name);
+  const _oSpeech = _speechFor({ text: _open.text, sourceCount: _open.sources.length, limitations: _omf.limitations });
+  const _oApproved = manifest.approve(_omf, {
+    card: { value: _open.text, claims: manifest.claimsIn(_open.text, _omf) },
+    voice: { value: _oSpeech, claims: manifest.claimsIn(_oSpeech, _omf) },
+  }, { roster: _oRoster });
+  const _voiceOnly = _oApproved.violations.filter(v =>
+    v.channel === 'voice' || String(v.kind).startsWith('voice_')
+    || (v.kind === 'channels_disagree' && (v.a === 'voice' || v.b === 'voice')));
+  const _cardRefused = _oApproved.violations.length > _voiceOnly.length;
+
   res.json({ ok: true, about: object.about, opening: object.explained, present: object.present,
+    /* Composed on the server, rendered by the client. `speech` empty means there is nothing
+       approved to read aloud, and `speechNote` says why rather than leaving a dead control. */
+    openingText: _cardRefused ? _oApproved.note : _open.text,
+    openingSources: _cardRefused ? [] : _open.sources,
+    openingSpeech: _oApproved.ok ? _oSpeech : '',
+    openingNote: _oApproved.ok ? '' : _oApproved.note,
     prioritised: _mine.includes(`${kind}:${object.id}`),
     shared: _forum, forumAvailable: _forum, sharedByRule: _forum, nodeId: _nodeId,
-    forumKind: _nodeId ? 'group' : (_invited ? 'focus' : null),
+    forumKind: _aud.forumKind,
+    /* HOW MANY PEOPLE, AND WHY NOT. A screen that is told only "no" has to invent a reason, and
+       "fewer than two people can read this" is a fact worth being able to say rather than an
+       absence a reader has to interpret. The count is of the room, never a list of who is in it. */
+    forumReadable: _aud.readable, forumWhy: _aud.available ? null : _aud.reason,
     conversation: conversation ? { id: conversation.id, updatedAt: conversation.updatedAt } : null,
     messages: conversation ? (conversation.messages || []).map(_historyMessage) : [] });
 });
@@ -15965,7 +16530,36 @@ app.get('/api/objects/:kind/:id/reading', requireAuth, async (req, res) => {
     .find(x => x && x.kind === kind && String(x.id) === String(req.params.id));
   if (!object) return res.status(404).json({ error: 'not found' });
 
-  const topic = (object.raw && object.raw.topic) || {};
+  /* WHAT THIS IS ABOUT, IN VOCABULARY THE SYSTEM OWNS.
+
+     An Inquiry, a High and a Low carry a canonical concept. A FOCUS does not: ai/team-state.js
+     normalizeFocus keeps its text, its status and its origin, and deliberately drops any topic —
+     so a focus reaching here has nothing searchable except the sentence a person typed, and that
+     sentence must never become a query (L-WS1). The honest answer for a focus somebody simply had
+     an idea for is therefore "there is nothing here to search on that is not something you wrote",
+     and that is what the refusal below says.
+
+     BUT A FOCUS STARTED OUT OF AN INQUIRY HAS ONE, and it is the inquiry's. `origin.inquiryId` is
+     a field the record already carries, survives normalisation, and is verified against this
+     group's own inquiries when the focus is created — so borrowing that inquiry's CONCEPT is
+     reading owned vocabulary off a link that already exists, not manufacturing a topic. The
+     person's words are still nowhere near the query.
+
+     RESOLVED WITHIN THE READER'S OWN SCOPE. The lookup is against the same subject the object
+     belongs to, so it cannot reach an inquiry from another group or another tenant even if an id
+     collided — which is exactly the shape group-loop-smoke's same-id fixture exists to catch. */
+  let topic = (object.raw && object.raw.topic) || {};
+  if (!topic.canonicalConcept) {
+    const originId = String(((object.raw || {}).origin || {}).inquiryId || '');
+    if (originId) {
+      const nodeId = String(req.query.scope || '').startsWith('group:')
+        ? String(req.query.scope).slice(6) : ((object.raw || {}).nodeId || null);
+      const subjectRef = nodeId ? `group:${nodeId}` : `member:${userId}`;
+      const bySubject = (inquiryStates[code] || {})[subjectRef] || {};
+      const origin = Object.values(bySubject).find(i => i && i.inquiryId === originId);
+      if (origin && origin.topic && origin.topic.canonicalConcept) topic = origin.topic;
+    }
+  }
   const built = websearch.deriveQuery({
     canonicalConcept: topic.canonicalConcept || '',
     domain: topic.domain || (orgMeta[code] || {}).orgMode || '',
@@ -15998,8 +16592,30 @@ app.get('/api/objects/:kind/:id/reading', requireAuth, async (req, res) => {
     const answer = websearch.answerFrom(content);
     if (!answer.ok) return res.json({ ok: false, available: true, query: built.query, reason: answer.reason });
     _audit(code, { actor: userId, action: 'web_reading', subjectIds: [userId], basis: built.query });
+    /* HOW THIS STANDS TO THE THING THEY ARE LOOKING AT, said by the server rather than left to a
+       reader to assume. Three clauses, and each is there because the assumption it blocks is the
+       natural one to make about a paragraph sitting under a belief:
+
+         WHAT IT IS ABOUT   the TOPIC, in the reader's own words -- not the claim, not the person.
+                            Somebody who does not know what was searched cannot judge whether the
+                            answer is relevant, and will assume it was searched about them.
+         WHAT IT IS NOT     it is about the subject in general, not about this record, not about
+                            anybody here. Nothing outside IntelliQ has seen this record.
+         WHAT IT DOES NOT DO  it changes no confidence and counts as no account. External reading
+                            arriving next to a band that then moved would read as corroboration
+                            from the outside world, which is the one thing it can never be.
+
+       No causal language, and none possible: this is composed from the topic label and fixed
+       clauses, so there is no path by which a model's phrasing becomes a claim about cause. */
+    const _topicLabel = present.humanTopic(topic) || 'this topic';
     return res.json({ ok: true, available: true, query: built.query, queryNote: built.note,
-      text: answer.text, citations: answer.citations, kind: 'advice', note: answer.note });
+      text: answer.text, citations: answer.citations, kind: 'advice', note: answer.note,
+      relation: {
+        about: _topicLabel,
+        line: `General reading about ${_topicLabel}. Nothing about this record, or about anybody here, `
+          + `was sent outside IntelliQ, and nothing that came back counts as an account or changes `
+          + `how sure IntelliQ is about anything.`,
+      } });
   } catch (e) {
     return res.json({ ok: false, available: true, query: built.query,
       reason: 'the search did not come back just now' });
@@ -16028,6 +16644,103 @@ app.get('/api/objects/:kind/:id/reading', requireAuth, async (req, res) => {
 
    The epistemic boundary is UNCHANGED and unchangeable here: this path touches forumThreads and
    nothing else. Ten people agreeing in a focus room moves no confidence anywhere. */
+/* ── THE ONE OWNER OF "DOES THIS OBJECT HAVE A FORUM" ──────────────────────────────────────
+   FOUNDER DECISION, September 2026: the creator explicitly chooses the audience, and any High,
+   Low, Inquiry or Focus with TWO OR MORE CURRENT READABLE MEMBERS has an object Forum.
+
+   THE DEFECT THIS REPLACES. `forumAvailable` was computed in two places with two different
+   rules, and they had already drifted:
+
+     the thread route     !!nodeId || (kind === 'focus' && participants.length > 1)
+     the composer context object.nodeId || subjectRef.startsWith('group:') || participants.length > 1
+
+   The second accepted a group subjectRef and accepted participants on ANY kind; the first did
+   neither. So the same object could have a Forum in conversation and no Forum on its own screen.
+   Two descriptions of one rule always drift — this file has found that four times now — and the
+   fix is one description, not two corrected ones.
+
+   AND NEITHER IMPLEMENTED THE RULE. Both read "is there a node" rather than "are there two
+   people". A node with one member on its roster — a squad mid-build, a group somebody was
+   removed from — showed a Forum with nobody in it to talk to. The rule counts PEOPLE.
+
+   CURRENT, NOT REMEMBERED. The set is resolved on every read from the roster and the
+   participant list as they stand right now. Nothing is cached and no list is stored, which is
+   what makes an audience change revoke access on the very next read rather than after a sweep.
+   The same property is why a removed participant loses the room immediately.
+
+   Returns the COUNT as well as the flag, because "fewer than two people" is a fact worth being
+   able to say on screen, and a caller that only gets a boolean has to invent a reason. */
+/* IS THIS SOMEBODY YOU COULD ACTUALLY TALK TO? One predicate, because the product already had
+   several: eleven readers ask `status !== 'removed'` or `status === 'active'`, and
+   `_forumAudience` asked only whether the account OBJECT existed. That last one fails OPEN — it
+   counts a person the rest of the product treats as gone, and a Forum offered on a room of one
+   living person and one departed one is exactly the surface AGENTS.md invariant 7 forbids.
+
+   THE RULE IS "NOT MARKED OTHERWISE", not "marked active", and the difference matters on real
+   data: an account written before this field existed carries no `status` at all, and refusing
+   those would empty every room in an older organisation. A status that is present and says
+   anything other than active is taken at its word.
+
+   An account with `passwordSet: false` — somebody invited who has not yet activated — is
+   deliberately COUNTED. They are on the roster, their leader can see them there, and a room that
+   appears the moment they choose a password would make the icon flicker on an event nobody in the
+   room can observe. */
+function _personPresent(u) {
+  return !!u && (u.status == null || u.status === '' || u.status === 'active');
+}
+
+function _forumAudience(code, userId, object) {
+  const kind = String((object && object.kind) || '');
+  const none = (reason) => ({ available: false, readable: 0, reason, key: null, forumKind: null, members: [] });
+  if (!['inquiry', 'high', 'low', 'focus'].includes(kind)) {
+    return none('only a High, a Low, an Inquiry or a Focus can have a discussion');
+  }
+  const raw = (object && object.raw) || {};
+
+  /* A NODE ROOM — whoever is on the roster right now, members and leaders alike. A leader of the
+     node reads the group's own state (see _mayReadGroup) and so belongs in the count; leaving
+     them out would make a coach and one player read as one person. */
+  const subjectRef = String(raw.subjectRef || '');
+  /* WHERE THE NODE COMES FROM, in the order the object is most likely to carry it. `scope` is
+     here because of a real disagreement: a group High or Low is a PROJECTION built by
+     ai/team-state.js, and that projection carries neither a nodeId nor a group subjectRef — so
+     the objects list reported `forumAvailable: false` for a High whose own screen reported true,
+     which is the same surface-disagreement this owner was created to end. The thread route was
+     already injecting the node from its scope; every bucket item carries `scope`, so the owner
+     reads it and no caller has to remember to inject anything. */
+  const scope = String((object && object.scope) || '');
+  const nodeId = (object && object.nodeId) || raw.nodeId
+    || (subjectRef.startsWith('group:') ? subjectRef.slice(6) : null)
+    || (scope.startsWith('group:') ? scope.slice(6) : null)
+    || (object && object.whoseNodeId) || null;
+  if (nodeId && (orgNodes[code] || {})[nodeId]) {
+    const people = [...new Set([..._nodeMembers(code, nodeId), ..._nodeLeaders(code, nodeId)])]
+      // A person whose account is gone is not somebody you can talk to. Counting them would put
+      // a Forum on an object whose room is one living person and one departed one. This used to
+      // ask only whether the account OBJECT existed, which counted an account the rest of the
+      // product treats as gone — see _personPresent.
+      .filter(id => _personPresent((orgUsers[code] || {})[id]));
+    if (people.length < 2) {
+      return { available: false, readable: people.length, key: null, forumKind: null, members: people,
+        reason: 'there is nobody else in this group yet' };
+    }
+    return { available: true, readable: people.length, key: nodeId, forumKind: 'group', members: people };
+  }
+
+  /* A FOCUS ROOM — the people named on it. Membership is the INVITATION and does not change
+     because a roster did, which is why this is a separate branch rather than one clever list. */
+  const invited = Array.isArray(raw.participants)
+    ? [...new Set(raw.participants.map(String))].filter(id => _personPresent((orgUsers[code] || {})[id])) : [];
+  if (kind === 'focus' && invited.length >= 2) {
+    return { available: true, readable: invited.length, key: String(object.id), forumKind: 'focus', members: invited };
+  }
+  if (kind === 'focus' && invited.length) {
+    return { available: false, readable: invited.length, key: null, forumKind: null, members: invited,
+      reason: 'this one is just you — there is nobody to discuss it with' };
+  }
+  return none('this one is just you — there is nobody to discuss it with');
+}
+
 function _forumRoom(code, userId, kind, objectId) {
   if (kind !== 'focus') {
     // Group inquiries have their own route above, whose room is the node. Saying so is better
@@ -16038,12 +16751,15 @@ function _forumRoom(code, userId, kind, objectId) {
     .find(o => o && o.kind === 'focus' && String(o.id) === String(objectId));
   if (!obj) return { ok: false, status: 404, error: 'not found' };
   const raw = obj.raw || {};
-  const members = Array.isArray(raw.participants) ? raw.participants.filter(Boolean) : [];
-  // A focus with nobody else on it is you and IntelliQ, which is a conversation and already has
-  // one. The founder's rule is 2+ PEOPLE, and one person is not two.
-  if (members.length < 2) {
-    return { ok: false, status: 400, error: 'this one is just you — there is nobody to discuss it with' };
+  /* WHO IS IN THE ROOM IS ASKED OF THE ONE OWNER, so the room a person can open and the icon
+     that offers it can never disagree. This branch used to count `raw.participants` itself —
+     a third copy of the rule alongside the thread route and the composer context, and the copy
+     that would have kept counting a departed account as somebody you can talk to. */
+  const aud = _forumAudience(code, userId, obj);
+  if (!aud.available) {
+    return { ok: false, status: 400, error: aud.reason || 'this one is just you — there is nobody to discuss it with' };
   }
+  const members = aud.members;
   if (!members.includes(userId)) return { ok: false, status: 403, error: 'not part of this' };
   return { ok: true, key: `focus:${objectId}`, members, subjectRef: raw.nodeId ? `group:${raw.nodeId}` : `member:${userId}` };
 }
@@ -16750,14 +17466,40 @@ app.post('/api/assistant/attachments', requireAuth, (req, res) => {
   if (!text.trim()) return res.status(400).json({ error: 'attachment text required' });
   if (text.length > material.TEXT_CAP) return res.status(413).json({ error: 'attachment is too large' });
   const key = _wsKey(code, userId);
-  const conv = _resolveConversation(key, b.conversationId, b.title || 'Attached material', Date.now(), b.about || null);
+  const checksum = _materialChecksum(text);
+  /* ── A RETRY AFTER AN ANSWER THAT NEVER ARRIVED ─────────────────────────────────────────────
+     The founder's device class is a phone on a stadium connection, and the failure that matters
+     there is not a refused request — it is one the server ACCEPTED and whose reply never came
+     back. The client's ceiling fires, the person presses Try again, and the second request is
+     byte-identical to the first with no conversationId, because the client never learned one.
+
+     The MATERIAL was already safe: deduplicated below by checksum, owner and private visibility.
+     The CONVERSATION was not. Each attempt with no id made a new thread, so one upload on a bad
+     connection left two or three in somebody's list, each holding the same document, and the
+     person had no way to tell which was the real one.
+
+     RECONCILED FROM STATE THE SERVER ALREADY HOLDS, not from a new key the client would have to
+     mint and remember: the checksum that identifies the document also identifies the thread the
+     earlier attempt created for it. Same bytes, same owner, no conversation named -> the same
+     conversation. It is scoped to this owner's own private copy, exactly as the material
+     deduplication is, so equal bytes belonging to somebody else are not a way into their thread.
+
+     A conversationId the client DOES send always wins: a person attaching a document inside a
+     thread they are already in is not retrying anything. */
+  let _priorConvId = null;
+  if (!b.conversationId) {
+    const prior = Object.values(_materials(code))
+      .find(m => m && m.checksum === checksum && m.byId === userId && m.visibility === 'private');
+    const priorRef = prior && _materialRefs(prior).find(r => r && r.kind === 'conversation');
+    if (priorRef && _assistantConvs(key).some(c => c.id === String(priorRef.id))) _priorConvId = String(priorRef.id);
+  }
+  const conv = _resolveConversation(key, b.conversationId || _priorConvId, b.title || 'Attached material', Date.now(), b.about || null);
   const about = _aboutRef(b.about);
   let ref = { kind: 'conversation', id: conv.id, at: Date.now(), by: userId };
   if (about) {
     const n = about.indexOf(':'), kind = about.slice(0, n), id = about.slice(n + 1);
     if (_allObjectsFor(code, userId).some(o => o.kind === kind && String(o.id) === id)) ref = { kind, id, at: Date.now(), by: userId };
   }
-  const checksum = _materialChecksum(text);
   // Composer uploads are private external reading. Deduplication may reuse only
   // this owner's private copy; equal bytes owned by somebody else are not access.
   let row = Object.values(_materials(code)).find(m => m && m.checksum === checksum && m.byId === userId && m.visibility === 'private');
@@ -16834,7 +17576,15 @@ app.post('/api/materials', requireAuth, (req, res) => {
   const kind = String(at.kind || '');
   if (!['focus', 'inquiry', 'high', 'low'].includes(kind)) return res.status(400).json({ error: 'attach it to a focus, inquiry, high or low' });
   const text = String(b.text || '');
-  if (!text.trim()) return res.status(400).json({ error: 'nothing readable came out of that file' });
+  /* `text.trim()` IS NOT ENOUGH, and finding out why cost an attachment list with a
+     control-character heading in it. trim() strips WHITESPACE; a NUL is not whitespace. So a
+     corrupt binary — a .pptx that failed to parse, an image renamed to .txt — arrives as control
+     characters, survives that check intact, and becomes a real material with unreadable parts.
+     `hasReadableText` asks the question that was actually meant: is there a character in here
+     somebody could read? */
+  if (!material.hasReadableText(text)) {
+    return res.status(400).json({ error: 'nothing readable came out of that file' });
+  }
   if (text.length > material.TEXT_CAP) return res.status(413).json({ error: `that file is larger than IntelliQ will hold (${material.TEXT_CAP} characters of text)` });
 
   const obj = _allObjectsFor(code, userId).find(o => o.kind === kind && String(o.id) === String(at.id));
@@ -16865,6 +17615,28 @@ app.post('/api/materials', requireAuth, (req, res) => {
       note: `This is already in your library, so it is the same one — not a second copy. What people have already said about it stays with it.` });
   }
 
+  /* L-MT6 — WHAT KIND OF THING THIS IS, DECIDED BY THE SERVER FROM WHAT IS TRUE.
+
+     The client SAYS what it is asking for; it never decides. `mayAttest` is the same
+     leads-this-node question `_mayAttach` already answered above — somebody entitled to speak for
+     the group the material is attached to — so a person cannot make a claim about an organisation
+     by uploading a file to it. Provenance and confirmation are the person's own deliberate acts
+     and are read from the request, because there is nowhere else they could come from; what stops
+     them being enough on their own is that permission is not.
+
+     A failed request DOWNGRADES to external context and says which of the three was missing.
+     Refusing would lose the file; accepting silently would let an assertion become a fact. */
+  const _mayAttest = _mayAttach(code, userId, obj)
+    && (obj.raw && (obj.raw.nodeId || String(obj.raw.subjectRef || '').startsWith('group:'))
+      ? _leadsNode(code, (obj.raw.nodeId || String(obj.raw.subjectRef).slice(6)), userId)
+      : false);
+  const _cls = material.classifyRequest({
+    requested: String(b.classification || ''),
+    mayAttest: _mayAttest,
+    provenance: String(b.source || '').trim().slice(0, 300),
+    confirmed: b.confirmClassification === true,
+  });
+
   const id = 'mat_' + generateId();
   _materials(code)[id] = {
     materialId: id, byId: userId, orgCode: code,
@@ -16873,6 +17645,11 @@ app.post('/api/materials', requireAuth, (req, res) => {
     kind: material.KINDS.includes(String(b.kind)) ? String(b.kind) : 'text',
     sections,
     checksum,
+    /* WHAT IT IS, AND WHERE IT CAME FROM, recorded together. `classification` is what was
+       actually granted, never what was asked for; `source` is the stated provenance and is empty
+       unless somebody stated one. */
+    classification: _cls.class,
+    source: _cls.class === 'organisation_evidence' ? String(b.source || '').trim().slice(0, 300) : '',
     visibility: 'object', provenance: 'internal',
     // Where it is used. The first ref is what `attachTo` used to be, kept in that position so
     // anything still reading the old field sees the same answer.
@@ -16883,6 +17660,25 @@ app.post('/api/materials', requireAuth, (req, res) => {
   _audit(code, { actor: userId, action: 'material_attached', subjectIds: [], basis: `${kind}:${at.id} (${sections.length} parts)` });
   scheduleSave();
   res.json({ ok: true, materialId: id, parts: sections.length,
+    /* WHAT WAS RECORDED, AND — WHEN IT IS NOT WHAT WAS ASKED FOR — WHY. A downgrade a person is
+       not told about is a product that quietly disagrees with them. */
+    classification: _cls.class,
+    classificationLabel: (material.CLASS_TEXT[_cls.class] || {}).label || '',
+    classificationMeans: (material.CLASS_TEXT[_cls.class] || {}).means || '',
+    classificationGranted: _cls.granted,
+    classificationReason: _cls.reason || null,
+    /* HOW MUCH WAS ACTUALLY READ. The founder's "read it and work from it" is only trustworthy if
+       a person can see what came out — a 40-slide deck that yielded four sections means something
+       went wrong with the file, and silence about that is how somebody comes to believe IntelliQ
+       has read a document it has four paragraphs of. */
+    extracted: {
+      characters: text.length,
+      sections: sections.length,
+      cap: material.TEXT_CAP,
+      truncated: text.length >= material.TEXT_CAP,
+      sectionCap: material.SECTION_CAP,
+      sectionsCapped: sections.length >= material.SECTION_CAP,
+    },
     sections: sections.map(s => ({ id: s.id, ordinal: s.ordinal, heading: s.heading })),
     note: `Attached, in ${sections.length} ${sections.length === 1 ? 'part' : 'parts'}. IntelliQ will answer from it, and you will see which parts landed.` });
 });
@@ -16902,6 +17698,60 @@ app.get('/api/objects/:kind/:id/materials', requireAuth, (req, res) => {
 });
 
 /* GET /api/materials/:id — read it. The parts, in the author's order, in their words. */
+/* POST /api/materials/:id/classification — say deliberately what this material IS.
+
+   SEPARATE FROM ATTACHING IT, which is the whole point. A person who has just uploaded a deck
+   should not have to answer an ontology question before it is saved, and a consequential
+   classification must never be a side effect of an upload. So the file lands as something to
+   read from, and this is the deliberate second act.
+
+   ONLY ITS AUTHOR. Somebody else's material is not yours to reclassify: turning another person's
+   attachment into evidence about the organisation would be putting words in their mouth, which is
+   the same law the contribution boundary keeps for speech.
+
+   AND THE SERVER RE-CHECKS EVERYTHING. Permission is re-derived now, not inherited from whatever
+   was true when the file was attached — a leader who has since been taken off the node cannot
+   confirm a claim about it. A request that fails is DOWNGRADED with its reason, never refused,
+   because refusing would strand the material and silence would let an assertion become a fact. */
+app.post('/api/materials/:id/classification', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const id = String(req.params.id || '');
+  const m = _materials(code)[id];
+  if (!m) return res.status(404).json({ error: 'not found' });
+  const seen = _materialFor(code, userId, id);
+  if (!seen.ok) return res.status(404).json({ error: 'not found' });
+  if (String(m.byId) !== String(userId)) {
+    return res.status(403).json({ error: 'only the person who attached this can say what it is' });
+  }
+
+  const b = req.body || {};
+  // The object it hangs on, resolved through the reader's own authorised set, so permission is
+  // asked about a thing they can actually open.
+  const first = _materialRefs(m)[0] || m.attachTo || {};
+  const obj = _allObjectsFor(code, userId).find(o => o.kind === first.kind && String(o.id) === String(first.id));
+  const nodeId = obj && obj.raw
+    ? (obj.raw.nodeId || (String(obj.raw.subjectRef || '').startsWith('group:') ? String(obj.raw.subjectRef).slice(6) : null))
+    : null;
+  const mayAttest = !!(obj && nodeId && _leadsNode(code, nodeId, userId));
+
+  const cls = material.classifyRequest({
+    requested: String(b.classification || ''),
+    mayAttest,
+    provenance: String(b.source || '').trim().slice(0, 300),
+    confirmed: b.confirmClassification === true,
+  });
+  m.classification = cls.class;
+  m.source = cls.class === 'organisation_evidence' ? String(b.source || '').trim().slice(0, 300) : '';
+  scheduleSave();
+  res.json({ ok: true, materialId: id,
+    classification: cls.class,
+    classificationLabel: (material.CLASS_TEXT[cls.class] || {}).label || '',
+    classificationMeans: (material.CLASS_TEXT[cls.class] || {}).means || '',
+    classificationGranted: cls.granted,
+    classificationReason: cls.reason || null,
+    note: cls.granted ? 'Recorded.' : 'Kept as something to read from.' });
+});
+
 app.get('/api/materials/:id', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const r = _materialFor(code, userId, req.params.id);
@@ -17401,6 +18251,111 @@ app.get('/api/objects/:kind/:id/related', requireAuth, (req, res) => {
     note: 'These are connections the records already carry. A connection says two things are related; it does not make either of them more certain.' });
 });
 
+/* ── ONE MANIFEST PER OBJECT (L-MF1) ─────────────────────────────────────────────────────────
+   A thread's opening card, the picture under it and the chips beside it are three channels of ONE
+   answer about ONE object, and each used to decide for itself what it was entitled to say. The
+   card is composed by ai/voice.js, the picture by ai/chart.js, the chips by the client — three
+   authors, no shared record of what the object actually supports.
+
+   This is that record. Built from the object's OWN signals, so it is the record talking rather
+   than a restatement of whatever the card happened to compose.
+
+   THE MOVEMENT CLAIM IS THE ONE THAT MATTERS. A picture drawn as a line says the thing changed
+   over time. `governChart` already refuses a line whose POINTS do not span two moments — but a
+   chart built from the wrong points can satisfy that and still be a line through a record that
+   never moved. So the movement is claimed here, from the signals, and L-MF7 refuses a trend that
+   cannot name it. Two different questions: does the picture agree with itself, and does it agree
+   with the record. */
+/* EVERY DATED FACT THIS OBJECT'S RECORD ACTUALLY HOLDS. Read from the record — signals, when the
+   object was set, reviewed and closed, when material was attached and when somebody engaged with
+   it — and NOT from the chart builders, which is the whole point: a picture is checked against
+   the record rather than against the code that drew it. A timestamp on a chart that is not a
+   moment in the record is an invented moment however plausible the value beside it looks. */
+function _recordMoments(code, userId, obj) {
+  const raw = (obj && obj.raw) || {};
+  const out = new Set();
+  const add = (v) => {
+    const t = Number.isFinite(v) ? Number(v) : (Date.parse(v || '') || NaN);
+    if (Number.isFinite(t) && t > 0) out.add(t);
+  };
+  for (const s of (raw.signals || [])) add(s && s.at);
+  add(raw.createdAt); add(raw.reviewAt); add(raw.updatedAt); add(raw.at);
+  add(raw.outcome && raw.outcome.at);
+  for (const m of Object.values(_materials(code))) {
+    if (!_materialOn(m, obj.kind, obj.id) || !_materialFor(code, userId, m.materialId).ok) continue;
+    add(m.createdAt);
+    for (const e of _engageOf(code, m.materialId)) add(e && e.at);
+  }
+  return [...out];
+}
+
+function _objectManifest(code, userId, obj, { chartSpec = null, sourceCount = 0, now = Date.now() } = {}) {
+  const raw = (obj && obj.raw) || {};
+  const sum = (obj && obj.present && obj.present.summary) || {};
+  const det = (obj && obj.present && obj.present.detail) || {};
+  const sigs = ((raw.signals || []).filter(s => s && s.ref));
+  const origins = new Set(sigs.map(s => diagnose.originIdentity(s) || String(s.ref)).filter(Boolean));
+  const times = _recordMoments(code, userId, obj);
+  const refs = sigs.map(s => String(s.ref));
+
+  const claims = [];
+  /* THE CARD'S OWN SENTENCE, and the counts it is entitled to state: how many accounts, how many
+     separate origins. Those two are the figures a belief card legitimately says and everything
+     else about this organisation it does not. */
+  const headline = String(sum.thinking || (obj.explained && obj.explained.claim) || '');
+  if (headline) {
+    claims.push(manifest.claim({
+      id: 'card', text: headline, stance: 'inferred', basis: refs, at: times[times.length - 1] || null,
+      numbers: [..._figuresIn(headline), origins.size, sigs.length, Number(det.evidenceCount) || 0].filter(n => n > 0),
+    }));
+  }
+  const ask = String(sum.openQuestion || '');
+  if (ask) claims.push(manifest.claim({ id: 'ask', text: ask, stance: 'advice', numbers: _figuresIn(ask) }));
+  /* THE FIGURES THIS ANSWER IS ENTITLED TO STATE ABOUT ITSELF: how many accounts, how many
+     separate origins, how many sources are shown beneath it. Deliberately carries NO text — it
+     approves numbers and states nothing, so it can never be counted as a claim a channel rests
+     on and can never make two channels look like they disagree. */
+  claims.push(manifest.claim({ id: 'counts', text: '', stance: 'recorded', basis: refs,
+    numbers: [origins.size, sigs.length, Number(det.evidenceCount) || 0, Number(sourceCount) || 0].filter(n => n > 0) }));
+  for (const [i, s] of sigs.slice(0, 12).entries()) {
+    claims.push(manifest.claim({ id: `signal_${i}`, text: String(s.text || s.summary || ''), stance: 'recorded',
+      basis: [String(s.ref)], at: Number.isFinite(s.at) ? s.at : null,
+      numbers: _figuresIn(String(s.text || s.summary || '')) }));
+  }
+  /* DID ANYTHING MOVE? Two distinct moments on the record is the whole of it, and it is a claim
+     about the RECORD rather than about the world — hence `inferred`, and hence carrying the
+     uncertainty until the origins clear the floor the rest of the kernel uses. */
+  const _sorted = [...times].sort((a, b) => a - b);
+  if (_sorted.length >= 2) {
+    claims.push(manifest.claim({
+      id: 'movement', stance: 'inferred', basis: refs, at: _sorted[_sorted.length - 1],
+      text: `This record holds ${_sorted.length} separate dated occasions, so there is a before and an after to compare.`,
+      numbers: [_sorted.length, origins.size].filter(n => n > 0),
+      carriesUncertainty: origins.size === 1,
+    }));
+  }
+
+  const limitations = [];
+  if (origins.size === 1) limitations.push('Everything here traces back to a single origin, so repetition is not adding certainty.');
+
+  return manifest.manifest({
+    subject: obj && obj.about ? String(obj.about) : '',
+    at: now, privacyScope: obj && obj.whose ? String(obj.whose) : '', limitations,
+    claims,
+    graph: chartSpec ? {
+      // THE MOMENTS THE RECORD HOLDS, so a plotted timestamp can be checked against the record
+      // rather than against the builder that produced it.
+      moments: times,
+      series: (chartSpec.series || []).map(s => ({
+        key: s && s.key, unit: s && s.unit, shape: s && s.shape,
+        // Only a trend needs a claim behind it; a state or a category asserts no change.
+        claim: (s && s.shape) === 'trend' ? 'movement' : '',
+        points: (s && s.points) || [],
+      })),
+    } : null,
+  });
+}
+
 app.get('/api/objects/:kind/:id/chart', requireAuth, (req, res) => {
   const { orgCode: code, userId } = req.iqSession;
   const kind = String(req.params.kind || ''), id = String(req.params.id || '');
@@ -17419,6 +18374,20 @@ app.get('/api/objects/:kind/:id/chart', requireAuth, (req, res) => {
   if (!governed.ok) {
     return res.json({ ok: true, chart: null, note: chart.refusalNote(governed.violations),
       violations: governed.violations.map(v => v.kind) });
+  }
+  /* ── AND THEN THE SAME QUESTION EVERY OTHER CHANNEL ANSWERS (L-MF4, L-MF7) ─────────────────
+     governChart asks whether the picture agrees with itself. This asks whether it agrees with the
+     ANSWER — the same manifest the object's card is checked against — which is the question that
+     catches a line drawn through a record that never moved, and a value that changed between the
+     governance step and the response. A refused picture returns its reason and no chart, exactly
+     as a governance refusal does: a half-drawn chart is worse than none, because a reader takes
+     what is drawn for the whole. */
+  const _mf = _objectManifest(code, userId, obj, { chartSpec: built.spec });
+  const _ok = manifest.approve(_mf, { graph: { value: governed.chart } });
+  if (!_ok.ok) {
+    console.log(`[chart] manifest refused — ${_ok.violations.map(v => v.kind).join('; ')}`);
+    return res.json({ ok: true, chart: null, note: _ok.note,
+      violations: _ok.violations.map(v => v.kind) });
   }
   res.json({ ok: true, chart: governed.chart });
 });
@@ -17803,6 +18772,7 @@ app.get('/api/admin/persistence', requireAuth, async (req, res) => {
 
   const body = {
     ok: true,
+    build: { ...BUILD, commitFull: _FULL_COMMIT },
     mode: PERSISTENCE_MODE,
     debounceMs: SAVE_DEBOUNCE_MS,
     saves: {
@@ -17918,9 +18888,29 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
 
   if (prop.capability === 'composer_action') {
     const p = prop.payload || {};
-    // A proposal id authorises the frozen server-side payload the person saw. The
-    // browser may never turn confirmation into a second, hidden proposal.
-    if (Object.keys(overrides).length) return res.status(409).json({ error: 'proposal_payload_changed', note: 'That change needs a new proposal and confirmation.' });
+    /* A proposal id authorises the frozen server-side payload the person saw. The browser may
+       never turn confirmation into a second, hidden proposal.
+
+       ONE EXCEPTION, AND IT IS NAMED RATHER THAN GENERAL. `share_to_forum` is the action whose
+       payload IS the thing the person is meant to edit: ai/composer-actions.js states it as the
+       contract — "the text is the PERSON'S, carried in `text` and editable on the card, because a
+       share whose wording the person did not see is a share they did not make" — and the handler
+       below reads `overrides.text` and says the same in its own comment.
+
+       BOTH OF THOSE WERE DEAD. This guard rejected every override before either could run, so the
+       card's edit box could not post and confirming an edited share answered
+       `proposal_payload_changed`. A capability described in two comments and exercised by nothing
+       is exactly the class this engagement keeps finding; it was found here by pressing the
+       button rather than by reading the handler, which is the only way it could have been found.
+
+       The exception is one FIELD on one ACTION, allow-listed by name in both directions: any
+       other key, on any action, still refuses. So the narrow thing a person is meant to change is
+       the only thing they can change, and a browser still cannot rewrite the room, the object or
+       the audience. What is posted is speech, by its author, into a room they are already in, and
+       the handler re-checks membership and re-reads the room from the server regardless. */
+    const _editable = prop.actionType === 'share_to_forum' ? ['text'] : [];
+    const _changed = Object.keys(overrides).filter(k => !_editable.includes(k));
+    if (_changed.length) return res.status(409).json({ error: 'proposal_payload_changed', note: 'That change needs a new proposal and confirmation.' });
     const ref = p.context || null;
     const live = ref && (ref.kind === 'conversation'
       ? ((assistantConversations[_wsKey(code, userId)] || []).some(c => c.id === ref.id) ? { kind: 'conversation', id: ref.id, raw: null } : null)
@@ -18087,6 +19077,68 @@ app.post('/api/assistant/turn/:turnId/confirm', requireAuth, async (req, res) =>
       prop.confirmed = { at: new Date().toISOString(), object: ref }; scheduleSave();
       return res.json({ ok: true, confirmed: prop.actionType, outcome: 'open_forum', forum: { room: nodeId ? 'group' : 'focus', nodeId, objectId: ref.id },
         note: 'Discussion opened. Nothing said there counts as evidence unless its author deliberately contributes it.' });
+    }
+
+    /* ── PRIVATE -> FORUM, THE ONLY PATH ────────────────────────────────────────────────────
+       FOUNDER DECISION: private conversation never enters a Forum without a separate explicit
+       Share to Forum action, an audience preview, and a confirmation. This is that action, at the
+       point where the person has read the audience and pressed confirm.
+
+       Everything that could be taken from somewhere else is taken from the server instead:
+
+         THE ROOM is the room of the object the turn is bound to (`live`), resolved through
+         _forumAudience -- the same owner that decides the icon appears. The proposal cannot name
+         a different one, because nothing here reads a room from the payload.
+         MEMBERSHIP is re-checked NOW, not inherited from the proposal being staged. A person
+         removed from the squad between staging and confirming is refused here.
+         THE WORDS are the person's, and their EDIT WINS. `overrides.text` is what they were
+         looking at on the card; a share whose wording they did not see is a share they did not
+         make.
+
+       AND IT IS SPEECH. It goes through forum.newMessage into forumThreads, the same path a typed
+       message takes, and touches nothing else -- no signal, no origin, no contribution, no
+       confidence. Making it count is a separate deliberate act by its author through the existing
+       contribution boundary, and the reply says so. */
+    if (prop.actionType === 'share_to_forum') {
+      if (!live || live.kind === 'conversation') {
+        return res.status(400).json({ error: 'open the thing you want to put to the forum first' });
+      }
+      const aud = _forumAudience(code, userId, live);
+      if (!aud.available) {
+        return res.status(403).json({ error: aud.reason || 'this object has no forum' });
+      }
+      const inRoom = aud.forumKind === 'group'
+        ? _mayReadGroup(code, aud.key, userId) : aud.members.includes(userId);
+      if (!inRoom) return res.status(403).json({ error: 'not part of this' });
+
+      const body = String(overrides.text || p.text || '').trim().slice(0, 4000);
+      if (!body) return res.status(400).json({ error: 'nothing_to_share' });
+
+      const key = aud.forumKind === 'group' ? String(ref.id) : `focus:${ref.id}`;
+      const threads = (forumThreads[code] = forumThreads[code] || {});
+      if (!threads[key]) {
+        threads[key] = forum.newThread({ inquiryId: key,
+          nodeId: aud.forumKind === 'group' ? aud.key : '',
+          subjectRef: aud.forumKind === 'group' ? `group:${aud.key}` : `member:${userId}` });
+      }
+      const msg = forum.newMessage({ id: 'fm_' + generateId(), authorId: userId, text: body, replyTo: null });
+      threads[key].messages.push(msg);
+      if (threads[key].messages.length > forum.THREAD_CAP) {
+        threads[key].messages.splice(0, threads[key].messages.length - forum.THREAD_CAP);
+      }
+      prop.confirmed = { at: new Date().toISOString(), object: ref, shared: true };
+      /* NOT AUDITED, DELIBERATELY. My first version called _audit with action 'forum_post', which
+         is not in ai/audit.js's allow-list — so record() refused it and the call was a silent
+         no-op that READ like a record being kept. Widening the vocabulary would have been worse:
+         that trail is "who accessed whose personal data", the basis for a subject access request,
+         and a person choosing to say something in a room they are already in is not an access of
+         anybody's data. The post is recorded where a post belongs — in the thread, with its
+         author held by the kernel — and the proposal carries its own confirmation stamp above. */
+      scheduleSave();
+      return res.json({ ok: true, confirmed: prop.actionType, outcome: 'posted_to_forum',
+        messageId: msg.messageId, epistemicEffect: 'none',
+        forum: { room: aud.forumKind, nodeId: aud.forumKind === 'group' ? aud.key : null, objectId: ref.id },
+        note: 'Posted to the forum for this. It is speech, not evidence — it changes nothing about what IntelliQ believes unless you separately offer it as your own account.' });
     }
 
     if (['inspect_inquiry', 'show_evidence', 'request_research', 'navigate_to_object'].includes(prop.actionType)) {
@@ -22545,7 +23597,27 @@ const LEARNING_CACHE_TTL   = 2 * 60 * 60 * 1000; // 2 hours
 
 /* Populate all in-memory store objects from a loaded data blob.
    Uses Object.assign so the existing const references stay valid. */
+/* When the required stores actually became available. `readiness.ready` is this and nothing else:
+   the brief's rule is that the product must not report itself ready before they are loaded, and a
+   timestamp is the only form of that claim which cannot be true by default. */
+let _storesLoadedAt = null;
+
+/* ONE PLACE THAT SAYS THE STORES ARE LOADED, because there is more than one way to load them and
+   only one of them was saying so.
+
+   FOUND BY RUNNING THE REAL SERVER AGAINST A REAL DATABASE, which no suite in this repository had
+   ever done: every test runs DB_OPTIONAL=1, and the in-memory path goes through _loadAllStores,
+   which set this. The AUTHORITATIVE SPLIT PATH does not — it calls _applyUnits — so on every real
+   deployment that has ever saved once, `readiness.storesLoaded` was false and `readiness.ready`
+   was FALSE FOREVER, on a completely healthy instance serving every request correctly.
+
+   Nothing failed. The product worked and reported itself not ready, which is the readiness level
+   lying in the safe direction — and a readiness probe nobody can believe is a readiness probe
+   nobody reads. */
+function _markStoresLoaded() { _storesLoadedAt = new Date().toISOString(); }
+
 function _loadAllStores(data) {
+  _markStoresLoaded();
   Object.assign(orgMeta,          data.orgMeta          || {});
   Object.assign(orgUsers,         data.orgUsers         || {});
   Object.assign(inviteTokens,     data.inviteTokens     || {});
@@ -22669,10 +23741,14 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   emailIndex, activeSessions, inviteTokens, userAiProfiles,
   // exported for the truth layer: the group contribution boundary
   groupCandidates, orgNodes, _groupSubjectRef, _noteGroupCandidates, _admitGroupContributions,
+  // The two forum owners, exported so a suite can drive them against object shapes the bucket
+  // produces for kinds that are derived rather than stored (a group High is a projection, not a
+  // record), and so the one-way context can be asserted as BEHAVIOUR rather than as source shape.
+  _forumAudience, _forumContext, _speechFor,
   _inNode, _leadsNode, forumThreads, _forumThread,
   raises, _raises, _ladderFor, _admitLeaderRead,
   // exported for the truth layer: attached material, whether it landed, and the graphs
-  materials, materialEngage, _materials, _engageOf, _materialCohort, _allObjectsFor, _chartFor, _materialContext,
+  materials, materialEngage, _materials, _engageOf, _materialCohort, _allObjectsFor, _objectsWithEvidenceFor, _chartFor, _materialContext,
   teamFocuses, _teamFocuses, _groupInquiryProjections, _groupPatternFindings, _mayReadGroup, _teamStateAnswer, _leadInquiry,
   reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library

@@ -49,7 +49,6 @@ const BACKEND_ONLY = new Map(Object.entries({
   '/api/library/from-chat': 'FOUNDER DECISION, September 2026: there is one user-facing product called Library and it is the shelf, which indexes live governed objects BY REFERENCE. This route is the old one\'s copy-taking act — it flattened a live conversation into a second record that sat beside it and drifted from it with no way to tell which you were reading. Its caller is gone and the control that used to invoke it now files a reference through POST /api/library/shelf. The route and everything anybody already saved through it are deliberately untouched: retiring a surface is not the same act as deleting somebody\'s records, and doing both in the week before a pilot is how records are lost. Removing the subsystem is its own piece of work, after the pilot.',
   '/api/objects/focus/:id/evidence-relation': 'the DIRECT half of the founder\'s September 2026 declared-relation law (supports / undermines / unclear), and it is BACKEND-ONLY IN BOTH DIRECTIONS TODAY. An earlier version of this entry claimed the model-suggested half was already reachable because declare_focus_relation is a registered composer action. That was wrong, and reproducing it is what found the defect: composer-actions normalize() retains a fixed list of argument keys which does not include `relation` or `evidenceRef`, so a proposal reaches the confirm branch carrying neither and the canonical owner refuses it. Registration is not reachability. Completing that path means deciding what evidence identifiers a model may be shown in order to name ONE piece of evidence, which is a disclosure decision and not a UI question, so it is written up in docs/reviews/PRIORITY_SURFACE_R1.md as a founder decision rather than guessed at here. The direct route works, is exercised including its refusals by priority-office-attention-smoke, and is the control a focus screen will use.',
   '/api/identity/reresolve': 'operator tooling',
-  '/api/objects/:kind/:id/related': 'the cross-evidence reader, September 2026. It DOES reach people -- the composer assembles the same neighbourhood server-side through _crossEvidenceContext, so "why did we create this focus" and "did it help" are answerable in conversation -- but no screen fetches it. It was declared reachable until 10 September only because the prefix test above could not tell it apart from its neighbours; this entry is the correction, not a new state of affairs.',
   '/api/objects/:kind/:id/priority': 'the DIRECT half of the personal attention override, September 2026. The screen deliberately does NOT call it: the verdict on an object thread stages `prioritise_object` through beginObjectAction, so a button does not own a mutation and confirmation still crosses the one dispatcher, exactly as Keep and Settled do. Both doors end at the same canonical owner, _setPersonalPriority. This route is the explicit control for a caller that has no conversation to go through, and priority-closure-smoke exercises it including its refusals.',
 }));
 
@@ -105,9 +104,45 @@ const KNOWN_ORPHANS = new Set([
 ]);
 
 const server = R('server.js');
+/* js/voice.js was missing from this list, so anything only voice.js calls read as unreachable and
+   anything voice.js is the sole caller of could not be seen at all. Every client file, or the
+   guard is measuring a subset and calling it the product. */
 const FRONT_FILES = ['js/app.js', 'js/auth.js', 'js/chat.js', 'js/data.js',
-  'js/ui.js', 'js/tree.js', 'js/attachments.js', 'js/scenarios.js', 'js/charts.js', 'index.html'];
+  'js/ui.js', 'js/tree.js', 'js/attachments.js', 'js/scenarios.js', 'js/charts.js',
+  'js/voice.js', 'index.html'];
 const front = FRONT_FILES.map(R).join('');
+
+/* ── EXPOSED BY CLOSING THE TAIL HOLE, 11 September 2026 ────────────────────────────────────
+   Tightening `reachable` (the tail must now follow the prefix inside one quoted URL) revealed
+   routes the looser rule had been passing on a stranger's words. Two separate accidents were
+   doing it: `/health` in `/api/connections/:id/health` was satisfied by an unrelated call to
+   `/api/health`, and every `/api/group/:nodeId/...` route was satisfied because `/api/group` is a
+   PREFIX OF `/api/groups`, which the client calls constantly.
+
+   These are NOT in KNOWN_ORPHANS, which this file says is frozen debt rather than a parking
+   space. They are a dated, counted set with a different meaning: each one needs a decision, and
+   the count must not grow.
+
+   FOUR CAME OFF ON 11 SEPTEMBER 2026, which is what this list is for. The node half of the
+   A -> B loop -- the group's inquiries, setting a group Focus out of one, and recording what came
+   of it -- had no client caller at all, so it was server-side only and reachable by nothing a
+   person could tap. It now has a doorway (the team card opens the group; MemberApp.openGroupNode
+   reads the inquiries; a leader sets a focus from one and records its outcome), and
+   `/api/objects/:kind/:id/related` -- the A -> B reader itself -- is fetched and rendered by the
+   object thread. Taken off the bill rather than left on it, per the rule below. */
+const TAIL_HOLE_EXPOSED = new Set([
+  '/api/assessments/:id/ask', '/api/assessments/:memberId/presentation',
+  '/api/assessments/templates/:id/stage', '/api/checkin/:memberId/intelligence',
+  '/api/connections/:id/mapping', '/api/evidence/:id/audience', '/api/evidence/:id/resolve',
+  '/api/group/:nodeId/roster', '/api/group/:nodeId/roster/:userId',
+  '/api/group/:nodeId/withdraw', '/api/inquiry/:id/dismiss', '/api/mappings/:id/retire',
+  '/api/me/focus/:id/source', '/api/me/focus/:id/visibility', '/api/messages/:msgId/read',
+  '/api/notes/:noteId/ask', '/api/org-context/:id/retire',
+  '/api/org-learning/observations/:fingerprint/dismiss',
+  '/api/org-memory/moments/:fingerprint/explain', '/api/org-playbook/:fingerprint/retire',
+  '/api/org-playbook/candidates/:fingerprint/confirm',
+  '/api/org-playbook/candidates/:fingerprint/dismiss', '/api/reason/:beliefId/feedback',
+]);
 
 const routes = [...new Set((server.match(/app\.(?:get|post|patch|put|delete)\(\s*'([^']+)'/g) || [])
   .map(m => m.replace(/^.*'([^']+)'.*$/, '$1')))].sort();
@@ -132,12 +167,26 @@ const reachable = r => {
   const firstParam = segs.findIndex(s => s.startsWith(':'));
   const prefix = '/' + segs.slice(0, firstParam).join('/');
   const tail = segs.slice(firstParam + 1).filter(s => !s.startsWith(':'));
-  return prefix.length > 5 && front.includes(prefix) && tail.every(t => front.includes('/' + t));
+  /* AND THE TAIL HAS TO FOLLOW THE PREFIX IN ONE STRING. A second hole, found on 11 September
+     2026 when an unrelated new call to `/api/health` made `/api/connections/:id/health` look
+     reached: `front.includes('/health')` is true of `/api/health`, so any route whose last
+     segment happens to be a word used elsewhere could be satisfied by a stranger. Requiring the
+     tail to appear AFTER the prefix inside the same quoted URL -- no quote or backtick in between
+     -- means a neighbour on a different path can no longer stand in for it. */
+  if (prefix.length <= 5 || !front.includes(prefix)) return false;
+  return tail.every(t => new RegExp(
+    prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + "[^'\"`\\s]{0,160}/" + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  ).test(front));
 };
 
 console.log('\n  ROUTE REACHABILITY');
+ok(`the tail-hole set has SHRUNK from the 26 it exposed and has not grown (${TAIL_HOLE_EXPOSED.size})`,
+  TAIL_HOLE_EXPOSED.size === 23);
+ok('…and every route in it is still a real declared route, so the set cannot outlive its subject',
+  [...TAIL_HOLE_EXPOSED].every(r => routes.includes(r)));
 ok(`every route is reachable, backend-only, or recorded debt (${routes.length} routes)`, (() => {
   const surprises = routes.filter(r => !reachable(r) && !BACKEND_ONLY.has(r) && !KNOWN_ORPHANS.has(r)
+    && !TAIL_HOLE_EXPOSED.has(r)
     && !PREFIX_HOLE_ORPHANS.has(r));
   if (surprises.length) {
     console.log('\n    NEW ORPHANS — built, and nothing calls them:');
@@ -169,6 +218,22 @@ ok(`every route is reachable, backend-only, or recorded debt (${routes.length} r
     fixed.length === 0 && PREFIX_HOLE_ORPHANS.size <= 17);
 }
 
+/* AND THE TAIL-HOLE LIST MUST SHRINK TOO. It did not have this check, which the other two debt
+   lists have had since they were written -- so a route on it could gain a caller and nothing would
+   notice, and the list would quietly stop describing reality while still being counted. That is
+   the same defect as a stale comment, with a passing test attached. Found while taking the four
+   A -> B routes off it: the count assertion above was satisfied by the size alone, so the entries
+   themselves were never re-examined. */
+{
+  const nowReachable = [...TAIL_HOLE_EXPOSED].filter(r => reachable(r));
+  if (nowReachable.length) {
+    console.log('\n    These are on the tail-hole bill but now have a caller — take them off it:');
+    nowReachable.forEach(r => console.log('      ' + r));
+  }
+  ok('the tail-hole list still describes reality — nothing on it has quietly gained a caller',
+    nowReachable.length === 0);
+}
+
 // Every entry on the allow-list must state WHY, so it cannot become a hiding place.
 ok('every backend-only route carries a reason', [...BACKEND_ONLY.values()].every(v => v && v.length > 8));
 
@@ -179,6 +244,31 @@ for (const r of ['/api/intelligence/act', '/api/intelligence/outcome', '/api/int
   ok(`${r} is declared and reachable from the UI`,
     server.includes(`app.post('${r}'`) && front.includes(`fetch('${r}'`));
 }
+
+/* THE A -> B LOOP, BOTH HALVES, NAMED. The personal half has been walkable for a while; the
+   GROUP half was three fully built, fully governed routes with nothing a person could tap, which
+   is why the human evidence web was reported PARTIAL rather than done for two passes running.
+   Named individually for the same reason the leader outcome loop is: a general count cannot tell
+   you WHICH door closed, and this is the loop the pilot exists to test.
+
+   A door is a FETCH WHOSE RESULT IS RENDERED, both halves — the Priority Office check below
+   learnt that the hard way, having passed once against a fetch whose answer was dropped. */
+console.log('\n  THE A -> B LOOP — BOTH HALVES');
+ok('the team card opens the group, rather than summarising it and leading nowhere',
+  front.includes('MemberApp.openGroupNode(') && front.includes('tstate-open'));
+ok('…the group screen READS what the group is working out',
+  /openGroupNode[\s\S]{0,2000}\/api\/group\/\$\{encodeURIComponent\(nodeId\)\}\/inquiry/.test(front));
+ok('…and RENDERS those inquiries rather than dropping the answer',
+  front.includes('_groupInquiryRow(') && /_groupInquiryRow\(nodeId, i, leads\)/.test(front));
+ok('…a group Focus can be set OUT OF one of them, carrying the inquiry it came from',
+  front.includes('/focus') && /fromInquiryId: inquiryId/.test(front));
+ok('…and what came of it can be recorded, which is what closes the loop',
+  front.includes('recordGroupOutcome(') && /\/focus\/\$\{encodeURIComponent\(focusId\)\}\/outcome/.test(front));
+ok('the cross-evidence reader reaches a screen: the object thread fetches /related and renders it',
+  /_renderRelated[\s\S]{0,600}\/related/.test(front) && front.includes('iqt-related')
+  && front.includes('this._renderRelated(kind, objectId)'));
+ok('…and the loop is rendered WITHOUT a causal claim — the caveat is unconditional, not decorative',
+  front.includes('not a\n            claim that the focus caused it') || /not a[\s\S]{0,40}claim that the focus caused it/.test(front));
 
 /* Likewise the surfaces built most recently — the ones with the least habit around them. */
 console.log('\n  RECENT SURFACES');
@@ -192,7 +282,7 @@ ok('the lead question renders the composed explanation, not hand-built prose',
    in the file is not a door; the door is a FETCH whose result is RENDERED. Both halves, or this
    check would pass against a fetch whose answer is dropped on the floor. */
 ok('the Priority Office reaches a screen: Home fetches the attention list and renders it',
-  /fetch\('\/api\/me\/attention'/.test(front) && /_renderAttention\(att\.items\)/.test(front)
+  /_read\('\/api\/me\/attention'/.test(front) && /_renderAttention\(att\.data\.items\)/.test(front)
   && /_renderAttention\(items\)\s*\{/.test(front));
 
 console.log(`\nreachability-smoke: ${pass} passed, ${fail} failed\n`);

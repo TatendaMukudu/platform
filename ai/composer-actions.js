@@ -38,6 +38,29 @@ const ACTIONS = Object.freeze({
     description: 'Create a personal Library folder.' },
   discuss_with_group: { contexts: [null, 'conversation', 'inquiry', 'high', 'low', 'focus'], confirmation: true,
     description: 'Open the governed Forum room; a private noticing is first promoted to a Focus with an explicit group.' },
+  /* PRIVATE -> FORUM IS A DISCLOSURE, AND DISCLOSURE IS NEVER A SIDE EFFECT.
+
+     FOUNDER DECISION, September 2026: Forum content may inform private conversation for that same
+     object; private conversation NEVER enters a Forum without a separate explicit Share to Forum
+     action, an audience preview, and a confirmation.
+
+     The direction is the whole design. Forum -> private is a READ of a room the person can already
+     open from the same screen, so it shows them nothing new. This is the other way, and every
+     property below exists because of that asymmetry:
+
+       it is its own action, not an argument on another one, so it can never be reached as a
+       variation of something the person meant to do;
+       `confirmation: true`, so nothing is written until a human presses confirm;
+       the text is the PERSON'S, carried in `text` and editable on the card, because a share whose
+       wording the person did not see is a share they did not make;
+       the audience is resolved and PREVIEWED by the server from the object's current readable
+       room, so the card names who will see it rather than describing them.
+
+     The model may OFFER it -- "do you want to put that to the group?" -- and that is the whole of
+     its authority. It never chooses the room (that is the object's), never chooses the words
+     (those are the person's), and cannot make the share happen. */
+  share_to_forum: { contexts: ['inquiry', 'high', 'low', 'focus'], confirmation: true,
+    description: 'OFFER to put something the person has said into the Forum for the object they are looking at. Propose ONLY the wording, taken from what they actually said. You do not choose the room -- it is the room of the object in view -- and nothing is shared until they read the audience and confirm. Never offer this for anything they have not themselves just said in this conversation.' },
   /* DECLARED, NEVER INFERRED (founder law, September 2026). The model may notice that a piece of
      evidence looks like it bears on what somebody is working on and OFFER to mark it -- "this may
      support what you're working on, mark it that way?" -- and that is the whole of its authority

@@ -38,21 +38,39 @@ const html = R('index.html');
 ok('US1 a load in progress says so, before either outcome is known',
   /iq-home-loading[\s\S]{0,120}Looking at your record/.test(app));
 
-ok('US2 A FAILED LOAD IS ITS OWN STATE — it names a connection problem rather than reporting an absence',
-  /iq-home-failed[\s\S]{0,300}could not be loaded[\s\S]{0,200}not an empty record/.test(app));
+/* US2/US2b REPOINTED, not weakened. These matched the literal failure markup `_loadTopQuestion`
+   used to build inline. That markup now comes from `_readFailedHTML`, the one place in the client
+   that renders a failed read — which is a STRONGER position for the law, because every surface
+   that reads now shares it instead of each writing its own. The law is unchanged and is asserted
+   where it now lives: a failed read says what happened, says nothing was lost, and offers exactly
+   one way to try again. */
+ok('US2 A FAILED LOAD IS ITS OWN STATE — it names what happened rather than reporting an absence',
+  /_readFailedHTML\(r, onRetry\)[\s\S]{0,900}Nothing has been lost/.test(app));
 ok('US2b …and offers a way back, because a dead end is what teaches people to close the app',
-  /iq-home-failed[\s\S]{0,700}onclick="MemberApp\._loadTopQuestion\(\)">Try again/.test(app));
+  /_readFailedHTML\(r, onRetry\)[\s\S]{0,900}Try again<\/button>/.test(app)
+  && /_readFailedHTML\([\s\S]{0,200}'MemberApp\._loadTopQuestion\(\)'\)/.test(app));
+ok('US2c …and an ended session is not offered a retry that cannot possibly work',
+  /_readFailedHTML\(r, onRetry\)[\s\S]{0,700}reason === 'auth'[\s\S]{0,300}Auth\.logout\(\)/.test(app));
 
 /* THE ROOT CAUSE, pinned. A request that did not return must be counted as a FAILURE, not read
    as a kind with nothing in it. */
 ok('US3 a request that does not come back is counted as a failure rather than folded into the data',
-  /if \(!j \|\| !Array\.isArray\(j\.objects\)\) \{ failures\+\+; continue; \}/.test(app));
+  /if \(!r\.ok \|\| !Array\.isArray\(r\.data\.objects\)\) \{ failures\+\+;/.test(app));
 /* US3b — ANCHORED TO THE FUNCTION UNDER TEST. The first version matched the bare pattern
    `.then(r => (r.ok ? r.json() : null))`, which appears THREE times in this file for unrelated
    calls — so removing it from _loadTopQuestion left the assertion green, satisfied by a call site
    that has nothing to do with the four states. */
+/* US3b USED TO PIN `.then(r => (r.ok ? r.json() : null))` INSIDE `_loadTopQuestion`. That check is
+   no longer written there because it is no longer written anywhere twice: `_read` is the only way
+   this app reads, and it refuses to return data for a non-ok response at all. Pinning it at the
+   owner is what makes it true for every surface rather than for this one function. */
 ok('US3b …and a non-ok response is a failure too, not an empty body',
-  /_loadTopQuestion\(\) \{[\s\S]{0,1600}\.then\(r => \(r\.ok \? r\.json\(\) : null\)\)/.test(app));
+  /async _read\(url[\s\S]{0,2200}if \(!res\.ok\) \{[\s\S]{0,200}reason: 'http'/.test(app));
+ok('US3c …and a 200 that is not a record is not an empty record either',
+  /async _read\(url[\s\S]{0,2600}reason: 'malformed'/.test(app));
+ok('US3d …every read in the app is BOUNDED, which is what stopped Home hanging on "Looking at your record…"',
+  /async _read\(url, \{ timeoutMs = \d+/.test(app)
+  && /const att = await this\._read\('\/api\/me\/attention', \{ timeoutMs/.test(app));
 
 ok('US4 the empty state is a statement about the RECORD, not a judgment about the person',
   /No findings saved yet/.test(app) &&
@@ -100,7 +118,7 @@ ok('US7 the composer that made copies is gone from the Library — the page inde
 ok('US7b …and the layout rules that existed only for that composer went with it, rather than staying behind as CSS nothing can reach',
   !/\.iq-composer-stack/.test(member) && !/iq-composer-stack/.test(html));
 ok('US7c …while the chat row those rules were carved out of is untouched, which is what proves the removal was surgical rather than broad',
-  /\.iq-composer\{display:flex;align-items:flex-end/.test(member) && /"iq-composer"/.test(app) && /iq-composer-input/.test(app));
+  /\.iq-composer\{display:flex;align-items:flex-end/.test(member) && /iq-composer\$\{off \? ' iq-composer-off' : ''\}/.test(app) && /iq-composer-input/.test(app));
 ok('US7d the Library page that replaced it has the four states a list needs, starting with a loading one',
   /Opening your library…/.test(app) && /iq-state-failed/.test(app));
 

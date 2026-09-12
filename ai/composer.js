@@ -93,6 +93,7 @@ function buildContext({
   material = null,     // { title, filename, text, sectionIds, partial } attached to THIS object
   connections = null,  // { related: [{type, kind, label}], loop } — edges the records already carry
   attention = null,    // [{ reason, kind, label, detail }] — deterministic candidates, codes only
+  forum = null,        // { people, messages, sameObject } — THIS object's forum, one way only
 } = {}) {
   const L = [];
   L.push('CONTEXT');
@@ -217,7 +218,12 @@ function buildContext({
         projected_from: 'came out of', projected_to: 'produced',
         shares_evidence: 'rests on some of the same evidence as',
         supersedes: 'replaced', superseded_by: 'was replaced by' })[r.type] || 'is connected to';
-      L.push(`  - this ${how} a ${r.kind || 'record'}${r.label ? `: ${_clip(r.label, 120)}` : ''}`);
+      /* "a inquiry" was reaching the model. A bundle this careful about not turning a sequence
+         into a cause should not read as though nobody proof-read it: the surrounding sentences
+         are the ones asking a model to be precise, and sloppiness in the frame invites sloppiness
+         in the answer. Four kinds, one of which begins with a vowel. */
+      const kind = r.kind || 'record';
+      L.push(`  - this ${how} ${/^[aeiou]/i.test(kind) ? 'an' : 'a'} ${kind}${r.label ? `: ${_clip(r.label, 120)}` : ''}`);
     }
     const lp = connections.loop;
     if (lp) {
@@ -234,6 +240,47 @@ function buildContext({
     L.push('If they ask whether it helped or whether they are closer, describe what was recorded and');
     L.push('what has been observed since. Do not say what will happen, and do not turn a sequence');
     L.push('into a cause.');
+    L.push('');
+  }
+
+  /* ── WHAT THIS OBJECT'S PEOPLE HAVE BEEN SAYING ─────────────────────────────────────────
+     FOUNDER DECISION, September 2026: Forum content may inform private conversation FOR THAT SAME
+     OBJECT ONLY, and private conversation never enters a Forum without a separate explicit
+     share-and-confirm.
+
+     The direction is the whole design. Forum -> private is a READ of something this person could
+     already open by tapping the icon on the same screen, so it discloses nothing new; it only
+     saves them going to look. Private -> Forum is a DISCLOSURE, and disclosure is never a side
+     effect of a model having seen something.
+
+     TWO WAYS THIS COULD GO WRONG, both stated in the block rather than left to the prompt:
+
+       Speech becoming evidence. A Forum message is conversation — not a signal, not a
+       contribution, not an origin, not corroboration. Six people agreeing in a room changes
+       exactly as much as one, and a model handed six agreeing messages will otherwise write
+       "the group agrees", which is the repetition-is-corroboration error in prose. Turning a
+       statement into evidence is a separate deliberate act by ITS AUTHOR through the existing
+       contribution boundary.
+
+       The room leaking sideways. The messages here are this object's room and no other's; the
+       caller resolves them from the object the person is looking at and cannot pass another's. */
+  if (forum && (forum.messages || []).length) {
+    L.push('WHAT PEOPLE HAVE SAID IN THIS OBJECT\'S FORUM (conversation, NOT evidence):');
+    L.push(`  the room is ${forum.people || 0} people, and this is the forum for THIS record only`);
+    /* NO AUTHOR, EVER. Forum speech is anonymous to every human including leaders — the kernel
+       keeps protected authorship so origins, echo, correction and withdrawal still work, and
+       `visibleThread` returns `authorId: null` to every reader for exactly that reason. Handing a
+       name to the model would route around the anonymity rule through the one reader that is not
+       a human, and it would come back out in the prose. There is no `by` field to pass and this
+       loop must never grow one. */
+    for (const m of (forum.messages || [])) {
+      if (m && m.text) L.push(`  - ${_clip(m.text, 200)}`);
+    }
+    L.push('NOTHING IN THAT LIST IS EVIDENCE. It does not raise confidence, it is not corroboration,');
+    L.push('and however many people agreed it counts as no accounts at all. Do not say "the group');
+    L.push('agrees", do not count the messages, and do not treat a message as support for anything.');
+    L.push('You may refer to what was said as something somebody said. If they want any of it to');
+    L.push('count, its own author has to offer it deliberately, which is a separate act.');
     L.push('');
   }
 

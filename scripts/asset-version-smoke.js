@@ -54,18 +54,37 @@ const fingerprint = crypto.createHash('sha1')
 const lockPath = path.join(root, 'scripts', '.asset-version.lock');
 const lock = fs.existsSync(lockPath) ? JSON.parse(fs.readFileSync(lockPath, 'utf8')) : null;
 
-if (!lock || lock.fingerprint !== fingerprint) {
-  // The assets changed. That is fine — but the stamp must have changed with them.
-  const stampChanged = !lock || lock.stamp !== stamps[0];
+/* ── A GUARD DOES NOT EDIT THE THING IT IS GUARDING ────────────────────────────────────────────
+   This block used to WRITE the lock file whenever it was satisfied, so `npm test` mutated the
+   repository. Two costs, and the second is the one that matters:
+
+     - a CI run, or anybody's local run, left a dirty working tree, and a lock change could ride
+       into an unrelated commit without anybody choosing it;
+     - a test that can change repository state is a test whose result depends on how many times it
+       has been run, which is the opposite of what a guard is for.
+
+   It now only COMPARES, and says exactly what to run when the record is behind. Recording is a
+   deliberate step -- `npm run stamp:record` -- so the person bumping the stamp is the person who
+   records it. */
+const UPDATE_HINT = 'run `npm run stamp:record` after bumping the stamp in index.html';
+
+if (!lock) {
+  ok(`AV5 the asset stamp record exists (${UPDATE_HINT})`, false);
+} else if (lock.fingerprint !== fingerprint) {
+  // The assets changed. That is fine -- but the stamp must have changed with them, AND the record
+  // must have been updated deliberately rather than by the act of running this file.
   ok('AV5 assets changed, so the cache stamp changed with them — otherwise the browser keeps the old ones',
-    stampChanged);
-  if (stampChanged) {
-    fs.writeFileSync(lockPath, JSON.stringify({ stamp: stamps[0], fingerprint }, null, 2) + '\n');
-    console.log(`       recorded: stamp ${stamps[0]} for fingerprint ${fingerprint}`);
-  }
+    lock.stamp !== stamps[0]);
+  ok(`AV5b …and the recorded fingerprint was updated with it (${UPDATE_HINT})`, false);
 } else {
-  ok('AV5 assets are unchanged since the last recorded stamp', true);
+  ok('AV5 assets are unchanged since the recorded stamp', true);
+  ok('AV5b …and the record matches the stamp index.html actually carries', lock.stamp === stamps[0]);
 }
+
+/* AV6 — THE GUARD ITSELF. Written because the defect above was invisible: a test that writes is
+   indistinguishable from one that does not, right up until you read it. */
+ok('AV6 this guard does not write to the repository',
+  !/fs\.writeFileSync/.test(fs.readFileSync(__filename, 'utf8').split('AV6')[0]));
 
 console.log(`\nasset-version-smoke: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
