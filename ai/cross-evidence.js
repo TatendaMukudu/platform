@@ -204,7 +204,17 @@ function loop(objects = [], focusRef = null) {
   const a = addressesRef ? byRef.get(addressesRef) : null;
 
   const raw = f.raw || {};
-  const outcome = raw.outcome || null;
+  /* THE OUTCOME IS A RECORD, NOT A STRING. `teamState.recordFocusOutcome` writes
+     `{ result, note, by, at }`, and this read was `raw.outcome || null` clipped to 20 characters
+     — so `_s` stringified the object and the bundle handed the model "the person recorded the
+     outcome of this focus as: [object Object]". Nothing failed: the field was present, the
+     sentence was well formed, and the only thing wrong with it was that it said nothing. Found by
+     driving the real turn and reading the prompt. The older string form is still accepted, because
+     a focus closed before that field became a record still has a result worth stating. */
+  const _rawOutcome = raw.outcome || null;
+  const outcome = (_rawOutcome && typeof _rawOutcome === 'object')
+    ? (_rawOutcome.result || null)
+    : _rawOutcome;
   const resolvedAt = Date.parse(raw.resolvedAt || '') || null;
 
   /* WHAT ARRIVED AFTER. Only on the object the focus addressed, only from signals that are

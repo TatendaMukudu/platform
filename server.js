@@ -16609,8 +16609,17 @@ function _forumAudience(code, userId, object) {
      node reads the group's own state (see _mayReadGroup) and so belongs in the count; leaving
      them out would make a coach and one player read as one person. */
   const subjectRef = String(raw.subjectRef || '');
+  /* WHERE THE NODE COMES FROM, in the order the object is most likely to carry it. `scope` is
+     here because of a real disagreement: a group High or Low is a PROJECTION built by
+     ai/team-state.js, and that projection carries neither a nodeId nor a group subjectRef — so
+     the objects list reported `forumAvailable: false` for a High whose own screen reported true,
+     which is the same surface-disagreement this owner was created to end. The thread route was
+     already injecting the node from its scope; every bucket item carries `scope`, so the owner
+     reads it and no caller has to remember to inject anything. */
+  const scope = String((object && object.scope) || '');
   const nodeId = (object && object.nodeId) || raw.nodeId
     || (subjectRef.startsWith('group:') ? subjectRef.slice(6) : null)
+    || (scope.startsWith('group:') ? scope.slice(6) : null)
     || (object && object.whoseNodeId) || null;
   if (nodeId && (orgNodes[code] || {})[nodeId]) {
     const people = [...new Set([..._nodeMembers(code, nodeId), ..._nodeLeaders(code, nodeId)])]

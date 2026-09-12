@@ -72,6 +72,14 @@ _loadAllStores({
       timeline: [], lastUpdatedAt: NOW,
     },
   } } },
+  /* A PERSONAL FOCUS OF THE COACH'S OWN, with nobody else on it. It is the NEGATIVE half of the
+     Forum-indicator check: without an object that correctly has no room, "the icon is drawn"
+     proves only that the icon can be drawn, and an indicator that is always on is the same as no
+     indicator at all. */
+  userAiProfiles: { [`${C}:coach`]: { focuses: [{
+    id: 'mine_only', text: 'Something just for me', status: 'active',
+    createdAt: new Date(NOW - 2 * DAY).toISOString(),
+  }] } },
   /* NO SEEDED CANDIDATE. The previous version of this file put one in the store, which asserted
      the member's control against a row the FIXTURE created — and an independent gate was right
      that this proves the control renders, not that a person talking to IntelliQ ever produces
@@ -353,6 +361,41 @@ const SAID_BY_P1 = 'Our press keeps forcing us backwards and we are not stepping
       /Nobody can see this yet/i.test(mineText));
     ok('GB-G0d …and it never says the group can already see them',
       !/the group can see|shared with|visible to the group/i.test(mineText));
+
+    /* ── I — THE FORUM INDICATOR, ON THE CARDS A PERSON ACTUALLY SCROLLS ────────────────────
+       This is where the indicator lives and where it was broken: the card decided availability
+       for itself out of two fields the objects projection does not carry, so it could never be
+       true and nobody scanning their list could tell which threads had anybody in them. The
+       check fails if the list is EMPTY, because every negative assertion below is satisfied for
+       free by an empty screen — which is exactly how the last browser hole passed. */
+    console.log('\n  I — THE FORUM INDICATOR IS ON THE CARD, AND ONLY WHERE THERE IS A ROOM');
+    await page.evaluate(() => MemberApp._renderBucketPage('focus'));
+    await page.waitForTimeout(1200);
+    const cards = await page.$$('.iq-inq');
+    ok('GB-I0 the Focus list renders CARDS — an empty list satisfies every negative assertion below for free',
+      cards.length >= 2);
+    const cardText = await page.evaluate(() =>
+      [...document.querySelectorAll('.iq-inq')].map(el => el.innerText).join(' | '));
+    ok('GB-I0b …including both the squad\'s focus and the coach\'s own, so there is a positive and a negative case on one screen',
+      /Press higher instead|Start our build-up|first touch/i.test(cardText) && /Something just for me/i.test(cardText));
+
+    const marks = await page.evaluate(() => [...document.querySelectorAll('.iq-inq')].map(el => ({
+      text: (el.innerText || '').trim(),
+      hasIcon: !!el.querySelector('.iq-inq-forum svg'),
+      label: (el.querySelector('.iq-inq-forum') || {}).getAttribute
+        ? el.querySelector('.iq-inq-forum').getAttribute('aria-label') : null,
+      literal: /\bForum\b/.test(el.innerText || ''),
+    })));
+    const squadCard = marks.find(m => !/Something just for me/i.test(m.text));
+    const ownCard   = marks.find(m =>  /Something just for me/i.test(m.text));
+    ok('GB-I1 a squad object — three people who can read it — carries the indicator',
+      !!squadCard && squadCard.hasIcon === true);
+    ok('GB-I1b …as an inline SVG with its meaning carried accessibly, since a glyph alone says nothing to a screen reader',
+      !!squadCard && /discuss/i.test(squadCard.label || ''));
+    ok('GB-I2 a PERSONAL focus nobody else can read carries none',
+      !!ownCard && ownCard.hasIcon === false);
+    ok('GB-I3 and the literal word "Forum" is nowhere on these cards — the icon decision, applied',
+      marks.every(m => m.literal === false));
 
     console.log('\n  H — NO PAGE ERRORS ALONG THE WAY');
     ok(`GB-G1 the whole walk raised no uncaught error (${pageErrors.length})`, pageErrors.length === 0);
