@@ -7305,14 +7305,46 @@ const BUILD = (() => {
    that wants one must not be handed another. */
 function _readiness() {
   const storesLoaded = !!(orgMeta && Object.keys(orgMeta).length >= 0 && _storesLoadedAt);
+  /* IS THERE A DURABLE STORE AT ALL? A different question from whether writing to it is safe,
+     and the difference is the one that gets misread: a host with no DATABASE_URL is running
+     entirely in memory, so everything works, nothing is wrong, and NOTHING SURVIVES A RESTART.
+     A host that has a database whose authoritative load failed is a different situation with a
+     different remedy, and reporting both as "not durable" tells an operator neither.
+
+     DB_OPTIONAL is the in-memory mode db.js runs the truth layer in; it is deliberately counted
+     as "no durable store configured" rather than as a database, because that is what it is. */
+  const configured = !!process.env.DATABASE_URL && process.env.DB_OPTIONAL !== '1';
+  /* AND DURABLE MEANS DURABLE. `_persistenceReady.ready` is the SAVE PATH's question — may this
+     process attempt a write — and it is deliberately true in memory-only mode, because in that
+     mode a write into memory is the correct behaviour rather than a failure. Reporting that as
+     `durableStore: true` told a reader that writes survive a restart on a host where nothing
+     does, which is the exact conflation this block exists to prevent, one level down from the
+     one the founder named. A store that is not configured is not durable however willingly this
+     process writes to it. */
+  const durable = configured && !!(_persistenceReady && _persistenceReady.ready);
   return {
     process: true,                                   // if this reply exists, the process is alive
     storesLoaded,
     storesLoadedAt: _storesLoadedAt || null,
-    durableStore: !!(_persistenceReady && _persistenceReady.ready),
-    durableReason: (_persistenceReady && _persistenceReady.error) || null,
+    /* THE FIVE LEVELS, EACH ANSWERED BY THE THING THAT KNOWS, and deliberately not collapsed:
+         process               this reply exists
+         storesLoaded          the state a request reads is in memory
+         persistenceConfigured a durable store exists to write to
+         durableStore          writing to it right now is safe
+       Level 4 (a model is reachable) and level 5 (which build is deployed) are answered in
+       /api/health's `composer` and `build` blocks, by the gateway and the build stamp
+       respectively, because a readiness probe is not the right owner for either. */
+    persistenceConfigured: configured,
+    durableStore: durable,
+    durableReason: (_persistenceReady && _persistenceReady.error)
+      || (!durable && !configured ? 'no durable store is configured — this instance is in memory only' : null),
     persistenceMode: PERSISTENCE_MODE,
-    ready: storesLoaded,                             // what a client may act on
+    /* WHAT A CLIENT MAY ACT ON, and it is stores-loaded ON PURPOSE: a request can be served
+       correctly from memory, and refusing to serve until a database answers would make a
+       degraded instance look like a dead one. It is NOT a statement that anything will survive
+       a restart, which is what `durableStore` is for, and no caller may read it as one —
+       readiness-levels-smoke drives every combination to keep the two apart. */
+    ready: storesLoaded,
   };
 }
 
