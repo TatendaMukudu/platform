@@ -211,8 +211,26 @@ const FALLBACK_MODEL = 'claude-haiku-4-5';
    would make the field a rumour. Nothing is inferred, nothing decays on a timer: the field says
    "the last attempt failed like this", which is exactly what is known.
 ──────────────────────────────────────────────────────────────────────────── */
+/* ── AND "NOTHING HAS BEEN TRIED" IS A THIRD ANSWER, NOT THE GOOD ONE ────────────────────────
+   `providerFault` alone gives two states and the product was reading three out of it: null meant
+   "no failure recorded", and the health route turned that into `providerReachable: true`. On a
+   host with no key, where no completion is ever attempted, that reported the provider as REACHABLE
+   — a claim with no observation anywhere behind it. An independent gate put it exactly right: an
+   untried provider has no observed failure, which is not evidence it is reachable.
+
+   The suite had the same hole and encoded it as correct: CT-A5 asserted `providerReachable ===
+   true` BEFORE any call, under the heading "nothing claims the provider is unreachable". That is
+   PROTOCOL lie #6 — an assertion that defends the defect — and it is why this survived a round
+   with a green capability suite over it.
+
+   So reachability is three states and each is an observation or the honest absence of one:
+     unknown      nothing has been attempted since this process started
+     reachable    a completion SUCCEEDED, and this is when
+     unavailable  a completion exhausted every retry and both providers, and this is why
+   Nothing decays on a timer: the record says what was last seen, which is exactly what is known. */
 let _providerFault = null;
-function _noteProviderReached() { _providerFault = null; }
+let _providerReachedAt = null;
+function _noteProviderReached() { _providerFault = null; _providerReachedAt = new Date().toISOString(); }
 function _noteProviderFault(err) {
   const status = err?.status || err?.statusCode || null;
   _providerFault = {
@@ -229,7 +247,20 @@ function _noteProviderFault(err) {
 }
 /* A copy, so no caller can edit the record by holding it. */
 function providerFault() { return _providerFault ? { ..._providerFault } : null; }
-function _resetProviderFault() { _providerFault = null; }
+/* Forgets EVERYTHING observed, not only the failure — a reset that cleared the fault and left the
+   success timestamp standing would report a reachable provider on a host that has just been told
+   to forget what it saw. */
+function _resetProviderFault() { _providerFault = null; _providerReachedAt = null; }
+
+/* THE WHOLE ANSWER, IN ONE SHAPE, so a caller cannot assemble two of the three states and infer
+   the third wrongly — which is precisely how `!providerFault` came to mean "reachable". */
+function providerReachability() {
+  if (_providerFault) {
+    return { state: 'unavailable', at: _providerFault.at, reason: _providerFault.reason, status: _providerFault.status };
+  }
+  if (_providerReachedAt) return { state: 'reachable', at: _providerReachedAt, reason: null, status: null };
+  return { state: 'unknown', at: null, reason: 'nothing has been asked of a provider yet', status: null };
+}
 
 /* ── complete ──────────────────────────────────────────────────────────────
    Returns the assistant text (string). Retries network/5xx/429 with backoff.
@@ -553,5 +584,5 @@ async function searchWeb({ query, system, maxUses = 3, maxTokens = 900, org, tas
 
 module.exports = { complete, completeJSON, parseJSON, MODELS, client, enabled, PLATFORM_ORG, _requireOrg, canTranscribe, transcribe, canUnderstand, understand, deterministicOnly, setDeterministicOnly,
   budgetAvailable, usageFor, _consumeBudget, _resetGatewayState,
-  providerFault, _resetProviderFault,
+  providerFault, providerReachability, _resetProviderFault,
   canSearchWeb, searchWeb, WEB_SEARCH_TOOL };

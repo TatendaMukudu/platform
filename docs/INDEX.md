@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `a270a9b`. **Branch:** `claude/platform-work-summary-nmb0cm`.
+**Written against:** `747bd35`. **Branch:** `claude/platform-work-summary-nmb0cm`.
 **Pilot work lands through** `claude/pilot-*` branches; §10 records what has merged since `f844c3a`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
@@ -371,9 +371,16 @@ access even by accident. It is not a relationship store and must not become one.
 | An invite address is DECLARED, so a typo is a refusal rather than an open join link | `POST /api/auth/invite` |
 
 **PR #89 (open) — live recovery.** The founder used the deployed product on a phone and found
-thirty-one things. **Twenty-one dispositioned** across three rounds; see
+thirty-one things. **Twenty-one dispositioned** across six rounds; see
 `docs/reviews/CLAUDE_PILOT_LIVE_RECOVERY_R1.md` for the full table including what is NOT done, which
-is the half of it worth reading.
+is the half of it worth reading. Rounds 5 and 6 answer an independent gate rather than the founder
+directly, and the pattern they keep finding is one thing: a capability that exists in the source,
+passes every hermetic test, and produces nothing on a real screen.
+
+`docs/reviews/FOUNDER_PHONE_RESTART_SCRIPT.md` is the other half — everything no container can
+check, as steps with expected results: reading aloud on an actual iPhone, two-member Forums across
+two devices, an attachment retried on a dropped connection, onboarding across a restart, and Neon.
+Nothing in this repository has tested Neon, iOS Safari, or a deployed build.
 
 | Correction | Canonical owner |
 |---|---|

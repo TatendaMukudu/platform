@@ -124,8 +124,21 @@ const server = app.listen(0, async () => {
     _enabled = true;
     gateway._resetProviderFault();
     const before = await comp();
-    ok('CT-A5 before any provider failure, nothing claims the provider is unreachable',
-      before.effective === true && before.providerReachable === true && before.providerFaultAt === null);
+    /* CT-A5 USED TO ASSERT `providerReachable === true` HERE, before anything had been attempted,
+       under the heading "nothing claims the provider is unreachable". That is the right instinct
+       and the wrong assertion: not claiming unreachable is not the same as claiming reachable,
+       and the field said the second. An independent gate put it exactly right — an untried
+       provider has no observed failure, which is not evidence it is reachable — and this suite
+       had encoded the defect as the expected answer, which is PROTOCOL lie #6 and is why a green
+       capability suite sat over it for a round.
+
+       UNKNOWN is now its own state, and these four assertions are the four the gate named. */
+    ok('CT-A5 before anything is attempted the provider is UNKNOWN — not reachable, because nothing has observed it',
+      before.providerReachability === 'unknown'
+      && before.providerReachable === null && before.providerFaultAt === null
+      && before.providerLastSeenAt === null);
+    ok('CT-A5a0 …and unknown is distinguishable from both of the observed answers, which a boolean could not be',
+      before.providerReachability !== 'reachable' && before.providerReachability !== 'unavailable');
 
     let threw = false;
     try {
@@ -135,7 +148,7 @@ const server = app.listen(0, async () => {
     } catch (_) { threw = true; }
     const s5 = await comp();
     ok('CT-A5b a completion that exhausted every retry and both providers is RECORDED, not forgotten',
-      threw === true && s5.providerReachable === false && !!s5.providerFaultAt);
+      threw === true && s5.providerReachable === false && s5.providerReachability === 'unavailable' && !!s5.providerFaultAt);
     ok('CT-A5c …so the composer reports itself off with the provider named, though the flag, the key and egress are all green',
       s5.on === true && s5.effective === false && s5.providerKey === false
       && /provider/.test(String(s5.why)));
@@ -157,7 +170,8 @@ const server = app.listen(0, async () => {
     const s5e = await comp();
     ok('CT-A5e one provider success CLEARS the record — and it took a success, the fault was still standing a line earlier',
       !!faultBefore && said === 'alive' && gateway.providerFault() === null
-      && s5e.providerReachable === true && s5e.effective === true);
+      && s5e.providerReachable === true && s5e.providerReachability === 'reachable'
+      && !!s5e.providerLastSeenAt && s5e.effective === true);
 
     console.log('\n  B — THE RECORD IS ABOUT THE PROVIDER AND NOTHING ELSE');
     /* A refusal that never touched the provider must not be recorded as the provider failing.

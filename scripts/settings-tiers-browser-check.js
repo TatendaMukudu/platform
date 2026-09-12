@@ -27,7 +27,7 @@ const EXE = '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const IPHONE = { width: 390, height: 844 };
 
 const S = require('../server.js');
-const { app, _loadAllStores, _rebuildEmailIndex, issueToken } = S;
+const { app, _loadAllStores, _rebuildEmailIndex, issueToken, userPermissions } = S;
 
 let pass = 0, fail = 0;
 const ok = (n, c) => { if (c) { pass++; console.log('  PASS', n); } else { fail++; console.error('  FAIL', n); } };
@@ -38,12 +38,22 @@ _loadAllStores({
   orgUsers: { [C]: {
     boss:   { id: 'boss', name: 'Platform Owner', email: 'b@x.io', role: 'superadmin', orgCode: C, status: 'active', profileComplete: true },
     admin:  { id: 'admin', name: 'Club Admin', email: 'a@x.io', role: 'admin', orgCode: C, status: 'active', profileComplete: true },
+    /* A PARTIAL GRANT, which is the case an independent gate found and the one nothing had
+       driven. `SETTINGS_TAB_ACCESS.org` opens for ANY of four permissions, and the cards inside
+       it call routes gated on `manage_settings` alone — so somebody with metrics and nothing else
+       saw the connection cards, pressed the buttons, and collected 403s from a screen that had
+       just offered them the work. A role with everything or nothing can never show this. */
+    metricsonly: { id: 'metricsonly', name: 'Metrics Only', email: 'mo@x.io', role: 'member', orgCode: C, status: 'active', profileComplete: true },
     player: { id: 'player', name: 'A Player', email: 'p@x.io', role: 'member', orgCode: C, status: 'active',
       assignedNodeIds: ['n1'], profileComplete: true },
   } },
   orgNodes: { [C]: { n1: { nodeId: 'n1', name: 'First Team', memberIds: ['player'], leaderIds: [] } } },
 });
 _rebuildEmailIndex();
+
+/* THE GRANT ITSELF, through the store the server reads. One permission, deliberately not the one
+   the Organisation tab's controls need. */
+userPermissions[C] = { metricsonly: { manage_metrics: true } };
 
 (async () => {
   const server = await new Promise(res => { const s = app.listen(0, () => res(s)); });
@@ -214,6 +224,85 @@ _rebuildEmailIndex();
     ok('ST-D0d …and typing is never said to be affected',
       /Typing works as normal/i.test(deviceText));
     await noSR.ctx.close();
+
+    console.log('\n  D1 — AND THE ROW SAYS WHICH QUESTION IT ANSWERED');
+    /* `IQVoice.isSupported()` asks whether THIS BROWSER OFFERS speech recognition. It cannot ask
+       whether the person has granted the microphone — a separate permission, asked the first time
+       and revocable — so somebody who had declined it read "Speaking instead of typing: ON" and
+       was told they could do a thing that would not work. The label now names what was checked,
+       and the microphone note is shown on the ON row as well as the OFF one, because the state
+       that needed explaining was the ON one and a panel that only explains its negatives leaves
+       its most misleading answer bare. */
+    const yes = await asPerson('player', 'A Player', 'member');
+    const onText = await yes.page.evaluate(() =>
+      ((document.getElementById('settings-you-device') || {}).innerText || ''));
+    ok('ST-D1a the row names what was actually checked — what this BROWSER offers, not what the microphone will do',
+      /Speaking instead of typing\s*—\s*offered by this browser/i.test(onText));
+    ok('ST-D1b …and an ON row still says the microphone is a separate permission that can be declined or withdrawn',
+      /ON/.test(onText) && /separate permission/i.test(onText) && /decline/i.test(onText));
+    ok('ST-D1c …and that IntelliQ is not told either way until the button is pressed, so nobody reads ON as "they have already agreed"',
+      /not told either way/i.test(onText));
+    ok('ST-D1d …and the reading-aloud row names its own question too, rather than borrowing the one above it',
+      /Reading replies aloud\s*—\s*offered by this browser/i.test(onText));
+    await yes.ctx.close();
+
+    console.log('\n  D2 — A PARTIAL GRANT: THE TAB IS NOT THE CONTROL');
+    /* THE CASE A ROLE WITH EVERYTHING OR NOTHING CANNOT SHOW. `manage_metrics` and nothing else
+       opens the Organisation tab — correctly, because that tab holds things belonging to four
+       different permissions — while every connection card inside it calls a route gated on
+       `manage_settings`. So this person saw the cards, pressed the buttons, and collected 403s
+       from a screen that had just offered them the work.
+
+       Both halves are driven: what is RENDERED, and what the real endpoints answer. A check on
+       either alone is the thing that let this through — the routes were right the whole time. */
+    const pg = await asPerson('metricsonly', 'Metrics Only', 'member');
+    ok('ST-D2a the partial grant opens the Organisation tab, which is correct — it holds more than one permission\'s worth',
+      pg.view.tabs.includes('org') && pg.view.tabs.includes('metrics'));
+    ok('ST-D2b …and NOT the tabs whose whole content they have no permission for',
+      !pg.view.tabs.includes('values') && !pg.view.tabs.includes('goals')
+      && !pg.view.tabs.includes('platform'));
+    const orgPanel = await pg.page.evaluate(() => {
+      const el = document.getElementById('settings-tab-org');
+      const wasHidden = el.style.display;
+      el.style.display = 'block';                     // read the tab they can switch to
+      const text = el.innerText || '';
+      const live = {
+        ingestBtn: !!document.getElementById('ingest-token-btn'),
+        connAddBtn: !!document.getElementById('conn-add-btn'),
+        domainCards: (document.getElementById('domain-catalog') || {}).children?.length || 0,
+      };
+      const gated = [...el.querySelectorAll('[data-gated="manage_settings"]')].length;
+      el.style.display = wasHidden;
+      return { text, live, gated };
+    });
+    ok('ST-D2c no control that would refuse them is drawn — the buttons are gone, not merely disabled',
+      orgPanel.live.ingestBtn === false && orgPanel.live.connAddBtn === false
+      && orgPanel.live.domainCards === 0);
+    ok('ST-D2d …and the reason is drawn where they were, because an absence with no explanation is indistinguishable from a broken product',
+      orgPanel.gated >= 4 && /organisation-settings permission/i.test(orgPanel.text));
+    ok('ST-D2e …while Organisation Details, which is a read and genuinely theirs, is still there',
+      /Organisation Details/i.test(orgPanel.text));
+    /* AND THE ROUTES, FROM THIS SESSION'S OWN TOKEN. The client gating is a courtesy; the server
+       is the gate, and a check that only looked at the screen would pass on a build where the
+       server had quietly stopped checking. */
+    const asThem = async (u, init) => pg.page.evaluate(async ([url, opts]) => {
+      const r = await fetch(url, { ...(opts || {}), headers: { ...(opts?.headers || {}), ...Auth._headers() } });
+      return r.status;
+    }, [u, init || null]);
+    ok('ST-D2f the ingest-token route refuses them, which is the gate the screen was only decorating',
+      (await asThem('/api/org/ingest-token')) === 403);
+    ok('ST-D2g …so does the connections route',
+      (await asThem('/api/connections')) === 403);
+    ok('ST-D2h …and changing the display language is refused too, though that route lets any signed-in person READ it',
+      (await asThem('/api/org/domain', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pack: 'education' }) })) === 403
+      && (await asThem('/api/org/domain')) === 200);
+    /* THE POSITIVE HALF, and it has to be a WRITE. /api/metrics is requireAuth, so reading it
+       proves nothing about the grant -- every signed-in person can. The route that actually asks
+       for manage_metrics is the write, and that is the one that must answer for this to be a
+       grant rather than a lockout dressed as one. */
+    ok('ST-D2i …while the metrics WRITE they do have permission for is accepted, so this is a grant and not a lockout',
+      (await asThem('/api/metrics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Sprint count', unit: 'count' }) })) < 400);
+    await pg.ctx.close();
 
     console.log('\n  E — NO PAGE ERRORS');
     ok(`ST-E1 opening Settings as four different sessions raised no uncaught error (${pageErrors.length})`,

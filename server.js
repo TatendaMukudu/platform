@@ -7357,6 +7357,7 @@ app.get('/api/health', (req, res) => {
      allowed to be used. The last branch is the only one that reports something observed rather
      than something configured — see ai/gateway.js providerFault(). */
   const providerFault = ai.providerFault();
+  const _reach = ai.providerReachability();
   const composerOff = !IQ_COMPOSER ? 'IQ_COMPOSER is not set to 1 on this host'
     : ai.deterministicOnly() ? 'deterministic-only mode is on — no model is called'
     : !ai.enabled() ? 'no language-model key is configured'
@@ -7392,10 +7393,22 @@ app.get('/api/health', (req, res) => {
       why: composerOff,
       deterministicOnly: ai.deterministicOnly(),
       providerKey: !!(process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY),
-      /* Configured is not reachable. `providerKey` is the claim; this is what the last attempt
-         actually saw. `providerFaultAt` is a timestamp, not an error body — nothing the provider
-         said is copied into an unauthenticated route. */
-      providerReachable: !providerFault,
+      /* Configured is not reachable, and UNTRIED is not reachable either — which is what this
+         used to say. `providerReachable: !providerFault` turned "no failure recorded" into a
+         claim, so a host with no key, where no completion is ever attempted, reported the
+         provider as reachable with no observation anywhere behind it.
+
+         Three states now, each an observation or the honest absence of one:
+           null   nothing has been asked of a provider since this process started
+           true   a completion SUCCEEDED, and `providerLastSeenAt` says when
+           false  a completion exhausted every retry and both providers, at `providerFaultAt`
+         `providerReachability` carries the same answer as a word, because a tri-state boolean is
+         a shape a reader gets wrong and a word is one they cannot. `providerFaultAt` is still a
+         timestamp and never an error body — nothing the provider said is copied into an
+         unauthenticated route. */
+      providerReachable: _reach.state === 'unknown' ? null : _reach.state === 'reachable',
+      providerReachability: _reach.state,
+      providerLastSeenAt: _reach.state === 'reachable' ? _reach.at : null,
       providerFaultAt: providerFault ? providerFault.at : null,
       writes: composerOff
         ? `off — ${composerOff}; every reply is written by the deterministic templates`

@@ -2609,20 +2609,35 @@ async function _renderYourDevice() {
   const box = document.getElementById('settings-you-device');
   if (!box) return;
   const esc = s => _escHtml(String(s == null ? '' : s));
+  /* THE LABEL HAS TO SAY WHICH QUESTION IT ANSWERED, and this one did not. `IQVoice.isSupported()`
+     asks whether THIS BROWSER OFFERS SPEECH RECOGNITION. It cannot ask whether the person has
+     granted the microphone, because that is a separate permission, asked the first time and
+     revocable at any time — so somebody who had declined it read "Speaking instead of typing: ON"
+     and was told they could do a thing that would not work. An independent gate named it
+     precisely: do not show permission as ON on browser capability alone.
+
+     Two changes, and the second matters more than the first. The label now says what was actually
+     checked. And the microphone note is shown when the row is ON as well as when it is OFF —
+     because the state that needed explaining was the ON one, and a panel that only explains its
+     negatives leaves its most misleading answer bare. */
   const rows = [
-    ['Speaking instead of typing', !!(window.IQVoice && IQVoice.isSupported && IQVoice.isSupported()),
-      'This browser does not offer speech recognition. Typing works as normal — this is about your browser, not about IntelliQ.'],
+    ['Speaking instead of typing — offered by this browser',
+      !!(window.IQVoice && IQVoice.isSupported && IQVoice.isSupported()),
+      'This browser does not offer speech recognition. Typing works as normal — this is about your browser, not about IntelliQ.',
+      'Your browser offers it. The microphone itself is a separate permission you are asked for the first time you use it, and can decline or withdraw — IntelliQ is not told either way until you press the button.'],
     /* ASKED OF THE OWNER, exactly as the line above asks IQVoice. This row used to test
        `window.speechSynthesis && window.SpeechSynthesisUtterance` itself — a second
        implementation of one question, which is how a Settings panel comes to report a capability
        the control beside it has already refused to draw. */
-    ['Reading replies aloud', !!(window.IQVoiceOut && IQVoiceOut.isSupported && IQVoiceOut.isSupported()),
-      'This browser cannot read text aloud. Replies are on screen as they always are.'],
+    ['Reading replies aloud — offered by this browser',
+      !!(window.IQVoiceOut && IQVoiceOut.isSupported && IQVoiceOut.isSupported()),
+      'This browser cannot read text aloud. Replies are on screen as they always are.',
+      'Your browser offers it. Whether a voice is actually installed on this device is the device\'s business, not IntelliQ\'s.'],
   ];
-  box.innerHTML = rows.map(([label, on, why]) => `
+  box.innerHTML = rows.map(([label, on, why, whenOn]) => `
     <div style="display:flex;align-items:flex-start;gap:8px;padding:0.5rem 0;border-bottom:1px solid var(--border)">
       <span style="font-size:var(--fs-sm);font-weight:700;color:${on ? 'var(--success)' : 'var(--text-muted)'};min-width:2.4rem">${on ? 'ON' : 'OFF'}</span>
-      <span style="font-size:var(--fs-md)">${esc(label)}${on ? '' : `<div style="font-size:var(--fs-sm);color:var(--text-muted)">${esc(why)}</div>`}</span>
+      <span style="font-size:var(--fs-md)">${esc(label)}<div style="font-size:var(--fs-sm);color:var(--text-muted)">${esc(on ? (whenOn || '') : why)}</div></span>
     </div>`).join('')
     + `<div style="font-size:var(--fs-sm);color:var(--text-muted);padding-top:0.6rem">
          This is what your browser on this device can do. It is not about the server, and nothing
@@ -2691,11 +2706,52 @@ function renderSettings(){
 
   if (_maySeeSettingsTab('org')) {
     _loadValuesIntoTextarea();
-    if (typeof loadConnections === 'function') loadConnections();
-    if (typeof loadOAuthCatalog === 'function') loadOAuthCatalog();
-    if (typeof loadDomainCatalog === 'function') loadDomainCatalog();
-    if (typeof loadMappings === 'function') loadMappings();
-    if (typeof loadPolicies === 'function') loadPolicies();
+    /* THE TAB IS NOT THE CONTROL, and an independent gate was right that treating them as one
+       thing was a lie on the screen. `SETTINGS_TAB_ACCESS.org` opens for ANY of four permissions
+       — settings, values, metrics or tree — because the Organisation tab holds things that belong
+       to each of them. But the connection cards inside it (the ingest token, the auto-sync
+       connections, the OAuth apps, the field mappings, the display language) all call routes
+       gated on `manage_settings` alone. So somebody with `manage_metrics` and nothing else saw
+       every one of those cards, pressed the buttons, and collected 403s from a screen that had
+       just offered them the work.
+
+       A control that will refuse you should not be drawn. The tab stays — Organisation Details is
+       a read and is genuinely theirs to see — and each card that needs `manage_settings` is
+       replaced by the reason it is not there, rather than by nothing: an absence with no
+       explanation is indistinguishable from a product that is broken. */
+    _gateOrgSettingsControls();
+    if (Auth.canDo('manage_settings')) {
+      if (typeof loadConnections === 'function') loadConnections();
+      if (typeof loadOAuthCatalog === 'function') loadOAuthCatalog();
+      if (typeof loadDomainCatalog === 'function') loadDomainCatalog();
+      if (typeof loadMappings === 'function') loadMappings();
+      if (typeof loadPolicies === 'function') loadPolicies();
+    }
+  }
+}
+
+/* WHICH CARDS IN THE ORGANISATION TAB NEED `manage_settings`, named once. Each id is the card's
+   own body, so the heading stays and the reason lands where the controls were. */
+const ORG_SETTINGS_ONLY = ['domain-catalog', 'ingest-token-box', 'connections-list', 'oauth-catalog', 'mappings-list', 'policies-list'];
+
+function _gateOrgSettingsControls() {
+  let may = false;
+  try { may = !!Auth.canDo('manage_settings'); } catch (_) { may = false; }
+  if (may) return;
+  const why = 'Changing this needs the organisation-settings permission. Ask an administrator who has it.';
+  for (const id of ORG_SETTINGS_ONLY) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const card = el.closest ? el.closest('.card') : null;
+    const body = card && card.querySelector ? card.querySelector('.card-body') : null;
+    if (body) body.innerHTML = `<div class="iq-act-note" data-gated="manage_settings">${why}</div>`;
+    else el.innerHTML = `<div class="iq-act-note" data-gated="manage_settings">${why}</div>`;
+  }
+  /* AND THE BUTTONS THAT SIT OUTSIDE A GATED BODY. Removing the card body takes most of them with
+     it; these are named so a layout change cannot quietly leave one live. */
+  for (const id of ['ingest-token-btn', 'conn-add-btn']) {
+    const b = document.getElementById(id);
+    if (b) b.remove();
   }
 }
 

@@ -1708,3 +1708,240 @@ PILOT OPERATIONS BLOCKERS: 3
 GITHUB CI ON EXACT HEAD: PENDING
 SAFE TO MERGE: NO
 READY FOR FINAL FOUNDER PHONE/RESTART RETEST: NO
+
+---
+
+# Round 6 — the independent gate's seven items
+
+**Audited head:** `9a0d3f3` · **Worked from:** `52ac115` → `747bd35` and beyond
+**Branch:** `claude/pilot-live-recovery-r1` · **PR #89 — open, not merged.**
+
+The gate audited `9a0d3f3`, which is three commits behind where this round started, so every item
+below was **reproduced or refuted against the CURRENT head** rather than against the head that was
+read. Two of the gate's findings had already been fixed in `91f3159` and are recorded as such.
+
+What makes this round different from the last two: **five of the seven items were found by pressing
+a button, not by reading code** — and two of them were defended by assertions in this repository
+that had encoded the defect as the expected answer.
+
+---
+
+## The ledger
+
+| Item | Verdict | Production entry | Guard | Mutations |
+|---|---|---|---|---|
+| **P1 · output verifier approves the wrong claim's number** | **CONFIRMED → FIXED** | `POST /api/assistant/turn` | `manifest-claim-binding-http-smoke` (13, new) · `output-manifest-smoke` §J (69→83) | M130–M133 red |
+| **P1 · graph gate pinned only by a source check** | **CONFIRMED → FIXED** | `GET /api/objects/:kind/:id/chart` | `output-channels-http-smoke` §F (26→44) | M140–M142 red |
+| **P1 · cross-route "one manifest" unproven** | **CONFIRMED → PROVEN** | thread + chart routes, same object | `output-channels-http-smoke` §F | M142 red |
+| **P1 · group Focus A→B shape mismatch** | **CONFIRMED → FIXED** (three defects) | `POST /api/group/:nodeId/focus`, `/outcome`, `/api/assistant/turn` | `group-focus-loop-http-smoke` (29, new) | M150–M154 red |
+| **P1/P2 · singleton Focus fixture satisfied by an empty list** | **CONFIRMED → FIXED** | `GET /api/objects?kind=focus&scope=group:…` | `forum-context-http-smoke` §F (46→53) | M161 red |
+| **P1/P2 · `_forumAudience` ignores active status** | **CONFIRMED as fail-open · REFUTED as reachable** | `_forumAudience` | `forum-audience-smoke` §H7 (80→85) · `forum-context-http-smoke` FC-F2e | M160 red |
+| **P1/P2 · private→Forum only source-checked** | **CONFIRMED → DRIVEN** (and a dead capability found) | `POST /api/assistant/turn/:turnId/confirm` | `forum-share-http-smoke` (27, new) | M171–M174 red; M170 a non-gate |
+| **P2 · voice-output parity on the fallback** | **CONFIRMED → FIXED** | `POST /api/assistant/turn`, degraded path | `output-channels-http-smoke` §G | M180, M181 red |
+| **P2 · a new answer may not stop the utterance** | **ALREADY FIXED at current head** (`91f3159`), guard strengthened | the real renderer, in a browser | `voice-output-browser-check` §D2 (16→19) | M182 red |
+| **P2 · attachment "Nothing was saved" and retry** | **CONFIRMED → FIXED** (both halves) | `POST /api/assistant/attachments` | `attachment-retry-http-smoke` (26, new) | M190, M193 red; M191/M192 non-gates |
+| **P2 · Settings partial grant** | **CONFIRMED → FIXED** | Settings → Organisation, and the real endpoints | `settings-tiers-browser-check` §D2 (31→39) | M200 red |
+| **P2 · `providerReachable` on an untried provider** | **CONFIRMED → FIXED** | `GET /api/health` | `capability-truth-smoke` (37→39) | M201, M202 red |
+| **P2 · voice-input label means browser support** | **CONFIRMED → FIXED** | Settings → You | `settings-tiers-browser-check` §D1 | M203, M204 red |
+
+---
+
+## 1 · The crossed figure — the sharpest counterexample this verifier has been given
+
+Reproduced exactly as written. Two approved claims — *"Two separate accounts concern recovery"* and
+*"Three separate accounts concern attendance"* — and the prose *"Three separate accounts concern
+recovery."* returned `ok: true`.
+
+Every word approved. Every figure approved. Both halves in the record. And the sentence false,
+because `verify` had pooled every claim's numbers into one set and could no longer tell which claim
+a figure came from. **A membership test cannot see a swap.** It is the same class as a stale
+channel: nothing invented, and the relation between true things wrong.
+
+**L-MF2b.** A figure carries the words around it — the rest of its **clause**, which is what says
+what it is a count of — and it is refused when the text's own context points more clearly at a
+claim that did not approve it than at any claim that did. A **comparison**, not a threshold, and
+that is what keeps it usable: an honest rephrasing loses coverage against every claim equally and
+so accuses nobody, while a crossing loses it against exactly one. A figure with no context — *"this
+rests on 3 sources"* — has nothing to be about and falls back to the membership test.
+
+The clause and not the sentence: *"two accounts concern recovery, and three concern attendance"* is
+one sentence about two things, and read whole its context binds neither. **My first version used
+the sentence and mutation M132 survived the entire suite** until OM-J2f was added.
+
+Driven through the real composer route: the model writes the crossing, the turn degrades with
+`unverified`, and the crossed sentence reaches no channel written or spoken. Both directions. The
+three sentences a threshold would wrongly refuse still go out.
+
+## 2 · The graph gate, fired through the real route
+
+Round 4 left this as a source check with an honest note that no fixture could make the chart route
+refuse. The gate was right that this is not enough.
+
+**Why no fixture could.** The chart route reads the moments the record holds and the points the
+picture plots from the same object through one owner, so no arrangement of signals makes them
+disagree. The condition the gate exists to catch is a **builder that computes a timestamp** rather
+than reading one, and no builder in this repository does.
+
+**So the builder is made to.** `ai/chart.js buildFirming` is replaced at the module boundary — the
+same instrument the provider boundary already uses — for one call, shifting one plotted moment by
+**one millisecond**. The value, refs, shape and key are untouched, so `governChart` passes it and
+the picture is drawn from real evidence at a moment the record does not have. One millisecond
+because a gate that only catches an obviously wrong date catches nothing: a builder that rounds,
+buckets or re-stamps is off by a little. The route returns `chart: null`,
+`violations: ['graph_time_not_in_record']` and a sentence; with the builder honest again the
+identical picture comes back.
+
+**Cross-route:** a new account written onto the object moves the card's source count and the
+picture's moments together, and every moment the picture plots is one the card's own manifest
+vouches for.
+
+## 3 · The group Focus loop — three defects, one of them under the other two
+
+Two owners had two field names for one fact:
+
+```
+ai/team-state.js  newFocus()   writes  origin.inquiryId   and  outcome.at
+ai/cross-evidence.js           read    raw.addresses      and  raw.resolvedAt
+```
+
+So every group Focus produced `edges: []`, `addresses: null`, `observedSince: null` — no
+relationship at all on the half of the product where the A→B loop is the point.
+
+**Why round 5's suite did not catch it** is the more useful half: its fixture was a **personal**
+Focus written by hand in the personal shape. A suite covering two shapes has to contain two shapes.
+PROTOCOL lie #5, and it was mine.
+
+**A third defect under those two, found by driving rather than reading.** A group object is a
+**projection** and carries no signals, so `loop()`'s post-outcome evidence count was structurally
+zero for every group Focus — the turn told the model *"nothing has been recorded on that thing since
+the outcome"* while two accounts sat in the record. That is not a fact about the world; it is a
+reader that cannot see. `_objectsWithEvidenceFor` joins each projection back to the evidence its own
+canonical record holds, for objects the reader was **already** cleared to see, and CE-D4 asserts it
+adds not one object to that set.
+
+The reader reads both shapes and **rewrites neither** — `origin.inquiryId` stays team-state's field,
+and the edge carries basis `focus.origin.inquiryId` rather than borrowing the personal one.
+
+## 4 · The Forum, both directions
+
+**The vacuous assertion first**, because it hid the rest. The singleton-Focus case read a node with
+no `teamFocuses` row, so the list came back **empty** — and `[].every(...)` is true, as is
+`rows.length === 0 ||` anything. Both assertions passed against a screen with nothing on it. The
+focus is seeded now, its card is **required** to exist, and then a second member joins and the icon
+has to appear — because *"never true"* and *"true only with two"* are the same assertion until
+something makes it true.
+
+**`_forumAudience` counted accounts that exist** while eleven other readers in this codebase ask
+about `status`. That fails **open**. `_personPresent` is the one predicate now, and the rule is
+"not marked otherwise" rather than "marked active" — an account written before the field existed
+still counts, or every room in an older organisation empties. **Classified honestly: no route in the
+product writes a non-active status onto an account** (`_removePerson` deletes the record and strips
+the rosters), so this is a rule made consistent with the other eleven readers, not a live defect
+reproduced through a product path.
+
+**And a dead capability, found by pressing the button.** `ai/composer-actions.js` states that the
+share's wording is the person's and editable on the card; the confirm handler reads
+`overrides.text` and its own comment says the same; and a **blanket guard above it rejected every
+override first**. So the edit box could not post, and a capability described in two comments was
+exercised by nothing. The exception is now one **field** on one **action**, allow-listed by name.
+
+**Which gate is load-bearing**, recorded because a mutation found out: M170 makes the share
+handler's membership re-check unconditionally true and **survives**. The object is resolved through
+`_allObjectsFor`, so a person removed from the squad cannot resolve the object their proposal was
+bound to and the route answers 404 before the handler runs. FS-C1 names a status and a reason
+instead of accepting `403 || 404`.
+
+## 5 · What is spoken keeps every caveat what is written shows
+
+`_speechFor` clipped limitations at three, silently. The obvious cost is that a listener cannot see
+the caveats under the answer. **The cost that would actually have arrived** is stranger:
+`ai/manifest.js` requires every limitation to survive into the voice channel, so a fourth would not
+have been quietly dropped on the composed path — it would have **refused the whole turn**, and the
+reader would have seen a degraded answer with nothing saying why. Two rules about one thing,
+disagreeing, with today's only producer topping out at exactly three.
+
+Both owners driven together: `_speechFor` with four limitations, put through
+`manifest.verify('voice')`. A clipped rendering is refused by that same gate, naming what it lost.
+
+**A fixture of mine failed honestly first:** my fourth limitation was *"this rests on what was said,
+not what was measured"*, whose only distinctive word outside the sentence is "measured" — and
+"rests" appears in the source-disclosure line every rendering ends with, so the substance test found
+half of it and called it present. The assertion that a clipped rendering is refused **passed a
+clipped rendering**. A negative assertion needs a fixture whose absence is detectable.
+
+## 6 · An upload whose answer never arrived
+
+The card said **"That took too long to send. Nothing was saved."** It cannot know that: an aborted
+fetch says nothing about what the server did with the bytes it already had. Telling somebody their
+work was lost when it was not is the sentence that makes them do it over — **and doing it over was
+the other half.** The material was already safe (deduplicated by checksum, owner, private
+visibility); the **conversation** was not, so three identical attempts produced three threads, each
+holding the same document.
+
+Reconciled from state the server already holds rather than a new key the client must mint: the
+checksum that identifies the document also identifies the thread the earlier attempt created for it.
+A `conversationId` the client does send always wins. The card now says what is true — it could not
+be **confirmed** — and then the thing that makes Try again safe, which is a property of the server
+rather than a hope.
+
+**Which gate holds the cross-person case:** neither of the two ownership checks. Removing either, or
+both at once, changes nothing — conversations are stored per person, so looking up somebody else's
+id in this person's list finds nothing. ATR-F5 hands a person another's conversation id outright.
+
+## 7 · Settings and capability truth
+
+**The tab is not the control.** `SETTINGS_TAB_ACCESS.org` opens for any of four permissions, and
+every connection card inside calls routes gated on `manage_settings` alone — so `manage_metrics`
+and nothing else saw the cards, pressed the buttons, and collected 403s from a screen that had just
+offered the work. Each card that needs `manage_settings` is replaced by the **reason**, not by
+nothing. Driven in a browser at 390px **and** against the real endpoints from that session's own
+token, because a check on either alone is what let this through — the routes were right the whole
+time.
+
+**`providerReachable` reported an untried provider as reachable.** `!providerFault` turned "no
+failure recorded" into a claim, so a host with no key — where no completion is ever attempted —
+said the provider was reachable with no observation behind it. Three states now: `unknown`,
+`reachable`, `unavailable`, each an observation or the honest absence of one.
+
+**And the suite had encoded the defect as correct.** CT-A5 asserted `providerReachable === true`
+**before any call**, under the heading *"nothing claims the provider is unreachable"* — the right
+instinct aimed at the wrong risk. PROTOCOL lie #6, and it is why a green capability suite sat over
+this for a round.
+
+**The voice-input label** said "Speaking instead of typing: ON" on browser capability alone, so
+somebody who had declined the microphone was told they could do a thing that would not work. The
+label names what was checked, and the microphone note is shown on the **ON** row as well as the OFF
+one — the state that needed explaining was the ON one, and a panel that only explains its negatives
+leaves its most misleading answer bare.
+
+---
+
+## Mistakes of mine this round, recorded rather than quietly fixed
+
+1. **The clause boundary.** My first L-MF2b used the sentence; M132 survived the whole suite. OM-J2f
+   exists because of it.
+2. **A negative assertion that passed its own negative.** The fourth limitation shared words with
+   the sentence every rendering already ends with (§5).
+3. **An assertion that could not tell code from the prose about it.** Twice in one round: the
+   comment explaining why *"Nothing was saved"* went away quotes that sentence, so searching for it
+   found the explanation. Both sites decomment before matching now.
+4. **An assertion demanding the opposite of the product's law.** I required every forum message to
+   carry an `authorId`; `ai/forum.js` projects `authorId: null` to everybody, leader and admin
+   included. My version would have demanded the product leak what that surface exists to protect.
+5. **A mutation harness that corrupted the tree.** A fixed backup path shared between two concurrent
+   runs: one run's mutation became another's "original", and the restore wrote a mutated line back
+   into `js/app.js`. Caught by reading the file rather than trusting the harness. The harness now
+   uses a unique path per invocation.
+6. **A no-op mutation that looked like a mutation.** M154's first form concatenated the objects of a
+   user who did not exist in that fixture, so it changed the text and nothing else. PROTOCOL lie #9.
+7. **A positive assertion against a route that proves nothing.** ST-D2i first read `/api/metrics`,
+   which is `requireAuth` — every signed-in person can. It is the **write** that asks for
+   `manage_metrics`.
+
+## Mutations recorded as non-gates, not counted as passes
+
+| Mutation | Why it survives |
+|---|---|
+| M170 the share handler's membership re-check | The object is resolved through `_allObjectsFor` first; a removed member gets 404 before the handler runs |
+| M191 / M191b / M191c the attachment reconciliation's ownership checks | Conversations are stored per person; `_resolveConversation` cannot find another person's id in this person's list |
+| M192 reconciliation running when a conversationId is given | `b.conversationId || _priorConvId` — the named one still wins, so it is a behavioural no-op |
