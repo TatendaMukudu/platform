@@ -11963,7 +11963,9 @@ const MemberApp = {
        `node_forum` is a different act on a different surface: a focus is a commitment somebody
        keeps, not a deliberation. */
     const ENFORCED = ['self', 'node_leaders'];
-    const list = all.filter(a => ENFORCED.includes(a.kind));
+    // Never present an empty recipient set as a sharing choice.
+    const list = all.filter(a => ENFORCED.includes(a.kind) &&
+      (a.kind === 'self' || (Number.isFinite(a.reaches) && a.reaches > 0)));
     if (!list.length) { box.innerHTML = ''; return; }
     this._audiences = this._audiences || {};
     this._audiences[id] = list;
@@ -11986,7 +11988,9 @@ const MemberApp = {
            A group genuinely named "Squad 1" still reads correctly, because the count is now
            parenthesised and carries its own noun. */
         Number.isFinite(a.reaches) && a.kind !== 'self'
-          ? ` <span class="iq-aud-n">(${esc(a.reaches)} ${a.reaches === 1 ? 'person' : 'people'})</span>` : ''}</button>`).join('')}</div>`;
+          ? ` <span class="iq-aud-n">(${esc(a.reaches)} ${a.reaches === 1 ? 'person' : 'people'})</span>` : ''}</button>`).join('')}
+      <button type="button" class="iq-make-chip" id="${esc(id)}-aud-people"
+        onclick="MemberApp._pickNamedPeople('${esc(id)}')">Choose specific people</button></div>`;
     this._pickAudience(id, 0);
   },
 
@@ -12000,6 +12004,10 @@ const MemberApp = {
       const b = document.getElementById(`${id}-aud-${n}`);
       if (b) b.classList.toggle('is-on', n === i);
     });
+    const people = document.getElementById(id + '-people');
+    if (people) { people.hidden = true; people.querySelectorAll('.iq-contact.is-on').forEach(b => b.classList.remove('is-on')); }
+    const named = document.getElementById(id + '-aud-people');
+    if (named) named.classList.remove('is-on');
     const badge = document.getElementById(id + '-badge');
     if (badge) badge.textContent = chosen.label;
     const who = document.getElementById(id + '-who');
@@ -12010,6 +12018,37 @@ const MemberApp = {
         ? ` Right now that is ${chosen.reaches} ${chosen.reaches === 1 ? 'person' : 'people'}.` : '';
       who.textContent = `${chosen.explanation || ''}${reach}`;
     }
+  },
+
+  /* Contacts are exact invitees, not a wider node audience. The writer revalidates them. */
+  async _pickNamedPeople(id) {
+    const box = document.getElementById(id + '-people');
+    if (!box) return;
+    this._focusMode = this._focusMode || {};
+    this._focusMode[id] = { kind: 'named_people' };
+    ((this._audiences || {})[id] || []).forEach((_, n) => {
+      const b = document.getElementById(`${id}-aud-${n}`);
+      if (b) b.classList.remove('is-on');
+    });
+    const named = document.getElementById(id + '-aud-people');
+    if (named) named.classList.add('is-on');
+    box.hidden = false;
+    const badge = document.getElementById(id + '-badge');
+    if (badge) badge.textContent = 'Specific people';
+    this._focusPeopleSummary(id);
+    await this._loadContacts(id, box);
+    this._focusPeopleSummary(id);
+  },
+
+  _focusPeopleSummary(id) {
+    const box = document.getElementById(id + '-people');
+    const who = document.getElementById(id + '-who');
+    if (!box || !who) return;
+    const names = [...box.querySelectorAll('.iq-contact.is-on .iq-contact-name')]
+      .map(n => n.textContent.trim()).filter(Boolean);
+    who.textContent = names.length
+      ? `Only you and ${names.join(', ')} can read this Focus. Your private conversation does not travel with it.`
+      : 'Select at least one person. Nobody else can read this Focus until you confirm.';
   },
 
   /* `_focusVis` lived here. It toggled three hard-coded chips — Just me / With people / My whole
@@ -12041,7 +12080,11 @@ const MemberApp = {
     }
   },
 
-  _toggleContact(btn) { btn.classList.toggle('is-on'); },
+  _toggleContact(btn) {
+    btn.classList.toggle('is-on');
+    const card = btn.closest('.iq-focusprop');
+    if (card) this._focusPeopleSummary(card.id);
+  },
 
   _cancelFocus(id) {
     const f = document.getElementById(id);
@@ -12055,15 +12098,16 @@ const MemberApp = {
     const tell = m => { if (said) said.textContent = m; };
     const text = String((t && t.value) || '').trim();
     if (!text) { tell('Say what you want to work on first.'); if (t) t.focus(); return; }
-    const mode = (this._focusMode || {})[id] || 'private';
+    const mode = (this._focusMode || {})[id] || { kind: 'self' };
+    const kind = mode.kind || 'self';
     const picked = [...document.querySelectorAll(`#${id}-people .iq-contact.is-on`)].map(b => b.dataset.uid);
-    if (mode === 'with' && !picked.length) { tell('Pick who this is with, or choose "Just me".'); return; }
+    if (kind === 'named_people' && !picked.length) { tell('Choose at least one person, or switch back to Only me.'); return; }
     tell('Making it…');
     try {
       const target = String((document.getElementById(id + '-g') || {}).value || '').trim();
       const reviewOn = String((document.getElementById(id + '-d') || {}).value || '').trim();
       const body = { text, target, reviewOn,
-        share: mode === 'shared', participants: mode === 'with' ? picked : [] };
+        share: kind === 'node_leaders', participants: kind === 'named_people' ? picked : [] };
       const r = await fetch('/api/me/focus', { method: 'POST', headers: this._authHeaders(), body: JSON.stringify(body) });
       /* A DEAD SESSION MUST NOT COST SOMEBODY THEIR WORDS. This path printed "Authentication
          required" over a filled-in form and left the person to retype it. The draft is kept
@@ -14442,10 +14486,13 @@ const MemberApp = {
       messageIds: [j.messageId].filter(Boolean),
       turnId: j.turnId || null,
     };
+    this._focusMode = this._focusMode || {};
+    this._focusMode[id] = { kind: 'self' };
+    setTimeout(() => this._renderAudiences(id), 0);
     return `<div class="iq-proposal iq-focusprop" data-proposal="${esc(p.id)}" id="${esc(id)}">
       <div class="iq-proposal-top">
         <span class="iq-proposal-label">Would you like to keep working on this?</span>
-        <span class="iq-badge iq-badge-private">Private</span>
+        <span class="iq-badge iq-badge-private" id="${esc(id)}-badge">Only me</span>
       </div>
       <div class="iq-field"><textarea id="${esc(id)}-t" class="iq-field-input" rows="2"
         aria-label="What you want to keep working on">${esc(suggested)}</textarea></div>
@@ -14458,6 +14505,9 @@ const MemberApp = {
         <label class="iq-focus-label" for="${esc(id)}-d">When should we look at it?</label>
         <input type="date" id="${esc(id)}-d" class="iq-field-date">
       </div>
+      <div class="iq-fp-aud" id="${esc(id)}-aud"></div>
+      <div class="iq-focus-people" id="${esc(id)}-people" hidden></div>
+      <div class="iq-focus-who" id="${esc(id)}-who">Only you can see this.</div>
       <div class="iq-proposal-actions">
         <button class="btn-primary btn-sm" id="${esc(id)}-go"
           onclick="MemberApp.startFocusFromChat('${esc(id)}')">Start this focus</button>
@@ -14497,16 +14547,17 @@ const MemberApp = {
     const text = String((t && t.value) || '').trim();
     if (!text) { tell('Say what you want to keep working on.'); if (t) t.focus(); return; }
     if (go && go.disabled) return;                    // a second tap while the first is in flight
-    if (go) { go.disabled = true; go.textContent = 'Starting…'; }
     const src = (this._focusProposals || {})[id] || {};
-    /* THE AUDIENCE THE PERSON CHOSE, sent as the server's own vocabulary. `private` is the
-       default and stays the default: a card that arrives with something else pre-selected is a
-       card that shares by accident. */
     /* The chosen audience, mapped to what the focus route enforces. `self` is the default and
        stays the default — a card that arrives with anything else selected shares by accident. */
     const chosen = (this._focusMode || {})[id];
     const kind = (chosen && chosen.kind) || 'self';
-    const picked = [...document.querySelectorAll(`#${id}-people .iq-contact.is-on`)].map(b => b.dataset.uid);
+    const picked = kind === 'named_people'
+      ? [...document.querySelectorAll(`#${id}-people .iq-contact.is-on`)].map(b => b.dataset.uid) : [];
+    if (kind === 'named_people' && !picked.length) {
+      tell('Choose at least one person, or switch back to Only me.'); return;
+    }
+    if (go) { go.disabled = true; go.textContent = 'Starting…'; }
     const body = {
       text,
       target: String((document.getElementById(id + '-g') || {}).value || '').trim(),
