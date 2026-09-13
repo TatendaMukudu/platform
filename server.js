@@ -24561,7 +24561,20 @@ function _loadAllStores(data) {
   for (const [token, s] of Object.entries(_savedSessions)) {
     if (s.expiresAt > _now) activeSessions[token] = s;
   }
-  console.log(`[sessions] Restored ${Object.keys(activeSessions).length} active session(s) from Postgres`);
+  /* ── SAY WHERE IT ACTUALLY CAME FROM ───────────────────────────────────────────────────────
+     This read "Restored 0 active session(s) from Postgres" on every boot, including boots with
+     no Postgres at all — `db.js` builds its pool only when DATABASE_URL is set, and without one
+     the pool is null. So the most prominent line in the startup log asserted a source that did
+     not exist, and "0 sessions" looked like an empty database rather than no database. Working
+     out which of the two you were looking at meant reading db.js.
+
+     A count is not a source. Both are said, and the source is the one the process can actually
+     observe rather than the one it hopes for. */
+  const _sessionSource = process.env.DATABASE_URL ? 'Postgres'
+    : (process.env.DB_OPTIONAL === '1' || process.env.NODE_ENV === 'test')
+      ? 'memory (no DATABASE_URL — nothing here survives a restart)'
+      : 'no configured store';
+  console.log(`[sessions] Restored ${Object.keys(activeSessions).length} active session(s) from ${_sessionSource}`);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

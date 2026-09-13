@@ -418,8 +418,13 @@ const OrgTree = {
   openAssignPeople(nodeId) {
     const node    = this._nodes[nodeId];
     if (!node) { if (typeof showToast === 'function') showToast('Tree still loading — refresh and try again.', 'warning'); return; }
+    /* THE SUPER-ADMIN CAN BE PUT IN A NODE, because they are usually in one. In a small
+       organisation the super-admin is the founder and often coaches a team; filtering them out
+       of this list meant the one structure the product is built on could never record where they
+       actually sat, so their own squad's roster was wrong by exactly one person — them. The
+       server has always accepted them in `memberIds` and `leaderIds`; only this list refused to
+       offer them. */
     const members = (AppState?.members || [])
-      .filter(m => m.role !== 'superadmin')
       .sort((a, b) => a.name.localeCompare(b.name));
     const currentMembers = new Set(node.memberIds  || []);
     const currentLeaders = new Set(node.leaderIds  || []);

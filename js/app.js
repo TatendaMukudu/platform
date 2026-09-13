@@ -1204,11 +1204,24 @@ async function loadRealOrgData() {
     let realUsers = [];
 
     if (Auth.isAdmin() || Auth.isSuperAdmin()) {
-      // ── Admin / SuperAdmin: full org tree (needed for People management) ──
-      // Filter out the superadmin account from the member list — admins
-      // manage all other users but superadmin is not a "member" in the UI.
+      /* ── Admin / SuperAdmin: full org tree (needed for People management) ──
+         THE SUPER-ADMIN IS ALSO A PERSON IN THE ORGANISATION. This filtered them out with the
+         reason "superadmin is not a 'member' in the UI", and the branch below asserted that
+         "visible-members already strips superadmin" — which is not true: the server returns
+         them, and a coach's own roster read shows Boss(superadmin) beside everybody else.
+
+         So the product erased somebody the server had deliberately included. In a small
+         organisation the super-admin is usually the founder, and usually also coaches a team:
+         they were on the squad's roster, they could set a focus, check in, be somebody's
+         contact — and they did not appear in the People list, so nobody could assign them to a
+         node or see them on the team they were actually on. An account you can talk to but
+         cannot see is the worst of both.
+
+         Nothing is loosened by showing them: the server already refuses a role change from
+         anybody who is not a super-admin, so the list being complete does not make it
+         dangerous. */
       const { flat } = await Auth.getOrgTree();
-      realUsers = (flat || []).filter(u => u.role !== 'superadmin');
+      realUsers = (flat || []);
       console.log(`[VISIBILITY] Admin path — loaded ${realUsers.length} users via org-tree`);
     } else {
       // ── Coach / Member: server-enforced subtree visibility ────────────────
@@ -1217,8 +1230,10 @@ async function loadRealOrgData() {
       const res  = await fetch('/api/workspace/visible-members', { headers: Auth._headers() });
       const data = await res.json();
       if (data.ok) {
-        // visible-members already strips superadmin; map to the same shape
-        // that buildRealMemberRecord expects (id, name, email, role, …)
+        // Map to the same shape that buildRealMemberRecord expects (id, name, email, role, …).
+        // This used to say "visible-members already strips superadmin". It does not, and never
+        // did — getVisibleUserIds returns everyone a person is entitled to see, super-admin
+        // included, which is correct: somebody on your squad is on your squad.
         realUsers = (data.members || []).map(m => ({
           id:             m.userId,
           name:           m.name,
