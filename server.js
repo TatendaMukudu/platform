@@ -7499,7 +7499,7 @@ app.get('/api/health', (req, res) => {
    transfer allowance. This one is 31 KB and builds only objects that still exist.
 
    Superadmin-gated. Re-running replaces the demo org's data and never touches another org. */
-app.post('/api/admin/seed-alma', requirePermission('manage_settings'), async (req, res) => {
+app.post('/api/admin/seed-alma', requirePlatformOperator('Replacing the demo organisation'), async (req, res) => {
   try {
     const { buildAlmaStore, ALMA_CODE } = require('./scripts/seed-alma.js');
     const { store, summary } = await buildAlmaStore();
@@ -7517,7 +7517,7 @@ app.post('/api/admin/seed-alma', requirePermission('manage_settings'), async (re
   }
 });
 
-app.post('/api/admin/llm-selftest', requirePermission('manage_settings'), async (req, res) => {
+app.post('/api/admin/llm-selftest', requirePlatformOperator('The language-model self-test'), async (req, res) => {
   const status = {
     enabled:   ai.enabled(),
     deterministicOnly: ai.deterministicOnly(),
@@ -7558,7 +7558,7 @@ app.post('/api/admin/llm-selftest', requirePermission('manage_settings'), async 
 /* POST /api/admin/llm-mode — flip the whole instance to deterministic-only (no-egress) or
    back, at runtime, without a redeploy. The env guarantee (IQ_DETERMINISTIC_ONLY) always
    wins — if it's set, this cannot re-enable the model. Superadmin/settings only. */
-app.post('/api/admin/llm-mode', requirePermission('manage_settings'), (req, res) => {
+app.post('/api/admin/llm-mode', requirePlatformOperator('Deterministic-only mode for this whole instance'), (req, res) => {
   const want = !!(req.body && req.body.deterministicOnly);
   const now = ai.setDeterministicOnly(want);
   res.json({ ok: true, deterministicOnly: now, enabled: ai.enabled(),
@@ -13869,6 +13869,45 @@ function _metric(code, event, n = 1) { try { metrics.inc(_metricsStore, code, ev
 function _isPlatformAdmin(req) {
   const key = process.env.IQ_PLATFORM_KEY;
   return !!key && (req.headers['x-platform-key'] === key || req.query.platformKey === key);
+}
+
+/* ── THE HOST IS NOT A TENANT, AND A TENANT'S SUPERADMIN IS NOT THE HOST ─────────────────────
+   REPRODUCED, and it is the worst thing this engagement has found. Three routes guarded by
+   `requirePermission('manage_settings')` — a permission every tenant SUPERADMIN holds by role —
+   do things that belong to the whole instance:
+
+     POST /api/admin/seed-alma      purges and replaces a FIXED organisation, whoever asks
+     POST /api/admin/llm-mode       flips deterministic-only for the entire host
+     POST /api/admin/llm-selftest   reports host provider state and spends the host's budget
+
+   Driven: a superadmin of an unrelated tenant, holding no platform key, called seed-alma and
+   REPLACED the pilot organisation — its profile overwritten, one person replaced by
+   thirty-one, six weeks of real data purged — then flipped the host's language-model mode. Two
+   different tenants on one instance is the ordinary case, and either could do this to the other.
+
+   The confusion is between a role that is the top of an ORGANISATION and a role that is the top
+   of a MACHINE. They are not the same authority and one must never imply the other.
+
+   THIS IS NOT A NEW MECHANISM. `_isPlatformAdmin` and `IQ_PLATFORM_KEY` already exist and already
+   guard the most destructive route in the product (`DELETE /api/admin/org/:code`). The defect was
+   that three routes of the same kind did not use it. A second platform-role flag would be a
+   second answer to one question, which is how the two drift.
+
+   IT FAILS CLOSED. With no `IQ_PLATFORM_KEY` configured there is no platform operator on this
+   host, so these routes are unavailable to everybody rather than available to everybody —
+   AGENTS.md invariant 7. `what` names the capability in the refusal so an operator reading a 403
+   knows which key they are missing rather than which permission they thought they had. */
+function requirePlatformOperator(what) {
+  return (req, res, next) => {
+    if (!_isPlatformAdmin(req)) {
+      return res.status(403).json({
+        error: 'platform key required',
+        note: `${what} belongs to whoever runs this instance, not to an organisation's administrators. `
+            + 'It needs the platform key.',
+      });
+    }
+    next();
+  };
 }
 const _errorBuffer = {};
 function _captureError(err, meta = {}) {
@@ -21801,10 +21840,34 @@ RULES:
    Additive merge — never overwrites orgName, orgMode, or createdAt.          */
 app.put('/api/org/profile', requireAuth, (req, res) => {
   const { orgCode, orgMode, orgDescription, orgSummary, orgEnvironment, orgSuccessDefinition, orgTraits } = req.body;
-  const code = (orgCode || req.iqSession?.orgCode || '').toLowerCase().trim();
-  if (!code) return res.status(400).json({ error: 'orgCode required' });
+  /* ── THE TENANT IS THE SESSION'S. THE BODY DOES NOT GET A VOTE. ──────────────────────────────
+     REPRODUCED: a superadmin of A sent `{ orgCode: 'B', orgSummary: 'PWNED FROM A' }` and B's
+     profile was rewritten, 200, with A left untouched.
 
-  // Only superadmin for this org may update the profile
+     Two mistakes compounded, and the second is the dangerous one:
+
+       `orgCode || req.iqSession.orgCode`   let the CALLER choose the target organisation
+       `orgUsers[code]?.[session.userId]`   then asked whether the caller's user id exists, with
+                                            the role superadmin, INSIDE THE TARGET THEY CHOSE
+
+     So the authorisation question was "are you a superadmin over there", answered by an id
+     collision. Two organisations that both have a `root`, an `admin` or an `owner` — which is to
+     say most of them — are one lookup away from each other. This is AGENTS.md invariant 4 exactly:
+     relevance is not authorisation, and the thing being confused here is not even relevance, it
+     is a string that happens to match.
+
+     The route directly below this one has said the right thing for months: "identity from the
+     session, never the body". So does the target. A body orgCode is accepted only when it AGREES
+     — rejected rather than ignored, because a client sending a different one is either confused
+     or probing, and silently writing somewhere other than where it asked is its own defect. */
+  const code = String(req.iqSession.orgCode || '').toLowerCase().trim();
+  if (!code) return res.status(401).json({ error: 'Authentication required. Please log in again.' });
+  const asked = String(orgCode == null ? '' : orgCode).toLowerCase().trim();
+  if (asked && asked !== code) {
+    return res.status(403).json({ error: 'You can only change the organisation you are signed in to.' });
+  }
+
+  // Only a superadmin OF THE SESSION'S OWN ORGANISATION may update the profile.
   const user = orgUsers[code]?.[req.iqSession.userId];
   if (!user || user.role !== 'superadmin') return res.status(403).json({ error: 'Forbidden' });
 

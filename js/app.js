@@ -3152,6 +3152,29 @@ async function loadIngestToken(regen) {
   }
 }
 
+/* THE HOST'S OWN KEY, read from the one field the Platform tab carries.
+
+   These controls act on the WHOLE INSTANCE — replacing the demo organisation, flipping
+   deterministic-only mode, spending the host's provider budget on a self-test — and they used to
+   be guarded by `manage_settings`, which every tenant superadmin holds. Driven at head 99a6544:
+   a superadmin of an unrelated tenant replaced the pilot organisation, thirty-one seeded people
+   over the top of six weeks of real data, and flipped the host's language-model mode. Being the
+   top of an ORGANISATION is not the same authority as being the top of a MACHINE.
+
+   The server is the gate (see requirePlatformOperator); this is the door. Without it the
+   capability would be unreachable from the product, which is its own defect — a route with no
+   door is a capability nobody has. `purge-key` is read as a fallback so the destructive control
+   that already had its own field keeps working unchanged. */
+function _platformKey() {
+  const el = document.getElementById('platform-key') || document.getElementById('purge-key');
+  return (el && el.value) || '';
+}
+function _platformHeaders() {
+  const k = _platformKey();
+  return k ? { ...Auth._headers(), 'x-platform-key': k } : Auth._headers();
+}
+const _PLATFORM_KEY_MISSING = 'This acts on the whole instance, so it needs the platform key above.';
+
 async function runLlmSelfTest() {
   const btn = document.getElementById('llm-selftest-btn');
   const out = document.getElementById('llm-selftest-result');
@@ -3160,7 +3183,8 @@ async function runLlmSelfTest() {
   out.innerHTML = `<div style="color:var(--text-muted)">Running…</div>`;
   const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   try {
-    const r = await fetch('/api/admin/llm-selftest', { method: 'POST', headers: Auth._headers() });
+    if (!_platformKey()) throw new Error(_PLATFORM_KEY_MISSING);
+    const r = await fetch('/api/admin/llm-selftest', { method: 'POST', headers: _platformHeaders() });
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || 'failed');
     const s = d.status || {};
@@ -3271,7 +3295,8 @@ async function seedDemoOrg() {
   if (btn) { btn.disabled = true; btn.textContent = 'Setting it up…'; }
   out.innerHTML = `<div style="color:var(--text-muted)">Building the roster…</div>`;
   try {
-    const r = await fetch('/api/admin/seed-alma', { method: 'POST', headers: Auth._headers() });
+    if (!_platformKey()) throw new Error(_PLATFORM_KEY_MISSING);
+    const r = await fetch('/api/admin/seed-alma', { method: 'POST', headers: _platformHeaders() });
     const d = await r.json();
     if (!r.ok || !d.ok) throw new Error(d.error || 'failed');
     const s = d.summary || {};
