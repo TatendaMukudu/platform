@@ -4645,14 +4645,29 @@ app.get('/api/workspace/briefing', requireAuth, async (req, res) => {
     'Signals are weighted: results and repeated patterns count more than one-off notes.',
   ].join('\n');
 
-  let narrative = null;
+  /* ── A SUBSTITUTE THAT DOES NOT SAY IT IS ONE IS A LIE OF OMISSION ─────────────────────────
+     This caught the provider failure and fell through to a stock sentence — "Your group looks
+     steady this week" — with nothing anywhere saying that IntelliQ had not actually read
+     anything. A leader could not tell that sentence apart from a considered one, which is worse
+     than no briefing: it is a confident-sounding line that nobody wrote about them.
+
+     The product already owns this exact idea. `COMPOSER_DEGRADED` is a closed vocabulary of
+     facts about IntelliQ's own state — never a provider's name, a key or an error message — and
+     the client already renders one sentence for it in one place. This route reports through that
+     same owner rather than growing a second notion of "the model did not write this". */
+  let narrative = null, degraded = null;
   try {
     narrative = await ai.complete({ org: code, taskType: 'workspace_briefing',
       tier: 'reason', maxTokens: 220,
       system: [`You are IntelliQ, briefing a group's leader. In 2-4 sentences say what the week looks like and the ONE or TWO things to prioritise. Aggregate only — do not name individuals (the leader sees the named list separately). Directional, practical, warm. No scores.`, _worldviewDirective(code), _domainDirective(code)].filter(Boolean).join('\n\n'),
       user: brief,
     });
-  } catch (_) { /* fall back to no narrative */ }
+    if (!String(narrative || '').trim()) { narrative = null; degraded = _degraded('empty'); }
+  } catch (_) {
+    // The reason is deliberately coarse: the operator gets the detail from the logs, and the
+    // person reading this gets one honest sentence rather than somebody else's error text.
+    degraded = _degraded(ai.enabled && !ai.enabled() ? 'no_model' : 'error');
+  }
 
   const data = {
     ok: true,
@@ -4665,8 +4680,20 @@ app.get('/api/workspace/briefing', requireAuth, async (req, res) => {
     briefing: narrative || (alerts.length
       ? `${alerts.length} member(s) could use your attention this week — see the list below.`
       : `Your group looks steady this week — ${activeWeek}/${members.length} active.`),
+    /* Carried in the shape the client already renders, so the one degraded sentence appears here
+       too without a second copy of it being written. Null on the ordinary path. */
+    composer: degraded,
   };
-  leaderBriefingCache[cacheKey] = { data, ts: Date.now() };
+  /* ── A SUBSTITUTE IS NOT CACHED FOR TWO HOURS ──────────────────────────────────────────────
+     BRIEFING_TTL is two hours, and this stored whatever it had just produced. So one failed
+     provider call pinned the stock sentence — and, now, the degraded marker with it — in front of
+     a leader for the rest of the morning, long after the provider had recovered, with nothing
+     saying that asking again would work. `refresh=1` bypassed it, which is a thing an operator
+     knows and a coach does not.
+
+     A fallback is cheap to recompute and expensive to entrench, so only a real briefing is kept.
+     The next request after recovery gets the considered one. */
+  if (!degraded) leaderBriefingCache[cacheKey] = { data, ts: Date.now() };
   res.json(data);
 });
 
@@ -6032,6 +6059,7 @@ async function _recordCheckin(code, userId, { text, mood } = {}) {
   (m?.deviations || []).slice(0, 2).forEach(d => noticed.push(`${d.label} is ${d.direction} your usual lately`));
   (m?.structural || []).slice(0, 2).forEach(s => noticed.push(intel.PATTERN_LABEL[s.type] || s.type));
 
+  let _ciDegraded = null;
   let acknowledgement = isReturn
     ? "Good to have you back — thanks for checking in after a bit of quiet. I've folded this in."
     : "Got it — I've added that and folded it into your picture.";
@@ -6050,7 +6078,15 @@ async function _recordCheckin(code, userId, { text, mood } = {}) {
       const line = await ai.complete({ org: code, taskType: 'checkin_reflection', tier: 'reason', system: sys, user: `They wrote: "${text}".${mood ? ` Their mood: ${mood}/5.` : ''}\n\nRespond in their voice.`, maxTokens: 320 });
       // Self-facing (their own record, reflected back to them) — no redaction needed.
       if (line && line.trim()) acknowledgement = line.trim();
-    } catch (_) { /* keep the deterministic acknowledgement */ }
+      else _ciDegraded = _degraded('empty');
+    } catch (_) {
+      /* THE DETERMINISTIC ACKNOWLEDGEMENT IS KEPT, AND SAID TO BE ONE. This caught and fell
+         through to a stock sentence, so a person who had just told IntelliQ something difficult
+         received a warm-sounding line that nothing had actually read. Reported through
+         `COMPOSER_DEGRADED`, the vocabulary the product already owns for exactly this, so the
+         client's one degraded sentence appears here too without a second copy being written. */
+      _ciDegraded = _degraded(ai.enabled && !ai.enabled() ? 'no_model' : 'error');
+    }
   }
 
   return {
@@ -6058,6 +6094,7 @@ async function _recordCheckin(code, userId, { text, mood } = {}) {
     checkinId: _ciRec.id,
     mood, moodLabel: _ciRec.moodLabel,
     acknowledgement,
+    composer: _ciDegraded,
     noticed,
     understanding: agents.personModel.understanding(_getMemory(code, userId).model),
   };

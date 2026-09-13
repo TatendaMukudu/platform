@@ -14938,8 +14938,13 @@ const MemberApp = {
         // The ONE post-confirm outcome (acknowledgement + what IntelliQ noticed) returns into the thread.
         const o = j.outcome || {};
         const noticed = (o.noticed && o.noticed.length) ? `<div class="iq-checkin-noticed">${o.noticed.map(t => `<div>• ${this._escape(t)}</div>`).join('')}</div>` : '';
+        /* AND WHETHER IntelliQ ACTUALLY READ IT. The acknowledgement falls back to a stock warm
+           sentence when the model is unavailable, and a person who has just said something
+           difficult cannot tell the two apart — which is the one place that substitution costs
+           something real. The same one sentence as everywhere else; no second wording. */
         cardEl.innerHTML = `<div class="iq-confirmed">Logged as today's check-in — kept private.</div>` +
-          (o.acknowledgement ? `<div class="iq-checkin-ack">${this._escape(o.acknowledgement)}</div>${noticed}` : '');
+          (o.acknowledgement ? `<div class="iq-checkin-ack">${this._escape(o.acknowledgement)}</div>${noticed}` : '')
+          + iqDegradedNote(o.composer);
       } else if (j.confirmed === 'submit_work') {
         this._wsWorkItemId = null;  // clear the focused work context after submitting
         const chip = document.getElementById('iq-workctx'); if (chip) chip.innerHTML = '';
