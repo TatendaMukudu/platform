@@ -217,5 +217,112 @@ function inquiryCard(inquiry = {}) {
   };
 }
 
-module.exports = { BAND_TEXT, STATUS_TEXT, looksLikeKey, humanTopic, humanBand, humanStatus,
-  confidenceWhy, inquiryCard };
+/* ── A FOCUS IS NOT AN INQUIRY ────────────────────────────────────────────────────────────────
+   Every object on the bucket read was run through `inquiryCard`, whatever kind it was. For an
+   inquiry, a high and a low that is right: each is something IntelliQ believes from evidence,
+   and a confidence band is the honest thing to say about it. A FOCUS IS NOT A BELIEF. It is a
+   commitment a person or a group made, in their own words, and it is true because they said it.
+
+   Driven through the real route: a member typed "Work on my first touch" into POST /api/me/focus
+   and the card came back reading
+
+       standing:  "Early thinking"
+       status:    "Looking into this"
+       band:      "tentative"
+       claim:     "My read is that Work on my first touch. Not sure yet."
+
+   The product was hedging about whether somebody meant what they had just typed. The founder's
+   law is that deterministic code decides and the prose reports that decision; here deterministic
+   code decided a commitment was a tentative hypothesis, which is not a wording problem.
+
+   THE SHAPE IS IDENTICAL on purpose — same `summary` and `detail` keys, same field names — so
+   every surface that renders a card keeps working and nobody is tempted to write a second card
+   renderer for this one kind. Only the CONTENT changes, to say what a commitment actually has:
+   who set it, whether it is still open, when it is due a look, and how it turned out. */
+const FOCUS_STANDING = Object.freeze({
+  active:    'Being worked on',
+  done:      'Closed',
+  abandoned: 'Dropped',
+});
+const FOCUS_OUTCOME_TEXT = Object.freeze({
+  helped:  'It helped',
+  no:      'It did not help',
+  mixed:   'Mixed',
+  unclear: 'Too tangled up in other things to tell',
+});
+
+function focusCard(focus = {}, opts = {}) {
+  const f = focus && typeof focus === 'object' ? focus : {};
+  const status = ['active', 'done', 'abandoned'].includes(f.status) ? f.status : 'active';
+  /* EITHER SHAPE. A group Focus records `{ result, note, recordedBy, at }`; a personal one was
+     stored as the bare string `'helped'` until the server's constructor was corrected, and those
+     records are already on disk. Reading both here is what keeps one card honest about two
+     histories, without rewriting somebody's stored record to suit a reader. */
+  const outcome = typeof f.outcome === 'string' && f.outcome
+    ? { result: f.outcome, note: '', recordedBy: null, at: null }
+    : (f.outcome && typeof f.outcome === 'object' ? f.outcome : null);
+  const text = String(f.text || (f.topic && f.topic.label) || '').trim();
+  /* WHOSE COMMITMENT IT IS. The caller knows; this only renders it. "You" and a group's name are
+     the only two answers, because a Focus set for somebody else is not a thing the product has. */
+  const mine = opts.mine !== false && !opts.groupName;
+  const who = opts.groupName ? String(opts.groupName) : 'You';
+
+  /* `Number(null)` is 0 and 0 is finite, so a Focus with no review date read as one due in 1970
+     and every card said "Due a look". Absence is checked before the number is. */
+  const reviewAt = f.reviewAt == null || f.reviewAt === '' || !Number.isFinite(Number(f.reviewAt))
+    ? null : Number(f.reviewAt);
+  const overdue = reviewAt != null && Number.isFinite(Number(opts.now)) && Number(opts.now) > reviewAt;
+
+  return {
+    inquiryId: null,                          // a Focus is not an inquiry and never claims to be
+    focusId: String(f.focusId || f.id || ''),
+    canonicalConcept: '',
+
+    summary: {
+      title: text || 'A focus',
+      /* `standing` is the state of the commitment, not a confidence band. `band` is carried
+         because callers style by it, and a commitment's band is not tentative — it is `stated`,
+         a value no confidence scale produces, so a surface can never mistake one for the other. */
+      standing: FOCUS_STANDING[status],
+      band: 'stated',
+      standingWhy: mine ? 'You set this, so it is what you decided to work on — not something IntelliQ inferred.'
+                        : `${who} set this. It is a commitment, not a conclusion drawn from evidence.`,
+      status: outcome ? FOCUS_OUTCOME_TEXT[outcome.result] || FOCUS_OUTCOME_TEXT.unclear
+            : overdue ? 'Due a look'
+            : status === 'active' ? 'Open' : FOCUS_STANDING[status],
+      // The person's own words, unchanged. Never re-worded, never summarised.
+      thinking: text || null,
+      /* The prompt belongs to whoever can answer it. Asking a squad member "what would tell you
+         this was working" about their coach's commitment is asking the wrong person. */
+      openQuestion: mine && status === 'active' && !outcome && !f.target
+        ? 'What would tell you this was working?' : null,
+      moreUnknowns: 0,
+    },
+
+    detail: {
+      because: [],
+      origin: f.origin && typeof f.origin === 'object' ? { ...f.origin } : null,
+      stillUnknown: [],
+      alternatives: [],
+      falsifiers: [],
+      evidenceCount: 0,
+      independentOrigins: 0,
+      contributors: Array.isArray(f.participants) ? f.participants.length : 0,
+      corrected: 0,
+      contested: false,
+      // What a commitment has that a hypothesis does not.
+      target: f.target ? String(f.target) : null,
+      reviewAt,
+      overdue,
+      outcome: outcome ? {
+        result: outcome.result || 'unclear',
+        reading: FOCUS_OUTCOME_TEXT[outcome.result] || FOCUS_OUTCOME_TEXT.unclear,
+        note: String(outcome.note || ''),
+        at: Number.isFinite(Number(outcome.at)) ? Number(outcome.at) : null,
+      } : null,
+    },
+  };
+}
+
+module.exports = { BAND_TEXT, STATUS_TEXT, FOCUS_STANDING, FOCUS_OUTCOME_TEXT,
+  looksLikeKey, humanTopic, humanBand, humanStatus, confidenceWhy, inquiryCard, focusCard };

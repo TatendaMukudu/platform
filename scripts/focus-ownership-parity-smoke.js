@@ -45,7 +45,15 @@ const confirm = async (code, turn, type) => {
   return post(code, `/api/assistant/turn/${turn.json.turnId}/confirm`, { proposalId: p && p.id });
 };
 const focusState = (code, id) => S._getMemory(code, 'owner').focuses.find(f => f.id === id);
-const comparable = f => ({ text: f.text, type: f.type, status: f.status, outcome: f.outcome,
+/* An outcome is now recorded as { result, note, recordedBy, at } rather than the bare string it
+   once was, so comparing it whole would compare two clock readings taken milliseconds apart and
+   fail on a difference that is not a difference in state. Its MEANING is compared instead —
+   result, note and who recorded it — which is strictly more than the string carried, and the
+   same treatment `createdAt` already gets one line below for the same reason. */
+const outcomeOf = f => (f.outcome == null ? null
+  : typeof f.outcome === 'string' ? { result: f.outcome, note: '', recordedBy: null }
+  : { result: f.outcome.result, note: f.outcome.note || '', recordedBy: f.outcome.recordedBy || null });
+const comparable = f => ({ text: f.text, type: f.type, status: f.status, outcome: outcomeOf(f),
   visibility: f.visibility, participants: f.participants, target: f.target || null, reviewAt: f.reviewAt || null,
   hasSource: !!f.source, sourceMessages: f.source?.messageIds || [], hasCreatedAt: Number.isFinite(Date.parse(f.createdAt)) });
 const sideEffects = (code, focus) => ({

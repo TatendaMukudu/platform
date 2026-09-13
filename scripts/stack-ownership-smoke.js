@@ -54,7 +54,12 @@ console.log('\n  ONE OWNER PER LAW — THE COMBINED PILOT STACK');
    `_recordPersonalFocusOutcome` are the canonical owners; the composer confirm branch and the
    direct routes both call them rather than touching the list. */
 law('personal focus create', /mem\.focuses\.(?:push|unshift)\(/g, 1);
-law('personal focus outcome', /focus\.status = 'done'; focus\.outcome =/g, 1);
+/* The assignment moved onto its own line and the record is built by a named constructor, so the
+   pattern is the constructor rather than the old one-line formatting. It still counts the same
+   thing — the number of places that decide a personal focus is closed and with what — and it is
+   now pinned to something meaningful rather than to where a semicolon fell. */
+law('personal focus outcome', /focus\.outcome = _focusOutcomeRecord\(/g, 1);
+law('personal focus outcome record shape', /function _focusOutcomeRecord\(/g, 1);
 
 /* The TEAM focus is a different object at a different grain (ai/team-state.js, the group's own
    store), which is the documented two-products-one-kernel split rather than a duplicate. What

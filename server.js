@@ -5489,8 +5489,9 @@ function _beliefStateFindings(code, userId, now) {
   const focuses = (_getMemory(code, userId).focuses) || [];
   for (const f of focuses) {
     if (!f || !f.text) continue;
-    if (f.outcome && f.outcome.result && f.outcome.result !== 'unclear') {
-      const helped = f.outcome.result === 'helped' || f.outcome.result === 'improved';
+    const _oc = _focusOutcome(f);
+    if (_oc && _oc.result && _oc.result !== 'unclear') {
+      const helped = _oc.result === 'helped' || _oc.result === 'improved';
       out.push({ patternType: helped ? 'focus_landed' : 'focus_missed',
         polarity: helped ? 'progress' : 'risk', subjectId: userId,
         severity: 'low', priority: 'low', confidence: 'clear',
@@ -9131,6 +9132,36 @@ function _personalFocusAddress(code, userId, input = {}) {
     ? { kind, id, at: Date.now() } : null;
 }
 
+/* THE ONE WRITER OF A PERSONAL FOCUS OUTCOME RECORD. Written as a named constructor rather than
+   an object literal at the assignment: `focus.outcome = { … }` is the TEAM grain's line, owned by
+   ai/team-state.js `recordFocusOutcome`, and stack-ownership-smoke counts that literal precisely
+   so the server can never start writing a team focus outcome itself. The two grains share a
+   shape; they do not share a writer, and the source should say which one this is.
+
+   The RESULT VOCABULARY IS THE PERSONAL ONE and is deliberately not converged: a person answers
+   helped / no / mixed about their own commitment, while a group records better / no_change /
+   worse / unclear about a change it tried. Those are different questions and collapsing them
+   would lose the distinction to make two enums match. */
+function _focusOutcomeRecord(result, byUserId, now = Date.now()) {
+  return { result: String(result || ''), note: '', recordedBy: byUserId || null, at: now };
+}
+
+/* THE ONE READER OF A FOCUS OUTCOME, whichever shape it is on disk in. A bare string is what
+   personal focuses were stored as before the constructor above was corrected; it carries the
+   result and nothing else, so the missing fields are reported as missing rather than invented. */
+function _focusOutcome(focus) {
+  const o = focus && focus.outcome;
+  if (!o) return null;
+  if (typeof o === 'string') {
+    return { result: o, note: '', recordedBy: null,
+      at: Date.parse(String(focus.resolvedAt || '')) || null, legacy: true };
+  }
+  if (typeof o !== 'object') return null;
+  return { result: String(o.result || ''), note: String(o.note || ''),
+    recordedBy: o.recordedBy || null,
+    at: Number.isFinite(Number(o.at)) ? Number(o.at) : (Date.parse(String(o.at || '')) || null) };
+}
+
 function _publicPersonalFocus(focus, userId) {
   return { id: focus.id, text: focus.text, visibility: focus.visibility || 'private',
     participants: focus.participants || [userId], target: focus.target || null,
@@ -9386,7 +9417,21 @@ function _recordPersonalFocusOutcome(code, userId, focusId, outcome) {
   const mem = _getMemory(code, userId);
   const focus = (mem.focuses || []).find(f => f && f.id === String(focusId));
   if (!focus) return { ok: false, status: 404, error: 'focus not found' };
-  focus.status = 'done'; focus.outcome = outcome; focus.resolvedAt = new Date().toISOString();
+  /* ONE FOCUS, ONE OUTCOME SHAPE. A group Focus records `{ result, note, recordedBy, at }` —
+     ai/team-state.js `recordFocusOutcome` is the owner — and a personal one stored the bare
+     string `'helped'`. Every reader in the product was written against the object, so the
+     divergence was silent and total. The clearest casualty is `_proactiveInsights`, which asks
+     `if (f.outcome && f.outcome.result && ...)` over THESE focuses and has therefore never once
+     fired: the person who did the rarest and most valuable thing in the product — recording how
+     their own commitment actually went — was never told it worked. Driven at 0e09556: record an
+     outcome of `helped`, then read Home and insights, and the recognition is absent.
+
+     The canonical shape is written here now. `_focusOutcome` reads either, because focuses
+     closed before this change are already on disk as strings and rewriting somebody's stored
+     record to fix a reader is a worse trade than reading honestly. */
+  focus.status = 'done';
+  focus.outcome = _focusOutcomeRecord(outcome, userId);
+  focus.resolvedAt = new Date().toISOString();
   _completeFocusAction(code, focus, outcome, userId);
   if (focus.type && outcome !== 'mixed') {
     try { _recordNoticeFeedback(code, focus.type, outcome === 'helped' ? 'useful' : 'dismiss'); } catch (_) {}
@@ -16357,7 +16402,15 @@ function _objectBucket(code, userId, scope = 'self') {
     if (!raw) return;
     const id = String(raw.inquiryId || raw.focusId || raw.id || raw.dedupeKey || '');
     if (!id) return;
+    /* WHOSE COMMITMENT, WHICH ONLY THIS LAYER KNOWS. A group Focus arrives here already carrying
+       the node's name; a personal one does not, and the difference is what makes the card say
+       "You said you would work on this" rather than a hedge about either. */
+    const _groupName = kind === 'focus' ? String(raw.group || extra.group || '') : '';
+    const _mine = kind === 'focus' && !_groupName
+      ? (raw.ownerId ? String(raw.ownerId) === String(userId) : !raw.invited)
+      : true;
     const explained = raw.explained || voice.explainObject({
+      ...(kind === 'focus' ? { groupName: _groupName || null, mine: _mine } : {}),
       // An INQUIRY carries its name in `topic`, not in any of the fields below, so every
       // inquiry fell through to the literal fallback and every card on the bucket page read
       // "Current understanding." present.humanTopic also strips the canonical key.
@@ -16371,8 +16424,14 @@ function _objectBucket(code, userId, scope = 'self') {
     const priority = raw.priority || raw.severity || (raw.confidence || {}).band || 'low';
     // The human reading, so every surface renders from ONE shape instead of each inventing
     // its own from the raw object — which is how two different inquiry cards came to exist.
-    const card = present.inquiryCard({ ...raw, hypothesis: raw.hypothesis || raw.body || raw.text || null,
-      stillUnknown: raw.stillUnknown || [], topic: raw.topic || { label: explained.headline || '' } });
+    /* AND THE CARD ITSELF IS PICKED BY KIND. `inquiryCard` was used for all four, so a Focus —
+       a commitment somebody made, in their own words — was rendered with a confidence band, a
+       standing of "Early thinking" and a status of "Looking into this". The shapes are identical
+       by design, so nothing downstream changes; only the reading does. */
+    const card = kind === 'focus'
+      ? present.focusCard(raw, { mine: _mine, groupName: _groupName || null, now: Date.now() })
+      : present.inquiryCard({ ...raw, hypothesis: raw.hypothesis || raw.body || raw.text || null,
+          stillUnknown: raw.stillUnknown || [], topic: raw.topic || { label: explained.headline || '' } });
     out.push({ id, kind, priority, score: priorityOffice._score(priorityOffice.normalizeItem({ ...raw, kind, priority, id })),
       parked: !!raw.parkedAt, parkedBecause: raw.parkedBecause || null, explained, present: card,
       about: `${kind}:${id}`, scope, raw });
