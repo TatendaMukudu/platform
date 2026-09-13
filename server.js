@@ -39,6 +39,7 @@ const intel      = require('./ai/intelligence');
 const baseline   = require('./ai/baseline');
 const agents     = require('./ai/agents');
 const packs      = require('./ai/packs');
+const language   = require('./ai/language');
 const primitives = require('./ai/primitives');
 const confidence = require('./ai/confidence');
 const proactive  = require('./ai/proactive');
@@ -836,7 +837,41 @@ function _domainDirective(code, opts = {}) {
   let subjectRole = null, avoidGeneric = false;
   if (opts.subjectRole !== undefined) subjectRole = opts.subjectRole;
   else if (opts.userId) ({ subjectRole, avoidGeneric } = _subjectRoleContext(code, opts.userId));
-  return packs.domainDirective(domain, { subjectRole, avoidGenericForSubject: avoidGeneric, concepts: opts.concepts });
+  const vocab = packs.domainDirective(domain, { subjectRole, avoidGenericForSubject: avoidGeneric, concepts: opts.concepts });
+  /* ── AND WHICH LANGUAGE TO ANSWER IN ──────────────────────────────────────────────────────
+     The product had no notion of language anywhere: no preference, no detection, no directive.
+     A person writing in Spanish was answered in English every turn, with nothing in the system
+     having noticed that anything was ignored.
+
+     It rides on this call because this is already the one directive every AI entry point makes,
+     and because language is a property OF PROSE — which is the model's half of the founder's
+     law. Deterministic code decides WHICH language (ai/language.js, model-free, failing closed
+     to null); the model writes in it. `_languageOf` returns null for English and for anything it
+     cannot tell, and `directive` is then empty, so the ordinary path is byte-identical and costs
+     no tokens. */
+  const lang = opts.userId ? _languageOf(code, opts.userId) : null;
+  return [vocab, language.directive(lang)].filter(Boolean).join('\n\n');
+}
+
+/* WHAT LANGUAGE THIS PERSON WRITES IN, remembered rather than re-guessed each turn. A single
+   short message ("ok, thanks") tells you nothing, and re-detecting per turn would make the
+   product switch language mid-conversation on one ambiguous line — which is the exact failure
+   `language.directive` tells the model not to commit. It is recorded when they write something
+   long enough to be evidence, and it stands until they write something else that is.
+
+   Their own words only. What the product said back is not evidence of what they speak. */
+function _languageOf(code, userId) {
+  const mem = userAiProfiles[`${code}:${userId}`];
+  const rec = mem && mem.writesIn;
+  return rec && rec.code ? { code: rec.code, name: language.nameOf(rec.code) || rec.code, confident: true } : null;
+}
+
+function _noteLanguage(code, userId, text) {
+  const found = language.detect(text);
+  if (!found || !found.confident) return null;
+  const mem = _getMemory(code, userId);
+  mem.writesIn = { code: found.code, at: new Date().toISOString() };
+  return found;
 }
 
 /* Audit stamp recorded alongside generated prose so historical outputs remain
@@ -15479,6 +15514,17 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
     parts.push(actionReading.needsClarification);
   }
   let responseText = parts.join(' ');
+  /* ── THE DETERMINISTIC COPY IS ENGLISH, AND SAYS SO ────────────────────────────────────────
+     Everything assembled above is written in this file. It is not model-written, so there is
+     nothing to instruct and it will stay English — which is a limit, not a bug. What WOULD be a
+     bug is a person writing in Spanish receiving an English paragraph with no explanation, which
+     reads as a product that is broken rather than one that is bounded. `language.fallbackNote`
+     is empty for English and for a language we could not tell, so this adds nothing on the
+     ordinary path. The model-written path is unaffected: it receives the language directive and
+     answers in their language. */
+  const _writesIn = _languageOf(code, userId);
+  const _langNote = language.fallbackNote(_writesIn);
+  if (_langNote && responseText) responseText = `${responseText} ${_langNote}`;
   const priorAssistant = [...priorMessages].reverse().find(m => m.role === 'assistant' && m.text);
   if (priorAssistant && responseText.trim() === String(priorAssistant.text).trim()) {
     responseText = actionReading.unavailable
@@ -15612,6 +15658,12 @@ app.post('/api/assistant/turn', requireAuth, async (req, res) => {
   const text = String(req.body?.text || '').trim();
   if (!text) return res.status(400).json({ error: 'text required' });
   if (text.length > 4000) return res.status(400).json({ error: 'too long' });
+  /* WHAT LANGUAGE THEY ARE WRITING IN, noted BEFORE the turn is built rather than after it —
+     otherwise the first message in a new language is always answered in the old one, and a person
+     who switches has to say it twice before the product notices. Their own words only, and only
+     when there are enough of them to be evidence; `_noteLanguage` returns null otherwise and
+     nothing is recorded. */
+  try { _noteLanguage(code, userId, text); } catch (_) {}
   // The active MyWorkspace lens is a BOUNDED context hint (emphasis only, same truth path).
   // An optional workItemId focuses authorised assigned-work context (from clicking a work card).
   // An optional subjectMemberId requests LEADER-SUPPORT context — validated server-side, never
