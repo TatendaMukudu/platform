@@ -110,7 +110,8 @@ const server = app.listen(0, async () => {
        means it cannot be used to probe whether a given id exists. ── */
     const reach = await post('/api/me/focus', p1T, { text: 'Reach across squads', participants: ['out'] });
     ok('FR12 naming somebody outside your contacts is rejected before a focus is written — an invite is not a way to discover people',
-      reach && reach.ok === false);
+      reach && !reach.ok && !reach.focus &&
+      /contact|participant|invite/i.test(reach.error || reach.message || ''));
 
     /* ── FR13: a private focus is still private. The new paths must not have widened the old
        one on their way past. ── */
