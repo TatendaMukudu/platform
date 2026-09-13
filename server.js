@@ -6113,6 +6113,27 @@ app.get('/api/me/focus/:id/source', requireAuth, (req, res) => {
   const want = new Set(focus.source.messageIds || []);
   const all = conv.messages || [];
   const picked = all.filter(m => want.has(String(m.id || m.messageId || '')));
+
+  /* ── FOUR RECENT MESSAGES ARE NOT "THE CONVERSATION THIS CAME FROM" ────────────────────────
+     This fell back to `all.slice(-4)` whenever the pinned messages could not be found, and
+     returned them under the same note as a real answer — so a Focus whose origin had been
+     destroyed by the message cap showed four unrelated recent sentences as its provenance.
+     Driven at a95f006: pin a Focus to the first message of a 501-message thread, take eight more
+     turns, and that is exactly what came back. `exact: false` was the only signal, and no surface
+     is obliged to read it.
+
+     A message something points at is now protected from the cap (see `_compactConversation`), so
+     this should not arise again. It can still arise for a conversation already shortened on disk
+     before that existed, and for one the person edited themselves — and in that case the honest
+     answer is that the referenced part is gone, not a substitute for it. A Focus stands on its
+     own words either way; that is why `available` is separate from `exact`. */
+  if (!picked.length && want.size) {
+    return res.json({ ok: true, available: true, exact: false, focusId: focus.id,
+      conversation: { id: conv.id, title: conv.title, updatedAt: conv.updatedAt },
+      messages: [],
+      note: 'The part of the conversation this came from is no longer in your history, so there is nothing to show you here. The focus stands on its own.' });
+  }
+
   res.json({ ok: true, available: true, focusId: focus.id,
     conversation: { id: conv.id, title: conv.title, updatedAt: conv.updatedAt },
     // The referenced messages, read live from the person's own history. Nothing here was stored
@@ -14136,6 +14157,61 @@ const ASSISTANT_CAP = 60;
 const assistantConversations = {};  // wsKey → [ { id, title, createdAt, updatedAt, messages:[{role,text,at,reasoning,register,provenance}] } ]
 const CONV_CAP = 200;               // max conversations kept per user (generous; effectively "permanent")
 const CONV_MSG_CAP = 400;           // max messages kept per conversation
+
+/* ── A LONG CONVERSATION IS COMPRESSED, NOT TRUNCATED ─────────────────────────────────────────
+   This cap used to be applied with `messages.splice(0, n)` — the oldest messages destroyed, in
+   place, with nothing recorded. Two things were wrong with that, and the second is the serious
+   one.
+
+   FIRST, THE COMMENT ABOVE CLAIMS THE OPPOSITE. "PRIVATE, PERMANENT chat history — kept until
+   the user deletes it." It was not permanent; message 1 of a long thread was deleted by message
+   401, by the product, silently.
+
+   SECOND, AND THIS IS THE DEFECT: A FOCUS POINTS AT ITS MESSAGES. `_personalFocusSource` pins the
+   exact message ids a Focus came out of, and GET /api/me/focus/:id/source resolves them live so
+   that editing or deleting the conversation changes what the Focus shows. Driven at a95f006: pin
+   a Focus to the first message of a 501-message thread, take eight more turns, and the pinned
+   message is gone — and the route then falls back to `all.slice(-4)` and serves FOUR UNRELATED
+   RECENT MESSAGES under the note "Sharing the focus does not share this conversation", as though
+   they were the conversation it came from. The evidence link behind a commitment quietly became
+   four arbitrary sentences.
+
+   THE RULE: A MESSAGE SOMETHING POINTS AT IS NOT SPARE CAPACITY. Eviction takes the oldest
+   UNPINNED messages and stops there; what was dropped is counted and dated on the conversation,
+   so a thread can say it has been shortened instead of just being shorter. No model is involved
+   and none is needed — deterministic code decides what is kept, which is the half of the law that
+   must never depend on a provider being reachable. */
+function _pinnedMessageIds(code, userId, conversationId) {
+  const out = new Set();
+  for (const f of (_getMemory(code, userId).focuses || [])) {
+    if (!f || !f.source || String(f.source.conversationId) !== String(conversationId)) continue;
+    for (const id of (f.source.messageIds || [])) out.add(String(id));
+  }
+  return out;
+}
+
+function _compactConversation(conv, pinned) {
+  const msgs = conv.messages || [];
+  if (msgs.length <= CONV_MSG_CAP) return conv;
+  const keep = [];
+  let dropped = 0, droppedThrough = null;
+  // Oldest first: drop until we are within the cap, but never something that is pointed at.
+  for (let i = 0; i < msgs.length; i++) {
+    const overBy = (msgs.length - dropped) - CONV_MSG_CAP;
+    const m = msgs[i];
+    if (overBy > 0 && !pinned.has(String(m.id || m.messageId || ''))) {
+      dropped++; droppedThrough = m.at || droppedThrough;
+      continue;
+    }
+    keep.push(m);
+  }
+  conv.messages = keep;
+  if (dropped) {
+    conv.compacted = { dropped: (conv.compacted ? conv.compacted.dropped : 0) + dropped,
+      through: droppedThrough || (conv.compacted || {}).through || null, at: new Date().toISOString() };
+  }
+  return conv;
+}
 function _assistantConvs(key) { return assistantConversations[key] || (assistantConversations[key] = []); }
 function _convTitle(t) { const s = String(t || '').trim().replace(/\s+/g, ' '); return s.length > 60 ? s.slice(0, 57) + '…' : (s || 'New conversation'); }
 /* ── THE LIBRARY — one organised home for what a person keeps ─────────────────
@@ -15512,7 +15588,7 @@ async function _assistantTurn(code, userId, text, lens, opts = {}) {
        needs, stored rather than recomposed by a browser. */
     speech: response.speech || '',
     sources: response.sources || [] });
-  if (_conv.messages.length > CONV_MSG_CAP) _conv.messages.splice(0, _conv.messages.length - CONV_MSG_CAP);
+  _compactConversation(_conv, _pinnedMessageIds(code, userId, _conv.id));
   _conv.updatedAt = _nowIso;
   scheduleSave();
   // THE EARS, last and unawaited. Understanding the turn must never delay answering it — this
