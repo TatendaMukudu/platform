@@ -1,7 +1,7 @@
 # IntelliQ — architecture index
 
 **The one page.** If you read nothing else, read §1. Everything below it is navigation.
-**Written against:** `9bb38b0f26b6c3cd60ba63bec3c429f0f8c972a4`. **Branch:** `codex/pilot-recovery-gate-r7`.
+**Written against:** `9bb38b0f26b6c3cd60ba63bec3c429f0f8c972a4`. **Branch:** `claude/platform-work-summary-nmb0cm`.
 **Pilot work lands through** `claude/pilot-*` branches; §10 records what has merged since `f844c3a`.
 **Freshness is asserted** by `scripts/docs-status-smoke.js` — a stale index sends an agent confidently toward duplicate work, which has already happened twice.
 
