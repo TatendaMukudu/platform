@@ -3150,11 +3150,29 @@ function _addTreeNode(code, { name, parentId = null, description = '' } = {}) {
   return { node: orgNodes[code][nodeId], already: false };
 }
 
-app.post('/api/tree/node', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
+/* ── THE TREE ROUTES ASK THE TREE'S OWNER ────────────────────────────────────────────────────
+   These three were `requirePermission('manage_tree')` — an org-wide switch — while
+   `/api/groups/*` wrote the same `orgNodes` store behind a bare `_isLeader`. Two doors into one
+   structure with two different locks, and the weaker one decided.
+
+   They now ask `_canManageNode`, which STILL returns true for `manage_tree` and for a superadmin,
+   so nothing an administrator could do has been taken away. What it adds is the case the product
+   law requires and the permission could not express: a leader assigned to a department may build
+   and staff that department without being handed authority over the whole organisation. The
+   answer is per node, so it is also the answer the browser can honestly mirror. */
+app.post('/api/tree/node', requireAuth, _serializeTreeMutation, async (req, res) => {
   const code = req.iqSession.orgCode;
   const { name, parentId, description, ifRev } = req.body;
   const parent = parentId ? orgNodes[code]?.[parentId] : null;
   if (parentId && !parent) return res.status(404).json({ error: 'Parent node not found' });
+  /* A NEW NODE IS CREATED SOMEWHERE, and where decides who may create it: inside a parent you
+     manage, or — with no parent at all — as a new top-level branch, which is an administrator's
+     act. A department head builds inside their department; they do not add one beside it. */
+  if (!_canManageNode(code, req.iqSession.userId, parentId || null)) {
+    return res.status(403).json({ error: parentId
+      ? 'You can only add a node inside a part of the organisation you lead.'
+      : 'Only an administrator can add a new top-level part of the organisation.' });
+  }
   if (parent && !_treePrecondition(res, parent, ifRev)) return;
 
   const snapshot = JSON.parse(JSON.stringify(orgNodes[code] || {}));
@@ -3165,14 +3183,49 @@ app.post('/api/tree/node', requirePermission('manage_tree'), _serializeTreeMutat
   res.json({ ok: true, node: made.node });
 });
 
-app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
+app.put('/api/tree/node/:nodeId', requireAuth, _serializeTreeMutation, async (req, res) => {
   const code   = req.iqSession.orgCode;
   const nodeId = req.params.nodeId;
   const node   = orgNodes[code]?.[nodeId];
   if (!node) return res.status(404).json({ error: 'Node not found' });
+  if (!_canManageNode(code, req.iqSession.userId, nodeId)) {
+    return res.status(403).json({ error: 'You can only change a part of the organisation you lead.' });
+  }
+  /* REPARENTING IS NOT AN EDIT OF THIS NODE. It changes where this node hangs, which is a
+     statement about the tree ABOVE it — so it needs authority over the place it is leaving and
+     the place it is going, not only over the thing being moved. Without this a leader could
+     reparent the node they lead onto any node they also lead, or out from under their superior. */
+  const _wantParent = req.body.parentId;
+  if (_wantParent !== undefined && _wantParent !== node.parentId) {
+    if (!_canManageNode(code, req.iqSession.userId, node.parentId || null)
+        || !_canManageNode(code, req.iqSession.userId, _wantParent || null)) {
+      return res.status(403).json({
+        error: 'Moving a node needs authority over where it is now and where it is going.' });
+    }
+  }
   if (!_treePrecondition(res, node, req.body.ifRev)) return;
   const snapshot = JSON.parse(JSON.stringify(orgNodes[code]));
   const { name, description, parentId, memberIds, leaderIds } = req.body;
+
+  /* ── THE ADMINISTRATOR'S DOOR OBEYS THE SAME ANCHOR LAW AS THE OTHER ONE ─────────────────────
+     `manage_tree` is a delegable per-user permission, not a role: an organisation can hand it to
+     a department head so they can build their own structure. It therefore cannot be treated as
+     "this person is an administrator, let them do anything" — the same person could name
+     themselves the leader of the node above their own and walk up the tree one grant at a time.
+     A superadmin reassigning anybody, including themselves, is a legitimate administrative act
+     and passes; everybody else may shape the tree without changing where THEY sit in it. */
+  const _me = req.iqSession.userId;
+  if ((orgUsers[code] || {})[_me]?.role !== 'superadmin') {
+    const wasM = (node.memberIds || []).map(String).includes(String(_me));
+    const wasL = (node.leaderIds || []).map(String).includes(String(_me));
+    const willM = memberIds === undefined ? wasM : (memberIds || []).map(String).includes(String(_me));
+    const willL = leaderIds === undefined ? wasL : (leaderIds || []).map(String).includes(String(_me));
+    if (willM !== wasM || willL !== wasL) {
+      return res.status(403).json({
+        error: 'You cannot change your own placement in the organisation. Ask an administrator.' });
+    }
+  }
+
   const now = new Date().toISOString();
   if (name        !== undefined) node.name        = name.trim();
   if (description !== undefined) node.description = description.trim();
@@ -3208,11 +3261,23 @@ app.put('/api/tree/node/:nodeId', requirePermission('manage_tree'), _serializeTr
   res.json({ ok: true, node });
 });
 
-app.delete('/api/tree/node/:nodeId', requirePermission('manage_tree'), _serializeTreeMutation, async (req, res) => {
+app.delete('/api/tree/node/:nodeId', requireAuth, _serializeTreeMutation, async (req, res) => {
   const code   = req.iqSession.orgCode;
   const nodeId = req.params.nodeId;
   const node   = orgNodes[code]?.[nodeId];
   if (!node) return res.status(404).json({ error: 'Node not found' });
+  if (!_canManageNode(code, req.iqSession.userId, nodeId)) {
+    return res.status(403).json({ error: 'You can only remove a part of the organisation you lead.' });
+  }
+  /* AND NOT THE NODE THAT MAKES YOU A LEADER. Deleting the node you lead removes your own anchor
+     and reparents its children upward past you — an anchor change dressed as a tidy-up, and the
+     one deletion the person doing it can never be a neutral party to. An administrator may. */
+  if (_ledNodeIds(code, req.iqSession.userId).has(nodeId)
+      && (orgUsers[code] || {})[req.iqSession.userId]?.role !== 'superadmin'
+      && !_userHasPerm(code, req.iqSession.userId, 'manage_tree')) {
+    return res.status(403).json({
+      error: 'You cannot remove the part of the organisation you lead. Ask an administrator.' });
+  }
   if (!_treePrecondition(res, node, req.body.ifRev)) return;
   const snapshot = JSON.parse(JSON.stringify(orgNodes[code]));
   const now = new Date().toISOString();
@@ -3284,12 +3349,94 @@ function _isLeader(orgCode, userId) {
 
 /* A user leads via hierarchy if any node they belong to (member or leader) has
    at least one sub-node beneath it — their tier sits above another. */
+/* BEING IN A ROOM IS NOT RUNNING IT.
+
+   REPRODUCED at head cdf2a79, and it is a complete privilege escalation with no administrator
+   anywhere in it. This function used to read:
+
+       for (const nid of getUserNodeIds(orgCode, userId))      // nodes they are IN, member OR leader
+         if ((nodes[nid]?.childNodeIds || []).length) return true;
+
+   `getUserNodeIds` returns nodes a person BELONGS to. So an ordinary member of any node that
+   happened to have a child node was reported as a leader — and `_isLeader` feeds
+   `_effectivePermissions`, so they silently received LEADER_GRANTS: view_members, view_team,
+   review_checkins, view_insights, assign_scenarios, view_reports. The whole member directory and
+   other people's check-ins, granted by the shape of the tree above them.
+
+   It did not stop there. `_isLeader` also gates `/api/groups/*`, and those routes write into
+   `orgNodes` through `_upsertGroupNode` — so the same ordinary member could CREATE org nodes and
+   EDIT ANY NODE IN THE ORGANISATION, including an unrelated subtree, setting its leaderIds to
+   themselves. Driven: a member of `alpha` made themselves the leader of `beta`.
+
+   The narrowing is the whole fix: a person leads via hierarchy when a node THEY LEAD has children.
+   That is already true by clause 1 of `_isLeader` — leading any node at all makes you a leader —
+   so this predicate is now honestly redundant and says so rather than pretending to add a case.
+   It is kept as a named function because `_isLeader` reads as a list of the ways leadership can be
+   recorded, and deleting one silently would leave a reader wondering which of the three it was. */
 function _leadsViaHierarchy(orgCode, userId) {
-  const nodes = orgNodes[orgCode] || {};
-  for (const nid of getUserNodeIds(orgCode, userId)) {
-    if ((nodes[nid]?.childNodeIds || []).length) return true;
+  return _ledNodeIds(orgCode, userId).size > 0;
+}
+
+/* WHICH NODES DOES THIS PERSON ACTUALLY LEAD. Leadership is recorded in two places by history —
+   on the node (`leaderIds`) and on the user (`leadershipNodeIds`) — and both are read here so a
+   caller never has to remember there are two. Membership is deliberately NOT consulted. */
+function _ledNodeIds(orgCode, userId) {
+  const out = new Set(((orgUsers[orgCode] || {})[userId] || {}).leadershipNodeIds || []);
+  for (const n of Object.values(orgNodes[orgCode] || {})) {
+    if (n && (n.leaderIds || []).includes(userId)) out.add(n.nodeId);
+  }
+  return out;
+}
+
+/* ── THE ONE OWNER OF "MAY THIS PERSON MANAGE THIS NODE" ─────────────────────────────────────
+   Every route that can move a person, rename a node, create a child, or change who leads
+   something asks this and nothing else. Before it existed the answer was spread across
+   `requirePermission('manage_tree')` on the tree routes, a bare `_isLeader` on the group routes,
+   and `canManage || true` in the browser — three answers to one question, and the loosest of them
+   won because it belonged to the routes nobody had audited.
+
+   THE PRODUCT LAW, in the order it is applied:
+
+     · A superadmin of THIS organisation may manage any node in it.
+     · So may anybody explicitly granted `manage_tree` — that is what the permission means.
+     · An ASSIGNED LEADER may manage the node they lead and everything BENEATH it. Downward only:
+       not their own parent, not a sibling, not an unrelated subtree.
+     · Everybody else, no. Including a member of a node that has children.
+
+   It answers about a NODE, not about an anchor. Changing where somebody is ANCHORED is a
+   different question with a different answer — see `_mayChangeAnchor` — because a leader may
+   legitimately manage their own node's membership while still being forbidden to move themselves
+   within it. Folding the two together is how "manage the subtree" quietly becomes "promote
+   yourself inside it". */
+function _canManageNode(code, actorId, nodeId) {
+  const actor = (orgUsers[code] || {})[actorId];
+  if (!_personPresent(actor)) return false;                 // fail closed on absent or unavailable
+  if (actor.role === 'superadmin') return true;
+  if (_userHasPerm(code, actorId, 'manage_tree')) return true;
+  if (!nodeId || !(orgNodes[code] || {})[nodeId]) return false;
+  for (const led of _ledNodeIds(code, actorId)) {
+    // getDescendantNodeIds includes the root itself, which is correct: a leader manages the node
+    // they lead as well as what hangs under it.
+    if (getDescendantNodeIds(code, led).includes(nodeId)) return true;
   }
   return false;
+}
+
+/* ── AND WHO MAY CHANGE WHERE SOMEBODY IS ANCHORED ───────────────────────────────────────────
+   "A person's own org-tree placement is their authoritative anchor" — so moving it is not an
+   ordinary edit, and nobody moves their own, ever. A leader running a department may add and
+   remove the people under them; they may not write themselves into a different department, and
+   they may not promote themselves to lead it. Only an authorised superior — somebody whose own
+   leadership covers the node in question — or a superadmin may do that.
+
+   `actorId === subjectId` is refused BEFORE authority is considered, deliberately. A superadmin
+   changing their own placement is a legitimate administrative act and goes through the tree
+   routes as an administrator; what this forbids is the self-service shortcut, which the product
+   law says must be a request-and-approval flow rather than a direct canonical mutation. */
+function _mayChangeAnchor(code, actorId, subjectId, nodeId) {
+  if (!actorId || !subjectId) return false;
+  if (String(actorId) === String(subjectId)) return false;   // never your own, by any route
+  return _canManageNode(code, actorId, nodeId);
 }
 
 /* ── _effectivePermissions — single source of truth for what a user can do ────
@@ -20048,13 +20195,41 @@ function groupId() { return 'grp_' + generateId(); }
 /* ── Create group ─────────────────────────────────────────────────────────── */
 app.post('/api/groups/create', requireAuth, (req, res) => {
   const code = req.iqSession.orgCode;
-  const { name, description, memberIds, leadIds } = req.body;
+  const me = req.iqSession.userId;
+  const { name, description, memberIds, leadIds, parentId } = req.body;
   if (!name) return res.status(400).json({ error: 'name required' });
-  if (!_isLeader(code, req.iqSession.userId) && orgUsers[code]?.[req.iqSession.userId]?.role !== 'superadmin') {
-    return res.status(403).json({ error: 'Only a leader can create groups.' });
+  /* ── THIS ROUTE WRITES THE ORG TREE, so it answers to the tree's owner ───────────────────────
+     `_upsertGroupNode` puts what this creates into `orgNodes`. It is not a lighter-weight sibling
+     of the tree routes; it is a second door into the same structure, and it was guarded by a bare
+     `_isLeader` — "does this person lead ANYTHING" — while the front door required `manage_tree`.
+
+     A NEW NODE IS CREATED SOMEWHERE, and where decides who may create it. Under a parent: the
+     creator must manage that parent, which is downward authority doing exactly what the law
+     allows. With no parent at all it is a new top-level branch of the organisation, which is an
+     administrator's act — a department head may build inside their department without being able
+     to add a department beside it. */
+  if (parentId) {
+    if (!(orgNodes[code] || {})[parentId]) return res.status(404).json({ error: 'no such parent node' });
+    if (!_canManageNode(code, me, parentId)) {
+      return res.status(403).json({ error: 'You can only create a group inside a part of the organisation you lead.' });
+    }
+  } else if (!_canManageNode(code, me, null)) {
+    return res.status(403).json({ error: 'Only an administrator can add a new top-level part of the organisation.' });
   }
-  const group = { id: groupId(), name, description: description || '', memberIds: memberIds || [], leadIds: leadIds || [], goals: [], traits: [], copilotEnabled: false, createdAt: new Date().toISOString() };
+  /* AND YOU MAY NOT WRITE YOURSELF A PROMOTION ON THE WAY IN. Creating a node you will lead is
+     ordinary when you already hold the authority that let you create it; naming yourself the
+     leader of something you could not otherwise have touched is self-promotion with extra steps. */
+  const wantLeads = Array.isArray(leadIds) ? leadIds.map(String) : [];
+  if (wantLeads.includes(String(me)) && !(parentId ? _canManageNode(code, me, parentId) : false)
+      && !_canManageNode(code, me, null)) {
+    return res.status(403).json({ error: 'You cannot make yourself the leader of a new group.' });
+  }
+  const group = { id: groupId(), name, description: description || '', memberIds: memberIds || [], leadIds: leadIds || [], goals: [], traits: [], copilotEnabled: false, createdAt: new Date().toISOString(), ...(parentId ? { parentId } : {}) };
   _upsertGroupNode(code, group);
+  if (parentId && (orgNodes[code] || {})[parentId]) {
+    const p = orgNodes[code][parentId];
+    p.childNodeIds = [...new Set([...(p.childNodeIds || []), group.id])];
+  }
   scheduleSave();
   res.json({ ok: true, group });
 });
@@ -20073,13 +20248,39 @@ app.get('/api/groups', requireAuth, (req, res) => {
 /* ── Update group ────────────────────────────────────────────────────────── */
 app.put('/api/groups/:groupId', requireAuth, (req, res) => {
   const code = req.iqSession.orgCode;
+  const me   = req.iqSession.userId;
   const { name, description, memberIds, leadIds } = req.body;
-  if (!_isLeader(code, req.iqSession.userId) && orgUsers[code]?.[req.iqSession.userId]?.role !== 'superadmin') {
-    return res.status(403).json({ error: 'Only a leader can edit groups.' });
-  }
   const groups = _groups(code);   // scoped to the caller's own org — never another's
   const g      = groups.find(g => g.id === req.params.groupId);
   if (!g) return res.status(404).json({ error: 'Group not found' });
+
+  /* ── AUTHORITY IS ABOUT THIS NODE, NOT ABOUT LEADING SOMETHING SOMEWHERE ─────────────────────
+     This asked `_isLeader(code, userId)` — "does this person lead ANYTHING in the organisation" —
+     and then let them rewrite whichever node they had named. So any leader could edit any node:
+     sideways, upward, into an unrelated subtree. Combined with `_leadsViaHierarchy` treating a
+     member of a node-with-children as a leader, an ordinary member could do it. Driven at head
+     cdf2a79: a member of `alpha` set `beta`'s leaders to themselves.
+
+     One question, one owner, asked about the node actually being changed. */
+  if (!_canManageNode(code, me, g.id)) {
+    return res.status(403).json({ error: 'You can only change a part of the organisation you lead.' });
+  }
+
+  /* ── AND NOT YOUR OWN PLACEMENT, WHICHEVER DIRECTION IT MOVES ────────────────────────────────
+     A leader running a department may add and remove the people under them. They may not write
+     themselves into it, out of it, or up to lead it — that is an anchor change, and an anchor is
+     changed by an authorised superior or an administrator, never by its owner. The comparison is
+     against what the node holds NOW, so a request that simply leaves the actor where they already
+     are is not treated as a move. */
+  const wasMember = (g.memberIds || []).map(String).includes(String(me));
+  const wasLead   = (g.leadIds   || []).map(String).includes(String(me));
+  const willMember = memberIds === undefined ? wasMember : (memberIds || []).map(String).includes(String(me));
+  const willLead   = leadIds   === undefined ? wasLead   : (leadIds   || []).map(String).includes(String(me));
+  if ((willMember !== wasMember || willLead !== wasLead) && !_mayChangeAnchor(code, me, me, g.id)) {
+    return res.status(403).json({
+      error: 'You cannot change your own placement. Ask somebody who leads this part of the organisation.' });
+  }
+
   if (name        !== undefined) g.name        = name;
   if (description !== undefined) g.description = description;
   if (memberIds   !== undefined) g.memberIds   = memberIds;
@@ -23989,6 +24190,10 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   // record), and so the one-way context can be asserted as BEHAVIOUR rather than as source shape.
   _forumAudience, _forumContext, _speechFor,
   _inNode, _leadsNode, forumThreads, _forumThread,
+  // exported for the truth layer: the ONE owner of org-tree authority, plus the two it is built
+  // from, so a suite can assert the law directly and mutate the production function rather than
+  // a copy of its rules.
+  _canManageNode, _mayChangeAnchor, _ledNodeIds, _isLeader, userPermissions,
   raises, _raises, _ladderFor, _admitLeaderRead,
   // exported for the truth layer: attached material, whether it landed, and the graphs
   materials, materialEngage, _materials, _engageOf, _materialCohort, _allObjectsFor, _objectsWithEvidenceFor, _chartFor, _materialContext,
