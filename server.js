@@ -880,13 +880,57 @@ function verifyToken(tokenStr) {
   return s;
 }
 
-// Middleware — applied to endpoints that expose aggregate org data
-function requireAuth(req, res, next) {
+/* ── WHO IS ASKING, RIGHT NOW ────────────────────────────────────────────────────────────────
+   A session is a record of who signed in. It is NOT a record of who they still are.
+
+   REPRODUCED through the real routes: issue a token to an active member, set their account to
+   `inactive`, and `GET /api/contacts` still answered 200. Same for `suspended`. And worse —
+   DELETE the account outright and it still answered 200, because `requireAuth` never resolved
+   the user at all. A token was, in effect, a bearer capability that outlived the person.
+
+   `requirePermission` was already better than this: it resolved the current user and read the
+   current role, so a role DOWNGRADE was already refused correctly (driven: admin writes a metric,
+   role set to member, the same token gets 403). That half of the finding is REFUTED, and it is
+   worth saying so rather than claiming a fix for something that already worked. What neither
+   middleware did was ask whether the account was still AVAILABLE.
+
+   ONE OWNER, and this is it. Both middlewares call `_authoriseRequest`, so there is exactly one
+   place that decides "is this request from somebody who currently exists here". A second copy is
+   how the two drift, which is the defect this whole engagement keeps finding.
+
+   THE TENANT IS THE SESSION'S, NEVER THE CALLER'S. The lookup is `orgUsers[session.orgCode]`,
+   full stop — so a user id that exists in two tenants resolves to the one the token was issued
+   for and can never authenticate against the other.
+
+   PRESENCE USES THE CANONICAL RULE, `_personPresent`: present unless the record says otherwise.
+   That is an allowlist, so an unrecognised future status fails CLOSED (AGENTS.md invariant 7),
+   and an account written before the field existed still works.
+
+   THE ROLE IS RE-READ, NOT REMEMBERED. `req.iqSession` is a per-request view carrying the role
+   the store holds NOW, so the five places that read `iqSession.role` get the current answer
+   without each having to remember to look it up. The stored session is not mutated: a read path
+   that writes is a read path that can corrupt what it is reading. */
+function _authoriseRequest(req) {
   const header = (req.headers.authorization || '').replace('Bearer ', '').trim();
   const token  = header || req.query.token || req.body?.token;
   const session = verifyToken(token);
-  if (!session) return res.status(401).json({ error: 'Authentication required. Please log in again.' });
-  req.iqSession = session;
+  if (!session) return { ok: false, status: 401, error: 'Authentication required. Please log in again.' };
+
+  const user = (orgUsers[session.orgCode] || {})[session.userId];
+  if (!_personPresent(user)) {
+    /* ONE MESSAGE FOR BOTH "gone" AND "never here". Distinguishing them would tell an attacker
+       holding a stale token whether the account still exists, which is a fact they are not
+       entitled to and cannot act on anyway. */
+    return { ok: false, status: 401, error: 'This account is no longer active. Please log in again.' };
+  }
+  return { ok: true, session: { ...session, role: user.role }, user };
+}
+
+// Middleware — applied to endpoints that expose aggregate org data
+function requireAuth(req, res, next) {
+  const a = _authoriseRequest(req);
+  if (!a.ok) return res.status(a.status).json({ error: a.error });
+  req.iqSession = a.session;
   next();
 }
 
@@ -2225,14 +2269,17 @@ function _resolveRoleDefaults(role) {
 /* ── Permission middleware factory ──────────────────────────────────────── */
 function requirePermission(perm) {
   return (req, res, next) => {
-    const header  = (req.headers.authorization || '').replace('Bearer ', '').trim();
-    const session = verifyToken(header || req.query.token);
-    if (!session) return res.status(401).json({ error: 'Authentication required.' });
+    /* THE SAME OWNER as requireAuth — see `_authoriseRequest`. This used to resolve the user
+       itself, which was very nearly right: it read the CURRENT role, so a downgrade was already
+       refused. What it did not ask was whether the account was still available, so an `inactive`
+       admin kept administrative authority for the life of their token. Routing both middlewares
+       through one function means that question is asked once, in one place, for every
+       authenticated request in the product. */
+    const a = _authoriseRequest(req);
+    if (!a.ok) return res.status(a.status).json({ error: a.error });
+    const { session, user } = a;
 
-    const user = orgUsers[session.orgCode]?.[session.userId];
-    if (!user) return res.status(401).json({ error: 'User not found.' });
-
-    // SuperAdmin bypasses all permission checks
+    // SuperAdmin bypasses all permission checks — read from the CURRENT record, not the token.
     if (user.role === 'superadmin') { req.iqSession = session; return next(); }
 
     const allowed = _effectivePermissions(session.orgCode, session.userId)[perm] === true;
