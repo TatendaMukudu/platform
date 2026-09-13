@@ -12718,7 +12718,10 @@ app.post('/api/org-context/preview', requireAuth, (req, res) => {
     const b = req.body || {};
     let proposals = [];
     if (typeof b.text === 'string' && b.text.trim()) {
-      const ex = orgContext.extract(b.text, { now: Date.now() });
+      /* THE ORGANISATION'S OWN WORDS REACH THE EXTRACTOR. Without the vocabulary it fell back
+         to a hard-coded set in which every occasion was a football fixture or, failing that,
+         "Default" — a machine word in the one sentence a person reads before confirming. */
+      const ex = orgContext.extract(b.text, { now: Date.now(), vocab: _resolvedDomain(code).vocab });
       if (ex.blocked) return res.json({ ok: false, blocked: ex.blocked, message: 'That describes private or sensitive information — it cannot become an operating rule.', proposals: [], preview: null });
       proposals = ex.proposals; var warnings = ex.warnings;
     } else if (Array.isArray(b.records)) {
