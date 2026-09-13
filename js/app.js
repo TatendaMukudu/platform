@@ -12111,6 +12111,94 @@ const MemberApp = {
     if (card) this._focusPeopleSummary(card.id);
   },
 
+  /* ── WHO CAN SEE THIS — the door for POST /api/me/objects/:kind/:id/audience ─────────────────
+     Three of the four kinds had no way to answer this at all: a High, a Low and a personal
+     Inquiry were private with no control anywhere, so the one thing the product most wants a
+     member to do — let their coach see what they have noticed about themselves — could not be
+     done. A Focus could, through a different sheet, and that sheet's contact picker is reused
+     here rather than copied: two pickers is how two ideas of "who can I reach" come to exist.
+
+     THE SERVER DECIDES AND THIS REPORTS IT. Nothing here computes an audience; it collects a
+     choice, sends it, and prints the sentence that comes back. A refusal — naming somebody out of
+     reach, or trying to re-aim an object that is not yours — is shown in the server's own words,
+     because a second explanation written here would be a second copy of the rule. */
+  async openAudience(kind, objectId) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const box = document.getElementById('iqt-related') || document.getElementById('iq-object-turns');
+    if (!box) return;
+    const id = 'iq-aud-sheet';
+    box.insertAdjacentHTML('beforebegin', `
+      <div class="iq-focusprop" id="${id}" role="group" aria-label="Who can see this">
+        <div class="iq-focus-label">Who can see this</div>
+        <div class="iq-fp-aud">
+          <button type="button" class="iq-make-chip is-on" data-mode="self"
+            onclick="MemberApp._audMode('${id}','self',this)">Only me</button>
+          <button type="button" class="iq-make-chip" data-mode="node_leaders"
+            onclick="MemberApp._audMode('${id}','node_leaders',this)">Whoever leads a group I am in</button>
+          <button type="button" class="iq-make-chip" data-mode="named_people"
+            onclick="MemberApp._audMode('${id}','named_people',this)">People I choose</button>
+        </div>
+        <div class="iq-focus-people" id="${id}-people" hidden></div>
+        <div class="iq-focus-who" id="${id}-who" role="status" aria-live="polite">Only you can see this.</div>
+        <div class="iq-proposal-actions">
+          <button type="button" class="btn-primary btn-sm"
+            onclick="MemberApp._saveAudience('${id}','${esc(kind)}','${esc(objectId)}')">Save</button>
+          <button type="button" class="btn-ghost btn-sm"
+            onclick="(function(e){e&&e.remove();})(document.getElementById('${id}'))">Cancel</button>
+        </div>
+      </div>`);
+    this._audMode(id, 'self', document.querySelector(`#${id} [data-mode="self"]`));
+  },
+
+  _audMode(id, mode, btn) {
+    this._audModes = this._audModes || {};
+    this._audModes[id] = mode;
+    const sheet = document.getElementById(id);
+    if (!sheet) return;
+    sheet.querySelectorAll('.iq-fp-aud .iq-make-chip').forEach(b => b.classList.remove('is-on'));
+    if (btn) btn.classList.add('is-on');
+    const people = document.getElementById(id + '-people');
+    const who = document.getElementById(id + '-who');
+    if (people) {
+      people.hidden = mode !== 'named_people';
+      if (mode === 'named_people') this._loadContacts(id, people);
+    }
+    if (who) {
+      who.textContent = mode === 'self' ? 'Only you can see this.'
+        : mode === 'node_leaders' ? 'Whoever leads a group you are in will be able to see this. Your squad will not.'
+        : 'Only the people you choose will be able to see this.';
+    }
+  },
+
+  async _saveAudience(id, kind, objectId) {
+    const esc = s => this._escape(String(s == null ? '' : s));
+    const who = document.getElementById(id + '-who');
+    const tell = m => { if (who) who.textContent = m; };
+    const mode = (this._audModes || {})[id] || 'self';
+    const picked = [...document.querySelectorAll(`#${id}-people .iq-contact.is-on`)].map(b => b.dataset.uid);
+    if (mode === 'named_people' && !picked.length) { tell('Choose at least one person, or switch back to Only me.'); return; }
+    tell('Saving…');
+    try {
+      /* `share: true` is how this client has always asked for "whoever leads a group I am in" —
+         see the focus sheet. Writing the visibility string here instead would be a second way to
+         say the same thing, which is the exact shape library-door-smoke L3b exists to forbid: a
+         quieter rule beside the governed audiences. The server's resolver owns the mapping. */
+      const body = mode === 'named_people' ? { participants: picked, share: false }
+        : mode === 'node_leaders' ? { share: true, participants: [] }
+        : { share: false, participants: [] };
+      const r = await fetch(`/api/me/objects/${encodeURIComponent(kind)}/${encodeURIComponent(objectId)}/audience`,
+        { method: 'POST', headers: this._authHeaders(), body: JSON.stringify(body) });
+      const j = await r.json().catch(() => null);
+      if (!r.ok || !j || !j.ok) { tell((j && j.error) || `That did not save — the server said ${r.status}.`); return; }
+      tell(j.note || 'Saved.');
+      // The Forum appears or disappears with the audience, so the thread is re-read rather than
+      // patched here — the server is the one that knows whether there is a room now.
+      setTimeout(() => this.openObjectThread(kind, objectId), 900);
+    } catch (e) {
+      tell(`That did not save — ${(e && e.message) || 'unknown problem'}.`);
+    }
+  },
+
   _cancelFocus(id) {
     const f = document.getElementById(id);
     const row = f && f.closest('.iq-make-row');
@@ -12379,6 +12467,20 @@ const MemberApp = {
             }" title="Open forum" onclick="MemberApp.beginObjectAction('discuss_with_group','${esc(kind)}','${esc(objectId)}')">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
             </button>` : ''}
+            ${/* WHO CAN SEE THIS. A person's own object was private with no way to say otherwise
+                  for three of the four kinds, so the one thing the product most wants somebody to
+                  do — let their coach see what they have noticed about themselves — had no
+                  control anywhere. It sits beside the Forum deliberately: the room exists because
+                  of who is in it, and both answers come from the same server-side owner.
+
+                  Only on something that is YOURS. A group's High is not one person's to give
+                  away, and an object somebody shared WITH you is not yours to pass on — both are
+                  refused by the route, and offering a control that will 403 is its own small lie. */''}
+            ${(data.whoseNodeId || data.invited || (data.ownerId && data.ownerId !== (Auth.currentUser || {}).id)) ? '' : `
+              <button type="button" class="iqt-forum" aria-label="Choose who can see this"
+                title="Who can see this" onclick="MemberApp.openAudience('${esc(kind)}','${esc(objectId)}')">
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              </button>`}
 
           </div>
           ${body}

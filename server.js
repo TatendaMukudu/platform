@@ -228,7 +228,7 @@ function _persistedStores() {
     reasonLedger, selfModelLedger, auditLog, deliveryPrefs, pushSubs, inquiryDismissed,
     conversationSessions, assistantConversations, libraryFolders, libraryItems, shelfFilings, safeguardingFlags,
     inquiryStates, groupCandidates, forumThreads, teamFocuses, raises,
-    materials, materialEngage,
+    materials, materialEngage, objectAudiences,
   };
 }
 
@@ -6220,6 +6220,95 @@ app.post('/api/me/focus/:id/visibility', requireAuth, (req, res) => {
     note: want === 'shared' ? 'Shared — leaders of your groups can see it now.' : 'Private again — only you.' });
 });
 
+/* POST /api/me/objects/:kind/:id/audience — CHOOSE WHO SEES IT, for all four kinds.
+
+   Before this, a Focus could be kept private, shared with whoever leads your groups, or opened to
+   named people — and a High, a Low and a personal Inquiry could be none of those. The one thing
+   the product most wants a member to do is volunteer what they have noticed about themselves, and
+   there was no way to say who should see it.
+
+   A FOCUS STILL GOES THROUGH ITS OWN OWNER. Its audience lives on the Focus record and
+   `_updatePersonalFocus` writes it; routing it through the store below would give one object two
+   audiences that could disagree. The other three are read models with no record to write on, so
+   the choice is held beside them, resolved by the same `_resolvePersonalAudience` and read by the
+   same `_forumAudience`.
+
+   The object must be one the caller can actually see, resolved through their own bucket on every
+   request — so this cannot be used to assert an audience over somebody else's object, or over one
+   that has since gone. */
+app.post('/api/me/objects/:kind/:id/audience', requireAuth, (req, res) => {
+  const { orgCode: code, userId } = req.iqSession;
+  const kind = String(req.params.kind || '');
+  const id   = String(req.params.id || '');
+  if (!['inquiry', 'focus', 'high', 'low'].includes(kind)) {
+    return res.status(400).json({ error: 'that is not a kind of thing you can share' });
+  }
+
+  /* ── IT HAS TO BE YOURS, AND IT HAS TO STILL EXIST — ASKED BEFORE ANY KIND IS BRANCHED ON ───
+     `_allObjectsFor` is the same privacy-merged read every other surface resolves an object
+     through, so nothing here invents a second answer to "may this person see this". These two
+     refusals apply to all four kinds: the first draft asked them only after the Focus branch had
+     already delegated, so a member re-aiming their squad's Focus got "not found" — true from
+     inside `_updatePersonalFocus`, and the wrong reason. */
+  const found = (_allObjectsFor(code, userId) || [])
+    .find(o => o && o.kind === kind && String(o.id) === id);
+  if (!found) return res.status(404).json({ error: 'not found' });
+
+  const rawFound = found.raw || {};
+  if (found.whoseNodeId || rawFound.nodeId) {
+    return res.status(403).json({ error: 'This belongs to a group, so it is not yours alone to share.' });
+  }
+  /* SHARING IS ONE-WAY, AND ONLY THE OWNER DOES IT.
+     Driven while building this: once somebody shared a High with a teammate, the teammate could
+     open it — correctly — and then share it onward to a leader, because `_allObjectsFor` found it
+     for them and the object was theirs to see, 200. Being shown something is not being given it.
+     A person who tells one teammate something has not told their coach, and a product that lets
+     the second happen has made the first a lie. */
+  if (rawFound.invited === true
+      || (rawFound.ownerId != null && String(rawFound.ownerId) !== String(userId))) {
+    return res.status(403).json({
+      error: 'This was shared with you. Only the person whose it is can decide who else sees it.' });
+  }
+
+  /* A FOCUS KEEPS ITS OWN OWNER. Its audience lives on the Focus record and `_updatePersonalFocus`
+     writes it; putting it in the store below as well would give one object two audiences that
+     could disagree, which is the second-system failure this whole change exists to avoid. */
+  if (kind === 'focus') {
+    const result = _updatePersonalFocus(code, userId, id, {
+      ...(req.body || {}), participantIds: (req.body || {}).participants,
+    }, { strictAudience: true });
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    const named = (result.focus.participants || []).filter(p => String(p) !== String(userId));
+    return res.json({ ok: true, kind, id, visibility: result.focus.visibility,
+      participants: named, note: _audienceNote(code, result.focus.visibility, named) });
+  }
+
+  const audience = _resolvePersonalAudience(code, userId, {
+    ...(req.body || {}), participantIds: (req.body || {}).participants,
+  }, { strict: true });
+  if (!audience.ok) return res.status(audience.status).json({ error: audience.error });
+
+  const store = (objectAudiences[code] = objectAudiences[code] || {});
+  store[_audienceKey(userId, kind, id)] = { visibility: audience.visibility,
+    participantIds: audience.participantIds, at: Date.now() };
+  _audit(code, { actor: userId, action: 'focus_created', subjectIds: [userId], basis: audience.visibility });
+  scheduleSave();
+  res.json({ ok: true, kind, id, visibility: audience.visibility,
+    participants: audience.participantIds,
+    note: _audienceNote(code, audience.visibility, audience.participantIds) });
+});
+
+/* ONE SENTENCE SAYING WHAT WAS JUST DECIDED, because "visibility: invited" is not an answer to
+   "who can see this now". Named people are named; a person is entitled to know exactly who. */
+function _audienceNote(code, visibility, participantIds) {
+  const named = (participantIds || []).map(id => ((orgUsers[code] || {})[id] || {}).name).filter(Boolean);
+  if (visibility === 'invited' && named.length) {
+    return `Shared with ${named.join(', ')}. Only they can see it, and you can take it back at any time.`;
+  }
+  if (visibility === 'shared') return 'Whoever leads a group you are in can see this now. Your squad cannot.';
+  return 'Private — only you can see it. You can share it later; nobody else can.';
+}
+
 /* POST /api/me/focus/outcome — close the loop: report how an approved focus went.
    Observe outcome → LEARN. Resolves the focus and teaches the Confidence Engine
    (helped → useful; didn't → dismiss) for the pattern type that suggested it.
@@ -9088,6 +9177,36 @@ function _completeFocusAction(code, focus, outcome, actorId) {
    both call these functions. Proposal-time audience resolution deliberately calls the
    same resolver again; confirmation re-resolves it so a stale membership snapshot is
    authority for nothing. */
+/* ── WHO CAN SEE THE THING YOU MADE ───────────────────────────────────────────────────────────
+   A person's own objects come in four kinds and, before this, exactly ONE of them could be
+   shared. A Focus had `private | shared | invited`, a route to widen or narrow it afterwards,
+   and a Forum once two people were in it. A High, a Low and a personal Inquiry had nothing:
+   `_forumAudience` answered "this one is just you" for every one of them and no visibility route
+   existed, so somebody who wanted their coach to see what they had noticed about themselves —
+   the single most valuable thing a member can volunteer — had no way to say so.
+
+   THIS IS ONE STORE AND THE EXISTING RESOLVER, NOT A SECOND AUDIENCE SYSTEM. A Focus keeps its
+   audience on the Focus record, where it already lives and where `_updatePersonalFocus` owns it;
+   the other three kinds are read models with no record to write on, so their choice is held here,
+   keyed by the object's own stable id. Both are resolved by `_resolvePersonalAudience` and read
+   by `_forumAudience`, so there is one definition of what an audience is and one of who may read.
+
+   A HIGH'S ID IS STABLE, which is what makes this possible and was worth checking rather than
+   assuming: ai/proactive.js mints `'pi_' + _hash(dedupeKey)`, the same value in a fresh process,
+   so a choice made today still points at the same object tomorrow. */
+const objectAudiences = {};   // code → `${userId}|${kind}:${objectId}` → { visibility, participantIds, at }
+const _audienceKey = (userId, kind, id) => `${userId}|${kind}:${id}`;
+
+/* THE ONE READER. Absent means private, which is the safe default and the one a person who has
+   never touched this gets. */
+function _objectAudience(code, userId, kind, id) {
+  const rec = (objectAudiences[code] || {})[_audienceKey(userId, kind, id)];
+  if (!rec) return { visibility: 'private', participantIds: [], at: null };
+  return { visibility: rec.visibility || 'private',
+    participantIds: Array.isArray(rec.participantIds) ? rec.participantIds.map(String) : [],
+    at: rec.at || null };
+}
+
 function _resolvePersonalFocusAudience(code, userId, input = {}, { strict = false, expectedParticipantIds = null } = {}) {
   const contacts = new Set(_contactsFor(code, userId).map(c => String(c.id)));
   const groupId = String(input.groupId || '');
@@ -9113,6 +9232,13 @@ function _resolvePersonalFocusAudience(code, userId, input = {}, { strict = fals
     visibility: participantIds.length ? 'invited' : requestedVisibility,
     rejected: rejected.length };
 }
+
+/* THE SAME RESOLVER, UNDER THE NAME THE OTHER THREE KINDS CALL IT BY. Nothing in it was ever
+   about focuses: it reads contacts, an optional group roster, a requested participant list and a
+   requested visibility, and answers who the audience is. The alias exists so the audience route
+   for a High does not have to call something named for a Focus, and so there is visibly one
+   function rather than two that agree today. */
+const _resolvePersonalAudience = _resolvePersonalFocusAudience;
 
 function _personalFocusSource(code, userId, input = {}) {
   const convId = String(input.sourceConversationId || input.conversationId || '').slice(0, 80);
@@ -16484,6 +16610,47 @@ function _objectBucket(code, userId, scope = 'self') {
       }
     }
 
+    /* ── AND THE HIGHS, LOWS AND INQUIRIES SOMEBODY SHARED WITH YOU BY NAME ────────────────────
+       The Focus already had this, in branch (b). The other three kinds had no audience at all, so
+       there was nothing to deliver; now that a person can choose one, the choice has to actually
+       reach the people named or it is a setting rather than a share.
+
+       The owner's own objects are resolved through THEIR bucket, not rebuilt here, so an invited
+       reader sees exactly the object its owner sees and there is no second projection to drift.
+       Eligibility is re-derived on every read — the same rule `_forumAudience` applies — so a
+       share withdrawn, or a person who is no longer a reachable contact, stops arriving on the
+       very next request rather than after a sweep. */
+    for (const [key, rec] of Object.entries(objectAudiences[code] || {})) {
+      const sep = key.indexOf('|');
+      if (sep < 0) continue;
+      const ownerId = key.slice(0, sep);
+      if (ownerId === String(userId)) continue;                       // your own are already here
+      if (!rec) continue;
+      if (!_personPresent((orgUsers[code] || {})[ownerId])) continue;
+      /* TWO WAYS TO BE IN THE AUDIENCE, and they are the same two a Focus has always had.
+         `invited` names people; `shared` means whoever leads a group the owner is in, which is
+         exactly what it already means on a Focus (see `_memberGoalsFor`). Anything else — and
+         `private`, which is most of them — reaches nobody. */
+      const namedHere = rec.visibility === 'invited'
+        && (rec.participantIds || []).map(String).includes(String(userId));
+      const leadsThem = rec.visibility === 'shared'
+        && Object.values(orgNodes[code] || {}).some(n =>
+          (n.memberIds || []).map(String).includes(String(ownerId))
+          && (n.leaderIds || []).map(String).includes(String(userId)));
+      if (!namedHere && !leadsThem) continue;
+      // A named person must still be somebody the owner could address; a leader is reached by
+      // leading them, which the roster above already establishes.
+      if (namedHere && !_contactsFor(code, ownerId).some(c => String(c.id) === String(userId))) continue;
+      const [kind, ...rest] = key.slice(sep + 1).split(':');
+      const objectId = rest.join(':');
+      if (!['inquiry', 'high', 'low'].includes(kind)) continue;
+      const theirs = (_objectBucket(code, ownerId, 'self') || [])
+        .find(o => o && o.kind === kind && String(o.id) === objectId);
+      if (!theirs) continue;
+      add(kind, { ...(theirs.raw || {}), id: objectId, explained: theirs.explained,
+        invited: true, ownerId, participants: [ownerId, ...(rec.participantIds || [])] });
+    }
+
     // (c) The squad's. A group focus belongs to everyone in the group, leaders included.
     for (const node of Object.values(orgNodes[code] || {})) {
       const inIt = (node.memberIds || []).includes(userId) || (node.leaderIds || []).includes(userId);
@@ -17098,6 +17265,28 @@ function _forumAudience(code, userId, object) {
     return { available: false, readable: invited.length, key: null, forumKind: null, members: invited,
       reason: 'this one is just you — there is nobody to discuss it with' };
   }
+
+  /* A HIGH, A LOW OR A PERSONAL INQUIRY THE PERSON CHOSE TO SHARE. These three are read models
+     with no record to write an audience on, so the choice is held in `objectAudiences` and read
+     here — the same question, the same owner, one more place the answer can come from rather than
+     a second definition of what a room is. Everything above still applies: a departed account is
+     nobody to talk to, and a room of one is not a room.
+
+     Resolved fresh on every read, like every other branch of this function, so taking a share
+     back closes the room on the next request rather than after a sweep. */
+  const ownerOfPersonal = String(raw.ownerId || (object && object.ownerId) || userId);
+  const chosen = _objectAudience(code, ownerOfPersonal, kind, String(object && object.id));
+  if (chosen.visibility === 'invited' && chosen.participantIds.length) {
+    const eligibleNow = new Set([ownerOfPersonal, ..._contactsFor(code, ownerOfPersonal).map(c => String(c.id))]);
+    const room = [...new Set([ownerOfPersonal, ...chosen.participantIds])]
+      .filter(id => _personPresent((orgUsers[code] || {})[id]) && eligibleNow.has(id));
+    if (room.length >= 2) {
+      return { available: true, readable: room.length, key: String(object.id), forumKind: kind, members: room };
+    }
+    return { available: false, readable: room.length, key: null, forumKind: null, members: room,
+      reason: 'the people you shared this with are no longer reachable' };
+  }
+
   return none('this one is just you — there is nobody to discuss it with');
 }
 
@@ -24259,6 +24448,8 @@ module.exports = { app, _loadAllStores, _rebuildEmailIndex, issueToken, _purgeEx
   raises, _raises, _ladderFor, _admitLeaderRead,
   // exported for the truth layer: attached material, whether it landed, and the graphs
   materials, materialEngage, _materials, _engageOf, _materialCohort, _allObjectsFor, _objectsWithEvidenceFor, _chartFor, _materialContext,
+  // exported for the truth layer: who a person chose to let see each of their own objects
+  objectAudiences, _objectAudience, _resolvePersonalAudience,
   teamFocuses, _teamFocuses, _groupInquiryProjections, _groupPatternFindings, _mayReadGroup, _teamStateAnswer, _leadInquiry,
   reasonLedger, selfModelLedger, deliveryPrefs, pushSubs, assistantConversations, libraryFolders,
   // exported for the truth layer: who an org has named as handling what, and the shared library
